@@ -40,12 +40,22 @@ import {
   modalFieldEntries,
   type ModalFilterEntry,
 } from '../../utils/filter-registry';
+import {
+  DEFAULT_RANK_PROFILE,
+  DEFAULT_SORT_BY,
+  getRankProfileOptions,
+  rankLabel,
+  SORT_OPTIONS,
+  type SortBy,
+} from '../../utils/rank-sort';
+import type { GlobalSearchTab } from '../../utils/search-tabs';
 import { DateModeSheet } from './date-mode-sheet';
 import { FilterMultiSelectSheet, selectionFirst } from './filter-multi-select-sheet';
 import { FilterOptionRow } from './filter-option-row';
 import { FilterSheetHeader } from './filter-sheet-header';
 import { FromFilterSheet } from './from-filter-sheet';
 import { InFilterSheet } from './in-filter-sheet';
+import { OptionPickerSheet } from './option-picker-sheet';
 import { BottomSheetFlatList } from '@gorhom/bottom-sheet';
 
 type NestedPicker =
@@ -61,11 +71,14 @@ type NestedPicker =
 type FiltersSheetProps = {
   isOpen: boolean;
   onClose: () => void;
+  tab: GlobalSearchTab;
   applied: SearchResultsFilters;
   onApply: (next: {
     structured: StructuredSearchFilters;
     chips: readonly SearchFilterChip[];
     onlyMyChannels: boolean;
+    sortBy: SortBy;
+    rankProfile: string;
   }) => void;
 };
 
@@ -79,33 +92,36 @@ function chipsToEntities(chips: readonly SearchFilterChip[]): FilterEntity[] {
 
 /**
  * Dashboard FiltersModal equivalent: draft on open, Apply commits, dismiss discards.
- * Bot / Exact stay on the bar; From / In / Only my channels are edited here.
+ * Bot / Exact stay on the bar; Sort / Rank / From / In / Only my channels are edited here.
  */
 export function FiltersSheet({
   isOpen,
   onClose,
+  tab,
   applied,
   onApply,
 }: FiltersSheetProps): ReactElement | null {
   const { shouldRender, sheetProps } = useMountWhileOpen(isOpen, onClose);
   if (!shouldRender) return null;
 
-  return <FiltersSheetBody {...sheetProps} applied={applied} onApply={onApply} />;
+  return <FiltersSheetBody {...sheetProps} tab={tab} applied={applied} onApply={onApply} />;
 }
 
 function FiltersSheetBody({
   isOpen,
   onOpenChange,
   onDismiss,
+  tab,
   applied,
   onApply,
-}: SheetMountProps & Pick<FiltersSheetProps, 'applied' | 'onApply'>): ReactElement {
+}: SheetMountProps & Pick<FiltersSheetProps, 'tab' | 'applied' | 'onApply'>): ReactElement {
   const [draft, setDraft] = useState<SearchResultsFilters>(applied);
   const [textDrafts, setTextDrafts] = useState<Record<string, string>>({});
   const [dateMode, setDateMode] = useState<DateMode | ''>('');
   const [pendingDateMode, setPendingDateMode] = useState<DateMode | null>(null);
   const [picker, setPicker] = useState<NestedPicker>(null);
   const [priorityOpen, setPriorityOpen] = useState(false);
+  const [rankOpen, setRankOpen] = useState(false);
 
   const { accentText } = useBubbleAccent();
   const muted = useCSSVariable('--color-bottomsheet-text-muted') as string;
@@ -121,6 +137,7 @@ function FiltersSheetBody({
     setPendingDateMode(null);
     setPicker(null);
     setPriorityOpen(false);
+    setRankOpen(false);
   }, [applied, isOpen]);
 
   useEffect(() => {
@@ -134,6 +151,7 @@ function FiltersSheetBody({
 
   // Always the dashboard Type=All set — see `modalDocTypeForTab`.
   const fieldEntries = useMemo(() => modalFieldEntries('all'), []);
+  const rankOptions = useMemo(() => getRankProfileOptions(tab), [tab]);
   const draftCount = countActiveFilters(draft);
 
   const carried = useMemo(() => {
@@ -222,6 +240,8 @@ function FiltersSheetBody({
         ...entitiesToInChips(committed.inChannels),
       ],
       onlyMyChannels: committed.onlyMyChannels,
+      sortBy: committed.sortBy,
+      rankProfile: committed.rankProfile,
     });
     onOpenChange(false);
   }, [commitTextFields, draft, onApply, onOpenChange, structuredFromDraft]);
@@ -234,6 +254,8 @@ function FiltersSheetBody({
       fromUsers: [],
       inChannels: [],
       onlyMyChannels: false,
+      sortBy: DEFAULT_SORT_BY,
+      rankProfile: DEFAULT_RANK_PROFILE,
     }));
     setTextDrafts({});
     setDateMode('');
@@ -338,6 +360,59 @@ function FiltersSheetBody({
               className='rounded-xl border px-3 py-3 text-[15px]'
               style={{ borderColor: border, backgroundColor: inputBg, color: fieldText }}
             />
+          </View>
+        );
+      case 'sort':
+        // Inline chips — a nested sheet for 3 options left a stuck touch-blocker
+        // when dynamic sizing failed to measure short content.
+        return (
+          <View className='mb-4'>
+            {fieldLabel(entry.label)}
+            <View className='flex-row flex-wrap gap-2'>
+              {SORT_OPTIONS.map(option => {
+                const selected = draft.sortBy === option.value;
+                return (
+                  <Pressable
+                    key={option.value}
+                    onPress={() => {
+                      void haptics.buttonTap();
+                      patch({ sortBy: option.value });
+                    }}
+                    className='rounded-full border px-3 py-1.5'
+                    style={{
+                      borderColor: selected ? accentText : border,
+                      backgroundColor: selected ? `${accentText}22` : inputBg,
+                    }}
+                  >
+                    <Text
+                      className='text-[13px]'
+                      style={{ color: selected ? accentText : muted }}
+                    >
+                      {option.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        );
+      case 'rank':
+        return (
+          <View className='mb-4'>
+            {fieldLabel(entry.label)}
+            <Pressable
+              onPress={() => {
+                void haptics.buttonTap();
+                setRankOpen(true);
+              }}
+              className='flex-row items-center justify-between rounded-xl border px-3 py-3'
+              style={{ borderColor: border, backgroundColor: inputBg }}
+            >
+              <Text className='text-[15px]' style={{ color: fieldText }}>
+                {rankLabel(tab, draft.rankProfile)}
+              </Text>
+              <ChevronDown size={16} color={muted} />
+            </Pressable>
           </View>
         );
       case 'enumSingle':
@@ -602,6 +677,18 @@ function FiltersSheetBody({
         onPick={value => {
           patch({ priority: value });
           setPriorityOpen(false);
+        }}
+      />
+
+      <OptionPickerSheet
+        isOpen={rankOpen}
+        onClose={() => setRankOpen(false)}
+        title='Rank'
+        options={rankOptions}
+        value={draft.rankProfile}
+        onPick={value => {
+          patch({ rankProfile: value });
+          setRankOpen(false);
         }}
       />
 

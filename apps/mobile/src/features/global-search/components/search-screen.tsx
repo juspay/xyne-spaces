@@ -17,6 +17,7 @@ import { SearchCategoryTags } from './search-category-tags';
 import { useSearchState, type SearchDispatch } from '../hooks/use-search-state';
 import { countActiveFilters, toSearchResultsFilters } from '../utils/filter-registry';
 import type { StructuredSearchFilters } from '../utils/filter-model';
+import type { SortBy } from '../utils/rank-sort';
 import {
   initialTabForSurface,
   SEARCH_TABS,
@@ -172,6 +173,8 @@ export function GlobalSearchScreen({
         onlyMyChannels={state.onlyMyChannels}
         includeBotMessages={state.includeBotMessages}
         exactMatch={state.exactMatch}
+        sortBy={state.sortBy}
+        rankProfile={state.rankProfile}
         dispatch={dispatch}
         inputRef={inputRef}
         topInset={insets.top}
@@ -196,6 +199,8 @@ const SearchToolbar = memo(function SearchToolbar({
   onlyMyChannels,
   includeBotMessages,
   exactMatch,
+  sortBy,
+  rankProfile,
   dispatch,
   inputRef,
   topInset,
@@ -212,6 +217,8 @@ const SearchToolbar = memo(function SearchToolbar({
   fieldHostedElsewhere: boolean;
   includeBotMessages: boolean;
   exactMatch: boolean;
+  sortBy: SortBy;
+  rankProfile: string;
   dispatch: SearchDispatch;
   inputRef: RefObject<SearchInputHandle | null>;
   topInset: number;
@@ -254,8 +261,10 @@ const SearchToolbar = memo(function SearchToolbar({
         onlyMyChannels,
         includeBotMessages,
         exactMatch,
+        sortBy,
+        rankProfile,
       }),
-    [chips, exactMatch, includeBotMessages, onlyMyChannels, structured, tab],
+    [chips, exactMatch, includeBotMessages, onlyMyChannels, rankProfile, sortBy, structured, tab],
   );
 
   const filterBadgeCount = countActiveFilters(appliedFilters);
@@ -270,12 +279,16 @@ const SearchToolbar = memo(function SearchToolbar({
       structured: StructuredSearchFilters;
       chips: readonly SearchFilterChip[];
       onlyMyChannels: boolean;
+      sortBy: SortBy;
+      rankProfile: string;
     }) => {
       dispatch({
         type: 'structuredApplied',
         structured: next.structured,
         chips: next.chips,
         onlyMyChannels: next.onlyMyChannels,
+        sortBy: next.sortBy,
+        rankProfile: next.rankProfile,
       });
     },
     [dispatch],
@@ -365,6 +378,7 @@ const SearchToolbar = memo(function SearchToolbar({
         <FiltersSheet
           isOpen={filtersOpen}
           onClose={() => setFiltersOpen(false)}
+          tab={tab}
           applied={appliedFilters}
           onApply={applyFilters}
         />

@@ -166,6 +166,8 @@ export interface VespaSearchFilters {
   limit?: number;
   apps?: string;
   rankProfile?: string;
+  /** Server-side result order: relevance | newest | oldest. */
+  orderBy?: 'relevance' | 'newest' | 'oldest';
   includeDebugInfo?: boolean;
   projectId?: string;
   status?: string;

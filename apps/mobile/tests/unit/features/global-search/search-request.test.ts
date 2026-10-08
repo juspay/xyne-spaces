@@ -286,5 +286,41 @@ describe('global search request', () => {
         toSearchParams(second as SearchRequest),
       );
     });
+
+    it('sends orderBy for Newest/Oldest and omits it for Relevance', () => {
+      assert.equal(params({ query: 'deploy', sortBy: 'newest' })['orderBy'], 'newest');
+      assert.equal(params({ query: 'deploy', sortBy: 'oldest' })['orderBy'], 'oldest');
+      assert.equal(params({ query: 'deploy', sortBy: 'relevance' })['orderBy'], undefined);
+    });
+
+    it('always sends an effective rankProfile (default_native when unset)', () => {
+      assert.equal(params({ query: 'deploy' })['rankProfile'], 'default_native');
+      assert.equal(
+        params({ query: 'deploy', rankProfile: 'personalized' })['rankProfile'],
+        'personalized',
+      );
+    });
+
+    it('does not treat sort or rank alone as a query', () => {
+      assert.equal(buildSearchRequest(input({ sortBy: 'newest' })), null);
+      assert.equal(buildSearchRequest(input({ rankProfile: 'personalized' })), null);
+    });
+
+    it('changes cache identity when sort or rank changes', () => {
+      const base = toSearchParams(
+        buildSearchRequest(input({ query: 'deploy' })) as SearchRequest,
+      );
+      const sorted = toSearchParams(
+        buildSearchRequest(input({ query: 'deploy', sortBy: 'newest' })) as SearchRequest,
+      );
+      const ranked = toSearchParams(
+        buildSearchRequest(
+          input({ query: 'deploy', rankProfile: 'personalized' }),
+        ) as SearchRequest,
+      );
+
+      assert.notDeepEqual(base, sorted);
+      assert.notDeepEqual(base, ranked);
+    });
   });
 });

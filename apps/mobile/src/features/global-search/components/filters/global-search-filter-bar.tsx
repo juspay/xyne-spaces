@@ -31,8 +31,8 @@ const GLYPH_SIZE = 14;
 const GLYPH_STROKE = 2.5;
 
 /**
- * Mode-toggle row. From / In / Only my channels live in the Filters drawer;
- * what remains here are Bot and Exact.
+ * Mode-toggle row. Sort / Rank / From / In / Only my channels live in the
+ * Filters drawer; what remains here are Bot and Exact.
  *
  * Built from the same Badge as the category tag strip, so the two rows are one
  * visual family. Badge owns the colours; nothing here paints its own.

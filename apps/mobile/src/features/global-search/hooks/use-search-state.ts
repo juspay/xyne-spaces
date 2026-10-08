@@ -7,6 +7,11 @@ import {
   structuredFiltersEqual,
   type StructuredSearchFilters,
 } from '../utils/filter-model';
+import {
+  DEFAULT_RANK_PROFILE,
+  DEFAULT_SORT_BY,
+  type SortBy,
+} from '../utils/rank-sort';
 import { triggersEqual, type FilterTrigger } from '../utils/filter-trigger';
 import type { GlobalSearchTab } from '../utils/search-tabs';
 
@@ -26,6 +31,13 @@ export type SearchState = {
    * the input. Also turns on when the user types quotes by hand.
    */
   exactMatch: boolean;
+  /** Page-level sort — Relevance / Newest / Oldest. Edited in Filters drawer. */
+  sortBy: SortBy;
+  /**
+   * Page-level Vespa rank profile. Empty = use tab default (`default_native`).
+   * Reset when the category tab changes (profiles are schema-scoped).
+   */
+  rankProfile: string;
   /** Live, not debounced. Non-null only inside an unfinished `from:` / `in:`. */
   trigger: FilterTrigger | null;
 };
@@ -43,6 +55,8 @@ export type SearchAction =
       structured: StructuredSearchFilters;
       chips: readonly SearchFilterChip[];
       onlyMyChannels: boolean;
+      sortBy: SortBy;
+      rankProfile: string;
     }
   | { type: 'onlyMyChannelsToggled' }
   | { type: 'includeBotMessagesToggled' }
@@ -60,6 +74,8 @@ export function createSearchState(tab: GlobalSearchTab): SearchState {
     onlyMyChannels: false,
     includeBotMessages: false,
     exactMatch: false,
+    sortBy: DEFAULT_SORT_BY,
+    rankProfile: DEFAULT_RANK_PROFILE,
     trigger: null,
   };
 }
@@ -88,9 +104,13 @@ function chipsEqual(a: readonly SearchFilterChip[], b: readonly SearchFilterChip
 export function searchReducer(state: SearchState, action: SearchAction): SearchState {
   switch (action.type) {
     case 'tabChanged':
-      // Keep filters across tabs — the Filters drawer always shows the full
-      // dashboard `all` set, and Vespa only consumes fields each category accepts.
-      return state.tab === action.tab ? state : { ...state, tab: action.tab };
+      // Keep structured filters across tabs; reset rank — profiles are schema-scoped.
+      if (state.tab === action.tab) return state;
+      return {
+        ...state,
+        tab: action.tab,
+        rankProfile: DEFAULT_RANK_PROFILE,
+      };
 
     case 'queryCommitted': {
       if (state.query === action.query) return state;
@@ -134,12 +154,16 @@ export function searchReducer(state: SearchState, action: SearchAction): SearchS
       const chipsSame = chipsEqual(state.chips, action.chips);
       const structuredSame = structuredFiltersEqual(state.structured, action.structured);
       const onlyMySame = state.onlyMyChannels === action.onlyMyChannels;
-      if (chipsSame && structuredSame && onlyMySame) return state;
+      const sortSame = state.sortBy === action.sortBy;
+      const rankSame = state.rankProfile === action.rankProfile;
+      if (chipsSame && structuredSame && onlyMySame && sortSame && rankSame) return state;
       return {
         ...state,
         chips: chipsSame ? state.chips : action.chips,
         structured: structuredSame ? state.structured : action.structured,
         onlyMyChannels: action.onlyMyChannels,
+        sortBy: action.sortBy,
+        rankProfile: action.rankProfile,
       };
     }
 

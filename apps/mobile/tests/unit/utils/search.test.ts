@@ -76,4 +76,21 @@ describe('buildVespaSearchParams', () => {
     const filters: VespaSearchFilters = { query: 'q', onlyMyChannels: true };
     assert.equal(buildVespaSearchParams(filters)['onlyMyChannels'], 'true');
   });
+
+  it('serializes orderBy and rankProfile for Sort / Rank', () => {
+    const filters: VespaSearchFilters = {
+      query: 'q',
+      orderBy: 'newest',
+      rankProfile: 'personalized',
+    };
+    const params = buildVespaSearchParams(filters);
+    assert.equal(params['orderBy'], 'newest');
+    assert.equal(params['rankProfile'], 'personalized');
+  });
+
+  it('omits orderBy and rankProfile when unset', () => {
+    const params = buildVespaSearchParams({ query: 'q' });
+    assert.equal(params['orderBy'], undefined);
+    assert.equal(params['rankProfile'], undefined);
+  });
 });

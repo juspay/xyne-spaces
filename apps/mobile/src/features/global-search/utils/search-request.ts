@@ -7,6 +7,11 @@ import {
   hasStructuredFilterInput,
   type StructuredSearchFilters,
 } from './filter-model';
+import {
+  DEFAULT_SORT_BY,
+  effectiveRankProfile,
+  type SortBy,
+} from './rank-sort';
 import { effectiveInputsForScope } from './scope';
 import type { GlobalSearchTab } from './search-tabs';
 
@@ -23,6 +28,10 @@ export type SearchRequest = {
   onlyMyChannels: boolean;
   includeBotMessages: boolean;
   exactMatch: boolean;
+  sortBy: SortBy;
+  rankProfile: string;
+  /** Tab used to resolve the default rank profile. */
+  tab: GlobalSearchTab;
 };
 
 export type SearchRequestInput = {
@@ -35,6 +44,8 @@ export type SearchRequestInput = {
   onlyMyChannels: boolean;
   includeBotMessages: boolean;
   exactMatch: boolean;
+  sortBy?: SortBy;
+  rankProfile?: string;
   scope: SearchScope | null;
 };
 
@@ -72,6 +83,8 @@ export function buildSearchRequest({
   onlyMyChannels,
   includeBotMessages,
   exactMatch,
+  sortBy = DEFAULT_SORT_BY,
+  rankProfile = '',
   scope,
 }: SearchRequestInput): SearchRequest | null {
   // Scoped search is a single messages surface with no tabs.
@@ -91,6 +104,9 @@ export function buildSearchRequest({
     category,
     freeText,
     structured,
+    sortBy,
+    rankProfile,
+    tab: scope ? 'messages' : tab,
     ...effectiveInputsForScope(
       { chips, onlyMyChannels, includeBotMessages, exactMatch },
       scope,
@@ -138,6 +154,9 @@ export function buildSearchFilters(request: SearchRequest): VespaSearchFilters {
     onlyMyChannels,
     includeBotMessages,
     exactMatch,
+    sortBy,
+    rankProfile,
+    tab,
   } = request;
   const from = chipIds(chips, 'from:');
   const inside = chipIds(chips, 'in:');
@@ -220,6 +239,11 @@ export function buildSearchFilters(request: SearchRequest): VespaSearchFilters {
   if (category === 'tickets') filters.excludeArchived = !structured.showArchived;
 
   if (!freeText && hasEntityFilters) filters.filterOnly = true;
+
+  // Prefer server-side order so pagination stays consistent with Newest/Oldest.
+  if (sortBy !== DEFAULT_SORT_BY) filters.orderBy = sortBy;
+
+  filters.rankProfile = effectiveRankProfile(tab, rankProfile);
 
   return filters;
 }

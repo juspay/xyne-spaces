@@ -9,6 +9,10 @@ import {
   modalFieldEntries,
   toSearchResultsFilters,
 } from '@/src/features/global-search/utils/filter-registry';
+import {
+  DEFAULT_RANK_PROFILE,
+  DEFAULT_SORT_BY,
+} from '@/src/features/global-search/utils/rank-sort';
 
 describe('global search filter registry', () => {
   it('maps mobile tabs onto dashboard doc types', () => {
@@ -19,13 +23,16 @@ describe('global search filter registry', () => {
     assert.equal(docTypeForTab('calls'), 'messages');
   });
 
-  it('always opens the Filters drawer as dashboard Type=All', () => {
+  it('always opens the Filters drawer as dashboard Type=All with Sort/Rank first', () => {
     assert.equal(modalDocTypeForTab('chats'), 'all');
     assert.equal(modalDocTypeForTab('channels'), 'all');
     assert.equal(modalDocTypeForTab('messages'), 'all');
 
-    const ids = modalFieldEntries('all').map(entry => entry.id);
+    const entries = modalFieldEntries('all');
+    const ids = entries.map(entry => entry.id);
     assert.deepEqual(ids, [
+      'sort',
+      'rank',
       'from',
       'in',
       'onlyMyChannels',
@@ -38,9 +45,73 @@ describe('global search filter registry', () => {
       'tags',
       'entity',
     ]);
+
+    assert.equal(entries.find(entry => entry.id === 'sort')?.control?.kind, 'sort');
+    assert.equal(entries.find(entry => entry.id === 'rank')?.control?.kind, 'rank');
   });
 
-  it('counts From, In, and Only my channels in the Filters badge', () => {
+  it('defaults sort/rank when building the Filters snapshot', () => {
+    const filters = toSearchResultsFilters({
+      tab: 'messages',
+      chips: [],
+      structured: DEFAULT_STRUCTURED_FILTERS,
+      onlyMyChannels: false,
+      includeBotMessages: false,
+      exactMatch: false,
+    });
+
+    assert.equal(filters.sortBy, DEFAULT_SORT_BY);
+    assert.equal(filters.rankProfile, DEFAULT_RANK_PROFILE);
+    assert.equal(countActiveFilters(filters), 0);
+  });
+
+  it('does not count default Relevance / default rank in the badge', () => {
+    const filters = toSearchResultsFilters({
+      tab: 'messages',
+      chips: [],
+      structured: DEFAULT_STRUCTURED_FILTERS,
+      onlyMyChannels: false,
+      includeBotMessages: false,
+      exactMatch: false,
+      sortBy: 'relevance',
+      rankProfile: '',
+    });
+
+    assert.equal(countActiveFilters(filters), 0);
+  });
+
+  it('counts Sort alone when Newest/Oldest is selected', () => {
+    const filters = toSearchResultsFilters({
+      tab: 'messages',
+      chips: [],
+      structured: DEFAULT_STRUCTURED_FILTERS,
+      onlyMyChannels: false,
+      includeBotMessages: false,
+      exactMatch: false,
+      sortBy: 'oldest',
+      rankProfile: '',
+    });
+
+    assert.equal(countActiveFilters(filters), 1);
+    assert.ok(filters.sortBy === 'oldest');
+  });
+
+  it('counts Rank alone when a non-default profile is selected', () => {
+    const filters = toSearchResultsFilters({
+      tab: 'messages',
+      chips: [],
+      structured: DEFAULT_STRUCTURED_FILTERS,
+      onlyMyChannels: false,
+      includeBotMessages: false,
+      exactMatch: false,
+      sortBy: 'relevance',
+      rankProfile: 'personalized',
+    });
+
+    assert.equal(countActiveFilters(filters), 1);
+  });
+
+  it('counts From, In, Only my channels, Sort, and Rank in the Filters badge', () => {
     const filters = toSearchResultsFilters({
       tab: 'messages',
       chips: [
@@ -51,9 +122,11 @@ describe('global search filter registry', () => {
       onlyMyChannels: true,
       includeBotMessages: false,
       exactMatch: false,
+      sortBy: 'newest',
+      rankProfile: 'personalized',
     });
 
-    assert.equal(countActiveFilters(filters), 3);
+    assert.equal(countActiveFilters(filters), 5);
   });
 
   it('counts modal-only filters in the badge', () => {

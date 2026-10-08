@@ -29,8 +29,18 @@ export function SearchResults({
   onLeave,
   ...chrome
 }: SearchResultsProps): ReactElement {
-  const { tab, query, chips, structured, onlyMyChannels, includeBotMessages, exactMatch, trigger } =
-    state;
+  const {
+    tab,
+    query,
+    chips,
+    structured,
+    onlyMyChannels,
+    includeBotMessages,
+    exactMatch,
+    sortBy,
+    rankProfile,
+    trigger,
+  } = state;
   const { scrollOffset } = chrome;
   const showsSuggestions = trigger !== null;
 
@@ -50,9 +60,22 @@ export function SearchResults({
         onlyMyChannels,
         includeBotMessages,
         exactMatch,
+        sortBy,
+        rankProfile,
         scope,
       }),
-    [chips, exactMatch, includeBotMessages, onlyMyChannels, query, scope, structured, tab],
+    [
+      chips,
+      exactMatch,
+      includeBotMessages,
+      onlyMyChannels,
+      query,
+      rankProfile,
+      scope,
+      sortBy,
+      structured,
+      tab,
+    ],
   );
 
   if (trigger) {

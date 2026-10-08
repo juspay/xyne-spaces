@@ -111,6 +111,10 @@ export function buildVespaSearchParams(filters: VespaSearchFilters): Record<stri
     params['rankProfile'] = filters.rankProfile;
   }
 
+  if (filters.orderBy) {
+    params['orderBy'] = filters.orderBy;
+  }
+
   if (filters.projectId) {
     params['projectId'] = filters.projectId;
   }

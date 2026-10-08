@@ -68,6 +68,10 @@ export type SearchResultsFilters = StructuredSearchFilters & {
   onlyMyChannels: boolean;
   includeBotMessages: boolean;
   exactMatch: boolean;
+  /** Page-level sort — Relevance / Newest / Oldest. */
+  sortBy: 'relevance' | 'newest' | 'oldest';
+  /** Page-level Vespa rank profile. Empty = tab default. */
+  rankProfile: string;
 };
 
 export const DATE_RANGE_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [

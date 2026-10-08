@@ -1,9 +1,16 @@
 /**
  * Mobile port of dashboard `filterRegistry` — modal fields, visibility, badge count.
- * Bot / Exact stay on the filter bar; From / In / Only my channels live here.
+ * Bot / Exact stay on the filter bar; From / In / Only my channels / Sort / Rank live here.
  */
 
 import type { SearchFilterChip } from '../types';
+import {
+  DEFAULT_RANK_PROFILE,
+  DEFAULT_SORT_BY,
+  isRankActive,
+  isSortActive,
+  type SortBy,
+} from './rank-sort';
 import type { GlobalSearchTab } from './search-tabs';
 import {
   DATE_RANGE_OPTIONS,
@@ -30,7 +37,9 @@ export type FilterControl =
     }
   | { kind: 'text'; placeholder: string; field: 'tags' | 'entities' }
   | { kind: 'date' }
-  | { kind: 'checkbox'; field: 'showArchived' | 'onlyMyChannels' };
+  | { kind: 'checkbox'; field: 'showArchived' | 'onlyMyChannels' }
+  | { kind: 'sort' }
+  | { kind: 'rank' };
 
 export type ModalFilterEntry = {
   id: string;
@@ -83,6 +92,20 @@ export function modalDocTypeForTab(_tab: GlobalSearchTab): SearchDocType {
 }
 
 export const FILTER_MODAL_ENTRIES: readonly ModalFilterEntry[] = [
+  {
+    id: 'sort',
+    label: 'Sort',
+    appliesTo: () => true,
+    isActive: f => isSortActive(f.sortBy),
+    control: { kind: 'sort' },
+  },
+  {
+    id: 'rank',
+    label: 'Rank',
+    appliesTo: () => true,
+    isActive: f => isRankActive(f.rankProfile),
+    control: { kind: 'rank' },
+  },
   {
     id: 'from',
     label: 'From',
@@ -281,6 +304,8 @@ export function toSearchResultsFilters(input: {
   onlyMyChannels: boolean;
   includeBotMessages: boolean;
   exactMatch: boolean;
+  sortBy?: SortBy;
+  rankProfile?: string;
 }): SearchResultsFilters {
   return {
     docType: modalDocTypeForTab(input.tab),
@@ -289,6 +314,8 @@ export function toSearchResultsFilters(input: {
     onlyMyChannels: input.onlyMyChannels,
     includeBotMessages: input.includeBotMessages,
     exactMatch: input.exactMatch,
+    sortBy: input.sortBy ?? DEFAULT_SORT_BY,
+    rankProfile: input.rankProfile ?? DEFAULT_RANK_PROFILE,
     ...input.structured,
   };
 }
