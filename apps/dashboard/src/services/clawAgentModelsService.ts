@@ -11,8 +11,10 @@ import { apiInstance } from './clients/apiClient';
 
 export interface ClawAgentModel {
   id: string;
-  /** Claw's label for the model. Raw model id today. */
+  /** People-facing name ("Sonnet 4.5"), from claw-auth's model catalog. */
   name: string;
+  /** What the model is good for, when claw-auth's catalog knows. */
+  description?: string;
   provider?: 'local-harness';
   harness?: string;
   deviceName?: string;
@@ -23,6 +25,8 @@ export interface ClawAgentModelsResult {
   models: ClawAgentModel[];
   /** The agent's configured model, used to label the "Default" row. */
   defaultModel: string | null;
+  /** `defaultModel`'s people-facing name. */
+  defaultModelName: string | null;
   /** Which providerOverride.provider a pick from this list must be sent with:
    *  "litellm" = the agent's shared credential, "spaces" = the keyless
    *  platform provider (the workspace's synced allowed-model list). */
@@ -35,6 +39,7 @@ export async function fetchClawAgentModels(agentSlug: string): Promise<ClawAgent
     success: boolean;
     data: ClawAgentModel[];
     defaultModel: string | null;
+    defaultModelName?: string | null;
     pinProvider?: 'litellm' | 'spaces';
     recommendedId?: string | null;
   }>(`/xyne-ai/agents/${encodeURIComponent(agentSlug)}/models`);
@@ -45,6 +50,7 @@ export async function fetchClawAgentModels(agentSlug: string): Promise<ClawAgent
   return {
     models: result.data ?? [],
     defaultModel: result.defaultModel ?? null,
+    defaultModelName: result.defaultModelName ?? null,
     pinProvider: result.pinProvider ?? 'litellm',
     recommendedId: result.recommendedId ?? null,
   };

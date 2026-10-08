@@ -97,9 +97,7 @@ export function isSubagentCall(
   invocation: ToolInvocation,
   children: ToolInvocation[] | undefined,
 ): boolean {
-  return (
-    !invocation.parentToolCallId && (!!invocation.subagentName || (children?.length ?? 0) > 0)
-  );
+  return !invocation.parentToolCallId && (!!invocation.subagentName || (children?.length ?? 0) > 0);
 }
 
 /** "Spaces agent" for the `spaces` subagent. */

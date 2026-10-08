@@ -213,9 +213,7 @@ export function InvocationItem({
     isBackground && invocation.backgroundState === 'running' && !isCancelled;
   const working = isRunning || isBackgroundRunning;
   const failed =
-    !!invocation.isError ||
-    invocation.status === 'error' ||
-    invocation.backgroundState === 'error';
+    !!invocation.isError || invocation.status === 'error' || invocation.backgroundState === 'error';
   const args = invocation.args ?? {};
   const preview = previewOf(args);
   // What a busy subagent is doing right now, so it reads as busy while closed.
@@ -351,9 +349,7 @@ export function InvocationItem({
           {isCancelled ? (
             <p className='text-xs italic text-muted-foreground/60'>Stopped before it finished</p>
           ) : (
-            !working && (
-              <ToolResult result={invocation.result} prose={isSubagent} failed={failed} />
-            )
+            !working && <ToolResult result={invocation.result} prose={isSubagent} failed={failed} />
           )}
 
           {invocation.citations && invocation.citations.length > 0 && (

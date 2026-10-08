@@ -7,7 +7,7 @@ export type SandboxMode = 'remote' | 'local' | 'container';
 
 export const SANDBOX_MODE_STORAGE_KEY = 'xyne:ai-sandbox-mode';
 
-const SANDBOX_MODE_OPTIONS: Array<{
+export const SANDBOX_MODE_OPTIONS: Array<{
   value: SandboxMode;
   label: string;
   shortLabel: string;

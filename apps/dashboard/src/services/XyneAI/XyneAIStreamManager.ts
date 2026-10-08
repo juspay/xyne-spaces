@@ -2272,7 +2272,13 @@ class XyneAIStreamManager {
       switch (type) {
         case 'snapshot': {
           const partial = data['partial'] as
-            | { msgId?: string; content?: string; reasoning?: string; parts?: unknown; createdAt?: string }
+            | {
+                msgId?: string;
+                content?: string;
+                reasoning?: string;
+                parts?: unknown;
+                createdAt?: string;
+              }
             | undefined;
           const inProgress = (data['inProgress'] as ToolInvocation[] | undefined) ?? [];
           if (!started) {

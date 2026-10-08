@@ -1,5 +1,13 @@
 import type { XyneAiSendTrigger } from '../../services/Analytics/xyneAiTracking';
-import { type ReactElement, useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import {
+  type ReactElement,
+  type ReactNode,
+  useState,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+} from 'react';
 import { useNavigate, useParams, useLocation, useNavigationType } from 'react-router-dom';
 import { Upload } from 'lucide-react';
 import { SidebarLeftOpen } from '@xyne/icons';
@@ -373,8 +381,9 @@ const AIScreen = (): ReactElement => {
   // The thread has fired the landing query — drop it so it can never be
   // auto-submitted twice. Without this the thread's `useRef` guard resets on any
   // remount and the same query is sent again as a NEW conversation.
-  // `initialExtras` is deliberately kept: it seeds the chat composer's context
-  // selections for the whole conversation, not just the first turn.
+  // `initialExtras` is deliberately kept: it seeds the chat composer's
+  // toggles for the whole conversation (its context went out with the first
+  // turn — see AIChatThread's composerSeed).
   const handleInitialQueryConsumed = useCallback((): void => {
     setInitialQuery('');
     setInitialAttachments(undefined);
@@ -701,7 +710,10 @@ const AIScreen = (): ReactElement => {
                   assistant={assistant}
                 />
               ) : (
-                /* Landing page – centred greeting + composer */
+                /* Landing page – centred greeting + composer. Context rises
+                   into the gap between them and a longer message grows the
+                   composer downward (see LandingComposerSlot), so neither
+                   moves the greeting. */
                 <main className='relative flex h-full flex-1 items-center justify-center px-6 py-8'>
                   {/* The landing page has no header, so without this the
                       sidebar's own collapse button would strand the user with
@@ -722,7 +734,7 @@ const AIScreen = (): ReactElement => {
                   )}
                   <div className='flex w-full max-w-3xl flex-col'>
                     <AIEmptyState />
-                    <div className='mt-6'>
+                    <LandingComposerSlot className='mt-16'>
                       <AIComposer
                         ref={landingComposerRef}
                         autoFocus
@@ -732,9 +744,10 @@ const AIScreen = (): ReactElement => {
                         onAgentChange={handleAgentChange}
                         showAgentSelector={isV2}
                         onContextChange={handleContextChange}
+                        anchor='top'
                         hideDisclaimer
                       />
-                    </div>
+                    </LandingComposerSlot>
                   </div>
                 </main>
               )}
@@ -745,5 +758,48 @@ const AIScreen = (): ReactElement => {
     </CitationDocsProvider>
   );
 };
+
+/**
+ * Keeps the landing composer's resting height in the layout and lets it grow
+ * downward over the page: the greeting and composer stay centred where they
+ * are while a long message makes the box taller.
+ */
+function LandingComposerSlot({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}): ReactElement {
+  const innerRef = useRef<HTMLDivElement>(null);
+  const [restingHeight, setRestingHeight] = useState<number | null>(null);
+  // Measured once, at rest (before anything is typed).
+  useEffect(() => {
+    const el = innerRef.current;
+    if (!el) return undefined;
+    const observer = new ResizeObserver(entries => {
+      const entry = entries[0];
+      const height = entry?.borderBoxSize?.[0]?.blockSize ?? entry?.contentRect.height;
+      if (!height) return;
+      setRestingHeight(height);
+      observer.disconnect();
+    });
+    observer.observe(el);
+    return (): void => observer.disconnect();
+  }, []);
+  return (
+    <div
+      className={['relative', className].filter(Boolean).join(' ')}
+      style={restingHeight === null ? undefined : { height: restingHeight }}
+    >
+      <div
+        ref={innerRef}
+        className={restingHeight === null ? undefined : 'absolute inset-x-0 top-0 z-10'}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
 
 export default AIScreen;

@@ -73,6 +73,8 @@ const SelectionContextSchema = z
 // Attached context item schema - for Add Context feature.
 // `collection`/`folder`/`file` items all arrive as ordinary entries in this
 // list — the dashboard already knows each one's cuid + name client-side.
+// `message`/`user`/`attachment` (a Spaces message, a person, a file shared in
+// a conversation) come from the composer's @ picker; claw-auth resolves them.
 const AttachedContextItemSchema = z.object({
   type: z.enum([
     'channel',
@@ -84,10 +86,15 @@ const AttachedContextItemSchema = z.object({
     'file',
     'folder',
     'local-folder',
+    'message',
+    'user',
+    'attachment',
   ]),
   id: z.string().min(1),
   title: z.string().min(1),
   threadId: z.string().optional(),
+  // Canvas items only — claw-auth labels a recording's notes vs its AI summary.
+  canvasRole: z.enum(['call-notes', 'call-summary']).optional(),
   // Activity-specific fields
   eventName: z.string().optional(),
   eventCategory: z.string().optional(),

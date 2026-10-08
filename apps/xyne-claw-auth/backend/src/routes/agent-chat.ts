@@ -1,6 +1,7 @@
 import { s2sKeyMatches } from "../middleware/require-auth.js";
 import { isAgentOwnedRun } from "../lib/agent-owned-runs.js";
 import { applyAiScreenCommand } from "../lib/ai-screen-commands.js";
+import { labelModel, modelDisplayName } from "../lib/model-catalog.js";
 import { parseSlashCommand } from "../lib/parseSlashCommand.js";
 import { screenUploadFiles } from "../lib/upload-screening.js";
 import { Router, type Request, type RequestHandler, type Response } from "express";
@@ -1073,7 +1074,9 @@ async function listPlatformModels(): Promise<{
 // chat via providerOverride — the key itself is never exposed. Returns an empty
 // list (not an error) when the agent has no litellm credential so the UI can
 // simply hide the picker. `defaultModel` is the agent's configured model, used
-// to preselect the dropdown.
+// to preselect the dropdown. Every entry carries its people-facing `name` and
+// `description` (lib/model-catalog.ts), and `defaultModelName` names the
+// default, so no client keeps its own model wording.
 interface LocalHarnessModelEntry {
   id: string;
   name: string;
@@ -1167,10 +1170,12 @@ router.get("/:slug/litellm-models", async (req: Request<{ slug: string }>, res: 
       const rawSpacesModel = ms?.["model"];
       const spacesModel = typeof rawSpacesModel === "string" && rawSpacesModel.trim() ? rawSpacesModel.trim() : null;
       const platformData = Array.isArray(platform.data) ? platform.data : [];
+      const defaultModel = spacesModel ?? platform.defaultModel;
       res.json({
         ...platform,
-        data: [...harnessEntries, ...platformData],
-        defaultModel: spacesModel ?? platform.defaultModel,
+        data: [...harnessEntries, ...platformData].map(labelModel),
+        defaultModel,
+        defaultModelName: defaultModel ? modelDisplayName(defaultModel) : null,
         ...(recommendedHarness ? { recommendedId: recommendedHarness.id } : {}),
       });
       return;
@@ -1194,8 +1199,9 @@ router.get("/:slug/litellm-models", async (req: Request<{ slug: string }>, res: 
       .sort((a, b) => a.name.localeCompare(b.name));
     res.json({
       success: true,
-      data: [...harnessEntries, ...models],
+      data: [...harnessEntries, ...models].map(labelModel),
       defaultModel: cred.model ?? null,
+      defaultModelName: cred.model ? modelDisplayName(cred.model) : null,
       pinProvider: "litellm",
       ...(recommendedHarness ? { recommendedId: recommendedHarness.id } : {}),
     });
@@ -1971,6 +1977,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       : runAgentConfig;
     const fastModeEnabled = await resolveFastMode(conversationId, slug, effectiveAgentConfig);
 
+    const aiScreenCommand = applyAiScreenCommand(message);
     const forwardBody: Record<string, unknown> = {
       // Pre-minted above and already persisted as an AgentRun row. prepareRun
       // honours it because this is an internal run, so the row, the dispatch and
@@ -1979,7 +1986,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       userId,
       userName: user?.name,
       userEmail: user?.email,
-      task: studioMode === "design" ? `/design ${message.trim()}` : applyAiScreenCommand(message).task,
+      task: studioMode === "design" ? `/design ${message.trim()}` : aiScreenCommand.task,
       conversationId,
       orgId: agent.orgId,
       ...(piConversationId !== conversationId ? { piSessionConversationId: piConversationId } : {}),
@@ -2014,6 +2021,8 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       // dashboard chat (same bug existed for webhook + scheduled jobs).
       ...(effectiveAgentConfig ? { agentConfig: effectiveAgentConfig } : {}),
       fastMode: fastModeEnabled,
+      // /compact shrinks the session before answering, not just summarises it.
+      ...(studioMode !== "design" && aiScreenCommand.compactBeforeRun ? { compactBeforeRun: true } : {}),
       ...evalRunSwitches(req, requestedOptimizations, requestedJudgeBackend),
     };
 

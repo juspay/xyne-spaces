@@ -1543,6 +1543,8 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       ...(generateFollowUpSuggestions === true ? { generateFollowUpSuggestions: true } : {}),
       __persistedByCaller: true,
       fastMode: fastModeEnabled,
+      // /compact shrinks the session before answering, not just summarises it.
+      ...(compactRequested ? { compactBeforeRun: true } : {}),
     };
 
     // Multi-agent direct chat: hand this agent the turns its own session has

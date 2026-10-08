@@ -28,7 +28,10 @@ export interface WorkerStartStreamMessage {
           | 'collection'
           | 'folder'
           | 'file'
-          | 'local-folder';
+          | 'local-folder'
+          | 'message'
+          | 'user'
+          | 'attachment';
         id: string;
         title: string;
         threadId?: string;

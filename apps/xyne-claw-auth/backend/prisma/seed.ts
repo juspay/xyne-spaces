@@ -1290,6 +1290,103 @@ You:
     }
   }
 
+  // Seed xyne — the orchestrator the dashboard opens by default (it falls back
+  // to Auto when this agent is missing). Snapshot of prod's agent and its skills
+  // in seed-data/xyne-agent.json. Prod tunes the prompt and skills live and helm
+  // reseeds on every deploy, so everything here is create-only: an existing
+  // agent, skill, skill file or credential is never overwritten.
+  const xyneSeed = JSON.parse(
+    readFileSync(join(SEED_DIR, "seed-data", "xyne-agent.json"), "utf8"),
+  ) as {
+    slug: string;
+    name: string;
+    description: string;
+    scope: string;
+    delegationTier: string;
+    color: string;
+    kbScope: string;
+    config: Prisma.InputJsonValue;
+    systemPrompt: string;
+    skills: Array<{
+      slug: string;
+      name: string;
+      description: string;
+      source: string;
+      content: string;
+      files: Array<{ relativePath: string; contentType: string | null; content: string }>;
+    }>;
+  };
+  const xyneAgent = await prisma.agent.upsert({
+    where: { orgId_slug: { orgId: defaultOrg.id, slug: xyneSeed.slug } },
+    create: {
+      slug: xyneSeed.slug,
+      orgId: defaultOrg.id,
+      name: xyneSeed.name,
+      description: xyneSeed.description,
+      systemPrompt: xyneSeed.systemPrompt,
+      scope: xyneSeed.scope,
+      delegationTier: xyneSeed.delegationTier,
+      color: xyneSeed.color,
+      kbScope: xyneSeed.kbScope,
+      config: xyneSeed.config,
+    },
+    update: {},
+  });
+  for (const def of xyneSeed.skills) {
+    const skill = await prisma.skill.upsert({
+      where: { orgId_slug: { orgId: defaultOrg.id, slug: def.slug } },
+      create: {
+        slug: def.slug,
+        orgId: defaultOrg.id,
+        name: def.name,
+        description: def.description,
+        content: def.content,
+        source: def.source,
+      },
+      update: {},
+    });
+    for (const file of def.files) {
+      await prisma.skillFile.upsert({
+        where: { skillId_relativePath: { skillId: skill.id, relativePath: file.relativePath } },
+        create: {
+          skillId: skill.id,
+          relativePath: file.relativePath,
+          content: file.content,
+          contentType: file.contentType,
+          sizeBytes: Buffer.byteLength(file.content, "utf8"),
+        },
+        update: {},
+      });
+    }
+    await prisma.agentSkill.upsert({
+      where: { agentId_skillId: { agentId: xyneAgent.id, skillId: skill.id } },
+      create: { agentId: xyneAgent.id, skillId: skill.id },
+      update: {},
+    });
+  }
+  // Ask AI's shared LLM bindings, so a fresh install can answer without a
+  // credential step. Only when xyne has none — never replaces a configured one.
+  const xyneCredentialCount = await prisma.agentProviderCredentials.count({
+    where: { agentId: xyneAgent.id },
+  });
+  if (xyneCredentialCount === 0) {
+    for (const binding of askAiSharedBindings) {
+      await prisma.agentProviderCredentials.create({
+        data: {
+          agentId: xyneAgent.id,
+          provider: binding.provider,
+          sharedCredentialId: binding.sharedCredentialId,
+          model: binding.model,
+          baseUrl: binding.baseUrl,
+          authType: binding.authType,
+          reasoningEffort: binding.reasoningEffort,
+          createdByUserId: binding.createdByUserId,
+        },
+      });
+    }
+  }
+  console.log(`[seed] Seeded agent: ${xyneSeed.name} (${xyneSeed.skills.length} skills)`);
+
   // Seed doctor-agent (Xyne Doctor — autonomous bug fixer)
   const DOCTOR_AGENT_PROMPT = [
     "You are the **Xyne Doctor** — an autonomous bug-fixing agent for the xyne-spaces codebase.",

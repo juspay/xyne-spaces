@@ -55,8 +55,8 @@ import { isAssistantMessage } from '../Assistant/turns';
 import { useTranscript } from '../Assistant/useTranscript';
 import type { AssistantActions } from '../Assistant/useAssistantActions';
 import { AIComposer, type AIComposerAttachment, type AIComposerHandle } from './AIComposer';
-import { ReadonlyContextPills } from './ReadonlyContextPills';
-import { type ComposerContext, toStreamOverrides } from './composerContext';
+import { ReadonlyContextPills, useSentMentions } from './ReadonlyContextPills';
+import { type ComposerContext, toStreamOverrides, withoutPickedContext } from './composerContext';
 import { AgentByline, AgentRecipient } from './ConversationAgents';
 import { FollowUpSuggestions } from './FollowUpSuggestions';
 import {
@@ -111,7 +111,11 @@ import { PromptMarkerRail, type PromptMarker } from './PromptMarkerRail';
 import type { ArtifactAppRestoreEvent } from '../../services/claw/artifactAppsService';
 import { useAppCreationModeSignal } from './ReactArtifact/appCreationModeContext';
 import { SidebarLeftOpen } from '@xyne/icons';
-import { formatChatTurnSeparator, formatFullTimestamp, formatTimeAmPm } from '../../utils/dateUtils';
+import {
+  formatChatTurnSeparator,
+  formatFullTimestamp,
+  formatTimeAmPm,
+} from '../../utils/dateUtils';
 import { Tooltip } from '../ui/Tooltip';
 import {
   ConversationToolInvocationsContext,
@@ -121,10 +125,7 @@ import {
   processTextForCopy,
 } from '../Chat/XyneAISidebar/components/MessageItem';
 import { TurnTimeline } from '../Chat/XyneAISidebar/components/TurnTimeline';
-import {
-  turnDurationLabel,
-  turnFinishedAt,
-} from '../Chat/XyneAISidebar/components/activityShared';
+import { turnDurationLabel, turnFinishedAt } from '../Chat/XyneAISidebar/components/activityShared';
 import { PendingActionBlock } from '../Chat/XyneAISidebar/components/PendingActionBlock';
 import { respondToPendingAction } from '../../services/XyneAI/XyneAIPendingActionService';
 import { AskAIDebugPanel } from '../Chat/XyneAISidebar/components/AskAIDebugPanel';
@@ -1025,6 +1026,12 @@ function ChatMessageBubble({
         : '',
     [isUser, message.content, validCitationKeys],
   );
+  // @/# mentions stay pills after sending, and open what they name.
+  const renderUserTags = useCallback(
+    (text: string) => processNodeForUserTags(text, resolveMention),
+    [resolveMention],
+  );
+  const sentMentions = useSentMentions(message.attachedContext, message.userTags, renderUserTags);
   const markCopied = useCallback((): void => {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -1123,7 +1130,7 @@ function ChatMessageBubble({
                   )}
                   {hasUserContent && (
                     <div className='whitespace-pre-wrap'>
-                      {processNodeForUserTags(userStrippedContent, resolveMention)}
+                      {sentMentions.render(userStrippedContent)}
                     </div>
                   )}
                 </>
@@ -1461,6 +1468,12 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
   ref,
 ): ReactElement {
   const composerRef = useRef<AIComposerHandle | null>(null);
+  // A landing send's context went out with that first turn, so the chat
+  // composer starts with only what lasts (toggles, the local folder). Read
+  // once: the composer seeds from it on mount.
+  const [composerSeed] = useState(() =>
+    initialQuery && initialExtras ? withoutPickedContext(initialExtras) : initialExtras,
+  );
   const dropZoneRef = useRef<HTMLDivElement | null>(null);
   const dragCounterRef = useRef(0);
   const [isDragging, setIsDragging] = useState(false);
@@ -2043,7 +2056,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
         toMessageAttachments(initialAttachments ?? []),
         undefined,
         undefined,
-        undefined,
+        initialExtras?.userTags,
         undefined,
         undefined,
         undefined,
@@ -2281,7 +2294,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
         messageAttachments,
         undefined,
         undefined,
-        undefined,
+        context?.userTags,
         parentMessageId,
         undefined,
         undefined,
@@ -2718,12 +2731,11 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
               // an empty thread hands the pick up (fresh chat for that agent).
               onAgentChange={conversationId ? undefined : onAgentChange}
               showAgentSelector={isV2}
-              initialExtras={initialExtras}
+              initialExtras={composerSeed}
               onContextChange={onContextChange}
               pending={isAnyMessageStreaming || (assistant?.isRouting ?? false)}
               onStop={handleStop}
               assistant={assistant && assistant.actions.length > 0 ? assistant : undefined}
-              placeholder='Write a message...'
             />
           </div>
         </div>

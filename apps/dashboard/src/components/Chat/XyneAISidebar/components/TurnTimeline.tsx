@@ -195,9 +195,7 @@ function StepGroup({
     : statusMessage;
   // What it is doing right now — held briefly so fast tool calls don't strobe.
   const liveLabel = useStableLabel(
-    steps.length === 0
-      ? status?.trim().replace(/…$/, '') || 'Thinking'
-      : liveActivity(steps, tree),
+    steps.length === 0 ? status?.trim().replace(/…$/, '') || 'Thinking' : liveActivity(steps, tree),
   );
   const liveThinking = live && current?.type === 'reasoning' ? current.text : '';
   const hasTools = steps.some(step => step.type === 'tool');
@@ -226,9 +224,7 @@ function StepGroup({
         ) : (
           <span className='min-w-0 truncate'>{summary.label}</span>
         )}
-        {!live && summary.failed > 0 && (
-          <span className='shrink-0'>({summary.failed} failed)</span>
-        )}
+        {!live && summary.failed > 0 && <span className='shrink-0'>({summary.failed} failed)</span>}
         {durationMs !== null && durationMs >= 1000 && (
           <span className='shrink-0 text-xs tabular-nums text-muted-foreground/50'>
             {formatSeconds(durationMs)}

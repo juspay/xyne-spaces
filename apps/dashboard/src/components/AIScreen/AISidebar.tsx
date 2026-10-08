@@ -16,7 +16,6 @@ import {
   PinSlant,
   LayoutGridStackDown,
   Notebook,
-  PencilEditBox,
   Piechart01,
   Settings01,
   ThreeDotsMenuVertical,
@@ -46,7 +45,6 @@ import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { Popover } from '../ui/Popover';
 import { Dialog } from '../ui/Dialog/Dialog';
 import { Button } from '../ui/Button';
-import Tooltip from '../ui/Tooltip';
 import AppNavigator from '../AppNavigator/AppNavigator';
 import type { ConversationHistory as ConversationHistoryType } from '../Chat/XyneAISidebar/utils/XyneAITypes';
 import { cn } from '../../utils/classNames';
@@ -735,22 +733,6 @@ export function AISidebar({
                 value={agentFilter}
                 onChange={setAgentFilter}
               />
-              <Tooltip content='New chat' side='top' sideOffset={0} delayDuration={500}>
-                <button
-                  type='button'
-                  onClick={onCreateChat}
-                  aria-label='New chat'
-                  className='group/child mr-0.5 rounded-md p-1 text-sidebar-foreground opacity-100 transition-opacity duration-300 ease-in-out hover:bg-sidebar-accent hover:text-sidebar-accent-foreground group-hover:opacity-100 md:opacity-0'
-                  data-track-category='XyneAI'
-                  data-track-name='NEW_CHAT_FROM_RECENTS'
-                >
-                  <PencilEditBox
-                    size={12}
-                    className='text-sidebar-foreground transition-colors group-hover/child:text-sidebar-primary'
-                    aria-hidden
-                  />
-                </button>
-              </Tooltip>
             </div>
 
             {recentsOpen && (

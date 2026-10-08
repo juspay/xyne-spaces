@@ -57,13 +57,16 @@ import { useAssistantActions } from '../../Assistant/useAssistantActions';
 import { useRoutedSubmit } from '../../Assistant/useRoutedSubmit';
 import { cn } from '../../../utils/classNames';
 import { type Attachment } from './components/XyneAIInputBox';
-import { XyneAIInputSection } from './components/XyneAIInputSection';
+import { XyneAIInputBox } from './components/XyneAIInputBox';
 import {
   type SelectedChannel,
   type SelectedTicket,
   type SelectedCanvas,
   type SelectedTranscript,
   type SelectedRecording,
+  type SelectedMessage,
+  type SelectedPerson,
+  type SelectedSharedFile,
   type ContextSelections,
   toAttachedContext,
   attachedContextToSelections,
@@ -82,10 +85,11 @@ import { UserActivityPanel } from './components/UserActivityPanel';
 import { AskAIDebugPanel } from './components/AskAIDebugPanel';
 import type { UserActivity } from '../../../hooks/useUserActivity';
 import { usePlatform } from '../../../hooks/usePlatform';
-import { useSelectedAgent } from '../../../hooks/useSelectedAgent';
+import { useDefaultAgent, useSelectedAgent } from '../../../hooks/useSelectedAgent';
 import { useAskAIAuto } from '../../../hooks/useAskAIAuto';
 import { fetchAccessibleClawAgents } from '../../../services/clawAgentListService';
 import { fetchClawAgentModels } from '../../../services/clawAgentModelsService';
+import { collectionsForAgent } from '../../Composer/ComposerCollections';
 import {
   xyneAIActor,
   type ThreadInfo,
@@ -297,7 +301,6 @@ const XyneAISidebar = ({
     !startFreshChat && !isFullscreen,
   );
   const [selectedChannels, setSelectedChannels] = useState<SelectedChannel[]>([]);
-  const [showContextModal, setShowContextModal] = useState(false);
   const [selectedCollectionIds, setSelectedCollectionIds] = useState<string[]>([]);
   // File scope(s) — multi-select. Seeded with the file Ask AI was opened from
   // (via a file viewer); users can add/remove more from the picker.
@@ -369,6 +372,10 @@ const XyneAISidebar = ({
   }, []);
   const [selectedTranscripts, setSelectedTranscripts] = useState<SelectedTranscript[]>([]);
   const [selectedRecordings, setSelectedRecordings] = useState<SelectedRecording[]>([]);
+  // Picked from the composer's @ menu.
+  const [selectedMessages, setSelectedMessages] = useState<SelectedMessage[]>([]);
+  const [selectedPeople, setSelectedPeople] = useState<SelectedPerson[]>([]);
+  const [selectedSharedFiles, setSelectedSharedFiles] = useState<SelectedSharedFile[]>([]);
   const [browserContext, setBrowserContext] = useState<{
     type: 'browser';
     text: string;
@@ -378,12 +385,26 @@ const XyneAISidebar = ({
     timestamp: number;
   } | null>(null);
   const [activeSelectionInfos, setActiveSelectionInfos] = useState<SelectionInfo[]>([]);
+  // Context the sidebar was OPENED with — the channel it opened on, a
+  // recording's call and notes — keyed `${kind}:${id}`. It belongs to the
+  // conversation, so a send keeps it; what the user added clears (see
+  // handleSubmit). Removing it by hand still removes it.
+  const openedWithRef = useRef(new Set<string>());
+  // Bumped after each send so the composer drops the collections the user
+  // picked (it owns those pills) and keeps the one it was opened on.
+  const [sentNonce, setSentNonce] = useState(0);
 
   // A recording page already knows the exact call and notes canvas that should
   // scope the conversation. Seed the normal picker state so its visible pills
   // and the request payload use the same source of truth.
   useEffect(() => {
     if (!initialContextSelections) return;
+    initialContextSelections.canvases.forEach(c => openedWithRef.current.add(`canvas:${c.id}`));
+    (initialContextSelections.tickets ?? []).forEach(t =>
+      openedWithRef.current.add(`ticket:${t.id}`),
+    );
+    initialContextSelections.recordings.forEach(r => openedWithRef.current.add(`call:${r.id}`));
+    (initialContextSelections.calls ?? []).forEach(c => openedWithRef.current.add(`call:${c.id}`));
     setSelectedCanvases(initialContextSelections.canvases);
     setSelectedTickets(initialContextSelections.tickets ?? []);
     setSelectedRecordings(initialContextSelections.recordings);
@@ -652,8 +673,6 @@ const XyneAISidebar = ({
 
   const channelName = (channel?.['name'] as string) || '';
 
-  const channelDescription = (channel?.['description'] as string) || '';
-
   const scopeType = (channel?.['scopeType'] as string) || '';
 
   // XYNE_AI_OPENED / XYNE_AI_CLOSED. This component is mounted only while the
@@ -726,13 +745,6 @@ const XyneAISidebar = ({
   }, [visible]);
 
   const allChannels = useAllVisibleChannels();
-  const nonDMChannels = useMemo(
-    () =>
-      allChannels.filter(
-        ch => ch.scopeType !== ChannelScopeType.DM && ch.scopeType !== ChannelScopeType.GROUP_DM,
-      ),
-    [allChannels],
-  );
 
   const currentUser = useSelf();
   // Load ALL collections the user can access (no scope), so the Ask AI picker works
@@ -764,6 +776,7 @@ const XyneAISidebar = ({
       scopeType !== (ChannelScopeType.GROUP_DM as string)
     ) {
       const ch = allChannels.find(c => c.id === channelId);
+      openedWithRef.current.add(`channel:${channelId}`);
       setSelectedChannels([
         {
           id: channelId,
@@ -796,6 +809,7 @@ const XyneAISidebar = ({
       name: channelName,
       isPrivate: channel ? String(channel.visibility) === 'PRIVATE' : false,
     };
+    openedWithRef.current.add(`channel:${nextChannel.id}`);
     setSelectedChannels(previous => {
       const current = previous[0];
       return previous.length === 1 &&
@@ -838,6 +852,7 @@ const XyneAISidebar = ({
     queryFn: fetchAccessibleClawAgents,
     staleTime: 60_000,
   });
+  useDefaultAgent(isAgentForced ? undefined : accessibleAgents);
 
   // Ask AI v1 has been removed; everything runs on v2 (xyne-claw) now.
   const isV2 = true;
@@ -887,7 +902,7 @@ const XyneAISidebar = ({
   const [thinkingLevel, setThinkingLevel] = useState<
     'off' | 'minimal' | 'low' | 'medium' | 'high' | null
   >(null);
-  const { data: agentModelsData } = useQuery({
+  const { data: agentModelsData, isLoading: agentModelsLoading } = useQuery({
     queryKey: ['claw-agent-models', modelAgentSlug],
     queryFn: () => fetchClawAgentModels(modelAgentSlug),
     staleTime: 60_000,
@@ -909,29 +924,12 @@ const XyneAISidebar = ({
       : null;
   const selectedAgentName = selectedAgent?.name ?? null;
 
-  // Ask AI v2 context-picker scope: when a claw agent is active, narrow the
-  // collections list to what THAT agent can actually read.
-  //   • v1 (selectedAgent === null) → unchanged, full list.
-  //   • USER-scoped agent           → agent inherits caller's full KB, so
-  //                                   showing the full list is the truthful
-  //                                   reflection of agent reach.
-  //   • COLLECTIONS-scoped agent    → filter to ids in agent.collections.
-  //                                   A collection appears if there's a
-  //                                   whole-collection grant OR a file-level
-  //                                   grant within it (the agent can still
-  //                                   read at least one doc inside).
-  // The downstream MCP layer is the hard gate; this filter just keeps the
-  // picker honest about what attaching a collection will get you.
-  const effectiveCollectionsList: CollectionSummary[] = useMemo(() => {
-    if (!selectedAgent) return collectionsList;
-    if (selectedAgent.kbScope === 'USER') return collectionsList;
-    // Top-level picker only lists ROOT collections — match against the
-    // resolved rootCollectionId (claw-auth stores the file's immediate
-    // parent, which can be a sub-folder).
-    const allowedRoots = new Set((selectedAgent.collections ?? []).map(g => g.rootCollectionId));
-    if (allowedRoots.size === 0) return [];
-    return collectionsList.filter(c => allowedRoots.has(c.id));
-  }, [collectionsList, selectedAgent]);
+  // The collections the selected agent can read — what the KB auto-add may
+  // attach (the "+" menu's picker narrows its own list the same way).
+  const effectiveCollectionsList: CollectionSummary[] = useMemo(
+    () => collectionsForAgent(collectionsList, selectedAgent),
+    [collectionsList, selectedAgent],
+  );
 
   // Auto-enable web search when browser context is provided (and user has access)
   // Web search stays enabled for the session to allow follow-up questions
@@ -952,6 +950,9 @@ const XyneAISidebar = ({
     canvases: selectedCanvases,
     transcripts: selectedTranscripts,
     recordings: selectedRecordings,
+    messages: selectedMessages,
+    people: selectedPeople,
+    sharedFiles: selectedSharedFiles,
     localFolders: [],
     folders: folderScopes,
     files: fileScopes,
@@ -1563,42 +1564,15 @@ const XyneAISidebar = ({
     }
   }, [messages, conversationId, streamThreadKey, channelId, activeThreadInfo?.conversationId]);
 
-  const handleOpenContextModal = useCallback(() => setShowContextModal(true), []);
-  const handleCloseContextModal = useCallback(() => {
-    setShowContextModal(false);
-    // Focus the input box after closing the modal
-    setTimeout(() => {
-      xyneAIInputRef.current?.focus();
-    }, 0);
-  }, [xyneAIInputRef]);
   const handleConfirmContext = useCallback((selections: ContextSelections) => {
     setSelectedChannels(selections.channels);
     setSelectedTickets(selections.tickets);
     setSelectedCanvases(selections.canvases);
     setSelectedTranscripts(selections.transcripts);
     setSelectedRecordings(selections.recordings);
-  }, []);
-  const handleRemoveChannel = useCallback((id: string) => {
-    setSelectedChannels(prev => prev.filter(ch => ch.id !== id));
-  }, []);
-  const handleAddChannel = useCallback((ch: SelectedChannel) => {
-    setSelectedChannels(prev => {
-      if (prev.some(c => c.id === ch.id)) return prev;
-      if (prev.length >= 5) return prev;
-      return [...prev, ch];
-    });
-  }, []);
-  const handleRemoveTicket = useCallback((id: string) => {
-    setSelectedTickets(prev => prev.filter(t => t.id !== id));
-  }, []);
-  const handleRemoveCanvas = useCallback((id: string) => {
-    setSelectedCanvases(prev => prev.filter(c => c.id !== id));
-  }, []);
-  const handleRemoveTranscript = useCallback((id: string) => {
-    setSelectedTranscripts(prev => prev.filter(t => t.id !== id));
-  }, []);
-  const handleRemoveRecording = useCallback((id: string) => {
-    setSelectedRecordings(prev => prev.filter(r => r.id !== id));
+    setSelectedMessages(selections.messages ?? []);
+    setSelectedPeople(selections.people ?? []);
+    setSelectedSharedFiles(selections.sharedFiles ?? []);
   }, []);
 
   // On switching to a conversation, carry its last user-turn context into the
@@ -1616,6 +1590,9 @@ const XyneAISidebar = ({
     setSelectedCanvases(c.canvases);
     setSelectedTranscripts(c.transcripts);
     setSelectedRecordings(c.recordings);
+    setSelectedMessages(c.messages ?? []);
+    setSelectedPeople(c.people ?? []);
+    setSelectedSharedFiles(c.sharedFiles ?? []);
     setFileScopes(c.fileScopes);
     setFolderScopes(c.folderScopes);
     setSelectedCollectionIds(c.collections.map(col => col.id));
@@ -2089,28 +2066,38 @@ const XyneAISidebar = ({
           sendTrigger ? { trigger: sendTrigger } : undefined,
         );
       } finally {
-        // The attachment belongs to the message it was sent with, not to the
-        // conversation: the sent message carries its own copy of attachedContext
-        // (persisted server-side — it is what the history pills and
-        // edit/regenerate read), so clearing the composer changes nothing already
-        // said. Left in place it silently steered every later answer, and nothing
-        // ever removed it.
+        // Context the user ADDED belongs to the message it was sent with, not
+        // to the conversation: the sent message carries its own copy of
+        // attachedContext (persisted server-side — it is what the history pills
+        // and edit/regenerate read), so clearing the composer changes nothing
+        // already said. Context the sidebar was OPENED with — the channel,
+        // thread, canvas, recording, KB file or the canvas selection it was
+        // asked about — is what the whole conversation is about, so it stays
+        // until the user removes it.
         //
         // In a finally: a send that throws is exactly when the context must not
         // be left behind, since the turn it belonged to never happened.
-        setSelectedChannels([]);
-        setSelectedTickets([]);
-        setSelectedCanvases([]);
-        setSelectedTranscripts([]);
-        setSelectedRecordings([]);
-        setActiveSelectionInfos([]);
-        processedSelectionKeysRef.current.clear();
-        // The machine holds the canvas selections that feed the list above;
-        // without this its next update would put them straight back.
-        xyneAIActor.send({ type: 'CLEAR_SELECTIONS' });
+        const openedWith = openedWithRef.current;
+        const keep =
+          (kind: string) =>
+          (item: { id: string }): boolean =>
+            openedWith.has(`${kind}:${item.id}`);
+        setSelectedChannels(prev => prev.filter(keep('channel')));
+        setSelectedTickets(prev => prev.filter(keep('ticket')));
+        setSelectedCanvases(prev => prev.filter(keep('canvas')));
+        setSelectedTranscripts(prev => prev.filter(keep('call')));
+        setSelectedRecordings(prev => prev.filter(keep('call')));
+        setSelectedMessages([]);
+        setSelectedPeople([]);
+        setSelectedSharedFiles([]);
+        setFileScopes(prev => prev.filter(f => f.id === kbDocIdProp));
+        setFolderScopes(prev => prev.filter(f => f.id === kbFolderIdProp));
+        setSentNonce(n => n + 1);
       }
     },
     [
+      kbDocIdProp,
+      kbFolderIdProp,
       inputValue,
       attachments,
       selectedActivities,
@@ -2161,8 +2148,10 @@ const XyneAISidebar = ({
     activeSelectionInfos.length === 0;
 
   // Not in handleSubmit, so auto-send, suggestion and follow-up sends are never routed.
+  // An explicit "/command" is never re-routed by Auto either (same as the AI screen).
   const handleComposerSubmit = (trigger?: 'button' | 'enter'): void => {
-    if (canRoute && inputValue.trim() !== '' && routedSubmit.route(trigger)) return;
+    const text = inputValue.trim();
+    if (canRoute && text !== '' && !text.startsWith('/') && routedSubmit.route(trigger)) return;
     void handleSubmit(trigger);
   };
 
@@ -2191,33 +2180,18 @@ const XyneAISidebar = ({
     return streamingSessionIds.some(id => id && !curKeys.has(id));
   }, [streamingSessionIds, conversationId, streamThreadKey, messages]);
 
-  // Shared props for XyneAIInputSection
-  const contextSelections: ContextSelections = {
-    channels: selectedChannels,
-    tickets: selectedTickets,
-    canvases: selectedCanvases,
-    transcripts: selectedTranscripts,
-    recordings: selectedRecordings,
-    localFolders: [],
-  };
-
+  // Shared props for the composer (XyneAIInputBox), at both mount points.
   const sharedInputSectionProps = {
-    // Model picker. Empty list (agent has no litellm credential) ⇒ the picker
-    // hides itself, so no extra gating is needed here beyond the v2 check.
     models: isV2 ? (agentModelsData?.models ?? []) : [],
+    modelsLoading: agentModelsLoading,
     defaultModel: agentModelsData?.defaultModel ?? null,
+    defaultModelName: agentModelsData?.defaultModelName ?? null,
     selectedModel,
     onSelectModel: setSelectedModel,
     thinkingLevel,
     onSelectThinking: setThinkingLevel,
-    showContextModal,
-    onCloseContextModal: handleCloseContextModal,
-    onConfirmContext: handleConfirmContext,
-    contextSelections,
+    onContextSelectionsChange: handleConfirmContext,
     channelId,
-    channelName,
-    channelDescription,
-    scopeType,
     threadInfo: activeThreadInfo,
     canvasInfo,
     workflowInfo: activeWorkflowInfo,
@@ -2230,30 +2204,20 @@ const XyneAISidebar = ({
     onSelectionInfosChange: setActiveSelectionInfos,
     onAttachmentsChange: setAttachments,
     onBrowserContextChange: setBrowserContext,
-    selectedChannels,
-    onRemoveChannel: handleRemoveChannel,
-    onAddChannel: handleAddChannel,
-    nonDMChannels,
     collectionsList: effectiveCollectionsList,
-    // Only pass grants when the agent is COLLECTIONS-scoped — USER scope
-    // and v1 (no agent) should keep the legacy "no drill-down gating"
-    // behavior, which the input box achieves when this prop is absent.
-    ...(selectedAgent && selectedAgent.kbScope === 'COLLECTIONS'
-      ? { agentKbGrants: selectedAgent.collections }
-      : {}),
+    sentNonce,
     fileScopes,
     onFileScopesChange: setFileScopes,
     folderScopes,
     onFolderScopesChange: setFolderScopes,
-    onOpenContextModal: handleOpenContextModal,
+    selectedChannels,
     selectedTickets,
-    onRemoveTicket: handleRemoveTicket,
     selectedCanvases,
-    onRemoveCanvas: handleRemoveCanvas,
     selectedTranscripts,
-    onRemoveTranscript: handleRemoveTranscript,
     selectedRecordings,
-    onRemoveRecording: handleRemoveRecording,
+    selectedMessages,
+    selectedPeople,
+    selectedSharedFiles,
     selectedActivities,
     onActivitiesChange: setSelectedActivities,
     onAbort: () => {
@@ -2470,12 +2434,10 @@ const XyneAISidebar = ({
                     <AILandingHeroErrorBoundary>
                       <AILandingHero
                         renderInput={
-                          <XyneAIInputSection
+                          <XyneAIInputBox
                             ref={xyneAIInputRef}
                             isOnboarding={false}
-                            showChannelTag={false}
                             isStreaming={false}
-                            contextPanelPosition='top'
                             selectedAgentSlug={effectiveAgentSlug}
                             agents={isV2 ? accessibleAgents : []}
                             {...(isV2 && !isAgentForced
@@ -2720,19 +2682,16 @@ const XyneAISidebar = ({
                       onExit={() => setVoiceMode(false)}
                     />
                   ) : (
-                    <XyneAIInputSection
+                    <XyneAIInputBox
                       ref={xyneAIInputRef}
                       isOnboarding={aiOnboarding.isActive}
-                      showChannelTag={true}
                       isStreaming={isActiveSessionStreaming || assistant.isRouting}
-                      contextPanelPosition='bottom'
                       selectedAgentSlug={effectiveAgentSlug}
                       agents={isV2 ? accessibleAgents : []}
                       {...(isV2 && !isAgentForced ? { onSelectAgent: handleSelectAgent } : {})}
                       {...(isV2 && !isAgentForced && !isFullscreen
                         ? { isAuto, onSelectAuto: handleSelectAuto }
                         : {})}
-                      compactToolbar={isCompactSidebar}
                       {...(!isFullscreen && { onEnterVoiceMode: () => setVoiceMode(true) })}
                       {...sharedInputSectionProps}
                       kbCollectionId={kbCollectionIdProp}

@@ -52,7 +52,7 @@ import {
   resolveCitationIconUrl,
 } from '../utils/clawCitationUrl';
 import { CitationLink } from './CitationLink';
-import { ReadonlyContextPills } from '../../../AIScreen/ReadonlyContextPills';
+import { ReadonlyContextPills, useSentMentions } from '../../../AIScreen/ReadonlyContextPills';
 import { genericInstance } from '../../../../services/clients/genericClient';
 import { showDownloadCompleteToast } from '../../../../utils/downloadToast';
 import type { Components } from 'react-markdown';
@@ -1208,6 +1208,16 @@ export const MessageItem = React.memo(
     // directory. Only REAL, unambiguous users become mentions — every other
     // "@text" stays plain text (matches channels/threads).
     const resolveMention = useMentionResolver(message.userTags);
+    // A user turn's @/# mentions stay pills after sending, and open what they name.
+    const renderUserTags = useCallback(
+      (text: string) => processNodeForUserTags(text, resolveMention),
+      [resolveMention],
+    );
+    const sentMentions = useSentMentions(
+      message.type === 'user' ? message.attachedContext : undefined,
+      message.userTags,
+      renderUserTags,
+    );
 
     // The rotating `displayStatus` + bouncing-dots indicator that used to live
     // here has been removed in favor of the TurnTimeline's live step header,
@@ -1444,10 +1454,7 @@ export const MessageItem = React.memo(
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
                     components={{
-                      p: ({ children }) => {
-                        const processed = processNodeForUserTags(children, resolveMention);
-                        return <span>{processed}</span>;
-                      },
+                      p: ({ children }) => <span>{sentMentions.render(children)}</span>,
                       a: ({ href, children, ...props }) => {
                         // Check if URL is external
                         const isExternal = (() => {
@@ -1538,10 +1545,7 @@ export const MessageItem = React.memo(
             !isEditing &&
             message.attachedContext &&
             message.attachedContext.length > 0 && (
-              <ReadonlyContextPills
-                items={message.attachedContext}
-                expandedWidthClass='max-w-[15rem]'
-              />
+              <ReadonlyContextPills items={message.attachedContext} />
             )}
 
           {/* Error display for bot messages */}

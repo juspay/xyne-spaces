@@ -63,10 +63,14 @@ export interface ClawRunRequest {
       | 'collection'
       | 'folder'
       | 'file'
+      | 'message'
+      | 'user'
+      | 'attachment'
       | string;
     id: string;
     title: string;
     threadId?: string;
+    canvasRole?: 'call-notes' | 'call-summary';
     eventName?: string;
     eventCategory?: string;
     timestamp?: string;
@@ -148,7 +152,10 @@ export interface ClawRunStreamResult {
  *  the raw model id today — the picker maps it to a friendlier label. */
 export interface ClawAgentModel {
   id: string;
+  /** People-facing name ("Sonnet 4.5") — claw-auth's model catalog. */
   name: string;
+  /** What the model is good for, when claw-auth's catalog knows. */
+  description?: string;
   provider?: 'local-harness';
   harness?: string;
   deviceName?: string;
@@ -1107,6 +1114,8 @@ export async function listClawAgentModels(
   defaultModel: string | null;
   pinProvider: 'litellm' | 'spaces';
   recommendedId?: string;
+  /** `defaultModel`'s people-facing name. */
+  defaultModelName?: string | null;
 }> {
   const slug = agentSlug || 'ask-ai';
   const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/litellm-models`;
@@ -1125,12 +1134,14 @@ export async function listClawAgentModels(
         defaultModel?: string | null;
         pinProvider?: 'litellm' | 'spaces';
         recommendedId?: string;
+        defaultModelName?: string | null;
       };
       if (result.success && (result.data ?? []).length > 0) {
         return {
           success: true,
           data: result.data,
           defaultModel: result.defaultModel ?? null,
+          defaultModelName: result.defaultModelName ?? null,
           // claw-auth says which provider a pick must pin: "litellm" when the
           // list came off the agent's own credential, "spaces" when it fell
           // back to the platform allowed list. Old claw-auth omits the field
