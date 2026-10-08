@@ -160,6 +160,8 @@ export interface XyneAIContext {
   // Parent-driven message submission (for contextual CTAs such as SDLC actions).
   initialQuery: string | null;
   autoSendNonce: number;
+  /** Turns web search on for the auto-sent `initialQuery` (it needs the open web). */
+  autoSendWebSearch: boolean;
   /** Which surface dispatched the last OPEN (analytics `source`). Not persisted. */
   openSource: string | null;
 }
@@ -189,6 +191,8 @@ export type XyneAIEvent =
       initialContextSelections?: AskAIInitialContextSelections | null;
       researchContext?: XyneAIResearchContext | null;
       initialQuery?: string | null;
+      /** With `initialQuery`: send it with web search on. */
+      webSearch?: boolean;
       /** Analytics attribution for XYNE_AI_OPENED — which surface opened the panel. */
       trackSource?: string;
     }
@@ -581,6 +585,7 @@ export const xyneAIMachine = setup({
           autoSendNonce: event.initialQuery?.trim()
             ? context.autoSendNonce + 1
             : context.autoSendNonce,
+          autoSendWebSearch: event.webSearch ?? false,
           openSource: event.trackSource ?? null,
           // Bump the nonce on every KB-scoped OPEN (collection, file, OR
           // folder) so the sidebar re-attaches the right chip even if the
@@ -666,6 +671,7 @@ export const xyneAIMachine = setup({
           autoSendNonce: event.initialQuery?.trim()
             ? context.autoSendNonce + 1
             : context.autoSendNonce,
+          autoSendWebSearch: event.webSearch ?? false,
           openSource: event.trackSource ?? context.openSource,
           // Re-bump on every KB-scoped OPEN (collection, file, OR folder).
           kbOpenNonce:
@@ -741,6 +747,7 @@ export const xyneAIMachine = setup({
         researchContext: null,
         initialQuery: null,
         autoSendNonce: context.autoSendNonce,
+        autoSendWebSearch: false,
         openSource: null,
       };
 
@@ -894,6 +901,7 @@ export const xyneAIMachine = setup({
     researchContext: null,
     initialQuery: null,
     autoSendNonce: 0,
+    autoSendWebSearch: false,
     openSource: null,
   }),
   id: 'xyneAIMachine',
