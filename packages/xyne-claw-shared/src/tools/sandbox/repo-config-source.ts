@@ -37,18 +37,12 @@ export function setRepoConfigLoader(next: RepoConfigLoader | null): void {
   inflight = null;
 }
 
-export function invalidateRepoConfigCache(): void {
-  nextFetchAt = 0;
-}
-
 export function getCachedRepoConfigs(): RepoConfigMap {
   return cached ?? REPO_CONFIGS;
 }
 
-export async function getRepoConfigs(): Promise<RepoConfigMap> {
-  if (!loader) return REPO_CONFIGS;
-  if (Date.now() < nextFetchAt) return cached ?? REPO_CONFIGS;
-  if (!inflight) {
+function refresh(): Promise<RepoConfigMap> {
+  if (!inflight && loader) {
     const current = loader;
     inflight = current()
       .then((map) => {
@@ -66,7 +60,17 @@ export async function getRepoConfigs(): Promise<RepoConfigMap> {
         inflight = null;
       });
   }
-  return inflight;
+  return inflight ?? Promise.resolve(cached ?? REPO_CONFIGS);
+}
+
+export async function getRepoConfigs(): Promise<RepoConfigMap> {
+  if (!loader) return REPO_CONFIGS;
+  if (Date.now() < nextFetchAt) return cached ?? REPO_CONFIGS;
+  if (cached) {
+    void refresh();
+    return cached;
+  }
+  return refresh();
 }
 
 export async function getRepoConfig(key: string): Promise<RepoSetupConfig | undefined> {

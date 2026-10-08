@@ -13,7 +13,7 @@ export { OPTIMIZATIONS, OPTIMIZATION_KEYS, OPTIMIZATION_GROUPS, OPTIMIZATION_TIE
 export { PRESENTATION_TOOL_SOURCES, PRESENTATION_CATALOG_SOURCE, isPresentationToolSource } from "./tools/presentation.js";
 export { classifyToolRisk, riskAtOrBelow, TOOL_RISK_LADDER, type ToolRiskLevel } from "./tools/tool-risk.js";
 export { openPaletteMode, openPaletteModeFromTools, openPaletteAdmits, type OpenPaletteMode } from "./tools/open-palette.js";
-export { getSandboxSession, probeSession, cleanupSdlcSandboxCredentialsForContext, buildSandboxStoreKey, sandboxConversationIdFromMeta, sandboxContentType, REPO_CONFIGS, SBX_GIT, type RepoSetupConfig, type SetupStep, buildEffectiveRepoConfigs, getCachedRepoConfigs, getRepoConfig, getRepoConfigs, invalidateRepoConfigCache, setRepoConfigLoader, type RepoConfigLoader, type RepoConfigMap, type RepoConfigOverride } from "./tools/sandbox/index.js";
+export { getSandboxSession, probeSession, cleanupSdlcSandboxCredentialsForContext, buildSandboxStoreKey, sandboxConversationIdFromMeta, sandboxContentType, DEFAULT_REPO_CONFIGS, SBX_GIT, type RepoSetupConfig, type SetupStep, buildEffectiveRepoConfigs, getCachedRepoConfigs, getRepoConfig, getRepoConfigs, setRepoConfigLoader, type RepoConfigLoader, type RepoConfigMap, type RepoConfigOverride } from "./tools/sandbox/index.js";
 export type { Citation, CitationIconKey } from "./types/citation.js";
 export { citationIconUrl, citationIconKey, iconUrlForKey, toolIconKey, CITATION_ICONS } from "./types/citation.js";
 export type { ClassifierExchange } from "./types/classifier-exchange.js";

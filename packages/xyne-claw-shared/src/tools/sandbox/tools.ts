@@ -2529,7 +2529,7 @@ export const sandboxRepoSetup: ToolDefinition = {
     // read-only). It ONLY relaxes the isReadOnlyJob force; `forceReadOnlySandbox`
     // (reviewer agents) still wins unconditionally. Default-off.
     const allowWriteInReadOnlyJob = context.meta?.["allowWriteInReadOnlyJob"] === "true";
-    const profile = pinnedRepo ? REPO_CONFIGS[pinnedRepo] : undefined;
+    const profile = pinnedRepo ? repoConfigs[pinnedRepo] : undefined;
     if (profile && !profile.repoUrl && context.meta?.["forceReadOnlySandbox"] !== "true") {
       try {
         return await makeRepoSetupTool(profile).execute(

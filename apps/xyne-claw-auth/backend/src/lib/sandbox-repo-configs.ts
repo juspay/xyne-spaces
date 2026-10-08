@@ -1,6 +1,6 @@
 import { z } from "zod";
 import {
-  REPO_CONFIGS,
+  DEFAULT_REPO_CONFIGS,
   buildEffectiveRepoConfigs,
   type RepoConfigMap,
   type RepoConfigOverride,
@@ -89,6 +89,10 @@ export async function loadRepoConfigOverrides(): Promise<RepoConfigOverride[]> {
   const rows = await sandboxRepoConfigRepository.list();
   const overrides: RepoConfigOverride[] = [];
   for (const row of rows) {
+    if (!row.enabled) {
+      overrides.push({ key: row.key, config: row.config as unknown as RepoSetupConfig, enabled: false });
+      continue;
+    }
     const parsed = parseRepoSetupConfig(row.config);
     if (!parsed.ok) {
       log.warn(`[sandbox-repo-configs] skipping invalid stored config "${row.key}": ${parsed.error}`);
@@ -100,5 +104,5 @@ export async function loadRepoConfigOverrides(): Promise<RepoConfigOverride[]> {
 }
 
 export async function loadEffectiveRepoConfigs(): Promise<RepoConfigMap> {
-  return buildEffectiveRepoConfigs(await loadRepoConfigOverrides(), REPO_CONFIGS);
+  return buildEffectiveRepoConfigs(await loadRepoConfigOverrides(), DEFAULT_REPO_CONFIGS);
 }

@@ -3227,7 +3227,7 @@ export async function processTask(
         "sandbox-run", "sandbox-run-detached", "sandbox-write-file",
         "sandbox-create", "sandbox-destroy", "write",
       ]);
-      const pinnedProfile = meta["sandboxRepo"] ? REPO_CONFIGS[meta["sandboxRepo"]] : undefined;
+      const pinnedProfile = meta["sandboxRepo"] ? await getRepoConfig(meta["sandboxRepo"]) : undefined;
       if (!forceReadOnlySandbox && pinnedProfile && !pinnedProfile.repoUrl) {
         RO_DISABLED.delete("sandbox-create");
         RO_DISABLED.delete("sandbox-destroy");

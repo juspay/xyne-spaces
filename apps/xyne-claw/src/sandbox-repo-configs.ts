@@ -20,11 +20,18 @@ async function fetchRepoConfigs(): Promise<RepoConfigMap> {
 }
 
 export function installSandboxRepoConfigLoader(): void {
+  let failing = false;
   setRepoConfigLoader(async () => {
     try {
-      return await fetchRepoConfigs();
+      const configs = await fetchRepoConfigs();
+      if (failing) log.info("[sandbox-repo-configs] fetch recovered");
+      failing = false;
+      return configs;
     } catch (err) {
-      log.warn(`[sandbox-repo-configs] fetch failed, using cached/static configs: ${err instanceof Error ? err.message : String(err)}`);
+      if (!failing) {
+        log.warn(`[sandbox-repo-configs] fetch failed, using cached/static configs: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      failing = true;
       throw err;
     }
   });
