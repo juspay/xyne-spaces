@@ -526,6 +526,10 @@ const AppRoot = (): ReactElement => {
   const xyneAIResearchContext = useSelector(xyneAIActor, state => state.context.researchContext);
   const xyneAIInitialQuery = useSelector(xyneAIActor, state => state.context.initialQuery);
   const xyneAIAutoSendNonce = useSelector(xyneAIActor, state => state.context.autoSendNonce);
+  const xyneAIAutoSendWebSearch = useSelector(
+    xyneAIActor,
+    state => state.context.autoSendWebSearch,
+  );
   const isCalendarOpen = useSelector(xyneCalendarActor, state => state.matches('open'));
   const { isMobile } = usePlatform();
   // No-op outside the SDLC bundle's framed instance.
@@ -648,6 +652,7 @@ const AppRoot = (): ReactElement => {
             researchContext={xyneAIResearchContext}
             initialQuery={xyneAIInitialQuery ?? undefined}
             autoSendNonce={xyneAIAutoSendNonce}
+            autoSendWebSearch={xyneAIAutoSendWebSearch}
             onDebuggerOpenChange={setIsXyneDebuggerOpen}
           />
         </XyneAISidebarZIndexShell>
@@ -878,6 +883,7 @@ const AppRoot = (): ReactElement => {
                                       researchContext={xyneAIResearchContext}
                                       initialQuery={xyneAIInitialQuery ?? undefined}
                                       autoSendNonce={xyneAIAutoSendNonce}
+                                      autoSendWebSearch={xyneAIAutoSendWebSearch}
                                       onDebuggerOpenChange={setIsXyneDebuggerOpen}
                                     />
                                   </XyneAISidebarZIndexShell>
@@ -1025,6 +1031,7 @@ const AppRoot = (): ReactElement => {
                             researchContext={xyneAIResearchContext}
                             initialQuery={xyneAIInitialQuery ?? undefined}
                             autoSendNonce={xyneAIAutoSendNonce}
+                            autoSendWebSearch={xyneAIAutoSendWebSearch}
                             onDebuggerOpenChange={setIsXyneDebuggerOpen}
                             visible={false}
                           />
@@ -1064,6 +1071,7 @@ const AppRoot = (): ReactElement => {
                               researchContext={xyneAIResearchContext}
                               initialQuery={xyneAIInitialQuery ?? undefined}
                               autoSendNonce={xyneAIAutoSendNonce}
+                              autoSendWebSearch={xyneAIAutoSendWebSearch}
                               onDebuggerOpenChange={setIsXyneDebuggerOpen}
                             />
                           </Drawer>

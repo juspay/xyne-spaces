@@ -155,6 +155,8 @@ interface XyneAISidebarProps {
   // Seed text for the input box; bump autoSendNonce to submit it as a real message.
   initialQuery?: string | undefined;
   autoSendNonce?: number;
+  // Sends the auto-sent initialQuery with web search on.
+  autoSendWebSearch?: boolean;
   researchContext?: XyneAIResearchContext | null;
   // Seed text that is *not* sent — bump seedNonce to place it in the composer and
   // leave it there to be edited. For hosts that hand the user a prepared question
@@ -217,6 +219,7 @@ const XyneAISidebar = ({
   forcedAgentSlug,
   initialQuery,
   autoSendNonce,
+  autoSendWebSearch = false,
   researchContext,
   seedQuery,
   seedNonce,
@@ -338,8 +341,12 @@ const XyneAISidebar = ({
     if (!initialQuery?.trim()) return;
     lastAutoSendNonceRef.current = autoSendNonce;
     autoSendPendingQueryRef.current = initialQuery;
+    // Batched with the seed, so the submit below already sees it.
+    if (autoSendWebSearch) {
+      setWebSearchEnabled(true);
+    }
     setInputValue(initialQuery);
-  }, [autoSendNonce, initialQuery]);
+  }, [autoSendNonce, initialQuery, autoSendWebSearch]);
   // Seed *without* sending, which `autoSendNonce` above deliberately cannot do —
   // it exists for callers that already know the whole question. A host that hands
   // over a starting point instead needs the text in the box and the cursor after
