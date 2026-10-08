@@ -6490,8 +6490,9 @@ export function createMutators(
 
               activities.push({
                 activityType,
-                value: field === 'stageName'
-                  ? { field: 'stageName', oldValue: previousValue, newValue: params[field] }
+                // Both are STATUS activities; `field` tells them apart.
+                value: field === 'stageName' || field === 'statusV2'
+                  ? { field, oldValue: previousValue, newValue: params[field] }
                   : { oldValue: previousValue, newValue: params[field] },
               });
             }
