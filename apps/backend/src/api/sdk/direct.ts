@@ -22,6 +22,7 @@ import { AccessType, MAX_RULES, NotificationStatus } from '@xyne/shared';
 import { searchQuerySchema, searchSchemaQuerySchema } from './schemas/search';
 import { db } from '@/database/client';
 import type { AuthData } from '@/zero/mutators';
+import type { Context } from '@xyne/shared';
 import { ChannelController } from '@/controllers/channelController';
 import { ConversationController } from '@/controllers/conversationController';
 import { TicketController } from '@/controllers/ticketController';
@@ -66,6 +67,7 @@ import {
   ConnectorRateLimitedError,
   ConnectorWriteToolError,
 } from '@/services/clawConnectorsService';
+import { DataQueryError, DataQuerySchema, runDataQuery } from '@/services/dataQuery';
 import { uploadMultiple, uploadSingle } from '@/middleware/upload';
 import { config } from '@/config/env';
 import { SdkApiError } from './errors';
@@ -287,6 +289,17 @@ const dailyBriefLimitQuery = z.object({
   limit: z.coerce.number().int().min(1).optional(),
 });
 
+/** ACL context for a data query. */
+function dataQueryContext(authData: AuthData): Context {
+  return {
+    userID: authData.sub,
+    workspaceId: authData.workspaceId,
+    role: authData.role,
+    orgRole: authData.orgRole,
+    memberId: authData.memberId,
+  };
+}
+
 const ROUTES: readonly DirectRoute[] = [
   {
     method: 'post',
@@ -371,6 +384,21 @@ const ROUTES: readonly DirectRoute[] = [
     controller: schemaHandler,
     query: searchSchemaQuerySchema,
     unwrap: unwrapEnvelope,
+  },
+
+  /** Single-table data query; see services/dataQuery. */
+  {
+    method: 'post',
+    path: '/data/query',
+    body: DataQuerySchema,
+    service: async (req, authData) => {
+      try {
+        return await runDataQuery(DataQuerySchema.parse(req.body), dataQueryContext(authData));
+      } catch (err) {
+        if (err instanceof DataQueryError) throw new SdkApiError(err.code, err.message, { cause: err });
+        throw err;
+      }
+    },
   },
 
   /**
