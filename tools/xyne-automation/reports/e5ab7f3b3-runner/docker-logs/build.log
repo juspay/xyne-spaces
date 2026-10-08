@@ -1,0 +1,257 @@
+#1 [internal] load local bake definitions
+#1 reading from stdin 3.50kB done
+#1 DONE 0.0s
+
+#2 [backend internal] load build definition from Dockerfile.test
+#2 transferring dockerfile: 2.77kB done
+#2 DONE 0.0s
+
+#3 [dashboard internal] load build definition from Dockerfile.test
+#3 transferring dockerfile: 2.44kB done
+#3 DONE 0.0s
+
+#4 [xyne-automation internal] load build definition from Dockerfile
+#4 transferring dockerfile: 1.69kB done
+#4 DONE 0.0s
+
+#5 [xyne-automation] resolve image config for docker-image://docker.io/docker/dockerfile:1
+#5 DONE 1.0s
+
+#6 [dashboard] docker-image://docker.io/docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
+#6 CACHED
+
+#7 [backend internal] load metadata for mirror.gcr.io/library/node:22.22.3-slim
+#7 DONE 0.5s
+
+#8 [backend internal] load .dockerignore
+#8 transferring context: 1.01kB done
+#8 DONE 0.0s
+
+#9 [xyne-automation internal] load metadata for mcr.microsoft.com/playwright:v1.59.1-noble
+#9 DONE 0.6s
+
+#10 [xyne-automation internal] load .dockerignore
+#10 transferring context: 88B done
+#10 DONE 0.0s
+
+#11 [backend stage-0  1/19] FROM mirror.gcr.io/library/node:22.22.3-slim@sha256:e21fc383b50d5347dc7a9f1cae45b8f4e2f0d39f7ade28e4eef7d2934522b752
+#11 DONE 0.0s
+
+#12 [xyne-automation stage-0  1/10] FROM mcr.microsoft.com/playwright:v1.59.1-noble@sha256:b0ab6f3cb99aa7803adbc14d9027ec1785fc6e433b97e134e0f8fe61683b6b53
+#12 DONE 0.0s
+
+#13 [xyne-automation internal] load build context
+#13 transferring context: 7.74kB done
+#13 DONE 0.0s
+
+#14 [xyne-automation stage-0  9/10] RUN chown -R pwuser:pwuser /app
+#14 CACHED
+
+#15 [xyne-automation stage-0  2/10] WORKDIR /app
+#15 CACHED
+
+#16 [xyne-automation stage-0  7/10] COPY . .
+#16 CACHED
+
+#17 [xyne-automation stage-0  8/10] RUN mkdir -p /app/reports
+#17 CACHED
+
+#18 [xyne-automation stage-0  3/10] COPY package*.json ./
+#18 CACHED
+
+#19 [xyne-automation stage-0  5/10] RUN --mount=type=cache,target=/root/.local/share/pnpm/store pnpm install --no-frozen-lockfile --ignore-scripts
+#19 CACHED
+
+#20 [xyne-automation stage-0  4/10] RUN corepack enable && corepack prepare pnpm@10.15.0 --activate
+#20 CACHED
+
+#21 [xyne-automation stage-0  6/10] RUN cd node_modules/@getgauge/cli &&     version=$(node -pe "require('./package.json').version") &&     case "$(uname -m)" in x86_64) arch=x86_64 ;; aarch64|arm64) arch=arm64 ;; *) echo "unsupported arch: $(uname -m)" && exit 1 ;; esac &&     url="https://github.com/getgauge/gauge/releases/download/v${version}/gauge-${version}-linux.${arch}.zip" &&     curl -fsSL -o /tmp/gauge.zip "$url" &&     node -e "const AdmZip=require('adm-zip'); new AdmZip('/tmp/gauge.zip').extractAllTo('bin', true, true)" &&     rm /tmp/gauge.zip
+#21 CACHED
+
+#22 [xyne-automation stage-0 10/10] RUN corepack prepare pnpm@10.15.0 --activate   && mkdir -p /home/pwuser/.gauge/config   && : > /home/pwuser/.gauge/config/gauge.properties   && pnpm exec gauge install ts   && pnpm exec gauge install html-report   && pnpm exec gauge install json-report   && pnpm exec gauge install screenshot
+#22 CACHED
+
+#23 [xyne-automation] exporting to image
+#23 exporting layers done
+#23 writing image sha256:90f3cdb54967b5719d12a20f412b538459f3497fd146227ae41a12cb98de6f37 done
+#23 naming to docker.io/library/xyne-test-feature-xyne-59771-implement-x-0-1791455764693-xyne-automation done
+#23 DONE 0.0s
+
+#24 [dashboard internal] load build context
+#24 ...
+
+#25 [xyne-automation] resolving provenance for metadata file
+#25 DONE 0.0s
+
+#24 [dashboard internal] load build context
+#24 ...
+
+#26 [backend internal] load build context
+#26 transferring context: 313.78kB 0.2s done
+#26 DONE 0.2s
+
+#27 [backend stage-0 17/28] COPY packages/cache     packages/cache
+#27 CACHED
+
+#28 [backend stage-0 10/28] COPY packages/cache/package.json            packages/cache/
+#28 CACHED
+
+#29 [backend stage-0 15/28] COPY packages/storage   packages/storage
+#29 CACHED
+
+#30 [backend stage-0 24/28] COPY apps/backend/.env.test .env.local
+#30 CACHED
+
+#31 [backend stage-0 19/28] COPY apps/backend apps/backend
+#31 CACHED
+
+#32 [backend stage-0  2/28] WORKDIR /app
+#32 CACHED
+
+#33 [backend stage-0 23/28] COPY apps/backend/.env.test .env
+#33 CACHED
+
+#34 [backend stage-0  3/28] RUN apt-get update && apt-get install -y     python3     make     g++     git     openssl     libssl-dev     ca-certificates     curl     libcairo2-dev     libpango1.0-dev     libjpeg-dev     libgif-dev     librsvg2-dev     postgresql-client     && rm -rf /var/lib/apt/lists/*
+#34 CACHED
+
+#35 [backend stage-0  5/28] WORKDIR /repo
+#35 CACHED
+
+#36 [backend stage-0 26/28] RUN chmod +x /scripts/setup-fake-gcs-test.sh
+#36 CACHED
+
+#37 [backend stage-0 16/28] COPY packages/framework packages/framework
+#37 CACHED
+
+#38 [backend stage-0  9/28] COPY packages/framework/package.json        packages/framework/
+#38 CACHED
+
+#39 [backend stage-0 14/28] COPY packages/shared    packages/shared
+#39 CACHED
+
+#40 [backend stage-0  4/28] RUN corepack enable && corepack prepare pnpm@10.15.0 --activate
+#40 CACHED
+
+#41 [backend stage-0 22/28] COPY package.json /package.json
+#41 CACHED
+
+#42 [backend stage-0 12/28] COPY apps/backend/eslint-rules/package.json apps/backend/eslint-rules/
+#42 CACHED
+
+#43 [backend stage-0 11/28] COPY apps/backend/package.json              apps/backend/
+#43 CACHED
+
+#44 [backend stage-0 18/28] RUN pnpm --filter @xyne/shared --filter @xyne/storage --filter agentic-framework --filter @xyne/cache run build
+#44 CACHED
+
+#45 [backend stage-0  6/28] COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+#45 CACHED
+
+#46 [backend stage-0  7/28] COPY packages/shared/package.json           packages/shared/
+#46 CACHED
+
+#47 [backend stage-0 20/28] RUN ln -s /repo/apps/backend /app
+#47 CACHED
+
+#48 [backend stage-0 13/28] RUN --mount=type=cache,target=/root/.local/share/pnpm/store     pnpm install --frozen-lockfile --prod=false --ignore-scripts --filter xyne-spaces-backend...
+#48 CACHED
+
+#49 [backend stage-0 21/28] WORKDIR /repo/apps/backend
+#49 CACHED
+
+#50 [backend stage-0  8/28] COPY packages/storage/package.json          packages/storage/
+#50 CACHED
+
+#51 [backend stage-0 27/28] RUN pnpm run db:generate
+#51 CACHED
+
+#52 [backend stage-0 25/28] COPY scripts/setup-fake-gcs-test.sh /scripts/setup-fake-gcs-test.sh
+#52 CACHED
+
+#53 [backend stage-0 28/28] RUN pnpm run db:common:generate
+#53 CACHED
+
+#24 [dashboard internal] load build context
+#24 ...
+
+#54 [backend] exporting to image
+#54 exporting layers done
+#54 writing image sha256:0eeec50ec10c55fc54c2cd1c3aa45ac665dfa2cc431837179880625ff6f558b6 done
+#54 naming to docker.io/library/xyne-test-feature-xyne-59771-implement-x-0-1791455764693-backend done
+#54 DONE 0.0s
+
+#24 [dashboard internal] load build context
+#24 ...
+
+#55 [backend] resolving provenance for metadata file
+#55 DONE 0.0s
+
+#24 [dashboard internal] load build context
+#24 transferring context: 61.55MB 0.7s done
+#24 DONE 0.8s
+
+#56 [dashboard stage-0 13/19] COPY packages/icons  packages/icons
+#56 CACHED
+
+#57 [dashboard stage-0  5/19] COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+#57 CACHED
+
+#58 [dashboard stage-0 16/19] COPY package.json /package.json
+#58 CACHED
+
+#59 [dashboard stage-0 14/19] RUN pnpm --filter @xyne/shared --filter @xyne/icons run build
+#59 CACHED
+
+#60 [dashboard stage-0 15/19] COPY apps/dashboard apps/dashboard
+#60 CACHED
+
+#61 [dashboard stage-0  8/19] COPY apps/dashboard/package.json            apps/dashboard/
+#61 CACHED
+
+#62 [dashboard stage-0 18/19] RUN cp .env.test .env
+#62 CACHED
+
+#63 [dashboard stage-0 10/19] COPY apps/backend/eslint-rules/package.json apps/backend/eslint-rules/
+#63 CACHED
+
+#64 [dashboard stage-0 17/19] WORKDIR /repo/apps/dashboard
+#64 CACHED
+
+#65 [dashboard stage-0  7/19] COPY packages/icons/package.json            packages/icons/
+#65 CACHED
+
+#66 [dashboard stage-0 11/19] RUN --mount=type=cache,target=/root/.local/share/pnpm/store     pnpm install --frozen-lockfile --prod=false --ignore-scripts --filter xyne-spaces-dashboard...
+#66 CACHED
+
+#67 [dashboard stage-0  9/19] COPY apps/backend/package.json              apps/backend/
+#67 CACHED
+
+#68 [dashboard stage-0 12/19] COPY packages/shared packages/shared
+#68 CACHED
+
+#69 [dashboard stage-0  3/19] RUN corepack enable && corepack prepare pnpm@10.15.0 --activate
+#69 CACHED
+
+#70 [dashboard stage-0  6/19] COPY packages/shared/package.json           packages/shared/
+#70 CACHED
+
+#71 [dashboard stage-0  2/19] RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+#71 CACHED
+
+#72 [dashboard stage-0  4/19] WORKDIR /repo
+#72 CACHED
+
+#73 [dashboard stage-0 19/19] RUN NODE_OPTIONS=--max-old-space-size=8192 pnpm exec vite build --mode test
+#73 CACHED
+
+#74 [dashboard] exporting to image
+#74 exporting layers done
+#74 writing image sha256:f928ade3b5c57fe602e05aafe59d0fae820e9dca53207d2a76a9922fbe79f42c done
+#74 naming to docker.io/library/xyne-test-feature-xyne-59771-implement-x-0-1791455764693-dashboard done
+#74 DONE 0.0s
+
+#75 [dashboard] resolving provenance for metadata file
+#75 DONE 0.0s
+ xyne-test-feature-xyne-59771-implement-x-0-1791455764693-backend  Built
+ xyne-test-feature-xyne-59771-implement-x-0-1791455764693-dashboard  Built
+ xyne-test-feature-xyne-59771-implement-x-0-1791455764693-xyne-automation  Built

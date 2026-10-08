@@ -1,0 +1,10 @@
+{"timestamp":"2026-10-08T10:37:06.121Z","level":"info","pid":25,"runner":"baseline","prefix":"","message":"[1/8] User created: user-1"}
+{"timestamp":"2026-10-08T10:37:06.169Z","level":"info","pid":25,"runner":"baseline","prefix":"","message":"[2/8] User created: user-2"}
+{"timestamp":"2026-10-08T10:37:06.321Z","level":"info","pid":25,"runner":"baseline","prefix":"","message":"[3/8] User created: admin-1"}
+{"timestamp":"2026-10-08T10:37:15.256Z","level":"info","pid":25,"runner":"baseline","prefix":"","message":"[3/5] Project created: baseline-project-xo6ejk"}
+{"timestamp":"2026-10-08T10:37:18.123Z","level":"info","pid":25,"runner":"baseline","prefix":"","message":"[4/5] Channel created: baseline-channel-piwgis"}
+{"timestamp":"2026-10-08T10:37:19.433Z","level":"info","pid":25,"runner":"baseline","prefix":"","message":"[5/5] Add-people submitted for user-1 on baseline channel"}
+{"timestamp":"2026-10-08T10:37:20.691Z","level":"info","pid":25,"runner":"baseline","prefix":"","message":"[5/5] Add-people submitted for user-2 on baseline channel"}
+{"timestamp":"2026-10-08T10:37:20.744Z","level":"info","pid":25,"runner":"baseline","prefix":"","message":"[6/8] Seed message sent in baseline channel"}
+{"timestamp":"2026-10-08T10:37:20.809Z","level":"info","pid":25,"runner":"baseline","prefix":"","message":"[7/8] Re-logged in as baseline user to create DM"}
+{"timestamp":"2026-10-08T10:37:25.379Z","level":"info","pid":25,"runner":"baseline","prefix":"","message":"[8/8] Baseline DM created with seed message"}

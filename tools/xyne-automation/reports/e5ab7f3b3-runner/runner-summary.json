@@ -1,0 +1,73 @@
+{
+  "runId": "e5ab7f3b3-1791456324953",
+  "commitHash": "e5ab7f3b3",
+  "timestamp": "2026-10-08T10:45:24.953Z",
+  "mode": "local",
+  "composeProjectName": "xyne-test-feature-xyne-59771-implement-x-0-1791455764693",
+  "testTargets": [
+    "tests/03_e2e/11_xyne-desk"
+  ],
+  "portMap": {
+    "POSTGRES_BIND_PORT": 59795,
+    "COMMON_POSTGRES_BIND_PORT": 59796,
+    "REDIS_BIND_PORT": 59797,
+    "LIVEKIT_HTTP_BIND_PORT": 59798,
+    "LIVEKIT_HTTPS_BIND_PORT": 59799,
+    "LIVEKIT_UDP_BIND_PORT": 65490,
+    "FAKE_GCS_BIND_PORT": 59800,
+    "MINIO_API_BIND_PORT": 59801,
+    "MINIO_CONSOLE_BIND_PORT": 59802,
+    "ZERO_BIND_PORT_1": 59803,
+    "ZERO_BIND_PORT_2": 59804,
+    "TRANSCRIPTION_AGENT_BIND_PORT": 59805,
+    "YSWEET_BIND_PORT": 59806,
+    "SUPERPOSITION_BIND_PORT": 59807,
+    "CLAW_AUTH_POSTGRES_BIND_PORT": 59808,
+    "OTEL_HTTP_BIND_PORT": 59809,
+    "OTEL_GRPC_BIND_PORT": 59810,
+    "OTEL_METRICS_BIND_PORT": 59811,
+    "VICTORIAMETRICS_BIND_PORT": 59812,
+    "GRAFANA_BIND_PORT": 59813,
+    "BACKEND_BIND_PORT": 59814,
+    "DASHBOARD_BIND_PORT": 59815
+  },
+  "steps": [
+    {
+      "id": "docker-build",
+      "title": "Build Docker images",
+      "status": "passed",
+      "duration": 3530
+    },
+    {
+      "id": "docker-up",
+      "title": "Start all Docker services",
+      "status": "passed",
+      "duration": 53948
+    },
+    {
+      "id": "run-tests",
+      "title": "Run Gauge tests",
+      "status": "passed",
+      "duration": 480642
+    },
+    {
+      "id": "copy-reports",
+      "title": "Copy test reports",
+      "status": "passed",
+      "duration": 110
+    },
+    {
+      "id": "docker-down",
+      "title": "Tear down Docker services",
+      "status": "passed",
+      "duration": 21674
+    }
+  ],
+  "testStatistics": {
+    "passed": 15,
+    "failed": 0,
+    "skipped": 0,
+    "total": 15
+  },
+  "exitCode": 0
+}

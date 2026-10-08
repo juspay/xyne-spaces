@@ -1,0 +1,72 @@
+
+📁 Run artifacts: reports/e5ab7f3b3-1
+
+🧱 Preparing baseline fixtures before starting Gauge workers...
+✅ Baseline fixtures ready. Starting 1 parallel runner(s).
+
+[TEST PROGRESS] 0% | ran 0/15 | remaining 15 | passed 0 | failed 0
+Executing in 1 parallel streams.
+[runner:  1] # Xyne Desk DL mail happy flow
+[runner:  1]   ## Create DL desk, receive customer mail, and send a reply through the mock provider
+[runner:  1] 
+[runner:  1] # Xyne Desk workspace shared mailbox permissions
+[runner:  1]   ## Only admins can configure the workspace shared Desk mailbox
+[TEST PROGRESS] 6% | ran 1/15 | remaining 14 | passed 1 | failed 0 | PASSED: Create DL desk, receive customer mail, and send a reply through the mock provider
+[runner:  1] 
+[runner:  1] # Xyne Desk multiple DL routing
+[runner:  1]   ## Multiple DL desk channels receive their own incoming mails
+[TEST PROGRESS] 13% | ran 2/15 | remaining 13 | passed 2 | failed 0 | PASSED: Only admins can configure the workspace shared Desk mailbox
+[runner:  1] 
+[runner:  1] # Xyne Desk mock DL membership delivery
+[runner:  1]   ## Member in three DLs receives all DL mails and stops receiving removed DL mails
+[TEST PROGRESS] 20% | ran 3/15 | remaining 12 | passed 3 | failed 0 | PASSED: Multiple DL desk channels receive their own incoming mails
+[runner:  1] 
+[runner:  1] # Xyne Desk personal mailbox happy flow
+[runner:  1]   ## Create personal mailbox desk, receive customer mail, and send a reply through the mock provider
+[TEST PROGRESS] 26% | ran 4/15 | remaining 11 | passed 4 | failed 0 | PASSED: Member in three DLs receives all DL mails and stops receiving removed DL mails
+[runner:  1] 
+[runner:  1] # Xyne Desk Slack channel happy flow
+[runner:  1]   ## Create Slack desk channel and receive a Slack message as a Desk ticket
+[TEST PROGRESS] 33% | ran 5/15 | remaining 10 | passed 5 | failed 0 | PASSED: Create personal mailbox desk, receive customer mail, and send a reply through the mock provider
+[runner:  1] 
+[runner:  1] # Xyne Desk personal mailbox advanced flow
+[runner:  1]   ## Personal mailbox ticket UI, update, reply-all, and attachment happy flow
+[TEST PROGRESS] 40% | ran 6/15 | remaining 9 | passed 6 | failed 0 | PASSED: Create Slack desk channel and receive a Slack message as a Desk ticket
+[TEST PROGRESS] 46% | ran 7/15 | remaining 8 | passed 7 | failed 0 | PASSED: Personal mailbox ticket UI, update, reply-all, and attachment happy flow
+[runner:  1] 
+[runner:  1] # Xyne Desk connection lifecycle
+[runner:  1]   ## Personal mailbox can disconnect and reconnect through mock Desk setup
+[runner:  1]   ## Slack Desk channel can disconnect after mock connect
+[TEST PROGRESS] 53% | ran 8/15 | remaining 7 | passed 8 | failed 0 | PASSED: Personal mailbox can disconnect and reconnect through mock Desk setup
+[runner:  1] 
+[runner:  1] # Xyne Desk compose merge and unmerge
+[runner:  1]   ## Compose mail creates a Desk ticket and the ticket can be merged and unmerged
+[TEST PROGRESS] 60% | ran 9/15 | remaining 6 | passed 9 | failed 0 | PASSED: Slack Desk channel can disconnect after mock connect
+[TEST PROGRESS] 66% | ran 10/15 | remaining 5 | passed 10 | failed 0 | PASSED: Compose mail creates a Desk ticket and the ticket can be merged and unmerged
+[runner:  1] 
+[runner:  1] # Xyne Desk AI rewrite and compose controls
+[runner:  1]   ## Desk ticket exposes compose Ask AI and rewrite controls without invoking external AI
+[runner:  1] 
+[runner:  1] # Xyne Desk deterministic Pub/Sub bulk mail flow
+[runner:  1]   ## Bulk Gmail Pub/Sub delivery reaches Desk exactly once
+[TEST PROGRESS] 73% | ran 11/15 | remaining 4 | passed 11 | failed 0 | PASSED: Desk ticket exposes compose Ask AI and rewrite controls without invoking external AI
+[runner:  1]   ## Retryable failure mid-batch is redelivered without duplicates
+[TEST PROGRESS] 80% | ran 12/15 | remaining 3 | passed 12 | failed 0 | PASSED: Bulk Gmail Pub/Sub delivery reaches Desk exactly once
+[runner:  1] 
+[runner:  1] # Xyne Desk recipients and filters
+[runner:  1]   ## Reply recipients and Desk filters remain correct
+[TEST PROGRESS] 86% | ran 13/15 | remaining 2 | passed 13 | failed 0 | PASSED: Retryable failure mid-batch is redelivered without duplicates
+[runner:  1] 
+[runner:  1] # Xyne Desk auto-merge and manual controls
+[runner:  1]   ## Auto Merge OFF keeps emails separate and manual merge/demerge remains available
+[TEST PROGRESS] 93% | ran 14/15 | remaining 1 | passed 14 | failed 0 | PASSED: Reply recipients and Desk filters remain correct
+[runner:  1] 
+[TEST PROGRESS] 100% | ran 15/15 | remaining 0 | passed 15 | failed 0 | PASSED: Auto Merge OFF keeps emails separate and manual merge/demerge remains available
+Successfully generated html-report to => /app/reports/e5ab7f3b3-1/html-report/index.html
+
+Successfully generated json-report to => /app/reports/e5ab7f3b3-1/json-report
+
+Specifications:	13 executed	13 passed	0 failed	0 skipped
+Scenarios:	15 executed	15 passed	0 failed	0 skipped
+
+Total time taken: 7m36.024s

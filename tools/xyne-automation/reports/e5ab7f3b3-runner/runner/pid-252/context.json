@@ -1,0 +1,3592 @@
+{
+  "runId": "e5ab7f3b3-1",
+  "runnerNumber": null,
+  "runnerPid": 252,
+  "runnerFolder": "pid-252",
+  "capturedAt": "2026-10-08T10:45:02.813Z",
+  "suite": {
+    "before": {
+      "activeSessionName": null,
+      "activeSession": null,
+      "sessions": {},
+      "storedUsers": {},
+      "lastResponse": null,
+      "hasApiRequestContext": false
+    },
+    "after": {
+      "activeSessionName": null,
+      "activeSession": null,
+      "sessions": {},
+      "storedUsers": {
+        "admin-1": {
+          "alias": "admin-1",
+          "role": "admin",
+          "id": "",
+          "email": "test-admin-email-1@xyne-test.local",
+          "name": "admin-1",
+          "projects": {
+            "project-1": {
+              "id": "cmuzejt5i0039v3stwlvqrbf1",
+              "name": "baseline-project-xo6ejk",
+              "code": "BLXO6EJK",
+              "description": "baseline project fixture"
+            }
+          },
+          "channels": {
+            "channel-1": {
+              "id": "cmuzejv2c003mv3stfch8xi3u",
+              "name": "baseline-channel-piwgis",
+              "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+              "messages": {
+                "message-baseline": {
+                  "alias": "message-baseline",
+                  "baseText": "baseline-channel-seed",
+                  "text": "baseline-channel-seed-yv6y97"
+                }
+              }
+            }
+          },
+          "dms": {},
+          "tickets": {}
+        },
+        "user-2": {
+          "alias": "user-2",
+          "role": "user",
+          "id": "",
+          "email": "test-user-email-2@xyne-test.local",
+          "name": "user-2",
+          "projects": {},
+          "channels": {
+            "channel-1": {
+              "id": "cmuzejv2c003mv3stfch8xi3u",
+              "name": "baseline-channel-piwgis",
+              "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+              "messages": {
+                "message-baseline": {
+                  "alias": "message-baseline",
+                  "baseText": "baseline-channel-seed",
+                  "text": "baseline-channel-seed-yv6y97"
+                }
+              }
+            }
+          },
+          "dms": {},
+          "tickets": {}
+        },
+        "user-1": {
+          "alias": "user-1",
+          "role": "user",
+          "id": "",
+          "email": "test-user-email-1@xyne-test.local",
+          "name": "user-1",
+          "projects": {},
+          "channels": {
+            "channel-1": {
+              "id": "cmuzejv2c003mv3stfch8xi3u",
+              "name": "baseline-channel-piwgis",
+              "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+              "messages": {
+                "message-baseline": {
+                  "alias": "message-baseline",
+                  "baseText": "baseline-channel-seed",
+                  "text": "baseline-channel-seed-yv6y97"
+                }
+              }
+            }
+          },
+          "dms": {
+            "dm-1": {
+              "id": "cmuzek0w2004qv3st5x9zx2j9",
+              "name": "Test User 2",
+              "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzek0w2004qv3st5x9zx2j9",
+              "messages": {
+                "message-baseline": {
+                  "alias": "message-baseline",
+                  "baseText": "baseline-dm-seed",
+                  "text": "baseline-dm-seed-dvoygb"
+                }
+              }
+            }
+          },
+          "tickets": {}
+        }
+      },
+      "lastResponse": null,
+      "hasApiRequestContext": false
+    }
+  },
+  "scenarios": [
+    {
+      "index": 1,
+      "specName": "Xyne Desk DL mail happy flow",
+      "specFile": "/app/tests/03_e2e/11_xyne-desk/01_dl-desk-mail-happy-flow.spec",
+      "scenarioName": "Create DL desk, receive customer mail, and send a reply through the mock provider",
+      "before": {
+        "activeSessionName": null,
+        "activeSession": null,
+        "sessions": {},
+        "storedUsers": {
+          "admin-1": {
+            "alias": "admin-1",
+            "role": "admin",
+            "id": "",
+            "email": "test-admin-email-1@xyne-test.local",
+            "name": "admin-1",
+            "projects": {
+              "project-1": {
+                "id": "cmuzejt5i0039v3stwlvqrbf1",
+                "name": "baseline-project-xo6ejk",
+                "code": "BLXO6EJK",
+                "description": "baseline project fixture"
+              }
+            },
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-2": {
+            "alias": "user-2",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-2@xyne-test.local",
+            "name": "user-2",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-1": {
+            "alias": "user-1",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-1@xyne-test.local",
+            "name": "user-1",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {
+              "dm-1": {
+                "id": "cmuzek0w2004qv3st5x9zx2j9",
+                "name": "Test User 2",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzek0w2004qv3st5x9zx2j9",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-dm-seed",
+                    "text": "baseline-dm-seed-dvoygb"
+                  }
+                }
+              }
+            },
+            "tickets": {}
+          }
+        },
+        "lastResponse": null,
+        "hasApiRequestContext": false
+      },
+      "after": {
+        "activeSessionName": "default-browser-1",
+        "activeSession": {
+          "name": "default-browser-1",
+          "browserType": "chromium",
+          "viewportWidth": 1280,
+          "viewportHeight": 720,
+          "currentUrl": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/support/cmuzek5ic005jv3stk9tq1ffv/BLXO6EJK-0001"
+        },
+        "sessions": {
+          "default-browser-1": {
+            "name": "default-browser-1",
+            "browserType": "chromium",
+            "viewportWidth": 1280,
+            "viewportHeight": 720,
+            "currentUrl": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/support/cmuzek5ic005jv3stk9tq1ffv/BLXO6EJK-0001"
+          }
+        },
+        "storedUsers": {
+          "admin-1": {
+            "alias": "admin-1",
+            "role": "admin",
+            "id": "cmuzejm6n0023v3stog4wmk5j",
+            "email": "test-admin-email-1@xyne-test.local",
+            "name": "Test Admin 1",
+            "workspaceId": "cmuzejlvt0002v3stv8ii008w",
+            "projects": {
+              "project-1": {
+                "id": "cmuzejt5i0039v3stwlvqrbf1",
+                "name": "baseline-project-xo6ejk",
+                "code": "BLXO6EJK",
+                "description": "baseline project fixture"
+              }
+            },
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              },
+              "channel-desk-dl-happy-flow": {
+                "id": "cmuzek5ic005jv3stk9tq1ffv",
+                "name": "channel-desk-dl-happy-flow-e5ab7f3b3-1-gdatpy",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/support/cmuzek5ic005jv3stk9tq1ffv",
+                "messages": {}
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-2": {
+            "alias": "user-2",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-2@xyne-test.local",
+            "name": "user-2",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-1": {
+            "alias": "user-1",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-1@xyne-test.local",
+            "name": "user-1",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {
+              "dm-1": {
+                "id": "cmuzek0w2004qv3st5x9zx2j9",
+                "name": "Test User 2",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzek0w2004qv3st5x9zx2j9",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-dm-seed",
+                    "text": "baseline-dm-seed-dvoygb"
+                  }
+                }
+              }
+            },
+            "tickets": {}
+          }
+        },
+        "lastResponse": null,
+        "hasApiRequestContext": false
+      },
+      "startedAt": "2026-10-08T10:37:28.296Z",
+      "finishedAt": "2026-10-08T10:37:39.705Z"
+    },
+    {
+      "index": 2,
+      "specName": "Xyne Desk workspace shared mailbox permissions",
+      "specFile": "/app/tests/03_e2e/11_xyne-desk/02_workspace-desk-admin-only.spec",
+      "scenarioName": "Only admins can configure the workspace shared Desk mailbox",
+      "before": {
+        "activeSessionName": null,
+        "activeSession": null,
+        "sessions": {},
+        "storedUsers": {
+          "admin-1": {
+            "alias": "admin-1",
+            "role": "admin",
+            "id": "",
+            "email": "test-admin-email-1@xyne-test.local",
+            "name": "admin-1",
+            "projects": {
+              "project-1": {
+                "id": "cmuzejt5i0039v3stwlvqrbf1",
+                "name": "baseline-project-xo6ejk",
+                "code": "BLXO6EJK",
+                "description": "baseline project fixture"
+              }
+            },
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-2": {
+            "alias": "user-2",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-2@xyne-test.local",
+            "name": "user-2",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-1": {
+            "alias": "user-1",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-1@xyne-test.local",
+            "name": "user-1",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {
+              "dm-1": {
+                "id": "cmuzek0w2004qv3st5x9zx2j9",
+                "name": "Test User 2",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzek0w2004qv3st5x9zx2j9",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-dm-seed",
+                    "text": "baseline-dm-seed-dvoygb"
+                  }
+                }
+              }
+            },
+            "tickets": {}
+          }
+        },
+        "lastResponse": null,
+        "hasApiRequestContext": false
+      },
+      "after": {
+        "activeSessionName": "default-browser-1",
+        "activeSession": {
+          "name": "default-browser-1",
+          "browserType": "chromium",
+          "viewportWidth": 1280,
+          "viewportHeight": 720,
+          "currentUrl": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/ai/chat/new"
+        },
+        "sessions": {
+          "default-browser-1": {
+            "name": "default-browser-1",
+            "browserType": "chromium",
+            "viewportWidth": 1280,
+            "viewportHeight": 720,
+            "currentUrl": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/ai/chat/new"
+          }
+        },
+        "storedUsers": {
+          "admin-1": {
+            "alias": "admin-1",
+            "role": "admin",
+            "id": "cmuzejm6n0023v3stog4wmk5j",
+            "email": "test-admin-email-1@xyne-test.local",
+            "name": "Test Admin 1",
+            "workspaceId": "cmuzejlvt0002v3stv8ii008w",
+            "projects": {
+              "project-1": {
+                "id": "cmuzejt5i0039v3stwlvqrbf1",
+                "name": "baseline-project-xo6ejk",
+                "code": "BLXO6EJK",
+                "description": "baseline project fixture"
+              }
+            },
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-2": {
+            "alias": "user-2",
+            "role": "user",
+            "id": "cmuzejm5g001wv3stoxln51gu",
+            "email": "test-user-email-2@xyne-test.local",
+            "name": "Test User 2",
+            "workspaceId": "cmuzejlvt0002v3stv8ii008w",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-1": {
+            "alias": "user-1",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-1@xyne-test.local",
+            "name": "user-1",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {
+              "dm-1": {
+                "id": "cmuzek0w2004qv3st5x9zx2j9",
+                "name": "Test User 2",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzek0w2004qv3st5x9zx2j9",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-dm-seed",
+                    "text": "baseline-dm-seed-dvoygb"
+                  }
+                }
+              }
+            },
+            "tickets": {}
+          }
+        },
+        "lastResponse": null,
+        "hasApiRequestContext": false
+      },
+      "startedAt": "2026-10-08T10:37:39.724Z",
+      "finishedAt": "2026-10-08T10:37:43.480Z"
+    },
+    {
+      "index": 3,
+      "specName": "Xyne Desk multiple DL routing",
+      "specFile": "/app/tests/03_e2e/11_xyne-desk/03_dl-desk-multiple-dl-routing.spec",
+      "scenarioName": "Multiple DL desk channels receive their own incoming mails",
+      "before": {
+        "activeSessionName": null,
+        "activeSession": null,
+        "sessions": {},
+        "storedUsers": {
+          "admin-1": {
+            "alias": "admin-1",
+            "role": "admin",
+            "id": "",
+            "email": "test-admin-email-1@xyne-test.local",
+            "name": "admin-1",
+            "projects": {
+              "project-1": {
+                "id": "cmuzejt5i0039v3stwlvqrbf1",
+                "name": "baseline-project-xo6ejk",
+                "code": "BLXO6EJK",
+                "description": "baseline project fixture"
+              }
+            },
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-2": {
+            "alias": "user-2",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-2@xyne-test.local",
+            "name": "user-2",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-1": {
+            "alias": "user-1",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-1@xyne-test.local",
+            "name": "user-1",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {
+              "dm-1": {
+                "id": "cmuzek0w2004qv3st5x9zx2j9",
+                "name": "Test User 2",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzek0w2004qv3st5x9zx2j9",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-dm-seed",
+                    "text": "baseline-dm-seed-dvoygb"
+                  }
+                }
+              }
+            },
+            "tickets": {}
+          }
+        },
+        "lastResponse": null,
+        "hasApiRequestContext": false
+      },
+      "after": {
+        "activeSessionName": "default-browser-1",
+        "activeSession": {
+          "name": "default-browser-1",
+          "browserType": "chromium",
+          "viewportWidth": 1280,
+          "viewportHeight": 720,
+          "currentUrl": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/ai/chat/new"
+        },
+        "sessions": {
+          "default-browser-1": {
+            "name": "default-browser-1",
+            "browserType": "chromium",
+            "viewportWidth": 1280,
+            "viewportHeight": 720,
+            "currentUrl": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/ai/chat/new"
+          }
+        },
+        "storedUsers": {
+          "admin-1": {
+            "alias": "admin-1",
+            "role": "admin",
+            "id": "cmuzejm6n0023v3stog4wmk5j",
+            "email": "test-admin-email-1@xyne-test.local",
+            "name": "Test Admin 1",
+            "workspaceId": "cmuzejlvt0002v3stv8ii008w",
+            "projects": {
+              "project-1": {
+                "id": "cmuzejt5i0039v3stwlvqrbf1",
+                "name": "baseline-project-xo6ejk",
+                "code": "BLXO6EJK",
+                "description": "baseline project fixture"
+              }
+            },
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              },
+              "channel-desk-dl-routing-a": {
+                "id": "cmuzekh7q0075v3strmwq9odc",
+                "name": "channel-desk-dl-routing-a-e5ab7f3b3-1-6t0ygc",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/support/cmuzekh7q0075v3strmwq9odc",
+                "messages": {}
+              },
+              "channel-desk-dl-routing-b": {
+                "id": "cmuzekhbn007iv3st9oo5f985",
+                "name": "channel-desk-dl-routing-b-e5ab7f3b3-1-kxlhhr",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/support/cmuzekhbn007iv3st9oo5f985",
+                "messages": {}
+              },
+              "channel-desk-dl-routing-c": {
+                "id": "cmuzekhfd007uv3stamewlozm",
+                "name": "channel-desk-dl-routing-c-e5ab7f3b3-1-m85squ",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/support/cmuzekhfd007uv3stamewlozm",
+                "messages": {}
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-2": {
+            "alias": "user-2",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-2@xyne-test.local",
+            "name": "user-2",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-1": {
+            "alias": "user-1",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-1@xyne-test.local",
+            "name": "user-1",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {
+              "dm-1": {
+                "id": "cmuzek0w2004qv3st5x9zx2j9",
+                "name": "Test User 2",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzek0w2004qv3st5x9zx2j9",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-dm-seed",
+                    "text": "baseline-dm-seed-dvoygb"
+                  }
+                }
+              }
+            },
+            "tickets": {}
+          }
+        },
+        "lastResponse": null,
+        "hasApiRequestContext": false
+      },
+      "startedAt": "2026-10-08T10:37:43.496Z",
+      "finishedAt": "2026-10-08T10:37:47.374Z"
+    },
+    {
+      "index": 4,
+      "specName": "Xyne Desk mock DL membership delivery",
+      "specFile": "/app/tests/03_e2e/11_xyne-desk/04_mock-dl-membership-delivery.spec",
+      "scenarioName": "Member in three DLs receives all DL mails and stops receiving removed DL mails",
+      "before": {
+        "activeSessionName": null,
+        "activeSession": null,
+        "sessions": {},
+        "storedUsers": {
+          "admin-1": {
+            "alias": "admin-1",
+            "role": "admin",
+            "id": "",
+            "email": "test-admin-email-1@xyne-test.local",
+            "name": "admin-1",
+            "projects": {
+              "project-1": {
+                "id": "cmuzejt5i0039v3stwlvqrbf1",
+                "name": "baseline-project-xo6ejk",
+                "code": "BLXO6EJK",
+                "description": "baseline project fixture"
+              }
+            },
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-2": {
+            "alias": "user-2",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-2@xyne-test.local",
+            "name": "user-2",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-1": {
+            "alias": "user-1",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-1@xyne-test.local",
+            "name": "user-1",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {
+              "dm-1": {
+                "id": "cmuzek0w2004qv3st5x9zx2j9",
+                "name": "Test User 2",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzek0w2004qv3st5x9zx2j9",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-dm-seed",
+                    "text": "baseline-dm-seed-dvoygb"
+                  }
+                }
+              }
+            },
+            "tickets": {}
+          }
+        },
+        "lastResponse": null,
+        "hasApiRequestContext": false
+      },
+      "after": {
+        "activeSessionName": "default-browser-1",
+        "activeSession": {
+          "name": "default-browser-1",
+          "browserType": "chromium",
+          "viewportWidth": 1280,
+          "viewportHeight": 720,
+          "currentUrl": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/ai/chat/new"
+        },
+        "sessions": {
+          "default-browser-1": {
+            "name": "default-browser-1",
+            "browserType": "chromium",
+            "viewportWidth": 1280,
+            "viewportHeight": 720,
+            "currentUrl": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/ai/chat/new"
+          }
+        },
+        "storedUsers": {
+          "admin-1": {
+            "alias": "admin-1",
+            "role": "admin",
+            "id": "cmuzejm6n0023v3stog4wmk5j",
+            "email": "test-admin-email-1@xyne-test.local",
+            "name": "Test Admin 1",
+            "workspaceId": "cmuzejlvt0002v3stv8ii008w",
+            "projects": {
+              "project-1": {
+                "id": "cmuzejt5i0039v3stwlvqrbf1",
+                "name": "baseline-project-xo6ejk",
+                "code": "BLXO6EJK",
+                "description": "baseline project fixture"
+              }
+            },
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-2": {
+            "alias": "user-2",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-2@xyne-test.local",
+            "name": "user-2",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-1": {
+            "alias": "user-1",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-1@xyne-test.local",
+            "name": "user-1",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {
+              "dm-1": {
+                "id": "cmuzek0w2004qv3st5x9zx2j9",
+                "name": "Test User 2",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzek0w2004qv3st5x9zx2j9",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-dm-seed",
+                    "text": "baseline-dm-seed-dvoygb"
+                  }
+                }
+              }
+            },
+            "tickets": {}
+          }
+        },
+        "lastResponse": null,
+        "hasApiRequestContext": false
+      },
+      "startedAt": "2026-10-08T10:37:47.390Z",
+      "finishedAt": "2026-10-08T10:37:50.197Z"
+    },
+    {
+      "index": 5,
+      "specName": "Xyne Desk personal mailbox happy flow",
+      "specFile": "/app/tests/03_e2e/11_xyne-desk/05_personal-mailbox-happy-flow.spec",
+      "scenarioName": "Create personal mailbox desk, receive customer mail, and send a reply through the mock provider",
+      "before": {
+        "activeSessionName": null,
+        "activeSession": null,
+        "sessions": {},
+        "storedUsers": {
+          "admin-1": {
+            "alias": "admin-1",
+            "role": "admin",
+            "id": "",
+            "email": "test-admin-email-1@xyne-test.local",
+            "name": "admin-1",
+            "projects": {
+              "project-1": {
+                "id": "cmuzejt5i0039v3stwlvqrbf1",
+                "name": "baseline-project-xo6ejk",
+                "code": "BLXO6EJK",
+                "description": "baseline project fixture"
+              }
+            },
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-2": {
+            "alias": "user-2",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-2@xyne-test.local",
+            "name": "user-2",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-1": {
+            "alias": "user-1",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-1@xyne-test.local",
+            "name": "user-1",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {
+              "dm-1": {
+                "id": "cmuzek0w2004qv3st5x9zx2j9",
+                "name": "Test User 2",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzek0w2004qv3st5x9zx2j9",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-dm-seed",
+                    "text": "baseline-dm-seed-dvoygb"
+                  }
+                }
+              }
+            },
+            "tickets": {}
+          }
+        },
+        "lastResponse": null,
+        "hasApiRequestContext": false
+      },
+      "after": {
+        "activeSessionName": "default-browser-1",
+        "activeSession": {
+          "name": "default-browser-1",
+          "browserType": "chromium",
+          "viewportWidth": 1280,
+          "viewportHeight": 720,
+          "currentUrl": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/support/cmuzekm19009bv3stgaf33rt4/BLXO6EJK-0005"
+        },
+        "sessions": {
+          "default-browser-1": {
+            "name": "default-browser-1",
+            "browserType": "chromium",
+            "viewportWidth": 1280,
+            "viewportHeight": 720,
+            "currentUrl": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/support/cmuzekm19009bv3stgaf33rt4/BLXO6EJK-0005"
+          }
+        },
+        "storedUsers": {
+          "admin-1": {
+            "alias": "admin-1",
+            "role": "admin",
+            "id": "cmuzejm6n0023v3stog4wmk5j",
+            "email": "test-admin-email-1@xyne-test.local",
+            "name": "Test Admin 1",
+            "workspaceId": "cmuzejlvt0002v3stv8ii008w",
+            "projects": {
+              "project-1": {
+                "id": "cmuzejt5i0039v3stwlvqrbf1",
+                "name": "baseline-project-xo6ejk",
+                "code": "BLXO6EJK",
+                "description": "baseline project fixture"
+              }
+            },
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              },
+              "channel-desk-personal-happy-flow": {
+                "id": "cmuzekm19009bv3stgaf33rt4",
+                "name": "channel-desk-personal-happy-flow-e5ab7f3b3-1-a2to8c",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/support/cmuzekm19009bv3stgaf33rt4",
+                "messages": {}
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-2": {
+            "alias": "user-2",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-2@xyne-test.local",
+            "name": "user-2",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-1": {
+            "alias": "user-1",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-1@xyne-test.local",
+            "name": "user-1",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {
+              "dm-1": {
+                "id": "cmuzek0w2004qv3st5x9zx2j9",
+                "name": "Test User 2",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzek0w2004qv3st5x9zx2j9",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-dm-seed",
+                    "text": "baseline-dm-seed-dvoygb"
+                  }
+                }
+              }
+            },
+            "tickets": {}
+          }
+        },
+        "lastResponse": null,
+        "hasApiRequestContext": false
+      },
+      "startedAt": "2026-10-08T10:37:50.209Z",
+      "finishedAt": "2026-10-08T10:38:01.182Z"
+    },
+    {
+      "index": 6,
+      "specName": "Xyne Desk Slack channel happy flow",
+      "specFile": "/app/tests/03_e2e/11_xyne-desk/06_slack-channel-happy-flow.spec",
+      "scenarioName": "Create Slack desk channel and receive a Slack message as a Desk ticket",
+      "before": {
+        "activeSessionName": null,
+        "activeSession": null,
+        "sessions": {},
+        "storedUsers": {
+          "admin-1": {
+            "alias": "admin-1",
+            "role": "admin",
+            "id": "",
+            "email": "test-admin-email-1@xyne-test.local",
+            "name": "admin-1",
+            "projects": {
+              "project-1": {
+                "id": "cmuzejt5i0039v3stwlvqrbf1",
+                "name": "baseline-project-xo6ejk",
+                "code": "BLXO6EJK",
+                "description": "baseline project fixture"
+              }
+            },
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-2": {
+            "alias": "user-2",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-2@xyne-test.local",
+            "name": "user-2",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-1": {
+            "alias": "user-1",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-1@xyne-test.local",
+            "name": "user-1",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {
+              "dm-1": {
+                "id": "cmuzek0w2004qv3st5x9zx2j9",
+                "name": "Test User 2",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzek0w2004qv3st5x9zx2j9",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-dm-seed",
+                    "text": "baseline-dm-seed-dvoygb"
+                  }
+                }
+              }
+            },
+            "tickets": {}
+          }
+        },
+        "lastResponse": null,
+        "hasApiRequestContext": false
+      },
+      "after": {
+        "activeSessionName": "default-browser-1",
+        "activeSession": {
+          "name": "default-browser-1",
+          "browserType": "chromium",
+          "viewportWidth": 1280,
+          "viewportHeight": 720,
+          "currentUrl": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/ai/chat/new"
+        },
+        "sessions": {
+          "default-browser-1": {
+            "name": "default-browser-1",
+            "browserType": "chromium",
+            "viewportWidth": 1280,
+            "viewportHeight": 720,
+            "currentUrl": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/ai/chat/new"
+          }
+        },
+        "storedUsers": {
+          "admin-1": {
+            "alias": "admin-1",
+            "role": "admin",
+            "id": "cmuzejm6n0023v3stog4wmk5j",
+            "email": "test-admin-email-1@xyne-test.local",
+            "name": "Test Admin 1",
+            "workspaceId": "cmuzejlvt0002v3stv8ii008w",
+            "projects": {
+              "project-1": {
+                "id": "cmuzejt5i0039v3stwlvqrbf1",
+                "name": "baseline-project-xo6ejk",
+                "code": "BLXO6EJK",
+                "description": "baseline project fixture"
+              }
+            },
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              },
+              "channel-desk-slack-happy-flow": {
+                "id": "cmuzekui700alv3st1kv49gix",
+                "name": "channel-desk-slack-happy-flow-e5ab7f3b3-1-samjnd",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/support/cmuzekui700alv3st1kv49gix",
+                "messages": {}
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-2": {
+            "alias": "user-2",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-2@xyne-test.local",
+            "name": "user-2",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-1": {
+            "alias": "user-1",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-1@xyne-test.local",
+            "name": "user-1",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {
+              "dm-1": {
+                "id": "cmuzek0w2004qv3st5x9zx2j9",
+                "name": "Test User 2",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzek0w2004qv3st5x9zx2j9",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-dm-seed",
+                    "text": "baseline-dm-seed-dvoygb"
+                  }
+                }
+              }
+            },
+            "tickets": {}
+          }
+        },
+        "lastResponse": null,
+        "hasApiRequestContext": false
+      },
+      "startedAt": "2026-10-08T10:38:01.199Z",
+      "finishedAt": "2026-10-08T10:38:03.808Z"
+    },
+    {
+      "index": 7,
+      "specName": "Xyne Desk personal mailbox advanced flow",
+      "specFile": "/app/tests/03_e2e/11_xyne-desk/07_personal-mailbox-advanced-flow.spec",
+      "scenarioName": "Personal mailbox ticket UI, update, reply-all, and attachment happy flow",
+      "before": {
+        "activeSessionName": null,
+        "activeSession": null,
+        "sessions": {},
+        "storedUsers": {
+          "admin-1": {
+            "alias": "admin-1",
+            "role": "admin",
+            "id": "",
+            "email": "test-admin-email-1@xyne-test.local",
+            "name": "admin-1",
+            "projects": {
+              "project-1": {
+                "id": "cmuzejt5i0039v3stwlvqrbf1",
+                "name": "baseline-project-xo6ejk",
+                "code": "BLXO6EJK",
+                "description": "baseline project fixture"
+              }
+            },
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-2": {
+            "alias": "user-2",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-2@xyne-test.local",
+            "name": "user-2",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-1": {
+            "alias": "user-1",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-1@xyne-test.local",
+            "name": "user-1",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {
+              "dm-1": {
+                "id": "cmuzek0w2004qv3st5x9zx2j9",
+                "name": "Test User 2",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzek0w2004qv3st5x9zx2j9",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-dm-seed",
+                    "text": "baseline-dm-seed-dvoygb"
+                  }
+                }
+              }
+            },
+            "tickets": {}
+          }
+        },
+        "lastResponse": null,
+        "hasApiRequestContext": false
+      },
+      "after": {
+        "activeSessionName": "default-browser-1",
+        "activeSession": {
+          "name": "default-browser-1",
+          "browserType": "chromium",
+          "viewportWidth": 1280,
+          "viewportHeight": 720,
+          "currentUrl": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/support/cmuzekxfr00bev3stgxmt9sqk/BLXO6EJK-0007"
+        },
+        "sessions": {
+          "default-browser-1": {
+            "name": "default-browser-1",
+            "browserType": "chromium",
+            "viewportWidth": 1280,
+            "viewportHeight": 720,
+            "currentUrl": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/support/cmuzekxfr00bev3stgxmt9sqk/BLXO6EJK-0007"
+          }
+        },
+        "storedUsers": {
+          "admin-1": {
+            "alias": "admin-1",
+            "role": "admin",
+            "id": "cmuzejm6n0023v3stog4wmk5j",
+            "email": "test-admin-email-1@xyne-test.local",
+            "name": "Test Admin 1",
+            "workspaceId": "cmuzejlvt0002v3stv8ii008w",
+            "projects": {
+              "project-1": {
+                "id": "cmuzejt5i0039v3stwlvqrbf1",
+                "name": "baseline-project-xo6ejk",
+                "code": "BLXO6EJK",
+                "description": "baseline project fixture"
+              }
+            },
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              },
+              "channel-desk-personal-advanced-flow": {
+                "id": "cmuzekxfr00bev3stgxmt9sqk",
+                "name": "channel-desk-personal-advanced-flow-e5ab7f3b3-1-glg0wl",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/support/cmuzekxfr00bev3stgxmt9sqk",
+                "messages": {}
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-2": {
+            "alias": "user-2",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-2@xyne-test.local",
+            "name": "user-2",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-1": {
+            "alias": "user-1",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-1@xyne-test.local",
+            "name": "user-1",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {
+              "dm-1": {
+                "id": "cmuzek0w2004qv3st5x9zx2j9",
+                "name": "Test User 2",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzek0w2004qv3st5x9zx2j9",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-dm-seed",
+                    "text": "baseline-dm-seed-dvoygb"
+                  }
+                }
+              }
+            },
+            "tickets": {}
+          }
+        },
+        "lastResponse": null,
+        "hasApiRequestContext": false
+      },
+      "startedAt": "2026-10-08T10:38:03.820Z",
+      "finishedAt": "2026-10-08T10:38:15.871Z"
+    },
+    {
+      "index": 8,
+      "specName": "Xyne Desk connection lifecycle",
+      "specFile": "/app/tests/03_e2e/11_xyne-desk/08_connection-lifecycle.spec",
+      "scenarioName": "Personal mailbox can disconnect and reconnect through mock Desk setup",
+      "before": {
+        "activeSessionName": null,
+        "activeSession": null,
+        "sessions": {},
+        "storedUsers": {
+          "admin-1": {
+            "alias": "admin-1",
+            "role": "admin",
+            "id": "",
+            "email": "test-admin-email-1@xyne-test.local",
+            "name": "admin-1",
+            "projects": {
+              "project-1": {
+                "id": "cmuzejt5i0039v3stwlvqrbf1",
+                "name": "baseline-project-xo6ejk",
+                "code": "BLXO6EJK",
+                "description": "baseline project fixture"
+              }
+            },
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-2": {
+            "alias": "user-2",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-2@xyne-test.local",
+            "name": "user-2",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-1": {
+            "alias": "user-1",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-1@xyne-test.local",
+            "name": "user-1",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {
+              "dm-1": {
+                "id": "cmuzek0w2004qv3st5x9zx2j9",
+                "name": "Test User 2",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzek0w2004qv3st5x9zx2j9",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-dm-seed",
+                    "text": "baseline-dm-seed-dvoygb"
+                  }
+                }
+              }
+            },
+            "tickets": {}
+          }
+        },
+        "lastResponse": null,
+        "hasApiRequestContext": false
+      },
+      "after": {
+        "activeSessionName": "default-browser-1",
+        "activeSession": {
+          "name": "default-browser-1",
+          "browserType": "chromium",
+          "viewportWidth": 1280,
+          "viewportHeight": 720,
+          "currentUrl": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/ai/chat/new"
+        },
+        "sessions": {
+          "default-browser-1": {
+            "name": "default-browser-1",
+            "browserType": "chromium",
+            "viewportWidth": 1280,
+            "viewportHeight": 720,
+            "currentUrl": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/ai/chat/new"
+          }
+        },
+        "storedUsers": {
+          "admin-1": {
+            "alias": "admin-1",
+            "role": "admin",
+            "id": "cmuzejm6n0023v3stog4wmk5j",
+            "email": "test-admin-email-1@xyne-test.local",
+            "name": "Test Admin 1",
+            "workspaceId": "cmuzejlvt0002v3stv8ii008w",
+            "projects": {
+              "project-1": {
+                "id": "cmuzejt5i0039v3stwlvqrbf1",
+                "name": "baseline-project-xo6ejk",
+                "code": "BLXO6EJK",
+                "description": "baseline project fixture"
+              }
+            },
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              },
+              "channel-desk-connect-lifecycle": {
+                "id": "cmuzel6qk00cov3st4kum6h5o",
+                "name": "channel-desk-connect-lifecycle-e5ab7f3b3-1-gupo14",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/support/cmuzel6qk00cov3st4kum6h5o",
+                "messages": {}
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-2": {
+            "alias": "user-2",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-2@xyne-test.local",
+            "name": "user-2",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-1": {
+            "alias": "user-1",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-1@xyne-test.local",
+            "name": "user-1",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {
+              "dm-1": {
+                "id": "cmuzek0w2004qv3st5x9zx2j9",
+                "name": "Test User 2",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzek0w2004qv3st5x9zx2j9",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-dm-seed",
+                    "text": "baseline-dm-seed-dvoygb"
+                  }
+                }
+              }
+            },
+            "tickets": {}
+          }
+        },
+        "lastResponse": null,
+        "hasApiRequestContext": false
+      },
+      "startedAt": "2026-10-08T10:38:15.885Z",
+      "finishedAt": "2026-10-08T10:38:19.630Z"
+    },
+    {
+      "index": 9,
+      "specName": "Xyne Desk connection lifecycle",
+      "specFile": "/app/tests/03_e2e/11_xyne-desk/08_connection-lifecycle.spec",
+      "scenarioName": "Slack Desk channel can disconnect after mock connect",
+      "before": {
+        "activeSessionName": null,
+        "activeSession": null,
+        "sessions": {},
+        "storedUsers": {
+          "admin-1": {
+            "alias": "admin-1",
+            "role": "admin",
+            "id": "",
+            "email": "test-admin-email-1@xyne-test.local",
+            "name": "admin-1",
+            "projects": {
+              "project-1": {
+                "id": "cmuzejt5i0039v3stwlvqrbf1",
+                "name": "baseline-project-xo6ejk",
+                "code": "BLXO6EJK",
+                "description": "baseline project fixture"
+              }
+            },
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-2": {
+            "alias": "user-2",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-2@xyne-test.local",
+            "name": "user-2",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-1": {
+            "alias": "user-1",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-1@xyne-test.local",
+            "name": "user-1",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {
+              "dm-1": {
+                "id": "cmuzek0w2004qv3st5x9zx2j9",
+                "name": "Test User 2",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzek0w2004qv3st5x9zx2j9",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-dm-seed",
+                    "text": "baseline-dm-seed-dvoygb"
+                  }
+                }
+              }
+            },
+            "tickets": {}
+          }
+        },
+        "lastResponse": null,
+        "hasApiRequestContext": false
+      },
+      "after": {
+        "activeSessionName": "default-browser-1",
+        "activeSession": {
+          "name": "default-browser-1",
+          "browserType": "chromium",
+          "viewportWidth": 1280,
+          "viewportHeight": 720,
+          "currentUrl": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/ai/chat/new"
+        },
+        "sessions": {
+          "default-browser-1": {
+            "name": "default-browser-1",
+            "browserType": "chromium",
+            "viewportWidth": 1280,
+            "viewportHeight": 720,
+            "currentUrl": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/ai/chat/new"
+          }
+        },
+        "storedUsers": {
+          "admin-1": {
+            "alias": "admin-1",
+            "role": "admin",
+            "id": "cmuzejm6n0023v3stog4wmk5j",
+            "email": "test-admin-email-1@xyne-test.local",
+            "name": "Test Admin 1",
+            "workspaceId": "cmuzejlvt0002v3stv8ii008w",
+            "projects": {
+              "project-1": {
+                "id": "cmuzejt5i0039v3stwlvqrbf1",
+                "name": "baseline-project-xo6ejk",
+                "code": "BLXO6EJK",
+                "description": "baseline project fixture"
+              }
+            },
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              },
+              "channel-desk-slack-connect-lifecycle": {
+                "id": "cmuzel8o900d8v3strx6ou3dg",
+                "name": "channel-desk-slack-connect-lifecycle-e5ab7f3b3-1-l5t9w1",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/support/cmuzel8o900d8v3strx6ou3dg",
+                "messages": {}
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-2": {
+            "alias": "user-2",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-2@xyne-test.local",
+            "name": "user-2",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-1": {
+            "alias": "user-1",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-1@xyne-test.local",
+            "name": "user-1",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {
+              "dm-1": {
+                "id": "cmuzek0w2004qv3st5x9zx2j9",
+                "name": "Test User 2",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzek0w2004qv3st5x9zx2j9",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-dm-seed",
+                    "text": "baseline-dm-seed-dvoygb"
+                  }
+                }
+              }
+            },
+            "tickets": {}
+          }
+        },
+        "lastResponse": null,
+        "hasApiRequestContext": false
+      },
+      "startedAt": "2026-10-08T10:38:19.637Z",
+      "finishedAt": "2026-10-08T10:38:22.153Z"
+    },
+    {
+      "index": 10,
+      "specName": "Xyne Desk compose merge and unmerge",
+      "specFile": "/app/tests/03_e2e/11_xyne-desk/09_compose-merge-unmerge.spec",
+      "scenarioName": "Compose mail creates a Desk ticket and the ticket can be merged and unmerged",
+      "before": {
+        "activeSessionName": null,
+        "activeSession": null,
+        "sessions": {},
+        "storedUsers": {
+          "admin-1": {
+            "alias": "admin-1",
+            "role": "admin",
+            "id": "",
+            "email": "test-admin-email-1@xyne-test.local",
+            "name": "admin-1",
+            "projects": {
+              "project-1": {
+                "id": "cmuzejt5i0039v3stwlvqrbf1",
+                "name": "baseline-project-xo6ejk",
+                "code": "BLXO6EJK",
+                "description": "baseline project fixture"
+              }
+            },
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-2": {
+            "alias": "user-2",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-2@xyne-test.local",
+            "name": "user-2",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-1": {
+            "alias": "user-1",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-1@xyne-test.local",
+            "name": "user-1",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {
+              "dm-1": {
+                "id": "cmuzek0w2004qv3st5x9zx2j9",
+                "name": "Test User 2",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzek0w2004qv3st5x9zx2j9",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-dm-seed",
+                    "text": "baseline-dm-seed-dvoygb"
+                  }
+                }
+              }
+            },
+            "tickets": {}
+          }
+        },
+        "lastResponse": null,
+        "hasApiRequestContext": false
+      },
+      "after": {
+        "activeSessionName": "default-browser-1",
+        "activeSession": {
+          "name": "default-browser-1",
+          "browserType": "chromium",
+          "viewportWidth": 1280,
+          "viewportHeight": 720,
+          "currentUrl": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/support/cmuzelan900dpv3stwhznrseq/BLXO6EJK-0008"
+        },
+        "sessions": {
+          "default-browser-1": {
+            "name": "default-browser-1",
+            "browserType": "chromium",
+            "viewportWidth": 1280,
+            "viewportHeight": 720,
+            "currentUrl": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/support/cmuzelan900dpv3stwhznrseq/BLXO6EJK-0008"
+          }
+        },
+        "storedUsers": {
+          "admin-1": {
+            "alias": "admin-1",
+            "role": "admin",
+            "id": "cmuzejm6n0023v3stog4wmk5j",
+            "email": "test-admin-email-1@xyne-test.local",
+            "name": "Test Admin 1",
+            "workspaceId": "cmuzejlvt0002v3stv8ii008w",
+            "projects": {
+              "project-1": {
+                "id": "cmuzejt5i0039v3stwlvqrbf1",
+                "name": "baseline-project-xo6ejk",
+                "code": "BLXO6EJK",
+                "description": "baseline project fixture"
+              }
+            },
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              },
+              "channel-desk-compose-merge-flow": {
+                "id": "cmuzelan900dpv3stwhznrseq",
+                "name": "channel-desk-compose-merge-flow-e5ab7f3b3-1-txkhj1",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/support/cmuzelan900dpv3stwhznrseq",
+                "messages": {}
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-2": {
+            "alias": "user-2",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-2@xyne-test.local",
+            "name": "user-2",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-1": {
+            "alias": "user-1",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-1@xyne-test.local",
+            "name": "user-1",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {
+              "dm-1": {
+                "id": "cmuzek0w2004qv3st5x9zx2j9",
+                "name": "Test User 2",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzek0w2004qv3st5x9zx2j9",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-dm-seed",
+                    "text": "baseline-dm-seed-dvoygb"
+                  }
+                }
+              }
+            },
+            "tickets": {}
+          }
+        },
+        "lastResponse": null,
+        "hasApiRequestContext": false
+      },
+      "startedAt": "2026-10-08T10:38:22.172Z",
+      "finishedAt": "2026-10-08T10:38:33.027Z"
+    },
+    {
+      "index": 11,
+      "specName": "Xyne Desk AI rewrite and compose controls",
+      "specFile": "/app/tests/03_e2e/11_xyne-desk/10_ai-rewrite-compose-controls.spec",
+      "scenarioName": "Desk ticket exposes compose Ask AI and rewrite controls without invoking external AI",
+      "before": {
+        "activeSessionName": null,
+        "activeSession": null,
+        "sessions": {},
+        "storedUsers": {
+          "admin-1": {
+            "alias": "admin-1",
+            "role": "admin",
+            "id": "",
+            "email": "test-admin-email-1@xyne-test.local",
+            "name": "admin-1",
+            "projects": {
+              "project-1": {
+                "id": "cmuzejt5i0039v3stwlvqrbf1",
+                "name": "baseline-project-xo6ejk",
+                "code": "BLXO6EJK",
+                "description": "baseline project fixture"
+              }
+            },
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-2": {
+            "alias": "user-2",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-2@xyne-test.local",
+            "name": "user-2",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-1": {
+            "alias": "user-1",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-1@xyne-test.local",
+            "name": "user-1",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {
+              "dm-1": {
+                "id": "cmuzek0w2004qv3st5x9zx2j9",
+                "name": "Test User 2",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzek0w2004qv3st5x9zx2j9",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-dm-seed",
+                    "text": "baseline-dm-seed-dvoygb"
+                  }
+                }
+              }
+            },
+            "tickets": {}
+          }
+        },
+        "lastResponse": null,
+        "hasApiRequestContext": false
+      },
+      "after": {
+        "activeSessionName": "default-browser-1",
+        "activeSession": {
+          "name": "default-browser-1",
+          "browserType": "chromium",
+          "viewportWidth": 1280,
+          "viewportHeight": 720,
+          "currentUrl": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/support/cmuzeljj400fkv3sth064zuyb/BLXO6EJK-0010"
+        },
+        "sessions": {
+          "default-browser-1": {
+            "name": "default-browser-1",
+            "browserType": "chromium",
+            "viewportWidth": 1280,
+            "viewportHeight": 720,
+            "currentUrl": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/support/cmuzeljj400fkv3sth064zuyb/BLXO6EJK-0010"
+          }
+        },
+        "storedUsers": {
+          "admin-1": {
+            "alias": "admin-1",
+            "role": "admin",
+            "id": "cmuzejm6n0023v3stog4wmk5j",
+            "email": "test-admin-email-1@xyne-test.local",
+            "name": "Test Admin 1",
+            "workspaceId": "cmuzejlvt0002v3stv8ii008w",
+            "projects": {
+              "project-1": {
+                "id": "cmuzejt5i0039v3stwlvqrbf1",
+                "name": "baseline-project-xo6ejk",
+                "code": "BLXO6EJK",
+                "description": "baseline project fixture"
+              }
+            },
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              },
+              "channel-desk-ai-rewrite-controls": {
+                "id": "cmuzeljj400fkv3sth064zuyb",
+                "name": "channel-desk-ai-rewrite-controls-e5ab7f3b3-1-h30m3c",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/support/cmuzeljj400fkv3sth064zuyb",
+                "messages": {}
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-2": {
+            "alias": "user-2",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-2@xyne-test.local",
+            "name": "user-2",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-1": {
+            "alias": "user-1",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-1@xyne-test.local",
+            "name": "user-1",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {
+              "dm-1": {
+                "id": "cmuzek0w2004qv3st5x9zx2j9",
+                "name": "Test User 2",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzek0w2004qv3st5x9zx2j9",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-dm-seed",
+                    "text": "baseline-dm-seed-dvoygb"
+                  }
+                }
+              }
+            },
+            "tickets": {}
+          }
+        },
+        "lastResponse": null,
+        "hasApiRequestContext": false
+      },
+      "startedAt": "2026-10-08T10:38:33.042Z",
+      "finishedAt": "2026-10-08T10:38:50.644Z"
+    },
+    {
+      "index": 12,
+      "specName": "Xyne Desk deterministic Pub/Sub bulk mail flow",
+      "specFile": "/app/tests/03_e2e/11_xyne-desk/11_pubsub-bulk-mail-flow.spec",
+      "scenarioName": "Bulk Gmail Pub/Sub delivery reaches Desk exactly once",
+      "before": {
+        "activeSessionName": null,
+        "activeSession": null,
+        "sessions": {},
+        "storedUsers": {
+          "admin-1": {
+            "alias": "admin-1",
+            "role": "admin",
+            "id": "",
+            "email": "test-admin-email-1@xyne-test.local",
+            "name": "admin-1",
+            "projects": {
+              "project-1": {
+                "id": "cmuzejt5i0039v3stwlvqrbf1",
+                "name": "baseline-project-xo6ejk",
+                "code": "BLXO6EJK",
+                "description": "baseline project fixture"
+              }
+            },
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-2": {
+            "alias": "user-2",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-2@xyne-test.local",
+            "name": "user-2",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-1": {
+            "alias": "user-1",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-1@xyne-test.local",
+            "name": "user-1",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {
+              "dm-1": {
+                "id": "cmuzek0w2004qv3st5x9zx2j9",
+                "name": "Test User 2",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzek0w2004qv3st5x9zx2j9",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-dm-seed",
+                    "text": "baseline-dm-seed-dvoygb"
+                  }
+                }
+              }
+            },
+            "tickets": {}
+          }
+        },
+        "lastResponse": null,
+        "hasApiRequestContext": false
+      },
+      "after": {
+        "activeSessionName": "default-browser-1",
+        "activeSession": {
+          "name": "default-browser-1",
+          "browserType": "chromium",
+          "viewportWidth": 1280,
+          "viewportHeight": 720,
+          "currentUrl": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/ai/chat/new"
+        },
+        "sessions": {
+          "default-browser-1": {
+            "name": "default-browser-1",
+            "browserType": "chromium",
+            "viewportWidth": 1280,
+            "viewportHeight": 720,
+            "currentUrl": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/ai/chat/new"
+          }
+        },
+        "storedUsers": {
+          "admin-1": {
+            "alias": "admin-1",
+            "role": "admin",
+            "id": "cmuzejm6n0023v3stog4wmk5j",
+            "email": "test-admin-email-1@xyne-test.local",
+            "name": "Test Admin 1",
+            "workspaceId": "cmuzejlvt0002v3stv8ii008w",
+            "projects": {
+              "project-1": {
+                "id": "cmuzejt5i0039v3stwlvqrbf1",
+                "name": "baseline-project-xo6ejk",
+                "code": "BLXO6EJK",
+                "description": "baseline project fixture"
+              }
+            },
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              },
+              "channel-desk-pubsub-bulk": {
+                "id": "cmuzelxnf00gjv3st4y4b47cx",
+                "name": "channel-desk-pubsub-bulk-e5ab7f3b3-1-a1niln",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/support/cmuzelxnf00gjv3st4y4b47cx",
+                "messages": {}
+              },
+              "channel-desk-pubsub-bulk-other": {
+                "id": "cmuzelxpm00gwv3st4s7qc6sx",
+                "name": "channel-desk-pubsub-bulk-other-e5ab7f3b3-1-e0t4jm",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/support/cmuzelxpm00gwv3st4s7qc6sx",
+                "messages": {}
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-2": {
+            "alias": "user-2",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-2@xyne-test.local",
+            "name": "user-2",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-1": {
+            "alias": "user-1",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-1@xyne-test.local",
+            "name": "user-1",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {
+              "dm-1": {
+                "id": "cmuzek0w2004qv3st5x9zx2j9",
+                "name": "Test User 2",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzek0w2004qv3st5x9zx2j9",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-dm-seed",
+                    "text": "baseline-dm-seed-dvoygb"
+                  }
+                }
+              }
+            },
+            "tickets": {}
+          }
+        },
+        "lastResponse": null,
+        "hasApiRequestContext": false
+      },
+      "startedAt": "2026-10-08T10:38:50.669Z",
+      "finishedAt": "2026-10-08T10:43:04.909Z"
+    },
+    {
+      "index": 13,
+      "specName": "Xyne Desk deterministic Pub/Sub bulk mail flow",
+      "specFile": "/app/tests/03_e2e/11_xyne-desk/11_pubsub-bulk-mail-flow.spec",
+      "scenarioName": "Retryable failure mid-batch is redelivered without duplicates",
+      "before": {
+        "activeSessionName": null,
+        "activeSession": null,
+        "sessions": {},
+        "storedUsers": {
+          "admin-1": {
+            "alias": "admin-1",
+            "role": "admin",
+            "id": "",
+            "email": "test-admin-email-1@xyne-test.local",
+            "name": "admin-1",
+            "projects": {
+              "project-1": {
+                "id": "cmuzejt5i0039v3stwlvqrbf1",
+                "name": "baseline-project-xo6ejk",
+                "code": "BLXO6EJK",
+                "description": "baseline project fixture"
+              }
+            },
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-2": {
+            "alias": "user-2",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-2@xyne-test.local",
+            "name": "user-2",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-1": {
+            "alias": "user-1",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-1@xyne-test.local",
+            "name": "user-1",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {
+              "dm-1": {
+                "id": "cmuzek0w2004qv3st5x9zx2j9",
+                "name": "Test User 2",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzek0w2004qv3st5x9zx2j9",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-dm-seed",
+                    "text": "baseline-dm-seed-dvoygb"
+                  }
+                }
+              }
+            },
+            "tickets": {}
+          }
+        },
+        "lastResponse": null,
+        "hasApiRequestContext": false
+      },
+      "after": {
+        "activeSessionName": "default-browser-1",
+        "activeSession": {
+          "name": "default-browser-1",
+          "browserType": "chromium",
+          "viewportWidth": 1280,
+          "viewportHeight": 720,
+          "currentUrl": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/ai/chat/new"
+        },
+        "sessions": {
+          "default-browser-1": {
+            "name": "default-browser-1",
+            "browserType": "chromium",
+            "viewportWidth": 1280,
+            "viewportHeight": 720,
+            "currentUrl": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/ai/chat/new"
+          }
+        },
+        "storedUsers": {
+          "admin-1": {
+            "alias": "admin-1",
+            "role": "admin",
+            "id": "cmuzejm6n0023v3stog4wmk5j",
+            "email": "test-admin-email-1@xyne-test.local",
+            "name": "Test Admin 1",
+            "workspaceId": "cmuzejlvt0002v3stv8ii008w",
+            "projects": {
+              "project-1": {
+                "id": "cmuzejt5i0039v3stwlvqrbf1",
+                "name": "baseline-project-xo6ejk",
+                "code": "BLXO6EJK",
+                "description": "baseline project fixture"
+              }
+            },
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              },
+              "channel-desk-pubsub-retry": {
+                "id": "cmuzerd8a00u0v3stylr4s2hf",
+                "name": "channel-desk-pubsub-retry-e5ab7f3b3-1-ruentc",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/support/cmuzerd8a00u0v3stylr4s2hf",
+                "messages": {}
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-2": {
+            "alias": "user-2",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-2@xyne-test.local",
+            "name": "user-2",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-1": {
+            "alias": "user-1",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-1@xyne-test.local",
+            "name": "user-1",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {
+              "dm-1": {
+                "id": "cmuzek0w2004qv3st5x9zx2j9",
+                "name": "Test User 2",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzek0w2004qv3st5x9zx2j9",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-dm-seed",
+                    "text": "baseline-dm-seed-dvoygb"
+                  }
+                }
+              }
+            },
+            "tickets": {}
+          }
+        },
+        "lastResponse": null,
+        "hasApiRequestContext": false
+      },
+      "startedAt": "2026-10-08T10:43:04.940Z",
+      "finishedAt": "2026-10-08T10:44:19.552Z"
+    },
+    {
+      "index": 14,
+      "specName": "Xyne Desk recipients and filters",
+      "specFile": "/app/tests/03_e2e/11_xyne-desk/12_recipients-and-filters.spec",
+      "scenarioName": "Reply recipients and Desk filters remain correct",
+      "before": {
+        "activeSessionName": null,
+        "activeSession": null,
+        "sessions": {},
+        "storedUsers": {
+          "admin-1": {
+            "alias": "admin-1",
+            "role": "admin",
+            "id": "",
+            "email": "test-admin-email-1@xyne-test.local",
+            "name": "admin-1",
+            "projects": {
+              "project-1": {
+                "id": "cmuzejt5i0039v3stwlvqrbf1",
+                "name": "baseline-project-xo6ejk",
+                "code": "BLXO6EJK",
+                "description": "baseline project fixture"
+              }
+            },
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-2": {
+            "alias": "user-2",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-2@xyne-test.local",
+            "name": "user-2",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-1": {
+            "alias": "user-1",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-1@xyne-test.local",
+            "name": "user-1",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {
+              "dm-1": {
+                "id": "cmuzek0w2004qv3st5x9zx2j9",
+                "name": "Test User 2",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzek0w2004qv3st5x9zx2j9",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-dm-seed",
+                    "text": "baseline-dm-seed-dvoygb"
+                  }
+                }
+              }
+            },
+            "tickets": {}
+          }
+        },
+        "lastResponse": null,
+        "hasApiRequestContext": false
+      },
+      "after": {
+        "activeSessionName": "default-browser-1",
+        "activeSession": {
+          "name": "default-browser-1",
+          "browserType": "chromium",
+          "viewportWidth": 1920,
+          "viewportHeight": 1080,
+          "currentUrl": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/support/cmuzet7yj00y4v3st05ggbg6q"
+        },
+        "sessions": {
+          "default-browser-1": {
+            "name": "default-browser-1",
+            "browserType": "chromium",
+            "viewportWidth": 1920,
+            "viewportHeight": 1080,
+            "currentUrl": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/support/cmuzet7yj00y4v3st05ggbg6q"
+          }
+        },
+        "storedUsers": {
+          "admin-1": {
+            "alias": "admin-1",
+            "role": "admin",
+            "id": "cmuzejm6n0023v3stog4wmk5j",
+            "email": "test-admin-email-1@xyne-test.local",
+            "name": "Test Admin 1",
+            "workspaceId": "cmuzejlvt0002v3stv8ii008w",
+            "projects": {
+              "project-1": {
+                "id": "cmuzejt5i0039v3stwlvqrbf1",
+                "name": "baseline-project-xo6ejk",
+                "code": "BLXO6EJK",
+                "description": "baseline project fixture"
+              }
+            },
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              },
+              "channel-desk-recipients-filters": {
+                "id": "cmuzet7yj00y4v3st05ggbg6q",
+                "name": "channel-desk-recipients-filters-e5ab7f3b3-1-xeifsx",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/support/cmuzet7yj00y4v3st05ggbg6q",
+                "messages": {}
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-2": {
+            "alias": "user-2",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-2@xyne-test.local",
+            "name": "user-2",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-1": {
+            "alias": "user-1",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-1@xyne-test.local",
+            "name": "user-1",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {
+              "dm-1": {
+                "id": "cmuzek0w2004qv3st5x9zx2j9",
+                "name": "Test User 2",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzek0w2004qv3st5x9zx2j9",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-dm-seed",
+                    "text": "baseline-dm-seed-dvoygb"
+                  }
+                }
+              }
+            },
+            "tickets": {}
+          }
+        },
+        "lastResponse": null,
+        "hasApiRequestContext": false
+      },
+      "startedAt": "2026-10-08T10:44:19.594Z",
+      "finishedAt": "2026-10-08T10:44:52.543Z"
+    },
+    {
+      "index": 15,
+      "specName": "Xyne Desk auto-merge and manual controls",
+      "specFile": "/app/tests/03_e2e/11_xyne-desk/13_auto-merge-manual-controls.spec",
+      "scenarioName": "Auto Merge OFF keeps emails separate and manual merge/demerge remains available",
+      "before": {
+        "activeSessionName": null,
+        "activeSession": null,
+        "sessions": {},
+        "storedUsers": {
+          "admin-1": {
+            "alias": "admin-1",
+            "role": "admin",
+            "id": "",
+            "email": "test-admin-email-1@xyne-test.local",
+            "name": "admin-1",
+            "projects": {
+              "project-1": {
+                "id": "cmuzejt5i0039v3stwlvqrbf1",
+                "name": "baseline-project-xo6ejk",
+                "code": "BLXO6EJK",
+                "description": "baseline project fixture"
+              }
+            },
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-2": {
+            "alias": "user-2",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-2@xyne-test.local",
+            "name": "user-2",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-1": {
+            "alias": "user-1",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-1@xyne-test.local",
+            "name": "user-1",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {
+              "dm-1": {
+                "id": "cmuzek0w2004qv3st5x9zx2j9",
+                "name": "Test User 2",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzek0w2004qv3st5x9zx2j9",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-dm-seed",
+                    "text": "baseline-dm-seed-dvoygb"
+                  }
+                }
+              }
+            },
+            "tickets": {}
+          }
+        },
+        "lastResponse": null,
+        "hasApiRequestContext": false
+      },
+      "after": {
+        "activeSessionName": "default-browser-1",
+        "activeSession": {
+          "name": "default-browser-1",
+          "browserType": "chromium",
+          "viewportWidth": 1280,
+          "viewportHeight": 720,
+          "currentUrl": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/support/cmuzetoa60100v3stbw4wur26/BLXO6EJK-0057"
+        },
+        "sessions": {
+          "default-browser-1": {
+            "name": "default-browser-1",
+            "browserType": "chromium",
+            "viewportWidth": 1280,
+            "viewportHeight": 720,
+            "currentUrl": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/support/cmuzetoa60100v3stbw4wur26/BLXO6EJK-0057"
+          }
+        },
+        "storedUsers": {
+          "admin-1": {
+            "alias": "admin-1",
+            "role": "admin",
+            "id": "cmuzejm6n0023v3stog4wmk5j",
+            "email": "test-admin-email-1@xyne-test.local",
+            "name": "Test Admin 1",
+            "workspaceId": "cmuzejlvt0002v3stv8ii008w",
+            "projects": {
+              "project-1": {
+                "id": "cmuzejt5i0039v3stwlvqrbf1",
+                "name": "baseline-project-xo6ejk",
+                "code": "BLXO6EJK",
+                "description": "baseline project fixture"
+              }
+            },
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              },
+              "channel-desk-auto-merge-off": {
+                "id": "cmuzetoa60100v3stbw4wur26",
+                "name": "channel-desk-auto-merge-off-e5ab7f3b3-1-us0t1e",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/support/cmuzetoa60100v3stbw4wur26",
+                "messages": {}
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-2": {
+            "alias": "user-2",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-2@xyne-test.local",
+            "name": "user-2",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {},
+            "tickets": {}
+          },
+          "user-1": {
+            "alias": "user-1",
+            "role": "user",
+            "id": "",
+            "email": "test-user-email-1@xyne-test.local",
+            "name": "user-1",
+            "projects": {},
+            "channels": {
+              "channel-1": {
+                "id": "cmuzejv2c003mv3stfch8xi3u",
+                "name": "baseline-channel-piwgis",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-channel-seed",
+                    "text": "baseline-channel-seed-yv6y97"
+                  }
+                }
+              }
+            },
+            "dms": {
+              "dm-1": {
+                "id": "cmuzek0w2004qv3st5x9zx2j9",
+                "name": "Test User 2",
+                "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzek0w2004qv3st5x9zx2j9",
+                "messages": {
+                  "message-baseline": {
+                    "alias": "message-baseline",
+                    "baseText": "baseline-dm-seed",
+                    "text": "baseline-dm-seed-dvoygb"
+                  }
+                }
+              }
+            },
+            "tickets": {}
+          }
+        },
+        "lastResponse": null,
+        "hasApiRequestContext": false
+      },
+      "startedAt": "2026-10-08T10:44:52.560Z",
+      "finishedAt": "2026-10-08T10:45:02.802Z"
+    }
+  ]
+}

@@ -1,0 +1,52 @@
+{
+  "runId": "e5ab7f3b3-1",
+  "commitHash": "e5ab7f3b3",
+  "runSequence": 1,
+  "environment": "test",
+  "startedAt": "2026-10-08T10:37:04.788Z",
+  "status": "passed",
+  "artifactDirectory": "/app/reports/e5ab7f3b3-1",
+  "htmlReportDirectory": "/app/reports/e5ab7f3b3-1/html-report",
+  "gaugeLogFile": "/app/reports/e5ab7f3b3-1/gauge.log",
+  "bootstrapLogFile": "/app/reports/e5ab7f3b3-1/runner/baseline/runner.log",
+  "runnerDirectory": "/app/reports/e5ab7f3b3-1/runner",
+  "parallelCount": 1,
+  "command": [
+    "gauge",
+    "run",
+    "--sort=alpha",
+    "--max-retries-count",
+    "3",
+    "--tags",
+    "!quarantine",
+    "-p",
+    "-n",
+    "1",
+    "tests/03_e2e/11_xyne-desk"
+  ],
+  "targets": [
+    "tests/03_e2e/11_xyne-desk"
+  ],
+  "totalScenarios": 15,
+  "progressFile": "/app/reports/e5ab7f3b3-1/test-progress.jsonl",
+  "finishedAt": "2026-10-08T10:45:03.053Z",
+  "exitCode": 0,
+  "runnerMappings": [
+    {
+      "runnerNumber": 0,
+      "pid": 0,
+      "runnerFolder": "baseline",
+      "logFile": "/app/reports/e5ab7f3b3-1/runner/baseline/runner.log",
+      "contextFile": "/app/reports/e5ab7f3b3-1/runner/baseline/context.json",
+      "label": "baseline"
+    },
+    {
+      "runnerNumber": null,
+      "pid": 252,
+      "runnerFolder": "pid-252",
+      "logFile": "/app/reports/e5ab7f3b3-1/runner/pid-252/runner.log",
+      "contextFile": "/app/reports/e5ab7f3b3-1/runner/pid-252/context.json",
+      "label": "pid-252"
+    }
+  ]
+}

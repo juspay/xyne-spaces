@@ -1,0 +1,73 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Automation report — e5ab7f3b3</title>
+<style>
+  body{font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#1f2328;background:#fff;margin:0;padding:24px;max-width:1100px}
+  h1{font-size:20px;margin:0 0 4px}h2{font-size:16px;margin:28px 0 10px}
+  .muted{color:#656d76}.hdr{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:12px;font-weight:600;margin-left:8px}
+  .badge.passed{background:#dafbe1;color:#116329}.badge.failed{background:#ffebe9;color:#a40e26}.badge.warn{background:#fff8c5;color:#7d4e00}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 4px}.chip{border:1px solid #d0d7de;border-radius:6px;padding:6px 10px}.chip b{font-size:16px}
+  .spec{border:1px solid #d0d7de;border-radius:6px;margin:8px 0;padding:0 12px}.spec summary{cursor:pointer;padding:10px 0;list-style:none;display:flex;align-items:center;gap:8px}
+  .spec summary::-webkit-details-marker{display:none}.dot{width:10px;height:10px;border-radius:50%;background:#1a7f37;flex:none}.spec.failed .dot{background:#cf222e}.spec.skipped .dot{background:#9a6700}
+  .counts{color:#656d76;margin-left:auto}.t{color:#8c959f;font-size:12px;margin-left:10px;font-variant-numeric:tabular-nums}
+  ul{list-style:none;margin:0 0 10px;padding:0 0 0 18px}li{padding:3px 0}li.failed{color:#a40e26}li.skipped{color:#9a6700}
+  .fail{background:#fff8f8;border:1px solid #ffcecb;border-radius:6px;padding:12px;margin:8px 0}.crumb{color:#656d76;margin-bottom:6px}.step{font-weight:600;color:#a40e26}
+  pre{white-space:pre-wrap;word-break:break-word;background:#f6f8fa;border-radius:6px;padding:10px;margin:8px 0;font-size:12px}.stack{max-height:280px;overflow:auto}
+  .shot{max-width:100%;border:1px solid #d0d7de;border-radius:6px;margin-top:6px}
+  details>summary{cursor:pointer}
+</style></head><body>
+<div class="hdr"><h1>Automation report</h1><span class="badge passed">PASSED</span></div>
+<div class="muted">commit <code>e5ab7f3b3</code> · Oct 8, 2026 at 10:37am ·  · tags <code>!quarantine</code></div>
+<div class="chips">
+  <div class="chip"><b>15</b> / 15 scenarios passed</div>
+  <div class="chip"><b>0</b> failed</div>
+  <div class="chip"><b>0</b> skipped</div>
+  <div class="chip"><b>13</b> / 13 specs passed</div>
+  <div class="chip"><b>0</b> retried</div>
+  <div class="chip"><b>7m 36s</b> total</div>
+</div>
+
+
+
+<h2>Specs (13)</h2>
+<details class="spec passed"><summary><span class="dot"></span>Xyne Desk DL mail happy flow<span class="counts">1/1 passed</span><span class="t">11.3s</span></summary>
+    <ul><li class="passed">✓ Create DL desk, receive customer mail, and send a reply through the mock provider<span class="t">11.3s</span></li></ul>
+    
+  </details><details class="spec passed"><summary><span class="dot"></span>Xyne Desk workspace shared mailbox permissions<span class="counts">1/1 passed</span><span class="t">3.7s</span></summary>
+    <ul><li class="passed">✓ Only admins can configure the workspace shared Desk mailbox<span class="t">3.7s</span></li></ul>
+    
+  </details><details class="spec passed"><summary><span class="dot"></span>Xyne Desk Slack channel happy flow<span class="counts">1/1 passed</span><span class="t">2.6s</span></summary>
+    <ul><li class="passed">✓ Create Slack desk channel and receive a Slack message as a Desk ticket<span class="t">2.6s</span></li></ul>
+    
+  </details><details class="spec passed"><summary><span class="dot"></span>Xyne Desk personal mailbox advanced flow<span class="counts">1/1 passed</span><span class="t">12.0s</span></summary>
+    <ul><li class="passed">✓ Personal mailbox ticket UI, update, reply-all, and attachment happy flow<span class="t">12.0s</span></li></ul>
+    
+  </details><details class="spec passed"><summary><span class="dot"></span>Xyne Desk connection lifecycle<span class="counts">2/2 passed</span><span class="t">6.2s</span></summary>
+    <ul><li class="passed">✓ Personal mailbox can disconnect and reconnect through mock Desk setup<span class="t">3.7s</span></li><li class="passed">✓ Slack Desk channel can disconnect after mock connect<span class="t">2.5s</span></li></ul>
+    
+  </details><details class="spec passed"><summary><span class="dot"></span>Xyne Desk deterministic Pub/Sub bulk mail flow<span class="counts">2/2 passed</span><span class="t">5m 29s</span></summary>
+    <ul><li class="passed">✓ Bulk Gmail Pub/Sub delivery reaches Desk exactly once<span class="t">4m 14s</span></li><li class="passed">✓ Retryable failure mid-batch is redelivered without duplicates<span class="t">1m 15s</span></li></ul>
+    
+  </details><details class="spec passed"><summary><span class="dot"></span>Xyne Desk recipients and filters<span class="counts">1/1 passed</span><span class="t">32.9s</span></summary>
+    <ul><li class="passed">✓ Reply recipients and Desk filters remain correct<span class="t">32.9s</span></li></ul>
+    
+  </details><details class="spec passed"><summary><span class="dot"></span>Xyne Desk auto-merge and manual controls<span class="counts">1/1 passed</span><span class="t">10.2s</span></summary>
+    <ul><li class="passed">✓ Auto Merge OFF keeps emails separate and manual merge/demerge remains available<span class="t">10.2s</span></li></ul>
+    
+  </details><details class="spec passed"><summary><span class="dot"></span>Xyne Desk multiple DL routing<span class="counts">1/1 passed</span><span class="t">3.7s</span></summary>
+    <ul><li class="passed">✓ Multiple DL desk channels receive their own incoming mails<span class="t">3.7s</span></li></ul>
+    
+  </details><details class="spec passed"><summary><span class="dot"></span>Xyne Desk mock DL membership delivery<span class="counts">1/1 passed</span><span class="t">2.7s</span></summary>
+    <ul><li class="passed">✓ Member in three DLs receives all DL mails and stops receiving removed DL mails<span class="t">2.7s</span></li></ul>
+    
+  </details><details class="spec passed"><summary><span class="dot"></span>Xyne Desk personal mailbox happy flow<span class="counts">1/1 passed</span><span class="t">10.9s</span></summary>
+    <ul><li class="passed">✓ Create personal mailbox desk, receive customer mail, and send a reply through the mock provider<span class="t">10.9s</span></li></ul>
+    
+  </details><details class="spec passed"><summary><span class="dot"></span>Xyne Desk compose merge and unmerge<span class="counts">1/1 passed</span><span class="t">10.8s</span></summary>
+    <ul><li class="passed">✓ Compose mail creates a Desk ticket and the ticket can be merged and unmerged<span class="t">10.8s</span></li></ul>
+    
+  </details><details class="spec passed"><summary><span class="dot"></span>Xyne Desk AI rewrite and compose controls<span class="counts">1/1 passed</span><span class="t">17.5s</span></summary>
+    <ul><li class="passed">✓ Desk ticket exposes compose Ask AI and rewrite controls without invoking external AI<span class="t">17.5s</span></li></ul>
+    
+  </details>
+</body></html>

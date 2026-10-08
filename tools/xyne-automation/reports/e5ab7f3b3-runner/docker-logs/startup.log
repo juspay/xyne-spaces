@@ -1,0 +1,300 @@
+#1 [internal] load local bake definitions
+#1 reading from stdin 3.50kB done
+#1 DONE 0.0s
+
+#2 [livekit internal] load build definition from Dockerfile.livekit
+#2 transferring dockerfile: 130B done
+#2 DONE 0.0s
+
+#3 [postgres internal] load build definition from Dockerfile.postgres
+#3 transferring dockerfile: 294B done
+#3 DONE 0.0s
+
+#4 [backend-migrate internal] load build definition from Dockerfile.test
+#4 transferring dockerfile: 2.77kB done
+#4 DONE 0.1s
+
+#5 [backend-migrate] resolve image config for docker-image://docker.io/docker/dockerfile:1
+#5 DONE 0.3s
+
+#6 [postgres internal] load metadata for mirror.gcr.io/library/postgres:16-alpine
+#6 DONE 0.5s
+
+#7 [backend-migrate] docker-image://docker.io/docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
+#7 CACHED
+
+#8 [livekit internal] load metadata for mirror.gcr.io/livekit/livekit-server:latest
+#8 DONE 0.5s
+
+#9 [livekit internal] load .dockerignore
+#9 transferring context: 2B done
+#9 DONE 0.0s
+
+#10 [livekit 1/2] FROM mirror.gcr.io/livekit/livekit-server:latest@sha256:d0c04791bf63ca8dcea123571827d56ba9504bd57c8d5de60ee03b5408cc3154
+#10 DONE 0.0s
+
+#11 [postgres internal] load .dockerignore
+#11 transferring context: 1.01kB done
+#11 DONE 0.0s
+
+#12 [livekit internal] load build context
+#12 transferring context: 34B done
+#12 DONE 0.0s
+
+#13 [postgres 1/3] FROM mirror.gcr.io/library/postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+#13 DONE 0.0s
+
+#14 [livekit 2/2] COPY livekit.yaml /etc/livekit.yaml
+#14 CACHED
+
+#15 [postgres internal] load build context
+#15 transferring context: 2.92kB done
+#15 DONE 0.0s
+
+#16 [postgres 2/3] COPY docker/init-db.sh /docker-entrypoint-initdb.d/init-db.sh
+#16 CACHED
+
+#17 [postgres 3/3] RUN chmod 755 /docker-entrypoint-initdb.d/init-db.sh
+#17 CACHED
+
+#18 [livekit] exporting to image
+#18 exporting layers done
+#18 writing image sha256:f4db7cf237998170c2fb7418eb8f5f858379f954a58701217285ceec987ca969 done
+#18 naming to docker.io/library/xyne-test-feature-xyne-59771-implement-x-0-1791455764693-livekit done
+#18 DONE 0.0s
+
+#19 [postgres] exporting to image
+#19 exporting layers done
+#19 writing image sha256:125c5b41e3348c9ff9fd179f36475852abb0a7d214124ddf0a10b6c418c691f1 0.0s done
+#19 naming to docker.io/library/xyne-test-feature-xyne-59771-implement-x-0-1791455764693-postgres done
+#19 DONE 0.1s
+
+#20 [livekit] resolving provenance for metadata file
+#20 DONE 0.0s
+
+#21 [postgres] resolving provenance for metadata file
+#21 DONE 0.0s
+
+#22 [backend-migrate internal] load metadata for mirror.gcr.io/library/node:22.22.3-slim
+#22 DONE 0.4s
+
+#11 [backend-migrate internal] load .dockerignore
+#11 CACHED
+
+#23 [backend-migrate stage-0  1/28] FROM mirror.gcr.io/library/node:22.22.3-slim@sha256:e21fc383b50d5347dc7a9f1cae45b8f4e2f0d39f7ade28e4eef7d2934522b752
+#23 DONE 0.0s
+
+#24 [backend-migrate internal] load build context
+#24 transferring context: 81.49MB 0.5s done
+#24 DONE 0.5s
+
+#25 [backend-migrate stage-0 15/28] COPY packages/storage   packages/storage
+#25 CACHED
+
+#26 [backend-migrate stage-0  6/28] COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+#26 CACHED
+
+#27 [backend-migrate stage-0  5/28] WORKDIR /repo
+#27 CACHED
+
+#28 [backend-migrate stage-0  7/28] COPY packages/shared/package.json           packages/shared/
+#28 CACHED
+
+#29 [backend-migrate stage-0  4/28] RUN corepack enable && corepack prepare pnpm@10.15.0 --activate
+#29 CACHED
+
+#30 [backend-migrate stage-0 10/28] COPY packages/cache/package.json            packages/cache/
+#30 CACHED
+
+#31 [backend-migrate stage-0 17/28] COPY packages/cache     packages/cache
+#31 CACHED
+
+#32 [backend-migrate stage-0 13/28] RUN --mount=type=cache,target=/root/.local/share/pnpm/store     pnpm install --frozen-lockfile --prod=false --ignore-scripts --filter xyne-spaces-backend...
+#32 CACHED
+
+#33 [backend-migrate stage-0 19/28] COPY apps/backend apps/backend
+#33 CACHED
+
+#34 [backend-migrate stage-0 11/28] COPY apps/backend/package.json              apps/backend/
+#34 CACHED
+
+#35 [backend-migrate stage-0 14/28] COPY packages/shared    packages/shared
+#35 CACHED
+
+#36 [backend-migrate stage-0 27/28] RUN pnpm run db:generate
+#36 CACHED
+
+#37 [backend-migrate stage-0  3/28] RUN apt-get update && apt-get install -y     python3     make     g++     git     openssl     libssl-dev     ca-certificates     curl     libcairo2-dev     libpango1.0-dev     libjpeg-dev     libgif-dev     librsvg2-dev     postgresql-client     && rm -rf /var/lib/apt/lists/*
+#37 CACHED
+
+#38 [backend-migrate stage-0  9/28] COPY packages/framework/package.json        packages/framework/
+#38 CACHED
+
+#39 [backend-migrate stage-0 23/28] COPY apps/backend/.env.test .env
+#39 CACHED
+
+#40 [backend-migrate stage-0  2/28] WORKDIR /app
+#40 CACHED
+
+#41 [backend-migrate stage-0 24/28] COPY apps/backend/.env.test .env.local
+#41 CACHED
+
+#42 [backend-migrate stage-0 26/28] RUN chmod +x /scripts/setup-fake-gcs-test.sh
+#42 CACHED
+
+#43 [backend-migrate stage-0  8/28] COPY packages/storage/package.json          packages/storage/
+#43 CACHED
+
+#44 [backend-migrate stage-0 21/28] WORKDIR /repo/apps/backend
+#44 CACHED
+
+#45 [backend-migrate stage-0 25/28] COPY scripts/setup-fake-gcs-test.sh /scripts/setup-fake-gcs-test.sh
+#45 CACHED
+
+#46 [backend-migrate stage-0 18/28] RUN pnpm --filter @xyne/shared --filter @xyne/storage --filter agentic-framework --filter @xyne/cache run build
+#46 CACHED
+
+#47 [backend-migrate stage-0 16/28] COPY packages/framework packages/framework
+#47 CACHED
+
+#48 [backend-migrate stage-0 20/28] RUN ln -s /repo/apps/backend /app
+#48 CACHED
+
+#49 [backend-migrate stage-0 12/28] COPY apps/backend/eslint-rules/package.json apps/backend/eslint-rules/
+#49 CACHED
+
+#50 [backend-migrate stage-0 22/28] COPY package.json /package.json
+#50 CACHED
+
+#51 [backend-migrate stage-0 28/28] RUN pnpm run db:common:generate
+#51 CACHED
+
+#52 [backend-migrate] exporting to image
+#52 exporting layers done
+#52 writing image sha256:df37f8d35ce34292cf385b2a98112788b997dfc693216fde632a7eaedf510911 done
+#52 naming to docker.io/library/xyne-test-feature-xyne-59771-implement-x-0-1791455764693-backend-migrate done
+#52 DONE 0.0s
+
+#53 [backend-migrate] resolving provenance for metadata file
+#53 DONE 0.0s
+ xyne-test-feature-xyne-59771-implement-x-0-1791455764693-postgres  Built
+ xyne-test-feature-xyne-59771-implement-x-0-1791455764693-backend-migrate  Built
+ xyne-test-feature-xyne-59771-implement-x-0-1791455764693-livekit  Built
+ Network xyne-test-feature-xyne-59771-implement-x-0-1791455764693_default  Creating
+ Network xyne-test-feature-xyne-59771-implement-x-0-1791455764693_default  Created
+ Volume xyne-test-feature-xyne-59771-implement-x-0-1791455764693_postgres_data  Creating
+ Volume xyne-test-feature-xyne-59771-implement-x-0-1791455764693_postgres_data  Created
+ Volume xyne-test-feature-xyne-59771-implement-x-0-1791455764693_ysweet_data  Creating
+ Volume xyne-test-feature-xyne-59771-implement-x-0-1791455764693_ysweet_data  Created
+ Volume xyne-test-feature-xyne-59771-implement-x-0-1791455764693_zero_cache_data  Creating
+ Volume xyne-test-feature-xyne-59771-implement-x-0-1791455764693_zero_cache_data  Created
+ Volume xyne-test-feature-xyne-59771-implement-x-0-1791455764693_victorialogs_errors_data  Creating
+ Volume xyne-test-feature-xyne-59771-implement-x-0-1791455764693_victorialogs_errors_data  Created
+ Volume xyne-test-feature-xyne-59771-implement-x-0-1791455764693_fake_gcs_data  Creating
+ Volume xyne-test-feature-xyne-59771-implement-x-0-1791455764693_fake_gcs_data  Created
+ Volume xyne-test-feature-xyne-59771-implement-x-0-1791455764693_redis_data  Creating
+ Volume xyne-test-feature-xyne-59771-implement-x-0-1791455764693_redis_data  Created
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-ysweet  Creating
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-postgres  Creating
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-victorialogs-errors  Creating
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-fake-gcs  Creating
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-redis  Creating
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-ysweet  Created
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-fake-gcs  Created
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-victorialogs-errors  Created
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-fluent-bit  Creating
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-postgres  Created
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-backend-migrate  Creating
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-redis  Created
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-livekit  Creating
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-superposition  Creating
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-fluent-bit  Created
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-superposition  Created
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-livekit  Created
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-backend-migrate  Created
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-zero-cache  Creating
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-zero-cache  Created
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-backend  Creating
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-backend  Created
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-dashboard  Creating
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-dashboard  Created
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-automation  Creating
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-automation  Created
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-redis  Starting
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-victorialogs-errors  Starting
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-postgres  Starting
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-ysweet  Starting
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-fake-gcs  Starting
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-postgres  Started
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-postgres  Waiting
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-redis  Started
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-redis  Waiting
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-redis  Waiting
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-victorialogs-errors  Started
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-fluent-bit  Starting
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-fake-gcs  Started
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-ysweet  Started
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-fluent-bit  Started
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-postgres  Healthy
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-backend-migrate  Starting
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-redis  Healthy
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-superposition  Starting
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-redis  Healthy
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-livekit  Starting
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-backend-migrate  Started
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-backend-migrate  Waiting
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-postgres  Waiting
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-superposition  Started
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-livekit  Started
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-postgres  Healthy
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-backend-migrate  Exited
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-zero-cache  Starting
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-zero-cache  Started
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-zero-cache  Waiting
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-livekit  Waiting
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-backend-migrate  Waiting
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-redis  Waiting
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-fake-gcs  Waiting
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-fake-gcs  Healthy
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-redis  Healthy
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-backend-migrate  Exited
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-livekit  Healthy
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-zero-cache  Healthy
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-backend  Starting
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-backend  Started
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-backend  Waiting
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-backend  Healthy
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-dashboard  Starting
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-dashboard  Started
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-backend  Waiting
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-dashboard  Waiting
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-backend  Healthy
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-dashboard  Healthy
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-automation  Starting
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-automation  Started
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-postgres  Waiting
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-ysweet  Waiting
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-automation  Waiting
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-livekit  Waiting
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-victorialogs-errors  Waiting
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-redis  Waiting
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-backend-migrate  Waiting
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-superposition  Waiting
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-fake-gcs  Waiting
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-backend  Waiting
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-fluent-bit  Waiting
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-zero-cache  Waiting
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-dashboard  Waiting
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-postgres  Healthy
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-victorialogs-errors  Healthy
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-backend  Healthy
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-automation  Healthy
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-redis  Healthy
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-ysweet  Healthy
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-fake-gcs  Healthy
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-livekit  Healthy
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-fluent-bit  Healthy
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-backend-migrate  Exited
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-dashboard  Healthy
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-superposition  Healthy
+ Container xyne-test-feature-xyne-59771-implement-x-0-1791455764693-zero-cache  Healthy

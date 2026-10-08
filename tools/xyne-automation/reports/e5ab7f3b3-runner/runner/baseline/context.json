@@ -1,0 +1,91 @@
+{
+  "runId": "e5ab7f3b3-1",
+  "runnerNumber": null,
+  "runnerPid": 25,
+  "runnerFolder": "baseline",
+  "capturedAt": "2026-10-08T10:37:25.380Z",
+  "suite": {
+    "before": {
+      "activeSessionName": null,
+      "activeSession": null,
+      "sessions": {},
+      "storedUsers": {},
+      "lastResponse": null,
+      "hasApiRequestContext": false
+    },
+    "after": {
+      "activeSessionName": "default-browser-1",
+      "activeSession": {
+        "name": "default-browser-1",
+        "browserType": "chromium",
+        "viewportWidth": 1280,
+        "viewportHeight": 720,
+        "currentUrl": "http://dashboard:5173/version.json"
+      },
+      "sessions": {
+        "default-browser-1": {
+          "name": "default-browser-1",
+          "browserType": "chromium",
+          "viewportWidth": 1280,
+          "viewportHeight": 720,
+          "currentUrl": "http://dashboard:5173/version.json"
+        }
+      },
+      "storedUsers": {
+        "admin-1": {
+          "alias": "admin-1",
+          "role": "admin",
+          "id": "cmuzejm6n0023v3stog4wmk5j",
+          "email": "test-admin-email-1@xyne-test.local",
+          "name": "Test Admin 1",
+          "workspaceId": "cmuzejlvt0002v3stv8ii008w",
+          "projects": {
+            "project-1": {
+              "id": "cmuzejt5i0039v3stwlvqrbf1",
+              "name": "baseline-project-xo6ejk",
+              "code": "BLXO6EJK",
+              "description": "baseline project fixture"
+            }
+          },
+          "channels": {
+            "channel-1": {
+              "id": "cmuzejv2c003mv3stfch8xi3u",
+              "name": "baseline-channel-piwgis",
+              "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+              "messages": {}
+            }
+          },
+          "dms": {},
+          "tickets": {}
+        },
+        "user-1": {
+          "alias": "user-1",
+          "role": "user",
+          "id": "cmuzejlwh0007v3st74kglnsr",
+          "email": "test-user-email-1@xyne-test.local",
+          "name": "Test User 1",
+          "workspaceId": "cmuzejlvt0002v3stv8ii008w",
+          "projects": {},
+          "channels": {},
+          "dms": {},
+          "tickets": {}
+        },
+        "user-2": {
+          "alias": "user-2",
+          "role": "user",
+          "id": "cmuzejm5g001wv3stoxln51gu",
+          "email": "test-user-email-2@xyne-test.local",
+          "name": "Test User 2",
+          "workspaceId": "cmuzejlvt0002v3stv8ii008w",
+          "projects": {},
+          "channels": {},
+          "dms": {},
+          "tickets": {}
+        }
+      },
+      "lastResponse": null,
+      "hasApiRequestContext": false
+    }
+  },
+  "scenarios": []
+}

@@ -1,0 +1,30 @@
+{
+  "runId": "e5ab7f3b3-1",
+  "ownerUserAlias": "admin-1",
+  "project": {
+    "id": "cmuzejt5i0039v3stwlvqrbf1",
+    "name": "baseline-project-xo6ejk",
+    "code": "BLXO6EJK",
+    "description": "baseline project fixture"
+  },
+  "channel": {
+    "id": "cmuzejv2c003mv3stfch8xi3u",
+    "name": "baseline-channel-piwgis",
+    "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzejv2c003mv3stfch8xi3u",
+    "seedMessage": {
+      "baseText": "baseline-channel-seed",
+      "text": "baseline-channel-seed-yv6y97"
+    }
+  },
+  "dm": {
+    "id": "cmuzek0w2004qv3st5x9zx2j9",
+    "name": "Test User 2",
+    "url": "http://dashboard:5173/cmuzejlvt0002v3stv8ii008w/chat/dir/cmuzek0w2004qv3st5x9zx2j9",
+    "ownerAlias": "user-1",
+    "partnerAlias": "user-2",
+    "seedMessage": {
+      "baseText": "baseline-dm-seed",
+      "text": "baseline-dm-seed-dvoygb"
+    }
+  }
+}
