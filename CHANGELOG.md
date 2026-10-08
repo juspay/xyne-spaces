@@ -1,3 +1,10 @@
+## [1.474.5-release-20261008.2](https://github.com/juspay/xyne-spaces/compare/v1.474.5-release-20261008.1...v1.474.5-release-20261008.2) (2026-10-08)
+
+
+### Bug Fixes
+
+* align organizer rows and add double-click rename ([#2816](https://github.com/juspay/xyne-spaces/issues/2816)) ([d3a9668](https://github.com/juspay/xyne-spaces/commit/d3a9668dc579048a09df3e40e9ace3f3c76843f3))
+
 ## [1.474.5-release-20261008.1](https://github.com/juspay/xyne-spaces/compare/v1.474.4...v1.474.5-release-20261008.1) (2026-10-08)
 
 
