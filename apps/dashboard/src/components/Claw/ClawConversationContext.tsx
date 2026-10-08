@@ -13,7 +13,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useXyneAIStream } from '../../hooks/useXyneAIStream';
 import { newStreamSlotKey } from '../../utils/xyneAIStreamThreadId';
 import { CLAW_AGENTS_STALE_TIME_MS } from './claw.constants';
-import { useV2SessionsList, useV2SessionInvalidator } from '../../hooks/useAskAISessionsV2';
+import { useV2SessionInvalidator } from '../../hooks/useAskAISessionsV2';
 import {
   fetchV2ConversationMessages,
   deleteV2Conversation,
@@ -32,7 +32,6 @@ import { resolveMessagePendingAction } from './claw.utils';
 
 const EMPTY_CHANNEL_IDS: string[] = [];
 const EMPTY_AGENTS: AccessibleClawAgent[] = [];
-const EMPTY_SESSIONS: ConversationHistory[] = [];
 
 export interface ClawConversationValue {
   messages: Message[];
@@ -40,8 +39,6 @@ export interface ClawConversationValue {
   conversationId: string;
   selectedAgentSlug: string | null;
   agents: AccessibleClawAgent[];
-  sessions: ConversationHistory[];
-  sessionsLoading: boolean;
   loadingSessionId: string | null;
   submitQuery: (text: string) => void;
   abortCurrentRequest: () => void;
@@ -49,7 +46,6 @@ export interface ClawConversationValue {
   newChat: () => void;
   loadConversation: (conversation: ConversationHistory) => Promise<boolean>;
   deleteConversation: (conversation: ConversationHistory) => Promise<void>;
-  refetchSessions: () => void;
   resolvePendingAction: (
     messageId: string,
     actionIndex: number,
@@ -105,12 +101,6 @@ export function ClawConversationProvider({
   });
   const agents = agentsData ?? EMPTY_AGENTS;
 
-  const {
-    data: sessionsData,
-    isLoading: sessionsLoading,
-    refetch: refetchSessionsQuery,
-  } = useV2SessionsList(historyAgentSlug, isOpen);
-  const sessions = sessionsData ?? EMPTY_SESSIONS;
   const { invalidateSessions } = useV2SessionInvalidator();
 
   const { submitQuery: submitQueryAsync, abortCurrentRequest } = useXyneAIStream({
@@ -168,20 +158,27 @@ export function ClawConversationProvider({
       if (slug === selectedAgentSlug) return;
       if (isStreaming) return;
 
-      resetConversation();
+      // In an open conversation this is a mid-conversation switch: the chat
+      // stays and the next turn goes to the new agent in the same
+      // conversation. Only an empty overlay starts fresh.
+      if (!conversationId) resetConversation();
       setSelectedAgentSlug(slug);
     },
-    [selectedAgentSlug, isStreaming, resetConversation],
+    [selectedAgentSlug, isStreaming, resetConversation, conversationId],
   );
 
   const loadConversation = useCallback(
     async (conversation: ConversationHistory): Promise<boolean> => {
       const requestId = ++loadRequestRef.current;
       setLoadingSessionId(conversation.sessionId);
+      // The history spans every agent: open the chat with the agent it was
+      // last with, and keep talking to that agent from here.
+      const rowAgentSlug = conversation.agentSlug ?? historyAgentSlug;
+      setSelectedAgentSlug(rowAgentSlug === 'ask-ai' ? null : rowAgentSlug);
       try {
         const live = xyneAIStreamManager.findActiveStreamBySessionId(
           conversation.sessionId,
-          historyAgentSlug,
+          rowAgentSlug,
         );
         if (live && (live.status === 'streaming' || live.status === 'completed')) {
           if (loadRequestRef.current !== requestId) return false;
@@ -196,7 +193,7 @@ export function ClawConversationProvider({
           setHasUnseenAnswer(false);
           return true;
         }
-        const fetched = await fetchV2ConversationMessages(conversation.sessionId, historyAgentSlug);
+        const fetched = await fetchV2ConversationMessages(conversation.sessionId, rowAgentSlug);
 
         if (loadRequestRef.current !== requestId) return false;
         setStreamThreadKey(conversation.sessionId);
@@ -222,16 +219,13 @@ export function ClawConversationProvider({
 
   const deleteConversation = useCallback(
     async (conversation: ConversationHistory): Promise<void> => {
-      await deleteV2Conversation(conversation.sessionId, historyAgentSlug);
+      const rowAgentSlug = conversation.agentSlug ?? historyAgentSlug;
+      await deleteV2Conversation(conversation.sessionId, rowAgentSlug);
       if (conversation.sessionId === conversationId) resetConversation();
-      invalidateSessions(historyAgentSlug);
+      invalidateSessions();
     },
     [historyAgentSlug, conversationId, resetConversation, invalidateSessions],
   );
-
-  const refetchSessions = useCallback(() => {
-    void refetchSessionsQuery();
-  }, [refetchSessionsQuery]);
 
   const resolvePendingAction = useCallback(
     (messageId: string, actionIndex: number, resolution: PendingActionResolution) => {
@@ -249,8 +243,6 @@ export function ClawConversationProvider({
       conversationId,
       selectedAgentSlug,
       agents,
-      sessions,
-      sessionsLoading,
       loadingSessionId,
       submitQuery,
       abortCurrentRequest,
@@ -258,7 +250,6 @@ export function ClawConversationProvider({
       newChat,
       loadConversation,
       deleteConversation,
-      refetchSessions,
       resolvePendingAction,
     }),
     [
@@ -267,8 +258,6 @@ export function ClawConversationProvider({
       conversationId,
       selectedAgentSlug,
       agents,
-      sessions,
-      sessionsLoading,
       loadingSessionId,
       submitQuery,
       abortCurrentRequest,
@@ -276,7 +265,6 @@ export function ClawConversationProvider({
       newChat,
       loadConversation,
       deleteConversation,
-      refetchSessions,
       resolvePendingAction,
     ],
   );

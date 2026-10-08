@@ -6,3 +6,4 @@ export * from './types';
 export * from './parser';
 export * from './constants';
 export * from './citationUrl';
+export * from './assistantParts';

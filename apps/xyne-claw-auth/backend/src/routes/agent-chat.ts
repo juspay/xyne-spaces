@@ -1,6 +1,7 @@
 import { s2sKeyMatches } from "../middleware/require-auth.js";
 import { isAgentOwnedRun } from "../lib/agent-owned-runs.js";
 import { applyAiScreenCommand } from "../lib/ai-screen-commands.js";
+import { labelModel, modelDisplayName } from "../lib/model-catalog.js";
 import { parseSlashCommand } from "../lib/parseSlashCommand.js";
 import { screenUploadFiles } from "../lib/upload-screening.js";
 import { Router, type Request, type RequestHandler, type Response } from "express";
@@ -8,8 +9,33 @@ import { errMsg } from "../lib/errors.js";
 import { SDLC_AGENT_SLUG, isAgentInvocableBy, IMMEDIATE_TASK_COMMAND_RE, parseLocalSandboxCommand } from "xyne-claw-shared";
 import { recordDeliveredArtifacts } from "../lib/delivered-artifacts.js";
 import { recordUploadedArtifacts } from "../lib/conversation-artifact-signals.js";
-import { mintChatSessionId, beginChatRun, failChatRun, discardChatRun } from "../lib/chat-run-record.js";
-import { isChatConversation } from "../lib/conversation-kind.js";
+import {
+  mintChatSessionId,
+  beginChatRun,
+  failChatRun,
+  discardChatRun,
+  finalTurnFields,
+  normalizeAssistantParts,
+  reasoningText,
+  type AssistantPart,
+} from "../lib/chat-run-record.js";
+import { isDirectChatConversation } from "../lib/conversation-kind.js";
+import {
+  agentFacets,
+  buildAgentHandoff,
+  buildConversationList,
+  CONVERSATION_PAGE_MAX,
+  CONVERSATION_PAGE_SIZE,
+  conversationEntries,
+  conversationPath,
+  decodeCursor,
+  entriesNeedingFallbackTitle,
+  entryMetaKey,
+  handoffMessagesFrom,
+  selectPage,
+  type ConversationEntry,
+  type ConversationListRow,
+} from "../lib/multi-agent-chat.js";
 import {
   localFolderUnavailableMessage,
   splitLocalFolderContext,
@@ -58,7 +84,7 @@ import { consumeClawStream } from "../lib/consume-claw-stream.js";
 import { cancelRunSession } from "../lib/experiment.js";
 import { redisService } from "../redis.js";
 import { subscribeLive, publishLiveEvent, type LiveEvent } from "../lib/live-conversation-bus.js";
-import { pushDelta, endDeltaCoalescer, liveUserIdForSession } from "../lib/live-delta-coalescer.js";
+import { pushDelta, pushToolPart, endDeltaCoalescer, liveUserIdForSession } from "../lib/live-delta-coalescer.js";
 import { resolveSdlcRepositoryForUser } from "../lib/sdlc-repository-context.js";
 
 import { attachArtifactToApp, type ArtifactAppTarget } from "../lib/artifact-app-session.js";
@@ -301,6 +327,8 @@ interface PendingStream {
     /** Canonical attachment rows persisted by the callback handler, for the
      *  SSE `done` event. */
     persistedAttachments?: PersistedAttachment[];
+    /** The turn as ordered thinking / text / tool parts (null: render from content). */
+    parts?: AssistantPart[] | null;
   }) => void;
   setClosed: () => void;
   /** Pre-created assistant ChatMessage row for this turn. Branching requires
@@ -404,6 +432,7 @@ type ChatBusEvent =
       pendingActions?: Array<Record<string, unknown>>;
       persisted: boolean;
       persistedAttachments?: PersistedAttachment[];
+      parts?: AssistantPart[] | null;
     };
 
 let _chatSubscriberReady = false;
@@ -441,6 +470,7 @@ function ensureChatEventsSubscriber(): void {
       ...(msg.pendingActions?.length ? { pendingActions: msg.pendingActions } : {}),
       persisted: msg.persisted,
       ...(msg.persistedAttachments?.length ? { persistedAttachments: msg.persistedAttachments } : {}),
+      ...(msg.parts ? { parts: msg.parts } : {}),
     });
   });
 }
@@ -463,6 +493,25 @@ function publishChatEvent(event: ChatBusEvent): void {
  * Returns null when another pod/attempt already persisted this session's
  * message (guard lost), or the persisted rows when this call won.
  */
+/**
+ * The `reasoning` a reader expects, for a row that stores its thinking only in
+ * ordered `parts` (newer turns): joined from the parts when the column is
+ * empty, so clients that only know `reasoning` see what they always did.
+ */
+/** How long a finished run took, start to finish; null while it runs. */
+function runDurationMs(run: { startedAt: Date; completedAt: Date | null }): number | null {
+  if (!run.completedAt) return null;
+  const ms = run.completedAt.getTime() - run.startedAt.getTime();
+  return ms >= 0 ? ms : null;
+}
+
+function withPartsReasoning(row: { reasoning?: string | null; parts?: unknown }): { reasoning?: string | null } {
+  if (row.reasoning) return { reasoning: row.reasoning };
+  const parts = normalizeAssistantParts(row.parts);
+  const text = parts ? reasoningText(parts) : "";
+  return text ? { reasoning: text } : {};
+}
+
 async function persistAssistantResult(args: {
   conversationId: string;
   agentSlug: string;
@@ -478,10 +527,15 @@ async function persistAssistantResult(args: {
    *  time so its id can drive PI session branching and AgentRun linkage. */
   assistantMessageId?: string;
   runProvider?: string;
+  /** The turn's ordered parts and/or whole reasoning (lib/chat-run-record finalTurnFields). */
+  turn?: { parts: AssistantPart[] | null; reasoning?: string };
   /** Verified workspace of the request — forwarded to artifact session-scoping. */
   workspaceId?: string | undefined;
 }): Promise<{ messageId: string; persistedAttachments: PersistedAttachment[] } | null> {
-  const runProviderField = args.runProvider ? { runProvider: args.runProvider } : {};
+  const runProviderField = {
+    ...(args.runProvider ? { runProvider: args.runProvider } : {}),
+    ...(args.turn ? { parts: args.turn.parts, ...(args.turn.reasoning ? { reasoning: args.turn.reasoning } : {}) } : {}),
+  };
   if (args.sessionId) {
     const guard = await redisService.getConnection()
       .set(`agent-chat:msg-persisted:${args.sessionId}`, "1", "EX", 86_400, "NX")
@@ -1048,7 +1102,9 @@ async function listPlatformModels(): Promise<{
 // chat via providerOverride — the key itself is never exposed. Returns an empty
 // list (not an error) when the agent has no litellm credential so the UI can
 // simply hide the picker. `defaultModel` is the agent's configured model, used
-// to preselect the dropdown.
+// to preselect the dropdown. Every entry carries its people-facing `name` and
+// `description` (lib/model-catalog.ts), and `defaultModelName` names the
+// default, so no client keeps its own model wording.
 interface LocalHarnessModelEntry {
   id: string;
   name: string;
@@ -1142,10 +1198,12 @@ router.get("/:slug/litellm-models", async (req: Request<{ slug: string }>, res: 
       const rawSpacesModel = ms?.["model"];
       const spacesModel = typeof rawSpacesModel === "string" && rawSpacesModel.trim() ? rawSpacesModel.trim() : null;
       const platformData = Array.isArray(platform.data) ? platform.data : [];
+      const defaultModel = spacesModel ?? platform.defaultModel;
       res.json({
         ...platform,
-        data: [...harnessEntries, ...platformData],
-        defaultModel: spacesModel ?? platform.defaultModel,
+        data: [...harnessEntries, ...platformData].map(labelModel),
+        defaultModel,
+        defaultModelName: defaultModel ? modelDisplayName(defaultModel) : null,
         ...(recommendedHarness ? { recommendedId: recommendedHarness.id } : {}),
       });
       return;
@@ -1169,8 +1227,9 @@ router.get("/:slug/litellm-models", async (req: Request<{ slug: string }>, res: 
       .sort((a, b) => a.name.localeCompare(b.name));
     res.json({
       success: true,
-      data: [...harnessEntries, ...models],
+      data: [...harnessEntries, ...models].map(labelModel),
       defaultModel: cred.model ?? null,
+      defaultModelName: cred.model ? modelDisplayName(cred.model) : null,
       pinProvider: "litellm",
       ...(recommendedHarness ? { recommendedId: recommendedHarness.id } : {}),
     });
@@ -1426,14 +1485,22 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     //   • be linked to AgentRun.chatMessageId at finalize (so the messages
     //     endpoint can pair runs ↔ assistant messages once branching produces
     //     multiple siblings under the same user parent).
-    const existingMessages = existingConvId
-      ? (await chatMessageRepository.findByConversation(conversationId)).map((m) => ({
-          id: m.id,
-          role: m.role,
-          parentId: (m as { parentId?: string | null }).parentId ?? null,
-          createdAt: m.createdAt,
-        }))
+    const existingMessageRows = existingConvId
+      ? await chatMessageRepository.findByConversation(conversationId)
       : [];
+    const existingMessages = existingMessageRows.map((m) => ({
+      id: m.id,
+      role: m.role,
+      parentId: (m as { parentId?: string | null }).parentId ?? null,
+      createdAt: m.createdAt,
+      agentSlug: m.agentSlug,
+    }));
+    // Multi-agent direct chat: the tip of the selected path this turn answers
+    // after (hand-off note), and the agent whose session a regenerate/edit
+    // would clone. A turn owned by ANOTHER agent has no session of this agent
+    // to clone — that branch starts fresh and the note carries the path.
+    let handoffLeafId: string | null = null;
+    let cloneOwnerSlug: string | null = null;
 
     let assistantParentId: string | null = null;
     let createdUserMessageId: string | undefined;
@@ -1485,6 +1552,10 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
         existingAssistantId ?? parentUserMessageId,
         conversationId,
       );
+      handoffLeafId = userMsgRow.parentId ?? null;
+      cloneOwnerSlug = (existingAssistantId
+        ? existingMessages.find((m) => m.id === existingAssistantId)?.agentSlug
+        : undefined) ?? userMsgRow.agentSlug;
       // Clone the session ending BEFORE the user message we're replaying.
       // PI's runTask always appends `task` as a fresh user entry; if we
       // included the original user msg in the clone (the old "lastUser"
@@ -1509,6 +1580,8 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
         conversationId,
       );
       cloneBranchMode = "beforeLastUser";
+      handoffLeafId = requestedParent?.id ?? null;
+      cloneOwnerSlug = editedUserMsg.agentSlug;
 
       const userMsg = await chatMessageRepository.create({
         conversationId, agentSlug: slug, userId, role: "user", content: message.trim(),
@@ -1525,6 +1598,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       const lastAssistantMsg = [...existingMessages].reverse().find((m) => m.role === "assistant");
       const userParentId = requestedParent?.id ?? lastAssistantMsg?.id ?? null;
       piConversationId = resolvePiConversationIdForPath(existingMessages, userParentId, conversationId);
+      handoffLeafId = userParentId;
 
       const userMsg = await chatMessageRepository.create({
         conversationId, agentSlug: slug, userId, role: "user", content: message.trim(),
@@ -1604,7 +1678,12 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     }
 
     // If this turn requires a branched PI session, clone it now (S2S to claw).
-    if (cloneSourcePiConversationId) {
+    if (cloneSourcePiConversationId && cloneOwnerSlug && cloneOwnerSlug !== slug) {
+      piConversationId = branchPiConversationId(conversationId, assistantMsg.id);
+      log.info(
+        `[agent-chat] branch turn owned by ${cloneOwnerSlug}, answered by ${slug} — fresh branch session conv=${conversationId}`,
+      );
+    } else if (cloneSourcePiConversationId) {
       piConversationId = branchPiConversationId(conversationId, assistantMsg.id);
       const cloneSourceSessionKey = piSessionStoreKey(cloneSourcePiConversationId, slug);
       const cloneTargetSessionKey = piSessionStoreKey(piConversationId, slug);
@@ -1683,6 +1762,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       pendingActions?: Array<Record<string, unknown>>;
       persisted?: boolean;
       persistedAttachments?: PersistedAttachment[];
+      parts?: AssistantPart[] | null;
     }>((resolve) => {
       let closed = false;
       // This pod now holds a live SSE stream — make sure it's listening on the
@@ -1925,6 +2005,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       : runAgentConfig;
     const fastModeEnabled = await resolveFastMode(conversationId, slug, effectiveAgentConfig);
 
+    const aiScreenCommand = applyAiScreenCommand(message);
     const forwardBody: Record<string, unknown> = {
       // Pre-minted above and already persisted as an AgentRun row. prepareRun
       // honours it because this is an internal run, so the row, the dispatch and
@@ -1933,7 +2014,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       userId,
       userName: user?.name,
       userEmail: user?.email,
-      task: studioMode === "design" ? `/design ${message.trim()}` : applyAiScreenCommand(message).task,
+      task: studioMode === "design" ? `/design ${message.trim()}` : aiScreenCommand.task,
       conversationId,
       orgId: agent.orgId,
       ...(piConversationId !== conversationId ? { piSessionConversationId: piConversationId } : {}),
@@ -1968,6 +2049,8 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       // dashboard chat (same bug existed for webhook + scheduled jobs).
       ...(effectiveAgentConfig ? { agentConfig: effectiveAgentConfig } : {}),
       fastMode: fastModeEnabled,
+      // /compact shrinks the session before answering, not just summarises it.
+      ...(studioMode !== "design" && aiScreenCommand.compactBeforeRun ? { compactBeforeRun: true } : {}),
       ...evalRunSwitches(req, requestedOptimizations, requestedJudgeBackend),
     };
 
@@ -1981,7 +2064,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     let localFolderItem: LocalFolderContextItem | null = contextSplit.localFolders[0] ?? null;
     if (!localFolderItem) {
       const sticky = await chatMessageRepository
-        .latestLocalFolderContext(conversationId, slug)
+        .latestLocalFolderContext(conversationId, isDirectChatConversation(conversationId) ? null : slug)
         .catch(() => null);
       localFolderItem = splitLocalFolderContext(sticky ? [sticky] : []).localFolders[0] ?? null;
     }
@@ -2012,8 +2095,23 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       return undefined;
     });
 
+    // Multi-agent direct chat: hand this agent the turns its own session has
+    // not seen. Null whenever the path holds a single agent — those turns run
+    // exactly as before. When present it already covers the local-harness
+    // turns the provider catch-up below would add, so that one is skipped.
+    const handoffMessages = isDirectChatConversation(conversationId) ? handoffMessagesFrom(existingMessageRows) : [];
+    const agentHandoff = buildAgentHandoff({
+      path: conversationPath(handoffMessages, handoffLeafId),
+      agentSlug: slug,
+      isOwnSessionTurn: (m) => !isLocalHarnessProvider(m.runProvider),
+    });
+    if (agentHandoff) {
+      forwardBody["agentHandoff"] = agentHandoff;
+      log.info(`[agent-chat] multi-agent hand-off note conv=${conversationId} agent=${slug}`);
+    }
+
     try {
-      const serverCatchUp = await planServerContinuation({
+      const serverCatchUp = agentHandoff ? null : await planServerContinuation({
         conversationId,
         agentSlug: slug,
         excludeMessageIds: [createdUserMessageId, assistantMsg.id].filter((id): id is string => Boolean(id)),
@@ -2084,6 +2182,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
         continuation: {
           agentSlug: slug,
           excludeMessageIds: [createdUserMessageId, assistantMsg.id].filter((id): id is string => Boolean(id)),
+          ...(agentHandoff ? { multiAgent: { messages: handoffMessages, leafId: handoffLeafId } } : {}),
         },
       });
       runBody = { success: true, sessionId: dispatched.sessionId };
@@ -2204,6 +2303,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
         parentId: assistantParentId,
         ...(pendingActionsForClient.length ? { pendingActions: pendingActionsForClient } : {}),
         ...(persistedAttachments.length ? { attachments: persistedAttachments } : {}),
+        ...(result.parts ? { parts: result.parts } : {}),
       })}\n\n`);
       res.end();
     }
@@ -2346,12 +2446,14 @@ internalRouter.post("/:slug/chat/:convId/progress", async (req: Request<{ slug: 
   res.json({ success: true });
 
   const callbackId = req.query["callbackId"] as string | undefined;
-  const { toolLabel, sessionId, toolInvocation, reasoningDelta, textDelta, attachment, debugEvent } = req.body as {
+  const { toolLabel, sessionId, toolInvocation, reasoningDelta, textDelta, partId, attachment, debugEvent } = req.body as {
     toolLabel?: string;
     sessionId?: string;
     toolInvocation?: unknown;
     reasoningDelta?: string;
     textDelta?: string;
+    /** The thinking/text block the delta belongs to (absent from older pods). */
+    partId?: string;
     attachment?: { fileName: string; mimeType: string; data: string; metadata?: Record<string, unknown> };
     debugEvent?: Record<string, unknown>;
   };
@@ -2370,8 +2472,9 @@ internalRouter.post("/:slug/chat/:convId/progress", async (req: Request<{ slug: 
   // toolInvocation may carry parentToolCallId + subagentName for nested child rows.
   if (toolInvocation) events.push({ event: "tool", data: { toolInvocation } });
   // Tier 3: reasoning / text deltas char-by-char as they arrive from the model.
-  if (typeof reasoningDelta === "string" && reasoningDelta.length > 0) events.push({ event: "reasoning", data: { delta: reasoningDelta } });
-  if (typeof textDelta === "string" && textDelta.length > 0) events.push({ event: "text", data: { delta: textDelta } });
+  const deltaPart = typeof partId === "string" && partId ? { partId } : {};
+  if (typeof reasoningDelta === "string" && reasoningDelta.length > 0) events.push({ event: "reasoning", data: { delta: reasoningDelta, ...deltaPart } });
+  if (typeof textDelta === "string" && textDelta.length > 0) events.push({ event: "text", data: { delta: textDelta, ...deltaPart } });
   // Stream a just-captured attachment (e.g. create-ppt PPTX) so the UI
   // renders it mid-session instead of waiting for finalize.
   if (attachment) events.push({ event: "attachment", data: { attachment } });
@@ -2445,6 +2548,8 @@ internalRouter.post("/:slug/chat/:convId/progress", async (req: Request<{ slug: 
   if (sessionId && toolInvocation) {
     agentRunRepository.appendToolInvocation(sessionId, toolInvocation).catch(() => {});
     if (CONFIG.liveToolCallsEnabled) {
+      const assistantMessageId = typeof req.query["assistantMessageId"] === "string" ? req.query["assistantMessageId"] : undefined;
+      pushToolPart(sessionId, req.params.convId, req.params.slug, assistantMessageId, toolInvocation as Record<string, unknown>);
       liveUserIdForSession(sessionId)
         .then((uid) => {
           if (uid)
@@ -2471,7 +2576,7 @@ internalRouter.post("/:slug/chat/:convId/progress", async (req: Request<{ slug: 
   // above); applyLiveEvent's driving-tab guard prevents double-render.
   if (sessionId && CONFIG.liveToolCallsEnabled && ((typeof textDelta === "string" && textDelta) || (typeof reasoningDelta === "string" && reasoningDelta))) {
     const assistantMessageId = typeof req.query["assistantMessageId"] === "string" ? req.query["assistantMessageId"] : undefined;
-    pushDelta(sessionId, req.params.convId, req.params.slug, assistantMessageId, textDelta, reasoningDelta);
+    pushDelta(sessionId, req.params.convId, req.params.slug, assistantMessageId, textDelta, reasoningDelta, undefined, typeof partId === "string" ? partId : undefined);
   }
 
   if (sessionId && toolLabel) {
@@ -2614,6 +2719,16 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
   const finalContent = enrichedResult ?? widgetErrorContent(error, error ?? "No response");
   const finalStatus = normalizeRunStatus(status);
   const errorCode = typeof error === "string" ? error : undefined;
+  // The turn's ordered parts (or, without them, its whole reasoning) — the
+  // same value is stored and sent on `done`.
+  const turn = await finalTurnFields({
+    status: finalStatus,
+    modelAnswer: result ?? "",
+    storedAnswer: finalContent,
+    callbackParts: (req.body as { parts?: unknown }).parts,
+    callbackReasoning: (req.body as { reasoning?: unknown }).reasoning,
+    assistantMessageId: chatMessageId,
+  });
   // persistedFlag semantics: true ⇔ a chat_messages row for this result
   // durably exists (written now, or by an earlier retry that won the SETNX
   // guard). Only then may the SSE pod skip its own fallback write. A thrown
@@ -2641,6 +2756,7 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
         ...(sessionId ? { sessionId } : {}),
         ...(chatMessageId ? { assistantMessageId: chatMessageId } : {}),
         ...(provider ? { runProvider: provider } : {}),
+        turn,
       });
       persistedFlag = true; // non-null = written now; null = guard loss = a retry already wrote it
       if (persisted?.persistedAttachments.length) {
@@ -2758,6 +2874,7 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
     ...(pendingActions?.length ? { pendingActions } : {}),
     persisted: persistedFlag,
     ...(persistedAttachments.length ? { persistedAttachments } : {}),
+    parts: turn.parts,
   };
 
   if (callbackId && pendingStreams.has(callbackId)) {
@@ -2785,6 +2902,7 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
       ...(pendingActions?.length ? { pendingActions } : {}),
       persisted: persistedFlag,
       ...(persistedAttachments.length ? { persistedAttachments } : {}),
+      ...(turn.parts ? { parts: turn.parts } : {}),
     });
   }
 });
@@ -2858,6 +2976,7 @@ router.post("/:slug/chat/:convId/fork", async (req: Request<{ slug: string; conv
         role: msg.role,
         content: msg.content ?? "",
         ...(msg.reasoning ? { reasoning: msg.reasoning } : {}),
+        ...(normalizeAssistantParts(msg.parts) ? { parts: normalizeAssistantParts(msg.parts) } : {}),
         parentId,
         orgId: (msg as { orgId: string }).orgId,
       });
@@ -2887,7 +3006,15 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
     // across agents (incl. a mentioned user's digital twin, same conversationId
     // but agentSlug="digital-twin"), so an unscoped read leaked the twin's
     // private messages/reasoning into the host agent's chat window.
-    const allMessages = await chatMessageRepository.findByConversationAndAgent(req.params.convId, req.params.slug);
+    //
+    // Opt-in exception: `?scope=conversation` on a direct chat returns every
+    // agent's turns. The user can switch agents mid-chat, so the window shows
+    // the whole conversation (each row carries its own agentSlug). Never for a
+    // Spaces thread id — that is where the twin rows above live.
+    const conversationScope = req.query["scope"] === "conversation" && isDirectChatConversation(req.params.convId);
+    const allMessages = conversationScope
+      ? await chatMessageRepository.findByConversation(req.params.convId)
+      : await chatMessageRepository.findByConversationAndAgent(req.params.convId, req.params.slug);
 
     // Per-user ACL. Sessions are now keyed by conversation+agent and SHARED
     // across every user in a thread (see buildSandboxStoreKey), so one
@@ -2946,7 +3073,7 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
           ...(reactArtifact ? { metadata: { reactArtifact } } : {}),
         };
       });
-      return { ...m, attachments };
+      return { ...m, ...withPartsReasoning(m), attachments };
     });
 
     // Pair tool invocations with the assistant message they produced.
@@ -2973,11 +3100,15 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
     // to agent_runs via POST /runs/:sessionId/rate). Built off the same
     // chatMessageId linkage as runByMsgId, with the same legacy fallback.
     const ratingByMsgId: Record<string, { rating: "up" | "down" | null; comment: string | null }> = {};
+    // assistantMsgId → how long its run took, start to finish ("Worked for 2m 31s").
+    const durationByMsgId: Record<string, number> = {};
     const linkedAssistantIds = new Set<string>();
     for (const run of agentRuns) {
       const linkedId = (run as { chatMessageId?: string | null }).chatMessageId;
       if (!linkedId) continue;
       if (run.sessionId) runByMsgId[linkedId] = run.sessionId;
+      const linkedDuration = runDurationMs(run);
+      if (linkedDuration !== null) durationByMsgId[linkedId] = linkedDuration;
       if (run.rating) ratingByMsgId[linkedId] = { rating: run.rating as "up" | "down", comment: run.ratingComment ?? null };
       const invocations = run.toolInvocations;
       if (Array.isArray(invocations) && (invocations as unknown[]).length > 0) {
@@ -3012,6 +3143,8 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
       const run = unlinkedCompletedRuns[i]!;
       if (run.sessionId) runByMsgId[msg.id] = run.sessionId;
       if (run.rating) ratingByMsgId[msg.id] = { rating: run.rating as "up" | "down", comment: run.ratingComment ?? null };
+      const pairedDuration = runDurationMs(run);
+      if (pairedDuration !== null) durationByMsgId[msg.id] = pairedDuration;
       const invocations = run.toolInvocations;
       if (Array.isArray(invocations) && (invocations as unknown[]).length > 0) {
         const followUps = extractFollowUpSuggestionsFromInvocations(invocations);
@@ -3044,6 +3177,7 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
         ...(followUpsByMsgId[message.id]?.length
           ? { followUpSuggestions: followUpsByMsgId[message.id] }
           : {}),
+        ...(durationByMsgId[message.id] !== undefined ? { durationMs: durationByMsgId[message.id] } : {}),
       })),
       ...(Object.keys(invocationsByMsgId).length > 0 && { invocationsByMsgId }),
       ...(Object.keys(icons).length > 0 && { icons }),
@@ -3122,6 +3256,9 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
     return;
   }
   const { slug, convId } = req.params;
+  // Same opt-in as /messages: a direct chat viewed as a whole conversation
+  // streams every agent's turns, not just this slug's.
+  const conversationScope = req.query["scope"] === "conversation" && isDirectChatConversation(convId);
   // Cross-user visibility is OPT-IN (mirrors /messages): the default live view
   // — even for admins — streams ONLY the requester's own runs, so a shared twin
   // thread doesn't leak other users' in-flight turns into the normal chat. The
@@ -3155,7 +3292,9 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
 
   // 1) Snapshot from Postgres so a mid-run joiner sees tool calls already made.
   try {
-    const messages = await chatMessageRepository.findByConversationAndAgent(convId, slug);
+    const messages = conversationScope
+      ? await chatMessageRepository.findByConversation(convId)
+      : await chatMessageRepository.findByConversationAndAgent(convId, slug);
     const visible = crossUser ? messages : messages.filter((m) => liveUserAliases.includes(m.userId));
     const agentRuns = crossUser
       ? await agentRunRepository.listByConversation(convId, liveUserAliases)
@@ -3163,6 +3302,9 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
 
     // Pair completed runs to assistant messages by chronological index — same
     // logic as the /messages read (see its comment for why we don't pre-filter).
+    // The conversation-wide view pairs by AgentRun.chatMessageId first: runs
+    // from several agents interleave, so index pairing alone would hand one
+    // agent's tool calls to another agent's reply.
     const assistantMsgs = visible
       .filter((m) => m.role === "assistant")
       .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
@@ -3170,10 +3312,30 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
       .filter((r) => r.completedAt)
       .sort((a, b) => new Date(a.completedAt!).getTime() - new Date(b.completedAt!).getTime());
     const invocationsByMsgId: Record<string, unknown[]> = {};
-    const pairCount = Math.min(assistantMsgs.length, completedRuns.length);
-    for (let i = 0; i < pairCount; i++) {
-      const msg = assistantMsgs[i]!;
-      const run = completedRuns[i]!;
+    const pairs: Array<[typeof assistantMsgs[number], typeof completedRuns[number]]> = [];
+    if (conversationScope) {
+      const byId = new Map(assistantMsgs.map((m) => [m.id, m] as const));
+      const linkedMsgIds = new Set<string>();
+      const unlinkedRuns: typeof completedRuns = [];
+      for (const run of completedRuns) {
+        const linked = run.chatMessageId ? byId.get(run.chatMessageId) : undefined;
+        if (linked) {
+          pairs.push([linked, run]);
+          linkedMsgIds.add(linked.id);
+        } else if (!run.chatMessageId) {
+          unlinkedRuns.push(run);
+        }
+      }
+      const unlinkedMsgs = assistantMsgs.filter((m) => !linkedMsgIds.has(m.id));
+      for (let i = 0; i < Math.min(unlinkedMsgs.length, unlinkedRuns.length); i++) {
+        pairs.push([unlinkedMsgs[i]!, unlinkedRuns[i]!]);
+      }
+    } else {
+      for (let i = 0; i < Math.min(assistantMsgs.length, completedRuns.length); i++) {
+        pairs.push([assistantMsgs[i]!, completedRuns[i]!]);
+      }
+    }
+    for (const [msg, run] of pairs) {
       const invs = run.toolInvocations;
       if (Array.isArray(invs) && (invs as unknown[]).length > 0) {
         const visibleInvocations = withoutFollowUpRecorderInvocations(invs as unknown[]);
@@ -3220,7 +3382,19 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
         invocationsByMsgId,
         inProgress,
         ...(Object.keys(uiFlowsByMsgId).length > 0 ? { uiFlowsByMsgId } : {}),
-        ...(runningMsg ? { partial: { msgId: runningMsg.id, content: runningMsg.content ?? "", reasoning: runningMsg.reasoning ?? "" } } : {}),
+        ...(runningMsg
+          ? {
+              partial: {
+                msgId: runningMsg.id,
+                // When the turn started — a tab attaching mid-run times it from here.
+                createdAt: runningMsg.createdAt,
+                content: runningMsg.content ?? "",
+                reasoning: withPartsReasoning(runningMsg).reasoning ?? "",
+                // The run so far in order, for the viewer's step timeline.
+                ...(normalizeAssistantParts(runningMsg.parts) ? { parts: normalizeAssistantParts(runningMsg.parts) } : {}),
+              },
+            }
+          : {}),
       })}\n\n`,
     );
   } catch (err) {
@@ -3229,7 +3403,7 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
 
   // 2) Subscribe to live deltas (cross-pod via Redis). Buffer-free: write as they arrive.
   const unsub = subscribeLive(convId, (evt: LiveEvent) => {
-    if (evt.agentSlug && evt.agentSlug !== slug) return; // scope to this agent
+    if (!conversationScope && evt.agentSlug && evt.agentSlug !== slug) return; // scope to this agent
     if (!allow(evt.userId)) return;
     let data: LiveEvent = evt;
     // Same rule as the stored transcript above — without this an awakened run
@@ -3288,9 +3462,24 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
     // Scope to THIS agent's messages (a thread is shared across agents incl.
     // digital-twin) so authz + the GCS-restore ownerId hint match this agent's
     // session key (`<userId>_<convId>_<agentSlug>`), not another agent's.
-    const convMessages = await chatMessageRepository.findByConversationAndAgent(req.params.convId, req.params.slug);
-    const ownerId = convMessages[0]?.userId; // first speaker — used only as the xyne-claw GCS-restore hint
+    //
+    // Exception: the requester's OWN direct chat may have switched agents, and
+    // the drawer must show every turn — not only the picked agent's. Then the
+    // bundle spans every agent that answered (claw probes each agent's keys).
+    // Someone else's chat opened via edit access on ONE agent stays scoped to
+    // that agent: that access does not extend to the other agents' turns.
     const isAdmin = await isClawAdmin(requesterId);
+    const directChatRows = isDirectChatConversation(req.params.convId)
+      ? await chatMessageRepository.findByConversation(req.params.convId)
+      : [];
+    const spanAgents = directChatRows.length > 0 && (isAdmin || directChatRows.some((m) => m.userId === requesterId));
+    const convMessages = spanAgents
+      ? directChatRows
+      : await chatMessageRepository.findByConversationAndAgent(req.params.convId, req.params.slug);
+    const otherAgentSlugs = spanAgents
+      ? [...new Set(convMessages.map((m) => m.agentSlug))].filter((s) => s !== req.params.slug)
+      : [];
+    const ownerId = convMessages[0]?.userId; // first speaker — used only as the xyne-claw GCS-restore hint
     const editAccess = isAdmin
       ? null
       : await getAgentEditAccess(requesterId, req.params.slug, getOrgId(req));
@@ -3326,6 +3515,7 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
     const upstreamUrl =
       `${CONFIG.xyneClawUrl}/internal/sessions/${encodeURIComponent(req.params.convId)}/debug` +
       `?agentSlug=${encodeURIComponent(req.params.slug)}` +
+      `${otherAgentSlugs.length > 0 ? `&agentSlugs=${encodeURIComponent(otherAgentSlugs.join(","))}` : ""}` +
       `${ownerId ? `&userId=${encodeURIComponent(ownerId)}` : ""}` +
       `${limitParam ? `&limit=${limitParam}` : ""}` +
       `${beforeParam ? `&before=${encodeURIComponent(beforeParam)}` : ""}`;
@@ -3393,7 +3583,10 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
       // per-user ACL/redaction below via each synth run's data.userId.
       const inProgressRuns = hasElevatedDebugAccess
         ? await agentRunRepository.listByConversation(req.params.convId, requesterAliases)
-        : await agentRunRepository.listByUser(requesterAliases, { conversationId: req.params.convId, agentSlug: req.params.slug });
+        : await agentRunRepository.listByUser(requesterAliases, {
+            conversationId: req.params.convId,
+            ...(spanAgents ? {} : { agentSlug: req.params.slug }),
+          });
       const active = inProgressRuns.filter((r) => !r.completedAt && Array.isArray(r.toolInvocations));
       if (active.length === 0) {
         res.status(404).json({ success: false, error: "Debug artifacts not found" });
@@ -3531,11 +3724,11 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
         ? await agentRunRepository.listByConversation(req.params.convId, requesterAliases, { limit: 100 })
         : await agentRunRepository.listByUser(requesterAliases, {
             conversationId: req.params.convId,
-            agentSlug: req.params.slug,
+            ...(spanAgents ? {} : { agentSlug: req.params.slug }),
             limit: 100,
           });
       body.data.followUpDiagnostics = diagnosticRuns
-        .filter((run) => run.agentSlug === req.params.slug)
+        .filter((run) => spanAgents || run.agentSlug === req.params.slug)
         .map((run) => {
           const invocations = Array.isArray(run.toolInvocations)
             ? (run.toolInvocations as Array<Record<string, unknown>>)
@@ -3655,7 +3848,12 @@ router.delete("/:slug/chat/:convId", async (req: Request<{ slug: string; convId:
       res.status(400).json({ success: false, error: "userId required" });
       return;
     }
-    const count = await chatMessageRepository.deleteConversation(userAliases, req.params.slug, req.params.convId);
+    // A direct chat is ONE conversation even when the user switched agents in
+    // it, so deleting it from any agent's list removes every agent's turns.
+    // For a chat that never switched this deletes exactly the same rows.
+    const count = isDirectChatConversation(req.params.convId)
+      ? await chatMessageRepository.deleteConversationAllAgents(userAliases, req.params.convId)
+      : await chatMessageRepository.deleteConversation(userAliases, req.params.slug, req.params.convId);
     res.json({ success: true, data: { deleted: count } });
   } catch (err) {
     log.error("[agent-chat] delete conversation error:", err);
@@ -3685,10 +3883,13 @@ router.patch("/:slug/chat/:convId", async (req: Request<{ slug: string; convId: 
       return;
     }
 
-    const messages = await chatMessageRepository.findByConversationAndAgent(
-      req.params.convId,
-      req.params.slug,
-    );
+    // A direct chat answered by several agents is one conversation: owning a
+    // turn under any of them is enough, and the title/pin land on the home
+    // agent's meta row so every agent's list shows the same name.
+    const directChat = isDirectChatConversation(req.params.convId);
+    const messages = directChat
+      ? await chatMessageRepository.findByConversation(req.params.convId)
+      : await chatMessageRepository.findByConversationAndAgent(req.params.convId, req.params.slug);
     // Chat rows may be keyed under EITHER the canonical id or the raw Spaces id
     // (pre/post canonicalization), so match against the caller's alias set and
     // persist/read the meta under the id the rows actually use (owned.userId).
@@ -3702,7 +3903,7 @@ router.patch("/:slug/chat/:convId", async (req: Request<{ slug: string; convId: 
     const target = {
       conversationId: req.params.convId,
       userId: owned.userId,
-      agentSlug: req.params.slug,
+      agentSlug: await chatConversationMetaRepository.metaAgentSlug(req.params.convId, req.params.slug),
       orgId: owned.orgId,
     };
     if (typeof title === "string") {
@@ -3718,7 +3919,7 @@ router.patch("/:slug/chat/:convId", async (req: Request<{ slug: string; convId: 
     const meta = await chatConversationMetaRepository.find({
       conversationId: req.params.convId,
       userId: owned.userId,
-      agentSlug: req.params.slug,
+      agentSlug: target.agentSlug,
     });
     res.json({
       success: true,
@@ -3730,8 +3931,28 @@ router.patch("/:slug/chat/:convId", async (req: Request<{ slug: string; convId: 
   }
 });
 
-// GET /agents/:slug/conversations — list user's conversations with summaries
-router.get("/:slug/conversations", async (req: Request<{ slug: string }>, res: Response) => {
+/** One query-string value, or undefined when absent, repeated or blank. */
+function singleQueryParam(req: Request, name: string): string | undefined {
+  const raw = req.query[name];
+  return typeof raw === "string" && raw.trim() ? raw.trim() : undefined;
+}
+
+/**
+ * The user's chat history — ONE implementation behind both list routes
+ * (lib/multi-agent-chat.ts). A chat the user switched agents in is a single row
+ * carrying every agent that answered; `agentSlug` narrows the list to the
+ * conversations that agent answered in.
+ *
+ * Paged (`paged: true`): `limit` rows per page (default 50, max 100) after
+ * `cursor`, every pinned row on the first page, `q` matching titles, plus
+ * `nextCursor` and the `agents` facet. Unpaged: the whole list, exactly the
+ * shape the per-agent route has always returned.
+ */
+async function sendConversationList(
+  req: Request,
+  res: Response,
+  opts: { agentSlug: string | null; paged: boolean },
+): Promise<void> {
   try {
     // Identity comes from the session, NOT the query param. A caller-supplied
     // ?userId previously overrode the authenticated user, letting anyone list
@@ -3779,47 +4000,74 @@ router.get("/:slug/conversations", async (req: Request<{ slug: string }>, res: R
       userIds = [...targetIds];
     }
 
-    // Get all messages for this user+agent, grouped by conversation
-    const allMessages = await chatMessageRepository.findByUserAndAgent(userIds, req.params.slug);
+    const rawCursor = opts.paged ? singleQueryParam(req, "cursor") : undefined;
+    const cursor = rawCursor ? decodeCursor(rawCursor) : null;
+    if (rawCursor && !cursor) {
+      res.status(400).json({ success: false, error: "Invalid cursor" });
+      return;
+    }
+    const rawLimit = Number.parseInt(singleQueryParam(req, "limit") ?? "", 10);
+    const limit = Number.isFinite(rawLimit)
+      ? Math.min(Math.max(rawLimit, 1), CONVERSATION_PAGE_MAX)
+      : CONVERSATION_PAGE_SIZE;
+    const query = opts.paged ? singleQueryParam(req, "q")?.toLowerCase() : undefined;
 
-    // Group by conversationId, skipping machine-initiated threads. They are
-    // real, durable conversations, but their prompts are written on the user's
-    // behalf, so listing them here would bury the user's own chats. They stay
-    // reachable from the Agent Control Center, which links each run to its
-    // thread.
-    const convMap = new Map<string, typeof allMessages>();
-    for (const msg of allMessages) {
-      if (!isChatConversation(msg.conversationId)) continue;
-      const list = convMap.get(msg.conversationId) ?? [];
-      list.push(msg);
-      convMap.set(msg.conversationId, list);
+    // One aggregate for the whole history; titles and pins only for what is sent.
+    const all = conversationEntries(await chatMessageRepository.conversationAgentGroupsForUser(userIds));
+    const { agentSlug } = opts;
+    const entries = agentSlug ? all.filter((entry) => entry.agentSlugs.includes(agentSlug)) : all;
+    const resolve = async (list: ConversationEntry[]): Promise<ConversationListRow[]> => {
+      const meta = await chatConversationMetaRepository
+        .forConversationsAnyAgent([...new Set(list.map((entry) => entry.conversationId))], userIds)
+        .catch((err) => {
+          log.error("[agent-chat] conversation meta lookup failed:", err);
+          return [];
+        });
+      const firstUserMessages = await chatMessageRepository
+        .firstUserMessagesPerAgent(entriesNeedingFallbackTitle(list, meta), userIds)
+        .catch((err) => {
+          log.error("[agent-chat] conversation title fallback failed:", err);
+          return [];
+        });
+      return buildConversationList({ entries: list, meta, firstUserMessages });
+    };
+
+    if (!opts.paged) {
+      res.json({ success: true, data: await resolve(entries) });
+      return;
     }
 
-    const meta = await chatConversationMetaRepository
-      .byConversationIds([...convMap.keys()], userIds, req.params.slug)
-      .catch((err) => {
-        log.error("[agent-chat] conversation meta lookup failed:", err);
-        return new Map<string, { title: string | null; pinned: boolean }>();
+    let page: { items: ConversationListRow[]; nextCursor: string | null };
+    if (query) {
+      // Matching a title needs every title, so search resolves the whole
+      // (filtered) history first — still one meta and one fallback query.
+      const matches = (await resolve(entries)).filter((row) => row.title.toLowerCase().includes(query));
+      page = selectPage(matches, { isPinned: (row) => row.pinned, limit, cursor });
+    } else {
+      const pinned = await chatConversationMetaRepository.pinnedKeys(userIds).catch((err) => {
+        log.error("[agent-chat] pinned lookup failed:", err);
+        return new Set<string>();
       });
-    const conversations = [...convMap.entries()].map(([conversationId, msgs]) => {
-      const firstUserMsg = msgs.find((m) => m.role === "user");
-      const lastMsg = msgs[msgs.length - 1]!;
-      const row = meta.get(conversationId);
-      return {
-        conversationId,
-        title: row?.title ?? (firstUserMsg?.content ?? "").slice(0, 80),
-        titleGenerated: Boolean(row?.title),
-        pinned: row?.pinned ?? false,
-        messageCount: msgs.length,
-        lastMessageAt: lastMsg.createdAt,
-      };
-    }).sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime());
-
-    res.json({ success: true, data: conversations });
+      const selected = selectPage(entries, { isPinned: (entry) => pinned.has(entryMetaKey(entry)), limit, cursor });
+      page = { items: await resolve(selected.items), nextCursor: selected.nextCursor };
+    }
+    res.json({ success: true, data: page.items, nextCursor: page.nextCursor, agents: agentFacets(all) });
   } catch (err) {
     log.error("[agent-chat] conversations error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
+}
+
+// GET /agent-chat/conversations — every agent's chats, newest first, in pages.
+// Query: agentSlug (filter), q (title search), limit (default 50), cursor.
+router.get("/conversations", async (req: Request, res: Response) => {
+  await sendConversationList(req, res, { agentSlug: singleQueryParam(req, "agentSlug") ?? null, paged: true });
+});
+
+// GET /agent-chat/:slug/conversations — one agent's whole list, unpaged, kept
+// for clients that predate the route above.
+router.get("/:slug/conversations", async (req: Request<{ slug: string }>, res: Response) => {
+  await sendConversationList(req, res, { agentSlug: req.params.slug, paged: false });
 });
 
 /**
@@ -4016,6 +4264,7 @@ async function runAgentChatViaSse(
               agentRunRepository.appendToolInvocation(sessionId, toolInvocation as Record<string, unknown>).catch(() => {});
               // Live tap: fan out to /live viewers (other tabs / shared link).
               if (CONFIG.liveToolCallsEnabled && liveUserId) {
+                pushToolPart(sessionId, conversationId, slug, assistantMessageId, toolInvocation as Record<string, unknown>, liveUserId);
                 publishLiveEvent(conversationId, { type: "invocation", conversationId, agentSlug: slug, userId: liveUserId, toolInvocation, ts: Date.now() });
               }
             },
@@ -4033,18 +4282,18 @@ async function runAgentChatViaSse(
                 }
               }
             },
-            onReasoning: (sid, delta) => {
+            onReasoning: (sid, delta, partId) => {
               if (!delta) return;
-              pendingStreams.get(callbackId)?.sendEvent("reasoning", { delta });
+              pendingStreams.get(callbackId)?.sendEvent("reasoning", { delta, ...(partId ? { partId } : {}) });
               // Live tap for VIEWERS (reloaded tabs / Spaces): coalesce + publish
               // reasoning to the bus + debounce-persist partial content, so a
               // viewer streams the answer instead of seeing it appear on `done`.
-              if (CONFIG.liveToolCallsEnabled && sid && liveUserId) pushDelta(sid, conversationId, slug, assistantMessageId, undefined, delta, liveUserId);
+              if (CONFIG.liveToolCallsEnabled && sid && liveUserId) pushDelta(sid, conversationId, slug, assistantMessageId, undefined, delta, liveUserId, partId);
             },
-            onTextDelta: (sid, delta) => {
+            onTextDelta: (sid, delta, partId) => {
               if (!delta) return;
-              pendingStreams.get(callbackId)?.sendEvent("text", { delta });
-              if (CONFIG.liveToolCallsEnabled && sid && liveUserId) pushDelta(sid, conversationId, slug, assistantMessageId, delta, undefined, liveUserId);
+              pendingStreams.get(callbackId)?.sendEvent("text", { delta, ...(partId ? { partId } : {}) });
+              if (CONFIG.liveToolCallsEnabled && sid && liveUserId) pushDelta(sid, conversationId, slug, assistantMessageId, delta, undefined, liveUserId, partId);
             },
             onAttachment: (_sid, attachment) => {
               pendingStreams.get(callbackId)?.sendEvent("attachment", { attachment });

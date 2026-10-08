@@ -3007,8 +3007,23 @@ export interface ChatMsg {
   reasoning?: string | null;
   /** Tree parent for branching conversations. Null/undefined = root child. */
   parentId?: string | null;
+  /** Agent this turn was sent to / answered by. A chat can switch agents
+   *  mid-conversation, so identity is per message, not per conversation. */
+  agentSlug?: string;
   attachments?: ChatAttachmentMeta[];
   contextItems?: AttachedContextRef[];
+}
+
+/** `conversation` = every agent's turns in a direct chat, for a window that
+ *  lets the user switch agents mid-conversation. Omitted = one agent's turns. */
+export type ChatReadScope = "conversation";
+
+function chatReadQuery(allRuns: boolean, scope?: ChatReadScope): string {
+  const params = new URLSearchParams();
+  if (allRuns) params.set("allRuns", "1");
+  if (scope) params.set("scope", scope);
+  const qs = params.toString();
+  return qs ? `?${qs}` : "";
 }
 
 export type ContextType = "channel" | "ticket" | "canvas" | "call" | "app" | "repository";
@@ -3565,13 +3580,14 @@ export async function pollChatMessages(
   // the normal chat window shows only the caller's own turns — the backend ACL
   // gates on ?allRuns=1 AND admin, so passing this from a non-admin is a no-op.
   allRuns = false,
+  scope?: ChatReadScope,
 ): Promise<ChatHistory> {
   const data = await request<{
     success: boolean;
     data: ChatMsg[];
     invocationsByMsgId?: Record<string, ToolInvocation[]>;
   }>(
-    `${AUTH_API_URL}/api/v1/agent-chat/${slug}/chat/${conversationId}/messages${allRuns ? "?allRuns=1" : ""}`,
+    `${AUTH_API_URL}/api/v1/agent-chat/${slug}/chat/${conversationId}/messages${chatReadQuery(allRuns, scope)}`,
   );
   const invocationsByMsgId = new Map<string, ToolInvocation[]>();
   if (data.invocationsByMsgId) {
@@ -3628,12 +3644,13 @@ export function subscribeLiveConversation(
   callbacks: LiveStreamCallbacks,
   // OPT-IN cross-user live stream (admin "All Runs" only) — mirrors pollChatMessages.
   allRuns = false,
+  scope?: ChatReadScope,
 ): () => void {
   const controller = new AbortController();
   void (async () => {
     let res: Response;
     try {
-      res = await fetch(`${AUTH_API_URL}/api/v1/agent-chat/${slug}/chat/${conversationId}/live${allRuns ? "?allRuns=1" : ""}`, {
+      res = await fetch(`${AUTH_API_URL}/api/v1/agent-chat/${slug}/chat/${conversationId}/live${chatReadQuery(allRuns, scope)}`, {
         credentials: "include",
         headers: { "x-user-id": userId, Accept: "text/event-stream" },
         signal: controller.signal,
@@ -3751,18 +3768,41 @@ export async function fetchConversationDebugArtifacts(
   return data.data;
 }
 
+/** One row of the chat history: a chat the user switched agents in is one row. */
 export interface ConversationSummary {
+  /** Unique per row (a Spaces thread is listed once per agent). */
+  rowId: string;
   conversationId: string;
   title: string;
   messageCount: number;
   lastMessageAt: string;
+  /** The agent to open and continue the chat with — the most recent one. */
+  agentSlug: string;
+  /** Every agent that answered, in first-use order. */
+  agentSlugs: string[];
 }
 
-export async function listChatConversations(slug: string, userId: string): Promise<ConversationSummary[]> {
-  const data = await request<{ success: boolean; data: ConversationSummary[] }>(
-    `${AUTH_API_URL}/api/v1/agent-chat/${slug}/conversations?userId=${userId}`,
+export interface ConversationPage {
+  conversations: ConversationSummary[];
+  /** Pass back as `cursor` for the next page; null on the last one. */
+  nextCursor: string | null;
+}
+
+/** One page of the user's chat history across every agent — newest first, 50
+ *  rows a page with every pinned chat on the first; the same endpoint the
+ *  Spaces AI screen and sidebar use. `agentSlug` keeps only that agent's chats. */
+export async function listChatConversations(
+  userId: string,
+  opts: { agentSlug?: string | null; cursor?: string | null; limit?: number } = {},
+): Promise<ConversationPage> {
+  const query = new URLSearchParams({ userId });
+  if (opts.agentSlug) query.set("agentSlug", opts.agentSlug);
+  if (opts.cursor) query.set("cursor", opts.cursor);
+  if (opts.limit) query.set("limit", String(opts.limit));
+  const data = await request<{ success: boolean; data: ConversationSummary[]; nextCursor?: string | null }>(
+    `${AUTH_API_URL}/api/v1/agent-chat/conversations?${query.toString()}`,
   );
-  return data.data;
+  return { conversations: data.data, nextCursor: data.nextCursor ?? null };
 }
 // ── Knowledge Base (spaces collections) ──────────────────────────────
 

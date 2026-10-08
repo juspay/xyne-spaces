@@ -16,6 +16,8 @@ import { awaitTurnHandoff, isTurnControlCommand } from "../lib/run-turn-handoff.
 import { dispatchLocalHarnessRun, localHarnessProviderLabel, pinnedModelForProvider, resolveLocalHarnessTarget, resolveLocalHarnessTargetForProvider, resolveLocalSandbox } from "../lib/local-harness.js";
 import { isLocalHarnessProvider, IMMEDIATE_TASK_COMMAND_RE, parseLocalSandboxCommand } from "xyne-claw-shared";
 import { planServerContinuation } from "../lib/local-harness-continuation.js";
+import { buildAgentHandoff, conversationPath, handoffMessagesFrom } from "../lib/multi-agent-chat.js";
+import { isDirectChatConversation } from "../lib/conversation-kind.js";
 import { applyAiScreenCommand } from "../lib/ai-screen-commands.js";
 import { parseSlashCommand } from "../lib/parseSlashCommand.js";
 import { localHarnessSessionRepository } from "../repositories/localHarnessSessionRepository.js";
@@ -49,7 +51,8 @@ import {
   withAiScreenPresentationTools,
   withAiScreenPresentationInstructions,
 } from "../lib/ai-screen-presentation-tools.js";
-import { pushDelta, endDeltaCoalescer } from "../lib/live-delta-coalescer.js";
+import { pushDelta, pushToolPart, endDeltaCoalescer } from "../lib/live-delta-coalescer.js";
+import { finalTurnFields, type AssistantPart } from "../lib/chat-run-record.js";
 import { redisService } from "../redis.js";
 import {
   branchPiConversationId,
@@ -86,6 +89,8 @@ interface PendingStream {
     followUpSuggestions?: string[] | undefined;
     followUpsPending?: boolean | undefined;
     clawRunOrigin?: Record<string, unknown> | undefined;
+    /** The turn as ordered thinking / text / tool parts (null: render from content). */
+    parts?: AssistantPart[] | null | undefined;
   }) => void;
   reject: (error: Error) => void;
   setClosed: () => void;
@@ -198,6 +203,7 @@ type StreamBusEvent =
       toolInvocations?: unknown;
       followUpSuggestions?: string[];
       followUpsPending?: boolean;
+      parts?: AssistantPart[] | null;
     }
   | { kind: "follow_ups"; streamId: string; suggestions: string[] };
 
@@ -244,8 +250,14 @@ function ensureStreamEventsSubscriber(): void {
       ...(msg.toolInvocations !== undefined ? { toolInvocations: msg.toolInvocations } : {}),
       ...(msg.followUpSuggestions?.length ? { followUpSuggestions: msg.followUpSuggestions } : {}),
       ...(msg.followUpsPending === true ? { followUpsPending: true } : {}),
+      ...(msg.parts ? { parts: msg.parts } : {}),
     });
   });
+}
+
+/** The `partId` a claw progress body carries, for the client's step timeline. */
+function partIdOf(body: Record<string, unknown>): { partId?: string } {
+  return typeof body.partId === "string" && body.partId ? { partId: body.partId } : {};
 }
 
 function publishStreamEvent(event: StreamBusEvent): void {
@@ -360,8 +372,13 @@ export async function persistRunStreamResult(args: {
    *  linkage, and the SSE `done` payload's stable id. */
   assistantMessageId?: string;
   runProvider?: string;
+  /** The turn's ordered parts and/or whole reasoning (lib/chat-run-record finalTurnFields). */
+  turn?: { parts: AssistantPart[] | null; reasoning?: string };
 }): Promise<{ messageId: string; persistedAttachments: PersistedAttachment[] } | null> {
-  const runProviderField = args.runProvider ? { runProvider: args.runProvider } : {};
+  const runProviderField = {
+    ...(args.runProvider ? { runProvider: args.runProvider } : {}),
+    ...(args.turn ? { parts: args.turn.parts, ...(args.turn.reasoning ? { reasoning: args.turn.reasoning } : {}) } : {}),
+  };
   // A run that produced no text did not succeed, whatever it reported. Saying
   // "completed" with an empty body leaves the reader staring at a blank turn
   // with nothing to act on — the budget rejections read exactly like that.
@@ -900,6 +917,12 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
           parentId: (m as { parentId?: string | null }).parentId ?? null,
           createdAt: m.createdAt,
         }));
+    // Multi-agent direct chat: the tip of the selected path this turn answers
+    // after (hand-off note), and the agent whose session a regenerate/edit
+    // would clone. A turn owned by ANOTHER agent has no session of this agent
+    // to clone — that branch starts fresh and the note carries the path.
+    let handoffLeafId: string | null = null;
+    let cloneOwnerSlug: string | null = null;
 
     let assistantParentId: string | null = null;
     let createdUserMessageId: string | undefined;
@@ -948,6 +971,8 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         convId,
       );
       cloneBranchMode = "beforeLastUser";
+      handoffLeafId = followUpHistoryLeafId;
+      cloneOwnerSlug = existingMessageRows.find((m) => m.id === (existingAssistantId ?? resolvedParentUserMessageId))?.agentSlug ?? null;
     } else if (isEditUserMessageFlag && editedUserMessageIdStr) {
       const requestedParent = parentAssistantMessageIdStr
         ? existingMessages.find((m) => m.id === parentAssistantMessageIdStr && m.role === "assistant")
@@ -964,6 +989,8 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       );
       cloneBranchMode = "beforeLastUser";
       followUpHistoryLeafId = requestedParent?.id ?? null;
+      handoffLeafId = requestedParent?.id ?? null;
+      cloneOwnerSlug = existingMessageRows.find((m) => m.id === editedUserMessageIdStr)?.agentSlug ?? null;
 
       if (convId && userId) {
         try {
@@ -1000,6 +1027,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
             (message) => message.role === "assistant" && message.agentSlug === slug,
           )?.id ?? null;
       piConversationId = resolvePiConversationIdForPath(existingMessages, userParentId, convId);
+      handoffLeafId = userParentId;
 
       if (convId && userId) {
         try {
@@ -1085,7 +1113,12 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     }
 
     // Branched PI session clone (regenerate / edit-user).
-    if (cloneSourcePiConversationId && assistantMsg) {
+    if (cloneSourcePiConversationId && assistantMsg && cloneOwnerSlug && cloneOwnerSlug !== slug) {
+      piConversationId = branchPiConversationId(convId, assistantMsg.id);
+      log.info(
+        `[run-stream] branch turn owned by ${cloneOwnerSlug}, answered by ${slug} — fresh branch session conv=${convId}`,
+      );
+    } else if (cloneSourcePiConversationId && assistantMsg) {
       piConversationId = branchPiConversationId(convId, assistantMsg.id);
       const cloneSourceSessionKey = piSessionStoreKey(cloneSourcePiConversationId, slug);
       const cloneTargetSessionKey = piSessionStoreKey(piConversationId, slug);
@@ -1326,6 +1359,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       followUpSuggestions?: string[] | undefined;
       followUpsPending?: boolean | undefined;
       clawRunOrigin?: Record<string, unknown> | undefined;
+      parts?: AssistantPart[] | null | undefined;
     }>((resolve, reject) => {
       let closed = false;
       pendingStreams.set(streamId, {
@@ -1475,7 +1509,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     let localFolderItem: LocalFolderContextItem | null = splitContext.localFolders[0] ?? null;
     if (!localFolderItem && convId) {
       const sticky = await chatMessageRepository
-        .latestLocalFolderContext(convId, slug)
+        .latestLocalFolderContext(convId, isDirectChatConversation(convId) ? null : slug)
         .catch(() => null);
       const stickySplit = splitLocalFolderContext(sticky ? [sticky] : []);
       localFolderItem = stickySplit.localFolders[0] ?? null;
@@ -1538,10 +1572,27 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       ...(generateFollowUpSuggestions === true ? { generateFollowUpSuggestions: true } : {}),
       __persistedByCaller: true,
       fastMode: fastModeEnabled,
+      // /compact shrinks the session before answering, not just summarises it.
+      ...(compactRequested ? { compactBeforeRun: true } : {}),
     };
 
+    // Multi-agent direct chat: hand this agent the turns its own session has
+    // not seen. Null whenever the path holds a single agent — those turns run
+    // exactly as before. When present it already covers the local-harness
+    // turns the provider catch-up below would add, so that one is skipped.
+    const handoffMessages = isDirectChatConversation(convId) ? handoffMessagesFrom(existingMessageRows) : [];
+    const agentHandoff = buildAgentHandoff({
+      path: conversationPath(handoffMessages, handoffLeafId),
+      agentSlug: slug,
+      isOwnSessionTurn: (m) => !isLocalHarnessProvider(m.runProvider),
+    });
+    if (agentHandoff) {
+      runRequestBody["agentHandoff"] = agentHandoff;
+      log.info(`[run-stream] multi-agent hand-off note conv=${convId} agent=${slug}`);
+    }
+
     try {
-      const serverCatchUp = await planServerContinuation({
+      const serverCatchUp = agentHandoff ? null : await planServerContinuation({
         conversationId: convId,
         agentSlug: slug,
         excludeMessageIds: [createdUserMessageId, assistantMsg?.id].filter((id): id is string => Boolean(id)),
@@ -1750,6 +1801,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         continuation: {
           agentSlug: slug,
           excludeMessageIds: [createdUserMessageId, assistantMsg?.id].filter((id): id is string => Boolean(id)),
+          ...(agentHandoff ? { multiAgent: { messages: handoffMessages, leafId: handoffLeafId } } : {}),
         },
       });
 
@@ -1830,6 +1882,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
           ...(result.attachments?.length ? { attachments: result.attachments } : {}),
           ...(result.followUpSuggestions?.length ? { followUpSuggestions: result.followUpSuggestions } : {}),
           ...(result.followUpsPending === true ? { followUpsPending: true } : {}),
+          ...(result.parts ? { parts: result.parts } : {}),
         })}\n\n`);
         if (result.followUpsPending === true) await holdForLateFollowUps(res, streamId, assistantMsg?.id);
         if (!res.writableEnded) res.end();
@@ -1913,6 +1966,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         ...(result.attachments?.length ? { attachments: result.attachments } : {}),
         ...(result.followUpSuggestions?.length ? { followUpSuggestions: result.followUpSuggestions } : {}),
         ...(result.followUpsPending === true ? { followUpsPending: true } : {}),
+        ...(result.parts ? { parts: result.parts } : {}),
       })}\n\n`);
       if (result.followUpsPending === true) await holdForLateFollowUps(res, streamId, assistantMsg?.id);
       if (!res.writableEnded) res.end();
@@ -2046,9 +2100,9 @@ internalRouter.post("/:streamId/progress", (req: Request<{ streamId: string }>, 
         agentRunRepository.appendToolInvocation(sessionId, inv).catch(() => {});
       }
     } else if (body.reasoningDelta !== undefined) {
-      events.push({ event: "reasoning", data: { delta: body.reasoningDelta } });
+      events.push({ event: "reasoning", data: { delta: body.reasoningDelta, ...partIdOf(body) } });
     } else if (body.textDelta !== undefined) {
-      events.push({ event: "delta", data: { content: body.textDelta } });
+      events.push({ event: "delta", data: { content: body.textDelta, ...partIdOf(body) } });
     } else if (Array.isArray(body.todos)) {
       events.push({ event: "plan", data: { todos: body.todos, ...(typeof body.planTitle === "string" ? { title: body.planTitle } : {}) } });
     } else if (body.kind === "ui-widget" && body.widget) {
@@ -2329,6 +2383,17 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
     // UPDATEs that row instead of creating a new one — keeps the assistant id
     // stable so the SSE `done` payload, AgentRun.chatMessageId, and any
     // attachments all point at the same row.
+    // The turn's ordered parts (or, without them, its whole reasoning) — the
+    // same value is stored and sent on `done`.
+    const turn = await finalTurnFields({
+      status,
+      modelAnswer: rawResult,
+      storedAnswer: content,
+      callbackParts: body["parts"],
+      callbackReasoning: body["reasoning"],
+      assistantMessageId,
+    });
+
     if (meta?.conversationId && meta.userId) {
       try {
         const persistedResult = await persistRunStreamResult({
@@ -2343,6 +2408,7 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
           ...(assistantMessageId ? { assistantMessageId } : {}),
           ...(pendingActions?.length ? { pendingActions } : {}),
           ...(provider ? { runProvider: provider } : {}),
+          turn,
         });
         if (persistedResult?.persistedAttachments.length) {
           void recordDeliveredArtifacts({
@@ -2599,6 +2665,7 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
         followUpSuggestions,
         ...(followUpsPending ? { followUpsPending: true } : {}),
         ...(callbackRunOrigin ? { clawRunOrigin: callbackRunOrigin } : {}),
+        parts: turn.parts,
       });
     } else if (meta?.conversationId) {
       // Stream lives on another pod (the multi-replica case that returns
@@ -2618,6 +2685,7 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
         ...(toolInvocations !== undefined ? { toolInvocations } : {}),
         ...(followUpSuggestions?.length ? { followUpSuggestions } : {}),
         ...(followUpsPending ? { followUpsPending: true } : {}),
+        ...(turn.parts ? { parts: turn.parts } : {}),
       });
     } else {
       log.warn(`[run-stream] callback streamId=${streamId} resolved without local stream or conversationId — no SSE done frame will be sent`);
@@ -2784,19 +2852,21 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
         // shared live-conversation-bus that GET /agent-chat/:slug/chat/:convId/live
         // reads (same convId + slug as this run — no separate viewer bus needed).
         if (CONFIG.liveToolCallsEnabled && !internalFollowUp) {
+          // The call's place in the turn's timeline, then the call itself.
+          pushToolPart(sessionId, convId, slug, assistantMessageId, toolInvocation as Record<string, unknown>, userId);
           publishLiveEvent(convId, { type: "invocation", conversationId: convId, agentSlug: slug, userId, toolInvocation, ts: Date.now() });
         }
       },
-      onReasoning: (sid, delta) => {
+      onReasoning: (sid, delta, partId) => {
         if (!delta) return;
-        stream.sendEvent("reasoning", { delta });
+        stream.sendEvent("reasoning", { delta, ...(partId ? { partId } : {}) });
         // Coalesce reasoning → live bus + partial persist (viewers stream it).
-        if (CONFIG.liveToolCallsEnabled && sid) pushDelta(sid, convId, slug, assistantMessageId, undefined, delta, userId);
+        if (CONFIG.liveToolCallsEnabled && sid) pushDelta(sid, convId, slug, assistantMessageId, undefined, delta, userId, partId);
       },
-      onTextDelta: (sid, delta) => {
+      onTextDelta: (sid, delta, partId) => {
         if (!delta) return;
-        stream.sendEvent("delta", { content: delta });
-        if (CONFIG.liveToolCallsEnabled && sid) pushDelta(sid, convId, slug, assistantMessageId, delta, undefined, userId);
+        stream.sendEvent("delta", { content: delta, ...(partId ? { partId } : {}) });
+        if (CONFIG.liveToolCallsEnabled && sid) pushDelta(sid, convId, slug, assistantMessageId, delta, undefined, userId, partId);
       },
       onAttachment: (_sid, attachment) => {
         stream.sendEvent("attachment", attachment);

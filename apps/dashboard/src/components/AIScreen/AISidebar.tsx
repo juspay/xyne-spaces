@@ -16,7 +16,6 @@ import {
   PinSlant,
   LayoutGridStackDown,
   Notebook,
-  PencilEditBox,
   Piechart01,
   Settings01,
   ThreeDotsMenuVertical,
@@ -46,11 +45,17 @@ import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { Popover } from '../ui/Popover';
 import { Dialog } from '../ui/Dialog/Dialog';
 import { Button } from '../ui/Button';
-import Tooltip from '../ui/Tooltip';
 import AppNavigator from '../AppNavigator/AppNavigator';
 import type { ConversationHistory as ConversationHistoryType } from '../Chat/XyneAISidebar/utils/XyneAITypes';
 import { cn } from '../../utils/classNames';
 import { UnpinIcon } from '../../assets/icons/UnpinIcon';
+import {
+  ConversationAgentFilter,
+  ConversationListEnd,
+  ConversationRowContent,
+  useAgentDirectory,
+} from './ConversationAgents';
+import { agentIdentity, groupByRecency } from '../Chat/XyneAISidebar/utils/XyneAIUtils';
 
 const NAV_ITEM_CLASS =
   'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent';
@@ -61,7 +66,7 @@ const NAV_ITEM_ACTIVE_CLASS =
   'text-sidebar-accent-foreground bg-sidebar-accent border-sidebar-border';
 
 const LIST_ROW_CLASS =
-  'relative flex items-center h-9 mt-px group rounded-[10px] px-3 border border-transparent transition-colors';
+  'relative flex items-center min-h-[46px] py-1.5 mt-px group rounded-[10px] px-2.5 border border-transparent transition-colors';
 
 const LIST_ROW_ACTIVE_CLASS =
   'text-sidebar-accent-foreground font-medium bg-sidebar-accent border-sidebar-border';
@@ -209,10 +214,10 @@ function SessionTitle({ title }: { title: string }): ReactElement {
 interface SessionHistoryProps {
   sessions: ConversationHistoryType[];
   activeSessionId?: string | undefined;
-  onSelect: (sessionId: string) => void;
-  onDelete: (sessionId: string) => Promise<void>;
-  onRename: (sessionId: string, title: string) => Promise<void>;
-  onTogglePin: (sessionId: string, pinned: boolean) => Promise<void>;
+  onSelect: (session: ConversationHistoryType) => void;
+  onDelete: (session: ConversationHistoryType) => Promise<void>;
+  onRename: (session: ConversationHistoryType, title: string) => Promise<void>;
+  onTogglePin: (session: ConversationHistoryType, pinned: boolean) => Promise<void>;
   showEmpty?: boolean;
 }
 
@@ -231,15 +236,14 @@ function SessionHistory({
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
 
-  const commitRename = (sessionId: string): void => {
+  const commitRename = (session: ConversationHistoryType): void => {
     const next = renameDraft.trim();
     setRenamingId(null);
-    const current = sessions.find(s => s.sessionId === sessionId)?.title ?? '';
-    if (!next || next === current) return;
-    void onRename(sessionId, next);
+    if (!next || next === session.title) return;
+    void onRename(session, next);
   };
 
-  const pendingSession = sessions.find(s => s.sessionId === pendingDeleteId) ?? null;
+  const pendingSession = sessions.find(s => s.id === pendingDeleteId) ?? null;
 
   /** Ignored while the request is in flight so the dialog can't vanish mid-delete. */
   const closeDeleteDialog = (): void => {
@@ -248,10 +252,10 @@ function SessionHistory({
   };
 
   const confirmDelete = async (): Promise<void> => {
-    if (!pendingDeleteId) return;
+    if (!pendingSession) return;
     setIsDeleting(true);
     try {
-      await onDelete(pendingDeleteId);
+      await onDelete(pendingSession);
       setPendingDeleteId(null);
     } finally {
       setIsDeleting(false);
@@ -283,25 +287,25 @@ function SessionHistory({
           const isActive = session.sessionId === activeSessionId;
 
           return (
-            <li key={session.sessionId}>
+            <li key={session.id}>
               <div
                 className={cn(
                   LIST_ROW_CLASS,
                   isActive ? LIST_ROW_ACTIVE_CLASS : LIST_ROW_IDLE_CLASS,
-                  openDropdownId === session.sessionId && 'sidebar-title-static',
+                  openDropdownId === session.id && 'sidebar-title-static',
                 )}
               >
-                {renamingId === session.sessionId ? (
+                {renamingId === session.id ? (
                   <input
                     autoFocus
                     maxLength={MANUAL_CHAT_TITLE_MAX_CHARS}
                     value={renameDraft}
                     onChange={e => setRenameDraft(e.target.value)}
-                    onBlur={() => commitRename(session.sessionId)}
+                    onBlur={() => commitRename(session)}
                     onKeyDown={e => {
                       if (e.key === 'Enter') {
                         e.preventDefault();
-                        commitRename(session.sessionId);
+                        commitRename(session);
                       }
                       if (e.key === 'Escape') {
                         e.preventDefault();
@@ -316,33 +320,37 @@ function SessionHistory({
                 ) : (
                   <button
                     type='button'
-                    onClick={() => onSelect(session.sessionId)}
+                    onClick={() => onSelect(session)}
                     className={cn(
-                      'flex min-w-0 flex-1 items-center gap-1.5 self-stretch pr-1 text-left text-sm transition-[padding] group-hover:pr-14',
-                      openDropdownId === session.sessionId && 'pr-14',
+                      'flex min-w-0 flex-1 items-center self-stretch pr-1 text-left text-sm transition-[padding] group-hover:pr-14',
+                      openDropdownId === session.id && 'pr-14',
                     )}
                     data-track-category='XyneAI'
                     data-track-name='SELECT_SESSION'
                   >
-                    <SessionTitle title={session.title} />
+                    <ConversationRowContent
+                      conversation={session}
+                      title={<SessionTitle title={session.title} />}
+                      ringClassName={isActive ? 'ring-sidebar-accent' : 'ring-sidebar'}
+                    />
                   </button>
                 )}
                 <span
                   className={cn(
                     'pointer-events-none absolute right-2 flex items-center gap-1 group-hover:pointer-events-auto group-focus-within:pointer-events-auto',
-                    openDropdownId === session.sessionId && 'pointer-events-auto',
-                    renamingId === session.sessionId && 'invisible pointer-events-none',
+                    openDropdownId === session.id && 'pointer-events-auto',
+                    renamingId === session.id && 'invisible pointer-events-none',
                   )}
                 >
                   <button
                     type='button'
                     onClick={e => {
                       e.stopPropagation();
-                      void onTogglePin(session.sessionId, !session.isStarred);
+                      void onTogglePin(session, !session.isStarred);
                     }}
                     className={cn(
                       'flex shrink-0 items-center justify-center rounded-md p-1 opacity-0 transition-opacity hover:bg-sidebar-accent focus-visible:opacity-100 group-hover:opacity-100',
-                      openDropdownId === session.sessionId && 'opacity-100',
+                      openDropdownId === session.id && 'opacity-100',
                     )}
                     aria-label={session.isStarred ? 'Unpin chat' : 'Pin chat'}
                     title={session.isStarred ? 'Unpin' : 'Pin'}
@@ -361,10 +369,8 @@ function SessionHistory({
                     )}
                   </button>
                   <Popover
-                    open={openDropdownId === session.sessionId}
-                    onOpenChange={(open: boolean) =>
-                      setOpenDropdownId(open ? session.sessionId : null)
-                    }
+                    open={openDropdownId === session.id}
+                    onOpenChange={(open: boolean) => setOpenDropdownId(open ? session.id : null)}
                     side='right'
                     align='start'
                     sideOffset={4}
@@ -373,7 +379,7 @@ function SessionHistory({
                         type='button'
                         className={cn(
                           'flex shrink-0 items-center justify-center rounded-md p-1 opacity-0 transition-opacity hover:bg-sidebar-accent focus-visible:opacity-100 group-hover:opacity-100',
-                          openDropdownId === session.sessionId && 'opacity-100',
+                          openDropdownId === session.id && 'opacity-100',
                         )}
                         aria-label='Chat options'
                         data-track-category='XyneAI'
@@ -390,7 +396,7 @@ function SessionHistory({
                         e.stopPropagation();
                         setOpenDropdownId(null);
                         setRenameDraft(session.title);
-                        setRenamingId(session.sessionId);
+                        setRenamingId(session.id);
                       }}
                       className='flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-accent'
                       data-track-category='XyneAI'
@@ -408,7 +414,7 @@ function SessionHistory({
                       onClick={e => {
                         e.stopPropagation();
                         setOpenDropdownId(null);
-                        void onTogglePin(session.sessionId, !session.isStarred);
+                        void onTogglePin(session, !session.isStarred);
                       }}
                       className='flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-accent'
                       data-track-category='XyneAI'
@@ -431,7 +437,7 @@ function SessionHistory({
                       onClick={e => {
                         e.stopPropagation();
                         setOpenDropdownId(null);
-                        setPendingDeleteId(session.sessionId);
+                        setPendingDeleteId(session.id);
                       }}
                       className='flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm text-destructive hover:bg-accent'
                       data-track-category='XyneAI'
@@ -547,44 +553,76 @@ export function AISidebar({
   );
   const isNewChatActive = !routedActiveItem && !activeSessionId;
 
-  const { selectedAgentSlug } = useSelectedAgent();
-  const effectiveAgentSlug = selectedAgentSlug;
-  const { data: sessions = [] } = useV2SessionsList(effectiveAgentSlug, true);
+  // One history across every agent, newest first, 50 at a time; the filter
+  // narrows it to one agent on the server, so it reaches unloaded chats too.
+  const { setSelectedAgentSlug } = useSelectedAgent();
+  const [agentFilter, setAgentFilter] = useState<string | null>(null);
+  const {
+    conversations: sessions,
+    agents,
+    hasMore,
+    isLoadingMore,
+    loadMore,
+  } = useV2SessionsList({ agentSlug: agentFilter });
+  const directory = useAgentDirectory();
   const pinnedSessions = sessions.filter(session => session.isStarred);
-  const recentSessions = sessions.filter(session => !session.isStarred);
+  const recentGroups = groupByRecency(sessions.filter(session => !session.isStarred));
   const { invalidateSessions: invalidateV2Sessions } = useV2SessionInvalidator();
   const { patchSession } = useV2SessionPatcher();
 
-  const handleDeleteSession = async (sessionId: string): Promise<void> => {
+  // Every action names the row's own agent: a Spaces thread is listed once per
+  // agent and its rename/pin/delete are per agent; for a direct chat the server
+  // resolves the conversation whichever agent is named.
+  const rowAgentSlug = (session: ConversationHistoryType): string | null =>
+    session.agentSlug ?? null;
+
+  const handleSelectSession = (session: ConversationHistoryType): void => {
+    // Continue with the agent this chat was last with, so the next message
+    // doesn't silently switch it to whichever agent was picked before.
+    if (session.agentSlug) {
+      setSelectedAgentSlug(session.agentSlug === 'ask-ai' ? null : session.agentSlug);
+    }
+    onSelectSession(session.sessionId);
+  };
+
+  const handleDeleteSession = async (session: ConversationHistoryType): Promise<void> => {
     try {
-      await deleteV2Conversation(sessionId, effectiveAgentSlug);
+      await deleteV2Conversation(session.sessionId, rowAgentSlug(session));
       // If the user just deleted the conversation they're viewing, bounce
       // back to the new-chat landing so the thread pane isn't stuck on a
       // stale session id.
-      if (sessionId === activeSessionId) {
+      if (session.sessionId === activeSessionId) {
         onCreateChat();
       }
     } finally {
-      invalidateV2Sessions(effectiveAgentSlug);
+      invalidateV2Sessions();
     }
   };
 
-  const handleRenameSession = async (sessionId: string, title: string): Promise<void> => {
-    const rollback = patchSession(effectiveAgentSlug, sessionId, { title, titleGenerated: true });
+  const handleRenameSession = async (
+    session: ConversationHistoryType,
+    title: string,
+  ): Promise<void> => {
+    const agentSlug = rowAgentSlug(session);
+    const rollback = patchSession(session.id, { title, titleGenerated: true });
     try {
-      await updateV2Conversation(sessionId, { title }, effectiveAgentSlug);
-      invalidateV2Sessions(effectiveAgentSlug);
+      await updateV2Conversation(session.sessionId, { title }, agentSlug);
+      invalidateV2Sessions();
     } catch {
       rollback();
       toast.error('Could not rename chat');
     }
   };
 
-  const handleTogglePinSession = async (sessionId: string, pinned: boolean): Promise<void> => {
-    const rollback = patchSession(effectiveAgentSlug, sessionId, { isStarred: pinned });
+  const handleTogglePinSession = async (
+    session: ConversationHistoryType,
+    pinned: boolean,
+  ): Promise<void> => {
+    const agentSlug = rowAgentSlug(session);
+    const rollback = patchSession(session.id, { isStarred: pinned });
     try {
-      await updateV2Conversation(sessionId, { pinned }, effectiveAgentSlug);
-      invalidateV2Sessions(effectiveAgentSlug);
+      await updateV2Conversation(session.sessionId, { pinned }, agentSlug);
+      invalidateV2Sessions();
     } catch {
       rollback();
       toast.error(pinned ? 'Could not pin chat' : 'Could not unpin chat');
@@ -661,7 +699,7 @@ export function AISidebar({
                   <SessionHistory
                     sessions={pinnedSessions}
                     activeSessionId={activeSessionId}
-                    onSelect={onSelectSession}
+                    onSelect={handleSelectSession}
                     onDelete={handleDeleteSession}
                     onRename={handleRenameSession}
                     onTogglePin={handleTogglePinSession}
@@ -690,34 +728,62 @@ export function AISidebar({
                   aria-hidden
                 />
               </button>
-              <Tooltip content='New chat' side='top' sideOffset={0} delayDuration={500}>
-                <button
-                  type='button'
-                  onClick={onCreateChat}
-                  aria-label='New chat'
-                  className='group/child mr-0.5 rounded-md p-1 text-sidebar-foreground opacity-100 transition-opacity duration-300 ease-in-out hover:bg-sidebar-accent hover:text-sidebar-accent-foreground group-hover:opacity-100 md:opacity-0'
-                  data-track-category='XyneAI'
-                  data-track-name='NEW_CHAT_FROM_RECENTS'
-                >
-                  <PencilEditBox
-                    size={12}
-                    className='text-sidebar-foreground transition-colors group-hover/child:text-sidebar-primary'
-                    aria-hidden
-                  />
-                </button>
-              </Tooltip>
+              <ConversationAgentFilter
+                options={agents}
+                value={agentFilter}
+                onChange={setAgentFilter}
+              />
             </div>
 
             {recentsOpen && (
               <div className='min-h-0 flex-1 overflow-y-auto no-scrollbar'>
-                <SessionHistory
-                  sessions={recentSessions}
-                  activeSessionId={activeSessionId}
-                  onSelect={onSelectSession}
-                  onDelete={handleDeleteSession}
-                  onRename={handleRenameSession}
-                  onTogglePin={handleTogglePinSession}
-                  showEmpty={sessions.length === 0}
+                {agentFilter && sessions.length === 0 ? (
+                  <div className='px-3 pt-6 text-center' data-testid='agent-filter-empty'>
+                    <p className='text-sm text-sidebar-accent-foreground'>
+                      No chats with {agentIdentity(directory, agentFilter).name}
+                    </p>
+                    <button
+                      type='button'
+                      onClick={() => setAgentFilter(null)}
+                      data-track-category='XyneAI'
+                      data-track-name='CLEAR_AGENT_FILTER_EMPTY'
+                      className='mt-1 text-xs font-medium text-sidebar-primary hover:underline'
+                    >
+                      Show all agents
+                    </button>
+                  </div>
+                ) : recentGroups.length === 0 ? (
+                  <SessionHistory
+                    sessions={[]}
+                    activeSessionId={activeSessionId}
+                    onSelect={handleSelectSession}
+                    onDelete={handleDeleteSession}
+                    onRename={handleRenameSession}
+                    onTogglePin={handleTogglePinSession}
+                    showEmpty={sessions.length === 0}
+                  />
+                ) : (
+                  recentGroups.map(group => (
+                    <section key={group.label} aria-label={group.label}>
+                      <h3 className='px-3 pb-0.5 pt-3 text-[11px] font-medium text-muted-foreground first:pt-1'>
+                        {group.label}
+                      </h3>
+                      <SessionHistory
+                        sessions={group.conversations}
+                        activeSessionId={activeSessionId}
+                        onSelect={handleSelectSession}
+                        onDelete={handleDeleteSession}
+                        onRename={handleRenameSession}
+                        onTogglePin={handleTogglePinSession}
+                        showEmpty={false}
+                      />
+                    </section>
+                  ))
+                )}
+                <ConversationListEnd
+                  hasMore={hasMore}
+                  isLoadingMore={isLoadingMore}
+                  onLoadMore={() => void loadMore()}
                 />
               </div>
             )}

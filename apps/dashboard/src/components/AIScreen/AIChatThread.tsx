@@ -11,7 +11,6 @@ import {
   forwardRef,
   useImperativeHandle,
   type ReactElement,
-  type CSSProperties,
 } from 'react';
 import {
   Menu,
@@ -56,8 +55,10 @@ import { isAssistantMessage } from '../Assistant/turns';
 import { useTranscript } from '../Assistant/useTranscript';
 import type { AssistantActions } from '../Assistant/useAssistantActions';
 import { AIComposer, type AIComposerAttachment, type AIComposerHandle } from './AIComposer';
-import { ReadonlyContextPills } from './ReadonlyContextPills';
-import { type ComposerContext, toStreamOverrides } from './composerContext';
+import { ReadonlyContextPills, useSentMentions } from './ReadonlyContextPills';
+import { type ComposerContext, toStreamOverrides, withoutPickedContext } from './composerContext';
+import { AgentByline, AgentRecipient } from './ConversationAgents';
+import { FollowUpSuggestions } from './FollowUpSuggestions';
 import {
   anchorFromArgs,
   documentIdFromArgs,
@@ -73,10 +74,8 @@ import {
 } from './Workspace';
 import { fetchV2ConversationMessages } from '../../services/XyneAI/XyneAISessionsV2Service';
 import { useV2SessionsList, useV2SessionInvalidator } from '../../hooks/useAskAISessionsV2';
-import { lengthBucket } from '../../services/Analytics/trackSource';
 import { xyneAIStreamManager } from '../../services/XyneAI/XyneAIStreamManager';
 import { BASE_URL } from '../../services/clients/apiClient';
-import { BrailleLoader, AnimatedLabel, useStableLabel } from './ReasoningLoader';
 import { createMarkdownComponents } from '../../utils/markdownComponents';
 import { StreamingMarkdownBlocks, rehypeStreamWordFade } from '../utils/StreamingMarkdownBlocks';
 import {
@@ -112,7 +111,11 @@ import { PromptMarkerRail, type PromptMarker } from './PromptMarkerRail';
 import type { ArtifactAppRestoreEvent } from '../../services/claw/artifactAppsService';
 import { useAppCreationModeSignal } from './ReactArtifact/appCreationModeContext';
 import { SidebarLeftOpen } from '@xyne/icons';
-import { formatChatTurnSeparator } from '../../utils/dateUtils';
+import {
+  formatChatTurnSeparator,
+  formatFullTimestamp,
+  formatTimeAmPm,
+} from '../../utils/dateUtils';
 import { Tooltip } from '../ui/Tooltip';
 import {
   ConversationToolInvocationsContext,
@@ -121,17 +124,10 @@ import {
   processNodeForUserTags,
   processTextForCopy,
 } from '../Chat/XyneAISidebar/components/MessageItem';
-import { ToolInvocationList } from '../Chat/XyneAISidebar/components/ToolInvocationList';
+import { TurnTimeline } from '../Chat/XyneAISidebar/components/TurnTimeline';
+import { turnDurationLabel, turnFinishedAt } from '../Chat/XyneAISidebar/components/activityShared';
 import { PendingActionBlock } from '../Chat/XyneAISidebar/components/PendingActionBlock';
 import { respondToPendingAction } from '../../services/XyneAI/XyneAIPendingActionService';
-import {
-  ActivityStatusChip,
-  LiveReasoning,
-  formatDuration,
-  formatCount,
-  useElapsedMs,
-  useSmoothCount,
-} from '../Chat/XyneAISidebar/components/activityShared';
 import { AskAIDebugPanel } from '../Chat/XyneAISidebar/components/AskAIDebugPanel';
 import {
   resolveActivePath,
@@ -307,201 +303,6 @@ function ChatTopbar({
         </button>
       )}
     </header>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Reasoning Section (expandable, matching xyne-search reference)
-// ═══════════════════════════════════════════════════════════════════════════════
-
-// Rotating phase labels shown while reasoning is streaming. We don't have
-// pi-mono-style tool events here (just a single accumulating string), so we
-// cycle through a small list of human-sounding phases driven by how much
-// reasoning has arrived. Matches the "Thinking → Weighing it up → Reasoning"
-// feel of the xyne-search /ai chip without faking tool-specific labels.
-const STREAMING_PHASES = ['Thinking', 'Weighing it up', 'Reasoning'] as const;
-
-function phaseLabelFor(reasoningLength: number): string {
-  if (reasoningLength === 0) return STREAMING_PHASES[0];
-  if (reasoningLength < 240) return STREAMING_PHASES[1];
-  return STREAMING_PHASES[2];
-}
-
-// Top + bottom fade mask for the expanded panel — mirrors the sidebar's
-// ActivityBlock so the section bleeds into the surrounding message column
-// instead of ending in a hard edge.
-const REASONING_FADE_MASK_STYLE: CSSProperties = {
-  WebkitMaskImage:
-    'linear-gradient(to bottom, transparent 0, black 14px, black calc(100% - 14px), transparent 100%)',
-  maskImage:
-    'linear-gradient(to bottom, transparent 0, black 14px, black calc(100% - 14px), transparent 100%)',
-};
-
-function ReasoningSection({
-  reasoning,
-  isStreaming,
-  toolInvocations,
-  messageAborted,
-}: {
-  reasoning: string;
-  isStreaming?: boolean | undefined;
-  toolInvocations?: ToolInvocationType[] | undefined;
-  messageAborted?: boolean | undefined;
-}): ReactElement {
-  const [expanded, setExpanded] = useState(false);
-  const hasReasoning = reasoning.trim().length > 0;
-  const hasTools = !!toolInvocations && toolInvocations.length > 0;
-  const canExpand = hasReasoning || hasTools;
-  // Anything to show? When this flips false on completion (pure text answer) the
-  // grid-rows collapse eases the section out. No remount now (stable key), so the
-  // transition actually animates.
-  const shouldShow = !!isStreaming || hasReasoning || hasTools;
-
-  // Throttled so the chip doesn't strobe through phases.
-  const stablePhase = useStableLabel(phaseLabelFor(reasoning.length));
-  const elapsedMs = useElapsedMs(!!isStreaming);
-  const completedToolCount = (toolInvocations ?? []).filter(t => !t.parentToolCallId).length;
-  const toolDurationSumMs = (toolInvocations ?? []).reduce((a, t) => a + (t.durationMs || 0), 0);
-  const displayedDurationMs = elapsedMs ?? toolDurationSumMs;
-  // Tool count tweens on the rare +1; the char count updates per delta (no
-  // per-frame tween) — keeps streaming cheap.
-  const smoothTools = useSmoothCount(completedToolCount);
-  // Done label mirrors the sidebar: "Thought for Ns · N tools".
-  const doneLabel =
-    displayedDurationMs > 0
-      ? `Thought for ${formatDuration(displayedDurationMs)}${hasTools ? ` · ${smoothTools} tool${smoothTools === 1 ? '' : 's'}` : ''}`
-      : hasReasoning
-        ? 'Thought process'
-        : 'Reasoning';
-  const liveText = isStreaming ? `${stablePhase}…` : doneLabel;
-  // Streaming right-side metadata: live char counter + elapsed (tweened digits).
-  const streamingBits = isStreaming
-    ? [
-        reasoning.length > 0 ? `${formatCount(reasoning.length)} chars` : null,
-        displayedDurationMs > 0 ? formatDuration(displayedDurationMs) : null,
-      ].filter(Boolean)
-    : [];
-
-  return (
-    // Whole-section collapse: grid-rows(1fr↔0fr)+opacity eases the section out on
-    // completion when nothing's left to show. Kept mounted (collapsed) so the exit
-    // transitions; CSS only animates on change, so a message that starts hidden
-    // (history) renders collapsed with no motion. Margin is on the inner div so it
-    // collapses with the height.
-    <div
-      className={cn(
-        'grid',
-        shouldShow ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0',
-      )}
-      style={{ transition: 'grid-template-rows 220ms ease-out, opacity 180ms ease-out' }}
-    >
-      <div className='overflow-hidden'>
-        <div className='my-1 text-xs'>
-          <button
-            type='button'
-            onClick={() => {
-              if (canExpand) setExpanded(!expanded);
-            }}
-            disabled={!canExpand}
-            aria-expanded={expanded}
-            aria-label={isStreaming ? liveText : 'Show reasoning'}
-            className={cn(
-              '-ml-1 inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-muted-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background',
-              canExpand ? 'hover:bg-secondary/70 hover:text-foreground' : 'cursor-default',
-            )}
-            data-track-category='XyneAI'
-            data-track-name='TOGGLE_REASONING'
-          >
-            <ChevronRight
-              className={cn(
-                'h-3 w-3 flex-shrink-0 transition-transform duration-200',
-                expanded && 'rotate-90',
-                !canExpand && 'opacity-50',
-              )}
-              aria-hidden
-              strokeWidth={2}
-            />
-            {isStreaming && <BrailleLoader />}
-            <span className='select-none'>
-              <AnimatedLabel text={liveText} />
-            </span>
-            {streamingBits.length > 0 && (
-              <span className='text-[10px] tabular-nums text-muted-foreground/60'>
-                · {streamingBits.join(' · ')}
-              </span>
-            )}
-            {/* ONE consolidated status chip ("⟳ 2 running · ⧗ 5 bg") — fixed
-            footprint, tweened counts, so the header never grows or jumps as
-            parallel calls come and go. Renders after completion too while
-            detached background work is still running. */}
-            <ActivityStatusChip toolInvocations={toolInvocations} />
-          </button>
-
-          {/* Live streaming surface: streams the model's reasoning live in a bounded
-          auto-scroll window. Collapses out (grid-rows + opacity) when streaming
-          ends instead of unmounting abruptly; kept mounted while collapsed so the
-          exit transitions. */}
-          <div
-            className={cn(
-              'grid',
-              isStreaming && hasReasoning
-                ? 'grid-rows-[1fr] opacity-100'
-                : 'grid-rows-[0fr] opacity-0',
-            )}
-            style={{ transition: 'grid-template-rows 220ms ease-out, opacity 180ms ease-out' }}
-          >
-            <div className='overflow-hidden'>
-              <div className='mt-1 pl-5'>
-                <LiveReasoning reasoning={reasoning} streaming={!!isStreaming} lines={5} />
-              </div>
-            </div>
-          </div>
-
-          {/* Smooth expand/collapse via the grid-rows 0fr→1fr trick — quick, never
-          snaps. Content stays mounted. */}
-          {canExpand && (
-            <div
-              className={cn(
-                'grid transition-[grid-template-rows] duration-200 ease-out',
-                expanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]',
-              )}
-            >
-              <div className='overflow-hidden'>
-                <div
-                  className='mt-1.5 max-h-[28rem] overflow-y-auto pl-5 pr-0.5 py-2 space-y-3'
-                  style={REASONING_FADE_MASK_STYLE}
-                >
-                  {hasReasoning && (
-                    <div>
-                      <div className='mb-1 text-[10px] uppercase tracking-wide text-muted-foreground/70'>
-                        Reasoning
-                      </div>
-                      <pre className='whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-muted-foreground'>
-                        {reasoning}
-                      </pre>
-                    </div>
-                  )}
-
-                  {hasTools && (
-                    <div>
-                      {hasReasoning && (
-                        <div className='mb-1 text-[10px] uppercase tracking-wide text-muted-foreground/70'>
-                          Tool calls
-                        </div>
-                      )}
-                      <ToolInvocationList
-                        invocations={toolInvocations}
-                        messageAborted={messageAborted}
-                      />
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -826,6 +627,7 @@ function ChatMessageBubble({
   onRatingChange,
   trackContext,
   agentSlug,
+  recipientAgentSlug,
   onPendingActionResolved,
   conversationId,
   onFlowActionComplete,
@@ -839,6 +641,8 @@ function ChatMessageBubble({
   /** Run dimensions merged into every act-on-answer click (joins to the run). */
   trackContext?: Record<string, unknown> | undefined;
   agentSlug?: string | undefined;
+  /** Agent a user message was sent to — shown as "To <agent>" above it. */
+  recipientAgentSlug?: string | undefined;
   onPendingActionResolved?: (() => void) | undefined;
   onCopy?: () => void;
   onFeedback?: (messageId: string, feedbackType: 'LIKE' | 'DISLIKE') => void;
@@ -978,6 +782,22 @@ function ChatMessageBubble({
     return filtered;
   }, [message.content, message.streamingContent, knownToolCallIds]);
 
+  // One answer text, ready for markdown: citation tokens linked (numbered
+  // across the whole turn, so a text part never renumbers), unknown marks
+  // stripped, design HTML wrapped. Used for the whole answer and per text part.
+  const prepareAnswerText = useCallback(
+    (raw: string, streaming: boolean): string => {
+      const linkified = linkifyAndGroupClawCitations(raw, clawCitationToolNumbers);
+      const stripped = stripCitationMarks(linkified);
+      const nonClfStripped = stripNonClfCitationTokens(stripped);
+      const cleaned = stripUnknownCiteLinks(nonClfStripped, validCitationKeys);
+      const designed =
+        message.type === 'bot' && hasDesignHtml(cleaned) ? designChatContent(cleaned) : cleaned;
+      return streaming ? designed + '\n' : designed;
+    },
+    [message.type, clawCitationToolNumbers, validCitationKeys],
+  );
+
   const displayContent = useMemo(() => {
     // While streaming, the manager batches deltas into `streamingContent` and
     // only writes `content` on completion. Reading content-only here is what
@@ -987,20 +807,13 @@ function ChatMessageBubble({
       message.type === 'bot' && message.isStreaming && message.streamingContent
         ? message.streamingContent
         : message.content || message.streamingContent || '';
-    const linkified = linkifyAndGroupClawCitations(raw, clawCitationToolNumbers);
-    const stripped = stripCitationMarks(linkified);
-    const nonClfStripped = stripNonClfCitationTokens(stripped);
-    const cleaned = stripUnknownCiteLinks(nonClfStripped, validCitationKeys);
-    const designed =
-      message.type === 'bot' && hasDesignHtml(cleaned) ? designChatContent(cleaned) : cleaned;
-    return message.isStreaming ? designed + '\n' : designed;
+    return prepareAnswerText(raw, !!message.isStreaming);
   }, [
     message.type,
     message.content,
     message.streamingContent,
     message.isStreaming,
-    clawCitationToolNumbers,
-    validCitationKeys,
+    prepareAnswerText,
   ]);
 
   const inlineCitations = useMemo(
@@ -1169,6 +982,25 @@ function ChatMessageBubble({
     [answerComponents, wordFade],
   );
 
+  /** One block of answer markdown. Keyed off everStreamed (not isStreaming) so
+   *  content that lands AT completion — the final tail words, finalized
+   *  citation chips — still fades in instead of popping the instant
+   *  isStreaming flips false; settled DOM never re-animates. */
+  const renderAnswerMarkdown = (content: string): ReactElement | null =>
+    content.trim().length > 0 ? (
+      <div
+        className={`bot-markdown-content xyne-ai-markdown text-sm font-normal leading-7 text-foreground${
+          everStreamedRef.current ? ' streaming-answer-fade' : ''
+        }`}
+      >
+        {everStreamedRef.current ? (
+          <StreamingMarkdownBlocks content={content} render={renderAnswerBlock} />
+        ) : (
+          renderAnswerBlock(content)
+        )}
+      </div>
+    ) : null;
+
   const hasUserContent = isUser && message.content.trim().length > 0;
   const hasUserAttachments = isUser && !!message.attachments && message.attachments.length > 0;
   // Everything an assistant message attached EXCEPT its React artifacts, which
@@ -1194,6 +1026,12 @@ function ChatMessageBubble({
         : '',
     [isUser, message.content, validCitationKeys],
   );
+  // @/# mentions stay pills after sending, and open what they name.
+  const renderUserTags = useCallback(
+    (text: string) => processNodeForUserTags(text, resolveMention),
+    [resolveMention],
+  );
+  const sentMentions = useSentMentions(message.attachedContext, message.userTags, renderUserTags);
   const markCopied = useCallback((): void => {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -1220,6 +1058,9 @@ function ChatMessageBubble({
             isEditing ? 'w-full max-w-[90%]' : 'max-w-[78%]',
           )}
         >
+          {recipientAgentSlug && !isEditing && (
+            <AgentRecipient slug={recipientAgentSlug} className='pr-2' />
+          )}
           <div className='flex w-full items-start justify-end gap-1'>
             <div
               className={cn(
@@ -1289,7 +1130,7 @@ function ChatMessageBubble({
                   )}
                   {hasUserContent && (
                     <div className='whitespace-pre-wrap'>
-                      {processNodeForUserTags(userStrippedContent, resolveMention)}
+                      {sentMentions.render(userStrippedContent)}
                     </div>
                   )}
                 </>
@@ -1323,85 +1164,75 @@ function ChatMessageBubble({
             />
           )}
           {!isEditing && (
-            <div className='mt-0.5 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100'>
-              {hasUserContent && (
-                <button
-                  type='button'
-                  onClick={(): void => {
-                    void navigator.clipboard
-                      .writeText(processTextForCopy(userStrippedContent, resolveMention))
-                      .then(markCopied);
-                  }}
-                  className='inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground'
-                  title={copied ? 'Copied!' : 'Copy'}
-                  data-track-category='XyneAI'
-                  data-track-name='COPY_USER_MESSAGE'
-                  data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
-                >
-                  {copied ? (
-                    <Check className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
-                  ) : (
-                    <Copy className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
-                  )}
-                </button>
-              )}
-              {onEditSubmit && (
-                <button
-                  type='button'
-                  onClick={() => {
-                    setEditText(message.content);
-                    setIsEditing(true);
-                    setTimeout(() => editTextareaRef.current?.focus(), 0);
-                  }}
-                  className='inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground'
-                  title='Edit message'
-                  data-track-category='XyneAI'
-                  data-track-name='EDIT_MESSAGE'
-                >
-                  <Pencil className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
-                </button>
-              )}
+            <div className='mt-0.5 flex items-center gap-1'>
+              <div className='flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100'>
+                {hasUserContent && (
+                  <button
+                    type='button'
+                    onClick={(): void => {
+                      void navigator.clipboard
+                        .writeText(processTextForCopy(userStrippedContent, resolveMention))
+                        .then(markCopied);
+                    }}
+                    className='inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground'
+                    title={copied ? 'Copied!' : 'Copy'}
+                    data-track-category='XyneAI'
+                    data-track-name='COPY_USER_MESSAGE'
+                    data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
+                  >
+                    {copied ? (
+                      <Check className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
+                    ) : (
+                      <Copy className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
+                    )}
+                  </button>
+                )}
+                {onEditSubmit && (
+                  <button
+                    type='button'
+                    onClick={() => {
+                      setEditText(message.content);
+                      setIsEditing(true);
+                      setTimeout(() => editTextareaRef.current?.focus(), 0);
+                    }}
+                    className='inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground'
+                    title='Edit message'
+                    data-track-category='XyneAI'
+                    data-track-name='EDIT_MESSAGE'
+                  >
+                    <Pencil className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
+                  </button>
+                )}
+              </div>
+              <time
+                dateTime={new Date(message.timestamp).toISOString()}
+                title={formatFullTimestamp(message.timestamp)}
+                className='px-1 text-[11px] tabular-nums text-muted-foreground/60'
+              >
+                {formatTimeAmPm(message.timestamp)}
+              </time>
             </div>
           )}
         </div>
       ) : (
         <div className='flex min-w-0 flex-col gap-2'>
-          {/* Reasoning section — also acts as the initial loading placeholder
-              so the user sees "Reasoning" with bouncing dots from the moment
-              streaming starts. When expanded, also reveals the tool-call tree
-              inside (matching the sidebar's ActivityBlock layout). Always
-              mounted so its grid-rows collapse can animate the exit on
-              completion; it self-hides (collapsed) when there's nothing to show. */}
-          <ReasoningSection
-            reasoning={message.reasoning ?? ''}
-            isStreaming={message.isStreaming}
-            toolInvocations={message.toolInvocations}
-            messageAborted={!!message.isAborted}
+          {isV2 && agentSlug && <AgentByline slug={agentSlug} />}
+          {/* The turn in order — thinking, text, tool calls, … answer — with
+              each run of steps folded into one expandable group. Shared with
+              the sidebar and the overlay. */}
+          <TurnTimeline
+            message={message}
+            previewLines={4}
+            renderText={(text, { streaming }) =>
+              renderAnswerMarkdown(prepareAnswerText(text, streaming))
+            }
+            legacyAnswer={displayContent ? renderAnswerMarkdown(displayContent) : null}
+            plan={
+              message.planTodos?.length ? (
+                <PlanCard todos={message.planTodos} title={message.planTitle} />
+              ) : undefined
+            }
           />
-
-          {displayContent && displayContent.length > 0 && (
-            <div
-              className={`bot-markdown-content xyne-ai-markdown text-sm font-normal leading-7 text-foreground${
-                // Keyed off everStreamed (not isStreaming) so content that
-                // lands AT completion — the final tail words, finalized
-                // citation chips — still fades in instead of popping the
-                // instant isStreaming flips false. Mount-only animations +
-                // the no-remount architecture make the class harmless to
-                // keep: settled DOM never re-animates.
-                everStreamedRef.current ? ' streaming-answer-fade' : ''
-              }`}
-            >
-              {everStreamedRef.current ? (
-                <StreamingMarkdownBlocks content={displayContent} render={renderAnswerBlock} />
-              ) : (
-                renderAnswerBlock(displayContent)
-              )}
-            </div>
-          )}
-
-          {!isUser && message.planTodos && message.planTodos.length > 0 && (
-            <PlanCard todos={message.planTodos} title={message.planTitle} />
-          )}
 
           {!isUser &&
             message.uiFlows?.map(flow => (
@@ -1468,39 +1299,42 @@ function ChatMessageBubble({
           !message.isStreaming &&
           onFollowUpSuggestionClick &&
           message.followUpSuggestions?.length ? (
-            <div className='mt-1 flex flex-wrap gap-2' data-testid='ask-ai-follow-ups'>
-              {message.followUpSuggestions.map((suggestion, suggestionIndex) => (
-                <button
-                  key={suggestion}
-                  type='button'
-                  onClick={() => onFollowUpSuggestionClick(suggestion)}
-                  className='rounded-full border border-border bg-card px-3 py-1.5 text-left text-xs font-medium leading-5 text-muted-foreground transition-colors hover:bg-accent'
-                  data-track-category='AskAI'
-                  data-track-name='FollowUpSuggestion'
-                  data-track-metadata={JSON.stringify({
-                    ...trackContext,
-                    messageId: message.id,
-                    index: suggestionIndex,
-                    lengthBucket: lengthBucket(suggestion.length),
-                  })}
-                >
-                  {suggestion}
-                </button>
-              ))}
-            </div>
+            <FollowUpSuggestions
+              suggestions={message.followUpSuggestions}
+              onSelect={onFollowUpSuggestionClick}
+              messageId={message.id}
+              trackContext={trackContext}
+              className='mt-2'
+            />
           ) : null}
 
-          {!isUser && onDebug && (
-            <button
-              type='button'
-              onClick={onDebug}
-              className='mt-1.5 inline-flex w-fit items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
-              title='Debug this response'
-              data-track-category='XyneAI'
-              data-track-name='DEBUG_RESPONSE'
-            >
-              <Bug size={12} /> Debug this response
-            </button>
+          {/* The turn's closing line: how long it took and when it finished. */}
+          {!isUser && ((!message.isStreaming && !message.errorInfo) || onDebug) && (
+            <div className='mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground'>
+              {!message.isStreaming && !message.errorInfo && (
+                <time
+                  dateTime={turnFinishedAt(message).toISOString()}
+                  title={formatFullTimestamp(turnFinishedAt(message))}
+                  className='tabular-nums text-muted-foreground/70'
+                >
+                  {[turnDurationLabel(message), formatTimeAmPm(turnFinishedAt(message))]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </time>
+              )}
+              {onDebug && (
+                <button
+                  type='button'
+                  onClick={onDebug}
+                  className='-ml-1.5 inline-flex w-fit items-center gap-1 rounded-md px-1.5 py-1 transition-colors hover:bg-muted hover:text-foreground'
+                  title='Debug this response'
+                  data-track-category='XyneAI'
+                  data-track-name='DEBUG_RESPONSE'
+                >
+                  <Bug size={12} /> Debug this response
+                </button>
+              )}
+            </div>
           )}
 
           {/* Hover actions — on all bot messages */}
@@ -1634,6 +1468,12 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
   ref,
 ): ReactElement {
   const composerRef = useRef<AIComposerHandle | null>(null);
+  // A landing send's context went out with that first turn, so the chat
+  // composer starts with only what lasts (toggles, the local folder). Read
+  // once: the composer seeds from it on mount.
+  const [composerSeed] = useState(() =>
+    initialQuery && initialExtras ? withoutPickedContext(initialExtras) : initialExtras,
+  );
   const dropZoneRef = useRef<HTMLDivElement | null>(null);
   const dragCounterRef = useRef(0);
   const [isDragging, setIsDragging] = useState(false);
@@ -1787,10 +1627,29 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
 
   void threadId; // Used by stream manager via useXyneAIStream internally
 
-  const { selectedAgentSlug } = useSelectedAgent();
+  const { selectedAgentSlug, setSelectedAgentSlug } = useSelectedAgent();
   const { askAIVersion } = useAskAIVersion();
   const isV2 = askAIVersion === 'v2';
   const effectiveAgentSlug = isV2 ? selectedAgentSlug : null;
+  // Opening a conversation (history click, link, back/forward) continues it
+  // with the agent it was last with — once per conversation, so a switch the
+  // user makes afterwards is never undone by a later reload of the thread.
+  const agentSyncedForSessionRef = useRef<string | null>(null);
+  const continueWithLastAgent = useCallback(
+    (forSessionId: string, loaded: Message[]): void => {
+      if (!isV2 || agentSyncedForSessionRef.current === forSessionId) return;
+      agentSyncedForSessionRef.current = forSessionId;
+      const lastAgentSlug = [...loaded].reverse().find(m => m.agentSlug)?.agentSlug;
+      if (!lastAgentSlug) return;
+      setSelectedAgentSlug(lastAgentSlug === 'ask-ai' ? null : lastAgentSlug);
+    },
+    [isV2, setSelectedAgentSlug],
+  );
+  // Read by the session loader without being one of its deps: the user can
+  // switch agents mid-conversation, and the thread (read conversation-wide)
+  // must not reload — or re-seed the composer — when they do.
+  const effectiveAgentSlugRef = useRef(effectiveAgentSlug);
+  effectiveAgentSlugRef.current = effectiveAgentSlug;
 
   const { submitQuery, abortCurrentRequest } = useXyneAIStream({
     channelIds: [],
@@ -1830,24 +1689,25 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
   );
 
   const queryClient = useQueryClient();
-  const { data: v2Sessions } = useV2SessionsList(
-    effectiveAgentSlug,
-    isV2 && Boolean(conversationId),
-  );
+  // The newest chats are on the first page — where a chat awaiting its
+  // generated title always is.
+  const { conversations: v2Sessions } = useV2SessionsList({
+    enabled: isV2 && Boolean(conversationId),
+  });
   const { invalidateSessions } = useV2SessionInvalidator();
   const generatedTitle = useMemo(() => {
     if (!conversationId) return undefined;
-    const session = v2Sessions?.find(s => s.sessionId === conversationId);
+    const session = v2Sessions.find(s => s.sessionId === conversationId);
     return session?.titleGenerated ? session.title : undefined;
   }, [v2Sessions, conversationId]);
   useEffect(() => {
     if (!isV2 || !conversationId) return;
     if (generatedTitle) return;
     const timers = [4_000, 10_000, 20_000, 35_000, 60_000, 90_000].map(delay =>
-      window.setTimeout(() => invalidateSessions(effectiveAgentSlug), delay),
+      window.setTimeout(() => invalidateSessions(), delay),
     );
     return () => timers.forEach(id => window.clearTimeout(id));
-  }, [isV2, conversationId, effectiveAgentSlug, invalidateSessions, generatedTitle]);
+  }, [isV2, conversationId, invalidateSessions, generatedTitle]);
   const designStudio = useDesignStudio();
   const revealedEditsRef = useRef<Set<string>>(new Set());
 
@@ -1933,6 +1793,11 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
 
     abortCurrentRequest();
 
+    // A chat can switch agents mid-conversation: regenerate re-runs this turn
+    // with the agent that answered it, not the one picked now.
+    const lastBotMessage = [...displayMessages].reverse().find(m => m.type === 'bot');
+    const turnAgentSlug = lastBotMessage?.agentSlug ?? lastUserMessage.agentSlug;
+
     // parentId = the user message itself → the new bot response branches from it.
     await submitQuery(
       lastUserMessage.content,
@@ -1942,6 +1807,10 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
       undefined, // userTags
       lastUserMessage.id, // parentMessageId
       true, // isRegenerate
+      undefined, // isEditUserMessage
+      undefined, // editedUserMessageId
+      undefined, // parentAssistantMessageId
+      turnAgentSlug ? { agentSlug: turnAgentSlug } : undefined,
     );
   }, [isActiveSessionStreaming, displayMessages, abortCurrentRequest, submitQuery]);
 
@@ -1971,6 +1840,8 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
         true, // isEditUserMessage
         messageToEdit.id, // editedUserMessageId
         editedParentAssistant, // parentAssistantMessageId
+        // Editing re-asks that turn, so it goes to the agent it was sent to.
+        messageToEdit.agentSlug ? { agentSlug: messageToEdit.agentSlug } : undefined,
       );
     },
     [isActiveSessionStreaming, messages, abortCurrentRequest, submitQuery],
@@ -2086,6 +1957,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
           );
           setMessages(normalized);
           seedComposerFromLastUserTurn(normalized);
+          continueWithLastAgent(sessionId, normalized);
           setConversationId(live.sessionId || sessionId);
           setDebugEvents(live.debugEvents);
           setDebugArtifactsReadyVersion(live.debugArtifactsReadyVersion);
@@ -2101,7 +1973,10 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
         setDebugSessionId(null);
 
         if (isV2) {
-          const messages = await fetchV2ConversationMessages(sessionId, effectiveAgentSlug);
+          const messages = await fetchV2ConversationMessages(
+            sessionId,
+            effectiveAgentSlugRef.current,
+          );
           const loadedMessages = messages.map(msg => ({
             ...msg,
             isStreaming: false,
@@ -2125,6 +2000,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
 
           setMessages(loadedMessages);
           seedComposerFromLastUserTurn(loadedMessages);
+          continueWithLastAgent(sessionId, loadedMessages);
           setConversationId(sessionId);
           onConversationChange?.(sessionId);
           // Reload mid-run: no in-memory stream was adopted above, so attach a
@@ -2140,7 +2016,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
               detach: xyneAIStreamManager.attachLiveViewer(
                 threadId,
                 sessionId,
-                effectiveAgentSlug || 'ask-ai',
+                effectiveAgentSlugRef.current || 'ask-ai',
                 loadedMessages,
               ),
             };
@@ -2167,7 +2043,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     return () => {
       cancelled = true;
     };
-  }, [sessionId, threadId, onConversationChange, effectiveAgentSlug, isV2]);
+  }, [sessionId, threadId, onConversationChange, isV2, continueWithLastAgent]);
 
   // Auto-submit initialQuery once, applying the landing composer's chosen
   // context/toggles to this first turn. The ref guard resets on remount, so the
@@ -2180,7 +2056,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
         toMessageAttachments(initialAttachments ?? []),
         undefined,
         undefined,
-        undefined,
+        initialExtras?.userTags,
         undefined,
         undefined,
         undefined,
@@ -2418,7 +2294,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
         messageAttachments,
         undefined,
         undefined,
-        undefined,
+        context?.userTags,
         parentMessageId,
         undefined,
         undefined,
@@ -2723,8 +2599,13 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
                       <ChatMessageBubble
                         trackContext={messageTrackContext}
                         message={message}
+                        recipientAgentSlug={
+                          isV2 && message.type === 'user' ? message.agentSlug : undefined
+                        }
                         conversationId={conversationId || undefined}
-                        agentSlug={effectiveAgentSlug ?? undefined}
+                        // A pending action belongs to the agent that proposed
+                        // it, which after a switch may not be the one picked.
+                        agentSlug={message.agentSlug ?? effectiveAgentSlug ?? undefined}
                         onPendingActionResolved={() => {
                           if (!conversationId) return;
                           const refreshArtifacts = (): void => {
@@ -2844,14 +2725,17 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
               onSubmit={(text, attachments, context, trigger): void => {
                 void handleSubmit(text, attachments, context, trigger);
               }}
-              onAgentChange={onAgentChange}
+              // Mid-conversation switch: once this thread has a conversation,
+              // picking another agent keeps it — the selector already moved the
+              // selected agent, so the next turn goes to it in THIS chat. Only
+              // an empty thread hands the pick up (fresh chat for that agent).
+              onAgentChange={conversationId ? undefined : onAgentChange}
               showAgentSelector={isV2}
-              initialExtras={initialExtras}
+              initialExtras={composerSeed}
               onContextChange={onContextChange}
               pending={isAnyMessageStreaming || (assistant?.isRouting ?? false)}
               onStop={handleStop}
               assistant={assistant && assistant.actions.length > 0 ? assistant : undefined}
-              placeholder='Write a message...'
             />
           </div>
         </div>

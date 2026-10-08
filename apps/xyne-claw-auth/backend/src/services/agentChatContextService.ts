@@ -3,12 +3,29 @@ import { errMsg } from "../lib/errors.js";
 import { prisma } from "../db.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
 
-export type ContextType = "channel" | "ticket" | "canvas" | "call" | "app" | "activity" | "collection" | "file" | "folder";
+export type ContextType =
+  | "channel"
+  | "ticket"
+  | "canvas"
+  | "call"
+  | "app"
+  | "activity"
+  | "collection"
+  | "file"
+  | "folder"
+  | "message"
+  | "user"
+  | "attachment";
 // 'collection' / 'file' / 'folder' are not user-searchable via this service
 // (they're picked through the dashboard's KB picker, not via the generic
 // search), so they're intentionally excluded from the search-type enum.
 export type ContextItemType = ContextType | "repository";
-export type ContextSearchType = Exclude<ContextType, "activity" | "collection" | "file" | "folder"> | "repository" | "all";
+// 'message' / 'user' / 'attachment' come from the composer's @ picker, which
+// searches through Spaces itself — same reason.
+export type ContextSearchType =
+  | Exclude<ContextType, "activity" | "collection" | "file" | "folder" | "message" | "user" | "attachment">
+  | "repository"
+  | "all";
 
 export interface ContextItem {
   id: string;
@@ -139,6 +156,9 @@ export function normalizeAttachedContext(input: unknown): { items: AttachedConte
     ["collection", 0],
     ["file", 0],
     ["folder", 0],
+    ["message", 0],
+    ["user", 0],
+    ["attachment", 0],
   ]);
 
   for (const raw of input) {
@@ -147,7 +167,7 @@ export function normalizeAttachedContext(input: unknown): { items: AttachedConte
     const type = obj["type"];
     const id = obj["id"];
     const title = obj["title"];
-    if (!isContextType(type)) return { items: [], error: "attachedContext.type must be one of channel|ticket|canvas|call|app|activity|collection|file|folder" };
+    if (!isContextType(type)) return { items: [], error: "attachedContext.type must be one of channel|ticket|canvas|call|app|activity|collection|file|folder|message|user|attachment" };
     if (typeof id !== "string" || id.trim().length === 0) return { items: [], error: "attachedContext.id must be a non-empty string" };
     if (typeof title !== "string" || title.trim().length === 0) return { items: [], error: "attachedContext.title must be a non-empty string" };
     const threadId = obj["threadId"];
@@ -621,6 +641,9 @@ async function resolveSection(
   if (item.type === "collection") return resolveCollectionSection(item);
   if (item.type === "file") return resolveFileSection(item);
   if (item.type === "folder") return resolveFolderSection(item);
+  if (item.type === "message") return resolveMessageSection(item, auth);
+  if (item.type === "user") return resolveUserSection(item);
+  if (item.type === "attachment") return resolveAttachmentSection(item);
   return resolveCallSection(item, auth);
 }
 
@@ -695,6 +718,56 @@ async function resolveFolderSection(item: AttachedContextRef): Promise<ResolvedC
   const lines = [
     `Folder: ${item.title} (collectionId=${item.id})`,
     `Fetch: enumerate files with \`kb-list-files\` (collectionId=${item.id}); find one with \`kb-search\` (collectionId=${item.id} + query); read a file with \`kb-read-file\` (fileId from kb-list-files).`,
+  ];
+  return { header, inlineText: lines.join("\n") };
+}
+
+/** A single Spaces message picked in the composer's @ picker. `id` is the
+ *  messageId and `threadId` the conversation it was posted in; the text is
+ *  inlined so a question about "this message" needs no lookup. */
+async function resolveMessageSection(item: AttachedContextRef, auth?: SpacesAuthContext): Promise<ResolvedContextSection> {
+  const rows = (await interact({
+    model: "message",
+    operation: "findMany",
+    where: { messageId: { equals: item.id }, isDeleted: { equals: false } },
+    take: 1,
+  }, auth)) as MessageRow[];
+  const message = rows[0];
+  const header = `Message "${item.title}" (id=${item.id})`;
+  if (!message) {
+    return { header, inlineText: "Message is not accessible or no longer exists." };
+  }
+  const conversationId = item.threadId ?? message.conversationId;
+  const content = [
+    `Message: ${item.id} · sent ${formatDate(message.createdAt)} by ${message.senderId ?? "unknown"}`,
+    `Thread conversationId: ${conversationId}`,
+    `Fetch: reactions and attachments with \`spaces-message-detail\` (messageId=${item.id}); the surrounding discussion with \`spaces-messages\` (conversationId=${conversationId}).`,
+    "",
+    "Text:",
+    message.content?.trim() ? message.content.trim() : "(no text)",
+  ].join("\n");
+  return inlineOrFile(header, content, "message", item.id);
+}
+
+/** A person picked in the composer's @ picker — the query names them as
+ *  `@title`. Pointer only: the agent's own tools read their profile and work. */
+async function resolveUserSection(item: AttachedContextRef): Promise<ResolvedContextSection> {
+  const header = `Person "${item.title}" (userId=${item.id})`;
+  const lines = [
+    `Person: ${item.title} (userId=${item.id}) — "@${item.title}" in the query means this person.`,
+    `Fetch: their profile with \`spaces-users\`; what they said with \`spaces-search\` (from=${item.id}).`,
+  ];
+  return { header, inlineText: lines.join("\n") };
+}
+
+/** A file shared in a Spaces conversation (not a Knowledge Base file — those
+ *  are type 'file'). `id` is the message attachment id. */
+async function resolveAttachmentSection(item: AttachedContextRef): Promise<ResolvedContextSection> {
+  const header = `Shared file "${item.title}" (attachmentId=${item.id})`;
+  const lines = [
+    `Shared file: ${item.title} (attachmentId=${item.id})`,
+    ...(item.threadId ? [`Shared in thread conversationId: ${item.threadId}`] : []),
+    `Fetch: its content with \`spaces-fetch-attachment\` (attachmentId=${item.id}).`,
   ];
   return { header, inlineText: lines.join("\n") };
 }
@@ -966,6 +1039,7 @@ function dirForType(type: ContextType): string {
   if (type === "channel") return "channels";
   if (type === "ticket") return "tickets";
   if (type === "canvas") return "canvases";
+  if (type === "message") return "messages";
   return "calls";
 }
 
@@ -1018,7 +1092,10 @@ function isContextType(value: unknown): value is ContextType {
     value === "activity" ||
     value === "collection" ||
     value === "file" ||
-    value === "folder"
+    value === "folder" ||
+    value === "message" ||
+    value === "user" ||
+    value === "attachment"
   );
 }
 
@@ -1031,5 +1108,8 @@ function labelForType(type: ContextType): string {
   if (type === "collection") return "Collection";
   if (type === "file") return "File";
   if (type === "folder") return "Folder";
+  if (type === "message") return "Message";
+  if (type === "user") return "Person";
+  if (type === "attachment") return "Shared file";
   return "Call";
 }
