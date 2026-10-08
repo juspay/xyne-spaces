@@ -202,6 +202,8 @@ export interface TicketFilters {
   createdAfter?: string; // Created after date (multiple formats)
   createdOn?: string; // Created on specific date (multiple formats)
   createdRange?: string; // Time keyword (today, yesterday, this week, etc.)
+  createdAfterTimestamp?: number; // Created at or after this epoch-ms instant (programmatic callers)
+  createdBeforeTimestamp?: number; // Created strictly before this epoch-ms instant (programmatic callers)
   stage?: string[]; // Filter by ticket stage - comma-separated
   assignedTo?: string[]; // Filter by assigned user ID - comma-separated
   userGroupId?: string[]; // Filter by user group ID - comma-separated
@@ -1271,6 +1273,14 @@ export class YqlBuilder {
           `(createdAtTimestamp >= ${timeRange.from} and createdAtTimestamp <= ${timeRange.to})`
         );
       }
+    }
+
+    if (filters.createdAfterTimestamp !== undefined && Number.isFinite(filters.createdAfterTimestamp)) {
+      conditions.push(`createdAtTimestamp >= ${Math.floor(filters.createdAfterTimestamp)}`);
+    }
+
+    if (filters.createdBeforeTimestamp !== undefined && Number.isFinite(filters.createdBeforeTimestamp)) {
+      conditions.push(`createdAtTimestamp < ${Math.floor(filters.createdBeforeTimestamp)}`);
     }
 
     return conditions.join(' and ');

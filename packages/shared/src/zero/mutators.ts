@@ -10661,6 +10661,7 @@ export const mutators = defineMutators({
         // Artifact apps shown on this desk, in order (see EmailChannelPreference.deskAppIds).
         // An empty list clears the column.
         deskAppIds: z.array(z.string().min(1).max(64)).max(MAX_DESK_APPS).nullable().optional(),
+        duplicateLookbackDays: z.number().int().min(0).max(3650).optional(),
         // Scoped duplicate detection config (see EmailChannelPreference.duplicateScopeConfig)
         duplicateScopeConfig: z
           .object({
@@ -10693,6 +10694,7 @@ export const mutators = defineMutators({
           deskReportRangeDays,
           deskAppIds,
           duplicateScopeConfig,
+          duplicateLookbackDays,
         },
       }) => {
         const existing = await tx.run(
@@ -10718,6 +10720,7 @@ export const mutators = defineMutators({
             ...(deskReportAgentSlug !== undefined ? { deskReportAgentSlug } : {}),
             ...(deskReportRangeDays !== undefined ? { deskReportRangeDays } : {}),
             ...(deskAppIds !== undefined ? { deskAppIds: serializeDeskAppIds(deskAppIds) } : {}),
+            ...(duplicateLookbackDays !== undefined ? { duplicateLookbackDays } : {}),
             ...(duplicateScopeConfig !== undefined
               ? { duplicateScopeConfig: duplicateScopeConfig == null ? null : JSON.stringify(duplicateScopeConfig) }
               : {}),
@@ -10753,6 +10756,7 @@ export const mutators = defineMutators({
             deskReportAgentSlug: deskReportAgentSlug ?? null,
             deskReportRangeDays: deskReportRangeDays ?? 1,
             deskAppIds: serializeDeskAppIds(deskAppIds ?? null),
+            duplicateLookbackDays: duplicateLookbackDays ?? null,
             duplicateScopeConfig: duplicateScopeConfig ? JSON.stringify(duplicateScopeConfig) : null,
           });
         }

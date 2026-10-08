@@ -79,6 +79,7 @@ export function useUpdateEmailChannelPreference() {
       deskReportRangeDays,
       duplicateScopeConfig,
       deskAppIds,
+      duplicateLookbackDays,
     }: {
       channelId: string;
       ownerUserId?: string;
@@ -100,6 +101,7 @@ export function useUpdateEmailChannelPreference() {
       duplicateScopeConfig?: DuplicateScopeConfig | null;
       /** Artifact apps on the desk, in order. An empty list clears them. */
       deskAppIds?: string[];
+      duplicateLookbackDays?: number;
     }): Promise<void> => {
       const mutation = zero.mutate(
         mutators.emailChannelPreference.upsert({
@@ -126,6 +128,7 @@ export function useUpdateEmailChannelPreference() {
           ...(deskReportRangeDays !== undefined ? { deskReportRangeDays } : {}),
           ...(duplicateScopeConfig !== undefined ? { duplicateScopeConfig } : {}),
           ...(deskAppIds !== undefined ? { deskAppIds } : {}),
+          ...(duplicateLookbackDays !== undefined ? { duplicateLookbackDays } : {}),
         }),
       );
       // Zero resolves .server with the rejection instead of rejecting the promise.
