@@ -1,3 +1,11 @@
+## [1.480.1](https://github.com/juspay/xyne-spaces/compare/v1.480.0...v1.480.1) (2026-10-08)
+
+
+### Bug Fixes
+
+* MiniCallView re-mounts header buttons and resize handles on every render ([#2759](https://github.com/juspay/xyne-spaces/issues/2759)) ([249e23f](https://github.com/juspay/xyne-spaces/commit/249e23f98cfdae00e799619cc41471dd73a1c976))
+* update recording controls and floating pill behavior ([#2817](https://github.com/juspay/xyne-spaces/issues/2817)) ([8e71b11](https://github.com/juspay/xyne-spaces/commit/8e71b1104ae54e329b05f58bcebe73da6f24d8f4))
+
 ## [1.480.0](https://github.com/juspay/xyne-spaces/compare/v1.479.0...v1.480.0) (2026-10-08)
 
 
