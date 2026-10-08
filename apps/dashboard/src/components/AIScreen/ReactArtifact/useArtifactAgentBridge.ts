@@ -413,7 +413,7 @@ function attachUnavailableListener(
   const onMessage = (event: MessageEvent): void => {
     if (!isAppArtifactMessage(event.data)) return;
     const target = artifactFrame(previewRef);
-    if (!target || !isFromArtifactFrame(event, previewRef)) return;
+    if (!target || event.source !== target.window || event.origin !== target.origin) return;
     const { type, runKey } = event.data;
     if (type !== 'agent-attach' && type !== 'agent-run') return;
 

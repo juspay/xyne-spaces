@@ -8,6 +8,8 @@ export interface SlotRect {
   left: number;
   width: number;
   height: number;
+  /** CSS clip-path for the part of the slot its scroll containers show. */
+  clip?: string;
 }
 
 export interface SlotProps {
@@ -71,7 +73,13 @@ function sameProps(a: SlotProps, b: SlotProps): boolean {
 
 function sameRect(a: SlotRect | null, b: SlotRect | null): boolean {
   if (!a || !b) return a === b;
-  return a.top === b.top && a.left === b.left && a.width === b.width && a.height === b.height;
+  return (
+    a.top === b.top &&
+    a.left === b.left &&
+    a.width === b.width &&
+    a.height === b.height &&
+    a.clip === b.clip
+  );
 }
 
 /** Takes props and rect from the current owner slot. */

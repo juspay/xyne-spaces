@@ -32,6 +32,10 @@ interface BridgeArgs {
   /** Assigned by the bridge so the header refresh button can trigger a re-resolve.
    *  A ref (not a prop) so triggering refresh never re-renders the sandbox. */
   refreshRef: MutableRefObject<(() => Promise<void>) | null>;
+  /** False while the app is hidden; its refresh requests are held until resumed. */
+  activeRef?: MutableRefObject<boolean>;
+  /** Assigned by the bridge; called when the app is shown to run any held refresh. */
+  resumeRef?: MutableRefObject<(() => void) | null>;
 }
 
 /**
@@ -54,6 +58,8 @@ export function useArtifactDataBridge({
   appId,
   previewRef,
   refreshRef,
+  activeRef,
+  resumeRef,
 }: BridgeArgs): void {
   useEffect(() => {
     const declared = requirements ?? [];
@@ -64,6 +70,7 @@ export function useArtifactDataBridge({
     let cancelled = false;
     const snapshot: ArtifactDataSnapshot = {};
     let lastResolveStartedAt = 0;
+    let heldRefresh = false;
     const inflight = new Set<string>();
 
     for (const requirement of declared) {
@@ -235,6 +242,10 @@ export function useArtifactDataBridge({
       }
 
       if (event.data.type === 'refresh') {
+        if (activeRef && !activeRef.current) {
+          heldRefresh = true;
+          return;
+        }
         if (Date.now() - lastResolveStartedAt < REFRESH_THROTTLE_MS) return;
         void resolve(event.data.name);
         return;
@@ -249,12 +260,20 @@ export function useArtifactDataBridge({
 
     window.addEventListener('message', onMessage);
     refreshRef.current = (): Promise<void> => resolve();
+    if (resumeRef) {
+      resumeRef.current = (): void => {
+        if (!heldRefresh) return;
+        heldRefresh = false;
+        void resolve();
+      };
+    }
     void resolve();
 
     return (): void => {
       cancelled = true;
       window.removeEventListener('message', onMessage);
       refreshRef.current = null;
+      if (resumeRef) resumeRef.current = null;
     };
-  }, [requirements, canWrite, appId, previewRef, refreshRef]);
+  }, [requirements, canWrite, appId, previewRef, refreshRef, activeRef, resumeRef]);
 }

@@ -94,6 +94,8 @@ export interface ReactArtifactViewProps {
   hideTitle?: boolean;
   /** Hides the saved chip, which on the app's own page links to itself. */
   hideSavedIndicator?: boolean;
+  /** False while kept alive off-screen; data refreshes wait until it's shown. */
+  active?: boolean;
   /**
    * Contents of the Settings tab. Supplied by the caller rather than built
    * here: settings are properties of the APP (its icon, later its name and

@@ -105,6 +105,8 @@ const ArtifactSandpack = memo(
     fill,
     contextRef,
     pushContextRef,
+    activeRef,
+    resumeRef,
   }: {
     payload: ReactArtifactPayload;
     theme: 'light' | 'dark';
@@ -122,6 +124,8 @@ const ArtifactSandpack = memo(
      *  must reach a RUNNING app as a message, not as a new prop that reboots it. */
     contextRef: MutableRefObject<XyneAppContext | null>;
     pushContextRef: MutableRefObject<(() => void) | null>;
+    activeRef: MutableRefObject<boolean>;
+    resumeRef: MutableRefObject<(() => void) | null>;
     /** Drives the boot overlay's scale and surface. A plain boolean, so the
      *  memo's shallow compare still holds and the iframe is never torn down. */
     fill: boolean;
@@ -137,6 +141,8 @@ const ArtifactSandpack = memo(
       ...(appId ? { appId } : {}),
       previewRef,
       refreshRef,
+      activeRef,
+      resumeRef,
     });
 
     // Separate from the data bridge: agent runs outlive the app and must not be
@@ -213,6 +219,7 @@ export const ReactArtifactView = ({
   titleSlot,
   hideTitle = false,
   hideSavedIndicator = false,
+  active = true,
   settingsSlot,
   onSave,
   saveState = 'idle',
@@ -238,6 +245,13 @@ export const ReactArtifactView = ({
     // `contextKey` rather than the object: same content must not re-push.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contextKey]);
+  // Refs, not props, into the sandbox: a changing prop there tears the iframe down.
+  const activeRef = useRef(active);
+  const resumeRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    activeRef.current = active;
+    if (active) resumeRef.current?.();
+  }, [active]);
   const auth = useAuthContextValues();
   const theme = useMemo(() => sandpackThemeName(), []);
   const { attachmentId, inlineData, savedAppId, versionId } = artifact;
@@ -483,6 +497,8 @@ export const ReactArtifactView = ({
           refreshRef={refreshRef}
           contextRef={contextRef}
           pushContextRef={pushContextRef}
+          activeRef={activeRef}
+          resumeRef={resumeRef}
           fill={fill}
           canWrite
           canInvokeAgents

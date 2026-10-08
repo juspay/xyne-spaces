@@ -92,7 +92,7 @@ const PooledAppFrame = memo(({ app }: { app: PooledApp }): ReactElement => {
         visibility: visible ? 'visible' : 'hidden',
         // Sandpack's iframe overrides `visibility`; opacity and clip-path can't be undone from inside.
         opacity: visible ? 1 : 0,
-        clipPath: visible ? 'none' : 'inset(100%)',
+        clipPath: visible ? (app.rect?.clip ?? 'none') : 'inset(100%)',
         pointerEvents: visible ? 'auto' : 'none',
         // Same layer as the SDLC frame: above content, below popovers.
         zIndex: 1,

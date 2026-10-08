@@ -81,12 +81,13 @@ export const ArtifactAppHostView = ({
   const { workspaceId } = useParams<{ workspaceId: string }>();
   const [error, setError] = useState<string | null>(null);
 
-  const { data, isLoading, refetch } = useQuery({
+  const { data, dataUpdatedAt, isLoading, refetch } = useQuery({
     queryKey: ['artifact-app', appId],
     queryFn: () => getArtifactApp(appId),
     enabled: Boolean(appId),
     staleTime: VERSION_CHECK_STALE_MS,
     refetchOnWindowFocus: visible,
+    refetchOnMount: 'always',
   });
 
   // Kept-alive apps never remount, so re-check the version when shown.
@@ -119,15 +120,23 @@ export const ArtifactAppHostView = ({
     return versions.find(v => v.id === preferred) ?? versions[0];
   }, [app, versions]);
 
-  // Owners follow new builds at once; viewers get a reload prompt.
+  // The payload is the build current at mount, so only data fetched since then says what's running.
+  const [mountedAt] = useState(() => Date.now());
+  const fresh = dataUpdatedAt >= mountedAt;
   const [runningVersionId, setRunningVersionId] = useState<string | null>(null);
+  const [reloads, setReloads] = useState(0);
   const isOwner = Boolean(app?.isOwner);
+  const reload = useCallback((): void => {
+    setRunningVersionId(shown?.id ?? null);
+    setReloads(n => n + 1);
+  }, [shown]);
   useEffect(() => {
-    if (!shown) return;
-    if (runningVersionId === null || isOwner) setRunningVersionId(shown.id);
-  }, [shown, isOwner, runningVersionId]);
-  const runningId = runningVersionId ?? shown?.id ?? null;
-  const running = versions.find(v => v.id === runningId) ?? shown;
+    if (!shown || !fresh || shown.id === runningVersionId) return;
+    if (runningVersionId === null) setRunningVersionId(shown.id);
+    // Owners follow new builds at once; viewers get a reload prompt.
+    else if (isOwner) reload();
+  }, [shown, fresh, isOwner, runningVersionId, reload]);
+  const running = versions.find(v => v.id === runningVersionId) ?? shown;
   const updateAvailable = Boolean(shown && runningVersionId && shown.id !== runningVersionId);
 
   const hostContext = useMemo(
@@ -258,7 +267,7 @@ export const ArtifactAppHostView = ({
           <span className='flex-1'>A newer version of this app is available.</span>
           <button
             type='button'
-            onClick={() => setRunningVersionId(shown?.id ?? null)}
+            onClick={reload}
             className='flex items-center gap-1 rounded px-2 py-0.5 font-medium text-foreground hover:bg-accent'
             data-track-category='AskAI'
             data-track-name='ArtifactAppLoadNewerVersion'
@@ -272,12 +281,13 @@ export const ArtifactAppHostView = ({
       <div className='min-h-0 flex-1'>
         {/* Remount on a new build; the payload route serves the current one. */}
         <ReactArtifactView
-          key={runningId ?? ''}
+          key={reloads}
           artifact={artifact}
           fill
           hostContext={hostContext}
           hideTitle={!showPayloadTitle}
           hideSavedIndicator={placement.surface !== 'channel'}
+          active={visible}
           settingsSlot={
             <ArtifactAppSettings
               app={app}
