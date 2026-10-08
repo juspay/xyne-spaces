@@ -6,6 +6,7 @@ import { decrypt } from '@/services/encryptionService';
 import { prepareAppWebhookDispatch } from './appUrlResolver';
 import { safeWebhookFetch } from '@/utils/ssrfGuard';
 import crypto from 'crypto';
+import { repositories } from '@/database/repositories';
 
 const installedAppsRepository = new InstalledAppsRepository();
 
@@ -146,6 +147,47 @@ export async function emitEventToWorkspaceApps(
         logger.info(`[emitEventToWorkspaceApps] Emitted ${event.eventType} to ${appUserIds.length} apps`);
     } catch (error) {
         logger.error(`[emitEventToWorkspaceApps] Failed to emit ${event.eventType}:`, error);
+        // Don't throw - event emission failures should not break the main flow
+    }
+}
+
+/**
+ * Emit an event only to the apps that are participants of a channel — the same
+ * scoping EMAIL uses (dispatchEmailEventForEmailId). Use this instead of
+ * emitEventToWorkspaceApps for channel-bound events so a single edit does not
+ * fan out to every install in the workspace.
+ *
+ * @param channelId - The channel the event belongs to; no-op when empty
+ * @param event - The event to emit (includes eventType, payload, timestamp)
+ * @param options - Optional: excludeUserId to exclude a specific user (e.g., sender)
+ */
+export async function emitEventToChannelApps(
+    channelId: string,
+    event: BaseAppEvent,
+    options?: { excludeUserId?: string }
+): Promise<void> {
+    try {
+        if (!channelId) {
+            logger.debug(`[emitEventToChannelApps] No channelId for ${event.eventType}; skipping`);
+            return;
+        }
+
+        let appUserIds = await repositories.channelParticipants.getAppParticipantUserIds(channelId);
+
+        if (options?.excludeUserId) {
+            appUserIds = appUserIds.filter(id => id !== options.excludeUserId);
+        }
+
+        if (appUserIds.length === 0) {
+            logger.debug(`[emitEventToChannelApps] No apps to notify for ${event.eventType} in channel ${channelId}`);
+            return;
+        }
+
+        await handleEventSubscriptionsForUsers(event, appUserIds);
+
+        logger.info(`[emitEventToChannelApps] Emitted ${event.eventType} to ${appUserIds.length} apps in channel ${channelId}`);
+    } catch (error) {
+        logger.error(`[emitEventToChannelApps] Failed to emit ${event.eventType}:`, error);
         // Don't throw - event emission failures should not break the main flow
     }
 }
