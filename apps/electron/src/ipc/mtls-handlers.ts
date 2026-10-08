@@ -11,6 +11,12 @@ import { Logger } from '../services/logger/Logger';
 import { EnrollmentEvent } from '../services/logger/enrollment-events';
 import { safeRecordMetric } from '../services/telemetry';
 import { dashboardLoad, enrollmentDone } from '../services/enrollmentMetrics';
+import { recordIssuedCertificate, startCertificateExpiryWatcher } from '../services/mtls-recovery';
+import {
+    clearEnrollmentReason,
+    getEnrollmentReason,
+    type EnrollmentReasonRecord,
+} from '../services/enrollment-reason';
 
 const MAX_RETRIES = 3;
 
@@ -128,6 +134,13 @@ export function setupMTLSIpcHandlers(): void {
         assertMainWindowSender(event);
         try {
             await keychain.importCertificate(pem);
+
+            // Stored before the frontend loads so the expiry watcher has a date to work with
+            // from this point on, and cleared of any stale "why are you enrolling" reason now
+            // that the device is healthy again.
+            recordIssuedCertificate(pem);
+            clearEnrollmentReason();
+
             Logger.info(EnrollmentEvent.ENROLLMENT_SUCCESS, { 
                 certificate_imported: true,
                 next_step: 'loading_frontend'
@@ -154,6 +167,7 @@ export function setupMTLSIpcHandlers(): void {
             });
             // Switch logger to use protected URL
             Logger.enablePostEnrollmentLogging();
+            startCertificateExpiryWatcher();
         } catch (error) {
             Logger.logError(EnrollmentEvent.CERTIFICATE_STORAGE_FAILED, error);
             throw error;
@@ -168,6 +182,18 @@ export function setupMTLSIpcHandlers(): void {
     ipcMain.handle('check-keys', async (event) => {
         assertMainWindowSender(event);
         return await keychain.checkIdentity(config.MTLS_IDENTITY_NAME);
+    });
+
+    // Read by the enrollment page so it can tell the user why they are seeing it — an expired
+    // certificate the app removed on its own reads as a silent logout otherwise.
+    ipcMain.handle('get-enrollment-reason', async (event): Promise<EnrollmentReasonRecord | null> => {
+        assertMainWindowSender(event);
+        return getEnrollmentReason();
+    });
+
+    ipcMain.handle('clear-enrollment-reason', async (event) => {
+        assertMainWindowSender(event);
+        clearEnrollmentReason();
     });
 
     ipcMain.handle('get-device-info', async (event) => {

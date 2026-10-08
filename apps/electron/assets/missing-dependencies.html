@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>Missing System Packages</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #F5F5F5;
+            color: #181B25;
+        }
+
+        .container {
+            text-align: center;
+            padding: 3rem 2.5rem;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0px 2px 8px 1px rgba(5, 5, 6, 0.07);
+            max-width: 560px;
+            width: 90%;
+        }
+
+        .icon-container {
+            width: 64px;
+            height: 64px;
+            margin: 0 auto 1.5rem;
+            background: linear-gradient(135deg, #FFF3DC 0%, #FFE8BF 100%);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .icon {
+            width: 32px;
+            height: 32px;
+            color: #D98A00;
+        }
+
+        h1 {
+            font-size: 24px;
+            margin-bottom: 0.75rem;
+            color: #181B25;
+            font-weight: 600;
+            letter-spacing: -0.01em;
+        }
+
+        p {
+            margin-bottom: 1.25rem;
+            line-height: 1.6;
+            color: #525866;
+            font-size: 15px;
+        }
+
+        .tools {
+            font-weight: 600;
+            color: #181B25;
+        }
+
+        pre {
+            text-align: left;
+            background: #0F1115;
+            color: #E8EAED;
+            padding: 14px 16px;
+            border-radius: 6px;
+            font-size: 13px;
+            line-height: 1.6;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-break: break-word;
+            margin: 0 0 1.5rem;
+        }
+
+        button {
+            background-color: #181B25;
+            color: white;
+            border: none;
+            padding: 12px 32px;
+            border-radius: 6px;
+            font-size: 15px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            width: 100%;
+            max-width: 240px;
+        }
+
+        button:hover {
+            background-color: #2A2E3A;
+        }
+
+        .footer-text {
+            margin-top: 2rem;
+            margin-bottom: 0;
+            font-size: 13px;
+            color: #717784;
+            line-height: 1.5;
+        }
+
+        .footer-text a {
+            color: #181B25;
+            font-weight: 500;
+            text-decoration: none;
+        }
+
+        .footer-text a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="icon-container">
+            <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z">
+                </path>
+            </svg>
+        </div>
+        <h1>Missing system packages</h1>
+        <p>
+            Xyne Spaces stores your device certificate in the system certificate database, and the
+            tools it needs are not installed on this machine:
+            <span class="tools" id="tools"></span>
+        </p>
+        <p>Run this in a terminal, then reopen the app:</p>
+        <pre id="hint"></pre>
+        <button id="retryBtn">Retry</button>
+        <p class="footer-text">
+            Your existing certificate has not been removed.<br>
+            Need help? Contact support in
+            the <a target="_blank" rel="noopener noreferrer"
+                href="https://juspay.slack.com/archives/C0A2BFNLBB8">#xyne-spaces-troubleshooting</a> Slack channel.
+        </p>
+    </div>
+    <script>
+        // textContent only — the values arrive via the query string and are never treated as markup.
+        const params = new URLSearchParams(location.search);
+        document.getElementById('tools').textContent = params.get('tools') || 'certutil, pk12util';
+        document.getElementById('hint').textContent =
+            params.get('hint') || 'sudo apt install libnss3-tools';
+
+        document.getElementById('retryBtn').addEventListener('click', () => {
+            if (window.electronAPI && window.electronAPI.reloadApp) {
+                window.electronAPI.reloadApp();
+            } else {
+                location.reload();
+            }
+        });
+    </script>
+</body>
+
+</html>

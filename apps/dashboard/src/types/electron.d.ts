@@ -85,6 +85,17 @@ export interface ElectronAPI {
   ) => () => void;
   onAuthSuccess: (callback: () => void) => void;
   onTokenExpired: (callback: (payload?: { url?: string; resourceType?: string }) => void) => void;
+  /**
+   * Why the device was dropped back to enrollment. Optional: absent on Electron builds older
+   * than the one that added it.
+   */
+  getEnrollmentReason?: () => Promise<{
+    reason: string;
+    recordedAt: string;
+    certificateExpiredAt?: string;
+    detail?: string;
+  } | null>;
+  clearEnrollmentReason?: () => Promise<void>;
   showBrowserView: (config: {
     url: string;
     userAgent: string;

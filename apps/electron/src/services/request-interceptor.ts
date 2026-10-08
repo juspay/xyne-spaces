@@ -7,6 +7,7 @@ import { existsSync, mkdirSync } from 'fs';
 import Logger from 'electron-log';
 import { EnrollmentEvent } from './logger/enrollment-events';
 import { showScreenPicker } from './screen-picker';
+import { isClientAuthFailure, reportClientAuthFailure } from './mtls-recovery';
 import Store from 'electron-store';
 
 let mainWindow: BrowserWindow | null = null;
@@ -349,6 +350,14 @@ export function setupRequestInterceptor(): void {
         url: details.url,
         error: details.error,
       });
+
+      // A client-auth TLS failure against our own backend means the device certificate is no
+      // longer usable. Reported here rather than left to fail silently, so an expiry or
+      // revocation mid-session recovers into enrollment instead of leaving the dashboard
+      // running with every request failing until the user quits and reopens the app.
+      if (isClientAuthFailure(details.error)) {
+        reportClientAuthFailure({ url: details.url, errorCode: details.error });
+      }
     }
   );
 }

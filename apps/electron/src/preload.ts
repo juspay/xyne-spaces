@@ -249,6 +249,12 @@ const electronAPI = {
   deleteKeys: (commonName: string) => ipcRenderer.invoke('delete-keys', commonName),
   checkKeys: (commonName: string) => ipcRenderer.invoke('check-keys', commonName),
   getDeviceInfo: () => ipcRenderer.invoke('get-device-info'),
+  /**
+   * Why the enrollment screen is showing: null for a user-initiated enrollment, or a record
+   * naming the certificate failure that made the app remove the old identity itself.
+   */
+  getEnrollmentReason: () => ipcRenderer.invoke('get-enrollment-reason'),
+  clearEnrollmentReason: () => ipcRenderer.invoke('clear-enrollment-reason'),
   setUserEmail: (email: string) => ipcRenderer.send('set-user-email', email),
   getClientSessionId: () => ipcRenderer.invoke('logger:get-client-session-id'),
 

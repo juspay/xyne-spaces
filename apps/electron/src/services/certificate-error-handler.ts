@@ -1,33 +1,28 @@
 import log from 'electron-log/main';
-import { config } from '../app/config';
-import path from 'path';
-import { getMainWindow } from '../window/manager';
-import { keychain } from '../keychain';
-/**
- * SSL/TLS error codes that indicate certificate issues requiring re-enrollment
- */
-const CERTIFICATE_ERROR_CODES = [
-  // Network error codes
-  'ERR_SSL_CLIENT_AUTH_SIGNATURE_FAILED',
-  'ERR_BAD_SSL_CLIENT_AUTH_CERT',
-];
+import {
+  isClientAuthFailure,
+  isStoredCertificateExpired,
+  recoverFromDeadCertificate,
+} from './mtls-recovery';
+import { EnrollmentReason, type EnrollmentReasonType } from './enrollment-reason';
 
 /**
- * Check if an error string indicates a certificate problem
+ * Check if an error string indicates the server rejected our client certificate.
+ *
+ * Only client-auth failures count. A server-trust error (untrusted CA, hostname mismatch) is not
+ * the device certificate's fault, and deleting the device identity over one would cost the user
+ * an enrollment for nothing.
  */
 export function isCertificateError(errorDescription: string): boolean {
-  if (!errorDescription) return false;
-  
-  const upperError = errorDescription.toUpperCase();
-  
-  return CERTIFICATE_ERROR_CODES.some(code => {
-    const upperCode = code.toUpperCase();
-    return upperError.includes(upperCode);
-  });
+  return isClientAuthFailure(errorDescription);
 }
 
 /**
- * Handle certificate error by clearing certificates and redirecting to enrollment
+ * Handle certificate error by clearing the dead certificate and sending the user to enrollment.
+ *
+ * The user-visible reason is derived from the locally stored notAfter: past it, this is an
+ * expiry; otherwise the backend rejected a certificate that should still have been valid
+ * (revoked, or re-issued elsewhere).
  */
 export async function handleCertificateError(
   errorDetails: {
@@ -41,38 +36,13 @@ export async function handleCertificateError(
     errorCode: errorDetails.errorCode,
     errorDescription: errorDetails.errorDescription,
   });
-  try {
-    // Clear the invalid certificate from keychain. A failure here (locked keychain, user
-    // cancels the keychain auth prompt, ACL denial) must NOT prevent loading the
-    // re-enrollment page — that page hosts the only "Re-enroll Device" recovery action,
-    // so aborting into the catch below would trap the user in a permanent dead-end loop.
-    log.info('[CertificateErrorHandler] Clearing invalid certificate from keychain');
-    try {
-      await keychain.deleteIdentity(config.MTLS_IDENTITY_NAME);
-      log.info('[CertificateErrorHandler] Certificate cleared successfully');
-    } catch (deleteError) {
-      log.error('[CertificateErrorHandler] Failed to clear certificate; continuing to re-enrollment page anyway:', deleteError);
-    }
 
-    const mainWindow = getMainWindow();
+  const reason: EnrollmentReasonType = isStoredCertificateExpired()
+    ? EnrollmentReason.CERTIFICATE_EXPIRED
+    : EnrollmentReason.CERTIFICATE_REJECTED;
 
-    if (mainWindow) {
-      // Load the invalid certificate error page
-      const errorPage = path.join(__dirname, '..', '..', 'assets', 'invalid-certificate.html');
-      log.info('[CertificateErrorHandler] Loading invalid certificate page');
-      await mainWindow.loadFile(errorPage);
-    } else {
-      log.error('[CertificateErrorHandler] Main window is not available to reload the app');
-    }
-
-  } catch (error) {
-    log.error('[CertificateErrorHandler] Failed to handle certificate error:', error);
-
-    // Show error dialog to user
-    const { dialog } = require('electron');
-    dialog.showErrorBox(
-      'Certificate Error',
-      'Your device certificate is invalid. Please restart the application to re-enroll.'
-    );
-  }
+  await recoverFromDeadCertificate(reason, {
+    detail: errorDetails.errorCode ?? errorDetails.errorDescription,
+    trigger: 'certificate_error_handler',
+  });
 }

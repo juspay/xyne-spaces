@@ -21,9 +21,16 @@ import {
 } from '../services/incoming-call-window';
 
 import { keychain } from '../keychain';
+import { isKeychainToolingError } from '../keychain/errors';
 import { Logger } from '../services/logger/Logger';
 import { EnrollmentEvent } from '../services/logger/enrollment-events';
 import { handleCertificateError, isCertificateError } from '../services/certificate-error-handler';
+import {
+  checkCertificateExpiry,
+  isStoredCertificateExpired,
+  startCertificateExpiryWatcher,
+} from '../services/mtls-recovery';
+import { EnrollmentReason, setEnrollmentReasonIfAbsent } from '../services/enrollment-reason';
 import { dashboardLoad, enrollmentSkipped, mtlsFrontendLoaded } from '../services/enrollmentMetrics';
 import { safeRecordMetric } from '../services/telemetry';
 import {
@@ -394,6 +401,24 @@ export function setWindowReferences(): void {
   setInterceptorMainWindow(mainWindow);
 }
 
+/**
+ * Shows the "install these packages" page when the platform keystore's external tools are
+ * missing. The install command is passed through the URL query because these asset pages are
+ * plain files with no IPC bootstrap of their own.
+ */
+async function showMissingToolingPage(
+  window: BrowserWindow,
+  missingTools: readonly string[],
+  installHint: string,
+): Promise<void> {
+  const errorPage = path.join(__dirname, '..', '..', 'assets', 'missing-dependencies.html');
+  const search = new URLSearchParams({
+    tools: missingTools.join(', '),
+    hint: installHint,
+  }).toString();
+  await window.loadFile(errorPage, { search });
+}
+
 export async function loadApp(window: BrowserWindow) {
   log.info('[WindowManager] loadApp called');
   log.info('[WindowManager] config.enableMtls:', config.enableMtls);
@@ -404,11 +429,47 @@ export async function loadApp(window: BrowserWindow) {
   
   // check mtls
   if (config.enableMtls) {
-    const mtls = await keychain.checkIdentity(config.MTLS_IDENTITY_NAME);
+    // The keystore's external tooling is verified before anything reads it. Without this a host
+    // missing `certutil` (Linux/NSS) reported "no identity" on every launch and the app
+    // re-enrolled over a perfectly good certificate, over and over.
+    try {
+      await keychain.ensureToolingAvailable?.();
+    } catch (error) {
+      if (isKeychainToolingError(error)) {
+        log.error('[WindowManager] Certificate tooling missing:', error.missingTools);
+        await showMissingToolingPage(window, error.missingTools, error.installHint);
+        return;
+      }
+      throw error;
+    }
+
+    // An expiry already in the past is handled before the identity lookup, so the user gets the
+    // "certificate expired" explanation instead of a bare enrollment screen.
+    if (isStoredCertificateExpired()) {
+      await checkCertificateExpiry('app_load');
+      return;
+    }
+
+    let mtls: boolean;
+    try {
+      mtls = await keychain.checkIdentity(config.MTLS_IDENTITY_NAME);
+    } catch (error) {
+      // The keystore could not be read. That is not the same as "not enrolled", so we must not
+      // push the user through enrollment — show the load error and leave the identity alone.
+      Logger.logError(EnrollmentEvent.UNKNOWN_ERROR, error, { error_at: 'check_identity' });
+      log.error('[WindowManager] Identity check failed; not re-enrolling:', error);
+      const errorPage = path.join(__dirname, '..', '..', 'assets', 'load-error.html');
+      await window.loadFile(errorPage);
+      return;
+    }
+
     log.info("[WindowManager] MTLS Identity Present:", mtls);
 
     if (!mtls) {
       const targetUrl = config.MTLS_FRONTEND_URL;
+      // First-run enrollment is the common case here; only overwrite the reason when the app has
+      // not already recorded a more specific one (expiry, rejection) on the way in.
+      setEnrollmentReasonIfAbsent(EnrollmentReason.CERTIFICATE_MISSING);
       Logger.info(EnrollmentEvent.MTLS_FRONTEND_LOAD, {
         url: targetUrl,
         has_certificate: false,
@@ -420,6 +481,9 @@ export async function loadApp(window: BrowserWindow) {
       if (!isHealthy) {
         return; // certificateHealthCheck will handle the error case and redirect to enrollment
       }
+      // Only watch once a working certificate is confirmed, so the watcher never fires during
+      // enrollment itself.
+      startCertificateExpiryWatcher();
     }
   }
       

@@ -8,6 +8,7 @@ import {
   type NativePushTokenPayload,
   reactNativeBridge,
 } from '../utils/reactNativeBridge';
+import { AuthLogoutReason, setAuthLogoutReason } from '../utils/authLogoutReason';
 import { setupElectronAuthListeners } from '../utils/electronAuth';
 import { usePlatform } from '../hooks/usePlatform';
 import { apiInstance } from '../services/clients/apiClient';
@@ -325,6 +326,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         // The in-memory log buffer would be lost in the teardown ahead.
         logger.pushlogs();
         localStorage.removeItem('user_id');
+        // Same silent-teardown problem as the web 401 path: without this the login screen gives
+        // no hint that a session ended rather than never existing.
+        setAuthLogoutReason(AuthLogoutReason.SESSION_EXPIRED);
         authActor.send({ type: 'LOGOUT' });
       },
     );

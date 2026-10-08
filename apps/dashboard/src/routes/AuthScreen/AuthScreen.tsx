@@ -20,6 +20,7 @@ import {
 } from '../../machines/authMachine';
 import { WorkspaceType } from '@xyne/shared';
 import { getPendingSdkSso, clearPendingSdkSso } from '../../utils/pendingSdkSso';
+import { takeAuthLogoutMessage } from '../../utils/authLogoutReason';
 
 interface CommunityWorkspaceListItem {
   id: string;
@@ -81,6 +82,11 @@ const AuthScreen = (): ReactElement | null => {
   const [password, setPassword] = useState('');
   const [pendingCommunityWorkspaceName, setPendingCommunityWorkspaceName] = useState<string | null>(
     () => localStorage.getItem(PENDING_WORKSPACE_NAME_KEY),
+  );
+  // Read once on mount: the sign-out that redirected here has already finished, and consuming
+  // the reason keeps a later manual reload from repeating a message the user has seen.
+  const [sessionEndedMessage, setSessionEndedMessage] = useState<string | null>(() =>
+    takeAuthLogoutMessage(),
   );
   const [isRequestingEnterpriseJoin, setIsRequestingEnterpriseJoin] = useState(false);
   const [enterpriseJoinRequestMessage, setEnterpriseJoinRequestMessage] = useState('');
@@ -649,6 +655,27 @@ const AuthScreen = (): ReactElement | null => {
                       </p>
                     </div>
                   ) : null}
+                </div>
+              )}
+
+              {/* Automatic sign-out notice (session expiry), distinct from a login failure */}
+              {sessionEndedMessage && !error && (
+                <div
+                  className='p-3 sm:p-4 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-3'
+                  role='status'
+                  aria-live='polite'
+                >
+                  <p className='text-sm sm:text-base text-amber-800 break-words flex-1'>
+                    {sessionEndedMessage}
+                  </p>
+                  <button
+                    type='button'
+                    onClick={() => setSessionEndedMessage(null)}
+                    className='text-amber-700 hover:text-amber-900 text-sm font-medium shrink-0'
+                    aria-label='Dismiss session expiry notice'
+                  >
+                    Dismiss
+                  </button>
                 </div>
               )}
 
