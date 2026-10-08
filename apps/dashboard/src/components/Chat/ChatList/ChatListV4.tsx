@@ -521,6 +521,26 @@ const ChatListV4: React.FC<ChatListProps> = ({
     isMember &&
     !linkedConversationId;
 
+  // Deep link landed on a conversation that isn't the newest: keep IT fixed rather than
+  // the bottom. If the rows below it don't fill the screen the list sits at the end,
+  // and every "stick to bottom" behaviour (followOnAppend, TanStack's at-end resize
+  // adjustment, the near-bottom rule, the last-message auto-scroll) would scroll each
+  // new message into view and push the target up. Released when the target leaves the
+  // screen, or on explicit user intent (see releaseDeepLinkHold); state because the
+  // virtualizer options read it.
+  const [isHoldingDeepLink, setIsHoldingDeepLink] = useState(false);
+  const isHoldingDeepLinkRef = useRef(false);
+  // The held conversation, so the scroll check can tell when it leaves the screen.
+  const heldDeepLinkIdRef = useRef<string | null>(null);
+  /** Holds `conversationId` in place, or releases the hold when null. */
+  const setDeepLinkHold = useCallback((conversationId: string | null): void => {
+    heldDeepLinkIdRef.current = conversationId;
+    const hold = conversationId !== null;
+    if (isHoldingDeepLinkRef.current === hold) return;
+    isHoldingDeepLinkRef.current = hold;
+    setIsHoldingDeepLink(hold);
+  }, []);
+
   // ── TanStack Virtualizer ──────────────────────────────────────────────────────
   // anchorTo: 'end' replaces Virtuoso's firstItemIndex trick and alignToBottom.
   // Prepends are scroll-stable natively as long as getItemKey returns stable conversationIds.
@@ -541,8 +561,10 @@ const ChatListV4: React.FC<ChatListProps> = ({
     // Discussion cards carry their own spacing, so the list ends close to the composer.
     paddingEnd: discussionList ? 12 : 28,
     anchorTo: 'end',
-    followOnAppend: 'auto',
-    scrollEndThreshold: 80,
+    // While a deep link is held: don't follow appends, and a threshold below 0 means the
+    // list is never "at end", which turns off TanStack's at-end resize adjustment.
+    followOnAppend: isHoldingDeepLink ? false : 'auto',
+    scrollEndThreshold: isHoldingDeepLink ? -1 : 80,
     // directDomUpdates: positions are written directly to DOM nodes via TanStack,
     // bypassing React entirely. React only re-renders when the visible index range
     // changes (not on every scroll pixel or measurement).
@@ -584,6 +606,8 @@ const ChatListV4: React.FC<ChatListProps> = ({
     // 'backward' check below never sees the user scrolling up).
     const previousSize = virtualizer.itemSizeCache.get(item.key) ?? item.size;
     if (item.start + previousSize <= scrollTop) return true;
+    // Holding a deep link: rows below it grow downward instead of pinning the bottom.
+    if (isHoldingDeepLinkRef.current) return false;
     const isNearBottom = virtualizer.isAtEnd(80);
     const isLastFewItems = item.index >= instance.options.count - 5;
     return (isNearBottom && isLastFewItems) || virtualizer.scrollDirection === 'backward';
@@ -628,12 +652,16 @@ const ChatListV4: React.FC<ChatListProps> = ({
     [virtualizer],
   );
 
-  // Deep links land with the linked row at the top (below the sticky date pill):
-  // rows below it can then grow or shrink without moving it, and the end-anchor
-  // keeps the top row in place when the list is swapped. The newest row aligns
-  // to the end instead, so the list isn't left with empty space below it.
+  // Deep links land with the linked row exactly at the top edge: rows below it can
+  // then grow or shrink without moving it, and every row above it sits entirely above
+  // the viewport, so their first measurements and later resizes (e.g. media loading)
+  // are compensated by shouldAdjustOnSizeChange. A gap above the target would leave
+  // a row straddling the edge, which isn't compensated. The newest row aligns to the
+  // end instead, so the list isn't left with empty space below it.
   const scrollLinkedConversationIntoView = useCallback(
     (index: number, isLast: boolean): void => {
+      // The newest row is the latest message: keep following new ones as usual.
+      setDeepLinkHold(isLast ? null : String(virtualizer.options.getItemKey(index)));
       if (isLast) {
         virtualizer.scrollToIndex(index, { align: 'end', behavior: 'auto' });
         return;
@@ -643,9 +671,45 @@ const ChatListV4: React.FC<ChatListProps> = ({
         virtualizer.scrollToIndex(index, { align: 'start', behavior: 'auto' });
         return;
       }
-      virtualizer.scrollToOffset(Math.max(0, offsetInfo[0] - SELECTION_SCROLL_TOP_OFFSET));
+      virtualizer.scrollToOffset(offsetInfo[0]);
     },
-    [virtualizer],
+    [setDeepLinkHold, virtualizer],
+  );
+
+  // Explicit "I'm moving on" input: wheel/trackpad and touch on the list, and sending.
+  // These release even while the target is still visible — e.g. at the end of the
+  // list the user can't scroll it off screen, but still expects new messages to follow.
+  const releaseDeepLinkHold = useCallback((): void => {
+    setDeepLinkHold(null);
+  }, [setDeepLinkHold]);
+
+  // Catch-all release: once the held target is off screen, whatever moved it
+  // (keyboard, jump buttons, find-in-page…), there's nothing left to hold. Runs a
+  // frame after the scroll event so the virtualizer has read the new offset, and
+  // uses its range (recomputed, from its own offset and measurements) rather than the
+  // DOM: right after rows are inserted above, the DOM scrollTop lags the virtualizer
+  // and the target would look off screen.
+  const holdCheckFrameRef = useRef<number | null>(null);
+  const scheduleHeldTargetCheck = useCallback((): void => {
+    if (!heldDeepLinkIdRef.current || holdCheckFrameRef.current !== null) return;
+    holdCheckFrameRef.current = requestAnimationFrame(() => {
+      holdCheckFrameRef.current = null;
+      const heldId = heldDeepLinkIdRef.current;
+      if (!heldId) return;
+      const range = virtualizer.calculateRange();
+      if (!range) return;
+      const { getItemKey } = virtualizer.options;
+      for (let i = range.startIndex; i <= range.endIndex; i++) {
+        if (getItemKey(i) === heldId) return;
+      }
+      setDeepLinkHold(null);
+    });
+  }, [setDeepLinkHold, virtualizer]);
+  useEffect(
+    () => (): void => {
+      if (holdCheckFrameRef.current !== null) cancelAnimationFrame(holdCheckFrameRef.current);
+    },
+    [],
   );
 
   // ── Queries ───────────────────────────────────────────────────────────────────
@@ -1117,7 +1181,12 @@ const ChatListV4: React.FC<ChatListProps> = ({
 
       requestAnimationFrame(() => {
         const scrollToLinkedConversation = (): boolean => {
-          if (isConversationFullyVisible(linkedConversationId, idx)) return false;
+          if (isConversationFullyVisible(linkedConversationId, idx)) {
+            // Already on screen, so no scroll — but still hold it like any deep-link
+            // landing, so new messages don't push it up.
+            setDeepLinkHold(isLast ? null : linkedConversationId);
+            return false;
+          }
           scrollLinkedConversationIntoView(idx, isLast);
           return true;
         };
@@ -1177,7 +1246,11 @@ const ChatListV4: React.FC<ChatListProps> = ({
     if (lastConversationAutoScrollKey === lastAutoScrollKeyRef.current) return;
     lastAutoScrollKeyRef.current = lastConversationAutoScrollKey;
 
-    if (virtualizer.isAtEnd(80) && latestConversationsListRef.current.length === 0) {
+    if (
+      !isHoldingDeepLinkRef.current &&
+      virtualizer.isAtEnd(80) &&
+      latestConversationsListRef.current.length === 0
+    ) {
       window.setTimeout(() => {
         virtualizer.scrollToEnd();
       }, 80);
@@ -1190,6 +1263,8 @@ const ChatListV4: React.FC<ChatListProps> = ({
   useEffect(() => {
     const handler = (e: Event): void => {
       if ((e as CustomEvent<{ channelId: string }>).detail?.channelId !== channelId) return;
+      // Sending is "take me to the latest": stop holding a deep-link target.
+      releaseDeepLinkHold();
       const latest = latestConversationsListRef.current;
       if (latest.length > 0) {
         const first = latest[0];
@@ -1208,7 +1283,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
     // ChatInput dispatches 'xyne:chat-message-sent'
     window.addEventListener('xyne:chat-message-sent', handler);
     return () => window.removeEventListener('xyne:chat-message-sent', handler);
-  }, [channelId, virtualizer]);
+  }, [channelId, releaseDeepLinkHold, virtualizer]);
 
   // ── In-window mutation reconciliation ────────────────────────────────────────
   useEffect(() => {
@@ -1663,6 +1738,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
     if (!el || combinedMessages.length === 0) return;
 
     lifecycleRef.current.initialPositionSet = true;
+    scheduleHeldTargetCheck();
 
     const distanceFromEnd = Math.max(el.scrollHeight - el.clientHeight - el.scrollTop, 0);
     // Near-bottom: within ~300px of end (DOM-based, avoids virtualizer scroll lag)
@@ -1757,6 +1833,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
     conversations,
     shouldUseCutoffQuery,
     inViewAnchor,
+    scheduleHeldTargetCheck,
     virtualizer,
   ]);
 
@@ -1910,6 +1987,8 @@ const ChatListV4: React.FC<ChatListProps> = ({
       <div
         ref={parentRef}
         onScroll={handleScroll}
+        onWheel={releaseDeepLinkHold}
+        onTouchMove={releaseDeepLinkHold}
         onClickCapture={handleMessageListClick}
         style={{ height: '100%', overflow: 'auto', zIndex: 0, overflowAnchor: 'none' }}
         className='no-scrollbar'
