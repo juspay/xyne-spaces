@@ -1,3 +1,10 @@
+## [1.480.0](https://github.com/juspay/xyne-spaces/compare/v1.479.0...v1.480.0) (2026-10-08)
+
+
+### Features
+
+* notification-on-disconnect-and-errors ([#2810](https://github.com/juspay/xyne-spaces/issues/2810)) ([2dc897a](https://github.com/juspay/xyne-spaces/commit/2dc897a31ef1794014d98d439751eebf560f2a32))
+
 ## [1.479.0](https://github.com/juspay/xyne-spaces/compare/v1.478.0...v1.479.0) (2026-10-08)
 
 
