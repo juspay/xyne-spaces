@@ -373,8 +373,7 @@ const ConversationPanelV2 = ({
             (canvasId ? <CanvasScreen canvasId={canvasId} /> : <CanvasTab channelId={channelId} />)}
           {tab === 'links' && <LinksTab channelId={channelId} />}
           {appIdOf(tab) !== null && (
-            // An artifact app the user added as a tab. Keyed on the app so each
-            // tab claims its own pooled sandbox, which stays alive when you switch away.
+            // An artifact app the user added as a tab; keyed so each app gets its own pooled sandbox.
             <ArtifactAppHost
               key={tab}
               appId={appIdOf(tab) ?? ''}

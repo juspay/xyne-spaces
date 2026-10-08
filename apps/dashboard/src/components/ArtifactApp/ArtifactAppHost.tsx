@@ -5,10 +5,7 @@ import type { SlotProps } from './artifactAppPool.state';
 
 export type { ArtifactAppPlacement };
 
-/**
- * A saved app, running. Reserves this box and reports it; ArtifactAppPoolHost
- * (mounted in AppRoot) draws the app over it and keeps it alive afterwards.
- */
+/** Reserves this box; ArtifactAppPoolHost draws the app over it and keeps it alive. */
 export const ArtifactAppHost = ({
   appId,
   placement,
@@ -25,7 +22,7 @@ export const ArtifactAppHost = ({
   propsRef.current = props;
   const propsKey = JSON.stringify(props);
 
-  // Layout effect, so the app is claimed before paint and a returning app never flashes hidden.
+  // Layout effect so a returning app never flashes hidden.
   useLayoutEffect(() => pool.mount(slotId, appId, propsRef.current, backRef), [slotId, appId]);
 
   useEffect(() => {
@@ -46,7 +43,7 @@ export const ArtifactAppHost = ({
     };
     publish();
 
-    // Per frame rather than on resize/scroll events: content shifting above the slot moves it without firing either.
+    // Polled per frame: a slot can move without any resize or scroll event.
     let frame = requestAnimationFrame(function track() {
       publish();
       frame = requestAnimationFrame(track);

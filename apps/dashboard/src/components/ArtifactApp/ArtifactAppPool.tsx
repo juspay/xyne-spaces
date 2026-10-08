@@ -25,7 +25,7 @@ import {
 
 type BackRef = MutableRefObject<(() => void) | undefined>;
 
-// Module-level so slots anywhere under AppRoot reach the one host without a provider around the shell.
+// Module-level so slots reach the host without a provider around the shell.
 let poolState: PoolState = initialPoolState;
 const listeners = new Set<() => void>();
 const backRefs = new Map<string, BackRef>();
@@ -58,7 +58,7 @@ export const artifactAppPool = {
   },
 };
 
-// Memoized so a slot moving every frame (a panel being dragged) restyles the frame without re-rendering the app.
+// Memoized so per-frame moves don't re-render the app.
 const PooledAppView = memo(ArtifactAppHostView);
 
 const PooledAppFrame = memo(({ app }: { app: PooledApp }): ReactElement => {
@@ -66,7 +66,7 @@ const PooledAppFrame = memo(({ app }: { app: PooledApp }): ReactElement => {
   const owner = ownerSlotId(app);
   const frameRef = useRef<HTMLDivElement | null>(null);
 
-  // A hidden app must not keep keyboard focus, or typing lands in an app nobody can see.
+  // A hidden app must not keep keyboard focus.
   useEffect(() => {
     const active = document.activeElement;
     if (!visible && active instanceof HTMLElement && frameRef.current?.contains(active)) {
@@ -90,11 +90,11 @@ const PooledAppFrame = memo(({ app }: { app: PooledApp }): ReactElement => {
         width: app.rect?.width ?? 0,
         height: app.rect?.height ?? 0,
         visibility: visible ? 'visible' : 'hidden',
-        // A descendant can override `visibility` (Sandpack's preview iframe does); opacity and clip-path can't be undone from inside.
+        // Sandpack's iframe overrides `visibility`; opacity and clip-path can't be undone from inside.
         opacity: visible ? 1 : 0,
         clipPath: visible ? 'none' : 'inset(100%)',
         pointerEvents: visible ? 'auto' : 'none',
-        // Same layer as the SDLC frame: above page content, below popovers and modals.
+        // Same layer as the SDLC frame: above content, below popovers.
         zIndex: 1,
       }}
     >
@@ -110,14 +110,7 @@ const PooledAppFrame = memo(({ app }: { app: PooledApp }): ReactElement => {
 });
 PooledAppFrame.displayName = 'PooledAppFrame';
 
-/**
- * Keeps recently opened artifact apps running across tabs and routes.
- *
- * Apps render here, portalled to document.body, and are positioned over the
- * slot the current screen reports — the SdlcFrameHost pattern. Moving an iframe
- * in the DOM reloads it, so a slot never owns the app, only its geometry.
- * Mounted once in AppRoot; every ArtifactAppHost renders through it.
- */
+/** Keeps recent apps running, drawn over their slots like SdlcFrameHost; moving an iframe would reload it. */
 const ArtifactAppPoolHost = (): ReactElement | null => {
   const state = useSyncExternalStore(subscribe, getState);
   const { workspaceId } = useParams<{ workspaceId?: string }>();
@@ -135,7 +128,7 @@ const ArtifactAppPoolHost = (): ReactElement | null => {
     return (): void => container.remove();
   }, [container]);
 
-  // Another workspace's apps must not keep running behind this one.
+  // Drop another workspace's hidden apps.
   useEffect(() => {
     dispatch({ type: 'dropHidden' });
   }, [workspaceId]);

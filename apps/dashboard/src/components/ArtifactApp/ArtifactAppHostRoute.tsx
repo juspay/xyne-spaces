@@ -12,8 +12,7 @@ interface ArtifactAppHostRouteProps {
 /**
  * `/:workspaceId/app/:appId` (full screen) and `/:workspaceId/chat/dir/app/:appId`
  * (inside the chat panel) both mount this: the route decides the box, the host
- * fills it. Keyed on the app so each bar app claims its own pooled sandbox
- * rather than reusing one app's iframe for another's payload.
+ * fills it. Keyed on the app so each app gets its own pooled sandbox.
  */
 export const ArtifactAppHostRoute = ({ placement }: ArtifactAppHostRouteProps): ReactElement => {
   const { appId } = useParams<{ appId?: string }>();

@@ -1,6 +1,6 @@
 import type { ArtifactAppPlacement } from './ArtifactAppHostView';
 
-/** Hidden apps kept running after their screen closes (~60–100 MB each, measured); the least recently shown is dropped first. */
+/** Hidden apps kept running (~60–100 MB each); least recently shown goes first. */
 export const MAX_HIDDEN_APPS = 3;
 
 export interface SlotRect {
@@ -26,15 +26,15 @@ export interface PooledApp {
   appId: string;
   /** Mounted slots showing this app; the last one owns it. */
   slots: Slot[];
-  /** The owner's props, kept after it unmounts so a hidden app keeps its context. */
+  /** Last owner's props, kept while hidden. */
   props: SlotProps;
-  /** Last non-empty rect, kept while hidden so the app is never re-laid out at 0×0. */
+  /** Last non-empty rect, so a hidden app never lays out at 0×0. */
   rect: SlotRect | null;
   lastUsed: number;
 }
 
 export interface PoolState {
-  /** Insertion order, never reordered — React moving a keyed iframe reloads it. */
+  /** Never reordered: React moving an iframe reloads it. */
   apps: PooledApp[];
   seq: number;
   maxHidden: number;
@@ -74,7 +74,7 @@ function sameRect(a: SlotRect | null, b: SlotRect | null): boolean {
   return a.top === b.top && a.left === b.left && a.width === b.width && a.height === b.height;
 }
 
-/** Re-derives the app's props and rect from whichever slot owns it now. */
+/** Takes props and rect from the current owner slot. */
 function settle(app: PooledApp, slots: Slot[]): PooledApp {
   const owner = slots[slots.length - 1];
   const props = owner && !sameProps(owner.props, app.props) ? owner.props : app.props;
@@ -146,8 +146,7 @@ export function poolReducer(state: PoolState, action: PoolAction): PoolState {
             )
           : app,
       );
-      // No trim here: switching apps unmounts the old slot before the new one mounts, and trimming in
-      // between would evict the app being switched to. The next mount trims.
+      // No trim: a switch unmounts before it mounts, so trimming here could evict the target.
       return { ...state, apps };
     }
 

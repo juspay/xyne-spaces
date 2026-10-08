@@ -16,7 +16,7 @@ function originOf(url: unknown): string | null {
   }
 }
 
-/** The app's window plus the bundler origin it booted on — a link that navigates the frame away keeps the window but not the origin. */
+/** App window plus its boot origin, so a frame navigated elsewhere stops matching. */
 export function artifactFrame(
   previewRef: MutableRefObject<SandpackPreviewRef | null>,
 ): ArtifactFrame | null {
@@ -24,7 +24,7 @@ export function artifactFrame(
   const iframe = client?.iframe;
   const frameWindow = iframe?.contentWindow;
   if (!client || !iframe || !frameWindow) return null;
-  // `bundlerURL` is on the runtime client, not the base type `getClient` returns.
+  // `bundlerURL` exists only on the runtime client.
   const origin = originOf((client as { bundlerURL?: unknown }).bundlerURL) ?? originOf(iframe.src);
   return origin ? { window: frameWindow, origin } : null;
 }

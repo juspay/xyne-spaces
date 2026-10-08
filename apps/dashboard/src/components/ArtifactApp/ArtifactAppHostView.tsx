@@ -56,7 +56,7 @@ export interface ArtifactAppHostProps {
   onBack?: () => void;
 }
 
-/** How long a running app trusts its version info before re-checking for a newer build. */
+/** Age after which a running app re-checks for a new build. */
 const VERSION_CHECK_STALE_MS = 30_000;
 
 /**
@@ -74,7 +74,7 @@ export const ArtifactAppHostView = ({
   showPayloadTitle = false,
   visible = true,
 }: ArtifactAppHostProps & {
-  /** False while pooled off-screen; it only re-checks the version when shown. */
+  /** False while pooled off-screen. */
   visible?: boolean;
 }): ReactElement => {
   const queryClient = useQueryClient();
@@ -89,7 +89,7 @@ export const ArtifactAppHostView = ({
     refetchOnWindowFocus: visible,
   });
 
-  // A kept-alive app is never remounted, so coming back on screen is when it looks for a newer build.
+  // Kept-alive apps never remount, so re-check the version when shown.
   useEffect(() => {
     if (!visible || !appId) return;
     void queryClient.refetchQueries({
@@ -119,7 +119,7 @@ export const ArtifactAppHostView = ({
     return versions.find(v => v.id === preferred) ?? versions[0];
   }, [app, versions]);
 
-  // The build actually running. Owners follow `shown` at once; viewers are offered it so a session isn't yanked.
+  // Owners follow new builds at once; viewers get a reload prompt.
   const [runningVersionId, setRunningVersionId] = useState<string | null>(null);
   const isOwner = Boolean(app?.isOwner);
   useEffect(() => {
@@ -187,7 +187,7 @@ export const ArtifactAppHostView = ({
     );
   }
 
-  // Only without data: a failed background version check must not tear down a running app.
+  // Not on error alone: a failed background check must not kill a running app.
   if (!app || !artifact) {
     return (
       <div className='flex h-full flex-col items-center justify-center gap-2'>
@@ -270,7 +270,7 @@ export const ArtifactAppHostView = ({
       )}
 
       <div className='min-h-0 flex-1'>
-        {/* Keyed on the running build: the payload route serves the current one, so a remount is the reload. */}
+        {/* Remount on a new build; the payload route serves the current one. */}
         <ReactArtifactView
           key={runningId ?? ''}
           artifact={artifact}
