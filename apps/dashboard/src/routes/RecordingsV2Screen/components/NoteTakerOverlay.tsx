@@ -414,11 +414,11 @@ const RecordingControlBar = ({
             isOn={isScreenShareEnabled}
             disabled={isPaused}
             onClick={onToggleScreenShare}
-            onLabel='Stop sharing screen'
-            offLabel='Share screen'
+            onLabel='Stop recording screen'
+            offLabel='Record screen'
             onIcon={Monitor}
             offIcon={MonitorOff}
-            trackName='screen_share'
+            trackName='record_screen'
           />
         )}
         <MarkMomentButton markedCount={markedCount} onMarkMoment={onMarkMoment} />
