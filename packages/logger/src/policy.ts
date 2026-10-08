@@ -1,10 +1,11 @@
 // Redaction allow-list — config-driven exceptions to the KEY detector.
 //
-// Set once per service via the LOG_REDACT_ALLOW_PATHS env var (Helm `env:`),
-// so no exception is hardcoded in this package. Format: comma-separated
-// `<module>:<dotted.path>` entries, e.g.
+// The value lives in Superposition under REDACT_ALLOW_CONFIG_KEY, so no
+// exception is hardcoded in this package. Each service keeps it current with
+// syncRedactAllowList (or pushes it in with setRedactAllowList). Format:
+// comma-separated `<module>:<dotted.path>` entries (or a JSON array of them), e.g.
 //
-//   LOG_REDACT_ALLOW_PATHS="MobilePush:tokenPreview,UserSessionLogging:changes.fcmTokenPreview"
+//   MobilePush:tokenPreview,UserSessionLogging:changes.fcmTokenPreview
 //
 // - `<module>` must equal the log record's `module` field exactly.
 // - `<dotted.path>` is the field path from the record root; array indices are
@@ -12,12 +13,9 @@
 // - Wildcards are rejected, as are entries without a module or a path.
 // - An allowed field only bypasses the KEY detector. Its string value still goes
 //   through every VALUE pattern (Bearer, JWT, xox*-, sk-, AKIA, PEM, …).
-// - Unset / empty / all-invalid => empty list => strict redaction (fail safe).
-//
-// The value is read once (first use) and cached for the life of the process.
-// Browser bundles have no `process.env`, so they always get the strict default.
+// - Until a value arrives, or when it is empty / all-invalid, redaction is strict.
 
-export const REDACT_ALLOW_ENV = "LOG_REDACT_ALLOW_PATHS";
+export const REDACT_ALLOW_CONFIG_KEY = "log_redact_allow_paths";
 
 export interface RedactAllowList {
   /** module -> allowed dotted paths for that module. */
@@ -60,47 +58,73 @@ export function parseRedactAllowList(raw: string | undefined | null): RedactAllo
   return { byModule, accepted, rejected };
 }
 
-function readEnv(): string | undefined {
-  try {
-    const p = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process;
-    return p?.env?.[REDACT_ALLOW_ENV];
-  } catch {
-    return undefined;
-  }
+function normalizeRaw(raw: unknown): string {
+  if (typeof raw === "string") return raw;
+  if (Array.isArray(raw)) return raw.filter((e): e is string => typeof e === "string").join(",");
+  return "";
 }
 
-let cached: RedactAllowList | undefined;
+let active: RedactAllowList = parseRedactAllowList(undefined);
 
-/** The active allow-list (env read once, then cached). */
+/** The active allow-list (strict until a value is set). */
 export function getRedactAllowList(): RedactAllowList {
-  if (!cached) cached = parseRedactAllowList(readEnv());
-  return cached;
+  return active;
 }
 
-/**
- * Override the active allow-list (tests, or hosts without `process.env`).
- * Pass `undefined` to re-read the env var on next use.
- */
-export function setRedactAllowList(raw: string | undefined): void {
-  cached = raw === undefined ? undefined : parseRedactAllowList(raw);
+/** Replace the active allow-list from a raw config value; anything unusable means strict. */
+export function setRedactAllowList(raw: unknown): RedactAllowList {
+  active = parseRedactAllowList(normalizeRaw(raw));
+  return active;
 }
 
 /** Allowed paths for a record's `module`, or undefined when none apply. */
 export function allowedPathsFor(module: unknown): ReadonlySet<string> | undefined {
   if (typeof module !== "string" || module === "") return undefined;
-  const list = getRedactAllowList();
-  if (list.byModule.size === 0) return undefined;
-  return list.byModule.get(module);
+  if (active.byModule.size === 0) return undefined;
+  return active.byModule.get(module);
+}
+
+export interface RedactAllowSyncOptions {
+  /** Poll interval in ms. Default 60000. */
+  intervalMs?: number;
+  /** Called whenever the applied value changes, e.g. to log accepted/rejected. */
+  onChange?: (list: RedactAllowList) => void;
 }
 
 /**
- * Metadata for the one-line startup log every service emits, so SRE can
- * confirm what the deployed value resolved to. Returns null when the env var
- * is unset/empty (nothing to report).
+ * Poll `fetchRaw` and apply what it returns. `null` (key absent) means strict;
+ * a throw or `undefined` (source unreachable) keeps the last applied list.
+ * Returns a stop function.
  */
-export function describeRedactAllowList(): { accepted: string[]; rejected: string[] } | null {
-  const raw = readEnv();
-  if (typeof raw !== "string" || raw.trim() === "") return null;
-  const list = getRedactAllowList();
-  return { accepted: [...list.accepted], rejected: [...list.rejected] };
+export function syncRedactAllowList(
+  fetchRaw: () => Promise<unknown>,
+  opts: RedactAllowSyncOptions = {},
+): () => void {
+  let applied = "";
+  let stopped = false;
+  const tick = async (): Promise<void> => {
+    let raw: unknown;
+    try {
+      raw = await fetchRaw();
+    } catch {
+      return;
+    }
+    if (stopped || raw === undefined) return;
+    const next = normalizeRaw(raw);
+    if (next === applied) return;
+    applied = next;
+    const list = setRedactAllowList(next);
+    try {
+      opts.onChange?.(list);
+    } catch {
+      // A failing reporter must not stop the sync.
+    }
+  };
+  void tick();
+  const timer = setInterval(() => void tick(), opts.intervalMs ?? 60_000);
+  (timer as { unref?: () => void }).unref?.();
+  return () => {
+    stopped = true;
+    clearInterval(timer);
+  };
 }

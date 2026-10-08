@@ -1,9 +1,12 @@
 import { useEffect } from 'react';
 import { useQuery as useTanStackQuery } from '@tanstack/react-query';
+import { REDACT_ALLOW_CONFIG_KEY } from '@xyne/logger';
+import { useCacConfig } from '@xyne/shared/hooks';
 import { queries } from '../zero/queries';
 import { useCachedQuery } from '../hooks/useCachedQuery';
 import { stateMachineActor } from '../machines/stateMachine';
 import { apiInstance } from '../services/clients/apiClient';
+import { logger } from '../utils/logger';
 
 interface CurrentUserRolesApiResponse {
   success: boolean;
@@ -26,6 +29,11 @@ export const DeferredLoader: React.FC = () => {
     staleTime: 10 * 60 * 1000,
   });
 
+  const { config: logRedactAllowList, isSuccess: logRedactAllowListLoaded } = useCacConfig<unknown>({
+    key: REDACT_ALLOW_CONFIG_KEY,
+    fallbackConfig: null,
+  });
+
   useEffect(() => {
     stateMachineActor.send({
       type: 'SET_UNREAD_ACTIVITIES',
@@ -41,6 +49,10 @@ export const DeferredLoader: React.FC = () => {
       });
     }
   }, [currentUserRolesQuery.isSuccess, currentUserRolesQuery.data]);
+
+  useEffect(() => {
+    if (logRedactAllowListLoaded) logger.setRedactAllowList(logRedactAllowList);
+  }, [logRedactAllowListLoaded, logRedactAllowList]);
 
   return null;
 };

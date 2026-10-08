@@ -25,6 +25,7 @@ import { redisService } from '@/services/redisService'
 //import { vespaWorker } from '@/workers/vespaWorker'
 import { workerScheduler } from './workers';
 import { initializeOpenTelemetry, shutdownOpenTelemetry } from '@/services/otel';
+import { startLogRedactAllowListSync } from '@/services/logRedactAllowList';
 import { callTimeoutWorker } from '@/workers/callTimeoutWorker';
 import { callValidationWorker } from '@/workers/callValidationWorker';
 import { initializeBotRegistry } from '@/bots/registry';
@@ -72,6 +73,7 @@ class WorkerService {
     try {
       // Initialize metrics
       initializeOpenTelemetry();
+      startLogRedactAllowListSync();
 
       await DatabaseClient.connect()
       const isCommonDatabaseConnected = await CommonDatabaseClient.connect()

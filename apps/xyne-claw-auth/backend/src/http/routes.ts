@@ -1,5 +1,6 @@
 import { type Express, type NextFunction, type Request, type Response } from "express";
 import { requestLogger } from "../middleware/requestLogger.js";
+import { logRedactAllowListValue } from "../logger.js";
 import { errorMiddleware } from "../lib/http.js";
 import { serversRouter } from "../routes/servers.js";
 import { connectionsRouter } from "../routes/connections.js";
@@ -203,6 +204,9 @@ function mountCoreApi(app: Express): void {
   app.use(`${BASE}/internal/error-pipeline`, requireStrictS2S, errorPipelineInternalRouter); // run-result callback from xyne-claw (S2S only)
   app.use(`${BASE}/internal/tts`, requireStrictS2S, ttsRouter);
   app.use(`${BASE}/internal/connectors`, requireStrictS2S, connectorsInternalRouter); // connector availability lookup for xyne-claw (S2S only)
+  app.get(`${BASE}/internal/log-redact-allow-paths`, requireStrictS2S, (_req: Request, res: Response) => {
+    res.json({ value: logRedactAllowListValue() }); // log redaction allow-list relayed to xyne-claw
+  });
 }
 
 function mountOAuthProviders(app: Express): void {

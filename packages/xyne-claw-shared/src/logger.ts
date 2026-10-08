@@ -1,7 +1,7 @@
 import winston from "winston";
 import { AsyncLocalStorage } from "node:async_hooks";
 import crypto from "node:crypto";
-import { describeRedactAllowList, shredRecordInPlace } from "@xyne/logger";
+import { getRedactAllowList, shredRecordInPlace, syncRedactAllowList } from "@xyne/logger";
 
 /**
  * Structured JSON logger shared across the claw backend services
@@ -124,11 +124,28 @@ export const logger = winston.createLogger({
   },
 });
 
-// Report the resolved LOG_REDACT_ALLOW_PATHS once per process (only when set),
-// so SRE can confirm in Grafana what the deployed value turned into.
-const redactAllowList = describeRedactAllowList();
-if (redactAllowList) {
-  logger.info("LOG_REDACT_ALLOW_PATHS active", { module: "logger", ...redactAllowList });
+/**
+ * Keep the log redaction allow-list in sync from an upstream S2S endpoint that
+ * returns `{ value }` (Spaces for claw-auth, claw-auth for claw). No key = strict.
+ */
+export function startLogRedactAllowListSync(url: string, s2sKey: string): () => void {
+  if (!s2sKey) return () => {};
+  return syncRedactAllowList(
+    async () => {
+      const res = await fetch(url, { headers: { "x-s2s-key": s2sKey }, signal: AbortSignal.timeout(5_000) });
+      if (!res.ok) return undefined;
+      return ((await res.json()) as { value?: unknown }).value ?? null;
+    },
+    {
+      onChange: ({ accepted, rejected }) =>
+        logger.info("Log redaction allow-list updated", { module: "logger", accepted, rejected }),
+    },
+  );
+}
+
+/** The active allow-list in its config format, for serving to downstream services. */
+export function logRedactAllowListValue(): string {
+  return getRedactAllowList().accepted.join(",");
 }
 
 export type Logger = winston.Logger;

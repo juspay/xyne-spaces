@@ -2,7 +2,7 @@
 // Redacts secret VALUES only (field names kept => frozen Grafana contract intact)
 // via two detectors: by KEY (secret-named field) and by VALUE (secret-shaped
 // string). Cycle-safe, size-capped, control-char scrubbed, and never throws.
-// Per-service exceptions to the KEY detector come from LOG_REDACT_ALLOW_PATHS
+// Exceptions to the KEY detector come from the Superposition allow-list
 // (see policy.ts); nothing is allow-listed in code.
 
 import { allowedPathsFor } from "./policy.js";
@@ -254,7 +254,7 @@ function shredAt(value: unknown, o: Required<ShredOptions>, path: string, allow:
 
 /**
  * Deep-redact a value into a JSON-safe clone. Never throws. When the value is
- * a record with a string `module`, that module's LOG_REDACT_ALLOW_PATHS entries apply.
+ * a record with a string `module`, that module's allow-list entries apply.
  */
 export function shred(value: unknown, opts?: ShredOptions): LogValueOut {
   const o = { ...DEFAULTS, ...opts };

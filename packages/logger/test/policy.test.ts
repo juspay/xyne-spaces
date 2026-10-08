@@ -1,16 +1,15 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { shred, shredRecordInPlace } from "../src/shredder.js";
 import {
-  REDACT_ALLOW_ENV,
-  describeRedactAllowList,
   getRedactAllowList,
   parseRedactAllowList,
   setRedactAllowList,
+  syncRedactAllowList,
 } from "../src/policy.js";
 
 afterEach(() => {
-  delete process.env[REDACT_ALLOW_ENV];
   setRedactAllowList(undefined);
+  vi.useRealTimers();
 });
 
 describe("parseRedactAllowList", () => {
@@ -33,18 +32,50 @@ describe("parseRedactAllowList", () => {
   });
 });
 
-describe("env wiring", () => {
-  it("reads LOG_REDACT_ALLOW_PATHS once and caches it", () => {
-    process.env[REDACT_ALLOW_ENV] = "M:token";
+describe("setRedactAllowList", () => {
+  it("is strict until set, and accepts a JSON array value", () => {
+    expect(getRedactAllowList().accepted).toEqual([]);
+    expect(setRedactAllowList(["M:token", "token"]).rejected).toEqual(["token"]);
     expect(getRedactAllowList().accepted).toEqual(["M:token"]);
-    process.env[REDACT_ALLOW_ENV] = "M:other";
+    setRedactAllowList({ not: "a list" });
+    expect(getRedactAllowList().accepted).toEqual([]);
+  });
+});
+
+describe("syncRedactAllowList", () => {
+  it("applies changes, treats null as strict and keeps the last list on failure", async () => {
+    vi.useFakeTimers();
+    const values: Array<unknown> = ["M:token", "M:token", new Error("down"), undefined, null];
+    const fetchRaw = vi.fn(async () => {
+      const v = values.shift();
+      if (v instanceof Error) throw v;
+      return v;
+    });
+    const onChange = vi.fn();
+    const stop = syncRedactAllowList(fetchRaw, { intervalMs: 1000, onChange });
+
+    await vi.advanceTimersByTimeAsync(0);
     expect(getRedactAllowList().accepted).toEqual(["M:token"]);
+    for (let i = 0; i < 3; i++) await vi.advanceTimersByTimeAsync(1000);
+    expect(getRedactAllowList().accepted).toEqual(["M:token"]);
+    expect(onChange).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(getRedactAllowList().accepted).toEqual([]);
+    expect(onChange).toHaveBeenCalledTimes(2);
+
+    stop();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(fetchRaw).toHaveBeenCalledTimes(5);
   });
 
-  it("describe() returns null when unset and reports rejected entries when set", () => {
-    expect(describeRedactAllowList()).toBeNull();
-    process.env[REDACT_ALLOW_ENV] = "M:token,token";
-    expect(describeRedactAllowList()).toEqual({ accepted: ["M:token"], rejected: ["token"] });
+  it("stays silent while the value stays empty", async () => {
+    vi.useFakeTimers();
+    const onChange = vi.fn();
+    const stop = syncRedactAllowList(async () => null, { intervalMs: 1000, onChange });
+    await vi.advanceTimersByTimeAsync(3000);
+    stop();
+    expect(onChange).not.toHaveBeenCalled();
   });
 });
 

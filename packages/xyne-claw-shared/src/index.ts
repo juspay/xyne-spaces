@@ -162,6 +162,8 @@ export {
   createTraceId,
   withLogContext,
   setLogContext,
+  startLogRedactAllowListSync,
+  logRedactAllowListValue,
 } from "./logger.js";
 export type { LogContext, Logger } from "./logger.js";
 export { AGENT_INTROSPECT_TOOL_DEFS } from "./tools/agent-introspect/index.js";

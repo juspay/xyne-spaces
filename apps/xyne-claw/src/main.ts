@@ -22,7 +22,7 @@ import { beginDraining, isDraining } from "./drain.js";
 import { markRunQueueDrainPaused, startRunQueueWorker } from "./run-queue-worker.js";
 import { startLoopWatchdog, stopLoopWatchdog } from "./loop-watchdog.js";
 import { stopRunControlSubscriber } from "./run-control.js";
-import { createLogger } from "./logger.js";
+import { createLogger, startLogRedactAllowListSync } from "./logger.js";
 const log = createLogger("main");
 
 const DRAIN_TIMEOUT_MS = Number(process.env["DRAIN_TIMEOUT"] ?? 900) * 1_000;
@@ -36,6 +36,10 @@ if (!SERVER.s2sKey) {
   log.error("[startup] FATAL: XYNE_CLAW_S2S_KEY is not set. Refusing to boot an unauthenticated service. Set the key.");
   process.exit(1);
 }
+startLogRedactAllowListSync(
+  `${SERVER.authServiceUrl.replace(/\/+$/, "")}/claw/api/v1/internal/log-redact-allow-paths`,
+  SERVER.s2sKey,
+);
 
 // Sessions are the pod's heaviest writer. Defaulting the location means they
 // land wherever cwd happens to be, which is the container's own writable layer

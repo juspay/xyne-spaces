@@ -377,6 +377,16 @@ export class Logger implements LoggerConfig {
     }
   }
 
+  setRedactAllowList(redactAllowList: unknown): void {
+    if (this.worker) {
+      const message: WorkerMessage = {
+        type: 'SET_REDACT_ALLOW_LIST',
+        payload: { redactAllowList },
+      };
+      this.worker.postMessage(message);
+    }
+  }
+
   setNotificationWsId(notificationWsId: string): void {
     this.notificationWsId = notificationWsId;
     if (this.worker) {

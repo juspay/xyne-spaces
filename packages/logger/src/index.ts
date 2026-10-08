@@ -20,12 +20,13 @@ export {
 } from "./shredder.js";
 
 export {
-  REDACT_ALLOW_ENV,
+  REDACT_ALLOW_CONFIG_KEY,
   parseRedactAllowList,
   getRedactAllowList,
   setRedactAllowList,
-  describeRedactAllowList,
+  syncRedactAllowList,
   type RedactAllowList,
+  type RedactAllowSyncOptions,
 } from "./policy.js";
 
 export { SetOnceContext, emptyContext } from "./context.js";

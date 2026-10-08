@@ -66,17 +66,26 @@ const errorFrom = (value: unknown): Error | undefined => {
   ) as Error | undefined;
 };
 
-export const installElectronLogStackHook = (): void => {
+// Local file/console output skips Logger.log, so shred it here too. Errors are
+// left as-is so their stacks stay multi-line; the stack hook adds a redacted copy.
+const shredLogMessage: (typeof log.hooks)[number] = message => ({
+  ...message,
+  data: message.data.map(item => (item instanceof Error ? item : shred(item, CLIENT_EVENT_SHRED_OPTIONS))),
+});
+
+export const installElectronLogHooks = (): void => {
   log.hooks.push(message => {
     if (message.level !== 'error') return message;
     const error = message.data.map(errorFrom).find(Boolean);
     if (error) message.data.push({ error: serializeError(error) });
     return message;
   });
+  log.hooks.push(shredLogMessage);
 };
 
 // Create logger instance for errors and warnings only
 export const errorLogger = log.create({ logId: 'error' });
+errorLogger.hooks.push(shredLogMessage);
 errorLogger.transports.file.fileName = 'errors.log';
 errorLogger.transports.file.level = 'error'; // Only error
 errorLogger.transports['console'].level = false;

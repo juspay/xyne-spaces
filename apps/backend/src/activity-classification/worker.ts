@@ -3,6 +3,7 @@ import { DatabaseClient } from '../database/client';
 import { CommonDatabaseClient } from '../database/commonClient';
 import { activityClassificationWorkerService } from '../services/activity/activityClassificationWorkerService';
 import { logger } from '../utils/logger';
+import { startLogRedactAllowListSync } from '../services/logRedactAllowList';
 
 config();
 
@@ -22,6 +23,7 @@ const shutdown = async (): Promise<void> => {
 
 const startActivityClassificationWorker = async (): Promise<void> => {
   try {
+    startLogRedactAllowListSync();
     await DatabaseClient.connect();
     const isCommonDatabaseConnected = await CommonDatabaseClient.connect();
     logger.info('Activity classification worker database initialization completed', {

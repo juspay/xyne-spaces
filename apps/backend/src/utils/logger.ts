@@ -2,7 +2,7 @@ import winston from 'winston';
 import { AsyncLocalStorage } from 'async_hooks';
 import fluentLogger from 'fluent-logger';
 import type { Socket } from 'net';
-import { describeRedactAllowList, shredRecordInPlace, shredText } from '@xyne/logger';
+import { shredRecordInPlace, shredText } from '@xyne/logger';
 import { config } from '@/config/env';
 
 export interface LogContext {
@@ -269,13 +269,6 @@ export const logger = winston.createLogger({
     version: '1.0',
   },
 });
-
-// Report the resolved LOG_REDACT_ALLOW_PATHS once per process (only when set),
-// so SRE can confirm in Grafana what the deployed value turned into.
-const redactAllowList = describeRedactAllowList();
-if (redactAllowList) {
-  logger.info('LOG_REDACT_ALLOW_PATHS active', { module: 'logger', ...redactAllowList });
-}
 
 const originalError = logger.error.bind(logger) as (...args: unknown[]) => winston.Logger;
 
