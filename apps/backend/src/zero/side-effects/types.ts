@@ -119,6 +119,10 @@ export interface ConversationLabelMappingPreviousValue {
   conversationId: string;
 }
 
+export interface SdlcEntityLinkPreviousValue {
+  channelId: string | null;
+}
+
 export type PreviousValue =
   | ConversationPreviousValue
   | TicketPreviousValue
@@ -137,7 +141,8 @@ export type PreviousValue =
   | ChannelUserStatusPreviousValue
   | ConversationParticipantPreviousValue
   | ConversationLabelMappingPreviousValue
-  | TicketStageRequestPreviousValue;
+  | TicketStageRequestPreviousValue
+  | SdlcEntityLinkPreviousValue;
 
 export interface TicketStageRequestPreviousValue {
   status: string;
@@ -187,6 +192,7 @@ export const SIDE_EFFECT_OPERATION_CONFIG: SideEffectOperationConfigMap = {
   channel_user_status: ['update'],
   conversation_participants: ['update'],
   ticket_stage_requests: ['insert', 'update', 'upsert'],
+  sdlc_entity_links: ['delete'],
 };
 
 export function createSideEffectJobsAccumulator(): SideEffectJobsAccumulator {

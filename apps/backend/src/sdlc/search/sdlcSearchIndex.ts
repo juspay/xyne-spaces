@@ -20,6 +20,7 @@ import {
   type SdlcContainerType,
   type SdlcDiscussionFields,
   type SdlcFileFields,
+  type SdlcTicketFields,
   type VespaSdlcContainerDocument,
 } from '@/vespa/src/types';
 
@@ -32,9 +33,11 @@ import {
  * [HUB_ITEM] for the Wiki and Hub Knowledge trees. A repository's wiki is the Wiki folder
  * sdlc-wiki-<hubId>-<repoId>, indexed as a REPOSITORY container.
  *
- * Documents, uploads, tickets and conversations are indexed by the one container they sit in
- * (sdlcContainerRef); Vespa imports the rest of their place from it. A ticket or conversation
- * started on a document sits in the document's container and names it (sdlcDocumentId).
+ * Documents, uploads and conversations are indexed by the one container they sit in
+ * (sdlcContainerRef); Vespa imports the rest of their place from it. A conversation started on a
+ * document sits in the document's container and names it (sdlcDocumentId). A ticket can sit in
+ * several places, so its scope ids and documents are fed as lists (sdlcScopeIds,
+ * sdlcDocumentIds).
  */
 export interface SdlcHubIndex {
   hubId: string;
@@ -43,10 +46,10 @@ export interface SdlcHubIndex {
   containers: Map<string, VespaSdlcContainerDocument>;
   /** Canvas id -> its SDLC fields. */
   canvases: Map<string, SdlcFileFields>;
-  /** Uploaded file (message_attachments) id -> its container ref. */
-  attachments: Map<string, string>;
-  /** Ticket id -> its container ref and the document it was raised on. */
-  tickets: Map<string, SdlcDiscussionFields>;
+  /** Uploaded file (message_attachments) id -> its SDLC fields. */
+  attachments: Map<string, SdlcFileFields>;
+  /** Ticket id -> every place it is linked to in this hub, and its linked documents. */
+  tickets: Map<string, SdlcTicketFields>;
   /** Conversation id -> its container ref and the document it was started on. */
   conversations: Map<string, SdlcDiscussionFields>;
   /** Repositories attached to the hub. */
@@ -92,7 +95,12 @@ async function buildSdlcHubIndex(hubId: string, prisma: PrismaClient): Promise<S
   });
   if (!hub || hub.type !== ChannelType.SDLC) return null;
 
-  const links = await prisma.sdlcEntityLink.findMany({ where: { channelId: hubId } });
+  // Oldest first, so where several edges could place one item the first one written wins, the
+  // same way on every sync.
+  const links = await prisma.sdlcEntityLink.findMany({
+    where: { channelId: hubId },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+  });
 
   // item -> the container it is in. A CHANNEL source is the hub itself.
   const parentOf = new Map<string, string>();
@@ -215,14 +223,6 @@ async function buildSdlcHubIndex(hubId: string, prisma: PrismaClient): Promise<S
   };
 
   const typeNames = new Map(canvasFolders.map(f => [f.id, f.name]));
-  const related = new Map<string, Set<string>>();
-  for (const l of links) {
-    if (l.relationType !== 'CONTEXT' || l.sourceType !== 'CANVAS' || l.targetType !== 'CANVAS') continue;
-    for (const [a, b] of [[l.sourceId, l.targetId], [l.targetId, l.sourceId]] as const) {
-      if (!related.has(a)) related.set(a, new Set());
-      related.get(a)!.add(b);
-    }
-  }
   const canvasFields = new Map<string, SdlcFileFields>();
   for (const c of canvases) {
     const containerId = containerOf('CANVAS', c.id);
@@ -231,20 +231,35 @@ async function buildSdlcHubIndex(hubId: string, prisma: PrismaClient): Promise<S
       sdlcContainerRef: sdlcContainerRef(containerId),
       sdlcTypeName: (c.folderId && typeNames.get(c.folderId)) || '',
       sdlcStatus: c.sdlcArtifact?.artifactStatus ?? '',
-      sdlcRelatedDocumentIds: [...(related.get(c.id) ?? [])],
+      sdlcRelatedDocumentIds: [],
     });
   }
 
-  const attachments = new Map<string, string>();
+  const attachments = new Map<string, SdlcFileFields>();
   for (const l of links) {
     if (l.relationType !== SDLC_CONTAINMENT_RELATION || l.targetType !== 'ATTACHMENT') continue;
     const containerId = containerOf('ATTACHMENT', l.targetId);
-    if (containerId) attachments.set(l.targetId, sdlcContainerRef(containerId));
+    if (containerId) {
+      attachments.set(l.targetId, { ...EMPTY_SDLC_FILE_FIELDS, sdlcContainerRef: sdlcContainerRef(containerId), sdlcRelatedDocumentIds: [] });
+    }
+  }
+
+  // Related documents: CONTEXT edges whose two ends are both documents of this hub (a canvas or
+  // an upload), read in both directions.
+  const documentOf = (type: string, id: string): SdlcFileFields | undefined =>
+    type === 'CANVAS' ? canvasFields.get(id) : type === 'ATTACHMENT' ? attachments.get(id) : undefined;
+  for (const l of links) {
+    if (l.relationType !== 'CONTEXT' || l.sourceId === l.targetId) continue;
+    const source = documentOf(l.sourceType, l.sourceId);
+    const target = documentOf(l.targetType, l.targetId);
+    if (!source || !target) continue;
+    if (!source.sdlcRelatedDocumentIds.includes(l.targetId)) source.sdlcRelatedDocumentIds.push(l.targetId);
+    if (!target.sdlcRelatedDocumentIds.includes(l.sourceId)) target.sdlcRelatedDocumentIds.push(l.sourceId);
   }
 
   /**
-   * Where a ticket or conversation started on an item sits: the item's container, and the
-   * item itself when it is an indexed document (a canvas or upload in the hub).
+   * Where a conversation started on an item sits: the item's container, and the item itself
+   * when it is an indexed document (a canvas or upload in the hub).
    */
   const discussionOf = (type: string, id: string): SdlcDiscussionFields | null => {
     const containerId = containerOf(type, id);
@@ -253,23 +268,35 @@ async function buildSdlcHubIndex(hubId: string, prisma: PrismaClient): Promise<S
     return { sdlcContainerRef: sdlcContainerRef(containerId), sdlcDocumentId: isDocument ? id : '' };
   };
 
-  // A ticket's place is that of the item it was raised from (X -> TICKET [TICKET]); a ticket
-  // raised on a track has only the TRACK -> TICKET [TRACK_ITEM] edge.
-  const tickets = new Map<string, SdlcDiscussionFields>();
+  // Tickets. Every item a ticket is linked to is one of its places: X -> TICKET [TICKET] (raised
+  // or linked there), X <-> TICKET [CONTEXT], and TRACK -> TICKET [TRACK_ITEM] (the tracks whose
+  // board holds it). Its scope ids are those of every such item's container, hub first.
+  const tickets = new Map<string, SdlcTicketFields>();
+  const addOnce = (list: string[], value: string) => {
+    if (!list.includes(value)) list.push(value);
+  };
   for (const l of links) {
-    if (l.targetType !== 'TICKET' || l.relationType !== 'TICKET') continue;
-    const place = discussionOf(l.sourceType, l.sourceId);
-    if (place) tickets.set(l.targetId, place);
-  }
-  for (const l of links) {
-    if (l.targetType !== 'TICKET' || l.relationType !== SDLC_CONTAINMENT_RELATION || tickets.has(l.targetId)) continue;
-    const place = discussionOf('TRACK', l.sourceId);
-    if (place) tickets.set(l.targetId, place);
+    const fromItem = l.targetType === 'TICKET' && l.sourceType !== 'TICKET'
+      && (l.relationType === 'TICKET' || l.relationType === 'CONTEXT' || l.relationType === SDLC_CONTAINMENT_RELATION);
+    const toItem = l.sourceType === 'TICKET' && l.targetType !== 'TICKET' && l.relationType === 'CONTEXT';
+    if (!fromItem && !toItem) continue;
+    const [ticketId, itemType, itemId] = fromItem
+      ? [l.targetId, l.sourceType, l.sourceId]
+      : [l.sourceId, l.targetType, l.targetId];
+    const containerId = containerOf(itemType, itemId);
+    if (!containerId) continue;
+    let entry = tickets.get(ticketId);
+    if (!entry) {
+      entry = { sdlcScopeIds: [], sdlcDocumentIds: [] };
+      tickets.set(ticketId, entry);
+    }
+    for (const scopeId of containers.get(containerId)!.scopeIds) addOnce(entry.sdlcScopeIds, scopeId);
+    if (l.relationType !== SDLC_CONTAINMENT_RELATION && documentOf(itemType, itemId)) addOnce(entry.sdlcDocumentIds, itemId);
   }
 
   const conversations = new Map<string, SdlcDiscussionFields>();
   for (const l of links) {
-    if (l.relationType !== 'DISCUSSION' || l.targetType !== 'CONVERSATION') continue;
+    if (l.relationType !== 'DISCUSSION' || l.targetType !== 'CONVERSATION' || conversations.has(l.targetId)) continue;
     const place = discussionOf(l.sourceType, l.sourceId);
     if (place) conversations.set(l.targetId, place);
   }
@@ -294,10 +321,14 @@ export const EMPTY_SDLC_FILE_FIELDS: SdlcFileFields = {
   sdlcRelatedDocumentIds: [],
 };
 
-/** The hub of an item, from the link that files it (or a ticket / discussion link to it). */
-async function hubOfTarget(targetType: string, targetId: string): Promise<string | null> {
+/**
+ * The hub of a conversation: the hub of the oldest edge that places it, among the relations the
+ * hub index places it by.
+ */
+async function hubOfTarget(targetType: string, targetId: string, relationTypes: string[]): Promise<string | null> {
   const link = await db.sdlcEntityLink.findFirst({
-    where: { targetType, targetId },
+    where: { targetType, targetId, relationType: { in: relationTypes } },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     select: { channelId: true },
   });
   return link?.channelId ?? null;
@@ -314,23 +345,42 @@ export async function sdlcFieldsForCanvas(canvas: { id: string; channelId?: stri
 export async function sdlcFieldsForAttachment(attachment: { id: string; entityType?: string | null; entityId?: string | null }): Promise<SdlcFileFields> {
   if (attachment.entityType !== 'SDLC_HUB' || !attachment.entityId) return EMPTY_SDLC_FILE_FIELDS;
   const index = await loadSdlcHubIndex(attachment.entityId);
-  const ref = index?.attachments.get(attachment.id);
-  return ref ? { ...EMPTY_SDLC_FILE_FIELDS, sdlcContainerRef: ref } : EMPTY_SDLC_FILE_FIELDS;
+  return index?.attachments.get(attachment.id) ?? EMPTY_SDLC_FILE_FIELDS;
 }
 
 export const EMPTY_SDLC_DISCUSSION_FIELDS: SdlcDiscussionFields = { sdlcContainerRef: '', sdlcDocumentId: '' };
 
-/** Where a ticket raised in a hub sits; empty outside SDLC. */
-export async function sdlcFieldsForTicket(ticketId: string): Promise<SdlcDiscussionFields> {
-  const hubId = await hubOfTarget('TICKET', ticketId);
-  if (!hubId) return EMPTY_SDLC_DISCUSSION_FIELDS;
-  return (await loadSdlcHubIndex(hubId))?.tickets.get(ticketId) ?? EMPTY_SDLC_DISCUSSION_FIELDS;
+export const EMPTY_SDLC_TICKET_FIELDS: SdlcTicketFields = { sdlcScopeIds: [], sdlcDocumentIds: [] };
+
+/**
+ * Where a ticket sits, across every hub it is linked in; empty outside SDLC. Its scope ids and
+ * documents are the union over all its hubs, in the order its links were made.
+ */
+export async function sdlcFieldsForTicket(ticketId: string): Promise<SdlcTicketFields> {
+  const links = await db.sdlcEntityLink.findMany({
+    where: {
+      OR: [
+        { targetType: 'TICKET', targetId: ticketId, relationType: { in: ['TICKET', 'CONTEXT', SDLC_CONTAINMENT_RELATION] } },
+        { sourceType: 'TICKET', sourceId: ticketId, relationType: 'CONTEXT' },
+      ],
+    },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    select: { channelId: true },
+  });
+  const fields: SdlcTicketFields = { sdlcScopeIds: [], sdlcDocumentIds: [] };
+  for (const hubId of new Set(links.map(l => l.channelId))) {
+    const entry = (await loadSdlcHubIndex(hubId))?.tickets.get(ticketId);
+    if (!entry) continue;
+    fields.sdlcScopeIds.push(...entry.sdlcScopeIds.filter(id => !fields.sdlcScopeIds.includes(id)));
+    fields.sdlcDocumentIds.push(...entry.sdlcDocumentIds.filter(id => !fields.sdlcDocumentIds.includes(id)));
+  }
+  return fields;
 }
 
 /** Where a conversation started in a hub sits; empty outside SDLC. */
 export async function sdlcFieldsForConversation(conversationId: string | null | undefined): Promise<SdlcDiscussionFields> {
   if (!conversationId) return EMPTY_SDLC_DISCUSSION_FIELDS;
-  const hubId = await hubOfTarget('CONVERSATION', conversationId);
+  const hubId = await hubOfTarget('CONVERSATION', conversationId, ['DISCUSSION']);
   if (!hubId) return EMPTY_SDLC_DISCUSSION_FIELDS;
   return (await loadSdlcHubIndex(hubId))?.conversations.get(conversationId) ?? EMPTY_SDLC_DISCUSSION_FIELDS;
 }
