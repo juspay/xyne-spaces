@@ -1,5 +1,6 @@
 import { parseTicketEtaManagement, type TicketEtaManagement } from '@xyne/shared';
 import { notificationService } from '@/services/notificationService';
+import { formatDisplayDate } from '@/utils/dateUtils';
 import { resolveAwarenessRecipients, resolveActionRecipients } from './etaRecipients';
 import type { EvaluateEtaResult } from './index';
 
@@ -117,7 +118,7 @@ export async function dispatchEtaNotifications(
     await notificationService.sendTicketDueDateChangedNotification(
       ctx.ticketId,
       awareness,
-      signals.newEta.toLocaleDateString(),
+      formatDisplayDate(signals.newEta),
       ctx.actorId,
     );
   }

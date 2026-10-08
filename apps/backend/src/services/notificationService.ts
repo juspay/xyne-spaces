@@ -1,4 +1,5 @@
 import { logger } from '@/utils/logger';
+import { DISPLAY_TIME_ZONE } from '@/utils/dateUtils';
 import { getWorkspaceNotificationCountsQuery } from '@/bypassAcl/notificationServices';
 import { repositories } from '@/database/repositories';
 import { websocketService } from './websocketService';
@@ -2393,7 +2394,8 @@ class NotificationService {
     if (recipientUserIds.length === 0) return;
 
     try {
-      const availableAt = new Date(unavailableUntil).toLocaleString(undefined, {
+      const availableAt = new Date(unavailableUntil).toLocaleString('en-US', {
+        timeZone: DISPLAY_TIME_ZONE,
         month: 'short',
         day: 'numeric',
         hour: 'numeric',

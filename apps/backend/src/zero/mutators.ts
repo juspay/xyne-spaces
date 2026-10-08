@@ -1,4 +1,5 @@
 import { ReadonlyJSONValue, Transaction, defineMutator, defineMutators, ApplicationError } from '@rocicorp/zero';
+import { formatDisplayDate } from '../utils/dateUtils';
 import { AutomationStatus } from '../automations/types/status';
 import {
   ChannelRole,
@@ -7033,8 +7034,8 @@ export function createMutators(
             } else if (activity.activityType === ActivityType.PRIORITY) {
               activityMessage = `${userName} changed priority from ${activity.value.oldValue} to ${activity.value.newValue}`;
             } else if (activity.activityType === ActivityType.ETA) {
-              const oldDate = activity.value.oldValue ? new Date(activity.value.oldValue).toLocaleDateString() : 'none';
-              const newDate = activity.value.newValue ? new Date(activity.value.newValue).toLocaleDateString() : 'none';
+              const oldDate = activity.value.oldValue ? formatDisplayDate(activity.value.oldValue) : 'none';
+              const newDate = activity.value.newValue ? formatDisplayDate(activity.value.newValue) : 'none';
               activityMessage = `${userName} updated ETA from ${oldDate} to ${newDate}`;
             } else if (activity.activityType === ActivityType.BOARD) {
               const oldBoard = await tx.run(zql.boards.where('id', activity.value.oldValue).one());
@@ -7492,12 +7493,12 @@ export function createMutators(
             let activityMessage: string;
             if (oldStageEta === null) {
               // New entry - setting deadline for the first time
-              const newDate = new Date(newStageEta).toLocaleDateString();
+              const newDate = formatDisplayDate(newStageEta);
               activityMessage = `${userName} set "${currentStage.name}" stage deadline to ${newDate}`;
             } else {
               // Updating existing deadline
-              const oldDate = new Date(oldStageEta).toLocaleDateString();
-              const newDate = new Date(newStageEta).toLocaleDateString();
+              const oldDate = formatDisplayDate(oldStageEta);
+              const newDate = formatDisplayDate(newStageEta);
               activityMessage = `${userName} updated "${currentStage.name}" stage deadline from ${oldDate} to ${newDate}`;
             }
 
