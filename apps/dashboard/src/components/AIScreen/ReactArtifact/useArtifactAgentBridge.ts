@@ -389,11 +389,12 @@ export function useArtifactAgentBridge({
       }
       if (type === 'agent-run' && runKey && event.data.prompt) {
         // Refused like a write: a run started late would act on what the app saw while hidden.
+        // Event only, not shared state: a run already going under this key must not read as failed.
         if (visibility && !visibility.isActive()) {
-          const state = stateFor(runKey);
-          state.status = 'failed';
-          state.error = 'This app is in the background, so it cannot start an agent.';
-          postEvent(runKey, { kind: 'error', error: state.error });
+          postEvent(runKey, {
+            kind: 'error',
+            error: 'This app is in the background, so it cannot start an agent.',
+          });
           return;
         }
         void startRun(runKey, event.data.prompt, event.data.agentSlug);

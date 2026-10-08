@@ -11,7 +11,7 @@ import { ChannelNoBoardsEmptyState } from '../ChannelInformation/ChannelNoBoards
 import { useDragAndDropAreaRef } from '../../../hooks/useDragAndDropAreaRef';
 import { useConversationTabs } from './ConversationPannel.utils';
 import { appIdOf } from '../../../hooks/barItems';
-import { ArtifactAppHost } from '../../ArtifactApp/ArtifactAppHost';
+import { ArtifactAppSlot } from '../../ArtifactApp/ArtifactAppSlot';
 import { useChannelSubscription } from '../../../hooks/useChannelSubscription';
 import { useScope, useShortcutById } from '../../../shortcuts';
 import { ChannelVisibility, ChannelScopeType } from '@xyne/shared';
@@ -374,7 +374,7 @@ const ConversationPanelV2 = ({
           {tab === 'links' && <LinksTab channelId={channelId} />}
           {appIdOf(tab) !== null && (
             // An artifact app the user added as a tab; keyed so each app gets its own pooled sandbox.
-            <ArtifactAppHost
+            <ArtifactAppSlot
               key={tab}
               appId={appIdOf(tab) ?? ''}
               placement={{

@@ -239,7 +239,7 @@ import { attachmentViewerActor, type AttachmentRef } from '../../machines/attach
 
 import { DeskSettings } from '../../components/xyne-desk/DeskSettings';
 import { DeskAppsMenu } from '../../components/xyne-desk/DeskApps/DeskAppsMenu';
-import { ArtifactAppHost } from '../../components/ArtifactApp/ArtifactAppHost';
+import { ArtifactAppSlot } from '../../components/ArtifactApp/ArtifactAppSlot';
 import { useDeskApps } from '../../components/xyne-desk/DeskApps/useDeskApps';
 import { DeskMetricsDashboard } from '../../components/xyne-desk/DeskMetrics';
 import { TopicsExplorer } from '../../components/xyne-desk/TopicsExplorer';
@@ -4563,7 +4563,7 @@ const SupportScreen = (): ReactElement => {
                 // Apps see the `channel` surface with this desk, so a channel-scoped
                 // app scopes itself to the desk unchanged.
                 <div className='flex-1 min-h-0'>
-                  <ArtifactAppHost
+                  <ArtifactAppSlot
                     key={openDeskAppId}
                     appId={openDeskAppId}
                     onBack={() => showDeskApp(null)}

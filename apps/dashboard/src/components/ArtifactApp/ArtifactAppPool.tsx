@@ -10,7 +10,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { useParams } from 'react-router-dom';
-import { ArtifactAppHostView } from './ArtifactAppHostView';
+import { ArtifactAppHost } from './ArtifactAppHost';
 import {
   initialPoolState,
   isAppVisible,
@@ -68,7 +68,7 @@ export const artifactAppPool = {
 };
 
 // Memoized so per-frame moves don't re-render the app.
-const PooledAppView = memo(ArtifactAppHostView);
+const PooledAppView = memo(ArtifactAppHost);
 
 const PooledAppFrame = memo(({ app }: { app: PooledApp }): ReactElement => {
   const visible = isAppVisible(app);

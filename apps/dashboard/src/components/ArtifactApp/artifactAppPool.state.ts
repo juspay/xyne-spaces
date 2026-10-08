@@ -1,4 +1,4 @@
-import type { ArtifactAppPlacement } from './ArtifactAppHostView';
+import type { ArtifactAppPlacement } from './ArtifactAppHost';
 
 /** Hidden apps kept running (~60–100 MB each); least recently shown goes first. */
 export const MAX_HIDDEN_APPS = 3;
@@ -148,16 +148,21 @@ export function poolReducer(state: PoolState, action: PoolAction): PoolState {
 
     case 'unmount': {
       const { slotId, key } = action;
+      const seq = state.seq + 1;
+      // Recency counts from when an app was last on screen, so leaving it refreshes it too.
       const apps = state.apps.map(app =>
         app.key === key && app.slots.some(s => s.id === slotId)
-          ? settle(
-              app,
-              app.slots.filter(s => s.id !== slotId),
-            )
+          ? {
+              ...settle(
+                app,
+                app.slots.filter(s => s.id !== slotId),
+              ),
+              lastUsed: seq,
+            }
           : app,
       );
       // No trim: a switch unmounts before it mounts, so trimming here could evict the target.
-      return { ...state, apps };
+      return { ...state, apps, seq };
     }
 
     case 'dropHidden': {

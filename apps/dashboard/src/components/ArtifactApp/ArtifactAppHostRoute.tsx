@@ -1,6 +1,7 @@
 import type { ReactElement } from 'react';
 import { useParams } from 'react-router-dom';
-import { ArtifactAppHost, type ArtifactAppPlacement } from './ArtifactAppHost';
+import type { ArtifactAppPlacement } from './ArtifactAppHost';
+import { ArtifactAppSlot } from './ArtifactAppSlot';
 import NotFoundScreen from '../../routes/NotFoundScreen/NotFoundScreen';
 
 interface ArtifactAppHostRouteProps {
@@ -17,5 +18,5 @@ interface ArtifactAppHostRouteProps {
 export const ArtifactAppHostRoute = ({ placement }: ArtifactAppHostRouteProps): ReactElement => {
   const { appId } = useParams<{ appId?: string }>();
   if (!appId) return <NotFoundScreen />;
-  return <ArtifactAppHost key={appId} appId={appId} placement={placement} />;
+  return <ArtifactAppSlot key={appId} appId={appId} placement={placement} />;
 };
