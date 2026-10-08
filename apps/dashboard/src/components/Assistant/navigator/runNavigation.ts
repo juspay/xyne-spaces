@@ -5,10 +5,13 @@ import {
 import {
   collectClickables,
   findLoadingIndicator,
+  openForms,
   snapshotPage,
   type Clickable,
+  type CollectOptions,
 } from './collectClickables';
 import { logClick, logFallback, logRunEnd, logRunStart, logStep } from './navigatorDebug';
+import type { Opener } from './destinations';
 import { resolveGoal } from './resolveGoal';
 import type { NavigatorItems } from './useNavigatorItems';
 
@@ -24,7 +27,10 @@ const AFTER_CLICK_MIN_MS = 200;
 const WAIT_MAX_MS = 6000;
 
 export interface NavigationStep {
+  /** `open`: went straight to a page or form; `click`: clicked an element on screen. */
+  via: 'open' | 'click';
   url: string;
+  /** For `open`, what was opened; for `click`, the clicked element's description. */
   clicked: string;
   urlAfter: string;
   /** False when the click changed neither the url nor what is clickable: a dead end. */
@@ -92,11 +98,12 @@ const sleep = (ms: number, signal: AbortSignal): Promise<void> =>
 async function waitForStableScreen(
   signal: AbortSignal,
   minWaitMs: number,
+  options: CollectOptions = {},
 ): Promise<{ clickables: Clickable[]; wait: ScreenWait }> {
   const started = performance.now();
   if (minWaitMs > 0) await sleep(minWaitMs, signal);
 
-  let clickables = collectClickables();
+  let clickables = collectClickables(options);
   let loader = findLoadingIndicator();
   let signature = '';
   let sameReads = 0;
@@ -117,7 +124,7 @@ async function waitForStableScreen(
     }
 
     await sleep(POLL_MS, signal);
-    clickables = collectClickables();
+    clickables = collectClickables(options);
     loader = findLoadingIndicator();
   }
 }
@@ -136,6 +143,12 @@ const activate = (element: HTMLElement): void => {
   element.dispatchEvent(new MouseEvent('mouseup', init));
   element.click();
 };
+
+/** Opens a form through the event the app already listens for. */
+async function runOpener(opener: Opener, signal: AbortSignal): Promise<void> {
+  window.dispatchEvent(new CustomEvent(opener.name));
+  await waitForStableScreen(signal, AFTER_CLICK_MIN_MS);
+}
 
 /**
  * Drives "take me to <goal>". First it tries to resolve the goal to a path without touching the
@@ -163,29 +176,56 @@ export async function runNavigation(
 
   const resolution = await resolveGoal(goal, deps.getItems(), signal);
   if (signal.aborted) return publish('cancelled');
+
+  // Set when the goal is a form behind a button: the click agent presses it and stops as soon
+  // as the form is open.
+  let formNote: string | null = null;
   if (resolution.kind !== 'fallback') {
     const found = resolution.kind === 'open';
-    const path = found ? resolution.path : resolution.destination.path;
     const label = found ? resolution.label : resolution.destination.title;
+    const path = found ? resolution.path : resolution.destination.path;
     const url = currentUrl();
-    deps.navigate(path);
-    await waitForStableScreen(signal, AFTER_CLICK_MIN_MS);
+    if (found && resolution.opener) {
+      await runOpener(resolution.opener, signal);
+    } else if (path) {
+      deps.navigate(path);
+      await waitForStableScreen(signal, AFTER_CLICK_MIN_MS);
+    }
+    if (signal.aborted) return publish('cancelled');
     const urlAfter = currentUrl();
-    logClick(`opened ${label}`, url, urlAfter, true);
-    run.steps.push({
-      url,
-      clicked: `opened ${label}`,
-      urlAfter,
-      changed: true,
-      confidence: found ? resolution.confidence : 0,
-    });
-    return found
-      ? publish('reached', `opened ${label}`)
-      : publish('stuck', `no ${resolution.itemType} matched, so opened ${label} instead`);
+    if (path || !found || resolution.opener) {
+      logClick(`opened ${label}`, url, urlAfter, true);
+      run.steps.push({
+        via: 'open',
+        url,
+        clicked: label,
+        urlAfter,
+        changed: true,
+        confidence: found ? resolution.confidence : 0,
+      });
+    }
+    if (!found) {
+      return publish('stuck', `no ${resolution.itemType} matched, so opened ${label} instead`);
+    }
+    if (!resolution.finishByClicking) {
+      return publish(
+        'reached',
+        resolution.note ? `Opened ${label}: ${resolution.note}.` : `Opened ${label}.`,
+      );
+    }
+    formNote = resolution.note ?? 'fill it in';
+    logFallback('the form opens from a button: letting Jev find it on screen');
+  } else {
+    logFallback(resolution.reason);
   }
-  logFallback(resolution.reason);
 
-  let screen = await waitForStableScreen(signal, 0);
+  const formMode = formNote !== null;
+  const collectOptions: CollectOptions = { allowFormOpeners: formMode };
+  // Forms already open before any click, so only a newly opened one ends the run.
+  const formsBefore = openForms();
+  const formOpened = (): boolean => [...openForms()].some(form => !formsBefore.has(form));
+
+  let screen = await waitForStableScreen(signal, 0, collectOptions);
   // Elements whose click changed nothing, per page: never offered again this run.
   const deadEnds = new Set<string>();
 
@@ -197,6 +237,7 @@ export async function runNavigation(
     const clickables = screen.clickables.filter(c => !deadEnds.has(deadEndKey(url, c.description)));
     const request: NavigateStepRequest = {
       goal,
+      formMode,
       page: snapshotPage(),
       history: run.steps.map(({ url: from, clicked, urlAfter, changed }) => ({
         url: from,
@@ -242,18 +283,23 @@ export async function runNavigation(
 
     const before = screenSignature(url, screen.clickables);
     activate(target.element);
-    screen = await waitForStableScreen(signal, AFTER_CLICK_MIN_MS);
+    screen = await waitForStableScreen(signal, AFTER_CLICK_MIN_MS, collectOptions);
     const urlAfter = currentUrl();
     const changed = screenSignature(urlAfter, screen.clickables) !== before;
     if (!changed) deadEnds.add(deadEndKey(url, target.description));
     logClick(target.description, url, urlAfter, changed);
     run.steps.push({
+      via: 'click',
       url,
       clicked: target.description,
       urlAfter,
       changed,
       confidence: response.confidence,
     });
+    // The form the user asked for is open: they fill it in and submit, never the navigator.
+    if (formMode && formOpened()) {
+      return publish('reached', `Opened the form: ${formNote}.`);
+    }
     publish('running');
   }
 

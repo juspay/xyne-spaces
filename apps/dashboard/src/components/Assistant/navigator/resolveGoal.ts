@@ -2,7 +2,7 @@ import {
   chooseWithJev,
   type NavigateChooseRequest,
 } from '../../../services/assistantNavigateService';
-import { DESTINATIONS, ITEM_TYPE_WORDS, type Destination } from './destinations';
+import { DESTINATIONS, ITEM_TYPE_WORDS, type Destination, type Opener } from './destinations';
 import { logChoose } from './navigatorDebug';
 import type { NavigatorItem, NavigatorItems } from './useNavigatorItems';
 
@@ -10,8 +10,17 @@ import type { NavigatorItem, NavigatorItems } from './useNavigatorItems';
 const SHORTLIST_SIZE = 60;
 
 export type Resolution =
-  /** Go straight to `path`. */
-  | { kind: 'open'; path: string; label: string; confidence: number }
+  /** Go straight to `path` (if any), then run `opener` (if any). */
+  | {
+      kind: 'open';
+      path: string;
+      label: string;
+      confidence: number;
+      opener?: Opener;
+      /** Go to `path`, then let the click agent press the button that opens the form. */
+      finishByClicking?: true;
+      note?: string;
+    }
   /** The goal is a kind of item (a canvas…) but none of the user's matched: open the list. */
   | { kind: 'itemNotFound'; destination: Destination; itemType: string }
   /** Not a known destination: leave it to the click-by-click agent. */
@@ -97,12 +106,26 @@ export async function resolveGoal(
 
   const destination = DESTINATIONS.find(d => d.id === picked.id);
   if (!destination) return { kind: 'fallback', reason: `unknown destination ${picked.id}` };
+  if (destination.creates && picked.confidence < destination.creates.minConfidence) {
+    // Not sure enough to create something: show where it is made instead.
+    const { fallback } = destination.creates;
+    return {
+      kind: 'open',
+      path: fallback.path,
+      label: fallback.title,
+      confidence: picked.confidence,
+      note: fallback.note,
+    };
+  }
   if (!destination.item) {
     return {
       kind: 'open',
       path: destination.path,
       label: destination.title,
       confidence: picked.confidence,
+      ...(destination.open ? { opener: destination.open } : {}),
+      ...(destination.finishByClicking ? { finishByClicking: true as const } : {}),
+      ...(destination.note ? { note: destination.note } : {}),
     };
   }
 
@@ -126,5 +149,11 @@ export async function resolveGoal(
   if (item.status !== 'chosen') return { kind: 'itemNotFound', destination, itemType };
   const chosen = candidates[Number(item.id.slice(1))];
   if (!chosen) return { kind: 'itemNotFound', destination, itemType };
-  return { kind: 'open', path: chosen.path, label: chosen.label, confidence: item.confidence };
+  return {
+    kind: 'open',
+    path: chosen.path,
+    label: chosen.label,
+    confidence: item.confidence,
+    ...(destination.note ? { note: destination.note } : {}),
+  };
 }

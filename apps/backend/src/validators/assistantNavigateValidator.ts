@@ -12,6 +12,8 @@ const shortText = (max: number) => Joi.string().trim().allow('').max(max);
 
 export const assistantNavigateStepBodySchema = Joi.object({
   goal: Joi.string().trim().min(1).max(MAX_GOAL_CHARS).required(),
+  // The goal is a form behind a button: the run ends when the form opens, never by `reached`.
+  formMode: Joi.boolean().default(false),
   page: Joi.object({
     url: Joi.string().trim().min(1).max(2000).required(),
     title: shortText(300).default(''),

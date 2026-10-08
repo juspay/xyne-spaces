@@ -16,18 +16,24 @@ const CLICKABLE_SELECTOR = [
 const NAV_CONTAINER_SELECTOR =
   'nav, aside, [role="navigation"], [role="tablist"], [role="menu"], [data-sidebar]';
 
-// The navigator only moves around the app; it must never act on the user's behalf. That covers
-// creating things too: "New Canvas" made a fresh canvas on every click until this listed it.
+// The navigator only moves around the app; it must never act on the user's behalf. These words
+// mark buttons that change data and are never offered: "New Canvas" made a fresh canvas on
+// every click until "new" was listed.
 const ACTS_ON_DATA =
-  /\b(delete|remove|log ?out|sign ?out|send|submit|pay|archive|leave|discard|revoke|deactivate|kick|ban|block|reset|clear|unsubscribe|uninstall|disconnect|confirm|new|create|add|start|schedule|invite|upload|import|duplicate|copy|share|join|call|record|compose|generate|publish|save|post|reply|react|pin|unpin|star|unstar|bookmark|mute|unmute|follow|unfollow|subscribe|approve|reject|assign|rename|edit|move|restore|retry|run|install|connect|enable|disable)\b/i;
+  /\b(delete|remove|log ?out|sign ?out|send|submit|pay|archive|leave|discard|revoke|deactivate|kick|ban|block|reset|clear|unsubscribe|uninstall|disconnect|confirm|upload|import|duplicate|copy|share|join|record|generate|publish|save|post|reply|react|pin|unpin|star|unstar|bookmark|mute|unmute|follow|unfollow|subscribe|approve|reject|assign|rename|edit|move|restore|retry|run|install|connect|enable|disable)\b/i;
+
+// Buttons that usually open a form ("Schedule a call", "Invite people", "New ticket"). Blocked
+// too, except when the user asked for that form: then the clicker may press them, and stops the
+// moment a form opens, so the user still does the submitting.
+const OPENS_A_FORM = /\b(new|create|add|start|schedule|invite|compose|call)\b/i;
 
 // `\b` treats `_` as part of a word, so "Create_Canvas" never matched "create"; split
 // snake_case, kebab-case and camelCase into plain words before testing.
 const asWords = (text: string): string =>
   text.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_\-./]+/g, ' ');
 
-const actsOnData = (label: string, trackName: string): boolean =>
-  ACTS_ON_DATA.test(asWords(label)) || ACTS_ON_DATA.test(asWords(trackName));
+const matches = (pattern: RegExp, label: string, trackName: string): boolean =>
+  pattern.test(asWords(label)) || pattern.test(asWords(trackName));
 
 // The navigator can click but not type, so a text field is a dead end: clicking one only
 // focuses it. Search boxes are often a wrapper div around the field, hence the label check.
@@ -54,10 +60,64 @@ const SECTION_CONTENTS: Record<string, readonly string[]> = {
 const sectionContents = (path: string | null): string | null => {
   if (!path) return null;
   const segments = path.split('?')[0]?.split('/').filter(Boolean) ?? [];
-  // Only links to a section's root: /<workspaceId>/<section>.
-  if (segments.length !== 2 || !segments[1]) return null;
-  const contents = SECTION_CONTENTS[segments[1]];
+  // Only links to a section's root: /<section> (the workspace id is already stripped).
+  if (segments.length !== 1 || !segments[0]) return null;
+  const contents = SECTION_CONTENTS[segments[0]];
   return contents ? `contains ${contents.join(', ')}` : null;
+};
+
+/** Extra words for Jev where the visible label is not enough. Never read by analytics. */
+export const NAV_HINT_ATTR = 'data-nav-hint';
+
+// Labelled regions an element can sit in, nearest first: "in Calls header", "in Sidebar".
+const REGION_SELECTOR =
+  'nav[aria-label], aside[aria-label], header[aria-label], section[aria-label], ' +
+  '[role="navigation"][aria-label], [role="region"][aria-label], [role="dialog"][aria-label], ' +
+  '[role="tablist"][aria-label], [role="menu"][aria-label], [role="toolbar"][aria-label]';
+
+// The id of the workspace in the url, so links read "/calls" rather than "/<id>/calls".
+const workspacePrefix = (): string => `/${window.location.pathname.split('/')[1] ?? ''}`;
+
+const stripWorkspace = (path: string): string => {
+  const prefix = workspacePrefix();
+  return path === prefix ? '/' : path.startsWith(`${prefix}/`) ? path.slice(prefix.length) : path;
+};
+
+// Analytics ids and slugs ("channel-calls-toggle", "OPEN_SEARCH") into plain lower-case words.
+const humanize = (id: string): string =>
+  id
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/[_\-.]+/g, ' ')
+    .trim()
+    .toLowerCase();
+
+// A label that is really an id: no spaces, but - or _ inside ("channel-calls-toggle").
+const looksLikeId = (label: string): boolean => !/\s/.test(label) && /[_-]/.test(label);
+
+/** What the element is and does, from the ARIA the app already sets. */
+const kindOf = (element: HTMLElement, path: string | null): string => {
+  if (path) return `link to ${path}`;
+  const role = element.getAttribute('role');
+  const popup = element.getAttribute('aria-haspopup');
+  if (role === 'tab') return 'tab';
+  if (role === 'menuitem') return 'menu item';
+  if (popup === 'dialog') return 'button that opens a dialog';
+  if (popup && popup !== 'false') return 'button that opens a menu';
+  const pressed = element.getAttribute('aria-pressed') ?? element.getAttribute('aria-checked');
+  if (role === 'switch' || pressed === 'true' || pressed === 'false') {
+    return `toggle, currently ${pressed === 'true' ? 'on' : 'off'}`;
+  }
+  const expanded = element.getAttribute('aria-expanded');
+  if (expanded === 'true' || expanded === 'false') {
+    return `button that ${expanded === 'true' ? 'collapses' : 'expands'} a section`;
+  }
+  return 'button';
+};
+
+const regionOf = (element: HTMLElement): string | null => {
+  const region = element.parentElement?.closest(REGION_SELECTOR);
+  const label = clean(region?.getAttribute('aria-label'));
+  return label ? `in ${truncate(label, 40)}` : null;
 };
 
 export interface Clickable {
@@ -142,7 +202,12 @@ const scopeRoot = (): ParentNode => {
 };
 
 /** The visible, safe-to-click elements on screen, each with a description Jev can read. */
-export function collectClickables(): Clickable[] {
+export interface CollectOptions {
+  /** The user asked to open a form: buttons that open one may be offered. */
+  allowFormOpeners?: boolean;
+}
+
+export function collectClickables({ allowFormOpeners = false }: CollectOptions = {}): Clickable[] {
   const seen = new Set<string>();
   const nav: Omit<Clickable, 'id'>[] = [];
   const rest: Omit<Clickable, 'id'>[] = [];
@@ -163,24 +228,28 @@ export function collectClickables(): Clickable[] {
     const trackName = element.getAttribute('data-track-name') ?? '';
     const trackCategory = element.getAttribute('data-track-category') ?? '';
     if (!label && !trackName) continue;
-    if (actsOnData(label, trackName)) continue;
+    if (matches(ACTS_ON_DATA, label, trackName)) continue;
+    if (!allowFormOpeners && matches(OPENS_A_FORM, label, trackName)) continue;
     if (isTypingField(element, label, trackName)) continue;
 
     const path = hrefPath(element);
     if (path === '') continue;
 
     const inNav = element.closest(NAV_CONTAINER_SELECTOR) !== null;
-    const role = element.getAttribute('role');
-    const contents = sectionContents(path);
-    const parts = [label || trackName.toLowerCase().replace(/_/g, ' ')];
-    if (path) parts.push(`link to ${path}`);
-    else if (role === 'tab') parts.push('tab');
-    else if (role === 'menuitem') parts.push('menu item');
-    else parts.push('button');
-    if (trackCategory || trackName) {
-      parts.push(`(${[trackCategory, trackName].filter(Boolean).join(' / ')})`);
-    }
+    const appPath = path ? stripWorkspace(path) : null;
+    const contents = sectionContents(appPath);
+    const hint = clean(element.getAttribute(NAV_HINT_ATTR));
+    // The visible label is what Jev should read. Analytics ids only stand in when there is no
+    // readable label, and then as plain words: they name the tracking event, not the element.
+    const name =
+      label && !looksLikeId(label)
+        ? label
+        : humanize(label || trackName) || humanize(trackCategory);
+    const parts = [name, kindOf(element, appPath)];
+    if (hint) parts.push(hint);
     if (contents) parts.push(contents);
+    const region = regionOf(element);
+    if (region) parts.push(region);
     if (inNav) parts.push('[navigation]');
     if (
       element.getAttribute('aria-current') === 'page' ||
@@ -245,4 +314,22 @@ export function findLoadingIndicator(): string | null {
     return truncate(clean(label), 80);
   }
   return null;
+}
+
+// A form the user can fill in: a dialog with somewhere to type or choose. A menu or popover
+// (which Radix also marks role="dialog") has only buttons, so it is not one.
+const FORM_FIELD_SELECTOR =
+  'input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]), textarea, select, ' +
+  '[contenteditable="true"], [role="textbox"], [role="combobox"]';
+
+/** The open dialogs on screen that hold a form, outside the navigator itself. */
+export function openForms(): Set<Element> {
+  const forms = new Set<Element>();
+  for (const dialog of document.querySelectorAll<HTMLElement>(
+    '[role="dialog"], [role="alertdialog"], [aria-modal="true"]',
+  )) {
+    if (dialog.closest(`[${NAVIGATOR_ROOT_ATTR}]`) || !isVisible(dialog)) continue;
+    if (dialog.querySelector(FORM_FIELD_SELECTOR)) forms.add(dialog);
+  }
+  return forms;
 }

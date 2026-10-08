@@ -66,6 +66,14 @@ export function useNavigatorItems(): NavigatorItems {
       path: `/ai/library/agent/${encodeURIComponent(a.slug)}`,
     }));
 
-    return { canvas, dm, channel, agent };
+    // The compose page opens the existing DM with them, or starts one.
+    const person = users
+      .filter(u => u.id && (u.displayName || u.name))
+      .map(u => ({
+        label: `${u.displayName || u.name}${u.id === userID ? ' (you)' : ''}`,
+        path: `/chat/dm/compose?userId=${encodeURIComponent(u.id)}`,
+      }));
+
+    return { canvas, dm, channel, agent, person };
   }, [agents, canvasPage, statuses, userID, users, visibleChannels]);
 }

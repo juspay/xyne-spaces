@@ -19,6 +19,7 @@ export interface NavigateCandidate {
 
 export interface NavigateStepInput {
   goal: string;
+  formMode: boolean;
   page: { url: string; title: string; headings: string[] };
   history: { url: string; clicked: string; urlAfter: string; changed: boolean }[];
   candidates: NavigateCandidate[];
@@ -70,6 +71,12 @@ const NEXT_INSTRUCTIONS =
   'would contain it, even when it is not the goal itself. Prefer navigation (sidebar, tabs, ' +
   'menus) over actions. A step in `steps_taken` with changed false did nothing: do not ' +
   'pick that element again.';
+
+const FORM_MODE_INSTRUCTIONS =
+  'Here `goal` asks to open a form. Pick the button whose words say the same thing as the goal ' +
+  '(an Invite button for "invite people", Schedule for "schedule a meeting"), wherever it is on ' +
+  'the screen, sidebar included. Only when no such button is visible, pick the menu or button ' +
+  'that would reveal it.';
 
 const NONE_DESCRIPTION =
   'None: no element on this screen is even plausibly a step toward the goal.';
@@ -196,7 +203,9 @@ export const navigateStep = async (
   if (input.candidates.length > 0) {
     questions.next = {
       type: 'choice',
-      instructions: NEXT_INSTRUCTIONS,
+      instructions: input.formMode
+        ? `${NEXT_INSTRUCTIONS} ${FORM_MODE_INSTRUCTIONS}`
+        : NEXT_INSTRUCTIONS,
       criteria,
     } satisfies JevChoiceQuestion;
   }
@@ -215,7 +224,11 @@ export const navigateStep = async (
   if (!reachedAnswer || reachedAnswer.type !== 'noul') return unavailable('jev_unusable');
   const reached = reachedAnswer.noul;
 
-  if (reached >= config.reachedThreshold) return finish({ status: 'reached', reached });
+  // In form mode being on the right page is not enough: the dashboard ends the run once the
+  // form is open, so keep picking what to click.
+  if (!input.formMode && reached >= config.reachedThreshold) {
+    return finish({ status: 'reached', reached });
+  }
   if (input.candidates.length === 0) {
     return finish({ status: 'stuck', reason: 'no_candidates', reached });
   }

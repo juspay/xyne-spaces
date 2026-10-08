@@ -7,7 +7,14 @@
  * person). For those, a second pick chooses among the user's own items of that kind, and
  * `path` is where to go when none of them matches.
  */
-export type ItemKind = 'canvas' | 'dm' | 'channel' | 'agent';
+export type ItemKind = 'canvas' | 'dm' | 'channel' | 'agent' | 'person';
+
+/**
+ * Opens a form that has neither a page nor a button to click: the app already listens for these
+ * events (hooks/useGlobalShortcuts.ts, AppSidebar.tsx). Forms behind a button are not listed by
+ * selector: `finishByClicking` lets Jev find the button on screen instead.
+ */
+export type Opener = { type: 'event'; name: string };
 
 export interface Destination {
   /** Jev option id: lower snake_case. */
@@ -17,10 +24,25 @@ export interface Destination {
   description: string;
   path: string;
   item?: ItemKind;
+  /** Set for forms that open in place rather than at `path`. */
+  open?: Opener;
+  /**
+   * The form opens from a button on the page: go to `path` (stay put when empty), then the click
+   * agent finds and presses the button, and stops as soon as the form is open.
+   */
+  finishByClicking?: true;
+  /** Said to the user once there, e.g. what is left for them to do. */
+  note?: string;
+  /**
+   * Opening this creates something (a blank canvas). Only used when Jev is very sure the user
+   * asked for it; otherwise the user is sent to `fallback` instead.
+   */
+  creates?: { minConfidence: number; fallback: { path: string; title: string; note: string } };
 }
 
 export const ITEM_TYPE_WORDS: Record<ItemKind, string> = {
   canvas: 'canvas (document)',
+  person: 'person to message',
   dm: 'direct message conversation',
   channel: 'channel',
   agent: 'AI agent',
@@ -59,6 +81,139 @@ export const DESTINATIONS: readonly Destination[] = [
       'One specific AI agent in Agent Hub by its name, e.g. "open the code review agent".',
     path: '/ai/library',
     item: 'agent',
+  },
+
+  // ----- Forms: opened for the user, who fills them in and submits -----
+  {
+    id: 'create_channel',
+    title: 'Create channel form',
+    description:
+      'Create a new channel: open the "create channel" form, e.g. "create channel", "make a new channel".',
+    path: '/chat/dir?dialog=add_channel',
+    note: 'fill in the form and press Create',
+  },
+  {
+    id: 'new_dm_item',
+    title: 'a new DM',
+    description:
+      'Start or create a direct message with one specific person by their name, e.g. "create dm with Om", "start a chat with Priya", "message Rahul".',
+    path: '/chat/search?mode=dm',
+    item: 'person',
+    note: 'type your message and send it',
+  },
+  {
+    id: 'new_message',
+    title: 'New message',
+    description:
+      'Start a new message or chat without naming anyone yet: pick who to message, e.g. "new message", "start a chat".',
+    path: '/chat/search?mode=dm',
+  },
+  {
+    id: 'new_canvas',
+    title: 'a new canvas',
+    description: 'Create a new canvas (document, doc, note), e.g. "create a canvas", "new doc".',
+    // The app's own new-canvas route: it creates one "Untitled Canvas" and opens it. A canvas
+    // has no form, so the blank canvas is what the user fills in.
+    path: '/chat/canvas/new',
+    note: 'give it a title and start writing',
+    creates: {
+      minConfidence: 0.9,
+      fallback: {
+        path: '/chat/canvas',
+        title: 'Canvases',
+        note: 'press New Canvas in the sidebar to create one',
+      },
+    },
+  },
+  {
+    id: 'create_agent',
+    title: 'Create agent form',
+    description: 'Create a new AI agent: the create agent form.',
+    path: '/ai/library/agent/create',
+    note: 'fill in the form and press Create',
+  },
+  {
+    id: 'create_skill',
+    title: 'Create skill form',
+    description: 'Create a new AI skill: the create skill form.',
+    path: '/ai/library/skill/create',
+    note: 'fill in the form and press Create',
+  },
+  {
+    id: 'create_subagent',
+    title: 'Create subagent form',
+    description: 'Create a new AI subagent: the create subagent form.',
+    path: '/ai/library/subagent/create',
+    note: 'fill in the form and press Create',
+  },
+  {
+    id: 'create_automation',
+    title: 'New automation',
+    description: 'Create a new automation: the automation builder.',
+    path: '/automations/new',
+    note: 'build it and save',
+  },
+  {
+    id: 'create_view',
+    title: 'New ticket view',
+    description: 'Create a new ticket view: the project view builder.',
+    path: '/projects/views/new',
+    note: 'set it up and save',
+  },
+  {
+    id: 'invite_people',
+    title: 'Invite people',
+    description: 'Invite people or teammates to the workspace: the invite dialog.',
+    // The invite button is in the app sidebar, on every page.
+    path: '',
+    finishByClicking: true,
+    note: 'add their emails and send the invites',
+  },
+  {
+    id: 'schedule_call',
+    title: 'Schedule a call',
+    description: 'Schedule a call or meeting for later: the schedule call form.',
+    path: '/calls',
+    finishByClicking: true,
+    note: 'pick the time and people, then schedule it',
+  },
+  {
+    id: 'start_call',
+    title: 'Start a call',
+    description: 'Start an instant call or meeting now: the start call dialog.',
+    path: '/calls',
+    finishByClicking: true,
+    note: 'choose who to call and start it',
+  },
+  {
+    id: 'set_status',
+    title: 'Set status',
+    description:
+      'Set my status: the status form (available, away, busy, in a meeting, on leave), e.g. "set my status", "change status", "mark me as away".',
+    path: '',
+    open: { type: 'event', name: 'xyne-open-status' },
+    note: 'pick a status and save',
+  },
+  {
+    id: 'preferences',
+    title: 'Preferences',
+    description: 'Open preferences / user settings (theme, notifications…).',
+    path: '',
+    open: { type: 'event', name: 'xyne-open-preferences' },
+  },
+  {
+    id: 'create_user_group',
+    title: 'User groups',
+    description: 'Create a user group or team.',
+    path: '/organisations/user-groups',
+    note: 'press Create to add the group',
+  },
+  {
+    id: 'create_role',
+    title: 'Roles',
+    description: 'Create a role with permissions.',
+    path: '/organisations/roles',
+    note: 'press Create to add the role',
   },
 
   // ----- Chat -----

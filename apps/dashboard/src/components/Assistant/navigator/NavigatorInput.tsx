@@ -2,10 +2,11 @@ import { useCallback, useEffect, useRef, useState, type ReactElement } from 'rea
 import { useNavigate } from 'react-router-dom';
 import { useShortcutById } from '../../../shortcuts/hooks';
 import { NAVIGATOR_ROOT_ATTR } from './collectClickables';
+import { NavigatorMicButton } from './NavigatorMicButton';
 import { runNavigation, type NavigationRun, type NavigationStatus } from './runNavigation';
 import { useNavigatorItems, type NavigatorItems } from './useNavigatorItems';
 
-const NO_ITEMS: NavigatorItems = { canvas: [], dm: [], channel: [], agent: [] };
+const NO_ITEMS: NavigatorItems = { canvas: [], dm: [], channel: [], agent: [], person: [] };
 
 // Holds the canvas, DM, channel and agent subscriptions; mounted only while the box is open.
 const ItemsSource = ({ onItems }: { onItems: (items: NavigatorItems) => void }): null => {
@@ -16,7 +17,7 @@ const ItemsSource = ({ onItems }: { onItems: (items: NavigatorItems) => void }):
 
 const STATUS_TEXT: Record<NavigationStatus, string> = {
   running: 'Finding the way…',
-  reached: 'You are there.',
+  reached: 'Done.',
   stuck: "Couldn't find a way from here.",
   loop: 'Went in a circle, stopped.',
   maxSteps: 'Took too many steps, stopped.',
@@ -69,20 +70,25 @@ const NavigatorInput = (): ReactElement | null => {
 
   useEffect(() => cancel, [cancel]);
 
-  const start = useCallback(async () => {
-    const text = goal.trim();
-    if (!text) return;
-    cancel();
-    const controller = new AbortController();
-    controllerRef.current = controller;
-    await runNavigation(text, controller.signal, setRun, {
-      navigate: path => {
-        void navigate(path);
-      },
-      getItems: () => itemsRef.current,
-    });
-    if (controllerRef.current === controller) controllerRef.current = null;
-  }, [cancel, goal, navigate]);
+  const [listening, setListening] = useState(false);
+
+  const start = useCallback(
+    async (spoken?: string) => {
+      const text = (spoken ?? goal).trim();
+      if (!text) return;
+      cancel();
+      const controller = new AbortController();
+      controllerRef.current = controller;
+      await runNavigation(text, controller.signal, setRun, {
+        navigate: path => {
+          void navigate(path);
+        },
+        getItems: () => itemsRef.current,
+      });
+      if (controllerRef.current === controller) controllerRef.current = null;
+    },
+    [cancel, goal, navigate],
+  );
 
   if (!open) return null;
 
@@ -112,11 +118,21 @@ const NavigatorInput = (): ReactElement | null => {
               else close();
             }
           }}
-          placeholder='Take me to… e.g. agent hub'
+          placeholder={listening ? 'Listening…' : 'Take me to… or create… e.g. create channel'}
           aria-label='Where do you want to go?'
           className='min-w-0 flex-1 rounded-lg border border-border bg-background px-3 py-2 text-[14px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring'
           data-track-category='Assistant'
           data-track-name='NAVIGATOR_INPUT'
+        />
+        {/* Speak instead of typing: the transcript becomes the goal and runs straight away. */}
+        <NavigatorMicButton
+          disabled={running}
+          onListeningChange={setListening}
+          onInterim={setGoal}
+          onTranscript={text => {
+            setGoal(text);
+            void start(text);
+          }}
         />
         <button
           type={running ? 'button' : 'submit'}
@@ -133,13 +149,14 @@ const NavigatorInput = (): ReactElement | null => {
           <ol className='flex flex-col gap-1'>
             {run.steps.map((step, index) => (
               <li key={`${index}-${step.urlAfter}`} className='truncate'>
-                {index + 1}. Clicked “{shortLabel(step.clicked)}” → {step.urlAfter}
+                {`${index + 1}. ${step.via === 'open' ? 'Opened' : 'Clicked'} “${shortLabel(step.clicked)}” → ${step.urlAfter}`}
               </li>
             ))}
           </ol>
           <span className={run.status === 'reached' ? 'text-foreground' : undefined}>
-            {STATUS_TEXT[run.status]}
-            {run.detail ? ` (${run.detail})` : ''}
+            {run.status === 'reached' && run.detail
+              ? `${STATUS_TEXT.reached} ${run.detail}`
+              : `${STATUS_TEXT[run.status]}${run.detail ? ` (${run.detail})` : ''}`}
           </span>
         </div>
       )}

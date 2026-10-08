@@ -2,6 +2,8 @@ import { apiInstance } from './clients/apiClient';
 
 export interface NavigateStepRequest {
   goal: string;
+  /** The goal is a form behind a button: keep clicking until it opens. */
+  formMode: boolean;
   page: { url: string; title: string; headings: string[] };
   history: { url: string; clicked: string; urlAfter: string; changed: boolean }[];
   candidates: { id: string; description: string }[];
