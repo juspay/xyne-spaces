@@ -317,6 +317,9 @@ class XyneAIStreamManager {
   // attach guard tell a live viewer apart from a dead viewer's leftover state
   // (which must be replaceable, not adopted — else a return visit freezes).
   private liveViewerStreams: Set<string> = new Set();
+  /** Driving streams whose transport dropped and are being recovered from the
+   *  server — guards against recovering the same stream twice. */
+  private recoveringStreams: Set<string> = new Set();
 
   private constructor() {
     // Initialize the Web Worker
@@ -827,6 +830,21 @@ class XyneAIStreamManager {
     // Flush any remaining buffered delta before erroring
     if (this.pendingDeltaMap.has(streamId)) {
       this.flushDeltaContentSync(streamId);
+    }
+
+    // The browser→backend SSE leg can be cut by a proxy (route timeout, pod
+    // roll, flaky network) while the run itself carries on server-side and
+    // later persists. Don't declare failure on a transport error — re-attach
+    // to the run (or read its persisted result) first.
+    if (this.recoverDroppedStream(streamId, threadId, botMessageId, error)) {
+      this.streamDataMap.delete(streamId);
+      this.pendingDeltaMap.delete(streamId);
+      const recoveringRafId = this.rafIdMap.get(streamId);
+      if (recoveringRafId !== undefined) {
+        cancelAnimationFrame(recoveringRafId);
+        this.rafIdMap.delete(streamId);
+      }
+      return;
     }
 
     this.errorStream(streamId, threadId, botMessageId, error);
@@ -2153,8 +2171,12 @@ class XyneAIStreamManager {
     convId: string,
     agentSlug = 'ask-ai',
     initialMessages: Message[] = [],
+    /** Called once if the viewer closes WITHOUT ever attaching to a live run
+     *  (empty snapshot, live view disabled, or the SSE never came up). */
+    onUnattached?: () => void,
   ): () => void {
     if (!convId.startsWith('chat-')) {
+      onUnattached?.();
       return () => undefined;
     }
     const existing = this.activeStreams.get(threadId);
@@ -2183,6 +2205,7 @@ class XyneAIStreamManager {
     const close = (): void => {
       if (closed) return;
       closed = true;
+      if (!started) onUnattached?.();
       abort.abort();
       this.abortControllers.delete(streamId);
       this.liveViewerStreams.delete(streamId);
@@ -2781,6 +2804,101 @@ class XyneAIStreamManager {
       currentState.messages = updatedMessages;
       this.notifySubscribers({ ...currentState });
       void xyneAIStreamStorage.updateMessages(streamId, updatedMessages);
+    }
+  }
+
+  /**
+   * Recover a driving stream whose SSE transport died mid-run.
+   *
+   * Returns false (caller errors the stream as before) for failures the server
+   * reported itself — a non-2xx response or no body — and for anything that is
+   * not a claw-backed conversation. Otherwise hands the thread to a live viewer:
+   *   - run still going → the viewer re-snapshots and keeps streaming into a
+   *     fresh bubble, then reconciles on `done`;
+   *   - run already finished (or live view unavailable) → read the persisted
+   *     transcript; complete with the server's answer if this turn has one,
+   *     else show the original error.
+   */
+  private recoverDroppedStream(
+    streamId: string,
+    threadId: string,
+    botMessageId: string,
+    error: string,
+  ): boolean {
+    if (/^HTTP error!/.test(error) || error === 'No response body') return false;
+    if (this.recoveringStreams.has(streamId)) return false;
+    const state = this.activeStreams.get(threadId);
+    const convId = state?.sessionId;
+    if (!state || state.streamId !== streamId || !convId?.startsWith('chat-')) return false;
+
+    this.recoveringStreams.add(streamId);
+    logger.warn(LogEvent.FRONTEND_ERROR, {
+      type: 'xyne_ai_stream_recovery',
+      message: String('[XyneAIStreamManager] stream transport dropped; recovering from server'),
+      context: [{ streamId, conversationId: convId, error }],
+    });
+
+    const agentSlug = state.agentSlug ?? 'ask-ai';
+    const priorMessages = state.messages.filter(m => m.id !== botMessageId);
+    // Free the thread so the viewer's attach guard lets it in; the abort
+    // controller belongs to a request that is already dead.
+    this.activeStreams.delete(threadId);
+    this.abortControllers.delete(streamId);
+
+    this.attachLiveViewer(threadId, convId, agentSlug, priorMessages, () => {
+      void this.finishFromPersistedTranscript(streamId, threadId, state, botMessageId, error);
+    });
+    return true;
+  }
+
+  /** No live run to follow: settle the dropped turn from the server's copy. */
+  private async finishFromPersistedTranscript(
+    streamId: string,
+    threadId: string,
+    state: StreamState,
+    botMessageId: string,
+    error: string,
+  ): Promise<void> {
+    try {
+      // A newer send (or another viewer) owns the thread now — leave it be.
+      if (this.activeStreams.has(threadId)) return;
+      this.activeStreams.set(threadId, state);
+
+      let serverAnswer = '';
+      try {
+        const refreshed = await fetchV2ConversationMessages(
+          state.sessionId ?? '',
+          state.agentSlug ?? 'ask-ai',
+        );
+        // This turn's assistant row is the server's Nth bot, where N counts the
+        // local bots up to and including the dropped one.
+        const localBotCount = state.messages.filter(m => m.type === 'bot').length;
+        const refreshedBots = refreshed.filter(m => m.type === 'bot');
+        if (refreshedBots.length >= localBotCount) {
+          const row = refreshedBots[localBotCount - 1];
+          serverAnswer = (row?.content || row?.streamingContent || '').trim();
+        }
+      } catch (fetchErr) {
+        logger.warn(LogEvent.FRONTEND_ERROR, {
+          type: 'xyne_ai_stream_recovery',
+          message: String('[XyneAIStreamManager] recovery transcript fetch failed'),
+          context: [fetchErr],
+        });
+      }
+
+      if (this.activeStreams.get(threadId) !== state) return;
+      if (!serverAnswer) {
+        this.errorStream(streamId, threadId, botMessageId, error);
+        return;
+      }
+      state.messages = state.messages.map(m =>
+        m.id === botMessageId ? { ...m, streamingContent: serverAnswer, content: '' } : m,
+      );
+      // completeStream also reconciles against the backend (attachments,
+      // cards, ids), so the bubble ends up identical to a reload.
+      this.completeStream(streamId, threadId, serverAnswer);
+    } finally {
+      this.recoveringStreams.delete(streamId);
     }
   }
 

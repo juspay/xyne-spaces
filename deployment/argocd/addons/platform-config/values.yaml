@@ -59,6 +59,9 @@ routes:
   clawAuthFrontend: false
   clawPreview: false
   apiTimeout: 50s
+  # Total-duration cap for the Xyne AI SSE routes (POST /api/xyne-ai and the
+  # /live re-attach stream). Empty disables the dedicated route.
+  streamTimeout: 15m
   health: false
   healthPath: /healthz/ready
   extra: []
