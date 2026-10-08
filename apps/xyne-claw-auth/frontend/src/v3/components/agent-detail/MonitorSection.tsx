@@ -172,7 +172,7 @@ export function MonitorSection({ slug }: { slug: string }) {
       {data && (
         <>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            <Stat label="Runs" value={String(data.totals.runs)} sub={`${data.totals.completed} completed`} />
+            <Stat label="Runs" value={data.sampled ? `${data.totals.runs}+` : String(data.totals.runs)} sub={data.sampled ? "latest runs only" : `${data.totals.completed} completed`} />
             <Stat
               label="Failed"
               value={String(data.totals.failed)}

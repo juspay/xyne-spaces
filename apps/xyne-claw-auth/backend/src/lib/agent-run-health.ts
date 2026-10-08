@@ -6,6 +6,7 @@ const STUCK_P90_FACTOR = 3;
 
 export interface AgentRunHealth {
   windowDays: number;
+  sampled: boolean;
   totals: { runs: number; completed: number; failed: number; cancelled: number; running: number };
   duration: { p50Ms: number | null; p90Ms: number | null; llmP50Ms: number | null; toolP50Ms: number | null };
   daily: Array<{ day: string; runs: number; failed: number }>;
@@ -24,135 +25,155 @@ export interface AgentRunDetail {
   children: Array<{ sessionId: string; agentSlug: string; status: string; startedAt: string; durationMs: number | null; task: string }>;
 }
 
-const num = (v: unknown): number => Number(v ?? 0);
-const ms = (v: unknown): number | null => (v === null || v === undefined ? null : Math.round(Number(v)));
+const MAX_WINDOW_ROWS = 20000;
+const MAX_FAILED_ROWS = 2000;
+
+function percentile(values: number[], q: number): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const pos = (sorted.length - 1) * q;
+  const lo = Math.floor(pos);
+  const hi = Math.ceil(pos);
+  return Math.round(sorted[lo]! + (sorted[hi]! - sorted[lo]!) * (pos - lo));
+}
+
+function normalizeError(error: string): string {
+  return error.replace(/[0-9a-f]{8}-[0-9a-f-]{27,}|[0-9]{3,}/gi, "#").slice(0, 140);
+}
+
+function bump<K>(map: Map<K, number>, key: K): void {
+  map.set(key, (map.get(key) ?? 0) + 1);
+}
 
 export async function agentRunHealth(agentSlug: string, orgId: string, windowDays: number): Promise<AgentRunHealth> {
   const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
+  const inWindow = { agentSlug, orgId, startedAt: { gte: since } };
 
-  const [totals] = await prisma.$queryRaw<Array<Record<string, unknown>>>`
-    SELECT
-      COUNT(*) AS runs,
-      COUNT(*) FILTER (WHERE status = 'completed') AS completed,
-      COUNT(*) FILTER (WHERE status = 'failed') AS failed,
-      COUNT(*) FILTER (WHERE status = 'cancelled') AS cancelled,
-      COUNT(*) FILTER (WHERE status = 'running') AS running,
-      PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM ("completedAt" - "startedAt")) * 1000)
-        FILTER (WHERE status = 'completed' AND "completedAt" IS NOT NULL) AS p50,
-      PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM ("completedAt" - "startedAt")) * 1000)
-        FILTER (WHERE status = 'completed' AND "completedAt" IS NOT NULL) AS p90,
-      PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY "llmTotalMs") FILTER (WHERE "llmTotalMs" IS NOT NULL) AS llm_p50,
-      PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY "toolMs") FILTER (WHERE "toolMs" IS NOT NULL) AS tool_p50
-    FROM "agent_runs"
-    WHERE "agentSlug" = ${agentSlug} AND "orgId" = ${orgId} AND "startedAt" >= ${since}
-      AND (error IS NULL OR error <> ${ORPHANED})
-  `;
+  const [rows, failedRows, running, recent] = await Promise.all([
+    prisma.agentRun.findMany({
+      where: { ...inWindow, OR: [{ error: null }, { error: { not: ORPHANED } }] },
+      orderBy: { startedAt: "desc" },
+      take: MAX_WINDOW_ROWS,
+      select: {
+        status: true,
+        triggerSource: true,
+        provider: true,
+        model: true,
+        startedAt: true,
+        completedAt: true,
+        llmTotalMs: true,
+        toolMs: true,
+      },
+    }),
+    prisma.agentRun.findMany({
+      where: { ...inWindow, status: "failed", NOT: [{ error: null }, { error: ORPHANED }] },
+      orderBy: { startedAt: "desc" },
+      take: MAX_FAILED_ROWS,
+      select: { sessionId: true, triggerSource: true, startedAt: true, model: true, error: true },
+    }),
+    prisma.agentRun.findMany({
+      where: { agentSlug, orgId, status: "running" },
+      orderBy: { startedAt: "asc" },
+      take: 25,
+      select: { sessionId: true, triggerSource: true, startedAt: true, currentToolLabel: true },
+    }),
+    prisma.agentRun.findMany({
+      where: inWindow,
+      orderBy: { startedAt: "desc" },
+      take: 30,
+      select: { sessionId: true, triggerSource: true, status: true, startedAt: true, completedAt: true, model: true, task: true },
+    }),
+  ]);
 
-  const daily = await prisma.$queryRaw<Array<Record<string, unknown>>>`
-    SELECT to_char(date_trunc('day', "startedAt"), 'YYYY-MM-DD') AS day,
-      COUNT(*) AS runs,
-      COUNT(*) FILTER (WHERE status = 'failed') AS failed
-    FROM "agent_runs"
-    WHERE "agentSlug" = ${agentSlug} AND "orgId" = ${orgId} AND "startedAt" >= ${since}
-      AND (error IS NULL OR error <> ${ORPHANED})
-    GROUP BY 1 ORDER BY 1
-  `;
+  const statusCount = new Map<string, number>();
+  const completedDurations: number[] = [];
+  const llm: number[] = [];
+  const tool: number[] = [];
+  const daily = new Map<string, { runs: number; failed: number }>();
+  const triggers = new Map<string, { runs: number; failed: number; durations: number[] }>();
+  const models = new Map<string, { provider: string; model: string; runs: number; failed: number; llm: number[] }>();
 
-  const byTrigger = await prisma.$queryRaw<Array<Record<string, unknown>>>`
-    SELECT COALESCE("triggerSource", 'unknown') AS trigger,
-      COUNT(*) AS runs,
-      COUNT(*) FILTER (WHERE status = 'failed') AS failed,
-      PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM ("completedAt" - "startedAt")) * 1000)
-        FILTER (WHERE status = 'completed' AND "completedAt" IS NOT NULL) AS p50,
-      PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM ("completedAt" - "startedAt")) * 1000)
-        FILTER (WHERE status = 'completed' AND "completedAt" IS NOT NULL) AS p90
-    FROM "agent_runs"
-    WHERE "agentSlug" = ${agentSlug} AND "orgId" = ${orgId} AND "startedAt" >= ${since}
-      AND (error IS NULL OR error <> ${ORPHANED})
-    GROUP BY 1 ORDER BY runs DESC
-  `;
+  for (const r of rows) {
+    bump(statusCount, r.status);
+    const failed = r.status === "failed";
+    const duration = r.status === "completed" && r.completedAt ? r.completedAt.getTime() - r.startedAt.getTime() : null;
+    if (duration !== null) completedDurations.push(duration);
+    if (r.llmTotalMs !== null) llm.push(r.llmTotalMs);
+    if (r.toolMs !== null) tool.push(r.toolMs);
 
-  const byModel = await prisma.$queryRaw<Array<Record<string, unknown>>>`
-    SELECT COALESCE(provider, 'unknown') AS provider, COALESCE(model, 'unknown') AS model,
-      COUNT(*) AS runs,
-      COUNT(*) FILTER (WHERE status = 'failed') AS failed,
-      PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY "llmTotalMs") FILTER (WHERE "llmTotalMs" IS NOT NULL) AS llm_p50
-    FROM "agent_runs"
-    WHERE "agentSlug" = ${agentSlug} AND "orgId" = ${orgId} AND "startedAt" >= ${since}
-      AND (error IS NULL OR error <> ${ORPHANED})
-    GROUP BY 1, 2 ORDER BY runs DESC LIMIT 12
-  `;
+    const day = r.startedAt.toISOString().slice(0, 10);
+    const d = daily.get(day) ?? { runs: 0, failed: 0 };
+    d.runs += 1;
+    if (failed) d.failed += 1;
+    daily.set(day, d);
 
-  const topErrors = await prisma.$queryRaw<Array<Record<string, unknown>>>`
-    SELECT LEFT(regexp_replace(error, '[0-9a-f]{8}-[0-9a-f-]{27,}|[0-9]{3,}', '#', 'g'), 140) AS error,
-      COUNT(*) AS count,
-      MAX("startedAt") AS last_at
-    FROM "agent_runs"
-    WHERE "agentSlug" = ${agentSlug} AND "orgId" = ${orgId} AND "startedAt" >= ${since}
-      AND status = 'failed' AND error IS NOT NULL AND error <> ${ORPHANED}
-    GROUP BY 1 ORDER BY count DESC LIMIT 8
-  `;
+    const trigger = r.triggerSource ?? "unknown";
+    const t = triggers.get(trigger) ?? { runs: 0, failed: 0, durations: [] };
+    t.runs += 1;
+    if (failed) t.failed += 1;
+    if (duration !== null) t.durations.push(duration);
+    triggers.set(trigger, t);
 
-  const p90 = ms(totals?.["p90"]);
+    const provider = r.provider ?? "unknown";
+    const model = r.model ?? "unknown";
+    const key = `${provider}|${model}`;
+    const m = models.get(key) ?? { provider, model, runs: 0, failed: 0, llm: [] };
+    m.runs += 1;
+    if (failed) m.failed += 1;
+    if (r.llmTotalMs !== null) m.llm.push(r.llmTotalMs);
+    models.set(key, m);
+  }
+
+  const errors = new Map<string, { count: number; lastAt: Date }>();
+  for (const f of failedRows) {
+    const key = normalizeError(f.error ?? "");
+    const e = errors.get(key);
+    if (e) {
+      e.count += 1;
+      if (f.startedAt > e.lastAt) e.lastAt = f.startedAt;
+    } else {
+      errors.set(key, { count: 1, lastAt: f.startedAt });
+    }
+  }
+
+  const p90 = percentile(completedDurations, 0.9);
   const stuckAfterMs = Math.max(STUCK_FLOOR_MS, (p90 ?? 0) * STUCK_P90_FACTOR);
-
-  const running = await prisma.agentRun.findMany({
-    where: { agentSlug, orgId, status: "running" },
-    orderBy: { startedAt: "asc" },
-    take: 25,
-    select: { sessionId: true, triggerSource: true, startedAt: true, currentToolLabel: true },
-  });
-
-  const failures = await prisma.agentRun.findMany({
-    where: { agentSlug, orgId, status: "failed", startedAt: { gte: since }, NOT: { error: ORPHANED } },
-    orderBy: { startedAt: "desc" },
-    take: 15,
-    select: { sessionId: true, triggerSource: true, startedAt: true, model: true, error: true },
-  });
-
-  const recent = await prisma.agentRun.findMany({
-    where: { agentSlug, orgId, startedAt: { gte: since } },
-    orderBy: { startedAt: "desc" },
-    take: 30,
-    select: { sessionId: true, triggerSource: true, status: true, startedAt: true, completedAt: true, model: true, task: true },
-  });
-
   const now = Date.now();
+
   return {
     windowDays,
+    sampled: rows.length >= MAX_WINDOW_ROWS,
     totals: {
-      runs: num(totals?.["runs"]),
-      completed: num(totals?.["completed"]),
-      failed: num(totals?.["failed"]),
-      cancelled: num(totals?.["cancelled"]),
-      running: num(totals?.["running"]),
+      runs: rows.length,
+      completed: statusCount.get("completed") ?? 0,
+      failed: statusCount.get("failed") ?? 0,
+      cancelled: statusCount.get("cancelled") ?? 0,
+      running: statusCount.get("running") ?? 0,
     },
     duration: {
-      p50Ms: ms(totals?.["p50"]),
+      p50Ms: percentile(completedDurations, 0.5),
       p90Ms: p90,
-      llmP50Ms: ms(totals?.["llm_p50"]),
-      toolP50Ms: ms(totals?.["tool_p50"]),
+      llmP50Ms: percentile(llm, 0.5),
+      toolP50Ms: percentile(tool, 0.5),
     },
-    daily: daily.map((d) => ({ day: String(d["day"]), runs: num(d["runs"]), failed: num(d["failed"]) })),
-    byTrigger: byTrigger.map((t) => ({
-      trigger: String(t["trigger"]),
-      runs: num(t["runs"]),
-      failed: num(t["failed"]),
-      p50Ms: ms(t["p50"]),
-      p90Ms: ms(t["p90"]),
-    })),
-    byModel: byModel.map((m) => ({
-      provider: String(m["provider"]),
-      model: String(m["model"]),
-      runs: num(m["runs"]),
-      failed: num(m["failed"]),
-      llmP50Ms: ms(m["llm_p50"]),
-    })),
-    topErrors: topErrors.map((e) => ({
-      error: String(e["error"]),
-      count: num(e["count"]),
-      lastAt: new Date(e["last_at"] as string | Date).toISOString(),
-    })),
+    daily: [...daily.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([day, v]) => ({ day, ...v })),
+    byTrigger: [...triggers.entries()]
+      .map(([trigger, v]) => ({
+        trigger,
+        runs: v.runs,
+        failed: v.failed,
+        p50Ms: percentile(v.durations, 0.5),
+        p90Ms: percentile(v.durations, 0.9),
+      }))
+      .sort((a, b) => b.runs - a.runs),
+    byModel: [...models.values()]
+      .map((v) => ({ provider: v.provider, model: v.model, runs: v.runs, failed: v.failed, llmP50Ms: percentile(v.llm, 0.5) }))
+      .sort((a, b) => b.runs - a.runs)
+      .slice(0, 12),
+    topErrors: [...errors.entries()]
+      .map(([error, v]) => ({ error, count: v.count, lastAt: v.lastAt.toISOString() }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 8),
     stuckAfterMs,
     runningNow: running.map((r) => {
       const ageMs = now - r.startedAt.getTime();
@@ -165,7 +186,7 @@ export async function agentRunHealth(agentSlug: string, orgId: string, windowDay
         currentTool: r.currentToolLabel ?? null,
       };
     }),
-    recentFailures: failures.map((f) => ({
+    recentFailures: failedRows.slice(0, 15).map((f) => ({
       sessionId: f.sessionId,
       trigger: f.triggerSource ?? "unknown",
       startedAt: f.startedAt.toISOString(),

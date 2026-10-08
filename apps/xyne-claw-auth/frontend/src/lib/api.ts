@@ -765,6 +765,7 @@ export async function decideDelegationRequest(
 
 export interface AgentRunHealth {
   windowDays: number;
+  sampled: boolean;
   totals: { runs: number; completed: number; failed: number; cancelled: number; running: number };
   duration: { p50Ms: number | null; p90Ms: number | null; llmP50Ms: number | null; toolP50Ms: number | null };
   daily: Array<{ day: string; runs: number; failed: number }>;
