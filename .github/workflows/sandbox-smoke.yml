@@ -1,0 +1,52 @@
+name: Sandbox smoke check
+
+# One-click post-deploy check: Actions → "Sandbox smoke check" → Run workflow.
+# Logs in as the Xyne Test account, runs read checks, and — when SBX_SMOKE_CHANNEL_ID is set —
+# write checks confined to that private channel (message, reply, reaction, image upload).
+# Secret: SBX_SMOKE_SESSION_ID (a user_session_id cookie from a one-time sandbox login).
+# Variable: SBX_SMOKE_CHANNEL_ID. Login checks are skipped until the secret exists.
+# Script: scripts/sandbox-smoke.mjs (no dependencies, so nothing to install).
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_branch:
+        description: "Release branch you deployed (e.g. release-20261001). Leave empty to skip the version check."
+        required: false
+        default: ""
+      # A fixed list, not free text: the job sends login secrets to this URL.
+      base_url:
+        description: "Environment"
+        type: choice
+        options:
+          - "https://spaces.sandbox.xyne.juspay.net"
+        default: "https://spaces.sandbox.xyne.juspay.net"
+
+concurrency:
+  group: sandbox-smoke
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      - name: Run smoke check
+        env:
+          SMOKE_BASE_URL: ${{ inputs.base_url }}
+          SMOKE_EXPECTED_BRANCH: ${{ inputs.expected_branch }}
+          SMOKE_SESSION_ID: ${{ secrets.SBX_SMOKE_SESSION_ID }}
+          # Repository variable (not a secret): private test channel for the write checks.
+          SMOKE_CHANNEL_ID: ${{ vars.SBX_SMOKE_CHANNEL_ID }}
+        run: node scripts/sandbox-smoke.mjs
