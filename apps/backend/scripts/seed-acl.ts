@@ -413,13 +413,19 @@ async function main() {
       } else {
         // Create orgMember FIRST to get memberId
         const passwordHash = await hashPassword(DEV_ADMIN_PASSWORD);
-        const orgMember = await prisma.orgMember.create({
-          data: {
-            email: DEFAULT_ADMIN_USER.email,
-            orgId: DEFAULT_ORG.orgId,
-            role: OrgRole.OWNER,
-            passwordHash,
-          }
+        const orgMember = await prisma.$transaction(async (tx) => {
+          const created = await tx.orgMember.create({
+            data: {
+              email: DEFAULT_ADMIN_USER.email,
+              orgId: DEFAULT_ORG.orgId,
+              role: OrgRole.OWNER,
+              passwordHash,
+            }
+          });
+          await tx.orgMemberCredential.create({
+            data: { memberId: created.memberId, orgId: created.orgId, passwordHash },
+          });
+          return created;
         });
         console.log(`  ✅ Created orgMember with id: ${orgMember.memberId}`);
         console.log(`  ℹ️  Admin login: ${DEFAULT_ADMIN_USER.email} / ${DEV_ADMIN_PASSWORD}`);

@@ -1,12 +1,12 @@
 import { ReactElement, useEffect, useState } from 'react';
 import Cookies from 'js-cookie';
 import {
+  ArrowRight,
   CheckCircle2,
   Clock3,
   Loader2,
   LockKeyhole,
   MessageSquare,
-  Plus,
   Users,
   XCircle,
   Zap,
@@ -50,13 +50,13 @@ interface CommunityWorkspaceScreenProps {
 
 const SANS_FONT = "'Inter', sans-serif";
 
-/* Reference-matched tokens (see Generate Screen Code reference). */
-const REF_TEXT = '#232229';
-const REF_TEXT_60 = 'rgba(35,34,41,0.6)';
-const REF_TEXT_40 = 'rgba(35,34,41,0.4)';
-const REF_LINE = 'rgba(35,34,41,0.1)';
-const REF_RED = '#fd6b6b';
-const REF_JOIN_BORDER = '#e1e7ef';
+/* Tokens matched to the "Join Xyne Community" mock. */
+const REF_TEXT = '#16161A';
+const REF_MUTED = '#63636B';
+const REF_ACCENT = '#C92F35';
+const REF_PAGE_BG = '#F4F4F5';
+const REF_CARD_BORDER = '#E4E4E7';
+const REF_DIVIDER = '#DCDCE0';
 
 /* ------------------------------------------------------------------ */
 /* Pure helpers.                                                       */
@@ -84,8 +84,14 @@ const getAvatarSquareColor = (index: number, name: string): string =>
   AVATAR_SQUARE_COLORS[(index + hashHue(name)) % AVATAR_SQUARE_COLORS.length] ?? '#4f7df9';
 
 /* ------------------------------------------------------------------ */
-/* Left column — white marketing/auth panel.                           */
+/* Join panel — featured community card + work-email row.              */
 /* ------------------------------------------------------------------ */
+
+const WORK_EMAIL_TILES = [
+  { letter: 'A', background: '#2F5BD3' },
+  { letter: 'X', background: '#E0393E' },
+  { letter: 'U', background: '#7C3AED' },
+] as const;
 
 interface LeftPanelProps {
   communityOrganizations: CommunityWorkspaceOrganization[];
@@ -103,153 +109,133 @@ const LeftPanel = ({
   communityJoinRequest,
   onJoin,
   onContinueToAuth,
-}: LeftPanelProps): ReactElement => (
-  <section className='flex min-h-screen w-full max-w-[720px] flex-col bg-white'>
-    <div className='flex w-full flex-col px-[88px] py-[72px]'>
-      {/* Xyne logo */}
-      <header>
-        <img src='/svgs/xyne.svg' alt='Xyne' style={{ width: 133, height: 27 }} />
+}: LeftPanelProps): ReactElement => {
+  // For now there is a single public community — feature the first one in the card.
+  const featuredOrg = communityOrganizations.find(org => org.workspaces.length > 0);
+  const featuredWorkspace = featuredOrg?.workspaces[0];
+
+  const isRequested =
+    !!featuredWorkspace &&
+    communityJoinRequest?.workspaceId === featuredWorkspace.id &&
+    communityJoinRequest.status === CommunityJoinResultStatus.REQUEST_PENDING;
+  const isRejected =
+    !!featuredWorkspace &&
+    communityJoinRequest?.workspaceId === featuredWorkspace.id &&
+    communityJoinRequest.status === CommunityJoinResultStatus.REQUEST_REJECTED;
+  const isRequestToJoin = featuredWorkspace?.joinPolicy === WorkspaceJoinPolicy.REQUEST_TO_JOIN;
+  const joinDisabled = isRequested || isRejected;
+  const description = featuredWorkspace?.description?.trim();
+
+  return (
+    <section className='flex w-full max-w-[560px] flex-col gap-[28px]'>
+      {/* Logo + heading */}
+      <header className='flex flex-col items-center gap-[14px] text-center'>
+        <img src='/svgs/xyne.svg' alt='Xyne' className='h-[40px] w-auto' />
+        <p className='text-[16px]' style={{ color: '#55555C' }}>
+          Join the community or start a workspace for your team
+        </p>
       </header>
 
-      {/* Onboarding card */}
+      {/* Primary: community card */}
       <div
-        className='mt-[92px] flex flex-col items-center overflow-clip rounded-[24px] bg-white px-[20px] py-[52px] text-center'
+        className='flex flex-col items-center gap-[20px] rounded-[20px] bg-white px-[32px] pb-[28px] pt-[36px] text-center'
         style={{
-          boxShadow: '0px 0px 6px 0px rgba(0,0,0,0.05)',
-          border: `1px solid ${REF_LINE}`,
+          border: `1px solid ${REF_CARD_BORDER}`,
+          boxShadow: '0 12px 40px rgba(22,22,26,0.07)',
         }}
       >
-        <div className='flex flex-col items-center gap-[10px]'>
-          {/* Overlapping member tiles with + */}
-          <div className='flex items-center'>
+        {isLoading ? (
+          <Loader2 className='h-5 w-5 animate-spin text-[#98a0ad]' />
+        ) : communityError ? (
+          <p className='text-[14px]' style={{ color: REF_MUTED }}>
+            {communityError}
+          </p>
+        ) : !featuredOrg || !featuredWorkspace ? (
+          <p className='text-[14px]' style={{ color: REF_MUTED }}>
+            No community workspaces are available.
+          </p>
+        ) : (
+          <>
             <span
-              className='mr-[-5px] flex items-center justify-center rounded-[6px] text-[13.5px] font-extrabold'
+              className='flex h-[60px] w-[60px] items-center justify-center rounded-[16px] text-white'
               style={{
-                width: 24.6,
-                height: 24.6,
-                background: '#6277fc',
-                border: '1px solid white',
+                background: getAvatarSquareColor(
+                  hashHue(featuredWorkspace.name) % 6,
+                  featuredWorkspace.name,
+                ),
               }}
             >
-              <span
-                style={{
-                  color: 'transparent',
-                  backgroundImage:
-                    'linear-gradient(to bottom, rgba(255,255,255,1), rgba(255,255,255,0.75))',
-                  backgroundClip: 'text',
-                  WebkitBackgroundClip: 'text',
-                }}
+              <WorkspaceGlyph name={featuredWorkspace.name} className='h-7 w-7' strokeWidth={2} />
+            </span>
+
+            <div className='flex flex-col gap-[6px]'>
+              <h1
+                className='text-[26px] font-extrabold tracking-[-0.5px]'
+                style={{ color: REF_TEXT }}
               >
-                A
+                {featuredWorkspace.name}
+              </h1>
+              <span className='text-[15px]' style={{ color: REF_MUTED }}>
+                Community space
               </span>
-            </span>
-            {/* Middle Xyne red tile */}
-            <span
-              className='mr-[-5px] flex items-center justify-center rounded-[6px]'
-              style={{
-                width: 24,
-                height: 24,
-                background:
-                  'radial-gradient(circle at 30% 20%, #faa8aa 0%, #fb898c 25%, #fd6b6f 55%, #ff4c51 100%)',
-                border: '1px solid white',
-                boxShadow:
-                  '26.8px 24px 5px rgba(191,191,191,0), 17.2px 15.6px 4.6px rgba(191,191,191,0.01), 9.6px 8.8px 4px rgba(191,191,191,0.05), 4.4px 4px 2.8px rgba(191,191,191,0.09), 1.2px 0.8px 1.6px rgba(191,191,191,0.1)',
-              }}
+            </div>
+
+            {description && description.toLowerCase() !== 'community space' ? (
+              <p className='max-w-[400px] text-[15px] leading-[1.55]' style={{ color: '#3F3F46' }}>
+                {description}
+              </p>
+            ) : null}
+
+            <button
+              type='button'
+              disabled={joinDisabled}
+              onClick={() => onJoin(featuredWorkspace)}
+              className={cn(
+                'mt-[4px] flex w-full items-center justify-center gap-[10px] rounded-[12px] px-[24px] py-[16px] text-[17px] font-bold text-white transition hover:brightness-95 active:scale-[0.99]',
+                joinDisabled && 'cursor-not-allowed opacity-70 hover:brightness-100',
+              )}
+              style={{ background: REF_ACCENT }}
+              data-track-category='Auth'
+              data-track-name={
+                isRequestToJoin ? 'RequestCommunityWorkspaceAccess' : 'JoinCommunityWorkspace'
+              }
+              data-track-metadata={JSON.stringify({
+                workspaceId: featuredWorkspace.id,
+                orgId: featuredOrg.orgId,
+              })}
             >
-              <svg
-                viewBox='0 0 24 24'
-                className='h-[13px] w-[13px]'
-                fill='white'
-                aria-hidden='true'
-              >
-                <path
-                  d='M18.4 11.7 29.4 23.4h-7.5l-7.2-7.7-7.2 7.7H0l10.9-11.7L.5.6h7.5l6.6 7.1L21.3.6h7.5L18.4 11.7Z'
-                  transform='scale(0.83)'
-                />
-              </svg>
-            </span>
-            <span
-              className='mr-[-3px] flex items-center justify-center rounded-[6px] text-[13.5px] font-extrabold'
-              style={{
-                width: 24.6,
-                height: 24.6,
-                background: '#d673ff',
-                border: '1px solid white',
-              }}
-            >
-              <span
-                style={{
-                  color: 'transparent',
-                  backgroundImage:
-                    'linear-gradient(to bottom, rgba(255,255,255,1), rgba(255,255,255,0.75))',
-                  backgroundClip: 'text',
-                  WebkitBackgroundClip: 'text',
-                }}
-              >
-                U
+              {isRejected ? (
+                <>
+                  Request rejected
+                  <LockKeyhole className='h-[18px] w-[18px]' />
+                </>
+              ) : isRequested ? (
+                <>
+                  Request pending
+                  <Clock3 className='h-[18px] w-[18px]' />
+                </>
+              ) : (
+                <>
+                  {isRequestToJoin ? 'Request to join' : 'Join community'}
+                  <ArrowRight className='h-[18px] w-[18px]' strokeWidth={2.4} />
+                </>
+              )}
+            </button>
+
+            {!isRequestToJoin && !joinDisabled ? (
+              <span className='text-[13px]' style={{ color: REF_MUTED }}>
+                Free to join
               </span>
-            </span>
-            {/* + tile */}
-            <span
-              className='ml-[2px] flex items-center justify-center rounded-[16px] bg-[#eee]'
-              style={{ width: 18, height: 18, border: '1px solid white' }}
-            >
-              <Plus
-                className='h-[8.7px] w-[8.7px]'
-                style={{ color: 'rgba(35,34,41,0.6)' }}
-                strokeWidth={1.4}
-              />
-            </span>
-          </div>
-
-          {/* Title + subtitle */}
-          <div className='flex flex-col items-center gap-[2px]'>
-            <h1
-              className='text-[18px] font-semibold tracking-[-0.36px]'
-              style={{ color: REF_TEXT }}
-            >
-              Join or create workspace
-            </h1>
-            <p
-              className='text-[14px] font-medium tracking-[-0.28px]'
-              style={{ color: REF_TEXT_60 }}
-            >
-              A collaborative space for your team and agents
-            </p>
-          </div>
-        </div>
-
-        {/* Button + caption */}
-        <div className='mt-[20px] flex flex-col items-center gap-[8px]'>
-          <button
-            type='button'
-            onClick={onContinueToAuth}
-            className='overflow-clip rounded-[8px] px-[12px] py-[8px] text-[15px] font-semibold leading-[1.2] text-white transition active:scale-[0.99]'
-            style={{ background: REF_RED }}
-            data-track-category='Auth'
-            data-track-name='ContinueWithWorkEmail'
-          >
-            Continue with work email
-          </button>
-        </div>
-      </div>
-
-      {/* Divider — hairline with centered white label chip */}
-      <div className='relative mt-[24px] flex items-center justify-center'>
-        <span className='h-px w-full' style={{ background: REF_LINE }} />
-        <span
-          className='absolute bg-white px-[8px] py-[2px] text-[12px] font-medium tracking-[-0.24px]'
-          style={{ color: REF_TEXT_40 }}
-        >
-          Explore Public Communities
-        </span>
+            ) : null}
+          </>
+        )}
       </div>
 
       {/* Pending-request banner */}
       {communityJoinRequest ? (
         <div
           className={cn(
-            'mt-6 flex items-start gap-3 rounded-[14px] border px-4 py-3',
+            'flex items-start gap-3 rounded-[14px] border px-4 py-3',
             communityJoinRequest.status === CommunityJoinResultStatus.REQUEST_REJECTED
               ? 'border-red-200 bg-red-50'
               : 'border-emerald-200 bg-emerald-50',
@@ -279,123 +265,67 @@ const LeftPanel = ({
         </div>
       ) : null}
 
-      {/* Community list */}
-      <div className='mt-[24px] flex flex-col'>
-        {isLoading ? (
-          <div className='flex items-center justify-center py-14'>
-            <Loader2 className='h-5 w-5 animate-spin text-[#98a0ad]' />
-          </div>
-        ) : communityError ? (
-          <p className='py-6 text-center text-[13.5px] text-[#767c8a]'>{communityError}</p>
-        ) : communityOrganizations.length === 0 ? (
-          <p className='py-6 text-center text-[13.5px] text-[#767c8a]'>
-            No community workspaces are available.
-          </p>
-        ) : (
-          communityOrganizations.map(org => (
-            <div key={org.orgId} className='flex flex-col'>
-              {org.workspaces.map(workspace => {
-                const isRequested =
-                  communityJoinRequest?.workspaceId === workspace.id &&
-                  communityJoinRequest.status === CommunityJoinResultStatus.REQUEST_PENDING;
-                const isRejected =
-                  communityJoinRequest?.workspaceId === workspace.id &&
-                  communityJoinRequest.status === CommunityJoinResultStatus.REQUEST_REJECTED;
-                const isRequestToJoin =
-                  workspace.joinPolicy === WorkspaceJoinPolicy.REQUEST_TO_JOIN;
-                const disabled = isRequested || isRejected;
-
-                return (
-                  <button
-                    key={workspace.id}
-                    type='button'
-                    disabled={disabled}
-                    onClick={() => onJoin(workspace)}
-                    className={cn(
-                      'group flex w-full items-center gap-[10px] bg-transparent py-[12px] text-left transition',
-                      disabled ? 'cursor-not-allowed opacity-70' : 'cursor-pointer',
-                    )}
-                    data-track-category='Auth'
-                    data-track-name={
-                      isRequestToJoin ? 'RequestCommunityWorkspaceAccess' : 'JoinCommunityWorkspace'
-                    }
-                    data-track-metadata={JSON.stringify({
-                      workspaceId: workspace.id,
-                      orgId: org.orgId,
-                    })}
-                  >
-                    {/* Icon tile — 40px rounded, tinted surface */}
-                    <span
-                      className='flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] text-white'
-                      style={{
-                        background: getAvatarSquareColor(
-                          hashHue(workspace.name) % 6,
-                          workspace.name,
-                        ),
-                        border: '1px solid rgba(35,34,41,0.04)',
-                        boxShadow: 'inset 0 0 0 1px rgba(35,34,41,0.04)',
-                      }}
-                    >
-                      <WorkspaceGlyph name={workspace.name} />
-                    </span>
-
-                    {/* Name + description */}
-                    <span className='min-w-0 flex-1'>
-                      <span
-                        className='block truncate text-[14px] font-medium tracking-[-0.28px]'
-                        style={{ color: REF_TEXT }}
-                      >
-                        {workspace.name}
-                      </span>
-                      <span
-                        className='mt-[2px] block truncate text-[12px] tracking-[-0.24px]'
-                        style={{ color: REF_TEXT_60 }}
-                      >
-                        {workspace.description || 'Community space'}
-                      </span>
-                    </span>
-
-                    {/* Join / Request button */}
-                    <span className='flex shrink-0 items-center'>
-                      <span
-                        className={cn(
-                          'flex items-center justify-center gap-1.5 rounded-[8px] bg-white px-[12px] py-[6px] text-[15px] font-medium leading-[1.2] transition',
-                          disabled ? 'text-[#98a0ad]' : 'text-[#101828] group-hover:bg-[#fafbfc]',
-                        )}
-                        style={{ border: `1px solid ${REF_JOIN_BORDER}` }}
-                      >
-                        {isRejected ? (
-                          <>
-                            Rejected
-                            <LockKeyhole className='h-3.5 w-3.5' />
-                          </>
-                        ) : isRequested ? (
-                          <>
-                            Pending
-                            <Clock3 className='h-3.5 w-3.5' />
-                          </>
-                        ) : isRequestToJoin ? (
-                          'Request to Join'
-                        ) : (
-                          'Join'
-                        )}
-                      </span>
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          ))
-        )}
+      {/* Divider */}
+      <div className='flex items-center gap-[14px] text-[13px]' style={{ color: REF_MUTED }}>
+        <span className='h-px flex-1' style={{ background: REF_DIVIDER }} />
+        Or use your work email
+        <span className='h-px flex-1' style={{ background: REF_DIVIDER }} />
       </div>
-    </div>
-  </section>
-);
+
+      {/* Secondary: workspace row */}
+      <div
+        className='flex flex-wrap items-center gap-[16px] rounded-[16px] bg-white px-[20px] py-[18px]'
+        style={{ border: `1px solid ${REF_CARD_BORDER}` }}
+      >
+        <span className='flex shrink-0'>
+          {WORK_EMAIL_TILES.map((tile, index) => (
+            <span
+              key={tile.letter}
+              className={cn(
+                'flex h-8 w-8 items-center justify-center rounded-[8px] border-2 border-white text-[14px] font-extrabold text-white',
+                index > 0 && 'ml-[-8px]',
+              )}
+              style={{ background: tile.background }}
+            >
+              {tile.letter}
+            </span>
+          ))}
+        </span>
+        <div className='flex min-w-0 flex-[1_1_200px] flex-col gap-[3px]'>
+          <strong className='text-[15px] font-bold' style={{ color: REF_TEXT }}>
+            Join or create workspace
+          </strong>
+          <span className='text-[13px] leading-[1.45]' style={{ color: REF_MUTED }}>
+            A private Xyne workspace to try with your team
+          </span>
+        </div>
+        <button
+          type='button'
+          onClick={onContinueToAuth}
+          className='mx-auto shrink-0 rounded-[10px] bg-white px-[16px] py-[12px] text-[14px] font-bold transition hover:bg-[#fafafa] active:scale-[0.99]'
+          style={{ color: REF_TEXT, border: '1px solid #CFCFD4' }}
+          data-track-category='Auth'
+          data-track-name='ContinueWithWorkEmail'
+        >
+          Continue with work email
+        </button>
+      </div>
+    </section>
+  );
+};
 
 /** Minimal glyph per workspace — deterministic pick from a small set. */
-const WorkspaceGlyph = ({ name }: { name: string }): ReactElement => {
+const WorkspaceGlyph = ({
+  name,
+  className = 'h-5 w-5',
+  strokeWidth = 2.2,
+}: {
+  name: string;
+  className?: string;
+  strokeWidth?: number;
+}): ReactElement => {
   const hue = hashHue(name) % 4;
-  const props = { className: 'h-5 w-5', strokeWidth: 2.2 } as const;
+  const props = { className, strokeWidth };
   switch (hue) {
     case 0:
       return <MessageSquare {...props} />;
@@ -501,8 +431,8 @@ export const CommunityWorkspaceScreen = ({
 
   return (
     <div
-      className='flex min-h-screen justify-center bg-white'
-      style={{ fontFamily: SANS_FONT, WebkitFontSmoothing: 'antialiased' }}
+      className='flex min-h-screen flex-col items-center justify-center px-[20px] py-[48px]'
+      style={{ fontFamily: SANS_FONT, WebkitFontSmoothing: 'antialiased', background: REF_PAGE_BG }}
     >
       <LeftPanel
         communityOrganizations={communityOrganizations}

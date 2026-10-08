@@ -16,7 +16,7 @@ class UserActivityStatusService {
     return participant !== null;
   }
 
-  async markInCall(userId: string): Promise<void> {
+  async markInCall(userId: string, callExternalId: string): Promise<void> {
     try {
       // updateMany, not update: external participants have no users row and update would throw
       const { count } = await db.user.updateMany({
@@ -26,22 +26,22 @@ class UserActivityStatusService {
 
       if (count === 0) {
         logger.debug(
-          `[UserActivityStatus] No user row for ${userId} — skipping IN_CALL (external participant?)`,
+          `[UserActivityStatus] No user row for ${userId} — skipping IN_CALL (external participant?) | call=${callExternalId}`,
         );
         return;
       }
 
-      logger.info(`[UserActivityStatus] activity_status_updated | user=${userId}, to=IN_CALL`);
+      logger.info(`[UserActivityStatus] activity_status_updated | user=${userId}, to=IN_CALL, call=${callExternalId}`);
     } catch (error) {
-      logger.error(`[UserActivityStatus] Failed to mark user ${userId} as IN_CALL:`, error);
+      logger.error(`[UserActivityStatus] Failed to mark user ${userId} as IN_CALL for call ${callExternalId}:`, error);
     }
   }
 
-  async clearInCall(userId: string): Promise<void> {
+  async clearInCall(userId: string, callExternalId: string): Promise<void> {
     try {
       if (await this.isUserInAnyActiveCall(userId)) {
         logger.debug(
-          `[UserActivityStatus] Keeping IN_CALL for user ${userId} — still joined to another active call`,
+          `[UserActivityStatus] Keeping IN_CALL for user ${userId} — still joined to another active call | left_call=${callExternalId}`,
         );
         return;
       }
@@ -52,23 +52,23 @@ class UserActivityStatusService {
       });
 
       if (count > 0) {
-        logger.info(`[UserActivityStatus] activity_status_updated | user=${userId}, from=IN_CALL, to=null`);
+        logger.info(`[UserActivityStatus] activity_status_updated | user=${userId}, from=IN_CALL, to=null, call=${callExternalId}`);
       }
     } catch (error) {
-      logger.error(`[UserActivityStatus] Failed to clear IN_CALL for user ${userId}:`, error);
+      logger.error(`[UserActivityStatus] Failed to clear IN_CALL for user ${userId} for call ${callExternalId}:`, error);
     }
   }
 
-  async clearInCallForEndedCall(callId: string): Promise<void> {
+  async clearInCallForEndedCall(call: { id: string; externalId: string }): Promise<void> {
     try {
       const participants = await db.callParticipant.findMany({
-        where: { callId, response: InvitationResponse.ACCEPTED },
+        where: { callId: call.id, response: InvitationResponse.ACCEPTED },
         select: { userId: true },
       });
 
-      await Promise.all(participants.map((participant) => this.clearInCall(participant.userId)));
+      await Promise.all(participants.map((participant) => this.clearInCall(participant.userId, call.externalId)));
     } catch (error) {
-      logger.error(`[UserActivityStatus] Failed to clear IN_CALL for ended call ${callId}:`, error);
+      logger.error(`[UserActivityStatus] Failed to clear IN_CALL for ended call ${call.externalId}:`, error);
     }
   }
 

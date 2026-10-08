@@ -185,7 +185,7 @@ class NoteTakerWebhookController {
     }
 
     logger.info(`[NoteTaker Webhook] Created note taker call record for ${roomName}`, {
-      callId: call.id,
+      callId: call.externalId,
     });
 
     // Thread-linked recording: post the single anchor message into the thread

@@ -14,6 +14,7 @@ import {
   defineQuery,
   DocType,
   EntityUserAccess,
+  getConnectQueryEnabledCanvas,
   flowStepVisibilitySchemaShape,
   FormContextType,
   FormEntityType,
@@ -3319,26 +3320,14 @@ export const queries: AnyQueryRegistry = defineQueries({
     }),
     ({ ctx, args }) => {
       const isBackward = args.direction === 'backward';
-      let query = zql.canvases
-        .where('docType', DocType.Quarto)
-        .where((helpers) => {
-          return helpers.or(
-            helpers.cmp('createdBy', ctx.userID),
-            helpers.exists('participants', p =>
-              p.where(({ or, cmp, exists: ex }) =>
-                or(
-                  cmp('userId', ctx.userID),
-                  ex('userGroup', ug =>
-                    ug.whereExists('userGroupMappings', m => m.where('userId', ctx.userID)),
-                  ),
-                  ex('channel', ch =>
-                    ch.whereExists('participants', cp => cp.where('userId', ctx.userID)),
-                  ),
-                ),
-              ),
-            ),
-          );
-        })
+      // Use the flipped (no-PUBLIC) visibility helper — same as userCanvasesPaginated. The viewer's
+      // own rows drive the scan instead of a hand-written OR-of-exists that Zero can't push into
+      // SQLite, which (combined with the connect_group reach) made it walk every workspace's docs.
+      let query = applyCanvasVisibilityQueryFilter(
+        zql.canvases.where('docType', DocType.Quarto),
+        ctx.userID,
+        false,
+      )
         .orderBy('updatedAt', isBackward ? 'asc' : 'desc')
         .orderBy('id', isBackward ? 'asc' : 'desc');
 
@@ -4308,28 +4297,37 @@ export const queries: AnyQueryRegistry = defineQueries({
     }
   ),
 
-  canvasParticipants: defineQuery(z.object({ canvasId: z.string() }), ({ args: { canvasId } }) => {
-    return zql.canvas_participants.where('canvasId', canvasId).related('canvas');
-  }),
+  canvasParticipants: defineQuery(
+    z.object({ canvasId: z.string(), connectId: z.string().optional() }),
+    ({ args: { canvasId, connectId } }) => {
+      // Slack Connect: when enabled and the caller knows the connectId, scope by the
+      // connect group (returns the shared entity's full participant set); else by canvasId.
+      // Mode counted server-side in the backend's handleQueries (connect_query_mode metric).
+      const useConnect = getConnectQueryEnabledCanvas() && !!connectId;
+      return useConnect
+        ? zql.canvas_participants.where('canvasConnectId', connectId as string).related('canvas')
+        : zql.canvas_participants.where('canvasId', canvasId).related('canvas');
+    },
+  ),
 
   canvasCommentThreads: defineQuery(
-    z.object({ canvasId: z.string() }),
-    ({ ctx, args: { canvasId } }) => {
-      return zql.canvas_comment_threads
-        .where('workspaceId', ctx.workspaceId)
-        .where('canvasId', canvasId)
-        .orderBy('createdAt', 'asc')
-        .related('initialComment', comment =>
-          comment.where('workspaceId', ctx.workspaceId),
-        );
+    z.object({ canvasId: z.string(), connectId: z.string().optional() }),
+    ({ args: { canvasId, connectId } }) => {
+      const useConnect = getConnectQueryEnabledCanvas() && !!connectId;
+      const base = useConnect
+        ? zql.canvas_comment_threads.where('canvasConnectId', connectId as string)
+        : zql.canvas_comment_threads.where('canvasId', canvasId);
+      return base.orderBy('createdAt', 'asc').related('initialComment');
     },
   ),
 
   canvasThreadComments: defineQuery(
-    z.object({ threadId: z.string() }),
-    ({ ctx, args: { threadId } }) => {
+    // A thread belongs to one connect group, so threadId alone scopes the comments. No `workspaceId`
+    // filter: tenancy comes from the defineQuery backstop (connect_group reach), which keeps comments
+    // on a canvas shared from another workspace visible. connectId is accepted for signature symmetry.
+    z.object({ threadId: z.string(), connectId: z.string().optional() }),
+    ({ args: { threadId } }) => {
       return zql.canvas_comments
-        .where('workspaceId', ctx.workspaceId)
         .where('threadId', threadId)
         .orderBy('createdAt', 'asc');
     },
@@ -4359,10 +4357,13 @@ export const queries: AnyQueryRegistry = defineQueries({
   }),
 
   canvasVersions: defineQuery(
-    z.object({ canvasId: z.string() }),
-    ({ ctx, args: { canvasId } }) => {
-      return zql.canvas_versions
-        .where('canvasId', canvasId)
+    z.object({ canvasId: z.string(), connectId: z.string().optional() }),
+    ({ ctx, args: { canvasId, connectId } }) => {
+      const useConnect = getConnectQueryEnabledCanvas() && !!connectId;
+      const base = useConnect
+        ? zql.canvas_versions.where('canvasConnectId', connectId as string)
+        : zql.canvas_versions.where('canvasId', canvasId);
+      return base
         .whereExists('canvas', canvas =>
           applyCanvasVisibilityQueryFilter(canvas, ctx.userID),
         )
@@ -5257,8 +5258,9 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       limit: z.number().optional(),
       start: z.object({ name: z.string(), id: z.string() }).nullish(),
       direction: z.enum(['forward', 'backward']).optional(),
+      search: z.string().optional(),
     }),
-    ({ args: { projectIds, limit = 100, start, direction = 'forward' } }) => {
+    ({ args: { projectIds, limit = 100, start, direction = 'forward', search } }) => {
       if (projectIds.length === 0) {
         return zql.project_tags.where('id', 'nonexistent').limit(0);
       }
@@ -5267,6 +5269,9 @@ dmChannelsLatestMessagesPaginated: defineQuery(
         .where('projectId', 'IN', projectIds)
         .orderBy('name', isBackward ? 'desc' : 'asc')
         .orderBy('id', isBackward ? 'desc' : 'asc');
+      if (search) {
+        q = q.where('name', 'ILIKE', `%${search}%`);
+      }
       if (start) {
         q = q.start({ name: start.name, id: start.id }, { inclusive: false });
       }

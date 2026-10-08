@@ -487,6 +487,33 @@ export interface SandboxRepoOption {
   description?: string;
 }
 
+export interface OptimizationOption {
+  key: string;
+  label: string;
+  summary: string;
+  detail: string;
+  group: string;
+  defaultOn: boolean;
+  /** "fleet" switches are decided outside agent runs, so only env changes them. */
+  scope: "agent" | "fleet";
+  requires?: string;
+}
+
+export interface OptimizationCatalog {
+  groups: Array<{ id: string; title: string; description: string }>;
+  optimizations: OptimizationOption[];
+  /** Per delegation tier: switches that default on (or off) for that tier. */
+  tierDefaults: Record<string, Record<string, boolean>>;
+}
+
+/** Every claw optimization switch, for the agent page's Optimizations section. */
+export async function getOptimizationCatalog(): Promise<OptimizationCatalog> {
+  const data = await request<{ success: boolean; data: OptimizationCatalog }>(
+    `${AUTH_API_URL}/api/v1/agents/optimizations`,
+  );
+  return data.data;
+}
+
 /** Available sandbox repo setups (for the agent "Sandbox repository" picker). */
 export async function listSandboxRepos(): Promise<SandboxRepoOption[]> {
   const data = await request<{ success: boolean; data: SandboxRepoOption[] }>(

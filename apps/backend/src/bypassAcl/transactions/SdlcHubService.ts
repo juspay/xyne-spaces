@@ -2,6 +2,7 @@ import { transaction } from '../base';
 import type { SdlcActor } from '@/sdlc/types';
 import { AppError } from '@/middleware/errorHandler';
 import { sdlcChannelCanvasParticipant } from '@/sdlc/sdlcCanvasAccess';
+import { newConnectId, createConnectGroupForEntity, ConnectEntityType } from '@/database/connectGroup';
 import { ensureHubKnowledgeFolder, placeHubItem, ensureHubWikiFolder, ensureRepositoryWikiFolder } from '@/sdlc/hubFolders';
 import { ensureLink, refileFolderEdges } from '@/sdlc/entityLinkService';
 import { SdlcHubService, SDLC_FOLDERS, channelRepository, linkRelatedCanvases } from '@/sdlc/SdlcHubService';
@@ -90,8 +91,10 @@ export function addChannelRepositoriesTx(self: SdlcHubService, actor: SdlcActor,
   }));
 }
 export function createArtifactFromClawTx(self: SdlcHubService, actor: SdlcActor, input: { title: string; folderId: string; markdown: string; channelId?: string | undefined; trackId?: string | undefined; trackFolderId?: string | undefined; repoId?: string | undefined; repoIds?: string[] | undefined; relatedCanvasIds?: string[] | undefined; }, content: BlockNoteBlock[], channelId: string, folder: { id: string; name: string }, projectId: string, repo: { id: string } | null, hubKnowledge: boolean, trackFolderId: string | undefined, repoIds: string[]) {
-  return transaction(['Canvas', 'CanvasParticipant', 'SdlcArtifact', 'SdlcEntityLink', 'SdlcFolder'], 'createArtifactFromClaw: canvas, artifact, track/repo links and hub placement must commit atomically; tx is not ACL-wrapped', self.prisma, async (tx) => {
+  return transaction(['Canvas', 'CanvasParticipant', 'SdlcArtifact', 'SdlcEntityLink', 'SdlcFolder', 'ConnectGroup'], 'createArtifactFromClaw: canvas, artifact, track/repo links and hub placement must commit atomically; tx is not ACL-wrapped', self.prisma, async (tx) => {
     const viewAccessId = randomUUID();
+    // Slack Connect: a canvas is a shareable entity → its own connectId + a private connect_group row.
+    const connectId = newConnectId();
     const canvas = await tx.canvas.create({
       data: {
         workspaceId: actor.workspaceId,
@@ -106,11 +109,18 @@ export function createArtifactFromClawTx(self: SdlcHubService, actor: SdlcActor,
         viewAccessId,
         visibility: CanvasVisibility.PRIVATE,
         isCollaborative: true,
+        connectId,
         metadata: {} as Prisma.InputJsonValue,
         participants: {
-          create: sdlcChannelCanvasParticipant(actor.workspaceId, channelId),
+          create: sdlcChannelCanvasParticipant(actor.workspaceId, channelId, connectId),
         },
       },
+    });
+    await createConnectGroupForEntity(tx, {
+      entityType: ConnectEntityType.CANVAS,
+      entityId: canvas.id,
+      hostWorkspaceId: actor.workspaceId,
+      connectId,
     });
     if (input.trackId) {
       await tx.sdlcEntityLink.create({
@@ -390,6 +400,8 @@ export async function createSdlcChannel(tx: TransactionClient, actor: SdlcActor,
 
     const channelId = randomUUID();
     const now = new Date();
+    // Slack Connect: the channel is a shareable entity → its own connectId + a private connect_group row.
+    const connectId = newConnectId();
 
     await tx.channel.create({
       data: {
@@ -402,6 +414,7 @@ export async function createSdlcChannel(tx: TransactionClient, actor: SdlcActor,
         createdBy: actor.userId,
         projectId: input.projectId,
         workspaceId: actor.workspaceId,
+        connectId,
         participantCount: 1,
         addUserPolicy: ChannelAddUserPolicy.ADMINS_ONLY,
         showTicketsTabTicketsInChat: false,
@@ -430,6 +443,12 @@ export async function createSdlcChannel(tx: TransactionClient, actor: SdlcActor,
           },
         },
       },
+    });
+    await createConnectGroupForEntity(tx, {
+      entityType: ConnectEntityType.CHANNEL,
+      entityId: channelId,
+      hostWorkspaceId: actor.workspaceId,
+      connectId,
     });
 
     // Dual-write: mirror the channel→project board set into ChannelBoardMapping so

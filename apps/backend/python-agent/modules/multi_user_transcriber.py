@@ -514,7 +514,10 @@ class MultiUserTranscriber:
 
         multi_language = len(language_codes) > 1
 
-        # Create Google STT with Chirp configuration and speech adaptation
+        # Create Google STT with Chirp configuration and speech adaptation.
+        # Keywords are sent for multi-language too: Chirp 3 accepts adaptation alongside
+        # multiple language codes, and an empty list here becomes an empty PhraseSet that
+        # Google rejects with "Has no phrases" (the plugin only skips adaptation for NOT_GIVEN).
         return google.STT(
             model=self._google_stt_model,
             languages=language_codes,
@@ -525,7 +528,7 @@ class MultiUserTranscriber:
             min_confidence_threshold=0.5,
             sample_rate=16000,
             interim_results=True,
-            keywords=[(word, 10.0) for word in hot_words] if not multi_language else [],
+            keywords=[(word, 10.0) for word in hot_words],
         )
     
     def _create_stt(self, call_type: Optional[str] = None) -> ResilientSTT:

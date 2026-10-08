@@ -44,6 +44,35 @@ export function getZeroQueryOperations(): Counter {
   return _zeroQueryOperations;
 }
 
+// Slack Connect — counts canvas/channel child query executions by lookup mode so the
+// new (connectId) vs old (canvasId/channelId) split is visible in Grafana (victoriametrics).
+// Labels: entity (canvas|channel), table, mode (connect_id|legacy).
+let _connectQueryMode: Counter | null = null;
+export function getConnectQueryMode(): Counter {
+  if (!_connectQueryMode) {
+    _connectQueryMode = getMeter().createCounter('connect_query_mode', {
+      description: 'Slack Connect child-query executions by lookup mode (connect_id vs legacy)',
+      unit: '1',
+    });
+  }
+  return _connectQueryMode;
+}
+
+// Slack Connect — counts canvas/channel child ACL evaluations by workspace-truth source.
+// Unlike the query-mode metric, the ACL is NOT flag-gated: connectId present → connect_group
+// truth; else workspaceId. Labels: entity, table, layer (zero|prisma), op (read|write),
+// mode (connect_group|workspace), outcome (ok|error_fallback — a real Prisma reach fallback).
+let _connectAclMode: Counter | null = null;
+export function getConnectAclMode(): Counter {
+  if (!_connectAclMode) {
+    _connectAclMode = getMeter().createCounter('connect_acl_mode', {
+      description: 'Slack Connect ACL evaluations by workspace-truth source (connect_group vs workspace)',
+      unit: '1',
+    });
+  }
+  return _connectAclMode;
+}
+
 let _zeroQueryLatency: Histogram | null = null;
 export function getZeroQueryLatency(): Histogram {
   if (!_zeroQueryLatency) {

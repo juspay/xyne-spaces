@@ -186,8 +186,10 @@ function sessionKey(
   agentSlug?: string,
   credentials?: Record<string, unknown>,
   lane?: SessionLane,
+  instance?: string,
 ): string {
   const suffix = lane === "app" ? APP_LANE_SUFFIX : "";
+  const instanceSegment = instance && instance !== "default" ? `:inst:${instance}` : "";
   const credsWorkspaceId = credentials?.["workspaceId"];
   const wsSegment =
     SPACES_WORKSPACE_SCOPED_SERVER_TYPES.has(serverType) && typeof credsWorkspaceId === "string" && credsWorkspaceId.trim()
@@ -197,12 +199,12 @@ function sessionKey(
   // surface run. Keep each team's env-bound child process isolated.
   const slackTeamId = credentials?.["teamId"];
   if (serverType === "slack" && typeof slackTeamId === "string" && slackTeamId) {
-    return `${userId}:${serverType}:team:${slackTeamId}${wsSegment}${suffix}`;
+    return `${userId}:${serverType}:team:${slackTeamId}${instanceSegment}${wsSegment}${suffix}`;
   }
   if (PER_AGENT_SERVER_TYPES.has(serverType) && agentSlug) {
-    return `${userId}:${serverType}:${agentSlug}${wsSegment}${suffix}`;
+    return `${userId}:${serverType}:${agentSlug}${instanceSegment}${wsSegment}${suffix}`;
   }
-  return `${userId}:${serverType}${wsSegment}${suffix}`;
+  return `${userId}:${serverType}${instanceSegment}${wsSegment}${suffix}`;
 }
 
 /** Close + drop sessions idle longer than the TTL. Best-effort; never throws. */
@@ -231,6 +233,7 @@ async function getOrCreateSession(
   credentials: Record<string, unknown>,
   agentSlug?: string,
   lane?: SessionLane,
+  instance?: string,
 ): Promise<Client> {
   if (SPACES_SESSION_CREDENTIAL_SERVER_TYPES.has(serverType)) {
     // Benchmark lane: the onyx-ask-ai agent ALWAYS routes to the benchmark Vespa
@@ -301,7 +304,7 @@ async function getOrCreateSession(
   // key — the Spaces-family sessions are keyes per (user × server ×
   // workspace); keying on the pre-enrichment creds would collapse two
   // workspaces back into one shared child process.
-  const key = sessionKey(userId, serverType, agentSlug, credentials, lane);
+  const key = sessionKey(userId, serverType, agentSlug, credentials, lane, instance);
 
   // For xyne-spaces the rotating credential is `token`; for OAuth-based HTTP
   // adapters (customerio, honeycomb, egnyte, …) it is `accessToken`; for
@@ -629,8 +632,9 @@ export async function callTool(
   params: Record<string, unknown>,
   agentSlug?: string,
   lane?: SessionLane,
+  instance?: string,
 ): Promise<McpCallResult> {
-  const client = await getOrCreateSession(userId, serverType, credentials, agentSlug, lane);
+  const client = await getOrCreateSession(userId, serverType, credentials, agentSlug, lane, instance);
 
   // Same pattern as listToolsForUser above: pass BOTH `timeout` and `signal`
   // to override the SDK's 60s default. See protocol.js:712 in the MCP SDK.

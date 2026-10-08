@@ -1,7 +1,8 @@
 // Barrel export - allows clean imports from @xyne/shared
 export * from './zero/schema';
 export * from './zero/audit';
-export { defineQuery } from './zero/acl';
+export { defineQuery, connectReach, connectColumnForTable, CONNECT_SCOPED_TABLES } from './zero/acl';
+export { setConnectQueryEnabledCanvas, getConnectQueryEnabledCanvas } from './zero/connect-flags';
 export {
   EncryptedFieldQueryError,
   validateQueryWhereClause,
@@ -18,6 +19,7 @@ export * from './activity';
 export * from './types/index';
 export * from './config/index';
 export * from './utils/mentionRanking';
+export * from './utils/channelSectionSuggestions';
 export * from './tags';
 export * from './board-types';
 export * from './types/workflowApproval';

@@ -73,6 +73,7 @@ import { useUserGroups } from '../../../hooks/useUserGroup';
 import { useTheme } from '../../../hooks/useTheme';
 import { useZero } from '../../../hooks/useZero';
 import { useCachedQuery } from '@xyne/shared/hooks';
+import { useCanvasConnectId } from '../../../hooks/useCanvasConnectId';
 import { queries } from '@xyne/shared/zero/queries';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { logger, Event } from '../../../utils/logger';
@@ -157,8 +158,9 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
     const { theme } = useTheme();
     const isXyneAIOpen = useSelector(xyneAIActor, state => state.matches('open'));
     const z = useZero();
+    const connectId = useCanvasConnectId(canvasId);
     const [queriedParticipants = []] = useCachedQuery(
-      queries.canvasParticipants({ canvasId: canvasId || '' }),
+      queries.canvasParticipants({ canvasId: canvasId || '', connectId }),
       {
         enabled: Boolean(canvasId) && !preloadedParticipants,
       },

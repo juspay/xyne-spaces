@@ -128,6 +128,7 @@ import {
   parseSlashCommandArtifactMessage,
   withSlashCommandArtifactClosed,
 } from '@xyne/shared';
+import { ConnectEntityType } from '@xyne/shared';
 import { SDLC_HUB_KNOWLEDGE_FOLDER, sdlcIconNameSchema, sdlcTrackStatusSchema } from '@xyne/shared';
 import { isSdlcTreeItemType, refileSdlcFolderEdges } from '@xyne/shared';
 import { MAX_DESK_APPS, MAX_DUPLICATE_SCOPE_FIELDS, serializeDeskAppIds } from '@xyne/shared';
@@ -2505,9 +2506,10 @@ export function createMutators(
           name: z.string(),
           emoji: z.string().nullable().optional(),
           position: z.string(),
+          filterMode: z.nativeEnum(ChannelFilterMode).nullable().optional(),
           timestamp: z.number(),
         }),
-        async ({ tx, args: { id, name, emoji, position, timestamp } }) => {
+        async ({ tx, args: { id, name, emoji, position, filterMode, timestamp } }) => {
           // Reject a name this user already uses in this workspace (case-insensitive).
           const siblings = await tx.run(
             zql.channel_sections
@@ -2528,6 +2530,7 @@ export function createMutators(
             position,
             isCollapsed: false,
             isDeleted: false,
+            ...(filterMode !== undefined && { filterMode: filterMode ?? null }),
             createdAt: timestamp,
             updatedAt: timestamp,
           });
@@ -5274,8 +5277,9 @@ export function createMutators(
           // Cancelling from the Calls screen goes through this mutator, not a REST
           // route, so the channel pill has to be refreshed from here too.
           const cancelledCallId = call.id;
+          const cancelledCallExternalId = call.externalId;
           asyncTasks.push(async () => {
-            queueScheduledCallPillSync(cancelledCallId, 'mutators.calls.cancel');
+            queueScheduledCallPillSync(cancelledCallId, cancelledCallExternalId, 'mutators.calls.cancel');
           });
           if (cancelEntireSeries && call.recurringSeriesId) {
             await tx.mutate.recurring_call_series.update({
@@ -9538,13 +9542,15 @@ export function createMutators(
           content: z.any().optional(),
           timestamp: z.number(),
           participantId: z.string(),
+          // Slack Connect: caller-generated connectId (id == connectId for the private row).
+          connectId: z.string().optional(),
           // Legacy fields (pre-XYNE-17290). Accepted so old clients don't get
           // Zod validation errors during a rolling deploy; intentionally
           // ignored — the canonical `id` is the only identity we write.
           viewAccessId: z.string().optional(),
           editAccessId: z.string().optional(),
         }),
-        async ({ tx, args: { id, title, channelId, folderId, projectId, visibility, content, timestamp, participantId } }) => {
+        async ({ tx, args: { id, title, channelId, folderId, projectId, visibility, content, timestamp, participantId, connectId } }) => {
           const now = timestamp;
           const {
             projectId: resolvedProjectId,
@@ -9578,7 +9584,22 @@ export function createMutators(
             createdAt: now,
             updatedAt: now,
             metadata: {},
+            connectId,
           });
+
+          // Slack Connect: create this canvas's private connect_group row (id == connectId).
+          if (connectId) {
+            await tx.mutate.connect_group.insert({
+              id: connectId,
+              entityType: ConnectEntityType.CANVAS,
+              entityId: id,
+              hostWorkspaceId: authData.workspaceId,
+              connectId,
+              status: 'ACTIVE',
+              createdAt: now,
+              updatedAt: now,
+            });
+          }
 
           // Add creator as participant with OWNER role
           await tx.mutate.canvas_participants.insert({
@@ -9589,6 +9610,7 @@ export function createMutators(
             role: CanvasRole.OWNER,
             joinedAt: now,
             updatedAt: now,
+            ...(connectId ? { canvasConnectId: connectId } : {}),
           });
           asyncTasks.push(async () => {
             try {
@@ -9674,6 +9696,7 @@ export function createMutators(
               role: role,
               joinedAt: now,
               updatedAt: now,
+              ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
             });
           }
         },
@@ -9734,6 +9757,7 @@ export function createMutators(
             role,
             joinedAt: timestamp,
             updatedAt: timestamp,
+            ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
           });
         },
       ),
@@ -9800,6 +9824,7 @@ export function createMutators(
             role,
             joinedAt: timestamp,
             updatedAt: timestamp,
+            ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
           });
         },
       ),
@@ -10433,6 +10458,7 @@ export function createMutators(
             isStarred: true,
             createdAt: timestamp,
             updatedAt: timestamp,
+            ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
           });
         },
       ),
@@ -10457,6 +10483,9 @@ export function createMutators(
             authData.workspaceId,
           );
 
+          // Slack Connect: inherit the parent canvas's connectId (null until backfilled).
+          const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+
           await tx.mutate.canvas_comment_threads.insert({
             id: threadId,
             workspaceId: authData.workspaceId,
@@ -10470,6 +10499,7 @@ export function createMutators(
             statusUpdatedAt: null,
             createdBy: authData.sub,
             createdAt: timestamp,
+            ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
           });
 
           await tx.mutate.canvas_comments.insert({
@@ -10484,6 +10514,7 @@ export function createMutators(
             editedAt: null,
             deletedAt: null,
             createdAt: timestamp,
+            ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
           });
         },
       ),
@@ -10514,6 +10545,9 @@ export function createMutators(
             authData.workspaceId,
           );
 
+          // Slack Connect: inherit the parent canvas's connectId (null until backfilled).
+          const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+
           await tx.mutate.canvas_comments.insert({
             id: commentId,
             workspaceId: authData.workspaceId,
@@ -10526,6 +10560,7 @@ export function createMutators(
             editedAt: null,
             deletedAt: null,
             createdAt: timestamp,
+            ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
           });
 
           const commentCount = await getCanvasThreadCommentCount(
@@ -10710,6 +10745,7 @@ export function createMutators(
             createdBy: authData.sub,
             createdAt: timestamp,
             updatedAt: timestamp,
+            ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
           });
         },
       ),
