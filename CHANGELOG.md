@@ -1,3 +1,10 @@
+## [1.475.1](https://github.com/juspay/xyne-spaces/compare/v1.475.0...v1.475.1) (2026-10-08)
+
+
+### Bug Fixes
+
+* moving passwordHash to non zero schema ([#2754](https://github.com/juspay/xyne-spaces/issues/2754)) ([9ae0e08](https://github.com/juspay/xyne-spaces/commit/9ae0e0862cb61879d0445db7739a71a69fdea505))
+
 ## [1.475.0](https://github.com/juspay/xyne-spaces/compare/v1.474.6...v1.475.0) (2026-10-08)
 
 
