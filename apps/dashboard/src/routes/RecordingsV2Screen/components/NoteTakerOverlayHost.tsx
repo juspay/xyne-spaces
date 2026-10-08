@@ -1,22 +1,17 @@
 import { useCallback, useEffect, type ReactElement } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { useZeroOfflineState } from '@xyne/shared/hooks';
 import { AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
-import { refreshOatsRecordings } from '../../../hooks/usePaginatedOatsRecordings';
+import { useStopRecording } from '../../../hooks/useStopRecording';
 import { useMarkMoment } from '../../../hooks/useMarkMoment';
+import { useRecordingPillSettings } from '../../../hooks/useRecordingPillSettings';
 import {
   sendRecordingEvent,
   useRecordingStore,
   useRecordingVideoControls,
 } from '../../../hooks/useRecordingStore';
-import { recordingService } from '../../../services/Recording/recordingService';
 import { isElectronApp } from '../../../utils/electronApp';
-import {
-  calculateRecordingElapsedMs,
-  logRecordingError,
-  NO_TRANSCRIPT_RECORDING_TITLE,
-} from '../../../utils/recordingUtils';
 import NoteTakerOverlay from './NoteTakerOverlay';
 
 export function NoteTakerOverlayHost(): ReactElement {
@@ -34,51 +29,17 @@ export function NoteTakerOverlayHost(): ReactElement {
   const markedMoments = useRecordingStore(context => context.markedMoments);
   const isMinimized = useRecordingStore(context => context.isTranscriptMinimized);
   const videoControls = useRecordingVideoControls();
+  const { pillEnabled } = useRecordingPillSettings();
   const { markMoment } = useMarkMoment();
   const { showOfflineBanner } = useZeroOfflineState();
   const isActive = status === 'recording' || status === 'paused';
   const { pathname } = useLocation();
-  const navigate = useNavigate();
   // hide the overlay when live recording detail screen entered.
   const isViewingThisRecording =
     Boolean(externalId) && pathname.replace(/\/+$/, '').endsWith(`/recordings/${externalId}`);
   const isOnRecordingsSection = /^\/[^/]+\/recordings(\/|$)/.test(pathname);
 
-  const handleStop = useCallback((): void => {
-    const stoppedRecordingId = externalId;
-    const capturedNothing = transcripts.length === 0;
-    const alreadyTitled = Boolean(title?.trim());
-    const durationMs = calculateRecordingElapsedMs(startTime, pauseStartedAt, accumulatedPausedMs);
-    const endedAtMs = Date.now();
-
-    sendRecordingEvent({ type: 'stopRecording' });
-
-    // The recording just transitioned to ENDED — land the user on its detail
-    if (stoppedRecordingId && !isViewingThisRecording) {
-      void navigate(`/recordings/${stoppedRecordingId}`, {
-        state: { justStopped: true, durationMs, endedAtMs, hasTranscript: !capturedNothing },
-      });
-    }
-
-    if (!stoppedRecordingId || alreadyTitled || !capturedNothing) {
-      refreshOatsRecordings();
-      return;
-    }
-
-    void recordingService
-      .updateRecordingTitle(stoppedRecordingId, NO_TRANSCRIPT_RECORDING_TITLE)
-      .catch(err => logRecordingError('NoteTakerOverlayHost.titleUntranscribed', err))
-      .finally(refreshOatsRecordings);
-  }, [
-    externalId,
-    title,
-    transcripts,
-    isViewingThisRecording,
-    navigate,
-    startTime,
-    pauseStartedAt,
-    accumulatedPausedMs,
-  ]);
+  const handleStop = useStopRecording();
 
   useEffect(() => {
     if (!isActive) return;
@@ -91,8 +52,11 @@ export function NoteTakerOverlayHost(): ReactElement {
 
   useEffect(() => {
     if (!isElectron || !isActive) return;
-    sendRecordingEvent({ type: 'setTranscriptMinimized', isMinimized: !isOnRecordingsSection });
-  }, [isElectron, isActive, isOnRecordingsSection]);
+    sendRecordingEvent({
+      type: 'setTranscriptMinimized',
+      isMinimized: pillEnabled && !isOnRecordingsSection,
+    });
+  }, [isElectron, isActive, isOnRecordingsSection, pillEnabled]);
 
   useEffect(() => {
     if (!isElectron) return;
@@ -117,7 +81,10 @@ export function NoteTakerOverlayHost(): ReactElement {
   }, []);
 
   const shouldRenderOverlay =
-    isActive && startTime !== null && !isViewingThisRecording && (!isMinimized || !isElectron);
+    isActive &&
+    startTime !== null &&
+    !isViewingThisRecording &&
+    (!isMinimized || !isElectron || !pillEnabled);
 
   return (
     <>
