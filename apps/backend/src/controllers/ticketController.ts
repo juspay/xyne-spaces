@@ -48,7 +48,10 @@ import { vespaQueue } from '@/queues/vespaQueue';
 import { messageClassificationQueue } from '@/queues/messageClassificationQueue';
 import { ticketSchema, fileSchema, SubApp } from '@/vespa/src/types';
 import { vespaBackfillQueue } from '@/queues/vespaQueue';
-import { createTicketWithConversation as createTransferredTicket } from '@/apps/core/ticketutils';
+import {
+  createTicketWithConversation as createTransferredTicket,
+  pushVespaJobForTicket,
+} from '@/apps/core/ticketutils';
 import { isSupportedMimeType } from '@/services/fileProcessor';
 import { logger } from '@/utils/logger';
 import { resolveChannelDefaultBoard } from '@/utils/channelDefaultBoard';
@@ -106,6 +109,9 @@ type MyTicketBoardOption = {
   name: string;
   projectId?: string;
 };
+
+// Rolls back the transfer transaction and maps to 409
+class TransferConflictError extends Error {}
 
 export class TicketController {
   private ticketRepository: TicketRepository;
@@ -492,12 +498,17 @@ export class TicketController {
         select: {
           id: true, xyneId: true, title: true, description: true, boardId: true,
           projectId: true, channelId: true, assignedTo: true, priority: true,
-          userGroupId: true, eta: true, ticketType: true,
+          userGroupId: true, eta: true, ticketType: true, isArchived: true, statusV2: true,
           tags: { select: { name: true } },
         },
       });
       if (!source) {
         res.status(404).json({ error: 'Ticket not found' });
+        return;
+      }
+      // Already closed (e.g. by an earlier transfer); a transfer would duplicate it
+      if (source.isArchived || source.statusV2 === TicketStatusV2.CANCELLED) {
+        res.status(409).json({ error: 'Cannot transfer an archived or cancelled ticket' });
         return;
       }
 
@@ -541,80 +552,97 @@ export class TicketController {
         return;
       }
 
-      // Create the new ticket on the target board (fresh id from its namespace).
-      const created = await createTransferredTicket({
-        title: source.title,
-        description: source.description?.trim() || source.title,
-        projectId: targetBoard.projectId,
-        boardId: targetBoardId,
-        channelId: source.channelId,
-        userId,
-        priority: source.priority as TicketPriority,
-        assignedTo: source.assignedTo ?? undefined,
-        userGroupId: source.userGroupId ?? undefined,
-        eta: source.eta ?? undefined,
-        ticketType: source.ticketType ?? undefined,
-      });
-
       const relationType = closeOld
         ? TicketReferenceRelation.MERGED_INTO
         : TicketReferenceRelation.LINKED;
 
-      await db.$transaction(async (tx) => {
-        // Link original -> new (MERGED_INTO surfaces the original on the new
-        // ticket's detail view; LINKED keeps both visibly related).
-        await tx.ticketReferenceMapping.create({
-          data: {
-            workspaceId,
-            sourceTicketId: source.id,
-            targetTicketId: created.ticketId,
-            relationType,
-            createdBy: userId,
-          },
-        });
-
-        // Carry the labels over to the new ticket.
-        if (source.tags.length > 0) {
-          await tx.ticketTag.createMany({
-            data: source.tags.map((tag) => ({
-              workspaceId,
-              name: tag.name,
-              ticketId: created.ticketId,
-            })),
+      // Claim/close the original, create, link and copy labels atomically
+      const created = await db.$transaction(
+        async (tx) => {
+          // Conditional update: only one concurrent transfer can claim the original
+          const claimed = await tx.ticket.updateMany({
+            where: {
+              id: source.id,
+              isArchived: false,
+              statusV2: { not: TicketStatusV2.CANCELLED },
+            },
+            data: closeOld
+              ? {
+                  isArchived: true,
+                  statusV2: TicketStatusV2.CANCELLED,
+                  statusUpdatedAt: new Date(),
+                  updatedBy: userId,
+                }
+              : { updatedBy: userId },
           });
-        }
-        const tagMappings = await tx.ticketTagMapping.findMany({
-          where: { ticketId: source.id },
-          select: { tagId: true, tagName: true },
-        });
-        if (tagMappings.length > 0) {
-          await tx.ticketTagMapping.createMany({
-            data: tagMappings.map((mapping) => ({
-              workspaceId,
-              ticketId: created.ticketId,
-              tagId: mapping.tagId,
-              tagName: mapping.tagName,
-            })),
-            skipDuplicates: true,
-          });
-        }
+          if (claimed.count === 0) {
+            throw new TransferConflictError('Cannot transfer an archived or cancelled ticket');
+          }
 
-        // Close the original: archive it and mark it cancelled (superseded).
-        if (closeOld) {
-          await tx.ticket.update({
-            where: { id: source.id },
+          const newTicket = await createTransferredTicket(
+            {
+              title: source.title,
+              description: source.description?.trim() || source.title,
+              projectId: targetBoard.projectId,
+              boardId: targetBoardId,
+              channelId: source.channelId,
+              userId,
+              priority: source.priority as TicketPriority,
+              assignedTo: source.assignedTo ?? undefined,
+              userGroupId: source.userGroupId ?? undefined,
+              eta: source.eta ?? undefined,
+              ticketType: source.ticketType ?? undefined,
+            },
+            tx,
+          );
+
+          // Link original -> new (MERGED_INTO surfaces the original on the new
+          // ticket's detail view; LINKED keeps both visibly related).
+          await tx.ticketReferenceMapping.create({
             data: {
-              isArchived: true,
-              statusV2: TicketStatusV2.CANCELLED,
-              statusUpdatedAt: new Date(),
-              updatedBy: userId,
+              workspaceId,
+              sourceTicketId: source.id,
+              targetTicketId: newTicket.ticketId,
+              relationType,
+              createdBy: userId,
             },
           });
-        }
-      });
 
-      // Re-index the original in search (its archived/closed state changed). The
-      // new ticket is indexed by createTicketWithConversation itself.
+          // Carry the labels over to the new ticket.
+          if (source.tags.length > 0) {
+            await tx.ticketTag.createMany({
+              data: source.tags.map((tag) => ({
+                workspaceId,
+                name: tag.name,
+                ticketId: newTicket.ticketId,
+              })),
+            });
+          }
+          const tagMappings = await tx.ticketTagMapping.findMany({
+            where: { ticketId: source.id },
+            select: { tagId: true, tagName: true },
+          });
+          if (tagMappings.length > 0) {
+            await tx.ticketTagMapping.createMany({
+              data: tagMappings.map((mapping) => ({
+                workspaceId,
+                ticketId: newTicket.ticketId,
+                tagId: mapping.tagId,
+                tagName: mapping.tagName,
+              })),
+              skipDuplicates: true,
+            });
+          }
+
+          return newTicket;
+        },
+        { maxWait: 5_000, timeout: 15_000 },
+      );
+
+      // Index after commit
+      pushVespaJobForTicket(created.ticketId, userId, workspaceId).catch((error) => {
+        logger.error(`[TRANSFER-TICKET] Vespa indexing failed for ${created.ticketId}:`, error);
+      });
       if (closeOld) {
         try {
           await vespaBackfillQueue.addJob({
@@ -639,6 +667,10 @@ export class TicketController {
         closedOld: closeOld,
       });
     } catch (error) {
+      if (error instanceof TransferConflictError) {
+        res.status(409).json({ error: error.message });
+        return;
+      }
       logger.error('[TRANSFER-TICKET] Transfer failed:', error);
       res.status(500).json({
         error: error instanceof Error ? error.message : 'Failed to transfer ticket',

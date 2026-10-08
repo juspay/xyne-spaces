@@ -58,7 +58,7 @@ const CreateTicketParamsSchema = z.object({
 });
 
 
-async function pushVespaJobForTicket(
+export async function pushVespaJobForTicket(
   ticketId: string,
   userId: string,
   workspaceId?: string
@@ -104,10 +104,12 @@ async function pushVespaJobForTicket(
  * and then creates a ticket linked to that conversation. The ticket is created with a generated xyneId.
  * 
  * @param params - Ticket creation parameters
+ * @param callerTx - Optional transaction to run in; the caller then indexes after commit
  * @returns The ticket action response with event type, ticket details, and conversation info
  */
 export async function createTicketWithConversation(
-  params: z.infer<typeof CreateTicketParamsSchema>
+  params: z.infer<typeof CreateTicketParamsSchema>,
+  callerTx?: Prisma.TransactionClient
 ): Promise<TicketActionResponse> {
   try {
     // Validate parameters with Zod
@@ -188,7 +190,7 @@ export async function createTicketWithConversation(
         : undefined;
 
     // Generate xyneId and create ticket in a transaction
-    const ticket = await prisma.$transaction(async (tx) => {
+    const createInTransaction = async (tx: Prisma.TransactionClient) => {
       // Generate xyneId using project-scoped format
       const xyneId = await TicketIdService.generateTicketId(tx, boardId);
       // Create ticket using repository
@@ -211,10 +213,6 @@ export async function createTicketWithConversation(
         ticketType,
         formFieldChanges,
       }, tx);
-
-      pushVespaJobForTicket(createdTicket.id, userId, workspaceId || undefined).catch(error => {
-        logger.error(`[CREATE-TICKET] Error pushing Vespa job for ticket ${createdTicket.id}:`, error);
-      });
 
        const ticketMd = serializeTicketMd({
          id: createdTicket.id,
@@ -255,7 +253,17 @@ export async function createTicketWithConversation(
       }
 
       return createdTicket;
-    });
+    };
+    const ticket = callerTx
+      ? await createInTransaction(callerTx)
+      : await prisma.$transaction(createInTransaction);
+
+    // Index after commit; with callerTx the caller does it
+    if (!callerTx) {
+      pushVespaJobForTicket(ticket.id, userId, workspaceId || undefined).catch(error => {
+        logger.error(`[CREATE-TICKET] Error pushing Vespa job for ticket ${ticket.id}:`, error);
+      });
+    }
 
     logger.info(`[CREATE-TICKET] Created ticket ${ticket.id} (${ticket.xyneId}) in conversation ${finalConversationId}`);
 
