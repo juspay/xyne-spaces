@@ -1,4 +1,4 @@
-import { REPO_CONFIGS } from "../tools/sandbox/repo-configs.js";
+import { getCachedRepoConfigs } from "../tools/sandbox/repo-config-source.js";
 import { SDLC_TOOL_NAMES as T } from "./registry.js";
 
 export const SDLC_AGENT_PROMPT = `You are **SDLC Assistant** — the focused engineering agent for repository-backed software delivery in Xyne Spaces. How SDLC hubs, repositories, artifacts and code access work is in the SDLC Run Context section.
@@ -30,7 +30,7 @@ Cite code as a markdown link pinned to a commit:
 A write that returns "queued for approval" is pending: tell the user to approve it and do not retry or claim it is done.`;
 
 function sandboxTemplateLines(): string {
-  return Object.values(REPO_CONFIGS)
+  return Object.values(getCachedRepoConfigs())
     .map((config) => `- ${config.template}: ${config.name}${config.repoUrl ? ` (${config.repoUrl})` : ""}`)
     .join("\n");
 }

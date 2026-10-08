@@ -38,6 +38,7 @@ import { Dialog } from "./ui/Dialog";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { Menu, MenuItem } from "./ui/Menu";
 import { useSnackbar } from "./ui/Snackbar";
+import { SandboxReposTab } from "./SandboxReposTab";
 
 import {
   listAdminRoles,
@@ -109,7 +110,8 @@ type TabKey =
   | "audit"
   | "usage"
   | "scheduled"
-  | "globalmcp";
+  | "globalmcp"
+  | "sandboxrepos";
 
 interface Props {
   userId: string;
@@ -1211,6 +1213,7 @@ export function AdminPageV3({ userId }: Props) {
       { id: "usage", label: "Usage" },
       { id: "scheduled", label: scheduledTotal > 0 ? `Scheduled (${scheduledTotal})` : "Scheduled" },
       { id: "globalmcp", label: "Global MCP" },
+      { id: "sandboxrepos", label: "Sandbox Repos" },
     ],
     [requests.length, mcpRequests.length, mcpEditRequests.length, gatewayRequests.length, workflowRequests.length, agents.length, admins.length, auditTotal, scheduledTotal],
   );
@@ -1504,6 +1507,8 @@ export function AdminPageV3({ userId }: Props) {
                     showOrgLabels={allOrgs}
                   />
                 )}
+
+                {tab === "sandboxrepos" && <SandboxReposTab userId={userId} />}
 
                 {tab === "globalmcp" && (
                   <GlobalMcpTab

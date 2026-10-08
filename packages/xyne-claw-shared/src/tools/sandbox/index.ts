@@ -25,4 +25,14 @@ export {
   type HealthCheck,
 } from "./tools.js";
 
-export { REPO_CONFIGS, SBX_GIT } from "./repo-configs.js";
+export { REPO_CONFIGS as DEFAULT_REPO_CONFIGS, SBX_GIT } from "./repo-configs.js";
+export {
+  buildEffectiveRepoConfigs,
+  getCachedRepoConfigs,
+  getRepoConfig,
+  getRepoConfigs,
+  setRepoConfigLoader,
+  type RepoConfigLoader,
+  type RepoConfigMap,
+  type RepoConfigOverride,
+} from "./repo-config-source.js";

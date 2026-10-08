@@ -137,7 +137,7 @@ import {
   parseToolsConfig,
   resolveAgentToolsConfig,
   COPILOT_SYSTEM_INSTRUCTION,
-  REPO_CONFIGS,
+  getRepoConfig,
   getSandboxSession,
   probeSession,
   buildSandboxStoreKey,
@@ -3227,7 +3227,7 @@ export async function processTask(
         "sandbox-run", "sandbox-run-detached", "sandbox-write-file",
         "sandbox-create", "sandbox-destroy", "write",
       ]);
-      const pinnedProfile = meta["sandboxRepo"] ? REPO_CONFIGS[meta["sandboxRepo"]] : undefined;
+      const pinnedProfile = meta["sandboxRepo"] ? await getRepoConfig(meta["sandboxRepo"]) : undefined;
       if (!forceReadOnlySandbox && pinnedProfile && !pinnedProfile.repoUrl) {
         RO_DISABLED.delete("sandbox-create");
         RO_DISABLED.delete("sandbox-destroy");
@@ -3699,7 +3699,7 @@ export async function processTask(
       const pinnedRepoName =
         (agentConfig?.["sandboxRepo"] as string | undefined) ?? undefined;
       const pinnedRepo = pinnedRepoName
-        ? REPO_CONFIGS[pinnedRepoName]
+        ? await getRepoConfig(pinnedRepoName)
         : undefined;
       if (pinnedRepoName && pinnedRepo) {
         const installPkgs = pinnedRepo.steps

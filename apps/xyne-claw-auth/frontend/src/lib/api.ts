@@ -7218,6 +7218,43 @@ export async function deleteErrorPipelineRule(userId: string, name: string): Pro
   );
 }
 
+export interface SandboxRepoConfigRow {
+  key: string;
+  source: "database" | "default";
+  hasDefault: boolean;
+  enabled: boolean;
+  active: boolean;
+  config: Record<string, unknown>;
+  updatedAt: string | null;
+  updatedByUserId: string | null;
+}
+
+export async function listSandboxRepoConfigs(userId: string): Promise<SandboxRepoConfigRow[]> {
+  const data = await request<{ success: boolean; data: SandboxRepoConfigRow[] }>(
+    `${AUTH_API_URL}/api/v1/admin/sandbox-repos`,
+    { headers: { "x-user-id": userId } },
+  );
+  return data.data;
+}
+
+export async function saveSandboxRepoConfig(
+  userId: string,
+  key: string,
+  body: { config: unknown; enabled: boolean },
+): Promise<void> {
+  await request(
+    `${AUTH_API_URL}/api/v1/admin/sandbox-repos/${encodeURIComponent(key)}`,
+    { method: "PUT", headers: { "x-user-id": userId, "Content-Type": "application/json" }, body: JSON.stringify(body) },
+  );
+}
+
+export async function deleteSandboxRepoConfig(userId: string, key: string): Promise<void> {
+  await request(
+    `${AUTH_API_URL}/api/v1/admin/sandbox-repos/${encodeURIComponent(key)}`,
+    { method: "DELETE", headers: { "x-user-id": userId } },
+  );
+}
+
 // ── Entity extraction ────────────────────────────────────────────────────────
 // Type discovery over a channel: read its threads/tickets, propose an entity
 // type vocabulary, pause for human approval. Approving writes the channel's
