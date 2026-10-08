@@ -284,6 +284,7 @@ export function RecordingOverlay(): React.ReactElement | null {
                 disabled={isStarting}
                 className='flex items-center justify-center w-10 h-10 rounded-full bg-destructive hover:bg-destructive/85 transition-colors'
                 data-track-category='RecordingOverlay'
+                aria-label='Stop recording'
                 data-track-name='stop_recording'
                 data-ph-capture-attribute-track-id='stop_recording'
               >
@@ -334,6 +335,7 @@ export function RecordingOverlay(): React.ReactElement | null {
               size='sm'
               onClick={() => void navigate('/recordings')}
               data-track-category='RecordingOverlay'
+              aria-label='Go to recordings'
               data-track-name='go_to_recordings'
             >
               <ArrowUpRight />

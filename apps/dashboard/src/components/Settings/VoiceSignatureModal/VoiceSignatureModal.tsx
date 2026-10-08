@@ -208,6 +208,7 @@ export const VoiceSignatureModal: React.FC<VoiceSignatureModalProps> = ({
             <button
               onClick={handleClose}
               data-track-category='voice-signature'
+              aria-label='Close voice signature dialog'
               data-track-name='close-modal'
               className='text-muted-foreground hover:text-foreground transition-colors rounded-md p-1 hover:bg-muted'
             >
@@ -316,6 +317,7 @@ export const VoiceSignatureModal: React.FC<VoiceSignatureModalProps> = ({
                             <button
                               onClick={handleStopRecording}
                               data-track-category='voice-signature'
+                              aria-label='Stop recording'
                               data-track-name='stop-recording'
                               className='relative z-10 flex items-center justify-center w-12 h-12 rounded-full bg-destructive text-white hover:bg-destructive/90 transition-colors shadow-lg'
                             >
@@ -353,6 +355,9 @@ export const VoiceSignatureModal: React.FC<VoiceSignatureModalProps> = ({
                           <button
                             onClick={() => void handleStartRecording()}
                             data-track-category='voice-signature'
+                            aria-label={
+                              hasVoiceSignature ? 'Re-record voice signature' : 'Start recording'
+                            }
                             data-track-name='start-recording'
                             className='flex items-center justify-center w-14 h-14 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition-all shadow-md hover:shadow-lg hover:scale-105'
                           >

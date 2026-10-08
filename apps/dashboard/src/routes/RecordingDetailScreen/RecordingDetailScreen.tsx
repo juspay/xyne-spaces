@@ -391,6 +391,7 @@ export default function RecordingDetailScreen(): ReactElement {
                   onClick={() => void handleSaveTitle()}
                   className='p-2 text-status-success hover:bg-muted rounded-md'
                   data-track-category='RecordingDetail'
+                  aria-label='Save title'
                   data-track-name='save_title'
                 >
                   <Check className='w-5 h-5' />
@@ -402,6 +403,7 @@ export default function RecordingDetailScreen(): ReactElement {
                   }}
                   className='p-2 text-destructive hover:bg-muted rounded-md'
                   data-track-category='RecordingDetail'
+                  aria-label='Cancel title edit'
                   data-track-name='cancel_edit_title'
                 >
                   <X className='w-5 h-5' />
@@ -414,6 +416,7 @@ export default function RecordingDetailScreen(): ReactElement {
                   onClick={() => setIsEditingTitle(true)}
                   className='p-2 text-muted-foreground hover:bg-muted rounded-md'
                   data-track-category='RecordingDetail'
+                  aria-label='Edit title'
                   data-track-name='edit_title'
                 >
                   <Edit2 className='w-5 h-5' />

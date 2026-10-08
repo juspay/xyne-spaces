@@ -112,6 +112,7 @@ export const ShortcutPickerModal: React.FC<ShortcutPickerModalProps> = ({
             className='h-7 w-7 p-0'
             onClick={onClose}
             data-track-category='shortcut-picker'
+            aria-label='Close shortcut picker'
             data-track-name='close-modal-button'
           >
             <X className='w-4 h-4' />

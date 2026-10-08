@@ -1037,6 +1037,7 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
                 className='size-7 rounded-lg'
                 onClick={handleClose}
                 data-track-category='CALLS'
+                aria-label={isEditMode ? 'Close edit call dialog' : 'Close schedule call dialog'}
                 data-track-name='CLOSE_SCHEDULE_CALL_MODAL'
               >
                 <X className='size-4' />
@@ -1500,6 +1501,7 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
                                           )
                                         }
                                         data-track-category='CALLS'
+                                        aria-label='Increase repeat interval'
                                         data-track-name='INCREMENT_REPEAT_INTERVAL'
                                         className='size-3 text-secondary-foreground/40 hover:text-secondary-foreground/60 cursor-pointer'
                                         strokeWidth={3}
@@ -1511,6 +1513,7 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
                                           )
                                         }
                                         data-track-category='CALLS'
+                                        aria-label='Decrease repeat interval'
                                         data-track-name='DECREMENT_REPEAT_INTERVAL'
                                         className='size-3 text-secondary-foreground/40 hover:text-secondary-foreground/60 cursor-pointer'
                                         strokeWidth={3}
@@ -1766,6 +1769,7 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
                                                 )
                                               }
                                               data-track-category='CALLS'
+                                              aria-label='Increase number of occurrences'
                                               data-track-name='INCREMENT_OCCURRENCE_COUNT'
                                               className={cn(
                                                 'size-3 text-secondary-foreground/40 cursor-pointer',
@@ -1782,6 +1786,7 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
                                                 )
                                               }
                                               data-track-category='CALLS'
+                                              aria-label='Decrease number of occurrences'
                                               data-track-name='DECREMENT_OCCURRENCE_COUNT'
                                               className={cn(
                                                 'size-3 text-secondary-foreground/40 cursor-pointer',

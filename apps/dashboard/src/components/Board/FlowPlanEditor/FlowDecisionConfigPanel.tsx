@@ -127,6 +127,7 @@ export const FlowDecisionConfigPanel: React.FC<FlowDecisionConfigPanelProps> = (
             >
               <SelectTrigger
                 data-track-category='flow_plan_editor'
+                aria-label='Comparison operator'
                 data-track-name='select_decision_operator'
                 className='w-full bg-background text-[12px]'
               >
@@ -184,6 +185,7 @@ export const FlowDecisionConfigPanel: React.FC<FlowDecisionConfigPanelProps> = (
                       <SelectTrigger
                         size='sm'
                         data-track-category='flow_plan_editor'
+                        aria-label={`Next step for ${route.label}`}
                         data-track-name='select_decision_target'
                         className='w-full bg-background text-[11px]'
                       >

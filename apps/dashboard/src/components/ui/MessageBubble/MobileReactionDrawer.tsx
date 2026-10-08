@@ -178,6 +178,7 @@ export default function MobileReactionDrawer({
     <Drawer.Root open={isOpen} onOpenChange={setIsOpen}>
       <Drawer.Portal>
         <Drawer.Overlay
+          aria-label='Close reactions drawer'
           className='fixed inset-0 z-[100] bg-background/80 backdrop-blur-[2px]'
           onClick={() => setIsOpen(false)}
           data-track-category='MESSAGE'

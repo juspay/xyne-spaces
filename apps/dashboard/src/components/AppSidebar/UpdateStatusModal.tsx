@@ -274,6 +274,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
             Set a status
           </h2>
           <Button
+            aria-label='Close status dialog'
             variant='ghost'
             size='sm'
             onClick={onClose}

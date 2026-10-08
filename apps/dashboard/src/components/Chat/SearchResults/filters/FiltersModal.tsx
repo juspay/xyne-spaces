@@ -405,6 +405,7 @@ function CarriedChip({ label, onRemove }: { label: string; onRemove: () => void 
     <span className='inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-xs'>
       <span className='truncate max-w-[140px]'>{label}</span>
       <button
+        aria-label={`Remove ${label} filter`}
         onClick={onRemove}
         className='text-muted-foreground hover:text-foreground'
         data-track-category='SEARCH_FILTERS'

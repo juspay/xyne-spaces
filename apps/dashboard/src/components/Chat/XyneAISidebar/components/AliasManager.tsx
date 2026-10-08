@@ -50,6 +50,7 @@ export const AliasManager = ({
             </p>
           </div>
           <button
+            aria-label='Close activity aliases'
             onClick={onClose}
             data-track-category='XYNE_AI_SIDEBAR'
             data-track-name='CLOSE_ALIAS_MANAGER'

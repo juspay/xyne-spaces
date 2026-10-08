@@ -132,6 +132,7 @@ export const CandidateRow = ({
                   setEditing(false);
                 }}
                 data-track-category='Claw Agents'
+                aria-label='Cancel edit'
                 data-track-name='Digital Twin cancel candidate edit'
                 disabled={isBusy}
                 className={cn(
@@ -150,6 +151,7 @@ export const CandidateRow = ({
                 type='button'
                 onClick={() => setEditing(true)}
                 data-track-category='Claw Agents'
+                aria-label='Edit candidate'
                 data-track-name='Digital Twin edit candidate'
                 disabled={isBusy}
                 className={cn(

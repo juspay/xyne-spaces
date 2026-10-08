@@ -288,6 +288,7 @@ export const GuestUsersTab = ({ isActive = false }: GuestUsersTabProps): ReactEl
                         size='sm'
                         onClick={() => setRevokeTarget({ guest, access })}
                         data-track-category='workspace-management'
+                        aria-label={`Revoke ${guest.name}'s access to ${access.entityName}`}
                         data-track-name='OPEN_REVOKE_GUEST_CONFIRM'
                         className='text-destructive hover:text-destructive hover:bg-destructive/10 shrink-0'
                       >

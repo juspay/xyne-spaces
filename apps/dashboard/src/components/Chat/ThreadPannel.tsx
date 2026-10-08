@@ -1273,6 +1273,7 @@ export const ThreadMessages = ({
           {!isStandaloneWindow() && askAIAvailable && (
             <Tooltip content='Ask AI Conversation'>
               <Button
+                aria-label='Ask AI about this thread'
                 size='sm'
                 variant='ghost'
                 onClick={() => {
@@ -1545,6 +1546,7 @@ export const ThreadMessages = ({
               {!isStandaloneWindow() && askAIAvailable && (
                 <Tooltip content='Ask AI Conversation'>
                   <Button
+                    aria-label='Ask AI about this thread'
                     size='sm'
                     variant='ghost'
                     onClick={() => {

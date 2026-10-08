@@ -234,6 +234,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
             className='size-7 rounded-lg'
             onClick={handleClose}
             data-track-category='CALL_PARTICIPANTS_SELECTION_MODAL'
+            aria-label='Close start call dialog'
             data-track-name='CLOSE_PARTICIPANTS_MODAL'
           >
             <X className='size-4' />

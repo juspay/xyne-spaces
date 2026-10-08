@@ -122,6 +122,7 @@ export const UpdateAssignmentStatusModal: React.FC<UpdateAssignmentStatusModalPr
         <div className='flex items-center justify-between'>
           <h2 className='text-lg font-semibold'>Ticket Assignment Availability</h2>
           <Button
+            aria-label='Close ticket assignment availability dialog'
             variant='ghost'
             size='sm'
             onClick={onClose}

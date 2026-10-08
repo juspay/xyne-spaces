@@ -466,6 +466,7 @@ const TransitionEdge: React.FC<EdgeProps<TransitionEdgeData>> = ({
         style={{ cursor: 'pointer' }}
         onClick={() => data?.onSelectEdge(id)}
         data-track-category='board_stage_config'
+        aria-label='Select transition'
         data-track-name='select_transition_edge'
       />
       <EdgeLabelRenderer>

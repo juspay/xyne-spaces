@@ -303,6 +303,7 @@ export const DashboardShareModal = ({
                       <Select.Trigger
                         className='w-[100px] h-8 text-xs flex items-center justify-between px-2 border border-border rounded bg-background'
                         data-track-category='DYNAMIC_DASHBOARD'
+                        aria-label={`Change role for ${usersById.get(participant.userId)?.name || 'Unknown User'}`}
                         data-track-name='Open_Role_Select'
                       >
                         <Select.Value />

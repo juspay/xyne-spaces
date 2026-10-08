@@ -658,6 +658,7 @@ export default function CallDetailScreen(): ReactElement {
                     updateScrollButtons();
                   }}
                   data-track-category='CallDetail'
+                  aria-label='Scroll tabs left'
                   data-track-name='tabs-scroll-left'
                   className='shrink-0 size-5 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors'
                 >
@@ -705,6 +706,7 @@ export default function CallDetailScreen(): ReactElement {
                     updateScrollButtons();
                   }}
                   data-track-category='CallDetail'
+                  aria-label='Scroll tabs right'
                   data-track-name='tabs-scroll-right'
                   className='shrink-0 size-5 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors'
                 >

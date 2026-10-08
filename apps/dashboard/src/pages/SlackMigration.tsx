@@ -1258,6 +1258,7 @@ function OwnerActions({
           trackId='slack_migration_remove_own'
           onClick={() => act('remove', () => slackMigrationApi.removeMine(job.id))}
           data-track-category='SLACK_MIGRATION'
+          aria-label='Delete migration job'
           data-track-name='DELETE_OWN_JOB'
           className='text-destructive hover:text-destructive'
         >
@@ -1372,6 +1373,7 @@ function AdminActions({
         trackId='slack_migration_remove_admin'
         onClick={() => act('remove', () => slackMigrationApi.remove(job.id))}
         data-track-category='SLACK_MIGRATION'
+        aria-label='Delete migration job'
         data-track-name='DELETE_JOB'
         className='text-destructive hover:text-destructive'
       >

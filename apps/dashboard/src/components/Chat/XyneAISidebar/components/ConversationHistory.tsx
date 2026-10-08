@@ -127,6 +127,7 @@ export const ConversationHistory = ({
             </div>
             {!isMobile && (
               <button
+                aria-label='Close chats'
                 onClick={handleClose}
                 className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors'
                 data-track-category='XyneAI'
@@ -140,6 +141,7 @@ export const ConversationHistory = ({
           <>
             <div className='flex items-center gap-2'>
               <button
+                aria-label='Back from chat history'
                 onClick={onBack}
                 className={
                   isMobile
@@ -181,6 +183,7 @@ export const ConversationHistory = ({
               </button>
               {!isMobile && (
                 <button
+                  aria-label='Close chats'
                   onClick={handleClose}
                   className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors'
                   data-track-category='XyneAI'
@@ -564,6 +567,7 @@ const ConversationItem = ({
           sideOffset={4}
           trigger={
             <button
+              aria-label='More options for this chat'
               onClick={e => e.stopPropagation()}
               className='opacity-0 group-hover:opacity-100 p-1 hover:bg-accent rounded'
               data-track-category='XyneAI'

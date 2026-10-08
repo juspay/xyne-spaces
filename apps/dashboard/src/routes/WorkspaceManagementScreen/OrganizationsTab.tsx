@@ -183,6 +183,7 @@ export const OrganizationsTab = (): ReactElement => {
                 size='sm'
                 onClick={() => setShowCreateDialog(false)}
                 data-track-category='workspace-management'
+                aria-label='Close create organization dialog'
                 data-track-name='CLOSE_CREATE_ORG_DIALOG'
                 className='size-7 p-0 text-muted-foreground hover:text-foreground rounded-lg border border-border hover:bg-muted'
                 disabled={isCreatingOrg}

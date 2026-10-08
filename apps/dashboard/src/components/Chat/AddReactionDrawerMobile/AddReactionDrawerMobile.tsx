@@ -57,6 +57,7 @@ const AddReactionDrawerMobile = ({
       </Drawer.Trigger>
       <Drawer.Portal>
         <Drawer.Overlay
+          aria-label='Close add reaction drawer'
           className='fixed inset-0 z-[100] bg-black/30'
           onClick={() => setEmojiPickerOpen(false)}
           data-track-category='MESSAGE'

@@ -795,6 +795,7 @@ export const Summary = (props: SummaryProps): ReactElement => {
         </div>
         <div className='flex justify-start items-center gap-2'>
           <button
+            aria-label='Close summary'
             onClick={onClose}
             className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-input flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors'
             data-track-category='CHAT_SUMMARY'
