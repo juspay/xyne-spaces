@@ -12,7 +12,7 @@ import { messageMetadataService } from '@/services/messageMetadataService';
 import type { CallParticipantMetadata } from '@xyne/shared';
 import { normalizeEmailList } from '@/utils/email';
 import { CallVespaFeedSource, queueCallVespaDelete, queueCallVespaFeed } from '@/services/callVespaQueue';
-import { refreshCallParticipantPreview } from '@/utils/callParticipantCountUtils';
+import { refreshCallParticipantPreview, refreshCallParticipantPreviews } from '@/utils/callParticipantCountUtils';
 import { queueScheduledCallPillSync } from '@/services/scheduledCallPillSync';
 import {
   setSlashCommandArtifactLifecycle,
@@ -634,23 +634,38 @@ export class CallRepository {
   ): Promise<void> {
     if (callIds.length === 0) return;
 
-    const calls = await tx.call.findMany({
-      where: { id: { in: callIds } },
-      select: { id: true, workspaceId: true, createdByUserId: true, organizerId: true },
-    });
+    // A daily series moves ~60 calls in one transaction, so every step is a batch
+    // rather than a few writes per call.
+    const [calls, existingParticipants] = await Promise.all([
+      tx.call.findMany({
+        where: { id: { in: callIds } },
+        select: { id: true, workspaceId: true, createdByUserId: true },
+      }),
+      tx.callParticipant.findMany({
+        where: { callId: { in: callIds }, userId: newOwnerId },
+        select: { callId: true },
+      }),
+    ]);
     const now = new Date();
 
-    for (const call of calls) {
-      await tx.call.update({
-        where: { id: call.id },
-        data: {
-          createdByUserId: newOwnerId,
-          ...(call.organizerId ? { organizerId: newOwnerId } : {}),
-        },
-      });
-      await tx.callParticipant.upsert({
-        where: { callId_userId: { callId: call.id, userId: newOwnerId } },
-        create: {
+    await tx.call.updateMany({
+      where: { id: { in: callIds } },
+      data: { createdByUserId: newOwnerId },
+    });
+    await tx.call.updateMany({
+      where: { id: { in: callIds }, organizerId: { not: null } },
+      data: { organizerId: newOwnerId },
+    });
+
+    const alreadyParticipant = new Set(existingParticipants.map(participant => participant.callId));
+    await tx.callParticipant.updateMany({
+      where: { callId: { in: [...alreadyParticipant] }, userId: newOwnerId },
+      data: { meetingStatus: MeetingStatus.ACCEPTED, respondedAt: now },
+    });
+    await tx.callParticipant.createMany({
+      data: calls
+        .filter(call => !alreadyParticipant.has(call.id))
+        .map(call => ({
           id: uuidv4(),
           callId: call.id,
           workspaceId: call.workspaceId,
@@ -660,11 +675,11 @@ export class CallRepository {
           response: InvitationResponse.INVITED,
           meetingStatus: MeetingStatus.ACCEPTED,
           respondedAt: now,
-        },
-        update: { meetingStatus: MeetingStatus.ACCEPTED, respondedAt: now },
-      });
-      await refreshCallParticipantPreview(tx, call.id);
-    }
+        })),
+      skipDuplicates: true,
+    });
+
+    await refreshCallParticipantPreviews(tx, calls.map(call => call.id));
   }
 
   async delete(id: string): Promise<void> {

@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/Button';
 import { Checkbox } from '@/components/ui/Checkbox/Checkbox';
 import { SearchUserV2 } from '@/components/ui/SearchUser/SearchUserV2';
 import { useActiveUsers } from '@/hooks/useUsers';
+import { useAuth } from '@/hooks/useAuth';
 import {
   callAdminErrorText,
   changeAdminCallOwner,
@@ -28,16 +29,31 @@ export function ChangeOwnerDialog({
 }): ReactElement {
   const queryClient = useQueryClient();
   const users = useActiveUsers();
+  const { user: me } = useAuth();
   const [newOwner, setNewOwner] = useState<User | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isPickerOpen, setIsPickerOpen] = useState(false);
   const [applyToSeries, setApplyToSeries] = useState(false);
 
-  // The backend only accepts active human members of the workspace.
+  // The backend only accepts active human members of the workspace who already have
+  // access to the call, and never the caller themselves unless they already own it. The
+  // current owner is a valid pick only with applyToSeries: it moves the series to them.
   const candidates = useMemo(
-    () => users.filter(user => user.userType === UserType.USER && user.id !== call?.owner.id),
-    [users, call?.owner.id],
+    () =>
+      users.filter(user => {
+        if (user.userType !== UserType.USER) return false;
+        const isOwner = user.id === call?.owner.id;
+        if (isOwner) return applyToSeries;
+        return user.id !== me?.id;
+      }),
+    [users, call?.owner.id, me?.id, applyToSeries],
   );
+
+  const onApplyToSeriesChange = (checked: boolean): void => {
+    setApplyToSeries(checked);
+    // Without the series, the current owner is no longer a valid pick.
+    if (!checked && newOwner?.id === call?.owner.id) setNewOwner(null);
+  };
 
   const changeOwner = useMutation({
     mutationFn: (target: { externalId: string; newOwnerUserId: string }) =>
@@ -65,7 +81,7 @@ export function ChangeOwnerDialog({
         if (!open) onClose();
       }}
       title='Change owner'
-      description='Move this call to another member of the workspace'
+      description='Move this call to someone who already has access to it'
     >
       <div className='flex flex-col gap-4 p-6'>
         <div className='flex flex-col gap-1.5'>
@@ -73,7 +89,8 @@ export function ChangeOwnerDialog({
           {call && (
             <p className='text-sm text-muted-foreground'>
               {call.title || 'Untitled call'} is owned by {userLabel(call.owner)}. The new owner
-              gets full control; the current owner keeps access to view it.
+              must already be a participant or a member of its channel, and gets full control; the
+              current owner keeps access to view it.
             </p>
           )}
         </div>
@@ -94,7 +111,7 @@ export function ChangeOwnerDialog({
         {call?.recurringSeriesId && (
           <Checkbox
             checked={applyToSeries}
-            onChange={setApplyToSeries}
+            onChange={onApplyToSeriesChange}
             label='Apply to the whole series (organizer and every upcoming instance)'
             size='sm'
             data-track-category={CALLS_ADMIN_TRACK}

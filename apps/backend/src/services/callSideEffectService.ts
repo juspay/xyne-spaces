@@ -8,7 +8,7 @@ import { activityService } from '@/services/activity/activityService';
 import { callTimeoutWorker } from '@/workers/callTimeoutWorker';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { MessagesSideEffectHandler } from '@/zero/side-effects/tables/messages-handler';
-import { validateCallTx } from '@/bypassAcl/transactions/callValidationWorker';
+import { endOrphanedCallTx } from '@/bypassAcl/transactions/callSideEffectService';
 import {
   ActivityClassification,
   MessageType,
@@ -283,7 +283,7 @@ class CallSideEffectService {
     async endOrphanedCall(call: Call, reason: string): Promise<void> {
         const endedAt = new Date();
 
-        await validateCallTx(call.id, endedAt, call.externalId, call.status, reason, call);
+        await endOrphanedCallTx(call.id, endedAt, call.externalId, call.status, reason, call);
 
         // Emit analytics events (call_ended + per-participant) for the Calls dashboards
         try {

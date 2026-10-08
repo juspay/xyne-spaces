@@ -55,6 +55,8 @@ import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQue
 import { callShareService } from '@/services/callShareService';
 import { callNotesCanvasService } from '@/services/callNotesCanvasService';
 import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
+import { acquireSummaryGenerationLock } from '@/utils/summaryGenerationLock';
+import { releaseLock } from '@/utils/distributedLock';
 import { summaryTemplateService } from '@/services/summaryTemplateService';
 import { canvasAuthService } from '@/services/canvasAuthService';
 import { validateOwnerInChannel } from '@/sdlc/entityLinkService';
@@ -1830,14 +1832,25 @@ export class CallController {
         return;
       }
 
+      // Shared with every other summary entry point (admin panel included): two
+      // overlapping runs would overwrite each other's detailedSummaryStatus.
+      const lockHandle = await acquireSummaryGenerationLock(call.externalId);
+      if (!lockHandle) {
+        res.status(409).json({ success: false, error: 'A summary is already being generated' });
+        return;
+      }
+
       // Fire-and-forget: the service owns every status transition ('pending'
       // at start, 'ready'/'failed' at the end) plus the completion
       // notification, so holding this HTTP request open for a minutes-long
-      // LLM run adds nothing except timeout risk.
+      // LLM run adds nothing except timeout risk. The lock is released when it settles.
       void noteTakerTranscriptService
         .regenerateSummary(call, input.summaryTemplateId, input.modelType)
         .catch(error => {
           logger.error(`[${callId}] Background summary regeneration threw`, error);
+        })
+        .finally(() => {
+          void releaseLock(lockHandle);
         });
 
       res.status(202).json({ success: true, status: 'pending' });
@@ -2327,13 +2340,24 @@ export class CallController {
         return;
       }
 
-      // 4. Generate detailed summary and post to conversation
-      const result = await callDocumentService.generateAndPostDetailedSummary(
-        callId,
-        transcriptContent,
-        callMessage.conversationId,
-        customPrompt
-      );
+      // 4. Generate detailed summary and post to conversation, under the lock every
+      // summary entry point shares so runs can't overlap.
+      const lockHandle = await acquireSummaryGenerationLock(call.externalId);
+      if (!lockHandle) {
+        res.status(409).json({ success: false, error: 'A summary is already being generated' });
+        return;
+      }
+      let result: Awaited<ReturnType<typeof callDocumentService.generateAndPostDetailedSummary>>;
+      try {
+        result = await callDocumentService.generateAndPostDetailedSummary(
+          callId,
+          transcriptContent,
+          callMessage.conversationId,
+          customPrompt
+        );
+      } finally {
+        await releaseLock(lockHandle);
+      }
 
       if (!result.success) {
         res.status(500).json({ success: false, error: result.error || 'Failed to generate detailed summary' });

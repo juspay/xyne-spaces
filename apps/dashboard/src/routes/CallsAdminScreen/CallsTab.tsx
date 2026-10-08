@@ -83,29 +83,47 @@ const TYPE_OPTIONS = [
 ];
 
 type DirectAction = Exclude<CallAdminAction, 'changeOwner'>;
-type ConfirmedAction = Extract<DirectAction, 'cancel' | 'forceEnd' | 'unlinkTranscript'>;
 
+// Every direct action asks first: the destructive ones (`danger`) and the ones that cost
+// an LLM run and post a new summary into the call's thread.
 const CONFIRM_COPY: Record<
-  ConfirmedAction,
-  { title: string; description: string; confirmLabel: string }
+  DirectAction,
+  { title: string; description: string; confirmLabel: string; danger: boolean }
 > = {
   cancel: {
     title: 'Cancel this call?',
     description:
       'The call is marked cancelled, its reminders are removed and the calendar invite is withdrawn.',
     confirmLabel: 'Cancel call',
+    danger: true,
   },
   forceEnd: {
     title: 'Force-end this call?',
     description:
       'Only works once the call room is gone. The call is marked ended and its thread message is closed out.',
     confirmLabel: 'Force end',
+    danger: true,
   },
   unlinkTranscript: {
     title: 'Unlink the transcript?',
     description:
       'The transcript is removed from the call, its thread and search. The stored file is kept, so it can be reprocessed later.',
     confirmLabel: 'Unlink',
+    danger: true,
+  },
+  regenerateSummary: {
+    title: 'Regenerate the summary?',
+    description:
+      'The summary is generated again from the transcript. For a channel call, the new summary is posted into the call thread.',
+    confirmLabel: 'Regenerate',
+    danger: false,
+  },
+  reprocessTranscript: {
+    title: 'Reprocess the transcript?',
+    description:
+      'The transcript is rebuilt from the stored file and attached to the call again, which also generates a new summary.',
+    confirmLabel: 'Reprocess',
+    danger: false,
   },
 };
 
@@ -116,8 +134,6 @@ const SUCCESS_TOASTS: Record<DirectAction, string> = {
   regenerateSummary: 'Summary regeneration started',
   reprocessTranscript: 'Transcript reprocessing started',
 };
-
-const isConfirmed = (action: DirectAction): action is ConfirmedAction => action in CONFIRM_COPY;
 
 function runDirectAction(action: DirectAction, externalId: string): Promise<void> {
   switch (action) {
@@ -144,7 +160,7 @@ export function CallsTab({ scope }: { scope: CallAdminListScope }): ReactElement
   const [type, setType] = useState('');
   const [quickFilter, setQuickFilter] = useState<QuickFilterId | null>(null);
   const [confirmTarget, setConfirmTarget] = useState<{
-    action: ConfirmedAction;
+    action: DirectAction;
     call: CallAdminCallRow;
   } | null>(null);
   const [ownerTarget, setOwnerTarget] = useState<CallAdminCallRow | null>(null);
@@ -197,10 +213,8 @@ export function CallsTab({ scope }: { scope: CallAdminListScope }): ReactElement
   const onSelectAction = (action: CallAdminAction, call: CallAdminCallRow): void => {
     if (action === 'changeOwner') {
       setOwnerTarget(call);
-    } else if (isConfirmed(action)) {
-      setConfirmTarget({ action, call });
     } else {
-      runAction.mutate({ action, call });
+      setConfirmTarget({ action, call });
     }
   };
 
@@ -273,7 +287,7 @@ export function CallsTab({ scope }: { scope: CallAdminListScope }): ReactElement
     );
   }
 
-  if (isError) {
+  if (isError && !data) {
     return (
       <div className='flex min-h-0 flex-1 flex-col gap-4'>
         {toolbar}
@@ -389,7 +403,7 @@ export function CallsTab({ scope }: { scope: CallAdminListScope }): ReactElement
                         data-track-name={`Calls admin: ${ACTION_LABELS[action]}`}
                         className={cn(
                           action !== 'changeOwner' &&
-                            isConfirmed(action) &&
+                            CONFIRM_COPY[action].danger &&
                             'text-destructive focus:text-destructive',
                         )}
                       >
@@ -417,7 +431,7 @@ export function CallsTab({ scope }: { scope: CallAdminListScope }): ReactElement
             : undefined
         }
         confirmLabel={confirmTarget ? CONFIRM_COPY[confirmTarget.action].confirmLabel : 'Confirm'}
-        danger
+        danger={confirmTarget ? CONFIRM_COPY[confirmTarget.action].danger : false}
         loading={runAction.isPending}
         trackCategory={CALLS_ADMIN_TRACK}
         onConfirm={() => {

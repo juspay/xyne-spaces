@@ -1,8 +1,9 @@
 import type { Call, RecurringCallSeries } from '@prisma/client';
-import { CallOrigin, CallStatus, RecurringCallSeriesStatus } from '@xyne/shared';
+import { CallStatus, RecurringCallSeriesStatus } from '@xyne/shared';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { hasResourceAdminAccess } from '@/database/acl/admin-access';
+import { CALENDAR_CALL_ORIGINS } from '@/utils/callTypeUtils';
 
 /**
  * Who may do what in the calls admin panel. Single source of truth for the panel:
@@ -43,11 +44,6 @@ const CALL_ACTIONS = Object.keys(CALL_ADMIN_ACTIONS) as CallAdminAction[];
 
 const LIVE_STATUSES = new Set<string>([CallStatus.ACTIVE, CallStatus.IN_PROGRESS]);
 
-/** Calls that came FROM a calendar; that calendar owns them, so Xyne may not re-own them. */
-export const CALENDAR_CALL_ORIGINS = [
-  CallOrigin.GOOGLE_CALENDAR,
-  CallOrigin.MICROSOFT_CALENDAR,
-] as const;
 const CALENDAR_ORIGINS = new Set<string>(CALENDAR_CALL_ORIGINS);
 
 type CallActionState = Pick<Call, 'status' | 'transcript' | 'callOrigin'>;

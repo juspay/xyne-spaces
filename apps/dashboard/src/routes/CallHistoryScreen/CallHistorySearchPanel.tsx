@@ -139,7 +139,10 @@ export function CallHistorySearchPanel(props: CallHistorySearchPanelProps): Reac
                 type='button'
                 variant='outline'
                 onClick={() => void navigate('/calls/admin')}
-                className='h-9 gap-1.5 whitespace-nowrap rounded-xl border-border px-4 font-semibold hover:bg-muted/70'
+                className={cn(
+                  'h-9 gap-1.5 whitespace-nowrap rounded-xl border-border px-4 font-semibold',
+                  !isMobile && 'hover:bg-muted/70',
+                )}
                 data-track-category='CALLS'
                 data-track-name='open-calls-admin'
               >

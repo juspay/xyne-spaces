@@ -2999,6 +2999,7 @@ model Call {
   @@index([summaryTemplateId])
 
   @@index([status, startedAt(sort: Desc), externalId])
+  @@index([workspaceId, startedAt(sort: Desc), id]) // Calls admin panel list: one workspace, newest first, keyset-paged
   @@index([status, startsAt, externalId])
   // A hub's or track's calls, a page at a time: the ended ones newest first, and the
   // scheduled ones by when they start.
@@ -3148,6 +3149,7 @@ model RecurringCallSeries {
   @@index([organizerId])  // Fast lookup of series created by a user
   @@index([channelId])    // Fast lookup of series in a channel
   @@index([status])       // Fast lookup of active series
+  @@index([workspaceId, createdAt(sort: Desc), id]) // Calls admin panel series list, keyset-paged
   @@map("recurring_call_series")
   @@schema("public")
 }

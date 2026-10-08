@@ -1,19 +1,22 @@
-import type { Call, RecurringCallSeries } from '@prisma/client';
+import type { Call, Prisma, PrismaClient, RecurringCallSeries } from '@prisma/client';
 import {
   CallOrigin,
   CallStatus,
   CallType,
+  NotificationType,
   RecurringCallSeriesStatus,
   UserStatus,
   UserType,
 } from '@xyne/shared';
 import { db } from '@/database/client';
+import { ACLFactory } from '@/database/acl';
 import { repositories } from '@/database/repositories';
 import type { CallMetadata } from '@/database/repositories/callRepository';
 import { logger } from '@/utils/logger';
-import { acquireLock, releaseLock } from '@/utils/distributedLock';
+import { acquireLock, releaseLock, type LockHandle } from '@/utils/distributedLock';
 import { isRecording } from '@/utils/callTypeUtils';
 import { isTranscriptUnlinked } from '@/utils/transcriptUnlink';
+import { acquireSummaryGenerationLock } from '@/utils/summaryGenerationLock';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { livekitService } from '@/services/liveKitService';
@@ -21,6 +24,7 @@ import { callSideEffectService } from '@/services/callSideEffectService';
 import { recurringCallService } from '@/services/recurringCallService';
 import { scheduledCallNotificationService } from '@/services/scheduledCallNotificationService';
 import { transcriptService } from '@/services/transcriptService';
+import { notificationService } from '@/services/notificationService';
 import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
 import { callDocumentService } from '@/services/callDocumentService';
 import { logDetailedSummaryFailed } from '@/services/detailedSummaryFailureLog';
@@ -108,13 +112,8 @@ export interface ListSeriesInput {
 const CALENDAR_PUSH_ORIGINS = new Set<string>([CallOrigin.CHANNEL, CallOrigin.CONVERSATION]);
 
 // A transcript run holds the processing lock for the length of its LLM work, so an
-// unlink waits briefly for it rather than interleaving with a half-finished run.
-const UNLINK_LOCK_WAIT_MS = 10_000;
-
-// Only reached when a summary run dies without releasing its lock; a normal run releases
-// as soon as it settles. Long enough to outlast a slow model, short enough that a wedged
-// run doesn't block the retry this panel exists to offer.
-const REGENERATE_SUMMARY_LOCK_TTL_SECONDS = 15 * 60;
+// unlink or reprocess waits briefly for it rather than interleaving with a half-finished run.
+const TRANSCRIPT_LOCK_WAIT_MS = 10_000;
 
 function encodeCursor(at: Date, id: string): string {
   return Buffer.from(`${at.toISOString()}|${id}`).toString('base64');
@@ -328,16 +327,7 @@ class CallAdminService {
    * would re-attach the transcript as it finishes.
    */
   async unlinkTranscript(call: Call, actorUserId: string): Promise<void> {
-    const lockKey = isRecording(call)
-      ? `lock:note-taker-transcript-processing:${call.externalId}`
-      : `lock:transcript-processing:${call.externalId}`;
-    const lockHandle = await acquireLock(lockKey, {
-      ttlSeconds: 60,
-      waitTimeoutMs: UNLINK_LOCK_WAIT_MS,
-    });
-    if (!lockHandle) {
-      throw new CallAdminError('This transcript is being processed right now. Try again in a minute.', 409);
-    }
+    const lockHandle = await this.acquireTranscriptProcessingLock(call);
 
     try {
       const current = await repositories.calls.findById(call.id);
@@ -385,19 +375,46 @@ class CallAdminService {
   }
 
   /**
+   * The lock every transcript-processing path takes for this call. Held only around the
+   * admin's own read-modify-write of the call, never across a processing run.
+   */
+  private async acquireTranscriptProcessingLock(call: Call): Promise<LockHandle> {
+    const lockKey = isRecording(call)
+      ? `lock:note-taker-transcript-processing:${call.externalId}`
+      : `lock:transcript-processing:${call.externalId}`;
+    const lockHandle = await acquireLock(lockKey, {
+      ttlSeconds: 60,
+      waitTimeoutMs: TRANSCRIPT_LOCK_WAIT_MS,
+    });
+    if (!lockHandle) {
+      throw new CallAdminError('This transcript is being processed right now. Try again in a minute.', 409);
+    }
+    return lockHandle;
+  }
+
+  /**
    * Clear the unlink marker and rebuild the transcript from storage in the
    * background, through the same reconcile the room_finished webhook uses.
    */
   async reprocessTranscript(call: Call): Promise<void> {
-    const current = (await repositories.calls.findById(call.id)) ?? call;
-    const metadata = metadataRecord(current.metadata);
-    const hadMarker = 'unlinkedTranscript' in metadata;
-    delete metadata.unlinkedTranscript;
-    // With no transcript linked, a stored note-taker entry count only blocks the rerun.
-    const hadEntryCount = isRecording(current) && 'transcriptEntryCount' in metadata;
-    if (hadEntryCount) delete metadata.transcriptEntryCount;
-    if (hadMarker || hadEntryCount) {
-      await repositories.calls.update(current.id, { metadata });
+    // Under the processing lock, so the metadata written back is read after any run that
+    // is still writing to it, and a second click while a run is going gets a 409. Released
+    // before the reconcile, which takes this same lock itself.
+    const lockHandle = await this.acquireTranscriptProcessingLock(call);
+    let current: Call;
+    try {
+      current = (await repositories.calls.findById(call.id)) ?? call;
+      const metadata = metadataRecord(current.metadata);
+      const hadMarker = 'unlinkedTranscript' in metadata;
+      delete metadata.unlinkedTranscript;
+      // With no transcript linked, a stored note-taker entry count only blocks the rerun.
+      const hadEntryCount = isRecording(current) && 'transcriptEntryCount' in metadata;
+      if (hadEntryCount) delete metadata.transcriptEntryCount;
+      if (hadMarker || hadEntryCount) {
+        await repositories.calls.update(current.id, { metadata });
+      }
+    } finally {
+      await releaseLock(lockHandle);
     }
 
     const reconcile = isRecording(current)
@@ -419,10 +436,9 @@ class CallAdminService {
     // `detailedSummaryStatus === 'pending'` check: a summary stuck in 'pending' is one of
     // the things this panel exists to repair, and the stale sweep only frees it an hour
     // later, so refusing on status would disable the retry exactly when it is needed.
-    const lockHandle = await acquireLock(
-      `lock:call-admin-regenerate-summary:${call.externalId}`,
-      { ttlSeconds: REGENERATE_SUMMARY_LOCK_TTL_SECONDS },
-    );
+    // The lock is shared with the user-facing summary endpoints, so an admin run and a
+    // user run can't overlap either.
+    const lockHandle = await acquireSummaryGenerationLock(call.externalId);
     if (!lockHandle) {
       throw new CallAdminError('A summary is already being generated for this call', 409);
     }
@@ -509,6 +525,60 @@ class CallAdminService {
   }
 
   /**
+   * Ownership is itself a read grant (CallsACL matches `createdByUserId`), so a transfer
+   * must never hand someone a call, or its transcript, they couldn't already see. The call
+   * is checked against the new owner's own CallsACL filter, built explicitly: the ACL
+   * extension only applies per-user ACLs to the HTTP request's own principal, so running
+   * the read "as" the new owner would get plain workspace scope and match every call.
+   * A series has no per-user ACL, so its rule is spelled out: a series participant or a
+   * member of the series channel.
+   */
+  private async assertNewOwnerHasAccess(
+    call: Call,
+    newOwner: { id: string; role: string | null },
+    seriesId: string | null,
+  ): Promise<void> {
+    const newOwnerUserId = newOwner.id;
+    const newOwnerCallFilter = (await ACLFactory.getACL(
+      'call',
+      { userId: newOwnerUserId, workspaceId: call.workspaceId, role: newOwner.role ?? undefined },
+      db as unknown as PrismaClient,
+    ).getWhereClause()) as Prisma.CallWhereInput | null;
+    const visibleCall = await db.call.findFirst({
+      where: { AND: [{ id: call.id }, newOwnerCallFilter ?? { workspaceId: call.workspaceId }] },
+      select: { id: true },
+    });
+    let hasAccess = !!visibleCall;
+
+    if (hasAccess && seriesId) {
+      const series = await db.recurringCallSeries.findUnique({
+        where: { id: seriesId },
+        select: { channelId: true },
+      });
+      const [seriesParticipant, channelMember] = await Promise.all([
+        db.recurringCallParticipant.findUnique({
+          where: { recurringSeriesId_userId: { recurringSeriesId: seriesId, userId: newOwnerUserId } },
+          select: { id: true },
+        }),
+        series
+          ? db.channelParticipant.findUnique({
+            where: { channelId_userId: { channelId: series.channelId, userId: newOwnerUserId } },
+            select: { id: true },
+          })
+          : null,
+      ]);
+      hasAccess = !!seriesParticipant || !!channelMember;
+    }
+
+    if (!hasAccess) {
+      throw new CallAdminError(
+        `The new owner must already have access to this ${seriesId ? 'series' : isRecording(call) ? 'recording' : 'call'}`,
+        400,
+      );
+    }
+  }
+
+  /**
    * Move a call (and optionally its whole series: the series organizer plus every
    * future SCHEDULED instance) to another active member of the workspace. Returns a
    * warning when the calendar push cannot follow, because the push runs on the new
@@ -518,6 +588,7 @@ class CallAdminService {
     call: Call,
     newOwnerUserId: string,
     applyToSeries: boolean,
+    actorUserId: string,
   ): Promise<{ transferredCallIds: string[]; warning: string | null }> {
     // The controller has already refused applyToSeries on a call with no series.
     const seriesId = applyToSeries ? call.recurringSeriesId : null;
@@ -533,27 +604,37 @@ class CallAdminService {
         status: UserStatus.ACTIVE,
         userType: UserType.USER,
       },
-      select: { id: true },
+      select: { id: true, role: true },
     });
     if (!newOwner) {
       throw new CallAdminError('The new owner must be an active member of this workspace', 400);
     }
+    await this.assertNewOwnerHasAccess(call, newOwner, seriesId);
+
+    // Read before the transaction moves it: the series organizer is told too.
+    const previousSeriesOrganizerId = seriesId
+      ? (await db.recurringCallSeries.findUnique({ where: { id: seriesId }, select: { organizerId: true } }))
+        ?.organizerId ?? null
+      : null;
 
     const transferred = await transferOwnershipTx(call, newOwnerUserId, seriesId);
 
-    for (const transferredCall of transferred) {
-      queueCallVespaFeed(transferredCall.id, { source: CallVespaFeedSource.CallAdminPanel });
-      // The transcript has a search doc of its own, separate from the call's, and the
-      // call feed above does not touch it. It takes both `ownerId`/`createdBy` and its
-      // `permissions` list from the call, so left alone it would keep the previous owner
-      // and leave the new one unable to find the transcript they now own.
-      if (transferredCall.transcript) {
-        await this.refeedTranscriptDoc(transferredCall.id, newOwnerUserId, call.workspaceId);
-      }
-      if (transferredCall.status === CallStatus.SCHEDULED) {
-        await scheduledCallNotificationService.addReminderRecipient(transferredCall.id, newOwnerUserId);
-      }
-    }
+    // Each call's follow-up is independent of the others', so a series runs them together.
+    await Promise.all(
+      transferred.map(async (transferredCall) => {
+        queueCallVespaFeed(transferredCall.id, { source: CallVespaFeedSource.CallAdminPanel });
+        // The transcript has a search doc of its own, separate from the call's, and the
+        // call feed above does not touch it. It takes both `ownerId`/`createdBy` and its
+        // `permissions` list from the call, so left alone it would keep the previous owner
+        // and leave the new one unable to find the transcript they now own.
+        if (transferredCall.transcript) {
+          await this.refeedTranscriptDoc(transferredCall.id, newOwnerUserId, call.workspaceId);
+        }
+        if (transferredCall.status === CallStatus.SCHEDULED) {
+          await scheduledCallNotificationService.addReminderRecipient(transferredCall.id, newOwnerUserId);
+        }
+      }),
+    );
 
     const pushed = transferred.filter(
       (transferredCall) =>
@@ -592,7 +673,89 @@ class CallAdminService {
       }
     }
 
+    await this.notifyOwnershipChange(call, {
+      actorUserId,
+      newOwnerUserId,
+      previousOwnerIds: [call.createdByUserId, previousSeriesOrganizerId],
+      transferredCount: transferred.length,
+    });
+
     return { transferredCallIds: transferred.map((transferredCall) => transferredCall.id), warning };
+  }
+
+  /**
+   * Tell the new owner and the previous owner(s) that ownership moved, so a transfer is
+   * never silent. The actor is skipped (they did it). Best-effort: a missed notification
+   * must not fail a transfer that has already committed.
+   */
+  private async notifyOwnershipChange(
+    call: Call,
+    change: {
+      actorUserId: string;
+      newOwnerUserId: string;
+      previousOwnerIds: (string | null)[];
+      transferredCount: number;
+    },
+  ): Promise<void> {
+    const subject = isRecording(call) ? 'recording' : 'call';
+    const actionUrl = isRecording(call) ? `/recordings/${call.externalId}` : `/calls/${call.externalId}/detail`;
+    const title = call.title || `Untitled ${subject}`;
+    const seriesNote =
+      change.transferredCount > 1 ? ` and ${change.transferredCount - 1} upcoming calls in its series` : '';
+
+    try {
+      const [actor, newOwner] = await Promise.all([
+        repositories.users.findById(change.actorUserId),
+        repositories.users.findById(change.newOwnerUserId),
+      ]);
+      const actorName = actor?.name || 'Someone';
+      const newOwnerName = newOwner?.name || 'another member';
+      const base = {
+        type: NotificationType.CALL_UPDATED,
+        relatedEntityType: 'call',
+        relatedEntityId: call.externalId,
+        actionUrl,
+        workspaceId: call.workspaceId,
+        metadata: { callExternalId: call.externalId, actorId: change.actorUserId, actorAction: 'owner_changed' },
+      };
+
+      const notifications: Promise<unknown>[] = [];
+      if (change.newOwnerUserId !== change.actorUserId) {
+        notifications.push(
+          notificationService.createNotification(change.newOwnerUserId, {
+            ...base,
+            title: `You're now the owner of a ${subject}`,
+            message: `${actorName} made you the owner of "${title}"${seriesNote}`,
+          }),
+        );
+      }
+      const previousOwners = new Set(
+        change.previousOwnerIds.filter(
+          (userId): userId is string =>
+            !!userId && userId !== change.actorUserId && userId !== change.newOwnerUserId,
+        ),
+      );
+      for (const userId of previousOwners) {
+        notifications.push(
+          notificationService.createNotification(userId, {
+            ...base,
+            title: `Ownership of your ${subject} changed`,
+            message: `${actorName} transferred "${title}"${seriesNote} to ${newOwnerName}`,
+          }),
+        );
+      }
+
+      const results = await Promise.allSettled(notifications);
+      const failed = results.filter((result) => result.status === 'rejected');
+      if (failed.length > 0) {
+        logger.error(`[${call.externalId}] owner_change_notification_failed`, {
+          failed: failed.length,
+          error: (failed[0] as PromiseRejectedResult).reason,
+        });
+      }
+    } catch (error) {
+      logger.error(`[${call.externalId}] owner_change_notification_failed`, { error });
+    }
   }
 }
 

@@ -61,7 +61,6 @@ export interface CallAdminCallFilters {
   /** Comma-separated CallStatus values. */
   status?: string;
   type?: string;
-  ownerId?: string;
   search?: string;
   /** Comma-separated pending | ready | failed. */
   summaryStatus?: string;

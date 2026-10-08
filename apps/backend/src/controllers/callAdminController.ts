@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import type { Call } from '@prisma/client';
 import { ZodError } from 'zod';
+import { WorkspaceRole } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import {
   CallAdminError,
@@ -15,7 +16,8 @@ import {
   CallAdminListSeriesQuerySchema,
 } from '@/validators/callValidator';
 
-type CallActionResult = { status?: number; body?: Record<string, unknown> } | void;
+/** `audit` is appended to the action's log line, for details the action/actor pair can't show. */
+type CallActionResult = { status?: number; body?: Record<string, unknown>; audit?: string } | void;
 
 /** One structured line per admin mutation — the audit trail until the audit tab lands. */
 function logAdminAction(
@@ -23,9 +25,10 @@ function logAdminAction(
   action: string,
   actor: CallAdminActor,
   relation: CallAdminRelation,
+  audit?: string,
 ): void {
   logger.info(
-    `[${targetId}] call_admin_action | action=${action}, actor=${actor.userId}, scope=${actor.scope}, relation=${relation}`,
+    `[${targetId}] call_admin_action | action=${action}, actor=${actor.userId}, scope=${actor.scope}, relation=${relation}${audit ? `, ${audit}` : ''}`,
   );
 }
 
@@ -33,6 +36,7 @@ function logAdminAction(
  * The other half of that trail. A panel every workspace member can reach needs the
  * refused attempts too, not just the ones that went through — a 403/404 says someone
  * reached for a call that isn't theirs, which is the part worth being able to look up.
+ * Only those count: a 409 (wrong state) or 400 (bad input) is not a refusal.
  */
 function logAdminDenial(
   targetId: string,
@@ -40,6 +44,7 @@ function logAdminDenial(
   actor: CallAdminActor | null,
   error: CallAdminError,
 ): void {
+  if (error.status !== 403 && error.status !== 404) return;
   logger.warn(
     `[${targetId}] call_admin_action_denied | action=${action}, actor=${actor?.userId ?? 'unknown'}, scope=${actor?.scope ?? 'unknown'}, status=${error.status}, reason=${error.message}`,
   );
@@ -55,6 +60,12 @@ export class CallAdminController {
     const user = req.user;
     if (!user?.id || !user.workspaceId) {
       res.status(401).json({ success: false, error: 'Unauthorized' });
+      return null;
+    }
+    // Guests are limited to the channels they can currently access (CallsACL), which this
+    // panel's relation checks don't model, so they don't get the panel at all.
+    if (user.role === WorkspaceRole.GUEST) {
+      res.status(403).json({ success: false, error: 'Guests cannot use the calls admin panel' });
       return null;
     }
     const scope = await callAdminAccessService.getScope(user.id);
@@ -99,7 +110,7 @@ export class CallAdminController {
         callAdminAccessService.assertApplicable(action, call);
 
         const result = await run(call, actor, req);
-        logAdminAction(call.externalId, action, actor, relation);
+        logAdminAction(call.externalId, action, actor, relation, result?.audit);
         res.status(result?.status ?? 200).json({ success: true, ...result?.body });
       } catch (error) {
         if (error instanceof CallAdminError) logAdminDenial(callId, action, actor, error);
@@ -231,19 +242,37 @@ export class CallAdminController {
   changeOwner = this.callAction('changeOwner', 'Failed to change owner', async (call, actor, req) => {
     const input = CallAdminChangeOwnerSchema.parse(req.body);
 
+    let seriesOrganizerId: string | null = null;
     if (input.applyToSeries) {
       if (!call.recurringSeriesId) {
         throw new CallAdminError('This call is not part of a recurring series', 400);
       }
-      const { relation: seriesRelation } = await callAdminService.resolveSeries(
+      const { series, relation: seriesRelation } = await callAdminService.resolveSeries(
         actor,
         call.recurringSeriesId,
       );
       callAdminAccessService.assertCanChangeSeriesOwner(seriesRelation);
+      seriesOrganizerId = series.organizerId;
     }
 
-    const result = await callAdminService.transferOwnership(call, input.newOwnerUserId, input.applyToSeries);
-    return { body: { ...result } };
+    // Ownership grants read access to the transcript, so an admin must not be able to
+    // take a call for themselves. Re-asserting something you already own stays allowed.
+    const alreadyOwner =
+      call.createdByUserId === actor.userId && (!input.applyToSeries || seriesOrganizerId === actor.userId);
+    if (input.newOwnerUserId === actor.userId && !alreadyOwner) {
+      throw new CallAdminError('You cannot transfer ownership to yourself', 403);
+    }
+
+    const result = await callAdminService.transferOwnership(
+      call,
+      input.newOwnerUserId,
+      input.applyToSeries,
+      actor.userId,
+    );
+    return {
+      body: { ...result },
+      audit: `previousOwner=${call.createdByUserId}, newOwner=${input.newOwnerUserId}, applyToSeries=${input.applyToSeries}, transferredCalls=${result.transferredCallIds.length}`,
+    };
   });
 }
 

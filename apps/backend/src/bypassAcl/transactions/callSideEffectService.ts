@@ -7,7 +7,7 @@ import { Call } from '@prisma/client';
 import { endCall } from '@/bypassAcl/transactions/callRepository';
 
 
-export function validateCallTx(callId: string, endedAt: Date, externalId: string, status: string, reason: string, call: Call) {
+export function endOrphanedCallTx(callId: string, endedAt: Date, externalId: string, status: string, reason: string, call: Call) {
   return transaction(['Call', 'CallParticipant', 'Message', 'MessageArtifact', 'User'], 'validateCall: stale call end, preview refresh, artifact completion and system message update must commit atomically; tx is not ACL-wrapped', db, async (tx) => {
     // End the call
     await endCall(repositories.calls, callId, endedAt, tx);

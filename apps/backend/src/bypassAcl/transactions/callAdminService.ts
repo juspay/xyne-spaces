@@ -3,9 +3,8 @@ import type { Call } from '@prisma/client';
 import { CallStatus, InvitationResponse, MeetingStatus } from '@xyne/shared';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
-import { isRecording } from '@/utils/callTypeUtils';
+import { CALENDAR_CALL_ORIGINS, isRecording } from '@/utils/callTypeUtils';
 import { recordingSharingService } from '@/services/recordingSharingService';
-import { CALENDAR_CALL_ORIGINS } from '@/services/callAdminAccessService';
 
 
 type TransferredCall = Pick<Call, 'id' | 'externalId' | 'status' | 'callOrigin' | 'metadata' | 'transcript'>;
