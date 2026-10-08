@@ -270,6 +270,7 @@ export const UserActivityPanel = ({
           )}
           {!isMobile && (
             <button
+              aria-label='Close Ask AI'
               onClick={handleXyneAIClose}
               data-track-category='XYNE_AI_SIDEBAR'
               data-track-name='CLOSE_XYNE_AI'

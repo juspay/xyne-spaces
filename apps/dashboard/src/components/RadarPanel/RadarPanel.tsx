@@ -3717,6 +3717,7 @@ const RadarPanel = (): ReactElement => {
               <button
                 className='ml-auto p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent'
                 data-track-category='RADAR'
+                aria-label='Close thread debug'
                 data-track-name='CLOSE_THREAD_DEBUG'
                 onClick={() => setThreadDebug(null)}
               >

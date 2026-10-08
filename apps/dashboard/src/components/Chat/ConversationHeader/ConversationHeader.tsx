@@ -397,6 +397,7 @@ const ConversationHeader = ({
               }}
               className='text-base font-semibold tracking-[-0.32px] flex items-center gap-2 min-w-0 h-7 px-1.5 rounded-md hover:bg-muted transition-colors duration-100'
               style={APP_NO_DRAG_STYLE}
+              aria-label={`${displayName}: channel details`}
               data-testid='channel-info-trigger'
               data-track-category='CHANNELS'
               data-track-name='OPEN_CHANNEL_INFO'
@@ -495,6 +496,7 @@ const ConversationHeader = ({
                   side='bottom'
                 >
                   <Button
+                    aria-label='Ask AI about this channel'
                     variant='ghost'
                     size='sm'
                     onClick={() => {

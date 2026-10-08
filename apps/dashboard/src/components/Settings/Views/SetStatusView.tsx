@@ -147,6 +147,7 @@ export const StatusSuggestionsView: React.FC<StatusViewProps> = ({ setView }) =>
           size='sm'
           onClick={() => setView('default')}
           data-track-category='STATUS'
+          aria-label='Back to status'
           data-track-name='BACK_TO_STATUS_DEFAULT'
           className='size-7 p-0 text-muted-foreground hover:text-foreground rounded-lg border border-border hover:bg-muted'
         >
@@ -429,6 +430,7 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
           size='sm'
           onClick={() => setView('default')}
           data-track-category='STATUS'
+          aria-label='Close status editor'
           data-track-name='BACK_TO_STATUS_DEFAULT'
           className='size-7 p-0 text-muted-foreground hover:text-foreground rounded-lg border border-border hover:bg-muted'
         >
@@ -496,6 +498,7 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
             onClick={handleClearStatus}
             className='flex-shrink-0 text-muted-foreground hover:text-muted-foreground'
             data-track-category='STATUS'
+            aria-label='Clear status'
             data-track-name='ClearStatus'
           >
             <X className='size-4' />
@@ -510,6 +513,7 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
           <Select.Trigger
             className='w-full flex items-center justify-between px-3 py-2 rounded-lg border border-input text-foreground hover:bg-muted transition-colors focus:outline-none focus:ring-2 focus:ring-ring'
             data-track-category='STATUS'
+            aria-label='Remove status after'
             data-track-name='SelectExpiryOption'
           >
             <Select.Value />

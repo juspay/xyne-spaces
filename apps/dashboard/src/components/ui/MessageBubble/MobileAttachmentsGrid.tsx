@@ -168,6 +168,7 @@ export const MobileAttachmentsGrid: React.FC<MobileAttachmentsGridProps> = ({ at
                         {formatAttachmentSummary(attachments)}
                       </span>
                       <button
+                        aria-label='Close attachments'
                         type='button'
                         onClick={handleClose}
                         data-track-category='MESSAGE'

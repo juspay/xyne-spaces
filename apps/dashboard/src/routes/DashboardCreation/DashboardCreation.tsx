@@ -149,6 +149,7 @@ export const DashboardCreation: React.FC = () => {
                       onClick={() => void handleDeleteDashboard(dashboard.id)}
                       className='p-1 text-muted-foreground hover:text-red-500'
                       data-track-category='Dashboards'
+                      aria-label={`Delete dashboard ${dashboard.name}`}
                       data-track-name='DeleteDashboard'
                       data-track-metadata={JSON.stringify({ dashboardId: dashboard.id })}
                     >

@@ -115,6 +115,20 @@ export const sdkSsoPollLimiter: RateLimitRequestHandler = rateLimit({
   legacyHeaders: false,
 });
 
+/** Per-user limiter for "take me to X" navigation (one Jev call per click step). */
+export const assistantNavigateLimiter: RateLimitRequestHandler = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 120,
+  keyGenerator: (req): string => req.user?.id ?? ipKeyGenerator(req.ip ?? 'unknown'),
+  message: () => ({
+    success: false,
+    error: 'Too many navigation requests. Please slow down.',
+    timestamp: new Date().toISOString(),
+  }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 /** Per-user limiter for Ask AI routing (one Jev call per typed message). */
 export const assistantRouteLimiter: RateLimitRequestHandler = rateLimit({
   windowMs: 60 * 1000, // 1 minute

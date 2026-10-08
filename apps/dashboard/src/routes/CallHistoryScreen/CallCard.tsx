@@ -369,6 +369,7 @@ export const CallCard = ({
                         className='size-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent'
                         onClick={e => e.stopPropagation()}
                         data-track-category='CALLS'
+                        aria-label='More options for this call'
                         data-track-name='call-more-options'
                       >
                         <MoreVertical className='size-4' />
@@ -440,6 +441,7 @@ export const CallCard = ({
                           }}
                           disabled={!isUserChannelMember || !handleGotoTranscript}
                           data-track-category='CALLS'
+                          aria-label='Go to call messages'
                           data-track-name='goto-call-message'
                           className='size-7 flex items-center justify-center border border-border rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-50 disabled:pointer-events-none'
                         >
@@ -459,6 +461,7 @@ export const CallCard = ({
                           }}
                           disabled={!hasTranscript}
                           data-track-category='CALLS'
+                          aria-label='Download transcript'
                           data-track-name='download-transcript'
                           className='size-7 flex items-center justify-center border border-border rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-50 disabled:pointer-events-none'
                         >
@@ -474,6 +477,7 @@ export const CallCard = ({
                             onViewExternalChat();
                           }}
                           data-track-category='CALLS'
+                          aria-label='View external chat'
                           data-track-name='view-external-chat'
                           className='size-7 flex items-center justify-center border border-border rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent'
                         >
@@ -510,6 +514,7 @@ export const CallCard = ({
                       className='size-7 text-muted-foreground hover:text-foreground'
                       onClick={e => e.stopPropagation()}
                       data-track-category='CALLS'
+                      aria-label='More options for this call'
                       data-track-name='call-more-options'
                     >
                       <MoreVertical className='size-4' />
@@ -566,6 +571,7 @@ export const CallCard = ({
                       <Button
                         onClick={handleGotoTranscript}
                         data-track-category='CALLS'
+                        aria-label='Go to call messages'
                         data-track-name='GOTO_TRANSCRIPT'
                         variant='outline'
                         size='icon'
@@ -584,6 +590,7 @@ export const CallCard = ({
                       <Button
                         onClick={handleDownloadTranscript}
                         data-track-category='CALLS'
+                        aria-label='Download transcript'
                         data-track-name='DOWNLOAD_TRANSCRIPT'
                         variant='outline'
                         size='icon'
@@ -602,6 +609,7 @@ export const CallCard = ({
                         size='icon'
                         className='size-7'
                         data-track-category='CALLS'
+                        aria-label='View external chat'
                         data-track-name='view-external-chat'
                       >
                         <ScrollText className='size-3.5 text-muted-foreground' />

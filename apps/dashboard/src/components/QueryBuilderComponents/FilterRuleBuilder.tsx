@@ -972,6 +972,7 @@ export const FilterRuleBuilder: React.FC<FilterRuleBuilderProps> = ({
           size='iconSm'
           onClick={() => removeCondition(condition.id)}
           data-track-category='QueryBuilder'
+          aria-label='Remove filter condition'
           data-track-name='REMOVE_FILTER_CONDITION'
           className='text-red-600 hover:bg-red-50'
         >

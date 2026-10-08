@@ -176,6 +176,7 @@ export const UserListView = ({
               size='sm'
               onClick={handlePrevPage}
               data-track-category='RESOURCE_ACCESS'
+              aria-label='Previous page'
               data-track-name='USER_LIST_PREV_PAGE'
               disabled={currentPage === 1}
               className='h-8 w-8 p-0'
@@ -190,6 +191,7 @@ export const UserListView = ({
               size='sm'
               onClick={handleNextPage}
               data-track-category='RESOURCE_ACCESS'
+              aria-label='Next page'
               data-track-name='USER_LIST_NEXT_PAGE'
               disabled={currentPage === totalPages}
               className='h-8 w-8 p-0'

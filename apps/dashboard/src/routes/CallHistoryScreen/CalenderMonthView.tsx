@@ -464,6 +464,7 @@ const CalendarMonthView = ({
                                       setOpenOverflowCallId(null);
                                     }}
                                     data-track-category='CALLS'
+                                    aria-label='Close events for this day'
                                     data-track-name='calendar-overflow-close'
                                     className='text-muted-foreground hover:text-foreground transition-colors p-0.5 cursor-pointer'
                                   >

@@ -986,6 +986,7 @@ export const OrganisationsScreen = (): ReactElement => {
                   className='size-7 p-0 text-muted-foreground hover:text-foreground rounded-lg border border-border hover:bg-muted'
                   disabled={isCreatingOrg}
                   data-track-category='Organisations'
+                  aria-label='Close create organisation dialog'
                   data-track-name='CloseCreateOrgDialog'
                 >
                   <X className='size-4' />

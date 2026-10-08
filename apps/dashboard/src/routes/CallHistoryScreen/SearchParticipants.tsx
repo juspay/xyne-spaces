@@ -345,6 +345,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
           }}
           className='ml-0.5 hover:bg-muted rounded p-0.5 text-foreground'
           data-track-category='CALLS'
+          aria-label={`Remove ${option.label}`}
           data-track-name='remove-participant'
         >
           <X className='size-3' />
@@ -438,6 +439,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
               }}
               className='ml-0.5 hover:bg-muted rounded p-0.5 text-foreground shrink-0'
               data-track-category='CALLS'
+              aria-label={`Remove ${selectedGroupOrChannel.label}`}
               data-track-name='remove-participant'
             >
               <X className='size-3' />

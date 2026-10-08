@@ -3695,6 +3695,7 @@ const SupportScreen = (): ReactElement => {
                             }}
                             className='p-1.5 rounded transition-colors text-muted-foreground hover:text-foreground hover:bg-accent'
                             data-track-category='Support'
+                            aria-label='Ask AI'
                             data-track-name='OPEN_XYNE_AI'
                             data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
                           >

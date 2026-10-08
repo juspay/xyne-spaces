@@ -44,6 +44,7 @@ export const DeleteCallModal: React.FC<DeleteCallModalProps> = ({
           <button
             onClick={onClose}
             data-track-category='CALLS'
+            aria-label='Close delete call dialog'
             data-track-name='close-delete-modal'
             className='w-7 h-7 rounded-lg border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors'
           >

@@ -159,6 +159,7 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({
         <div className='px-3 py-3 flex items-center justify-between border-b border-border bg-muted/10'>
           <div className='flex gap-0.5'>
             <button
+              aria-label='Previous year'
               onClick={() =>
                 setViewDate(new Date(viewDate.setFullYear(viewDate.getFullYear() - 1)))
               }
@@ -169,6 +170,7 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({
               <ChevronsLeft className='w-4 h-4' />
             </button>
             <button
+              aria-label='Previous month'
               onClick={() => setViewDate(new Date(viewDate.setMonth(viewDate.getMonth() - 1)))}
               data-track-category='DATE_TIME_PICKER'
               data-track-name='PREV_MONTH'
@@ -182,6 +184,7 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({
           </span>
           <div className='flex gap-0.5'>
             <button
+              aria-label='Next month'
               onClick={() => setViewDate(new Date(viewDate.setMonth(viewDate.getMonth() + 1)))}
               data-track-category='DATE_TIME_PICKER'
               data-track-name='NEXT_MONTH'
@@ -190,6 +193,7 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({
               <ChevronRight className='w-4 h-4' />
             </button>
             <button
+              aria-label='Next year'
               onClick={() =>
                 setViewDate(new Date(viewDate.setFullYear(viewDate.getFullYear() + 1)))
               }

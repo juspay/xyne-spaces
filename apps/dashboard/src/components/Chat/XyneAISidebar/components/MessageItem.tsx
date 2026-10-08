@@ -2931,6 +2931,7 @@ const MessageActions = ({
     ) && (
       <Tooltip content='Powered By searXNG' side='left'>
         <a
+          aria-label='Open searXNG on GitHub'
           href='https://github.com/searxng/searxng'
           target='_blank'
           rel='noopener noreferrer'

@@ -169,6 +169,15 @@ export const shortcuts = {
     category: 'Composer',
     preventDefault: true,
   },
+  'assistant.navigate': {
+    keys: 'mod+alt+g',
+    scope: 'global',
+    description: 'Take me to… (navigate by describing where to go)',
+    category: 'Navigation',
+    priority: 50,
+    allowInInputs: true,
+    preventDefault: true,
+  },
   'global.toggleBrowser': {
     keys: 'mod+shift+b',
     scope: 'global',

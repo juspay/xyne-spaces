@@ -89,6 +89,7 @@ export const ActivityConfigDialog = ({
             {hasExistingAlias ? 'Edit Activity Alias' : 'Create Activity Alias'}
           </h2>
           <button
+            aria-label='Close activity alias dialog'
             onClick={onClose}
             data-track-category='XYNE_AI_SIDEBAR'
             data-track-name='CLOSE_ACTIVITY_CONFIG'

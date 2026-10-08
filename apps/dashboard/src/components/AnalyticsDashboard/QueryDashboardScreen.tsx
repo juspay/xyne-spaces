@@ -775,6 +775,7 @@ export const QueryDashboardScreen: React.FC = () => {
                                 setAggregations(prev => prev.filter((_, x) => x !== i))
                               }
                               data-track-category='ANALYTICS'
+                              aria-label='Remove aggregation'
                               data-track-name='Remove_Aggregation'
                             >
                               <X className='w-3 h-3' />
@@ -858,6 +859,7 @@ export const QueryDashboardScreen: React.FC = () => {
                                 size='icon'
                                 onClick={() => setGroupBy(prev => prev.filter((_, x) => x !== i))}
                                 data-track-category='ANALYTICS'
+                                aria-label='Remove group by field'
                                 data-track-name='Remove_Group_By'
                               >
                                 <X className='w-3 h-3' />
@@ -969,6 +971,7 @@ export const QueryDashboardScreen: React.FC = () => {
                             size='icon'
                             onClick={() => setOrderBy(prev => prev.filter((_, x) => x !== i))}
                             data-track-category='ANALYTICS'
+                            aria-label='Remove order by field'
                             data-track-name='Remove_Order_By'
                           >
                             <X className='w-3 h-3' />

@@ -176,6 +176,7 @@ import { KeyedComposeDmPanel } from '../components/Chat/AddDmForm/ComposeDmPanel
 import ProfileSidebar from '../components/ProfileSidebar/ProfileSidebar';
 import UserGroupSidePanel from '../components/UserGroup/UserGroupSidePanel/UserGroupSidePanel';
 import GlobalCommandMenu from '../components/GlobalCommandMenu/GlobalCommandMenu';
+import NavigatorInput from '../components/Assistant/navigator/NavigatorInput';
 import TicketReportsScreen from './TicketReportsScreen/TicketReportsScreen';
 import LaunchScreen from './LaunchScreen/LaunchScreen';
 import { AssignmentConfigWrapper } from '../components/UserGroup/AssignmentConfigScreen';
@@ -982,6 +983,7 @@ const AppRoot = (): ReactElement => {
                           <CloudAgentFloatingHost />
                           <BrowserPanelHandler />
                           <GlobalCommandMenu aiOverview ticketScreenScope />
+                          <NavigatorInput />
                           <ShortcutsHelpModal
                             isOpen={isShortcutsModalOpen}
                             onClose={() => setIsShortcutsModalOpen(false)}

@@ -340,6 +340,7 @@ export const CallCard = ({
                       className='size-7 text-muted-foreground hover:text-foreground hover:bg-border rounded-lg'
                       onClick={e => e.stopPropagation()}
                       data-track-category='CALLS'
+                      aria-label='More options for this call'
                       data-track-name='call-more-options'
                     >
                       <ThreeDotsMenuHorizontal className='size-4' />

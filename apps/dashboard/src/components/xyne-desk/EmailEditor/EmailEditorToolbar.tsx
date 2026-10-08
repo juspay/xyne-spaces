@@ -703,6 +703,7 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
               onClick={() => setLinkDialogOpen(false)}
               className='p-1 hover:bg-accent rounded text-muted-foreground hover:text-muted-foreground'
               data-track-category='email-editor'
+              aria-label='Close link dialog'
               data-track-name='close-link-dialog'
             >
               <X className='h-4 w-4' />

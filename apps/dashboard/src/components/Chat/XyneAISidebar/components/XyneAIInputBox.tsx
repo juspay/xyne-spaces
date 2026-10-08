@@ -2032,6 +2032,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                     </button>
                   )}
                   <button
+                    aria-label={isStreaming ? 'Stop generating response' : 'Send message'}
                     onClick={isStreaming ? onAbort : () => onSubmit('button')}
                     data-ph-capture-attribute-track-id={
                       isStreaming ? 'abort_message' : 'submit_message'

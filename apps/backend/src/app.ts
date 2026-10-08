@@ -108,6 +108,7 @@ import searchFeedbackRoutes from '@/routes/searchFeedback';
 import knowledgeRoutes from '@/routes/knowledge';
 import vespaSearchRoutes, { relatedContextRouter } from '@/routes/vespaSearch';
 import assistantRouteRoutes from '@/routes/assistantRoute';
+import assistantNavigateRoutes from '@/routes/assistantNavigate';
 import { dashboardClawRouter } from '@/routes/dashboardClaw';
 import summarizeRoutes from '@/routes/summarize';
 import xyneAIRoutes from '@/routes/xyneAI';
@@ -198,9 +199,16 @@ import { appRoutes } from '@/apps';
 import { ChatController } from '@/apps/controllers/chatController';
 import { ReactionController } from '@/controllers/reactionController';
 import { unifiedDMService } from '@/bots/unified/services/unified-dm-service';
-import { coerceTwinReplyDraft, destinationNameLookup, createTwinReplyDraft } from '@/services/twinReplyDraftService';
+import {
+  coerceTwinReplyDraft,
+  destinationNameLookup,
+  createTwinReplyDraft,
+} from '@/services/twinReplyDraftService';
 import userMigrationRoutes from '@/routes/userMigration';
-import { decryptRequestBodyMiddleware, encryptResponseBodyMiddleware } from './middleware/decryptionMiddleware';
+import {
+  decryptRequestBodyMiddleware,
+  encryptResponseBodyMiddleware,
+} from './middleware/decryptionMiddleware';
 import internalRoutes from '@/routes/internal';
 import userDeactivationRoutes from '@/routes/userDeactivation';
 import collectionsRoutes from '@/routes/collections';
@@ -215,7 +223,6 @@ import { createSdkPublicRouter, createSdkRouter } from '@/api/sdk';
 import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
 import sdkSsoRoutes from '@/routes/sdk-sso';
 
-
 export class App {
   public app: Application;
   public httpServer: HttpServer;
@@ -229,7 +236,6 @@ export class App {
   }
 
   private initializeMiddlewares(): void {
-
     const apiPathPrefix = config.apiPathPrefix;
     if (apiPathPrefix) {
       this.app.use((req: Request, _res: Response, next: express.NextFunction): void => {
@@ -290,8 +296,11 @@ export class App {
 
     // Logging
     if (config.env !== 'test') {
-      morgan.token('url', req =>
-        redactSensitiveUrl((req as { originalUrl?: string; url?: string }).originalUrl ?? (req as { url?: string }).url),
+      morgan.token('url', (req) =>
+        redactSensitiveUrl(
+          (req as { originalUrl?: string; url?: string }).originalUrl ??
+            (req as { url?: string }).url
+        )
       );
       this.app.use(morgan('combined', { stream }));
     }
@@ -319,7 +328,11 @@ export class App {
     this.app.use('/api/integrations/slack-desk', slackDeskRoutes);
     this.app.use('/api/integrations/app-desk', appDeskRoutes);
     this.app.use('/api/integrations/social-media', socialMediaRoutes);
-    this.app.use('/api/integrations/ozonetel', authMiddleware.authenticate, ozonetelIntegrationRoutes);
+    this.app.use(
+      '/api/integrations/ozonetel',
+      authMiddleware.authenticate,
+      ozonetelIntegrationRoutes
+    );
     this.app.use('/api/integrations/slack-user', slackUserAuthRoutes);
 
     // Migration routes (body parsing handled in route file)
@@ -342,17 +355,21 @@ export class App {
     // its HMAC check. Endpoints are unauthenticated (Bitbucket is external, no
     // client cert) and workspace-scoped; restrict to Bitbucket egress IPs at the
     // ingress if the project-code / ticket-title exposure is a concern.
-    this.app.use(JIRA_COMPAT_MOUNT,
+    this.app.use(
+      JIRA_COMPAT_MOUNT,
       webhookLimiter,
 
-      jiraCompatRoutes);
+      jiraCompatRoutes
+    );
 
     // Webhook routes with webhook rate limiter (applied before general rate limiter)
-    this.app.use('/api/webhooks',
+    this.app.use(
+      '/api/webhooks',
       express.raw({ type: 'application/json' }),
       webhookLimiter,
 
-      webhookRoutes);
+      webhookRoutes
+    );
 
     // Calendar webhook routes (needs JSON body parsing for Microsoft notifications)
     this.app.use('/api/calendar/webhooks', express.json(), webhookLimiter, calendarWebhookRoutes);
@@ -386,7 +403,6 @@ export class App {
 
     this.app.use('/api/automation-webhooks', webhookLimiter, automationWebhookRoutes);
 
-
     // Claw MCP route (user + app auth)
     this.app.use('/api/query/claw', authenticateUserOrApp, pythonQueryRoutes);
 
@@ -396,14 +412,34 @@ export class App {
     this.app.use('/api/health', healthRoutes);
     this.app.use('/api/email', emailRoutes);
     this.app.use('/api/email', emailDemergeRoutes);
-    this.app.use('/api/channels/:channelId/classification', authMiddleware.authenticate, emailClassificationRoutes);
-    this.app.use('/api/channels/:channelId/tags-config', authMiddleware.authenticate, deskTagsConfigRoutes);
-    this.app.use('/api/channels/:channelId/priority-classification', authMiddleware.authenticate, priorityClassificationRoutes);
-    this.app.use('/api/channels/:channelId/metrics', authMiddleware.authenticate, deskMetricsRoutes);
+    this.app.use(
+      '/api/channels/:channelId/classification',
+      authMiddleware.authenticate,
+      emailClassificationRoutes
+    );
+    this.app.use(
+      '/api/channels/:channelId/tags-config',
+      authMiddleware.authenticate,
+      deskTagsConfigRoutes
+    );
+    this.app.use(
+      '/api/channels/:channelId/priority-classification',
+      authMiddleware.authenticate,
+      priorityClassificationRoutes
+    );
+    this.app.use(
+      '/api/channels/:channelId/metrics',
+      authMiddleware.authenticate,
+      deskMetricsRoutes
+    );
     this.app.use('/api/desk-metrics/claw', authenticateUserOrApp, deskMetricsClawRoutes);
     this.app.use('/api/desk-metrics', authMiddleware.authenticate, deskMetricsAggregateRoutes);
     this.app.use('/api/desk-report', authMiddleware.authenticate, deskReportPanelRoutes);
-    this.app.use('/api/channels/:channelId/ai-retrigger', authMiddleware.authenticate, aiRetriggerRoutes);
+    this.app.use(
+      '/api/channels/:channelId/ai-retrigger',
+      authMiddleware.authenticate,
+      aiRetriggerRoutes
+    );
 
     // Meet callback route (API key auth - called by SAM service)
     this.app.use('/api/meet', meetCallbackRoutes);
@@ -421,9 +457,24 @@ export class App {
     this.app.use('/api/team-intelligence', teamIntelligenceRoutes);
 
     // Team intelligence dashboard routes (JWT auth - called by dashboard)
-    this.app.use('/api/team-intelligence-dashboard/org', authMiddleware.authenticate, aclMiddleware.checkAccess, teamIntelligenceDashboardRoutes);
-    this.app.use('/api/team-intelligence-dashboard/team', authMiddleware.authenticate, aclMiddleware.checkAccess, teamIntelligenceTeamDashboardRoutes);
-    this.app.use('/api/team-intelligence-dashboard/user', authMiddleware.authenticate, aclMiddleware.checkAccess, teamIntelligenceUserDashboardRoutes);
+    this.app.use(
+      '/api/team-intelligence-dashboard/org',
+      authMiddleware.authenticate,
+      aclMiddleware.checkAccess,
+      teamIntelligenceDashboardRoutes
+    );
+    this.app.use(
+      '/api/team-intelligence-dashboard/team',
+      authMiddleware.authenticate,
+      aclMiddleware.checkAccess,
+      teamIntelligenceTeamDashboardRoutes
+    );
+    this.app.use(
+      '/api/team-intelligence-dashboard/user',
+      authMiddleware.authenticate,
+      aclMiddleware.checkAccess,
+      teamIntelligenceUserDashboardRoutes
+    );
 
     // Mettle employee details route (JWT auth - fetch employee information)
     this.app.use('/api/mettle/employee', authMiddleware.authenticate, mettleEmployeeDetailsRoutes);
@@ -461,13 +512,18 @@ export class App {
     // Same shape: the one-off SDLC multi-repo data migration spans every workspace,
     // so it opens its own runAsSystem scope rather than taking workspaceScopedRoute.
 
-    this.app.use('/migrate/api/users-data-migration', authMiddleware.authenticate, userMigrationRoutes);
+    this.app.use(
+      '/migrate/api/users-data-migration',
+      authMiddleware.authenticate,
+      userMigrationRoutes
+    );
 
     // Apply general rate limiter to all API routes from this point onward
 
     // Test-only routes - only register when NODE_ENV=test
     // Test auth routes - used for CI automation testing and sandbox environments
-    const enableDevAuth = process.env.ENABLE_DEV_AUTH === 'true' && process.env.NODE_ENV === 'development';
+    const enableDevAuth =
+      process.env.ENABLE_DEV_AUTH === 'true' && process.env.NODE_ENV === 'development';
     if (config.isTestEnv || enableDevAuth) {
       logger.info('Registering test routes (/api/test/*)');
       this.app.use('/api/test', testAuthRoutes);
@@ -569,103 +625,133 @@ export class App {
     this.app.post('/api/internal/reactAsUser', validateS2SKey, (req: Request, res: Response) => {
       void new ReactionController().reactAsUser(req, res);
     });
-    this.app.post('/api/internal/getOrCreateDm', validateS2SKey, async (req: Request, res: Response) => {
-      try {
-        const { userId, targetUserId, workspaceId } = (req.body ?? {}) as {
-          userId?: string; targetUserId?: string; workspaceId?: string;
-        };
-        if (!userId || !targetUserId || !workspaceId) {
-          res.status(400).json({ error: 'userId, targetUserId and workspaceId are required' });
-          return;
-        }
-        const channelId = await unifiedDMService.getOrCreateDirectMessage(userId, targetUserId, workspaceId);
-        res.json({ channelId });
-      } catch (err) {
-        logger.error('[getOrCreateDm] failed', err);
-        res.status(500).json({ error: 'Internal error' });
-      }
-    });
-    this.app.post('/api/internal/twin-reply-draft', validateS2SKey, async (req: Request, res: Response) => {
-      try {
-        const parsed = coerceTwinReplyDraft(req.body);
-        if ('error' in parsed) {
-          res.status(400).json({ error: parsed.error });
-          return;
-        }
-        const lookup = destinationNameLookup(parsed.draft);
-        if (lookup) {
-          try {
-            const prisma = DatabaseClient.getInstance();
-            if (lookup.field === 'destinationChannelName') {
-              const chan = await prisma.channel.findUnique({ where: { id: lookup.id }, select: { name: true } });
-              if (chan?.name) parsed.draft.destinationChannelName = chan.name;
-            } else {
-              const target = await prisma.user.findUnique({ where: { id: lookup.id }, select: { name: true, displayName: true } });
-              const name = target?.displayName || target?.name;
-              if (name) parsed.draft.destinationUserName = name;
-            }
-          } catch (err) {
-            logger.warn('[twin-reply-draft] destination name resolution failed', err);
+    this.app.post(
+      '/api/internal/getOrCreateDm',
+      validateS2SKey,
+      async (req: Request, res: Response) => {
+        try {
+          const { userId, targetUserId, workspaceId } = (req.body ?? {}) as {
+            userId?: string;
+            targetUserId?: string;
+            workspaceId?: string;
+          };
+          if (!userId || !targetUserId || !workspaceId) {
+            res.status(400).json({ error: 'userId, targetUserId and workspaceId are required' });
+            return;
           }
+          const channelId = await unifiedDMService.getOrCreateDirectMessage(
+            userId,
+            targetUserId,
+            workspaceId
+          );
+          res.json({ channelId });
+        } catch (err) {
+          logger.error('[getOrCreateDm] failed', err);
+          res.status(500).json({ error: 'Internal error' });
         }
-        await createTwinReplyDraft(parsed.draft);
-        res.json({ ok: true });
-      } catch (err) {
-        logger.error('[twin-reply-draft] create failed', err);
-        res.status(500).json({ error: 'Internal error' });
       }
-    });
+    );
+    this.app.post(
+      '/api/internal/twin-reply-draft',
+      validateS2SKey,
+      async (req: Request, res: Response) => {
+        try {
+          const parsed = coerceTwinReplyDraft(req.body);
+          if ('error' in parsed) {
+            res.status(400).json({ error: parsed.error });
+            return;
+          }
+          const lookup = destinationNameLookup(parsed.draft);
+          if (lookup) {
+            try {
+              const prisma = DatabaseClient.getInstance();
+              if (lookup.field === 'destinationChannelName') {
+                const chan = await prisma.channel.findUnique({
+                  where: { id: lookup.id },
+                  select: { name: true },
+                });
+                if (chan?.name) parsed.draft.destinationChannelName = chan.name;
+              } else {
+                const target = await prisma.user.findUnique({
+                  where: { id: lookup.id },
+                  select: { name: true, displayName: true },
+                });
+                const name = target?.displayName || target?.name;
+                if (name) parsed.draft.destinationUserName = name;
+              }
+            } catch (err) {
+              logger.warn('[twin-reply-draft] destination name resolution failed', err);
+            }
+          }
+          await createTwinReplyDraft(parsed.draft);
+          res.json({ ok: true });
+        } catch (err) {
+          logger.error('[twin-reply-draft] create failed', err);
+          res.status(500).json({ error: 'Internal error' });
+        }
+      }
+    );
     // Conversation-access check for claw: claw sessions are keyed by
     // conversationId (not userId), so claw must verify the caller may access a
     // conversation before binding its session. Returns whether the conversation
     // exists and whether the user is a member of its channel (or it is a PUBLIC
     // channel in the user's workspace). Spaces owns this ACL.
-    this.app.post('/api/internal/conversation-access', validateS2SKey, async (req: Request, res: Response) => {
-      try {
-        const { conversationId, userId } = (req.body ?? {}) as { conversationId?: string; userId?: string };
-        if (!conversationId || !userId) {
-          res.status(400).json({ error: 'conversationId and userId are required' });
-          return;
-        }
-        const prisma = DatabaseClient.getInstance();
-        const conv = await prisma.conversation.findUnique({
-          where: { conversationId },
-          select: { channelId: true },
-        });
-        if (!conv) {
-          res.json({ exists: false, canAccess: false });
-          return;
-        }
-        const participant = await prisma.channelParticipant.findUnique({
-          where: { channelId_userId: { channelId: conv.channelId, userId } },
-          select: { id: true },
-        });
-        let canAccess = participant !== null;
-        if (!canAccess) {
-          const channel = await prisma.channel.findUnique({
-            where: { id: conv.channelId },
-            select: { visibility: true, workspaceId: true },
-          });
-          if (channel?.visibility === 'PUBLIC') {
-            const user = await prisma.user.findUnique({ where: { id: userId }, select: { workspaceId: true } });
-            canAccess = !!user?.workspaceId && user.workspaceId === channel.workspaceId;
+    this.app.post(
+      '/api/internal/conversation-access',
+      validateS2SKey,
+      async (req: Request, res: Response) => {
+        try {
+          const { conversationId, userId } = (req.body ?? {}) as {
+            conversationId?: string;
+            userId?: string;
+          };
+          if (!conversationId || !userId) {
+            res.status(400).json({ error: 'conversationId and userId are required' });
+            return;
           }
+          const prisma = DatabaseClient.getInstance();
+          const conv = await prisma.conversation.findUnique({
+            where: { conversationId },
+            select: { channelId: true },
+          });
+          if (!conv) {
+            res.json({ exists: false, canAccess: false });
+            return;
+          }
+          const participant = await prisma.channelParticipant.findUnique({
+            where: { channelId_userId: { channelId: conv.channelId, userId } },
+            select: { id: true },
+          });
+          let canAccess = participant !== null;
+          if (!canAccess) {
+            const channel = await prisma.channel.findUnique({
+              where: { id: conv.channelId },
+              select: { visibility: true, workspaceId: true },
+            });
+            if (channel?.visibility === 'PUBLIC') {
+              const user = await prisma.user.findUnique({
+                where: { id: userId },
+                select: { workspaceId: true },
+              });
+              canAccess = !!user?.workspaceId && user.workspaceId === channel.workspaceId;
+            }
+          }
+          res.json({ exists: true, canAccess });
+        } catch (err) {
+          logger.error('[conversation-access] failed', err);
+          res.status(500).json({ error: 'Internal error' });
         }
-        res.json({ exists: true, canAccess });
-      } catch (err) {
-        logger.error('[conversation-access] failed', err);
-        res.status(500).json({ error: 'Internal error' });
       }
-    });
+    );
     this.app.post(
       '/api/internal/automations/claw-callback/:executionId/:stepName',
       validateS2SKey,
-      handleClawCallback,
+      handleClawCallback
     );
     this.app.post(
       '/api/internal/email/autodraft-callback/:conversationId/:channelId',
       validateS2SKey,
-      handleAutoDraftCallback,
+      handleAutoDraftCallback
     );
     // Claw's completion callback for a parked RUN_AGENT step. The session — not
     // the node path — identifies which attempt reported back; the handler
@@ -673,7 +759,7 @@ export class App {
     this.app.post(
       '/api/internal/workflows-v2/claw-callback/:executionId',
       validateS2SKey,
-      handleWorkflowClawCallback,
+      handleWorkflowClawCallback
     );
     this.app.use('/api/internal/sdlc/vcs', validateS2SKey, sdlcVcsInternalRoutes);
     this.app.use('/api/internal/sdlc/agent', validateS2SKey, sdlcAgentInternalRoutes);
@@ -686,7 +772,7 @@ export class App {
     this.app.post(
       '/api/internal/desk-report/callback/:channelId/:attachmentId',
       validateS2SKey,
-      handleDeskReportCallback,
+      handleDeskReportCallback
     );
 
     // Internal canvas read/update (S2S-only, used by MCP tools)
@@ -696,7 +782,6 @@ export class App {
     this.app.use('/api/canvas/claw', authenticateUserOrApp, canvasRoutes);
     this.app.use('/api/vespaSearch/claw', authenticateUserOrApp, vespaSearchRoutes);
     this.app.use('/api/dashboard/claw', authenticateUserOrApp, dashboardClawRouter);
-
 
     // No user session here — the caller is the y-sweet server itself, gated
     // by the shared Y_SWEET_SERVER_TOKEN instead of authMiddleware.
@@ -718,7 +803,7 @@ export class App {
       userManagementRoutes
     );
 
-    // user deactivation from dashboard 
+    // user deactivation from dashboard
     this.app.use('/api/user-activation', userActivationRoutes);
 
     // Project routes (auth and ACL required)
@@ -804,7 +889,11 @@ export class App {
     // New chat schema routes
     this.app.use('/api/channels', authMiddleware.authenticate, channelRoutes);
     this.app.use('/api/conversations', authMiddleware.authenticate, conversationRoutes);
-    this.app.use('/api/thread-type-vocabulary', authMiddleware.authenticate, threadTypeVocabularyRoutes);
+    this.app.use(
+      '/api/thread-type-vocabulary',
+      authMiddleware.authenticate,
+      threadTypeVocabularyRoutes
+    );
     this.app.use('/api/organizations', authMiddleware.authenticate, organizationRoutes);
     this.app.use('/api/users', authMiddleware.authenticate, userRoutes);
     this.app.use('/api/user-groups', authMiddleware.authenticate, userGroupRoutes); // User groups (teams)
@@ -821,6 +910,7 @@ export class App {
     this.app.use('/api/vespaSearch', authMiddleware.authenticate, vespaSearchRoutes);
 
     this.app.use('/api/assistant/route', authMiddleware.authenticate, assistantRouteRoutes);
+    this.app.use('/api/assistant/navigate', authMiddleware.authenticate, assistantNavigateRoutes);
 
     // API Key management routes (admin only, no ACL needed as it has requireAdmin middleware)
     this.app.use('/api/admin/api-keys', apiKeyRoutes);
@@ -1050,9 +1140,7 @@ export class App {
       await modelSyncQueue.initialize();
       await modelSyncQueue.runInitialSync();
     } else {
-      logger.info(
-        'Skipping model sync queue: LITELLM_API_KEY / LITELLM_BASE_URL not configured',
-      );
+      logger.info('Skipping model sync queue: LITELLM_API_KEY / LITELLM_BASE_URL not configured');
     }
 
     // Initialize calendar sync queues as PRODUCERS only. The calendar webhook
@@ -1168,7 +1256,8 @@ export class App {
     const { delayedMessageQueue } = await import('@/queues/delayedMessageQueue');
     await delayedMessageQueue.initialize();
 
-    const { radarExecutionQueue, isRadarExecutionEnabled } = await import('@/queues/radarExecutionQueue');
+    const { radarExecutionQueue, isRadarExecutionEnabled } =
+      await import('@/queues/radarExecutionQueue');
     if (isRadarExecutionEnabled()) {
       logger.info('Initializing radar execution queue (producer)...');
       await radarExecutionQueue.initialize();

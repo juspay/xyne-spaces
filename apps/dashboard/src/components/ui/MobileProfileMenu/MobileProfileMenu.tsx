@@ -81,6 +81,7 @@ export const MobileProfileMenu = ({ userId }: MobileProfileMenuProps): ReactElem
       <Drawer.Root open={isOpen} onOpenChange={setIsOpen}>
         <Drawer.Portal>
           <Drawer.Overlay
+            aria-label='Close profile menu'
             className='fixed inset-0 z-50 bg-background/80 backdrop-blur-[2px]'
             onClick={() => setIsOpen(false)}
             data-track-category='MOBILE_PROFILE_MENU'
