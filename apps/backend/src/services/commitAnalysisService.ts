@@ -17,6 +17,9 @@ import {
   DiffParser,
   ReleaseEventContext,
 } from './release/core';
+
+const sanitizeForLog = (value: string): string => value.replace(/[\r\n]/g, '');
+
 export type AnalyzeCommitsRequest =
   | {
     commitIds: string[];
@@ -233,7 +236,9 @@ export class CommitAnalysisService {
             select: { id: true, workspaceId: true },
           });
       if (!project) {
-        logger.warn(`[AutoStub] No project found for code=${code} in workspace=${workspaceId}`);
+        logger.warn(
+          `[AutoStub] No project found for code=${sanitizeForLog(code)} in workspace=${sanitizeForLog(workspaceId)}`
+        );
         return null;
       }
       const board = await db.board.findFirst({
