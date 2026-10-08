@@ -286,7 +286,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (method, route) (rate(http_requests_total{route=~\"/api/(health/readiness|conversations.*|zero/.*)\"}[$__rate_interval]))",
+          "expr": "sum by (method, route) (rate(http_requests_total{route=~\"/api/(health/readiness|conversations.*|zero/.*|vespaSearch.*|attachments/.*)\"}[$__rate_interval]))",
           "legendFormat": "{{method}} {{route}}",
           "refId": "A"
         }
@@ -326,7 +326,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le, method, route) (rate(http_request_duration_ms_bucket{route=~\"/api/(health/readiness|conversations.*|zero/.*)\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le, method, route) (rate(http_request_duration_ms_bucket{route=~\"/api/(health/readiness|conversations.*|zero/.*|vespaSearch.*|attachments/.*)\"}[$__rate_interval])))",
           "legendFormat": "p95 {{method}} {{route}}",
           "refId": "A"
         }

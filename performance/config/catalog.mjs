@@ -1,3 +1,5 @@
+import { PROFILE_NAMES } from '../k6/profiles.mjs';
+
 export const K6_IMAGE = 'grafana/k6:2.2.0';
 
 // The two targets are not peers, and the asymmetry is deliberate.
@@ -9,24 +11,15 @@ export const K6_IMAGE = 'grafana/k6:2.2.0';
 // `x-route-env: playground` to the SAME host, and the backend passes that to Superposition
 // as a config dimension (cacConfigController.ts:14) — so it resolves a different feature
 // set against the same backend, database, Vespa and Redis that serve customers. Load there
-// is load on production. It is kept as a verification target, capped to a handful of
-// virtual users on the smoke profile, and nothing more.
+// is load on production. It is kept as a UAT verification target: the smoke check and the
+// read-only release check, capped at the release profile's 25-VU peak, and nothing heavier.
 export const ENVIRONMENTS = Object.freeze({
   sandbox: Object.freeze({ maxVus: 300, maxDurationSeconds: 8 * 60 * 60 }),
-  preprod: Object.freeze({ maxVus: 5, maxDurationSeconds: 10 * 60 }),
+  preprod: Object.freeze({ maxVus: 25, maxDurationSeconds: 10 * 60 }),
 });
 
-// Must stay in lockstep with PROFILE_NAMES in performance/k6/profiles.mjs — this set
-// gates what the runner accepts, that one defines what k6 can build. A parity test
-// in performance/tests/catalog.test.mjs fails if they drift.
-export const PROFILES = new Set([
-  'smoke',
-  'release',
-  'load',
-  'stress',
-  'spike',
-  'soak',
-]);
+export const PROFILES = new Set(PROFILE_NAMES);
+
 // `zero-query-transform` exercises the query-transform step of POST /api/zero/query:
 // auth, rate limit, ACL, tenant scoping and AST compilation. It does not execute SQL and
 // is not a Zero-sync test. `rest-messaging` exercises POST /api/conversations/:id/messages,
@@ -43,9 +36,10 @@ export const SCENARIOS = new Set([
   'zero-push',
   'rest-messaging',
 ]);
-// Pre-production runs on production infrastructure, so only the single-request profile
-// is permitted there. Everything heavier belongs on sandbox.
-const PREPROD_PROFILES = new Set(['smoke']);
+// Pre-production runs on production infrastructure, so only the single-request smoke check
+// and the short read-only release check are permitted there. Everything heavier — load,
+// stress, spike, soak — belongs on sandbox.
+const PREPROD_PROFILES = new Set(['smoke', 'release']);
 
 // Scenarios that insert rows. Each `rest-messaging` iteration writes a message, which also
 // enqueues a Vespa index job and side-effect fan-out; a soak is roughly 360,000 of them.
@@ -77,8 +71,7 @@ function parseOptionalDuration(value, maximumSeconds) {
   const multipliers = { s: 1, m: 60, h: 3600 };
   const seconds = Number(match[1]) * multipliers[match[2]];
   if (seconds > maximumSeconds) {
-    const maximum = maximumSeconds === 3600 ? '1h' : `${maximumSeconds / 3600}h`;
-    throw new Error(`Duration override exceeds maximum ${maximum}`);
+    throw new Error(`Duration override exceeds maximum ${maximumSeconds}s`);
   }
 
   return String(value);
@@ -99,7 +92,7 @@ export function resolveRunConfig(input = {}) {
   if (environment === 'preprod' && !PREPROD_PROFILES.has(profile)) {
     throw new Error(
       `${profile} is not allowed on preprod: it shares production's backend, database and `
-      + 'capacity, so anything beyond a single-request smoke check is a production load '
+      + 'capacity, so anything beyond the smoke and release checks is a production load '
       + 'test. Run it on sandbox instead.',
     );
   }

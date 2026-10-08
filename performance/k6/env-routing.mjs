@@ -7,11 +7,12 @@
 //   apps/electron/src/services/request-interceptor.ts:129-131
 //     if (preProdEnabled === true) headers['x-route-env'] = 'playground';
 //
-// That makes the environment *name* an unreliable guard. A run labelled `preprod` that
-// points at the production host and omits the header is a production load test wearing a
-// pre-production label, and every report would say "preprod" while the traffic lands on
-// customers. So the host is checked directly, and the header is always sent for preprod.
-//
+// That makes the environment *name* an unreliable guard on its own. A run labelled
+// `sandbox` that points at the production host is a production load test wearing a
+// sandbox label. So the host is checked directly: the production host is accepted only for
+// `preprod`, whose profiles the catalog already limits to smoke and release, and the
+// header is always sent for preprod so its traffic resolves the pre-production feature set.
+
 // Pure data and functions only — no k6 globals — so the k6 scenarios and the Node runner
 // and test suite can all import it.
 
@@ -27,12 +28,16 @@ export function routeEnvHeaders(environment) {
 }
 
 /**
- * Refuse a URL whose host serves production.
+ * Refuse a production host unless the run is a pre-production run.
  *
+ * Pre-production has no host of its own, so it is the one environment that may address
+ * the production host; `resolveRunConfig` restricts it to the smoke and release profiles.
  * Compares the parsed hostname exactly rather than by substring, so neither a lookalike
  * (`app.spaces.xyne.juspay.net.example.com`) nor a port or path disguises a real one.
  */
-export function assertNotProductionHost(url) {
+export function assertNotProductionHost(url, environment) {
+  if (environment === 'preprod') return;
+
   let hostname;
   try {
     hostname = new URL(url).hostname.toLowerCase();
@@ -42,10 +47,9 @@ export function assertNotProductionHost(url) {
 
   if (PRODUCTION_HOSTS.includes(hostname)) {
     throw new Error(
-      `${hostname} serves production and is refused regardless of the environment name. `
-      + 'Pre-production is this same host plus the x-route-env header, so a name alone '
-      + 'cannot keep load off customers. Point PERF_BASE_URL at sandbox, or at a '
-      + 'pre-production host that is not in the production list.',
+      `${hostname} serves production and is refused for the ${environment ?? 'sandbox'} environment. `
+      + 'Point PERF_BASE_URL at sandbox, or use --environment preprod, which adds the '
+      + 'x-route-env header and is limited to the smoke and release profiles.',
     );
   }
 }

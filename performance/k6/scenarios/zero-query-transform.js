@@ -17,8 +17,8 @@
 import http from 'k6/http';
 import { sleep } from 'k6';
 
-import { parseJson, verify, zeroQueryDuration } from '../lib/checks.js';
-import { buildOptions, getRunConfig, readinessUrl, zeroQueryUrl } from '../lib/config.js';
+import { assertReady, parseJson, verify, zeroQueryDuration } from '../lib/checks.js';
+import { buildOptions, getRunConfig, zeroQueryUrl } from '../lib/config.js';
 import { authenticatedHeaders, userForVirtualUser } from '../lib/data.js';
 import { buildSummary } from '../lib/report.js';
 import { routeEnvHeaders } from '../env-routing.mjs';
@@ -43,15 +43,7 @@ function postTransform(user, message) {
 }
 
 export function setup() {
-  const readiness = http.get(readinessUrl(config), { headers: ROUTE_HEADERS, tags: { operation: 'readiness' } });
-  const readinessBody = parseJson(readiness);
-  const ready = verify(readiness, {
-    'readiness returns 200': (result) => result.status === 200,
-    'readiness reports success': () => readinessBody?.success === true,
-    'database is ready': () => readinessBody?.data?.status === 'ready',
-  }, { operation: 'readiness' });
-
-  if (!ready) throw new Error('ENVIRONMENT_FAILURE: target is not ready');
+  assertReady(config, ROUTE_HEADERS);
 
   // One authenticated request before load starts, so a stale fixture token or a changed
   // query contract fails now — as an environment fault at virtual-user 1 — rather than as

@@ -115,13 +115,13 @@ menu's "Enable pre-prod features" is on
 | production | `app.spaces.xyne.juspay.net` | no header |
 | pre-production | `app.spaces.xyne.juspay.net` | **`x-route-env: playground`** |
 
-That makes the environment *name* an unreliable guard: a run labelled `preprod` pointed at
-the production host with no header is a production load test wearing a pre-production
-label, and every report would say "preprod" while the traffic landed on customers.
+That makes the environment *name* an unreliable guard on its own: a run labelled `sandbox`
+pointed at the production host is a production load test wearing a sandbox label.
 
-So two things are enforced. Every scenario sends the routing header for `preprod`, and the
-runner **refuses the production hosts by hostname**, whatever the run is called. The
-hostname is compared exactly, so a lookalike or a port cannot disguise one.
+So three things are enforced. Every scenario sends the routing header for `preprod`; the
+runner **refuses the production hosts by hostname for every environment except `preprod`**;
+and `preprod` itself is limited to the `smoke` and `release` profiles and the read-only
+scenarios. The hostname is compared exactly, so a lookalike or a port cannot disguise one.
 
 Routine runs accept only `sandbox` and `preprod`. Production is deliberately rejected.
 
@@ -132,8 +132,8 @@ Routine runs accept only `sandbox` and `preprod`. Production is deliberately rej
 | Deployment | **its own** | **production's** |
 | Database | **its own** | **production's — the one customers use** |
 | Selected by | separate host | `x-route-env: playground` header |
-| Profiles allowed | **all six** | **`smoke` only** |
-| VU cap | **300** | **5** |
+| Profiles allowed | **all six** | **`smoke` and `release` only** |
+| VU cap | **300** | **25** (the `release` peak) |
 | Max duration | 8h | 10m |
 | Write scenarios | allowed with opt-in | **refused — no opt-in exists** |
 
@@ -143,8 +143,10 @@ config dimension (`cacConfigController.ts:14`), resolving a different feature se
 the same backend, database, Vespa and Redis that serve customers. Load there is load on
 production, and a write there is a write to customer data.
 
-So preprod is kept as a **verification** target — enough to confirm the framework reaches
-the playground feature set — and nothing heavier. **Sandbox is where load actually runs.**
+So preprod is kept as a **UAT verification** target — the `smoke` check and the read-only
+`release` check against the playground feature set before it is promoted — and nothing
+heavier. Load, stress, spike and soak find where the system degrades; on preprod that would
+be production degrading. **Sandbox is where load actually runs.**
 
 ## Identity fixture sizing
 
@@ -242,7 +244,7 @@ side-effect fan-out. A `soak` at 25 VUs and 1s think time is roughly 360,000 mes
 tagged `PERF-<run-id>-<userId>-<vu>-<iter>` so they can be found and removed, but **no teardown is
 implemented yet**. Decide one of: a k6 `teardown()` that deletes by marker, a documented pre/post
 reset job, or a throwaway workspace per run — before running a capacity profile of
-`rest-messaging` against pre-production.
+`rest-messaging` on sandbox. (Pre-production refuses write scenarios outright.)
 
 `zero-query-transform`, `search` and `attachments` are unaffected: they write nothing. `attachments` has no cleanup need but does transfer real bytes, so watch egress on long runs.
 
@@ -252,10 +254,10 @@ reset job, or a throwaway workspace per run — before running a capacity profil
 PERF_REMOTE_WRITE_URL=https://victoriametrics.example.com/api/v1/write \
 PERF_REMOTE_WRITE_USERNAME="$METRICS_USER" \
 PERF_REMOTE_WRITE_PASSWORD="$METRICS_PASSWORD" \
-PERF_BASE_URL=https://preprod.example.com \
+PERF_BASE_URL=https://spaces.sandbox.xyne.juspay.net \
 PERF_RELEASE_VERSION=1.298.0 \
-PERF_USERS_FILE=performance/test-data/users.preprod.json \
-pnpm perf:run -- --environment preprod --profile release --scenario zero-query-transform
+PERF_USERS_FILE=performance/test-data/users.sandbox.json \
+pnpm perf:run -- --environment sandbox --profile release --scenario zero-query-transform
 ```
 
 Open the provisioned **Xyne k6 Performance Testing** dashboard and choose the generated run ID.

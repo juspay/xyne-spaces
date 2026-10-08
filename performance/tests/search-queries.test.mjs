@@ -6,6 +6,8 @@ import {
   SEARCH_APP_SETS,
   buildSearchPath,
   selectSearchTerms,
+  isGroupedSearch,
+  searchResults,
 } from '../k6/search-queries.mjs';
 
 test('ships neutral default terms so a run needs no extra fixture fields', () => {
@@ -52,4 +54,33 @@ test('rejects a term longer than the endpoint allows', () => {
     () => buildSearchPath({ term: 'x'.repeat(501), apps: 'chat', limit: 20, offset: 0 }),
     /500/,
   );
+});
+
+test('reads rows from a flat single-app response', () => {
+  const body = { success: true, data: { results: [{ id: 'a' }], totalCount: 1 } };
+  assert.equal(isGroupedSearch(body), false);
+  assert.deepEqual(searchResults(body), [{ id: 'a' }]);
+});
+
+test('flattens rows from a grouped multi-app response', () => {
+  // apps/backend/src/services/vespaSearch/index.ts, grouped branch of searchHandler.
+  const body = {
+    success: true,
+    data: {
+      grouped: true,
+      groups: [
+        { groupBy: 'docType', groupValue: 'chat', count: 2, results: [{ id: 'c1' }, { id: 'c2' }] },
+        { groupBy: 'docType', groupValue: 'ticket', count: 1, results: [{ id: 't1' }] },
+      ],
+      totalCount: 3,
+    },
+  };
+  assert.equal(isGroupedSearch(body), true);
+  assert.deepEqual(searchResults(body), [{ id: 'c1' }, { id: 'c2' }, { id: 't1' }]);
+});
+
+test('reports no rows for a response of neither shape', () => {
+  assert.equal(searchResults({ success: true, data: {} }), undefined);
+  assert.equal(searchResults({ success: true, data: { grouped: true } }), undefined);
+  assert.equal(searchResults(null), undefined);
 });

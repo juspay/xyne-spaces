@@ -1,11 +1,13 @@
-const startedAt = new Date().toISOString();
-
 function metricValue(data, metric, field) {
   return data.metrics?.[metric]?.values?.[field];
 }
 
 export function buildSummary(data, config) {
-  const endedAt = new Date().toISOString();
+  // handleSummary runs in a fresh runtime after the test, so init-time clocks read the end
+  // of the run. Derive the start from k6's own measured duration instead.
+  const endedAtMs = Date.now();
+  const startedAt = new Date(endedAtMs - data.state.testRunDurationMs).toISOString();
+  const endedAt = new Date(endedAtMs).toISOString();
   const metadata = {
     runId: config.runId,
     releaseVersion: config.releaseVersion,

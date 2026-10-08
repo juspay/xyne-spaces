@@ -66,12 +66,30 @@ export function buildSearchPath({ term, apps, limit, offset }) {
 }
 
 /**
+ * Whether a search response is grouped by docType.
+ *
+ * The backend groups whenever more than one app is requested
+ * (apps/backend/src/vespa/src/utils/YqlBuilder.ts `shouldGroup`), and answers
+ * `{success, data:{grouped: true, groups:[{groupBy, groupValue, count, results}], ...}}`
+ * (apps/backend/src/services/vespaSearch/index.ts, grouped branch of searchHandler).
+ */
+export function isGroupedSearch(body) {
+  return body?.data?.grouped === true;
+}
+
+/**
  * The result rows of a search response.
  *
- * The default path answers `{success, data:{results, totalCount, ...}}`; a grouped
- * response answers `{success, results, total}`. Accept either.
+ * A single-app search answers `{success, data:{results, totalCount, ...}}`; a multi-app
+ * search answers groups, whose rows are flattened here; the `appsView` path answers
+ * `{success, results, total}`. Anything else is `undefined`.
  */
 export function searchResults(body) {
+  if (isGroupedSearch(body)) {
+    return Array.isArray(body.data.groups)
+      ? body.data.groups.flatMap((group) => (Array.isArray(group?.results) ? group.results : []))
+      : undefined;
+  }
   if (Array.isArray(body?.data?.results)) return body.data.results;
   if (Array.isArray(body?.results)) return body.results;
   return undefined;

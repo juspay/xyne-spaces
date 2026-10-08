@@ -10,25 +10,16 @@ import { K6_IMAGE, resolveRunConfig } from '../config/catalog.mjs';
 import { minimumIdentities, resolveZeroRequestBudget } from '../config/rate-limit.mjs';
 import { buildExecutionProfile, peakVus } from '../k6/profiles.mjs';
 import { assertNotProductionHost } from '../k6/env-routing.mjs';
+import { selectAttachmentIds } from '../k6/attachment-requests.mjs';
 
 const REPOSITORY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SAFE_METADATA = /^[A-Za-z0-9._-]+$/;
 const DEFAULT_THINK_TIME_SECONDS = 1;
 
-// Scenarios that authenticate as a test identity need the fixture. Of those, only the
-// ones that call /api/zero/* are metered by the per-user Zero limiter, so only they
-// carry an identity-count floor.
-const FIXTURE_SCENARIOS = new Set([
-  'zero-query-transform',
-  'search',
-  'attachments',
-  'zero-push',
-  'rest-messaging',
-]);
+// Every scenario except smoke authenticates as a test identity and needs the fixture. Of
+// those, only the ones that call /api/zero/* are metered by the per-user Zero limiter, so
+// only they carry an identity-count floor.
 const ZERO_METERED_SCENARIOS = new Set(['zero-query-transform', 'zero-push']);
-// Scenarios that address the push endpoint, which parses schema and appID from the
-// querystring. Missing either fails inside k6 after Docker has started, so require them here.
-const PUSH_SCENARIOS = new Set(['zero-push']);
 
 export function parseCliArgs(argv) {
   const parsed = { dryRun: false };
@@ -103,7 +94,7 @@ function requireSafeMetadata(value, label, fallback) {
   return resolved;
 }
 
-function validateUsersFixture(file) {
+function validateUsersFixture(file, scenario) {
   let payload;
   try {
     payload = JSON.parse(readFileSync(file, 'utf8'));
@@ -124,6 +115,11 @@ function validateUsersFixture(file) {
       throw new Error(
         `PERF_USERS_FILE user ${index} requires userId, token, workspaceId, and conversationId`,
       );
+    }
+    // k6 maps virtual users onto identities round-robin, so one identity without attachment
+    // ids would leave its virtual users looping without sending a request.
+    if (scenario === 'attachments' && selectAttachmentIds(user).length === 0) {
+      throw new Error(`PERF_USERS_FILE user ${index} requires attachmentIds for the attachments scenario`);
     }
   }
 
@@ -165,15 +161,15 @@ function requireRateLimitHeadroom({ config, env, identityCount, thinkTimeSeconds
 
 export function validateRuntime({ root, config = {}, env }) {
   const baseUrl = requireHttpUrl(env.PERF_BASE_URL);
-  // Checked by host, not by the environment name: pre-production shares production's
-  // host, so a name alone cannot keep load off customers.
-  assertNotProductionHost(baseUrl);
+  // Checked by host, not only by the environment name: pre-production shares production's
+  // host, so only a preprod run (smoke or release, per the catalog) may address it.
+  assertNotProductionHost(baseUrl, config.environment);
   const releaseVersion = requireSafeMetadata(env.PERF_RELEASE_VERSION, 'PERF_RELEASE_VERSION', 'local');
   const thinkTimeSeconds = parseThinkTime(env.PERF_THINK_TIME_SECONDS);
   let usersFile;
   let identityCount;
 
-  if (FIXTURE_SCENARIOS.has(config.scenario)) {
+  if (config.scenario !== 'smoke') {
     if (!env.PERF_USERS_FILE) {
       throw new Error(`PERF_USERS_FILE is required for the ${config.scenario} scenario`);
     }
@@ -182,7 +178,7 @@ export function validateRuntime({ root, config = {}, env }) {
       throw new Error('PERF_USERS_FILE must reference an existing file');
     }
     usersFile = realpathSync(candidate);
-    identityCount = validateUsersFixture(usersFile);
+    identityCount = validateUsersFixture(usersFile, config.scenario);
 
     if (ZERO_METERED_SCENARIOS.has(config.scenario)) {
       requireRateLimitHeadroom({ config, env, identityCount, thinkTimeSeconds });
@@ -191,7 +187,9 @@ export function validateRuntime({ root, config = {}, env }) {
 
   let zeroSchema;
   let zeroAppId;
-  if (PUSH_SCENARIOS.has(config.scenario)) {
+  // The push endpoint parses schema and appID from the querystring. Missing either fails
+  // inside k6 after Docker has started, so require them here.
+  if (config.scenario === 'zero-push') {
     for (const name of ['PERF_ZERO_SCHEMA', 'PERF_ZERO_APP_ID']) {
       if (!env[name]) {
         throw new Error(
@@ -213,8 +211,6 @@ export function validateRuntime({ root, config = {}, env }) {
     zeroSchema,
     zeroAppId,
     messageType: env.PERF_MESSAGE_TYPE,
-    token: env.PERF_TEST_TOKEN,
-    workspaceId: env.PERF_WORKSPACE_ID,
     usersFile,
     remoteWriteUrl: optionalHttpUrl(env.PERF_REMOTE_WRITE_URL, 'PERF_REMOTE_WRITE_URL'),
     remoteWriteUsername: env.PERF_REMOTE_WRITE_USERNAME,
@@ -268,8 +264,6 @@ export function buildDockerInvocation(config, runtime) {
 
   const forwarded = {
     PERF_BASE_URL: runtime.baseUrl,
-    PERF_TEST_TOKEN: runtime.token,
-    PERF_WORKSPACE_ID: runtime.workspaceId,
     PERF_ENVIRONMENT: config.environment,
     PERF_PROFILE: config.profile,
     PERF_SCENARIO: config.scenario,
