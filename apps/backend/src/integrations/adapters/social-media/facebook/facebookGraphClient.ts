@@ -2,6 +2,7 @@ import axios from 'axios';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { SenderNameCache } from '../shared/senderNameCache';
+import { metaGraphErrorCode as graphErrorCode } from '../shared/metaTokenRejection';
 
 const FB_API_VERSION = 'v25.0';
 const FB_REQUEST_TIMEOUT_MS = 10_000;
@@ -97,15 +98,6 @@ function bearer(accessToken: string) {
 }
 
 const senderNameCache = new SenderNameCache();
-
-const graphErrorCode = (error: unknown): number | undefined =>
-  (error as { response?: { data?: { error?: { code?: number } } } })?.response?.data?.error?.code;
-
-// Page tokens have no expiry date, but Meta invalidates them when the admin who connected the
-// Page changes their password, loses their Page role, or removes the app (Graph error 190).
-export function isFacebookTokenRejected(error: unknown): boolean {
-  return graphErrorCode(error) === 190;
-}
 
 // Meta's throttling codes: app (4), user (17), Page (32) and custom (613) rate limits.
 export function isFacebookRateLimited(error: unknown): boolean {

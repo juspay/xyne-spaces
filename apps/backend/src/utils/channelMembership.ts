@@ -1,6 +1,7 @@
 import { Request } from 'express';
 import { Channel } from '@prisma/client';
 import { ChannelRole } from '@xyne/shared';
+import { db } from '@/database/client';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
 
@@ -60,6 +61,23 @@ export function assertDeskOwner(
     return access;
   }
   return { ok: false, status: 403, error: denyMessage };
+}
+
+/**
+ * Everyone allowed to manage a desk's integrations: the channel creator, the desk owner and
+ * channel admins — the same three that the desk and social-media connect routes accept.
+ */
+export async function listDeskManagerUserIds(channelId: string): Promise<string[]> {
+  const [channel, preference, admins] = await Promise.all([
+    db.channel.findUnique({ where: { id: channelId }, select: { createdBy: true } }),
+    db.emailChannelPreference.findUnique({ where: { channelId }, select: { ownerUserId: true } }),
+    db.channelParticipant.findMany({
+      where: { channelId, role: ChannelRole.ADMIN },
+      select: { userId: true },
+    }),
+  ]);
+  const userIds = [channel?.createdBy, preference?.ownerUserId, ...admins.map((a) => a.userId)];
+  return [...new Set(userIds.filter((id): id is string => Boolean(id)))];
 }
 
 /**

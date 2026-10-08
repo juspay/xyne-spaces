@@ -10,24 +10,17 @@ import { decrypt } from '@/services/encryptionService';
 import {
   facebookGraphClient,
   isFacebookTagRejected,
-  isFacebookTokenRejected,
 } from './facebookGraphClient';
 import type { FacebookCredentials } from './types';
-import { disconnectSourceWithDeadToken } from './flow';
 import { FACEBOOK_HUMAN_AGENT_WINDOW_MS, FACEBOOK_MAX_REPLY_LENGTH } from './constants';
 import { getLastInboundAt, META_REPLY_WINDOW_MS } from '../shared/metaDmThread';
+import { onMetaTokenRejected } from '../shared/metaTokenRejection';
 
-// A reply is often the first thing to hit a dead Page token: mark the Page disconnected so desk
-// settings offer Reconnect, and tell the agent.
-const onTokenRejected =
-  (sourceId: string) =>
-  async (error: unknown): Promise<never> => {
-    if (!isFacebookTokenRejected(error)) throw error;
-    await disconnectSourceWithDeadToken(sourceId);
-    throw new InteractionReplyValidationError(
-      "Facebook no longer accepts this Page's connection, so it has been disconnected. Reconnect the Page in desk settings, then try again.",
-    );
-  };
+const onTokenRejected = (sourceId: string) =>
+  onMetaTokenRejected(
+    sourceId,
+    "Facebook no longer accepts this Page's connection, so it has been disconnected. Reconnect the Page in desk settings, then try again.",
+  );
 
 export class FacebookReplySender extends BaseInteractionReplySender {
   async sendReply(context: InteractionReplyContext): Promise<NormalizedData> {

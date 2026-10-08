@@ -16,6 +16,7 @@ import { instagramOAuthStateService } from '../../adapters/social-media/instagra
 import type { InstagramCredentials } from '../../adapters/social-media/instagram/types';
 import { authorizeSocialMediaManager, canAccessSocialMediaChannel } from './access';
 import { oauthDeskStartSchema, parseOAuthPlatform, validateOAuthDeskSetup } from './deskSetup';
+import { notifyDeskSourcesDisconnected } from '../../core/deskSourceDisconnect';
 
 const TAG = '[InstagramRoutes]';
 const router = express.Router();
@@ -742,14 +743,20 @@ router.post(
 
       if (igUserId) {
         // externalIdentifier stores igUserId directly (set at channel creation) — no decryption needed.
-        const result = await db.externalSource.updateMany({
+        const active = await db.externalSource.findMany({
           where: {
             sourceType: ExternalSourcePlatform.INSTAGRAM,
             externalIdentifier: igUserId,
             isActive: true,
           },
+          select: { id: true },
+        });
+        const sourceIds = active.map(source => source.id);
+        const result = await db.externalSource.updateMany({
+          where: { id: { in: sourceIds }, isActive: true },
           data: { isActive: false, credentials: '' },
         });
+        await notifyDeskSourcesDisconnected(sourceIds);
         logger.info(`${TAG} Deactivated ${result.count} source(s) for igUserId=${igUserId}`);
       }
 

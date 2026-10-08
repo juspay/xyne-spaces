@@ -7,6 +7,9 @@ import { AUTOMATION_WORKFLOW_TYPE } from '@/automations/types/workflow-adapter';
 import { runDeskLabelBackfill } from '@/automations/services/desk-label-backfill.service';
 import type { AutomationExecutor } from '@/automations/engine/automation-executor';
 import type { AutomationWorker } from '@/automations/queue/automation.worker';
+import { MessagesSideEffectHandler } from '@/zero/side-effects/tables/messages-handler';
+import { buildUserQueryContext } from '@/utils/queryContext';
+import { logger } from '@/utils/logger';
 import { asService } from './base';
 
 /**
@@ -179,6 +182,43 @@ export function sendApprovalNotificationAsUser(
         msgType: MessageType.BOT,
         isBot: true,
       });
+    },
+  );
+}
+
+export function postBotMessageToChannel(
+  botUserId: string,
+  channelId: string,
+  workspaceId: string,
+  content: string,
+): Promise<void> {
+  return asService(
+    ['Channel', 'ChannelParticipant', 'Conversation', 'Message'],
+    'channel alert: posted by the system bot, callers are background jobs with no request context',
+    botUserId,
+    workspaceId,
+    async () => {
+      const { message } = await conversationService.createConversationWithMessage({
+        channelId,
+        userId: botUserId,
+        content,
+        msgType: MessageType.BOT,
+        isBot: true,
+        emitsMessageReceivedViaSideEffects: true,
+      });
+      // conversationService does not run message side-effects itself; without this the
+      // mentions create no notifications. Same as the automations Send a message step, and
+      // best-effort like it: the message is already posted.
+      try {
+        const ctx = await buildUserQueryContext(botUserId);
+        await new MessagesSideEffectHandler(ctx).onInsert({
+          entityId: message.messageId,
+          entityType: 'messages',
+          operation: 'insert',
+        });
+      } catch (error) {
+        logger.error('[postBotMessageToChannel] Message side-effects failed', { channelId, error });
+      }
     },
   );
 }

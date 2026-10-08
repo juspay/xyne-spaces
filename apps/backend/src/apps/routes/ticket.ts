@@ -3,13 +3,14 @@ import { TicketController } from '../controllers/ticketController';
 import { validateChannelAccessForPost } from '../middelware/channelValidation';
 import { requirePermission } from '@/middleware/requirePermission';
 import { uploadMultiple } from '@/middleware/upload';
+import { alertOnAppDeskInboundFailure } from '../core/appDeskInboundAlert';
 
 const router = Router();
 const ticketController = new TicketController();
 
 router.post('/createTicket', requirePermission('tickets:write'), validateChannelAccessForPost, ticketController.createTicket);
 router.post('/createEmailTicket', requirePermission('tickets:write'), validateChannelAccessForPost, ticketController.createEmailTicket);
-router.post('/appDeskInbound', requirePermission('desk:write'), uploadMultiple, validateChannelAccessForPost, ticketController.appDeskInbound);
+router.post('/appDeskInbound', requirePermission('desk:write'), alertOnAppDeskInboundFailure, uploadMultiple, validateChannelAccessForPost, ticketController.appDeskInbound);
 router.post('/updateTicket', requirePermission('tickets:write'), validateChannelAccessForPost, ticketController.updateTicket);
 router.post('/updateFormField', requirePermission('tickets:write'), validateChannelAccessForPost, ticketController.updateFormField);
 router.post('/disableEmailSend', requirePermission('tickets:write'), validateChannelAccessForPost, ticketController.disableEmailSend);

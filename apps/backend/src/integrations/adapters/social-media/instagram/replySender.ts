@@ -11,6 +11,13 @@ import { metaGraphClient } from './metaGraphClient';
 import type { InstagramCredentials } from './types';
 import { INSTAGRAM_MAX_REPLY_LENGTH } from './constants';
 import { getMetaReplyWindowState } from '../shared/metaDmThread';
+import { onMetaTokenRejected } from '../shared/metaTokenRejection';
+
+const onTokenRejected = (sourceId: string) =>
+  onMetaTokenRejected(
+    sourceId,
+    "Instagram no longer accepts this account's connection, so it has been disconnected. Reconnect the account in desk settings, then try again.",
+  );
 
 export class InstagramReplySender extends BaseInteractionReplySender {
   async sendReply(context: InteractionReplyContext): Promise<NormalizedData> {
@@ -48,7 +55,9 @@ export class InstagramReplySender extends BaseInteractionReplySender {
     // No 24h window restriction; replies go as public Instagram comment replies.
     if (externalThreadId.startsWith('comment:')) {
       const commentId = externalThreadId.slice('comment:'.length);
-      const result = await metaGraphClient.replyToComment(credentials.accessToken, commentId, body);
+      const result = await metaGraphClient
+        .replyToComment(credentials.accessToken, commentId, body)
+        .catch(onTokenRejected(source.id));
       return {
         externalId: `${source.id}:comment-reply:${result.id}`,
         externalThreadId,
@@ -100,12 +109,9 @@ export class InstagramReplySender extends BaseInteractionReplySender {
     const recipientIgsid = externalThreadId.split(':')[0];
     // Use credentials.igsid (app-scoped) for the sender path — the real igUserId is rejected by the API.
     const senderIgsid = credentials.igsid ?? credentials.igUserId;
-    const result = await metaGraphClient.sendDM(
-      credentials.accessToken,
-      senderIgsid,
-      recipientIgsid,
-      body
-    );
+    const result = await metaGraphClient
+      .sendDM(credentials.accessToken, senderIgsid, recipientIgsid, body)
+      .catch(onTokenRejected(source.id));
 
     return {
       externalId: `${source.id}:${result.message_id}`,

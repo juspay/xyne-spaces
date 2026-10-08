@@ -2377,6 +2377,76 @@ class NotificationService {
   }
 
   /**
+   * Tells the people who can reconnect it that the system disconnected a desk account.
+   * `channelId` is absent for the workspace shared mailbox, which belongs to no desk.
+   */
+  async sendDeskAccountDisconnectedNotification(params: {
+    sourceId: string;
+    accountLabel: string;
+    deskName?: string;
+    workspaceId: string;
+    channelId?: string;
+    actionUrl: string;
+    recipientUserIds: string[];
+  }): Promise<void> {
+    const { sourceId, accountLabel, deskName, workspaceId, channelId, actionUrl, recipientUserIds } = params;
+    if (recipientUserIds.length === 0) return;
+
+    try {
+      const title = 'Account disconnected';
+      const message = `${accountLabel} was disconnected${deskName ? ` from ${deskName}` : ''}. Reconnect it in desk settings.`;
+
+      const { desktopUsers, mobileUsers } = await notificationFilterService.filterGlobalUsers(
+        recipientUserIds,
+        NotificationType.DESK_ACCOUNT_DISCONNECTED,
+        'mention',
+      );
+
+      await realTimeNotificationService.initialize();
+
+      const notify = (userId: string, sendDesktop: boolean, sendMobile: boolean) =>
+        this.createNotification(userId, {
+          title,
+          message,
+          type: NotificationType.DESK_ACCOUNT_DISCONNECTED,
+          relatedEntityType: 'external_source',
+          relatedEntityId: sourceId,
+          actionUrl,
+          workspaceId,
+          metadata: { sourceId, ...(channelId && { channelId }) },
+        }, { sendDesktop, sendMobile });
+
+      const results = await Promise.allSettled(
+        recipientUserIds.map(async (userId) => {
+          await activityService.createActivity({
+            userId,
+            actorId: userId,
+            workspaceId,
+            actorAction: 'desk_account_disconnected',
+            actionSource: channelId ? 'channel' : 'workspace',
+            actionSourceId: channelId ?? workspaceId,
+            ...(channelId && { channelId }),
+            classification: ActivityClassification.ACTIONABLE,
+          });
+
+          const receiveDesktop = desktopUsers.includes(userId);
+          const receiveMobile = mobileUsers.includes(userId);
+          if (!receiveDesktop && !receiveMobile) return;
+
+          await notify(userId, receiveDesktop, receiveMobile);
+        }),
+      );
+      for (const result of results) {
+        if (result.status === 'rejected') {
+          logger.error('[NotificationService] Desk account disconnected notification failed for a recipient:', result.reason);
+        }
+      }
+    } catch (error) {
+      logger.error('[NotificationService] Failed to send desk account disconnected notification:', error);
+    }
+  }
+
+  /**
    * Desktop/mobile push for subscribers (user_group_mappings.isNotified) when a
    * user pauses ticket assignment. The Activities-tab entry is created
    * separately by userAssignmentStateService (activityService.createActivities),

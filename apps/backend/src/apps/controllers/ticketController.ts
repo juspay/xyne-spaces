@@ -3091,6 +3091,7 @@ export class TicketController {
         externalId: req.body?.externalId,
       });
       logger.error('[TicketController] appDeskInbound error:', error);
+      res.locals.appDeskInboundError = error;
       res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
     } finally {
       await releaseLock(creationLock);
