@@ -374,6 +374,8 @@ export const mapChannel = async (
     isIm: args.scopeType === ChannelScopeType.DM,
     isMpim: args.scopeType === ChannelScopeType.GROUP_DM,
     scopeType: args.scopeType,
+    // The channel's type (SDLC for a hub); chat_message and ticket import it through channelRef.
+    channelType: args.type ?? '',
     metadata: JSON.stringify(args.metadata) || '',
     lastActivityAt: toTimestamp(lastActivityAt),
     lastSyncedAt: toTimestamp(lastActivityAt),
