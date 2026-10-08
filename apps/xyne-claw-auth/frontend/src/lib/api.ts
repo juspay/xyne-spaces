@@ -763,19 +763,55 @@ export async function decideDelegationRequest(
   return data.data;
 }
 
+export type RunSource = "automation" | "scheduled" | "people" | "workflow" | "delegated" | "awakening";
+export type InflightState = "live" | "stuck" | "lost";
+type SourceCounts = Partial<Record<RunSource, { completed: number; failed: number; lost: number }>>;
+
 export interface AgentRunHealth {
   windowDays: number;
   sampled: boolean;
-  totals: { runs: number; completed: number; failed: number; cancelled: number; running: number };
-  duration: { p50Ms: number | null; p90Ms: number | null; llmP50Ms: number | null; toolP50Ms: number | null };
-  daily: Array<{ day: string; runs: number; failed: number }>;
-  byTrigger: Array<{ trigger: string; runs: number; failed: number; p50Ms: number | null; p90Ms: number | null }>;
-  byModel: Array<{ provider: string; model: string; runs: number; failed: number; llmP50Ms: number | null }>;
-  topErrors: Array<{ error: string; count: number; lastAt: string }>;
-  stuckAfterMs: number;
-  runningNow: Array<{ sessionId: string; trigger: string; startedAt: string; ageMs: number; stuck: boolean; currentTool: string | null }>;
-  recentFailures: Array<{ sessionId: string; trigger: string; startedAt: string; model: string | null; error: string }>;
-  recentRuns: Array<{ sessionId: string; trigger: string; status: string; startedAt: string; durationMs: number | null; model: string | null; task: string }>;
+  sources: Array<{
+    id: RunSource | "all";
+    runs: number;
+    completed: number;
+    failed: number;
+    cancelled: number;
+    lost: number;
+    p50Ms: number | null;
+    p90Ms: number | null;
+  }>;
+  inflight: Array<{
+    sessionId: string;
+    state: InflightState;
+    source: RunSource;
+    task: string;
+    startedAt: string;
+    ageMs: number;
+    idleMs: number;
+    owned: boolean;
+    currentStep: string | null;
+  }>;
+  daily: Array<{ day: string; bySource: SourceCounts }>;
+  reasons: Array<{ error: string; count: number; lastAt: string; bySource: Partial<Record<RunSource, number>> }>;
+  models: Array<{
+    provider: string;
+    model: string;
+    runs: number;
+    failed: number;
+    llmP50Ms: number | null;
+    bySource: Partial<Record<RunSource, { runs: number; failed: number }>>;
+  }>;
+  recentRuns: Array<{
+    sessionId: string;
+    source: RunSource;
+    status: string;
+    startedBy: string | null;
+    startedAt: string;
+    durationMs: number | null;
+    model: string | null;
+    task: string;
+  }>;
+  thresholds: { liveIdleMs: number; lostIdleMs: number };
 }
 
 export interface AgentRunDetail {
@@ -804,6 +840,8 @@ export interface AgentRunDetail {
     startedAt: string;
     completedAt: string | null;
   };
+  source: RunSource;
+  inflight: { state: InflightState; idleMs: number; owned: boolean } | null;
   requester: { id: string; name: string | null; email: string | null } | null;
   children: Array<{ sessionId: string; agentSlug: string; status: string; startedAt: string; durationMs: number | null; task: string }>;
 }
@@ -818,6 +856,14 @@ export async function getAgentRunDetail(slug: string, sessionId: string): Promis
 export async function getAgentRunHealth(slug: string, days: number): Promise<AgentRunHealth> {
   const data = await request<{ success: boolean; data: AgentRunHealth }>(
     `${AUTH_API_URL}/api/v1/agents/${encodeURIComponent(slug)}/monitor?days=${days}`,
+  );
+  return data.data;
+}
+
+export async function closeLostRuns(slug: string, sessionIds?: string[]): Promise<{ closed: string[]; skipped: string[] }> {
+  const data = await request<{ success: boolean; data: { closed: string[]; skipped: string[] } }>(
+    `${AUTH_API_URL}/api/v1/agents/${encodeURIComponent(slug)}/monitor/close-lost`,
+    { method: "POST", body: JSON.stringify(sessionIds ? { sessionIds } : {}) },
   );
   return data.data;
 }

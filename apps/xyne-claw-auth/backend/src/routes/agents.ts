@@ -51,7 +51,7 @@ import { validateKbGrants } from "../lib/spaces-kb.js";
 import { ORG_SCOPED_SLUGS } from "../lib/org-scoped-slugs.js";
 import { getAdminOrgScope, getOrgNameMap, withOrgLabel } from "../lib/admin-org-scope.js";
 import { asyncHandler, ok, badRequest, unauthorized, forbidden, notFound, conflict, HttpError } from "../lib/http.js";
-import { agentRunDetail, agentRunHealth } from "../lib/agent-run-health.js";
+import { agentRunDetail, agentRunHealth, closeLostRuns } from "../lib/agent-run-health.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("agents");
@@ -1387,6 +1387,29 @@ router.get(
     const detail = await agentRunDetail(agent.slug, agent.orgId, req.params.sessionId);
     if (!detail) throw notFound("Run not found for this agent");
     ok(res, detail);
+  }),
+);
+
+router.post(
+  "/:slug/monitor/close-lost",
+  requireAgentOwnerOrAdmin,
+  asyncHandler(async (req: Request<{ slug: string }>, res: Response) => {
+    const agent = req.agentContext!.agent;
+    const raw = (req.body as { sessionIds?: unknown } | undefined)?.sessionIds;
+    if (raw !== undefined && (!Array.isArray(raw) || raw.some((id) => typeof id !== "string") || raw.length > 500)) {
+      throw badRequest("sessionIds must be an array of at most 500 session ids");
+    }
+    const result = await closeLostRuns(agent.slug, agent.orgId, raw as string[] | undefined);
+    if (result.closed.length > 0) {
+      await writeAuditLog({
+        actorUserId: getRequesterId(req) ?? "unknown",
+        eventType: "AGENT_UPDATED",
+        targetId: agent.id,
+        description: `Closed ${result.closed.length} lost runs of agent "${agent.slug}" as failed`,
+        metadata: { action: "close-lost-runs", orgId: agent.orgId, sessionIds: result.closed },
+      });
+    }
+    ok(res, result);
   }),
 );
 
