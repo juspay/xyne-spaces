@@ -48,16 +48,22 @@ const getState = (): PoolState => poolState;
 if (import.meta.hot) import.meta.hot.accept(() => window.location.reload());
 
 export const artifactAppPool = {
-  mount(slotId: string, appId: string, props: SlotProps, backRef: BackRef): () => void {
+  mount(
+    slotId: string,
+    key: string,
+    appId: string,
+    props: SlotProps,
+    backRef: BackRef,
+  ): () => void {
     backRefs.set(slotId, backRef);
-    dispatch({ type: 'mount', slotId, appId, props });
+    dispatch({ type: 'mount', slotId, key, appId, props });
     return () => {
       backRefs.delete(slotId);
-      dispatch({ type: 'unmount', slotId, appId });
+      dispatch({ type: 'unmount', slotId, key });
     };
   },
-  update(slotId: string, appId: string, patch: { props?: SlotProps; rect?: SlotRect }): void {
-    dispatch({ type: 'update', slotId, appId, ...patch });
+  update(slotId: string, key: string, patch: { props?: SlotProps; rect?: SlotRect }): void {
+    dispatch({ type: 'update', slotId, key, ...patch });
   },
 };
 
@@ -138,7 +144,7 @@ const ArtifactAppPoolHost = (): ReactElement | null => {
 
   if (!container) return null;
   return createPortal(
-    state.apps.map(app => <PooledAppFrame key={app.appId} app={app} />),
+    state.apps.map(app => <PooledAppFrame key={app.key} app={app} />),
     container,
   );
 };

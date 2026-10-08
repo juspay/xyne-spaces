@@ -6,7 +6,7 @@ import {
 } from './artifactData.constants';
 import { API_BASE_URL } from '../../../config';
 import type { PreviewClientRef } from './useArtifactDataBridge';
-import { artifactFrame, isFromArtifactFrame } from './artifactFrame';
+import { artifactFrame, isFromArtifactFrame, type ArtifactVisibility } from './artifactFrame';
 
 // The backend origin the dashboard's own api client talks to. On localhost that
 // is :3001 (there is no /api vite proxy in dev); in prod it's same-origin. /claw
@@ -24,7 +24,12 @@ interface BridgeArgs {
   /** The saved app's id. Injected into storage requests so an app can only ever
    *  touch its OWN storage — the app never sets (or can spoof) it. */
   appId?: string;
+  /** While hidden, requests wait for the app to be shown. */
+  visibility?: ArtifactVisibility;
 }
+
+/** Requests held for a hidden app; a polling app's oldest are failed past this. */
+const MAX_HELD_REQUESTS = 20;
 
 /** Storage requests carry appId in their JSON body; the host owns that value. */
 const STORAGE_PREFIX = '/claw/api/v1/artifact-app-storage/';
@@ -60,8 +65,11 @@ const ALLOWED_PREFIXES = ['/api/sdk/', STORAGE_PREFIX];
  * Lives entirely in the effect — nothing enters React state, or the memoised
  * sandbox would tear down and re-bundle (see useArtifactDataBridge).
  */
-export function useArtifactRequestBridge({ previewRef, appId }: BridgeArgs): void {
+export function useArtifactRequestBridge({ previewRef, appId, visibility }: BridgeArgs): void {
   useEffect(() => {
+    type Held = [string, string, string, Record<string, string> | undefined, string | undefined];
+    const held: Held[] = [];
+
     const post = (message: HostRequestResultMessage): void => {
       const target = artifactFrame(previewRef);
       if (!target) return;
@@ -171,10 +179,24 @@ export function useArtifactRequestBridge({ previewRef, appId }: BridgeArgs): voi
 
       const { requestId, method, url, headers, body } = event.data;
       if (!requestId || !method || !url) return;
+      // Safe to hold: app requests have no timeout, so they simply resolve once the app is shown.
+      if (visibility && !visibility.isActive()) {
+        held.push([requestId, method, url, headers, body]);
+        const dropped = held.length > MAX_HELD_REQUESTS ? held.shift() : undefined;
+        if (dropped) reply(dropped[0], 0, {}, '', 'Dropped while the app was in the background.');
+        return;
+      }
       void run(requestId, method, url, headers, body);
     };
 
+    const stopResume = visibility?.onResume(() => {
+      for (const request of held.splice(0)) void run(...request);
+    });
+
     window.addEventListener('message', onMessage);
-    return (): void => window.removeEventListener('message', onMessage);
-  }, [previewRef, appId]);
+    return (): void => {
+      window.removeEventListener('message', onMessage);
+      stopResume?.();
+    };
+  }, [previewRef, appId, visibility]);
 }

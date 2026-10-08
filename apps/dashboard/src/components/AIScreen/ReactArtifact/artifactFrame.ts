@@ -6,6 +6,12 @@ export interface ArtifactFrame {
   origin: string;
 }
 
+/** Whether the app is on screen, and a hook to run held work when it comes back. */
+export interface ArtifactVisibility {
+  isActive: () => boolean;
+  onResume: (fn: () => void) => () => void;
+}
+
 function originOf(url: unknown): string | null {
   if (typeof url !== 'string' || !url) return null;
   try {
@@ -29,10 +35,26 @@ export function artifactFrame(
   return origin ? { window: frameWindow, origin } : null;
 }
 
+let warnedOriginMismatch = false;
+
+export function isFromFrame(event: MessageEvent, frame: ArtifactFrame | null): boolean {
+  if (!frame || event.source !== frame.window) return false;
+  if (event.origin === frame.origin) return true;
+  // Fine after the app navigates away; otherwise the origin is derived wrong and every message is lost.
+  if (!warnedOriginMismatch) {
+    warnedOriginMismatch = true;
+    // eslint-disable-next-line no-console -- the only signal when every bridge message is being dropped
+    console.warn('[artifact-app] dropped bridge message from unexpected origin', {
+      expected: frame.origin,
+      got: event.origin,
+    });
+  }
+  return false;
+}
+
 export function isFromArtifactFrame(
   event: MessageEvent,
   previewRef: MutableRefObject<SandpackPreviewRef | null>,
 ): boolean {
-  const frame = artifactFrame(previewRef);
-  return !!frame && event.source === frame.window && event.origin === frame.origin;
+  return isFromFrame(event, artifactFrame(previewRef));
 }

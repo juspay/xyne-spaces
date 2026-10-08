@@ -19,7 +19,12 @@ import {
   type HostAgentStateMessage,
 } from './artifactData.constants';
 import type { PreviewClientRef } from './useArtifactDataBridge';
-import { artifactFrame, isFromArtifactFrame } from './artifactFrame';
+import {
+  artifactFrame,
+  isFromArtifactFrame,
+  isFromFrame,
+  type ArtifactVisibility,
+} from './artifactFrame';
 
 interface AgentBridgeArgs {
   /** Which app this is. Both fields may be absent for a preview that has not
@@ -29,6 +34,8 @@ interface AgentBridgeArgs {
   /** Feature flag only. Authorization is the server's, per the caller's ACLs. */
   canInvokeAgents: boolean;
   previewRef: MutableRefObject<PreviewClientRef | null>;
+  /** While hidden, new runs wait for the app to be shown. */
+  visibility?: ArtifactVisibility;
 }
 
 /** Live-stream event names carrying assistant text, per conversation-bus LiveEvent. */
@@ -58,6 +65,7 @@ export function useArtifactAgentBridge({
   attachmentId,
   canInvokeAgents,
   previewRef,
+  visibility,
 }: AgentBridgeArgs): void {
   useEffect(() => {
     if (!canInvokeAgents) {
@@ -370,6 +378,8 @@ export function useArtifactAgentBridge({
       void finalize(key);
     }
 
+    const heldRuns = new Map<string, { prompt: string; agentSlug: string | undefined }>();
+
     const onMessage = (event: MessageEvent): void => {
       if (!isAppArtifactMessage(event.data)) return;
       if (!isFromArtifactFrame(event, previewRef)) return;
@@ -380,19 +390,31 @@ export function useArtifactAgentBridge({
         return;
       }
       if (type === 'agent-run' && runKey && event.data.prompt) {
+        // Runs have no timeout, so a start from a hidden app waits; the latest per key wins.
+        if (visibility && !visibility.isActive()) {
+          heldRuns.set(runKey, { prompt: event.data.prompt, agentSlug: event.data.agentSlug });
+          return;
+        }
         void startRun(runKey, event.data.prompt, event.data.agentSlug);
         return;
       }
       if (type === 'agent-cancel' && runKey) {
+        heldRuns.delete(runKey);
         void cancelRun(runKey);
       }
     };
+
+    const stopResume = visibility?.onResume(() => {
+      for (const [runKey, run] of heldRuns) void startRun(runKey, run.prompt, run.agentSlug);
+      heldRuns.clear();
+    });
 
     window.addEventListener('message', onMessage);
 
     return (): void => {
       cancelled = true;
       window.removeEventListener('message', onMessage);
+      stopResume?.();
       // Stop WATCHING every key. The runs themselves keep going server-side —
       // that is the entire point, and aborting them here would break it.
       keys.forEach(state => {
@@ -400,7 +422,7 @@ export function useArtifactAgentBridge({
         state.watcher?.abort();
       });
     };
-  }, [appId, attachmentId, canInvokeAgents, previewRef]);
+  }, [appId, attachmentId, canInvokeAgents, previewRef, visibility]);
 }
 
 /**
@@ -413,7 +435,7 @@ function attachUnavailableListener(
   const onMessage = (event: MessageEvent): void => {
     if (!isAppArtifactMessage(event.data)) return;
     const target = artifactFrame(previewRef);
-    if (!target || event.source !== target.window || event.origin !== target.origin) return;
+    if (!target || !isFromFrame(event, target)) return;
     const { type, runKey } = event.data;
     if (type !== 'agent-attach' && type !== 'agent-run') return;
 

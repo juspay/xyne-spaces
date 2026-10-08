@@ -25,6 +25,8 @@ interface Slot {
 }
 
 export interface PooledApp {
+  /** The app, plus the channel for channel placements, so one channel's app never shows another's data. */
+  key: string;
   appId: string;
   /** Mounted slots showing this app; the last one owns it. */
   slots: Slot[];
@@ -43,9 +45,9 @@ export interface PoolState {
 }
 
 export type PoolAction =
-  | { type: 'mount'; slotId: string; appId: string; props: SlotProps }
-  | { type: 'update'; slotId: string; appId: string; props?: SlotProps; rect?: SlotRect }
-  | { type: 'unmount'; slotId: string; appId: string }
+  | { type: 'mount'; slotId: string; key: string; appId: string; props: SlotProps }
+  | { type: 'update'; slotId: string; key: string; props?: SlotProps; rect?: SlotRect }
+  | { type: 'unmount'; slotId: string; key: string }
   | { type: 'dropHidden' };
 
 export const initialPoolState: PoolState = { apps: [], seq: 0, maxHidden: MAX_HIDDEN_APPS };
@@ -99,24 +101,24 @@ function trim(apps: PooledApp[], maxHidden: number): PooledApp[] {
     [...hidden]
       .sort((a, b) => a.lastUsed - b.lastUsed)
       .slice(0, excess)
-      .map(app => app.appId),
+      .map(app => app.key),
   );
-  return apps.filter(app => !dropped.has(app.appId));
+  return apps.filter(app => !dropped.has(app.key));
 }
 
 export function poolReducer(state: PoolState, action: PoolAction): PoolState {
   switch (action.type) {
     case 'mount': {
-      const { slotId, appId, props } = action;
+      const { slotId, key, appId, props } = action;
       const seq = state.seq + 1;
       const slot: Slot = { id: slotId, props, rect: null };
-      const existing = state.apps.find(app => app.appId === appId);
+      const existing = state.apps.find(app => app.key === key);
       if (!existing) {
-        const added: PooledApp = { appId, slots: [slot], props, rect: null, lastUsed: seq };
+        const added: PooledApp = { key, appId, slots: [slot], props, rect: null, lastUsed: seq };
         return { ...state, apps: trim([...state.apps, added], state.maxHidden), seq };
       }
       const apps = state.apps.map(app =>
-        app.appId === appId
+        app.key === key
           ? { ...settle(app, [...app.slots.filter(s => s.id !== slotId), slot]), lastUsed: seq }
           : app,
       );
@@ -124,10 +126,10 @@ export function poolReducer(state: PoolState, action: PoolAction): PoolState {
     }
 
     case 'update': {
-      const { slotId, appId, props, rect } = action;
+      const { slotId, key, props, rect } = action;
       let changed = false;
       const apps = state.apps.map(app => {
-        if (app.appId !== appId) return app;
+        if (app.key !== key) return app;
         const index = app.slots.findIndex(s => s.id === slotId);
         const slot = app.slots[index];
         if (!slot) return app;
@@ -145,9 +147,9 @@ export function poolReducer(state: PoolState, action: PoolAction): PoolState {
     }
 
     case 'unmount': {
-      const { slotId, appId } = action;
+      const { slotId, key } = action;
       const apps = state.apps.map(app =>
-        app.appId === appId && app.slots.some(s => s.id === slotId)
+        app.key === key && app.slots.some(s => s.id === slotId)
           ? settle(
               app,
               app.slots.filter(s => s.id !== slotId),
@@ -166,4 +168,9 @@ export function poolReducer(state: PoolState, action: PoolAction): PoolState {
     default:
       return state;
   }
+}
+
+/** Pool identity for a slot: channel placements get one running app per channel. */
+export function poolKey(appId: string, placement: ArtifactAppPlacement): string {
+  return placement.surface === 'channel' ? `${appId}:${placement.channel.id}` : appId;
 }

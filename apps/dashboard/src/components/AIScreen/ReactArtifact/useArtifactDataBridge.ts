@@ -16,7 +16,7 @@ import {
   type HostDataMessage,
   type HostMutateResultMessage,
 } from './artifactData.constants';
-import { artifactFrame, isFromArtifactFrame } from './artifactFrame';
+import { artifactFrame, isFromArtifactFrame, type ArtifactVisibility } from './artifactFrame';
 
 /** The SandpackPreview ref itself — only its client's iframe is used here. */
 export type PreviewClientRef = SandpackPreviewRef;
@@ -32,10 +32,8 @@ interface BridgeArgs {
   /** Assigned by the bridge so the header refresh button can trigger a re-resolve.
    *  A ref (not a prop) so triggering refresh never re-renders the sandbox. */
   refreshRef: MutableRefObject<(() => Promise<void>) | null>;
-  /** False while the app is hidden; its refresh requests are held until resumed. */
-  activeRef?: MutableRefObject<boolean>;
-  /** Assigned by the bridge; called when the app is shown to run any held refresh. */
-  resumeRef?: MutableRefObject<(() => void) | null>;
+  /** While hidden, refreshes wait for the app to be shown and writes are refused. */
+  visibility?: ArtifactVisibility;
 }
 
 /**
@@ -58,8 +56,7 @@ export function useArtifactDataBridge({
   appId,
   previewRef,
   refreshRef,
-  activeRef,
-  resumeRef,
+  visibility,
 }: BridgeArgs): void {
   useEffect(() => {
     const declared = requirements ?? [];
@@ -242,7 +239,7 @@ export function useArtifactDataBridge({
       }
 
       if (event.data.type === 'refresh') {
-        if (activeRef && !activeRef.current) {
+        if (visibility && !visibility.isActive()) {
           heldRefresh = true;
           return;
         }
@@ -254,26 +251,33 @@ export function useArtifactDataBridge({
       if (event.data.type === 'mutate') {
         const { requestId, name, args } = event.data;
         if (!requestId || !name) return;
+        // Not queued: the app times a write out after 30s, so a late replay would apply a change it reported as failed.
+        if (visibility && !visibility.isActive()) {
+          postMutateResult(
+            requestId,
+            false,
+            'This app is in the background, so it cannot make changes.',
+          );
+          return;
+        }
         void runMutation(requestId, name, args);
       }
     };
 
     window.addEventListener('message', onMessage);
     refreshRef.current = (): Promise<void> => resolve();
-    if (resumeRef) {
-      resumeRef.current = (): void => {
-        if (!heldRefresh) return;
-        heldRefresh = false;
-        void resolve();
-      };
-    }
+    const stopResume = visibility?.onResume(() => {
+      if (!heldRefresh) return;
+      heldRefresh = false;
+      void resolve();
+    });
     void resolve();
 
     return (): void => {
       cancelled = true;
       window.removeEventListener('message', onMessage);
       refreshRef.current = null;
-      if (resumeRef) resumeRef.current = null;
+      stopResume?.();
     };
-  }, [requirements, canWrite, appId, previewRef, refreshRef, activeRef, resumeRef]);
+  }, [requirements, canWrite, appId, previewRef, refreshRef, visibility]);
 }
