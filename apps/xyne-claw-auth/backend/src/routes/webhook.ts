@@ -109,7 +109,16 @@ import { ensureUserExists, orgIdForSpacesUser, resolveClawUserIdForSpacesIdentit
 import { finalizeOrphanedRun } from "../services/orphan-run-finalizer.js";
 import { requireStrictS2S, s2sKeyMatches, requireResultToken } from "../middleware/require-auth.js";
 import { sendStoredExternalResultCallback, isInternalCallbackOrigin, isAllowedExternalCallbackUrl, type ExternalResultCallbackConfig } from "../surfaces/external-api/delivery.js";
-import { encryptSurfaceSecret } from "../lib/surface-resolver.js";
+import { decryptSurfaceSecret, encryptSurfaceSecret } from "../lib/surface-resolver.js";
+import {
+  admitAutomationRun,
+  agentRunQueueKey,
+  isWriteAutomationAgent,
+  enqueueAutomationRun,
+  releaseAutomationRun,
+  scheduleAgentRunQueueDrain,
+  setAutomationRunDispatcher,
+} from "../lib/agent-run-queue.js";
 import { deliverSlackResult } from "../surfaces/slack/delivery.js";
 import { deliverChannelResult } from "../surfaces/messaging/delivery.js";
 import { sendInterimMessage } from "../surfaces/messaging/interim.js";
@@ -2127,11 +2136,32 @@ async function redispatchStoredQueuedMessage(msg: QueuedMessage): Promise<void> 
 //     and need the final callback to resume the workflow step.
 //   - The target agent must be path-bound. The old bare `/webhook` route took
 //     `agentSlug` from the body, which made the endpoint too broad.
+setAutomationRunDispatcher(async (run) => {
+  let status = 200;
+  let body: unknown;
+  const replayBody: Record<string, unknown> = { ...run.body };
+  if (typeof replayBody["callbackSecretEnc"] === "string") {
+    replayBody["callbackSecret"] = decryptSurfaceSecret(replayBody["callbackSecretEnc"], "queued callback secret");
+    delete replayBody["callbackSecretEnc"];
+  }
+  const mockRes = {
+    headersSent: false,
+    status(n: number) { status = n; return this; },
+    json(o: unknown) { body = o; return this; },
+    type(_: string) { return this; },
+    send(t: unknown) { body = t; return this; },
+  } as unknown as Response;
+  const mockReq = { body: replayBody, headers: {} } as unknown as Request;
+  await handleAutomationWebhook(mockReq, mockRes, run.agentSlug, run.orgId, { queuedRunAdmitted: true });
+  return { status, body };
+});
+
 export async function handleAutomationWebhook(
   req: Request,
   res: Response,
   pathAgentSlug: string,
   pathAgentOrgId?: string | null,
+  opts?: { queuedRunAdmitted?: boolean },
 ): Promise<void> {
   const payload = req.body as {
     sessionId?: string;
@@ -2491,6 +2521,45 @@ export async function handleAutomationWebhook(
     return;
   }
   const __provMs = Number((process.hrtime.bigint() - __t0) / 1_000_000n);
+  const runCapped = isWriteAutomationAgent(baseAgentConfig);
+  const runQueueKey = agentRunQueueKey(agent.orgId, agentSlug);
+  let runSlotHeld = false;
+  const releaseRunSlot = async (): Promise<void> => {
+    if (runSlotHeld) await releaseAutomationRun(runQueueKey, sessionId!);
+  };
+  if (runCapped && !sdlcProfile) {
+    runSlotHeld = opts?.queuedRunAdmitted === true || (await admitAutomationRun(runQueueKey, sessionId!));
+    if (!runSlotHeld) {
+      await releaseAutomationSlot();
+      const queuedBody: Record<string, unknown> = { ...payload };
+      if (typeof callbackSecret === "string") {
+        delete queuedBody["callbackSecret"];
+        queuedBody["callbackSecretEnc"] = encryptSurfaceSecret(callbackSecret);
+      }
+      const enq = await enqueueAutomationRun(runQueueKey, {
+        sessionId: sessionId!,
+        agentSlug,
+        orgId: pathAgentOrgId ?? null,
+        body: queuedBody,
+        enqueuedAt: Date.now(),
+        attempts: 0,
+      }).catch((err) => {
+        clog.warn(`[webhook/automation-run] agent queue enqueue failed agent=${runQueueKey} session=${sessionId}: ${errMsg(err)}`);
+        return null;
+      });
+      clog.info(
+        `[webhook/automation-run] agent ${runQueueKey} at cap — queued session=${sessionId} enqueued=${enq?.enqueued} deduped=${enq?.deduped} full=${enq?.full} pos=${enq?.position}`,
+      );
+      if (enq && (enq.enqueued || enq.deduped)) {
+        res.status(202).json({ success: true, queued: true, sessionId });
+      } else {
+        res
+          .status(enq?.full ? 429 : 503)
+          .json({ success: false, error: enq?.full ? "agent automation queue is full" : "failed to queue automation run" });
+      }
+      return;
+    }
+  }
   clog.info(
     `[webhook] AUTODBG ${sessionId}: provider configs resolved in ${__provMs}ms (configs=${Object.keys(providerConfigs).length}, order=${providerOrder.length}) — forwarding to ${CONFIG.internalUrl}/claw/api/v1/internal/run`,
   );
@@ -2542,6 +2611,7 @@ export async function handleAutomationWebhook(
       `[webhook] AUTODBG forward to claw-pod failed for session ${sessionId} after ${Number((process.hrtime.bigint() - __t0) / 1_000_000n)}ms: ${err instanceof Error ? `${err.name}: ${err.message}` : String(err)}`,
     );
     await releaseAutomationSlot();
+    await releaseRunSlot();
     res.status(502).json({ success: false, error: "failed to reach claw-pod" });
     return;
   }
@@ -2555,6 +2625,7 @@ export async function handleAutomationWebhook(
   );
   if (status < 200 || status >= 300) {
     await releaseAutomationSlot();
+    await releaseRunSlot();
   }
   let runSessionId = sessionId!;
   try {
@@ -5512,6 +5583,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     if (resultConversationId && resultAgentSlug && !goalContinues && !experimentContinues && !skipQueueDrain) {
       await drainNextQueued(resultConversationId, resultAgentSlug, undefined, resultUserScope || undefined).catch(() => {});
     }
+    scheduleAgentRunQueueDrain();
   }
 });
 
