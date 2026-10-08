@@ -981,6 +981,8 @@ const EdgeSettingsPanel: React.FC<EdgeSettingsPanelProps> = props => {
                 <button
                   key={ps}
                   type='button'
+                  data-track-category='board_stage_config'
+                  data-track-name='edit_condition_for_edge'
                   onClick={() =>
                     props.onAddCondition({
                       id: `pr-${props.toStage.tempId}-${ps}`,
