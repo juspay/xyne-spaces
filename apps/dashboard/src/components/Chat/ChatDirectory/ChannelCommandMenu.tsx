@@ -25,13 +25,7 @@ import {
 } from '@xyne/icons';
 import * as Tabs from '@radix-ui/react-tabs';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
-import {
-  Channel,
-  ChannelVisibility,
-  isDeskChannelType,
-  TicketPriority,
-  UserType,
-} from '@xyne/shared';
+import { Channel, ChannelVisibility, isDeskChannelType, TicketPriority } from '@xyne/shared';
 import { ChannelChipIcon, resolveChipName, PRIORITY_ICON_COLOR } from './FilterChipNode';
 import {
   isDMChannel,
@@ -106,7 +100,11 @@ import { ActionModal } from '../../Call/ActionModal';
 import { cn } from '../../../utils/classNames';
 import SearchResultItem from './SearchResultItem';
 import SearchSectionSkeleton from './SearchSectionSkeleton';
-import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
+import {
+  getUserDisplayName,
+  isNonHumanUser,
+  isUserDeactivated,
+} from '../../../utils/userDisplayName';
 import { LexicalSearchInput, type InitialQueryData, type InsertText } from './LexicalSearchInput';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { useSearchMetrics, CMDK_USER_LIMIT } from '../../../hooks/useSearchMetrics';
@@ -873,11 +871,9 @@ const ChannelCommandMenuContent = ({
   // on — so a `from:` one of them would find nothing. The toggle follows the chip: on when one
   // is added, off when the last is removed. Only a change flips it, so mount (a restored search)
   // and a manual toggle while the chip is present are left alone.
-  const hasBotAuthorFilter = selectedMentions.some(mention => {
-    if (mention.prefix !== 'from:') return false;
-    const userType = usersById.get(mention.id)?.userType;
-    return userType === UserType.BOT || userType === UserType.APP || userType === UserType.AGENT;
-  });
+  const hasBotAuthorFilter = selectedMentions.some(
+    mention => mention.prefix === 'from:' && isNonHumanUser(usersById.get(mention.id)),
+  );
   const prevHasBotAuthorFilterRef = useRef(hasBotAuthorFilter);
   useEffect(() => {
     if (prevHasBotAuthorFilterRef.current === hasBotAuthorFilter) return;
