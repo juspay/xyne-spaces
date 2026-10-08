@@ -5,7 +5,7 @@ import { db } from '@/database/client';
 import { activityService } from '@/services/activity/activityService';
 import { notificationService } from '@/services/notificationService';
 import { logger } from '@/utils/logger';
-import { getFormFieldUserActors } from '@/utils/ticketActorUtils';
+import { excludeTicketOptOuts, getFormFieldUserActors } from '@/utils/ticketActorUtils';
 
 async function fetchTicketActors(ticketId: string): Promise<string[]> {
   const [roleAssignments, formFieldUserActors] = await Promise.all([
@@ -52,11 +52,11 @@ export class TicketSubTicketMappingsSideEffectHandler extends BaseSideEffectHand
     const actorId = this.ctx.userID;
     const extraActors = await fetchTicketActors(mapping.ticketId);
 
-    const allActorIds = [
+    const allActorIds = await excludeTicketOptOuts(mapping.ticketId, [
       ticket.createdBy,
       ticket.assignedTo,
       ...extraActors,
-    ].filter((id, index, arr): id is string => Boolean(id) && arr.indexOf(id) === index);
+    ].filter((id, index, arr): id is string => Boolean(id) && arr.indexOf(id) === index));
 
     const activityRecipients = allActorIds.filter(id => id !== actorId);
 

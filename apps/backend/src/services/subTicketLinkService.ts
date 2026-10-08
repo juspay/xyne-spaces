@@ -15,7 +15,7 @@ import { db } from '@/database/client';
 import { activityService } from '@/services/activity/activityService';
 import { notificationService } from '@/services/notificationService';
 import { logger } from '@/utils/logger';
-import { getFormFieldUserActors } from '@/utils/ticketActorUtils';
+import { excludeTicketOptOuts, getFormFieldUserActors } from '@/utils/ticketActorUtils';
 import { subTicketLinkClosesLoop } from '@/bypassAcl/subTicketServices';
 
 type PrismaTx = Prisma.TransactionClient;
@@ -235,12 +235,12 @@ async function resolveTicketActors(ticketId: string): Promise<string[]> {
     getFormFieldUserActors(ticketId),
   ]);
 
-  return [
+  return excludeTicketOptOuts(ticketId, [
     ticket?.createdBy,
     ticket?.assignedTo,
     ...roleAssignments.map(a => a.userId),
     ...formFieldUserActors,
-  ].filter((id, index, arr): id is string => Boolean(id) && arr.indexOf(id) === index);
+  ].filter((id, index, arr): id is string => Boolean(id) && arr.indexOf(id) === index));
 }
 
 /**

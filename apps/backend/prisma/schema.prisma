@@ -2195,6 +2195,7 @@ model ConversationParticipant {
   userId            String                        // User ID (no FK constraint)
   participationType String?                       // AUTHOR, MENTIONED, or NULL (manual subscription)
   isSubscribed      Boolean                       @default(true) // Notification subscription status
+  unsubscribedAt    DateTime?
   joinedAt          DateTime                      @default(now())
   lastReadAt        DateTime?                     // Track when user last read this thread conversation
   lastReplyAt       DateTime?                     // Denormalized: set to conversation.lastActivityAt when a reply is sent. NULL = no replies.

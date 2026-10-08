@@ -5,7 +5,7 @@ import { db } from '@/database/client';
 import { activityService } from '@/services/activity/activityService';
 import { notificationService } from '@/services/notificationService';
 import { logger } from '@/utils/logger';
-import { getFormFieldUserActors } from '@/utils/ticketActorUtils';
+import { excludeTicketOptOuts, getFormFieldUserActors } from '@/utils/ticketActorUtils';
 import { recordTicketTimelineEvent } from '@/services/ticketTimelineEventService';
 
 async function fetchTicketActors(ticketId: string): Promise<string[]> {
@@ -57,11 +57,11 @@ async function resolveRcaContext(
 
   const extraActors = await fetchTicketActors(rca.ticketId);
 
-  const allActorIds = [
+  const allActorIds = await excludeTicketOptOuts(rca.ticketId, [
     ticket.createdBy,
     ticket.assignedTo,
     ...extraActors,
-  ].filter((id, index, arr): id is string => Boolean(id) && arr.indexOf(id) === index);
+  ].filter((id, index, arr): id is string => Boolean(id) && arr.indexOf(id) === index));
 
   const activityRecipients = allActorIds.filter(id => id !== actorId);
 

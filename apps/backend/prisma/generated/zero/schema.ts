@@ -1240,6 +1240,7 @@ export const conversationParticipantTable = table("conversation_participants")
     userId: string(),
     participationType: string().optional(),
     isSubscribed: boolean(),
+    unsubscribedAt: number().optional(),
     joinedAt: number(),
     lastReadAt: number().optional(),
     lastReplyAt: number().optional(),

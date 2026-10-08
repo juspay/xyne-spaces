@@ -1,5 +1,5 @@
 import { db } from '@/database/client';
-import { getFormFieldUserActors } from '@/utils/ticketActorUtils';
+import { excludeTicketOptOuts, getFormFieldUserActors } from '@/utils/ticketActorUtils';
 import { canUserModifyTicketControl } from './etaPermissions';
 
 /**
@@ -33,9 +33,9 @@ export async function resolveAwarenessRecipients(
   excludeUserId?: string,
 ): Promise<string[]> {
   const extraActors = await fetchTicketActors(ticketId);
-  const all = [createdBy, assignedTo, ...extraActors].filter(
+  const all = await excludeTicketOptOuts(ticketId, [createdBy, assignedTo, ...extraActors].filter(
     (id, index, arr): id is string => Boolean(id) && arr.indexOf(id) === index,
-  );
+  ));
   return excludeUserId ? all.filter((id) => id !== excludeUserId) : all;
 }
 

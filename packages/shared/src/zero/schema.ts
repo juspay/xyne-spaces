@@ -917,6 +917,7 @@ export const conversationParticipantTable = table('conversation_participants')
     channelId: string().optional(),
     participationType: enumeration<ConversationParticipation>().optional(),
     isSubscribed: boolean(),
+    unsubscribedAt: number().optional(),
     joinedAt: number(),
     lastReadAt: number().optional(),
     lastReplyAt: number().optional(),
