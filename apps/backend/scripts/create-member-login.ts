@@ -222,6 +222,11 @@ async function main(): Promise<void> {
         where: { memberId: existingOrgMember.memberId },
         data: { passwordHash },
       });
+      await tx.orgMemberCredential.upsert({
+        where: { memberId: existingOrgMember.memberId },
+        create: { memberId: existingOrgMember.memberId, orgId: existingOrgMember.orgId, passwordHash },
+        update: { orgId: existingOrgMember.orgId, passwordHash },
+      });
       for (const permission of grantablePermissions) {
         await tx.resourceAccess.upsert({
           where: {
@@ -252,6 +257,9 @@ async function main(): Promise<void> {
           role: isAdmin ? OrgRole.ADMIN : OrgRole.MEMBER,
           passwordHash,
         },
+      });
+      await tx.orgMemberCredential.create({
+        data: { memberId: orgMember.memberId, orgId: orgMember.orgId, passwordHash },
       });
 
       const user = await tx.user.create({
