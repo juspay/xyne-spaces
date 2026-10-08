@@ -41,16 +41,11 @@ export function mentionToken(kind: ContextRef['kind'], mention: string): string 
   return kind === 'channel' ? `#${mention}` : `@${mention}`;
 }
 
-const stripTags = (value: string): string =>
-  value
-    .replace(/<[^>]*>/g, '')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/\s+/g, ' ')
-    .trim();
+const stripTags = (value: string): string => {
+  if (!value) return '';
+  const text = new DOMParser().parseFromString(value, 'text/html').body.textContent ?? '';
+  return text.replace(/\s+/g, ' ').trim();
+};
 
 const truncate = (value: string, max: number): string =>
   value.length > max ? `${value.slice(0, max - 1).trimEnd()}…` : value;
