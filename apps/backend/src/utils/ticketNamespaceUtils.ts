@@ -10,6 +10,19 @@ export async function ticketNamespacesActivated(db: PrismaClientLike): Promise<b
   return existing !== null;
 }
 
+// Ticket codes are unique per workspace across project codes and namespace codes
+export async function isTicketCodeTaken(
+  db: PrismaClientLike,
+  code: string,
+  workspaceId: string,
+): Promise<boolean> {
+  const [project, namespace] = await Promise.all([
+    db.project.findFirst({ where: { code, workspaceId }, select: { id: true } }),
+    db.ticketNamespace.findFirst({ where: { code, workspaceId }, select: { id: true } }),
+  ]);
+  return project !== null || namespace !== null;
+}
+
 // Creates a project's default namespace, sets it as the project default, and links the
 // project's boards. Returns null (writes nothing) until the feature is activated, so a
 // project created before the backfill falls back to project.code + PROJECT_TICKET.

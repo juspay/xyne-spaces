@@ -1,7 +1,7 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { sanitizeProjectCode, ProjectType, ChannelRole, ChannelScopeType, ChannelVisibility } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
-import { createDefaultTicketNamespace } from './ticketNamespaceUtils';
+import { createDefaultTicketNamespace, isTicketCodeTaken } from './ticketNamespaceUtils';
 
 type PrismaClientLike = PrismaClient | Prisma.TransactionClient;
 
@@ -162,12 +162,7 @@ async function generateUniqueDefaultProjectCode(
   for (let index = 0; index < 100; index += 1) {
     const suffix = index === 0 ? '' : String(index + 1);
     const candidate = `${base.slice(0, 10 - suffix.length)}${suffix}`;
-    const existing = await db.project.findFirst({
-      where: { workspaceId, code: candidate },
-      select: { id: true },
-    });
-
-    if (!existing) {
+    if (!(await isTicketCodeTaken(db, candidate, workspaceId))) {
       return candidate;
     }
   }

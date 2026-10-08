@@ -1,5 +1,6 @@
 import { PrismaClient, TicketNamespace } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
+import { isTicketCodeTaken } from '@/utils/ticketNamespaceUtils';
 
 export interface CreateTicketNamespaceInput {
   workspaceId: string;
@@ -23,11 +24,7 @@ export class TicketNamespaceRepository {
   // A code is workspace-unique across namespaces AND (until Project.code is dropped)
   // across project codes, so a new namespace can never shadow a legacy project prefix.
   async isCodeAvailable(code: string, workspaceId: string): Promise<boolean> {
-    const [namespace, project] = await Promise.all([
-      this.db.ticketNamespace.findFirst({ where: { code, workspaceId }, select: { id: true } }),
-      this.db.project.findFirst({ where: { code, workspaceId }, select: { id: true } }),
-    ]);
-    return !namespace && !project;
+    return !(await isTicketCodeTaken(this.db, code, workspaceId));
   }
 
   async create(data: CreateTicketNamespaceInput): Promise<TicketNamespace> {

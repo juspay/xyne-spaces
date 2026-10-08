@@ -6,6 +6,7 @@ import { logger } from '@/utils/logger';
 import { convertMarkdownToBlockNote } from '@/services/canvasService';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
 import { initializeYSweetDoc, syncToYSweet } from '@/utils/ysweetUtils';
+import { isTicketCodeTaken } from '@/utils/ticketNamespaceUtils';
 import { getStorageService } from '@/services/storage';
 import { config } from '@/config/env';
 import { ProjectRepository } from '@/database/repositories/projectRepository';
@@ -652,7 +653,7 @@ export class ConfluenceImportService {
     let candidate = sanitized;
     let suffix = 1;
 
-    while (await db.project.findFirst({ where: { workspaceId, code: candidate }, select: { id: true } })) {
+    while (await isTicketCodeTaken(db, candidate, workspaceId)) {
       const nextSuffix = String(suffix);
       candidate = `${sanitized.slice(0, Math.max(1, 8 - nextSuffix.length))}${nextSuffix}`;
       suffix += 1;
