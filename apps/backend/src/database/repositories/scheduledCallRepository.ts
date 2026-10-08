@@ -14,11 +14,11 @@ export class ScheduledCallRepository {
    * Cancel a single SCHEDULED call instance by marking it as CANCELLED.
    */
   async cancelCall(callId: string): Promise<void> {
-    await this.client().call.update({
+    const call = await this.client().call.update({
       where: { id: callId },
       data: { status: CallStatus.CANCELLED },
     });
-    queueScheduledCallPillSync(callId, 'scheduledCallRepository.cancelCall');
+    queueScheduledCallPillSync(callId, call.externalId, 'scheduledCallRepository.cancelCall');
     queueCallVespaFeed(callId, { source: CallVespaFeedSource.ScheduledCallRepositoryCancelCall });
   }
 
@@ -126,38 +126,36 @@ export class ScheduledCallRepository {
   }
 
   /**
-   * Find all call instance IDs for a series.
+   * Find all call instances (id + externalId) for a series.
    */
-  async findCallIdsBySeriesId(params: {
+  async findCallsBySeriesId(params: {
     seriesId: string;
     tx: Prisma.TransactionClient;
-  }): Promise<string[]> {
+  }): Promise<Array<{ id: string; externalId: string }>> {
     const { seriesId, tx } = params;
-    const instances = await tx.call.findMany({
+    return tx.call.findMany({
       where: { recurringSeriesId: seriesId },
-      select: { id: true },
+      select: { id: true, externalId: true },
     });
-    return instances.map((i) => i.id);
   }
 
   /**
-   * Find future SCHEDULED call instance IDs for a series.
+   * Find future SCHEDULED call instances (id + externalId) for a series.
    */
-  async findFutureScheduledCallIds(params: {
+  async findFutureScheduledCalls(params: {
     seriesId: string;
     now: Date;
     tx: Prisma.TransactionClient;
-  }): Promise<string[]> {
+  }): Promise<Array<{ id: string; externalId: string }>> {
     const { seriesId, now, tx } = params;
-    const instances = await tx.call.findMany({
+    return tx.call.findMany({
       where: {
         recurringSeriesId: seriesId,
         status: CallStatus.SCHEDULED,
         startsAt: { gt: now },
       },
-      select: { id: true },
+      select: { id: true, externalId: true },
     });
-    return instances.map((i) => i.id);
   }
 
   /**

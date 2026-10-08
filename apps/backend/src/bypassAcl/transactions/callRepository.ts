@@ -740,7 +740,7 @@ export async function endCall(self: CallRepository, callId: string, endedAt: Dat
     await refreshCallParticipantPreview(tx, callId);
     await self.syncArtifactLifecycle(tx, call, MessageArtifactStatus.COMPLETED, endedAt);
     queueCallVespaFeed(callId, { source: CallVespaFeedSource.CallRepositoryEndCall });
-    queueScheduledCallPillSync(callId, 'callRepository.endCall');
+    queueScheduledCallPillSync(callId, call.externalId, 'callRepository.endCall');
   }
 
   /**

@@ -42,12 +42,13 @@ export class AppCallController {
       // created call off the response instead and stamp it here.
       const installedAppId = (req as unknown as { auth?: { installedAppId?: string } }).auth
         ?.installedAppId;
-      const created: { callId: string | null } = { callId: null };
+      const created: { callId: string | null; externalId: string | null } = { callId: null, externalId: null };
       const sendJson = res.json.bind(res);
       res.json = (body: unknown): Response => {
-        const payload = body as { success?: boolean; callId?: unknown } | null;
+        const payload = body as { success?: boolean; callId?: unknown; externalId?: unknown } | null;
         if (payload?.success === true && typeof payload.callId === 'string') {
           created.callId = payload.callId;
+          created.externalId = typeof payload.externalId === 'string' ? payload.externalId : null;
         }
         return sendJson(body);
       };
@@ -55,7 +56,7 @@ export class AppCallController {
       await scheduleCallController.scheduleCall(req, res);
 
       if (created.callId && installedAppId) {
-        await this.stampOwningApp(created.callId, installedAppId);
+        await this.stampOwningApp(created.callId, created.externalId, installedAppId);
       }
     } catch (error) {
       logger.error('[AppCallController] Failed to schedule call:', error);
@@ -352,7 +353,7 @@ export class AppCallController {
   }
 
   /** Merge-writes the owning app id onto Call.metadata. */
-  private async stampOwningApp(callId: string, installedAppId: string): Promise<void> {
+  private async stampOwningApp(callId: string, externalId: string | null, installedAppId: string): Promise<void> {
     try {
       const call = await repositories.calls.findById(callId);
       if (!call) return;
@@ -367,7 +368,7 @@ export class AppCallController {
       // The call itself was created and answered for. Losing the stamp only
       // costs this app its CALL_SUMMARY_READY event, so log loudly and move on.
       logger.error(
-        `[AppCallController] [${callId}] Failed to stamp owning app ${installedAppId}:`,
+        `[AppCallController] [${externalId}] Failed to stamp owning app ${installedAppId}:`,
         error,
       );
     }
