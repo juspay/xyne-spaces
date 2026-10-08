@@ -11,11 +11,13 @@ import { metaGraphClient } from './metaGraphClient';
 import type { InstagramCredentials } from './types';
 import { INSTAGRAM_MAX_REPLY_LENGTH } from './constants';
 import { getMetaReplyWindowState } from '../shared/metaDmThread';
-import { onMetaTokenRejected } from '../shared/metaTokenRejection';
+import { isMetaTokenRejected } from '../shared/metaTokenRejection';
+import { disconnectAndRejectReply } from '@/integrations/core/deskSourceDisconnect';
 
 const onTokenRejected = (sourceId: string) =>
-  onMetaTokenRejected(
+  disconnectAndRejectReply(
     sourceId,
+    isMetaTokenRejected,
     "Instagram no longer accepts this account's connection, so it has been disconnected. Reconnect the account in desk settings, then try again.",
   );
 

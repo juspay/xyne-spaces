@@ -82,7 +82,13 @@ export class GmailWatchProvider extends BaseWatchProvider {
     );
   }
 
-  async markError(id: string): Promise<void> {
+  async markError(id: string, error?: string): Promise<void> {
+    // unauthorized_client is a fault in our own OAuth client, so reconnecting cannot fix it:
+    // deactivate as before, but do not ask the desk's managers to reconnect.
+    if (error && /unauthorized_client/i.test(error)) {
+      await this.externalSourceRepo.update(id, { isActive: false });
+      return;
+    }
     await disconnectDeskSourceBySystem(id, { clearCredentials: false });
   }
 }

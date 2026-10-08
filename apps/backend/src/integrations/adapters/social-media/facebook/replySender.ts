@@ -14,11 +14,13 @@ import {
 import type { FacebookCredentials } from './types';
 import { FACEBOOK_HUMAN_AGENT_WINDOW_MS, FACEBOOK_MAX_REPLY_LENGTH } from './constants';
 import { getLastInboundAt, META_REPLY_WINDOW_MS } from '../shared/metaDmThread';
-import { onMetaTokenRejected } from '../shared/metaTokenRejection';
+import { isMetaTokenRejected } from '../shared/metaTokenRejection';
+import { disconnectAndRejectReply } from '@/integrations/core/deskSourceDisconnect';
 
 const onTokenRejected = (sourceId: string) =>
-  onMetaTokenRejected(
+  disconnectAndRejectReply(
     sourceId,
+    isMetaTokenRejected,
     "Facebook no longer accepts this Page's connection, so it has been disconnected. Reconnect the Page in desk settings, then try again.",
   );
 

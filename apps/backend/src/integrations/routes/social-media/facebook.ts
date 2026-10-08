@@ -22,7 +22,7 @@ import {
 } from '../../adapters/social-media/facebook/oauthStateService';
 import type { FacebookCredentials } from '../../adapters/social-media/facebook/types';
 import { authorizeSocialMediaManager } from './access';
-import { notifyDeskSourcesDisconnected } from '../../core/deskSourceDisconnect';
+import { disconnectDeskSourceBySystem } from '../../core/deskSourceDisconnect';
 import { oauthDeskStartSchema, parseOAuthPlatform, validateOAuthDeskSetup } from './deskSetup';
 
 const TAG = '[FacebookRoutes]';
@@ -498,13 +498,15 @@ router.post(
         }
       });
       if (matching.length > 0) {
+        // Active ones one at a time, so only a source this request actually flipped is notified
+        // about; the update after it wipes tokens on sources that were already inactive.
+        for (const source of matching.filter(source => source.wasActive)) {
+          await disconnectDeskSourceBySystem(source.id, { clearCredentials: true });
+        }
         await db.externalSource.updateMany({
           where: { id: { in: matching.map(source => source.id) } },
           data: { isActive: false, credentials: '' },
         });
-        await notifyDeskSourcesDisconnected(
-          matching.filter(source => source.wasActive).map(source => source.id),
-        );
         // Best-effort, as on disconnect: stop Meta delivering events for these Pages.
         for (const { creds } of matching) {
           try {

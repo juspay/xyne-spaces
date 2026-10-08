@@ -1,6 +1,6 @@
 import { Request } from 'express';
 import { Channel } from '@prisma/client';
-import { ChannelRole } from '@xyne/shared';
+import { ChannelRole, UserStatus } from '@xyne/shared';
 import { db } from '@/database/client';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
@@ -65,7 +65,8 @@ export function assertDeskOwner(
 
 /**
  * Everyone allowed to manage a desk's integrations: the channel creator, the desk owner and
- * channel admins — the same three that the desk and social-media connect routes accept.
+ * channel admins — the same three that the desk and social-media connect routes accept — minus
+ * deactivated users.
  */
 export async function listDeskManagerUserIds(channelId: string): Promise<string[]> {
   const [channel, preference, admins] = await Promise.all([
@@ -77,7 +78,11 @@ export async function listDeskManagerUserIds(channelId: string): Promise<string[
     }),
   ]);
   const userIds = [channel?.createdBy, preference?.ownerUserId, ...admins.map((a) => a.userId)];
-  return [...new Set(userIds.filter((id): id is string => Boolean(id)))];
+  const active = await db.user.findMany({
+    where: { id: { in: userIds.filter((id): id is string => Boolean(id)) }, status: UserStatus.ACTIVE },
+    select: { id: true },
+  });
+  return active.map((user) => user.id);
 }
 
 /**

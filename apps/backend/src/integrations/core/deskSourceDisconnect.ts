@@ -3,6 +3,7 @@ import { db } from '@/database/client';
 import { notificationService } from '@/services/notificationService';
 import { listDeskManagerUserIds } from '@/utils/channelMembership';
 import { logger } from '@/utils/logger';
+import { InteractionReplyValidationError } from './baseInteractionReplySender';
 import { ExternalSourcePlatform } from './types';
 
 const TAG = '[DeskSourceDisconnect]';
@@ -98,17 +99,6 @@ async function notifyOne(sourceId: string): Promise<void> {
   });
 }
 
-/** For sources the caller has already marked disconnected. Never throws. */
-export async function notifyDeskSourcesDisconnected(sourceIds: string[]): Promise<void> {
-  for (const sourceId of sourceIds) {
-    try {
-      await notifyOne(sourceId);
-    } catch (error) {
-      logger.error(`${TAG} Failed to notify about disconnected source`, { sourceId, error });
-    }
-  }
-}
-
 /**
  * Marks a source disconnected because the provider no longer accepts its credentials, and
  * notifies whoever can reconnect it. Returns false when it was already disconnected, so repeat
@@ -124,6 +114,27 @@ export async function disconnectDeskSourceBySystem(
   });
   if (count === 0) return false;
 
-  await notifyDeskSourcesDisconnected([sourceId]);
+  try {
+    await notifyOne(sourceId);
+  } catch (error) {
+    logger.error(`${TAG} Failed to notify about disconnected source`, { sourceId, error });
+  }
   return true;
 }
+
+/**
+ * For a reply's provider call: a reply is often the first thing to hit a dead token, so mark the
+ * account disconnected (desk settings then offer Reconnect) and tell the agent with `message`.
+ * Other errors pass through untouched.
+ */
+export const disconnectAndRejectReply =
+  (sourceId: string, isTokenRejected: (error: unknown) => boolean, message: string) =>
+  async (error: unknown): Promise<never> => {
+    if (!isTokenRejected(error)) throw error;
+    try {
+      await disconnectDeskSourceBySystem(sourceId, { clearCredentials: true });
+    } catch (disconnectError) {
+      logger.error(`${TAG} Failed to mark source disconnected`, { sourceId, error: disconnectError });
+    }
+    throw new InteractionReplyValidationError(message);
+  };
