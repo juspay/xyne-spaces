@@ -655,6 +655,7 @@ function enforceMcpToolsListing(
       parseGatewayServerType,
       subagentRefs,
       retainedForSubagents,
+      { agent: agentSlug, log: (message) => log.info(message) },
     );
     if (!filtered) {
       dropped += 1;
@@ -1706,6 +1707,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
         // Connector is the source of record for write tools, so the call gate's
         // open-palette check matches what the listing already showed.
         (await resolveConnectorDefinition(serverType).catch(() => undefined))?.writeTools?.includes(tool),
+        { agent: agentSlug ?? null, log: (message) => log.info(message) },
       ) &&
       // Custom-subagent escape hatch: tools referenced by the agent's enabled
       // subagent definitions are callable even though the agent's own config
@@ -1926,6 +1928,8 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
         callServerName,
         tool,
         parseGatewayServerType,
+        undefined,
+        { agent: sessionAgentTools.slug, log: (message) => log.info(message) },
       ) &&
       !subagentReferencingTool(sessionAgentTools.subagentToolRefs, { name: tool })
     ) {
