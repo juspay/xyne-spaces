@@ -21,6 +21,7 @@ import { redisService } from '@/services/redisService';
 import { logger } from '@/utils/logger';
 import { recordRevocationFailOpen } from '@/services/otel/authMetrics';
 import { claimsStaleKey, revokedSidKey } from './constants';
+import { writeClaimsWatermark } from './claimsWatermark';
 import type { ClaimsVerdict, RevocationStore } from './types';
 
 const TOMBSTONE_VALUE = '1';
@@ -77,21 +78,11 @@ export const redisRevocationStore: RevocationStore = {
   },
 
   /**
-   * Stamp the account's claims watermark. Called by every writer that changes what the JWT
-   * freezes (workspace role, org role, membership removal, deactivation) so outstanding tokens
-   * are re-minted on their next request instead of carrying the old authorization for up to a
-   * full JWT TTL. One second is added so a token minted in the SAME second as the change — whose
-   * `iat` is truncated to that second — is also treated as stale.
+   * Stamp the account's claims watermark. The write itself lives in `auth/claimsWatermark`, a leaf
+   * the DB repositories can import without pulling in the auth stack — this is the same key, via
+   * the `RevocationStore` interface, for callers that already hold the store.
    */
-  async markClaimsStale(accountId: string, ttlSeconds: number, at: Date = new Date()): Promise<void> {
-    const watermark = Math.floor(at.getTime() / 1000) + 1;
-    try {
-      await redisService.set(claimsStaleKey(accountId), String(watermark), Math.max(1, Math.ceil(ttlSeconds)));
-    } catch (error) {
-      logger.warn('[AUTH] [Revocation] claims watermark write failed', {
-        accountId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
+  markClaimsStale(accountId: string, ttlSeconds: number, at: Date = new Date()): Promise<void> {
+    return writeClaimsWatermark(accountId, ttlSeconds, at);
   },
 };

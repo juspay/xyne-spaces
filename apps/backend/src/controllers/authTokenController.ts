@@ -22,7 +22,7 @@ import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { ensureServiceSession, findMembership, findOrgMember, findUserById, hasActiveSession } from '@/bypassAcl/authSessionServices';
 import { recordTokenMinted } from '@/services/otel/authMetrics';
-import { mintWorkspaceJwt } from '@/auth/sessionIssuer';
+import { accessTokenTtlSeconds, mintWorkspaceJwt } from '@/auth/sessionIssuer';
 import type { WorkspaceTokenResponse } from '@/auth/types';
 
 const internalBodySchema = z
@@ -88,7 +88,8 @@ async function mintInternalToken(req: Request, res: Response): Promise<void> {
     return;
   }
   const session = await ensureServiceSession(accountId, orgMember.orgId);
-  const expiresIn = config.session.workspaceTokenTtlSeconds;
+  // Same clamp as every other mint: a token must not outlive the row whose `sid` it carries.
+  const expiresIn = accessTokenTtlSeconds(session.absoluteExpiry, config.session.workspaceTokenTtlSeconds);
   const token = mintWorkspaceJwt({
     user: membership,
     memberId: accountId,

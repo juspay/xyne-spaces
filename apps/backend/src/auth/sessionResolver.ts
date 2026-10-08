@@ -43,8 +43,8 @@ import {
 } from './constants';
 import { legacyCookieMirror, responsePlatform, sameSiteFor } from './platform';
 import { redisRevocationStore } from './revocation';
-import { accessTokenCookie, applyCookies, cookiesForLegacyConversion } from './sessionCookies';
-import { mintWorkspaceJwt, secureCookies } from './sessionIssuer';
+import { accessTokenCookie, applyCookies, cookiesForLegacyConversion, lastWorkspaceCookie } from './sessionCookies';
+import { accessTokenTtlSeconds, mintWorkspaceJwt, secureCookies } from './sessionIssuer';
 import { hashToken, isLegacyShaped, readSessionCredential, type SessionCredentialValue } from './sessionTokens';
 import type {
   AuthPath,
@@ -232,6 +232,13 @@ export interface GrantWorkspaceInput {
   resolved: SessionOnly;
   /** Target workspace; `workspace_hint_missing` when absent. */
   workspaceId: string | undefined;
+  /**
+   * True when `workspaceId` came from the `xyne_last_workspace` cookie rather than an explicit
+   * `x-workspace-id` (or an explicit caller argument). A stale HINT is repairable — the client
+   * never asked for that workspace — whereas an explicit request for a forbidden workspace is a
+   * genuine 403.
+   */
+  workspaceIdFromHint?: boolean;
   cookies: Record<string, string | undefined>;
   headers: IncomingHttpHeaders;
   /** False for callers that cannot deliver Set-Cookie (socket handshake): mint, write nothing. */
@@ -430,12 +437,39 @@ export function createSessionResolver(deps: SessionResolverDeps): SessionResolve
 
   async function grantWorkspace(input: GrantWorkspaceInput): Promise<ResolveResult> {
     const { session, orgMember, credential, source, path } = input.resolved;
-    const hint = input.workspaceId;
-    if (!hint) return failure('workspace_hint_missing');
-    const membership = await repo.findMembership(session.accountId, hint);
+    if (!input.workspaceId) return failure('workspace_hint_missing');
+
+    let hint = input.workspaceId;
+    let membership = await repo.findMembership(session.accountId, hint);
+    let hintRepaired = false;
+    if (!membership && input.workspaceIdFromHint) {
+      // The hint cookie is written at login / switch and never corrected, while membership can be
+      // taken away at any time. Left alone, that divergence 403s EVERY request — including
+      // /auth/refresh-session — and the dashboard treats a non-401 as transient, so the user sits
+      // "authenticated" in a loop. Re-point the hint at a workspace they do belong to instead.
+      const fallback = await repo.findAnyMembership(session.accountId);
+      if (fallback) {
+        logger.info('[AUTH] stale workspace hint repaired', {
+          event: 'workspace_hint_repaired',
+          accountId: session.accountId,
+          sessionId: session.id,
+          staleWorkspaceId: hint,
+          workspaceId: fallback.workspaceId,
+        });
+        hint = fallback.workspaceId;
+        membership = fallback;
+        hintRepaired = true;
+      } else {
+        // No live membership anywhere: 401, not 403, so the client runs its dead-session path
+        // (log out and re-authenticate) instead of retrying a request that can never succeed.
+        return failure('workspace_user_left');
+      }
+    }
     if (!membership) return failure('workspace_forbidden');
 
     const platform = session.platform as SessionPlatform;
+    // Never longer than the session itself: nothing re-reads `absoluteExpiry` on the stateless path.
+    const ttl = accessTokenTtlSeconds(session.absoluteExpiry, jwtTtl, clock());
     const minted = mintWorkspaceJwt({
       user: membership,
       memberId: orgMember.memberId,
@@ -444,6 +478,7 @@ export function createSessionResolver(deps: SessionResolverDeps): SessionResolve
       orgId: orgMember.orgId,
       orgRole: orgMember.role,
       platform,
+      expiresInSeconds: ttl,
     });
     recordTokenMinted({ audience: 'cookie' });
 
@@ -463,9 +498,9 @@ export function createSessionResolver(deps: SessionResolverDeps): SessionResolve
           sessionExpiresAt: session.absoluteExpiry,
           workspaceId: hint,
           jwt: minted,
-          jwtTtlSeconds: jwtTtl,
+          jwtTtlSeconds: ttl,
           presentNames: Object.keys(input.cookies ?? {}),
-          writeLastWorkspace: !cookieString(input.cookies, LAST_WORKSPACE_COOKIE),
+          writeLastWorkspace: hintRepaired || !cookieString(input.cookies, LAST_WORKSPACE_COOKIE),
           legacyMirror: mirror,
           now: clock(),
         });
@@ -482,7 +517,9 @@ export function createSessionResolver(deps: SessionResolverDeps): SessionResolve
         };
       }
     } else if (writeCookies) {
-      cookies = [accessTokenCookie(hint, minted, jwtTtl, base)];
+      cookies = [accessTokenCookie(hint, minted, ttl, base)];
+      // A repaired hint must be persisted, or the next request repeats the whole repair.
+      if (hintRepaired) cookies.push(lastWorkspaceCookie(hint, session.absoluteExpiry, base, clock()));
     }
 
     return {
@@ -502,12 +539,18 @@ export function createSessionResolver(deps: SessionResolverDeps): SessionResolve
     };
   }
 
-  async function resolveFromSession(input: ResolveInput, hint: string | undefined, writeCookies: boolean): Promise<ResolveResult> {
+  async function resolveFromSession(
+    input: ResolveInput,
+    hint: string | undefined,
+    hintFromCookie: boolean,
+    writeCookies: boolean,
+  ): Promise<ResolveResult> {
     const resolved = await resolveSession(input);
     if (!resolved.ok) return resolved;
     return grantWorkspace({
       resolved: resolved.session,
       workspaceId: hint,
+      workspaceIdFromHint: hintFromCookie,
       cookies: input.cookies,
       headers: input.headers,
       writeCookies,
@@ -515,7 +558,9 @@ export function createSessionResolver(deps: SessionResolverDeps): SessionResolve
   }
 
   async function resolve(input: ResolveInput): Promise<ResolveResult> {
-    const hint = input.workspaceId ?? headerString(input.headers, WORKSPACE_HEADER) ?? cookieString(input.cookies, LAST_WORKSPACE_COOKIE);
+    const explicit = input.workspaceId ?? headerString(input.headers, WORKSPACE_HEADER);
+    const hint = explicit ?? cookieString(input.cookies, LAST_WORKSPACE_COOKIE);
+    const hintFromCookie = !explicit && !!hint;
     const inlineRefresh = input.inlineRefresh !== false;
     const cred = readSessionCredential(input);
 
@@ -544,7 +589,7 @@ export function createSessionResolver(deps: SessionResolverDeps): SessionResolve
     }
 
     // 3. Session credential → row → membership → mint.
-    if (cred) return resolveFromSession(input, hint, inlineRefresh);
+    if (cred) return resolveFromSession(input, hint, hintFromCookie, inlineRefresh);
 
     // 4. Legacy per-workspace JWT cookie (old Electron / MCP readers): re-issued under xw_, never cleared.
     if (hint) {
@@ -605,9 +650,15 @@ function requestCookies(req: Request): Record<string, string | undefined> {
   return (req.cookies ?? {}) as Record<string, string | undefined>;
 }
 
-/** The workspace this request claims: explicit > `x-workspace-id` > `xyne_last_workspace`. */
-export function workspaceHintFromRequest(req: Request, explicit?: string): string | undefined {
-  return explicit ?? headerString(req.headers, WORKSPACE_HEADER) ?? cookieString(requestCookies(req), LAST_WORKSPACE_COOKIE);
+/**
+ * The workspace this request claims: explicit > `x-workspace-id` > `xyne_last_workspace`, plus
+ * whether it came from the hint cookie (which `grantWorkspace` may repair rather than 403).
+ */
+export function workspaceHintFromRequest(req: Request, explicit?: string): { workspaceId: string | undefined; fromHint: boolean } {
+  const asked = explicit ?? headerString(req.headers, WORKSPACE_HEADER);
+  if (asked) return { workspaceId: asked, fromHint: false };
+  const hinted = cookieString(requestCookies(req), LAST_WORKSPACE_COOKIE);
+  return { workspaceId: hinted, fromHint: !!hinted };
 }
 
 /**
@@ -691,9 +742,11 @@ export async function grantWorkspaceForRequest(
   resolved: SessionOnly,
   opts: { workspaceId?: string; middleware: AuthResolveMiddleware },
 ): Promise<ResolveResult> {
+  const hint = workspaceHintFromRequest(req, opts.workspaceId);
   const result = await getDefaultResolver().grantWorkspace({
     resolved,
-    workspaceId: workspaceHintFromRequest(req, opts.workspaceId),
+    workspaceId: hint.workspaceId,
+    workspaceIdFromHint: hint.fromHint,
     cookies: requestCookies(req),
     headers: req.headers,
   });

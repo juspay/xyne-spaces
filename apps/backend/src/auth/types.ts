@@ -204,8 +204,6 @@ export interface SetPushTokensInput {
   voipToken: string | null;
   pushPlatform: PushPlatform;
   appVersion?: string | null;
-  /** Mobile's stable device id; when present and different from the row's deviceKey it becomes the deviceKey. */
-  deviceId?: string | null;
 }
 
 // ─── Repository (implemented by src/bypassAcl/authSessionServices.ts, faked in tests) ────────
@@ -235,6 +233,8 @@ export interface SessionRepository {
   createSession(input: CreateSessionInput): Promise<AuthSessionRow>;
   /** `users` row with orgMemberId=accountId, workspaceId, status ACTIVE, leftAt null. */
   findMembership(accountId: string, workspaceId: string): Promise<MembershipUser | null>;
+  /** Any live membership of the account (newest first) — used to repair a stale workspace hint. */
+  findAnyMembership(accountId: string): Promise<MembershipUser | null>;
   findUserById(userId: string): Promise<MembershipUser | null>;
   findOrgMember(memberId: string): Promise<OrgMemberRef | null>;
   revokeSession(sessionId: string, reason: SessionRevokeReason): Promise<void>;

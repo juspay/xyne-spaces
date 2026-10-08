@@ -1,4 +1,5 @@
 import { BaseRepository } from './base';
+import { markAccountClaimsStale } from '@/auth/claimsWatermark';
 import {
   User,
   CreateUserInput,
@@ -12,6 +13,25 @@ import {
 import { Prisma } from '@prisma/client';
 import { AuthProvider, UserStatus } from '@xyne/shared';
 //import { queueUserIngestion } from '@/queues/vespaQueue';
+
+/**
+ * `role`, `status` and `leftAt` are frozen into every access JWT for its whole lifetime and are
+ * never re-read on the stateless path, so a write that takes access away has to stamp the
+ * account's claims watermark or it does not take effect until the token expires.
+ *
+ * It lives HERE, at the single write, rather than at the ~13 callers: `UpdateUserInput` is
+ * `Prisma.UserUpdateInput`, so any caller can change any of those fields, and a stamp added at one
+ * caller silently does not cover the next one. A write that only touches name / picture / metadata
+ * stamps nothing.
+ *
+ * The watermark comes from `auth/claimsWatermark`, an 8-module leaf, NOT from
+ * `bypassAcl/authSessionServices`: that would close an import cycle back onto this file through
+ * `repositories/index`.
+ */
+async function stampClaimsIfFrozen(user: Pick<User, 'orgMemberId'>, data: UpdateUserInput): Promise<void> {
+  const touchesFrozenClaims = data.role !== undefined || data.status !== undefined || data.leftAt !== undefined;
+  if (touchesFrozenClaims && user.orgMemberId) await markAccountClaimsStale(user.orgMemberId);
+}
 
 export class UserRepository extends BaseRepository<User, CreateUserInput, UpdateUserInput> {
   constructor() {
@@ -153,6 +173,8 @@ export class UserRepository extends BaseRepository<User, CreateUserInput, Update
       where: { id },
       data,
     });
+
+    await stampClaimsIfFrozen(user, data);
 
     // Queue updated user for Vespa ingestion
     // try {
@@ -410,6 +432,8 @@ export class UserRepository extends BaseRepository<User, CreateUserInput, Update
       where: { id },
       data: { status },
     });
+
+    await stampClaimsIfFrozen(user, { status });
 
     // Queue user status update for Vespa ingestion
     // try {

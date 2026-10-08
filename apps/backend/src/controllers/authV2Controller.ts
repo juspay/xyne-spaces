@@ -701,11 +701,16 @@ export class AuthV2Controller {
 
       logger.info(`[${requestId}] Access token refreshed (platform=${platform}, workspaceId=${workspaceId}, sessionId=${session.id}, legacyCredential=${!!legacyConversion})`);
 
+      // `sessionId` here is the raw `xs` credential — a 180-day refresh token — and `token` is
+      // the access JWT. Both are httpOnly cookies for a browser, so echoing them in a readable
+      // body would hand page JavaScript (and any XSS) the refresh credential; `main` returned
+      // only `{ success, message }`. Same gate as login's `nonWebAuthFields`: native clients read
+      // these from JSON because they have no cookie jar to read, the browser already has them.
+      const forResponse = responsePlatform(req, platform);
       res.status(200).json({
         success: true,
-        token: accessToken,
         workspaceId,
-        sessionId: resolved.session.credential,
+        ...(forResponse === 'WEB' ? {} : { token: accessToken, sessionId: resolved.session.credential }),
       });
     } catch (error) {
       logger.error(`[${requestId}] Error refreshing session:`, error);

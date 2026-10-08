@@ -14,7 +14,7 @@ import { recordSessionIssued, recordTokenMinted } from '@/services/otel/authMetr
 import { clearPendingAuth } from './pendingAuth';
 import { legacyCookieMirror, responsePlatform, toSessionPlatform } from './platform';
 import { applyCookies, cookiesForLogout, cookiesForSession } from './sessionCookies';
-import { issueSession, mintWorkspaceJwt, secureCookies } from './sessionIssuer';
+import { accessTokenTtlSeconds, issueSession, mintWorkspaceJwt, secureCookies } from './sessionIssuer';
 import { resolveSessionFromRequest } from './sessionResolver';
 import { readSessionCredential } from './sessionTokens';
 import type { AuthSessionRow, CompleteLoginInput, CompleteLoginResult, SessionPlatform, SessionRevokeReason } from './types';
@@ -57,7 +57,9 @@ export async function completeLogin(input: CompleteLoginInput): Promise<Complete
   // the JSON session token for callers that actually announce themselves as native.
   const forResponse = responsePlatform(req, platform);
 
-  // Requirement: a fresh access token on every login / switch / create / join.
+  // Requirement: a fresh access token on every login / switch / create / join. Clamped to the
+  // session's remaining life — the stateless path never re-reads `absoluteExpiry`.
+  const jwtTtlSeconds = accessTokenTtlSeconds(session.absoluteExpiry, config.jwt.expirationSeconds);
   const token = mintWorkspaceJwt({
     user: workspaceUser,
     memberId: orgMember.memberId,
@@ -66,6 +68,7 @@ export async function completeLogin(input: CompleteLoginInput): Promise<Complete
     orgId: orgMember.orgId,
     orgRole: orgMember.role,
     platform,
+    expiresInSeconds: jwtTtlSeconds,
   });
   recordTokenMinted({ audience: 'cookie' });
 
@@ -78,7 +81,7 @@ export async function completeLogin(input: CompleteLoginInput): Promise<Complete
         sessionExpiresAt: session.absoluteExpiry,
         workspaceId: workspaceUser.workspaceId,
         jwt: token,
-        jwtTtlSeconds: config.jwt.expirationSeconds,
+        jwtTtlSeconds,
         sameSite,
         secure: secureCookies(),
         deviceCookie,

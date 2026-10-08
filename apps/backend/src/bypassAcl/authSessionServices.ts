@@ -22,6 +22,7 @@ import { encrypt } from '@/services/encryptionService';
 import { UserSessionService, resolveSessionPlatform } from '@/services/userSessionService';
 import { recordSessionIssued, recordSessionRevoked } from '@/services/otel/authMetrics';
 import { redisRevocationStore } from '@/auth/revocation';
+import { markAccountClaimsStale, maxJwtTtlSeconds } from '@/auth/claimsWatermark';
 import { appVersionFromDeviceInfo, parseLegacyPushToken } from '@/auth/legacyPushToken';
 import { S2S_DEVICE_KEY_PREFIX, s2sDeviceKey } from '@/auth/constants';
 import { hashToken } from '@/auth/sessionTokens';
@@ -57,11 +58,6 @@ const MEMBERSHIP_SELECT = {
 
 const ORG_MEMBER_SELECT = { memberId: true, orgId: true, role: true, leftAt: true } as const;
 
-/** Ceiling on a tombstone TTL: the longest-lived JWT any session can mint. */
-function maxJwtTtlSeconds(): number {
-  return Math.max(config.jwt.expirationSeconds, config.session.workspaceTokenTtlSeconds, config.sdkSso.tokenTtlSeconds);
-}
-
 type TombstoneTarget = { id: string; absoluteExpiry?: Date | null };
 
 /**
@@ -80,21 +76,12 @@ async function tombstone(targets: TombstoneTarget[], now: Date = new Date()): Pr
   );
 }
 
-/**
- * Stamp the account's claims watermark: every access JWT minted before now carries a role / org
- * role / workspace membership that has just changed, so the stateless path must stop trusting it
- * and re-mint from the session. Called by the writers of those fields, never on a read path.
- */
-export async function markAccountClaimsStale(accountId: string, at: Date = new Date()): Promise<void> {
-  await redisRevocationStore.markClaimsStale(accountId, maxJwtTtlSeconds(), at);
-  logger.info('[AUTH] claims watermark stamped', { accountId, at: at.toISOString() });
-}
+export { markAccountClaimsStale };
 
 /**
- * Same stamp, for writers that hold a `users.id` rather than the account id (status flips,
- * workspace-role writes). Best-effort: a missing row or a user with no org member means there is
- * no account to invalidate, and failing the caller's write over a metrics-grade Redis key would be
- * the wrong trade.
+ * Same stamp, for writers that hold a `users.id` rather than the account id (raw `db.user.update`
+ * sites that do not go through `UserRepository`). Best-effort: a missing row or a user with no org
+ * member means there is no account to invalidate.
  */
 export async function markClaimsStaleForUser(userId: string, at: Date = new Date()): Promise<void> {
   try {
@@ -142,6 +129,23 @@ export function findMembership(accountId: string, workspaceId: string): Promise<
     db.user.findFirst({
       where: { orgMemberId: accountId, workspaceId, status: 'ACTIVE', leftAt: null },
       select: MEMBERSHIP_SELECT,
+    }),
+  );
+}
+
+/**
+ * Any live workspace membership of the account, newest first.
+ *
+ * Only used to repair a stale `xyne_last_workspace` hint: that cookie is written at login and on
+ * switch and is never corrected, so an admin removing someone from the workspace it names leaves
+ * every subsequent request pointing at a workspace they no longer belong to.
+ */
+export function findAnyMembership(accountId: string): Promise<MembershipUser | null> {
+  return asSystem(['User'], 'fallback membership read when the workspace hint is stale: spans the account', () =>
+    db.user.findFirst({
+      where: { orgMemberId: accountId, status: 'ACTIVE', leftAt: null },
+      select: MEMBERSHIP_SELECT,
+      orderBy: { createdAt: 'desc' },
     }),
   );
 }
@@ -516,22 +520,26 @@ export async function adoptDeviceKey(sessionId: string, accountId: string, devic
 // ─── Push ─────────────────────────────────────────────────────────────────────
 
 /**
- * Register push tokens on the caller's own session row. In one transaction: the same tokens are
- * nulled on any other ACTIVE row (partial unique), a client-supplied stable deviceId becomes the
- * row's deviceKey (revoking other ACTIVE rows of that device), then the row is updated. Returns
- * false when the row is not the caller's (guarded by accountId).
+ * Register push tokens on the caller's own session row: the same tokens are nulled on any other
+ * ACTIVE row (they are unique across ACTIVE sessions) and then the row is updated. Returns false
+ * when the row is not the caller's (guarded by accountId).
+ *
+ * Deliberately does NOT touch the device key any more. It used to adopt a client-supplied
+ * `deviceId`, which meant registering a push token could REVOKE another live session — a write
+ * with a far bigger blast radius than the one the endpoint advertises, hidden inside it. Device
+ * adoption is now its own call (`adoptDeviceKey`), made by the caller before this one.
  */
 export async function setPushTokens(input: SetPushTokensInput): Promise<boolean> {
-  const { updated, revokedIds } = await transaction(
+  return await transaction(
     ['AuthSession'],
     'push token register: tokens are unique across ACTIVE sessions, which span every workspace',
     db,
     async (tx) => {
       const own = await tx.authSession.findFirst({
         where: { id: input.sessionId, accountId: input.accountId, status: SessionStatus.ACTIVE },
-        select: { id: true, deviceKey: true },
+        select: { id: true },
       });
-      if (!own) return { updated: false, revokedIds: [] as TombstoneTarget[] };
+      if (!own) return false;
 
       await tx.authSession.updateMany({
         where: { id: { not: own.id }, status: SessionStatus.ACTIVE, fcmToken: input.fcmToken },
@@ -544,8 +552,6 @@ export async function setPushTokens(input: SetPushTokensInput): Promise<boolean>
         });
       }
 
-      const revokedIds = input.deviceId ? await adoptDeviceKeyInTx(tx, own, input.deviceId) : [];
-
       await tx.authSession.update({
         where: { id: own.id },
         data: {
@@ -555,11 +561,9 @@ export async function setPushTokens(input: SetPushTokensInput): Promise<boolean>
           appVersion: input.appVersion ?? undefined,
         },
       });
-      return { updated: true, revokedIds };
+      return true;
     },
   );
-  await afterDeviceReuse(revokedIds, 'setPushTokens');
-  return updated;
 }
 
 export function clearPushTokens(sessionId: string): Promise<void> {
@@ -634,6 +638,7 @@ export const authSessionRepository: SessionRepository = {
   convertLegacySession,
   createSession,
   findMembership,
+  findAnyMembership,
   findUserById,
   findOrgMember,
   revokeSession,

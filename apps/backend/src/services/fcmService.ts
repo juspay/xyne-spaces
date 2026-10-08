@@ -172,12 +172,13 @@ export type MobilePushRegistration = {
 /** DB seam: the push subset of the auth-session repository (faked in fcmService.test.ts). */
 export type FcmSessionRepo = Pick<
   SessionRepository,
-  'setPushTokens' | 'clearPushTokens' | 'findPushTargetsForAccount' | 'nullLegacyPushColumns' | 'findUserById'
+  'setPushTokens' | 'adoptDeviceKey' | 'clearPushTokens' | 'findPushTargetsForAccount' | 'nullLegacyPushColumns' | 'findUserById'
 >;
 
 // Late-bound so a jest.mock / spy on the module is honoured after the singleton is built.
 const defaultRepo: FcmSessionRepo = {
   setPushTokens: (input) => authSessionRepo.setPushTokens(input),
+  adoptDeviceKey: (sessionId, accountId, deviceKey) => authSessionRepo.adoptDeviceKey(sessionId, accountId, deviceKey),
   clearPushTokens: (sessionId) => authSessionRepo.clearPushTokens(sessionId),
   findPushTargetsForAccount: (accountId, now) => authSessionRepo.findPushTargetsForAccount(accountId, now),
   nullLegacyPushColumns: (legacyId) => authSessionRepo.nullLegacyPushColumns(legacyId),
@@ -294,13 +295,18 @@ export class FcmPushService {
       voipTokenPreview,
     });
 
-    // The body's `deviceId` becomes the session row's deviceKey, and "one ACTIVE session per
-    // device" revokes whoever else holds that key — so it must pass the same validation as the
-    // `x-device-id` header, reserved `s2s:` namespace included. An unusable value is dropped
-    // rather than rejected: registering the push token still matters, adopting the id does not.
+    // Device adoption is a SEPARATE write, on purpose: claiming a device key revokes whoever else
+    // holds it ("one ACTIVE session per device"), which is far beyond what registering a push
+    // token should be able to do, and it used to happen invisibly inside `setPushTokens`. The id
+    // is validated exactly like the `x-device-id` header, reserved `s2s:` namespace included; an
+    // unusable value is dropped rather than failing the registration, which still matters.
     const deviceId = reg.deviceId && isClientDeviceKey(reg.deviceId.trim()) ? reg.deviceId.trim() : null;
     if (reg.deviceId && !deviceId) {
       logger.warn('[FCM] registerToken step=device_id_rejected', { accountId, sessionId: reg.sessionId });
+    }
+    if (deviceId) {
+      const adopted = await this.repo.adoptDeviceKey(reg.sessionId, accountId, deviceId);
+      logger.info('[FCM] registerToken step=device_key_adopted', { accountId, sessionId: reg.sessionId, adopted });
     }
 
     const updated = await this.repo.setPushTokens({
@@ -310,7 +316,6 @@ export class FcmPushService {
       voipToken: reg.voipToken?.trim() || null,
       pushPlatform,
       appVersion: reg.appVersion,
-      deviceId,
     });
 
     if (!updated) {

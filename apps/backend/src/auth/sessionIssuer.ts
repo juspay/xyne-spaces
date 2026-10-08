@@ -42,6 +42,20 @@ export function sessionExpiryFrom(now: Date = new Date()): Date {
   return new Date(now.getTime() + config.session.expiryDays * 24 * 60 * 60 * 1000);
 }
 
+/**
+ * How long an access token minted from this session may live.
+ *
+ * The stateless path never re-reads `absoluteExpiry`, so a token issued for the full
+ * JWT_EXPIRATION_SECONDS shortly before a session expires would keep working after it — the only
+ * thing that would stop it is the cleanup worker tombstoning the row, and that worker is OFF by
+ * default (`ENABLE_SESSION_CLEANUP_WORKER=false`). Clamping here makes session expiry self-
+ * enforcing: the token simply cannot outlive the session it was minted from.
+ */
+export function accessTokenTtlSeconds(absoluteExpiry: Date, jwtTtlSeconds: number, now: Date = new Date()): number {
+  const untilSessionEnds = Math.floor((absoluteExpiry.getTime() - now.getTime()) / 1000);
+  return Math.max(1, Math.min(jwtTtlSeconds, untilSessionEnds));
+}
+
 /** Workspace access JWT bound to a session (`sid`). TTL defaults to JWT_EXPIRATION_SECONDS. */
 export function mintWorkspaceJwt(input: MintWorkspaceJwtInput): string {
   const { user } = input;
