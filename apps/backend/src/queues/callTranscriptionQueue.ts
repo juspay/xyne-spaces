@@ -29,8 +29,8 @@ export function callTranscriptionJobId(emailId: string): string {
  *
  * The audio download and STT both happen in the Python agent; the job here
  * only holds an HTTP call to the agent open and then writes the attachment, so
- * the consumer runs in the API process (`startConsumer()` from app.ts) like the
- * other lightweight queues. One job per call email (jobId = emailId) so a double
+ * the consumer runs in the worker process (`startConsumer()` from worker.ts, gated by
+ * ENABLE_CALL_TRANSCRIPTION_WORKER); the API only enqueues. One job per call email (jobId = emailId) so a double
  * click or a concurrent request never starts a second transcription. Whole-job
  * failures retry with backoff; permanent failures (recording gone, bad media)
  * are reported by the processor returning normally so Bull does not burn
@@ -55,7 +55,7 @@ class CallTranscriptionQueue {
         removeOnComplete: true,
         removeOnFail: false,
       },
-      // The consumer lives in the API process and a job can hold for ~45 min, so a rolling
+      // A job can hold for ~45 min, so a rolling
       // deploy can stall the same job more than once. Bull's default of 1 would fail it.
       settings: { maxStalledCount: 3 },
     });
@@ -100,7 +100,7 @@ class CallTranscriptionQueue {
     return true;
   }
 
-  /** Register the processor (called once from app.ts). Idempotent per process. */
+  /** Register the processor (called once from worker.ts). Idempotent per process. */
   startConsumer(concurrency = 1): void {
     if (this.consuming) return;
     this.consuming = true;
