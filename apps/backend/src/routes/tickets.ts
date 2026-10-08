@@ -38,6 +38,11 @@ router.post(
   authorize('TICKETS', AccessType.WRITE),
   ticketController.backlogFlowGroup,
 );
+router.post(
+  '/:ticketId/flow-groups/:groupId/skip',
+  authorize('TICKETS', AccessType.WRITE),
+  ticketController.skipFlowGroup,
+);
 // Bulk add/remove tags across many tickets in one request (additive semantics)
 router.post(
   '/bulk-tags',

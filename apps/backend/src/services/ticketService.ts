@@ -12,8 +12,9 @@ import { ticketSchema } from '@/vespa/src/types';
 import { buildKanbanCountsSnapshot } from '@/services/tickets/kanbanCountsSnapshotService';
 import { websocketService } from '@/services/websocketService';
 import { versionReleaseMappingService } from '@/services/release/versionReleaseMappingService';
-import { BaseTicketType, isReleaseTicket, PRStatusEvent, BoardType, ActivityType, TicketStatusV2 } from '@xyne/shared';
+import { BaseTicketType, isReleaseTicket, PRStatusEvent, BoardType, ActivityType, TicketStatusV2, FLOW_STAGE_NAMES } from '@xyne/shared';
 import { ticketStageTransitionService } from './stageTransition/ticketStageTransitionService';
+import { assertFlowStepSkippable } from '@/services/flowCascadeService';
 import { updateTicketTagsTx } from '@/bypassAcl/transactions/ticketService';
 import { bulkUpdateTicketTagsTx } from '@/bypassAcl/transactions/ticketService';
 
@@ -96,6 +97,12 @@ export class TicketService {
         if (!transition) {
           logger.warn(`[TicketService] FLOW transition rejected for ${ticketId} → "${stage}"`);
           return;
+        }
+        if (stage === FLOW_STAGE_NAMES.SKIPPED) {
+          await assertFlowStepSkippable({
+            metadata: ticket.metadata,
+            flowPlan: ticket.board.flowPlan,
+          });
         }
         await this.ticketRepository.updateTicketStage(ticketId, stage, userId, source, prActivityData);
         return;
@@ -222,6 +229,14 @@ export class TicketService {
       const targetStageName = params.stage ?? params.status;
       if (!targetStageName || (params.status && params.status !== targetStageName)) {
         throw new Error('Flow status must match its target stage');
+      }
+      // Step skip is terminal and irreversible, so the mutator's guards
+      // (run root, decision-parent step, paused run) gate this path too.
+      if (targetStageName === FLOW_STAGE_NAMES.SKIPPED) {
+        await assertFlowStepSkippable({
+          metadata: existingTicket.metadata,
+          flowPlan: existingTicket.board.flowPlan,
+        });
       }
       const [currentStage, targetStage] = await Promise.all([
         prisma.stage.findFirst({

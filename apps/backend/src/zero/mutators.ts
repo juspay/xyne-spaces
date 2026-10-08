@@ -218,10 +218,13 @@ import { hasProjectAdminAccess } from './acl/core/admin-access';
 import vespaClient from '@/vespa/client';
 import { fileSchema } from '@/vespa/src/types';
 import {
+  assertFlowStepSkippable,
   onFlowPlanUpdated,
   onFlowStepBacklogged,
   onFlowTicketStatusChanged,
 } from '@/services/flowCascadeService';
+import { ensureFlowSkippedStage } from '@/services/flowStageTransitionRecovery';
+import { assertTicketUpdateAccess } from './acl/tables/tickets-acl';
 import { validateFlowDecisionFields } from '@/zero/utils/flowPlanValidation';
 import { getEncryptionProvider } from '@/services/encryption';
 
@@ -6085,7 +6088,7 @@ export function createMutators(
             if (!params.stageName) {
               throw new Error('Flow ticket status must change through a stage transition');
             }
-            const [currentStage, targetStage, transitions] = await Promise.all([
+            const [currentStage, targetStageRow, transitionRows] = await Promise.all([
               tx.run(
                 zql.stages.where('boardId', ticket.boardId).where('name', ticket.stageName).one(),
               ),
@@ -6094,22 +6097,66 @@ export function createMutators(
               ),
               tx.run(zql.stage_transitions.where('boardId', ticket.boardId)),
             ]);
-            if (!currentStage || !targetStage) {
+            const flow = (ticket.metadata as { flow?: { planNodeId?: string; rootTicketId?: string } } | null)?.flow;
+            const skipping = params.stageName === FLOW_STAGE_NAMES.SKIPPED;
+            // Skip guards and the write-access check run BEFORE the lazy
+            // SKIPPED stage write below: a rejected or unauthorized skip must
+            // leave the board untouched.
+            if (skipping) {
+              await assertFlowStepSkippable({
+                metadata: ticket.metadata,
+                flowPlan: currentBoard.flowPlan,
+              });
+              await assertTicketUpdateAccess(
+                {
+                  userID: authData.sub,
+                  workspaceId: authData.workspaceId,
+                  role: authData.role,
+                  orgRole: authData.orgRole,
+                  memberId: authData.memberId,
+                },
+                tx,
+                ticket,
+              );
+            }
+            let targetStageId = targetStageRow?.id;
+            let targetDefaultStatusV2 = targetStageRow?.defaultTicketStatusV2;
+            let transitionAllowed =
+              currentStage !== undefined &&
+              targetStageRow !== undefined &&
+              transitionRows.some(
+                transition =>
+                  transition.fromStageId === currentStage.id &&
+                  transition.toStageId === targetStageRow.id,
+              );
+            if (skipping && currentStage && !transitionAllowed) {
+              // Boards created before SKIPPED (or its transitions are
+              // missing): create/repair on first use instead of a migration.
+              // Done via prisma (not tx.mutate): a concurrent first skip
+              // would make both zero transactions insert the same
+              // deterministic id and the loser's whole mutation would abort;
+              // the prisma path is P2002-safe and uses skipDuplicates, and
+              // zero picks the rows up via its normal replication moment
+              // later.
+              const ensured = await ensureFlowSkippedStage(
+                ticket.boardId,
+                ticket.workspaceId,
+                authData.sub,
+              );
+              targetStageId = ensured.stageId;
+              targetDefaultStatusV2 = TicketStatusV2.COMPLETED;
+              transitionAllowed = ensured.fromStageIds.includes(currentStage.id);
+            }
+            if (!currentStage || !targetStageId) {
               throw new Error('Flow ticket stage not found');
             }
-            const allowed = transitions.some(
-              transition =>
-                transition.fromStageId === currentStage.id &&
-                transition.toStageId === targetStage.id,
-            );
-            if (!allowed) throw new Error('This Flow stage transition is not allowed');
+            if (!transitionAllowed) throw new Error('This Flow stage transition is not allowed');
             if (
               params.statusV2 !== undefined &&
-              params.statusV2 !== targetStage.defaultTicketStatusV2
+              params.statusV2 !== targetDefaultStatusV2
             ) {
               throw new Error('Flow ticket status must match its target stage');
             }
-            const flow = (ticket.metadata as { flow?: { planNodeId?: string; rootTicketId?: string } } | null)?.flow;
             if (params.stageName === FLOW_STAGE_NAMES.BACKLOG && !flow?.planNodeId) {
               throw new Error('The main Flow ticket cannot be moved to backlog');
             }
@@ -6511,6 +6558,9 @@ export function createMutators(
           if (
             params.statusV2 === TicketStatusV2.COMPLETED &&
             ticket.statusV2 !== TicketStatusV2.COMPLETED &&
+            // A skipped step completes, but it was not "confirmed" — the
+            // confirmation activity drives the event-log wording.
+            params.stageName !== FLOW_STAGE_NAMES.SKIPPED &&
             flowSnapshot?.gate?.type === 'confirmation'
           ) {
             activities.push({

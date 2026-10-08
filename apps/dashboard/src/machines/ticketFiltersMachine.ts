@@ -492,14 +492,16 @@ export const ticketFiltersMachine = setup({
 
         const boardFromUrl = urlFilters.boards?.length ? urlFilters.boards : undefined;
         const boardFromDb = event.selectedBoardIdFromDb ? [event.selectedBoardIdFromDb] : undefined;
-        // When the user navigates directly to a board via the URL path (/projects/:projectId/:boardId),
-        // the boardId is in the route params (not query params), so we use it as a fallback.
+        // On a board route (/projects/:projectId/:boardId) the path board is the board
+        // being rendered, so it outranks a board= chip param — otherwise a stuck URL
+        // like /projects/P/<flowBoard>?layout=flow&board=<kanban> renders the route's
+        // flow board under the chip's filters with no way back.
         const boardFromPath =
           event.viewMode === 'board' && event.boardId ? [event.boardId] : undefined;
         // Last resort only: the URL, the user's persisted board, and the route
         // path all outrank it, so seeding never overrides an explicit choice.
         const boardFromDefault = event.defaultBoardId ? [event.defaultBoardId] : undefined;
-        const boardFilter = boardFromUrl ?? boardFromDb ?? boardFromPath ?? boardFromDefault;
+        const boardFilter = boardFromPath ?? boardFromUrl ?? boardFromDb ?? boardFromDefault;
 
         if (Object.keys(urlFilters).length > 0) {
           filters = { ...urlFilters };
@@ -627,6 +629,12 @@ export const ticketFiltersMachine = setup({
       if (event.type !== 'URL_CHANGED') return context;
 
       const urlFilters = readFiltersFromUrl(event.searchParams);
+      // Same precedence as initializeFromUrl: on a board route the path board wins,
+      // so back/forward through a stale board= chip param can't re-stick it. Only
+      // when board= is present: an empty URL must stay empty or restored filters are wiped.
+      if (context.viewMode === 'board' && context.boardId && urlFilters.boards?.length) {
+        urlFilters.boards = [context.boardId];
+      }
       const urlViewType = event.searchParams.get('viewType');
       const urlGroupBy = event.searchParams.get('groupBy');
       const urlHasOverdue = event.searchParams.has('overdue');

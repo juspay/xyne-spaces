@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Boxes,
   MoreHorizontal,
+  SkipForward,
   X,
 } from 'lucide-react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
@@ -57,6 +58,9 @@ export interface FlowGroupNodeData {
   onMoveToBacklog?: () => void;
   backlogDisabledReason?: string;
   backlogPending?: boolean;
+  onSkipGroup?: () => void;
+  skipDisabledReason?: string;
+  skipPending?: boolean;
   onRename?: (name: string) => void;
   onUngroup?: () => void;
 }
@@ -137,6 +141,9 @@ export const FlowGroupNode: React.FC<NodeProps<FlowGroupNodeData>> = ({ data, se
     onMoveToBacklog,
     backlogDisabledReason,
     backlogPending = false,
+    onSkipGroup,
+    skipDisabledReason,
+    skipPending = false,
     onRename,
     onUngroup,
   } = data;
@@ -157,50 +164,73 @@ export const FlowGroupNode: React.FC<NodeProps<FlowGroupNodeData>> = ({ data, se
       {memberCount}
     </span>
   );
-  const groupMenu = onMoveToBacklog ? (
-    <DropdownMenu.Root>
-      <DropdownMenu.Trigger asChild>
-        <button
-          type='button'
-          title='Group actions'
-          aria-label={`Actions for ${name || 'group'}`}
-          data-track-category='flow_board'
-          data-track-name='open_group_actions'
-          className='nodrag shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:bg-black/5 hover:text-foreground'
-          onClick={event => event.stopPropagation()}
-          onPointerDown={event => event.stopPropagation()}
-        >
-          <MoreHorizontal size={14} />
-        </button>
-      </DropdownMenu.Trigger>
-      <DropdownMenu.Portal>
-        <DropdownMenu.Content
-          sideOffset={6}
-          align='end'
-          className='z-50 min-w-[230px] rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md'
-        >
-          <DropdownMenu.Item
-            disabled={!!backlogDisabledReason || backlogPending}
-            onSelect={onMoveToBacklog}
-            title={backlogDisabledReason}
+  const groupMenu =
+    onMoveToBacklog || onSkipGroup ? (
+      <DropdownMenu.Root>
+        <DropdownMenu.Trigger asChild>
+          <button
+            type='button'
+            title='Group actions'
+            aria-label={`Actions for ${name || 'group'}`}
             data-track-category='flow_board'
-            data-track-name='backlog_group'
-            className='flex cursor-pointer select-none items-start gap-2 rounded-sm px-2 py-1.5 text-xs outline-none hover:bg-muted focus:bg-muted data-[disabled]:cursor-not-allowed data-[disabled]:opacity-60'
+            data-track-name='open_group_actions'
+            className='nodrag shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:bg-black/5 hover:text-foreground'
+            onClick={event => event.stopPropagation()}
+            onPointerDown={event => event.stopPropagation()}
           >
-            <Archive size={13} className='mt-0.5 shrink-0 text-amber-600' />
-            <span className='flex min-w-0 flex-col'>
-              <span>{backlogPending ? 'Moving to backlog…' : 'Move group to backlog'}</span>
-              {backlogDisabledReason && (
-                <span className='mt-0.5 max-w-[200px] text-[10px] leading-4 text-muted-foreground'>
-                  {backlogDisabledReason}
+            <MoreHorizontal size={14} />
+          </button>
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Portal>
+          <DropdownMenu.Content
+            sideOffset={6}
+            align='end'
+            className='z-50 min-w-[230px] rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md'
+          >
+            {onMoveToBacklog && (
+              <DropdownMenu.Item
+                disabled={!!backlogDisabledReason || backlogPending}
+                onSelect={onMoveToBacklog}
+                title={backlogDisabledReason}
+                data-track-category='flow_board'
+                data-track-name='backlog_group'
+                className='flex cursor-pointer select-none items-start gap-2 rounded-sm px-2 py-1.5 text-xs outline-none hover:bg-muted focus:bg-muted data-[disabled]:cursor-not-allowed data-[disabled]:opacity-60'
+              >
+                <Archive size={13} className='mt-0.5 shrink-0 text-amber-600' />
+                <span className='flex min-w-0 flex-col'>
+                  <span>{backlogPending ? 'Moving to backlog…' : 'Move group to backlog'}</span>
+                  {backlogDisabledReason && (
+                    <span className='mt-0.5 max-w-[200px] text-[10px] leading-4 text-muted-foreground'>
+                      {backlogDisabledReason}
+                    </span>
+                  )}
                 </span>
-              )}
-            </span>
-          </DropdownMenu.Item>
-        </DropdownMenu.Content>
-      </DropdownMenu.Portal>
-    </DropdownMenu.Root>
-  ) : null;
+              </DropdownMenu.Item>
+            )}
+            {onSkipGroup && (
+              <DropdownMenu.Item
+                disabled={!!skipDisabledReason || skipPending}
+                onSelect={onSkipGroup}
+                title={skipDisabledReason}
+                data-track-category='flow_board'
+                data-track-name='skip_group'
+                className='flex cursor-pointer select-none items-start gap-2 rounded-sm px-2 py-1.5 text-xs outline-none hover:bg-muted focus:bg-muted data-[disabled]:cursor-not-allowed data-[disabled]:opacity-60'
+              >
+                <SkipForward size={13} className='mt-0.5 shrink-0 text-teal-600' />
+                <span className='flex min-w-0 flex-col'>
+                  <span>{skipPending ? 'Skipping group…' : 'Skip group'}</span>
+                  {skipDisabledReason && (
+                    <span className='mt-0.5 max-w-[200px] text-[10px] leading-4 text-muted-foreground'>
+                      {skipDisabledReason}
+                    </span>
+                  )}
+                </span>
+              </DropdownMenu.Item>
+            )}
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
+      </DropdownMenu.Root>
+    ) : null;
 
   if (collapsed) {
     return (
