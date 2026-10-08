@@ -1,3 +1,9 @@
+// @xyne/shared ships ESM that jest's transform ignores — stub the enums used.
+jest.mock('@xyne/shared', () => ({
+  BoardType: { DEFAULT: 'DEFAULT', RELEASE: 'RELEASE', NON_LINEAR: 'NON_LINEAR', FLOW: 'FLOW' },
+  TicketStatusV2: { TODO: 'TODO', STARTED: 'STARTED', PAUSED: 'PAUSED', CANCELLED: 'CANCELLED', COMPLETED: 'COMPLETED' },
+}));
+
 import { BoardType, TicketStatusV2 } from '@xyne/shared';
 import {
   resolveReleaseCompletionStage,
@@ -116,7 +122,7 @@ describe('resolveReleaseCompletionStage', () => {
       const r = run({
         boardType: BoardType.NON_LINEAR,
         stages: nl,
-        transitions: [t('Merged', 'Build'), t('Build', 'Closed'), t('Merged', 'Rejected')],
+        transitions: [t('Merged', 'Build'), t('Build', 'Closed'), t('Merged', 'Rejected'), t('Rejected', 'Backlog')],
         currentStageName: 'Merged',
       });
       // Merged → Build → Closed (Verified is not reachable via explicit edges)
