@@ -5,7 +5,7 @@
  *
  * Layout: ["XME1"|ver|keyIdLen|keyId|wrapIv(12)|wrapTag(16)|wrappedDek(32)|dataIv(12)][ciphertext][tag(16)]
  */
-import { Transform, Readable } from 'stream';
+import { Transform, Readable, pipeline } from 'stream';
 import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
 import { config } from '@/config/env';
 
@@ -160,15 +160,13 @@ class DecryptTransform extends Transform {
 export function encryptStream(plaintext: NodeJS.ReadableStream): Readable {
   const { header, dek, dataIv } = seal();
   const t = new EncryptTransform(header, createCipheriv('aes-256-gcm', dek, dataIv));
-  plaintext.on('error', (e) => t.destroy(e as Error));
-  return plaintext.pipe(t);
+  return pipeline(plaintext, t, () => undefined);
 }
 
-/** Decrypt a stream produced by encryptStream/encryptBuffer. Bounded memory. */
+/** Decrypt a stream produced by encryptStream/encryptBuffer. Bounded memory. pipeline, not pipe: a source that closes
+ *  early (dropped connection) errors the output instead of leaving its reader waiting forever. */
 export function decryptStream(ciphertext: NodeJS.ReadableStream): Readable {
-  const t = new DecryptTransform();
-  ciphertext.on('error', (e) => t.destroy(e as Error));
-  return ciphertext.pipe(t);
+  return pipeline(ciphertext, new DecryptTransform(), () => undefined);
 }
 
 // ── Buffers (small JSON blobs) ──────────────────────────────────────────────

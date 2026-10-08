@@ -1,4 +1,4 @@
-import { PassThrough } from 'stream';
+import { PassThrough, Readable } from 'stream';
 import { randomUUID } from 'node:crypto';
 import readline from 'readline';
 import fetch from 'node-fetch';
@@ -47,7 +47,18 @@ const FILE_DOWNLOAD_RETRY_BASE_MS = 1_000; // exponential backoff base between a
 // daily-sync "legacy thread replies" 30-day window). A reply on a thread older than this window isn't picked up.
 const REFRESH_LOOKBACK_DAYS = 30;
 const PUBLIC_CHANNELS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const DUMP_READ_IDLE_MS = 2 * 60_000;
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+type SlackFileRef = { id: string; url_private: string; url_private_download?: string; mimetype?: string };
+
+/** Fail a read that delivers nothing for `ms` — a dropped connection can otherwise go silent and never end. */
+const withIdleTimeout = (s: Readable, ms: number): Readable => {
+  let timer: NodeJS.Timeout | undefined;
+  const arm = () => { clearTimeout(timer); timer = setTimeout(() => s.destroy(new Error(`read idle for ${ms / 1000}s`)), ms); };
+  arm();
+  return s.on('data', arm).on('close', () => clearTimeout(timer));
+};
 
 // Route the Slack SDK's own diagnostics (esp. rate-limit "A rate limit was exceeded … retry in N seconds")
 // into our logs, so a stalled collection can be attributed to throttling vs. a genuinely hung request.
@@ -541,22 +552,24 @@ export class SlackMigrationEngine {
 
   /**
    * Attachment backfill: download the files an already-collected dump references but never stored (e.g. collected
-   * with a token that couldn't fetch them). Reads only the dump — no Slack history calls — and skips stored copies, so
-   * a restart resumes. Uses the same downloader as collection (streamed, encrypted, retries, timeouts).
+   * with a token that couldn't fetch them). Two passes: list the files from the dump, then download — reading while
+   * downloading held one GCS read open for the whole run until the connection silently dropped and the job hung.
+   * Stored copies are skipped, so a resume continues; a dump read error fails the job rather than skipping files.
    */
   async collectMissingFiles(job: MigrationJob, touch: () => Promise<void>, isStopped: () => Promise<boolean>): Promise<{ messages: number; withFiles: number; files: number; stored: number; stopped: boolean }> {
     const token = getBotConfigByWorkspaceId(job.workspaceId).slackBotToken; // channel jobs use the workspace bot
     this.uploadedFiles.delete(job.gcsPrefix);
     const r = { messages: 0, withFiles: 0, files: 0, stored: 0, stopped: false };
+    const pending = new Map<string, SlackFileRef>();
     let lines = 0;
     for (const conv of await this.readManifest(job.gcsPrefix)) {
       for (const file of await this.listConversationDataFiles(job.gcsPrefix, conv.id)) {
+        const input = withIdleTimeout(decryptStream(await this.storage.createReadStream(file)), DUMP_READ_IDLE_MS);
         try {
-          const rl = readline.createInterface({ input: decryptStream(await this.storage.createReadStream(file)), crlfDelay: Infinity });
-          for await (const line of rl) {
+          for await (const line of readline.createInterface({ input, crlfDelay: Infinity })) {
             if (!line.trim()) continue;
-            if (++lines % 100 === 0) {
-              await touch(); // keeps the stall watchdog quiet through long runs of file-less messages
+            if (++lines % 1000 === 0) {
+              await touch();
               if (await isStopped()) return { ...r, stopped: true };
             }
             let raw: { _replies?: unknown[] };
@@ -564,23 +577,28 @@ export class SlackMigrationEngine {
             for (const m of [raw, ...(raw._replies ?? [])]) {
               r.messages += 1;
               const files = collectRawFiles(m).filter(isDownloadableSlackFile);
-              if (files.length === 0) continue;
-              r.withFiles += 1;
-              r.files += files.length;
-              await this.prefetchFiles(token, m, job.gcsPrefix, touch);
-              r.stored += files.filter((f) => f.prefetchedStoragePath).length;
+              if (files.length) r.withFiles += 1;
+              for (const f of files) pending.set(f.id, { id: f.id, url_private: f.url_private, url_private_download: f.url_private_download, mimetype: f.mimetype });
             }
           }
-        } catch (e) {
-          // A missing/unreadable snapshot shouldn't sink the rest of the dump.
-          logger.warn('[SlackMigration] backfill: dump file unreadable — skipping', { id: job.id, file, error: e instanceof Error ? e.message : String(e) });
+        } finally {
+          input.destroy();
         }
       }
+    }
+    r.files = pending.size;
+    const { fileConcurrency } = await getMigrationRuntimeConfig();
+    const files = [...pending.values()];
+    for (let i = 0; i < files.length; i += fileConcurrency) {
+      if (await isStopped()) return { ...r, stopped: true };
+      const uris = await Promise.all(files.slice(i, i + fileConcurrency).map((f) => this.streamFileToGcs(token, f, job.gcsPrefix)));
+      r.stored += uris.filter(Boolean).length;
+      await touch();
     }
     return r;
   }
 
-  private async streamFileToGcs(token: string, file: { id: string; url_private: string; url_private_download?: string; mimetype?: string }, gcsPrefix: string): Promise<string | undefined> {
+  private async streamFileToGcs(token: string, file: SlackFileRef, gcsPrefix: string): Promise<string | undefined> {
     const cfg = await getMigrationRuntimeConfig();
     const dest = paths.file(gcsPrefix, file.id);
     // Skip re-downloading a file already streamed on an earlier run (resume idempotency).
