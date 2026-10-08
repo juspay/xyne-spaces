@@ -92,7 +92,9 @@ export const chatConversationMetaRepository = {
         orgId: args.orgId,
         title: args.title,
       },
-      update: { title: args.title },
+      // A rename is the user's title, not a generated one: clearing the stamp
+      // keeps generated-title cleanups from ever touching it.
+      update: { title: args.title, titleGeneratedAt: null },
     }),
 
   setPinned: (args: MetaKey & { orgId: string; pinned: boolean }): Promise<ChatConversationMeta> =>

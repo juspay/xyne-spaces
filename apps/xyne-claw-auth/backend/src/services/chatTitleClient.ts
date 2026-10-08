@@ -48,6 +48,26 @@ export async function generateChatTitleViaClaw(req: ChatTitleRequest): Promise<s
   }
 }
 
+const GREETING_WORDS = new Set([
+  "hi", "hii", "hello", "hey", "heyy", "yo", "hola", "namaste", "thanks", "thank", "you",
+  "ok", "okay", "sure", "good", "morning", "afternoon", "evening", "there", "test", "ping",
+]);
+
+/**
+ * Whether the first message alone says enough to name the chat. "hey" or
+ * "hello there" do not, and naming them early produces titles like "Greeting"
+ * that then block the better, reply-aware title (fillTitleIfEmpty keeps the
+ * first one). Those chats are named after the first completed reply instead.
+ */
+export function isTitleWorthyFirstMessage(message: string): boolean {
+  const words = message
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}_-]+/u)
+    .filter((word) => word.length > 1 || /\p{N}/u.test(word));
+  const meaningful = words.filter((word) => !GREETING_WORDS.has(word));
+  return meaningful.length >= 3;
+}
+
 export async function maybeGenerateConversationTitle(args: {
   conversationId: string;
   agentSlug: string;
@@ -72,6 +92,8 @@ export async function maybeGenerateConversationTitle(args: {
   const firstUserMessage =
     messages.find((m) => m.role === "user" && m.userId === args.userId)?.content ?? "";
   if (!firstUserMessage.trim()) return;
+  // Before any reply exists, only name chats whose opener carries a subject.
+  if (!args.assistantReply?.trim() && !isTitleWorthyFirstMessage(firstUserMessage)) return;
 
   const title = await generateChatTitleViaClaw({
     firstUserMessage,
