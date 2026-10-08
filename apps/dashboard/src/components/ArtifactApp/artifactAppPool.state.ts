@@ -1,6 +1,6 @@
 import type { ArtifactAppPlacement } from './ArtifactAppHostView';
 
-/** Hidden apps kept running after their screen closes; the least recently shown is dropped first. */
+/** Hidden apps kept running after their screen closes (~60–100 MB each, measured); the least recently shown is dropped first. */
 export const MAX_HIDDEN_APPS = 3;
 
 export interface SlotRect {
@@ -37,6 +37,7 @@ export interface PoolState {
   /** Insertion order, never reordered — React moving a keyed iframe reloads it. */
   apps: PooledApp[];
   seq: number;
+  maxHidden: number;
 }
 
 export type PoolAction =
@@ -45,7 +46,7 @@ export type PoolAction =
   | { type: 'unmount'; slotId: string; appId: string }
   | { type: 'dropHidden' };
 
-export const initialPoolState: PoolState = { apps: [], seq: 0 };
+export const initialPoolState: PoolState = { apps: [], seq: 0, maxHidden: MAX_HIDDEN_APPS };
 
 function isEmpty(rect: SlotRect | null): boolean {
   return !rect || rect.width <= 0 || rect.height <= 0;
@@ -82,9 +83,9 @@ function settle(app: PooledApp, slots: Slot[]): PooledApp {
   return { ...app, slots, props, rect };
 }
 
-function trim(apps: PooledApp[]): PooledApp[] {
+function trim(apps: PooledApp[], maxHidden: number): PooledApp[] {
   const hidden = apps.filter(app => app.slots.length === 0);
-  const excess = hidden.length - MAX_HIDDEN_APPS;
+  const excess = hidden.length - maxHidden;
   if (excess <= 0) return apps;
   const dropped = new Set(
     [...hidden]
@@ -104,14 +105,14 @@ export function poolReducer(state: PoolState, action: PoolAction): PoolState {
       const existing = state.apps.find(app => app.appId === appId);
       if (!existing) {
         const added: PooledApp = { appId, slots: [slot], props, rect: null, lastUsed: seq };
-        return { apps: trim([...state.apps, added]), seq };
+        return { ...state, apps: trim([...state.apps, added], state.maxHidden), seq };
       }
       const apps = state.apps.map(app =>
         app.appId === appId
           ? { ...settle(app, [...app.slots.filter(s => s.id !== slotId), slot]), lastUsed: seq }
           : app,
       );
-      return { apps: trim(apps), seq };
+      return { ...state, apps: trim(apps, state.maxHidden), seq };
     }
 
     case 'update': {
@@ -145,7 +146,9 @@ export function poolReducer(state: PoolState, action: PoolAction): PoolState {
             )
           : app,
       );
-      return { ...state, apps: trim(apps) };
+      // No trim here: switching apps unmounts the old slot before the new one mounts, and trimming in
+      // between would evict the app being switched to. The next mount trims.
+      return { ...state, apps };
     }
 
     case 'dropHidden': {
