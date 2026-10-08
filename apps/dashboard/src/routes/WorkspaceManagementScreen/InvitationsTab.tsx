@@ -145,9 +145,16 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
         payload['entityType'] = entityType;
       }
 
-      await apiInstance.post('/invitations', payload);
+      const { data } = await apiInstance.post<{ pendingApproval?: boolean }>(
+        '/invitations',
+        payload,
+      );
 
-      toast.success(`Invitation sent to ${email}`);
+      toast.success(
+        data?.pendingApproval
+          ? `Invitation for ${email} sent to an org admin for approval`
+          : `Invitation sent to ${email}`,
+      );
       setEmail('');
       setRole(WorkspaceRole.MEMBER);
       setEntityType('');
