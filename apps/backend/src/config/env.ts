@@ -188,8 +188,6 @@ const envSchema = Joi.object({
   META_IG_APP_SECRET: Joi.string().allow('').default(''), // Instagram App Secret (for Instagram Login OAuth)
   META_IG_REDIRECT_URI: Joi.string().allow('').default(''), // Override redirect URI for Instagram OAuth (e.g. ngrok URL in local dev)
   ENABLE_INSTAGRAM_TOKEN_REFRESH_WORKER: Joi.boolean().default(false),
-  DESK_ALERT_CHANNEL_ID: Joi.string().allow('').default(''), // Channel that gets desk alerts (account disconnected, app-desk inbound API failure); empty turns them off
-  DESK_ALERT_MENTION_USER_IDS: Joi.string().allow('').default(''), // Comma-separated user ids to @mention in those alerts
   SLACK_SIGNING_SECRET: Joi.string().allow('').default(''), // Slack signing secret for request verification
   SLACK_MIGRATION_APPROVALS: Joi.string().allow('').default(''), // Comma-separated list of approved Slack user IDs
   SLACK_IGNORED_BOT_IDS: Joi.string().allow('').default(''), // Comma-separated list of bot IDs to exclude from migration
@@ -902,11 +900,6 @@ export const config = {
   googleAuthRedirectUri: envVars.GOOGLE_AUTH_REDIRECT_URI as string,
   microsoftAuthRedirectUri: envVars.MICROSOFT_AUTH_REDIRECT_URI as string,
   externalCallInviteBaseUrl: envVars.EXTERNAL_CALL_INVITE_BASE_URL,
-  deskAlertChannelId: envVars.DESK_ALERT_CHANNEL_ID as string,
-  deskAlertMentionUserIds: (envVars.DESK_ALERT_MENTION_USER_IDS as string)
-    .split(',')
-    .map((id) => id.trim())
-    .filter(Boolean),
   META_APP_ID: envVars.META_APP_ID as string,
   META_APP_SECRET: envVars.META_APP_SECRET as string,
   META_WEBHOOK_VERIFY_TOKEN: envVars.META_WEBHOOK_VERIFY_TOKEN as string,
