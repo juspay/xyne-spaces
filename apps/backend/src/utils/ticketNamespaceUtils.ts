@@ -34,12 +34,15 @@ export async function createDefaultTicketNamespace(
     return null;
   }
 
+  const now = new Date();
   const namespace = await db.ticketNamespace.create({
     data: {
       code: params.code,
       workspaceId: params.workspaceId,
       projectId: params.projectId,
       createdBy: params.createdBy,
+      createdAt: now,
+      updatedAt: now,
     },
     select: { id: true },
   });

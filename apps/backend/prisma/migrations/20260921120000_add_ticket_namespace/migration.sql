@@ -15,7 +15,7 @@ CREATE TABLE "public"."ticket_namespaces" (
     "createdBy" TEXT NOT NULL,
     "updatedBy" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3),
+    "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "ticket_namespaces_pkey" PRIMARY KEY ("id")
 );

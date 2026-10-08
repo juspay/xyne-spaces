@@ -1705,7 +1705,7 @@ model TicketNamespace {
   createdBy      String
   updatedBy      String?
   createdAt      DateTime  @default(now())
-  updatedAt      DateTime? @updatedAt
+  updatedAt      DateTime
 
   project        Project   @relation(fields: [projectId], references: [id])
 

@@ -88,7 +88,7 @@ export class EntitySequenceService {
 
     const namespace = await tx.ticketNamespace.update({
       where: { id: namespaceId },
-      data: { ticketSequence: { increment: 1 } },
+      data: { ticketSequence: { increment: 1 }, updatedAt: new Date() },
       select: { ticketSequence: true },
     });
 

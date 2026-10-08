@@ -382,7 +382,7 @@ export const ticketNamespaceTable = table('ticket_namespaces')
     createdBy: string(),
     updatedBy: string().optional(),
     createdAt: number(),
-    updatedAt: number().optional(),
+    updatedAt: number(),
   })
   .primaryKey('id');
 

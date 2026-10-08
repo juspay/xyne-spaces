@@ -28,6 +28,7 @@ export class TicketNamespaceRepository {
   }
 
   async create(data: CreateTicketNamespaceInput): Promise<TicketNamespace> {
+    const now = new Date();
     return this.db.ticketNamespace.create({
       data: {
         code: data.code,
@@ -35,6 +36,8 @@ export class TicketNamespaceRepository {
         workspaceId: data.workspaceId,
         projectId: data.projectId,
         createdBy: data.createdBy,
+        createdAt: now,
+        updatedAt: now,
       },
     });
   }
