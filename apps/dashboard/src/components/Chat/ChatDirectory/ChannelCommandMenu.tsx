@@ -2,7 +2,7 @@ import { logger, Event as LogEvent } from '../../../utils/logger';
 import React, { ReactElement, useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Command } from 'cmdk';
-import { CalendarDays, LayoutGrid, SignalHigh, X, ChevronDown } from 'lucide-react';
+import { CalendarDays, LayoutGrid, MessageSquare, SignalHigh, X, ChevronDown } from 'lucide-react';
 import {
   ChatDefault,
   UserTwo,
@@ -139,6 +139,7 @@ import { resolveDateKeyword } from '../../../search/filterModel';
 import { hasExactSearchQuotes } from '../../../utils/exactSearch';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { MergeTicketsDialog } from '../../Tickets/MergeTicketsDialog/MergeTicketsDialog';
+import { CmdkFeedbackView, useCanPostSearchFeedback } from '../SearchFeedback';
 import { toast } from 'sonner';
 import Button from '../../ui/Button';
 import { AiAnswerCard } from './AiAnswerCard';
@@ -364,6 +365,17 @@ const MENTION_GROUPS = [
 ] as const;
 
 type MentionGroupKey = (typeof MENTION_GROUPS)[number]['key'];
+
+/**
+ * Label for a selected filter chip, as shown in the palette: `from: alice`, `#general`,
+ * `@alice`. Same output as `buildChipText`, which can't be reused here because it expects
+ * the fuller `ChipData` type.
+ */
+const chipSummaryLabel = (mention: { type: ChipType; prefix?: string; name?: string }): string => {
+  const name = mention.name ?? '';
+  if (mention.prefix) return `${mention.prefix} ${name}`.trim();
+  return `${mention.type === ChipType.USER ? '@' : '#'}${name}`;
+};
 
 /** Rows shown per section before "Show more", and the ceiling once expanded. */
 const MENTION_GROUP_PAGE = 5;
@@ -1512,6 +1524,11 @@ const ChannelCommandMenuContent = ({
   >(new Map());
   const [showMergeDialog, setShowMergeDialog] = useState(false);
 
+  // Whether the search feedback view is showing in place of the results.
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  // Feedback is about search results, so it's hidden in the context-picker and desk-merge modes.
+  const canPostFeedback = useCanPostSearchFeedback() && !contextSelectionMode && !deskMergeMode;
+
   // Only the real search palette keeps history — not the context picker or desk-merge mode.
   const recentSearchesEnabled = !contextSelectionMode && !deskMergeMode;
   const recentSearches = useRecentSearches({
@@ -2464,6 +2481,7 @@ const ChannelCommandMenuContent = ({
       setDeskMergeMode(false);
       setSelectedMergeTickets(new Map());
       setShowMergeDialog(false);
+      setFeedbackOpen(false);
 
       // Reset the previous search text refs
       prevSearchTextRef.current = '';
@@ -2790,6 +2808,14 @@ const ChannelCommandMenuContent = ({
 
   const resolveTabLabel = (tab: TabType): string =>
     allTabDefinitions.find(t => t.id === tab)?.label ?? '';
+
+  // Filters sent with feedback: selected tab, filter chips, and active toggles (@Ch, Bot, "ab").
+  // The "All" tab has no label, so it's dropped.
+  const feedbackFilters = [
+    resolveTabLabel(activeTab),
+    ...selectedMentions.map(chipSummaryLabel),
+    ...SEARCH_MODE_TOGGLES.filter(toggle => toggle.isOn).map(toggle => toggle.label),
+  ].filter(Boolean);
 
   // Tabs the active filters could fill — `in:#general` scopes to content within a channel,
   // so People and Channels can only come back empty. Not named `enabledTabs`: that's a prop,
@@ -3876,6 +3902,9 @@ const ChannelCommandMenuContent = ({
     // handler); the palette must stay inert underneath.
     if (actionsMenuTarget) return;
 
+    // Same while the feedback view is open, so typing in it doesn't move through the hidden results.
+    if (feedbackOpen) return;
+
     // ── Slash-command mode: picker / `/` discovery ───────────────────────
     // Escape is intentionally NOT handled here — it falls through so the menu
     // closes like everywhere else (Radix dismiss), rather than a hidden
@@ -4272,12 +4301,24 @@ const ChannelCommandMenuContent = ({
       </div>
     ) : null;
 
+  // Leave the feedback view and put focus back in the search box, so typing and arrow keys
+  // work straight away. Next frame, same as the Actions menu: the editor is still hidden
+  // when this runs.
+  const closeFeedback = (): void => {
+    setFeedbackOpen(false);
+    requestAnimationFrame(() => {
+      (
+        commandRef.current?.querySelector('[contenteditable="true"]') as HTMLElement | null
+      )?.focus();
+    });
+  };
+
   const commandBody = (
     <>
       {/* Search Input — hidden (but kept mounted) during `/chat` compose so its
           `/chat <query>` text survives for the "back" button. Stays visible during the
           `/call` channel-confirm so the modal overlays the picker. */}
-      <div className={cn('flex items-center shrink-0', isComposing && 'hidden')}>
+      <div className={cn('flex items-center shrink-0', (isComposing || feedbackOpen) && 'hidden')}>
         <div className='relative flex-1 flex items-center gap-2 p-3'>
           <button
             onClick={() => onOpenChange(false)}
@@ -4421,6 +4462,20 @@ const ChannelCommandMenuContent = ({
             or hijack Enter/arrows — the editor and its mention dropdown handle them.
             Radix (Escape) and ProseMirror listen at document/editor level, so they still
             work. */}
+        {/* Feedback view. The search input, results and footer are hidden while it's open. */}
+        {feedbackOpen && (
+          <div className='flex-1 min-h-0'>
+            <CmdkFeedbackView
+              query={searchText}
+              filters={feedbackFilters}
+              onBack={closeFeedback}
+              onPosted={() => {
+                setFeedbackOpen(false);
+                onOpenChange(false);
+              }}
+            />
+          </div>
+        )}
         {isComposing && commandTarget && (
           <div
             role='presentation'
@@ -4443,7 +4498,7 @@ const ChannelCommandMenuContent = ({
         <div
           className={cn(
             'relative flex-1 flex flex-col min-h-0 overflow-x-hidden rounded-b-2xl',
-            isComposing && 'hidden',
+            (isComposing || feedbackOpen) && 'hidden',
           )}
           role='presentation'
           data-track-category='CHANNEL_SEARCH'
@@ -5482,16 +5537,31 @@ const ChannelCommandMenuContent = ({
       {/* Footer - outside body flex so TicketPreviewPanel only spans results area. Hidden while the
           `/chat` composer is open (isComposing): its hints (Open/Navigate/Actions/Ask AI) are about
           the results list, which the composer replaces — you're typing a message, not navigating. */}
-      {!inline && !isMobile && !isComposing && (
+      {!inline && !isMobile && !isComposing && !feedbackOpen && (
         <div className='relative px-6 py-4 text-sm font-medium text-muted-foreground flex items-center justify-between shrink-0 rounded-b-2xl'>
           {/* Fade the scrolling results into the footer (replaces the hard top border) */}
           <div className='pointer-events-none absolute inset-x-0 bottom-full h-[30px] bg-gradient-to-t from-card to-transparent' />
-          {/* Left: slash-command hint for Ask AI */}
-          <span className='flex items-center gap-2.5'>
-            <span className='flex items-center justify-center px-1.5 py-1 bg-muted rounded-lg leading-none'>
-              /
+          {/* Left: Ask AI hint and the Feedback button */}
+          <span className='flex items-center gap-5'>
+            <span className='flex items-center gap-2.5'>
+              <span className='flex items-center justify-center px-1.5 py-1 bg-muted rounded-lg leading-none'>
+                /
+              </span>
+              <span>Ask AI</span>
             </span>
-            <span>Ask AI</span>
+            {canPostFeedback && (
+              <button
+                type='button'
+                onClick={() => setFeedbackOpen(true)}
+                title='Tell the search team about these results'
+                data-track-category='COMMAND_MENU'
+                data-track-name='OPEN_SEARCH_FEEDBACK'
+                className='flex items-center gap-2.5 text-muted-foreground hover:text-foreground transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-0'
+              >
+                <MessageSquare size={14} />
+                <span>Feedback</span>
+              </button>
+            )}
           </span>
           <div className='flex items-center gap-6'>
             {deskMergeEnabled &&
@@ -5676,6 +5746,12 @@ const ChannelCommandMenuContent = ({
               }
             }}
             onEscapeKeyDown={event => {
+              // Esc in the feedback view goes back to the results instead of closing the palette.
+              if (feedbackOpen) {
+                event.preventDefault();
+                closeFeedback();
+                return;
+              }
               // While the ⌥↵ Actions menu is open, Escape closes only it — never the palette.
               if (actionsMenuTarget !== null) {
                 event.preventDefault();
@@ -5725,7 +5801,10 @@ const ChannelCommandMenuContent = ({
                 // come and go. Header + footer are shrink-0; Command.List is flex-1 and
                 // absorbs the remainder, so a wrapped filter-chip row or a hidden tab bar
                 // changes the list height, never the total. Mobile keeps h-[100dvh]/h-screen.
-                'md:w-full md:h-[549px] md:overflow-hidden bg-card md:rounded-2xl shadow-[0px_7px_15px_0px_#0000000D,0px_28px_28px_0px_#00000017,0px_62px_37px_0px_#0000000D,0px_111px_44px_0px_#00000003,0px_173px_48px_0px_#00000000] border border-border',
+                //
+                // The feedback view is shorter, so the height shrinks to fit it while open.
+                feedbackOpen ? 'md:h-auto' : 'md:h-[549px]',
+                'md:w-full md:overflow-hidden bg-card md:rounded-2xl shadow-[0px_7px_15px_0px_#0000000D,0px_28px_28px_0px_#00000017,0px_62px_37px_0px_#0000000D,0px_111px_44px_0px_#00000003,0px_173px_48px_0px_#00000000] border border-border',
                 showMergeDialog ? 'z-40' : 'z-[9999]',
               )}
               onKeyDownCapture={handleCommandKeyDown}

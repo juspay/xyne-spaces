@@ -3,6 +3,7 @@ import { errMsg } from "../lib/errors.js";
 import { randomUUID } from "node:crypto";
 import { CONFIG } from "../config.js";
 import type { FlowDefinition } from "xyne-claw-shared";
+import type { DraftAgentSpec } from "../lib/agent-card.js";
 import { requireAuth, requireNoAccessToken, requireResultToken, s2sKeyMatches } from "../middleware/require-auth.js";
 import { matchesAuthenticatedUserId } from "../middleware/pin-user-id-param.js";
 import { resolveCanonicalUserIdOrSelf } from "../lib/users-jit.js";
@@ -170,6 +171,8 @@ const SESSION_LOCKED_USER_MESSAGE =
    ───────────────────────────────────────────────────────────────────── */
 const STREAM_EVENTS_CHANNEL = "run-stream:events";
 const STREAM_PERSIST_KEY_PREFIX = "run-stream:msg-persisted:";
+/** Turn text when a propose-agent draft could not be put up for approval. */
+const AGENT_DRAFT_DELIVERY_FAILED = "I drafted the agent but couldn't post it for approval. Please try again.";
 
 interface PersistedAttachment {
   id: string;
@@ -2207,7 +2210,7 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
       ? `I couldn't reach **${localHarnessProviderLabel(typeof body["localHarnessProvider"] === "string" ? body["localHarnessProvider"] : "your local harness")}** on your machine, and running this on Xyne's servers instead didn't start either. Open the Xyne desktop app (or turn off the local harness for this agent) and try again.`
       : undefined;
 
-    const content = harnessUnreachableNotice
+    const baseContent = harnessUnreachableNotice
       ? harnessUnreachableNotice
       : isSessionLockedFailure
       ? SESSION_LOCKED_USER_MESSAGE
@@ -2250,6 +2253,72 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
     // Branching: resolve the placeholder assistant id — query param wins
     // (cross-pod safe), streamMeta is the same-pod fast path.
     const assistantMessageId = queryAssistantMessageId ?? meta?.assistantMessageId;
+
+    // propose-agent ends its run with an EMPTY result on purpose — the draft
+    // card is the deliverable. The Spaces-thread path (webhook.ts) intercepts
+    // it; without the same branch here the empty-result guard in
+    // persistRunStreamResult rewrites the turn as "The model returned
+    // nothing…" and the draft is lost. So: persist the AgentRequest, put the
+    // card on the assistant row, and use the agent's own summary as the turn's
+    // text. Runs BEFORE persistence so the content is right the first time.
+    const pendingAgentCard = body["pendingAgentCard"] as
+      | { variant?: string; slug?: string; slugs?: string[]; agent?: DraftAgentSpec }
+      | undefined;
+    let draftCardFlow: FlowDefinition | undefined;
+    let draftContent: string | undefined;
+    if (
+      pendingAgentCard?.variant === "draft" &&
+      pendingAgentCard.agent &&
+      status === "completed" &&
+      !rawResult.trim()
+    ) {
+      const spec = pendingAgentCard.agent;
+      // claw retries callbacks; only the first delivery may create the
+      // AgentRequest + append the card (Redis down fails open, like persist).
+      // Keyed per assistant reply (not per session) so a later draft in the
+      // same conversation still gets its own card.
+      const claimed = assistantMessageId
+        ? await redisService.getConnection()
+            .set(`${STREAM_PERSIST_KEY_PREFIX}agent-draft:${assistantMessageId}`, "1", "EX", 86_400, "NX")
+            .catch(() => "OK" as const)
+        : "OK";
+      try {
+        const { prepareAgentDraftCard, agentDraftLeadIn } = await import("../lib/agent-card-render.js");
+        draftContent = agentDraftLeadIn(spec);
+        if (claimed === "OK") {
+          const { resolveXyneAiCardTarget, postFlowCard } = await import("../lib/flow-card-delivery.js");
+          const draftTarget = await resolveXyneAiCardTarget({ assistantMessageId });
+          if (!draftTarget) {
+            log.warn(`[agent-card] xyne-ai draft skipped — no assistant row for stream=${streamId}`);
+            draftContent = AGENT_DRAFT_DELIVERY_FAILED;
+          } else {
+            const prepared = await prepareAgentDraftCard(spec, {
+              agentSlug: draftTarget.agentSlug,
+              orgId: draftTarget.orgId,
+              userId: draftTarget.userId,
+              conversationId: draftTarget.conversationId,
+              channelId: "",
+              spacesAppId: draftTarget.spacesAppId,
+            });
+            if (!prepared.ok) {
+              draftContent = prepared.message;
+            } else {
+              // postFlowCard stamps surface/chatMessageId (so approval is
+              // routed back to this row) and persists it in uiFlows, so the
+              // card survives a reload.
+              draftCardFlow = await postFlowCard(prepared.flow, draftTarget);
+              log.info(
+                `[agent-card] xyne-ai draft card slug=${spec.slug} request=${prepared.requestId} conv=${draftTarget.conversationId}`,
+              );
+            }
+          }
+        }
+      } catch (draftErr) {
+        log.error(`[agent-card] xyne-ai draft card failed slug=${spec.slug}:`, errMsg(draftErr));
+        draftContent = AGENT_DRAFT_DELIVERY_FAILED;
+      }
+    }
+    const content = draftContent ?? baseContent;
 
     // DURABLE write: persist the assistant message + attachments here, on
     // whichever pod received the callback. SETNX guard on sessionId stops
@@ -2298,10 +2367,19 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
     }
 
 
-    const pendingAgentCard = body["pendingAgentCard"] as
-      | { variant?: string; slug?: string; slugs?: string[] }
-      | undefined;
-    if (pendingAgentCard?.variant) {
+    if (draftCardFlow) {
+      // Same reason as the sibling cards below: the terminal payload has no
+      // uiFlows slot, so the card goes on the wire to paint without a refetch.
+      const draftStream = pendingStreams.get(streamId);
+      if (draftStream) draftStream.sendEvent("ui-flow", { flow: draftCardFlow });
+      else
+        publishStreamEvent({
+          kind: "progress",
+          streamId,
+          events: [{ event: "ui-flow", data: { flow: draftCardFlow } }],
+        });
+    }
+    if (pendingAgentCard?.variant && pendingAgentCard.variant !== "draft") {
       try {
         const { resolveXyneAiCardTarget } = await import("../lib/flow-card-delivery.js");
         const cardTarget = await resolveXyneAiCardTarget({ assistantMessageId });

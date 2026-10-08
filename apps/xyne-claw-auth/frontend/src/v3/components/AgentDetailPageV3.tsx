@@ -178,6 +178,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
   // routes every run to the shared read-only sbx-git sandbox (grep across all repos,
   // no per-project clone, mutating sandbox tools stripped).
   const [draftForceReadOnlySandbox, setDraftForceReadOnlySandbox] = useState(false);
+  const [draftAllowWriteInReadOnlyJob, setDraftAllowWriteInReadOnlyJob] = useState(false);
   // Operator-selected repo focus for read-only agents (agent.config.sbxGitRepos).
   const [draftSbxGitRepos, setDraftSbxGitRepos] = useState<string[]>([]);
   const [sbxGitRepoOptions, setSbxGitRepoOptions] = useState<SbxGitRepoOption[]>([]);
@@ -336,6 +337,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
         setDraftPromptInjection(promptInj);
         setDraftSandboxRepo((agentData.config as { sandboxRepo?: string }).sandboxRepo ?? "");
         setDraftForceReadOnlySandbox((agentData.config as { forceReadOnlySandbox?: boolean }).forceReadOnlySandbox === true);
+        setDraftAllowWriteInReadOnlyJob((agentData.config as { allowWriteInReadOnlyJob?: boolean }).allowWriteInReadOnlyJob === true);
         setDraftSbxGitRepos(Array.isArray((agentData.config as { sbxGitRepos?: string[] }).sbxGitRepos) ? (agentData.config as { sbxGitRepos: string[] }).sbxGitRepos : []);
         setDraftResearchAgentProductId((agentData.config as { product_id?: string | null; RESEARCH_AGENT_PRODUCT_ID?: string | null }).product_id ?? (agentData.config as { RESEARCH_AGENT_PRODUCT_ID?: string | null }).RESEARCH_AGENT_PRODUCT_ID ?? "");
         setDraftResearchAgentRepositoryId((agentData.config as { repository_id?: string | null; RESEARCH_AGENT_REPOSITORY_ID?: string | null }).repository_id ?? (agentData.config as { RESEARCH_AGENT_REPOSITORY_ID?: string | null }).RESEARCH_AGENT_REPOSITORY_ID ?? "");
@@ -446,6 +448,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
     const basePromptInjection = (agent.config as { promptInjection?: string }).promptInjection ?? "";
     const baseSandboxRepo = (agent.config as { sandboxRepo?: string }).sandboxRepo ?? "";
     const baseForceReadOnlySandbox = (agent.config as { forceReadOnlySandbox?: boolean }).forceReadOnlySandbox === true;
+    const baseAllowWriteInReadOnlyJob = (agent.config as { allowWriteInReadOnlyJob?: boolean }).allowWriteInReadOnlyJob === true;
     const baseSbxGitRepos = Array.isArray((agent.config as { sbxGitRepos?: string[] }).sbxGitRepos) ? (agent.config as { sbxGitRepos: string[] }).sbxGitRepos : [];
     const baseResearchAgentProductId = (agent.config as { product_id?: string | null; RESEARCH_AGENT_PRODUCT_ID?: string | null }).product_id ?? (agent.config as { RESEARCH_AGENT_PRODUCT_ID?: string | null }).RESEARCH_AGENT_PRODUCT_ID ?? "";
     const baseResearchAgentRepositoryId = (agent.config as { repository_id?: string | null; RESEARCH_AGENT_REPOSITORY_ID?: string | null }).repository_id ?? (agent.config as { RESEARCH_AGENT_REPOSITORY_ID?: string | null }).RESEARCH_AGENT_REPOSITORY_ID ?? "";
@@ -493,6 +496,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       draftPromptInjection !== basePromptInjection ||
       draftSandboxRepo !== baseSandboxRepo ||
       draftForceReadOnlySandbox !== baseForceReadOnlySandbox ||
+      draftAllowWriteInReadOnlyJob !== baseAllowWriteInReadOnlyJob ||
       JSON.stringify([...draftSbxGitRepos].sort()) !== JSON.stringify([...baseSbxGitRepos].sort()) ||
       draftResearchAgentProductId !== baseResearchAgentProductId ||
       draftResearchAgentRepositoryId !== baseResearchAgentRepositoryId ||
@@ -518,7 +522,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       draftOutputRequireTools !== baseOutputRequireTools ||
       triggersChanged
     );
-  }, [agent, config, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPrefetchContext, draftPostTodos, draftPlanTracking, draftAutoGoal, draftPlanMode, draftOptimizations, draftPlanModePrompt, draftMaxDelegations, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers]);
+  }, [agent, config, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftAllowWriteInReadOnlyJob, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPrefetchContext, draftPostTodos, draftPlanTracking, draftAutoGoal, draftPlanMode, draftOptimizations, draftPlanModePrompt, draftMaxDelegations, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers]);
 
   /* ── handlers ──────────────────────────────────────────────────── */
 
@@ -581,6 +585,11 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
         nextConfig.forceReadOnlySandbox = true;
       } else {
         delete nextConfig.forceReadOnlySandbox;
+      }
+      if (draftAllowWriteInReadOnlyJob) {
+        nextConfig.allowWriteInReadOnlyJob = true;
+      } else {
+        delete nextConfig.allowWriteInReadOnlyJob;
       }
       if (draftSbxGitRepos.length > 0) {
         nextConfig.sbxGitRepos = draftSbxGitRepos;
@@ -758,7 +767,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
     } finally {
       setSavingConfig(false);
     }
-  }, [agent, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPrefetchContext, draftPostTodos, draftPlanTracking, draftAutoGoal, draftPlanMode, draftOptimizations, draftPlanModePrompt, draftMaxDelegations, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers, config, savingConfig, dirty, userId, showSnackbar]);
+  }, [agent, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftAllowWriteInReadOnlyJob, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPrefetchContext, draftPostTodos, draftPlanTracking, draftAutoGoal, draftPlanMode, draftOptimizations, draftPlanModePrompt, draftMaxDelegations, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers, config, savingConfig, dirty, userId, showSnackbar]);
 
   const persistToolsConfig = useCallback(async (nextTools: AgentToolSelection): Promise<Agent> => {
     if (!agent) throw new Error("Agent not loaded");
@@ -1131,6 +1140,8 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
             sandboxRepoOptions={sandboxRepoOptions}
             draftForceReadOnlySandbox={draftForceReadOnlySandbox}
             onDraftForceReadOnlySandboxChange={setDraftForceReadOnlySandbox}
+            draftAllowWriteInReadOnlyJob={draftAllowWriteInReadOnlyJob}
+            onDraftAllowWriteInReadOnlyJobChange={setDraftAllowWriteInReadOnlyJob}
             draftSbxGitRepos={draftSbxGitRepos}
             onDraftSbxGitReposChange={setDraftSbxGitRepos}
             sbxGitRepoOptions={sbxGitRepoOptions}

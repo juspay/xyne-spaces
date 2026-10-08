@@ -23,23 +23,7 @@ import {
   activeGoalRepository,
   experimentRepository,
 } from "../repositories/index.js";
-import { hashSkillContent } from "xyne-claw-shared";
-import { agentRequestRepository } from "../repositories/agentRequestRepository.js";
-import { buildAvailableToolsCatalog } from "./tools.js";
-import {
-  identityFromDraftSpec,
-  isValidAgentSlug,
-  resolveAgentCapabilities,
-  unknownToolsNote,
-  draftNote,
-  expandMcpRequests,
-  listCallableAgentOptions,
-  toConfigTools,
-  unknownMcpsNote,
-  unknownProvidersNote,
-  resolveDraftExtras,
-  type DraftAgentSpec,
-} from "../lib/agent-card.js";
+import type { DraftAgentSpec } from "../lib/agent-card.js";
 import { toResolvedAgent, type ResolvedAgent } from "../lib/resolved-agent.js";
 import { stripLeadingAgentMention } from "../lib/strip-agent-mention.js";
 import { resolveUserSpacesAuth } from "../surfaces/spaces/user-auth.js";
@@ -77,7 +61,7 @@ import { prisma } from "../db.js";
 import { redisService } from "../redis.js";
 import { publishLiveEvent } from "../lib/live-conversation-bus.js";
 import { deliverXyneAiFlow, postFlowCard, resolveXyneAiCardTarget } from "../lib/flow-card-delivery.js";
-import { renderAgentProfileCard, renderAgentProfileListCard, renderAgentSummaryCard } from "../lib/agent-card-render.js";
+import { agentDraftTranscript, prepareAgentDraftCard, renderAgentProfileCard, renderAgentProfileListCard, renderAgentSummaryCard } from "../lib/agent-card-render.js";
 import { renderConnectorSuggestCard, renderProviderSuggestCard } from "../lib/connector-card-render.js";
 import { buildWriteApprovalCardFlow, formatActionDescription, mintWriteCardAction, readPendingWriteAction } from "../lib/write-card-render.js";
 import { UNREGISTERED_USER_TEMPLATE } from "../constants.js";
@@ -148,7 +132,6 @@ import {
   buildCapacityRetryFlow,
   buildGoalSuggestionFlow,
   buildPlanFlow,
-  buildAgentCardFlow,
   buildCodeFlow,
   buildDiffFlow,
   buildChartFlow,
@@ -4464,88 +4447,40 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       const orgId = ctx.agentOrgId;
       const requesterId = ctx.senderId;
 
-      // Fail loudly on the card rather than silently creating a mis-slugged
-      // agent: the pod normalizes, so an invalid slug here means drift.
-      if (!isValidAgentSlug(spec.slug)) {
-        await postAgentMessage(
-          { spacesAppUserId: ctx.spacesAppUserId, appToken: token },
-          {
-            channelId: ctx.channelId,
-            conversationId: ctx.conversationId,
-            markdownText: `I drafted an agent but \`${spec.slug}\` isn't a usable identifier. Ask me again with a simple name like "ticket triage".`,
-            metadata: { contentFormat: "markdown" },
-          }
-        );
-        log.warn(`[agent-card] rejected draft with invalid slug "${spec.slug}" conv=${ctx.conversationId}`);
-        await deleteSession(sessionId).catch(() => {});
-        return;
-      }
-
-      // Duplicate slug: catch it NOW, while the agent can still be re-asked,
-      // instead of at approval time when the user has already committed.
-      const existing = await agentRepository.findBySlug(spec.slug, orgId);
-      if (existing) {
-        await postAgentMessage(
-          { spacesAppUserId: ctx.spacesAppUserId, appToken: token },
-          {
-            channelId: ctx.channelId,
-            conversationId: ctx.conversationId,
-            markdownText: `An agent called **${existing.name}** (\`${spec.slug}\`) already exists here, so I didn't create a draft. Ask me again with a different name, or edit the existing agent.`,
-            metadata: { contentFormat: "markdown" },
-          }
-        );
-        log.info(`[agent-card] draft dropped — slug ${spec.slug} already exists in org ${orgId}`);
-        await deleteSession(sessionId).catch(() => {});
-        return;
-      }
-
-      // Resolve the requested tools against THIS org's catalog. Unmatched
-      // tokens are reported on the card and never persisted.
-      const catalog = await buildAvailableToolsCatalog(undefined, orgId);
-      const callableOptions = await listCallableAgentOptions(orgId, requesterId, spec.slug);
-      const expandedMcps = expandMcpRequests(spec.mcps, catalog);
-      if (expandedMcps.unknown.length > 0) {
-        log.info(`[agent-card] draft ${spec.slug}: unmatched MCPs [${expandedMcps.unknown.join(", ")}]`);
-      }
-      const resolved = await resolveAgentCapabilities(
-        [...(spec.tools ?? []), ...expandedMcps.tokens],
-        catalog,
-        requesterId,
-        callableOptions,
-      );
-      const note = unknownToolsNote(resolved.unknown);
-      if (resolved.unknown.length > 0) {
-        log.info(`[agent-card] draft ${spec.slug}: unmatched tools [${resolved.unknown.join(", ")}]`);
-      }
-
-      // The draft itself lives server-side. proposedContent is what the approve
-      // path re-reads and creates — the card is display only.
-      const proposedContent = JSON.stringify(spec);
-      const outcome = await agentRequestRepository.supersedeAndCreateAgentCreate({
-        agentSlug: spec.slug,
-        requesterId,
+      // Validation, duplicate check, capability resolution, AgentRequest
+      // persistence and the card itself are shared with the Xyne AI surface
+      // (run-stream.ts) — only delivery differs per surface.
+      const prepared = await prepareAgentDraftCard(spec, {
+        agentSlug: ctx.agentSlug,
         orgId,
-        proposedContent,
-        proposedContentHash: hashSkillContent(proposedContent),
+        userId: requesterId,
+        conversationId: ctx.conversationId,
+        channelId: ctx.channelId,
+        spacesAppId: ctx.spacesAppId,
       });
-      if (outcome.supersededCount > 0) {
-        log.info(`[agent-card] superseded ${outcome.supersededCount} stale draft(s) for ${spec.slug} by ${requesterId}`);
+      if (!prepared.ok) {
+        await postAgentMessage(
+          { spacesAppUserId: ctx.spacesAppUserId, appToken: token },
+          {
+            channelId: ctx.channelId,
+            conversationId: ctx.conversationId,
+            markdownText: prepared.message,
+            metadata: { contentFormat: "markdown" },
+          }
+        );
+        await deleteSession(sessionId).catch(() => {});
+        return;
       }
+      const { flow, identity } = prepared;
 
-      // A lead-in line so the card isn't dropped into the thread wordlessly. The
-      // agent's own `summary` (why it made these calls) when it wrote one;
-      // otherwise a neutral line — never a restatement of the card, which would
-      // just be the same content twice.
-      const leadIn =
-        spec.summary?.trim() ||
-        `I've drafted an agent for this — have a look and approve it below if it's right.`;
+      // A lead-in line so the card isn't dropped into the thread wordlessly.
       try {
         await postAgentMessage(
           { spacesAppUserId: ctx.spacesAppUserId, appToken: token },
           {
             channelId: ctx.channelId,
             conversationId: ctx.conversationId,
-            markdownText: leadIn,
+            markdownText: prepared.leadIn,
             metadata: { contentFormat: "markdown" },
           }
         );
@@ -4556,33 +4491,6 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         });
       }
 
-      const draftExtras = await resolveDraftExtras(spec, orgId, requesterId);
-      const cardNote = draftNote(
-        note,
-        unknownMcpsNote(expandedMcps.unknown),
-        unknownProvidersNote(draftExtras.unknownProviders ?? []),
-      );
-      const identity = identityFromDraftSpec(spec, resolved, ctx.agentSlug, draftExtras);
-      const flow = withSpacesAppId(
-        buildAgentCardFlow(
-          {
-            variant: "draft",
-            phase: "pending",
-            agent: identity,
-            toolSelection: toConfigTools(resolved),
-            ...(cardNote ? { note: cardNote } : {}),
-          },
-          {
-            requestId: outcome.request.id,
-            agentSlug: ctx.agentSlug,
-            userId: requesterId,
-            conversationId: ctx.conversationId,
-            channelId: ctx.channelId,
-          },
-        ),
-        ctx.spacesAppId,
-      );
-
       await postFlowCard(flow, {
         kind: "spaces",
         channelId: ctx.channelId,
@@ -4590,16 +4498,13 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         spacesAppUserId: ctx.spacesAppUserId,
         appToken: token,
       });
-      log.info(`[agent-card] posted draft card slug=${spec.slug} request=${outcome.request.id} conv=${ctx.conversationId}`);
+      log.info(`[agent-card] posted draft card slug=${spec.slug} request=${prepared.requestId} conv=${ctx.conversationId}`);
 
       // Persist an assistant transcript row: the interactive card exists only in
       // Spaces, so without this the claw chat shows nothing for this turn and the
       // next user message groups as a sibling branch. Same reasoning as the plan
       // card's transcript row above.
       try {
-        const capabilityLine = identity.capabilities?.length
-          ? `\n\n**Capabilities:** ${identity.capabilities.map((c) => c.label).join(", ")}`
-          : "";
         const parentId = await chatMessageRepository
           .latestMessageId(ctx.conversationId, ctx.agentSlug)
           .catch(() => null);
@@ -4610,7 +4515,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           orgId,
           ...(parentId ? { parentId } : {}),
           role: "assistant",
-          content: `**🤖 Drafted an agent — ${identity.name}** (\`${identity.slug}\`)\n\n${identity.description ?? ""}${capabilityLine}\n\n_Approve the card to create it._`,
+          content: agentDraftTranscript(identity),
           status: "completed",
           ...(payload.reasoning ? { reasoning: payload.reasoning } : {}),
         });

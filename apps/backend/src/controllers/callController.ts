@@ -3077,7 +3077,7 @@ export class CallController {
 
       // stopRecording clears the room-metadata indicator (every stop path) and the
       // egress_ended webhook finalizes the file + posts it to the thread.
-      await callRecordingService.stopRecording(recording);
+      await callRecordingService.stopRecording(recording, call.externalId);
 
       logger.info(`[CallController] stopCallRecording | callId=${callId}, recordingId=${recording.id}, userId=${userId}`);
       res.json({ success: true, recordingId: recording.id });

@@ -424,7 +424,7 @@ class NoteTakerTranscriptService {
           : {};
       return canvasMeta.summaryModelPreference === 'thinking' ? 'thinking' : 'fast';
     } catch (error) {
-      logger.warn('summary_model_preference_lookup_failed', { callId: call.id, error });
+      logger.warn('summary_model_preference_lookup_failed', { callId: call.externalId, error });
       return 'fast';
     }
   }
@@ -1069,9 +1069,9 @@ class NoteTakerTranscriptService {
         app: SubApp.TRANSCRIPT,
         ...(call.workspaceId ? { workspaceId: call.workspaceId } : {}),
       });
-      logger.info(`[NoteTakerTranscriptService] Queued Vespa indexing for transcript ${call.id}`, { path: 'note_taker' });
+      logger.info(`[NoteTakerTranscriptService] Queued Vespa indexing for transcript ${call.externalId}`, { path: 'note_taker' });
     } catch (vespaError) {
-      logger.error(`[NoteTakerTranscriptService] Failed to queue Vespa job for transcript ${call.id}:`, vespaError);
+      logger.error(`[NoteTakerTranscriptService] Failed to queue Vespa job for transcript ${call.externalId}:`, vespaError);
     }
   }
 }

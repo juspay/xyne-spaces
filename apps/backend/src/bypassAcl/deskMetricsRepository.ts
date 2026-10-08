@@ -154,6 +154,12 @@ export class DeskMetricsRepository {
         AND ta.value->>'newValue' IN (${Prisma.join(names)})
       )`;
 
+    // Older UI status changes were saved without `field`.
+    const statusV2Change = Prisma.sql`(
+      ta."activityType" = 'STATUS'
+      AND (ta.value->>'field' = 'statusV2' OR ta.value->>'field' IS NULL)
+    )`;
+
     const frtStopSql = (): Prisma.Sql => {
       const emailArm = Prisma.sql`
         (SELECT MIN(ta."timestamp") FROM "public"."ticket_activities" ta
@@ -176,7 +182,7 @@ export class DeskMetricsRepository {
 
     const resolvedStageNames = await this.resolvedStageNamesForChannel(channelId);
     const resolvedPredicate = ((): Prisma.Sql => {
-      const statusArm = Prisma.sql`(ta."activityType" = 'STATUS' AND ta.value->>'field' = 'statusV2' AND ta.value->>'newValue' = ${TicketStatusV2.COMPLETED})`;
+      const statusArm = Prisma.sql`(${statusV2Change} AND ta.value->>'newValue' = ${TicketStatusV2.COMPLETED})`;
       if (resolvedStageNames.length === 0) return statusArm;
       return Prisma.sql`(${statusArm} OR ${stageEntryPredicate(resolvedStageNames)})`;
     })();
@@ -189,8 +195,7 @@ export class DeskMetricsRepository {
           AND ta."timestamp" >= ${gte})`;
 
     const reopenedPredicate = Prisma.sql`(
-      ta."activityType" = 'STATUS'
-      AND ta.value->>'field' = 'statusV2'
+      ${statusV2Change}
       AND ta.value->>'oldValue' = ${TicketStatusV2.COMPLETED}
       AND ta.value->>'newValue' IN (${Prisma.join([
         TicketStatusV2.TODO,

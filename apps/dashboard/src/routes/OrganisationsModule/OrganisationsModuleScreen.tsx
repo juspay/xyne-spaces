@@ -8,6 +8,7 @@ import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { queries } from '../../zero/queries';
 import OrganisationsSidebar from './OrganisationsSidebar';
 import OrganisationsTabBar from './OrganisationsTabBar';
+import { cn } from '../../utils/classNames';
 import {
   useActiveOrganisationsGroup,
   useOrganisationsAccess,
@@ -89,10 +90,19 @@ const LEGACY_WORKSPACE_TABS: Record<string, OrganisationsSectionKey> = {
 export const legacyWorkspaceTab = (params: URLSearchParams): OrganisationsSectionKey =>
   LEGACY_WORKSPACE_TABS[params.get('tab') ?? ''] ?? 'general';
 
-/** Scrollable page body for the workspace settings sections (they bring their own headers). */
-export const OrganisationsPage = ({ children }: { children: ReactNode }): ReactElement => (
+/**
+ * Scrollable page body for the workspace settings sections (they bring their own headers).
+ * `wide` lifts the width cap for table-heavy sections like Members.
+ */
+export const OrganisationsPage = ({
+  children,
+  wide = false,
+}: {
+  children: ReactNode;
+  wide?: boolean;
+}): ReactElement => (
   <div className='h-full overflow-y-auto'>
-    <div className='max-w-5xl mx-auto w-full p-6'>{children}</div>
+    <div className={cn('mx-auto w-full p-6', wide ? 'max-w-7xl' : 'max-w-5xl')}>{children}</div>
   </div>
 );
 
