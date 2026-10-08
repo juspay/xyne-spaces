@@ -142,7 +142,8 @@ export const ProjectForm = ({
             data-testid='project-code-input'
           />
           <p className='text-xs text-muted-foreground'>
-            Your boards&apos; tickets will be {code || 'CODE'}-0001. You can add more codes per board later.
+            Your boards&apos; tickets will be {code || 'CODE'}-0001. You can add more codes per
+            board later.
           </p>
         </div>
       )}

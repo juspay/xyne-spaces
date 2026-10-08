@@ -1621,7 +1621,7 @@ const BoardEditScreen = ({
                       },
                     ]}
                     selected={namespaceId ?? ''}
-                    onSelect={value => setNamespaceId(value as string)}
+                    onSelect={value => setNamespaceId(value)}
                   />
                   <p className='mt-1 text-xs text-muted-foreground'>
                     The prefix for new tickets on this board; existing tickets keep their code.

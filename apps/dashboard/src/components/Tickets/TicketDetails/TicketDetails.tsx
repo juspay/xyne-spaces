@@ -1405,8 +1405,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     if (!sourceNamespaceId || !targetNamespaceId || sourceNamespaceId === targetNamespaceId) {
       return null;
     }
-    const nsList =
-      ticketNamespaces && !(ticketNamespaces instanceof Error) ? ticketNamespaces : [];
+    const nsList = ticketNamespaces && !(ticketNamespaces instanceof Error) ? ticketNamespaces : [];
     const targetCode = nsList.find(ns => ns.id === targetNamespaceId)?.code;
     if (!targetCode) return null;
     return { targetCode, ticketId: ticket.xyneId };
@@ -6110,7 +6109,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           open={showBoardChangeConfirmDialog}
           onOpenChange={setShowBoardChangeConfirmDialog}
           title={
-            boardChangeCodeMismatch ? 'Move to a board with a different code' : 'Confirm Board Change'
+            boardChangeCodeMismatch
+              ? 'Move to a board with a different code'
+              : 'Confirm Board Change'
           }
         >
           <div className='p-6'>
@@ -6118,12 +6119,19 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
               <>
                 <p className='text-sm text-muted-foreground mb-4'>
                   This board uses the code{' '}
-                  <span className='font-mono text-foreground'>{boardChangeCodeMismatch.targetCode}</span>,
-                  which differs from this ticket&apos;s. Ids never change, so a new ticket is created on the
-                  target board (with a{' '}
-                  <span className='font-mono text-foreground'>{boardChangeCodeMismatch.targetCode}</span> id)
-                  and linked to{' '}
-                  <span className='font-mono text-foreground'>{boardChangeCodeMismatch.ticketId}</span>.
+                  <span className='font-mono text-foreground'>
+                    {boardChangeCodeMismatch.targetCode}
+                  </span>
+                  , which differs from this ticket&apos;s. Ids never change, so a new ticket is
+                  created on the target board (with a{' '}
+                  <span className='font-mono text-foreground'>
+                    {boardChangeCodeMismatch.targetCode}
+                  </span>{' '}
+                  id) and linked to{' '}
+                  <span className='font-mono text-foreground'>
+                    {boardChangeCodeMismatch.ticketId}
+                  </span>
+                  .
                 </p>
                 <div className='mb-6'>
                   <Checkbox
@@ -6135,8 +6143,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
               </>
             ) : (
               <p className='text-sm text-muted-foreground mb-6'>
-                Changing the board will move this ticket to the first stage of the selected board. All
-                previous stage progress and change requests will be permanently removed.
+                Changing the board will move this ticket to the first stage of the selected board.
+                All previous stage progress and change requests will be permanently removed.
               </p>
             )}
 

@@ -1157,7 +1157,9 @@ const ProjectDetailScreen = (): ReactElement => {
         <TicketNamespacesModal
           projectId={projectId}
           defaultNamespaceId={
-            project && !(project instanceof Error) ? project.defaultTicketNamespaceId ?? null : null
+            project && !(project instanceof Error)
+              ? (project.defaultTicketNamespaceId ?? null)
+              : null
           }
           open={showManageNamespaces}
           onOpenChange={setShowManageNamespaces}

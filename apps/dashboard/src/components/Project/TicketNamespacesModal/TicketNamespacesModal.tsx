@@ -129,13 +129,16 @@ export const TicketNamespacesModal = ({
           <div>
             <p className='text-base font-semibold text-foreground'>Ticket codes</p>
             <p className='text-xs text-muted-foreground'>
-              The prefixes this project&apos;s boards use for ticket IDs. A board keeps its code for life.
+              The prefixes this project&apos;s boards use for ticket IDs. A board keeps its code for
+              life.
             </p>
           </div>
           <button
             type='button'
             onClick={() => onOpenChange(false)}
             aria-label='Close'
+            data-track-category='TicketNamespace'
+            data-track-name='CloseModal'
             className='shrink-0 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground'
           >
             <X className='size-4' />
@@ -198,7 +201,7 @@ export const TicketNamespacesModal = ({
                           variant='default'
                           size='sm'
                           loading={savingRename}
-                          onClick={() => handleRename(namespace.id)}
+                          onClick={() => void handleRename(namespace.id)}
                         >
                           Save
                         </Button>
@@ -226,8 +229,14 @@ export const TicketNamespacesModal = ({
           <p className='text-sm font-medium text-foreground'>Add a code</p>
           <div className='flex items-end gap-2'>
             <div className='w-28'>
-              <label className='mb-1 block text-xs text-muted-foreground'>Code</label>
+              <label
+                htmlFor='ticket-namespace-code'
+                className='mb-1 block text-xs text-muted-foreground'
+              >
+                Code
+              </label>
               <Input
+                id='ticket-namespace-code'
                 value={newCode}
                 onChange={e => setNewCode(sanitizeProjectCode(e.target.value))}
                 placeholder='SEA'
@@ -235,8 +244,14 @@ export const TicketNamespacesModal = ({
               />
             </div>
             <div className='flex-1'>
-              <label className='mb-1 block text-xs text-muted-foreground'>Name (optional)</label>
+              <label
+                htmlFor='ticket-namespace-name'
+                className='mb-1 block text-xs text-muted-foreground'
+              >
+                Name (optional)
+              </label>
               <Input
+                id='ticket-namespace-name'
                 value={newName}
                 onChange={e => setNewName(e.target.value)}
                 placeholder='e.g. Payments squad'
@@ -247,7 +262,7 @@ export const TicketNamespacesModal = ({
               variant='default'
               loading={creating}
               disabled={!newCode}
-              onClick={handleCreate}
+              onClick={() => void handleCreate()}
               data-track-category='TicketNamespace'
               data-track-name='CreateNamespace'
               data-track-metadata={JSON.stringify({ projectId })}
