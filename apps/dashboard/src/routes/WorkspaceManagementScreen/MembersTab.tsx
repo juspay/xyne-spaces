@@ -202,11 +202,17 @@ export const MembersTab = (): ReactElement => {
     <div data-testid='user-management-page' className='space-y-6'>
       <div>
         <h2 className='text-lg font-semibold text-foreground'>Members</h2>
-        <p className='text-sm text-muted-foreground'>
-          {users.length} member{users.length !== 1 ? 's' : ''} • {adminCount} admin
-          {adminCount !== 1 ? 's' : ''}
-          {canEditAccess && ' · Edit access controls which resources each member can use'}
-        </p>
+        <div className='space-y-0.5'>
+          <p className='text-sm text-muted-foreground'>
+            {users.length} member{users.length !== 1 ? 's' : ''} • {adminCount} admin
+            {adminCount !== 1 ? 's' : ''}
+          </p>
+          {canEditAccess && (
+            <p className='text-xs text-muted-foreground/80'>
+              Edit access controls which resources each member can use
+            </p>
+          )}
+        </div>
       </div>
 
       <div className='relative max-w-md'>

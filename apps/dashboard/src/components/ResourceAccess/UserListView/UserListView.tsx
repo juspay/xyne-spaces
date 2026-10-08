@@ -70,10 +70,7 @@ const UserRow = ({
       {/* Manager Column */}
       <div className='flex-1 min-w-0 px-4'>
         {manager ? (
-          <div className='flex items-center gap-2'>
-            <Avatar userId={manager.id} size='sm' />
-            <span className='text-sm text-foreground truncate'>{manager.name}</span>
-          </div>
+          <span className='block text-sm text-foreground truncate'>{manager.name}</span>
         ) : (
           <span className='text-sm text-muted-foreground'>-</span>
         )}
