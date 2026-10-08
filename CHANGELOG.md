@@ -1,3 +1,10 @@
+## [1.475.4](https://github.com/juspay/xyne-spaces/compare/v1.475.3...v1.475.4) (2026-10-08)
+
+
+### Bug Fixes
+
+* count UI status changes in desk metrics resolved, RT and reopened ([#2746](https://github.com/juspay/xyne-spaces/issues/2746)) ([0b937ad](https://github.com/juspay/xyne-spaces/commit/0b937ad3464b2f02143cd14775191865a8773780))
+
 ## [1.475.3](https://github.com/juspay/xyne-spaces/compare/v1.475.2...v1.475.3) (2026-10-08)
 
 
