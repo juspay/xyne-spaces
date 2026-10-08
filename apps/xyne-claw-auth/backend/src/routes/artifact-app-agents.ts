@@ -589,7 +589,9 @@ function stripCreateApp(config: unknown): unknown {
     ...(cfg as object),
     tools: {
       ...(cfg?.tools as object),
-      custom: custom.filter((s) => s !== "create-app" && s !== "read-app-file" && s !== "schedule-task"),
+      custom: custom.filter(
+        (s) => s !== "create-app" && s !== "read-app-file" && s !== "publish-app" && s !== "schedule-task",
+      ),
     },
   };
 }

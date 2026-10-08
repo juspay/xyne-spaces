@@ -98,7 +98,7 @@ export interface BubbleMessage {
   role: "user" | "assistant";
   content: string;
   contextItems?: Array<{
-    type: "channel" | "ticket" | "canvas" | "call";
+    type: "channel" | "ticket" | "canvas" | "call" | "app";
     id: string;
     title: string;
   }>;
@@ -335,11 +335,12 @@ function InlineCitations({ content }: { content: string }) {
 }
 
 function contextTypeLabel(
-  type: "channel" | "ticket" | "canvas" | "call",
+  type: "channel" | "ticket" | "canvas" | "call" | "app",
 ): string {
   if (type === "channel") return "Channel";
   if (type === "ticket") return "Ticket";
   if (type === "canvas") return "Canvas";
+  if (type === "app") return "App";
   return "Call";
 }
 
