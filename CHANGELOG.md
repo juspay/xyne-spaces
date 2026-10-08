@@ -1,3 +1,12 @@
+## [1.474.6](https://github.com/juspay/xyne-spaces/compare/v1.474.5...v1.474.6) (2026-10-08)
+
+
+### Bug Fixes
+
+* external id in call logs ([#2678](https://github.com/juspay/xyne-spaces/issues/2678)) ([995a71d](https://github.com/juspay/xyne-spaces/commit/995a71dda3c016fff39a2b45868bd014c891c80b))
+* rotate euler sandbox claims across variants e and f ([#2788](https://github.com/juspay/xyne-spaces/issues/2788)) ([1068406](https://github.com/juspay/xyne-spaces/commit/1068406c9200e34ae55439a14c7388fd3a462584))
+* show the kanban board's horizontal scrollbar so a mouse can scroll it ([#2784](https://github.com/juspay/xyne-spaces/issues/2784)) ([9e9f86e](https://github.com/juspay/xyne-spaces/commit/9e9f86e0feb774012bbd6769c9ee6885143c1a18))
+
 ## [1.474.5](https://github.com/juspay/xyne-spaces/compare/v1.474.4...v1.474.5) (2026-10-08)
 
 
