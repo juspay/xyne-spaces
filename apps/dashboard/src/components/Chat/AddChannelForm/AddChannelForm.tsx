@@ -840,25 +840,46 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
           ) : (
             <>
               <Select value={selectedInstalledAppId} onValueChange={setSelectedInstalledAppId}>
-                <SelectTrigger id='app-desk-select' className='w-full'>
-                  <SelectValue placeholder='Select a Xyne App' />
+                <SelectTrigger id='app-desk-select' className='w-full min-w-0'>
+                  {/* Render only the app name in the trigger — the item's description /
+                      desk count would otherwise be mirrored here and overflow the field. */}
+                  <SelectValue placeholder='Select a Xyne App'>
+                    <span className='block truncate'>
+                      {
+                        eligibleAppsData.find(app => app.installedAppId === selectedInstalledAppId)
+                          ?.name
+                      }
+                    </span>
+                  </SelectValue>
                 </SelectTrigger>
-                <SelectContent>
-                  {eligibleAppsData.map(app => (
-                    <SelectItem key={app.installedAppId} value={app.installedAppId}>
-                      {app.name}
-                      {app.description && (
-                        <span className='ml-2 text-xs text-muted-foreground'>
-                          {app.description}
+                {/* Pin the popover to the trigger width so long app descriptions wrap/truncate
+                    instead of stretching the dropdown across the viewport. */}
+                <SelectContent className='w-[var(--radix-select-trigger-width)] max-w-[var(--radix-select-trigger-width)]'>
+                  {eligibleAppsData.map(app => {
+                    const meta = [
+                      app.description,
+                      app.deskCount
+                        ? `backs ${app.deskCount} desk${app.deskCount === 1 ? '' : 's'}`
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ');
+                    return (
+                      <SelectItem
+                        key={app.installedAppId}
+                        value={app.installedAppId}
+                        title={meta ? `${app.name} — ${meta}` : app.name}
+                        className='[&>span:last-child]:min-w-0 [&>span:last-child]:flex-1'
+                      >
+                        <span className='flex min-w-0 flex-col'>
+                          <span className='truncate'>{app.name}</span>
+                          {meta && (
+                            <span className='truncate text-xs text-muted-foreground'>{meta}</span>
+                          )}
                         </span>
-                      )}
-                      {!!app.deskCount && (
-                        <span className='ml-2 text-xs text-muted-foreground'>
-                          backs {app.deskCount} desk{app.deskCount === 1 ? '' : 's'}
-                        </span>
-                      )}
-                    </SelectItem>
-                  ))}
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
               <p className='text-xs text-muted-foreground'>
