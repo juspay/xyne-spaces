@@ -17,6 +17,7 @@ import {
   ArrowDownIcon,
   PencilSimpleIcon,
   LightningIcon,
+  PulseIcon,
 } from "@phosphor-icons/react";
 import type { Agent, AgentLight } from "../../../lib/types";
 import { PromptVersionHistory } from "../../../components/PromptVersionHistory";
@@ -30,6 +31,7 @@ import { Dialog } from "../ui/Dialog";
 import { IntegrationCard } from "./IntegrationCard";
 import { SettingGroup, SettingRow } from "./SettingRow";
 import { OptimizationsSection, changedOptimizationKeys, useOptimizationCatalog } from "./OptimizationsSection";
+import { MonitorSection } from "./MonitorSection";
 import { Switch } from "../ui/Switch";
 import { ToolboxPicker } from "../ToolboxPicker";
 import { KnowledgeBasePicker } from "../KnowledgeBasePicker";
@@ -52,7 +54,8 @@ type ConfigTabKey =
   | "knowledge"
   | "toolbox"
   | "behavior"
-  | "optimizations";
+  | "optimizations"
+  | "monitor";
 
 /* ── constants ─────────────────────────────────────────────────────── */
 
@@ -3305,6 +3308,26 @@ export function AgentDetailLeftColumn({
       </div>
       )}
       </div>
+
+      {canEdit && (
+      <div className={`rounded-xl border bg-xyne-surface transition-colors ${activeTab === "monitor" ? "border-xyne-border-strong" : "border-xyne-border-subtle"}`}>
+      <DisclosureHeader
+        icon={PulseIcon}
+        label="Monitor"
+        tech="runs"
+        subtitle="how this agent's runs are doing: failures, durations, models, stuck runs"
+        summary="Last 7 days"
+        open={activeTab === "monitor"}
+        onToggle={() => toggleSection("monitor")}
+      />
+
+      {activeTab === "monitor" && (
+      <div className="border-t border-xyne-border-subtle px-4 py-4">
+        <MonitorSection slug={agent.slug} />
+      </div>
+      )}
+      </div>
+      )}
 
       {/* Delete moved to the page header (owner-only Trash button there) so
           it's reachable without scrolling to the bottom of the config. */}

@@ -763,6 +763,26 @@ export async function decideDelegationRequest(
   return data.data;
 }
 
+export interface AgentRunHealth {
+  windowDays: number;
+  totals: { runs: number; completed: number; failed: number; cancelled: number; running: number };
+  duration: { p50Ms: number | null; p90Ms: number | null; llmP50Ms: number | null; toolP50Ms: number | null };
+  daily: Array<{ day: string; runs: number; failed: number }>;
+  byTrigger: Array<{ trigger: string; runs: number; failed: number; p50Ms: number | null; p90Ms: number | null }>;
+  byModel: Array<{ provider: string; model: string; runs: number; failed: number; llmP50Ms: number | null }>;
+  topErrors: Array<{ error: string; count: number; lastAt: string }>;
+  stuckAfterMs: number;
+  runningNow: Array<{ sessionId: string; trigger: string; startedAt: string; ageMs: number; stuck: boolean; currentTool: string | null }>;
+  recentFailures: Array<{ sessionId: string; trigger: string; startedAt: string; model: string | null; error: string }>;
+}
+
+export async function getAgentRunHealth(slug: string, days: number): Promise<AgentRunHealth> {
+  const data = await request<{ success: boolean; data: AgentRunHealth }>(
+    `${AUTH_API_URL}/api/v1/agents/${encodeURIComponent(slug)}/monitor?days=${days}`,
+  );
+  return data.data;
+}
+
 export async function revokeDelegationRequest(slug: string, grantId: string): Promise<AgentDelegationGrant> {
   const data = await request<{ success: boolean; data: AgentDelegationGrant }>(
     `${AUTH_API_URL}/api/v1/agents/${encodeURIComponent(slug)}/delegation-requests/${encodeURIComponent(grantId)}/revoke`,
