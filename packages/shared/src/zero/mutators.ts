@@ -3203,27 +3203,12 @@ export const mutators = defineMutators({
             isDeleted: true,
           });
 
-          // Check if there are any remaining non-deleted attachments for this message
-          const remainingAttachments = await tx.run(
-            zql.message_attachments
-              .where('entityId', message.messageId)
-              .where('isDeleted', false),
-          );
-
-          // Only inspect content if no non-deleted attachments remain
-          if (remainingAttachments.length === 0) {
-            // Check if the message content is empty (including HTML-only content like <p><br></p>)
-            const doc = new DOMParser().parseFromString(message.content, 'text/html');
-            const plainText = doc.body.textContent?.trim();
-
-            if (plainText === '') {
-              // All attachments are soft-deleted and message body is empty.
-              // Keep the message so tombstones ("This file was deleted.") remain visible.
-              // Do NOT delete the message.
-            }
-            // Note: we intentionally do NOT set hasAttachment: false — the soft-deleted
-            // attachments still need to appear as tombstones in the UI.
-          }
+          // Intentionally no further work here: the message is kept even when every
+          // attachment is soft-deleted and the body is empty, so the "This file was
+          // deleted." tombstone stays visible, and hasAttachment stays true for the
+          // same reason. This mutator also runs as the optimistic client mutator in
+          // React Native (Hermes), which has no DOMParser — do not add browser-only
+          // APIs here (see utils/messageContent.ts for isomorphic helpers).
         } else {
           await tx.mutate.message_attachments.delete({ id: attachment.id });
 
