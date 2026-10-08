@@ -1163,7 +1163,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         const outcome = await applyConversationFork(
           params,
           { conversationId, ...(continueChannelId ? { channelId: continueChannelId } : {}), agentSlug: agent.slug, userId: writeUserId },
-          { post: (body) => postAsSpacesApp(appToken, "/chat/postMessage", body) as Promise<{ conversationId?: string }> },
+          { post: (body) => postAsSpacesApp(appToken, "/chat/postMessage", body) as Promise<{ conversationId?: string; channelId?: string }> },
         );
         const text = outcome.ok ? outcome.message : `Fork failed: ${outcome.error}`;
         resp = { type: "close_screen", finalMessage: text };
