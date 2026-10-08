@@ -646,6 +646,9 @@ export const boardComplexityScoreTable = table("board_complexity_scores")
     boardId: string(),
     weight: number(),
     usePercentage: boolean(),
+    percentageWindowDays: number().optional(),
+    percentageShareBasis: string().optional(),
+    percentageWindowStartAt: number().optional(),
     createdAt: number(),
     updatedAt: number(),
     createdBy: string(),
@@ -1406,6 +1409,7 @@ export const emailChannelPreferenceTable = table("email_channel_preferences")
     deskReportRangeDays: number().optional(),
     duplicateScopeConfig: string().optional(),
     slackDeskTriggerMode: string().optional(),
+    deskAppIds: string().optional(),
   })
   .primaryKey("channelId");
 
@@ -2116,6 +2120,7 @@ export const sdlcFolderTable = table("sdlc_folders")
     workspaceId: string(),
     id: string(),
     name: string(),
+    icon: string().optional(),
     createdBy: string(),
     createdAt: number(),
     updatedAt: number(),
@@ -2129,6 +2134,7 @@ export const sdlcTrackTable = table("sdlc_tracks")
     repoId: string().optional(),
     name: string(),
     description: string().optional(),
+    icon: string().optional(),
     status: string(),
     createdBy: string(),
     createdAt: number(),
@@ -3120,6 +3126,20 @@ export const executionRunLogTable = table("execution_run_logs")
     dedupChecks: json().optional(),
     error: string().optional(),
     durationMs: number().optional(),
+    createdAt: number(),
+  })
+  .primaryKey("id");
+
+export const radarPrLinkTable = table("radar_pr_links")
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    prUrl: string(),
+    scopeKey: string(),
+    channelId: string(),
+    conversationId: string(),
+    messageId: string(),
+    postedAt: number(),
     createdAt: number(),
   })
   .primaryKey("id");
@@ -5460,6 +5480,7 @@ export const schema = createSchema(
       executionThreadStateTable,
       executionItemMutationTable,
       executionRunLogTable,
+      radarPrLinkTable,
       radarRuleTable,
     ],
     relationships: [
@@ -5778,4 +5799,5 @@ export type ExecutionItem = Row<typeof schema.tables.execution_items>;
 export type ExecutionThreadState = Row<typeof schema.tables.execution_thread_states>;
 export type ExecutionItemMutation = Row<typeof schema.tables.execution_item_mutations>;
 export type ExecutionRunLog = Row<typeof schema.tables.execution_run_logs>;
+export type RadarPrLink = Row<typeof schema.tables.radar_pr_links>;
 export type RadarRule = Row<typeof schema.tables.radar_rules>;
