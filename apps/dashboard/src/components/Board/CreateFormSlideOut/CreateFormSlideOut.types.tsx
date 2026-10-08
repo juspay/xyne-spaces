@@ -3,6 +3,8 @@ import { FormFieldType, type FieldEnumOption } from '@xyne/shared';
 export interface FormField {
   id: string;
   persistedFieldId?: string | undefined;
+  /** form_fields row id; equals persistedFieldId for a form-local (legacy) field. */
+  membershipId?: string | undefined;
   fieldName: string;
   fieldType: FormFieldType;
   isOptional: boolean;
@@ -39,17 +41,4 @@ export interface CreateFormSlideOutProps {
   /** Render builder in parent layout instead of fixed slide-out. */
   embedded?: boolean;
   submitLabel?: string;
-}
-
-export interface SelectOption {
-  value: string;
-  label: string;
-}
-
-export interface SelectDropdownProps {
-  value: string;
-  onChange: (value: string) => void;
-  options: SelectOption[];
-  disabled?: boolean;
-  placeholder?: string;
 }
