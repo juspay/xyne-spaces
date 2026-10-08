@@ -23,6 +23,9 @@ import log from 'electron-log/main';
 
 import { config } from '../app/config';
 import { keychain } from '../keychain';
+// Cycle with window/manager is fine: the binding is only read inside a function body, long after
+// both modules have finished loading.
+import { getMainWindow } from '../window/manager';
 import { Logger } from './logger/Logger';
 import { EnrollmentEvent } from './logger/enrollment-events';
 import {
@@ -242,7 +245,13 @@ export async function recoverFromDeadCertificate(
         ...(options.detail ? { detail: options.detail } : {}),
     });
 
-    const mainWindow = BrowserWindow.getAllWindows().find(w => !w.isDestroyed()) ?? null;
+    // Must be the main window by identity, never "whatever BrowserWindow comes first".
+    //
+    // The app keeps several small always-on-top windows alive — the recording pill, the tray
+    // renderer, the claw overlay — and picking by array position navigated one of those to the
+    // enrollment page instead: a 156x162 panel pinned to the screen edge, showing the enrollment
+    // flow on top of whatever the user was doing, and never restored to its own content.
+    const mainWindow = getMainWindow();
 
     // Stop the dead page first: a dashboard mid-reconnect keeps firing requests that all fail
     // client auth, which is exactly the noise the user described as "all calls fail".
@@ -285,7 +294,10 @@ export async function recoverFromDeadCertificate(
  */
 async function navigateToEnrollment(mainWindow: BrowserWindow | null): Promise<void> {
     if (!mainWindow || mainWindow.isDestroyed()) {
-        log.error('[mTLSRecovery] No window available to show enrollment');
+        // No main window — the app is running in the tray with nothing to navigate. Conjuring a
+        // window here would interrupt the user; the reason is already persisted, so the next
+        // launch opens on enrollment and explains itself.
+        log.warn('[mTLSRecovery] No main window to show enrollment; deferring to next launch');
         return;
     }
 

@@ -2,14 +2,31 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const storeData = new Map<string, unknown>();
 
+/** Swapped per test so the recovery path can be pointed at a main window, or at none. */
+const mainWindowMock = vi.hoisted(() => ({
+  main: null as unknown,
+  allWindows: [] as unknown[],
+}));
+
+const makeWindow = (name: string) => ({
+  name,
+  isDestroyed: () => false,
+  isVisible: () => true,
+  show: vi.fn(),
+  focus: vi.fn(),
+  loadURL: vi.fn().mockResolvedValue(undefined),
+  webContents: { stop: vi.fn() },
+});
+
 vi.mock('electron-log/main', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 vi.mock('electron', () => ({
   app: { on: vi.fn(), once: vi.fn(), getVersion: () => '0.0.0-test' },
   powerMonitor: { on: vi.fn() },
-  BrowserWindow: { getAllWindows: () => [] },
+  BrowserWindow: { getAllWindows: () => mainWindowMock.allWindows },
 }));
+vi.mock('../window/manager', () => ({ getMainWindow: () => mainWindowMock.main }));
 vi.mock('electron-store', () => ({
   default: class {
     get(key: string): unknown {
@@ -36,6 +53,8 @@ vi.mock('../app/config', () => ({
 }));
 
 import {
+  recoverFromDeadCertificate,
+  resetRecoveryStateForTests,
   isClientAuthFailure,
   isStoredCertificateExpired,
   getStoredCertificateExpiry,
@@ -123,5 +142,43 @@ describe('stored certificate expiry', () => {
   it('survives an unparseable certificate — the reactive path still covers the user', () => {
     expect(() => recordIssuedCertificate('not a certificate')).not.toThrow();
     expect(getStoredCertificateExpiry()).toBeNull();
+  });
+});
+
+describe('recovery target window', () => {
+  beforeEach(() => {
+    storeData.clear();
+    resetRecoveryStateForTests();
+  });
+
+  it('navigates the main window, never another app window', async () => {
+    // The recording pill, tray renderer and claw overlay are all live BrowserWindows. Selecting
+    // by array position navigated one of those small always-on-top panels to the enrollment
+    // page, leaving it pinned over the user's screen showing a flow it never owned.
+    const pill = makeWindow('recording-pill');
+    const main = makeWindow('main');
+    mainWindowMock.allWindows = [pill, main];
+    mainWindowMock.main = main;
+
+    await recoverFromDeadCertificate('certificate_expired', { trigger: 'test' });
+
+    expect(main.loadURL).toHaveBeenCalledWith('https://auth.example.test');
+    expect(main.webContents.stop).toHaveBeenCalled();
+    expect(pill.loadURL).not.toHaveBeenCalled();
+    expect(pill.webContents.stop).not.toHaveBeenCalled();
+  });
+
+  it('touches nothing when the app is in the tray with no main window', async () => {
+    const pill = makeWindow('recording-pill');
+    mainWindowMock.allWindows = [pill];
+    mainWindowMock.main = null;
+
+    await recoverFromDeadCertificate('certificate_expired', { trigger: 'test' });
+
+    expect(pill.loadURL).not.toHaveBeenCalled();
+    // The reason is still recorded, so the next launch opens on enrollment and explains itself.
+    expect(storeData.get('mtls.enrollmentReason')).toMatchObject({
+      reason: 'certificate_expired',
+    });
   });
 });
