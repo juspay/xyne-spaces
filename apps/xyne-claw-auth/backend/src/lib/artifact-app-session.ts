@@ -1,16 +1,14 @@
 /**
- * One app per conversation.
+ * Persist a generated artifact onto the app it was built for.
  *
- * `create-app` has no update path — every call emits a complete project — so
- * before this a thread that iterated on one app produced N unrelated apps
- * (observed: five copies of "Univer Spreadsheet" in a single conversation).
- * Each was a full re-imagining, so "fix the header" could silently undo work
- * from two turns earlier, and the Library filled with dead iterations.
+ * `create-app` stamps the target onto the manifest: a freshly minted `appId`
+ * (`newApp: true`) on a create, or the id of the user's existing app on an
+ * update. Apps used to be keyed by conversation — one per thread — which made
+ * it impossible to build a second app in a chat or to keep working on an app
+ * from anywhere but the thread that created it. Addressing by id removes both.
  *
- * This turns the second and later generations in a thread into VERSIONS of the
- * first app instead. Nothing about the tool or the wire format changes: the
- * attachment still carries the whole project. We simply notice, at persist
- * time, that this conversation already owns an app.
+ * Every later generation of the same app becomes a VERSION of it rather than an
+ * unrelated copy, so the Library does not fill with dead iterations.
  *
  * It runs in the assistant-result path rather than inside the tool because the
  * tool executes in xyne-claw (stateless, no database) and must stay a pure
@@ -49,24 +47,41 @@ export interface SessionAppResult {
   created: boolean;
 }
 
+/** Which app a build is for, as `create-app` stamped it on the manifest. */
+export interface ArtifactAppTarget {
+  appId?: unknown;
+  newApp?: unknown;
+}
+
+/** Same shape the tool mints and accepts; anything else is not an id we wrote. */
+const APP_ID_RE = /^[A-Za-z0-9_-]{8,64}$/;
+
 /**
- * Attach a freshly generated artifact to its conversation's app, creating that
- * app on the first generation.
+ * Attach a freshly generated artifact to its app, creating that app when the
+ * tool minted a new id for it.
  *
- * Returns null — never throws — when the artifact should not be session-scoped
- * (non-chat conversation, unvalidatable payload, no workspace) or when
- * something goes wrong. A failure here must not lose the user's artifact: the
- * attachment is still written and still renders, it simply is not yet an app.
+ * Ownership is re-checked here even though the tool checked it: the tool runs in
+ * another service, and this is the write that actually lands. A build aimed at
+ * an app the user does not own is NOT versioned onto it — it stays a plain
+ * attachment.
+ *
+ * Returns null — never throws — when the artifact should not become an app
+ * (non-chat conversation, unvalidatable payload, no workspace, foreign or
+ * missing target) or when something goes wrong. A failure here must not lose
+ * the user's artifact: the attachment is still written and still renders, it
+ * simply is not yet an app.
  */
-export async function attachArtifactToSessionApp(input: {
+export async function attachArtifactToApp(input: {
   conversationId: string | null | undefined;
   userId: string;
   /** Raw artifact JSON — the same bytes written to the chat attachment. */
   payload: Buffer;
+  /** The `reactArtifact` manifest from the attachment metadata. */
+  target: ArtifactAppTarget;
   /** Request's verified Spaces workspace — disambiguates two-membership users. */
   workspaceId?: string;
 }): Promise<SessionAppResult | null> {
-  const { conversationId, userId, payload, workspaceId: workspaceHint } = input;
+  const { conversationId, userId, payload, target, workspaceId: workspaceHint } = input;
   if (!isChatConversation(conversationId) || !userId) return null;
 
   // Re-validate rather than trust the bytes, exactly as the Save path does, and
@@ -82,7 +97,7 @@ export async function attachArtifactToSessionApp(input: {
     title = built.payload.title.slice(0, MAX_TITLE);
     icon = built.payload.icon ?? null;
   } catch (err) {
-    log.warn(`artifact failed validation, not session-scoping: ${String(err)}`);
+    log.warn(`artifact failed validation, not attaching to an app: ${String(err)}`);
     return null;
   }
 
@@ -92,13 +107,12 @@ export async function attachArtifactToSessionApp(input: {
   const contentHash = createHash("sha256").update(canonical).digest("hex");
 
   try {
-    const existing = await prisma.artifactApp.findUnique({
-      where: { conversationId: conversationId as string },
-    });
+    const appId = typeof target.appId === "string" && APP_ID_RE.test(target.appId) ? target.appId : null;
 
-    if (!existing) {
+    if (!appId) {
+      // A build from a xyne-claw that predates app ids (deploy skew). Become a
+      // new app rather than guess which one it meant.
       return await createSessionApp({
-        conversationId: conversationId as string,
         workspaceId,
         userId,
         title,
@@ -109,15 +123,42 @@ export async function attachArtifactToSessionApp(input: {
       });
     }
 
+    const existing = await prisma.artifactApp.findUnique({ where: { id: appId } });
+
+    if (!existing) {
+      // Only a create may bring an app into being, and only under the id the
+      // tool minted for it. An update whose app vanished stays an attachment.
+      if (target.newApp !== true) {
+        log.warn(`update targeted missing app ${appId}; not versioning`);
+        return null;
+      }
+      return await createSessionApp({
+        id: appId,
+        workspaceId,
+        userId,
+        title,
+        icon,
+        canonical,
+        manifest,
+        contentHash,
+      });
+    }
+
+    if (existing.isArchived || existing.ownerUserId !== userId) {
+      log.warn(`user ${userId} cannot write app ${appId}; not versioning`);
+      return null;
+    }
+
     return await appendSessionVersion({ app: existing, userId, icon, canonical, manifest, contentHash });
   } catch (err) {
-    log.error(`failed to session-scope artifact for ${conversationId}: ${String(err)}`);
+    log.error(`failed to attach artifact to an app (conversation ${conversationId}): ${String(err)}`);
     return null;
   }
 }
 
 async function createSessionApp(input: {
-  conversationId: string;
+  /** The id `create-app` minted, so the agent can already address the app. */
+  id?: string;
   workspaceId: string;
   userId: string;
   title: string;
@@ -128,9 +169,9 @@ async function createSessionApp(input: {
 }): Promise<SessionAppResult | null> {
   const app = await prisma.artifactApp.create({
     data: {
+      ...(input.id ? { id: input.id } : {}),
       workspaceId: input.workspaceId,
       ownerUserId: input.userId,
-      conversationId: input.conversationId,
       title: input.title,
       ...(input.icon ? { icon: input.icon } : {}),
       // Created, never shared. Auto-materializing must not auto-publish —
@@ -167,7 +208,7 @@ async function createSessionApp(input: {
     data: { headVersionId: version.id },
   });
 
-  log.info(`session app created ${app.id} for ${input.conversationId}`);
+  log.info(`app created ${app.id}`);
   return { appId: app.id, versionId: version.id, versionNumber: 1, created: true };
 }
 
@@ -236,6 +277,6 @@ async function appendSessionVersion(input: {
     },
   });
 
-  log.info(`session app ${app.id} advanced to v${versionNumber}`);
+  log.info(`app ${app.id} advanced to v${versionNumber}`);
   return { appId: app.id, versionId: version.id, versionNumber, created: false };
 }

@@ -3026,7 +3026,7 @@ function chatReadQuery(allRuns: boolean, scope?: ChatReadScope): string {
   return qs ? `?${qs}` : "";
 }
 
-export type ContextType = "channel" | "ticket" | "canvas" | "call" | "repository";
+export type ContextType = "channel" | "ticket" | "canvas" | "call" | "app" | "repository";
 export type ContextSearchType = ContextType | "all";
 
 export interface ContextItem {

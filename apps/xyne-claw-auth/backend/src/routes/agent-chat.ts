@@ -79,7 +79,7 @@ import {
   type ContextSearchType,
 } from "../services/agentChatContextService.js";
 import { appendCitations, collectCitationIconUrls } from "../lib/citations.js";
-import { getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { getSpacesAuthForUser, getWorkspaceIdForUser, requestWorkspaceHint } from "../lib/spaces-db.js";
 import { consumeClawStream } from "../lib/consume-claw-stream.js";
 import { cancelRunSession } from "../lib/experiment.js";
 import { redisService } from "../redis.js";
@@ -87,7 +87,7 @@ import { subscribeLive, publishLiveEvent, type LiveEvent } from "../lib/live-con
 import { pushDelta, pushToolPart, endDeltaCoalescer, liveUserIdForSession } from "../lib/live-delta-coalescer.js";
 import { resolveSdlcRepositoryForUser } from "../lib/sdlc-repository-context.js";
 
-import { attachArtifactToSessionApp } from "../lib/artifact-app-session.js";
+import { attachArtifactToApp, type ArtifactAppTarget } from "../lib/artifact-app-session.js";
 import { createLogger } from "../logger.js";
 import { safeFetch } from "../lib/safe-fetch.js";
 const log = createLogger("agent-chat");
@@ -383,7 +383,7 @@ interface PersistedAttachment {
   /**
    * The artifact manifest, ENRICHED with appId/versionId.
    *
-   * This is the only channel that can carry them live. `attachArtifactToSessionApp`
+   * This is the only channel that can carry them live. `attachArtifactToApp`
    * runs at persist time — after the tool returned — so the tool's own metadata
    * has no appId, and without it a freshly generated app cannot address itself:
    * the card shows Save (thinking it is unsaved), Expand falls back to the
@@ -601,17 +601,18 @@ async function persistAssistantResult(args: {
               ? { slideJson: fallbackSlide }
               : undefined;
 
-        // A conversation owns ONE app: the first generated artifact creates it,
-        // every later one becomes a version of it. Done here rather than in the
-        // tool because the tool runs in xyne-claw with no database. The ids are
-        // stamped onto the manifest so the chat card can address the app (and
-        // its version history) instead of only the raw attachment.
+        // Land the build on the app create-app aimed it at — a new app on a
+        // create, a new version of the user's app on an update. Done here rather
+        // than in the tool because the tool runs in xyne-claw with no database.
+        // The ids are stamped onto the manifest so the chat card can address the
+        // app (and its version history) instead of only the raw attachment.
         const reactArtifact = attachmentMetadata?.["reactArtifact"];
         if (reactArtifact && typeof reactArtifact === "object") {
-          const session = await attachArtifactToSessionApp({
+          const session = await attachArtifactToApp({
             conversationId: args.conversationId,
             userId: args.userId,
             payload: buffer,
+            target: reactArtifact as ArtifactAppTarget,
             ...(args.workspaceId ? { workspaceId: args.workspaceId } : {}),
           });
           if (session) {
@@ -1034,8 +1035,8 @@ router.get("/:slug/context/search", async (req: Request<{ slug: string }>, res: 
     }
 
     const rawType = String(req.query["type"] ?? "all").trim() as ContextSearchType;
-    if (rawType !== "all" && rawType !== "channel" && rawType !== "ticket" && rawType !== "canvas" && rawType !== "call" && rawType !== "repository") {
-      res.status(400).json({ success: false, error: "type must be one of all|channel|ticket|canvas|call|repository" });
+    if (rawType !== "all" && rawType !== "channel" && rawType !== "ticket" && rawType !== "canvas" && rawType !== "call" && rawType !== "app" && rawType !== "repository") {
+      res.status(400).json({ success: false, error: "type must be one of all|channel|ticket|canvas|call|app|repository" });
       return;
     }
 
@@ -1049,7 +1050,11 @@ router.get("/:slug/context/search", async (req: Request<{ slug: string }>, res: 
       return;
     }
 
-    const items = await searchContextItems(rawType, q, limit, spacesAuth);
+    const workspaceHint = requestWorkspaceHint(req);
+    const items = await searchContextItems(rawType, q, limit, spacesAuth, {
+      userId,
+      ...(workspaceHint ? { workspaceHint } : {}),
+    });
     res.json({ items });
   } catch (err) {
     log.error("[agent-chat] context search error:", err);
@@ -1707,7 +1712,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     let resolvedContext: { promptPrefix?: string; contextFiles: Array<{ path: string; content: string }> } = { contextFiles: [] };
     if (attachedContextItems.length > 0) {
       try {
-        resolvedContext = await buildAttachedContextPayload(attachedContextItems, spacesAuth);
+        resolvedContext = await buildAttachedContextPayload(attachedContextItems, spacesAuth, { userId });
       } catch (err) {
         log.error("[agent-chat] attached context resolve error:", err);
       }

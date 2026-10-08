@@ -1,3 +1,32 @@
+## [1.481.1](https://github.com/juspay/xyne-spaces/compare/v1.481.0...v1.481.1) (2026-10-08)
+
+
+### Bug Fixes
+
+* align organizer rows and add double-click rename ([#2815](https://github.com/juspay/xyne-spaces/issues/2815)) ([1d3af4a](https://github.com/juspay/xyne-spaces/commit/1d3af4ae6b6d109ddabe716e614f1a33a4dcbd04))
+
+## [1.481.0](https://github.com/juspay/xyne-spaces/compare/v1.480.1...v1.481.0) (2026-10-08)
+
+
+### Features
+
+* Add artifact app tools and artifact apps in context ([#2807](https://github.com/juspay/xyne-spaces/issues/2807)) ([ab2cbc0](https://github.com/juspay/xyne-spaces/commit/ab2cbc04732a6c1aed94babf9fe9926c73bf6c6f))
+
+## [1.480.1](https://github.com/juspay/xyne-spaces/compare/v1.480.0...v1.480.1) (2026-10-08)
+
+
+### Bug Fixes
+
+* MiniCallView re-mounts header buttons and resize handles on every render ([#2759](https://github.com/juspay/xyne-spaces/issues/2759)) ([249e23f](https://github.com/juspay/xyne-spaces/commit/249e23f98cfdae00e799619cc41471dd73a1c976))
+* update recording controls and floating pill behavior ([#2817](https://github.com/juspay/xyne-spaces/issues/2817)) ([8e71b11](https://github.com/juspay/xyne-spaces/commit/8e71b1104ae54e329b05f58bcebe73da6f24d8f4))
+
+## [1.480.0](https://github.com/juspay/xyne-spaces/compare/v1.479.0...v1.480.0) (2026-10-08)
+
+
+### Features
+
+* notification-on-disconnect-and-errors ([#2810](https://github.com/juspay/xyne-spaces/issues/2810)) ([2dc897a](https://github.com/juspay/xyne-spaces/commit/2dc897a31ef1794014d98d439751eebf560f2a32))
+
 ## [1.479.0](https://github.com/juspay/xyne-spaces/compare/v1.478.0...v1.479.0) (2026-10-08)
 
 

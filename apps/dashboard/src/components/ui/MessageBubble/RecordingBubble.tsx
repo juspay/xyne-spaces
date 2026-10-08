@@ -1,8 +1,12 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AudioLines } from 'lucide-react';
+import { ChevronRight, PauseBig, PlayBig, StopBig } from '@xyne/icons';
+import { Button } from '../Button/Button';
+import { Tooltip } from '../Tooltip';
 import { useAuth } from '../../../hooks/useAuth';
 import { useCallDuration } from '../../../hooks/useCalls';
+import { sendRecordingEvent, useRecordingStore } from '../../../hooks/useRecordingStore';
+import { useStopRecording } from '../../../hooks/useStopRecording';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { RecordingSharePill } from './RecordingSharePill';
 import { MessageMetadata } from './MessageBubble.utils';
@@ -46,6 +50,11 @@ export const RecordingBubble: React.FC<RecordingBubbleProps> = ({ message, callI
   const startedAt = message.createdAt ? Number(message.createdAt) : undefined;
   const duration = useCallDuration(startedAt, isActive);
 
+  const localStatus = useRecordingStore(ctx => (ctx.externalId === callId ? ctx.status : null));
+  const isPaused = localStatus === 'paused';
+  const canControl = !isEnded && (localStatus === 'recording' || isPaused);
+  const stopRecording = useStopRecording();
+
   const canView = isEnded || (!!user?.id && metadata?.createdBy === user.id);
 
   const goToRecording = (): void => {
@@ -80,33 +89,76 @@ export const RecordingBubble: React.FC<RecordingBubbleProps> = ({ message, callI
   }
 
   return (
-    <button
-      type='button'
-      onClick={goToRecording}
-      disabled={!canView}
-      className='group flex w-full max-w-lg items-center gap-2.5 rounded-lg border border-border bg-card enabled:hover:bg-muted/50 transition-colors px-3 py-1.5 text-left disabled:cursor-default'
+    <div
+      className='flex w-full max-w-lg items-center gap-2.5 rounded-xl border border-border bg-card py-1 pl-3 pr-1'
       data-testid='recording-active-card'
-      data-track-category='RECORDING'
-      data-track-name='OPEN_LIVE_RECORDING_FROM_THREAD'
     >
-      <span className='flex size-5 shrink-0 items-center justify-center rounded-md bg-muted'>
-        <AudioLines size={12} strokeWidth={2.5} className='text-muted-foreground' />
+      <span className='relative flex size-2 shrink-0' aria-hidden='true'>
+        {!isPaused && (
+          <span className='absolute inline-flex h-full w-full animate-ping rounded-full bg-status-failure opacity-75' />
+        )}
+        <span
+          className={`relative inline-flex size-2 rounded-full ${isPaused ? 'bg-muted-foreground' : 'bg-status-failure'}`}
+        />
       </span>
       <span className='min-w-0 flex-1 truncate text-sm font-medium text-foreground'>
         Recording notes
-        <span className='ml-1.5 font-normal text-xs text-muted-foreground'>
-          {duration ? `${duration} elapsed` : 'Just started'}
+        <span className='ml-1.5 font-normal text-xs tabular-nums text-muted-foreground'>
+          {isPaused ? 'Paused' : duration ? `${duration} elapsed` : 'Just started'}
         </span>
       </span>
-      <span className='relative flex size-2 shrink-0' aria-hidden='true'>
-        <span className='absolute inline-flex h-full w-full animate-ping rounded-full bg-status-failure opacity-75' />
-        <span className='relative inline-flex size-2 rounded-full bg-status-failure' />
-      </span>
-      {canView && (
-        <span className='text-xs font-medium text-foreground shrink-0 rounded-full border border-border px-2 py-0.5'>
-          View
-        </span>
+      {canControl && (
+        <div className='flex shrink-0 items-center gap-1'>
+          <Tooltip content={isPaused ? 'Resume recording' : 'Pause recording'} side='top'>
+            <Button
+              type='button'
+              variant='ghost'
+              size='icon'
+              className='size-6 rounded-full text-muted-foreground hover:text-foreground'
+              onClick={() =>
+                sendRecordingEvent({ type: isPaused ? 'resumeRecording' : 'pauseRecording' })
+              }
+              aria-label={isPaused ? 'Resume recording' : 'Pause recording'}
+              data-track-category='RECORDING'
+              data-track-name={isPaused ? 'RESUME_FROM_THREAD' : 'PAUSE_FROM_THREAD'}
+            >
+              {isPaused ? (
+                <PlayBig size={14} variant='Solid' />
+              ) : (
+                <PauseBig size={14} strokeWidth={4} variant='Solid' />
+              )}
+            </Button>
+          </Tooltip>
+          <Tooltip content='End recording' side='top'>
+            <Button
+              type='button'
+              variant='destructive'
+              size='icon'
+              className='size-6 rounded-full'
+              onClick={stopRecording}
+              aria-label='End recording'
+              data-track-category='RECORDING'
+              data-track-name='END_FROM_THREAD'
+            >
+              <StopBig size={14} variant='Solid' />
+            </Button>
+          </Tooltip>
+        </div>
       )}
-    </button>
+      {canView && (
+        <Button
+          type='button'
+          variant='default'
+          size='sm'
+          onClick={goToRecording}
+          className='h-7 gap-0.5 rounded-full pl-3 pr-2 text-xs font-semibold bg-card hover:bg-border text-foreground'
+          data-track-category='RECORDING'
+          data-track-name='OPEN_LIVE_RECORDING_FROM_THREAD'
+        >
+          View
+          <ChevronRight size={12} strokeWidth={2.2} />
+        </Button>
+      )}
+    </div>
   );
 };

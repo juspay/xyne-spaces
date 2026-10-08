@@ -339,7 +339,7 @@ function dedupeToolsByName(tools: ToolDefinition[]): ToolDefinition[] {
 
 /** Snapshot for shutdown/drain forensics — one line per still-active run. */
 /**
- * `read-app-file` rides on `create-app` selection.
+ * `read-app-file` and `publish-app` ride on `create-app` selection.
  *
  * The two are one feature. `create-app` writes a project but hands back only a
  * manifest — file paths, never contents — so without the read half an
@@ -355,7 +355,10 @@ function dedupeToolsByName(tools: ToolDefinition[]): ToolDefinition[] {
  */
 function expandCustomSelection(custom: string[] | undefined): Set<string> {
   const selected = new Set(custom ?? []);
-  if (selected.has("create-app")) selected.add("read-app-file");
+  if (selected.has("create-app")) {
+    selected.add("read-app-file");
+    selected.add("publish-app");
+  }
   return selected;
 }
 
@@ -3198,16 +3201,19 @@ export async function processTask(
       eventType === "artifact_app" || (conversationId?.startsWith("app_") ?? false);
     if (isArtifactAppRun) {
       const before = allTools.length;
-      // read-app-file goes with create-app: it is keyed by conversation, and an
-      // app-invoked run carries the `app_` conversation of the app itself, so
-      // leaving it in would let an app read its own source back.
+      // The app tools go with create-app: an app-invoked run acts as the viewer,
+      // so leaving them in would let an app read, rewrite or publish apps —
+      // including itself — on whoever opens it.
       allTools = allTools.filter(
         (t) =>
-          t.name !== "create-app" && t.name !== "read-app-file" && t.name !== "schedule-task",
+          t.name !== "create-app" &&
+          t.name !== "read-app-file" &&
+          t.name !== "publish-app" &&
+          t.name !== "schedule-task",
       );
       if (allTools.length !== before) {
         log(
-          "Artifact-app run — create-app + read-app-file + schedule-task removed (self-replication ban)",
+          "Artifact-app run — create-app + read-app-file + publish-app + schedule-task removed (self-replication ban)",
         );
       }
     }

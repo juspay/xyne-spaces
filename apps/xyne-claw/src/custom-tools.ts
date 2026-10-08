@@ -53,6 +53,10 @@ const SLIDE_JSON_RE = /SLIDE_JSON_START\s*([\s\S]+?)\s*SLIDE_JSON_END/;
 // is also stripped from the text handed back to the model — the model just
 // authored the project and re-reading a listing of it buys nothing.
 const REACT_ARTIFACT_RE = /REACT_ARTIFACT_START\s*([\s\S]+?)\s*REACT_ARTIFACT_END/;
+// create-app's "App id: …" line. Meant for the MODEL — it is how the next
+// read/update/publish names the app — so it stays in the tool result but is
+// stripped from the user-visible summary.
+const APP_NOTE_RE = /\s*APP_NOTE_START\s*([\s\S]*?)\s*APP_NOTE_END/g;
 
 // PLATFORM_ONLY_CONFIG_KEYS is imported from xyne-claw-shared (single source of
 // truth — also enforced at the xyne-claw-auth /run boundary). See that module
@@ -466,12 +470,18 @@ export function loadCustomTools(
           // any SLIDE_JSON block so the fallback text doesn't include
           // metadata the user shouldn't see.
           if (trailingText && trailingText.length > 0) {
-            const visibleSummary = trailingText.replace(SLIDE_JSON_RE, "").replace(REACT_ARTIFACT_RE, "").trim();
+            const visibleSummary = trailingText
+              .replace(SLIDE_JSON_RE, "")
+              .replace(REACT_ARTIFACT_RE, "")
+              .replace(APP_NOTE_RE, "")
+              .trim();
             if (visibleSummary.length > 0) lastAttachmentSummary = visibleSummary;
           }
           // No-op for every existing tool (only create-react-artifact emits the
           // marker), so the model-facing text is unchanged for create-ppt et al.
-          const modelFacingText = trailingText ? trailingText.replace(REACT_ARTIFACT_RE, "").trim() : "";
+          const modelFacingText = trailingText
+            ? trailingText.replace(REACT_ARTIFACT_RE, "").replace(APP_NOTE_RE, "\n$1").trim()
+            : "";
           const responseText = modelFacingText.length > 0
             ? `Rendered and attached ${singleMatch[1]}\n\n${modelFacingText}`
             : `Rendered and attached ${singleMatch[1]}`;

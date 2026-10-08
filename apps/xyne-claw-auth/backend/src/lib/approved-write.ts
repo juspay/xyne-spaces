@@ -132,6 +132,18 @@ export async function executeApprovedWrite(input: {
     return { ok: true, message: `Done — ${tool} ran.`, resultText };
   }
 
+  // Artifact-app writes (publish-app) have no connector; claw-auth applies
+  // them directly, so they run here like on every other approval surface.
+  {
+    const { applyArtifactAppAction, isArtifactAppAction } = await import("./artifact-app-apply.js");
+    if (isArtifactAppAction(serverType, tool)) {
+      const outcome = await applyArtifactAppAction(tool, params, userId);
+      if (!outcome.ok) return { ok: false, reason: "failed", message: outcome.error };
+      log.info(`[approved-write] executed tool=${tool} user=${userId}`);
+      return { ok: true, message: outcome.message, resultText: outcome.message };
+    }
+  }
+
   if (needsSpacesApproval(serverType, tool)) {
     return {
       ok: false,
