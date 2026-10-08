@@ -208,6 +208,8 @@ export interface VespaChatAttachmentDocument extends VespaDocument {
 export interface VespaChatContainerDocument extends VespaDocument {
   channelName: string;
   scopeType: string;
+  /** DEFAULT | EMAIL | SUPPORT | SLACK | APP | CALL | SOCIAL_MEDIA | SDLC: the channel's type. */
+  channelType: string;
   visibility: string;
   isIm: boolean;
   isMpim: boolean;
