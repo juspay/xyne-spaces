@@ -41,6 +41,7 @@ export async function createDefaultTicketNamespace(
       workspaceId: params.workspaceId,
       projectId: params.projectId,
       createdBy: params.createdBy,
+      ticketSequence: 0,
       createdAt: now,
       updatedAt: now,
     },

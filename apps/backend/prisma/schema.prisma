@@ -1700,11 +1700,11 @@ model TicketNamespace {
   workspaceId    String
   projectId      String
   code           String
-  ticketSequence Int       @default(0)
+  ticketSequence Int
   name           String?
   createdBy      String
   updatedBy      String?
-  createdAt      DateTime  @default(now())
+  createdAt      DateTime
   updatedAt      DateTime
 
   project        Project   @relation(fields: [projectId], references: [id])

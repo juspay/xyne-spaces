@@ -10,11 +10,11 @@ CREATE TABLE "public"."ticket_namespaces" (
     "workspaceId" TEXT NOT NULL,
     "projectId" TEXT NOT NULL,
     "code" TEXT NOT NULL,
-    "ticketSequence" INTEGER NOT NULL DEFAULT 0,
+    "ticketSequence" INTEGER NOT NULL,
     "name" TEXT,
     "createdBy" TEXT NOT NULL,
     "updatedBy" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "createdAt" TIMESTAMP(3) NOT NULL,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "ticket_namespaces_pkey" PRIMARY KEY ("id")

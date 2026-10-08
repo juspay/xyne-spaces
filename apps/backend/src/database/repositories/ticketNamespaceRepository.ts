@@ -36,6 +36,7 @@ export class TicketNamespaceRepository {
         workspaceId: data.workspaceId,
         projectId: data.projectId,
         createdBy: data.createdBy,
+        ticketSequence: 0,
         createdAt: now,
         updatedAt: now,
       },
