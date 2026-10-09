@@ -63,6 +63,13 @@ export type ReleaseCompletionResolution =
        * current stage for a direct jump; null when the current stage is unknown.
        */
       enteredFromStageId: string | null;
+      /**
+       * Stage ids the ticket passes through on the resolved route, in order,
+       * EXCLUDING the current stage and INCLUDING the target. A single element
+       * means a direct jump. The caller validates every hop (current→path[0],
+       * path[0]→path[1], …) so intermediate gates are not silently skipped.
+       */
+      path: string[];
     }
   | { kind: 'ALREADY_COMPLETED' }
   | { kind: 'NO_TARGET'; reason: string };
@@ -88,20 +95,40 @@ export function resolveReleaseCompletionStage(
   const target = (
     stage: CompletionStage,
     source: ReleaseCompletionSource,
-    enteredFromStageId: string | null = currentId,
-  ): ReleaseCompletionResolution => ({ kind: 'TARGET', stage, source, enteredFromStageId });
+    path: string[] = [stage.id],
+  ): ReleaseCompletionResolution => ({
+    kind: 'TARGET',
+    stage,
+    source,
+    enteredFromStageId: path.length > 1 ? path[path.length - 2]! : currentId,
+    path,
+  });
+  const isLinear = boardType === BoardType.DEFAULT || boardType === BoardType.RELEASE;
+  // Linear route: every stage strictly after the current one up to the target
+  // (forward moves only — a backward jump is a single direct hop, as in the UI).
+  const linearPath = (to: CompletionStage): string[] =>
+    current && to.sequenceNumber > current.sequenceNumber
+      ? [...stages]
+          .filter(s => s.sequenceNumber > current.sequenceNumber && s.sequenceNumber <= to.sequenceNumber)
+          .sort(bySequence)
+          .map(s => s.id)
+      : [to.id];
 
   // ── 1. Admin-configured stage ─────────────────────────────────────────────
   if (configuredStageName) {
     const configured = completed.find(s => s.name === configuredStageName);
-    if (configured) return target(configured, 'CONFIGURED');
+    if (configured) {
+      if (isLinear) return target(configured, 'CONFIGURED', linearPath(configured));
+      const route = currentId ? shortestRoute(currentId, configured.id, stages, transitions) : null;
+      return target(configured, 'CONFIGURED', route ?? [configured.id]);
+    }
     // Misconfigured (renamed/deleted stage or not COMPLETED) → fall through.
   }
 
   // ── 2/4. Linear boards ────────────────────────────────────────────────────
-  if (boardType === BoardType.DEFAULT || boardType === BoardType.RELEASE) {
+  if (isLinear) {
     const after = current ? completed.find(s => s.sequenceNumber > current.sequenceNumber) : undefined;
-    if (after) return target(after, 'LINEAR');
+    if (after) return target(after, 'LINEAR', linearPath(after));
     return target(completed[0]!, 'FALLBACK');
   }
 
@@ -113,9 +140,9 @@ export function resolveReleaseCompletionStage(
     for (let i = searchFrom; i < standardPathStageIds.length; i++) {
       const stage = byId.get(standardPathStageIds[i]!);
       if (stage && isCompleted(stage)) {
-        // On-path: entered from the previous path stage. Off-path: direct jump.
-        const enteredFrom = position === -1 ? currentId : standardPathStageIds[i - 1] ?? currentId;
-        return target(stage, 'STANDARD_PATH', enteredFrom);
+        // On-path: walk the path from the ticket's position. Off-path: direct jump.
+        const path = position === -1 ? [stage.id] : standardPathStageIds.slice(position + 1, i + 1);
+        return target(stage, 'STANDARD_PATH', path);
       }
     }
   }
@@ -123,7 +150,7 @@ export function resolveReleaseCompletionStage(
   // ── 3. Nearest reachable Completed stage (NON_LINEAR / FLOW) ──────────────
   if (currentId) {
     const reached = nearestReachableCompleted(currentId, stages, transitions);
-    if (reached) return target(reached.stage, 'REACHABLE', reached.enteredFromStageId);
+    if (reached) return target(reached.stage, 'REACHABLE', reached.path);
   }
 
   if (boardType === BoardType.FLOW) {
@@ -137,12 +164,10 @@ export function resolveReleaseCompletionStage(
   return target(completed[0]!, 'FALLBACK');
 }
 
-function nearestReachableCompleted(
-  startId: string,
+function buildNeighbours(
   stages: ReadonlyArray<CompletionStage>,
   transitions: ReadonlyArray<CompletionTransition>,
-): { stage: CompletionStage; enteredFromStageId: string } | null {
-  const byId = new Map(stages.map(s => [s.id, s]));
+): (id: string) => string[] {
   const allIds = stages.map(s => s.id);
   const globalTargets = transitions.filter(t => t.fromStageId == null).map(t => t.toStageId);
   const explicit = new Map<string, string[]>();
@@ -152,13 +177,56 @@ function nearestReachableCompleted(
     list.push(t.toStageId);
     explicit.set(t.fromStageId, list);
   }
-  const neighbours = (id: string): string[] => {
+  return (id: string): string[] => {
     const out = explicit.get(id);
     // No outgoing explicit edges → unrestricted (matches transitionTicket).
     if (!out || out.length === 0) return allIds;
     return [...out, ...globalTargets];
   };
+}
 
+/** Walk BFS parents back from `endId` to (excluding) `startId`. */
+function routeTo(parent: Map<string, string>, startId: string, endId: string): string[] {
+  const route: string[] = [];
+  for (let id: string | undefined = endId; id && id !== startId; id = parent.get(id)) route.unshift(id);
+  return route;
+}
+
+/** Fewest-hop route from `startId` to `endId` (path excludes start, includes end), or null. */
+function shortestRoute(
+  startId: string,
+  endId: string,
+  stages: ReadonlyArray<CompletionStage>,
+  transitions: ReadonlyArray<CompletionTransition>,
+): string[] | null {
+  const known = new Set(stages.map(s => s.id));
+  const neighbours = buildNeighbours(stages, transitions);
+  const parent = new Map<string, string>();
+  const visited = new Set<string>([startId]);
+  let frontier = [startId];
+  while (frontier.length > 0) {
+    const next: string[] = [];
+    for (const id of frontier) {
+      for (const n of neighbours(id)) {
+        if (visited.has(n) || !known.has(n)) continue;
+        visited.add(n);
+        parent.set(n, id);
+        if (n === endId) return routeTo(parent, startId, endId);
+        next.push(n);
+      }
+    }
+    frontier = next;
+  }
+  return null;
+}
+
+function nearestReachableCompleted(
+  startId: string,
+  stages: ReadonlyArray<CompletionStage>,
+  transitions: ReadonlyArray<CompletionTransition>,
+): { stage: CompletionStage; path: string[] } | null {
+  const byId = new Map(stages.map(s => [s.id, s]));
+  const neighbours = buildNeighbours(stages, transitions);
   const parent = new Map<string, string>();
   const visited = new Set<string>([startId]);
   let frontier = [startId];
@@ -175,7 +243,7 @@ function nearestReachableCompleted(
     const hits = next.map(id => byId.get(id)!).filter(isCompleted).sort(bySequence);
     if (hits.length > 0) {
       const stage = hits[0]!;
-      return { stage, enteredFromStageId: parent.get(stage.id)! };
+      return { stage, path: routeTo(parent, startId, stage.id) };
     }
     frontier = next;
   }

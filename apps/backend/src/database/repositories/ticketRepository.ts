@@ -15,6 +15,7 @@ import {
   ActivityType,
   PRStatusEvent,
   EmailType,
+  deriveTicketClosurePatch,
   
   
   
@@ -412,6 +413,7 @@ export class TicketRepository {
             data: {
               stageName: newStageName,
               statusV2: newStatusV2,
+              ...deriveTicketClosurePatch(oldStatusV2, newStatusV2, updatedBy, new Date()),
               updatedBy: updatedBy,
               updatedAt: new Date(),
             },
@@ -924,6 +926,11 @@ export class TicketRepository {
         : null;
     }
     const previousStatus: TicketStatusV2 | null = prevSnapshot?.statusV2 ?? null;
+
+    // Closure bookkeeping when the status changes; explicit closedAt/closedBy from the caller win.
+    if (fields.statusV2 !== undefined && fields.closedAt === undefined && fields.closedBy === undefined) {
+      Object.assign(data, deriveTicketClosurePatch(previousStatus, fields.statusV2, updatedBy, new Date()));
+    }
 
     // Same as createTicket: make sure the merchant row exists before linking to it.
     if (fields.merchantId) {

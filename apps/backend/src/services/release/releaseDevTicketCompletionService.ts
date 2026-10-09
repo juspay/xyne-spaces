@@ -1,5 +1,5 @@
 import { Prisma } from '@prisma/client';
-import { ActivityType, BoardType, TicketStatusV2, parseBoardEtaManagement } from '@xyne/shared';
+import { ActivityType, BoardType, FormContextType, TicketStatusV2, parseBoardEtaManagement } from '@xyne/shared';
 import type { BoardMetadata } from '@xyne/shared';
 import { db } from '@/database/client';
 import { withWorkspaceScope } from '@/database/tenant/context';
@@ -12,6 +12,7 @@ import { notifyEntryApprovers } from '@/services/stageTransition/stageEntryAppro
 import { maybeCreateEntryApprovalRequestTx } from '@/bypassAcl/transactions/stageEntryApproval';
 import { ActivitySource } from '@/types/ticket';
 import { resolveReleaseCompletionStage } from './resolveReleaseCompletionStage';
+import { evaluateReleaseCompletionGates, type LinearStageGate } from './releaseCompletionGates';
 
 const LOG_PREFIX = '[ReleaseDevComplete]';
 
@@ -44,7 +45,8 @@ export interface ReleaseCompletedParams {
 
 export type DevTicketOutcome =
   | { ticketId: string; outcome: 'MOVED'; toStage: string; source: string }
-  | { ticketId: string; outcome: 'APPROVAL_REQUESTED'; toStage: string }
+  | { ticketId: string; outcome: 'APPROVAL_REQUESTED'; toStage: string; advancedTo?: string }
+  | { ticketId: string; outcome: 'NEEDS_MANUAL_MOVE'; gate: 'FORM' | 'NOT_ALLOWED'; toStage: string; advancedTo?: string }
   | { ticketId: string; outcome: 'SKIPPED'; reason: string }
   | { ticketId: string; outcome: 'FAILED'; error: string };
 
@@ -147,16 +149,34 @@ async function completeDevTicket(ticketId: string, ctx: CompleteCtx): Promise<De
           id: true,
           fromStageId: true,
           toStageId: true,
+          formId: true,
           requiresApproval: true,
           bypassApprovalForAutomation: true,
         },
       }),
     ]);
-    return { ticket, board, stages, transitions };
+    // Linear boards gate on the stage itself (form mapping / approvers), not on edges.
+    const linearStageGates = new Map<string, LinearStageGate>();
+    if (board && (board.boardType === BoardType.DEFAULT || board.boardType === BoardType.RELEASE)) {
+      const stageIds = stages.map(s => s.id);
+      const [forms, approvers] = await Promise.all([
+        db.formContextMapping.findMany({
+          where: { contextId: { in: stageIds }, contextType: FormContextType.STAGE },
+          select: { contextId: true },
+        }),
+        db.stageApprovers.findMany({ where: { stageId: { in: stageIds } }, select: { stageId: true } }),
+      ]);
+      const withForm = new Set(forms.map(f => f.contextId));
+      const withApprovers = new Set(approvers.map(a => a.stageId));
+      for (const id of stageIds) {
+        linearStageGates.set(id, { hasForm: withForm.has(id), hasApprovers: withApprovers.has(id) });
+      }
+    }
+    return { ticket, board, stages, transitions, linearStageGates };
   });
 
   if (!loaded) return { ticketId, outcome: 'SKIPPED', reason: 'ticket not found' };
-  const { ticket, board, stages, transitions } = loaded;
+  const { ticket, board, stages, transitions, linearStageGates } = loaded;
   if (ticket.isArchived) return { ticketId, outcome: 'SKIPPED', reason: 'archived' };
   if (!board) return { ticketId, outcome: 'SKIPPED', reason: 'board not found' };
   if (!isReleaseCompletionEnabledForBoard(board.metadata)) {
@@ -189,74 +209,116 @@ async function completeDevTicket(ticketId: string, ctx: CompleteCtx): Promise<De
 
   const targetStage = resolution.stage;
   const wasRejected = ticket.statusV2 === TicketStatusV2.CANCELLED;
+  const stageById = new Map(stages.map(s => [s.id, s]));
+  const currentStageId = stages.find(s => s.name === ticket.stageName)?.id ?? null;
 
-  // ── Approval gate on the edge INTO the target (NON_LINEAR only) ───────────
-  // Intermediate gates are not evaluated (we jump directly). The final edge's
-  // approval is honoured unless the board opted that edge into automation
-  // bypass. The move runs as the ticket bot, never as the release completer, so
-  // a completer who happens to be an approver cannot self-approve it.
-  if (board.boardType === BoardType.NON_LINEAR) {
-    const from = resolution.enteredFromStageId;
-    const edge =
-      (from && transitions.find(t => t.fromStageId === from && t.toStageId === targetStage.id))
-      || transitions.find(t => t.fromStageId == null && t.toStageId === targetStage.id)
-      || null;
-    if (edge?.requiresApproval && !(edge.bypassApprovalForAutomation ?? false)) {
-      return requestApproval(ticket, targetStage, edge, ctx);
-    }
+  // ── Gates along the whole route, not just the final edge ──────────────────
+  // The write is a single jump, so every hop the ticket would have taken is
+  // checked first. The first hop that needs a human (form, approval without
+  // automation bypass, or no allowed edge) stops the move there.
+  const gates = evaluateReleaseCompletionGates({
+    boardType: board.boardType,
+    currentStageId,
+    path: resolution.path,
+    transitions,
+    linearStageGates,
+  });
+
+  // Advance as far as the route is clear: to the target when nothing blocks,
+  // otherwise to the stage just before the first gate (if that is not where the
+  // ticket already is). Runs as the ticket bot, never as the release completer,
+  // so a completer who happens to be an approver cannot self-approve a gate.
+  const stopStageId = gates.kind === 'CLEAR' ? targetStage.id : gates.fromStageId;
+  const stopStage = stopStageId ? stageById.get(stopStageId) ?? null : null;
+  let advancedTo: string | undefined;
+  if (stopStage && stopStage.id !== currentStageId) {
+    // allowedCurrentStatuses turns this into a compare-and-swap on statusV2: a
+    // concurrent manual close or a second release completing at the same time
+    // makes this a no-op instead of a double transition. closedAt/closedBy are
+    // derived inside the same write when the stop stage is Completed-group.
+    const repo = new TicketRepository();
+    const updated = await repo.updateTicketStage(ticket.id, stopStage.name, ctx.botId, ActivitySource.AUTOMATION, undefined, {
+      allowedCurrentStatuses: [...RELEASE_COMPLETION_MOVABLE_STATUSES],
+    });
+    if (!updated) return { ticketId, outcome: 'SKIPPED', reason: 'ticket changed concurrently' };
+    advancedTo = stopStage.name;
   }
 
-  // ── Move ──────────────────────────────────────────────────────────────────
-  // allowedCurrentStatuses turns this into a compare-and-swap on statusV2: a
-  // concurrent manual close or a second release completing at the same time
-  // makes this a no-op instead of a double transition.
-  const repo = new TicketRepository();
-  const updated = await repo.updateTicketStage(ticket.id, targetStage.name, ctx.botId, ActivitySource.AUTOMATION, undefined, {
-    allowedCurrentStatuses: [...RELEASE_COMPLETION_MOVABLE_STATUSES],
-  });
-  if (!updated) return { ticketId, outcome: 'SKIPPED', reason: 'ticket changed concurrently' };
+  if (gates.kind === 'BLOCKED') {
+    const gatedStage = stageById.get(gates.toStageId)!;
+    const atStageName = advancedTo ?? ticket.stageName;
+    if (gates.gate === 'APPROVAL') {
+      return requestApproval(
+        { ...ticket, stageName: atStageName },
+        gatedStage,
+        gates.transitionId ? { transitionId: gates.transitionId } : { stageId: gatedStage.id },
+        ctx,
+        advancedTo,
+      );
+    }
+    await postTimeline(ticket, ctx, {
+      content:
+        gates.gate === 'FORM'
+          ? `\u26A0\uFE0F Release ${ctx.releaseXyneId} completed — ${advancedTo ? `moved to "${advancedTo}", but ` : ''}moving to "${gatedStage.name}" needs a form, so this ticket must be moved manually.`
+          : `\u26A0\uFE0F Release ${ctx.releaseXyneId} completed — the board does not allow moving from "${atStageName}" to "${gatedStage.name}", so this ticket must be moved manually.`,
+      extra: { releaseCompletion: { fromStage: ticket.stageName, advancedTo: advancedTo ?? null, blockedAt: gatedStage.name, gate: gates.gate } },
+    });
+    return { ticketId, outcome: 'NEEDS_MANUAL_MOVE', gate: gates.gate, toStage: gatedStage.name, ...(advancedTo && { advancedTo }) };
+  }
 
-  // Closure analytics: only stamp when the move actually happened, and never
-  // overwrite an existing closedAt.
+  // Closure attribution: the move above stamped closedAt/closedBy as the ticket
+  // bot. Re-attribute to the release completer and release time, but only for
+  // the stamp this move just wrote (closedBy still the bot).
   await withWorkspaceScope(() =>
     db.ticket.updateMany({
-      where: { id: ticket.id, closedAt: null },
+      where: { id: ticket.id, statusV2: TicketStatusV2.COMPLETED, closedBy: ctx.botId },
       data: { closedAt: ctx.closedAt, closedBy: ctx.closedBy },
     }),
   );
 
-  if (ticket.conversationId) {
-    const content = wasRejected
+  await postTimeline(ticket, ctx, {
+    content: wasRejected
       ? `\u2705 Release ${ctx.releaseXyneId} completed — moved from Rejected stage "${ticket.stageName}" to "${targetStage.name}" because this ticket shipped in the release.`
-      : `\u2705 Release ${ctx.releaseXyneId} completed — moved to "${targetStage.name}".`;
-    await recordTicketTimelineEvent({
-      message: {
-        conversationId: ticket.conversationId,
-        senderId: ctx.botId,
-        content,
-        activityType: ActivityType.STATUS,
-        workspaceId: ticket.workspaceId,
-        isAutomation: true,
-        extraMetadata: {
-          releaseTicketId: ctx.releaseId,
-          releaseCompletion: { fromStage: ticket.stageName, toStage: targetStage.name, source: resolution.source },
-        },
-      },
-    }).catch(error => logger.error(`${LOG_PREFIX} timeline message failed for ${ticket.id}:`, error));
-  }
+      : `\u2705 Release ${ctx.releaseXyneId} completed — moved to "${targetStage.name}".`,
+    extra: { releaseCompletion: { fromStage: ticket.stageName, toStage: targetStage.name, source: resolution.source } },
+  });
 
   return { ticketId, outcome: 'MOVED', toStage: targetStage.name, source: resolution.source };
+}
+
+type TimelineTicket = { id: string; workspaceId: string; conversationId: string | null };
+
+/** Best-effort system message in the dev ticket thread, linked back to the release ticket. */
+async function postTimeline(
+  ticket: TimelineTicket,
+  ctx: CompleteCtx,
+  msg: { content: string; extra: Record<string, unknown> },
+): Promise<void> {
+  if (!ticket.conversationId) return;
+  await recordTicketTimelineEvent({
+    message: {
+      conversationId: ticket.conversationId,
+      senderId: ctx.botId,
+      content: msg.content,
+      activityType: ActivityType.STATUS,
+      workspaceId: ticket.workspaceId,
+      isAutomation: true,
+      extraMetadata: { releaseTicketId: ctx.releaseId, ...msg.extra },
+    },
+  }).catch(error => logger.error(`${LOG_PREFIX} timeline message failed for ${ticket.id}:`, error));
 }
 
 async function requestApproval(
   ticket: { id: string; workspaceId: string; channelId: string | null; conversationId: string | null; stageName: string | null },
   targetStage: { id: string; name: string },
-  edge: { id: string },
+  approversWhere: { transitionId: string } | { stageId: string },
   ctx: CompleteCtx,
+  advancedTo: string | undefined,
 ): Promise<DevTicketOutcome> {
+  const base = { ticketId: ticket.id, ...(advancedTo && { advancedTo }) };
   if (!ticket.conversationId || !ticket.stageName) {
     // The shared claim helper writes the audit message into the ticket thread.
-    return { ticketId: ticket.id, outcome: 'SKIPPED', reason: 'approval required but ticket has no thread' };
+    return { ...base, outcome: 'SKIPPED', reason: 'approval required but ticket has no thread' } as DevTicketOutcome;
   }
   let claimed = false;
   try {
@@ -278,22 +340,15 @@ async function requestApproval(
   }
 
   if (claimed) {
-    await recordTicketTimelineEvent({
-      message: {
-        conversationId: ticket.conversationId,
-        senderId: ctx.botId,
-        content: `\u23F3 Release ${ctx.releaseXyneId} completed — waiting for approval to move to "${targetStage.name}".`,
-        activityType: ActivityType.STATUS,
-        workspaceId: ticket.workspaceId,
-        isAutomation: true,
-        extraMetadata: { releaseTicketId: ctx.releaseId, releaseCompletion: { toStage: targetStage.name, pendingApproval: true } },
-      },
-    }).catch(error => logger.error(`${LOG_PREFIX} timeline message failed for ${ticket.id}:`, error));
-    await notifyEntryApprovers({ transitionId: edge.id }, ticket, targetStage.name, ctx.botId).catch(error =>
+    await postTimeline(ticket, ctx, {
+      content: `\u23F3 Release ${ctx.releaseXyneId} completed — ${advancedTo ? `moved to "${advancedTo}" and ` : ''}waiting for approval to move to "${targetStage.name}".`,
+      extra: { releaseCompletion: { advancedTo: advancedTo ?? null, toStage: targetStage.name, pendingApproval: true } },
+    });
+    await notifyEntryApprovers(approversWhere, ticket, targetStage.name, ctx.botId).catch(error =>
       logger.error(`${LOG_PREFIX} approver notify failed for ${ticket.id}:`, error),
     );
   }
-  return { ticketId: ticket.id, outcome: 'APPROVAL_REQUESTED', toStage: targetStage.name };
+  return { ...base, outcome: 'APPROVAL_REQUESTED', toStage: targetStage.name };
 }
 
 export const releaseDevTicketCompletionService = { onReleaseCompleted };

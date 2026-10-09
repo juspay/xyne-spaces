@@ -105,6 +105,7 @@ describe('resolveReleaseCompletionStage', () => {
       });
       expect(targetName(r)).toBe('Closed:STANDARD_PATH');
       expect(r.kind === 'TARGET' && r.enteredFromStageId).toBe('Merged');
+      expect(r.kind === 'TARGET' && r.path).toEqual(['Merged', 'Closed']);
     });
 
     it('uses the first Completed stage on the path when the ticket is off-path', () => {
@@ -128,6 +129,7 @@ describe('resolveReleaseCompletionStage', () => {
       // Merged → Build → Closed (Verified is not reachable via explicit edges)
       expect(targetName(r)).toBe('Closed:REACHABLE');
       expect(r.kind === 'TARGET' && r.enteredFromStageId).toBe('Build');
+      expect(r.kind === 'TARGET' && r.path).toEqual(['Build', 'Closed']);
     });
 
     it('breaks reachability ties by lower sequenceNumber', () => {
@@ -180,6 +182,24 @@ describe('resolveReleaseCompletionStage', () => {
 
     it('uses the configured stage', () => {
       expect(targetName(run({ boardType: BoardType.FLOW, configuredStageName: 'Shipped' }))).toBe('Shipped:CONFIGURED');
+    });
+  });
+
+  describe('route (path) for gate checks', () => {
+    it('linear: lists every forward stage up to the target', () => {
+      const r = run({ currentStageName: 'Dev' });
+      expect(r.kind === 'TARGET' && r.path).toEqual(['Merged', 'Done']);
+    });
+
+    it('linear: configured stage further ahead includes intermediates', () => {
+      const r = run({ currentStageName: 'Merged', configuredStageName: 'Shipped' });
+      expect(r.kind === 'TARGET' && r.path).toEqual(['Done', 'QA', 'Shipped']);
+    });
+
+    it('linear: a backward jump (from Rejected) is a single hop', () => {
+      const r = run({ currentStageName: 'Rejected' });
+      expect(targetName(r)).toBe('Done:FALLBACK');
+      expect(r.kind === 'TARGET' && r.path).toEqual(['Done']);
     });
   });
 });
