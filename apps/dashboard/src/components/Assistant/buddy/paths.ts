@@ -7,6 +7,8 @@ export interface MenuItem {
   label: string;
   href?: string;
   use: 'click' | 'point';
+  /** Opens a menu, popover or dialog. */
+  opens?: boolean;
 }
 
 /** A menu Buddy opened on screen during this request, and what was in it. */
