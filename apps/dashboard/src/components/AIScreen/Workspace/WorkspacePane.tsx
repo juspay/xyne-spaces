@@ -24,7 +24,7 @@ import type { ConversationArtifact } from '../../../services/XyneAI/XyneAIArtifa
 import { useConversationArtifacts } from './useConversationArtifacts';
 import { ArtifactList } from './ArtifactList';
 import { ArtifactInlineView, artifactInlineActions } from './ArtifactInlineView';
-import { AiBrowserItemView } from './AiBrowserItemView';
+import { AiBrowserItemView, isWorkspacePagePlaying } from './AiBrowserItemView';
 import { AiDocItemView } from './AiDocItemView';
 import { useReviewGuide } from './useReviewGuide';
 import { registerArtifactCommentStore } from './artifactCommentStore';
@@ -37,6 +37,7 @@ import {
   itemFromArtifact,
   openTab,
   closeTab,
+  moveTab,
   pruneTabs,
   EMPTY_TABS,
   type TabState,
@@ -231,17 +232,19 @@ function WorkspacePaneInner({
       setSelectedId(null);
       return;
     }
-    const page = artifacts.find(a => a.kind === 'PAGE' && isNew(a));
-    if (page && designDraftActive) {
-      setTab('artifacts');
-      setTransientAppId(null);
-      setSelectedId(page.id);
-      return;
-    }
+    const pages = artifacts.filter(a => a.kind === 'PAGE' && isNew(a));
+    const page = pages[0];
     if (!page) return;
-    setTab('sources');
+    // Every page the agent opened gets a tab of its own, kept alive for it to work
+    // in — two opened together are two tabs. The first shows, as one alone did.
+    setTabs(current =>
+      openTab(
+        pages.reduce((state, opened) => openTab(state, opened.id), current),
+        page.id,
+      ),
+    );
+    setTab(designDraftActive ? 'artifacts' : 'sources');
     setTransientAppId(null);
-    setSelectedId(page.id);
   }, [artifacts, isLoading]);
 
   useEffect(() => {
@@ -542,6 +545,7 @@ function WorkspacePaneInner({
             onOpen={id => setSelectedId(id)}
             sections={quickSwitchSections}
             onClose={closeWorkspaceTab}
+            onReorder={(id, toIndex) => setTabs(current => moveTab(current, id, toIndex))}
             icon={item => artifactKindIcon((item.row as ConversationArtifact).kind, 'h-3 w-3')}
             actionsFor={item => (
               <>
@@ -549,11 +553,17 @@ function WorkspacePaneInner({
                 {artifactInlineActions(item.row as ConversationArtifact)}
               </>
             )}
-            renderItem={item => {
+            keepAlive={{
+              keeps: item => item.kind === 'link' || item.kind === 'page',
+              // Xyne AI works in these tabs too, and must find each as it left it.
+              policy: 'every',
+              isPlaying: isWorkspacePagePlaying,
+            }}
+            renderItem={(item, shown) => {
               if (item.kind === 'html-doc') return <AiDocItemView item={item} />;
               if (SHARED_ITEM_KINDS.has(item.kind)) return null;
               if (item.kind === 'link' || item.kind === 'page') {
-                return <AiBrowserItemView item={item} />;
+                return <AiBrowserItemView item={item} shown={shown} />;
               }
               return (
                 <ArtifactInlineView

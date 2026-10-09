@@ -342,7 +342,8 @@ function setFolderTabParams(search: URLSearchParams, tab: FolderTab | null): voi
   if (tab?.kind === 'CANVAS') search.set('canvas', tab.id);
   if (tab?.kind === 'ATTACHMENT') search.set('file', tab.id);
   if (tab?.kind === 'LINK') search.set('link', tab.id);
-  if (tab?.kind === 'BROWSER') search.set('browse', '1');
+  // Which browsing tab, as there can be several; `1` named the one there used to be.
+  if (tab?.kind === 'BROWSER') search.set('browse', tab.id === SCRATCH_TAB_ID ? '1' : tab.id);
 }
 
 export default function SdlcScreen(): ReactElement {
@@ -844,7 +845,13 @@ export default function SdlcScreen(): ReactElement {
   // an upload, a save — and must not act on the render it began in.
   const routeNow = useRef({ openFolderId, search: routeSearchParams.toString() });
   routeNow.current = { openFolderId, search: routeSearchParams.toString() };
-  const browsingScratchTab = routeSearchParams.get('browse') === '1';
+  const browseParam = routeSearchParams.get('browse');
+  const browsingTabId =
+    browseParam === '1'
+      ? SCRATCH_TAB_ID
+      : browseParam && /^[\w-]{1,64}$/.test(browseParam)
+        ? browseParam
+        : null;
   const openFileId = routeSearchParams.get('file');
   const openLinkId = routeSearchParams.get('link');
   const selectedTrack = tracks.find(track => track.id === selectedTrackId);
@@ -1456,8 +1463,8 @@ export default function SdlcScreen(): ReactElement {
         ? { kind: 'ATTACHMENT', id: openFileId }
         : openLinkId
           ? { kind: 'LINK', id: openLinkId }
-          : browsingScratchTab
-            ? { kind: 'BROWSER', id: SCRATCH_TAB_ID }
+          : browsingTabId
+            ? { kind: 'BROWSER', id: browsingTabId }
             : null
     : null;
 

@@ -5485,6 +5485,16 @@ img.inline-emoji,
 
 /* Full-DOM viewers (DOCX) paint matches via the CSS Custom Highlight API rather
    than <mark> injection, so the third-party markup is never mutated. */
+/* A loading bar's shine: a highlight sweeping left to right along what has filled. */
+@keyframes xyne-bar-shine {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+
 ::highlight(xyne-find) {
   background-color: var(--search-result-highlight-bg, #fde68a);
   color: inherit;

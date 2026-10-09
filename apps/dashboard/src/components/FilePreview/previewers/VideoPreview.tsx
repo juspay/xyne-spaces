@@ -240,7 +240,7 @@ export default function VideoPreview(props: PreviewerProps): ReactElement {
           type='button'
           title={zoom === 'fit' ? 'Actual size' : 'Fit to the pane'}
           onClick={() => setZoom(zoom === 'fit' ? 1 : 'fit')}
-          className='h-7 min-w-[52px] rounded-md px-1.5 text-xs tabular-nums text-muted-foreground transition-colors hover:bg-foreground/[0.08] hover:text-foreground'
+          className='outline-none h-7 min-w-[52px] rounded-md px-1.5 text-xs tabular-nums text-muted-foreground transition-colors hover:bg-foreground/[0.08] focus-visible:bg-foreground/[0.08] hover:text-foreground focus-visible:text-foreground'
           data-track-category='FilePreview'
           data-track-name='PreviewZoomReset'
         >
@@ -396,7 +396,7 @@ export default function VideoPreview(props: PreviewerProps): ReactElement {
               if (video) video.currentTime = Number(event.target.value);
             }}
             aria-label='Seek'
-            className='mb-2 h-1 w-full cursor-pointer accent-white'
+            className='outline-none mb-2 h-1 w-full cursor-pointer accent-white'
             data-track-category='FilePreview'
             data-track-name='PreviewVideoSeeked'
           />
@@ -437,7 +437,7 @@ export default function VideoPreview(props: PreviewerProps): ReactElement {
                 video.muted = video.volume === 0;
               }}
               aria-label='Volume'
-              className='h-1 w-20 cursor-pointer accent-white'
+              className='outline-none h-1 w-20 cursor-pointer accent-white'
               data-track-category='FilePreview'
               data-track-name='PreviewVideoVolumeChanged'
             />
@@ -495,7 +495,7 @@ function VideoButton(props: {
       title={props.title}
       aria-label={props.title}
       onClick={props.onClick}
-      className='flex h-8 min-w-8 items-center justify-center rounded-md px-1 text-white/90 transition-colors hover:bg-white/15 hover:text-white'
+      className='outline-none flex h-8 min-w-8 items-center justify-center rounded-md px-1 text-white/90 transition-colors hover:bg-white/15 focus-visible:bg-white/15 hover:text-white focus-visible:text-white'
       data-track-category='FilePreview'
       data-track-name={props.track}
     >

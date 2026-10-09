@@ -1,16 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ElectronWebviewElement } from '../../../types/electron';
-import type { AnnotateTransport, CommentMark, PickedBlock, TransportEvents } from './transport';
+import {
+  measuredRect,
+  rectOnScreen,
+  type AnnotateTransport,
+  type CommentMark,
+  type TransportEvents,
+} from './transport';
 import type { CommentAnchor } from '../itemComments';
-import { ANNOTATE_SCRIPT } from './pageScript';
-
-const DRAIN_MS = 250;
-
-const DRAIN = `(() => {
-  const queue = window.__xyneAnnotateQueue || [];
-  window.__xyneAnnotateQueue = [];
-  return queue;
-})()`;
+import { ANNOTATE_SCRIPT, annotateEventFrom } from './pageScript';
 
 const INSTALLED = `Boolean(window.__xyneAnnotateApply)`;
 
@@ -77,38 +75,48 @@ export function useWebviewTransport(
     };
   }, [view]);
 
+  // A pick or a badge click, said by the page as the reader makes it.
   useEffect(() => {
     if (!view || !ready) return;
-    const timer = window.setInterval(() => {
-      void run(view, DRAIN).then(result => {
-        if (!Array.isArray(result)) return;
-        for (const message of result as Array<Record<string, unknown>>) {
-          const selector = typeof message['selector'] === 'string' ? message['selector'] : '';
-          const text = typeof message['text'] === 'string' ? message['text'] : '';
-          const id = typeof message['id'] === 'string' ? message['id'] : '';
-          if (message['type'] === 'pick' && message['rect']) {
-            handlers.current.onPick({
-              selector,
-              text,
-              rect: message['rect'] as PickedBlock['rect'],
-            });
-          }
-          if (message['type'] === 'commentClick' && id) {
-            handlers.current.onMarkClick(id, message['rect'] as PickedBlock['rect'] | undefined);
-          }
-        }
-      });
-    }, DRAIN_MS);
-    return () => window.clearInterval(timer);
+    const onConsole = (event: Event): void => {
+      const message = annotateEventFrom((event as Event & { message?: string }).message);
+      if (!message) return;
+      // The page measures in its own zoomed units; the box and threads drawn
+      // beside a block go by the app's.
+      let zoom = 1;
+      try {
+        zoom = view.getZoomFactor?.() ?? 1;
+      } catch {
+        /* not attached yet: as measured */
+      }
+      const selector = typeof message['selector'] === 'string' ? message['selector'] : '';
+      const text = typeof message['text'] === 'string' ? message['text'] : '';
+      const id = typeof message['id'] === 'string' ? message['id'] : '';
+      const rect = measuredRect(message['rect']);
+      if (message['type'] === 'pick' && rect) {
+        handlers.current.onPick({ selector, text, rect: rectOnScreen(rect, zoom) });
+      }
+      if (message['type'] === 'commentClick' && id) {
+        handlers.current.onMarkClick(id, rect ? rectOnScreen(rect, zoom) : undefined);
+      }
+    };
+    view.addEventListener('console-message', onConsole);
+    return () => view.removeEventListener('console-message', onConsole);
   }, [view, ready]);
 
-  return {
-    ready,
-    setPicking: (on: boolean) => apply({ type: 'pick', on }),
-    paintMarks: (marks: readonly CommentMark[]) => apply({ type: 'marks', marks }),
-    reveal: (anchor: CommentAnchor) =>
-      apply({ type: 'reveal', selector: anchor.selector ?? '', quote: anchor.quote ?? '' }),
-    clearHighlight: () => apply({ type: 'clearHighlight' }),
-    clearActive: () => apply({ type: 'clearActive' }),
-  };
+  // The same functions from one render to the next, for as long as the page is: a
+  // viewer's effects keyed on them run when the page changes, not on every render —
+  // its comments were fetched again on each one.
+  return useMemo(
+    () => ({
+      ready,
+      setPicking: (on: boolean) => apply({ type: 'pick', on }),
+      paintMarks: (marks: readonly CommentMark[]) => apply({ type: 'marks', marks }),
+      reveal: (anchor: CommentAnchor) =>
+        apply({ type: 'reveal', selector: anchor.selector ?? '', quote: anchor.quote ?? '' }),
+      clearHighlight: () => apply({ type: 'clearHighlight' }),
+      clearActive: () => apply({ type: 'clearActive' }),
+    }),
+    [ready, apply],
+  );
 }

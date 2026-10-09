@@ -1,26 +1,49 @@
-import { executePageTool, getWorkspaceWebview, type PageToolResult } from './workspaceBrowserTools';
-import { getSdlcWebview, requestSdlcBrowser } from './sdlcBrowserTarget';
+import {
+  executePageTool,
+  getWorkspaceWebview,
+  subscribeToWorkspacePages,
+  workspacePage,
+  workspaceTabAt,
+  type PageToolResult,
+} from './workspaceBrowserTools';
+import { getSdlcWebview, requestSdlcBrowser, subscribeToSdlcWebview } from './sdlcBrowserTarget';
 import type { ElectronWebviewElement } from '../../../types/electron';
 
 export type BrowserSurface = 'xyne-ai' | 'sdlc';
 
 const OPEN_URL_TOOL = 'open-url';
 const WAIT_FOR_BROWSER_MS = 12_000;
-const WAIT_STEP_MS = 200;
 const SETTLE_MS = 800;
 
 function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function waitFor<T>(read: () => T | null, ms: number): Promise<T | null> {
-  const until = Date.now() + ms;
-  for (;;) {
-    const value = read();
-    if (value) return value;
-    if (Date.now() >= until) return null;
-    await delay(WAIT_STEP_MS);
-  }
+/**
+ * What `read` gives, once it gives something: read now, and again each time
+ * `subscribe` says things changed — null if nothing comes within `ms`.
+ */
+function whenReady<T>(
+  read: () => T | null,
+  subscribe: (listener: () => void) => () => void,
+  ms: number,
+): Promise<T | null> {
+  const now = read();
+  if (now) return Promise.resolve(now);
+  return new Promise(resolve => {
+    let unsubscribe = (): void => undefined;
+    const timer = setTimeout(() => {
+      unsubscribe();
+      resolve(null);
+    }, ms);
+    unsubscribe = subscribe(() => {
+      const value = read();
+      if (!value) return;
+      clearTimeout(timer);
+      unsubscribe();
+      resolve(value);
+    });
+  });
 }
 
 function httpUrl(value: unknown): string | null {
@@ -73,7 +96,7 @@ async function openUrl(
         content: 'The SDLC screen is not open in the Xyne app, so there is no browser to use.',
       };
     }
-    const wv = await waitFor(getSdlcWebview, WAIT_FOR_BROWSER_MS);
+    const wv = await whenReady(getSdlcWebview, subscribeToSdlcWebview, WAIT_FOR_BROWSER_MS);
     if (!wv) {
       return {
         ok: false,
@@ -88,7 +111,30 @@ async function openUrl(
     };
   }
 
-  const wv = await waitFor(getWorkspaceWebview, WAIT_FOR_BROWSER_MS);
+  // Already open in a tab: that one, as it is.
+  const open = workspaceTabAt(url);
+  if (open) {
+    return {
+      ok: true,
+      content: `${url} is already open in tab ${open} of the browser panel beside the Xyne AI chat. Pass tab ${open} to page-snapshot, page-read, page-click and page-type to work with it.`,
+    };
+  }
+  // The server added it as a new tab: its page, once it opens.
+  const tab = await whenReady(
+    () => workspaceTabAt(url),
+    subscribeToWorkspacePages,
+    WAIT_FOR_BROWSER_MS,
+  );
+  if (tab) {
+    const wv = workspacePage(tab);
+    if (wv) await load(wv, url);
+    return {
+      ok: true,
+      content: `Opened ${url} in tab ${tab} of the browser panel beside the Xyne AI chat. Pass tab ${tab} to page-snapshot, page-read, page-click and page-type to work with it.`,
+    };
+  }
+  // A server from before tabs: the page on screen, as then.
+  const wv = getWorkspaceWebview();
   if (!wv) {
     return { ok: false, content: 'The Xyne AI screen did not open its browser panel.' };
   }

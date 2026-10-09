@@ -6,6 +6,9 @@ declare const window: {
   location: { protocol: string; hostname: string; origin: string };
 };
 
+/** How many of the app's listeners want browser keys; the desktop app takes them while any do. */
+let browserCommandListeners = 0;
+
 interface RecordingPillState {
   startTime: number;
   paused: boolean;
@@ -155,9 +158,15 @@ const electronAPI = {
   /** Moves focus off an embedded <webview> guest and back to the app. */
   focusHostWebContents: (): Promise<void> => ipcRenderer.invoke('focus-host-webcontents'),
 
-  onOpenInBrowserPanel: (callback: (url: string, sourceWebContentsId?: number) => void) => {
-    const listener = (_event: unknown, url: string, sourceWebContentsId?: number) =>
-      callback(url, sourceWebContentsId);
+  onOpenInBrowserPanel: (
+    callback: (url: string, sourceWebContentsId?: number, disposition?: string) => void,
+  ) => {
+    const listener = (
+      _event: unknown,
+      url: string,
+      sourceWebContentsId?: number,
+      disposition?: unknown,
+    ) => callback(url, sourceWebContentsId, typeof disposition === 'string' ? disposition : undefined);
     ipcRenderer.on('open-in-browser-panel', listener);
     return () => ipcRenderer.removeListener('open-in-browser-panel', listener);
   },
@@ -261,6 +270,82 @@ const electronAPI = {
   writeClipboardText: (text: string) => ipcRenderer.invoke('clipboard:write-text', text),
   browserImportAvailable: () => ipcRenderer.invoke('browser-import:available'),
   importChromeCookies: () => ipcRenderer.invoke('browser-import:chrome'),
+  browserHistorySuggest: (typed: string, limit?: number) =>
+    ipcRenderer.invoke('browser-history:suggest', typed, limit),
+  browserHistoryTop: (limit?: number) => ipcRenderer.invoke('browser-history:top', limit),
+  clearBrowserHistory: () => ipcRenderer.invoke('browser-history:clear'),
+  getBrowserState: (key: string) => ipcRenderer.invoke('browser-state:get', key),
+  setBrowserState: (key: string, value: unknown) =>
+    ipcRenderer.invoke('browser-state:set', key, value),
+  setBrowserPageFrozen: (pageId: number, frozen: boolean) =>
+    ipcRenderer.invoke('browser-page:set-frozen', pageId, frozen),
+  getPowerState: () => ipcRenderer.invoke('power:state'),
+  onPowerChange: (callback: (state: { onBattery: boolean }) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, state: unknown) => {
+      if (typeof state === 'object' && state !== null && 'onBattery' in state) {
+        callback({ onBattery: state.onBattery === true });
+      }
+    };
+    ipcRenderer.on('power:changed', listener);
+    return () => ipcRenderer.removeListener('power:changed', listener);
+  },
+  onBrowserMemoryPressure: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on('browser-pages:memory-pressure', listener);
+    return () => ipcRenderer.removeListener('browser-pages:memory-pressure', listener);
+  },
+  preconnectBrowserPage: (url: string) => ipcRenderer.invoke('browser:preconnect', url),
+  bringAppToFront: () => ipcRenderer.send('browser:bring-to-front'),
+  // The View menu's zoom (⌘+, ⌘-, ⌘0), for the app to take: its browser's page if the
+  // browser has the keyboard, else the app, through zoomApp.
+  onAppZoomRequest: (callback: (step: 'in' | 'out' | 'reset') => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, step: unknown) => {
+      if (step === 'in' || step === 'out' || step === 'reset') callback(step);
+    };
+    ipcRenderer.on('app-zoom-request', listener);
+    return () => ipcRenderer.removeListener('app-zoom-request', listener);
+  },
+  zoomApp: (step: 'in' | 'out' | 'reset') => ipcRenderer.send('app-zoom:apply', step),
+  onBrowserPageZoom: (callback: (pageId: number, direction: 'in' | 'out') => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, pageId: unknown, direction: unknown) => {
+      if (typeof pageId === 'number' && (direction === 'in' || direction === 'out')) {
+        callback(pageId, direction);
+      }
+    };
+    ipcRenderer.on('browser-page-zoom', listener);
+    return () => ipcRenderer.removeListener('browser-page-zoom', listener);
+  },
+  // The in-app browsers' downloads. Listening is what has the desktop app save them
+  // and pass their progress on; without it, Electron handles them as before.
+  onBrowserDownload: (callback: (download: unknown) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, download: unknown) => callback(download);
+    ipcRenderer.on('browser-download', listener);
+    ipcRenderer.send('browser-downloads:accept');
+    return () => ipcRenderer.removeListener('browser-download', listener);
+  },
+  browserDownloadAction: (id: string, action: string) =>
+    ipcRenderer.invoke('browser-download:act', id, action),
+  // Browser keys pressed inside a page — back, forward, the address, the tab list,
+  // moving between tabs — for the app to act on. Asking for them is what tells the
+  // desktop app to take them from the page; with no one listening, pages keep them.
+  onBrowserCommand: (callback: (command: string) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, command: unknown) => {
+      if (typeof command === 'string') callback(command);
+    };
+    ipcRenderer.on('browser-command', listener);
+    browserCommandListeners += 1;
+    if (browserCommandListeners === 1) ipcRenderer.send('browser-commands:accept', true);
+    return () => {
+      ipcRenderer.removeListener('browser-command', listener);
+      browserCommandListeners -= 1;
+      if (browserCommandListeners === 0) ipcRenderer.send('browser-commands:accept', false);
+    };
+  },
+  browserImportBrowsers: () => ipcRenderer.invoke('browser-import:browsers'),
+  browserImportProfiles: (browser: string) => ipcRenderer.invoke('browser-import:profiles', browser),
+  browserImport: (sourceId: string) => ipcRenderer.invoke('browser-import:run', sourceId),
+  openBrowserAccessSettings: (access: 'app-data' | 'full-disk') =>
+    ipcRenderer.invoke('browser-import:open-access-settings', access),
 
   // File Management APIs
   openDownloadsFolder: () => ipcRenderer.invoke('open-downloads-folder'),

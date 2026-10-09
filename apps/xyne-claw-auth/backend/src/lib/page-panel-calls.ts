@@ -3,6 +3,7 @@ import { prisma } from "../db.js";
 import { createLogger } from "../logger.js";
 import { redisService } from "../redis.js";
 import { errMsg } from "./errors.js";
+import { onArtifacts, onPageCall, signalPageCall } from "./panel-signals.js";
 
 const log = createLogger("page-panel-calls");
 
@@ -19,6 +20,7 @@ const PANEL_OPEN_WAIT_MS = 8_000;
 const OPEN_URL_DEADLINE_MS = 15_000;
 
 export const PAGE_PANEL_TOOLS = new Set([
+  "page-tabs",
   "page-read",
   "page-snapshot",
   "page-navigate",
@@ -183,7 +185,7 @@ export async function callPagePanelTool(input: {
 
   const redis = redisService.getConnection();
   const presence = parsePresence(await redis.get(presenceKey(runId)).catch(() => null));
-  if (presence?.userId !== userId) {
+  if (presence?.userId !== userId || !presence.panelOpen) {
     return unavailable("The Xyne AI screen for this run is not open with a browser panel on the desktop app.");
   }
 
@@ -192,6 +194,8 @@ export async function callPagePanelTool(input: {
   await redis.set(callKey(call.id), JSON.stringify({ userId, runId }), "EX", RESULT_TTL_SECONDS);
   await redis.rpush(queueKey(runId), JSON.stringify(call));
   await redis.expire(queueKey(runId), QUEUE_TTL_SECONDS);
+  // A client holding the page-call stream for this run hears of it now.
+  signalPageCall(runId);
 
   while (Date.now() < call.expiresAt) {
     await new Promise((resolve) => setTimeout(resolve, RESULT_POLL_MS));
@@ -270,6 +274,81 @@ export async function nextPagePanelCall(
     }
   }
   return null;
+}
+
+// Page-call stream: a client's Xyne AI screen holds one SSE connection for its
+// streaming runs instead of asking every second. A call queued for one of its runs
+// wakes it (panel-signals) and it drains the queue as /page-calls/next would; its
+// heartbeat drains too, so a missed wake costs one beat, and keeps the runs'
+// presence fresh while the stream is open. An artifact recorded in one of the runs'
+// conversations is said down it too, for the screen to fetch its list afresh.
+
+export interface PagePanelStreamDeps {
+  userId: string;
+  runIds: ReadonlyArray<string>;
+  panelOpen: boolean;
+  write: (chunk: string) => void;
+  heartbeatMs: number;
+}
+
+/** Serves a page-call stream until the returned function is called. */
+export async function servePagePanelStream(deps: PagePanelStreamDeps): Promise<() => void> {
+  let closed = false;
+  let draining = false;
+  let again = false;
+  const runIds = deps.runIds.slice(0, MAX_RUNS_PER_POLL);
+
+  const drain = async (): Promise<void> => {
+    if (draining) {
+      again = true;
+      return;
+    }
+    draining = true;
+    try {
+      do {
+        again = false;
+        for (;;) {
+          if (closed) return;
+          const call = await nextPagePanelCall(deps.userId, runIds, deps.panelOpen).catch(() => null);
+          if (!call) break;
+          deps.write(`event: call\ndata: ${JSON.stringify(call)}\n\n`);
+        }
+      } while (again && !closed);
+    } finally {
+      draining = false;
+    }
+  };
+
+  const stops = runIds.map((runId) => onPageCall(runId, () => void drain()));
+
+  // The runs' conversations, for their artifacts: only the user's own.
+  const conversations = new Set<string>();
+  for (const runId of runIds) {
+    const owner = await runOwner(runId).catch(() => null);
+    if (owner?.userId === deps.userId && owner.conversationId) conversations.add(owner.conversationId);
+  }
+  for (const conversationId of conversations) {
+    stops.push(
+      onArtifacts(conversationId, () => {
+        if (!closed) deps.write(`event: artifacts\ndata: ${JSON.stringify({ conversationId })}\n\n`);
+      }),
+    );
+  }
+
+  // `artifacts` tells the client this stream says when artifacts change.
+  deps.write(`event: ready\ndata: ${JSON.stringify({ artifacts: true })}\n\n`);
+  await drain();
+  const heartbeat = setInterval(() => {
+    if (closed) return;
+    deps.write(":ka\n\n");
+    void drain();
+  }, deps.heartbeatMs);
+
+  return () => {
+    closed = true;
+    clearInterval(heartbeat);
+    for (const stop of stops) stop();
+  };
 }
 
 function readImage(value: unknown): { data: string; mimeType: string } | undefined {

@@ -7,6 +7,7 @@ import { routePopupToEmbeddedWebview } from '../../utils/embeddedWebviewRegistry
 import { SdlcEmbeddedWebview } from './SdlcEmbeddedWebview';
 import { parseSdlcFrameMessage, SDLC_FRAME_MESSAGE } from './sdlcFrameMessages';
 import { SDLC_WINDOW_FRAME_NAME } from './useSdlcFrameBridge';
+import { keepDownloads } from '../../components/InAppBrowser';
 
 /**
  * The SDLC lane as a whole window, at /newWindow/sdlc/:workspaceId/:channelId/:section.
@@ -86,6 +87,17 @@ const SdlcWindow = (): ReactElement => {
       // so the system browser is the only place left for it to go.
       openLink(url, null, { force: 'external' });
     });
+  }, []);
+
+  // Downloads from this window's pages: saved to Downloads, marked as from the
+  // internet, and said when done — as in the main window.
+  useEffect(() => keepDownloads(), []);
+
+  // The View menu's zoom (⌘+, ⌘-, ⌘0) when no page here has the keyboard: this
+  // window has no browser bar of its own, so the window itself, as before.
+  useEffect(() => {
+    const api = window.electronAPI;
+    return api?.onAppZoomRequest?.(step => api.zoomApp?.(step));
   }, []);
 
   return (

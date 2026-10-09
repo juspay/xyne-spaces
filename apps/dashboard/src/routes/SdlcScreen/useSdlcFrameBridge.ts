@@ -1,8 +1,15 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { isSdlcSurface } from '../../config';
 import { isElectronApp } from '../../utils/electronApp';
-import { parseSdlcFrameMessage, SDLC_FRAME_MESSAGE, type SdlcEmbedTab } from './sdlcFrameMessages';
+import {
+  parseSdlcFrameMessage,
+  SDLC_FRAME_MESSAGE,
+  type SdlcEmbedCommand,
+  type SdlcEmbedPageState,
+  type SdlcEmbedTab,
+  type SdlcHistoryPage,
+} from './sdlcFrameMessages';
 
 /** True when this document is the SDLC bundle running inside the parent's frame. */
 export function isFramedSdlcSurface(): boolean {
@@ -61,8 +68,26 @@ export function openLinkFromSdlcFrame(url: string): boolean {
 
 /** Drives the page the host is holding: the lane has the buttons, not the page. */
 export function controlEmbeddedPage(
-  action: 'back' | 'forward' | 'reload' | 'goto' | 'select' | 'close' | 'newTab',
-  payload?: { url?: string; tabId?: string },
+  action:
+    | 'back'
+    | 'forward'
+    | 'reload'
+    | 'stop'
+    | 'goto'
+    | 'select'
+    | 'close'
+    | 'newTab'
+    | 'find'
+    | 'stopFind',
+  payload?: {
+    url?: string;
+    tabId?: string;
+    key?: string;
+    /** For 'find'. */
+    text?: string;
+    forward?: boolean;
+    findNext?: boolean;
+  },
 ): void {
   if (!isFramedSdlcSurface()) return;
   window.parent.postMessage(
@@ -71,9 +96,86 @@ export function controlEmbeddedPage(
       action,
       ...(payload?.url ? { url: payload.url } : {}),
       ...(payload?.tabId ? { tabId: payload.tabId } : {}),
+      ...(payload?.key ? { key: payload.key } : {}),
+      ...(payload?.text ? { text: payload.text } : {}),
+      ...(payload?.forward === false ? { forward: false } : {}),
+      ...(payload?.findNext ? { findNext: true } : {}),
     },
     window.location.origin,
   );
+}
+
+/** Lets the host throw a tab's page away: the tab was closed, so it won't be back. */
+export function discardEmbeddedPage(key: string): void {
+  if (!canHostEmbedPages()) return;
+  window.parent.postMessage(
+    { type: SDLC_FRAME_MESSAGE.embedPage, url: null, rect: null, visible: false, key },
+    window.location.origin,
+  );
+}
+
+/**
+ * The keyed pages the host holds, as it last reported them: every tab's title,
+ * icon and loading state, for the strip as well as the open tab's bar. One
+ * listener for the whole lane, installed on first use.
+ */
+let embeddedPages: ReadonlyMap<string, SdlcEmbedPageState> = new Map();
+const embeddedPagesListeners = new Set<() => void>();
+let embeddedPagesListening = false;
+
+function listenForEmbeddedPages(): void {
+  if (embeddedPagesListening || !isFramedSdlcSurface()) return;
+  embeddedPagesListening = true;
+  window.addEventListener('message', event => {
+    if (event.origin !== window.location.origin || event.source !== window.parent) return;
+    const message = parseSdlcFrameMessage(event.data);
+    if (message?.type !== SDLC_FRAME_MESSAGE.embedState || !message.pages) return;
+    embeddedPages = new Map(message.pages.map(page => [page.key, page]));
+    embeddedPagesListeners.forEach(listener => listener());
+  });
+}
+
+function subscribeToEmbeddedPages(listener: () => void): () => void {
+  listenForEmbeddedPages();
+  embeddedPagesListeners.add(listener);
+  return () => embeddedPagesListeners.delete(listener);
+}
+
+/** Every keyed page's state, by key; empty off the desktop app, or before the host says. */
+export function useEmbeddedPages(): ReadonlyMap<string, SdlcEmbedPageState> {
+  return useSyncExternalStore(subscribeToEmbeddedPages, () => embeddedPages);
+}
+
+/**
+ * Hears a keyed page asking for something the lane's chrome does — ⌘F, ⌘T, ⌘L
+ * pressed while the page had the keyboard, "Save" from its menu.
+ */
+export function subscribeToEmbeddedCommand(
+  onCommand: (key: string, command: SdlcEmbedCommand) => void,
+): () => void {
+  if (!isFramedSdlcSurface()) return () => {};
+  const onMessage = (event: MessageEvent): void => {
+    if (event.origin !== window.location.origin || event.source !== window.parent) return;
+    const message = parseSdlcFrameMessage(event.data);
+    if (message?.type === SDLC_FRAME_MESSAGE.embedCommand) onCommand(message.key, message.command);
+  };
+  window.addEventListener('message', onMessage);
+  return () => window.removeEventListener('message', onMessage);
+}
+
+/**
+ * Hears a keyed page asking for a new window — a link to open in a new tab, a
+ * popup — which the lane opens as a tab of its own.
+ */
+export function subscribeToEmbeddedOpen(onOpen: (url: string, from: string) => void): () => void {
+  if (!isFramedSdlcSurface()) return () => {};
+  const onMessage = (event: MessageEvent): void => {
+    if (event.origin !== window.location.origin || event.source !== window.parent) return;
+    const message = parseSdlcFrameMessage(event.data);
+    if (message?.type === SDLC_FRAME_MESSAGE.embedOpen) onOpen(message.url, message.from);
+  };
+  window.addEventListener('message', onMessage);
+  return () => window.removeEventListener('message', onMessage);
 }
 
 /**
@@ -120,6 +222,46 @@ export function reclaimHostFocus(): void {
   window.parent.postMessage({ type: SDLC_FRAME_MESSAGE.embedRelease }, window.location.origin);
 }
 
+/** How long the lane waits for the host to answer about history before going without. */
+const HISTORY_TIMEOUT_MS = 1500;
+let historyQueries = 0;
+
+/**
+ * Asks the host what the browsing history suggests: matches for what is typed, or
+ * the sites visited most. Nothing, quickly, from a host that doesn't answer — an
+ * older one, or one whose desktop app keeps no history.
+ */
+export function historyFromHost(
+  kind: 'suggest' | 'top',
+  typed: string,
+  limit: number,
+): Promise<{ searches: string[]; pages: SdlcHistoryPage[] }> {
+  const nothing = { searches: [], pages: [] };
+  if (!canHostEmbedPages()) return Promise.resolve(nothing);
+  historyQueries += 1;
+  const id = `history-${historyQueries}`;
+  return new Promise(resolve => {
+    const done = (answer: { searches: string[]; pages: SdlcHistoryPage[] }): void => {
+      window.removeEventListener('message', onMessage);
+      window.clearTimeout(timer);
+      resolve(answer);
+    };
+    const onMessage = (event: MessageEvent): void => {
+      if (event.origin !== window.location.origin || event.source !== window.parent) return;
+      const message = parseSdlcFrameMessage(event.data);
+      if (message?.type === SDLC_FRAME_MESSAGE.historyResult && message.id === id) {
+        done({ searches: message.searches, pages: message.pages });
+      }
+    };
+    const timer = window.setTimeout(() => done(nothing), HISTORY_TIMEOUT_MS);
+    window.addEventListener('message', onMessage);
+    window.parent.postMessage(
+      { type: SDLC_FRAME_MESSAGE.historyQuery, id, kind, typed, limit },
+      window.location.origin,
+    );
+  });
+}
+
 /** True when the host can hold a live page over the lane for us. */
 export function canHostEmbedPages(): boolean {
   return isFramedSdlcSurface() && isElectronApp();
@@ -131,27 +273,37 @@ export function canHostEmbedPages(): boolean {
  *
  * The lane leaves a hole rather than drawing anything: the real page is the
  * host's webview, sitting above this frame.
+ *
+ * With a `key`, the page is one of the lane's tabs: the host keeps it when the
+ * cleanup runs — the reader went to another tab — so it comes back as it was, and
+ * only lets it go on discardEmbeddedPage. Without one it is cleared outright.
  */
-export function embedPageOverElement(url: string, element: HTMLElement): () => void {
+export function embedPageOverElement(url: string, element: HTMLElement, key?: string): () => void {
   if (!canHostEmbedPages()) return () => {};
 
+  // What was last said, so a resize or a toast elsewhere that moves nothing says
+  // nothing: each message re-renders the host's pages.
+  let last = '';
   const post = (payload: { url: string | null; rect: DOMRect | null; visible: boolean }): void => {
-    window.parent.postMessage(
-      {
-        type: SDLC_FRAME_MESSAGE.embedPage,
-        url: payload.url,
-        rect: payload.rect
-          ? {
-              x: payload.rect.x,
-              y: payload.rect.y,
-              width: payload.rect.width,
-              height: payload.rect.height,
-            }
-          : null,
-        visible: payload.visible,
-      },
-      window.location.origin,
-    );
+    const message = {
+      type: SDLC_FRAME_MESSAGE.embedPage,
+      url: payload.url,
+      rect: payload.rect
+        ? {
+            x: payload.rect.x,
+            y: payload.rect.y,
+            width: payload.rect.width,
+            height: payload.rect.height,
+          }
+        : null,
+      visible: payload.visible,
+      ...(key && { key }),
+      ...(key && payload.url === null && { keep: true }),
+    };
+    const said = JSON.stringify(message);
+    if (said === last) return;
+    last = said;
+    window.parent.postMessage(message, window.location.origin);
   };
 
   /**
@@ -161,7 +313,8 @@ export function embedPageOverElement(url: string, element: HTMLElement): () => v
    */
   const overlayOpen = (): boolean => {
     const overlays = document.querySelectorAll(
-      '[role="dialog"], [role="menu"], [data-radix-popper-content-wrapper]',
+      // Ours too: an address bar's suggestions, drawn over the page below it.
+      '[role="dialog"], [role="menu"], [data-radix-popper-content-wrapper], [data-xyne-overlay]',
     );
     const hole = element.getBoundingClientRect();
     return Array.from(overlays).some(overlay => {

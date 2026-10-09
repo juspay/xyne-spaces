@@ -3,7 +3,7 @@ export { useAnnotation, type AnnotationParts, type AnnotationInput } from './Ann
 export { useFrameTransport } from './useFrameTransport';
 export { useWebviewTransport } from './useWebviewTransport';
 export { useDomTransport } from './useDomTransport';
-export { ANNOTATE_SCRIPT, ANNOTATE_SCRIPT_TAG } from './pageScript';
+export { ANNOTATE_SCRIPT, ANNOTATE_SCRIPT_TAG, annotateEventFrom } from './pageScript';
 export { publishPendingPassage, consumePendingPassage } from './pendingPassage';
 export {
   registerSelectionSink,
@@ -12,3 +12,4 @@ export {
   type PassageSelection,
 } from './selectionSink';
 export type { AnnotateTransport, TransportEvents, PickedBlock, CommentMark } from './transport';
+export { measuredRect, rectOnScreen } from './transport';

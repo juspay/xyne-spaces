@@ -9,8 +9,7 @@ import {
   type ConversationArtifact,
   type ConversationArtifactPatch,
 } from '../../../services/XyneAI/XyneAIArtifactsService';
-
-const STREAMING_POLL_MS = 6000;
+import { subscribeToArtifactChanges } from './pagePanelCalls';
 
 function useConversationStreaming(conversationId: string | null): boolean {
   const [streaming, setStreaming] = useState(false);
@@ -49,8 +48,21 @@ export function useConversationArtifacts(
     queryFn: () => listConversationArtifacts(conversationId as string),
     enabled: Boolean(conversationId),
     staleTime: 15_000,
-    refetchInterval: streaming ? STREAMING_POLL_MS : false,
   });
+
+  // Fetched afresh when the server says the conversation's artifacts changed, and
+  // once more when a run ends.
+  useEffect(() => {
+    if (!conversationId) return undefined;
+    return subscribeToArtifactChanges(changed => {
+      if (changed !== null && changed !== conversationId) return;
+      // Every screen part showing the list hears it; one fetch serves them all.
+      void queryClient.invalidateQueries(
+        { queryKey: conversationArtifactsQueryKey(conversationId) },
+        { cancelRefetch: false },
+      );
+    });
+  }, [conversationId, queryClient]);
 
   const wasStreaming = useRef(streaming);
   useEffect(() => {

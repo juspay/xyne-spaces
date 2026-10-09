@@ -3,10 +3,11 @@ import type { PanelImperativeHandle } from 'react-resizable-panels';
 import type { RefObject } from 'react';
 import { CHAT_SIDEBAR_KEYBOARD_STEP } from '../routes/ChatScreen/chatSidebarWidth';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useSelector } from '@xstate/react';
 import { roomActor } from '../machines/roomMachine';
 import { browserPanelActor } from '../machines/browserPanelMachine';
+import { subscribeToAppKeys } from '../components/InAppBrowser';
 
 interface UseGlobalShortcutsProps {
   leftPanelRef: RefObject<PanelImperativeHandle | null>;
@@ -74,20 +75,46 @@ export const useGlobalShortcuts = ({ leftPanelRef }: UseGlobalShortcutsProps): v
     window.dispatchEvent(new CustomEvent('xyne-open-status'));
   });
 
-  // Toggle between the main app and the in-app fullscreen browser.
-  useShortcutById('global.toggleBrowser', () => {
-    const onBrowser = /\/browser(\/|$)/.test(location.pathname);
+  /**
+   * Shows or hides the in-app browser docked on the right. Hiding keeps its tabs and
+   * their pages. Full screen, it does nothing: ⌘⇧F docks it first.
+   */
+  const toggleBrowser = (): void => {
+    if (/\/browser(\/|$)/.test(location.pathname)) return;
     const panelState = browserPanelActor.getSnapshot().context.browserPanelState;
 
-    if (onBrowser) {
-      browserPanelActor.send({ type: 'CLOSE' });
-      void navigate(-1);
-    } else if (panelState === 'open') {
+    if (panelState === 'open') {
       browserPanelActor.send({ type: 'CLOSE' });
     } else {
+      browserPanelActor.send({ type: 'OPEN' });
+    }
+  };
+
+  /** Takes the in-app browser full screen, or docks it back on the right. */
+  const toggleBrowserDock = (): void => {
+    if (/\/browser(\/|$)/.test(location.pathname)) {
+      void navigate(-1);
+      browserPanelActor.send({ type: 'OPEN' });
+    } else {
+      browserPanelActor.send({ type: 'CLOSE' });
       void navigate(workspaceId ? `/${workspaceId}/browser` : '/browser');
     }
-  });
+  };
+
+  useShortcutById('global.toggleBrowser', toggleBrowser);
+  useShortcutById('global.toggleBrowserDock', toggleBrowserDock);
+
+  // The same keys, pressed inside a page of a browser, which has the keyboard then.
+  const browserKeysRef = useRef({ toggleBrowser, toggleBrowserDock });
+  browserKeysRef.current = { toggleBrowser, toggleBrowserDock };
+  useEffect(
+    () =>
+      subscribeToAppKeys(command => {
+        if (command === 'toggleBrowser') browserKeysRef.current.toggleBrowser();
+        else browserKeysRef.current.toggleBrowserDock();
+      }),
+    [],
+  );
 
   // Go back in navigation history
   useShortcutById('global.goBack', () => {

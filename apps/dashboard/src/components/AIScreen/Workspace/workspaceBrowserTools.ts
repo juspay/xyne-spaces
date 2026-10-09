@@ -1,4 +1,5 @@
 import type { ElectronWebviewElement } from '../../../types/electron';
+import { wakePage } from '../../InAppBrowser/BrowserWebview';
 
 export interface PageToolResult {
   ok: boolean;
@@ -9,19 +10,94 @@ export interface PageToolResult {
 const SCREENSHOT_MAX_WIDTH = 1280;
 
 const NO_PAGE = 'No page is open in the workspace panel. Call open-url first.';
+const TABS_TOOL = 'page-tabs';
 const MAX_TEXT_CHARS = 20000;
 const MAX_ELEMENTS = 300;
 const NAVIGATE_TIMEOUT_MS = 15000;
 const SETTLE_MS = 500;
 
-let registeredWebview: ElectronWebviewElement | null = null;
-
-export function registerWorkspaceWebview(el: ElectronWebviewElement | null): void {
-  registeredWebview = el;
+/** A page open in the workspace's browser, under its tab's id. */
+interface WorkspacePage {
+  view: ElectronWebviewElement;
+  /** Where its tab opened it: the address the agent asked for, whatever it went on to. */
+  url: string;
 }
 
+/**
+ * The workspace browser's open pages, each kept alive in its tab, and which shows.
+ * The agent's page tools reach any of them by its tab; without one, the one shown.
+ */
+const pages = new Map<string, WorkspacePage>();
+let shownTab: string | null = null;
+const pageListeners = new Set<() => void>();
+const pagesChanged = (): void => pageListeners.forEach(listener => listener());
+
+/** Puts a tab's page within the agent's reach; what it returns takes it out. */
+export function registerWorkspacePage(tab: string, page: WorkspacePage): () => void {
+  pages.set(tab, page);
+  pagesChanged();
+  return () => {
+    if (pages.get(tab) !== page) return;
+    pages.delete(tab);
+    pagesChanged();
+  };
+}
+
+/** Which tab shows; what it returns says it no longer does. */
+export function showWorkspaceTab(tab: string): () => void {
+  shownTab = tab;
+  pagesChanged();
+  return () => {
+    if (shownTab !== tab) return;
+    shownTab = null;
+    pagesChanged();
+  };
+}
+
+/** The page on screen: the one a page tool without a tab acts on. */
 export function getWorkspaceWebview(): ElectronWebviewElement | null {
-  return registeredWebview;
+  return (shownTab && pages.get(shownTab)?.view) || null;
+}
+
+/** Whether any page is open in the workspace's browser. */
+export function hasWorkspacePages(): boolean {
+  return pages.size > 0;
+}
+
+/** Hears pages open, close, or another show. */
+export function subscribeToWorkspacePages(listener: () => void): () => void {
+  pageListeners.add(listener);
+  return () => pageListeners.delete(listener);
+}
+
+const comparable = (url: string): string => {
+  try {
+    const parsed = new URL(url);
+    parsed.hash = '';
+    return parsed.href.replace(/\/$/, '');
+  } catch {
+    return url;
+  }
+};
+
+/** The tab whose page is at an address, or opened for it; null for none. */
+export function workspaceTabAt(url: string): string | null {
+  const wanted = comparable(url);
+  for (const [tab, page] of pages) {
+    let now = '';
+    try {
+      now = page.view.getURL();
+    } catch {
+      now = '';
+    }
+    if (comparable(page.url) === wanted || (now && comparable(now) === wanted)) return tab;
+  }
+  return null;
+}
+
+/** The page of a tab, for a tool. */
+export function workspacePage(tab: string): ElectronWebviewElement | null {
+  return pages.get(tab)?.view ?? null;
 }
 
 function delay(ms: number): Promise<void> {
@@ -163,13 +239,51 @@ function unknownRef(ref: string): PageToolResult {
   return { ok: false, content: `Unknown ref ${ref} — take a fresh page-snapshot.` };
 }
 
+/** The workspace's open tabs, as page-tabs answers. */
+function listTabs(): PageToolResult {
+  if (pages.size === 0) return { ok: false, content: NO_PAGE };
+  const lines = [...pages].map(([tab, page]) => {
+    let title = '';
+    let url = page.url;
+    try {
+      title = page.view.getTitle();
+      url = page.view.getURL() || url;
+    } catch {
+      /* not loaded yet: where it was opened */
+    }
+    return `- ${tab}${tab === shownTab ? ' (shown)' : ''}: ${title || '(untitled)'} — ${url}`;
+  });
+  return {
+    ok: true,
+    content:
+      'Open tabs in the workspace panel. Page tools act on the shown tab unless given `tab`; ' +
+      'every tab stays loaded, so work in the one you need rather than opening its page again.\n' +
+      lines.join('\n'),
+  };
+}
+
 export async function executePageTool(
   toolName: string,
   args: Record<string, unknown>,
   target?: ElectronWebviewElement | null,
 ): Promise<PageToolResult> {
-  const wv = target === undefined ? registeredWebview : target;
+  if (toolName === TABS_TOOL) {
+    // The SDLC browser has one page: the one on screen.
+    if (target !== undefined) {
+      return target
+        ? { ok: true, content: `One tab, shown: ${describe(target)}` }
+        : { ok: false, content: NO_PAGE };
+    }
+    return listTabs();
+  }
+  const tab = typeof args['tab'] === 'string' ? args['tab'].trim() : '';
+  if (target === undefined && tab && !pages.has(tab)) {
+    return { ok: false, content: `No open tab ${tab}. Call ${TABS_TOOL} for the open tabs.` };
+  }
+  const wv = target !== undefined ? target : tab ? workspacePage(tab) : getWorkspaceWebview();
   if (!wv) return { ok: false, content: NO_PAGE };
+  // A tab out of sight may be frozen; it runs again before it is asked anything.
+  await wakePage(wv);
 
   try {
     switch (toolName) {

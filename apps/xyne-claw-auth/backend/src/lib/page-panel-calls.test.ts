@@ -5,6 +5,8 @@ const state = vi.hoisted(() => ({
   artifacts: [] as Array<Record<string, unknown>>,
   kv: new Map<string, string>(),
   lists: new Map<string, string[]>(),
+  /** The pod's pattern subscriber, which a publish reaches. */
+  onPublished: null as ((pattern: string, channel: string, message: string) => void) | null,
 }));
 
 vi.mock("../db.js", () => ({
@@ -35,6 +37,16 @@ vi.mock("../redis.js", () => ({
       }),
       lpop: vi.fn(async (k: string) => state.lists.get(k)?.shift() ?? null),
       expire: vi.fn(async () => 1),
+      publish: vi.fn(async (channel: string, message: string) => {
+        state.onPublished?.("*", channel, message);
+        return 1;
+      }),
+      duplicate: () => ({
+        psubscribe: vi.fn(async () => 1),
+        on: vi.fn((event: string, handler: (pattern: string, channel: string, message: string) => void) => {
+          if (event === "pmessage") state.onPublished = handler;
+        }),
+      }),
     }),
   },
 }));
@@ -52,7 +64,9 @@ import {
   nextPagePanelCall,
   pagePanelAllowedForTrigger,
   resolvePagePanelCall,
+  servePagePanelStream,
 } from "./page-panel-calls.js";
+import { signalArtifacts } from "./panel-signals.js";
 
 let run = 0;
 const newRun = (userId: string, triggerSource: string) => {
@@ -107,6 +121,78 @@ describe("browser panel calls for Xyne AI screen runs", () => {
     expect(await resolvePagePanelCall("u2", call!.id, { ok: true, content: "stolen" })).toBe(false);
     expect(await resolvePagePanelCall("u1", call!.id, { ok: true, content: "Title: Example" })).toBe(true);
     expect(await pending).toEqual({ ok: true, content: "Title: Example" });
+  });
+
+  it("streams a call to the panel holding the stream as soon as it is queued", async () => {
+    const id = newRun("u1", "chat");
+    const written: string[] = [];
+    const stop = await servePagePanelStream({
+      userId: "u1",
+      runIds: [id],
+      panelOpen: true,
+      write: (chunk) => written.push(chunk),
+      // No beat during the test: the wake alone has to bring the call.
+      heartbeatMs: 60_000,
+    });
+    const answer = callPagePanelTool({ userId: "u1", sessionId: id, toolName: "page-tabs", args: {} });
+    await vi.waitFor(() => expect(written.some((chunk) => chunk.startsWith("event: call"))).toBe(true));
+    const sent = written.find((chunk) => chunk.startsWith("event: call")) ?? "";
+    const call = JSON.parse(sent.slice(sent.indexOf("data: ") + 6)) as { id: string; toolName: string };
+    expect(call.toolName).toBe("page-tabs");
+    expect(await resolvePagePanelCall("u1", call.id, { ok: true, content: "- tab-1 (shown)" })).toBe(true);
+    expect((await answer).content).toBe("- tab-1 (shown)");
+    stop();
+  });
+
+  it("says down the stream when an artifact of the run's conversation changes, and no other's", async () => {
+    const id = newRun("u1", "chat");
+    const written: string[] = [];
+    const stop = await servePagePanelStream({
+      userId: "u1",
+      runIds: [id],
+      panelOpen: false,
+      write: (chunk) => written.push(chunk),
+      heartbeatMs: 60_000,
+    });
+    expect(written[0]).toBe(`event: ready\ndata: {"artifacts":true}\n\n`);
+    signalArtifacts("conv-elsewhere");
+    signalArtifacts(`conv-${id}`);
+    await vi.waitFor(() => expect(written.some((chunk) => chunk.startsWith("event: artifacts"))).toBe(true));
+    expect(written.filter((chunk) => chunk.startsWith("event: artifacts"))).toEqual([
+      `event: artifacts\ndata: {"conversationId":"conv-${id}"}\n\n`,
+    ]);
+    stop();
+  });
+
+  it("leaves page tools unavailable to a screen streaming without pages", async () => {
+    const id = newRun("u1", "chat");
+    const stop = await servePagePanelStream({
+      userId: "u1",
+      runIds: [id],
+      panelOpen: false,
+      write: () => undefined,
+      heartbeatMs: 60_000,
+    });
+    const result = await callPagePanelTool({ userId: "u1", sessionId: id, toolName: "page-read", args: {} });
+    expect(result.unavailable).toBe(true);
+    stop();
+  });
+
+  it("streams nothing for someone else's run", async () => {
+    const id = newRun("u2", "chat");
+    const written: string[] = [];
+    const stop = await servePagePanelStream({
+      userId: "u1",
+      runIds: [id],
+      panelOpen: true,
+      write: (chunk) => written.push(chunk),
+      heartbeatMs: 60_000,
+    });
+    // Not present for u2's run, so the call is refused rather than queued.
+    const result = await callPagePanelTool({ userId: "u2", sessionId: id, toolName: "page-read", args: {} });
+    expect(result.ok).toBe(false);
+    expect(written.some((chunk) => chunk.startsWith("event: call"))).toBe(false);
+    stop();
   });
 
   it("does not let a user poll someone else's run", async () => {

@@ -29,6 +29,13 @@ import { initializeUIUpdater } from '../services/ui-updater';
 import { initializeTelemetry } from '../services/telemetry';
 import { setupGlobalErrorHandlers } from '../services/error-handler';
 import { setupWebviewShortcuts } from '../services/webview-shortcuts';
+import { followAppTheme } from '../services/webview-theme';
+import { setupBrowserTabsUserAgent } from '../services/browser-tabs-session';
+import { trackBrowserHistory } from '../services/browser-history';
+import { watchBrowserMemory } from '../services/browser-memory';
+import { setupBrowserDownloads } from '../services/browser-downloads';
+import { routeMenuZoom } from '../services/zoom-menu';
+import { browserSettingsService } from '../services/browser-settings';
 import { callInvitePath } from '../utils/validation';
 import Store from 'electron-store';
 
@@ -128,6 +135,10 @@ function setupApplicationMenu(): void {
   // process.
   const menu = Menu.getApplicationMenu() ?? new Menu();
 
+  // ⌘+, ⌘- and ⌘0 zoom what has the keyboard: a browser's page, so its bar shows the
+  // size, or else the app.
+  routeMenuZoom(menu);
+
   menu.append(new MenuItem({
     label: 'Beta',
     submenu: [
@@ -168,6 +179,8 @@ async function initializeApp(): Promise<void> {
   setupMTLS();
   setupRequestInterceptor();
   setupXyneSpacesInterceptor();
+  setupBrowserTabsUserAgent();
+  setupBrowserDownloads();
   void hydrateCachedUserFromCookies();
   setupIpcHandlers();
 
@@ -263,17 +276,41 @@ function setupAppStateListeners(): void {
 // Handle webview preload scripts - will-attach-webview fires on the HOST webContents
 app.on('web-contents-created', (_event, webContents) => {
   // Listen for will-attach-webview on any webContents (to catch webviews being created in the renderer)
-  webContents.on('will-attach-webview', (_event, webPreferences, _params) => {
-    // Set the webview preload script for Ask AI text selection
-    // In production, the preload script is in resources/app/dist
-    // In development, it's in the dist folder (parent of app folder where main.js is)
-    const webviewPreloadPath = app.isPackaged
-      ? path.join(process.resourcesPath, 'app', 'dist', 'webview-preload.js')
-      : path.join(__dirname, '..', 'webview-preload.js');
+  webContents.on('will-attach-webview', (_event, webPreferences, params) => {
+    // The SDLC folder page's browser marks its pages in their webpreferences: they
+    // are plain browsing, with no use for the panel's Ask AI script — whose button
+    // sits over a site's own popups for a selection — nor for its bridge to the app,
+    // which a third-party page has no business holding.
+    // Xyne AI's workspace browser marks its pages `plain` for the same reason.
+    const features = typeof params.webpreferences === 'string' ? params.webpreferences : '';
+    if (/(^|,)\s*xyneSurface=(sdlc|plain)\s*(,|$)/.test(features)) {
+      delete webPreferences.preload;
+      log.info('[Main] Plain browsing page: no webview preload');
+    } else {
+      // Xyne's own pages, which load in their own partition, are told they are
+      // in the browser panel; a third-party site never is.
+      if (params.partition === 'persist:xyne-spaces') {
+        webPreferences.additionalArguments = [
+          ...(webPreferences.additionalArguments ?? []),
+          '--xyne-own-page',
+        ];
+      }
+      // Set the webview preload script for Ask AI text selection
+      // In production, the preload script is in resources/app/dist
+      // In development, it's in the dist folder (parent of app folder where main.js is)
+      const webviewPreloadPath = app.isPackaged
+        ? path.join(process.resourcesPath, 'app', 'dist', 'webview-preload.js')
+        : path.join(__dirname, '..', 'webview-preload.js');
+
+      webPreferences.preload = webviewPreloadPath;
+      log.info('[Main] Setting webview preload:', webviewPreloadPath);
+    }
     
-    webPreferences.preload = webviewPreloadPath;
-    log.info('[Main] Setting webview preload:', webviewPreloadPath);
-    
+    // A page going full screen — a video — fills the app's window, which the app
+    // does for it, and never resizes or full-screens the window itself: leaving it
+    // would otherwise take the whole app out of macOS full screen with it.
+    webPreferences.disableHtmlFullscreenWindowResize = true;
+
     // Enable context isolation for security
     webPreferences.contextIsolation = true;
     // Disable node integration for security
@@ -291,7 +328,12 @@ app.on('web-contents-created', (_event, webContents) => {
 
   // Handle new window requests from webviews
   if (webContents.getType() === 'webview') {
-    webContents.setWindowOpenHandler(({ url }) => {
+    webContents.setWindowOpenHandler(({ url, disposition }) => {
+      // A script's own window — a popup — is held back while popups are turned off
+      // in the browser's settings. Links that open in a new tab are not popups.
+      if (disposition === 'new-window' && !browserSettingsService.getSettings().popups) {
+        return { action: 'deny' };
+      }
       try {
         const urlObj = new URL(url);
         if (urlObj.protocol === 'http:' || urlObj.protocol === 'https:') {
@@ -310,14 +352,16 @@ app.on('web-contents-created', (_event, webContents) => {
             if (invitePath) {
               mainWindow.webContents.send('navigate-to', invitePath);
             } else {
+              // How it asked: a ⌘-click or middle click opens a tab behind.
               (embedder ?? mainWindow.webContents).send(
                 'open-in-browser-panel',
                 url,
                 webContents.id,
+                disposition,
               );
             }
           } else if (embedder) {
-            embedder.send('open-in-browser-panel', url, webContents.id);
+            embedder.send('open-in-browser-panel', url, webContents.id, disposition);
           }
         }
       } catch (e) {
@@ -326,6 +370,15 @@ app.on('web-contents-created', (_event, webContents) => {
       
       return { action: 'deny' };
     });
+
+    // Pages see the app's theme, not the OS's, as prefers-color-scheme.
+    followAppTheme(webContents);
+
+    // Where the in-app browsers go, for their address bars to suggest.
+    trackBrowserHistory(webContents);
+
+    // How much memory the pages use, so a window lets go of hidden ones when too much.
+    watchBrowserMemory();
 
     // Keyboard shortcuts for webview (Cmd+T, Cmd+F, Cmd+R, etc.).
     // To add new shortcuts edit services/webview-shortcuts.ts.

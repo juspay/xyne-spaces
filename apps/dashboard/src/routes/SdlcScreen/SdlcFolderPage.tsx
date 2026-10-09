@@ -1,41 +1,16 @@
-import {
-  Fragment,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type KeyboardEvent,
-  type ReactElement,
-  type ReactNode,
-} from 'react';
-import {
-  DndContext,
-  PointerSensor,
-  closestCenter,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-  type Modifier,
-} from '@dnd-kit/core';
-import {
-  SortableContext,
-  arrayMove,
-  horizontalListSortingStrategy,
-  useSortable,
-} from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
-import { Command } from 'cmdk';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
+import { arrayMove } from '@dnd-kit/sortable';
 import { createPortal } from 'react-dom';
 import {
-  BookmarkPlus,
   ChevronDown,
   ClipboardPaste,
   Download,
   FolderPlus,
   Pencil,
-  ChevronLeft,
   ChevronRight,
+  ExternalLink,
+  Loader2,
+  Save,
   FileText,
   Folder,
   Globe,
@@ -46,11 +21,8 @@ import {
   MessageSquare,
   Paperclip,
   Plus,
-  RotateCw,
   Scissors,
-  Search,
   Upload,
-  X,
 } from 'lucide-react';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { queries } from '../../zero/queries';
@@ -64,25 +36,50 @@ import {
   DropdownMenuTrigger,
 } from '../../components/ui/dropdown-menu';
 import { downloadFile } from '../../services/clients/fileFetchService';
-import { setUserPreference, useUserPreference } from '../../machines/userPreferencesMachine';
+import {
+  setUserPreference,
+  useUserPreference,
+  userPreferencesSnapshot,
+} from '../../machines/userPreferencesMachine';
 import { formatShortcut, useScope, useShortcutById, type ShortcutId } from '../../shortcuts';
 import { resolveShortcutKeys } from '../../components/ui/ShortcutHint';
 import { usePlatform } from '../../hooks/usePlatform';
-import { useScrollFade } from '../../hooks/useScrollFade';
 import { FilePreview } from '../../components/FilePreview';
 import { Tooltip } from '../../components/ui/Tooltip';
 import { openLink } from '../../utils/openLink';
+import { homePageFor, hostOf } from '../../utils/browserAddress';
 import { useBridgeTransport } from './useBridgeTransport';
 import {
   canHostEmbedPages,
   controlEmbeddedPage,
+  discardEmbeddedPage,
   embedPageOverElement,
+  historyFromHost,
   openLinkFromSdlcFrame,
   reclaimHostFocus,
+  subscribeToEmbeddedCommand,
+  subscribeToEmbeddedOpen,
   subscribeToEmbeddedPage,
+  useEmbeddedPages,
 } from './useSdlcFrameBridge';
-import type { SdlcEmbedTab } from './sdlcFrameMessages';
+import type { SdlcEmbedPageState, SdlcEmbedTab } from './sdlcFrameMessages';
 import { fileKind, type FileKind } from './fileKind';
+import {
+  BrowserToolbar,
+  DownloadsButton,
+  FindBar,
+  LoadError,
+  SiteTiles,
+  StartPage,
+  StartSection,
+  TabStrip,
+  TabSwitcher,
+  ToolbarButton,
+  siteLetter,
+  useFindInPage,
+  type HistorySource,
+  type TabSwitcherEntry,
+} from '../../components/InAppBrowser';
 import { FileTypeIcon } from './FileTypeIcon';
 import { AppIcon } from '../../components/AppIcon/AppIcon';
 import { ActivityPill, type SdlcLiveCalls } from './ActivityPill';
@@ -112,8 +109,15 @@ import {
 
 export type FolderTabKind = 'CANVAS' | 'LINK' | 'ATTACHMENT' | 'BROWSER';
 
-/** The one scratch tab a folder can have open; it is not an item of anything. */
+/**
+ * The browsing tab folders had before they could have several: still opened from
+ * links and tabs saved then. New browsing tabs get ids of their own.
+ */
 export const SCRATCH_TAB_ID = 'browse';
+
+/** A new browsing tab's id: its own, so several can be open in one folder. */
+export const newBrowsingTabId = (): string =>
+  `browse-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
 /**
  * How many tabs a folder's strip looks up. Past this many the oldest drop out of the
@@ -121,12 +125,16 @@ export const SCRATCH_TAB_ID = 'browse';
  */
 const TAB_LOOKUP_LIMIT = 100;
 
-/** Where scratch browsing starts. */
-const SCRATCH_START_PAGE = 'https://www.google.com';
-
 export interface FolderTab {
   kind: FolderTabKind;
   id: string;
+  /** A browsing tab's page, kept as it moves so the tab reopens where it was; none
+   *  while it shows its start page. */
+  url?: string;
+  /** A browsing tab's page title, for its label before the page has loaded again. */
+  title?: string;
+  /** And its icon, likewise. */
+  favicon?: string;
 }
 
 /**
@@ -471,7 +479,7 @@ function TreeRow(
           'group/row flex h-9 items-center gap-1 rounded-[10px] border border-transparent pr-1.5 text-sm transition-colors',
           isActive
             ? 'border-sidebar-border bg-sidebar-accent font-medium text-sidebar-accent-foreground'
-            : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+            : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground has-[:focus-visible]:bg-sidebar-accent has-[:focus-visible]:text-sidebar-accent-foreground',
           props.cursorId === node.id && !isActive && 'bg-sidebar-accent/70',
           dragOver && 'bg-primary/15',
           props.cutIds.has(node.id) && 'opacity-50',
@@ -525,7 +533,7 @@ function TreeRow(
               }
               props.onOpen({ kind: node.kind, id: node.id });
             }}
-            className='flex h-full min-w-0 flex-1 items-center gap-2 text-left'
+            className='outline-none flex h-full min-w-0 flex-1 items-center gap-2 text-left'
             data-track-category='SdlcHub'
             data-track-name={isFolder ? 'FolderTreeToggled' : 'FolderTreeItemOpened'}
             data-track-metadata={JSON.stringify({ id: node.id })}
@@ -573,7 +581,7 @@ function TreeRow(
           aria-pressed={props.discussingId === node.id}
           onClick={() => props.onDiscuss({ type: node.kind, id: node.id, name: node.name })}
           className={cn(
-            'flex size-6 shrink-0 items-center justify-center rounded-md transition-opacity hover:bg-sidebar-border hover:text-sidebar-accent-foreground',
+            'outline-none flex size-6 shrink-0 items-center justify-center rounded-md transition-opacity hover:bg-sidebar-border focus-visible:bg-sidebar-border hover:text-sidebar-accent-foreground focus-visible:text-sidebar-accent-foreground',
             props.discussingId === node.id
               ? 'bg-sidebar-border/70 text-sidebar-accent-foreground opacity-100'
               : 'text-sidebar-foreground/70 opacity-0 focus:opacity-100 group-hover/row:opacity-100',
@@ -661,7 +669,7 @@ function AddMenu(props: {
         setOpen(false);
         run();
       }}
-      className='flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] transition-colors hover:bg-muted'
+      className='outline-none flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] transition-colors hover:bg-muted focus-visible:bg-muted'
       data-track-category='SdlcHub'
       data-track-name={trackName}
     >
@@ -681,7 +689,7 @@ function AddMenu(props: {
           type='button'
           title='Add to this folder'
           aria-label='Add to this folder'
-          className='flex size-6 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/70 transition-colors hover:bg-sidebar-border hover:text-sidebar-accent-foreground'
+          className='outline-none flex size-6 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/70 transition-colors hover:bg-sidebar-border focus-visible:bg-sidebar-border hover:text-sidebar-accent-foreground focus-visible:text-sidebar-accent-foreground'
           data-track-category='SdlcHub'
           data-track-name='FolderPageAddOpened'
         >
@@ -721,69 +729,78 @@ function AddMenu(props: {
  *  on the way somewhere else shouldn't. */
 const TOOLTIP_DELAY_MS = 600;
 
-// A dragged tab moves along the strip only, as the strip's own tabs shuffle aside.
-const lockToStrip: Modifier = ({ transform }) => ({ ...transform, y: 0 });
-
 /**
- * A tab that can be dragged along the strip to a new place. The whole tab is the
- * handle: a press has to travel a few pixels before it is a drag, so a click still
- * opens or closes it. Only the pointer drags; the arrow keys stay the strip's own.
+ * A tab's name. A page shows what it is on now — its title, as the host reports it —
+ * a saved link its own name until then, and a browsing tab the title it last had, or
+ * its site, or that it is new. Anything else is its item's name, or what it is while
+ * the item is on its way.
  */
-function SortableTab(props: { id: string; className: string; children: ReactNode }): ReactElement {
-  const { setNodeRef, listeners, transform, transition, isDragging } = useSortable({
-    id: props.id,
-  });
-  return (
-    <div
-      ref={setNodeRef}
-      {...listeners}
-      data-folder-tab={props.id}
-      // Lifted while dragged: solid, so the tabs it passes over don't show through.
-      className={cn(
-        props.className,
-        isDragging && 'z-10 border-border bg-muted text-foreground shadow-lg',
-      )}
-      style={{ transform: CSS.Translate.toString(transform), transition }}
-    >
-      {props.children}
-    </div>
-  );
-}
-
-/** A tab's name: its item's, or what it is while the item is on its way. */
-function tabName(tab: FolderTab, item: SdlcTrackItem | undefined): string {
-  if (tab.kind === 'BROWSER') return 'Browsing';
+function tabName(
+  tab: FolderTab,
+  item: SdlcTrackItem | undefined,
+  page?: SdlcEmbedPageState,
+): string {
+  if (page?.title) return page.title;
+  if (tab.kind === 'BROWSER') return tab.title || hostOf(tab.url) || 'New tab';
   if (item) return sdlcItemName(item);
   return tab.kind === 'LINK' ? 'Link' : tab.kind === 'ATTACHMENT' ? 'File' : 'Artifact';
 }
 
-function TabLabel(props: { tab: FolderTab; item: SdlcTrackItem | undefined }): ReactElement {
+/** On hover: a saved link's own name above the page it is on, and where that is. */
+function tabTooltip(
+  tab: FolderTab,
+  item: SdlcTrackItem | undefined,
+  page: SdlcEmbedPageState | undefined,
+): string {
+  const name = tabName(tab, item, page);
+  if (tab.kind !== 'LINK' && tab.kind !== 'BROWSER') return name;
+  const saved = tab.kind === 'LINK' && item ? sdlcItemName(item) : '';
+  const url = page?.url || (item?.kind === 'LINK' ? item.url : tab.url) || '';
+  return [saved && saved !== name ? `Saved as ${saved}` : '', name, url].filter(Boolean).join('\n');
+}
+
+/** A page's icon: the site's own once it says, a spinner while it loads, the tab's
+ *  kind until then — and a link mark on a saved one. */
+function PageIcon(props: {
+  tab: FolderTab;
+  item: SdlcTrackItem | undefined;
+  page: SdlcEmbedPageState | undefined;
+}): ReactElement {
+  const { tab, item, page } = props;
+  const savedFavicon = item?.kind === 'LINK' ? item.favicon : tab.favicon;
+  const favicon = page?.favicon || savedFavicon;
+  return (
+    <span className='relative flex size-4 shrink-0 items-center justify-center'>
+      {page?.loading ? (
+        <Loader2 className='size-3.5 animate-spin text-muted-foreground motion-reduce:animate-none' />
+      ) : favicon ? (
+        <img src={favicon} alt='' className='size-4 rounded-[3px] object-contain' />
+      ) : tab.kind === 'LINK' ? (
+        <Link2 className='size-4' />
+      ) : (
+        <Globe className='size-4' />
+      )}
+      {tab.kind === 'LINK' && (favicon || page?.loading) && (
+        // A saved link, whichever page it is on: the mark the explorer's links carry.
+        <span className='absolute -bottom-1 -right-1 flex size-2.5 items-center justify-center rounded-full bg-background'>
+          <Link2 className='size-2 text-muted-foreground' />
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** A tab's icon alone, as its label shows it: for the tab switcher's rows. */
+function TabIcon(props: { tab: FolderTab; item: SdlcTrackItem | undefined }): ReactElement {
   const { tab, item } = props;
-  if (tab.kind === 'BROWSER') {
-    return (
-      <>
-        <Globe className='size-4 shrink-0' />
-        <span className='min-w-0 truncate'>Browsing</span>
-      </>
-    );
+  const page = useEmbeddedPages().get(tabKey(tab));
+  if (tab.kind === 'BROWSER' || tab.kind === 'LINK') {
+    return <PageIcon tab={tab} item={item} page={page} />;
   }
-  // Only the open tab is ever shown before its item has arrived.
   const node: TreeNode = item
     ? treeNodeOf(item)
-    : {
-        kind: tab.kind,
-        id: tab.id,
-        name: tabName(tab, item),
-        favicon: null,
-        fileKind: null,
-        folderIcon: null,
-      };
-  return (
-    <>
-      <NodeIcon node={node} size='size-4' />
-      <span className='min-w-0 truncate'>{node.name}</span>
-    </>
-  );
+    : { kind: tab.kind, id: tab.id, name: '', favicon: null, fileKind: null, folderIcon: null };
+  return <NodeIcon node={node} size='size-4' />;
 }
 
 /** When an item last changed: links and files never do, so theirs is when they came. */
@@ -1043,27 +1060,25 @@ export function SdlcFolderPage(props: {
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storedTabs, tabItems, props.activeTab?.kind, props.activeTab?.id]);
+  // What each page-holding tab is on: its title, icon and loading, for the strip.
+  const embeddedPages = useEmbeddedPages();
+  /**
+   * Where the original browsing tab opens when it has no page of its own: the tab
+   * Xyne AI asks for (requestSdlcBrowser, `browse=1`), which must hold a live page
+   * the moment it opens for the agent to drive — not the start page new tabs show.
+   */
+  const homePage = useUserPreference('sdlcBrowserHomePage');
+  /**
+   * A browsing tab opened at an address — a link a page opened in a new window —
+   * before the stored list has caught up with it: the url changes first, and the
+   * tab joins the strip from there without its address.
+   */
+  const browseStartsRef = useRef(new Map<string, string>());
   const [dragging, setDragging] = useState<{
     type: 'FOLDER' | 'CANVAS' | 'LINK' | 'ATTACHMENT';
     id: string;
   } | null>(null);
-  const stripRef = useRef<HTMLDivElement | null>(null);
-  const tabIds = useMemo(() => tabs.map(tabKey), [tabs]);
-  const tabSensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-  );
-  const [draggingTab, setDraggingTab] = useState<string | null>(null);
   const [tabListOpen, setTabListOpen] = useState(false);
-  // The strip fades at an edge while there are more tabs past it, as the hub's other
-  // scrolling rows do.
-  const stripFade = useScrollFade<HTMLDivElement>('x');
-  const attachStrip = useCallback(
-    (element: HTMLDivElement | null) => {
-      stripRef.current = element;
-      stripFade.ref(element);
-    },
-    [stripFade.ref],
-  );
   const treeRef = useRef<HTMLDivElement | null>(null);
   // The tree as an element in state too: it is drawn into the sidebar, so it can
   // arrive after this page does, and the pinned stack watches it.
@@ -1285,14 +1300,25 @@ export function SdlcFolderPage(props: {
   const [draftAnchor, setDraftAnchor] = useState<{ quote: string; selector?: string } | null>(null);
   const [viewerRoot, setViewerRoot] = useState<HTMLDivElement | null>(null);
   const activeItem = useMemo(
-    () => (active ? tabItem(active, tabItems.get(tabKey(active))) : null),
-    [active, tabItems],
+    () =>
+      active
+        ? tabItem(
+            active,
+            tabItems.get(tabKey(active)),
+            active.kind === 'BROWSER'
+              ? (tabs.find(tab => tab.kind === 'BROWSER' && tab.id === active.id)?.url ??
+                  browseStartsRef.current.get(active.id) ??
+                  (active.id === SCRATCH_TAB_ID ? homePage : undefined))
+              : undefined,
+          )
+        : null,
+    [active, tabItems, tabs, homePage],
   );
-  // The scratch tab is ad-hoc browsing, not an item of the hub: it has no entity id of
-  // its own (every folder would share SCRATCH_TAB_ID), so a comment left there would
-  // show in every other folder's scratch tab.
+  // A browsing tab is ad-hoc browsing, not an item of the hub: it has no entity of its
+  // own to hold a comment, and the old one's id is every folder's, so a comment left
+  // there would show in every other folder's.
   const canComment = Boolean(
-    activeItem && active?.id !== SCRATCH_TAB_ID && commentStoreFor(activeItem),
+    activeItem && active?.kind !== 'BROWSER' && commentStoreFor(activeItem),
   );
 
   useEffect(
@@ -1376,15 +1402,6 @@ export function SdlcFolderPage(props: {
     closedRef.current = null;
     props.onOpenTab(tab);
   };
-
-  // A tab can become active while scrolled out of the strip — opened from the
-  // tree, restored from the url, or simply pushed along by newer tabs.
-  useEffect(() => {
-    if (!active) return;
-    stripRef.current
-      ?.querySelector(`[data-folder-tab="${active.kind}:${active.id}"]`)
-      ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-  }, [active?.kind, active?.id, tabs.length]);
 
   // The folders from the open tab's item up to the page's own, which arrive with the
   // tab's lookup — often after the tab opens.
@@ -1471,10 +1488,10 @@ export function SdlcFolderPage(props: {
           {canBrowse && (
             <button
               type='button'
-              title='Open a tab for browsing'
-              aria-label='Open a tab for browsing'
-              onClick={() => openTab({ kind: 'BROWSER', id: SCRATCH_TAB_ID })}
-              className='flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.08] hover:text-foreground'
+              title='New browsing tab — look things up without saving them'
+              aria-label='New browsing tab'
+              onClick={openBrowsingTab}
+              className='outline-none flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.08] focus-visible:bg-foreground/[0.08] hover:text-foreground focus-visible:text-foreground'
               data-track-category='SdlcHub'
               data-track-name='ScratchBrowserOpened'
             >
@@ -1497,10 +1514,10 @@ export function SdlcFolderPage(props: {
                 })
               }
               className={cn(
-                'flex size-7 shrink-0 items-center justify-center rounded-md transition-colors',
+                'outline-none flex size-7 shrink-0 items-center justify-center rounded-md transition-colors',
                 commentsOpen
                   ? 'bg-muted text-foreground'
-                  : 'text-muted-foreground hover:bg-foreground/[0.08] hover:text-foreground',
+                  : 'text-muted-foreground hover:bg-foreground/[0.08] focus-visible:bg-foreground/[0.08] hover:text-foreground focus-visible:text-foreground',
               )}
               data-track-category='SdlcHub'
               data-track-name='FolderCommentsToggled'
@@ -1508,128 +1525,68 @@ export function SdlcFolderPage(props: {
               <MessageSquare className='size-4' />
             </button>
           )}
-          {/* Every open tab in one list, findable by name: the strip only shows what
-              fits. The menu's trigger can't also be the tooltip's, so the tooltip
-              holds the whole menu. */}
-          <Tooltip
-            content='All open tabs'
-            delayDuration={TOOLTIP_DELAY_MS}
-            {...(tabListOpen && { open: false })}
-          >
-            <span className='flex shrink-0'>
-              <Popover
-                open={tabListOpen}
-                onOpenChange={setTabListOpen}
-                align='end'
-                sideOffset={8}
-                className='w-[320px] overflow-hidden p-0'
-                trigger={
-                  <button
-                    type='button'
-                    aria-label='All open tabs'
-                    className={cn(
-                      'flex size-7 shrink-0 items-center justify-center rounded-md transition-colors',
-                      tabListOpen
-                        ? 'bg-muted text-foreground'
-                        : 'text-muted-foreground hover:bg-foreground/[0.08] hover:text-foreground',
-                    )}
-                    data-track-category='SdlcHub'
-                    data-track-name='FolderTabListOpened'
-                  >
-                    <ChevronDown className='size-4' />
-                  </button>
-                }
-              >
-                <Command
-                  loop
-                  label='Open tabs'
-                  // By the tab's name alone: its value is its kind and id, which
-                  // would otherwise match "re" or "1" in a uuid.
-                  filter={(_value, search, keywords) =>
-                    (keywords ?? []).some(keyword =>
-                      keyword.toLowerCase().includes(search.trim().toLowerCase()),
-                    )
-                      ? 1
-                      : 0
-                  }
-                >
-                  <div className='flex items-center gap-2 border-b border-border px-3'>
-                    <Search className='size-3.5 shrink-0 text-muted-foreground' />
-                    <Command.Input
-                      placeholder='Find an open tab'
-                      className='h-10 min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-muted-foreground'
-                    />
-                    <span className='shrink-0 text-xs tabular-nums text-muted-foreground'>
-                      {tabs.length}
-                    </span>
-                  </div>
-                  <Command.List className='max-h-[320px] overflow-y-auto p-1'>
-                    <Command.Empty className='px-2 py-6 text-center text-xs text-muted-foreground'>
-                      No open tab by that name
-                    </Command.Empty>
-                    {tabs.map(tab => {
-                      const item = tabItems.get(tabKey(tab));
-                      const name = tabName(tab, item);
-                      const isActive = active?.kind === tab.kind && active.id === tab.id;
-                      return (
-                        <Command.Item
-                          key={tabKey(tab)}
-                          value={tabKey(tab)}
-                          keywords={[name]}
-                          onSelect={() => {
-                            setTabListOpen(false);
-                            openTab(tab);
-                          }}
-                          className={cn(
-                            'group flex h-8 cursor-pointer items-center gap-2 rounded-md px-2 text-[13px] text-foreground data-[selected=true]:bg-muted',
-                            isActive && 'font-medium',
-                          )}
-                          data-track-category='SdlcHub'
-                          data-track-name='FolderTabListPicked'
-                        >
-                          <TabLabel tab={tab} item={item} />
-                          <span className='ml-auto flex shrink-0 items-center'>
-                            {isActive && (
-                              <span
-                                className='size-1.5 rounded-full bg-foreground/70 group-hover:hidden group-data-[selected=true]:hidden'
-                                title='Open now'
-                              />
-                            )}
-                            <button
-                              type='button'
-                              aria-label={`Close ${name}`}
-                              title={`Close ${name}`}
-                              onClick={event => {
-                                event.stopPropagation();
-                                closeTab(tab);
-                              }}
-                              className='hidden size-5 place-items-center rounded text-muted-foreground hover:bg-foreground/10 hover:text-foreground group-hover:grid group-data-[selected=true]:grid'
-                              data-track-category='SdlcHub'
-                              data-track-name='FolderTabClosed'
-                            >
-                              <X className='size-3.5' />
-                            </button>
-                          </span>
-                        </Command.Item>
-                      );
-                    })}
-                  </Command.List>
-                  <div className='border-t border-border p-1'>
-                    <button
-                      type='button'
-                      onClick={closeAllTabs}
-                      className='flex h-8 w-full items-center gap-2 rounded-md px-2 text-[13px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
-                      data-track-category='SdlcHub'
-                      data-track-name='FolderTabsAllClosed'
-                    >
-                      <X className='size-4' />
-                      Close all tabs
-                    </button>
-                  </div>
-                </Command>
-              </Popover>
-            </span>
+          {/* Every open tab in one list, findable by name or site: the strip only shows
+              what fits. ⌘P opens it from anywhere in the folder. */}
+          <Tooltip content='All open tabs (⌘P)' delayDuration={TOOLTIP_DELAY_MS}>
+            <button
+              type='button'
+              aria-label='All open tabs'
+              aria-keyshortcuts='Meta+P'
+              onClick={() => setTabListOpen(true)}
+              className={cn(
+                'flex size-7 shrink-0 items-center justify-center rounded-md outline-none transition-colors',
+                tabListOpen
+                  ? 'bg-muted text-foreground'
+                  : 'text-muted-foreground hover:bg-foreground/[0.08] hover:text-foreground focus-visible:bg-foreground/[0.08] focus-visible:text-foreground',
+              )}
+              data-track-category='SdlcHub'
+              data-track-name='FolderTabListOpened'
+            >
+              <ChevronDown className='size-4' />
+            </button>
           </Tooltip>
+          <TabSwitcher
+            open={tabListOpen}
+            onOpenChange={setTabListOpen}
+            // What is saved in the folder first, then pages only being browsed.
+            entries={[...tabs]
+              .sort((a, b) => Number(a.kind === 'BROWSER') - Number(b.kind === 'BROWSER'))
+              .map((tab): TabSwitcherEntry => {
+                const item = tabItems.get(tabKey(tab));
+                const page = embeddedPages.get(tabKey(tab));
+                const saved = tab.kind !== 'BROWSER';
+                const url = page?.url || (item?.kind === 'LINK' ? item.url : tab.url) || '';
+                const detail =
+                  tab.kind === 'LINK' || tab.kind === 'BROWSER'
+                    ? hostOf(url)
+                    : tab.kind === 'CANVAS'
+                      ? 'Artifact'
+                      : item?.kind === 'ATTACHMENT'
+                        ? fileKind(item.mimetype, item.name).label
+                        : 'File';
+                return {
+                  key: tabKey(tab),
+                  name: tabName(tab, item, page),
+                  detail: saved ? detail : `Not saved${detail ? ` · ${detail}` : ''}`,
+                  icon: <TabIcon tab={tab} item={item} />,
+                  group: saved ? 'Saved in this folder' : 'Browsing · not saved',
+                  current: Boolean(active && active.kind === tab.kind && active.id === tab.id),
+                  ...(!saved && /^https?:/.test(url) && { saveUrl: url }),
+                };
+              })}
+            onOpen={key => {
+              const tab = tabs.find(candidate => tabKey(candidate) === key);
+              if (tab) openTab(tab);
+            }}
+            onClose={key => {
+              const tab = tabs.find(candidate => tabKey(candidate) === key);
+              if (tab) closeTab(tab);
+            }}
+            onCloseAll={closeAllTabs}
+            {...(props.onAddLink ? { onSave: props.onAddLink } : {})}
+            where='anywhere in a folder'
+            trackCategory='SdlcHub'
+          />
         </div>
       </>
     );
@@ -1640,18 +1597,30 @@ export function SdlcFolderPage(props: {
     );
   };
 
-  const onTabDragEnd = (event: DragEndEvent): void => {
-    setDraggingTab(null);
-    const { active: dragged, over } = event;
-    if (!over || dragged.id === over.id) return;
-    const from = tabs.findIndex(tab => tabKey(tab) === dragged.id);
-    const to = tabs.findIndex(tab => tabKey(tab) === over.id);
+  const reorderTabs = (fromKey: string, toKey: string): void => {
+    const from = tabs.findIndex(tab => tabKey(tab) === fromKey);
+    const to = tabs.findIndex(tab => tabKey(tab) === toKey);
     if (from < 0 || to < 0) return;
     setTabs(arrayMove(tabs, from, to));
   };
 
+  /** The tab beside the open one, wrapping round: ⌃Tab and ⌃⇧Tab, as in a browser. */
+  const stepTab = (by: 1 | -1): void => {
+    if (tabs.length === 0) return;
+    const index = active
+      ? tabs.findIndex(tab => tab.kind === active.kind && tab.id === active.id)
+      : -1;
+    const next = tabs[(index + by + tabs.length) % tabs.length];
+    if (next) openTab(next);
+  };
+  const stepTabRef = useRef(stepTab);
+  stepTabRef.current = stepTab;
+  useShortcutById('browser.nextTab', () => stepTabRef.current(1), { scope: 'global' });
+  useShortcutById('browser.previousTab', () => stepTabRef.current(-1), { scope: 'global' });
+
   const closeAllTabs = (): void => {
     setTabListOpen(false);
+    tabs.forEach(tab => discardEmbeddedPage(tabKey(tab)));
     setTabs([]);
     if (!active) return;
     // Not openTab: that forgets the closure, and until the url catches up it still
@@ -1668,6 +1637,7 @@ export function SdlcFolderPage(props: {
     // keeps the open tab in the strip would put it straight back — which read
     // as the first click doing nothing.
     closedRef.current = `${tab.kind}:${tab.id}`;
+    discardEmbeddedPage(tabKey(tab));
     setTabs(remaining);
     if (active && active.kind === tab.kind && active.id === tab.id) {
       // The one that takes its place, else the one before it — through onOpenTab, not
@@ -1676,38 +1646,92 @@ export function SdlcFolderPage(props: {
     }
   };
 
-  const activeInStrip = Boolean(
-    active && tabs.some(tab => tab.kind === active.kind && tab.id === active.id),
-  );
-
-  // The strip is one stop in the page's tab order, on the open tab; the arrows move
-  // along it and Delete closes the tab you are on.
-  const onStripKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
-    const buttons = Array.from(
-      event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'),
+  /** A browsing tab, after the one it came from or at the end; open, with its address. */
+  const addBrowsingTab = (url?: string, after?: string): void => {
+    const tab: FolderTab = { kind: 'BROWSER', id: newBrowsingTabId(), ...(url && { url }) };
+    if (url) browseStartsRef.current.set(tab.id, url);
+    // Built on what is saved this moment, not this render's list: two pages opening
+    // windows at once would otherwise each add to the same list, and one be lost.
+    const saved = userPreferencesSnapshot().sdlcFolderTabs[props.folder.id] ?? tabs;
+    const at = after ? saved.findIndex(candidate => tabKey(candidate) === after) : -1;
+    const next =
+      at < 0 ? [...saved, tab] : [...saved.slice(0, at + 1), tab, ...saved.slice(at + 1)];
+    setUserPreference(
+      'sdlcFolderTabs',
+      withFolderEntry(userPreferencesSnapshot().sdlcFolderTabs, props.folder.id, next),
     );
-    const index = buttons.findIndex(button => button === event.target);
-    if (index < 0) return;
-    const focusAt = (next: number): void => {
-      event.preventDefault();
-      buttons[(next + buttons.length) % buttons.length]?.focus();
-    };
-    if (event.key === 'ArrowRight') focusAt(index + 1);
-    else if (event.key === 'ArrowLeft') focusAt(index - 1);
-    else if (event.key === 'Home') focusAt(0);
-    else if (event.key === 'End') focusAt(buttons.length - 1);
-    else if (event.key === 'Delete' || event.key === 'Backspace') {
-      const tab = tabs[index];
-      if (!tab) return;
-      event.preventDefault();
-      closeTab(tab);
-      // Stay in the strip, on the tab that took its place.
-      requestAnimationFrame(() => {
-        const left = stripRef.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]');
-        if (left && left.length > 0) left[Math.min(index, left.length - 1)]?.focus();
-      });
-    }
+    openTab(tab);
   };
+  const openBrowsingTab = (): void => {
+    const waiting = tabs.find(tab => tab.kind === 'BROWSER' && !tab.url);
+    if (waiting) openTab(waiting);
+    else addBrowsingTab();
+  };
+
+  // A page opening a new window — a link to a new tab, a popup — opens a tab beside it.
+  const addBrowsingTabRef = useRef(addBrowsingTab);
+  addBrowsingTabRef.current = addBrowsingTab;
+  useEffect(() => subscribeToEmbeddedOpen((url, from) => addBrowsingTabRef.current(url, from)), []);
+
+  // A browsing tab keeps the page it is on, and its title, so it reopens there and is
+  // named right before the page loads again. Written once the page settles, not on
+  // every step of a redirect.
+  useEffect(() => {
+    const stored = storedTabs ?? [];
+    const changed = stored.flatMap(tab => {
+      if (tab.kind !== 'BROWSER') return [];
+      const page = embeddedPages.get(tabKey(tab));
+      if (!page || page.loading || !/^https?:/.test(page.url)) return [];
+      return page.url !== tab.url ||
+        (page.title && page.title !== tab.title) ||
+        (page.favicon && page.favicon !== tab.favicon)
+        ? [tab.id]
+        : [];
+    });
+    if (changed.length === 0) return;
+    const timer = window.setTimeout(() => {
+      setTabs(
+        stored.map(tab => {
+          const page = changed.includes(tab.id) ? embeddedPages.get(tabKey(tab)) : undefined;
+          return page
+            ? {
+                ...tab,
+                url: page.url,
+                ...(page.title && { title: page.title }),
+                ...(page.favicon && { favicon: page.favicon }),
+              }
+            : tab;
+        }),
+      );
+    }, 600);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [embeddedPages, storedTabs]);
+
+  /** Where a browsing tab is: its page, its address before the list caught up, the
+   *  original tab's home page, or nothing yet. */
+  const browseUrlOf = (tab: FolderTab): string | undefined =>
+    tab.kind === 'BROWSER'
+      ? (tabs.find(candidate => candidate.kind === 'BROWSER' && candidate.id === tab.id)?.url ??
+        browseStartsRef.current.get(tab.id) ??
+        (tab.id === SCRATCH_TAB_ID ? homePage : undefined))
+      : undefined;
+
+  useShortcutById('folder.tabs', () => setTabListOpen(open => !open));
+  const openBrowsingTabRef = useRef(openBrowsingTab);
+  openBrowsingTabRef.current = openBrowsingTab;
+  useShortcutById('folder.newBrowsingTab', () => openBrowsingTabRef.current());
+  useEffect(
+    () =>
+      subscribeToEmbeddedCommand((_key, command) => {
+        if (command === 'newTab') openBrowsingTabRef.current();
+        // ⌘P pressed in a page, which had the keyboard: the folder's tabs, as anywhere.
+        else if (command === 'tabs') setTabListOpen(true);
+        else if (command === 'nextTab') stepTabRef.current(1);
+        else if (command === 'previousTab') stepTabRef.current(-1);
+      }),
+    [],
+  );
 
   // The folder's tree. Beside a hub sidebar it takes the sidebar's place; in a window
   // of its own it keeps a panel beside the page.
@@ -1923,10 +1947,19 @@ export function SdlcFolderPage(props: {
               </button>
             </div>
           ))}
-          {/* Where the stack ends and the scrolling list begins. */}
-          <div className='absolute inset-x-0 top-full h-2 bg-gradient-to-b from-black/20 to-transparent' />
         </div>
       )}
+      {/* Where the stack ends and the scrolling list begins: a hint, not a bar. Always
+        here, so it fades in as a folder pins and out as the last one lets go — where
+        the stack was, mostly the top folder alone, rather than jumping to the top. */}
+      <div
+        aria-hidden='true'
+        className={cn(
+          'pointer-events-none absolute inset-x-0 h-2 bg-gradient-to-b from-black/[0.12] to-transparent transition-opacity duration-300 ease-out motion-reduce:transition-none',
+          pinnedFolders.length > 0 ? 'opacity-100' : 'opacity-0',
+        )}
+        style={{ top: stackBottom > 0 ? stackBottom : TREE_ROW_HEIGHT }}
+      />
       {/* A row's right-click menu, opened where the pointer is. */}
       <DropdownMenu
         open={rowMenu?.open ?? false}
@@ -1977,7 +2010,7 @@ export function SdlcFolderPage(props: {
               aria-label={explorerCollapsed ? 'Show explorer' : 'Hide explorer'}
               aria-expanded={!explorerCollapsed}
               onClick={() => setUserPreference('sdlcExplorerCollapsed', !explorerCollapsed)}
-              className='-ml-1 flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-foreground/[0.08] hover:text-foreground'
+              className='outline-none -ml-1 flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-foreground/[0.08] focus-visible:bg-foreground/[0.08] hover:text-foreground focus-visible:text-foreground'
               data-track-category='SdlcHub'
               data-track-name='ExplorerCollapsed'
             >
@@ -1996,122 +2029,32 @@ export function SdlcFolderPage(props: {
       <div className='flex min-h-0 min-w-0 flex-1 flex-col'>
         {tabs.length > 0 &&
           renderTabStrip(
-            <div
-              ref={attachStrip}
-              role='tablist'
-              aria-label='Open files'
-              tabIndex={-1}
-              onPointerEnter={reclaimHostFocus}
-              onKeyDown={onStripKeyDown}
-              // A wheel scrolls the strip sideways when its tabs run past the edge.
-              onWheel={event => {
-                if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) {
-                  event.currentTarget.scrollLeft += event.deltaY;
-                }
+            <TabStrip
+              tabs={tabs.map(tab => {
+                const item = tabItems.get(tabKey(tab));
+                const page = embeddedPages.get(tabKey(tab));
+                return {
+                  key: tabKey(tab),
+                  name: tabName(tab, item, page),
+                  tooltip: tabTooltip(tab, item, page),
+                  icon: <TabIcon tab={tab} item={item} />,
+                };
+              })}
+              activeKey={active ? tabKey(active) : null}
+              onSelect={key => {
+                const tab = tabs.find(candidate => tabKey(candidate) === key);
+                if (tab) openTab(tab);
               }}
-              onScroll={stripFade.onScroll}
-              style={stripFade.style}
-              className='scrollbar-none flex h-full min-w-0 items-center gap-0.5 overflow-x-auto px-0.5 outline-none'
-            >
-              <DndContext
-                sensors={tabSensors}
-                collisionDetection={closestCenter}
-                modifiers={[lockToStrip]}
-                onDragStart={event => setDraggingTab(String(event.active.id))}
-                onDragEnd={onTabDragEnd}
-                onDragCancel={() => setDraggingTab(null)}
-              >
-                <SortableContext items={tabIds} strategy={horizontalListSortingStrategy}>
-                  {tabs.map((tab, index) => {
-                    const isActive = active?.kind === tab.kind && active.id === tab.id;
-                    const item = tabItems.get(tabKey(tab));
-                    const name = tabName(tab, item);
-                    // The one stop in the page's tab order: the open tab, else the first.
-                    const isStop = activeInStrip ? isActive : index === 0;
-                    const previous = tabs[index - 1];
-                    const afterActive =
-                      previous !== undefined &&
-                      active?.kind === previous.kind &&
-                      active.id === previous.id;
-                    return (
-                      <Fragment key={`${tab.kind}-${tab.id}`}>
-                        {/* A quiet line between tabs; the open tab's own edge does it beside
-                        that one. Hidden rather than dropped, so no tab shifts. */}
-                        {index > 0 && (
-                          <span
-                            aria-hidden='true'
-                            className={cn(
-                              'h-4 w-px shrink-0 bg-border',
-                              // Tabs moving aside under a drag would leave them standing alone.
-                              (isActive || afterActive || draggingTab !== null) && 'opacity-0',
-                            )}
-                          />
-                        )}
-                        <SortableTab
-                          id={tabKey(tab)}
-                          className={cn(
-                            'group relative flex h-8 max-w-[220px] shrink-0 items-center rounded-lg border text-[13px] transition-colors',
-                            isActive
-                              ? 'border-border bg-muted font-medium text-foreground shadow-sm'
-                              : 'border-transparent text-muted-foreground hover:bg-muted hover:text-foreground',
-                          )}
-                        >
-                          <button
-                            type='button'
-                            role='tab'
-                            aria-selected={isActive}
-                            aria-keyshortcuts='Delete'
-                            tabIndex={isStop ? 0 : -1}
-                            title={name}
-                            onClick={() => openTab(tab)}
-                            // A middle click closes it, as in a browser.
-                            onMouseDown={event => {
-                              if (event.button === 1) event.preventDefault();
-                            }}
-                            onAuxClick={event => {
-                              if (event.button !== 1) return;
-                              event.preventDefault();
-                              closeTab(tab);
-                            }}
-                            // Only the open tab keeps room for its close button; on the
-                            // others it comes over the end of the name on hover.
-                            className={cn(
-                              'flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-[7px] pl-2 text-left outline-none focus-visible:ring-1 focus-visible:ring-ring',
-                              isActive ? 'pr-7' : 'pr-2.5',
-                            )}
-                            data-track-category='SdlcHub'
-                            data-track-name='FolderTabSelected'
-                          >
-                            <TabLabel tab={tab} item={item} />
-                          </button>
-                          <button
-                            type='button'
-                            tabIndex={-1}
-                            // Keeps focus where it is: closing isn't a reason to move it.
-                            onMouseDown={event => event.preventDefault()}
-                            onClick={event => {
-                              event.stopPropagation();
-                              closeTab(tab);
-                            }}
-                            title={`Close ${name}`}
-                            aria-label={`Close ${name}`}
-                            className={cn(
-                              // The fade lets the name run under it rather than stop short.
-                              'absolute inset-y-0 right-0 flex items-center rounded-r-[7px] bg-gradient-to-l from-muted from-60% to-transparent pl-3 pr-1 text-muted-foreground transition-opacity [&>svg]:hover:bg-foreground/10 [&>svg]:hover:text-foreground',
-                              isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
-                            )}
-                            data-track-category='SdlcHub'
-                            data-track-name='FolderTabClosed'
-                          >
-                            <X className='box-content size-3.5 rounded-md p-[3px]' />
-                          </button>
-                        </SortableTab>
-                      </Fragment>
-                    );
-                  })}
-                </SortableContext>
-              </DndContext>
-            </div>,
+              onClose={key => {
+                const tab = tabs.find(candidate => tabKey(candidate) === key);
+                if (tab) closeTab(tab);
+              }}
+              onReorder={reorderTabs}
+              label='Open files'
+              onPointerEnter={reclaimHostFocus}
+              trackCategory='SdlcHub'
+              trackNames={{ select: 'FolderTabSelected', close: 'FolderTabClosed' }}
+            />,
           )}
 
         <div className='flex min-h-0 flex-1 overflow-hidden bg-background'>
@@ -2121,8 +2064,31 @@ export function SdlcFolderPage(props: {
                 <TabContent
                   tab={active}
                   item={tabItems.get(tabKey(active))}
+                  browseUrl={browseUrlOf(active)}
                   renderCanvas={props.renderCanvas}
                   {...(props.onAddLink ? { onAddLink: props.onAddLink } : {})}
+                  onBrowse={url => {
+                    browseStartsRef.current.set(active.id, url);
+                    setTabs(
+                      tabs.some(tab => tab.kind === 'BROWSER' && tab.id === active.id)
+                        ? tabs.map(tab =>
+                            tab.kind === 'BROWSER' && tab.id === active.id ? { ...tab, url } : tab,
+                          )
+                        : [...tabs, { ...active, url }],
+                    );
+                  }}
+                  onOpen={openTab}
+                  channelId={props.channelId}
+                  parentType={props.rootType ?? 'FOLDER'}
+                  folderId={props.folder.id}
+                  folderName={props.folder.name}
+                  homePage={homePage}
+                  browsing={tabs.filter(
+                    tab =>
+                      tab.kind === 'BROWSER' &&
+                      Boolean(tab.url) &&
+                      !(active.kind === 'BROWSER' && tab.id === active.id),
+                  )}
                 />
                 {annotate.box}
               </div>
@@ -2165,13 +2131,17 @@ const EMPTY_ITEM: WorkspaceItem = {
   row: {},
 };
 
-function tabItem(tab: FolderTab, item: SdlcTrackItem | undefined): WorkspaceItem | null {
+function tabItem(
+  tab: FolderTab,
+  item: SdlcTrackItem | undefined,
+  browseUrl?: string,
+): WorkspaceItem | null {
   if (tab.kind === 'BROWSER') {
     return itemFromSdlc({
       id: tab.id,
-      title: 'Browsing',
+      title: tab.title || 'New tab',
       kind: 'BROWSER',
-      url: SCRATCH_START_PAGE,
+      url: browseUrl ?? '',
     });
   }
   if (!item || item.kind === 'FOLDER') return null;
@@ -2209,7 +2179,7 @@ function LinkCard({ link }: { link: SdlcLinkItem }): ReactElement {
       <button
         type='button'
         onClick={event => openFromTab(link.url, event)}
-        className='mt-1 rounded-md bg-primary px-4 py-2 text-[12.5px] font-medium text-primary-foreground transition-opacity hover:opacity-90'
+        className='outline-none mt-1 rounded-md bg-primary px-4 py-2 text-[12.5px] font-medium text-primary-foreground transition-opacity hover:opacity-90 focus-visible:opacity-90'
         data-track-category='SdlcHub'
         data-track-name='FolderTabLinkOpened'
       >
@@ -2221,15 +2191,28 @@ function LinkCard({ link }: { link: SdlcLinkItem }): ReactElement {
 
 /**
  * One open tab, rendered by the shared workspace viewer. The folder keeps the
- * two things only it can draw — its own embedded browser, which the host window
- * holds over this frame, and the download card for a file no viewer previews.
+ * things only it can draw — its own embedded browser, which the host window holds
+ * over this frame, a browsing tab's start page, and the download card for a file
+ * no viewer previews.
  */
 function TabContent(props: {
   tab: FolderTab;
   /** The tab's item, once it has arrived. */
   item: SdlcTrackItem | undefined;
+  /** A browsing tab's page; none while it is at its start page. */
+  browseUrl: string | undefined;
   renderCanvas: (canvasId: string) => ReactElement;
   onAddLink?: (url: string, title: string) => void;
+  /** A browsing tab's start page was given somewhere to go. */
+  onBrowse: (url: string) => void;
+  onOpen: (tab: FolderTab) => void;
+  channelId: string;
+  parentType: 'TRACK' | 'FOLDER';
+  folderId: string;
+  folderName: string;
+  /** The folder's other browsing tabs on a page, for the start page. */
+  browsing: readonly FolderTab[];
+  homePage: string;
 }): ReactElement {
   const found = props.item;
   // An uploaded file is previewed by the file previewer, whatever kind it is.
@@ -2248,7 +2231,22 @@ function TabContent(props: {
       />
     );
   }
-  const item = tabItem(props.tab, found);
+  if (props.tab.kind === 'BROWSER' && !props.browseUrl && canHostEmbedPages()) {
+    return (
+      <BrowserStartPage
+        key={props.tab.id}
+        channelId={props.channelId}
+        parentType={props.parentType}
+        folderId={props.folderId}
+        folderName={props.folderName}
+        browsing={props.browsing}
+        homePage={props.homePage}
+        onGo={props.onBrowse}
+        onOpen={props.onOpen}
+      />
+    );
+  }
+  const item = tabItem(props.tab, found, props.browseUrl);
   if (!item) {
     return (
       <Missing
@@ -2257,6 +2255,7 @@ function TabContent(props: {
     );
   }
 
+  const pageKey = tabKey(props.tab);
   return (
     <ItemView
       item={item}
@@ -2268,9 +2267,15 @@ function TabContent(props: {
               <LinkCard link={found} />
             ) : null;
           }
+          const start = browsable.url || props.browseUrl;
+          if (!start) return null;
           return (
             <EmbeddedPage
-              url={browsable.url ?? SCRATCH_START_PAGE}
+              pageKey={pageKey}
+              url={start}
+              {...(found?.kind === 'LINK' && {
+                saved: { name: sdlcItemName(found), url: found.url },
+              })}
               {...(props.onAddLink ? { onAddLink: props.onAddLink } : {})}
             />
           );
@@ -2281,214 +2286,484 @@ function TabContent(props: {
 }
 
 /**
- * The page itself, inside the tab. A <webview> is the same mechanism the
- * browser panel uses, so it inherits the app's partitions: a Xyne URL loads
- * signed in, everything else stays in the external jar where Xyne cookies
- * never go.
+ * Where a folder's browser opens for Xyne AI, kept per person on this device: shown
+ * as its site, changed in place.
+ */
+function HomePageSetting(props: {
+  homePage: string;
+  onChange: (url: string) => void;
+}): ReactElement {
+  const [editing, setEditing] = useState<string | null>(null);
+  const [invalid, setInvalid] = useState(false);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    if (editing !== null) inputRef.current?.select();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing !== null]);
+
+  if (editing === null) {
+    return (
+      <p className='text-center text-[11.5px] text-muted-foreground'>
+        Home page{' '}
+        <span className='font-medium text-foreground'>
+          {hostOf(props.homePage) || props.homePage}
+        </span>
+        <span aria-hidden='true'> · </span>
+        <button
+          type='button'
+          onClick={() => {
+            setInvalid(false);
+            setEditing(props.homePage);
+          }}
+          className='rounded px-0.5 text-muted-foreground underline-offset-2 outline-none hover:text-foreground hover:underline focus-visible:text-foreground focus-visible:underline'
+          data-track-category='SdlcHub'
+          data-track-name='BrowserHomePageEditOpened'
+        >
+          Change
+        </button>
+      </p>
+    );
+  }
+  const save = (): void => {
+    const url = homePageFor(editing);
+    if (!url) {
+      setInvalid(true);
+      return;
+    }
+    props.onChange(url);
+    setEditing(null);
+  };
+  return (
+    <form
+      onSubmit={event => {
+        event.preventDefault();
+        save();
+      }}
+      className='mx-auto flex w-full max-w-[420px] flex-col items-center gap-1.5'
+    >
+      <div className='flex w-full items-center gap-1.5'>
+        <input
+          ref={inputRef}
+          value={editing}
+          onChange={event => {
+            setInvalid(false);
+            setEditing(event.target.value);
+          }}
+          onKeyDown={event => {
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              setEditing(null);
+            }
+          }}
+          aria-label='Home page'
+          aria-invalid={invalid}
+          spellCheck={false}
+          className={cn(
+            'h-8 min-w-0 flex-1 rounded-lg border bg-background px-2.5 text-[12.5px] text-foreground outline-none focus:ring-1',
+            invalid ? 'border-destructive focus:ring-destructive' : 'border-border focus:ring-ring',
+          )}
+          data-track-category='SdlcHub'
+          data-track-name='BrowserHomePageTyped'
+        />
+        <button
+          type='submit'
+          className='h-8 rounded-lg bg-foreground px-3 text-[12.5px] font-medium text-background outline-none transition-opacity hover:opacity-90 focus-visible:opacity-90'
+          data-track-category='SdlcHub'
+          data-track-name='BrowserHomePageSaved'
+        >
+          Save
+        </button>
+        <button
+          type='button'
+          onClick={() => setEditing(null)}
+          className='h-8 rounded-lg px-2.5 text-[12.5px] text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:bg-muted'
+          data-track-category='SdlcHub'
+          data-track-name='BrowserHomePageEditCancelled'
+        >
+          Cancel
+        </button>
+      </div>
+      <p
+        role={invalid ? 'alert' : undefined}
+        className={cn('text-[11.5px]', invalid ? 'text-destructive' : 'text-muted-foreground')}
+      >
+        {invalid
+          ? 'Enter a web address, like google.com.'
+          : 'Where the browser opens when Xyne AI browses for you.'}
+      </p>
+    </form>
+  );
+}
+
+/**
+ * A browsing tab before it has gone anywhere, as a browser's new tab is: where you
+ * are browsing from, one box to search or type an address, the links saved in this
+ * folder as tiles a click from their tabs, the pages still open from here, and the
+ * keys that get around. Pages browsed here aren't saved until saved.
+ */
+function BrowserStartPage(props: {
+  channelId: string;
+  parentType: 'TRACK' | 'FOLDER';
+  folderId: string;
+  folderName: string;
+  /** The folder's other browsing tabs that are on a page: somewhere to go back to. */
+  browsing: readonly FolderTab[];
+  homePage: string;
+  onGo: (url: string) => void;
+  onOpen: (tab: FolderTab) => void;
+}): ReactElement {
+  // The explorer holds this same query for the folder, so it costs nothing more.
+  const [edgeRows, details] = useCachedQuery(
+    queries.getSdlcFolderChildren({
+      channelId: props.channelId,
+      parentType: props.parentType,
+      parentId: props.folderId,
+    }),
+    { enabled: Boolean(props.channelId && props.folderId) },
+  );
+  const links = useMemo(
+    () =>
+      (Array.isArray(edgeRows) ? edgeRows : [])
+        .flatMap(edge => {
+          const item = targetItemOf(edge);
+          return item?.kind === 'LINK' ? [item] : [];
+        })
+        .slice(0, 8),
+    [edgeRows],
+  );
+
+  return (
+    <StartPage
+      heading={
+        <>
+          <Globe className='size-4' />
+          <span>
+            Browsing from <span className='font-medium text-foreground'>{props.folderName}</span>
+          </span>
+        </>
+      }
+      note={
+        <>
+          Pages here aren&apos;t kept until you press{' '}
+          <Save className='inline size-3.5 -translate-y-px' aria-label='Save' /> — then they join{' '}
+          {props.folderName}.
+        </>
+      }
+      onGo={props.onGo}
+      history={LANE_HISTORY}
+      footer={
+        <HomePageSetting
+          homePage={props.homePage}
+          onChange={url => setUserPreference('sdlcBrowserHomePage', url)}
+        />
+      }
+      keys={[
+        { keys: '⌘T', label: 'New tab' },
+        { keys: '⌘L', label: 'Address' },
+        { keys: '⌘F', label: 'Find in page' },
+        { keys: '⌘P', label: 'All tabs' },
+      ]}
+      trackCategory='SdlcHub'
+    >
+      <StartSection title={`Saved in ${props.folderName}`}>
+        {links.length > 0 ? (
+          <SiteTiles
+            sites={links.map(link => ({
+              key: link.id,
+              url: link.url,
+              name: sdlcItemName(link),
+              favicon: link.favicon,
+            }))}
+            onOpen={id => props.onOpen({ kind: 'LINK', id })}
+            trackCategory='SdlcHub'
+            trackName='BrowserStartLinkOpened'
+          />
+        ) : details.type === 'complete' ? (
+          <div className='flex items-center gap-3 rounded-xl border border-dashed border-border px-4 py-4 text-[12.5px] text-muted-foreground'>
+            <Link2 className='size-4 shrink-0' />
+            Links saved to {props.folderName} show up here, a click from their own tabs.
+          </div>
+        ) : (
+          <div className='grid grid-cols-2 gap-1 sm:grid-cols-4' aria-hidden='true'>
+            {Array.from({ length: 4 }, (_, index) => (
+              <div key={index} className='flex flex-col items-center gap-2 px-2 py-3'>
+                <span className='size-12 animate-pulse rounded-xl bg-muted motion-reduce:animate-none' />
+                <span className='h-3 w-16 animate-pulse rounded bg-muted motion-reduce:animate-none' />
+              </div>
+            ))}
+          </div>
+        )}
+      </StartSection>
+
+      {props.browsing.length > 0 && (
+        <StartSection title='Still open, not saved'>
+          <div className='flex flex-col gap-0.5'>
+            {props.browsing.slice(0, 5).map(tab => {
+              const host = hostOf(tab.url);
+              return (
+                <button
+                  key={tab.id}
+                  type='button'
+                  onClick={() => props.onOpen(tab)}
+                  title={tab.url}
+                  className='flex min-w-0 items-center gap-3 rounded-lg px-2 py-2 text-left outline-none transition-colors hover:bg-muted/70 focus-visible:bg-muted/70'
+                  data-track-category='SdlcHub'
+                  data-track-name='BrowserStartTabOpened'
+                >
+                  <span className='flex size-7 shrink-0 items-center justify-center rounded-lg bg-muted text-[11px] font-semibold text-muted-foreground'>
+                    {tab.favicon ? (
+                      <img
+                        src={tab.favicon}
+                        alt=''
+                        className='size-4 rounded-[3px] object-contain'
+                      />
+                    ) : (
+                      siteLetter(host)
+                    )}
+                  </span>
+                  <span className='min-w-0 flex-1 truncate text-[13px] text-foreground'>
+                    {tab.title || host || tab.url}
+                  </span>
+                  <span className='shrink-0 text-[11.5px] text-muted-foreground'>{host}</span>
+                </button>
+              );
+            })}
+          </div>
+        </StartSection>
+      )}
+    </StartPage>
+  );
+}
+
+/** The browsing history, asked of the host: the lane can't reach the desktop app itself. */
+const LANE_HISTORY: HistorySource = {
+  suggest: (typed, limit) => historyFromHost('suggest', typed, limit),
+  top: limit => historyFromHost('top', '', limit).then(found => found.pages),
+};
+
+/**
+ * The page itself, inside the tab. A <webview> is the same mechanism the browser
+ * panel uses, so it inherits the app's partitions: a Xyne URL loads signed in,
+ * everything else stays in the external jar where Xyne cookies never go.
+ *
+ * The host keeps it for as long as its tab is open: switching tabs puts it aside
+ * and back as it was. Its bar says what it is doing — loading, where it is and
+ * whether that is secure — and, on a saved link, which link it came from.
  */
 function EmbeddedPage(props: {
+  /** The tab it belongs to, which the host holds it under. */
+  pageKey: string;
+  /** Where it starts; afterwards it goes where its reader takes it. */
   url: string;
+  /** A saved link's name and address, to go back to. */
+  saved?: { name: string; url: string };
   onAddLink?: (url: string, title: string) => void;
 }): ReactElement {
   const holeRef = useRef<HTMLDivElement | null>(null);
-  const tabStripRef = useRef<HTMLDivElement | null>(null);
-  const [state, setState] = useState<{
+  const addressRef = useRef<HTMLInputElement | null>(null);
+  const page = useEmbeddedPages().get(props.pageKey);
+  // An older host reports its one page in the fields it always has, and keeps
+  // pages a link opened as tabs of its own, inside this one.
+  const [legacy, setLegacy] = useState<{
     url: string;
     canGoBack: boolean;
     canGoForward: boolean;
     tabs: SdlcEmbedTab[];
     activeTabId: string;
-  }>({ url: props.url, canGoBack: false, canGoForward: false, tabs: [], activeTabId: '' });
-  // Null while the reader is editing; the address follows the page otherwise.
-  const [draft, setDraft] = useState<string | null>(null);
+  } | null>(null);
 
   useEffect(() => {
     const element = holeRef.current;
     if (!element) return undefined;
-    return embedPageOverElement(props.url, element);
-  }, [props.url]);
+    return embedPageOverElement(props.url, element, props.pageKey);
+  }, [props.url, props.pageKey]);
+  useEffect(() => subscribeToEmbeddedPage(setLegacy), []);
 
-  useEffect(() => subscribeToEmbeddedPage(setState), []);
-
-  useEffect(() => {
-    if (!state.activeTabId) return;
-    tabStripRef.current
-      ?.querySelector(`[data-embed-tab="${state.activeTabId}"]`)
-      ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-  }, [state.activeTabId, state.tabs.length]);
-  useEffect(() => {
-    setState({
-      url: props.url,
-      canGoBack: false,
-      canGoForward: false,
-      tabs: [],
-      activeTabId: '',
-    });
-    setDraft(null);
-  }, [props.url]);
-
-  const button = (
-    label: string,
-    icon: ReactElement,
-    onClick: () => void,
-    disabled: boolean,
-    trackName: string,
-  ): ReactElement => (
-    <button
-      type='button'
-      title={label}
-      aria-label={label}
-      disabled={disabled}
-      onClick={onClick}
-      className={cn(
-        'flex size-7 shrink-0 items-center justify-center rounded-md transition-colors',
-        disabled
-          ? 'text-muted-foreground/40'
-          : 'text-muted-foreground hover:bg-foreground/[0.08] hover:text-foreground',
-      )}
-      data-track-category='SdlcHub'
-      data-track-name={trackName}
-    >
-      {icon}
-    </button>
+  const find = useFindInPage(
+    {
+      find: (key, text, forward, step) =>
+        controlEmbeddedPage('find', { key, text, forward, findNext: step }),
+      stop: key => controlEmbeddedPage('stopFind', { key }),
+    },
+    props.pageKey,
   );
+  const openFind = find.open;
+  const focusAddress = useCallback(() => {
+    requestAnimationFrame(() => addressRef.current?.focus());
+  }, []);
+
+  // While a page is open, ⌘F finds in it and ⌘L takes the address — ahead of the
+  // channel's own find — as in any browser.
+  useScope('sdlc-browser', true);
+  useShortcutById('browser.find', openFind);
+  useShortcutById('browser.focusAddress', focusAddress);
+
+  // The same, pressed inside the page, which has the keyboard then; and its menu's Save.
+  const saveRef = useRef<() => void>(() => undefined);
+  useEffect(
+    () =>
+      subscribeToEmbeddedCommand((key, command) => {
+        if (key !== props.pageKey) return;
+        if (command === 'find') openFind();
+        else if (command === 'focusAddress') focusAddress();
+        else if (command === 'save') saveRef.current();
+      }),
+    [props.pageKey, openFind, focusAddress],
+  );
+
+  const fromLegacy = !page && legacy?.url ? legacy : null;
+  const url = page?.url || fromLegacy?.url || props.url;
+  const title = page?.title || '';
+  const loading = page?.loading ?? false;
+  const canGoBack = page?.canGoBack ?? fromLegacy?.canGoBack ?? false;
+  const canGoForward = page?.canGoForward ?? fromLegacy?.canGoForward ?? false;
+  const error = page?.error ?? null;
+  // A saved link often lands somewhere else — stripe.com/docs redirects to
+  // docs.stripe.com — so where it landed, before any history, is the saved page too.
+  const landingRef = useRef<{ key: string; url: string } | null>(null);
+  if (
+    page &&
+    !page.loading &&
+    !page.canGoBack &&
+    page.url &&
+    landingRef.current?.key !== props.pageKey
+  ) {
+    landingRef.current = { key: props.pageKey, url: page.url };
+  }
+  const landing = landingRef.current?.key === props.pageKey ? landingRef.current.url : null;
+  const onSaved = props.saved ? url === props.saved.url || url === landing : false;
+  const canSave = Boolean(props.onAddLink) && /^https?:/.test(url) && !onSaved;
+  saveRef.current = () => {
+    if (/^https?:/.test(url)) props.onAddLink?.(url, title || url);
+  };
+
+  const control = (
+    action: 'back' | 'forward' | 'reload' | 'stop' | 'goto',
+    target?: string,
+  ): void => {
+    controlEmbeddedPage(action, { key: props.pageKey, ...(target ? { url: target } : {}) });
+  };
 
   return (
     <div className='flex size-full flex-col bg-background'>
-      <div
-        onPointerEnter={reclaimHostFocus}
-        className='flex shrink-0 items-center gap-1 border-b border-border px-2 py-1.5'
-      >
-        {button(
-          'Back',
-          <ChevronLeft className='size-4' />,
-          () => controlEmbeddedPage('back'),
-          !state.canGoBack,
-          'EmbeddedPageBack',
-        )}
-        {button(
-          'Forward',
-          <ChevronRight className='size-4' />,
-          () => controlEmbeddedPage('forward'),
-          !state.canGoForward,
-          'EmbeddedPageForward',
-        )}
-        {button(
-          'Reload',
-          <RotateCw className='size-3.5' />,
-          () => controlEmbeddedPage('reload'),
-          false,
-          'EmbeddedPageReload',
-        )}
-        {button(
-          'New tab',
-          <Plus className='size-4' />,
-          () => controlEmbeddedPage('newTab', { url: SCRATCH_START_PAGE }),
-          false,
-          'EmbeddedPageNewTab',
-        )}
-        <form
-          className='min-w-0 flex-1'
-          onSubmit={event => {
-            event.preventDefault();
-            const typed = (draft ?? '').trim();
-            if (!typed) return;
-            // A bare host is a url the moment someone presses enter on it.
-            const target = /^https?:\/\//i.test(typed) ? typed : `https://${typed}`;
-            controlEmbeddedPage('goto', { url: target });
-            setDraft(null);
-          }}
-        >
-          <input
-            value={draft ?? state.url}
-            onChange={event => setDraft(event.target.value)}
-            onFocus={event => event.target.select()}
-            onBlur={() => setDraft(null)}
-            spellCheck={false}
-            aria-label='Address'
-            className='h-7 w-full rounded-md bg-foreground/[0.06] px-2.5 text-[12px] outline-none focus:ring-1 focus:ring-ring'
-            data-track-category='SdlcHub'
-            data-track-name='EmbeddedPageAddressEdited'
-          />
-        </form>
-        {props.onAddLink &&
-          state.url &&
-          state.url !== props.url &&
-          button(
-            'Save to this folder',
-            <BookmarkPlus className='size-4' />,
-            () => {
-              const active = state.tabs.find(tab => tab.id === state.activeTabId);
-              props.onAddLink?.(state.url, active?.title ?? state.url);
-            },
-            false,
-            'EmbeddedPageAddLink',
-          )}
-      </div>
-      {state.tabs.length > 1 && (
-        <div
-          ref={tabStripRef}
-          onPointerEnter={reclaimHostFocus}
-          className='scrollbar-none flex shrink-0 items-stretch gap-px overflow-x-auto border-b border-border bg-foreground/[0.04] px-1 pt-1'
-        >
-          {state.tabs.map(tab => {
-            const isActive = tab.id === state.activeTabId;
-            return (
-              <div
-                key={tab.id}
-                data-embed-tab={tab.id}
-                className={cn(
-                  'group/tab flex w-[168px] shrink-0 items-stretch rounded-md text-[11.5px] transition-colors',
-                  isActive
-                    ? 'bg-background font-medium text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground',
-                )}
+      <BrowserToolbar
+        url={url}
+        loading={loading}
+        canGoBack={canGoBack}
+        canGoForward={canGoForward}
+        onBack={() => control('back')}
+        onForward={() => control('forward')}
+        onReload={() => control('reload')}
+        onStop={() => control('stop')}
+        onGo={target => control('goto', target)}
+        addressRef={addressRef}
+        history={LANE_HISTORY}
+        addressLeading={
+          props.saved ? (
+            <button
+              type='button'
+              onClick={() => props.saved && control('goto', props.saved.url)}
+              title={
+                onSaved
+                  ? `Saved link: ${props.saved.name}`
+                  : `Back to the saved page: ${props.saved.name}`
+              }
+              className={cn(
+                'flex h-6 max-w-[200px] shrink-0 items-center gap-1 rounded-md px-2 text-[11.5px] font-medium outline-none transition-colors',
+                onSaved
+                  ? 'bg-background text-foreground shadow-sm ring-1 ring-border/70'
+                  : 'bg-background text-muted-foreground ring-1 ring-border/70 hover:text-foreground focus-visible:text-foreground',
+              )}
+              data-track-category='SdlcHub'
+              data-track-name='EmbeddedPageSavedLinkReturned'
+            >
+              <Link2 className='size-3 shrink-0' />
+              <span className='truncate'>{props.saved.name}</span>
+            </button>
+          ) : null
+        }
+        find={
+          find.text !== null && (
+            <FindBar
+              text={find.text}
+              result={page?.find ?? null}
+              onChange={find.setText}
+              onStep={find.step}
+              onClose={find.close}
+              inputRef={find.inputRef}
+              trackCategory='SdlcHub'
+            />
+          )
+        }
+        trailing={
+          <>
+            <DownloadsButton />
+            {canSave && (
+              <ToolbarButton
+                label='Save to this folder'
+                onClick={() => props.onAddLink?.(url, title || url)}
+                trackCategory='SdlcHub'
+                trackName='EmbeddedPageAddLink'
               >
-                <button
-                  type='button'
-                  onClick={() => controlEmbeddedPage('select', { tabId: tab.id })}
-                  className='flex min-w-0 flex-1 items-center gap-1 py-1 pl-2.5 pr-1'
-                  title={tab.url}
-                  data-track-category='SdlcHub'
-                  data-track-name='EmbeddedTabSelected'
-                >
-                  {tab.favicon ? (
-                    <img
-                      src={tab.favicon}
-                      alt=''
-                      className='size-3.5 shrink-0 rounded-[2px] object-contain'
-                    />
-                  ) : tab.pinned ? (
-                    <Link2 className='size-3.5 shrink-0' />
-                  ) : (
-                    <Globe className='size-3.5 shrink-0' />
-                  )}
-                  <span className='min-w-0 truncate'>{tab.title || tab.url}</span>
-                </button>
-                {/* The item's own link is what this browser is for; closing it
-                    would leave the tab showing nothing. */}
-                {!tab.pinned && (
-                  <button
-                    type='button'
-                    onMouseDown={event => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      controlEmbeddedPage('close', { tabId: tab.id });
-                    }}
-                    aria-label='Close tab'
-                    className='my-auto mr-1.5 shrink-0 rounded p-0.5 opacity-0 hover:bg-foreground/10 group-hover/tab:opacity-100'
-                    data-track-category='SdlcHub'
-                    data-track-name='EmbeddedTabClosed'
-                  >
-                    <X className='size-2.5' />
-                  </button>
-                )}
-              </div>
-            );
-          })}
+                <Save className='size-4' />
+              </ToolbarButton>
+            )}
+            <ToolbarButton
+              label='Open in your browser'
+              onClick={() => openLink(url, null, { force: 'external' })}
+              disabled={!/^https?:/.test(url)}
+              trackCategory='SdlcHub'
+              trackName='EmbeddedPageOpenedExternally'
+            >
+              <ExternalLink className='size-4' />
+            </ToolbarButton>
+          </>
+        }
+        pageKey={props.pageKey}
+        onPointerEnter={reclaimHostFocus}
+        trackCategory='SdlcHub'
+      />
+      {fromLegacy && fromLegacy.tabs.length > 1 && (
+        // An older host keeps a page's new windows inside it: they can at least be
+        // switched between, until the host is updated and they become tabs.
+        <div
+          onPointerEnter={reclaimHostFocus}
+          className='scrollbar-none flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border px-2 py-1'
+        >
+          {fromLegacy.tabs.map(tab => (
+            <button
+              key={tab.id}
+              type='button'
+              onClick={() => controlEmbeddedPage('select', { tabId: tab.id })}
+              title={tab.url}
+              className={cn(
+                'flex h-6 max-w-[180px] shrink-0 items-center gap-1.5 rounded-md px-2 text-[11.5px] outline-none transition-colors',
+                tab.id === fromLegacy.activeTabId
+                  ? 'bg-muted font-medium text-foreground'
+                  : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground focus-visible:bg-muted/60',
+              )}
+              data-track-category='SdlcHub'
+              data-track-name='EmbeddedTabSelected'
+            >
+              {tab.favicon ? (
+                <img src={tab.favicon} alt='' className='size-3.5 shrink-0 rounded-[2px]' />
+              ) : (
+                <Globe className='size-3.5 shrink-0' />
+              )}
+              <span className='truncate'>{tab.title || tab.url}</span>
+            </button>
+          ))}
         </div>
       )}
-      <div ref={holeRef} className='min-h-0 flex-1' />
+      <div ref={holeRef} className='relative min-h-0 flex-1'>
+        {error && (
+          <LoadError
+            error={error}
+            onRetry={() => control('goto', error.url || url)}
+            trackCategory='SdlcHub'
+          />
+        )}
+      </div>
     </div>
   );
 }

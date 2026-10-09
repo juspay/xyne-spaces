@@ -3,6 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const state = vi.hoisted(() => ({
   upserts: [] as Array<{ where: unknown; create: Record<string, unknown>; update: Record<string, unknown> }>,
   fallbackOrgId: "org_from_user" as string | undefined,
+  signalled: [] as string[],
+}));
+
+vi.mock("./panel-signals.js", () => ({
+  signalArtifacts: vi.fn((conversationId: string) => {
+    state.signalled.push(conversationId);
+  }),
 }));
 
 vi.mock("./users-jit.js", () => ({
@@ -89,6 +96,7 @@ describe("toOpenRef", () => {
 describe("recordConversationArtifact caps", () => {
   beforeEach(() => {
     state.upserts = [];
+    state.signalled = [];
   });
 
   const base = {
@@ -146,6 +154,13 @@ describe("recordConversationArtifact caps", () => {
   it("does not send an updatedAt of its own on update", async () => {
     await recordConversationArtifact({ ...base, refId: "https://a.example/x", title: "t" });
     expect(state.upserts[0]?.update).not.toHaveProperty("updatedAt");
+  });
+
+  it("tells a screen showing the conversation once the row is written, and not for a skipped one", async () => {
+    await recordConversationArtifact({ ...base, refId: "https://a.example/x", title: "t" });
+    expect(state.signalled).toEqual(["conv_1"]);
+    await recordConversationArtifact({ ...base, kind: "FILE", refService: "CLAW", refId: "f".repeat(1001), title: "big" });
+    expect(state.signalled).toEqual(["conv_1"]);
   });
 });
 
