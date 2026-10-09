@@ -1,3 +1,10 @@
+## [1.483.0](https://github.com/juspay/xyne-spaces/compare/v1.482.1...v1.483.0) (2026-10-09)
+
+
+### Features
+
+* open the Ask AI panel for guests after onboarding ([#2805](https://github.com/juspay/xyne-spaces/issues/2805)) ([79478b5](https://github.com/juspay/xyne-spaces/commit/79478b5205e8b4c9c07f46fd168c20f09778f8e1))
+
 ## [1.482.1](https://github.com/juspay/xyne-spaces/compare/v1.482.0...v1.482.1) (2026-10-09)
 
 
