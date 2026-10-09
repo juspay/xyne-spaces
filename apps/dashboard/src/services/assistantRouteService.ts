@@ -5,7 +5,6 @@ interface RouteAction {
   description: string;
 }
 
-// Jev's top pick and its share of the vote.
 interface JevPick {
   chosen?: string;
   probability?: number;
@@ -35,7 +34,7 @@ export async function routeWithJev(
   text: string,
   actions: readonly RouteAction[],
   signal: AbortSignal,
-  mode?: 'screen',
+  mode?: 'screen' | 'check',
 ): Promise<RouteResponse> {
   try {
     const response = await apiInstance.post<unknown>(

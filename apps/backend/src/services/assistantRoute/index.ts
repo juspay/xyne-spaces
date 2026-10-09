@@ -14,7 +14,6 @@ export interface AssistantRouteAction {
   description: string;
 }
 
-// Jev's top pick and its share of the vote, so a caller can apply its own bar.
 interface JevPick {
   chosen: string;
   probability: number;
@@ -65,7 +64,6 @@ const INSTRUCTIONS =
   'Which of these is the user asking to do, or asking how to do? Pick none when the ' +
   'message is about something else or is a general question.';
 
-// Screen mode: the options are the controls on the user's screen.
 const SCREEN_INSTRUCTIONS =
   'If the user asked a question (what, why, who, which, explain), made small talk, or asked ' +
   'for something to be written, summarized or found, pick none. Otherwise they want something ' +
@@ -76,7 +74,13 @@ const SCREEN_NONE_DESCRIPTION =
   'None: a question, small talk, or a request to write, summarize or find something, for the ' +
   'AI assistant to answer.';
 
-export type AssistantRouteMode = 'actions' | 'screen';
+const CHECK_INSTRUCTIONS =
+  '`text` holds what the user asked and the control the assistant is about to use. Pick ' +
+  'whether that control is what they asked for, a way to reach it, or something else.';
+
+const CHECK_NONE_DESCRIPTION = 'None: it cannot be told from this.';
+
+export type AssistantRouteMode = 'actions' | 'screen' | 'check';
 
 // Catalog actions are shuffled against position bias; screen controls keep screen order.
 const PROMPTS: Record<
@@ -87,6 +91,11 @@ const PROMPTS: Record<
   screen: {
     instructions: SCREEN_INSTRUCTIONS,
     none: SCREEN_NONE_DESCRIPTION,
+    order: (items) => items,
+  },
+  check: {
+    instructions: CHECK_INSTRUCTIONS,
+    none: CHECK_NONE_DESCRIPTION,
     order: (items) => items,
   },
 };
