@@ -1,5 +1,5 @@
 
-import { setVisibilityTx, validateGrantTargetsTx, grantTx2, revokeTx, linkTicketTx, unlinkTicketTx, setAccess } from '@/bypassAcl/transactions/recordingSharingService';
+import { setVisibilityTx, validateGrantTargetsTx, grantTx2, revokeTx, linkTicketTx, unlinkTicketTx } from '@/bypassAcl/transactions/recordingSharingService';
 import { Prisma, type EntityAccess } from '@prisma/client';
 import {
   
@@ -176,44 +176,6 @@ export class RecordingSharingService {
       case 'set_visibility':
         return this.setVisibility(callId, actor, command.visibility);
     }
-  }
-
-  /**
-   * After an ownership transfer, keep the previous owner's view access as a plain
-   * direct share (no DM, no notification) that the new owner can revoke. The caller
-   * has already checked the call is a recording that actually changed owner.
-   */
-  async grantPreviousOwnerView(
-    tx: Prisma.TransactionClient,
-    callId: string,
-    previousOwnerUserId: string,
-  ): Promise<void> {
-    const recording = await tx.call.findUnique({
-      where: { id: callId },
-      select: {
-        id: true,
-        externalId: true,
-        title: true,
-        metadata: true,
-        callType: true,
-        channelId: true,
-        workspaceId: true,
-        createdByUserId: true,
-        startedAt: true,
-        endedAt: true,
-      },
-    });
-    if (!recording?.workspaceId) return;
-
-    await setAccess(
-      this,
-      tx,
-      recording,
-      recording.workspaceId,
-      { type: 'user', id: previousOwnerUserId },
-      EntityUserAccess.VIEW,
-      RECORDING_SHARE_INTENT.DIRECT_SHARE,
-    );
   }
 
   private async setVisibility(

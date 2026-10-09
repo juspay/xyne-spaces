@@ -12,7 +12,7 @@ import { messageMetadataService } from '@/services/messageMetadataService';
 import type { CallParticipantMetadata } from '@xyne/shared';
 import { normalizeEmailList } from '@/utils/email';
 import { CallVespaFeedSource, queueCallVespaDelete, queueCallVespaFeed } from '@/services/callVespaQueue';
-import { refreshCallParticipantPreview, refreshCallParticipantPreviews } from '@/utils/callParticipantCountUtils';
+import { refreshCallParticipantPreview } from '@/utils/callParticipantCountUtils';
 import { queueScheduledCallPillSync } from '@/services/scheduledCallPillSync';
 import {
   setSlashCommandArtifactLifecycle,
@@ -626,60 +626,59 @@ export class CallRepository {
    * createCallWithParticipants seeds an organizer. The previous owner keeps their
    * participant row. Ownership deliberately stays out of UpdateCallInput — this is
    * the only write path for it.
+   *
+   * Returns the writes unsent, for the caller to commit in one batch transaction with
+   * its own (a series moving with its calls). Participant previews are not among them:
+   * refresh those once the batch commits.
    */
-  async transferOwnership(
-    callIds: string[],
-    newOwnerId: string,
-    tx: Prisma.TransactionClient,
-  ): Promise<void> {
-    if (callIds.length === 0) return;
+  async transferOwnershipOps(callIds: string[], newOwnerId: string): Promise<Prisma.PrismaPromise<unknown>[]> {
+    if (callIds.length === 0) return [];
 
-    // A daily series moves ~60 calls in one transaction, so every step is a batch
-    // rather than a few writes per call.
+    const db = DatabaseClient.getInstance();
     const [calls, existingParticipants] = await Promise.all([
-      tx.call.findMany({
+      db.call.findMany({
         where: { id: { in: callIds } },
         select: { id: true, workspaceId: true, createdByUserId: true },
       }),
-      tx.callParticipant.findMany({
+      db.callParticipant.findMany({
         where: { callId: { in: callIds }, userId: newOwnerId },
         select: { callId: true },
       }),
     ]);
+    const alreadyParticipant = new Set(existingParticipants.map(participant => participant.callId));
     const now = new Date();
 
-    await tx.call.updateMany({
-      where: { id: { in: callIds } },
-      data: { createdByUserId: newOwnerId },
-    });
-    await tx.call.updateMany({
-      where: { id: { in: callIds }, organizerId: { not: null } },
-      data: { organizerId: newOwnerId },
-    });
-
-    const alreadyParticipant = new Set(existingParticipants.map(participant => participant.callId));
-    await tx.callParticipant.updateMany({
-      where: { callId: { in: [...alreadyParticipant] }, userId: newOwnerId },
-      data: { meetingStatus: MeetingStatus.ACCEPTED, respondedAt: now },
-    });
-    await tx.callParticipant.createMany({
-      data: calls
-        .filter(call => !alreadyParticipant.has(call.id))
-        .map(call => ({
-          id: uuidv4(),
-          callId: call.id,
-          workspaceId: call.workspaceId,
-          userId: newOwnerId,
-          invitedBy: call.createdByUserId,
-          invitedAt: now,
-          response: InvitationResponse.INVITED,
-          meetingStatus: MeetingStatus.ACCEPTED,
-          respondedAt: now,
-        })),
-      skipDuplicates: true,
-    });
-
-    await refreshCallParticipantPreviews(tx, calls.map(call => call.id));
+    return [
+      db.call.updateMany({
+        where: { id: { in: callIds } },
+        data: { createdByUserId: newOwnerId },
+      }),
+      db.call.updateMany({
+        where: { id: { in: callIds }, organizerId: { not: null } },
+        data: { organizerId: newOwnerId },
+      }),
+      db.callParticipant.createMany({
+        data: calls
+          .filter(call => !alreadyParticipant.has(call.id))
+          .map(call => ({
+            id: uuidv4(),
+            callId: call.id,
+            workspaceId: call.workspaceId,
+            userId: newOwnerId,
+            invitedBy: call.createdByUserId,
+            invitedAt: now,
+            response: InvitationResponse.INVITED,
+            meetingStatus: MeetingStatus.ACCEPTED,
+            respondedAt: now,
+          })),
+        skipDuplicates: true,
+      }),
+      // After the create, so a row added since the read (which skipDuplicates passed over) is accepted too.
+      db.callParticipant.updateMany({
+        where: { callId: { in: callIds }, userId: newOwnerId },
+        data: { meetingStatus: MeetingStatus.ACCEPTED, respondedAt: now },
+      }),
+    ];
   }
 
   async delete(id: string): Promise<void> {

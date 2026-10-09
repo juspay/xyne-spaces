@@ -3,6 +3,8 @@ import {
   CallOrigin,
   CallStatus,
   CallType,
+  InvitationResponse,
+  MeetingStatus,
   NotificationType,
   RecurringCallSeriesStatus,
   UserStatus,
@@ -30,7 +32,7 @@ import { callDocumentService } from '@/services/callDocumentService';
 import { logDetailedSummaryFailed } from '@/services/detailedSummaryFailureLog';
 import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
 import { queueCallCalendarPushMany } from '@/queues/callCalendarPushQueue';
-import { transferOwnershipTx } from '@/bypassAcl/transactions/callAdminService';
+import { refreshCallParticipantPreviews } from '@/utils/callParticipantCountUtils';
 import {
   CallAdminError,
   callAdminAccessService,
@@ -578,6 +580,29 @@ class CallAdminService {
     }
   }
 
+  /** The series side of an owner change: its organizer, and the new owner on its invite list. */
+  private seriesOwnershipOps(call: Call, seriesId: string, newOwnerUserId: string): Prisma.PrismaPromise<unknown>[] {
+    const now = new Date();
+    return [
+      db.recurringCallSeries.update({ where: { id: seriesId }, data: { organizerId: newOwnerUserId } }),
+      db.recurringCallParticipant.upsert({
+        where: { recurringSeriesId_userId: { recurringSeriesId: seriesId, userId: newOwnerUserId } },
+        create: {
+          recurringSeriesId: seriesId,
+          workspaceId: call.workspaceId,
+          userId: newOwnerUserId,
+          invitedBy: call.createdByUserId,
+          invitedAt: now,
+          response: InvitationResponse.INVITED,
+          meetingStatus: MeetingStatus.ACCEPTED,
+          respondedAt: now,
+          isExternal: false,
+        },
+        update: { meetingStatus: MeetingStatus.ACCEPTED, respondedAt: now },
+      }),
+    ];
+  }
+
   /**
    * Move a call (and optionally its whole series: the series organizer plus every
    * future SCHEDULED instance) to another active member of the workspace. Returns a
@@ -617,7 +642,37 @@ class CallAdminService {
         ?.organizerId ?? null
       : null;
 
-    const transferred = await transferOwnershipTx(call, newOwnerUserId, seriesId);
+    const transferred = [
+      call,
+      ...(seriesId ? await repositories.scheduledCalls.findOtherScheduledInstances(seriesId, call.id) : []),
+    ];
+    const transferredCallIds = transferred.map((transferredCall) => transferredCall.id);
+    // One batch transaction, under the workspace scope this route runs at: no ACL bypass.
+    await db.$transaction([
+      ...(seriesId ? this.seriesOwnershipOps(call, seriesId, newOwnerUserId) : []),
+      ...(await repositories.calls.transferOwnershipOps(transferredCallIds, newOwnerUserId)),
+    ]);
+    // Replenish may have created an instance from the old organizer between the read above
+    // and the commit; the series now names the new owner, so one sweep catches it.
+    if (seriesId && previousSeriesOrganizerId && previousSeriesOrganizerId !== newOwnerUserId) {
+      const missed = await repositories.scheduledCalls.findOtherScheduledInstances(
+        seriesId,
+        call.id,
+        previousSeriesOrganizerId,
+      );
+      if (missed.length > 0) {
+        const missedCallIds = missed.map((missedCall) => missedCall.id);
+        await db.$transaction([...(await repositories.calls.transferOwnershipOps(missedCallIds, newOwnerUserId))]);
+        transferred.push(...missed);
+        transferredCallIds.push(...missedCallIds);
+      }
+    }
+    // Display-only counts and avatars, rebuilt by the next participant change if this fails.
+    try {
+      await refreshCallParticipantPreviews(db, transferredCallIds);
+    } catch (error) {
+      logger.warn('[callAdmin] participant preview refresh failed after owner change', { callId: call.externalId, error });
+    }
 
     // Each call's follow-up is independent of the others', so a series runs them together.
     await Promise.all(

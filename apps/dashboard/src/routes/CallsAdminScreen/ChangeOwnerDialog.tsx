@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactElement } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { UserType, type User } from '@xyne/shared';
+import { CallType, UserType, type User } from '@xyne/shared';
 import { Dialog } from '@/components/ui/Dialog';
 import { Button } from '@/components/ui/Button';
 import { Checkbox } from '@/components/ui/Checkbox/Checkbox';
@@ -89,8 +89,10 @@ export function ChangeOwnerDialog({
           {call && (
             <p className='text-sm text-muted-foreground'>
               {call.title || 'Untitled call'} is owned by {userLabel(call.owner)}. The new owner
-              must already be a participant or a member of its channel, and gets full control; the
-              current owner keeps access to view it.
+              must already be a participant or a member of its channel, and gets full control;{' '}
+              {call.type === CallType.HEADLESS
+                ? 'the current owner loses access to this recording unless it is shared with them.'
+                : 'the current owner stays on the call as a participant.'}
             </p>
           )}
         </div>
