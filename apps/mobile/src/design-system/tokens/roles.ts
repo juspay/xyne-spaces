@@ -2,7 +2,17 @@
  * The semantic roles a palette defines - meaning, not location.
  */
 
-export const SEMANTIC_ROLES = ['background', 'foreground'] as const;
+export const SEMANTIC_ROLES = [
+  'background',
+  'foreground',
+  /** Secondary text: message preview, timestamp. */
+  'muted',
+  /** A raised block on the background: the active filter chip. */
+  'surface',
+  /** Unread badge, and anything that has to read as "new". */
+  'accent',
+  'accent-foreground',
+] as const;
 
 export type SemanticRole = (typeof SEMANTIC_ROLES)[number];
 

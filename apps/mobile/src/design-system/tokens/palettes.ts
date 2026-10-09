@@ -1,6 +1,6 @@
 import type { ThemeName } from 'uniwind';
 
-import { neutral } from './primitives';
+import { coral, neutral } from './primitives';
 import type { RoleValues } from './roles';
 
 export type ThemeMode = 'light' | 'dark';
@@ -20,12 +20,20 @@ const PALETTES = {
   default: {
     variant: { light: 'light', dark: 'dark' },
     light: {
-      background: neutral[50],
+      background: neutral[0],
       foreground: neutral[900],
+      muted: neutral[500],
+      surface: neutral[100],
+      accent: coral[500],
+      'accent-foreground': neutral[0],
     },
     dark: {
       background: neutral[900],
       foreground: neutral[0],
+      muted: neutral[500],
+      surface: neutral[800],
+      accent: coral[500],
+      'accent-foreground': neutral[0],
     },
   },
 } satisfies Record<string, Palette>;

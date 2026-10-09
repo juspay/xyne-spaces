@@ -36,6 +36,16 @@ export const FLAGS = {
     default: false,
     removeBy: '2026-12-31',
   },
+  'ui.dms': {
+    label: 'New DMs screen',
+    description: 'The redesigned conversation list, in place of the classic one.',
+    default: false,
+    removeBy: '2026-12-31',
+    // The new screen has no in-header search field; search lives in the new
+    // bottom bar. Inside the classic shell there is no such bar, so search
+    // would be unreachable.
+    requires: 'ui.shell',
+  },
 } as const satisfies Record<string, FlagDefinition>;
 
 export type FlagKey = keyof typeof FLAGS;

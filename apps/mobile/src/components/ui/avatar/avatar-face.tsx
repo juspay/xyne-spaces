@@ -3,7 +3,7 @@ import { memo, useCallback, useState } from 'react';
 import { Text, View, type ViewStyle } from 'react-native';
 
 import { getAvatarAccentColor, getInitials, useUserSnapshot } from './avatar.utils';
-import { useProfilePictureUri } from '@/src/hooks/useProfilePictureUri';
+import { forgetProfilePictureUri, useProfilePictureUri } from '@/src/hooks/useProfilePictureUri';
 import type { AvatarFallbackUser } from './avatar.types';
 
 type AvatarFaceProps = {
@@ -35,9 +35,16 @@ export const AvatarFace = memo(function AvatarFace({
   const borderRadius = rounded ? size / 2 : 8;
   const showImage = !!pictureUri && failedImageKey !== imageKey;
 
+  /**
+   * A URI that no longer loads is a cached location whose file has gone — the
+   * resolver hands those out without checking, so this is where that is found
+   * out. Dropping the entry makes the next mount re-resolve instead of showing
+   * initials for the rest of the install.
+   */
   const onError = useCallback(() => {
     setFailedImageKey(imageKey);
-  }, [imageKey]);
+    forgetProfilePictureUri(userId, picture);
+  }, [imageKey, picture, userId]);
 
   return (
     <View

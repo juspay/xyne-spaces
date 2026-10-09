@@ -114,7 +114,7 @@ function NativeShell(): ReactElement {
               <Stack
                 screenOptions={{
                   headerShown: false,
-                  freezeOnBlur: Platform.OS === 'android',
+                  // freezeOnBlur: Platform.OS === 'android',
                   contentStyle: { backgroundColor: stackContentBackground },
                 }}
               >

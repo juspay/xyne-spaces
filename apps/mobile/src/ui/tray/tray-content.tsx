@@ -64,7 +64,7 @@ export function TrayContent({ style, children }: TrayContentProps): ReactElement
     [contentHeight],
   );
   const insets = useSafeAreaInsets();
-  const surface = useCSSVariable('--color-card') as string;
+  const surface = useCSSVariable('--color-spaces-background') as string;
   const { height: keyboardHeight } = useReanimatedKeyboardAnimation();
 
   // The same ceiling `useTrayBodySpace` reports to the view, so the height a

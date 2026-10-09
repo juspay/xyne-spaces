@@ -1,0 +1,43 @@
+import * as React from 'react';
+import Svg, { Path, type SvgProps } from 'react-native-svg';
+
+/**
+ * The gold a starred conversation is marked with.
+ *
+ * Not a theme role: it means "starred" in both light and dark, the way a
+ * warning triangle is yellow everywhere. A role would imply it re-palettes
+ * with the theme, which it must not.
+ */
+export const STAR_COLOR = '#F5B301';
+
+/**
+ * Filled, not outlined.
+ *
+ * The source drawing is a stroked star. Painting the same path as both fill
+ * and stroke keeps the rounded joins the design has while making it solid —
+ * a separate filled path would have to re-derive those corners and drift.
+ */
+function StarIcon({
+  width = 16,
+  height = 16,
+  color = STAR_COLOR,
+  strokeWidth = 1.26667,
+  ...props
+}: SvgProps): React.ReactElement {
+  const paint = props.fill ?? color;
+
+  return (
+    <Svg width={width} height={height} viewBox='0 0 16 16' fill='none' {...props}>
+      <Path
+        d='M6.09946 4.16495C6.6608 2.98857 6.94146 2.40038 7.30779 2.18697C7.73566 1.93768 8.26452 1.93768 8.69239 2.18697C9.05866 2.40038 9.33932 2.98857 9.90072 4.16495C10.067 4.5135 10.1502 4.68778 10.2692 4.82643C10.409 4.98929 10.585 5.11716 10.7831 5.19981C10.9518 5.27017 11.1432 5.2954 11.5261 5.34587C12.8184 5.51622 13.4645 5.60139 13.7807 5.88381C14.15 6.21371 14.3134 6.71666 14.2085 7.20066C14.1187 7.615 13.6461 8.06366 12.7007 8.96106C12.4207 9.22693 12.2806 9.35987 12.1855 9.51593C12.0739 9.69927 12.0066 9.90613 11.9892 10.1201C11.9744 10.3022 12.0096 10.4921 12.0799 10.8718C12.3172 12.1535 12.4359 12.7943 12.265 13.1823C12.0653 13.6355 11.6375 13.9463 11.1448 13.9961C10.723 14.0388 10.1503 13.7279 9.00466 13.1061C8.66519 12.9219 8.49546 12.8298 8.31772 12.7876C8.10886 12.738 7.89132 12.738 7.68246 12.7876C7.50466 12.8298 7.33492 12.9219 6.99552 13.1061C5.84993 13.7279 5.27714 14.0388 4.85536 13.9961C4.36267 13.9463 3.9348 13.6355 3.73518 13.1823C3.56428 12.7943 3.68294 12.1535 3.92027 10.8718C3.99058 10.4921 4.02574 10.3022 4.01094 10.1201C3.99355 9.90613 3.92632 9.69927 3.81464 9.51593C3.71956 9.35987 3.57952 9.22693 3.29942 8.96106C2.35408 8.06366 1.88141 7.615 1.79163 7.20066C1.68676 6.71666 1.85019 6.21371 2.2195 5.88381C2.53566 5.60139 3.1818 5.51622 4.47406 5.34587C4.85695 5.2954 5.0484 5.27017 5.21704 5.19981C5.41514 5.11716 5.59114 4.98929 5.73095 4.82643C5.84998 4.68778 5.93314 4.5135 6.09946 4.16495Z'
+        fill={paint}
+        stroke={paint}
+        strokeWidth={strokeWidth}
+        strokeLinecap='round'
+        strokeLinejoin='round'
+      />
+    </Svg>
+  );
+}
+
+export default StarIcon;

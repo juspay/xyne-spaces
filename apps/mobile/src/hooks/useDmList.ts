@@ -30,6 +30,19 @@ import { queries } from '@/src/zero/queries';
 
 export type { DmFilterTab } from '@/src/utils/dm-list-filters';
 
+/**
+ * How many conversations each filter would show, counted before filtering.
+ *
+ * Over the conversations currently loaded, not over the workspace: the list
+ * is paginated, so these grow as more pages arrive. That was already true of
+ * `unreadDmCount`, which is now one of them.
+ *
+ * `starred` is the one to watch. Starred conversations outside the loaded
+ * pages are only merged in while the Starred tab is the active one (see
+ * `mergeStarredDmChannels`), so from another tab this can undercount.
+ */
+export type DmFilterCounts = Readonly<Record<DmFilterTab, number>>;
+
 const sortDmListItems = (items: DmListItemData[]): DmListItemData[] => {
   const starred: DmListItemData[] = [];
   const rest: DmListItemData[] = [];
@@ -162,6 +175,7 @@ type UseDmListResult = {
   isFiltering: boolean;
   isEmpty: boolean;
   unreadDmCount: number;
+  filterCounts: DmFilterCounts;
   hasCachedData: boolean;
   isListSyncComplete: boolean;
 };
@@ -350,10 +364,23 @@ export const useDmList = ({
 
   const allItems = liveItems;
 
-  const unreadDmCount = useMemo(
-    () => allItems.reduce((acc, item) => acc + ((item.unreadCount ?? 0) > 0 ? 1 : 0), 0),
-    [allItems],
-  );
+  // One pass for all four. `unreadDmCount` is kept as its own field because
+  // callers outside this screen read it by that name.
+  const filterCounts = useMemo<DmFilterCounts>(() => {
+    let unread = 0;
+    let starred = 0;
+    let groups = 0;
+
+    for (const item of allItems) {
+      if ((item.unreadCount ?? 0) > 0) unread += 1;
+      if (item.isStarred === true) starred += 1;
+      if (item.scopeType === ChannelScopeType.GROUP_DM) groups += 1;
+    }
+
+    return { all: allItems.length, unread, starred, groups };
+  }, [allItems]);
+
+  const unreadDmCount = filterCounts.unread;
 
   const tabFilteredItems = useMemo(
     () => filterDmListItems(allItems, filterTab),
@@ -392,6 +419,7 @@ export const useDmList = ({
     isFiltering: filterTab !== 'all',
     isEmpty: allItems.length === 0,
     unreadDmCount,
+    filterCounts,
     hasCachedData: hasDisplayData,
     isListSyncComplete: initialSyncStatus === 'complete' || isLiveReady,
   };

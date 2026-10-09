@@ -119,8 +119,12 @@ const MenuItem = memo(function MenuItem({
         />
         <Text style={[styles.menuItemLabel, { color: palette.textPrimary }]}>{item.label}</Text>
         {badgeLabel === null ? null : (
-          <View style={styles.badge}>
-            <Text allowFontScaling={false} style={styles.badgeLabel}>
+          <View style={styles.badge} className='bg-spaces-accent'>
+            <Text
+              allowFontScaling={false}
+              style={styles.badgeLabel}
+              className='text-spaces-accent-foreground'
+            >
               {badgeLabel}
             </Text>
           </View>
@@ -401,10 +405,8 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: BADGE_BACKGROUND,
   },
   badgeLabel: {
-    color: BADGE_TEXT,
     fontSize: 11,
     fontWeight: '700',
     lineHeight: 13,
