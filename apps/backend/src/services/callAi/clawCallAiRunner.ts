@@ -1,11 +1,12 @@
 import { randomUUID } from 'crypto';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
+import { cancelS2SClawRun, getS2SClawRunStatus } from '@/services/clawAgentService';
 import {
-  cancelS2SClawRun,
-  getS2SClawRunStatus,
-  runScopedClawAgent,
-} from '@/services/clawAgentService';
+  clawClient,
+  resolveAgentSpacesAppId,
+  resolveHeadlessIdentityContext,
+} from '@/automations/services/claw-client';
 import { CLAW_CALL_AI_SETTINGS } from './clawCallAiSettings';
 import {
   clearClawCallAiRun,
@@ -20,6 +21,13 @@ import type {
   ClawCallAiRunOutcome,
 } from './types';
 
+/** Everything `clawClient.runAgent` needs about who runs the agent and where. */
+type ClawCallAiDispatchTarget = ClawCallAiIdentity & {
+  spacesAppId: string;
+  spacesWorkspaceId: string;
+  spacesOrgId: string;
+  spacesOrgMemberId: string;
+};
 
 /** Callback route; registered in app.ts. */
 export const CLAW_CALL_AI_CALLBACK_PATH = '/api/internal/call-ai/claw-callback';
@@ -166,7 +174,7 @@ async function waitForRun(
 /** Dispatch one run and wait for it. Never throws. */
 async function runOnce(
   task: CallAiTask,
-  identity: ClawCallAiIdentity,
+  target: ClawCallAiDispatchTarget,
   attempt: number,
   logCallId: string,
 ): Promise<ClawCallAiResult> {
@@ -178,18 +186,16 @@ async function runOnce(
 
   try {
     await markClawCallAiRunPending(sessionId, CLAW_CALL_AI_SETTINGS.runTimeoutMs);
-    await runScopedClawAgent({
-      identity: { userId: identity.userId, orgId: identity.orgId, workspaceId: identity.workspaceId },
+    await clawClient.runAgent({
       sessionId,
+      spacesAppId: target.spacesAppId,
       agentSlug,
       task: runTask,
       context,
-      userId: identity.userId,
-      userName: identity.userName,
-      userEmail: identity.userEmail,
-      spacesWorkspaceId: identity.workspaceId,
-      spacesOrgId: identity.orgId,
-      workspaceId: identity.workspaceId,
+      userId: target.userId,
+      spacesWorkspaceId: target.spacesWorkspaceId,
+      spacesOrgId: target.spacesOrgId,
+      spacesOrgMemberId: target.spacesOrgMemberId,
       // No conversationId: each run is standalone, which avoids claw-auth's
       // per-conversation slot (409/queueing) and chat-history writes.
       callbackUrl,
@@ -200,7 +206,7 @@ async function runOnce(
     logger.error(`[${logCallId}] ${task.operation}_claw_dispatch_failed`, {
       attempt,
       agent_slug: agentSlug,
-      workspace_id: identity.workspaceId,
+      workspace_id: target.workspaceId,
       error: message,
     });
     return { ok: false, reason: 'dispatch_failed', error: message };
@@ -210,15 +216,16 @@ async function runOnce(
     attempt,
     session_id: sessionId,
     agent_slug: agentSlug,
-    user_id: identity.userId,
-    workspace_id: identity.workspaceId,
+    user_id: target.userId,
+    workspace_id: target.workspaceId,
+    spaces_app_id: target.spacesAppId,
     input_length: task.userPrompt.length,
     context_length: context.length,
     callback_url: callbackUrl,
   });
 
   try {
-    const outcome = await waitForRun(sessionId, identity, task, logCallId);
+    const outcome = await waitForRun(sessionId, target, task, logCallId);
     const duration_ms = Date.now() - attemptStart;
 
     if (outcome.status === 'aborted') return { ok: false, reason: 'cancelled' };
@@ -275,10 +282,29 @@ export async function runCallAiTaskOnClaw(
   const logCallId = task.callId || 'unknown';
   if (task.abortSignal?.aborted) return { ok: false, reason: 'cancelled' };
 
+  // Resolved once: an agent that is not installed in the workspace will not be
+  // on a retry either, so this fails straight to the legacy engine.
+  let target: ClawCallAiDispatchTarget;
+  try {
+    const [spacesAppId, headless] = await Promise.all([
+      resolveAgentSpacesAppId(CLAW_CALL_AI_SETTINGS.agentSlug, identity.workspaceId),
+      resolveHeadlessIdentityContext(identity.userId, identity.workspaceId),
+    ]);
+    target = { ...identity, spacesAppId, ...headless };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.warn(`[${logCallId}] ${task.operation}_claw_agent_unavailable`, {
+      agent_slug: CLAW_CALL_AI_SETTINGS.agentSlug,
+      workspace_id: identity.workspaceId,
+      error: message,
+    });
+    return { ok: false, reason: 'dispatch_failed', error: message };
+  }
+
   const maxAttempts = CLAW_CALL_AI_SETTINGS.maxAttempts;
   let last: ClawCallAiResult = { ok: false, reason: 'run_failed' };
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    last = await runOnce(task, identity, attempt, logCallId);
+    last = await runOnce(task, target, attempt, logCallId);
     if (last.ok || TERMINAL_REASONS.has(last.reason)) return last;
     if (attempt < maxAttempts) {
       logger.warn(`[${logCallId}] ${task.operation}_claw_retry_scheduled`, {

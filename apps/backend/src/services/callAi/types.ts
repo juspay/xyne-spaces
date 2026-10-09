@@ -27,12 +27,9 @@ export type ClawCallAiResult =
   | { ok: true; content: string; sessionId: string }
   | { ok: false; reason: ClawCallAiFailureReason; error?: string };
 
-/** The Spaces identity a Claw run acts as. */
+/** The Spaces user a Claw run acts as, and the workspace it runs in. */
 export interface ClawCallAiIdentity {
   userId: string;
-  userName: string;
-  userEmail: string;
-  orgId: string;
   workspaceId: string;
 }
 
