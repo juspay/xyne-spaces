@@ -149,6 +149,8 @@ import sdlcArtifactVersionsInternalRoutes from '@/routes/sdlcArtifactVersionsInt
 import sdlcWikiInternalRoutes from '@/routes/sdlcWikiInternal';
 import { handleAutoDraftCallback } from '@/controllers/autodraftCallback.handler';
 import { handleDeskReportCallback } from '@/controllers/deskReportCallback.handler';
+import { handleClawCallAiCallback } from '@/controllers/clawCallAiCallback.handler';
+import { CLAW_CALL_AI_CALLBACK_PATH } from '@/services/callAi/clawCallAiRunner';
 import automationWebhookRoutes from '@/automations/routes/webhook-trigger.handler';
 import activityLogRoutes from '@/routes/activityLog';
 import userActivityRoutes from '@/routes/userActivity';
@@ -687,6 +689,13 @@ export class App {
       '/api/internal/desk-report/callback/:channelId/:attachmentId',
       validateS2SKey,
       handleDeskReportCallback,
+    );
+    // Claw's terminal result for a call AI run (CALL_AI_USE_CLAW_AGENT); the
+    // dispatching worker picks it up from Redis.
+    this.app.post(
+      `${CLAW_CALL_AI_CALLBACK_PATH}/:runKey`,
+      validateS2SKey,
+      handleClawCallAiCallback,
     );
 
     // Internal canvas read/update (S2S-only, used by MCP tools)
