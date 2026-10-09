@@ -53,10 +53,6 @@ const v1Request = z.object({
   args: z.unknown().optional(),
 });
 
-// ============================================================================
-// COOKIE-BASED AUTH (ACTIVE) - Uses req.user set by authMiddleware
-// ============================================================================
-
 /**
  * Build SDK auth context from req.user (set by authMiddleware).
  * Fetches orgId from the database since it's not available on req.user.
@@ -134,18 +130,12 @@ function v1Handler(endpoint: Extract<V1Kind, 'query' | 'mutator'>) {
     const parsed = parseV1Args(op, args);
 
     if (endpoint === 'query') {
-      // COOKIE-BASED AUTH (ACTIVE)
       const data = await callQuery(target.name, parsed.args, ctx);
       res.status(200).json({ data: parsed.mapResult ? parsed.mapResult(data) : data });
-      // API KEY AUTH (COMMENTED OUT)
-      // res.status(200).json({ data: await callQuery(target.name, parsed.args, auth.ctx) });
       return;
     }
 
-    // COOKIE-BASED AUTH (ACTIVE)
     await callMutator(target.name, parsed.args, authData);
-    // API KEY AUTH (COMMENTED OUT)
-    // await callMutator(target.name, parsed.args, auth.authData);
     // `generated` carries any id this layer minted, so a caller that just created
     // a row learns its id without having had to supply one.
     res.status(200).json({ success: true, ...(parsed.generated ? { generated: parsed.generated } : {}) });
