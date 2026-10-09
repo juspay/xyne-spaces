@@ -474,7 +474,8 @@ export function ChannelMentionRenderer({
         data-channel-id={channelId}
         data-channel-name={channelName}
         data-is-private={isPrivate.toString()}
-        className='text-[color:var(--mention-color)] bg-[var(--mention-channel-bg)] hover:bg-[var(--mention-channel-hover-bg)] px-1 py-[2px] rounded-[4px] font-normal no-underline transition-colors duration-200 inline whitespace-nowrap align-baseline'
+        title={channelName}
+        className='text-[color:var(--mention-color)] bg-[var(--mention-channel-bg)] hover:bg-[var(--mention-channel-hover-bg)] px-1 py-[2px] rounded-[4px] font-normal no-underline transition-colors duration-200 inline-block max-w-[240px] truncate whitespace-nowrap align-bottom'
       >
         {isPrivate ? <Lock className='h-3 w-3 inline-block mr-0.5 mb-1' /> : '#'}
         {channelName}
