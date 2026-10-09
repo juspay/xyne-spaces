@@ -68,6 +68,7 @@ import {
   NotificationBellOn,
 } from '@xyne/icons';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
+import { ActivityRowBoundary } from './ActivityRowBoundary';
 
 type ActivityTab =
   | 'all'
@@ -884,11 +885,25 @@ const ActivityListView = (): ReactElement => {
                 // item measurement includes it.
                 return (
                   <div className='px-3 pb-1.5'>
-                    {item.type === 'single' ? (
-                      <ActivityItem activity={item.activity} isExpanded={isExpanded} />
-                    ) : (
-                      <GroupedTicketActivity activities={item.activities} isExpanded={isExpanded} />
-                    )}
+                    <ActivityRowBoundary
+                      activityId={
+                        item.type === 'single' ? item.activity.id : item.activities[0]!.id
+                      }
+                      actorAction={
+                        item.type === 'single' ? item.activity.actorAction : 'ticket_group'
+                      }
+                      activity={item.type === 'single' ? item.activity : item.activities[0]!}
+                      dataSource={activitiesMeta?.source}
+                    >
+                      {item.type === 'single' ? (
+                        <ActivityItem activity={item.activity} isExpanded={isExpanded} />
+                      ) : (
+                        <GroupedTicketActivity
+                          activities={item.activities}
+                          isExpanded={isExpanded}
+                        />
+                      )}
+                    </ActivityRowBoundary>
                   </div>
                 );
               }}

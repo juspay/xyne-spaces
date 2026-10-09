@@ -46,8 +46,14 @@ export function stripFlowMarkup(raw: string, resolveUserName?: MentionNameResolv
  * the content is not a FlowJSON message. Joins the flow title with every text
  * `content` prop in the component tree, plus plan `desc` / `todos[].text`.
  */
-export function getFlowJsonPreviewText(content: string): string | null {
-  if (!content.includes('data-flow-json')) return null;
+export function getFlowJsonPreviewText(content: string | null | undefined): string | null {
+  // Nullable by contract, like every `parse*Md` helper in activityMetadataParser.
+  // Callers pass a message's `content` straight through, and a message object can
+  // reach render partially shaped — from a cached query result or a projected
+  // payload, not from Zero's replica, which only ever sends whole rows. A
+  // render-time TypeError in a preview helper takes down the whole Activity page
+  // via the router boundary, so this must degrade instead of throwing.
+  if (typeof content !== 'string' || !content.includes('data-flow-json')) return null;
   const attrMatch = content.match(/data-flow-json="([^"]+)"/);
   if (!attrMatch?.[1]) return null;
 
