@@ -120,16 +120,10 @@ export function useArtifactRequestBridge({ previewRef, appId }: BridgeArgs): voi
       try {
         // Forward only a known-safe subset of the app's request headers — the
         // host owns identity/scoping and must not let untrusted app code set
-        // arbitrary headers on an authenticated call. x-workspace-id is set here,
-        // derived from the URL's first segment exactly as the api client does, so
-        // /api/sdk queries scope to the active workspace.
+        // arbitrary headers on an authenticated call.
         const outHeaders: Record<string, string> = {};
         for (const [name, value] of Object.entries(headers ?? {})) {
           if (FORWARDABLE_HEADERS.includes(name.toLowerCase())) outHeaders[name] = value;
-        }
-        const firstSegment = window.location.pathname.replace(/^\//, '').split('/')[0];
-        if (firstSegment && firstSegment !== 'auth' && firstSegment !== 'newWindow') {
-          outHeaders['x-workspace-id'] = firstSegment;
         }
 
         // Storage requests carry appId in their body — the app leaves it blank

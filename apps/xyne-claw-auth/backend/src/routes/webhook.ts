@@ -1265,7 +1265,6 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
             url: `${CONFIG.spacesInternalUrl}/api/attachments/${safeAttachmentId}/download`,
             headers: {
               Authorization: `Bearer ${userSpacesToken}`,
-              ...(userSpacesWorkspaceId ? { "x-workspace-id": userSpacesWorkspaceId } : {}),
               ...(userCookieHeader ? { Cookie: userCookieHeader } : {}),
             },
           });

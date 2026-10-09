@@ -125,13 +125,6 @@ class WebSocketService {
           ...socket.handshake.headers
         };
 
-        // Add auth data from socket.handshake.auth to headers (for dev mode)
-        Object.keys(socket.handshake.auth).forEach(key => {
-          if (key !== 'token') {
-            headers[key.toLowerCase()] = socket.handshake.auth[key];
-          }
-        });
-
         // Parse cookies from socket handshake (cookie-parser not available for socket.io)
         const cookies: Record<string, string> = {};
         const cookieHeader = socket.handshake.headers.cookie;

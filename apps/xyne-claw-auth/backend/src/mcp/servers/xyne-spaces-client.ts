@@ -108,8 +108,8 @@ export async function spacesFetch(path: string, init?: RequestInit, auth?: Space
   //     unconditionally is harmless on other paths.
   //   - `authV2Middleware.ts`:        reads `x-session-id` header or
   //                                   `user_session_id` cookie.
-  // Workspace id (legacy: `xyne_last_workspace` cookie, authV2: `x-workspace-id`
-  // header) is sent through both channels for the same reason.
+  // Workspace id is sent only as the `xyne_last_workspace` cookie; the Bearer
+  // JWT already carries the workspace, so no `x-workspace-id` header is sent.
   const cookieParts: string[] = [];
   if (sessionId) {
     cookieParts.push(`xyne_session=${sessionId}`);
@@ -122,7 +122,6 @@ export async function spacesFetch(path: string, init?: RequestInit, auth?: Space
     Authorization: `Bearer ${token}`,
     "Content-Type": "application/json",
     ...(sessionId ? { "x-session-id": sessionId } : {}),
-    ...(workspaceId ? { "x-workspace-id": workspaceId } : {}),
     ...(auth?.s2sKey ? { "x-s2s-key": auth.s2sKey } : {}),
     ...(cookieHeader ? { Cookie: cookieHeader } : {}),
     ...(init?.headers as Record<string, string> | undefined),
@@ -223,7 +222,6 @@ export async function spacesFetchBuffer(
     headers: {
       Authorization: `Bearer ${token}`,
       ...(sessionId ? { "x-session-id": sessionId } : {}),
-      ...(workspaceId ? { "x-workspace-id": workspaceId } : {}),
       ...(cookieHeader ? { Cookie: cookieHeader } : {}),
     },
     signal: AbortSignal.timeout(30_000),
@@ -259,7 +257,6 @@ export async function spacesFetchText(path: string, auth?: SpacesAuthContext): P
     headers: {
       Authorization: `Bearer ${token}`,
       ...(sessionId ? { "x-session-id": sessionId } : {}),
-      ...(workspaceId ? { "x-workspace-id": workspaceId } : {}),
       ...(cookieHeader ? { Cookie: cookieHeader } : {}),
     },
     signal: AbortSignal.timeout(30_000),
