@@ -378,18 +378,50 @@ export const mapChannel = async (
 export const mapAndUpdatePreviousMessagesMentions = async (
   messageId: string,
   conversationId: string,
+  { onlyIfLastMessage = false }: { onlyIfLastMessage?: boolean } = {},
 ): Promise<{ threadMentions: string[], threadSenders: string[] }> => {
   const { messages, threadMentions, threadSenders } = await getThreadInfo(conversationId);
-
-  const filteredMessages = messages.filter(m => m.messageId !== messageId);
-  logger.info(`[MESSAGE THREAD MENTIONS UPDATE] Updating ${filteredMessages.length} messages for conversationId: ${conversationId}`);
-
 
   const conversation = await db.conversation.findUnique({
     where: { conversationId },
     select: { replyCount: true },
   });
   const replyCount = conversation?.replyCount || 0;
+
+  if (onlyIfLastMessage && messages.length > 0) {
+    const isLater = (a: Message, b: Message) =>
+      a.createdAt > b.createdAt ||
+      (a.createdAt.getTime() === b.createdAt.getTime() && a.messageId > b.messageId);
+    const lastMessage = messages.reduce((last, m) => (isLater(m, last) ? m : last));
+
+    // Not the latest: skip the fan-out unless thread fields changed (e.g. an older message was
+    // edited to add a mention). The last message's stored doc tells us what the thread already has.
+    if (lastMessage.messageId !== messageId) {
+      try {
+        const lastDoc = await vespaClient.crudService.getDocument(lastMessage.messageId, messageSchema);
+        // Last message not indexed yet: its own feed will fan out.
+        if (!lastDoc) return { threadMentions, threadSenders };
+        const sameSet = (a: string[] = [], b: string[] = []) => {
+          const sa = new Set(a);
+          const sb = new Set(b);
+          return sa.size === sb.size && [...sa].every(v => sb.has(v));
+        };
+        const fields = lastDoc.fields || {};
+        if (
+          sameSet(fields.threadMentions, threadMentions) &&
+          sameSet(fields.threadSenders, threadSenders) &&
+          (fields.replyCount ?? 0) === replyCount
+        ) {
+          return { threadMentions, threadSenders };
+        }
+      } catch (error) {
+        logger.warn(`[MESSAGE THREAD MENTIONS UPDATE] Could not read last message ${lastMessage.messageId}, falling back to fan-out: ${error}`);
+      }
+    }
+  }
+
+  const filteredMessages = messages.filter(m => m.messageId !== messageId);
+  logger.info(`[MESSAGE THREAD MENTIONS UPDATE] Updating ${filteredMessages.length} messages for conversationId: ${conversationId}`);
 
   const updates = filteredMessages.map(message => ({
     docId: message.messageId,
@@ -457,7 +489,9 @@ export const mapMessage = async (
 
   const messageLinks = extractLinksFromContent(args.content || '');
 
-  const threadInfo = await mapAndUpdatePreviousMessagesMentions(args.messageId, args.conversationId);
+  const threadInfo = await mapAndUpdatePreviousMessagesMentions(args.messageId, args.conversationId, {
+    onlyIfLastMessage: process.env.VESPA_THREAD_FANOUT_ON_LAST_MESSAGE_ONLY === 'true',
+  });
 
   // Tag names, denormalized onto the doc so search can filter on them. Everything on the
   // thread is indexed as soon as it lands — classifier or person, vocabulary or free-form —
