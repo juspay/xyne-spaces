@@ -48,7 +48,7 @@ import { ChatInput } from './ChatInput';
 import ThreadList from './ThreadList/ThreadList';
 import { useDragAndDropAreaRef } from '../../hooks/useDragAndDropAreaRef';
 import { DragAndDropOverlay } from './DragAndDropOverlay';
-import { ConversationSubscription } from './ConversationSubscription';
+import { ConversationSubscription, TicketUpdatesSubscription } from './ConversationSubscription';
 import { useChannelSubscription } from '../../hooks/useChannelSubscription';
 import { insertDateSeparatorsForThreadMessages } from '../../utils/chatUtils';
 import { htmlToPlainText } from '../../utils/sanitizer';
@@ -276,6 +276,9 @@ export const ThreadMessages = ({
         : conversation?.participants;
     return !!source;
   }, [propConversationParticipant, conversation?.participants]);
+
+  const ownParticipant =
+    conversationDetails.type === 'complete' ? (conversation?.participants ?? null) : undefined;
 
   const ticket = useMemo(() => parseTicketMd(conversation?.ticket_md), [conversation?.ticket_md]);
   const derivedTicketId = ticketId || conversation?.ticketId || '';
@@ -1388,6 +1391,13 @@ export const ThreadMessages = ({
                   />
                 </DropdownMenuItem>
               )}
+              {derivedConversationId && derivedTicketId && (
+                <TicketUpdatesSubscription
+                  conversationId={derivedConversationId}
+                  ticketId={derivedTicketId}
+                  participant={ownParticipant}
+                />
+              )}
               {showThreadTags && !channel?.isArchived && (
                 <DropdownMenuSub>
                   <DropdownMenuSubTrigger
@@ -1617,6 +1627,13 @@ export const ThreadMessages = ({
                         className='px-2 py-1.5'
                       />
                     </DropdownMenuItem>
+                  )}
+                  {derivedConversationId && derivedTicketId && (
+                    <TicketUpdatesSubscription
+                      conversationId={derivedConversationId}
+                      ticketId={derivedTicketId}
+                      participant={ownParticipant}
+                    />
                   )}
                   {!isMobile && (
                     <DropdownMenuItem

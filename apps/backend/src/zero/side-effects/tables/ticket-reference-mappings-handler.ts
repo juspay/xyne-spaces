@@ -4,7 +4,7 @@ import type { SideEffectJobConfig } from '../types';
 import { db } from '@/database/client';
 import { notificationService } from '@/services/notificationService';
 import { logger } from '@/utils/logger';
-import { getFormFieldUserActors } from '@/utils/ticketActorUtils';
+import { excludeTicketOptOuts, getFormFieldUserActors } from '@/utils/ticketActorUtils';
 import { activityService } from '@/services/activity/activityService';
 
 async function fetchTicketActors(ticketId: string): Promise<string[]> {
@@ -68,11 +68,11 @@ async function resolveReferenceMappingContext(
 
   const extraActors = await fetchTicketActors(sourceTicketId);
 
-  const allActorIds = [
+  const allActorIds = await excludeTicketOptOuts(sourceTicketId, [
     ticket.createdBy,
     ticket.assignedTo,
     ...extraActors,
-  ].filter((id, index, arr): id is string => Boolean(id) && arr.indexOf(id) === index);
+  ].filter((id, index, arr): id is string => Boolean(id) && arr.indexOf(id) === index));
 
   const actorId = userId;
   const activityRecipients = allActorIds.filter(id => id !== actorId);

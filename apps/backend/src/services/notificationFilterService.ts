@@ -10,6 +10,22 @@ const DEFAULT_CHANNEL_NOTIFICATION_LEVEL = NotificationLevel.MENTIONS_ONLY;
 // 1:1 DMs always notify unless explicitly muted.
 const DEFAULT_DM_NOTIFICATION_LEVEL: NotificationLevel = NotificationLevel.ALL;
 
+const TICKET_UPDATE_TYPES: ReadonlySet<NotificationType> = new Set([
+  NotificationType.TICKET_STATUS_CHANGE,
+  NotificationType.TICKET_PRIORITY_CHANGED,
+  NotificationType.TICKET_DUE_DATE_CHANGED,
+  NotificationType.TICKET_REASSIGNMENT,
+  NotificationType.TICKET_TITLE_CHANGED,
+  NotificationType.TICKET_DESCRIPTION_CHANGED,
+  NotificationType.TICKET_USER_GROUP_CHANGED,
+  NotificationType.TICKET_RCA_CREATED,
+  NotificationType.TICKET_RCA_UPDATED,
+  NotificationType.TICKET_SUBTICKET_ADDED,
+  NotificationType.TICKET_RELATED_TICKET_ADDED,
+  NotificationType.TICKET_RELATED_TICKET_REMOVED,
+  NotificationType.TICKET_ETA_PLANNING_RISK,
+]);
+
 // ── Targeted notification-decision tracing ────────────────────────
 // Concrete-proof instrumentation for the question "is user X actually eligible
 // for a MOBILE push for this message, or is the filter classifying them
@@ -43,6 +59,7 @@ type ChannelStatusRow = {
   desktopNotificationLevel: NotificationLevel | null;
   mobileNotificationLevel: NotificationLevel | null;
   threadReplyNotificationsEnabled: boolean | null;
+  ticketUpdateNotificationsEnabled: boolean | null;
   channelWideMentionsEnabled: boolean | null;
 };
 
@@ -50,6 +67,7 @@ type UserPreferenceRow = {
   globalDesktopNotificationLevel: NotificationLevel | null;
   globalMobileNotificationLevel: NotificationLevel | null;
   threadReplyNotificationsEnabled: boolean;
+  ticketUpdateNotificationsEnabled: boolean;
   channelWideMentionsEnabled: boolean;
   notificationKeywords?: string[];
 };
@@ -94,6 +112,7 @@ async function prefetchFilterDataInner(
         desktopNotificationLevel: true,
         mobileNotificationLevel: true,
         threadReplyNotificationsEnabled: true,
+        ticketUpdateNotificationsEnabled: true,
         channelWideMentionsEnabled: true,
       },
     }).catch(e => {
@@ -114,6 +133,7 @@ async function prefetchFilterDataInner(
         globalDesktopNotificationLevel: true,
         globalMobileNotificationLevel: true,
         threadReplyNotificationsEnabled: true,
+        ticketUpdateNotificationsEnabled: true,
         channelWideMentionsEnabled: true,
         notificationKeywords: true,
       },
@@ -172,6 +192,7 @@ interface GlobalUserPreferences {
   globalDesktopNotificationLevel: NotificationLevel;
   globalMobileNotificationLevel: NotificationLevel;
   threadReplyNotificationsEnabled: boolean;
+  ticketUpdateNotificationsEnabled: boolean;
   channelWideMentionsEnabled: boolean;
 }
 
@@ -179,6 +200,7 @@ const DEFAULT_GLOBAL_PREFS: GlobalUserPreferences = {
   globalDesktopNotificationLevel: NotificationLevel.MENTIONS_ONLY,
   globalMobileNotificationLevel: NotificationLevel.MENTIONS_ONLY,
   threadReplyNotificationsEnabled: true,
+  ticketUpdateNotificationsEnabled: true,
   channelWideMentionsEnabled: true,
 };
 
@@ -365,6 +387,7 @@ async function filterUsersInner(
           desktopNotificationLevel: true,
           mobileNotificationLevel: true,
           threadReplyNotificationsEnabled: true,
+          ticketUpdateNotificationsEnabled: true,
           channelWideMentionsEnabled: true,
         },
       }).catch(e => {
@@ -385,6 +408,7 @@ async function filterUsersInner(
           globalDesktopNotificationLevel: true,
           globalMobileNotificationLevel: true,
           threadReplyNotificationsEnabled: true,
+          ticketUpdateNotificationsEnabled: true,
           channelWideMentionsEnabled: true,
         },
       }).catch(e => {
@@ -411,6 +435,8 @@ async function filterUsersInner(
         pref?.globalMobileNotificationLevel ?? DEFAULT_GLOBAL_PREFS.globalMobileNotificationLevel,
       threadReplyNotificationsEnabled:
         pref?.threadReplyNotificationsEnabled ?? DEFAULT_GLOBAL_PREFS.threadReplyNotificationsEnabled,
+      ticketUpdateNotificationsEnabled:
+        pref?.ticketUpdateNotificationsEnabled ?? DEFAULT_GLOBAL_PREFS.ticketUpdateNotificationsEnabled,
       channelWideMentionsEnabled:
         pref?.channelWideMentionsEnabled ?? DEFAULT_GLOBAL_PREFS.channelWideMentionsEnabled,
     };
@@ -476,6 +502,19 @@ async function filterUsersInner(
         notificationType: notificationType ?? null, mentionType,
         desktop: false, mobile: false, reason: 'channel_wide_mentions_off',
         channelWideMentionsEnabled: effectiveChannelWideMentions,
+      });
+      continue;
+    }
+
+    const effectiveTicketUpdates =
+      channelStatus?.ticketUpdateNotificationsEnabled ?? globalPrefs.ticketUpdateNotificationsEnabled;
+    if (notificationType && TICKET_UPDATE_TYPES.has(notificationType) && !effectiveTicketUpdates) {
+      emitDecisionTrace(userId, {
+        channelId, context, isDMChannel, isGroupDM,
+        notificationType, mentionType: mentionType ?? null,
+        desktop: false, mobile: false, reason: 'ticket_updates_toggle_off',
+        channelTicketUpdatesEnabled: channelStatus?.ticketUpdateNotificationsEnabled ?? null,
+        globalTicketUpdatesEnabled: globalPrefs.ticketUpdateNotificationsEnabled,
       });
       continue;
     }
@@ -590,6 +629,7 @@ async function filterGlobalUsersInner(
       globalDesktopNotificationLevel: true,
       globalMobileNotificationLevel: true,
       threadReplyNotificationsEnabled: true,
+      ticketUpdateNotificationsEnabled: true,
     },
   }).catch(e => {
     logger.error('[NotificationFilter] Failed to fetch userPreference', { error: e });
@@ -624,6 +664,18 @@ async function filterGlobalUsersInner(
           channelId: null, context, notificationType,
           desktop: false, mobile: false, reason: 'thread_reply_toggle_off',
           globalThreadReplyEnabled: threadReplyEnabled,
+        });
+        continue;
+      }
+    }
+
+    if (TICKET_UPDATE_TYPES.has(notificationType)) {
+      const ticketUpdatesEnabled = pref?.ticketUpdateNotificationsEnabled ?? DEFAULT_GLOBAL_PREFS.ticketUpdateNotificationsEnabled;
+      if (!ticketUpdatesEnabled) {
+        emitDecisionTrace(userId, {
+          channelId: null, context, notificationType,
+          desktop: false, mobile: false, reason: 'ticket_updates_toggle_off',
+          globalTicketUpdatesEnabled: ticketUpdatesEnabled,
         });
         continue;
       }

@@ -2,6 +2,7 @@ import { db } from '@/database/client';
 import { ActivityClassification, PRStatus } from '@xyne/shared';
 import { activityService } from '@/services/activity/activityService';
 import { logger } from '@/utils/logger';
+import { excludeTicketOptOuts } from '@/utils/ticketActorUtils';
 import { BaseSideEffectHandler } from '../base-handler';
 import type {TableSchema } from '../../acl/core/types';
 import type { SideEffectJobConfig } from '../types';
@@ -78,12 +79,12 @@ export class PullRequestActivityHandler extends BaseSideEffectHandler {
       }
 
       // Determine users to notify (creator, assignee, excluding the actor)
-      const usersToNotify = [
+      const usersToNotify = await excludeTicketOptOuts(ticket.id, [
         ticket.createdBy,
         ticket.assignedTo,
       ].filter((userId, index, arr): userId is string =>
         Boolean(userId) && userId !== actorId && arr.indexOf(userId) === index
-      );
+      ));
 
       if (usersToNotify.length === 0) {
         logger.info(`[PullRequestActivityHandler] No users to notify for PR ${pullRequest.prId} status change`);

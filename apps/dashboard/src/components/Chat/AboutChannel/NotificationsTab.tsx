@@ -51,6 +51,7 @@ const NotificationsTab = ({ channel, isParticipant }: NotificationsTabProps): Re
 
   // Per-channel boolean overrides (null = inherit global)
   const storedThreadReply = channelUserStatus?.threadReplyNotificationsEnabled ?? null;
+  const storedTicketUpdates = channelUserStatus?.ticketUpdateNotificationsEnabled ?? null;
   const storedChannelWideMentions = channelUserStatus?.channelWideMentionsEnabled ?? null;
 
   // Toggle state: ON when not explicitly NONE
@@ -75,6 +76,10 @@ const NotificationsTab = ({ channel, isParticipant }: NotificationsTabProps): Re
   // Effective boolean values: channel override ?? global
   const effectiveThreadReply =
     storedThreadReply !== null ? storedThreadReply : globalSettings.threadReplyNotificationsEnabled;
+  const effectiveTicketUpdates =
+    storedTicketUpdates !== null
+      ? storedTicketUpdates
+      : globalSettings.ticketUpdateNotificationsEnabled;
   const effectiveChannelWideMentions =
     storedChannelWideMentions !== null
       ? storedChannelWideMentions
@@ -82,6 +87,7 @@ const NotificationsTab = ({ channel, isParticipant }: NotificationsTabProps): Re
 
   const hasAnyDeliveryEnabled = desktopEnabled || mobileEnabled;
   const displayedThreadReply = hasAnyDeliveryEnabled && effectiveThreadReply;
+  const displayedTicketUpdates = hasAnyDeliveryEnabled && effectiveTicketUpdates;
   const displayedChannelWideMentions = hasAnyDeliveryEnabled && effectiveChannelWideMentions;
 
   const setNotificationLevel = (
@@ -260,6 +266,43 @@ const NotificationsTab = ({ channel, isParticipant }: NotificationsTabProps): Re
                   }}
                   data-track-category='NOTIFICATIONS'
                   data-track-name='toggle_channel_thread_reply'
+                  className={cn(
+                    switchClass,
+                    (!settingsReady || !hasAnyDeliveryEnabled) && 'opacity-40 cursor-not-allowed',
+                  )}
+                >
+                  <Switch.Thumb className={thumbClass} />
+                </Switch.Root>
+              </div>
+
+              {/* Ticket updates */}
+              <div className='flex items-center justify-between'>
+                <div>
+                  <p className='text-xs font-medium text-foreground'>Ticket updates</p>
+                  <div className='flex items-center gap-1 mt-0.5'>
+                    <p className='text-xs text-muted-foreground'>Changes to your tickets</p>
+                    {desktopEnabled !== mobileEnabled && (
+                      <span className='text-xs text-muted-foreground'>
+                        · {desktopEnabled ? 'Desktop only' : 'Mobile only'}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <Switch.Root
+                  id='channel-ticket-updates-toggle'
+                  checked={displayedTicketUpdates}
+                  disabled={!settingsReady || !hasAnyDeliveryEnabled}
+                  onCheckedChange={checked => {
+                    void zero.mutate(
+                      mutators.notificationSettings.setChannelNotificationLevel({
+                        channelId: channel.id,
+                        ticketUpdateNotificationsEnabled: checked,
+                        timestamp: Date.now(),
+                      }),
+                    );
+                  }}
+                  data-track-category='NOTIFICATIONS'
+                  data-track-name='toggle_channel_ticket_updates'
                   className={cn(
                     switchClass,
                     (!settingsReady || !hasAnyDeliveryEnabled) && 'opacity-40 cursor-not-allowed',

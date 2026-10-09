@@ -5,6 +5,7 @@ import { db } from '@/database/client';
 import { activityService } from '@/services/activity/activityService';
 import { syncStageOverdueFlag } from '@/services/tickets/syncStageOverdueFlag';
 import { logger } from '@/utils/logger';
+import { excludeTicketOptOuts } from '@/utils/ticketActorUtils';
 
 export class TicketStageEtaSideEffectHandler extends BaseSideEffectHandler {
   async onInsert(job: SideEffectJobConfig): Promise<void> {
@@ -50,10 +51,10 @@ export class TicketStageEtaSideEffectHandler extends BaseSideEffectHandler {
         return;
       }
       // Notify creator and assignee (exclude actor)
-      const usersToNotify = [ticket.createdBy, ticket.assignedTo]
+      const usersToNotify = await excludeTicketOptOuts(ticket.id, [ticket.createdBy, ticket.assignedTo]
         .filter((userId, index, arr): userId is string =>
           Boolean(userId) && userId !== actorId && arr.indexOf(userId) === index
-        );
+        ));
 
       if (usersToNotify.length === 0) {
         return;
