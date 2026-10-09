@@ -2425,6 +2425,174 @@ interface TicketRow {
 
 // ── spaces-messages ──────────────────────────────────────────────────
 
+interface PollProjectionRow {
+  id: string;
+  messageId: string;
+  createdBy: string;
+  isAnonymous: boolean;
+  resultVisibility: string;
+  closedAt?: string | null;
+}
+
+interface PollQuestionProjectionRow {
+  id: string;
+  pollId: string;
+  question: string;
+  responseType: string;
+  position: number;
+}
+
+interface PollOptionProjectionRow {
+  id: string;
+  questionId: string;
+  text: string;
+  position: number;
+}
+
+interface PollResultProjectionRow {
+  questionId: string;
+  voterCount: number;
+  optionCounts?: Record<string, number>;
+  responseCount?: number;
+  rankTotals?: Record<string, number>;
+  rankResponseCount?: number;
+  ratingTotal?: number;
+}
+
+interface PollVoteProjectionRow {
+  questionId: string;
+  userId: string;
+  optionIds?: string[];
+  textAnswer?: string | null;
+  rankedOptionIds?: string[] | null;
+  rating?: number | null;
+}
+
+function isPollMetadata(metadata: unknown): boolean {
+  let value = metadata;
+  if (typeof value === "string") {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return false;
+    }
+  }
+  return (
+    !!value && typeof value === "object" && (value as { messageSubtype?: unknown }).messageSubtype === "poll"
+  );
+}
+
+async function resolvePollProjections(
+  messages: Array<{ messageId: string; metadata?: unknown }>,
+  requesterId: string,
+): Promise<Map<string, string>> {
+  const messageIds = messages
+    .filter((message) => isPollMetadata(message.metadata))
+    .map((message) => message.messageId);
+  if (messageIds.length === 0) return new Map();
+
+  const polls = (await interact({
+    model: "poll",
+    operation: "findMany",
+    where: { messageId: { in: messageIds } },
+  })) as PollProjectionRow[];
+  if (!polls.length) return new Map();
+  const pollIds = polls.map((poll) => poll.id);
+  const [questions, results, votes] = await Promise.all([
+    interact({
+      model: "pollQuestion",
+      operation: "findMany",
+      where: { pollId: { in: pollIds } },
+      orderBy: [{ position: "asc" }],
+    }) as Promise<PollQuestionProjectionRow[]>,
+    interact({
+      model: "pollQuestionResult",
+      operation: "findMany",
+      where: { pollId: { in: pollIds } },
+    }) as Promise<PollResultProjectionRow[]>,
+    interact({ model: "pollVote", operation: "findMany", where: { pollId: { in: pollIds } } }) as Promise<
+      PollVoteProjectionRow[]
+    >,
+  ]);
+  const questionIds = questions.map((question) => question.id);
+  const options =
+    questionIds.length > 0
+      ? ((await interact({
+          model: "pollOption",
+          operation: "findMany",
+          where: { questionId: { in: questionIds } },
+          orderBy: [{ position: "asc" }],
+        })) as PollOptionProjectionRow[])
+      : [];
+  const voterInfo = await resolveUserInfo(votes.map((vote) => vote.userId));
+  const output = new Map<string, string>();
+
+  for (const poll of polls) {
+    const pollQuestions = questions.filter((question) => question.pollId === poll.id);
+    const visibleResults = results.filter((result) =>
+      pollQuestions.some((question) => question.id === result.questionId),
+    );
+    const resultRowsVisible = visibleResults.length > 0;
+    const lines = [
+      `Poll status: ${poll.closedAt ? "closed" : "open"}`,
+      `Result visibility: ${poll.resultVisibility}`,
+    ];
+    if (!resultRowsVisible) {
+      lines.push("Results: hidden by the poll's visibility policy for this requester.");
+    }
+    for (const question of pollQuestions) {
+      lines.push(`Question: ${question.question} (${question.responseType})`);
+      const result = visibleResults.find((row) => row.questionId === question.id);
+      const questionOptions = options.filter((option) => option.questionId === question.id);
+      if (result) {
+        if (question.responseType === "SINGLE_CHOICE" || question.responseType === "MULTIPLE_CHOICE") {
+          for (const option of questionOptions) {
+            const count = Number(result.optionCounts?.[option.id] ?? 0);
+            const percentage = result.voterCount > 0 ? Math.round((count / result.voterCount) * 100) : 0;
+            lines.push(`- ${option.text}: ${count} vote(s), ${percentage}%`);
+          }
+        } else if (question.responseType === "RATING_1_TO_5") {
+          const count = Number(result.responseCount ?? 0);
+          const average = count > 0 ? Number(result.ratingTotal ?? 0) / count : 0;
+          lines.push(`- ${count} response(s), average ${average.toFixed(1)}/5`);
+        } else if (question.responseType === "RANKING") {
+          const totals = result.rankTotals ?? {};
+          const responseCount = Number(result.rankResponseCount ?? 0);
+          for (const option of [...questionOptions].sort(
+            (a, b) => Number(totals[a.id] ?? 0) - Number(totals[b.id] ?? 0),
+          )) {
+            const averageRank = responseCount > 0 ? Number(totals[option.id] ?? 0) / responseCount : 0;
+            lines.push(`- ${option.text}: average rank ${averageRank > 0 ? averageRank.toFixed(1) : "—"}`);
+          }
+        } else {
+          lines.push(`- ${Number(result.responseCount ?? 0)} response(s)`);
+        }
+      }
+      const visibleVotes = votes.filter((vote) => vote.questionId === question.id);
+      if (visibleVotes.length > 0) {
+        lines.push(
+          ...visibleVotes.map((vote) => {
+            const who =
+              vote.userId === requesterId
+                ? "Your response"
+                : `${formatUserRef(vote.userId, voterInfo)} response`;
+            if (vote.textAnswer) return `- ${who}: ${cleanSnippet(vote.textAnswer)}`;
+            if (vote.rating) return `- ${who}: ${vote.rating}/5`;
+            const selected = (vote.rankedOptionIds ?? vote.optionIds ?? [])
+              .map((id) => questionOptions.find((option) => option.id === id)?.text ?? id)
+              .join(", ");
+            return `- ${who}: ${selected}`;
+          }),
+        );
+      } else if (poll.isAnonymous) {
+        lines.push("Voter identities: anonymous.");
+      }
+    }
+    output.set(poll.messageId, lines.join("\n"));
+  }
+  return output;
+}
+
 const spacesMessages: ToolDef = {
   name: "spaces-messages",
   description:
@@ -2462,94 +2630,96 @@ const spacesMessages: ToolDef = {
     },
     required: ["conversationId"],
   },
-  handler: withToolErrors("Messages error", async (args) => {
-      const conversationId = String(args["conversationId"]);
-      const sortDir: "asc" | "desc" = args["sortOrder"] === "desc" ? "desc" : "asc";
-      const msgTypes = Array.isArray(args["msgType"])
-        ? (args["msgType"] as unknown[]).map((v) => String(v)).filter(Boolean)
-        : [];
-      const rows = (await interact({
-        model: "message",
-        operation: "findMany",
-        where: {
-          conversationId: { equals: conversationId },
-          isDeleted: { equals: false },
-          ...(args["hasAttachment"] === true ? { hasAttachment: { equals: true } } : {}),
-          ...(msgTypes.length > 0 ? { msgType: { in: msgTypes } } : {}),
-        },
-        orderBy: [{ createdAt: sortDir }],
-        take: (args["limit"] as number | undefined) ?? 100,
-        skip: (args["offset"] as number | undefined) ?? 0,
-      })) as MessageRow[];
+  handler: withToolErrors("Messages error", async (args, ctx) => {
+    const conversationId = String(args["conversationId"]);
+    const sortDir: "asc" | "desc" = args["sortOrder"] === "desc" ? "desc" : "asc";
+    const msgTypes = Array.isArray(args["msgType"])
+      ? (args["msgType"] as unknown[]).map((v) => String(v)).filter(Boolean)
+      : [];
+    const rows = (await interact({
+      model: "message",
+      operation: "findMany",
+      where: {
+        conversationId: { equals: conversationId },
+        isDeleted: { equals: false },
+        ...(args["hasAttachment"] === true ? { hasAttachment: { equals: true } } : {}),
+        ...(msgTypes.length > 0 ? { msgType: { in: msgTypes } } : {}),
+      },
+      orderBy: [{ createdAt: sortDir }],
+      take: (args["limit"] as number | undefined) ?? 100,
+      skip: (args["offset"] as number | undefined) ?? 0,
+    })) as MessageRow[];
 
-      if (!rows || rows.length === 0) return ok(`No messages found in conversation ${conversationId}.`);
+    if (!rows || rows.length === 0) return ok(`No messages found in conversation ${conversationId}.`);
 
-      // Resolve, in three cheap batched lookups (the gateway strips `include`,
-      // so relations never ride back on the message rows): the conversation's
-      // channelId + reply count, every sender's name/email, and the channel
-      // display name. This makes a thread read human-readable ("Name <email>:
-      // …") with a "#channel · N replies" header — no follow-up tool calls.
-      const convMeta = await resolveConversationMeta(conversationId);
-      const channelId = convMeta?.channelId;
-      // One user lookup covers every SENDER and every REACTOR across the thread,
-      // so reactions can show who reacted (not just counts).
-      const userIds = new Set<string>();
-      for (const m of rows) {
-        if (m.senderId) userIds.add(m.senderId);
-        for (const g of parseReactions(m.reactions_md)) for (const uid of g.userIds) userIds.add(uid);
-      }
-      const userInfo = await resolveUserInfo(userIds);
-      const channelInfo = await resolveChannelInfo(channelId ? [channelId] : []);
-      const channelName = channelId ? channelInfo.get(channelId)?.name : undefined;
+    // Resolve, in three cheap batched lookups (the gateway strips `include`,
+    // so relations never ride back on the message rows): the conversation's
+    // channelId + reply count, every sender's name/email, and the channel
+    // display name. This makes a thread read human-readable ("Name <email>:
+    // …") with a "#channel · N replies" header — no follow-up tool calls.
+    const convMeta = await resolveConversationMeta(conversationId);
+    const channelId = convMeta?.channelId;
+    // One user lookup covers every SENDER and every REACTOR across the thread,
+    // so reactions can show who reacted (not just counts).
+    const userIds = new Set<string>();
+    for (const m of rows) {
+      if (m.senderId) userIds.add(m.senderId);
+      for (const g of parseReactions(m.reactions_md)) for (const uid of g.userIds) userIds.add(uid);
+    }
+    const userInfo = await resolveUserInfo(userIds);
+    const channelInfo = await resolveChannelInfo(channelId ? [channelId] : []);
+    const channelName = channelId ? channelInfo.get(channelId)?.name : undefined;
+    const pollProjections = await resolvePollProjections(rows, ctx.userId);
 
-      const lines = rows.map((m) => {
-        const time = toIST(m.createdAt);
-        const attach = m.hasAttachment ? " [attachment]" : "";
-        const edited = m.edited ? " (edited)" : "";
-        const reactions = formatReactions(m.reactions_md, userInfo);
-        const react = reactions ? ` {${reactions}}` : "";
-        // Message bodies are stored as rich-text HTML — strip to markdown-ish
-        // plain text so the model doesn't wade through <p class=…>/<h2>/<li> noise.
-        return `[${time}] ${formatUserRef(m.senderId, userInfo)}${attach}${edited}${react}: ${cleanSnippet(m.content)}`;
-      });
+    const lines = rows.map((m) => {
+      const time = toIST(m.createdAt);
+      const attach = m.hasAttachment ? " [attachment]" : "";
+      const edited = m.edited ? " (edited)" : "";
+      const reactions = formatReactions(m.reactions_md, userInfo);
+      const react = reactions ? ` {${reactions}}` : "";
+      // Message bodies are stored as rich-text HTML — strip to markdown-ish
+      // plain text so the model doesn't wade through <p class=…>/<h2>/<li> noise.
+      const poll = pollProjections.get(m.messageId);
+      return `[${time}] ${formatUserRef(m.senderId, userInfo)}${attach}${edited}${react}: ${cleanSnippet(m.content)}${poll ? `\n${poll}` : ""}`;
+    });
 
-      const context: string[] = [];
-      if (channelName) context.push(`#${channelName}`);
-      if (channelId) context.push(`channelId: ${channelId}`);
-      context.push(`conversationId: ${conversationId}`);
-      if (typeof convMeta?.replyCount === "number") {
-        context.push(`${convMeta.replyCount} repl${convMeta.replyCount === 1 ? "y" : "ies"}`);
-      }
-      const header = `${context.join(" · ")}\n\n`;
+    const context: string[] = [];
+    if (channelName) context.push(`#${channelName}`);
+    if (channelId) context.push(`channelId: ${channelId}`);
+    context.push(`conversationId: ${conversationId}`);
+    if (typeof convMeta?.replyCount === "number") {
+      context.push(`${convMeta.replyCount} repl${convMeta.replyCount === 1 ? "y" : "ies"}`);
+    }
+    const header = `${context.join(" · ")}\n\n`;
 
-      // Emit one Citation per rendered message chunk so the frontend can
-      // resolve each `[clf-…#N]` token back to its own thread URL. Each
-      // citation carries its row's messageId so the FE appends
-      // `&messageId=<id>` to the hash — the thread panel scrolls to the
-      // specific reply instead of the top of the conversation. Critical for
-      // long threads where the cited message could be 50+ scrolls down.
-      const citations: Citation[] = [];
-      rows.forEach((m, idx) => {
-        pushThreadCitation(
-          citations,
-          channelId,
-          conversationId,
-          idx + 1,
-          channelName ? `Thread in #${channelName}` : "Spaces thread",
-          m.messageId ? { messageId: m.messageId } : undefined,
-        );
-      });
-      applyChannelInfo(citations, channelInfo);
-
-      return okCited(
-        `${rows.length} message(s):\n\n${header}${lines
-          .map((line, idx) => prefixChunk(idx + 1, line, []))
-          .join(
-            "\n",
-          )}${paginationFooter({ returned: rows.length, limit: Number(args["limit"] ?? 100), offset: Number(args["offset"] ?? 0) })}`,
+    // Emit one Citation per rendered message chunk so the frontend can
+    // resolve each `[clf-…#N]` token back to its own thread URL. Each
+    // citation carries its row's messageId so the FE appends
+    // `&messageId=<id>` to the hash — the thread panel scrolls to the
+    // specific reply instead of the top of the conversation. Critical for
+    // long threads where the cited message could be 50+ scrolls down.
+    const citations: Citation[] = [];
+    rows.forEach((m, idx) => {
+      pushThreadCitation(
         citations,
+        channelId,
+        conversationId,
+        idx + 1,
+        channelName ? `Thread in #${channelName}` : "Spaces thread",
+        m.messageId ? { messageId: m.messageId } : undefined,
       );
-    }),
+    });
+    applyChannelInfo(citations, channelInfo);
+
+    return okCited(
+      `${rows.length} message(s):\n\n${header}${lines
+        .map((line, idx) => prefixChunk(idx + 1, line, []))
+        .join(
+          "\n",
+        )}${paginationFooter({ returned: rows.length, limit: Number(args["limit"] ?? 100), offset: Number(args["offset"] ?? 0) })}`,
+      citations,
+    );
+  }),
 };
 
 interface MessageRow {
@@ -2564,6 +2734,7 @@ interface MessageRow {
   conversationId?: string;
   /** The Prisma scalar — gateway returns this, but NOT the joined `sender.name`. */
   senderId?: string;
+  metadata?: unknown;
 }
 
 // ── spaces-message-detail ────────────────────────────────────────────
@@ -2578,66 +2749,72 @@ const spacesMessageDetail: ToolDef = {
   inputSchema: {
     type: "object",
     properties: {
-      messageId: { type: "string", description: "Exact messageId — from prior tool results, or the #messageId=<id> parameter in a pasted Spaces URL." },
+      messageId: {
+        type: "string",
+        description:
+          "Exact messageId — from prior tool results, or the #messageId=<id> parameter in a pasted Spaces URL.",
+      },
     },
     required: ["messageId"],
   },
-  handler: withToolErrors("Message detail error", async (args) => {
-      const messageId = String(args["messageId"]);
-      const rows = (await interact({
-        model: "message",
-        operation: "findMany",
-        where: { messageId: { equals: messageId } },
-        take: 1,
-      })) as MessageDetailRow[];
+  handler: withToolErrors("Message detail error", async (args, ctx) => {
+    const messageId = String(args["messageId"]);
+    const rows = (await interact({
+      model: "message",
+      operation: "findMany",
+      where: { messageId: { equals: messageId } },
+      take: 1,
+    })) as MessageDetailRow[];
 
-      if (!rows || rows.length === 0) return ok(`Message ${messageId} not found.`);
-      const m = rows[0]!;
-      // Gateway strips `include`, so resolve the conversation (channelId + reply
-      // count), the sender's name/email, the channel name, and reactions in
-      // batched scalar lookups — a human-readable detail view with no follow-ups.
-      const convMeta = await resolveConversationMeta(m.conversationId);
-      const channelId = convMeta?.channelId;
-      // Resolve the sender AND every reactor so "Reactions" shows who reacted.
-      const reactorIds = parseReactions(m.reactions_md).flatMap((g) => g.userIds);
-      const userInfo = await resolveUserInfo([...(m.senderId ? [m.senderId] : []), ...reactorIds]);
-      const channelInfo = await resolveChannelInfo(channelId ? [channelId] : []);
-      const channelName = channelId ? channelInfo.get(channelId)?.name : undefined;
-      const reactions = formatReactions(m.reactions_md, userInfo);
+    if (!rows || rows.length === 0) return ok(`Message ${messageId} not found.`);
+    const m = rows[0]!;
+    // Gateway strips `include`, so resolve the conversation (channelId + reply
+    // count), the sender's name/email, the channel name, and reactions in
+    // batched scalar lookups — a human-readable detail view with no follow-ups.
+    const convMeta = await resolveConversationMeta(m.conversationId);
+    const channelId = convMeta?.channelId;
+    // Resolve the sender AND every reactor so "Reactions" shows who reacted.
+    const reactorIds = parseReactions(m.reactions_md).flatMap((g) => g.userIds);
+    const userInfo = await resolveUserInfo([...(m.senderId ? [m.senderId] : []), ...reactorIds]);
+    const channelInfo = await resolveChannelInfo(channelId ? [channelId] : []);
+    const channelName = channelId ? channelInfo.get(channelId)?.name : undefined;
+    const reactions = formatReactions(m.reactions_md, userInfo);
+    const pollProjection = (await resolvePollProjections([m], ctx.userId)).get(m.messageId);
 
-      const parts = [
-        `Message: ${m.messageId}`,
-        `From: ${formatUserRef(m.senderId, userInfo)}`,
-        `Type: ${m.msgType}${m.edited ? " (edited)" : ""}`,
-        `Date: ${toIST(m.createdAt)}`,
-        ...(channelName ? [`Channel: #${channelName}`] : []),
-        ...(channelId ? [`channelId: ${channelId}`] : []),
-        ...(m.conversationId ? [`conversationId: ${m.conversationId}`] : []),
-        ...(typeof convMeta?.replyCount === "number" ? [`Thread replies: ${convMeta.replyCount}`] : []),
-        ...(reactions ? [`Reactions: ${reactions}`] : []),
-        // Message body is rich-text HTML — clean to markdown-ish plain text.
-        `\n${cleanSnippet(m.content)}`,
-      ];
+    const parts = [
+      `Message: ${m.messageId}`,
+      `From: ${formatUserRef(m.senderId, userInfo)}`,
+      `Type: ${m.msgType}${m.edited ? " (edited)" : ""}`,
+      `Date: ${toIST(m.createdAt)}`,
+      ...(channelName ? [`Channel: #${channelName}`] : []),
+      ...(channelId ? [`channelId: ${channelId}`] : []),
+      ...(m.conversationId ? [`conversationId: ${m.conversationId}`] : []),
+      ...(typeof convMeta?.replyCount === "number" ? [`Thread replies: ${convMeta.replyCount}`] : []),
+      ...(reactions ? [`Reactions: ${reactions}`] : []),
+      // Message body is rich-text HTML — clean to markdown-ish plain text.
+      `\n${cleanSnippet(m.content)}`,
+      ...(pollProjection ? [`\n${pollProjection}`] : []),
+    ];
 
-      if (m.hasAttachment) {
-        parts.push("\n[Has attachments]");
-      }
+    if (m.hasAttachment) {
+      parts.push("\n[Has attachments]");
+    }
 
-      const citations: Citation[] = [];
-      // `messageId` deep-links the citation chip into the specific message
-      // inside the thread instead of dropping the user at the thread start.
-      pushThreadCitation(
-        citations,
-        channelId,
-        m.conversationId,
-        1,
-        channelName ? `Message in #${channelName}` : `Message ${m.messageId}`,
-        { messageId: m.messageId },
-      );
-      applyChannelInfo(citations, channelInfo);
+    const citations: Citation[] = [];
+    // `messageId` deep-links the citation chip into the specific message
+    // inside the thread instead of dropping the user at the thread start.
+    pushThreadCitation(
+      citations,
+      channelId,
+      m.conversationId,
+      1,
+      channelName ? `Message in #${channelName}` : `Message ${m.messageId}`,
+      { messageId: m.messageId },
+    );
+    applyChannelInfo(citations, channelInfo);
 
-      return okCited(prefixChunk(1, parts[0]!, parts.slice(1)), citations);
-    }),
+    return okCited(prefixChunk(1, parts[0]!, parts.slice(1)), citations);
+  }),
 };
 
 interface MessageDetailRow {
@@ -2651,6 +2828,7 @@ interface MessageDetailRow {
   reactions_md?: string;
   conversationId?: string;
   senderId?: string;
+  metadata?: unknown;
 }
 
 // ── spaces-channels ──────────────────────────────────────────────────
@@ -5860,11 +6038,11 @@ const spacesEmails: ToolDef = {
         parts.push(`  Date: ${toIST(e.createdAt)}`);
         const body = e.body
           ? stripGmailQuote(e.body)
-              
+
               .replace(/<[^>]+>/g, " ")
-              
+
               .replace(/\s+/g, " ")
-              
+
               .trim()
           : "(no body)";
         parts.push(`  Body: ${body}`);
@@ -6032,19 +6210,22 @@ async function ingestAttachmentToMarkdown(
       ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
     },
     body: JSON.stringify({
-      attachments: [{
-        fileName,
-        mimeType,
-        ...source,
-        size,
-      }],
+      attachments: [
+        {
+          fileName,
+          mimeType,
+          ...source,
+          size,
+        },
+      ],
     }),
     signal: AbortSignal.timeout(ATTACHMENT_INGEST_TIMEOUT_MS),
   });
 
-  const data = (await response
-    .json()
-    .catch(() => ({ success: false, error: "invalid JSON from attachment ingest service" }))) as AttachmentIngestResponse;
+  const data = (await response.json().catch(() => ({
+    success: false,
+    error: "invalid JSON from attachment ingest service",
+  }))) as AttachmentIngestResponse;
   if (!response.ok || data.success !== true) {
     throw new Error(data.error ?? `attachment ingest service returned HTTP ${response.status}`);
   }

@@ -1044,6 +1044,46 @@ const applyArchiveFilter = <T extends { where: Function }>(
 
 
 export const queries = defineQueries({
+  pollByMessageId: defineQuery(
+    // channelId is intentionally consumed by defineQuery's ACL wrapper rather
+    // than this query body. PollsACL scopes poll -> message -> conversation -> channel.
+    z.object({ messageId: z.string(), channelId: z.string().optional() }),
+    ({ args: { messageId } }) =>
+      zql.polls
+        .where("messageId", "=", messageId)
+        .whereExists("message", (message) => message.where("isDeleted", false))
+        .related("questions", (question) =>
+          question
+            .orderBy("position", "asc")
+            .related("options", (option) =>
+              option.orderBy("position", "asc").orderBy("createdAt", "asc"),
+            ),
+        )
+        .one(),
+  ),
+  pollQuestionResultsByPollId: defineQuery(
+    z.object({ pollId: z.string(), channelId: z.string().optional() }),
+    ({ args: { pollId } }) =>
+      zql.poll_question_results.where("pollId", "=", pollId),
+  ),
+  myPollVotesByPollId: defineQuery(
+    z.object({ pollId: z.string(), channelId: z.string().optional() }),
+    ({ ctx, args: { pollId } }) =>
+      zql.poll_votes
+        .where("pollId", "=", pollId)
+        .where("userId", "=", ctx.userID),
+  ),
+  pollVoterDetails: defineQuery(
+    // channelId is consumed by the ACL wrapper. The creator/anonymous check is
+    // duplicated here so the query itself documents and enforces its contract.
+    z.object({ pollId: z.string(), channelId: z.string().optional() }),
+    ({ ctx, args: { pollId } }) =>
+      zql.poll_votes
+        .where('pollId', '=', pollId)
+        .whereExists('poll', poll =>
+          poll.where('createdBy', '=', ctx.userID).where('isAnonymous', false),
+        ),
+  ),
   activeSlashCommandArtifacts: defineQuery(({ ctx }) =>
     zql.message_artifacts
       .where('workspaceId', ctx.workspaceId)
@@ -2665,7 +2705,7 @@ export const queries = defineQueries({
       return query.limit(limit);
     },
   ),
- 
+
   searchChannelParticipants: defineQuery(
     z.object({ channelId: z.string(), searchQuery: z.string() }),
     ({ args: { channelId, searchQuery } }) => {
@@ -2797,7 +2837,7 @@ export const queries = defineQueries({
     return zql.user_profiles.where('userId', userId).one();
   }),
 
-  
+
   userActiveCalls: defineQuery(() => {
     return zql.calls
       .where(helpers => helpers.cmp('callType', 'NOT IN', [CallType.HEADLESS]))
@@ -3418,7 +3458,7 @@ export const queries = defineQueries({
         .orderBy('name', 'asc');
     },
   ),
-  
+
   projectFolderCanvases: defineQuery(
     z.object({
       folderId: z.string(),

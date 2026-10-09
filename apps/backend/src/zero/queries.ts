@@ -1080,6 +1080,43 @@ const applyArchiveFilter = <T extends { where: Function }>(
 };
 
 export const queries: AnyQueryRegistry = defineQueries({
+  pollByMessageId: defineQuery(
+    // channelId is intentionally consumed by defineQuery's ACL wrapper rather
+    // than this query body. PollsACL scopes poll -> message -> conversation -> channel.
+    z.object({ messageId: z.string(), channelId: z.string().optional() }),
+    ({ args: { messageId } }) =>
+      zql.polls
+        .where('messageId', '=', messageId)
+        .whereExists('message', (message) => message.where('isDeleted', false))
+        .related('questions', (question) =>
+          question
+            .orderBy('position', 'asc')
+            .related('options', (option) =>
+              option.orderBy('position', 'asc').orderBy('createdAt', 'asc')
+            )
+        )
+        .one()
+  ),
+  pollQuestionResultsByPollId: defineQuery(
+    z.object({ pollId: z.string(), channelId: z.string().optional() }),
+    ({ args: { pollId } }) => zql.poll_question_results.where('pollId', '=', pollId)
+  ),
+  myPollVotesByPollId: defineQuery(
+    z.object({ pollId: z.string(), channelId: z.string().optional() }),
+    ({ ctx, args: { pollId } }) =>
+      zql.poll_votes.where('pollId', '=', pollId).where('userId', '=', ctx.userID)
+  ),
+  pollVoterDetails: defineQuery(
+    // channelId is consumed by the ACL wrapper. The creator/anonymous check is
+    // duplicated here so the query itself documents and enforces its contract.
+    z.object({ pollId: z.string(), channelId: z.string().optional() }),
+    ({ ctx, args: { pollId } }) =>
+      zql.poll_votes
+        .where('pollId', '=', pollId)
+        .whereExists('poll', poll =>
+          poll.where('createdBy', '=', ctx.userID).where('isAnonymous', false),
+        ),
+  ),
   activeSlashCommandArtifacts: defineQuery(({ ctx }) =>
     zql.message_artifacts
       .where('workspaceId', ctx.workspaceId)
@@ -3247,7 +3284,7 @@ export const queries: AnyQueryRegistry = defineQueries({
       return query.limit(limit);
     }
   ),
-  
+
   searchUserGroups: defineQuery(
     z.object({ query: z.string(), limit: z.number().nullable() }),
     ({ args: { query, limit } }) => {
@@ -4043,7 +4080,7 @@ export const queries: AnyQueryRegistry = defineQueries({
       .where('createdBy', ctx.userID)
       .orderBy('name', 'asc');
   }),
-  
+
   hierarchyCanvases: defineQuery(
     z.object({
       scope: z.enum(['channel', 'channel_root', 'folder', 'personal_root']).optional(),
@@ -4239,7 +4276,7 @@ export const queries: AnyQueryRegistry = defineQueries({
       );
     }
   ),
-  
+
   channelCanvasesPaginated: defineQuery(
     z.object({
       channelId: z.string(),

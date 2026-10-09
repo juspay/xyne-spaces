@@ -294,7 +294,11 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   // Matches Slack, where a channel-level ephemeral message has no thread
   // affordance at all.
   const replies = ((): typeof repliesProp => {
-    if (!repliesProp || metadata?.['__xyneEphemeral'] !== true) return repliesProp;
+    const commentsDisabled =
+      metadata?.['messageSubtype'] === 'poll' && metadata?.['pollAllowComments'] === false;
+    if (!repliesProp || (metadata?.['__xyneEphemeral'] !== true && !commentsDisabled)) {
+      return repliesProp;
+    }
     const withoutThread = { ...repliesProp };
     delete withoutThread.onOpenThread;
     return withoutThread;
@@ -860,7 +864,10 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   // The slash command artifact wrapper is the persisted rendering contract. Keep deletion available,
   // but do not open this message in the generic editor, which would discard that wrapper.
   const canEditMessage =
-    canModifyMessage && !isSlashCommandArtifactMessage(message.content) && !isSharedEntityMessage;
+    canModifyMessage &&
+    metadata?.['messageSubtype'] !== 'poll' &&
+    !isSlashCommandArtifactMessage(message.content) &&
+    !isSharedEntityMessage;
   const canDeleteMessage = canModifyMessage && !hasTicket && !isSharedEntityMessage;
 
   // Check if message has meaningful text content (not just attachments).

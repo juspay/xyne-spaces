@@ -11,6 +11,10 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("./xyne-spaces-client.js", () => mocks);
+vi.mock("../../lib/spaces-db.js", () => ({
+  getWorkspaceIdForUser: vi.fn(),
+  spacesDbAvailable: vi.fn(() => false),
+}));
 
 process.env["ENCRYPTION_KEY"] ||= "00".repeat(32);
 process.env["XYNE_CLAW_URL"] = "http://claw.local";
@@ -20,6 +24,13 @@ async function fetchAttachmentTool() {
   const mod = await import("./xyne-spaces-tools.js");
   const tool = mod.tools.find((t) => t.name === "spaces-fetch-attachment");
   if (!tool) throw new Error("spaces-fetch-attachment tool not found");
+  return tool;
+}
+
+async function messagesTool() {
+  const mod = await import("./xyne-spaces-tools.js");
+  const tool = mod.tools.find((t) => t.name === "spaces-messages");
+  if (!tool) throw new Error("spaces-messages tool not found");
   return tool;
 }
 
@@ -198,5 +209,118 @@ describe("spaces-fetch-attachment", () => {
     expect(text).toContain("text/PDF/DOCX/XLSX/PPTX/HTML/ZIP");
     expect(mocks.spacesFetchBuffer).not.toHaveBeenCalled();
     expect(global.fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("spaces-messages poll projection", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("reports hidden results without leaking aggregate values", async () => {
+    mocks.interact
+      .mockResolvedValueOnce([
+        {
+          messageId: "message-1",
+          conversationId: "conversation-1",
+          senderId: "creator-1",
+          content: "Poll: Secret?",
+          createdAt: "2026-10-08T10:00:00.000Z",
+          isDeleted: false,
+          metadata: { messageSubtype: "poll" },
+        },
+      ])
+      .mockResolvedValueOnce([{ channelId: "channel-1", replyCount: 0 }])
+      .mockResolvedValueOnce([{ id: "creator-1", name: "Creator" }])
+      .mockResolvedValueOnce([{ id: "channel-1", name: "general" }])
+      .mockResolvedValueOnce([
+        {
+          id: "poll-1",
+          messageId: "message-1",
+          createdBy: "creator-1",
+          isAnonymous: false,
+          resultVisibility: "CREATOR_ONLY",
+          closedAt: null,
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: "question-1",
+          pollId: "poll-1",
+          question: "Secret?",
+          responseType: "SINGLE_CHOICE",
+          position: 0,
+        },
+      ])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { id: "yes", questionId: "question-1", text: "Yes", position: 0 },
+        { id: "no", questionId: "question-1", text: "No", position: 1 },
+      ]);
+
+    const result = await (
+      await messagesTool()
+    ).handler({ conversationId: "conversation-1" }, { userId: "viewer-1", authMode: "user" });
+    const text = result.content[0]?.text ?? "";
+
+    expect(text).toContain("Results: hidden by the poll's visibility policy");
+    expect(text).not.toContain("vote(s)");
+    expect(text).not.toContain("100%");
+  });
+
+  it("shows only ACL-returned aggregate results", async () => {
+    mocks.interact
+      .mockResolvedValueOnce([
+        {
+          messageId: "message-1",
+          conversationId: "conversation-1",
+          senderId: "creator-1",
+          content: "Poll: Lunch?",
+          createdAt: "2026-10-08T10:00:00.000Z",
+          isDeleted: false,
+          metadata: { messageSubtype: "poll" },
+        },
+      ])
+      .mockResolvedValueOnce([{ channelId: "channel-1", replyCount: 0 }])
+      .mockResolvedValueOnce([{ id: "creator-1", name: "Creator" }])
+      .mockResolvedValueOnce([{ id: "channel-1", name: "general" }])
+      .mockResolvedValueOnce([
+        {
+          id: "poll-1",
+          messageId: "message-1",
+          createdBy: "creator-1",
+          isAnonymous: false,
+          resultVisibility: "EVERYONE",
+          closedAt: null,
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: "question-1",
+          pollId: "poll-1",
+          question: "Lunch?",
+          responseType: "SINGLE_CHOICE",
+          position: 0,
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          questionId: "question-1",
+          voterCount: 2,
+          optionCounts: { yes: 1, no: 1 },
+        },
+      ])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { id: "yes", questionId: "question-1", text: "Yes", position: 0 },
+        { id: "no", questionId: "question-1", text: "No", position: 1 },
+      ]);
+
+    const result = await (
+      await messagesTool()
+    ).handler({ conversationId: "conversation-1" }, { userId: "viewer-1", authMode: "user" });
+    const text = result.content[0]?.text ?? "";
+
+    expect(text).toContain("Yes: 1 vote(s), 50%");
+    expect(text).toContain("No: 1 vote(s), 50%");
   });
 });

@@ -29,7 +29,6 @@ import { TicketReferenceMappingsSideEffectHandler } from './tables/ticket-refere
 import { TicketStageRequestsSideEffectHandler } from './tables/ticket-stage-requests-handler';
 
 export class SideEffectHandlerFactory {
-
   static getHandler(table: TableName, ctx: QueryContext): BaseSideEffectHandler {
     switch (table) {
       case 'messages':
@@ -67,7 +66,6 @@ export class SideEffectHandlerFactory {
         return new CanvasSideEffectHandler(ctx);
       case 'delayed_messages':
         return new DelayedMessagesSideEffectHandler(ctx);
-
       case 'ticket_tags':
         return new TicketTagsSideEffectHandler(ctx);
       case 'ticket_tag_mappings':
