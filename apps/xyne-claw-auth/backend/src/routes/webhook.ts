@@ -242,27 +242,32 @@ async function scheduleCapacityRetryIfNeeded(
 }
 
 
-// Per-process dedup for the one-shot sandbox preview announce. Claw also
-// guards against re-emit on its side; this Set is the second layer in case
-// run-recovery re-delivers the same payload. Bounded (FIFO) so it can't grow
-// unbounded over the process lifetime — every announced sessionId used to be
-// retained forever.
 /**
  * True when the agent opted out of the "Live preview" thread message via
- * `agent.config.hideLivePreview`. Read once per run (the announce is one-shot),
- * fail-open: any lookup error keeps the default behaviour of posting it.
+ * `agent.config.hideLivePreview`. Called once per run (the announce is one-shot).
+ * Fail-open: a lookup error keeps the default behaviour of posting it, but is
+ * logged so an opted-out agent that starts posting again can be explained.
  */
-async function isLivePreviewMessageHidden(agentId: string | undefined): Promise<boolean> {
+async function isLivePreviewMessageHidden(
+  agentId: string | undefined,
+  log: { warn: (msg: string, meta?: Record<string, unknown>) => void },
+): Promise<boolean> {
   if (!agentId) return false;
   try {
     const agent = await prisma.agent.findUnique({ where: { id: agentId }, select: { config: true } });
     const config = agent?.config as { hideLivePreview?: unknown } | null | undefined;
     return config?.hideLivePreview === true;
-  } catch {
+  } catch (err) {
+    log.warn("hideLivePreview lookup failed; posting live preview message", { agentId, error: errMsg(err) });
     return false;
   }
 }
 
+// Per-process dedup for the one-shot sandbox preview announce. Claw also
+// guards against re-emit on its side; this Set is the second layer in case
+// run-recovery re-delivers the same payload. Bounded (FIFO) so it can't grow
+// unbounded over the process lifetime — every announced sessionId used to be
+// retained forever.
 const announcedSandboxPreviews = new Set<string>();
 const ANNOUNCED_PREVIEWS_MAX = 5000;
 function rememberAnnouncedPreview(sessionId: string): void {
@@ -6481,7 +6486,7 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
     // Per-agent opt-out (agent.config.hideLivePreview). Only the thread message is
     // suppressed — the ownership row above is still written, because the sandbox
     // router's access check (and the Workspace pane) depend on it.
-    if (await isLivePreviewMessageHidden(ctx.agentId)) {
+    if (await isLivePreviewMessageHidden(ctx.agentId, log)) {
       log.info(`Sandbox preview message suppressed by agent config (sandboxId=${sandboxId})`);
       return;
     }
