@@ -24,9 +24,11 @@
 * verifying user is redirected to "/onboarding"
 * typing "Test Onboarding User" in "input[placeholder='Enter your full name']"
 * typing "QA Engineer" in "input[placeholder='Ex: Product Manager']"
+* waiting for "2" seconds
 * clicking button with text "Next"
 * typing "Xyne Test Co" in "input[placeholder='Ex: Nike']"
 * clicking on "[role='radiogroup'] button[role='radio']"
+* waiting for "2" seconds
 * clicking button with text "Next"
 * clicking button with text "Enter Workspace"
 * verifying user is redirected to "/chat/dir/*"

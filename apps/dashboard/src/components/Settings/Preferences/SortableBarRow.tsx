@@ -73,6 +73,7 @@ export const SortableBarRow = ({
           type='button'
           onClick={onRemove}
           aria-label={`Remove ${label}`}
+          data-testid={`customize-remove-${label.toLowerCase().replace(/\s+/g, '-')}`}
           className='flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
           data-track-category={trackCategory}
           data-track-name='RemoveBarItem'

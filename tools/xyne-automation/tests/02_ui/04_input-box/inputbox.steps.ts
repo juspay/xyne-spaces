@@ -614,7 +614,25 @@ export default class InputBoxSteps {
   @Step('typing <text> in link url input')
   public async typingTextInLinkUrlInput(text: string): Promise<void> {
     const page = testContext.activePage;
-    await page.locator('input[type="url"][placeholder*="example.com"]').first().fill(text);
+    const input = page.locator('input[type="url"][placeholder*="example.com"]').first();
+    await input.waitFor({ state: 'visible' });
+    // React controlled inputs ignore the plain `.value = x` assignment that
+    // some driver paths take; use the native setter + dispatch the React-shaped
+    // input event so useState picks up the new value. This is the reliable way
+    // to replace an existing value in dialogs whose Apply button reads the
+    // state at click time (LinkDialog's update flow).
+    await input.evaluate((el, newText) => {
+      const nativeSetter = Object.getOwnPropertyDescriptor(
+        Object.getPrototypeOf(el as unknown as { value: string }) as object,
+        'value'
+      )?.set;
+      nativeSetter?.call(el, newText);
+      (el as unknown as { dispatchEvent: (e: unknown) => boolean }).dispatchEvent(
+        new (
+          globalThis as unknown as { Event: new (t: string, i?: { bubbles?: boolean }) => unknown }
+        ).Event('input', { bubbles: true })
+      );
+    }, text);
   }
 
   @Step('typing <text> in link text input')
@@ -635,6 +653,11 @@ export default class InputBoxSteps {
     // Button label toggles "Update"/"Apply" by selection state; both share this
     // track-name and the same handler, so target it directly.
     await page.locator("[data-track-name='APPLY_LINK']").first().click();
+    // The dialog closes and the editor commits the href in a microtask after
+    // the click; wait for the DOM to settle before letting the next verify
+    // step read the href.
+    await page.locator("[data-testid='message-input'] a").first().waitFor({ state: 'visible' });
+    await page.waitForTimeout(300);
   }
 
   @Step('clicking remove link button')

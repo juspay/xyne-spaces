@@ -300,21 +300,26 @@ export class TestAuthController {
             { name: 'ORGANIZATIONS', description: 'Organization management access' },
           ];
 
+          // Parallel-safe: upsert on `name` (unique) so three concurrent admin
+          // logins can't race each other into a P2002 that the outer catch
+          // swallows, skipping the grant loop below and leaving admin-1 without
+          // USER-GROUPS access — which hides /user-groups from the sidebar
+          // entirely (rail + More popover + Customize Available all absent).
           for (const resourceData of essentialResources) {
-            const existingResource = await db.resource.findUnique({
+            await db.resource.upsert({
               where: { name: resourceData.name },
+              update: {},
+              create: resourceData,
             });
-
-            if (!existingResource) {
-              await db.resource.create({
-                data: resourceData,
-              });
-              logger.info(`[${requestId}] Created essential resource: ${resourceData.name}`);
-            }
           }
 
           const resources = await db.resource.findMany();
           for (const resource of resources) {
+            // ResourceAccess has @@unique([userId, resourceId, accessType]) —
+            // not [userId, resourceId] — so upsert can't key on that composite.
+            // Pattern: findFirst → update if present, else create; wrap create
+            // in try/catch for P2002 so parallel workers racing on the same
+            // (userId, resourceId, ADMIN) row don't throw out of the grant loop.
             const existingAccess = await db.resourceAccess.findFirst({
               where: {
                 userId: user.id,
@@ -323,21 +328,24 @@ export class TestAuthController {
             });
 
             if (!existingAccess) {
-              await db.resourceAccess.create({
-                data: {
-                  userId: user.id,
-                  resourceId: resource.id,
-                  workspaceId: user.workspaceId,
-                  accessType: AccessType.ADMIN,
-                },
-              });
-              logger.info(`[${requestId}] Granted ADMIN access to resource ${resource.name} for user ${user.email}`);
+              try {
+                await db.resourceAccess.create({
+                  data: {
+                    userId: user.id,
+                    resourceId: resource.id,
+                    workspaceId: user.workspaceId,
+                    accessType: AccessType.ADMIN,
+                  },
+                });
+              } catch (createErr) {
+                const code = (createErr as { code?: string } | null)?.code;
+                if (code !== 'P2002') throw createErr; // only swallow "already exists"
+              }
             } else if (existingAccess.accessType !== AccessType.ADMIN) {
               await db.resourceAccess.update({
                 where: { id: existingAccess.id },
                 data: { accessType: AccessType.ADMIN },
               });
-              logger.info(`[${requestId}] Updated access to ADMIN for resource ${resource.name} for user ${user.email}`);
             }
           }
         } catch (orgError) {

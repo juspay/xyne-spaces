@@ -17,6 +17,7 @@ import {
   assertValidUrlPath,
   assertValidUserAlias,
 } from '@/tests/shared/support/literal-validation';
+import { dispatchHoverEvents } from '@/tests/shared/support/message-hover';
 
 function resolvePathValue(source: unknown, path: string): unknown {
   return path.split('.').reduce<unknown>((currentValue, segment) => {
@@ -69,6 +70,93 @@ async function waitForPath(page: Page, expectedPath: string): Promise<void> {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+// Opens the "Customize toolbar" dialog from the More popover and returns once
+// the dialog is on-screen. The two toolbar-mutation helpers below (add / remove)
+// share this entry so changes to the entry sequence land in one place.
+async function openCustomizeToolbarDialog(page: Page): Promise<Locator> {
+  // The "Customize toolbar" button sits at the bottom of a max-h-[80vh] overflow-y-auto
+  // popover in AppSidebar, so when the user has many More-overflow items it starts
+  // below the fold. Attach + scroll before the visibility wait; otherwise the wait
+  // times out even though the button is rendered. The More popover can also
+  // auto-close on focus loss between the caller's open-click and our wait, so
+  // re-open via nav-more if the Customize row is attached but not visible.
+  const customizeTrigger = page.locator("[data-testid='more-customize-toolbar']").first();
+  await customizeTrigger.waitFor({ state: 'attached', timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS });
+  await customizeTrigger.scrollIntoViewIfNeeded().catch(() => {});
+  try {
+    await customizeTrigger.waitFor({ state: 'visible', timeout: 2000 });
+  } catch {
+    await page.locator("[data-testid='nav-more']").first().click();
+    await customizeTrigger.waitFor({ state: 'attached', timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS });
+    await customizeTrigger.scrollIntoViewIfNeeded().catch(() => {});
+    await customizeTrigger.waitFor({ state: 'visible', timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS });
+  }
+  await customizeTrigger.click();
+  // Preferences opens via a custom event + lazy section mount; wait for the
+  // dialog shell before poking at anything inside it.
+  const closeButton = page.locator("button[aria-label='Close preferences']").first();
+  await closeButton.waitFor({ state: 'visible', timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS });
+  return closeButton;
+}
+
+async function closeCustomizeToolbarDialog(page: Page, closeButton: Locator): Promise<void> {
+  await closeButton.click({ timeout: 2000 }).catch(() => page.keyboard.press('Escape'));
+  await closeButton.waitFor({ state: 'hidden', timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS });
+}
+
+async function addItemViaCustomizeToolbar(page: Page, itemId: string): Promise<void> {
+  // Caller has already opened the More menu to look for the item and failed to find it.
+  const closeButton = await openCustomizeToolbarDialog(page);
+  const addRow = page.locator(`[data-testid='customize-add-${itemId}']`).first();
+  try {
+    // The "Available" list in BarCustomizer is long (NAVIGATION_ITEMS has 30+
+    // entries) and lives inside the dialog's own scroll container, so items
+    // like Context / Scheduled Messages / User Groups sit below the fold.
+    // waitFor({state:'attached'}) + scrollIntoViewIfNeeded brings it on screen
+    // before the visibility check — otherwise visible-wait can race with the
+    // dialog's internal layout and the click target is never reached.
+    await addRow.waitFor({ state: 'attached', timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS });
+    await addRow.scrollIntoViewIfNeeded().catch(() => {});
+    await addRow.waitFor({ state: 'visible', timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS });
+  } catch (err) {
+    await closeCustomizeToolbarDialog(page, closeButton);
+    throw new Error(
+      `Sidebar item "${itemId}" is not available in the Customize Toolbar picker — ` +
+        `either the test references a label that no longer exists in NAVIGATION_ITEMS, ` +
+        `or permissions / toolbar overrides have hidden it for this user. ` +
+        `Underlying wait: ${errorMessage(err)}`
+    );
+  }
+  await addRow.click();
+  await closeCustomizeToolbarDialog(page, closeButton);
+}
+
+async function removeItemViaCustomizeToolbar(page: Page, itemId: string): Promise<void> {
+  // Caller is responsible for having opened the More menu first (same shape as
+  // addItemViaCustomizeToolbar) so openCustomizeToolbarDialog can scroll the
+  // "Customize toolbar" button into view inside the already-open popover.
+  const closeButton = await openCustomizeToolbarDialog(page);
+  const removeRow = page.locator(`[data-testid='customize-remove-${itemId}']`).first();
+  try {
+    // "Shown" rows live in the same scroll container as "Available", so the
+    // attach + scroll + visible dance applies here too — a locked/always-shown
+    // item has no remove button and this will throw cleanly below.
+    await removeRow.waitFor({ state: 'attached', timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS });
+    await removeRow.scrollIntoViewIfNeeded().catch(() => {});
+    await removeRow.waitFor({ state: 'visible', timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS });
+  } catch (err) {
+    await closeCustomizeToolbarDialog(page, closeButton);
+    throw new Error(
+      `Sidebar item "${itemId}" is not currently shown in the Customize Toolbar list — ` +
+        `either it was never in the toolbar, it is locked ("Always shown"), ` +
+        `or the test references a label that no longer exists in NAVIGATION_ITEMS. ` +
+        `Underlying wait: ${errorMessage(err)}`
+    );
+  }
+  await removeRow.click();
+  await closeCustomizeToolbarDialog(page, closeButton);
 }
 
 export default class BrowserSteps {
@@ -206,6 +294,11 @@ export default class BrowserSteps {
   @Step('clicking on <selector>')
   public async clickOnSelector(selector: string): Promise<void> {
     const element = testContext.activePage.locator(selector).first();
+    // Wait for the element to exist in the DOM first; if it's attached but
+    // scrolled past the fold (nested panel scrollers) `waitFor(visible)` can
+    // time out even though a scroll would bring it into view.
+    await element.waitFor({ state: 'attached' });
+    await element.scrollIntoViewIfNeeded().catch(() => {});
     await element.waitFor({ state: 'visible' });
     try {
       await element.click({ timeout: 5000 });
@@ -226,57 +319,157 @@ export default class BrowserSteps {
     }
   }
 
+  @Step('clicking on <selector> if visible')
+  public async clickOnSelectorIfVisible(selector: string): Promise<void> {
+    // No-wait sibling of `clicking on <selector>` for conditional UI
+    // (collapsed sections, dismissible banners) that may or may not be present
+    // for the current scenario. Fail-silent on absence. Scrolls below-the-fold
+    // elements into view first so a match that exists in DOM but is scrolled
+    // past still gets the click (Playwright's `isVisible` honours viewport).
+    const element = testContext.activePage.locator(selector).first();
+    // Short grace period so the DOM has a chance to mount the optional element
+    // when it is about to appear (e.g. after a modal transition).
+    try {
+      await element.waitFor({ state: 'attached', timeout: 2000 });
+    } catch {
+      return;
+    }
+    await element.scrollIntoViewIfNeeded().catch(() => {});
+    await element.click({ force: true }).catch(() => {});
+  }
+
+  @Step('showing all sidebar items in toolbar')
+  public async showAllSidebarItemsInToolbar(): Promise<void> {
+    // Setup helper: moves every item from the Customize Toolbar "Available"
+    // list into "Shown" so the rail carries every nav item the current user
+    // can see. After this runs, downstream `navigating via sidebar to <id>`
+    // steps hit the rail-fast-path and never need to re-open Customize.
+    // Idempotent — if nothing is in Available the loop exits on the first
+    // count check.
+    const page = testContext.activePage;
+    const moreTrigger = page.locator("[data-testid='nav-more']").first();
+    await moreTrigger.waitFor({ state: 'visible' });
+    await moreTrigger.click();
+    const customizeInMore = page.locator("[data-testid='more-customize-toolbar']").first();
+    await customizeInMore.waitFor({
+      state: 'attached',
+      timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS,
+    });
+    const closeButton = await openCustomizeToolbarDialog(page);
+    // Each +Add click moves one item from Available to Shown, which removes
+    // its customize-add-<slug> node, so re-querying every iteration lets the
+    // DOM mutations drive the loop. Hard cap at the current NAVIGATION_ITEMS
+    // size with headroom so a layout bug can't spin forever.
+    const addButtons = page.locator("[data-testid^='customize-add-']");
+    const MAX_ADDS = 60;
+    for (let i = 0; i < MAX_ADDS; i += 1) {
+      const remaining = await addButtons.count();
+      if (remaining === 0) {
+        break;
+      }
+      const next = addButtons.first();
+      await next.scrollIntoViewIfNeeded().catch(() => {});
+      await next.waitFor({ state: 'visible', timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS });
+      await next.click();
+    }
+    await closeCustomizeToolbarDialog(page, closeButton);
+  }
+
+  @Step('removing sidebar item <itemId>')
+  public async removeSidebarItem(itemId: string): Promise<void> {
+    const page = testContext.activePage;
+    const moreTrigger = page.locator("[data-testid='nav-more']").first();
+    await moreTrigger.waitFor({ state: 'visible' });
+    await moreTrigger.click();
+    // Wait for the More popover's content to mount — the Customize button is
+    // the last node in the menu, so once it is attached everything above it is
+    // too. See navigateViaSidebar for the overflow-container rationale.
+    const customizeInMore = page.locator("[data-testid='more-customize-toolbar']").first();
+    await customizeInMore.waitFor({ state: 'attached', timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS });
+    await removeItemViaCustomizeToolbar(page, itemId);
+  }
+
   @Step('navigating via sidebar to <itemId>')
   public async navigateViaSidebar(itemId: string): Promise<void> {
     const page = testContext.activePage;
-    // Wait for the sidebar to be mounted before deciding toolbar vs overflow.
+    // Wait for the sidebar to be mounted before deciding rail vs add-then-rail.
     const moreTrigger = page.locator("[data-testid='nav-more']").first();
     await moreTrigger.waitFor({ state: 'visible' });
 
     const toolbarItem = page.locator(`[data-testid='nav-${itemId}']`).first();
-    if (await toolbarItem.isVisible()) {
-      const expectedPath = await getSidebarDestinationPath(page, toolbarItem);
-      await toolbarItem.click();
-      await waitForPath(page, expectedPath);
-      return;
-    }
 
-    // Item is not in the toolbar — open the "More" overflow menu and click it there.
-    await moreTrigger.click();
-    let moreItem = page.locator(`[data-testid='more-${itemId}']`).first();
-    await moreItem.waitFor({ state: 'visible' });
-    const expectedPath = await getSidebarDestinationPath(page, moreItem);
-
-    try {
-      await moreItem.click({ timeout: 2000 });
-      await waitForPath(page, expectedPath);
-      return;
-    } catch (initialError) {
-      // A click can close the Radix popover before Playwright dispatches the final
-      // click event. Treat it as successful only if the URL actually changed.
-      if (isAtPath(page, expectedPath)) {
+    // Ensure the item lives on the rail before clicking. If it is not already
+    // there, add it through Customize Toolbar — then click it from the rail.
+    // We deliberately avoid clicking the item from the More overflow popover:
+    // Radix auto-closes the popover on outside pointer events, items below the
+    // scroll fold are reported as not-visible intermittently, and the click
+    // sequence has to race the popover's own close animation. Routing through
+    // the Customize dialog instead is slower by one dialog round-trip but is
+    // deterministic — once added, nav-<itemId> is a plain button on the rail.
+    // Give zero-sync a short grace window to hydrate the user's toolbarIds
+    // into the rail before deciding the item is missing. Without this, a fresh
+    // browser session that has the item in Shown on the backend loses the race
+    // against the rail's first render and falls through to the Customize add
+    // path, which fails because the item isn't in Available either.
+    const railVisible = await toolbarItem
+      .waitFor({ state: 'visible', timeout: 2500 })
+      .then(() => true)
+      .catch(() => false);
+    if (!railVisible) {
+      await moreTrigger.click();
+      // The Customize button is the last node in the More popover, so once it
+      // is attached the popover's content has finished mounting.
+      const customizeInMore = page.locator("[data-testid='more-customize-toolbar']").first();
+      await customizeInMore.waitFor({
+        state: 'attached',
+        timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS,
+      });
+      // Middle path: if the item is already in the user's Shown list but just
+      // happens to render in the More overflow (zero-sync lag, long rail, etc.),
+      // click it directly from the popover — faster and deterministic. Only fall
+      // through to the Customize add round-trip when the item genuinely isn't
+      // reachable from either slot yet.
+      const moreItem = page.locator(`[data-testid='more-${itemId}']`).first();
+      try {
+        await moreItem.waitFor({ state: 'visible', timeout: 2000 });
+        const moreExpectedPath = await getSidebarDestinationPath(page, moreItem);
+        await moreItem.click();
+        await waitForPath(page, moreExpectedPath);
+        return;
+      } catch {
+        // Not in More popover — add via Customize and continue.
+      }
+      await addItemViaCustomizeToolbar(page, itemId);
+      // After the dialog closes the item is in the user's toolbarIds. It may
+      // render on the rail directly, OR overflow back into the More popover
+      // when the rail is already full. Try the rail first (short wait); if it
+      // doesn't appear there, re-open More and click from the popover.
+      const railAfterAdd = await toolbarItem
+        .waitFor({ state: 'visible', timeout: 2500 })
+        .then(() => true)
+        .catch(() => false);
+      if (!railAfterAdd) {
+        await moreTrigger.click();
+        const moreItemAfterAdd = page.locator(`[data-testid='more-${itemId}']`).first();
+        await moreItemAfterAdd.waitFor({
+          state: 'attached',
+          timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS,
+        });
+        await moreItemAfterAdd.scrollIntoViewIfNeeded().catch(() => {});
+        await moreItemAfterAdd.waitFor({
+          state: 'visible',
+          timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS,
+        });
+        const moreExpectedPathAfterAdd = await getSidebarDestinationPath(page, moreItemAfterAdd);
+        await moreItemAfterAdd.click();
+        await waitForPath(page, moreExpectedPathAfterAdd);
         return;
       }
-
-      // The popover item may have been unmounted by the failed click. Reopen the
-      // menu if necessary and resolve a fresh locator before the forced retry.
-      if (!(await moreItem.isVisible())) {
-        await moreTrigger.click();
-      }
-
-      moreItem = page.locator(`[data-testid='more-${itemId}']`).first();
-      await moreItem.waitFor({ state: 'visible' });
-
-      try {
-        await moreItem.click({ force: true, timeout: 5000 });
-        await waitForPath(page, expectedPath);
-      } catch (retryError) {
-        throw new Error(
-          `Sidebar navigation to "${itemId}" did not reach "${expectedPath}". ` +
-            `Initial attempt: ${errorMessage(initialError)} Retry: ${errorMessage(retryError)}`
-        );
-      }
     }
+
+    const expectedPath = await getSidebarDestinationPath(page, toolbarItem);
+    await toolbarItem.click();
+    await waitForPath(page, expectedPath);
   }
 
   @Step('typing <text> in <selector>')
@@ -677,9 +870,10 @@ export default class BrowserSteps {
 
   @Step('verifying <selector> is visible')
   public async verifySelectorIsVisible(selector: string): Promise<void> {
-    await testContext.activePage.locator(selector).first().waitFor({
-      state: 'visible',
-    });
+    const element = testContext.activePage.locator(selector).first();
+    await element.waitFor({ state: 'attached' });
+    await element.scrollIntoViewIfNeeded().catch(() => {});
+    await element.waitFor({ state: 'visible' });
   }
 
   @Step('verifying <selector> is not visible')
@@ -1004,18 +1198,17 @@ export default class BrowserSteps {
   /**
    * Atomic hover-and-click for hover action toolbars.
    *
-   * Why this exists:
-   * The HoverActionsToolbar in the dashboard is rendered ONLY while the parent
-   * message has hover state (`if (!isVisible && !isDropdownOpen) return null`).
-   * The toolbar is positioned at `-top-7 right-4` - outside the message's
-   * bounding box. When Playwright tries to do separate hover + click steps,
-   * the mouse path from message to button can leave the message's bbox,
-   * triggering `onMouseLeave`, which UNMOUNTS the toolbar mid-click.
+   * The dashboard uses a single shared `MessageHoverToolbar` per message list
+   * (not one per bubble): a delegated `pointerover`/`pointermove` listener on
+   * the list container finds the hovered row via `closest('[data-message-id]')`
+   * and positions the overlay via `translateY`. The overlay is `pointer-events`
+   * active and renders `HoverActionsToolbar`'s buttons (hover-action-*).
    *
-   * The fix: dispatch synthetic `mouseover`/`mouseenter` events directly on
-   * the message DOM node (this triggers React's onMouseEnter handler, sets
-   * state, mounts the toolbar) and then click the action via JavaScript.
-   * No physical mouse involved = no mouseleave race = bulletproof.
+   * Real pointer events are required — the handler's modality guard
+   * (`messageInteractionModality.current !== 'pointer'`) is only flipped by a
+   * genuine `pointermove`, which `page.mouse.move` fires. Synthetic
+   * `dispatchEvent('mouseover')` on the row does not flip modality and the
+   * overlay never mounts.
    */
   @Step('clicking hover action <hoverActionSelector> on message with text <messageText>')
   public async clickHoverActionOnMessage(
@@ -1024,38 +1217,24 @@ export default class BrowserSteps {
   ): Promise<void> {
     const page = testContext.activePage;
 
-    // Locate the message bubble; fall back to last message if text match fails
     let message = page.locator(`[data-testid^="chat-message-"]:has-text("${messageText}")`).last();
     if (!(await message.isVisible().catch(() => false))) {
       message = page.locator('[data-testid^="chat-message-"]').last();
     }
     await message.waitFor({ state: 'visible' });
-    await message.scrollIntoViewIfNeeded();
 
-    // Trigger hover programmatically. We dispatch BOTH `mouseover` and
-    // `mouseenter` because React's synthetic event system listens to
-    // mouseover (delegated) but some components also listen to mouseenter.
-    // Using bubbles:true on mouseover ensures it propagates up to the
-    // ChatBubble parent that holds the onMouseEnter handler.
-    // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context
-    // @ts-ignore - Element and MouseEvent exist in browser context
-    await message.evaluate((el) => {
-      // biome-ignore lint/suspicious/noTsIgnore: browser context
-      // @ts-ignore - MouseEvent exists in browser context
-      el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
-      // biome-ignore lint/suspicious/noTsIgnore: browser context
-      // @ts-ignore - MouseEvent exists in browser context
-      el.dispatchEvent(new MouseEvent('mouseenter', { bubbles: false, cancelable: true }));
-    });
-
-    // Wait for the specific action button to mount (React re-render must complete)
     const actionButton = page.locator(hoverActionSelector).first();
-    await actionButton.waitFor({ state: 'visible', timeout: 10000 });
-
-    // Click the button. Use force:true so Playwright doesn't try to scroll
-    // or move the physical mouse (which would risk triggering mouseleave on
-    // the message and unmounting the toolbar between scroll and click).
-    await actionButton.click({ force: true });
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      await message.scrollIntoViewIfNeeded();
+      await message.evaluate(dispatchHoverEvents);
+      try {
+        await actionButton.waitFor({ state: 'visible', timeout: 5000 });
+        await actionButton.click({ force: true, timeout: 5000 });
+        return;
+      } catch (error) {
+        if (attempt === 3) throw error;
+      }
+    }
   }
 
   @Step('attaching file to <selector>')

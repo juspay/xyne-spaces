@@ -229,14 +229,16 @@ fs.writeFileSync(progressFile, '', 'utf8');
 
 console.log(`\n📁 Run artifacts: ${path.relative(process.cwd(), runArtifactDirectory)}\n`);
 
+const includeQuarantine = process.env.INCLUDE_QUARANTINE === 'true';
 const gaugeArgs = [
   'run',
   '--sort=alpha',
   // Retry failed scenarios; gauge rejects `--max-retries-count 0`, so only pass it when retries > 0.
   ...(testConfig.retries > 0 ? ['--max-retries-count', String(testConfig.retries)] : []),
-  // Exclude quarantined (known-flaky) scenarios.
-  '--tags',
-  scenarioTagFilter,
+  // Exclude quarantined (known-flaky) scenarios unless the caller opts in via
+  // INCLUDE_QUARANTINE=true (useful when verifying whether a quarantine is
+  // still warranted — expect flakes, don't gate CI on it).
+  ...(includeQuarantine ? [] : ['--tags', scenarioTagFilter]),
   '-p',
   '-n',
   String(parallelCount),
@@ -606,7 +608,11 @@ async function main(): Promise<void> {
   // passes changed so build-summary-report can show the final outcome.
   fs.writeFileSync(
     path.join(runArtifactDirectory, 'retry-recovery.json'),
-    JSON.stringify({ retriedAtEnd: failedAfterInlineRetries, stillFailing: remainingFailedItems }, null, 2)
+    JSON.stringify(
+      { retriedAtEnd: failedAfterInlineRetries, stillFailing: remainingFailedItems },
+      null,
+      2
+    )
   );
 
   const specOf = (item: string): string => item.replace(/:\d+$/, '');
