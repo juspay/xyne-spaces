@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { xyneAIStreamManager } from '../../../services/XyneAI/XyneAIStreamManager';
+import { usePollWhenShown } from '../../../hooks/usePageCoverage';
 import {
   conversationArtifactsQueryKey,
   listConversationArtifacts,
@@ -43,13 +44,19 @@ export function useConversationArtifacts(
 ): ConversationArtifactsResult {
   const queryClient = useQueryClient();
   const streaming = useConversationStreaming(conversationId);
+  const queryKey = conversationArtifactsQueryKey(conversationId ?? '');
+  // No polling under full-page search, where the list is out of sight, nor a refetch as a run ends
+  // there; it picks up on return.
+  const shown = usePollWhenShown(queryKey);
 
   const query = useQuery({
-    queryKey: conversationArtifactsQueryKey(conversationId ?? ''),
+    queryKey,
     queryFn: () => listConversationArtifacts(conversationId as string),
     enabled: Boolean(conversationId),
     staleTime: 15_000,
-    refetchInterval: streaming ? STREAMING_POLL_MS : false,
+    refetchInterval: streaming
+      ? (): number | false => (shown() ? STREAMING_POLL_MS : false)
+      : false,
   });
 
   const wasStreaming = useRef(streaming);
@@ -59,8 +66,9 @@ export function useConversationArtifacts(
     if (!finished || !conversationId) return;
     void queryClient.invalidateQueries({
       queryKey: conversationArtifactsQueryKey(conversationId),
+      refetchType: shown() ? 'active' : 'none',
     });
-  }, [streaming, conversationId, queryClient]);
+  }, [streaming, conversationId, queryClient, shown]);
 
   const mutation = useMutation({
     mutationFn: ({ id, patch }: { id: string; patch: ConversationArtifactPatch }) =>

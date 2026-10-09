@@ -28,6 +28,7 @@ import { BrowserSettingsMenu } from '../../components/BrowserPanel/BrowserSettin
 import { BrowserHintBar } from '../../components/BrowserPanel/BrowserHintBar';
 import { useLinkOpenHintDismissed } from '../../hooks/useLinkOpenHintDismissed';
 import { usePlatform } from '../../hooks/usePlatform';
+import { UnmountWhenCovered } from '../../hooks/usePageCoverage';
 
 // Define WebviewTag interface locally since Electron types may not be available in renderer
 interface WebviewTag extends HTMLElement {
@@ -241,10 +242,27 @@ function WebviewTab({
   );
 }
 
-export function BrowserTabsScreen({
+// The screen's frame: drawn empty in its place while full-page search covers it.
+const SCREEN_FRAME_CLASS =
+  'flex flex-col h-full bg-background md:rounded-2xl overflow-hidden shadow-md';
+
+export function BrowserTabsScreen(props: BrowserTabsScreenProps = {}): React.ReactElement {
+  // Not under full-page search, as leaving the page took it: its tabs' pages would play on there,
+  // out of reach, and it would open links and new tabs the browser panel opens too. Back on return,
+  // each tab loading again at its URL; until then its empty frame, so a collapse shrinks onto it.
+  // On the web it has no tabs to take: just its desktop-app notice.
+  if (!isElectronApp()) return <BrowserTabsView {...props} />;
+  return (
+    <UnmountWhenCovered fallback={<div className={SCREEN_FRAME_CLASS} />}>
+      <BrowserTabsView {...props} />
+    </UnmountWhenCovered>
+  );
+}
+
+function BrowserTabsView({
   variant = 'fullscreen',
   pendingUrls: externalPendingUrls,
-}: BrowserTabsScreenProps = {}): React.ReactElement {
+}: BrowserTabsScreenProps): React.ReactElement {
   const tabs = useSelector(browserPanelActor, state => state.context.tabs);
   const activeTabId = useSelector(browserPanelActor, state => state.context.activeTabId);
   const statePendingUrls = useSelector(browserPanelActor, state => state.context.pendingUrls);
@@ -591,7 +609,7 @@ export function BrowserTabsScreen({
   }
 
   return (
-    <div className='flex flex-col h-full bg-background md:rounded-2xl overflow-hidden shadow-md'>
+    <div className={SCREEN_FRAME_CLASS}>
       {/* Header with close button (panel mode only) — gated by the Eye toggle
           next to the + button so the user can collapse the chrome down to just
           the tab strip. */}

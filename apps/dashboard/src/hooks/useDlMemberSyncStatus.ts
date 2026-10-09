@@ -1,5 +1,6 @@
 import { useQuery, UseQueryResult } from '@tanstack/react-query';
 import { apiInstance } from '../services/clients/apiClient';
+import { usePollWhenShown } from './usePageCoverage';
 
 export interface DlMemberSyncStatusInactive {
   active: false;
@@ -18,8 +19,10 @@ export const useDlMemberSyncStatus = (
   channelId: string | null | undefined,
   enabled: boolean,
 ): UseQueryResult<DlMemberSyncStatus> => {
+  const queryKey = ['dl-member-sync-status', channelId];
+  const shown = usePollWhenShown(queryKey);
   return useQuery({
-    queryKey: ['dl-member-sync-status', channelId],
+    queryKey,
     enabled: enabled && !!channelId,
     queryFn: async (): Promise<DlMemberSyncStatus> => {
       if (!channelId) return { active: false };
@@ -28,7 +31,8 @@ export const useDlMemberSyncStatus = (
       );
       return res.data;
     },
-    refetchInterval: 5000,
-    refetchOnWindowFocus: true,
+    refetchInterval: () => (shown() ? 5000 : false),
+    refetchOnWindowFocus: () => shown(),
+    refetchOnReconnect: () => shown(),
   });
 };

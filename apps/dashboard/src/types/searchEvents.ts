@@ -212,6 +212,53 @@ export interface SearchShowResultsEvent extends CommonEventFields {
 }
 
 /**
+ * Event: vespa_search_full_page_open
+ * Triggered each time cmd+K search is shown full page. Tells us which entry point people use.
+ */
+export interface SearchFullPageOpenEvent extends CommonEventFields {
+  /**
+   * How full page was reached
+   * - expand_row: the "Expand to full-page search" row
+   * - banner: the return banner
+   * - header: the expand icon in the palette header
+   * - see_more: a section's "See N more" row, landing on that section's tab
+   * - default: cmd+K opened full page because it is the learned default
+   */
+  source: 'expand_row' | 'banner' | 'header' | 'see_more' | 'default';
+}
+
+/**
+ * Event: vespa_search_size_preference_switch
+ * Triggered when the learned cmd+K open size changes.
+ */
+export interface SearchSizePreferenceSwitchEvent extends CommonEventFields {
+  to: 'modal' | 'full';
+  /**
+   * Why it changed
+   * - streak: enough consecutive full-page sessions
+   * - collapse: collapsed full page back to the modal
+   * - undo: Undo on the "now opens in full page" snackbar
+   */
+  reason: 'streak' | 'collapse' | 'undo';
+}
+
+/**
+ * Event: vespa_search_return_banner
+ * The "Expand to full-page search" banner offered on a quick cmd+K return.
+ */
+export interface SearchReturnBannerEvent extends CommonEventFields {
+  action: 'shown' | 'clicked' | 'dismissed';
+}
+
+/**
+ * Event: vespa_search_full_page_snackbar
+ * The "Search now opens in full page" snackbar. Undo rate = undo / shown.
+ */
+export interface SearchFullPageSnackbarEvent extends CommonEventFields {
+  action: 'shown' | 'undo' | 'dismissed';
+}
+
+/**
  * Union type of all possible search metric events
  */
 export type SearchMetricEvent =
@@ -220,4 +267,8 @@ export type SearchMetricEvent =
   | SearchClickEvent
   | SearchSessionEndEvent
   | SearchTabClickEvent
-  | SearchShowResultsEvent;
+  | SearchShowResultsEvent
+  | SearchFullPageOpenEvent
+  | SearchSizePreferenceSwitchEvent
+  | SearchReturnBannerEvent
+  | SearchFullPageSnackbarEvent;

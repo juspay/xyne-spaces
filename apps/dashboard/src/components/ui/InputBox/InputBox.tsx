@@ -76,6 +76,7 @@ import { isEventFromInput } from '../../../utils/chatUtils';
 import { useDraftAttachments } from '../../../hooks/useDraft';
 import { MediaViewer } from '../files';
 import { usePlatform } from '../../../hooks/usePlatform';
+import { usePageCoverage } from '../../../hooks/usePageCoverage';
 import { MobileEditor } from './MobileEditor';
 import { useTypingState } from '../../../contexts/TypingStateContext';
 import { validateFile } from '../utils/files';
@@ -468,17 +469,19 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
     useShortcutById('composer.voiceInput', () => voiceInputRef.current?.toggle());
 
+    // Not while full-page search covers the composer: its Esc is full page's.
+    const coverage = usePageCoverage();
     useEffect(() => {
       if (!isVoiceRecording) return;
       const onKeyDown = (e: KeyboardEvent): void => {
-        if (e.key === 'Escape') {
+        if (e.key === 'Escape' && !coverage.isCovered()) {
           e.stopPropagation();
           voiceInputRef.current?.toggle();
         }
       };
       document.addEventListener('keydown', onKeyDown, true);
       return () => document.removeEventListener('keydown', onKeyDown, true);
-    }, [isVoiceRecording]);
+    }, [isVoiceRecording, coverage]);
 
     const artifactComposerDefinition = getSlashCommandArtifactDefinition(
       slashCommandArtifactCommand,
@@ -487,14 +490,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     useEffect(() => {
       if (!artifactComposerDefinition || !onCancelSlashCommandArtifact) return;
       const onKeyDown = (event: KeyboardEvent): void => {
-        if (event.key !== 'Escape') return;
+        if (event.key !== 'Escape' || coverage.isCovered()) return;
         event.preventDefault();
         event.stopPropagation();
         onCancelSlashCommandArtifact();
       };
       document.addEventListener('keydown', onKeyDown, true);
       return () => document.removeEventListener('keydown', onKeyDown, true);
-    }, [artifactComposerDefinition, onCancelSlashCommandArtifact]);
+    }, [artifactComposerDefinition, onCancelSlashCommandArtifact, coverage]);
 
     const handleTyping = onTyping;
 

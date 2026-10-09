@@ -4,6 +4,7 @@ import { pickWebviewPartition } from '../../utils/browserPanelPartition';
 import { registerEmbeddedWebview } from '../../utils/embeddedWebviewRegistry';
 import type { ElectronWebviewElement } from '../../types/electron';
 import { SandboxedFrame } from './primitives';
+import { UnmountWhenCovered } from '../../hooks/usePageCoverage';
 import {
   canHostEmbedPages,
   embedPageOverElement,
@@ -38,7 +39,18 @@ function HostedPage({ url }: { url: string }): ReactElement {
   return <div ref={setElement} className='h-full w-full bg-background' />;
 }
 
-export function EmbeddedBrowser({
+export function EmbeddedBrowser(props: EmbeddedBrowserProps): ReactElement {
+  // Not under full-page search: a page there plays on, and an agent can drive it out of sight (the
+  // AI browser is its page tools' target until the view goes), so it goes, as leaving the page
+  // took it, and loads again on return.
+  return (
+    <UnmountWhenCovered fallback={<div className='h-full' />}>
+      <EmbeddedBrowserView {...props} />
+    </UnmountWhenCovered>
+  );
+}
+
+function EmbeddedBrowserView({
   url,
   title,
   banner,

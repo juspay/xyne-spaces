@@ -4,6 +4,7 @@ import { voiceInputService } from '../../services/VoiceInput/voiceInputService';
 import { ttsService } from '../../services/VoiceInput/ttsService';
 import { xyneAIStreamManager, type StreamState } from '../../services/XyneAI';
 import { splitSentences, flushRemainder, toSpokenText } from './voiceSentences';
+import { useStopWhenCovered } from '../../hooks/usePageCoverage';
 
 export type VoicePhase = 'idle' | 'listening' | 'transcribing' | 'thinking' | 'speaking';
 
@@ -286,6 +287,19 @@ export function useVoiceMode({
       setPhaseSafe('idle');
     }
   }, [enabled, stopRecording, cancelPlayback, setPhaseSafe]);
+
+  // Voice mode is out of reach under full-page search: covering the page ends the turn the way
+  // turning voice mode off does, so nothing more is recorded or read out there, and it is ready to
+  // talk again when the page comes back.
+  useStopWhenCovered(enabled, () => {
+    sessionRef.current++;
+    stopRecording();
+    cancelPlayback();
+    turnActiveRef.current = false;
+    activeStreamIdRef.current = null;
+    // Only on a change: a render of the page underneath as full page opens is not free.
+    if (phaseRef.current !== 'idle') setPhaseSafe('idle');
+  });
 
   useEffect(
     () => (): void => {

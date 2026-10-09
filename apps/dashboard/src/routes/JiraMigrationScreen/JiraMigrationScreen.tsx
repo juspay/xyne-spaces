@@ -26,6 +26,7 @@ import { EntityMultiSelector } from '../../components/ui/EntitySelector/EntityMu
 import { cn } from '../../utils/classNames';
 import { FolderKanban, LayoutTemplate, Hash, User, Tag } from 'lucide-react';
 import { isAxiosError } from 'axios';
+import { usePageCoverage, watchShown } from '../../hooks/usePageCoverage';
 
 const actionClassMap: Record<string, string> = {
   create_board_custom_field: 'bg-blue-100 text-blue-800',
@@ -767,6 +768,9 @@ const JiraMigrationScreen = (): ReactElement => {
     [issueKeysInput],
   );
 
+  // Job status isn't polled under full-page search, out of sight there, as leaving the page stopped
+  // it; polled again once the collapse back to it is over.
+  const pageCoverage = usePageCoverage();
   useEffect(() => {
     if (!activeJobId) return undefined;
 
@@ -846,15 +850,17 @@ const JiraMigrationScreen = (): ReactElement => {
     };
 
     void pollStatus();
+    const watch = watchShown(pageCoverage, () => void pollStatus());
     const intervalId = window.setInterval(() => {
-      void pollStatus();
+      if (watch.shown()) void pollStatus();
     }, 1500);
 
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);
+      watch.stop();
     };
-  }, [activeJobId, resolvedDateFrom, ticketRange]);
+  }, [activeJobId, resolvedDateFrom, ticketRange, pageCoverage]);
 
   useEffect(() => {
     if (!purgeJobId) return undefined;
@@ -889,15 +895,17 @@ const JiraMigrationScreen = (): ReactElement => {
     };
 
     void pollPurgeStatus();
+    const watch = watchShown(pageCoverage, () => void pollPurgeStatus());
     const intervalId = window.setInterval(() => {
-      void pollPurgeStatus();
+      if (watch.shown()) void pollPurgeStatus();
     }, 2000);
 
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);
+      watch.stop();
     };
-  }, [purgeJobId]);
+  }, [purgeJobId, pageCoverage]);
 
   const canPreview =
     jiraProjectKey.trim() !== '' &&

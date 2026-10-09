@@ -12,12 +12,13 @@ type Found = { query: string; matches?: WorkerMatch[] };
 
 /**
  * Cmd+K channel search. The fuzzy match runs in web workers so long queries don't stall typing;
- * results are the same as `filterChannelsBySearchableNames`.
+ * results are the same as `filterChannelsBySearchableNames`. `isPending` is true while there is a
+ * query but the workers haven't answered one yet, so `channels` is still the unfiltered list.
  */
 export function useWorkerChannelSearch<T extends ChannelSearchItem>(
   items: T[],
   query: string,
-): T[] {
+): { channels: T[]; isPending: boolean } {
   const [found, setFound] = useState<Found | null>(null);
   const workerRef = useRef<FuseWorker<ChannelDoc> | null>(null);
 
@@ -76,7 +77,7 @@ export function useWorkerChannelSearch<T extends ChannelSearchItem>(
   // Ranked here rather than stored, so channel updates re-rank in the same render. Until the
   // workers answer, the previous query's results stay on screen.
   const hasQuery = query.trim() !== '';
-  return useMemo(() => {
+  const channels = useMemo(() => {
     if (!hasQuery || !found) return filterChannelsBySearchableNames(items, '');
     return filterChannelsBySearchableNames(
       items,
@@ -84,4 +85,5 @@ export function useWorkerChannelSearch<T extends ChannelSearchItem>(
       found.matches ? { regularFuseMatches: found.matches } : {},
     );
   }, [items, hasQuery, found]);
+  return { channels, isPending: hasQuery && !found };
 }

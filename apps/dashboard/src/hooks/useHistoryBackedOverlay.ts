@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 /** Key stamped into the router location state that marks an overlay's history entry. */
-const OVERLAY_STATE_KEY = 'xyneOverlay';
+export const OVERLAY_STATE_KEY = 'xyneOverlay';
 /** Key holding whatever the overlay wants handed back when the user returns to its entry. */
 const OVERLAY_PAYLOAD_KEY = 'xyneOverlayPayload';
 

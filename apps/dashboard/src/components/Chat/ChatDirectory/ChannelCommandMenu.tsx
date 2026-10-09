@@ -2,7 +2,15 @@ import { logger, Event as LogEvent } from '../../../utils/logger';
 import React, { ReactElement, useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Command } from 'cmdk';
-import { CalendarDays, LayoutGrid, MessageSquare, SignalHigh, X, ChevronDown } from 'lucide-react';
+import {
+  CalendarDays,
+  LayoutGrid,
+  MessageSquare,
+  SignalHigh,
+  X,
+  ChevronDown,
+  Maximize2,
+} from 'lucide-react';
 import {
   ChatDefault,
   UserTwo,
@@ -47,6 +55,10 @@ import { DisplaySearchResult } from '../../../types/search';
 import {
   TabType,
   TAB_TO_DOC_TYPE,
+  TAB_LABELS,
+  RECENTS_STARRED_CAP,
+  MERGED_DISPLAY_LIMIT,
+  MERGED_CANDIDATE_LIMIT,
   ChipType,
   type ChipData,
   type SearchScopeToggles,
@@ -86,6 +98,30 @@ import { useDeskPeople, ALL_DESK } from '../../../hooks/useDeskPeople';
 import { useUsers, useUserSearch, useUser } from '../../../hooks/useUsers';
 import { useUserGroups } from '../../../hooks/useUserGroup';
 import { makeMentionHighlightsBuilder } from '../../../search/mentionHighlights';
+import {
+  expectFullPageReady,
+  fadeOutFullPage,
+  growToFullPage,
+  focusFullPageSearch,
+  isFullPageSearchPath,
+  prefersReducedMotion,
+  playPendingCollapse,
+  revealCollapseOrigin,
+  takeResumingSearch,
+  markCollapseContentReady,
+  abandonCollapse,
+  whenFullPageReady,
+  recordExpandToFullPage,
+  recordResultOpened,
+  recordReturnBanner,
+  recordSessionEnd,
+  saveFullPageOrigin,
+  SELECTED_RESULT_PARAM,
+  searchToResultsParams,
+} from './cmdkFullPage';
+import { useCmdkPolicyOptions } from '../../../hooks/useCmdkSearchConfig';
+import { announceFullPageOpened } from '../../../hooks/usePageCoverage';
+import { ReturnBanner } from './ReturnBanner';
 import { useUserGroupSearch } from '@xyne/shared/hooks';
 import { QuickDmComposer } from './SlashCommands/QuickDmComposer';
 import type { CommandTarget } from './SlashCommands/QuickDmComposer';
@@ -117,15 +153,9 @@ import { searchMetricsService } from '../../../services/searchMetricsService';
 import { useHistoryBackedOverlay } from '../../../hooks/useHistoryBackedOverlay';
 import {
   clearLastSearchState,
-  DEFAULT_SEARCH_FILTERS,
   type SearchResultsFilters,
 } from '../../../hooks/useSearchResultsScreen';
-import {
-  buildTokens,
-  filtersFromChips,
-  writeFiltersToParams as writeRegistryParams,
-  type ResultsMention,
-} from '../../../search/filterRegistry';
+import { buildTokens, type ResultsMention } from '../../../search/filterRegistry';
 import { useScope, useShortcutById } from '../../../shortcuts';
 import { useSearchMode } from '../../../hooks/useSearchMode';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -381,11 +411,6 @@ const chipSummaryLabel = (mention: { type: ChipType; prefix?: string; name?: str
 const MENTION_GROUP_PAGE = 5;
 const MENTION_GROUP_MAX = 20;
 
-// Rows shown collapsed in the flat ALL view's merged people+channel list, before "See more".
-// The entries are the ones the per-category sections would have rendered — this only changes
-// their order. The merge itself keeps more than this so expanding has something to reveal.
-const MERGED_DISPLAY_LIMIT = 8;
-const MERGED_CANDIDATE_LIMIT = MERGED_DISPLAY_LIMIT * 5;
 /** expandedCategories key for the merged section — not a ChannelCategory, it spans types. */
 const MERGED_CATEGORY = 'merged-people-channels';
 
@@ -579,6 +604,13 @@ interface ShortcutRequest {
   startSession: boolean;
 }
 
+// The longest a palette opening on a carried search keeps its list hidden waiting for it.
+const CARRIED_SEARCH_HOLD_MS = 400;
+// How long a grown palette waits for the results route before closing anyway.
+const HAND_OFF_TIMEOUT_MS = 3000;
+// How long, once the route is there, it waits for the page's search to settle.
+const FULL_PAGE_READY_TIMEOUT_MS = 3000;
+
 const ChannelCommandMenuContent = ({
   channels,
   starred,
@@ -605,6 +637,12 @@ const ChannelCommandMenuContent = ({
   deskMergeEnabled = false,
   ticketView = null,
   onRemoveTicketView,
+  fullPageSearch = false,
+  returnBanner = false,
+  deferHistory = false,
+  sessionOrigin = 'search',
+  preferredResultId = null,
+  overPageDialog = false,
   seedCommandMode,
   setSeedCommandMode,
   restoredQuery,
@@ -669,7 +707,7 @@ const ChannelCommandMenuContent = ({
   const ticketViewName = ticketView?.viewName ?? null;
 
   // The top-bar palette (screen mode, tabs hidden) always routes to the results page;
-  // the default cmd+K popup renders results inline. Both show the "Show results for"
+  // the default cmd+K popup renders results inline. Both show the "Expand to full-page search"
   // row, but only the screen palette lets it own the default Enter target.
   const isScreenPalette = hideTabs && searchMode === 'screen';
 
@@ -683,6 +721,81 @@ const ChannelCommandMenuContent = ({
   useEffect(() => {
     if (open) navigatingToResultsRef.current = false;
   }, [open]);
+
+  // True while the palette grows into full page, before it hands off to the results route.
+  // The palette is inert for those 380ms: no keys, no dismiss, no clicks.
+  const [growingToFullPage, setGrowingToFullPage] = useState(false);
+  const policyOptions = useCmdkPolicyOptions();
+
+  // The return banner offered for this open: dismissing hides it until the palette closes, and a
+  // show is counted once per open, when it first actually renders.
+  const [returnBannerDismissed, setReturnBannerDismissed] = useState(false);
+  const returnBannerCountedRef = useRef(false);
+  useEffect(() => {
+    if (!open) return;
+    setReturnBannerDismissed(false);
+    returnBannerCountedRef.current = false;
+  }, [open]);
+  const growingToFullPageRef = useRef(false);
+  growingToFullPageRef.current = growingToFullPage;
+
+  // Platform detection - needs to be before useEffects that depend on it
+  const { isMobile } = usePlatform();
+
+  // How this Cmd+K session ends, for the open-size policy: in full page once it expands. Not
+  // recorded on mobile, where the policy never applies (see GlobalCommandMenu).
+  const endedInFullPageRef = useRef(false);
+  const wasOpenRef = useRef(open);
+  useEffect(() => {
+    const wasOpen = wasOpenRef.current;
+    wasOpenRef.current = open;
+    if (open) {
+      if (!wasOpen) endedInFullPageRef.current = false;
+      return;
+    }
+    if (!wasOpen || !fullPageSearch || !workspaceId || isMobile) return;
+    recordSessionEnd(
+      { workspaceId, userId: currentUserID, searchSessionId },
+      endedInFullPageRef.current ? 'full' : 'modal',
+      sessionOrigin,
+      policyOptions,
+    );
+    // Only the open/close edge ends a session.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  // A collapse from full page covers the results until the page it returns to is underneath;
+  // that is when the history entry stops being deferred, and when the cover lifts. Closing the
+  // palette mid-collapse lifts it too. Only the app-level palette collapses from full page.
+  const deferHistoryRef = useRef(deferHistory);
+  deferHistoryRef.current = deferHistory;
+  useEffect(() => {
+    if (!fullPageSearch) return;
+    if (!open) abandonCollapse();
+    else if (!deferHistory) revealCollapseOrigin();
+  }, [fullPageSearch, deferHistory, open]);
+
+  // Closes the grown palette once the results page is on screen beneath it.
+  const pendingHandOffRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    const leave = pendingHandOffRef.current;
+    if (!leave || !isFullPageSearchPath(location.pathname)) return;
+    pendingHandOffRef.current = null;
+    const root = commandRef.current;
+    // With reduced motion nothing grew to cover the page: the palette goes as soon as it is there.
+    if (prefersReducedMotion()) {
+      leave();
+      return;
+    }
+    // Lift only once the results page's search has settled — its first paint is a placeholder
+    // list — then let that paint land and fade the palette off it.
+    void whenFullPageReady(FULL_PAGE_READY_TIMEOUT_MS).then(() =>
+      requestAnimationFrame(() => {
+        if (root) void fadeOutFullPage(root).then(leave);
+        else leave();
+      }),
+    );
+  }, [location.pathname]);
 
   // Which of on:/after:/before: opened the date list — it decides what a pick means.
   const [dateTrigger, setDateTrigger] = useState<'on:' | 'after:' | 'before:'>('on:');
@@ -824,12 +937,14 @@ const ChannelCommandMenuContent = ({
     searchResults: backendResults,
     isSearching: isLoading,
     isSearchPending,
+    isLocalSearchPending,
     searchError: error,
     paginationState,
     isLoadingMore,
     isGrouped,
     resetSearchState,
     onOpen,
+    searchNextImmediately,
     onClose,
     onResultClick,
     setScrollContainer,
@@ -877,18 +992,72 @@ const ChannelCommandMenuContent = ({
     ticketView,
   });
 
+  // A collapse from full page keeps this palette under its landing card until it shows the search
+  // it carries — the query seeded into the editor and its searches settled — so it is never seen
+  // empty, or with the unfiltered lists it shows while matching, and filled in after. The card
+  // waits at most a moment for that (see markCollapseContentReady).
+  const carriedText = effectiveInitialQuery?.text.trim() ?? '';
+  const carriedSearchShown =
+    (!effectiveInitialQuery ||
+      ((!carriedText || searchText.includes(carriedText)) &&
+        selectedMentions.length >= effectiveInitialQuery.mentions.length)) &&
+    !isSearchPending &&
+    !isLoading &&
+    !isLocalSearchPending;
+  useEffect(() => {
+    if (open && fullPageSearch && carriedSearchShown) markCollapseContentReady();
+  }, [open, fullPageSearch, carriedSearchShown]);
+
+  // Any open on a carried search (a quick return, a Back onto the palette) keeps its list out of
+  // sight the same way until it shows that search, so the resting lists and the unfiltered matches
+  // never flash first. Released once per open, so typing afterwards never hides it.
+  const carriesSearch = !!carriedText || (effectiveInitialQuery?.mentions.length ?? 0) > 0;
+  const [carriedListReleased, setCarriedListReleased] = useState(false);
+  useEffect(() => {
+    if (!open) {
+      setCarriedListReleased(false);
+      return;
+    }
+    if (!carriesSearch || carriedSearchShown) setCarriedListReleased(true);
+  }, [open, carriesSearch, carriedSearchShown]);
+  useEffect(() => {
+    if (!open) return;
+    const timer = setTimeout(() => setCarriedListReleased(true), CARRIED_SEARCH_HOLD_MS);
+    return (): void => clearTimeout(timer);
+  }, [open]);
+  const holdingCarriedList = open && carriesSearch && !carriedListReleased;
+
   // In a ticket view, the skeleton fills the list while a search runs and nothing is listed yet.
   const showTicketViewSkeleton =
     isInTicketView && (isLoading || isSearchPending) && backendResults.length === 0;
 
   // The wrapper registers the global shortcuts (they have to work before the palette has
-  // ever mounted) and hands each press over here, where the search session lives.
+  // ever mounted) and hands each press over here, where the search session lives. A collapse from
+  // full page starts one too: it reopens the palette on the search the page ran, which then runs
+  // at once, served from the hand-off cache — unless there is no search to run, when nothing
+  // would use the skip (it would land on the first letter typed instead).
   const handledShortcutRef = useRef(0);
   useEffect(() => {
-    if (!shortcutRequest || shortcutRequest.nonce === handledShortcutRef.current) return;
-    handledShortcutRef.current = shortcutRequest.nonce;
-    if (shortcutRequest.startSession && !searchSessionId) onOpen('keyboard_shortcut');
-  }, [shortcutRequest, searchSessionId, onOpen]);
+    const pressed = !!shortcutRequest && shortcutRequest.nonce !== handledShortcutRef.current;
+    if (shortcutRequest && pressed) handledShortcutRef.current = shortcutRequest.nonce;
+    if (!open) return;
+    // Set by the app-level palette's host (GlobalCommandMenu), for it alone.
+    const resuming = fullPageSearch && takeResumingSearch();
+    const resume = resuming && carriesSearch;
+    if (!searchSessionId && ((pressed && shortcutRequest?.startSession) || resuming)) {
+      onOpen(pressed ? 'keyboard_shortcut' : 'click', { resume });
+    } else if (resume) {
+      searchNextImmediately();
+    }
+  }, [
+    open,
+    shortcutRequest,
+    fullPageSearch,
+    carriesSearch,
+    searchSessionId,
+    onOpen,
+    searchNextImmediately,
+  ]);
 
   // Aliases to match old usage if needed or just use new names
   const search = cleanedSearchText;
@@ -1313,6 +1482,11 @@ const ChannelCommandMenuContent = ({
       rowListObserverRef.current?.disconnect();
       rowListObserverRef.current = null;
       if (!node) return;
+      // Opened by collapsing full page: start at full page and shrink into place. Played here,
+      // when the root attaches, because Radix mounts the dialog content a render after `open`.
+      if (fullPageSearch && !inline && !contextSelectionMode) {
+        playPendingCollapse(node, deferHistoryRef.current);
+      }
       syncEnterIntent();
       // Observe the results list, not the <Command> root: the footer hint syncEnterIntent toggles
       // sits outside [cmdk-list], so scoping here avoids re-firing on our own hint writes.
@@ -1321,7 +1495,7 @@ const ChannelCommandMenuContent = ({
       observer.observe(listEl, { childList: true, subtree: true });
       rowListObserverRef.current = observer;
     },
-    [syncEnterIntent],
+    [syncEnterIntent, fullPageSearch, inline, contextSelectionMode],
   );
 
   // Ghost suffix telling the user what Enter does - shown when there's typed text or a filter
@@ -1367,9 +1541,8 @@ const ChannelCommandMenuContent = ({
   const openTargetLabel = !searchText.trim() ? activeItemLabel : null;
 
   /**
-   * The URL for the results screen: the palette's chips and scope turned back into filter
-   * params. Goes through the filter registry, so this hand-off and the page's own reading
-   * of the URL can't drift — the two directions are the same definitions.
+   * The URL for the results screen: the palette's search as results-page params
+   * (searchToResultsParams), with the label the page's top bar shows.
    */
   function buildSearchParams(
     text: string,
@@ -1378,17 +1551,12 @@ const ChannelCommandMenuContent = ({
     channels: typeof allChannels,
     tab?: SearchResultsDocType,
   ): URLSearchParams {
-    const params = new URLSearchParams();
-    if (text.trim()) params.set('query', text.trim());
-    if (tab) params.set('tab', tab);
-
-    const filters: SearchResultsFilters = {
-      ...DEFAULT_SEARCH_FILTERS,
-      ...filtersFromChips(mentions as ResultsMention[]),
-      onlyMyChannels,
-      includeBotMessages,
-    };
-    writeRegistryParams(filters, params);
+    const { params, filters } = searchToResultsParams({
+      text,
+      chips: mentions as ResultsMention[],
+      docType: tab,
+      toggles: { onlyMyChannels, includeBotMessages },
+    });
 
     // The human-readable label the top bar shows. Same tokens the results page renders,
     // resolved through the palette's own user/channel data.
@@ -1433,6 +1601,8 @@ const ChannelCommandMenuContent = ({
       toggles: { onlyMyChannels, includeBotMessages },
       // The view too, or coming back would restore the query outside it.
       ...(ticketView ? { ticketView } : {}),
+      // And how it started: a Cmd+F search brought back by Back is still one.
+      sessionOrigin,
     });
   }, [
     open,
@@ -1441,14 +1611,23 @@ const ChannelCommandMenuContent = ({
     onlyMyChannels,
     includeBotMessages,
     ticketView,
+    sessionOrigin,
     setPayload,
   ]);
 
-  // Leave the palette for the full-screen results page via the "Show results for" row.
+  // Leave the palette for the full-screen results page via the "Expand to full-page search" row.
   // Logged as its own event so the jump-out rate is readable per palette and trigger.
-  const goToSearchResults = (trigger: 'click' | 'keyboard'): void => {
-    // The row fires both onClick and cmdk's onSelect for one activation — first one wins.
-    if (navigatingToResultsRef.current) return;
+  const goToSearchResults = (
+    trigger: 'click' | 'keyboard',
+    // The header icon, or a section's "See N more"; left out for the row or the banner standing
+    // in for it.
+    via?: 'header' | 'see_more',
+    // The tab to land on, for "See N more"; otherwise the one the palette is on.
+    tab?: SearchResultsDocType,
+  ): void => {
+    // The row fires both onClick and cmdk's onSelect for one activation — first one wins. Over a
+    // dialog the palette never leaves for the results page (its ways out aren't offered).
+    if (navigatingToResultsRef.current || overPageDialog) return;
     navigatingToResultsRef.current = true;
     showResultsTriggerRef.current = 'keyboard';
 
@@ -1456,9 +1635,10 @@ const ChannelCommandMenuContent = ({
     // us. The search itself is already on that entry, kept current by the effect above.
     markNavigating();
 
-    // Metrics must never be able to swallow the navigation.
+    // Metrics must never be able to swallow the navigation. "See N more" is tracked by its own
+    // row (SEE_MORE_SECTION), not as the show-results row.
     try {
-      if (searchSessionId && currentUserID) {
+      if (via !== 'see_more' && searchSessionId && currentUserID) {
         searchMetricsService.trackShowResults({
           searchSessionId,
           userId: currentUserID,
@@ -1472,26 +1652,86 @@ const ChannelCommandMenuContent = ({
     } catch {
       // Swallowed on purpose — a broken log line must not block the results page.
     }
-    recentSearches.save();
+    // An empty palette has nothing to remember; full page opens on its recents instead.
+    if (searchText.trim() || selectedMentions.length > 0) recentSearches.save();
+    // Remembered so collapsing full page returns the user here, not to a modal over the results.
+    saveFullPageOrigin(openedAtHrefRef.current, sessionOrigin);
+    endedInFullPageRef.current = true;
+    if (workspaceId && currentUserID) {
+      const ids = { workspaceId, userId: currentUserID, searchSessionId };
+      // The banner stands in for the row while it shows, so it is the entry point.
+      const fromBanner = !via && showReturnBanner;
+      if (fromBanner) recordReturnBanner(ids, 'clicked', policyOptions);
+      // A Cmd+F palette goes to full page too, but never teaches the open-size policy.
+      recordExpandToFullPage(
+        ids,
+        via ?? (fromBanner ? 'banner' : 'expand_row'),
+        fullPageSearch && !isMobile && sessionOrigin === 'search',
+      );
+    }
 
-    onOpenChange(false);
     // Land on the tab the user was already filtering by — Messages stays on Messages,
     // Files on Files, and so on. Tabs with no results-page docType (and plain All) fall
     // through to undefined, which leaves the page on its own default.
-    const docType = TAB_TO_DOC_TYPE[activeTab as keyof typeof TAB_TO_DOC_TYPE];
-    void navigate(
-      `/search-results?${buildSearchParams(searchText, selectedMentions, usersById, allChannels, docType).toString()}`,
+    const docType = tab ?? TAB_TO_DOC_TYPE[activeTab as keyof typeof TAB_TO_DOC_TYPE];
+    const resultsParams = buildSearchParams(
+      searchText,
+      selectedMentions,
+      usersById,
+      allChannels,
+      docType,
     );
+    // The highlighted result stays highlighted across the switch: the one highlighted now, or —
+    // reaching for the expand icon moves the pointer off the list, which clears the highlight —
+    // the last one highlighted.
+    const selectedResultId =
+      commandRef.current
+        ?.querySelector('[cmdk-item][aria-selected="true"][data-result-id]')
+        ?.getAttribute('data-result-id') ?? lastHighlightedResultIdRef.current;
+    if (selectedResultId) resultsParams.set(SELECTED_RESULT_PARAM, selectedResultId);
+    const resultsUrl = `/search-results?${resultsParams.toString()}`;
+    const leave = (): void => {
+      growingToFullPageRef.current = false;
+      setGrowingToFullPage(false);
+      onOpenChange(false);
+      announceFullPageOpened();
+      // The page's box takes focus once the palette has gone, but stops waiting after a while: a
+      // search slower than that would leave focus nowhere, so the hand-off gives it to the box.
+      requestAnimationFrame(() => {
+        const active = document.activeElement;
+        if (!active || active === document.body) focusFullPageSearch();
+      });
+    };
+    // Only the app-level palette grows: a page's own copy (the chat directory's) is rendered inside
+    // the page full page keeps underneath, whose frozen location never shows the hand-off. Mobile
+    // has no modal size to grow from — the palette is already full screen — the top bar's inline
+    // palette sits in a popover, not over the page, and a palette opened over full page (mod+/)
+    // has nothing to grow over: the route's search changes, not its path.
+    const root = commandRef.current;
+    if (!root || !fullPageSearch || isMobile || inline || isFullPageSearchPath(location.pathname)) {
+      leave();
+      void navigate(resultsUrl);
+      return;
+    }
+    // Grow, navigate, lift only once the results route has rendered (the effect on the location).
+    growingToFullPageRef.current = true;
+    setGrowingToFullPage(true);
+    void growToFullPage(root).then(() => {
+      pendingHandOffRef.current = leave;
+      expectFullPageReady();
+      void navigate(resultsUrl);
+      // A navigation that never lands must not strand the user under a blank palette.
+      setTimeout(() => {
+        if (pendingHandOffRef.current !== leave) return;
+        pendingHandOffRef.current = null;
+        leave();
+      }, HAND_OFF_TIMEOUT_MS);
+    });
   };
 
-  // Navigate to the full results page with a specific section's tab pre-selected
-  // (from the screen-mode "See N more" links).
+  // A section's "See N more": full page on that section's tab, grown into like the expand row.
   const handleSeeMoreNavigate = (tab: SearchResultsDocType): void => {
-    recentSearches.save();
-    onOpenChange(false);
-    void navigate(
-      `/search-results?${buildSearchParams(searchText, selectedMentions, usersById, allChannels, tab).toString()}`,
-    );
+    goToSearchResults('click', 'see_more', tab);
   };
 
   const acceptTypeAutocomplete = useCallback(() => {
@@ -1513,6 +1753,11 @@ const ChannelCommandMenuContent = ({
   } | null>(null);
   const [previewTicket, setPreviewTicket] = useState<DisplaySearchResult | null>(null);
   const [hoveredResult, setHoveredResult] = useState<DisplaySearchResult | null>(null);
+  // The result row last highlighted, by the arrows or the pointer, for the expand to carry.
+  const lastHighlightedResultIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!open) lastHighlightedResultIdRef.current = null;
+  }, [open]);
   const [keyboardSelectedResult, setKeyboardSelectedResult] = useState<DisplaySearchResult | null>(
     null,
   );
@@ -1579,15 +1824,11 @@ const ChannelCommandMenuContent = ({
   }, []);
 
   const DISPLAY_LIMIT = 5;
-  const RECENTS_STARRED_CAP = 3; // Starred caps at 3 while Recents shows, to fit both sections
 
   // Suppress hover highlights when dialog first opens to prevent dual-highlight
   // (CSS :hover on one item + aria-selected on another) when mouse is already resting in the dialog area
   const [suppressHover, setSuppressHover] = useState(false);
   const hasNavigatedRef = useRef(false);
-
-  // Platform detection - needs to be before useEffects that depend on it
-  const { isMobile } = usePlatform();
 
   // Suppress hover on open to prevent dual-highlight when mouse is already in dialog area
   useEffect(() => {
@@ -2593,6 +2834,27 @@ const ChannelCommandMenuContent = ({
     }
     // Skip user/channel opens — recents capture content searches, not navigation to a person/channel.
     if (result.type !== 'user' && result.type !== 'channel') recentSearches.save();
+    // Remember what this result was found with, so reopening Cmd+K straight after brings it back.
+    // Content results only, like recents: jumping to a person or channel is navigation. Not from a
+    // Cmd+F search: it is scoped to where it was opened and never teaches the policy.
+    if (
+      fullPageSearch &&
+      sessionOrigin === 'search' &&
+      workspaceId &&
+      result.type !== 'user' &&
+      result.type !== 'channel' &&
+      (searchText.trim() || selectedMentions.length > 0)
+    ) {
+      recordResultOpened(
+        { workspaceId, userId: currentUserID },
+        {
+          text: searchText.trim(),
+          filterChips: selectedMentions as ChipData[],
+          tab: activeTab,
+          toggles: { onlyMyChannels, includeBotMessages },
+        },
+      );
+    }
 
     const useModifier = consumeModifier();
 
@@ -2647,6 +2909,7 @@ const ChannelCommandMenuContent = ({
       if (!items || items.length === 0) return;
       const hovered = Array.from(items).find(item => item.matches(':hover'));
       if (!hovered) return;
+      lastHighlightedResultIdRef.current = hovered.getAttribute('data-result-id');
       items.forEach(item => {
         item.setAttribute('aria-selected', item === hovered ? 'true' : 'false');
       });
@@ -2795,15 +3058,39 @@ const ChannelCommandMenuContent = ({
   const iconSize = 14;
 
   const allTabDefinitions: TabDefinition[] = [
-    { id: TabType.MESSAGES, label: 'Messages', icon: <ChatDefault size={iconSize} /> },
-    { id: TabType.USERS, label: 'People', icon: <UserTwo size={iconSize} /> },
-    { id: TabType.CHANNELS, label: 'Channels', icon: <Hashtag size={iconSize} /> },
-    { id: TabType.ATTACHMENTS, label: 'Files', icon: <FolderDefault size={iconSize} /> },
-    { id: TabType.CANVAS, label: 'Canvas', icon: <File02Text size={iconSize} /> },
-    { id: TabType.TICKETS, label: 'Tickets', icon: <TicketToken size={iconSize} /> },
-    { id: TabType.CALL, label: 'Calls', icon: <Phone size={iconSize} /> },
-    { id: TabType.RECORDING, label: 'Recordings', icon: <MicOn size={iconSize} /> },
-    { id: TabType.DESK, label: 'Desk', icon: <EnvelopeDefault size={iconSize} /> },
+    {
+      id: TabType.MESSAGES,
+      label: TAB_LABELS[TabType.MESSAGES],
+      icon: <ChatDefault size={iconSize} />,
+    },
+    { id: TabType.USERS, label: TAB_LABELS[TabType.USERS], icon: <UserTwo size={iconSize} /> },
+    {
+      id: TabType.CHANNELS,
+      label: TAB_LABELS[TabType.CHANNELS],
+      icon: <Hashtag size={iconSize} />,
+    },
+    {
+      id: TabType.ATTACHMENTS,
+      label: TAB_LABELS[TabType.ATTACHMENTS],
+      icon: <FolderDefault size={iconSize} />,
+    },
+    { id: TabType.CANVAS, label: TAB_LABELS[TabType.CANVAS], icon: <File02Text size={iconSize} /> },
+    {
+      id: TabType.TICKETS,
+      label: TAB_LABELS[TabType.TICKETS],
+      icon: <TicketToken size={iconSize} />,
+    },
+    { id: TabType.CALL, label: TAB_LABELS[TabType.CALL], icon: <Phone size={iconSize} /> },
+    {
+      id: TabType.RECORDING,
+      label: TAB_LABELS[TabType.RECORDING],
+      icon: <MicOn size={iconSize} />,
+    },
+    {
+      id: TabType.DESK,
+      label: TAB_LABELS[TabType.DESK],
+      icon: <EnvelopeDefault size={iconSize} />,
+    },
   ];
 
   const resolveTabLabel = (tab: TabType): string =>
@@ -2946,6 +3233,11 @@ const ChannelCommandMenuContent = ({
   // so the auto-select effect below wouldn't re-run and the highlight would stay stranded.
   const backendResultOrder = backendResults.map(r => r.id).join(',');
 
+  // The query the carried result was picked for, once it has been shown selected in it.
+  const carriedQueryRef = useRef<string | null>(null);
+  useEffect(() => {
+    carriedQueryRef.current = null;
+  }, [preferredResultId]);
   useEffect(() => {
     // Auto-select fires when there's a query OR an active filter chip — the
     // latter catches the case where the user typed `from:<name>` / `in:<ch>`,
@@ -2977,11 +3269,22 @@ const ChannelCommandMenuContent = ({
           item => item.getAttribute('data-show-results-item') === 'true',
         );
 
-        // Rest on the first real result; fall back to the show-results row when no real
-        // row is selectable (zero hits, still streaming, or it's the only row).
-        const firstReal = rows.findIndex(
-          item => item.getAttribute('data-show-results-item') !== 'true',
-        );
+        // Rest on the result carried back from full page if it is here — for the search it came
+        // with only: once the query moves on, the first result is the pick, as for any search —
+        // else on the first real result; fall back to the show-results row when no real row is
+        // selectable (zero hits, still streaming, or it's the only row).
+        const query = searchText.trim();
+        const carriedApplies =
+          preferredResultId !== null &&
+          (carriedQueryRef.current === null || carriedQueryRef.current === query);
+        const carried = carriedApplies
+          ? rows.findIndex(item => item.getAttribute('data-result-id') === preferredResultId)
+          : -1;
+        if (carried !== -1) carriedQueryRef.current = query;
+        const firstReal =
+          carried !== -1
+            ? carried
+            : rows.findIndex(item => item.getAttribute('data-show-results-item') !== 'true');
         const selectedIndex =
           firstReal !== -1 ? firstReal : showResultsIndex !== -1 ? showResultsIndex : 0;
         items.forEach((item, i) => {
@@ -3003,8 +3306,10 @@ const ChannelCommandMenuContent = ({
     mentionSearchType,
     commandActive,
     // Adding/removing a chip flips the resting Enter target between the first result and
-    // the "Show results for" row, so the auto-select has to re-run.
+    // the "Expand to full-page search" row, so the auto-select has to re-run.
     selectedMentions.length,
+    // The result carried back from full page: set as a collapse opens the palette.
+    preferredResultId,
     // `commandText` is a dep (not read in the body) so the first-row auto-select
     // re-fires as the `/` command list / user picker narrows while typing.
     commandText,
@@ -3153,7 +3458,10 @@ const ChannelCommandMenuContent = ({
               // never offers it: the results page would drop the view's filters, and the
               // list already pages in place.
               const showSeeMore =
-                !!sectionTab && !isInTicketView && (!isScreenAll || hiddenCount > 0);
+                !!sectionTab &&
+                !isInTicketView &&
+                !overPageDialog &&
+                (!isScreenAll || hiddenCount > 0);
 
               return (
                 <div key={groupKey} className='mb-4'>
@@ -3313,7 +3621,7 @@ const ChannelCommandMenuContent = ({
   );
 
   // Render the plain-search USERS section. Extracted so it can be rendered
-  // above the "Show results for" row when there is a strong user match.
+  // above the "Expand to full-page search" row when there is a strong user match.
   const renderSearchUsersSection = () =>
     (activeTab === TabType.ALL || activeTab === TabType.USERS) &&
     showGroupedUsers &&
@@ -3336,7 +3644,7 @@ const ChannelCommandMenuContent = ({
           const isExpanded = expandedCategories.has('users');
           // Full-screen (screen) mode: "See more" routes to the results page for ANY tab
           // (not just ALL); popup mode keeps the inline expand/collapse.
-          const routeSeeMore = searchMode === 'screen';
+          const routeSeeMore = searchMode === 'screen' && !overPageDialog;
           const hasMore = totalItemsCount > DISPLAY_LIMIT;
 
           const displayItems = !isExpanded && hasMore ? allItems.slice(0, DISPLAY_LIMIT) : allItems;
@@ -3390,7 +3698,7 @@ const ChannelCommandMenuContent = ({
           const items = groupedChannels[ChannelCategory.CHANNELS] ?? [];
           const category = ChannelCategory.CHANNELS;
           const isExpanded = expandedCategories.has(category);
-          const routeSeeMore = searchMode === 'screen';
+          const routeSeeMore = searchMode === 'screen' && !overPageDialog;
           const hasMore = items.length > DISPLAY_LIMIT;
           const displayItems = !isExpanded && hasMore ? items.slice(0, DISPLAY_LIMIT) : items;
           const hiddenCount = items.length - DISPLAY_LIMIT;
@@ -3453,7 +3761,7 @@ const ChannelCommandMenuContent = ({
           const items = groupedChannels[ChannelCategory.STARRED] ?? [];
           const category = ChannelCategory.STARRED;
           const isExpanded = expandedCategories.has(category);
-          const routeSeeMore = searchMode === 'screen';
+          const routeSeeMore = searchMode === 'screen' && !overPageDialog;
           const hasMore = items.length > DISPLAY_LIMIT;
           const displayItems = !isExpanded && hasMore ? items.slice(0, DISPLAY_LIMIT) : items;
           const hiddenCount = items.length - DISPLAY_LIMIT;
@@ -3524,7 +3832,7 @@ const ChannelCommandMenuContent = ({
           // per-keystroke render + cmdk bookkeeping cost.
           const category = ChannelCategory.GROUP_DMS;
           const isExpanded = expandedCategories.has(category);
-          const routeSeeMore = searchMode === 'screen';
+          const routeSeeMore = searchMode === 'screen' && !overPageDialog;
           const hasMore = localGroupDMs.length > DISPLAY_LIMIT;
           const displayItems =
             !isExpanded && hasMore ? localGroupDMs.slice(0, DISPLAY_LIMIT) : localGroupDMs;
@@ -3894,6 +4202,13 @@ const ChannelCommandMenuContent = ({
   };
 
   const handleCommandKeyDown = (e: React.KeyboardEvent<HTMLElement>): void => {
+    // Mid-grow into full page the search is already on its way; swallow every key.
+    if (growingToFullPageRef.current) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+
     // A picked target renders its own UI (composer or confirm modal) — let it own all
     // keys (typing, Enter to send/confirm, its own @/# mention pickers).
     if (commandTarget) return;
@@ -4029,6 +4344,8 @@ const ChannelCommandMenuContent = ({
 
       // Track which result is currently selected via keyboard
       const newlySelectedItem = items[nextIndex];
+      lastHighlightedResultIdRef.current =
+        newlySelectedItem?.getAttribute('data-result-id') ?? null;
       // Keep the command ghost in sync when arrowing through the `/` command list.
       const navCommandWord = newlySelectedItem?.getAttribute('data-command-word');
       if (navCommandWord) setActiveCommandWord(navCommandWord);
@@ -4208,7 +4525,7 @@ const ChannelCommandMenuContent = ({
     const enterTarget =
       activeItem ??
       (commandRef.current?.querySelector(
-        // In the popup the pinned "Show results for" row is the first item in the DOM,
+        // In the popup the pinned "Expand to full-page search" row is the first item in the DOM,
         // so exclude it here — the resting Enter target is still the first real result.
         isScreenPalette
           ? '[cmdk-item]:not([aria-disabled="true"])'
@@ -4258,12 +4575,13 @@ const ChannelCommandMenuContent = ({
       },
     });
 
-  // "Show results for: <chips> <query>" — the row that leaves the palette for the
+  // "Expand to full-page search: <chips> <query>" — the row that leaves the palette for the
   // full-screen results page. Rendered in both palettes; where it sits in the list is
   // decided at the call sites below. Never in the inline/context-selection palettes
   // (Ask AI context picker, thread-panel context) — navigating away would hijack the
   // picking flow. The old screen-only gate excluded those implicitly.
   const showResultsForRow =
+    !overPageDialog &&
     !inline &&
     !contextSelectionMode &&
     !isInTicketView &&
@@ -4285,9 +4603,9 @@ const ChannelCommandMenuContent = ({
           data-track-category='SEARCH'
           data-track-name='SHOW_RESULTS_FOR'
         >
-          <SearchDefault size={14} className='text-muted-foreground shrink-0' />
+          <Maximize2 size={14} className='text-muted-foreground shrink-0' />
           <span className='flex items-center flex-wrap gap-1'>
-            <span className='text-sm'>Show detailed results for:</span>
+            <span className='text-sm'>Expand to full-page search:</span>
             <QueryFilterChips
               mentions={selectedMentions as ChipData[]}
               currentUserID={currentUserID}
@@ -4312,6 +4630,59 @@ const ChannelCommandMenuContent = ({
       )?.focus();
     });
   };
+
+  // Where the palette can grow into full page from: the app-level search, not the pickers built on
+  // it, not a ticket-view search, not mid-mention, and not on mobile (already full screen).
+  const canExpandToFullPage =
+    fullPageSearch &&
+    !overPageDialog &&
+    !feedbackOpen &&
+    !inline &&
+    !contextSelectionMode &&
+    !isInTicketView &&
+    !mentionSearchType &&
+    !isMobile;
+
+  // On a quick return to Cmd+K the banner takes the row's place (never both): while it is offered
+  // for this open, not dismissed, and the restored query still has results.
+  const showReturnBanner =
+    returnBanner && !returnBannerDismissed && showResultsForRow !== null && hasResults;
+
+  const expandEntry = showReturnBanner ? (
+    <ReturnBanner
+      chips={
+        <QueryFilterChips
+          mentions={selectedMentions as ChipData[]}
+          currentUserID={currentUserID}
+          resolveName={resolveChipDisplayName}
+        />
+      }
+      queryText={searchText.trim()}
+      onShown={() => {
+        // Counted once per open, even if it hides and comes back as results change.
+        if (returnBannerCountedRef.current || !workspaceId) return;
+        returnBannerCountedRef.current = true;
+        recordReturnBanner(
+          { workspaceId, userId: currentUserID, searchSessionId },
+          'shown',
+          policyOptions,
+        );
+      }}
+      onExpand={goToSearchResults}
+      onDismiss={() => {
+        setReturnBannerDismissed(true);
+        if (workspaceId) {
+          recordReturnBanner(
+            { workspaceId, userId: currentUserID, searchSessionId },
+            'dismissed',
+            policyOptions,
+          );
+        }
+      }}
+    />
+  ) : (
+    showResultsForRow
+  );
 
   const commandBody = (
     <>
@@ -4452,6 +4823,27 @@ const ChannelCommandMenuContent = ({
               </div>
             ))}
           </div>
+          {canExpandToFullPage && (
+            <>
+              <span className='w-px h-5 bg-border mx-1 flex-shrink-0' />
+              <div className='relative group/expandtip flex-shrink-0'>
+                <button
+                  type='button'
+                  aria-label='Expand to full page'
+                  onMouseDown={event => event.preventDefault()}
+                  onClick={() => goToSearchResults('click', 'header')}
+                  className='size-8 grid place-items-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors focus-visible:outline-none focus-visible:ring-0'
+                  data-track-category='SEARCH'
+                  data-track-name='EXPAND_TO_FULL_PAGE'
+                >
+                  <Maximize2 size={16} />
+                </button>
+                <div className='pointer-events-none absolute top-full right-0 mt-1.5 px-2 py-1 rounded text-xs bg-foreground text-background whitespace-nowrap opacity-0 group-hover/expandtip:opacity-100 transition-opacity z-[10001]'>
+                  Expand to full page
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -4696,10 +5088,13 @@ const ChannelCommandMenuContent = ({
               // position is communicated by aria-selected, never by a ring here.
               'flex-1 overflow-y-auto px-4 pt-3 pb-6 focus:outline-none focus-visible:outline-none',
               '[&_[cmdk-item]]:scroll-mb-[30px]',
-              // The pinned "Show results for" row is exempt: it sits where the cursor
+              // The pinned "Expand to full-page search" row is exempt: it sits where the cursor
               // rests when the palette opens, and its first click must land even before
               // any mousemove clears suppressHover. Result rows keep the guard.
               suppressHover && '[&_[cmdk-item]:not([data-show-results-item])]:pointer-events-none',
+              // Opening on a carried search: hidden until it shows it, then faded in.
+              'transition-opacity duration-150',
+              holdingCarriedList && 'opacity-0',
             )}
             ref={el => {
               if (el) {
@@ -4725,16 +5120,16 @@ const ChannelCommandMenuContent = ({
                 {/* Popup palette: the row is pinned here, directly under the tabs, so it
                     sits in the same place no matter what matched. It is skipped by the
                     first-row auto-select, so the top result keeps the Enter target. */}
-                {!isScreenPalette && showResultsForRow}
+                {!isScreenPalette && expandEntry}
 
                 {/* Best local matches pinned to the top of the list — both popup and
                     screen. Starred leads; the strong-matched user/channel then becomes
                     the default Enter target (Slack-style). In screen mode these sit
-                    above the "Show results for" row below. */}
+                    above the "Expand to full-page search" row below. */}
 
                 {/* Screen palette: the row stays below the hoisted best matches, which
                     own the Enter target there. */}
-                {isScreenPalette && showResultsForRow}
+                {isScreenPalette && expandEntry}
 
                 {/* Mention Suggestions - Show when mention search is active */}
                 {mentionSearchType && (
@@ -5735,6 +6130,11 @@ const ChannelCommandMenuContent = ({
             // whole palette. It's a container, never a navigation position.
             className='focus:outline-none focus-visible:outline-none'
             onInteractOutside={event => {
+              // Growing into full page: the hand-off closes the palette itself.
+              if (growingToFullPageRef.current) {
+                event.preventDefault();
+                return;
+              }
               // Keep the palette open when the interaction comes from a composer
               // overlay portaled to <body> (canvas/emoji modals). They live
               // outside this dialog's DOM subtree, so Radix would otherwise read
@@ -5746,6 +6146,10 @@ const ChannelCommandMenuContent = ({
               }
             }}
             onEscapeKeyDown={event => {
+              if (growingToFullPageRef.current) {
+                event.preventDefault();
+                return;
+              }
               // Esc in the feedback view goes back to the results instead of closing the palette.
               if (feedbackOpen) {
                 event.preventDefault();
@@ -5803,9 +6207,13 @@ const ChannelCommandMenuContent = ({
                 // changes the list height, never the total. Mobile keeps h-[100dvh]/h-screen.
                 //
                 // The feedback view is shorter, so the height shrinks to fit it while open.
+                // The full-page collapse lands on the 549px box and this shadow before the palette
+                // exists to measure (cmdkFullPage's modalBox and MODAL_SHADOW): restyle them
+                // together.
                 feedbackOpen ? 'md:h-auto' : 'md:h-[549px]',
                 'md:w-full md:overflow-hidden bg-card md:rounded-2xl shadow-[0px_7px_15px_0px_#0000000D,0px_28px_28px_0px_#00000017,0px_62px_37px_0px_#0000000D,0px_111px_44px_0px_#00000003,0px_173px_48px_0px_#00000000] border border-border',
                 showMergeDialog ? 'z-40' : 'z-[9999]',
+                growingToFullPage && 'pointer-events-none',
               )}
               onKeyDownCapture={handleCommandKeyDown}
             >
@@ -5836,9 +6244,11 @@ const ChannelCommandMenu = (props: ChannelCommandMenuProps): ReactElement | null
     onOpenChange,
     inline = false,
     contextSelectionMode = false,
+    globalShortcuts = true,
     initialQuery,
     restoreFromLastSearch,
     onRestoreTicketView,
+    deferHistory = false,
   } = props;
 
   const [mounted, setMounted] = useState(open || inline);
@@ -5873,11 +6283,15 @@ const ChannelCommandMenu = (props: ChannelCommandMenuProps): ReactElement | null
     () => {
       // Cmd+K opens this palette in both search modes. Screen-mode behavior (2-item previews +
       // "See more" that routes to `/search-results`) comes from the `searchMode === 'screen'`
-      // checks in the palette.
-      if (!open) requestShortcut();
-      onOpenChange(!open);
+      // checks in the palette. A press that opened nothing (it went to full page) has no session
+      // to start.
+      if (open) {
+        onOpenChange(false);
+        return;
+      }
+      if (onOpenChange(true, 'shortcut') !== false) requestShortcut();
     },
-    { enabled: !contextSelectionMode },
+    { enabled: !contextSelectionMode && (globalShortcuts || open) },
   );
 
   // `mod+/` opens the menu straight into command mode (seeds `/` for slash-command discovery)
@@ -5885,11 +6299,11 @@ const ChannelCommandMenu = (props: ChannelCommandMenuProps): ReactElement | null
   useShortcutById(
     'global.openCommandMode',
     () => {
+      if (onOpenChange(true) === false) return;
       requestShortcut();
       setSeedCommandMode(true);
-      onOpenChange(true);
     },
-    { enabled: !contextSelectionMode },
+    { enabled: !contextSelectionMode && (globalShortcuts || open) },
   );
 
   // Cmd+K joins the URL history stack: opening pushes an entry, so the top-bar back arrow
@@ -5907,10 +6321,14 @@ const ChannelCommandMenu = (props: ChannelCommandMenuProps): ReactElement | null
       setRestoredQuery(source ? { text: source.text, mentions: source.mentions } : null);
       setRestoredToggles(source?.toggles ?? null);
       if (source?.ticketView) onRestoreTicketViewRef.current?.(source.ticketView);
-      onOpenChange(true);
+      // Read from history: only a recognised Cmd+F origin stays one.
+      const sessionOrigin = source?.sessionOrigin === 'findInChannel' ? 'findInChannel' : 'search';
+      onOpenChange(true, { restore: sessionOrigin });
     },
     id: 'command-menu',
-    enabled: !inline && !contextSelectionMode,
+    // Deferred while a collapse from full page is still navigating back: an entry pushed now
+    // would land on the results page and cancel that navigation.
+    enabled: !inline && !contextSelectionMode && !deferHistory,
   });
 
   // A restore only seeds the open it triggered — the next plain cmd+K starts empty.

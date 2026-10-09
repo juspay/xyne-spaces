@@ -3,6 +3,7 @@ import { Copy, ExternalLink, Link2, Trash2, Unlink } from 'lucide-react';
 import type { ReactElement } from 'react';
 import { toast } from 'sonner';
 import { useClipboard } from '../../hooks/useClipboard';
+import { UnmountWhenCovered } from '../../hooks/usePageCoverage';
 import { resolveVideoEmbed } from './videoEmbedUrl';
 
 export const CANVAS_EMBED_TYPE = 'embed';
@@ -152,17 +153,21 @@ function PlayerEmbed({ embedUrl, provider }: { embedUrl: string; provider: strin
       data-embed-provider={provider}
       contentEditable={false}
     >
-      <iframe
-        src={embedUrl}
-        title='Embedded video'
-        className='absolute inset-0 h-full w-full'
-        allow='accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture'
-        // The frame runs scripts and reaches its own origin — a player cannot
-        // work otherwise — but it may not navigate the document hosting it.
-        sandbox='allow-scripts allow-same-origin allow-presentation allow-popups allow-popups-to-escape-sandbox'
-        referrerPolicy='strict-origin-when-cross-origin'
-        allowFullScreen
-      />
+      {/* Not under full-page search: a video playing there is out of reach, so the player goes, as
+          leaving the page took it, and is back (stopped) on return. */}
+      <UnmountWhenCovered fallback={<div className='absolute inset-0 bg-muted' />}>
+        <iframe
+          src={embedUrl}
+          title='Embedded video'
+          className='absolute inset-0 h-full w-full'
+          allow='accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture'
+          // The frame runs scripts and reaches its own origin — a player cannot
+          // work otherwise — but it may not navigate the document hosting it.
+          sandbox='allow-scripts allow-same-origin allow-presentation allow-popups allow-popups-to-escape-sandbox'
+          referrerPolicy='strict-origin-when-cross-origin'
+          allowFullScreen
+        />
+      </UnmountWhenCovered>
     </div>
   );
 }

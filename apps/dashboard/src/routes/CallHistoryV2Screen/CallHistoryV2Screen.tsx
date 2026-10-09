@@ -32,6 +32,7 @@ import { ScheduleCallModal } from '../../components/Call/ScheduleCallModal/Sched
 import { useActiveUserSearch, useUsers } from '../../hooks/useUsers';
 import { useAllChannels } from '../../hooks/useChannels';
 import { useZero } from '../../hooks/useZero';
+import { usePageCoverage, whenShown } from '../../hooks/usePageCoverage';
 import { cn } from '../../utils/classNames';
 import { isSameDay } from '../../utils/dateUtils';
 import { mutators } from '../../zero/mutators';
@@ -346,11 +347,16 @@ const CallHistoryV2Screen = (): ReactElement => {
 
   const endedCallsCount = calls?.filter(c => c.status === CallStatus.ENDED).length ?? 0;
 
+  // Under full-page search the list is off screen: calls that end meanwhile stay unread until it
+  // is back.
+  const coverage = usePageCoverage();
   useEffect(() => {
     if (endedCallsCount === 0) return;
 
-    void zero.mutate(mutators.activities.markMissedCallsAsRead({}));
-  }, [endedCallsCount]);
+    return whenShown(coverage, () => {
+      void zero.mutate(mutators.activities.markMissedCallsAsRead({}));
+    });
+  }, [endedCallsCount, coverage]);
 
   useEffect(() => {
     if (queryDetails.type === 'unknown') {

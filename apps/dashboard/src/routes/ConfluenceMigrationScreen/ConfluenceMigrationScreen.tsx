@@ -18,6 +18,7 @@ import {
   type ConfluenceMigrationPreviewResponse,
   type ConfluenceMigrationSummary,
 } from '../../services/ConfluenceMigration/confluenceMigrationService';
+import { usePageCoverage, watchShown } from '../../hooks/usePageCoverage';
 
 const ACTIVE_CONFLUENCE_MIGRATION_STORAGE_KEY = 'confluenceMigration.activeJob';
 const PAGE_RESULTS_PER_VIEW = 12;
@@ -195,6 +196,9 @@ const ConfluenceMigrationScreen = (): ReactElement => {
     });
   }, []);
 
+  // Job status isn't polled under full-page search, out of sight there, as leaving the page stopped
+  // it; polled again once the collapse back to it is over.
+  const pageCoverage = usePageCoverage();
   useEffect(() => {
     if (!activeJobId) return undefined;
 
@@ -246,15 +250,17 @@ const ConfluenceMigrationScreen = (): ReactElement => {
     };
 
     void pollStatus();
+    const watch = watchShown(pageCoverage, () => void pollStatus());
     const intervalId = window.setInterval(() => {
-      void pollStatus();
+      if (watch.shown()) void pollStatus();
     }, 1500);
 
     return (): void => {
       cancelled = true;
       window.clearInterval(intervalId);
+      watch.stop();
     };
-  }, [activeJobId]);
+  }, [activeJobId, pageCoverage]);
 
   const handlePreview = async (): Promise<void> => {
     if (!canPreview) {

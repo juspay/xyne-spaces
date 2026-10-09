@@ -31,6 +31,7 @@ import {
   getPieChartConfig,
   processDurationMetric,
 } from './AnalyticsScreen.utils';
+import { usePollWhenShown } from '../../hooks/usePageCoverage';
 
 type Theme = 'classic' | 'midnight' | 'summer_breeze';
 
@@ -76,8 +77,15 @@ const AnalyticsScreen = (): ReactElement => {
     return { ...params, groupBy: 'hour' as const };
   }, [dateRange]);
 
-  // Query configuration using utility function (refetchInterval handles live updates)
-  const queryConfig = createQueryConfig(user);
+  // Query configuration using utility function (refetchInterval handles live updates, while the
+  // page is shown)
+  const shown = usePollWhenShown(['analytics']);
+  const baseQueryConfig = createQueryConfig(user);
+  const queryConfig = {
+    ...baseQueryConfig,
+    refetchInterval: (): number | false => (shown() ? baseQueryConfig.refetchInterval : false),
+    refetchOnReconnect: (): boolean => shown(),
+  };
 
   // Individual useQuery calls with stable query keys
   const {

@@ -187,6 +187,18 @@ export default {
           '0%, 100%': { boxShadow: '0 0 0 0 hsl(var(--primary) / 0)' },
           '25%, 75%': { boxShadow: '0 0 0 3px hsl(var(--primary) / 0.55)' },
         },
+        // Cmd+K return banner: the border brightens to Xyne orange and a soft ring spreads out.
+        'cmdk-banner-pulse': {
+          '0%': {
+            borderColor: 'rgba(255, 105, 0, 0.35)',
+            boxShadow: '0 0 0 0 rgba(255, 105, 0, 0)',
+          },
+          '25%': { borderColor: '#FF6900', boxShadow: '0 0 0 3px rgba(255, 105, 0, 0.18)' },
+          '100%': {
+            borderColor: 'rgba(255, 105, 0, 0.35)',
+            boxShadow: '0 0 0 6px rgba(255, 105, 0, 0)',
+          },
+        },
         // Incoming-call modal: the radar ping behind a solo caller's avatar.
         'call-radar': {
           '0%': { transform: 'scale(1)', opacity: '0.45' },
@@ -316,6 +328,9 @@ export default {
       },
       animation: {
         'streams-column-flash': 'streams-column-flash 300ms cubic-bezier(0.23,1,0.32,1)',
+        // Starts 300ms after the banner appears, plays twice, then rests. `backwards`, not
+        // `both`: a held final frame would pin the border colour and block the hover state.
+        'cmdk-banner-pulse': 'cmdk-banner-pulse 1.6s cubic-bezier(0.4,0,0.2,1) 300ms 2 backwards',
         'call-radar': 'call-radar 2s cubic-bezier(0, 0, 0.2, 1) infinite',
         'live-ping': 'live-ping 2s cubic-bezier(0, 0, 0.2, 1) infinite',
         'live-pulse': 'live-pulse 2s ease-in-out infinite',
