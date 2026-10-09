@@ -23,7 +23,7 @@ import { compactionExtension, setCompactionSubmitTool } from "./compaction-exten
 import { takeCitations, takeDebug } from "./citations.js";
 import { applyAutoCitations } from "./auto-citations.js";
 import { extractSessionClfTokens } from "./citation-sanitizer.js";
-import { getSandboxSession } from "xyne-claw-shared";
+import { checkReplyFormat, replyFormatNudge, type ResultSectionLimits, getSandboxSession } from "xyne-claw-shared";
 import type {
   ClawAttachmentPayload,
   ClawSandboxPreviewPayload,
@@ -1796,6 +1796,7 @@ export interface RunTaskOptions {
    *  yet the final prose cites none, runTask nudges the model once to rewrite
    *  the answer with inline citations. See the post-loop block. */
   citationReflection?: boolean | undefined;
+  replyFormat?: ResultSectionLimits | undefined;
   /** Opt-in generic auto-citations (agentConfig.autoToolCitations). When true,
    *  EVERY tool result that doesn't already self-cite is chunked and prefixed
    *  with inline [clf-<toolCallId>#n] tokens (plus one generic citation per
@@ -1965,6 +1966,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     planContinuation,
     agentHandoff,
     citationReflection,
+    replyFormat,
     autoToolCitations,
     isRegenerate,
     backgroundRegistry,
@@ -3819,6 +3821,23 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       if (nq._agentEventQueue) {
         await withAbort(nq._agentEventQueue);
       }
+    }
+  }
+
+  if (replyFormat && !structuredOutputRef && !verifyResponsesRef && !abortSignal?.aborted) {
+    const before = checkReplyFormat(extractFinalAnswerText(session, opts.finalAnswerMaxTurns) ?? "", replyFormat);
+    if (!before.ok) {
+      log.info(`[agent] replyFormat: answer does not fit (${before.problems.join("; ")}) — nudging rewrite`);
+      pushDebugEvent("reply_format", { phase: "nudge", problems: before.problems });
+      turnParts.supersedeTrailingText();
+      await promptWithAbort(() => session.prompt(`<system>${replyFormatNudge(before.problems, replyFormat)}</system>`));
+      const nq = session as unknown as { _agentEventQueue?: Promise<void> };
+      if (nq._agentEventQueue) {
+        await withAbort(nq._agentEventQueue);
+      }
+      const after = checkReplyFormat(extractFinalAnswerText(session, opts.finalAnswerMaxTurns) ?? "", replyFormat);
+      log.info(`[agent] replyFormat: rewrite ${after.ok ? "fits" : `still over (${after.problems.join("; ")}) — delivery will split it`}`);
+      pushDebugEvent("reply_format", { phase: "result", ok: after.ok, problems: after.problems });
     }
   }
 

@@ -66,6 +66,13 @@ export interface ChannelCapabilities {
    *  numbers are the messenger's hard caps, not our preference: the core
    *  trims to them and falls back to numbered text when this is absent. */
   interactive?: InteractiveLimits;
+  resultSections?: ResultSectionsCapability;
+}
+
+export interface ResultSectionsCapability {
+  maxWords: number;
+  maxSections: number;
+  fileMimeType: string;
 }
 
 /** What a messenger will accept in one interactive message. */
