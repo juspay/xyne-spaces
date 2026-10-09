@@ -1,3 +1,21 @@
+## [1.487.0](https://github.com/juspay/xyne-spaces/compare/v1.486.0...v1.487.0) (2026-10-09)
+
+
+### Features
+
+* edit sandbox profiles from the Environments page ([#2518](https://github.com/juspay/xyne-spaces/issues/2518)) ([ce7bdb4](https://github.com/juspay/xyne-spaces/commit/ce7bdb4e93c4a587d5b0b947191a23e7234434f3))
+* rewrite Hub Knowledge as Knowledge Files and Linked Skills ([#2703](https://github.com/juspay/xyne-spaces/issues/2703)) ([b0d164b](https://github.com/juspay/xyne-spaces/commit/b0d164bd410266b8fcdc507d5333ff692a300ec7))
+* SDLC hub agents and environments ([#2484](https://github.com/juspay/xyne-spaces/issues/2484)) ([f6ec649](https://github.com/juspay/xyne-spaces/commit/f6ec6491dcfbbd5dc76bcce81993b19a917d105d))
+
+
+### Bug Fixes
+
+* access fixes ([#2850](https://github.com/juspay/xyne-spaces/issues/2850)) ([cee33c8](https://github.com/juspay/xyne-spaces/commit/cee33c8c9c0b0f1b75faebed56593589581fbb51))
+* label resolution and display pending labels in new calls screen ([#2847](https://github.com/juspay/xyne-spaces/issues/2847)) ([39032d1](https://github.com/juspay/xyne-spaces/commit/39032d148a1e1bb7468729b8120284e8159a7741))
+* land message deep links at the right position ([#2658](https://github.com/juspay/xyne-spaces/issues/2658)) ([216a3a0](https://github.com/juspay/xyne-spaces/commit/216a3a0658de03aeca3c190e063e463708bae2eb))
+* max-width consist layout for calls, recordings and remove people filter ([#2852](https://github.com/juspay/xyne-spaces/issues/2852)) ([ed0646c](https://github.com/juspay/xyne-spaces/commit/ed0646c3fbc1fd9a2c642c2bfdc5cc008ff7f8d1))
+* show lock icon for private channels in activity thread breadcrumb ([#2822](https://github.com/juspay/xyne-spaces/issues/2822)) ([d946156](https://github.com/juspay/xyne-spaces/commit/d9461567a975012de7ee53c0f01697823b838a06))
+
 ## [1.486.0](https://github.com/juspay/xyne-spaces/compare/v1.485.0...v1.486.0) (2026-10-09)
 
 
