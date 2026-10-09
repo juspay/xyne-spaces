@@ -12,6 +12,10 @@ export const samTranscriptSchema = 'sam_transcript';
 export const mailSchema = 'mail';
 export const appSchema = 'app';
 export const callSchema = 'call';
+// SDLC Hub search: the hub's tracks and folders, and its repositories. SDLC documents stay in
+// `file`, and tickets and conversations in their own schemas, each pointing at its container.
+export const sdlcContainerSchema = 'sdlc_container';
+export const sdlcRepositorySchema = 'sdlc_repository';
 export type VespaSchema =
   | typeof ticketSchema
   | typeof messageSchema
@@ -25,6 +29,8 @@ export type VespaSchema =
   | typeof mailSchema
   | typeof appSchema
   | typeof callSchema
+  | typeof sdlcContainerSchema
+  | typeof sdlcRepositorySchema
 
 export const VESPA_SCHEMAS: VespaSchema[] = [
   ticketSchema,
@@ -38,7 +44,9 @@ export const VESPA_SCHEMAS: VespaSchema[] = [
   samTranscriptSchema,
   mailSchema,
   appSchema,
-  callSchema
+  callSchema,
+  sdlcContainerSchema,
+  sdlcRepositorySchema,
 ];
 
 export const MemoryScope = {
@@ -110,7 +118,9 @@ export enum VespaDocType {
   SAM_TRANSCRIPT = 'sam_transcript',
   MAIL = 'mail',
   APP = 'app',
-  CALL = 'call'
+  CALL = 'call',
+  SDLC_CONTAINER = 'sdlc_container',
+  SDLC_REPOSITORY = 'sdlc_repository',
 }
 
 export enum SubApp {
@@ -198,6 +208,8 @@ export interface VespaChatAttachmentDocument extends VespaDocument {
 export interface VespaChatContainerDocument extends VespaDocument {
   channelName: string;
   scopeType: string;
+  /** DEFAULT | EMAIL | SUPPORT | SLACK | APP | CALL | SOCIAL_MEDIA | SDLC: the channel's type. */
+  channelType: string;
   visibility: string;
   isIm: boolean;
   isMpim: boolean;
@@ -220,7 +232,7 @@ export interface VespaChatContainerDocument extends VespaDocument {
   memberCount: number;
 }
 
-export interface VespaChatMessageDocument extends Omit<VespaDocument, 'orgId' | 'workspaceId'> {
+export interface VespaChatMessageDocument extends Omit<VespaDocument, 'orgId' | 'workspaceId'>, Partial<SdlcDiscussionFields> {
   text: string;
   chunks: string[];
   links?: string[];
@@ -265,7 +277,7 @@ export interface VespaProjectDocument extends VespaDocument {
   updatedAt: number;
 }
 
-export interface VespaTicketDocument extends Omit<VespaDocument, 'orgId' | 'workspaceId'> {
+export interface VespaTicketDocument extends Omit<VespaDocument, 'orgId' | 'workspaceId'>, Partial<SdlcTicketFields> {
   convId: string;
   userGroupId: string;
   channelRef: string;
@@ -354,7 +366,7 @@ export interface VespaChunkMeta {
   block_labels: string[];
 }
 
-export interface VespaFileDocument extends VespaDocument {
+export interface VespaFileDocument extends VespaDocument, Partial<SdlcFileFields> {
   fileName: string;
   description: string;
   chunks: string[];
@@ -616,6 +628,101 @@ export type InsertDocument =
   | VespaMailDocument
   | VespaCallDocument
   | VespaAppDocument
+  | VespaSdlcContainerDocument
+  | VespaSdlcRepositoryDocument
+
+/**
+ * Where an item sits in an SDLC Hub: a reference to the track or folder it is in. Vespa
+ * imports the container's branch, track, scope and path from it (sdlcContainerId,
+ * sdlcContainerType, sdlcBranch, sdlcTrackId, sdlcScopeIds, sdlcPath), so nothing else is fed.
+ * Empty when the item is in no hub. Shared by documents (`file`) and messages.
+ */
+export interface SdlcPlacementFields {
+  /** id:sdlc_container:sdlc_container::<trackId|folderId>, or '' outside SDLC. */
+  sdlcContainerRef: string;
+}
+
+/** An SDLC document (a canvas filed in a hub, or an upload filed in a track) in `file`. */
+export interface SdlcFileFields extends SdlcPlacementFields {
+  /** Canvases only: the name of the document's canvas folder, e.g. "PRDs". '' for uploads. */
+  sdlcTypeName: string;
+  /** ACTIVE | ARCHIVED (sdlc_artifacts.artifactStatus); '' for uploads. */
+  sdlcStatus: string;
+  /** Other SDLC documents linked to it as context, read in both directions. */
+  sdlcRelatedDocumentIds: string[];
+}
+
+/**
+ * Where a conversation sits in an SDLC Hub. Started on a document, it is placed in the
+ * document's container and names the document; started on a track or folder, the document
+ * is ''.
+ */
+export interface SdlcDiscussionFields extends SdlcPlacementFields {
+  /** The file docId (canvas or upload) it was started on, or ''. */
+  sdlcDocumentId: string;
+}
+
+/**
+ * Where a ticket sits in SDLC hubs. Unlike a document or discussion, one ticket can sit in
+ * several places (raised on one item, linked from items in other tracks or hubs), so its places
+ * are fed as lists rather than imported through a single container reference.
+ */
+export interface SdlcTicketFields {
+  /** Every hub, track and folder above every item it is linked from, and every track holding it. */
+  sdlcScopeIds: string[];
+  /** Every document (canvas or upload) linked to it by a TICKET or CONTEXT edge. */
+  sdlcDocumentIds: string[];
+}
+
+export const SDLC_DISCUSSION_FIELDS: readonly (keyof SdlcDiscussionFields)[] = ['sdlcContainerRef', 'sdlcDocumentId'];
+export const SDLC_TICKET_FIELDS: readonly (keyof SdlcTicketFields)[] = ['sdlcScopeIds', 'sdlcDocumentIds'];
+export const SDLC_FILE_FIELDS: readonly (keyof SdlcFileFields)[] = [
+  'sdlcContainerRef', 'sdlcTypeName', 'sdlcStatus', 'sdlcRelatedDocumentIds',
+];
+
+export type SdlcBranch = 'TRACKS' | 'WIKI' | 'KNOWLEDGE';
+export type SdlcContainerType = 'TRACK' | 'FOLDER' | 'REPOSITORY';
+
+/** A track or folder of an SDLC Hub (vespa-core: sdlc_container.sd). */
+export interface VespaSdlcContainerDocument {
+  docId: string;
+  docType: VespaDocType.SDLC_CONTAINER;
+  /** The hub: id:chat_container:chat_container::<hubId>. Permissions are imported from it. */
+  channelRef: string;
+  projectId: string;
+  branch: SdlcBranch;
+  containerType: SdlcContainerType;
+  name: string;
+  /** Tracks only. */
+  description: string;
+  /** Tracks only: ACTIVE | COMPLETED | ARCHIVED. */
+  status: string;
+  /** TRACKS branch: the track; a track's own id for a track. */
+  trackId: string;
+  parentId: string;
+  parentType: 'HUB' | SdlcContainerType;
+  /** WIKI branch: id:sdlc_repository:sdlc_repository::<repoId> on a repository's wiki and every folder below it. */
+  repoRef: string;
+  /** Hub first, then every container above it, then itself. */
+  scopeIds: string[];
+  depth: number;
+  path: string;
+  createdBy: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** A repository registered for SDLC (vespa-core: sdlc_repository.sd). Access follows projectId. */
+export interface VespaSdlcRepositoryDocument {
+  docId: string;
+  docType: VespaDocType.SDLC_REPOSITORY;
+  orgId: string;
+  workspaceId: string;
+  projectId: string;
+  hubIds: string[];
+  name: string;
+  url: string;
+}
 
 export type SchemaDataMap = {
   [messageSchema]: VespaChatMessageDocument;
@@ -630,6 +737,8 @@ export type SchemaDataMap = {
   [mailSchema]: VespaMailDocument;
   [appSchema]: VespaAppDocument;
   [callSchema]: VespaCallDocument;
+  [sdlcContainerSchema]: VespaSdlcContainerDocument;
+  [sdlcRepositorySchema]: VespaSdlcRepositoryDocument;
 };
 
 export const schemaToDocType: Partial<Record<VespaSchema, VespaDocType>> = {
@@ -644,6 +753,8 @@ export const schemaToDocType: Partial<Record<VespaSchema, VespaDocType>> = {
   [mailSchema]: VespaDocType.MAIL,
   [appSchema]: VespaDocType.APP,
   [callSchema]: VespaDocType.CALL,
+  [sdlcContainerSchema]: VespaDocType.SDLC_CONTAINER,
+  [sdlcRepositorySchema]: VespaDocType.SDLC_REPOSITORY,
 };
 
 export interface MatchFeatures {

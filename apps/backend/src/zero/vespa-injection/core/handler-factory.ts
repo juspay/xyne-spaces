@@ -15,6 +15,14 @@ import { MessageAttachmentsVespaHandler } from '../tables/message-attachments-ha
 import { ChannelStatsVespaHandler } from '../tables/channel-stats-handler';
 import { FormEntityValuesVespaHandler } from '../tables/form-entity-values-handler';
 import { AppsVespaHandler } from '../tables/apps-handler';
+import {
+  CanvasFoldersVespaHandler,
+  ReposVespaHandler,
+  SdlcArtifactsVespaHandler,
+  SdlcEntityLinksVespaHandler,
+  SdlcFoldersVespaHandler,
+  SdlcTracksVespaHandler,
+} from '../tables/sdlc-handlers';
 /**
  * Factory for getting the appropriate Vespa handler for a given table.
  * 
@@ -72,6 +80,20 @@ export class VespaHandlerFactory {
       // xyne-apps catalog
       case 'apps':
         return new AppsVespaHandler(ctx);
+
+      // SDLC Hub search: each change requests a sync of its hub
+      case 'sdlc_entity_links':
+        return new SdlcEntityLinksVespaHandler(ctx);
+      case 'sdlc_tracks':
+        return new SdlcTracksVespaHandler(ctx);
+      case 'sdlc_folders':
+        return new SdlcFoldersVespaHandler(ctx);
+      case 'canvas_folders':
+        return new CanvasFoldersVespaHandler(ctx);
+      case 'sdlc_artifacts':
+        return new SdlcArtifactsVespaHandler(ctx);
+      case 'repos':
+        return new ReposVespaHandler(ctx);
 
       // Default: no Vespa jobs for unhandled tables
       default:

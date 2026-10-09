@@ -182,6 +182,8 @@ import { etaDeadlineQueue } from '@/queues/etaDeadlineQueue';
 import { stageEtaDeadlineQueue } from '@/queues/stageEtaDeadlineQueue';
 import { boardConfigCopyQueue } from '@/queues/boardConfigCopyQueue';
 import { boardConfigCopyWorker } from '@/workers/boardConfigCopyWorker';
+import { sdlcSearchSyncQueue } from '@/queues/sdlcSearchSyncQueue';
+import { sdlcSearchSyncWorker } from '@/workers/sdlcSearchSyncWorker';
 import { assignmentReactivationQueue } from '@/queues/assignmentReactivationQueue';
 import { ticketReassignmentQueue } from '@/queues/ticketReassignmentQueue';
 import { onCallRotationQueue } from '@/queues/onCallRotationQueue';
@@ -942,6 +944,11 @@ export class App {
           boardConfigCopyWorker.start();
         })(),
         (async () => {
+          logger.info('Initializing SDLC search sync queue...');
+          await sdlcSearchSyncQueue.initialize();
+          sdlcSearchSyncWorker.start();
+        })(),
+        (async () => {
           logger.info('Initializing assignment reactivation queue...');
           await assignmentReactivationQueue.initialize();
         })(),
@@ -996,6 +1003,10 @@ export class App {
       logger.info('Initializing board config copy queue...');
       await boardConfigCopyQueue.initialize();
       boardConfigCopyWorker.start();
+
+      logger.info('Initializing SDLC search sync queue...');
+      await sdlcSearchSyncQueue.initialize();
+      sdlcSearchSyncWorker.start();
 
       logger.info('Initializing assignment reactivation queue...');
       await assignmentReactivationQueue.initialize();
@@ -1243,6 +1254,9 @@ export class App {
 
       // Close board config copy queue
       await boardConfigCopyQueue.close();
+
+      // Close SDLC search sync queue
+      await sdlcSearchSyncQueue.close();
 
       // Close assignment reactivation queue
       await assignmentReactivationQueue.close();

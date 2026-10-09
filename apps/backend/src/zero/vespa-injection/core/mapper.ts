@@ -1,7 +1,15 @@
 import { readFromYSweetStrict } from '@/utils/ysweetUtils';
 import { extractMentionsFromContent } from '@/utils/mentionUtils';
 import { extractChannelMentions, extractGroupMentions } from '@/utils/mentionParser';
-import { appSchema, callSchema, channelSchema, InsertDocument, mailSchema, messageSchema, projectSchema, schemaToDocType, SubApp, ticketSchema, userSchema, VespaAppDocument, VespaCallDocument, VespaChatContainerDocument, VespaChatMessageDocument, VespaDocType, VespaFileDocument, VespaMailDocument, VespaProjectDocument, VespaSchema, VespaTicketDocument, samTranscriptSchema } from '@/vespa/src/types';
+import { appSchema, callSchema, channelSchema, InsertDocument, mailSchema, messageSchema, projectSchema, schemaToDocType, SubApp, ticketSchema, userSchema, VespaAppDocument, VespaCallDocument, VespaChatContainerDocument, VespaChatMessageDocument, VespaDocType, VespaFileDocument, VespaMailDocument, VespaProjectDocument, VespaSchema, VespaTicketDocument, samTranscriptSchema, sdlcContainerSchema, sdlcRepositorySchema, SDLC_DISCUSSION_FIELDS, SDLC_FILE_FIELDS, SDLC_TICKET_FIELDS, type SdlcDiscussionFields, type SdlcFileFields, type SdlcTicketFields, type VespaSdlcContainerDocument, type VespaSdlcRepositoryDocument } from '@/vespa/src/types';
+import {
+  hubOfContainer,
+  loadSdlcHubIndex,
+  sdlcFieldsForAttachment,
+  sdlcFieldsForCanvas,
+  sdlcFieldsForConversation,
+  sdlcFieldsForTicket,
+} from '@/sdlc/search/sdlcSearchIndex';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import type { InsertValue } from '@rocicorp/zero';
 import {
@@ -12,6 +20,7 @@ import {
   TicketStatusV2,
   type Schema,
   AttachmentEntityType,
+  SDLC_MEMBERSHIP_RELATION,
   VespaOperationType as VespaOpType,
 } from '@xyne/shared';
 import { indexableTagNames, parseAppliedTags } from '@xyne/shared';
@@ -365,6 +374,8 @@ export const mapChannel = async (
     isIm: args.scopeType === ChannelScopeType.DM,
     isMpim: args.scopeType === ChannelScopeType.GROUP_DM,
     scopeType: args.scopeType,
+    // The channel's type (SDLC for a hub); chat_message and ticket import it through channelRef.
+    channelType: args.type ?? '',
     metadata: JSON.stringify(args.metadata) || '',
     lastActivityAt: toTimestamp(lastActivityAt),
     lastSyncedAt: toTimestamp(lastActivityAt),
@@ -529,6 +540,7 @@ export const mapMessage = async (
     threadSenders: threadInfo.threadSenders,
     messageChannelName: msgChannelName || '',
     messageType: args.msgType || 'USER',
+    ...sdlcPlacement(await sdlcFieldsForConversation(args.conversationId)),
   }
 }
 
@@ -737,6 +749,7 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
     initialMessageSender: initialMessageSender,
     parentTicketXyneId: parentTicketXyneId,
     childTicketXyneIds: childTicketXyneIds,
+    ...sdlcTicketPlacement(await sdlcFieldsForTicket(args.id)),
   }
 }
 
@@ -994,6 +1007,7 @@ export const mapCanvas = async (args: InsertValue<CanvasesSchema>, workspaceId?:
     conversationId: undefined,
     workspaceId: effectiveWorkspaceId,
     orgId: effectiveOrgId,
+    ...sdlcFileFields(await sdlcFieldsForCanvas(args)),
   };
 };
 
@@ -1281,6 +1295,11 @@ export const mapFile = async (
       channelId = conversation.channelId;
       channelRef = getRef(channelSchema, conversation.channelId);
     }
+  } else if (args.entityType === 'SDLC_HUB' && args.entityId) {
+    // A file uploaded into an SDLC hub belongs to no conversation: the hub is its channel,
+    // so its members can find it.
+    channelId = args.entityId;
+    channelRef = getRef(channelSchema, args.entityId);
   }
 
   // Get permissions from channel participants (anyone in the channel can view files)
@@ -1408,6 +1427,7 @@ export const mapFile = async (
     ticketId: args.entityType === 'TICKET' ? args.entityId : undefined,
     workspaceId: effectiveWorkspaceId,
     orgId: effectiveOrgId,
+    ...sdlcFileFields(await sdlcFieldsForAttachment(args)),
   };
 };
 
@@ -1535,6 +1555,95 @@ export const mapEmail = async (email: Email, workspaceId?: string, orgId?: strin
   };
 };
 
+/**
+ * SDLC fields on a feed. A Vespa reference must hold a document id, so an item in no hub
+ * leaves sdlcContainerRef out rather than sending ''; a feed is a put, so leaving it out clears it.
+ */
+const sdlcPlacement = (fields: SdlcDiscussionFields): Partial<SdlcDiscussionFields> => {
+  if (!fields.sdlcContainerRef) return {};
+  return fields.sdlcDocumentId ? { ...fields } : { sdlcContainerRef: fields.sdlcContainerRef };
+};
+
+/** A ticket's places and linked documents; left out for a ticket in no hub. */
+const sdlcTicketPlacement = (fields: SdlcTicketFields): Partial<SdlcTicketFields> =>
+  fields.sdlcScopeIds.length || fields.sdlcDocumentIds.length ? { ...fields } : {};
+
+const sdlcFileFields = (fields: SdlcFileFields): Partial<SdlcFileFields> => {
+  if (!fields.sdlcContainerRef) return {};
+  return { ...fields };
+};
+
+/** A track or folder of an SDLC hub, as indexed: built with the rest of its hub. */
+export const mapSdlcContainer = async (containerId: string): Promise<VespaSdlcContainerDocument | null> => {
+  const hubId = await hubOfContainer(containerId);
+  if (!hubId) return null;
+  return (await loadSdlcHubIndex(hubId))?.containers.get(containerId) ?? null;
+};
+
+/** A repository registered for SDLC, with every hub it is attached to. */
+export const mapSdlcRepository = async (repoId: string): Promise<VespaSdlcRepositoryDocument | null> => {
+  const repo = await db.repo.findUnique({
+    where: { id: repoId },
+    select: { id: true, name: true, url: true, projectId: true, workspaceId: true },
+  });
+  if (!repo) return null;
+  const memberships = await db.sdlcEntityLink.findMany({
+    where: { sourceType: 'CHANNEL', targetType: 'REPOSITORY', targetId: repoId, relationType: SDLC_MEMBERSHIP_RELATION },
+    select: { channelId: true },
+  });
+  const { workspaceId, orgId } = await resolveOrgAndWorkspace(repo.workspaceId);
+  return {
+    docId: repo.id,
+    docType: VespaDocType.SDLC_REPOSITORY,
+    orgId: orgId ?? '',
+    workspaceId: workspaceId ?? repo.workspaceId ?? '',
+    projectId: repo.projectId ?? '',
+    hubIds: [...new Set(memberships.map(m => m.channelId))],
+    name: repo.name,
+    url: repo.url ?? '',
+  };
+};
+
+/**
+ * The SDLC fields of an indexed item, computed on their own: a hub sync re-places every item in
+ * the hub, and rebuilding each full document (a canvas's content, a ticket's thread) just to
+ * send its placement would be wasted work. Null when `fields` asks for anything else.
+ * Missing values come back undefined; the worker turns those into a clear.
+ */
+export const mapSdlcFieldsOnly = async (
+  schema: VespaSchema,
+  docId: string,
+  fields: readonly string[],
+  app?: SubApp,
+): Promise<Record<string, unknown> | null> => {
+  const pick = (all: Record<string, unknown>) =>
+    Object.fromEntries(fields.map(field => [field, all[field] === '' ? undefined : all[field]]));
+  if (schema === fileSchema && fields.every(f => (SDLC_FILE_FIELDS as readonly string[]).includes(f))) {
+    if (app === SubApp.CANVAS) {
+      const canvas = await db.canvas.findUnique({ where: { id: docId }, select: { id: true, channelId: true } });
+      return pick({ ...(canvas ? await sdlcFieldsForCanvas(canvas) : {}) });
+    }
+    if (app === SubApp.CHAT_ATTACHMENT) {
+      const attachment = await db.messageAttachment.findUnique({
+        where: { id: docId },
+        select: { id: true, entityType: true, entityId: true },
+      });
+      return pick({ ...(attachment ? await sdlcFieldsForAttachment(attachment) : {}) });
+    }
+    return null;
+  }
+  if (schema === ticketSchema) {
+    if (!fields.every(f => (SDLC_TICKET_FIELDS as readonly string[]).includes(f))) return null;
+    return pick({ ...(await sdlcFieldsForTicket(docId)) });
+  }
+  if (!fields.every(f => (SDLC_DISCUSSION_FIELDS as readonly string[]).includes(f))) return null;
+  if (schema === messageSchema) {
+    const message = await db.message.findUnique({ where: { messageId: docId }, select: { conversationId: true } });
+    return pick({ ...(await sdlcFieldsForConversation(message?.conversationId)) });
+  }
+  return null;
+};
+
 export const mapBySchema = async (
   schemaName: VespaSchema,
   args: VespaPayload,
@@ -1586,6 +1695,10 @@ export const mapBySchema = async (
         return mapEmail(args as unknown as Email, workspaceId, orgId);
       case appSchema:
         return mapApp(args as Apps);
+      case sdlcContainerSchema:
+      case sdlcRepositorySchema:
+        // Already mapped by fetchDataBySchema: a container needs its whole hub to place it.
+        return args as unknown as InsertDocument;
       case samTranscriptSchema:
         throw new Error(`${schemaName}: SAM transcripts must be queued with pre-transformed data. Pass the document via vespaQueue.addJob({ data: vespaDocument }).`);
       default:
@@ -1690,6 +1803,12 @@ export const fetchDataBySchema = async (
 
     case samTranscriptSchema:
       throw new Error(`${schema}: SAM transcripts have no DB table. Pass pre-transformed data via vespaQueue.addJob({ data: vespaDocument }).`);
+
+    case sdlcContainerSchema:
+      return await mapSdlcContainer(docId) as any;
+
+    case sdlcRepositorySchema:
+      return await mapSdlcRepository(docId) as any;
 
     default:
       throw new Error(`Unknown schema: ${schema}`);
