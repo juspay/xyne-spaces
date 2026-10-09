@@ -112,6 +112,8 @@ const envSchema = Joi.object({
   ENABLE_EXTERNAL_SOURCE_REGISTRATION: Joi.boolean().default(true),
   ENABLE_SCHEDULED_MESSAGE_WORKER: Joi.boolean().default(false),
   ENABLE_STAGE_ETA_DEADLINE_WORKER: Joi.boolean().default(false),
+  // Move bundled dev tickets to a Completed stage when their release completes (XYNE-66008).
+  ENABLE_RELEASE_DEV_TICKET_AUTO_COMPLETE: Joi.boolean().default(false),
   ENABLE_ETA_DEADLINE_WORKER: Joi.boolean().default(false),
   ENABLE_AUTOMATION_WORKER: Joi.boolean().default(false),
   AUTOMATION_WORKER_CONCURRENCY: Joi.number().integer().min(1).max(10).default(1),
@@ -812,6 +814,7 @@ export const config = {
   enableExternalSourceRegistration: envVars.ENABLE_EXTERNAL_SOURCE_REGISTRATION,
   enableScheduledMessageWorker: envVars.ENABLE_SCHEDULED_MESSAGE_WORKER,
   enableStageEtaDeadlineWorker: envVars.ENABLE_STAGE_ETA_DEADLINE_WORKER,
+  enableReleaseDevTicketAutoComplete: envVars.ENABLE_RELEASE_DEV_TICKET_AUTO_COMPLETE as boolean,
   enableEtaDeadlineWorker: envVars.ENABLE_ETA_DEADLINE_WORKER,
   enableAutomationWorker: envVars.ENABLE_AUTOMATION_WORKER,
   enableDelayedMessageWorker: envVars.ENABLE_DELAYED_MESSAGE_WORKER,

@@ -15,6 +15,7 @@ import {
   ActivityType,
   PRStatusEvent,
   EmailType,
+  deriveTicketClosurePatch,
   
   
   
@@ -153,6 +154,20 @@ export async function emitTicketCreated(
   } catch (err) {
     logger.error(`[automations] TICKET_CREATED emit failed for ticket ${ticket.id}:`, err);
   }
+}
+
+/**
+ * Release completed → move its bundled dev tickets to a Completed-group stage.
+ * Fire-and-forget: never blocks or fails the release transition. Dynamic import
+ * avoids an import cycle (the completion service itself uses TicketRepository).
+ * Flag + per-board opt-out are checked inside the service.
+ */
+function triggerReleaseDevTicketCompletion(releaseTicketId: string, completedBy: string, completedAt: Date): void {
+  void import('@/services/release/releaseDevTicketCompletionService')
+    .then(({ releaseDevTicketCompletionService }) =>
+      releaseDevTicketCompletionService.onReleaseCompleted({ releaseTicketId, completedBy, completedAt }),
+    )
+    .catch(error => logger.error(`[ReleaseDevComplete] failed for release ${releaseTicketId}:`, error));
 }
 
 export class TicketRepository {
@@ -398,6 +413,7 @@ export class TicketRepository {
             data: {
               stageName: newStageName,
               statusV2: newStatusV2,
+              ...deriveTicketClosurePatch(oldStatusV2, newStatusV2, updatedBy, new Date()),
               updatedBy: updatedBy,
               updatedAt: new Date(),
             },
@@ -472,6 +488,7 @@ export class TicketRepository {
           error,
         );
       }
+      triggerReleaseDevTicketCompletion(ticketId, updatedBy, updatedTicket.updatedAt);
     }
 
     if (stageChanged || statusChanged) {
@@ -910,6 +927,11 @@ export class TicketRepository {
     }
     const previousStatus: TicketStatusV2 | null = prevSnapshot?.statusV2 ?? null;
 
+    // Closure bookkeeping when the status changes; explicit closedAt/closedBy from the caller win.
+    if (fields.statusV2 !== undefined && fields.closedAt === undefined && fields.closedBy === undefined) {
+      Object.assign(data, deriveTicketClosurePatch(previousStatus, fields.statusV2, updatedBy, new Date()));
+    }
+
     // Same as createTicket: make sure the merchant row exists before linking to it.
     if (fields.merchantId) {
       await prisma.merchant.upsert({
@@ -963,6 +985,7 @@ export class TicketRepository {
           error,
         );
       }
+      triggerReleaseDevTicketCompletion(ticketId, updatedBy, updatedTicket.updatedAt);
     }
 
     // Consolidate all field changes into a single TICKET_UPDATED emit.

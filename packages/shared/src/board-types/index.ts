@@ -116,4 +116,18 @@ export interface BoardMetadata {
    * than casting this field directly.
    */
   etaManagement?: BoardEtaManagement;
+  /**
+   * What happens to this board's dev tickets when a release they are bundled
+   * into (application_release_tickets) is moved to COMPLETED.
+   *
+   * - `enabled` (default true): `false` turns the auto-move off for this board.
+   *   The "Released in REL-x" thread message and the Release tab keep working.
+   * - `stageName`: preferred target stage. Only honoured when the stage exists
+   *   on the board and its `defaultTicketStatusV2` is COMPLETED; otherwise the
+   *   resolver falls back (see resolveReleaseCompletionStage).
+   */
+  releaseCompletion?: {
+    enabled?: boolean;
+    stageName?: string;
+  };
 }

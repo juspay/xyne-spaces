@@ -10,7 +10,7 @@ import { syncStageOverdueFlag } from '@/services/tickets/syncStageOverdueFlag';
 import { calculateETADeadline } from '@/utils/etaCalculation';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { Prisma } from '@prisma/client';
-import { TicketStatusV2, parseTicketEtaManagement, mergeTicketEtaManagement, TicketPriority, MessageType, ConversationParticipation, type TicketCardSummary, serializeTicketMd, BoardType, AttachmentEntityType, TicketReferenceRelation, ActivityType } from '@xyne/shared';
+import { TicketStatusV2, parseTicketEtaManagement, mergeTicketEtaManagement, TicketPriority, MessageType, ConversationParticipation, type TicketCardSummary, serializeTicketMd, BoardType, AttachmentEntityType, TicketReferenceRelation, ActivityType, deriveTicketClosurePatch } from '@xyne/shared';
 import { randomUUID } from 'crypto';
 import { generateKeyBetween } from 'fractional-indexing';
 import type { FormFieldChanges } from '@/automations/triggers/ticket-updated.trigger';
@@ -65,6 +65,7 @@ export function transferTicketToBoardTx(targetBoardId: string, ticketId: string,
         boardId: targetBoardId,
         stageName: firstStage.name,
         statusV2: firstStage.defaultTicketStatusV2 ?? undefined,
+        ...deriveTicketClosurePatch(currentTicket.statusV2, firstStage.defaultTicketStatusV2, updatedBy, now),
         kanbanPosition,
         updatedAt: now,
         updatedBy,

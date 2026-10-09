@@ -8,7 +8,7 @@ import { calculateETADeadline } from '@/utils/etaCalculation';
 import { ActivitySource, CreateTicketRequest } from '@/types/ticket';
 import type { FormFieldChanges } from '@/automations/triggers/ticket-updated.trigger';
 import { recordTicketTimelineEvent } from '@/services/ticketTimelineEventService';
-import { TicketStatusV2, TicketPriority, PRStatusEvent, parseTicketEtaManagement, mergeTicketEtaManagement, parseBoardEtaManagement, PRActivityValue, ActivityType } from '@xyne/shared';
+import { TicketStatusV2, TicketPriority, PRStatusEvent, parseTicketEtaManagement, mergeTicketEtaManagement, parseBoardEtaManagement, PRActivityValue, ActivityType, deriveTicketClosurePatch } from '@xyne/shared';
 import { Prisma } from '@prisma/client';
 import { lockTicketMetadataAndEta } from '@/bypassAcl/rowLockServices';
 import { lockTicketStatusV2 } from '@/bypassAcl/rowLockServices';
@@ -158,6 +158,7 @@ export function updateTicketStageFlowGuardedTx(ticketId: string, oldStatusV2: Ti
       data: {
         stageName: newStageName,
         statusV2: newStatusV2,
+        ...deriveTicketClosurePatch(oldStatusV2, newStatusV2, updatedBy, new Date()),
         updatedBy: updatedBy,
         updatedAt: new Date(),
       },
@@ -356,6 +357,7 @@ export function updateTicketStageTx(isForwardMovement: boolean, currentStage: an
           data: {
             stageName: newStageName,
             statusV2: newStatusV2,
+            ...deriveTicketClosurePatch(oldStatusV2, newStatusV2, updatedBy, now),
             updatedBy: updatedBy,
             updatedAt: now,
             ...(etaResult.etaDecision.changed && etaResult.etaDecision.newEta

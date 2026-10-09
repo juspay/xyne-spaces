@@ -150,6 +150,7 @@ import {
   validateFlowPlan,
 } from '@xyne/shared';
 import { stringFromFormValue } from '@xyne/shared/zero';
+import { deriveTicketClosurePatch } from '@xyne/shared';
 import {
   ATTACHMENT_STILL_UPLOADING,
   isAttachmentUploaded,
@@ -182,6 +183,7 @@ import { processMeetLinksFromChatMessage } from '@/services/meetLinkService';
 import { bookmarkReminderService } from '@/services/bookmarkReminderService';
 import { versionReleaseMappingService } from '@/services/release/versionReleaseMappingService';
 import { releaseDevTicketNotifyService } from '@/services/release/releaseDevTicketNotifyService';
+import { releaseDevTicketCompletionService } from '@/services/release/releaseDevTicketCompletionService';
 import { EntitySequenceService } from '@/services/entitySequenceService';
 import { syncToYSweet } from '@/utils/ysweetUtils';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
@@ -6271,6 +6273,7 @@ export function createMutators(
               ...(firstStage.defaultTicketStatusV2 && {
                 statusV2: firstStage.defaultTicketStatusV2
               }),
+              ...deriveTicketClosurePatch(ticket.statusV2, firstStage.defaultTicketStatusV2, authData.sub, now),
               kanbanPosition: newKanbanPosition,
               updatedAt: now,
               updatedBy: authData.sub
@@ -6789,6 +6792,14 @@ export function createMutators(
             });
           }
 
+          // Closure bookkeeping for whichever status this update lands on (explicit statusV2,
+          // or a stage's default). An explicit closedAt/closedBy in the params wins.
+          if (updateData.closedAt === undefined && updateData.closedBy === undefined) {
+            Object.assign(
+              updateData,
+              deriveTicketClosurePatch(ticket.statusV2, updateData.statusV2, authData.sub, params.updatedAt),
+            );
+          }
           await tx.mutate.tickets.update({ id: params.id, ...updateData });
 
           if (params.description !== undefined && params.description !== currentDescription) {
@@ -6830,6 +6841,28 @@ export function createMutators(
                   `[VersionReleaseMapping] failed to update deployedVersion for ticket ${params.id}:`,
                   error,
                 );
+              }
+            });
+          }
+
+          // Release completed → move its bundled dev tickets to a Completed-group
+          // stage (flag + per-board opt-out checked inside). Post-commit, best-effort.
+          if (
+            params.statusV2 === TicketStatusV2.COMPLETED
+            && ticket.statusV2 !== TicketStatusV2.COMPLETED
+            && isReleaseTicket(ticket.ticketType as BaseTicketType | null)
+          ) {
+            const completedAt = new Date(params.updatedAt);
+            const completedBy = authData.sub;
+            asyncTasks.push(async () => {
+              try {
+                await releaseDevTicketCompletionService.onReleaseCompleted({
+                  releaseTicketId: params.id,
+                  completedBy,
+                  completedAt,
+                });
+              } catch (error) {
+                logger.error(`[ReleaseDevComplete] failed for release ${params.id}:`, error);
               }
             });
           }
@@ -14745,6 +14778,7 @@ export function createMutators(
                 id: ticket.id,
                 stageName: stage.name,
                 ...(stage.defaultTicketStatusV2 && { statusV2: stage.defaultTicketStatusV2 }),
+                ...deriveTicketClosurePatch(ticket.statusV2, stage.defaultTicketStatusV2, authData.sub, updatedAt),
                 updatedAt,
               });
             } else {
@@ -14752,6 +14786,7 @@ export function createMutators(
                 id: ticket.id,
                 stageName: stage.name,
                 ...(stage.defaultTicketStatusV2 && { statusV2: stage.defaultTicketStatusV2 }),
+                ...deriveTicketClosurePatch(ticket.statusV2, stage.defaultTicketStatusV2, authData.sub, updatedAt),
                 updatedAt,
               });
             }
@@ -15234,6 +15269,7 @@ export function createMutators(
             await tx.mutate.tickets.update({
               id: devTicket.id,
               ...(defaultTicketStatusV2 !== undefined && { statusV2: defaultTicketStatusV2 }),
+              ...deriveTicketClosurePatch(devTicket.statusV2, defaultTicketStatusV2, authData.sub, timestamp),
               ...(stageName !== undefined && { stageName }),
               updatedAt: timestamp,
             });
@@ -18808,6 +18844,7 @@ export function createMutators(
             ...(targetStage.defaultTicketStatusV2 && {
               statusV2: targetStage.defaultTicketStatusV2,
             }),
+            ...deriveTicketClosurePatch(ticket.statusV2, targetStage.defaultTicketStatusV2, authData.sub, now),
             updatedAt: now,
             ...(finalEtaMs !== undefined && finalEtaMs !== null ? { eta: finalEtaMs } : {}),
             metadata: mergedMetadata as ReadonlyJSONValue,
