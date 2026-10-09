@@ -24,13 +24,7 @@ import { keychain } from '../keychain';
 import { isKeychainToolingError } from '../keychain/errors';
 import { Logger } from '../services/logger/Logger';
 import { EnrollmentEvent } from '../services/logger/enrollment-events';
-import {
-  checkCertificateExpiry,
-  isClientAuthFailure,
-  isStoredCertificateExpired,
-  recoverFromClientAuthFailure,
-  startCertificateExpiryWatcher,
-} from '../services/mtls-recovery';
+import { isClientAuthFailure, recoverFromClientAuthFailure } from '../services/mtls-recovery';
 import { getAppBackgroundColor, getAppTheme } from '../services/app-theme';
 import { EnrollmentReason, setEnrollmentReasonIfAbsent } from '../services/enrollment-reason';
 import { dashboardLoad, enrollmentSkipped, mtlsFrontendLoaded } from '../services/enrollmentMetrics';
@@ -463,13 +457,6 @@ export async function loadApp(window: BrowserWindow) {
       throw error;
     }
 
-    // An expiry already in the past is handled before the identity lookup, so the user gets the
-    // "certificate expired" explanation instead of a bare enrollment screen.
-    if (isStoredCertificateExpired()) {
-      await checkCertificateExpiry('app_load');
-      return;
-    }
-
     let mtls: boolean;
     try {
       mtls = await keychain.checkIdentity(config.MTLS_IDENTITY_NAME);
@@ -487,8 +474,8 @@ export async function loadApp(window: BrowserWindow) {
 
     if (!mtls) {
       const targetUrl = config.MTLS_FRONTEND_URL;
-      // First-run enrollment is the common case here; only overwrite the reason when the app has
-      // not already recorded a more specific one (expiry, rejection) on the way in.
+      // First-run enrollment is the common case here; only overwrite the reason when a recovery
+      // has not already recorded the more specific "we rejected your certificate" on the way in.
       setEnrollmentReasonIfAbsent(EnrollmentReason.CERTIFICATE_MISSING);
       Logger.info(EnrollmentEvent.MTLS_FRONTEND_LOAD, {
         url: targetUrl,
@@ -496,17 +483,16 @@ export async function loadApp(window: BrowserWindow) {
       });
       await loadUrl(window, targetUrl, mtlsFrontendLoaded);
       return;
-    } else {
-      // No pre-flight request here on purpose.
-      //
-      // This used to open a hidden window and fetch /api/health before the real navigation, so
-      // every launch paid an extra TLS handshake and round trip (up to three, serially) to learn
-      // whether the certificate still worked. The navigation that follows answers the same
-      // question for free: loadUrl() below recovers into enrollment the moment the server
-      // refuses our client certificate, and the expiry watcher catches a certificate that dies
-      // while the app is open. Validating twice only made startup slower.
-      startCertificateExpiryWatcher();
     }
+
+    // No pre-flight request here on purpose.
+    //
+    // This used to open a hidden window and fetch /api/health before the real navigation, so
+    // every launch paid an extra TLS handshake and round trip (up to three, serially) to learn
+    // whether the certificate still worked. The navigation below answers the same question for
+    // free: loadUrl() recovers into enrollment the moment the server refuses our client
+    // certificate, and so does any request the dashboard makes afterwards. Validating twice
+    // only made startup slower.
   }
       
   // Enable post-enrollment logging after successful mTLS validation

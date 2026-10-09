@@ -1,24 +1,18 @@
 /**
- * Runtime recovery from a device certificate that stops working while the app is open.
+ * Runtime recovery from a device certificate the backend will not accept any more.
  *
- * Before this, the certificate was only validated during loadApp(). A certificate that expired or
- * was rejected mid-session left the window on a dashboard whose every request failed with
- * ERR_BAD_SSL_CLIENT_AUTH_CERT, and the only way out was to quit and reopen the app. Two paths
- * close that gap:
+ * The certificate used to be checked only during loadApp(), so one that expired or was revoked
+ * mid-session left the window on a dashboard whose every request failed with
+ * ERR_BAD_SSL_CLIENT_AUTH_CERT, with no way out but quitting and reopening the app.
  *
- *  - proactive: the issued certificate's notAfter is persisted at enrollment time and checked on a
- *    timer, on resume from sleep and on window focus, so an expiry is caught before the user sees
- *    a single failed request;
- *  - reactive: client-auth TLS failures against our own hosts are reported here and, past a small
- *    threshold, trigger the same recovery — this covers revocation and server-side rejection,
- *    which no local clock check can predict.
- *
- * Both end in one place: record why, drop the dead identity, and navigate to enrollment.
+ * The signal is the TLS error itself. Nothing here tracks when the certificate is due to expire:
+ * expiry, revocation and a server-side rejection are indistinguishable at this layer and all
+ * three surface the same way, as a refused handshake against one of our own hosts. A handful of
+ * requests fail first, which is an acceptable price for having one trigger instead of a clock to
+ * keep in sync.
  */
 
-import { BrowserWindow, powerMonitor, app } from 'electron';
-import { X509Certificate } from 'crypto';
-import Store from 'electron-store';
+import { BrowserWindow } from 'electron';
 import log from 'electron-log/main';
 
 import { config } from '../app/config';
@@ -28,39 +22,19 @@ import { keychain } from '../keychain';
 import { getMainWindow } from '../window/manager';
 import { Logger } from './logger/Logger';
 import { EnrollmentEvent } from './logger/enrollment-events';
-import {
-    EnrollmentReason,
-    type EnrollmentReasonType,
-    setEnrollmentReason,
-} from './enrollment-reason';
-
-const CERT_NOT_AFTER_KEY = 'mtls.certificateNotAfter';
-const CERT_SERIAL_KEY = 'mtls.certificateSerial';
-
-/** How often the stored notAfter is re-checked while the app is open. */
-const EXPIRY_CHECK_INTERVAL_MS = 15 * 60 * 1000;
+import { EnrollmentReason, setEnrollmentReason } from './enrollment-reason';
 
 /**
- * Treat the certificate as dead slightly before notAfter. Clock skew between device and backend
- * means the backend can start rejecting it a little early; recovering first is strictly better
- * than letting the user hit a wall of failed requests.
- */
-const EXPIRY_SKEW_MS = 2 * 60 * 1000;
-
-/**
- * Consecutive client-auth TLS failures needed before the reactive path fires. One is not enough:
- * a flaky network or a single racing request would otherwise wipe a healthy certificate.
+ * Client-auth failures needed before the threshold path fires. One is not enough: a flaky network
+ * or a single racing request would otherwise wipe a healthy certificate.
  */
 const FAILURE_THRESHOLD = 3;
 
 /** Failures older than this are forgotten, so unrelated blips never accumulate into recovery. */
 const FAILURE_WINDOW_MS = 60 * 1000;
 
-const store = new Store();
-
 let failureTimestamps: number[] = [];
 let recoveryInFlight = false;
-let expiryTimer: NodeJS.Timeout | null = null;
 
 /**
  * TLS errors that mean "the client certificate we presented is not acceptable". Server-trust
@@ -81,57 +55,8 @@ export function isClientAuthFailure(errorText: string | undefined | null): boole
 }
 
 /**
- * Persists the validity window of a freshly enrolled certificate.
- *
- * Parsed in-process with node's X509 reader rather than by shelling out, so it works identically
- * on all three platforms and needs none of the external tooling the Linux keystore depends on.
- */
-export function recordIssuedCertificate(certPem: string): void {
-    try {
-        const cert = new X509Certificate(certPem);
-        const notAfter = new Date(cert.validTo);
-        if (Number.isNaN(notAfter.getTime())) {
-            throw new Error(`Unparseable notAfter: ${cert.validTo}`);
-        }
-        store.set(CERT_NOT_AFTER_KEY, notAfter.toISOString());
-        store.set(CERT_SERIAL_KEY, cert.serialNumber);
-        log.info('[mTLSRecovery] Stored certificate validity until', notAfter.toISOString());
-    } catch (error) {
-        // Not fatal: without the stored date the proactive check is skipped and the reactive
-        // path still recovers the user.
-        log.warn('[mTLSRecovery] Could not read notAfter from issued certificate:', error);
-    }
-}
-
-export function getStoredCertificateExpiry(): Date | null {
-    const raw = store.get(CERT_NOT_AFTER_KEY);
-    if (typeof raw !== 'string') return null;
-    const parsed = new Date(raw);
-    return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
-
-function clearStoredCertificateMetadata(): void {
-    try {
-        store.delete(CERT_NOT_AFTER_KEY as never);
-        store.delete(CERT_SERIAL_KEY as never);
-    } catch (error) {
-        log.warn('[mTLSRecovery] Could not clear stored certificate metadata:', error);
-    }
-}
-
-/**
- * True when the stored certificate is past (notAfter - skew). Unknown expiry returns false:
- * a device enrolled before this field existed must not be treated as expired.
- */
-export function isStoredCertificateExpired(now: number = Date.now()): boolean {
-    const notAfter = getStoredCertificateExpiry();
-    if (!notAfter) return false;
-    return now >= notAfter.getTime() - EXPIRY_SKEW_MS;
-}
-
-/**
- * Called whenever a request to one of our hosts fails TLS client authentication. Recovery only
- * runs once FAILURE_THRESHOLD failures land inside FAILURE_WINDOW_MS.
+ * Called whenever a subresource or XHR to one of our hosts fails TLS client authentication.
+ * Recovery runs once FAILURE_THRESHOLD failures land inside FAILURE_WINDOW_MS.
  */
 export function reportClientAuthFailure(context: { url?: string; errorCode?: string }): void {
     const now = Date.now();
@@ -143,84 +68,41 @@ export function reportClientAuthFailure(context: { url?: string; errorCode?: str
         context,
     );
 
-    if (failureTimestamps.length < FAILURE_THRESHOLD) {
-        return;
-    }
+    if (failureTimestamps.length < FAILURE_THRESHOLD) return;
 
-    // An expired local certificate and a server-side rejection look identical at this layer;
-    // the stored notAfter is what tells them apart for the user-facing message.
-    const reason: EnrollmentReasonType = isStoredCertificateExpired()
-        ? EnrollmentReason.CERTIFICATE_EXPIRED
-        : EnrollmentReason.CERTIFICATE_REJECTED;
-
-    void recoverFromDeadCertificate(reason, {
+    void recoverFromDeadCertificate({
         detail: context.errorCode,
         trigger: 'client_auth_failures',
     });
 }
 
 /**
- * Recovers immediately from a client-auth failure, with no threshold.
+ * Recovers immediately, with no threshold.
  *
  * Used where one failure is already conclusive: a top-level navigation to one of our own hosts
  * that the server refused on client-auth grounds. There is nothing to debounce — the user is
- * looking at a page that did not load, and retrying with the same certificate cannot help. This
- * replaces the startup health check, which paid a hidden window plus a full TLS round trip on
- * every launch to learn the same thing the real navigation reports for free.
- *
- * Subresource and XHR failures still go through reportClientAuthFailure, where a threshold keeps
- * a flaky network from wiping a healthy certificate.
+ * looking at a page that did not load, and retrying with the same certificate cannot help.
  */
 export async function recoverFromClientAuthFailure(
     context: { url?: string; errorCode?: string; trigger: string },
 ): Promise<void> {
-    const reason: EnrollmentReasonType = isStoredCertificateExpired()
-        ? EnrollmentReason.CERTIFICATE_EXPIRED
-        : EnrollmentReason.CERTIFICATE_REJECTED;
-
-    await recoverFromDeadCertificate(reason, {
+    await recoverFromDeadCertificate({
         detail: context.errorCode,
         trigger: context.trigger,
     });
 }
 
 /**
- * Checks the stored expiry and recovers if it has passed. Safe to call often.
- */
-export async function checkCertificateExpiry(trigger: string): Promise<void> {
-    if (!config.enableMtls) return;
-
-    const notAfter = getStoredCertificateExpiry();
-    if (!notAfter) return;
-
-    const msRemaining = notAfter.getTime() - Date.now();
-    Logger.info(EnrollmentEvent.CERTIFICATE_EXPIRY_CHECK, {
-        trigger,
-        not_after: notAfter.toISOString(),
-        days_remaining: Math.floor(msRemaining / 86_400_000),
-    });
-
-    if (!isStoredCertificateExpired()) return;
-
-    Logger.warn(EnrollmentEvent.CERTIFICATE_EXPIRED, {
-        trigger,
-        not_after: notAfter.toISOString(),
-    });
-
-    await recoverFromDeadCertificate(EnrollmentReason.CERTIFICATE_EXPIRED, {
-        certificateExpiredAt: notAfter.toISOString(),
-        trigger,
-    });
-}
-
-/**
- * The single recovery path: record the reason, remove the unusable identity, send the window to
- * enrollment. Latched so concurrent triggers (a timer tick racing a burst of failed requests)
- * produce one recovery, not several competing navigations.
+ * The single recovery path: record why, remove the unusable identity, send the main window to
+ * enrollment. Latched so concurrent triggers produce one recovery, not several competing
+ * navigations.
+ *
+ * The reason is always "rejected". The backend refusing our certificate is all we observe, and
+ * claiming to know it had expired would mean keeping a copy of its notAfter in sync with the
+ * keystore — the thing this path exists to avoid.
  */
 export async function recoverFromDeadCertificate(
-    reason: EnrollmentReasonType,
-    options: { certificateExpiredAt?: string; detail?: string; trigger?: string } = {},
+    options: { detail?: string; trigger?: string } = {},
 ): Promise<void> {
     if (recoveryInFlight) {
         log.info('[mTLSRecovery] Recovery already in progress — ignoring duplicate trigger');
@@ -229,8 +111,7 @@ export async function recoverFromDeadCertificate(
     recoveryInFlight = true;
     failureTimestamps = [];
 
-    const certificateExpiredAt =
-        options.certificateExpiredAt ?? getStoredCertificateExpiry()?.toISOString();
+    const reason = EnrollmentReason.CERTIFICATE_REJECTED;
 
     Logger.warn(EnrollmentEvent.CERTIFICATE_RECOVERY_STARTED, {
         reason,
@@ -241,7 +122,6 @@ export async function recoverFromDeadCertificate(
     // Recorded before anything destructive so the enrollment screen can explain itself even if
     // the app is killed between here and the navigation below.
     setEnrollmentReason(reason, {
-        ...(certificateExpiredAt ? { certificateExpiredAt } : {}),
         ...(options.detail ? { detail: options.detail } : {}),
     });
 
@@ -269,8 +149,6 @@ export async function recoverFromDeadCertificate(
         log.error('[mTLSRecovery] Failed to delete dead identity; continuing to enrollment:', error);
         Logger.logError(EnrollmentEvent.IDENTITY_DELETE_FAILED, error, { reason });
     }
-
-    clearStoredCertificateMetadata();
 
     try {
         await navigateToEnrollment(mainWindow);
@@ -312,39 +190,6 @@ async function navigateToEnrollment(mainWindow: BrowserWindow | null): Promise<v
         trigger: 'runtime_recovery',
     });
     await mainWindow.loadURL(config.MTLS_FRONTEND_URL);
-}
-
-/**
- * Starts the proactive expiry watch. Idempotent.
- *
- * A plain interval is not enough on its own: a laptop asleep past notAfter wakes with a stale
- * timer, so resume and window focus are also checked.
- */
-export function startCertificateExpiryWatcher(): void {
-    if (!config.enableMtls || expiryTimer) return;
-
-    expiryTimer = setInterval(() => {
-        void checkCertificateExpiry('interval');
-    }, EXPIRY_CHECK_INTERVAL_MS);
-
-    powerMonitor.on('resume', () => {
-        void checkCertificateExpiry('power_resume');
-    });
-
-    app.on('browser-window-focus', () => {
-        void checkCertificateExpiry('window_focus');
-    });
-
-    app.once('will-quit', stopCertificateExpiryWatcher);
-
-    log.info('[mTLSRecovery] Certificate expiry watcher started');
-}
-
-export function stopCertificateExpiryWatcher(): void {
-    if (expiryTimer) {
-        clearInterval(expiryTimer);
-        expiryTimer = null;
-    }
 }
 
 /** Test seam: clears the failure window and recovery latch between cases. */

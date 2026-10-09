@@ -23,7 +23,6 @@ vi.mock('electron-log/main', () => ({
 }));
 vi.mock('electron', () => ({
   app: { on: vi.fn(), once: vi.fn(), getVersion: () => '0.0.0-test' },
-  powerMonitor: { on: vi.fn() },
   BrowserWindow: { getAllWindows: () => mainWindowMock.allWindows },
 }));
 vi.mock('../window/manager', () => ({ getMainWindow: () => mainWindowMock.main }));
@@ -53,119 +52,102 @@ vi.mock('../app/config', () => ({
 }));
 
 import {
-  recoverFromDeadCertificate,
-  resetRecoveryStateForTests,
   isClientAuthFailure,
-  isStoredCertificateExpired,
-  getStoredCertificateExpiry,
-  recordIssuedCertificate,
+  recoverFromDeadCertificate,
+  reportClientAuthFailure,
+  resetRecoveryStateForTests,
 } from './mtls-recovery';
 
-const NOT_AFTER_KEY = 'mtls.certificateNotAfter';
+const REASON_KEY = 'mtls.enrollmentReason';
 
 describe('isClientAuthFailure', () => {
   it('matches the client-auth TLS errors that mean our certificate was rejected', () => {
     expect(isClientAuthFailure('net::ERR_BAD_SSL_CLIENT_AUTH_CERT')).toBe(true);
-    expect(isClientAuthFailure("ERR_SSL_CLIENT_AUTH_SIGNATURE_FAILED (-141) loading 'https://x'")).toBe(
-      true,
-    );
+    expect(isClientAuthFailure('ERR_SSL_CLIENT_AUTH_SIGNATURE_FAILED')).toBe(true);
     expect(isClientAuthFailure('ERR_SSL_CLIENT_AUTH_CERT_NEEDED')).toBe(true);
+    expect(isClientAuthFailure('ERR_SSL_CLIENT_AUTH_NO_COMMON_ALGORITHMS')).toBe(true);
   });
 
   it('ignores server-trust and transport errors, which deleting our identity would not fix', () => {
     expect(isClientAuthFailure('net::ERR_CERT_AUTHORITY_INVALID')).toBe(false);
     expect(isClientAuthFailure('net::ERR_CERT_DATE_INVALID')).toBe(false);
     expect(isClientAuthFailure('net::ERR_CONNECTION_REFUSED')).toBe(false);
-    expect(isClientAuthFailure('net::ERR_NAME_NOT_RESOLVED')).toBe(false);
+    expect(isClientAuthFailure('net::ERR_INTERNET_DISCONNECTED')).toBe(false);
     expect(isClientAuthFailure(undefined)).toBe(false);
     expect(isClientAuthFailure('')).toBe(false);
   });
 });
 
-describe('stored certificate expiry', () => {
+describe('failure threshold', () => {
   beforeEach(() => {
+    resetRecoveryStateForTests();
     storeData.clear();
+    mainWindowMock.main = makeWindow('main');
   });
 
-  it('treats an unknown expiry as not expired so pre-upgrade devices are left alone', () => {
-    expect(getStoredCertificateExpiry()).toBeNull();
-    expect(isStoredCertificateExpired()).toBe(false);
+  it('leaves a healthy certificate alone until the threshold is reached', () => {
+    reportClientAuthFailure({ errorCode: 'ERR_BAD_SSL_CLIENT_AUTH_CERT' });
+    reportClientAuthFailure({ errorCode: 'ERR_BAD_SSL_CLIENT_AUTH_CERT' });
+
+    expect(storeData.get(REASON_KEY)).toBeUndefined();
   });
 
-  it('ignores an unparseable stored value', () => {
-    storeData.set(NOT_AFTER_KEY, 'not-a-date');
-    expect(getStoredCertificateExpiry()).toBeNull();
-    expect(isStoredCertificateExpired()).toBe(false);
+  it('recovers on the third failure inside the window', () => {
+    reportClientAuthFailure({ errorCode: 'ERR_BAD_SSL_CLIENT_AUTH_CERT' });
+    reportClientAuthFailure({ errorCode: 'ERR_BAD_SSL_CLIENT_AUTH_CERT' });
+    reportClientAuthFailure({ errorCode: 'ERR_BAD_SSL_CLIENT_AUTH_CERT' });
+
+    expect(storeData.get(REASON_KEY)).toMatchObject({
+      reason: 'certificate_rejected',
+      detail: 'ERR_BAD_SSL_CLIENT_AUTH_CERT',
+    });
   });
 
-  it('reports expired once past notAfter', () => {
-    const now = Date.UTC(2026, 9, 8, 12, 0, 0);
-    storeData.set(NOT_AFTER_KEY, new Date(now - 1000).toISOString());
-    expect(isStoredCertificateExpired(now)).toBe(true);
-  });
+  it('forgets failures older than the window so blips never accumulate', () => {
+    vi.useFakeTimers();
+    try {
+      reportClientAuthFailure({ errorCode: 'ERR_BAD_SSL_CLIENT_AUTH_CERT' });
+      reportClientAuthFailure({ errorCode: 'ERR_BAD_SSL_CLIENT_AUTH_CERT' });
 
-  it('expires slightly early to absorb clock skew against the backend', () => {
-    const now = Date.UTC(2026, 9, 8, 12, 0, 0);
-    // 1 minute of validity left — inside the 2 minute skew window.
-    storeData.set(NOT_AFTER_KEY, new Date(now + 60_000).toISOString());
-    expect(isStoredCertificateExpired(now)).toBe(true);
+      vi.advanceTimersByTime(61_000);
 
-    // 10 minutes left — comfortably valid.
-    storeData.set(NOT_AFTER_KEY, new Date(now + 600_000).toISOString());
-    expect(isStoredCertificateExpired(now)).toBe(false);
-  });
-
-  it('stores notAfter read from the issued certificate PEM', () => {
-    // Self-signed throwaway generated for this test (notAfter 2126-09-14); only the validity
-    // window is read.
-    const pem = [
-      '-----BEGIN CERTIFICATE-----',
-      'MIIBgjCCASmgAwIBAgIUS/R6jzrRcedDQLk+5bgz215uP38wCgYIKoZIzj0EAwIw',
-      'FjEUMBIGA1UEAwwLVGVzdCBDbGllbnQwIBcNMjYxMDA4MDY1NjUzWhgPMjEyNjA5',
-      'MTQwNjU2NTNaMBYxFDASBgNVBAMMC1Rlc3QgQ2xpZW50MFkwEwYHKoZIzj0CAQYI',
-      'KoZIzj0DAQcDQgAEQl+a/lFXArQM6L0T8bC1HpcyXze8VdfyPB+wSEbEXgQA5EXv',
-      'D+4MGyi6PcujSMNIal7qDagHlTRiDD/dRtPZIqNTMFEwHQYDVR0OBBYEFGyocMrF',
-      '1y3olacybziPdj+Rt1qcMB8GA1UdIwQYMBaAFGyocMrF1y3olacybziPdj+Rt1qc',
-      'MA8GA1UdEwEB/wQFMAMBAf8wCgYIKoZIzj0EAwIDRwAwRAIgd6AUgS8tgk+iF1a1',
-      '+Jbiuf9gDEa9uKPB7M2mE2lfvJ8CIBMhDirasju6X3VotR5WD1SxX3pYp6WKyBgs',
-      'D8IfpaQt',
-      '-----END CERTIFICATE-----',
-    ].join('\n');
-
-    recordIssuedCertificate(pem);
-
-    const stored = getStoredCertificateExpiry();
-    expect(stored?.toISOString()).toBe('2126-09-14T06:56:53.000Z');
-    expect(isStoredCertificateExpired()).toBe(false);
-  });
-
-  it('survives an unparseable certificate — the reactive path still covers the user', () => {
-    expect(() => recordIssuedCertificate('not a certificate')).not.toThrow();
-    expect(getStoredCertificateExpiry()).toBeNull();
+      reportClientAuthFailure({ errorCode: 'ERR_BAD_SSL_CLIENT_AUTH_CERT' });
+      expect(storeData.get(REASON_KEY)).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
-describe('recovery target window', () => {
+describe('recovery', () => {
   beforeEach(() => {
-    storeData.clear();
     resetRecoveryStateForTests();
+    storeData.clear();
+    mainWindowMock.main = null;
+    mainWindowMock.allWindows = [];
+  });
+
+  it('always reports the certificate as rejected, since that is all the TLS error tells us', async () => {
+    mainWindowMock.main = makeWindow('main');
+
+    await recoverFromDeadCertificate({ detail: 'ERR_BAD_SSL_CLIENT_AUTH_CERT', trigger: 'test' });
+
+    expect(storeData.get(REASON_KEY)).toMatchObject({ reason: 'certificate_rejected' });
   });
 
   it('navigates the main window, never another app window', async () => {
-    // The recording pill, tray renderer and claw overlay are all live BrowserWindows. Selecting
-    // by array position navigated one of those small always-on-top panels to the enrollment
-    // page, leaving it pinned over the user's screen showing a flow it never owned.
     const pill = makeWindow('recording-pill');
     const main = makeWindow('main');
+    // Order matters: the pill comes first, which is what the old getAllWindows() pick returned.
     mainWindowMock.allWindows = [pill, main];
     mainWindowMock.main = main;
 
-    await recoverFromDeadCertificate('certificate_expired', { trigger: 'test' });
+    await recoverFromDeadCertificate({ trigger: 'test' });
 
     expect(main.loadURL).toHaveBeenCalledWith('https://auth.example.test');
-    expect(main.webContents.stop).toHaveBeenCalled();
     expect(pill.loadURL).not.toHaveBeenCalled();
-    expect(pill.webContents.stop).not.toHaveBeenCalled();
+    expect(pill.show).not.toHaveBeenCalled();
+    expect(pill.focus).not.toHaveBeenCalled();
   });
 
   it('touches nothing when the app is in the tray with no main window', async () => {
@@ -173,12 +155,22 @@ describe('recovery target window', () => {
     mainWindowMock.allWindows = [pill];
     mainWindowMock.main = null;
 
-    await recoverFromDeadCertificate('certificate_expired', { trigger: 'test' });
+    await recoverFromDeadCertificate({ trigger: 'test' });
 
     expect(pill.loadURL).not.toHaveBeenCalled();
     // The reason is still recorded, so the next launch opens on enrollment and explains itself.
-    expect(storeData.get('mtls.enrollmentReason')).toMatchObject({
-      reason: 'certificate_expired',
-    });
+    expect(storeData.get(REASON_KEY)).toMatchObject({ reason: 'certificate_rejected' });
+  });
+
+  it('ignores a second trigger while a recovery is in flight', async () => {
+    const main = makeWindow('main');
+    mainWindowMock.main = main;
+
+    await Promise.all([
+      recoverFromDeadCertificate({ trigger: 'first' }),
+      recoverFromDeadCertificate({ trigger: 'second' }),
+    ]);
+
+    expect(main.loadURL).toHaveBeenCalledTimes(1);
   });
 });

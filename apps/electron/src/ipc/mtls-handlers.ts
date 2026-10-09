@@ -11,7 +11,6 @@ import { Logger } from '../services/logger/Logger';
 import { EnrollmentEvent } from '../services/logger/enrollment-events';
 import { safeRecordMetric } from '../services/telemetry';
 import { dashboardLoad, enrollmentDone } from '../services/enrollmentMetrics';
-import { recordIssuedCertificate, startCertificateExpiryWatcher } from '../services/mtls-recovery';
 import {
     clearEnrollmentReason,
     getEnrollmentReason,
@@ -135,10 +134,8 @@ export function setupMTLSIpcHandlers(): void {
         try {
             await keychain.importCertificate(pem);
 
-            // Stored before the frontend loads so the expiry watcher has a date to work with
-            // from this point on, and cleared of any stale "why are you enrolling" reason now
-            // that the device is healthy again.
-            recordIssuedCertificate(pem);
+            // Cleared of any stale "why are you enrolling" reason now that the device is healthy
+            // again.
             clearEnrollmentReason();
 
             Logger.info(EnrollmentEvent.ENROLLMENT_SUCCESS, { 
@@ -167,7 +164,6 @@ export function setupMTLSIpcHandlers(): void {
             });
             // Switch logger to use protected URL
             Logger.enablePostEnrollmentLogging();
-            startCertificateExpiryWatcher();
         } catch (error) {
             Logger.logError(EnrollmentEvent.CERTIFICATE_STORAGE_FAILED, error);
             throw error;
