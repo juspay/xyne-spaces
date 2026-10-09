@@ -673,6 +673,8 @@ const AuthScreen = (): ReactElement | null => {
                     onClick={() => setSessionEndedMessage(null)}
                     className='text-amber-700 hover:text-amber-900 text-sm font-medium shrink-0'
                     aria-label='Dismiss session expiry notice'
+                    data-track-category='Auth'
+                    data-track-name='DismissSessionExpiryNotice'
                   >
                     Dismiss
                   </button>

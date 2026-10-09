@@ -14,22 +14,22 @@
 const STORAGE_KEY = 'auth_logout_reason';
 
 export const AuthLogoutReason = {
-    /** A 401 that session refresh could not recover. */
-    SESSION_EXPIRED: 'session_expired',
+  /** A 401 that session refresh could not recover. */
+  SESSION_EXPIRED: 'session_expired',
 } as const;
 
 export type AuthLogoutReasonType = (typeof AuthLogoutReason)[keyof typeof AuthLogoutReason];
 
 const MESSAGES: Record<AuthLogoutReasonType, string> = {
-    [AuthLogoutReason.SESSION_EXPIRED]: 'Your session expired. Please log in again to continue.',
+  [AuthLogoutReason.SESSION_EXPIRED]: 'Your session expired. Please log in again to continue.',
 };
 
 export function setAuthLogoutReason(reason: AuthLogoutReasonType): void {
-    try {
-        sessionStorage.setItem(STORAGE_KEY, reason);
-    } catch {
-        // Storage disabled or full — the sign-out itself must still proceed.
-    }
+  try {
+    sessionStorage.setItem(STORAGE_KEY, reason);
+  } catch {
+    // Storage disabled or full — the sign-out itself must still proceed.
+  }
 }
 
 /**
@@ -37,12 +37,12 @@ export function setAuthLogoutReason(reason: AuthLogoutReasonType): void {
  * does not keep repeating a message about a sign-out the user has already seen.
  */
 export function takeAuthLogoutMessage(): string | null {
-    try {
-        const reason = sessionStorage.getItem(STORAGE_KEY);
-        if (!reason) return null;
-        sessionStorage.removeItem(STORAGE_KEY);
-        return MESSAGES[reason as AuthLogoutReasonType] ?? null;
-    } catch {
-        return null;
-    }
+  try {
+    const reason = sessionStorage.getItem(STORAGE_KEY);
+    if (!reason) return null;
+    sessionStorage.removeItem(STORAGE_KEY);
+    return MESSAGES[reason as AuthLogoutReasonType] ?? null;
+  } catch {
+    return null;
+  }
 }

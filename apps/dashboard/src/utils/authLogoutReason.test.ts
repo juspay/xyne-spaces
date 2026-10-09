@@ -21,11 +21,7 @@ class FakeStorage {
 const fakeSessionStorage = new FakeStorage();
 vi.stubGlobal('sessionStorage', fakeSessionStorage);
 
-import {
-  AuthLogoutReason,
-  setAuthLogoutReason,
-  takeAuthLogoutMessage,
-} from './authLogoutReason';
+import { AuthLogoutReason, setAuthLogoutReason, takeAuthLogoutMessage } from './authLogoutReason';
 
 describe('authLogoutReason', () => {
   beforeEach(() => {
