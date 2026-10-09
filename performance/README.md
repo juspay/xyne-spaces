@@ -1,0 +1,286 @@
+# Xyne performance testing
+
+This directory contains the CI-neutral Grafana k6 framework for XYNE-63166. Jenkins runs it now;
+a future GitHub Actions workflow can call the same `pnpm perf:run` command.
+
+## Scenarios
+
+| Scenario | Endpoint | Writes? | What it covers |
+| --- | --- | --- | --- |
+| `smoke` | `GET /api/health/readiness` | no | Connectivity and database readiness. Start here. |
+| `zero-query-transform` | `POST /api/zero/query` | no | The query-transform step: auth, rate limit, ACL, tenant scoping, AST compile. |
+| `search` | `GET /api/vespaSearch/` | no | ACL-filtered Vespa retrieval. Executes a real search and returns rows. |
+| `attachments` | `GET /api/attachments/:id/{download,thumbnail}` | no | Object-storage retrieval and access checking. Moves real bytes — see the cost note. |
+| `zero-push` | `POST /api/zero/push` | **yes** | The chat-send mutation path — `messages.send`, its ACL, Vespa enqueue and side-effect cascade. **Gated.** Needs `PERF_ZERO_SCHEMA` and `PERF_ZERO_APP_ID`. |
+| `rest-messaging` | `POST /api/conversations/:id/messages` | **yes** | The REST send path used by bots, the Claw MCP route and attachment uploads. **Gated — see below.** |
+
+### `zero-query-transform` — what it is, precisely
+
+The name is deliberately narrow. This is an **authenticated Zero query-transform test**, not a
+Zero-sync test and not a full read-load test.
+
+It measures authentication, the per-user Zero rate limiter, query construction,
+`scopeQueryToTenant`, ACL application and AST compilation — the work `handleQueryRequest` does in
+`apps/backend/src/zero/server.ts`.
+
+It does **not** measure:
+
+- **Postgres execution or row transfer.** The endpoint answers with compiled ASTs; rows reach
+  clients over the Zero sync socket. (`/api/zero/query-fallback` does execute, against the
+  read-replica pool, but it is a different path and is currently unmetered.)
+- **Anything on the write or fan-out path** — no push/mutation, no Socket.IO or Redis fan-out, no
+  unread recomputation, no message side effects.
+
+Request format, verified against `@rocicorp/zero` 1.9.0 rather than inferred from the public docs:
+
+```json
+["transform", [{"id": "q1", "name": "conversationMessagesV2", "args": [{"conversationId": "..."}]}]]
+```
+
+The batch is wrapped in a `["transform", …]` tuple (`zero-protocol/src/custom-queries.js`), and each
+query's arguments are array-wrapped because the server reads `args[0]`
+(`zero-server/src/queries/process-queries.js`). A malformed request is answered
+`{"kind": "TransformFailed", …}` with **HTTP 200**, so the scenario checks the body, never the
+status alone.
+
+### `rest-messaging` is gated
+
+It writes a message row per iteration and no reset exists yet, so `pnpm perf:run` refuses it unless
+`PERF_ALLOW_WRITE_SCENARIOS=true` is set. See "Cleanup" below. It is also deliberately **not**
+named `messaging`: the chat UI does not use this endpoint, so its numbers must not be read as the
+user-facing send path.
+
+## Coverage
+
+The highest-risk area identified from production telemetry is the connected real-time
+pipeline — `/api/zero/push`, `/api/zero/query`, `POST /api/conversations/:id/messages`,
+Socket.IO, Redis pub/sub, typing and presence, unread counts and message side effects —
+with steady-state message send as the first milestone.
+
+What is built here covers a slice of that, and the gap is deliberate, not forgotten:
+
+| Approved scenario | Status |
+| --- | --- |
+| 0 — reconnect/retry characterisation (Socket.IO) | **not built.** Needs a socket client; k6 HTTP cannot reach it. |
+| 1 — steady-state message send | `zero-push`, gated. The envelope was resolved from `@rocicorp/zero` 1.9.0 source: `{clientGroupID, mutations:[{type:'custom', id, clientID, name:'messages.send', args:[…], timestamp}], pushVersion:1, timestamp, requestID}` with `schema` and `appID` as querystring parameters. **Caveat:** `ZERO_MUTATE_URL` shows zero-cache calls this endpoint, so hitting it directly covers the mutator and its side effects but bypasses the sync layer where hydration and serving lag live. |
+| 2 — participant fan-out wall | **not built.** Depends on scenario 1. |
+| Wave 2 — search (Vespa + ACL) | `search`. Executes retrieval, so unlike the Zero scenario its latency is real work. |
+| Wave 2 — attachment downloads | `attachments`. Needs `attachmentIds` in the fixture and has a bandwidth cost. |
+| Wave 2 — tickets / boards views | **not built.** Their read path is Zero, not REST — `routes/boards.ts` exposes no GET at all — so this needs Zero coverage rather than a REST scenario. |
+| 3 — mixed human + external-source ingest | **not built.** |
+| 4 — soak and recovery | profile exists; the pipeline it should soak does not. |
+| — readiness / connectivity | `smoke`. |
+| — part of `/api/zero/query` | `zero-query-transform` (transform step only, no SQL). |
+
+So the serving-lag and chat-send risks that motivated the original priority are **not yet
+reproducible** by this framework. Zero push and WebSocket/Socket.IO load remain the next scenarios
+and are required for that.
+
+## Workload profiles
+
+`smoke`, `release`, `load`, `stress`, `spike`, `soak`.
+
+| Profile | Shape | Answers |
+| --- | --- | --- |
+| `smoke` | 1 VU, 1 iteration | Is it reachable at all? |
+| `release` | ramp to 25 over ~10m | Did this release regress? |
+| `load` | ramp to 100 over ~40m | Does expected peak traffic hold up? |
+| `stress` | 4 steps to 300 over ~17m | *Where* does it start to degrade? |
+| `spike` | 30 → 300 in **10s**, then recover | Does it survive a surge, and does it come back? |
+| `soak` | 25 held for 4h | Does anything leak or drift? |
+
+`spike` is not a shorter `stress`. Stress climbs in three-minute steps to locate the
+degradation point; spike slams from a tenth of peak to full peak in ten seconds, holds
+briefly, drops back and then **holds at baseline for three minutes so recovery is
+observable**. That recovery window is the point — the production signals behind this work
+include roughly 10,000 socket retries per second, which arrives as a surge rather than a
+ramp, and a stepped profile would never reproduce it. A `--duration` override lengthens
+the recovery hold rather than the surge, because a surge held for ten minutes is no
+longer a spike.
+
+Every completed run writes a self-contained
+`report.html`, `summary.json` and `metadata.json`, and can optionally Remote Write to
+VictoriaMetrics for the Grafana dashboard.
+
+## How Xyne environments are addressed
+
+Sandbox is a separate deployment with its own host. **Pre-production is not** — it is the
+production host plus a routing header, exactly as the desktop app does it when the Beta
+menu's "Enable pre-prod features" is on
+(`apps/electron/src/services/request-interceptor.ts:129-131`):
+
+| Environment | Host | Selected by |
+| --- | --- | --- |
+| sandbox | `spaces.sandbox.xyne.juspay.net` | separate deployment |
+| production | `app.spaces.xyne.juspay.net` | no header |
+| pre-production | `app.spaces.xyne.juspay.net` | **`x-route-env: playground`** |
+
+That makes the environment *name* an unreliable guard on its own: a run labelled `sandbox`
+pointed at the production host is a production load test wearing a sandbox label.
+
+So three things are enforced. Every scenario sends the routing header for `preprod`; the
+runner **refuses the production hosts by hostname for every environment except `preprod`**;
+and `preprod` itself is limited to the `smoke` and `release` profiles and the read-only
+scenarios. The hostname is compared exactly, so a lookalike or a port cannot disguise one.
+
+Routine runs accept only `sandbox` and `preprod`. Production is deliberately rejected.
+
+### The two targets are not peers
+
+| | sandbox | preprod |
+| --- | --- | --- |
+| Deployment | **its own** | **production's** |
+| Database | **its own** | **production's — the one customers use** |
+| Selected by | separate host | `x-route-env: playground` header |
+| Profiles allowed | **all six** | **`smoke` and `release` only** |
+| VU cap | **300** | **25** (the `release` peak) |
+| Max duration | 8h | 10m |
+| Write scenarios | allowed with opt-in | **refused — no opt-in exists** |
+
+Pre-production is not an environment in the usual sense. The desktop app's Beta toggle
+sends a header to the **same host**, and the backend passes it to Superposition as a
+config dimension (`cacConfigController.ts:14`), resolving a different feature set against
+the same backend, database, Vespa and Redis that serve customers. Load there is load on
+production, and a write there is a write to customer data.
+
+So preprod is kept as a **UAT verification** target — the `smoke` check and the read-only
+`release` check against the playground feature set before it is promoted — and nothing
+heavier. Load, stress, spike and soak find where the system degrades; on preprod that would
+be production degrading. **Sandbox is where load actually runs.**
+
+## Identity fixture sizing
+
+The Zero endpoints are rate limited **per authenticated user** (300 requests / 60s by default), so
+`zero-query-transform` runs need enough distinct identities to reach their target rate — 20 for
+`load`, 60 for `stress`. The runner refuses a run whose fixture is too small rather than letting the limiter be
+reported as a product failure. Full table and rationale: `performance/test-data/README.md`.
+
+## Dependencies
+
+Required locally:
+
+- Node.js and pnpm already used by this repository;
+- Docker with permission to run `grafana/k6:2.2.0`; and
+- network access from the Docker container to the selected environment.
+
+No npm k6 dependency, Java, JMeter, InfluxDB, or Grafana Cloud subscription is required.
+
+## 1. Validate the framework
+
+```bash
+pnpm perf:validate
+```
+
+This is an offline, fast check. It does not send application traffic.
+
+## 2. Run the readiness smoke test
+
+```bash
+PERF_BASE_URL=https://sandbox.example.com \
+PERF_RELEASE_VERSION=1.298.0 \
+pnpm perf:smoke
+```
+
+Start here. A new timestamped directory appears under `performance/reports/`.
+
+## 3. Prepare test identities
+
+Copy `performance/test-data/users.example.json` to an ignored file such as
+`performance/test-data/users.sandbox.json`. Replace every placeholder with a short-lived token and
+IDs from a dedicated, resettable performance workspace. Size the fixture per the table in
+`performance/test-data/README.md`.
+
+## 4. Confirm the contract with one authenticated request
+
+Before the first real run, confirm the endpoint accepts the envelope, with a real token from your
+fixture. The format is verified against the library source, but only a live call also confirms
+authentication, the query names and ACL behaviour on your target:
+
+```bash
+curl -sS -X POST "$PERF_BASE_URL/api/zero/query" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "x-workspace-id: $WORKSPACE_ID" \
+  -H 'Content-Type: application/json' \
+  -d '["transform",[{"id":"q1","name":"allTickets","args":[{}]}]]'
+```
+
+Expect `{"kind":"QueryResponse","queries":[{"id":"q1","name":"allTickets","ast":{…}}]}`. A
+`{"kind":"TransformFailed",…}` body — which arrives with HTTP 200 — means the envelope or the query
+name is wrong. Fix that before running load.
+
+## 5. Run a small Zero query-transform test
+
+```bash
+PERF_BASE_URL=https://sandbox.example.com \
+PERF_RELEASE_VERSION=1.298.0 \
+PERF_USERS_FILE=performance/test-data/users.sandbox.json \
+pnpm perf:run -- --environment sandbox --profile release --scenario zero-query-transform --vus 5 --duration 2m
+```
+
+Reads only, so this needs no workspace reset. The duration override changes the steady stage;
+ramp-up and ramp-down are preserved.
+
+`setup()` makes one authenticated request before load starts, so a stale fixture token, a wrong
+envelope or a renamed query fails immediately as an `ENVIRONMENT_FAILURE` instead of surfacing later
+as a latency regression.
+
+## 5b. The REST send path (gated — writes rows)
+
+```bash
+PERF_ALLOW_WRITE_SCENARIOS=true \
+PERF_BASE_URL=https://sandbox.example.com \
+PERF_RELEASE_VERSION=1.298.0 \
+PERF_USERS_FILE=performance/test-data/users.sandbox.json \
+pnpm perf:run -- --environment sandbox --profile release --scenario rest-messaging --vus 5 --duration 2m
+```
+
+Without the opt-in the runner refuses. Do not raise it beyond `release` until the cleanup question
+below is answered — and remember it is not the path the chat UI uses.
+
+## Cleanup (open)
+
+`rest-messaging` inserts a row per iteration, each one also enqueuing a Vespa index job and
+side-effect fan-out. A `soak` at 25 VUs and 1s think time is roughly 360,000 messages. Messages are
+tagged `PERF-<run-id>-<userId>-<vu>-<iter>` so they can be found and removed, but **no teardown is
+implemented yet**. Decide one of: a k6 `teardown()` that deletes by marker, a documented pre/post
+reset job, or a throwaway workspace per run — before running a capacity profile of
+`rest-messaging` on sandbox. (Pre-production refuses write scenarios outright.)
+
+`zero-query-transform`, `search` and `attachments` are unaffected: they write nothing. `attachments` has no cleanup need but does transfer real bytes, so watch egress on long runs.
+
+## 6. Send metrics to VictoriaMetrics
+
+```bash
+PERF_REMOTE_WRITE_URL=https://victoriametrics.example.com/api/v1/write \
+PERF_REMOTE_WRITE_USERNAME="$METRICS_USER" \
+PERF_REMOTE_WRITE_PASSWORD="$METRICS_PASSWORD" \
+PERF_BASE_URL=https://spaces.sandbox.xyne.juspay.net \
+PERF_RELEASE_VERSION=1.298.0 \
+PERF_USERS_FILE=performance/test-data/users.sandbox.json \
+pnpm perf:run -- --environment sandbox --profile release --scenario zero-query-transform
+```
+
+Open the provisioned **Xyne k6 Performance Testing** dashboard and choose the generated run ID.
+Do not embed VictoriaMetrics credentials in its URL.
+
+## Threshold policy
+
+Correctness checks always fail the command. Performance limits are report-only during the first
+3–5 stable baseline releases. After owners approve the p95 target, set
+`PERF_ENFORCE_THRESHOLDS=true` in the protected Jenkins configuration to make HTTP failure rate and
+the scenario's latency percentile blocking (`message_send_duration` p95 < 300ms for
+`rest-messaging`, `zero_query_duration` p95 < 400ms for `zero-query-transform`).
+
+## Output and result meaning
+
+Each run directory contains:
+
+- `report.html`: human-readable k6 dashboard;
+- `summary.json`: full machine-readable k6 summary; and
+- `metadata.json`: environment, profile, scenario, release, run ID, and timestamps.
+
+An exit code of `0` means all enabled gates passed. Exit code `2` from the launcher means invalid
+configuration or an environment/runner problem. Other non-zero k6 exits require the console and
+report to distinguish product thresholds from test or observability problems.
+
+Never commit reports, real tokens, customer content, or generated identity files.
