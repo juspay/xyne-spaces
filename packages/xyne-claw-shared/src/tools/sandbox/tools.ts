@@ -624,6 +624,8 @@ export interface RepoSetupConfig {
   /** Generic repositories are not baked into their template. Skip the golden
    * clone probe and clone them immediately. */
   skipBakedCloneWait?: boolean;
+  /** Set by claw-auth on a workspace's own profile; built-ins have none. */
+  workspaceId?: string;
 }
 
 export function buildRepoCloneCommand(
@@ -693,8 +695,14 @@ function makeClient(config: Record<string, string>, templateOverride?: string): 
 async function pinnedTemplateForContext(context: ToolExecutionContext): Promise<string | undefined> {
   const pinnedRepo = context.meta?.["sandboxRepo"]?.trim();
   if (!pinnedRepo) return undefined;
-  const { getRepoConfig } = await import("./repo-config-source.js");
-  return (await getRepoConfig(pinnedRepo))?.template;
+  return (await runRepoConfigs(context))[pinnedRepo]?.template;
+}
+
+/** The profiles this run may use: built-ins plus its workspace's own. */
+async function runRepoConfigs(context: ToolExecutionContext | undefined) {
+  const workspaceId = context?.meta?.[SDLC_META_KEYS.workspaceId]?.trim() || context?.meta?.["workspaceId"]?.trim();
+  const { getRepoConfigsFor } = await import("./repo-config-source.js");
+  return getRepoConfigsFor(workspaceId || undefined);
 }
 
 /** An unknown template name from the LLM falls back to the agent's or default template instead of failing the claim. */
@@ -716,7 +724,8 @@ const REPO_URL_INPUT = {
 };
 const PROFILE_INPUT = {
   type: "string",
-  description: "Sandbox profile key, needed only when repoUrl has several profiles (see sandbox-list-profiles).",
+  description:
+    "Sandbox profile key, needed only when repoUrl has several profiles. Take it from sandbox-list-profiles or the user; never guess it from the repository name.",
 };
 
 type RepoProfile = { key: string; config: RepoSetupConfig } | { error: string };
@@ -728,8 +737,7 @@ async function repoProfileFor(params: Record<string, unknown>, context: ToolExec
   // When a repository has several profiles and the model names none, the agent's pinned one is used.
   const named = typeof params["profile"] === "string" ? params["profile"].trim() : "";
   const profile = named || context.meta?.["sandboxRepo"]?.trim() || undefined;
-  const { getRepoConfigs } = await import("./repo-config-source.js");
-  const configs = await getRepoConfigs();
+  const configs = await runRepoConfigs(context);
   const choice = resolveSandboxProfile(configs, repoUrl, profile);
   if (!choice || "error" in choice) return choice;
   const config = configs[choice.key];
@@ -754,8 +762,7 @@ export const sandboxListProfiles: ToolDefinition = {
   async execute(params, context) {
     const param = typeof params["repoUrl"] === "string" ? params["repoUrl"].trim() : "";
     const repoUrl = param || context?.meta?.[SDLC_META_KEYS.repositoryUrl]?.trim();
-    const { getRepoConfigs } = await import("./repo-config-source.js");
-    const configs = await getRepoConfigs();
+    const configs = await runRepoConfigs(context);
     const keys = repoUrl ? findSandboxKeys(configs, repoUrl) : Object.keys(configs).sort();
     const profiles = keys.flatMap((key) => {
       const config = configs[key];
@@ -2585,8 +2592,7 @@ export const sandboxRepoSetup: ToolDefinition = {
     const sessionDurationMs = params["sessionDurationMs"] as number | undefined;
     // Import here to avoid circular dependency
     const { isReadOnlyJob } = await import("./repo-configs.js");
-    const { getRepoConfigs } = await import("./repo-config-source.js");
-    const repoConfigs = await getRepoConfigs();
+    const repoConfigs = await runRepoConfigs(context);
 
     // ── Routing ──────────────────────────────────────────────────────────
     // 1. Always-read-only contexts → shared read-only sbx-git (no snapshot

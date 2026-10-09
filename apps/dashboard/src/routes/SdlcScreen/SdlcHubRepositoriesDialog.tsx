@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactElement } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { GitBranch, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '../../components/ui/Button';
@@ -36,6 +37,12 @@ export function SdlcHubRepositoriesDialog(props: {
   const [search, setSearch] = useState('');
   const [picked, setPicked] = useState<SdlcRepositorySearchResult[]>([]);
   const [busy, setBusy] = useState(false);
+  const queryClient = useQueryClient();
+  // Environments lists the hub's repos; refresh it now instead of waiting for the hub row to sync.
+  const refreshEnvironments = (): void => {
+    void queryClient.invalidateQueries({ queryKey: ['sdlc-environments'] });
+    void queryClient.invalidateQueries({ queryKey: ['sdlc-sandbox-profiles'] });
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -86,6 +93,7 @@ export function SdlcHubRepositoriesDialog(props: {
   const disconnect = async (repoId: string): Promise<void> => {
     try {
       await apiInstance.delete(`${channelPath}/${encodeURIComponent(repoId)}`);
+      refreshEnvironments();
     } catch (error) {
       toast.error(sdlcErrorMessage(error));
     }
@@ -119,6 +127,7 @@ export function SdlcHubRepositoriesDialog(props: {
         throw failure.reason;
       }
       await apiInstance.post(channelPath, { repoIds: registered.map(result => result.id!) });
+      refreshEnvironments();
       setPicked([]);
       setAdding(false);
     } catch (error) {

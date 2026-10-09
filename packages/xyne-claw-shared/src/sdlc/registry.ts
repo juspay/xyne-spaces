@@ -47,6 +47,7 @@ export const SDLC_TOOL_CAPABILITIES: readonly SdlcToolCapability[] = [
 export const SDLC_WRITES_WITHOUT_APPROVAL: readonly string[] = [SDLC_TOOL_NAMES.createPullRequest];
 
 export const SDLC_GENERIC_SANDBOX_TOOLS = [
+  "sandbox-list-profiles",
   "sandbox-create",
   "sandbox-run",
   "sandbox-run-detached",
