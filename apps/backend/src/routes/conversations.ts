@@ -32,9 +32,6 @@ router.get('/:conversationId/recommendation', conversationController.getRecommen
 // Cancel an in-flight agent run for the given conversation
 router.post('/:conversationId/agent-cancel', conversationController.cancelAgentRun);
 
-// Update message content (for ticket suggestion → ticket created flow)
-router.put('/:conversationId/messages/:messageId/ticket-suggestion', conversationController.updateTicketSuggestion);
-
 // Mark a Pulse actionable item as sent (moves pulseItem → pulseSent in frontmatter)
 router.put('/:conversationId/messages/:messageId/pulse-item', conversationController.markPulseItemAsSent);
 

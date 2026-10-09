@@ -2,7 +2,7 @@ import { BaseRepository } from './base';
 import { Message } from '@prisma/client';
 import { PaginationOptions, PaginatedResult, QueryOptions } from '@/types/database';
 import { sanitizeMessageContent } from '@/utils/contentUtils';
-import { getMessageContentLength, MAX_MESSAGE_CONTENT_LENGTH, MessageType } from '@xyne/shared';
+import { CALL_TICKET_UPDATES_SUBTYPE, getMessageContentLength, MAX_MESSAGE_CONTENT_LENGTH, MessageType } from '@xyne/shared';
 //import { queueMessageIngestion } from '@/queues/vespaQueue';
 
 //import { extractAllMentions } from '@/utils/mentionParser';
@@ -551,31 +551,21 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
   }
 
   /**
-   * Find all existing ticket batch messages for a specific call, ordered by creation time.
+   * The single "ticket updates" card message a call posted into its thread
+   * (see callTicketUpdateService). Null until the pipeline has run.
    */
-  async findTicketsByCallId(conversationId: string, callId: string): Promise<Message[]> {
-    return await this.db.message.findMany({
+  async findTicketUpdatesByCallId(conversationId: string, callId: string): Promise<Message | null> {
+    return await this.db.message.findFirst({
       where: {
         conversationId,
         msgType: MessageType.BOT,
         AND: [
-          {
-            metadata: {
-              path: ['messageSubtype'],
-              equals: 'call_suggested_tickets',
-            },
-          },
-          {
-            metadata: {
-              path: ['callId'],
-              equals: callId,
-            },
-          },
+          { metadata: { path: ['messageSubtype'], equals: CALL_TICKET_UPDATES_SUBTYPE } },
+          { metadata: { path: ['callId'], equals: callId } },
         ],
       },
-      orderBy: {
-        createdAt: 'asc',
-      },
+      // Two overlapping runs can each create a card; every lookup settles on the oldest.
+      orderBy: { createdAt: 'asc' },
     });
   }
 

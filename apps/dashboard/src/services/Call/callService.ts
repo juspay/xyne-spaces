@@ -4,6 +4,7 @@ import { queryClient } from '../clients/queryClient';
 import { AxiosError } from 'axios';
 import { CallType, MeetingStatus, type HostControls, CalendarVisibility } from '@xyne/shared';
 import { logger, Event } from '../../utils/logger';
+import { getApiErrorMessage } from '../../utils/apiError';
 
 // ============================================================================
 // TYPES
@@ -187,6 +188,36 @@ export type CallShareTarget =
 export interface CallSharingResult {
   action: 'grant' | 'revoke';
   shares?: Array<{ id: string; target: CallShareTarget; access: string }>;
+}
+
+/** What approving one ticket update actually did. */
+export interface AppliedTicketUpdateResult {
+  commentPosted: boolean;
+  newStageName: string | null;
+  /** Stage the board will move the ticket to once an approver confirms. */
+  stagePendingApproval: string | null;
+}
+
+/**
+ * Approving a ticket update was refused. When the server could not settle on a
+ * stage itself, `stageOptions` lists the stages the user can choose from.
+ */
+export class TicketUpdateApplyError extends Error {
+  readonly stageOptions: string[];
+
+  constructor(message: string, stageOptions: string[] = []) {
+    super(message);
+    this.name = 'TicketUpdateApplyError';
+    this.stageOptions = stageOptions;
+  }
+}
+
+function extractStageOptions(error: unknown): string[] {
+  if (!(error instanceof AxiosError)) return [];
+  const data = error.response?.data as { stageOptions?: unknown } | undefined;
+  return Array.isArray(data?.stageOptions)
+    ? data.stageOptions.filter((s): s is string => typeof s === 'string')
+    : [];
 }
 
 export class CallService {
@@ -897,6 +928,47 @@ export class CallService {
       params: { from: from.toISOString(), to: to.toISOString() },
     });
     return response.data;
+  }
+
+  /**
+   * Approve one item on a call's "ticket updates" card: post the note on the
+   * ticket thread and/or move the ticket's stage, as the signed-in user.
+   */
+  async applyTicketUpdate(
+    callId: string,
+    updateId: string,
+    body: { postComment: boolean; changeStatus: boolean; message?: string; stageName?: string },
+  ): Promise<AppliedTicketUpdateResult> {
+    try {
+      const response = await apiInstance.post<{
+        success: true;
+        applied: {
+          commentMessageId: string | null;
+          newStageName: string | null;
+          stagePendingApproval: string | null;
+        };
+      }>(`/calls/${callId}/ticket-updates/${updateId}/apply`, body);
+      const { applied } = response.data;
+      return {
+        commentPosted: applied.commentMessageId !== null,
+        newStageName: applied.newStageName,
+        stagePendingApproval: applied.stagePendingApproval,
+      };
+    } catch (error) {
+      throw new TicketUpdateApplyError(
+        getApiErrorMessage(error, 'Failed to apply the ticket update'),
+        extractStageOptions(error),
+      );
+    }
+  }
+
+  /** Ignore one item on a call's "ticket updates" card. */
+  async ignoreTicketUpdate(callId: string, updateId: string): Promise<void> {
+    try {
+      await apiInstance.post(`/calls/${callId}/ticket-updates/${updateId}/ignore`);
+    } catch (error) {
+      throw new Error(getApiErrorMessage(error, 'Failed to ignore the ticket update'));
+    }
   }
 }
 
