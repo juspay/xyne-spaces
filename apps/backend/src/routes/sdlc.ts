@@ -10,6 +10,7 @@ import {
   createSdlcVcsCredentialSchema,
   resolveSdlcRepositoryLinkSchema,
   setSdlcArtifactArchivedSchema,
+  sdlcHubPinSchema,
   sdlcVcsProviderSchema,
   updateSdlcVcsCredentialSchema,
   type SandboxProfileConfig,
@@ -27,6 +28,12 @@ import { SdlcHubService, type SdlcActor } from '@/sdlc';
 import { sdlcAgentContext } from '@/sdlc/SdlcAgentContextService';
 import { listEnvironments } from '@/sdlc/sdlcEnvironment';
 import { listHubAgents, markHubAgentPending } from '@/sdlc/sdlcHubAgents';
+import {
+  linkHubSkill,
+  listHubKnowledgeLinks,
+  setHubPin,
+  unlinkHubSkill,
+} from '@/sdlc/hubKnowledge';
 import {
   createSandboxProfile,
   listSandboxProfiles,
@@ -170,6 +177,39 @@ router.post(
   route(async (req, res) => {
     const { agentId } = z.object({ agentId: z.string().min(1) }).parse(req.body);
     await markHubAgentPending(prisma, actorFromRequest(req), req.params.channelId, agentId);
+    res.status(204).send();
+  })
+);
+
+router.get(
+  '/channels/:channelId/knowledge',
+  route(async (req, res) => {
+    const links = await listHubKnowledgeLinks(actorFromRequest(req), req.params.channelId);
+    res.status(200).json({ success: true, ...links });
+  })
+);
+
+router.post(
+  '/channels/:channelId/knowledge/skills',
+  route(async (req, res) => {
+    const { skillId } = z.object({ skillId: z.string().min(1).max(64) }).parse(req.body);
+    await linkHubSkill(actorFromRequest(req), req.params.channelId, skillId);
+    res.status(204).send();
+  })
+);
+
+router.delete(
+  '/channels/:channelId/knowledge/skills/:skillId',
+  route(async (req, res) => {
+    await unlinkHubSkill(actorFromRequest(req), req.params.channelId, req.params.skillId);
+    res.status(204).send();
+  })
+);
+
+router.put(
+  '/channels/:channelId/knowledge/pins',
+  route(async (req, res) => {
+    await setHubPin(actorFromRequest(req), req.params.channelId, sdlcHubPinSchema.parse(req.body));
     res.status(204).send();
   })
 );

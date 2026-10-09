@@ -45,11 +45,11 @@ export const skillRepository = {
    * skills, including private ones owned by other users — necessary for
    * operators auditing skill libraries workspace-wide.
    */
-  listVisible: (opts: { userId?: string; isAdmin?: boolean; orgId?: string } = {}) => {
+  listVisible: (opts: { userId?: string | string[]; isAdmin?: boolean; orgId?: string } = {}) => {
     const base: Prisma.SkillWhereInput = opts.isAdmin
       ? {}
       : opts.userId
-        ? { OR: [{ scope: "global" }, { ownerUserId: opts.userId }] }
+        ? { OR: [{ scope: "global" }, { ownerUserId: { in: [opts.userId].flat() } }] }
         : { scope: "global" };
     // Phase-2: AND the caller's org when provided (see agentRepository.listVisible).
     const where: Prisma.SkillWhereInput = opts.orgId ? { AND: [{ orgId: opts.orgId }, base] } : base;

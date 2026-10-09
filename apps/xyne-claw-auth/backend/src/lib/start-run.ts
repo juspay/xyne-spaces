@@ -2,11 +2,12 @@ import { sanitizeAgentHandoff } from "./multi-agent-chat.js";
 import { scopeReplyFormat } from "./reply-format-scope.js";
 import { randomUUID } from "crypto";
 import { isMessagingChannelKey, type MessagingChannelKey } from "../surfaces/messaging/plugin.js";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { decrypt } from "../crypto.js";
 import { errMsg } from "./errors.js";
-import { loadSdlcHubKnowledge, resolveSdlcHubContextForUser } from "./sdlc-repository-context.js";
+import { loadHubRunContext, resolveSdlcHubContextForUser } from "./sdlc-repository-context.js";
 import { spacesAppFetch } from "./spaces-api.js";
 import {
   chatMessageRepository,
@@ -310,6 +311,24 @@ async function resolveUserId(
 
 // ── Resolve agent config ──
 
+function toRunSkill(skill: Prisma.SkillGetPayload<{ include: { files: true } }>) {
+  return {
+    slug: skill.slug,
+    name: skill.name,
+    description: skill.description ?? "",
+    content: skill.content,
+    ...(skill.files.length > 0
+      ? {
+          files: skill.files.map((f) => ({
+            relativePath: f.relativePath,
+            content: f.content,
+            contentType: f.contentType,
+          })),
+        }
+      : {}),
+  };
+}
+
 async function resolveAgent(
   agentSlug: string | undefined,
   orgId: string | undefined,
@@ -366,21 +385,7 @@ async function resolveAgent(
   // (UI-created skills are plain text; seeded skills have inline frontmatter).
   // Also forward `files[]` (relativePath/content) — extra files in the skill
   // directory beyond SKILL.md.
-  const skills = agent.skills.map((as) => ({
-    slug: as.skill.slug,
-    name: as.skill.name,
-    description: as.skill.description ?? "",
-    content: as.skill.content,
-    ...(as.skill.files.length > 0
-      ? {
-          files: as.skill.files.map((f) => ({
-            relativePath: f.relativePath,
-            content: f.content,
-            contentType: f.contentType,
-          })),
-        }
-      : {}),
-  }));
+  const skills = agent.skills.map((as) => toRunSkill(as.skill));
 
   return {
     id: agent.id,
@@ -1059,6 +1064,7 @@ export async function prepareRun(
         interactive: !isScheduledOrAutomationEvent(eventType),
       });
     }
+    let hubSkills: ReturnType<typeof toRunSkill>[] = [];
     if (effectiveChannelId) {
       try {
         // Hub Knowledge membership (channelParticipant.userId) is keyed by the
@@ -1071,8 +1077,9 @@ export async function prepareRun(
         const hubWorkspaceId =
           typeof hubWorkspaceRaw === "string" && hubWorkspaceRaw.trim() ? hubWorkspaceRaw.trim() : undefined;
         const hubKnowledgeUserId = await spacesUserIdForClawUser(resolved.userId, hubWorkspaceId);
-        const hubKnowledge = await loadSdlcHubKnowledge(effectiveChannelId, hubKnowledgeUserId);
-        if (hubKnowledge) mergedContext = mergedContext ? `${hubKnowledge}\n\n${mergedContext}` : hubKnowledge;
+        const hub = await loadHubRunContext(effectiveChannelId, hubKnowledgeUserId, resolved.userId, agent.orgId);
+        hubSkills = hub.skills.map(toRunSkill);
+        if (hub.text) mergedContext = mergedContext ? `${hub.text}\n\n${mergedContext}` : hub.text;
       } catch (err) {
         log.warn("[run] failed to load SDLC Hub Knowledge:", errMsg(err));
       }
@@ -1506,9 +1513,10 @@ export async function prepareRun(
               !!sk && typeof sk.name === "string" && typeof sk.content === "string",
           )
         : [];
-    const agentSkills = agent.skills ?? [];
+    const ownSlugs = new Set((agent.skills ?? []).map((sk) => sk.slug ?? sk.name));
+    const agentSkills = [...(agent.skills ?? []), ...hubSkills.filter((sk) => !ownSlugs.has(sk.slug))];
     // Agent-attached skills win a slug collision — an org's own skill must not
-    // be silently shadowed by a caller-supplied one.
+    // be silently shadowed by a hub-linked or caller-supplied one.
     const takenSlugs = new Set(agentSkills.map((sk) => sk.slug ?? sk.name));
     const mergedSkills = [
       ...agentSkills,

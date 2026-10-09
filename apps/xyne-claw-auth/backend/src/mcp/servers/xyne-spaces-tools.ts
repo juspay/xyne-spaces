@@ -3248,7 +3248,8 @@ function userTitle(u: UserRow): string {
   const type = u.userType ? ` — ${u.userType}` : "";
   let tag = "";
   if (u.status && u.status !== "ACTIVE") {
-    tag = u.leftAt ? ` [${u.status}, left ${new Date(u.leftAt).toLocaleDateString()}]` : ` [${u.status}]`;
+    // A fixed locale: the default one differs per machine.
+    tag = u.leftAt ? ` [${u.status}, left ${new Date(u.leftAt).toLocaleDateString("en-US")}]` : ` [${u.status}]`;
   }
   return `${u.name}${alias} <${u.email}>${type}${tag}`;
 }

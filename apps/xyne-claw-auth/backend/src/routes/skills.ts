@@ -6,7 +6,7 @@ import { getRequesterId, getOrgId, isClawAdmin, requireClawAdmin, getAgentEditAc
 import { s2sKeyMatches } from "../middleware/require-auth.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
-import { spacesUserIdForClawUser } from "../lib/users-jit.js";
+import { findUserByAnyId, spacesUserIdForClawUser } from "../lib/users-jit.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { spacesAppFetch } from "../lib/spaces-api.js";
@@ -71,8 +71,10 @@ router.get("/", asyncHandler(async (req: Request, res: Response) => {
   // every user's private skills (the same regression agents.ts already fixed).
   const wantAllSkills = req.query["scope"] === "all";
   const listOrgId = getOrgId(req);
+  // The scope may be the raw Spaces id, while Skill.ownerUserId holds the canonical Claw id.
+  const scopedUser = scopeUserId ? await findUserByAnyId(scopeUserId) : null;
   const skills = await skillRepository.listVisible({
-    ...(scopeUserId ? { userId: scopeUserId } : {}),
+    ...(scopeUserId ? { userId: scopedUser ? [scopeUserId, scopedUser.id] : scopeUserId } : {}),
     ...(listOrgId ? { orgId: listOrgId } : {}),
     isAdmin: admin && wantAllSkills,
   });
