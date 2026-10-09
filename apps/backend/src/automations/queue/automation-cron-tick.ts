@@ -67,7 +67,15 @@ export async function processCronTick(job: Bull.Job<AutomationScheduleJobData>):
   }
 
   const metadata = parseAutomationMetadata(workflow.metadata);
-  const firedAt = new Date().toISOString();
+  // IST is a fixed +05:30 (no DST), so shifting the UTC clock gives IST wall-clock fields.
+  const ist = new Date(Date.now() + 5.5 * 3600_000);
+  const iso = ist.toISOString();
+  const fired = {
+    firedAt: iso.replace('Z', '+05:30'),
+    date: iso.slice(0, 10),
+    time: iso.slice(11, 16),
+    weekday: ist.toLocaleDateString('en-US', { weekday: 'long', timeZone: 'UTC' }),
+  };
   const execution = await createAutomationExecutionForWebhook({
     workspaceId: workflow.workspaceId,
     workflowId: workflow.id,
@@ -77,7 +85,7 @@ export async function processCronTick(job: Bull.Job<AutomationScheduleJobData>):
         workspaceId: workflow.workspaceId,
         createdById: metadata.createdById,
       },
-      trigger: { type: SCHEDULE_EVENT, firedAt, data: { firedAt } },
+      trigger: { type: SCHEDULE_EVENT, ...fired, data: fired },
       steps: {},
       __meta: { error: null, chain: [] },
     },

@@ -26,15 +26,38 @@ const ScheduleTriggerConfigSchema = z.object({
     .describe(
       'Monthly only. DAY_OF_MONTH: 1..28, or -1 for the last day. NTH_WEEKDAY: ordinal*10+weekday (ordinal 5 = last).',
     ),
+  intervalUnit: z
+    .enum(['MINUTES', 'HOURS'])
+    .nullish()
+    .describe('Set for "every N minutes/hours"; takes precedence over the time-of-day fields.'),
+  intervalValue: z
+    .number()
+    .int()
+    .min(1)
+    .max(59)
+    .nullish()
+    .describe('Whole number. UI caps MINUTES at 59 and HOURS at 23.'),
+}).refine(c => c.intervalUnit !== 'HOURS' || !c.intervalValue || c.intervalValue <= 23, {
+  path: ['intervalValue'],
+  message: 'Hours must be between 1 and 23.',
 });
 
 const ScheduleTriggerOutputSchema = z.object({
-  firedAt: z.string(),
+  firedAt: z.string().describe('IST timestamp, e.g. 2026-10-09T14:09:00.109+05:30'),
+  date: z.string().describe('IST date, YYYY-MM-DD'),
+  time: z.string().describe('IST time, HH:mm'),
+  weekday: z.string().describe('IST weekday name, e.g. Friday'),
 });
 
 /** Single source of the cron expression for activate, tick-time checks and boot recovery. */
 export function cronFromTrigger(config: unknown): string {
-  return buildCronPattern(ScheduleTriggerConfigSchema.parse(config));
+  const parsed = ScheduleTriggerConfigSchema.parse(config);
+  if (parsed.intervalUnit && parsed.intervalValue) {
+    return parsed.intervalUnit === 'MINUTES'
+      ? `*/${parsed.intervalValue} * * * *`
+      : `0 */${parsed.intervalValue} * * *`;
+  }
+  return buildCronPattern(parsed);
 }
 
 export class ScheduleTrigger extends BaseTrigger<typeof ScheduleTriggerConfigSchema> {
