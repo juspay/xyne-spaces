@@ -1,3 +1,26 @@
+## [1.482.1](https://github.com/juspay/xyne-spaces/compare/v1.482.0...v1.482.1) (2026-10-09)
+
+
+### Bug Fixes
+
+* persist and show PR status conditions on non-linear b… ([#2808](https://github.com/juspay/xyne-spaces/issues/2808)) ([61d81b2](https://github.com/juspay/xyne-spaces/commit/61d81b242dc5409ab23c792b04dd6a6f88c1e1b6))
+
+## [1.482.0](https://github.com/juspay/xyne-spaces/compare/v1.481.2...v1.482.0) (2026-10-08)
+
+
+### Features
+
+* Monitor redesign: run sources, live/stuck/lost runs, close lost runs ([#2827](https://github.com/juspay/xyne-spaces/issues/2827)) ([f1d89f4](https://github.com/juspay/xyne-spaces/commit/f1d89f49b6bab627845f05730d483d7e218139f6))
+
+## [1.481.2](https://github.com/juspay/xyne-spaces/compare/v1.481.1...v1.481.2) (2026-10-08)
+
+## [1.481.1](https://github.com/juspay/xyne-spaces/compare/v1.481.0...v1.481.1) (2026-10-08)
+
+
+### Bug Fixes
+
+* align organizer rows and add double-click rename ([#2815](https://github.com/juspay/xyne-spaces/issues/2815)) ([1d3af4a](https://github.com/juspay/xyne-spaces/commit/1d3af4ae6b6d109ddabe716e614f1a33a4dcbd04))
+
 ## [1.481.0](https://github.com/juspay/xyne-spaces/compare/v1.480.1...v1.481.0) (2026-10-08)
 
 

@@ -1,71 +1,35 @@
 import { ReactElement, useState, useRef, useEffect } from 'react';
-import { ChevronDown, X, Search, ArrowLeft, MoreVertical, Loader2 } from 'lucide-react';
+import { X, Search, ArrowLeft, MoreVertical, Loader2 } from 'lucide-react';
 import { Popover } from '../../../ui/Popover';
 import { Drawer } from '../../../ui/Drawer/Drawer';
 import type { ConversationHistory as ConversationHistoryType } from '../utils/XyneAITypes';
 import { usePlatform } from '../../../../hooks/usePlatform';
 import { XyneDelete } from '../../../icons/xyne-ai';
-import { formatRelativeTime } from '../../../../utils/dateUtils';
-import { AgentSelector } from './AgentSelector';
-import type { AgentOption } from './AgentSelector';
+import { cn } from '../../../../utils/classNames';
+import {
+  ConversationAgentFilter,
+  ConversationListEnd,
+  ConversationRowContent,
+  useAgentDirectory,
+} from '../../../AIScreen/ConversationAgents';
+import { agentIdentity, groupByRecency } from '../utils/XyneAIUtils';
+import { useV2SessionsList } from '../../../../hooks/useAskAISessionsV2';
+import { useDebouncedValue } from '../../../../hooks/useDebouncedValue';
 
 interface ConversationHistoryProps {
-  conversations: ConversationHistoryType[];
   conversationId: string;
   loadingSessionId: string | null;
   streamingSessionIds: string[];
   onBack: () => void;
   onLoadConversation: (conversation: ConversationHistoryType) => void;
   onDeleteConversation: (conversation: ConversationHistoryType) => Promise<void>;
-  selectedAgentSlug?: string | null;
-  agents?: AgentOption[];
-  onSelectAgent?: (slug: string | null) => void;
-  isLoading?: boolean;
+  /** A panel dedicated to one agent (e.g. a desk auto-draft): its history is
+   *  fixed to that agent and the agent filter is hidden. */
+  lockedAgentSlug?: string | null;
   onClose?: () => void;
-  agentSelectorDisabled?: boolean;
 }
 
-// Helper function to group conversations by date
-const groupConversationsByDate = (
-  conversations: ConversationHistoryType[],
-): Record<string, ConversationHistoryType[]> => {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const yesterday = new Date(today);
-  yesterday.setDate(yesterday.getDate() - 1);
-
-  const groups: Record<string, ConversationHistoryType[]> = {
-    Today: [],
-    Yesterday: [],
-  };
-
-  conversations.forEach(conv => {
-    const convDate = new Date(conv.lastUpdated);
-    convDate.setHours(0, 0, 0, 0);
-
-    if (convDate.getTime() === today.getTime()) {
-      groups['Today']!.push(conv);
-    } else if (convDate.getTime() === yesterday.getTime()) {
-      groups['Yesterday']!.push(conv);
-    } else {
-      const dateKey = convDate.toLocaleDateString('en-US', {
-        month: 'long',
-        day: 'numeric',
-        year: convDate.getFullYear() !== today.getFullYear() ? 'numeric' : undefined,
-      });
-      if (!groups[dateKey]) {
-        groups[dateKey] = [];
-      }
-      groups[dateKey].push(conv);
-    }
-  });
-
-  return groups;
-};
-
 export const ConversationHistory = ({
-  conversations,
   conversationId,
   loadingSessionId,
   streamingSessionIds,
@@ -73,16 +37,30 @@ export const ConversationHistory = ({
   onLoadConversation,
   onDeleteConversation,
   onClose,
-  selectedAgentSlug,
-  agents,
-  onSelectAgent,
-  isLoading = false,
-  agentSelectorDisabled = false,
+  lockedAgentSlug = null,
 }: ConversationHistoryProps): ReactElement => {
   const { isMobile } = usePlatform();
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchExpanded, setIsSearchExpanded] = useState(false);
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
+  // Every agent's chats by default; the filter narrows to one agent. A locked
+  // panel is permanently narrowed to its agent.
+  const [agentFilter, setAgentFilter] = useState<string | null>(null);
+  const directory = useAgentDirectory();
+  const query = useDebouncedValue(searchQuery.trim(), 250);
+  // Filter and search run on the server, so they reach chats not loaded yet;
+  // the panel refetches each time it opens.
+  const { conversations, agents, isLoading, hasMore, isLoadingMore, loadMore } = useV2SessionsList({
+    agentSlug: lockedAgentSlug ?? agentFilter,
+    query,
+    refetchOnMount: 'always',
+  });
+  const groups = groupByRecency(conversations);
+  const emptyMessage = query
+    ? `No chats found matching "${searchQuery}"`
+    : agentFilter
+      ? `No chats with ${agentIdentity(directory, agentFilter).name}`
+      : 'No conversations yet. Start a new chat!';
 
   const handleClose = (): void => {
     onClose?.();
@@ -154,13 +132,11 @@ export const ConversationHistory = ({
               <span className="text-foreground text-base font-semibold font-['Inter']">Chats</span>
             </div>
             <div className='flex items-center gap-2'>
-              {agents && agents.length > 0 && onSelectAgent && (
-                <AgentSelector
-                  selectedAgentSlug={selectedAgentSlug ?? null}
-                  agents={agents}
-                  onSelect={onSelectAgent}
-                  disabled={agentSelectorDisabled}
-                  compact={true}
+              {!lockedAgentSlug && (
+                <ConversationAgentFilter
+                  options={agents}
+                  value={agentFilter}
+                  onChange={setAgentFilter}
                 />
               )}
               <button
@@ -203,69 +179,43 @@ export const ConversationHistory = ({
               className='size-5 animate-spin text-muted-foreground'
             />
           </div>
-        ) : isMobile ? (
-          // Mobile: Date-based grouping
-          <>
-            {((): (ReactElement | null)[] => {
-              const filteredConversations = conversations.filter(
-                c =>
-                  searchQuery === '' || c.title.toLowerCase().includes(searchQuery.toLowerCase()),
-              );
-              const groupedByDate = groupConversationsByDate(filteredConversations);
-
-              return Object.entries(groupedByDate).map(([dateKey, convs]) => {
-                if (convs.length === 0) return null;
-                return (
-                  <ConversationSection
-                    key={dateKey}
-                    title={dateKey}
-                    conversations={convs}
-                    currentConversationId={conversationId}
-                    loadingSessionId={loadingSessionId}
-                    streamingSessionIds={streamingSessionIds}
-                    openDropdownId={openDropdownId}
-                    onLoadConversation={onLoadConversation}
-                    onDeleteConversation={onDeleteConversation}
-                    setOpenDropdownId={setOpenDropdownId}
-                    isMobile={isMobile}
-                  />
-                );
-              });
-            })()}
-
-            {/* Empty state */}
-            {conversations.filter(
-              c => searchQuery === '' || c.title.toLowerCase().includes(searchQuery.toLowerCase()),
-            ).length === 0 && (
-              <div className='px-4 py-8 text-center text-muted-foreground text-sm'>
-                {searchQuery
-                  ? `No chats found matching "${searchQuery}"`
-                  : 'No conversations yet. Start a new chat!'}
-              </div>
+        ) : groups.length === 0 ? (
+          <div className='px-4 py-8 text-center text-sm text-muted-foreground'>
+            <p>{emptyMessage}</p>
+            {agentFilter && !query && (
+              <button
+                type='button'
+                onClick={() => setAgentFilter(null)}
+                data-track-category='XyneAI'
+                data-track-name='CLEAR_AGENT_FILTER_EMPTY'
+                className='mt-1 text-xs font-medium text-primary hover:underline'
+              >
+                Show all agents
+              </button>
             )}
-          </>
+          </div>
         ) : (
-          // Desktop: Original layout
-          <ConversationSection
-            title='All Chats'
-            conversations={conversations.filter(
-              c => searchQuery === '' || c.title.toLowerCase().includes(searchQuery.toLowerCase()),
-            )}
-            currentConversationId={conversationId}
-            loadingSessionId={loadingSessionId}
-            streamingSessionIds={streamingSessionIds}
-            openDropdownId={openDropdownId}
-            onLoadConversation={onLoadConversation}
-            onDeleteConversation={onDeleteConversation}
-            setOpenDropdownId={setOpenDropdownId}
-            isMobile={isMobile}
-            emptyMessage={
-              searchQuery
-                ? `No chats found matching "${searchQuery}"`
-                : 'No conversations yet. Start a new chat!'
-            }
-          />
+          groups.map(group => (
+            <ConversationSection
+              key={group.label}
+              title={group.label}
+              conversations={group.conversations}
+              currentConversationId={conversationId}
+              loadingSessionId={loadingSessionId}
+              streamingSessionIds={streamingSessionIds}
+              openDropdownId={openDropdownId}
+              onLoadConversation={onLoadConversation}
+              onDeleteConversation={onDeleteConversation}
+              setOpenDropdownId={setOpenDropdownId}
+              isMobile={isMobile}
+            />
+          ))
         )}
+        <ConversationListEnd
+          hasMore={hasMore}
+          isLoadingMore={isLoadingMore}
+          onLoadMore={() => void loadMore()}
+        />
       </div>
     </div>
   );
@@ -282,9 +232,10 @@ interface ConversationSectionProps {
   onDeleteConversation: (conversation: ConversationHistoryType) => Promise<void>;
   setOpenDropdownId: (id: string | null) => void;
   isMobile: boolean;
-  emptyMessage?: string;
 }
 
+/** One recency bucket ("Today", "Previous 7 days", …) — a quiet label over
+ *  its rows, no toggle: scanning a list should not need clicks. */
 const ConversationSection = ({
   title,
   conversations,
@@ -296,50 +247,36 @@ const ConversationSection = ({
   onDeleteConversation,
   setOpenDropdownId,
   isMobile,
-  emptyMessage,
 }: ConversationSectionProps): ReactElement => (
-  <div className={isMobile ? 'bg-muted rounded-[12px] mx-4 my-4' : ''}>
-    <details open>
-      <summary
-        className={
-          isMobile
-            ? "px-4 py-3 cursor-pointer flex items-center justify-between text-sm text-muted-foreground font-medium font-['Inter']"
-            : "px-4 py-2 cursor-pointer hover:bg-accent flex items-center justify-between text-sm text-muted-foreground font-medium font-['Inter']"
-        }
-      >
-        <span>{title}</span>
-        <ChevronDown className='w-4 h-4' />
-      </summary>
-      <div className={isMobile ? 'pb-2 px-2' : 'pb-2'}>
-        {conversations
-          .sort((a, b) => b.lastUpdated.getTime() - a.lastUpdated.getTime())
-          .map(conversation => (
-            <ConversationItem
-              key={conversation.id}
-              conversation={conversation}
-              isActive={conversation.sessionId === currentConversationId}
-              isLoadingRow={loadingSessionId === conversation.sessionId}
-              isStreamingRow={
-                streamingSessionIds.includes(conversation.sessionId) ||
-                streamingSessionIds.includes(conversation.id)
-              }
-              isDropdownOpen={openDropdownId === conversation.id}
-              onLoad={() => onLoadConversation(conversation)}
-              onDelete={() => {
-                if (window.confirm('Delete this conversation?')) {
-                  void onDeleteConversation(conversation);
-                }
-              }}
-              setOpenDropdownId={setOpenDropdownId}
-              isMobile={isMobile}
-            />
-          ))}
-        {conversations.length === 0 && emptyMessage && (
-          <div className='px-4 py-8 text-center text-muted-foreground text-sm'>{emptyMessage}</div>
-        )}
-      </div>
-    </details>
-  </div>
+  <section
+    aria-label={title}
+    className={isMobile ? 'mx-4 my-3 rounded-[12px] bg-muted pb-1' : 'pb-1'}
+  >
+    <h3 className='px-4 pb-1 pt-3 text-xs font-medium text-muted-foreground'>{title}</h3>
+    <div className='px-2'>
+      {conversations.map(conversation => (
+        <ConversationItem
+          key={conversation.id}
+          conversation={conversation}
+          isActive={conversation.sessionId === currentConversationId}
+          isLoadingRow={loadingSessionId === conversation.sessionId}
+          isStreamingRow={
+            streamingSessionIds.includes(conversation.sessionId) ||
+            streamingSessionIds.includes(conversation.id)
+          }
+          isDropdownOpen={openDropdownId === conversation.id}
+          onLoad={() => onLoadConversation(conversation)}
+          onDelete={() => {
+            if (window.confirm('Delete this conversation?')) {
+              void onDeleteConversation(conversation);
+            }
+          }}
+          setOpenDropdownId={setOpenDropdownId}
+          isMobile={isMobile}
+        />
+      ))}
+    </div>
+  </section>
 );
 
 interface ConversationItemProps {
@@ -433,15 +370,10 @@ const ConversationItem = ({
 
   return (
     <div
-      className={
-        isMobile
-          ? `relative w-full px-3 py-3 rounded-lg transition-colors flex items-center gap-3 group ${
-              isActive ? 'bg-background' : ''
-            }`
-          : `relative w-full px-4 py-3 hover:bg-accent transition-colors flex items-center gap-3 group ${
-              isActive ? 'bg-primary/10 border-l-2 border-primary' : ''
-            }`
-      }
+      className={cn(
+        'group relative flex w-full items-center gap-2 rounded-lg px-2.5 py-2 transition-colors',
+        isMobile ? isActive && 'bg-background' : isActive ? 'bg-accent' : 'hover:bg-accent/60',
+      )}
     >
       <button
         onClick={handleClick}
@@ -454,70 +386,73 @@ const ConversationItem = ({
         data-track-name='SELECT_CONVERSATION'
         data-track-metadata={JSON.stringify({ surface: 'panel', conversationId: conversation.id })}
       >
-        <div
-          className={
-            isMobile
-              ? `text-[14px] leading-[20px] tracking-[0.14px] text-foreground font-['Inter'] min-w-0 flex items-center gap-2 ${
-                  isActive ? 'font-semibold' : 'font-normal'
-                }`
-              : `text-sm text-foreground font-normal font-['Inter'] min-w-0 flex items-center gap-2`
-          }
-        >
-          {isLoadingRow && (
-            <Loader2 className='w-3.5 h-3.5 shrink-0 animate-spin text-muted-foreground' />
-          )}
-          <span className='truncate'>{conversation.title}</span>
-          {isStreamingRow && (
-            <span className='shrink-0 text-[10px] uppercase tracking-wide text-primary/80'>
-              Responding
+        <ConversationRowContent
+          conversation={conversation}
+          ringClassName={isActive ? 'ring-accent' : 'ring-background'}
+          title={
+            <span
+              className={cn(
+                "truncate text-sm text-foreground font-['Inter']",
+                isActive ? 'font-medium' : 'font-normal',
+              )}
+            >
+              {conversation.title}
             </span>
-          )}
-        </div>
-        <div className="text-xs text-muted-foreground font-['Inter'] mt-0.5 flex items-center gap-1 flex-wrap">
-          <span>{formatRelativeTime(conversation.lastUpdated)}</span>
-          {(() => {
-            const channels = (conversation.lastInputContext?.selectedChannels ?? []) as Array<{
-              id: string;
-              name: string;
-            }>;
-            if (!channels.length) return null;
-            const PILL_COLORS = [
-              'bg-blue-100 text-blue-700 border border-blue-200 hover:bg-blue-200',
-              'bg-purple-100 text-purple-700 border border-purple-200 hover:bg-purple-200',
-              'bg-green-100 text-green-700 border border-green-200 hover:bg-green-200',
-              'bg-orange-100 text-orange-700 border border-orange-200 hover:bg-orange-200',
-              'bg-pink-100 text-pink-700 border border-pink-200 hover:bg-pink-200',
-              'bg-teal-100 text-teal-700 border border-teal-200 hover:bg-teal-200',
-              'bg-red-100 text-red-700 border border-red-200 hover:bg-red-200',
-              'bg-yellow-100 text-yellow-700 border border-yellow-200 hover:bg-yellow-200',
-              'bg-indigo-100 text-indigo-700 border border-indigo-200 hover:bg-indigo-200',
-              'bg-cyan-100 text-cyan-700 border border-cyan-200 hover:bg-cyan-200',
-            ];
-            const getColor = (id: string) => {
-              let hash = 0;
-              for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
-              return PILL_COLORS[hash % PILL_COLORS.length]!;
-            };
-            const visible = channels.slice(0, 2);
-            const overflow = channels.length - 2;
-            return (
-              <>
-                <div className='w-px h-3 bg-border' />
-                {visible.map(ch => (
-                  <span
-                    key={ch.id}
-                    className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-md text-[10px] font-semibold leading-none shadow-sm cursor-default select-none transition-colors ${getColor(ch.id)}`}
-                  >
-                    # {ch.name}
-                  </span>
-                ))}
-                {overflow > 0 && (
-                  <span className='text-[10px] text-muted-foreground font-medium'>+{overflow}</span>
-                )}
-              </>
-            );
-          })()}
-        </div>
+          }
+          trailing={
+            <>
+              {isLoadingRow && (
+                <Loader2 className='size-3.5 shrink-0 animate-spin text-muted-foreground' />
+              )}
+              {isStreamingRow && (
+                <span className='shrink-0 text-[10px] uppercase tracking-wide text-primary/80'>
+                  Responding
+                </span>
+              )}
+            </>
+          }
+        />
+        {(() => {
+          const channels = (conversation.lastInputContext?.selectedChannels ?? []) as Array<{
+            id: string;
+            name: string;
+          }>;
+          if (!channels.length) return null;
+          const PILL_COLORS = [
+            'bg-blue-100 text-blue-700 border border-blue-200 hover:bg-blue-200',
+            'bg-purple-100 text-purple-700 border border-purple-200 hover:bg-purple-200',
+            'bg-green-100 text-green-700 border border-green-200 hover:bg-green-200',
+            'bg-orange-100 text-orange-700 border border-orange-200 hover:bg-orange-200',
+            'bg-pink-100 text-pink-700 border border-pink-200 hover:bg-pink-200',
+            'bg-teal-100 text-teal-700 border border-teal-200 hover:bg-teal-200',
+            'bg-red-100 text-red-700 border border-red-200 hover:bg-red-200',
+            'bg-yellow-100 text-yellow-700 border border-yellow-200 hover:bg-yellow-200',
+            'bg-indigo-100 text-indigo-700 border border-indigo-200 hover:bg-indigo-200',
+            'bg-cyan-100 text-cyan-700 border border-cyan-200 hover:bg-cyan-200',
+          ];
+          const getColor = (id: string) => {
+            let hash = 0;
+            for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
+            return PILL_COLORS[hash % PILL_COLORS.length]!;
+          };
+          const visible = channels.slice(0, 2);
+          const overflow = channels.length - 2;
+          return (
+            <div className='mt-1 flex flex-wrap items-center gap-1 pl-[30px]'>
+              {visible.map(ch => (
+                <span
+                  key={ch.id}
+                  className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-md text-[10px] font-semibold leading-none shadow-sm cursor-default select-none transition-colors ${getColor(ch.id)}`}
+                >
+                  # {ch.name}
+                </span>
+              ))}
+              {overflow > 0 && (
+                <span className='text-[10px] text-muted-foreground font-medium'>+{overflow}</span>
+              )}
+            </div>
+          );
+        })()}
       </button>
       {isMobile && isActive && (
         <svg

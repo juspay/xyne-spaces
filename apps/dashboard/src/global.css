@@ -79,6 +79,7 @@
     --mention-color: #3b82f6;
     --mention-hover-color: #2563eb;
     --mention-bg: rgba(59, 130, 246, 0.1);
+    --mention-bg-hover: rgba(59, 130, 246, 0.18);
     --mention-current-user-bg: rgba(244, 155, 53, 0.1);
     --mention-current-user-color: #f49b35;
     --mention-channel-bg: rgba(59, 130, 246, 0.1);
@@ -233,6 +234,7 @@
     --mention-color: #3b82f6;
     --mention-hover-color: #2563eb;
     --mention-bg: rgba(59, 130, 246, 0.1);
+    --mention-bg-hover: rgba(59, 130, 246, 0.18);
     --mention-current-user-bg: rgba(244, 155, 53, 0.1);
     --mention-current-user-color: #f49b35;
     --mention-channel-bg: rgba(59, 130, 246, 0.1);
@@ -382,6 +384,7 @@
     --mention-color: #88c2ff;
     --mention-hover-color: #a9d4ff;
     --mention-bg: rgba(82, 156, 232, 0.11);
+    --mention-bg-hover: rgba(82, 156, 232, 0.2);
     --mention-current-user-bg: rgba(244, 155, 53, 0.1);
     --mention-current-user-color: #f49b35;
     --mention-channel-bg: rgba(82, 156, 232, 0.11);
@@ -4912,6 +4915,13 @@ img.inline-emoji,
 @keyframes xyne-border-spin {
   to {
     --xyne-angle: 360deg;
+  }
+}
+
+/* The composer's listening glow drifts its colours sideways (Composer/ComposerGlow). */
+@keyframes composer-glow-drift {
+  to {
+    background-position: -200% 0;
   }
 }
 

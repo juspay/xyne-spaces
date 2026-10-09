@@ -1337,6 +1337,13 @@ model ChatMessage {
   /// Stored without __xyneFlowToken — that is minted per fetch.
   uiFlows Json?
 
+  /// The assistant turn as ordered parts — thinking, text and tool calls in the
+  /// order they happened (@xyne/shared AssistantPart[]). The one store of the
+  /// turn's thinking: readers fill `reasoning` from it when that is null. Tool
+  /// parts hold only the toolCallId; the invocation stays on the AgentRun.
+  /// Null on user rows and on rows written before this column existed.
+  parts Json?
+
   runProvider String?
 
   attachments ChatAttachment[]

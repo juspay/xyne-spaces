@@ -421,6 +421,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         status: "complete",
         createdAt: new Date().toISOString(),
         parentId: parentAssistantMessageId ?? null,
+        agentSlug,
         // Show the attached-context pills on the just-sent turn immediately
         // (matches what a later reload renders from the persisted column).
         ...(opts?.attachedContext && opts.attachedContext.length > 0
@@ -437,6 +438,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         status: "streaming",
         createdAt: new Date().toISOString(),
         parentId: userMsg.id,
+        agentSlug,
       };
 
       updateSession(key, (s) => ({
@@ -694,7 +696,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   );
 
   const regenerate = useCallback(
-    async (agentSlug: string, userId: string, assistantMessageId?: string, modelOverride?: string, speed?: "standard" | "fast", thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high") => {
+    async (requestedAgentSlug: string, userId: string, assistantMessageId?: string, modelOverride?: string, speed?: "standard" | "fast", thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high") => {
       const key = activeKey;
       if (!key) return;
       const current = sessions.get(key);
@@ -709,6 +711,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         ? current.messages.find((msg) => msg.id === parentUserMessageId && msg.role === "user")
         : undefined;
       if (!assistantToRegenerate || !parentUserMessageId || !userMsg) return;
+      // A chat can switch agents mid-conversation: "regenerate" re-runs THIS
+      // turn, so it goes to the agent that answered it, not the one now picked.
+      const agentSlug = assistantToRegenerate.agentSlug ?? userMsg.agentSlug ?? requestedAgentSlug;
 
       abortRefs.current.get(key)?.abort();
       const controller = new AbortController();
@@ -723,6 +728,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         status: "streaming",
         createdAt: new Date().toISOString(),
         parentId: parentUserMessageId,
+        agentSlug,
       };
 
       updateSession(key, (s) => ({
@@ -875,7 +881,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   );
 
   const editLatestUserMessage = useCallback(
-    async (agentSlug: string, userId: string, userMessageId: string, text: string, modelOverride?: string, speed?: "standard" | "fast", thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high") => {
+    async (requestedAgentSlug: string, userId: string, userMessageId: string, text: string, modelOverride?: string, speed?: "standard" | "fast", thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high") => {
       const key = activeKey;
       if (!key || !text.trim()) return;
       const current = sessions.get(key);
@@ -887,6 +893,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       // Only the latest visible user can be edited; older edits would require
       // re-rooting the tree, which is intentionally out of scope.
       if (!latestUser || latestUser.id !== userMessageId || !originalUser) return;
+      // Editing re-asks that turn, so it goes to the agent it was sent to.
+      const agentSlug = originalUser.agentSlug ?? requestedAgentSlug;
 
       abortRefs.current.get(key)?.abort();
       const controller = new AbortController();
@@ -902,6 +910,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         status: "complete",
         createdAt: new Date().toISOString(),
         parentId: originalUser.parentId ?? null,
+        agentSlug,
         // Editing keeps the same attached context — carry it onto the new turn.
         ...(originalUser.contextItems && originalUser.contextItems.length > 0
           ? { contextItems: originalUser.contextItems }
@@ -915,6 +924,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         status: "streaming",
         createdAt: new Date().toISOString(),
         parentId: userIdLocal,
+        agentSlug,
       };
 
       updateSession(key, (s) => ({

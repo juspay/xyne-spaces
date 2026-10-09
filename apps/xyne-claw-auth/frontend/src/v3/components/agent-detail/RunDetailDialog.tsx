@@ -1,9 +1,19 @@
 import { useCallback, useEffect, useState } from "react";
-import { getAgentRunDetail, type AgentRunDetail } from "../../../lib/api";
+import { closeLostRuns, getAgentRunDetail, type AgentRunDetail, type RunSource } from "../../../lib/api";
 import { ToolInvocationList } from "../../../components/ToolInvocationList";
 import { Dialog } from "../ui/Dialog";
+import { useSnackbar } from "../ui/Snackbar";
 
 const POLL_MS = 4000;
+
+export const SOURCE_LABEL: Record<RunSource, string> = {
+  automation: "Automation",
+  scheduled: "Scheduled",
+  people: "Person",
+  workflow: "Workflow step",
+  delegated: "Called by agent",
+  awakening: "Awakening",
+};
 
 export function fmtMs(value: number | null | undefined): string {
   if (value === null || value === undefined) return "—";
@@ -18,10 +28,12 @@ export function fmtMs(value: number | null | undefined): string {
 
 export function StatusPill({ status }: { status: string }) {
   const tone =
-    status === "failed"
+    status === "failed" || status === "lost"
       ? "border-xyne-error-border bg-xyne-error-bg text-xyne-error-fg"
-      : status === "running"
+      : status === "running" || status === "stuck"
         ? "border-xyne-warning-border bg-xyne-warning-bg text-xyne-warning-fg"
+        : status === "live"
+        ? "border-transparent bg-xyne-success-bg text-xyne-success-fg"
         : status === "completed"
           ? "border-transparent bg-xyne-success-bg text-xyne-success-fg"
           : "border-xyne-border bg-xyne-surface-sunken text-xyne-fg-secondary";
@@ -54,9 +66,21 @@ function Block({ title, children, tone }: { title: string; children: React.React
   );
 }
 
-export function RunDetailDialog({ slug, sessionId, onClose }: { slug: string; sessionId: string | null; onClose: () => void }) {
+export function RunDetailDialog({
+  slug,
+  sessionId,
+  onClose,
+  onChanged,
+}: {
+  slug: string;
+  sessionId: string | null;
+  onClose: () => void;
+  onChanged?: () => void;
+}) {
+  const { show } = useSnackbar();
   const [detail, setDetail] = useState<AgentRunDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [closing, setClosing] = useState(false);
 
   const load = useCallback(async () => {
     if (!sessionId) return;
@@ -74,7 +98,8 @@ export function RunDetailDialog({ slug, sessionId, onClose }: { slug: string; se
     void load();
   }, [load]);
 
-  const running = detail?.run.status === "running";
+  const state = detail?.inflight?.state ?? null;
+  const running = detail?.run.status === "running" && state !== "lost";
   useEffect(() => {
     if (!running) return;
     const timer = setInterval(() => void load(), POLL_MS);
@@ -86,6 +111,24 @@ export function RunDetailDialog({ slug, sessionId, onClose }: { slug: string; se
   const elapsed = run
     ? (run.completedAt ? new Date(run.completedAt).getTime() : Date.now()) - new Date(run.startedAt).getTime()
     : null;
+
+  const closeThisRun = async () => {
+    if (!sessionId) return;
+    setClosing(true);
+    try {
+      const result = await closeLostRuns(slug, [sessionId]);
+      show({
+        variant: result.closed.length > 0 ? "info" : "error",
+        title: result.closed.length > 0 ? "Closed as failed" : "Not closed: this run is no longer lost",
+      });
+      await load();
+      onChanged?.();
+    } catch (err) {
+      show({ variant: "error", title: "Could not close this run", description: err instanceof Error ? err.message : undefined });
+    } finally {
+      setClosing(false);
+    }
+  };
 
   return (
     <Dialog
@@ -108,12 +151,35 @@ export function RunDetailDialog({ slug, sessionId, onClose }: { slug: string; se
         {run && (
           <>
             <div className="flex flex-wrap items-center gap-3">
-              <StatusPill status={run.status} />
+              <StatusPill status={state ?? run.status} />
               <span className="text-[12px] text-xyne-fg-secondary">
                 {run.status === "running" ? `running for ${fmtMs(elapsed)}` : `took ${fmtMs(elapsed)}`}
               </span>
               {running && <span className="text-[11px] text-xyne-fg-tertiary">updates every {POLL_MS / 1000}s</span>}
             </div>
+
+            {state === "lost" && detail?.inflight && (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-dashed border-xyne-error-border bg-xyne-error-bg px-3 py-2">
+                <span className="text-[12px] text-xyne-fg-primary">
+                  This run is lost: no claw pod holds it and nothing has happened for {fmtMs(detail.inflight.idleMs)}. It will not finish.
+                </span>
+                <button
+                  type="button"
+                  disabled={closing}
+                  onClick={() => void closeThisRun()}
+                  className="rounded-lg border border-xyne-error-border bg-xyne-surface px-3 py-1 text-[12px] font-semibold text-xyne-error-fg disabled:opacity-50"
+                >
+                  {closing ? "Closing…" : "Close as failed"}
+                </button>
+              </div>
+            )}
+
+            {state === "stuck" && detail?.inflight && (
+              <div className="rounded-lg border border-xyne-warning-border bg-xyne-warning-bg px-3 py-2 text-[12px] text-xyne-warning-fg">
+                No progress for {fmtMs(detail.inflight.idleMs)}.{" "}
+                {detail.inflight.owned ? "A claw pod still holds it, so it may recover." : "No pod holds it; it becomes lost after an hour of silence."}
+              </div>
+            )}
 
             {running && run.currentToolLabel && (
               <div className="rounded-lg border border-xyne-warning-border bg-xyne-warning-bg px-3 py-2 text-[12px] text-xyne-warning-fg">
@@ -122,7 +188,7 @@ export function RunDetailDialog({ slug, sessionId, onClose }: { slug: string; se
             )}
 
             <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
-              <Field label="Trigger" value={run.triggerSource} />
+              <Field label="Source" value={detail ? `${SOURCE_LABEL[detail.source]} · ${run.triggerSource}` : run.triggerSource} />
               <Field label="Started by" value={detail?.requester?.name || detail?.requester?.email || "—"} />
               <Field label="Started" value={new Date(run.startedAt).toLocaleString()} />
               <Field label="Model" value={`${run.model ?? "—"}${run.provider ? ` · ${run.provider}` : ""}`} />

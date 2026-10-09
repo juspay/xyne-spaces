@@ -3,7 +3,7 @@
  * Proxies through the Spaces backend to xyne-claw-auth conversation APIs.
  */
 
-import type { FlowDefinition } from '@xyne/shared';
+import { normalizeAssistantParts, type FlowDefinition } from '@xyne/shared';
 import { apiInstance } from '../clients/apiClient';
 import type {
   ConversationHistory as ConversationHistoryType,
@@ -23,17 +23,50 @@ import { getPendingActionId, getStoredPendingActionResolution } from './XyneAIPe
 // ============================================================================
 
 interface ClawConversationSummary {
+  /** Unique per row: the conversation id, or `<id>:<agent>` for a per-agent row. */
+  rowId: string;
   conversationId: string;
   title: string;
   titleGenerated?: boolean;
   pinned?: boolean;
   messageCount: number;
   lastMessageAt: string;
+  /** The agent to open and continue the conversation with. */
+  agentSlug: string;
+  /** Every agent that answered, in first-use order. */
+  agentSlugs: string[];
 }
 
 interface ClawConversationListResponse {
   success: boolean;
   data: ClawConversationSummary[];
+  nextCursor?: string | null;
+  agents?: AgentConversationCount[];
+}
+
+/** An agent in the user's history and how many conversations it is in. */
+export interface AgentConversationCount {
+  slug: string;
+  count: number;
+}
+
+export interface V2ConversationListQuery {
+  /** Keep only the conversations this agent answered in. */
+  agentSlug?: string | null;
+  /** Title search. */
+  q?: string;
+  /** `nextCursor` of the previous page. */
+  cursor?: string | null;
+  /** Rows per page; the server defaults to 50. */
+  limit?: number;
+}
+
+export interface V2ConversationPage {
+  conversations: ConversationHistoryType[];
+  /** Null on the last page. */
+  nextCursor: string | null;
+  /** Every agent in the history — the agent filter's options. */
+  agents: AgentConversationCount[];
 }
 
 interface ClawChatMessage {
@@ -50,8 +83,12 @@ interface ClawChatMessage {
    *  chronological order in that case. */
   parentId?: string | null;
   reasoning?: string;
+  /** The assistant turn in order — thinking, text and tool calls (newer turns). */
+  parts?: unknown;
   pendingActions?: PendingAction[];
   followUpSuggestions?: string[];
+  /** Assistant rows: how long the run took, start to finish. */
+  durationMs?: number;
   attachments?: Array<{
     id: string;
     mimeType: string;
@@ -89,32 +126,46 @@ interface ClawMessagesResponse {
 // ============================================================================
 
 /**
- * Fetch all conversations for the current user from claw.
- * Maps claw format to the existing ConversationHistoryType.
- * @param agentSlug - Optional agent slug to filter conversations per-agent.
+ * One page of the user's chat history across EVERY agent — the list the AI
+ * screen, the sidebar and the overlay share. Newest first, 50 rows a page
+ * with every pinned chat on the first; a chat the user switched agents in is
+ * one row naming every agent. Filter and search run on the server so they
+ * reach chats that are not loaded yet.
  */
 export async function fetchV2Conversations(
-  agentSlug?: string | null,
-): Promise<ConversationHistoryType[]> {
-  const effectiveAgentSlug = agentSlug ?? 'ask-ai';
-  const url = `/xyne-ai/v2/conversations?agentSlug=${encodeURIComponent(effectiveAgentSlug)}`;
-  const response = await apiInstance.get<ClawConversationListResponse>(url);
+  query: V2ConversationListQuery = {},
+): Promise<V2ConversationPage> {
+  const params = new URLSearchParams({ allAgents: '1' });
+  if (query.agentSlug) params.set('agentSlug', query.agentSlug);
+  if (query.q) params.set('q', query.q);
+  if (query.cursor) params.set('cursor', query.cursor);
+  if (query.limit) params.set('limit', String(query.limit));
+  const response = await apiInstance.get<ClawConversationListResponse>(
+    `/xyne-ai/v2/conversations?${params.toString()}`,
+  );
 
   if (!response.data.success || !response.data.data) {
-    return [];
+    return { conversations: [], nextCursor: null, agents: [] };
   }
 
-  return response.data.data.map(conv => ({
-    id: conv.conversationId,
-    sessionId: conv.conversationId,
-    title: conv.title || 'New Chat',
-    titleGenerated: conv.titleGenerated === true && Boolean(conv.title),
-    channelId: '',
-    isStarred: conv.pinned === true,
-    lastUpdated: new Date(conv.lastMessageAt),
-    createdAt: new Date(conv.lastMessageAt),
-    messages: [],
-  }));
+  return {
+    conversations: response.data.data.map(conv => ({
+      // rowId is unique even when a non-chat thread lists once per agent.
+      id: conv.rowId,
+      sessionId: conv.conversationId,
+      title: conv.title || 'New Chat',
+      titleGenerated: conv.titleGenerated === true && Boolean(conv.title),
+      channelId: '',
+      isStarred: conv.pinned === true,
+      lastUpdated: new Date(conv.lastMessageAt),
+      createdAt: new Date(conv.lastMessageAt),
+      messages: [],
+      agentSlug: conv.agentSlug,
+      agentSlugs: conv.agentSlugs,
+    })),
+    nextCursor: response.data.nextCursor ?? null,
+    agents: response.data.agents ?? [],
+  };
 }
 
 /**
@@ -128,9 +179,13 @@ export async function fetchV2ConversationMessages(
   urlOverride?: string,
 ): Promise<Message[]> {
   const effectiveAgentSlug = agentSlug ?? 'ask-ai';
+  // scope=conversation: every agent's turns. The user can switch agents
+  // mid-chat, and every caller here (thread load, post-turn refresh) renders
+  // or replaces the WHOLE thread — an agent-only read would drop the other
+  // agents' turns. For a chat that never switched it returns the same rows.
   const url =
     urlOverride ??
-    `/xyne-ai/v2/conversations/${conversationId}/messages?agentSlug=${encodeURIComponent(effectiveAgentSlug)}`;
+    `/xyne-ai/v2/conversations/${conversationId}/messages?agentSlug=${encodeURIComponent(effectiveAgentSlug)}&scope=conversation`;
   const response = await apiInstance.get<ClawMessagesResponse>(url);
 
   if (!response.data.success || !response.data.data) {
@@ -210,6 +265,7 @@ export async function fetchV2ConversationMessages(
           ...(inv.citations !== undefined && { citations: inv.citations }),
           ...(inv.parentToolCallId !== undefined && { parentToolCallId: inv.parentToolCallId }),
           ...(inv.subagentName !== undefined && { subagentName: inv.subagentName }),
+          ...(inv.startedAt !== undefined && { startedAt: inv.startedAt }),
         }));
       } else if (allToolInvocations.length > 0) {
         const msgCreatedAt = new Date(msg.createdAt).getTime();
@@ -265,6 +321,7 @@ export async function fetchV2ConversationMessages(
       streamingContent: '',
       sessionId: conversationId,
       parentId,
+      ...(msg.agentSlug ? { agentSlug: msg.agentSlug } : {}),
       toolOutputs: [],
       toolInvocations: msgToolInvocations,
       pendingActions,
@@ -272,6 +329,7 @@ export async function fetchV2ConversationMessages(
         ? { followUpSuggestions: msg.followUpSuggestions }
         : {}),
       ...(!isUser && runByMsgId?.[msg.id] ? { debugSessionId: runByMsgId[msg.id] } : {}),
+      ...(!isUser && typeof msg.durationMs === 'number' ? { durationMs: msg.durationMs } : {}),
       // Seed 👍/👎 thumb state from the run's persisted rating (up→1, down→2).
       ...(!isUser && ratingByMsgId?.[msg.id]?.rating
         ? {
@@ -304,6 +362,9 @@ export async function fetchV2ConversationMessages(
     if (msg.reasoning && msg.reasoning.length > 0) {
       mappedMessage.reasoning = msg.reasoning;
     }
+    // The turn in order, for the step timeline (absent on older turns).
+    const parts = isUser ? null : normalizeAssistantParts(msg.parts);
+    if (parts) mappedMessage.parts = parts;
 
     return mappedMessage;
   });

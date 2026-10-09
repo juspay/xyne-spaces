@@ -1,3 +1,4 @@
+import { sanitizeAgentHandoff } from "./multi-agent-chat.js";
 import { randomUUID } from "crypto";
 import { isMessagingChannelKey, type MessagingChannelKey } from "../surfaces/messaging/plugin.js";
 import { prisma } from "../db.js";
@@ -1562,6 +1563,13 @@ export async function prepareRun(
         ? { planContinuation: true }
         : {}),
       ...(generateFollowUpSuggestions === true ? { generateFollowUpSuggestions: true } : {}),
+      // Multi-agent direct chat hand-off note (lib/multi-agent-chat.ts). claw picks
+      // `resume` or `fresh` once it knows whether the agent's session exists.
+      // Explicit allowlist again: drop it here and an agent switch silently
+      // answers with no memory of the other agents' turns.
+      ...(sanitizeAgentHandoff((body as { agentHandoff?: unknown }).agentHandoff)
+        ? { agentHandoff: sanitizeAgentHandoff((body as { agentHandoff?: unknown }).agentHandoff) }
+        : {}),
       // /experiment epoch context (id/epoch/deadlineAt/focus) — set only by
       // dispatchExperimentEpoch (lib/experiment.ts) via this same S2S proxy.
       // Must be threaded through the allowlist or the runtime never injects the

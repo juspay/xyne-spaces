@@ -50,6 +50,7 @@ import { describeFetchError } from "../run-deadline.js";
 import { SandboxUnavailableError } from "../sandbox-unavailable.js";
 import { isSafeId } from "../safe-id.js";
 import { sanitizeCitations } from "../citation-sanitizer.js";
+import { TurnParts } from "../turn-parts.js";
 import { validateS2SKey } from "../middleware/auth.js";
 import { transientProviderCallback } from "../transient-provider-callback.js";
 import { loadMcpToolsForUser,
@@ -70,6 +71,7 @@ import { activeToolCap, demotedCatalogItem, planActiveToolCap, readToolUsageRank
 import { buildExperimentTools, buildExperimentReviewTools, type ExperimentContext } from "../experiment.js";
 import {
   executeRunFromPayload,
+  type AgentHandoffNote,
   type InternalRunPayload,
   type RunExecutionState,
 } from "../run-execution.js";
@@ -585,6 +587,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     planContinuation,
     awakening,
     generateFollowUpSuggestions: shouldGenerateFollowUpSuggestions,
+    agentHandoff,
   } = req.body as InternalRunPayload;
 
   const experiment = normalizeExperimentContext(rawExperiment);
@@ -843,6 +846,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       shouldGenerateFollowUpSuggestions,
       typeof callbackUrl === "string" ? callbackUrl : undefined,
       awakening,
+      agentHandoff,
     ).finally(() => {
       if (activeRun.handoffCapTimer) clearTimeout(activeRun.handoffCapTimer);
       if (activeRun.gracefulInterruptSummaryTimer) clearTimeout(activeRun.gracefulInterruptSummaryTimer);
@@ -969,6 +973,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
         shouldGenerateFollowUpSuggestions,
         typeof callbackUrl === "string" ? callbackUrl : undefined,
         awakening,
+        agentHandoff,
       );
     } catch (err) {
       processTaskError = err;
@@ -1148,11 +1153,12 @@ function makeSseProgressEmitter(initialRes: Response, sessionId: string): SsePro
     pr: (sid, pr: Record<string, unknown>) => write({ event: "pr", seq: next(), sessionId: sid, pr }),
     uiWidget: (sid, widget: UiWidget) => write({ event: "ui-widget", seq: next(), sessionId: sid, widget }),
     streamChunk: (sid, payload) => {
+      const partId = payload.partId ? { partId: payload.partId } : {};
       if (payload.reasoningDelta !== undefined) {
-        write({ event: "reasoning", seq: next(), sessionId: sid, reasoningDelta: payload.reasoningDelta });
+        write({ event: "reasoning", seq: next(), sessionId: sid, reasoningDelta: payload.reasoningDelta, ...partId });
       }
       if (payload.textDelta !== undefined) {
-        write({ event: "delta", seq: next(), sessionId: sid, textDelta: payload.textDelta });
+        write({ event: "delta", seq: next(), sessionId: sid, textDelta: payload.textDelta, ...partId });
       }
     },
     debugProgress: (sid, event) => write({ event: "debug", seq: next(), sessionId: sid, debugEvent: event }),
@@ -1518,6 +1524,7 @@ export async function processTask(
     windowEndMs?: number;
     entryPath?: string;
   },
+  agentHandoff?: AgentHandoffNote,
   execution?: RunExecutionState,
 ): Promise<void> {
   // Started here so the extractor overlaps session restore + MCP listing;
@@ -4109,6 +4116,7 @@ export async function processTask(
         userId,
         task,
         context: fullContext,
+        ...(agentHandoff ? { agentHandoff } : {}),
         // Automation/scheduled runs draw from the low-priority LiteLLM key so
         // batch fleets can't queue interactive mentions (same predicate as the
         // read-only sandbox routing above).
@@ -4762,6 +4770,15 @@ export async function processTask(
       tokenUsage: result.tokenUsage,
       ...(result.reasoning && result.reasoning.trim()
         ? { reasoning: result.reasoning }
+        : {}),
+      // The turn as ordered thinking / text / tool parts, ending in exactly the
+      // answer delivered as `result` (same citation sanitizing).
+      ...(result.parts?.length && structuredOutputPayload === undefined
+        ? {
+            parts: TurnParts.alignFinalAnswer(result.parts, callbackResultText, (text) =>
+              sanitizeCitations(text, result.toolInvocations, result.sessionClfTokens),
+            ),
+          }
         : {}),
       ...(result.latency ? { latency: result.latency } : {}),
       ...(result.toolInvocations.length > 0

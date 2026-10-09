@@ -15,6 +15,7 @@ import {
   CpuIcon,
   CopyIcon,
   PulseIcon,
+  HeartbeatIcon,
 } from "@phosphor-icons/react";
 import type { Agent } from "../../../lib/types";
 import type { ScheduledJob } from "../../../lib/types";
@@ -34,6 +35,7 @@ import { readAwakening, summarize as summarizeAwakening } from "../../lib/awaken
 import type { AgentPermissions } from "../../lib/agentPermissions";
 import { useSnackbar } from "../ui/Snackbar";
 import { RunHistoryTab } from "./tabs/RunHistoryTab";
+import { MonitorSection } from "./MonitorSection";
 import { ContributorsTab } from "./tabs/ContributorsTab";
 import { MemoryTab } from "./tabs/MemoryTab";
 import { PrivacyTab } from "./tabs/PrivacyTab";
@@ -54,6 +56,7 @@ import { CloneRequestsTab } from "./tabs/CloneRequestsTab";
 export type TabId =
   | "overview"
   | "run-history"
+  | "monitor"
   | "contributors"
   | "privacy"
   | "memory"
@@ -307,6 +310,13 @@ export function AgentDetailRightColumn({
       show: true,
     },
     {
+      id: "monitor",
+      label: "Monitor",
+      status: failed > 0 ? `${fmtNum(failed)} failed · live runs` : "Failures, durations, live runs",
+      icon: HeartbeatIcon,
+      show: permissions.canEdit,
+    },
+    {
       id: "memory",
       label: "Memory",
       status: "Long-term memory",
@@ -410,6 +420,11 @@ export function AgentDetailRightColumn({
               onRevokeDelegation={revokeActiveDelegation}
             />
           )}
+          {activeTab === "monitor" && (
+            <div className="px-4 py-4">
+              <MonitorSection slug={agent.slug} />
+            </div>
+          )}
           {activeTab === "run-history" && (
             <RunHistoryTab
               agentSlug={agent.slug}
@@ -484,10 +499,15 @@ export function AgentDetailRightColumn({
       <div className="mx-auto flex w-full max-w-[460px] flex-col gap-5 px-6 py-7">
         {/* Health headline + one-line summary. */}
         <div className="flex flex-col gap-1.5">
-          <div className="flex items-center gap-2">
+          <button
+            type="button"
+            disabled={!permissions.canEdit}
+            onClick={() => onTabChange("monitor")}
+            className="flex items-center gap-2 text-left enabled:hover:opacity-80 disabled:cursor-default"
+          >
             <HealthGlyph size={20} weight="fill" className={healthColor} />
             <span className="text-[16px] font-semibold text-xyne-fg-primary">{health.label}</span>
-          </div>
+          </button>
           <p className="text-[13px] leading-relaxed text-xyne-fg-secondary">{summary}</p>
         </div>
 

@@ -1,6 +1,5 @@
 import { PageSelectionPreview } from './PageSelectionPreview';
 import { logger, Event as LogEvent } from '../../../../utils/logger';
-import { lengthBucket } from '../../../../services/Analytics/trackSource';
 import {
   ReactElement,
   useState,
@@ -53,7 +52,7 @@ import {
   resolveCitationIconUrl,
 } from '../utils/clawCitationUrl';
 import { CitationLink } from './CitationLink';
-import { ReadonlyContextPills } from '../../../AIScreen/ReadonlyContextPills';
+import { ReadonlyContextPills, useSentMentions } from '../../../AIScreen/ReadonlyContextPills';
 import { genericInstance } from '../../../../services/clients/genericClient';
 import { showDownloadCompleteToast } from '../../../../utils/downloadToast';
 import type { Components } from 'react-markdown';
@@ -87,13 +86,16 @@ import type {
   ToolInvocation as ToolInvocationType,
   ClawCitation,
 } from '../utils/XyneAITypes';
-import { ActivityBlock } from './ActivityBlock';
+import { TurnTimeline } from './TurnTimeline';
+import { turnDurationLabel, turnFinishedAt } from './activityShared';
 import { FlowScreenManager } from '../../../flowUI/FlowScreenManager';
 import {
   flowMessageId,
   requirePendingActionIndex,
   unpresentedPendingActions,
 } from '../utils/XyneAITypes';
+import { AgentByline, AgentRecipient } from '../../../AIScreen/ConversationAgents';
+import { FollowUpSuggestions } from '../../../AIScreen/FollowUpSuggestions';
 import { PendingActionBlock } from './PendingActionBlock';
 import { respondToPendingAction } from '../../../../services/XyneAI/XyneAIPendingActionService';
 import { Link2 } from 'lucide-react';
@@ -1206,13 +1208,20 @@ export const MessageItem = React.memo(
     // directory. Only REAL, unambiguous users become mentions — every other
     // "@text" stays plain text (matches channels/threads).
     const resolveMention = useMentionResolver(message.userTags);
+    // A user turn's @/# mentions stay pills after sending, and open what they name.
+    const renderUserTags = useCallback(
+      (text: string) => processNodeForUserTags(text, resolveMention),
+      [resolveMention],
+    );
+    const sentMentions = useSentMentions(
+      message.type === 'user' ? message.attachedContext : undefined,
+      message.userTags,
+      renderUserTags,
+    );
 
     // The rotating `displayStatus` + bouncing-dots indicator that used to live
-    // here has been removed in favor of the single ActivityBlock shimmer
-    // header. The backend `statusMessage` field is now ignored on this
-    // surface; if we ever want to surface it again, route it through
-    // ActivityBlock as a subtext prop instead of re-introducing a second
-    // loading row.
+    // here has been removed in favor of the TurnTimeline's live step header,
+    // which also shows the backend `statusMessage` while a tool runs.
 
     // Handle clicking selection context to navigate to canvas
     const handleSelectionContextClick = (canvasId: string): void => {
@@ -1308,11 +1317,15 @@ export const MessageItem = React.memo(
               : 'flex-1 max-w-full overflow-hidden'
           }
         >
+          {isV2 && message.type === 'user' && !isEditing && message.agentSlug && (
+            <AgentRecipient slug={message.agentSlug} className='pr-1' />
+          )}
+          {isV2 && message.type === 'bot' && message.agentSlug && (
+            <AgentByline slug={message.agentSlug} className='mb-2' />
+          )}
           {/* The legacy "displayStatus + bouncing dots" loading state lived
               here as the TRUE branch of a ternary. Removed in favor of the
-              single thinking indicator on ActivityBlock — when there's no
-              content yet, the transparent bot bubble is invisible and the
-              user sees only the ActivityBlock shimmer above. */}
+              TurnTimeline's live step header. */}
           <div
             className={`${
               message.type === 'user'
@@ -1441,10 +1454,7 @@ export const MessageItem = React.memo(
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
                     components={{
-                      p: ({ children }) => {
-                        const processed = processNodeForUserTags(children, resolveMention);
-                        return <span>{processed}</span>;
-                      },
+                      p: ({ children }) => <span>{sentMentions.render(children)}</span>,
                       a: ({ href, children, ...props }) => {
                         // Check if URL is external
                         const isExternal = (() => {
@@ -1535,10 +1545,7 @@ export const MessageItem = React.memo(
             !isEditing &&
             message.attachedContext &&
             message.attachedContext.length > 0 && (
-              <ReadonlyContextPills
-                items={message.attachedContext}
-                expandedWidthClass='max-w-[15rem]'
-              />
+              <ReadonlyContextPills items={message.attachedContext} />
             )}
 
           {/* Error display for bot messages */}
@@ -1609,7 +1616,8 @@ export const MessageItem = React.memo(
           {message.type === 'bot' &&
             (onDebug || !message.isStreaming) &&
             (() => {
-              const stamp = formatMessageTime(message.timestamp);
+              const stamp = formatMessageTime(turnFinishedAt(message));
+              const workedFor = turnDurationLabel(message);
               const complete = !message.isStreaming;
               const showActions = complete && !message.isAborted && !readOnly;
               return (
@@ -1627,12 +1635,12 @@ export const MessageItem = React.memo(
                         <Bug size={12} /> Debug
                       </button>
                     )}
-                    {complete && stamp && (
+                    {complete && (workedFor || stamp) && (
                       <span className='text-[10px] tabular-nums text-muted-foreground/60'>
-                        {stamp}
+                        {[workedFor, stamp].filter(Boolean).join(' · ')}
                       </span>
                     )}
-                    {complete && message.isAborted && (
+                    {complete && message.isAborted && !workedFor && (
                       <span className="text-[11px] font-['Inter'] italic text-muted-foreground/70">
                         Stopped
                       </span>
@@ -1669,26 +1677,12 @@ export const MessageItem = React.memo(
           !message.isStreaming &&
           onFollowUpSuggestionClick &&
           message.followUpSuggestions?.length ? (
-            <div className='mt-3 flex flex-wrap gap-2' data-testid='ask-ai-follow-ups'>
-              {message.followUpSuggestions.map((suggestion, suggestionIndex) => (
-                <button
-                  key={suggestion}
-                  type='button'
-                  onClick={() => onFollowUpSuggestionClick(suggestion)}
-                  className='rounded-full border border-border bg-card px-3 py-1.5 text-left text-xs font-medium leading-5 text-muted-foreground transition-colors hover:bg-accent'
-                  data-track-category='AskAI'
-                  data-track-name='FollowUpSuggestion'
-                  data-track-metadata={JSON.stringify({
-                    ...trackContext,
-                    messageId: message.id,
-                    index: suggestionIndex,
-                    lengthBucket: lengthBucket(suggestion.length),
-                  })}
-                >
-                  {suggestion}
-                </button>
-              ))}
-            </div>
+            <FollowUpSuggestions
+              suggestions={message.followUpSuggestions}
+              onSelect={onFollowUpSuggestionClick}
+              messageId={message.id}
+              trackContext={trackContext}
+            />
           ) : null}
 
           {/* User timestamp — right-aligned below the user bubble. Shown
@@ -1759,7 +1753,9 @@ export const MessageItem = React.memo(
       return (
         prev.message.id === next.message.id &&
         prev.message.content === next.message.content &&
+        prev.message.agentSlug === next.message.agentSlug &&
         prev.message.errorInfo === next.message.errorInfo &&
+        prev.message.durationMs === next.message.durationMs &&
         prev.message.followUpSuggestions === next.message.followUpSuggestions &&
         prev.isLatestBotMessage === next.isLatestBotMessage &&
         prev.onFollowUpSuggestionClick === next.onFollowUpSuggestionClick &&
@@ -1774,6 +1770,8 @@ export const MessageItem = React.memo(
       prev.message.toolOutputs === next.message.toolOutputs &&
       prev.message.summarizerOutput === next.message.summarizerOutput &&
       prev.message.reasoning === next.message.reasoning &&
+      prev.message.parts === next.message.parts &&
+      prev.message.durationMs === next.message.durationMs &&
       prev.message.toolInvocations === next.message.toolInvocations &&
       prev.message.pendingActions === next.message.pendingActions &&
       prev.message.errorInfo === next.message.errorInfo &&
@@ -2013,16 +2011,40 @@ const MessageContent = ({
     [answerComponents, wordFade],
   );
 
+  /** One block of answer markdown. Keyed off everStreamed (not isStreaming)
+   *  so content that lands AT completion — the final tail words, finalized
+   *  citation chips — still fades in instead of popping the instant
+   *  isStreaming flips false; settled DOM never re-animates. */
+  const renderAnswerMarkdown = (content: string): ReactElement | null =>
+    content.trim().length > 0 ? (
+      <div
+        className={`bot-markdown-content xyne-ai-markdown text-sm font-['Inter'] leading-6 font-normal${
+          everStreamedRef.current ? ' streaming-answer-fade' : ''
+        }`}
+      >
+        {everStreamedRef.current ? (
+          <StreamingMarkdownBlocks content={content} render={renderAnswerBlock} />
+        ) : (
+          renderAnswerBlock(content)
+        )}
+      </div>
+    ) : null;
+  const isGenius = !message.agentType || message.agentType === 'genius';
+
   return (
     <div className='space-y-4 max-w-full'>
-      {/* v2: Combined Thinking + Tool Calls panel. Inline block with the
-          8-bit loader header while live, expandable to inspect reasoning +
-          tool calls. */}
-      <ActivityBlock
-        reasoning={message.reasoning}
-        toolInvocations={message.toolInvocations}
-        streaming={message.isStreaming}
-        messageAborted={!!message.isAborted}
+      {/* The turn in order — thinking, text, tool calls, … answer — with each
+          run of steps folded into one expandable group. Shared with the AI
+          screen and the overlay. */}
+      <TurnTimeline
+        message={message}
+        renderText={(text, { streaming }) => {
+          const linked = stripCitationMarks(
+            linkifyAndGroupClawCitations(text, clawCitationToolNumbers),
+          );
+          return renderAnswerMarkdown(streaming ? linked + '\n' : linked);
+        }}
+        legacyAnswer={isGenius && displayContent ? renderAnswerMarkdown(displayContent) : null}
       />
 
       {flowCards &&
@@ -2063,26 +2085,6 @@ const MessageContent = ({
       {/* Tool Outputs */}
       {message.toolOutputs && message.toolOutputs.length > 0 && (
         <ToolOutputsSection toolOutputs={message.toolOutputs} />
-      )}
-
-      {/* Genius: Summary text */}
-      {(!message.agentType || message.agentType === 'genius') && displayContent && (
-        <div
-          className={`bot-markdown-content xyne-ai-markdown text-sm font-['Inter'] leading-6 font-normal${
-            // Keyed off everStreamed (not isStreaming) so content that lands
-            // AT completion — the final tail words, finalized citation chips —
-            // still fades in instead of popping the instant isStreaming flips
-            // false. Mount-only animations + the no-remount architecture make
-            // the class harmless to keep: settled DOM never re-animates.
-            everStreamedRef.current ? ' streaming-answer-fade' : ''
-          }`}
-        >
-          {everStreamedRef.current ? (
-            <StreamingMarkdownBlocks content={displayContent} render={renderAnswerBlock} />
-          ) : (
-            renderAnswerBlock(displayContent)
-          )}
-        </div>
       )}
 
       {/* Summarizer: Summary and Key Points */}

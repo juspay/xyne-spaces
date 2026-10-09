@@ -529,7 +529,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
     const validValueByFieldId = new Map<string, (typeof formValues)[number]>();
 
     for (const value of formValues) {
-      if (value.contextId !== boardId || value.version !== currentVersion) {
+      if (value.contextId !== boardId || (value.version ?? 1) !== currentVersion) {
         logger.warn('[FormsRepository] Skipping unexpected ticket form value', {
           ticketId,
           boardId,

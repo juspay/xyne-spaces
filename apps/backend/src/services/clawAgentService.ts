@@ -63,10 +63,14 @@ export interface ClawRunRequest {
       | 'collection'
       | 'folder'
       | 'file'
+      | 'message'
+      | 'user'
+      | 'attachment'
       | string;
     id: string;
     title: string;
     threadId?: string;
+    canvasRole?: 'call-notes' | 'call-summary';
     eventName?: string;
     eventCategory?: string;
     timestamp?: string;
@@ -148,7 +152,10 @@ export interface ClawRunStreamResult {
  *  the raw model id today — the picker maps it to a friendlier label. */
 export interface ClawAgentModel {
   id: string;
+  /** People-facing name ("Sonnet 4.5") — claw-auth's model catalog. */
   name: string;
+  /** What the model is good for, when claw-auth's catalog knows. */
+  description?: string;
   provider?: 'local-harness';
   harness?: string;
   deviceName?: string;
@@ -191,13 +198,33 @@ export interface AccessibleClawAgent {
    *  askAI composer shows a locked "Instant" indicator instead of its
    *  normal per-message toggle for such agents, and never for others. */
   instantAgent?: boolean;
+  /** The agent's Spaces bot user in this workspace — the user its channel
+   *  messages are posted as, so the dashboard draws the same avatar. */
+  botUserId?: string;
 }
 
+/** One row of the chat history (claw-auth lib/multi-agent-chat.ts). */
 export interface ClawConversationSummary {
+  /** Unique per row: the conversation id, or `<id>:<agent>` for a per-agent row. */
+  rowId: string;
   conversationId: string;
   title: string;
+  titleGenerated?: boolean;
+  pinned?: boolean;
   messageCount: number;
   lastMessageAt: string;
+  /** The agent to open and continue the conversation with. */
+  agentSlug: string;
+  /** Every agent that answered, in first-use order. */
+  agentSlugs: string[];
+}
+
+/** `conversation` = every agent's turns in a direct chat (claw-auth opt-in);
+ *  omitted = only the requested agent's turns, as before. */
+export type ClawConversationScope = 'conversation';
+
+function scopeQuery(scope?: ClawConversationScope): string {
+  return scope === 'conversation' ? '?scope=conversation' : '';
 }
 
 export interface ClawMessagesResponse {
@@ -714,6 +741,7 @@ export async function runClawAgentStream(
                 `data: ${JSON.stringify({
                   type: 'delta',
                   content: parsed.content || parsed.delta,
+                  ...(typeof parsed.partId === 'string' && { partId: parsed.partId }),
                 })}\n\n`
               );
               if (typeof (res as any).flush === 'function') (res as any).flush();
@@ -722,6 +750,9 @@ export async function runClawAgentStream(
                 `data: ${JSON.stringify({
                   type: 'reasoning_delta',
                   reasoningDelta: parsed.delta || parsed.reasoningDelta,
+                  // The thinking block it belongs to — the client builds the
+                  // turn's ordered step timeline from these.
+                  ...(typeof parsed.partId === 'string' && { partId: parsed.partId }),
                 })}\n\n`
               );
               if (typeof (res as any).flush === 'function') (res as any).flush();
@@ -803,6 +834,8 @@ export async function runClawAgentStream(
                     followUpSuggestions: parsed.followUpSuggestions,
                   }),
                   ...(parsed.followUpsPending === true && { followUpsPending: true }),
+                  // The turn as ordered thinking / text / tool parts.
+                  ...(Array.isArray(parsed.parts) && { parts: parsed.parts }),
                 })}\n\n`
               );
               if (typeof (res as any).flush === 'function') (res as any).flush();
@@ -930,11 +963,37 @@ interface RawClawAgent {
   /** Top-level in the light-list response (agents.ts's lightAgentProjection
    *  derives it from config.instantAgent, but doesn't expose config itself). */
   instantAgent?: boolean;
+  /** The Spaces app and the bot user claw-auth recorded when installing it. */
+  spacesAppId?: string | null;
+  spacesAppUserId?: string | null;
+}
+
+/**
+ * Each agent's bot user in this workspace, by Spaces app id. Every workspace
+ * install mints its own bot user, so claw-auth's single `spacesAppUserId` is
+ * right only for the workspace it was installed from.
+ */
+async function botUsersByAppId(
+  appIds: string[],
+  workspaceId: string | undefined
+): Promise<Map<string, string>> {
+  if (!workspaceId || appIds.length === 0) return new Map();
+  try {
+    const installs = await db.installedApps.findMany({
+      where: { appId: { in: appIds }, workspaceId },
+      select: { appId: true, userId: true },
+    });
+    return new Map(installs.map((install) => [install.appId, install.userId]));
+  } catch (err) {
+    logger.error('[ClawAgentService] bot user lookup failed:', err);
+    return new Map();
+  }
 }
 
 export async function listAccessibleClawAgents(req: {
   headers?: { cookie?: string };
   userId: string;
+  workspaceId?: string;
 }): Promise<{ success: boolean; data: AccessibleClawAgent[] }> {
   const url = `${getClawBaseUrl()}/claw/api/v1/agents?userId=${encodeURIComponent(req.userId)}`;
   const response = await fetch(url, {
@@ -976,8 +1035,17 @@ export async function listAccessibleClawAgents(req: {
     }
   }
 
+  const botUserByAppId = await botUsersByAppId(
+    result.data.map((agent) => agent.spacesAppId).filter((id): id is string => Boolean(id)),
+    req.workspaceId
+  );
+
   // Transform raw agent data to extract tool/skill/subagent names from nested structures
   const transformedData: AccessibleClawAgent[] = result.data.map((agent) => {
+    const botUserId =
+      (agent.spacesAppId ? botUserByAppId.get(agent.spacesAppId) : undefined) ??
+      agent.spacesAppUserId ??
+      undefined;
     return {
       slug: agent.slug,
       name: agent.name,
@@ -1011,6 +1079,7 @@ export async function listAccessibleClawAgents(req: {
         rootCollectionId: rootByCollectionId.get(c.collectionId) ?? c.collectionId,
       })),
       instantAgent: agent.instantAgent === true,
+      ...(botUserId ? { botUserId } : {}),
     };
   });
 
@@ -1045,6 +1114,8 @@ export async function listClawAgentModels(
   defaultModel: string | null;
   pinProvider: 'litellm' | 'spaces';
   recommendedId?: string;
+  /** `defaultModel`'s people-facing name. */
+  defaultModelName?: string | null;
 }> {
   const slug = agentSlug || 'ask-ai';
   const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/litellm-models`;
@@ -1063,12 +1134,14 @@ export async function listClawAgentModels(
         defaultModel?: string | null;
         pinProvider?: 'litellm' | 'spaces';
         recommendedId?: string;
+        defaultModelName?: string | null;
       };
       if (result.success && (result.data ?? []).length > 0) {
         return {
           success: true,
           data: result.data,
           defaultModel: result.defaultModel ?? null,
+          defaultModelName: result.defaultModelName ?? null,
           // claw-auth says which provider a pick must pin: "litellm" when the
           // list came off the agent's own credential, "spaces" when it fell
           // back to the platform allowed list. Old claw-auth omits the field
@@ -1137,13 +1210,45 @@ async function listWorkspaceAllowedModels(workspaceId?: string): Promise<{
   return { success: true, data, defaultModel, pinProvider: 'spaces' };
 }
 
+export interface ClawConversationListQuery {
+  /** Keep only the conversations this agent answered in. */
+  agentSlug?: string;
+  /** Title search. */
+  q?: string;
+  /** Rows per page (claw-auth default 50, max 100). */
+  limit?: string;
+  /** `nextCursor` of the previous page. */
+  cursor?: string;
+  /** One agent's whole list, unpaged — what dashboard builds from before
+   *  allAgents=1 expect. Needs `agentSlug`. */
+  fullAgentList?: boolean;
+}
+
+export interface ClawConversationListResponse {
+  success: boolean;
+  data: ClawConversationSummary[];
+  /** Pass back as `cursor` for the next page; null on the last one. */
+  nextCursor?: string | null;
+  /** Every agent in the history with its conversation count. */
+  agents?: Array<{ slug: string; count: number }>;
+}
+
+/** The user's chat history (claw-auth lib/multi-agent-chat.ts). */
 export async function listClawConversations(
   req: { headers?: { cookie?: string }; userId: string },
-  agentSlug?: string
-): Promise<{ success: boolean; data: ClawConversationSummary[] }> {
-  const slug = agentSlug || 'ask-ai';
-  const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/conversations?userId=${encodeURIComponent(req.userId)}`;
-  const response = await fetch(url, {
+  query: ClawConversationListQuery = {}
+): Promise<ClawConversationListResponse> {
+  const params = new URLSearchParams({ userId: req.userId });
+  let path = '/claw/api/v1/agent-chat/conversations';
+  if (query.fullAgentList && query.agentSlug) {
+    path = `/claw/api/v1/agent-chat/${encodeURIComponent(query.agentSlug)}/conversations`;
+  } else {
+    for (const key of ['agentSlug', 'q', 'limit', 'cursor'] as const) {
+      const value = query[key];
+      if (value) params.set(key, value);
+    }
+  }
+  const response = await fetch(`${getClawBaseUrl()}${path}?${params.toString()}`, {
     headers: {
       ...extractUserIdHeader(req.userId),
       ...extractCookieHeader(req),
@@ -1156,16 +1261,17 @@ export async function listClawConversations(
     throw new Error('Failed to fetch conversations');
   }
 
-  return (await response.json()) as { success: boolean; data: ClawConversationSummary[] };
+  return (await response.json()) as ClawConversationListResponse;
 }
 
 export async function getClawConversationMessages(
   req: { headers?: { cookie?: string }; userId: string },
   convId: string,
-  agentSlug?: string
+  agentSlug?: string,
+  scope?: ClawConversationScope
 ): Promise<ClawMessagesResponse> {
   const slug = agentSlug || 'ask-ai';
-  const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/chat/${encodeURIComponent(convId)}/messages`;
+  const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/chat/${encodeURIComponent(convId)}/messages${scopeQuery(scope)}`;
   const response = await fetch(url, {
     headers: {
       ...extractUserIdHeader(req.userId),
@@ -1360,9 +1466,9 @@ export async function streamClawConversationLive(
   res: Response,
   convId: string,
   agentSlug = 'ask-ai',
-  opts: { signal?: AbortSignal } = {}
+  opts: { signal?: AbortSignal; scope?: ClawConversationScope } = {}
 ): Promise<void> {
-  const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(agentSlug)}/chat/${encodeURIComponent(convId)}/live`;
+  const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(agentSlug)}/chat/${encodeURIComponent(convId)}/live${scopeQuery(opts.scope)}`;
   const upstream = await fetch(url, {
     headers: {
       Accept: 'text/event-stream',

@@ -7,7 +7,13 @@ import {
   type ChangeEvent,
   type ReactElement,
 } from 'react';
-import { ChatDefault, FolderAi, Hashtag, MultipleCrossCancelDefault } from '@xyne/icons';
+import {
+  ChatDefault,
+  FolderAi,
+  FolderDefault,
+  Hashtag,
+  MultipleCrossCancelDefault,
+} from '@xyne/icons';
 import {
   ChannelVisibility,
   MAX_ACTIVE_WINDOW_DAYS,
@@ -39,6 +45,8 @@ import { useUsers } from '../../../hooks/useUsers';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 const AUTO_EXPAND_MAX_CHANNELS = 25;
+
+const TITLE_CLICK_DELAY_MS = 200;
 
 const MODE_OPTIONS: SegmentedToggleOption<OrganizerMode>[] = [
   { label: 'By project', value: 'project' },
@@ -107,7 +115,7 @@ const ChannelLine = ({
   const { userID } = useAuthContextValues();
   const { displayName } = useChannelDisplayName(channel, userID);
   return (
-    <GroupedSelectRow>
+    <GroupedSelectRow indented>
       <Checkbox
         checked={!excluded}
         onChange={onToggle}
@@ -201,6 +209,35 @@ export const SectionOrganizerDialog = ({
 
   const updateGroup = (groupId: string, patch: Partial<OrganizerGroup>): void => {
     setGroups(prev => prev.map(g => (g.id === groupId ? { ...g, ...patch } : g)));
+  };
+
+  const toggleExpanded = (groupId: string): void => {
+    setGroups(prev => prev.map(g => (g.id === groupId ? { ...g, expanded: !g.expanded } : g)));
+  };
+
+  const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
+  const pendingToggleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const cancelPendingToggle = (): void => {
+    if (pendingToggleRef.current === null) return;
+    clearTimeout(pendingToggleRef.current);
+    pendingToggleRef.current = null;
+  };
+
+  useEffect(() => cancelPendingToggle, []);
+
+  const handleTitleClick = (groupId: string, clickCount: number): void => {
+    if (clickCount > 1) return;
+    cancelPendingToggle();
+    pendingToggleRef.current = setTimeout(() => {
+      pendingToggleRef.current = null;
+      toggleExpanded(groupId);
+    }, TITLE_CLICK_DELAY_MS);
+  };
+
+  const handleTitleDoubleClick = (groupId: string): void => {
+    cancelPendingToggle();
+    setEditingGroupId(groupId);
   };
 
   const toggleChannel = (groupId: string, channelId: string): void => {
@@ -358,24 +395,48 @@ export const SectionOrganizerDialog = ({
               return (
                 <GroupedSelectGroupHeader
                   expanded={row.expanded}
-                  onToggleExpand={() =>
-                    updateGroup(row.group.id, { expanded: !row.group.expanded })
-                  }
+                  onToggleExpand={() => toggleExpanded(row.group.id)}
                   count={row.selectedInGroup}
                   trackCategory='CHAT_SIDEBAR'
                   trackName='ORGANIZER_TOGGLE_EXPAND'
                 >
-                  <input
-                    value={row.group.name}
-                    onChange={e => updateGroup(row.group.id, { name: e.target.value })}
-                    maxLength={SECTION_NAME_MAX_LENGTH}
-                    data-track-category='CHAT_SIDEBAR'
-                    data-track-name='ORGANIZER_RENAME_SECTION'
-                    className={cn(
-                      'min-w-0 flex-1 border-0 border-b border-transparent bg-transparent px-0.5 py-0.5 text-[13px] font-medium text-foreground outline-none focus:border-b-primary',
-                      row.hasNameError && 'border-b-destructive focus:border-b-destructive',
-                    )}
-                  />
+                  {editingGroupId === row.group.id ? (
+                    <input
+                      value={row.group.name}
+                      autoFocus
+                      onFocus={e => e.target.select()}
+                      onChange={e => updateGroup(row.group.id, { name: e.target.value })}
+                      onBlur={() => setEditingGroupId(null)}
+                      onKeyDown={e => {
+                        if (e.key !== 'Enter' && e.key !== 'Escape') return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setEditingGroupId(null);
+                      }}
+                      maxLength={SECTION_NAME_MAX_LENGTH}
+                      data-track-category='CHAT_SIDEBAR'
+                      data-track-name='ORGANIZER_RENAME_SECTION'
+                      className={cn(
+                        'min-w-0 flex-1 border-0 border-b border-transparent bg-transparent px-0.5 py-0.5 text-[13px] font-medium text-foreground outline-none focus:border-b-primary',
+                        row.hasNameError && 'border-b-destructive focus:border-b-destructive',
+                      )}
+                    />
+                  ) : (
+                    <button
+                      type='button'
+                      onClick={e => handleTitleClick(row.group.id, e.detail)}
+                      onDoubleClick={() => handleTitleDoubleClick(row.group.id)}
+                      title='Double-click to rename'
+                      data-track-category='CHAT_SIDEBAR'
+                      data-track-name='ORGANIZER_TOGGLE_EXPAND'
+                      className={cn(
+                        'min-w-0 flex-1 truncate border-b border-transparent px-0.5 py-0.5 text-left text-[13px] font-medium text-foreground',
+                        row.hasNameError && 'border-b-destructive',
+                      )}
+                    >
+                      {row.group.name}
+                    </button>
+                  )}
                 </GroupedSelectGroupHeader>
               );
             }
@@ -390,10 +451,17 @@ export const SectionOrganizerDialog = ({
                       row.selectedInGroup > 0 && row.selectedInGroup < row.group.channelIds.length
                     }
                     onChange={checked => toggleAllChannels(row.group.id, checked)}
-                    label='All channels'
+                    ariaLabel={`Include all channels in ${row.group.name}`}
+                    label=''
                     data-track-category='CHAT_SIDEBAR'
                     data-track-name='ORGANIZER_TOGGLE_SECTION'
                   />
+                  <span className='flex size-4 shrink-0 items-center justify-center text-muted-foreground'>
+                    <FolderDefault size={12} />
+                  </span>
+                  <span className='min-w-0 flex-1 truncate text-[13px] font-medium text-foreground'>
+                    All channels
+                  </span>
                 </GroupedSelectRow>
               );
             }

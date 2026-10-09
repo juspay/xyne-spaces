@@ -69,6 +69,10 @@ export interface StreamOverrides {
   designArtifactAttachmentId?: string;
   designSelection?: DesignSelectionPayload;
   pageSelection?: PageSelectionPayload;
+  /** Answer this turn as a specific agent instead of the hook's. A chat can
+   *  switch agents mid-conversation; regenerating or editing a turn re-runs it
+   *  with the agent that owned it. */
+  agentSlug?: string | null;
 }
 
 interface UseXyneAIStreamParams {
@@ -200,10 +204,16 @@ export const useXyneAIStream = ({
   const streamSessionKeyRef = useRef(streamSessionKey);
   streamSessionKeyRef.current = streamSessionKey;
 
+  // Agent of the stream this hook last started. Normally the selected agent,
+  // but a regenerate/edit of another agent's turn runs as that turn's agent,
+  // and its stream must still reach this thread.
+  const dispatchedAgentSlugRef = useRef<string | null>(null);
+
   const prevStreamSessionKeyRef = useRef(streamSessionKey);
   if (prevStreamSessionKeyRef.current !== streamSessionKey) {
     prevStreamSessionKeyRef.current = streamSessionKey;
     currentStreamIdRef.current = null;
+    dispatchedAgentSlugRef.current = null;
   }
 
   // Subscribe by streamSlotKey (matches streamSessionKey). During draft→server migration,
@@ -212,7 +222,9 @@ export const useXyneAIStream = ({
   useEffect(() => {
     const expectedAgentSlug = agentSlug ?? 'ask-ai';
     const unsubscribe = xyneAIStreamManager.subscribe((state: StreamState) => {
-      if ((state.agentSlug ?? 'ask-ai') !== expectedAgentSlug) return;
+      const stateAgentSlug = state.agentSlug ?? 'ask-ai';
+      if (stateAgentSlug !== expectedAgentSlug && stateAgentSlug !== dispatchedAgentSlugRef.current)
+        return;
       const slotRef = streamSessionKeyRef.current;
       const matchesSlot = state.streamSlotKey === slotRef;
       const matchesTrackedStream =
@@ -347,6 +359,7 @@ export const useXyneAIStream = ({
       const eModel = ov && 'model' in ov ? (ov.model ?? null) : model;
       const eModelProvider = ov && 'model' in ov ? (ov.modelProvider ?? null) : modelProvider;
       const eThinkingLevel = ov?.thinkingLevel ?? thinkingLevel ?? undefined;
+      const eAgentSlug = ov && 'agentSlug' in ov ? (ov.agentSlug ?? null) : agentSlug;
       const eResearchContext =
         ov && 'researchContext' in ov ? (ov.researchContext ?? null) : researchContext;
       const eChannelIds = ov?.channelIds ?? channelIds;
@@ -436,6 +449,7 @@ export const useXyneAIStream = ({
             ...(selectionContexts && selectionContexts.length > 0 && { selectionContexts }),
             ...(ov?.pageSelection ? { pageSelection: ov.pageSelection } : {}),
             ...(parentMessageId && { parentId: parentMessageId }),
+            ...(isV2 && { agentSlug: eAgentSlug ?? 'ask-ai' }),
             ...(userTags && Object.keys(userTags).length > 0 && { userTags }),
             ...(displayContextForMessage && displayContextForMessage.length > 0
               ? { attachedContext: displayContextForMessage }
@@ -462,6 +476,7 @@ export const useXyneAIStream = ({
         statusMessage: 'Thinking',
         participants: [],
         parentId: localUserMessageId, // Bot is child of user message in tree
+        ...(isV2 && { agentSlug: eAgentSlug ?? 'ask-ai' }),
       };
 
       // Build initial messages list for stream manager
@@ -493,7 +508,7 @@ export const useXyneAIStream = ({
           ...aiRunTrackingMetadata({
             surface,
             contextType,
-            agentSlug,
+            agentSlug: eAgentSlug,
             model: eModel,
             modelProvider: eModelProvider,
             thinkingLevel: eThinkingLevel,
@@ -529,6 +544,7 @@ export const useXyneAIStream = ({
 
       // Start stream via the global stream manager
       // The stream manager will notify subscribers which will update messages with the streaming content
+      dispatchedAgentSlugRef.current = eAgentSlug ?? 'ask-ai';
       const streamId = await xyneAIStreamManager.startStream(
         threadId,
         {
@@ -556,7 +572,7 @@ export const useXyneAIStream = ({
           canvasIds: eCanvasIds,
           callIds: eCallIds,
           attachedContext: combinedAttachedContext,
-          agentSlug: agentSlug ?? undefined,
+          agentSlug: eAgentSlug ?? undefined,
           // v1 resolves its model from env and ignores the pin, so only send it
           // on v2 rather than letting a stale pick ride along invisibly.
           ...(isV2 && eModel ? { model: eModel } : {}),

@@ -7,9 +7,13 @@ import {
   type SelectedTranscript,
   type SelectedRecording,
   type SelectedLocalFolder,
+  type SelectedMessage,
+  type SelectedPerson,
+  type SelectedSharedFile,
   type AttachedContextItem,
 } from '../Chat/XyneAISidebar/components/ContextPickerPanel';
 import type { StreamOverrides } from '../../hooks/useXyneAIStream';
+import type { UserTag } from '../Chat/XyneAISidebar/utils/XyneAITypes';
 
 /**
  * Full snapshot of the extra composer state on the /ai page — everything the
@@ -28,6 +32,12 @@ export interface ComposerContext {
   canvases: SelectedCanvas[];
   transcripts: SelectedTranscript[];
   recordings: SelectedRecording[];
+  /** Picked from the composer's @ menu. */
+  messages: SelectedMessage[];
+  people: SelectedPerson[];
+  sharedFiles: SelectedSharedFile[];
+  /** People mentioned inline, for the sent bubble's mention chips. */
+  userTags: Record<string, UserTag>;
   localFolders: SelectedLocalFolder[];
   collections: { id: string; name: string }[];
   fileScopes: { id: string; name: string }[];
@@ -67,6 +77,10 @@ export const EMPTY_COMPOSER_CONTEXT: ComposerContext = {
   canvases: [],
   transcripts: [],
   recordings: [],
+  messages: [],
+  people: [],
+  sharedFiles: [],
+  userTags: {},
   localFolders: [],
   collections: [],
   fileScopes: [],
@@ -84,6 +98,30 @@ export const EMPTY_COMPOSER_CONTEXT: ComposerContext = {
   sandboxMode: 'remote',
 };
 
+/**
+ * The snapshot without the context that went out with one message (the @/#
+ * items, their inline people and the collections). The sent message keeps its
+ * own copy, so the composer drops it after a send; the local folder and the
+ * toggles stay for the conversation.
+ */
+export function withoutPickedContext(ctx: ComposerContext): ComposerContext {
+  return {
+    ...ctx,
+    collections: [],
+    fileScopes: [],
+    folderScopes: [],
+    channels: [],
+    tickets: [],
+    canvases: [],
+    transcripts: [],
+    recordings: [],
+    messages: [],
+    people: [],
+    sharedFiles: [],
+    userTags: {},
+  };
+}
+
 /** True when the snapshot carries any context/toggle worth sending as overrides. */
 export function hasComposerContext(ctx: ComposerContext): boolean {
   return (
@@ -92,6 +130,9 @@ export function hasComposerContext(ctx: ComposerContext): boolean {
     ctx.canvases.length > 0 ||
     ctx.transcripts.length > 0 ||
     ctx.recordings.length > 0 ||
+    ctx.messages.length > 0 ||
+    ctx.people.length > 0 ||
+    ctx.sharedFiles.length > 0 ||
     ctx.localFolders.length > 0 ||
     ctx.collections.length > 0 ||
     ctx.fileScopes.length > 0 ||
@@ -120,6 +161,9 @@ function toBaseAttachedContext(ctx: ComposerContext): AttachedContextItem[] {
     canvases: ctx.canvases,
     transcripts: ctx.transcripts,
     recordings: ctx.recordings,
+    messages: ctx.messages,
+    people: ctx.people,
+    sharedFiles: ctx.sharedFiles,
     localFolders: ctx.localFolders,
     files: ctx.fileScopes,
     folders: ctx.folderScopes,
