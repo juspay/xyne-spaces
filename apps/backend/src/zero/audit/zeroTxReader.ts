@@ -3,7 +3,7 @@ import type { Schema } from '@xyne/shared';
 import { zql } from '../queries';
 import { AUDIT_TABLE_CONFIG } from './config';
 import { collectTableAudit } from './collector';
-import { AuditResolution } from './resolution';
+import { AuditResolution, rowString } from './resolution';
 import type {
   AuditJobsAccumulator,
   AuditLookup,
@@ -96,10 +96,52 @@ export function createZeroAuditLookup(tx: Transaction<Schema>): AuditLookup {
         set.add(boardId);
         boardIdsByFormId.set(mapping.formId, set);
       }
+      // Non-linear boards attach forms to the transition itself.
+      const transitionsBuilder = builderFor('stage_transitions');
+      const transitions = transitionsBuilder
+        ? ((await tx.run(
+            transitionsBuilder.where('formId', 'IN', formIds) as never,
+          )) as { formId: string; boardId: string }[])
+        : [];
+      for (const transition of transitions) {
+        const set = boardIdsByFormId.get(transition.formId) ?? new Set<string>();
+        set.add(transition.boardId);
+        boardIdsByFormId.set(transition.formId, set);
+      }
       return [...boardIdsByFormId].map(([formId, boardIds]) => ({
         formId,
         boardIds: [...boardIds],
       }));
+    },
+    formIdsForGlobalFieldIds: async globalFieldIds => {
+      const builder = builderFor('form_fields');
+      if (globalFieldIds.length === 0 || !builder) return [];
+      const rows = (await tx.run(
+        builder.where('globalFieldId', 'IN', globalFieldIds) as never,
+      )) as { formId: string; globalFieldId: string }[];
+      const formIdsByGlobalFieldId = new Map<string, Set<string>>();
+      for (const row of rows) {
+        const set = formIdsByGlobalFieldId.get(row.globalFieldId) ?? new Set<string>();
+        set.add(row.formId);
+        formIdsByGlobalFieldId.set(row.globalFieldId, set);
+      }
+      return [...formIdsByGlobalFieldId].map(([globalFieldId, formIds]) => ({
+        globalFieldId,
+        formIds: [...formIds],
+      }));
+    },
+    memberAssignmentStates: async userGroupId => {
+      const statesBuilder = builderFor('user_assignment_states');
+      const mappingsBuilder = builderFor('user_group_mappings');
+      if (!statesBuilder || !mappingsBuilder) return [];
+      const states = (await tx.run(
+        statesBuilder.where('userGroupId', userGroupId) as never,
+      )) as AuditRow[];
+      const mappings = (await tx.run(
+        mappingsBuilder.where('userGroupId', userGroupId) as never,
+      )) as AuditRow[];
+      const memberIds = new Set(mappings.map(mapping => String(mapping.userId)));
+      return states.filter(state => memberIds.has(String(state.userId)));
     },
   };
 }
@@ -154,6 +196,16 @@ export async function collectZeroAuditOperation(params: {
     params.operation === 'delete'
       ? null
       : ({ ...(beforeRow ?? {}), ...rowArgs } as AuditRow);
+
+  // Counted sets are baselined here, before this write; the snapshot is memoized
+  // for the whole save, so it stays the pre-save state.
+  if (config.counters) {
+    await params.accumulator.resolution.warmCounterSnapshot(
+      params.table,
+      rowString(afterRow ?? beforeRow ?? {}, config.counters.groupBy),
+      config.counters,
+    );
+  }
 
   await collectTableAudit({
     table: params.table,
