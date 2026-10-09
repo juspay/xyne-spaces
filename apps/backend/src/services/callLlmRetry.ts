@@ -380,9 +380,12 @@ export async function executeStreamingLlmRequest(
 
       if (!content) {
         // Deterministic empty response — retrying only burns the backoff budget.
-        logger.warn(`[${callId}] ${options.operation}_failed`, {
-          reason: 'empty_content',
+        // Logged as an attempt failure; the caller that gives up on the summary
+        // emits the single `<operation>_failed` line for the final failure.
+        logger.warn(`[${callId}] ${options.operation}_attempt_failed`, {
           attempt,
+          max_attempts: MAX_ATTEMPTS,
+          reason: 'empty_content',
           duration_ms: Date.now() - attemptStart,
         });
 
