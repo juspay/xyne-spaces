@@ -1,6 +1,10 @@
 import { ReactElement, useMemo, useState, useEffect, useRef, useCallback, useContext } from 'react';
 import { createPortal } from 'react-dom';
 import { activitySkipMarkAsReadThreadRef } from '../Activity/activitySkipMarkAsRead';
+import {
+  clearThreadMessagesShowing,
+  setThreadMessagesShowing,
+} from '../../stores/chatScreenVisibilityStore';
 import { useEphemeralThreadMessages } from '../../hooks/useEphemeralMessages';
 import {
   useParams,
@@ -853,6 +857,18 @@ export const ThreadMessages = ({
     (!derivedTicketId && ticketOnlyTab)
       ? 'thread'
       : activeTab;
+
+  const threadVisibilityWriterRef = useRef(Symbol('ThreadMessages'));
+  const isMessagesTabShowing = underTicketView
+    ? underTicketActiveTab === 'replies'
+    : simpleView || !(derivedTicketId || tabbedView) || currentTab === 'thread';
+  useEffect(() => {
+    const writer = threadVisibilityWriterRef.current;
+    if (derivedConversationId) {
+      setThreadMessagesShowing(writer, derivedConversationId, isMessagesTabShowing);
+    }
+    return (): void => clearThreadMessagesShowing(writer);
+  }, [derivedConversationId, isMessagesTabShowing]);
 
   const tabs = useMemo(() => {
     const allTabs = [

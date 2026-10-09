@@ -13,6 +13,7 @@ import { NativeInboundMessageType, reactNativeBridge } from '../../utils/reactNa
 import { useZero } from '../../hooks/useZero';
 import { callActor } from '../../machines/callMachine';
 import { roomActor } from '../../machines/roomMachine';
+import { attachmentViewerActor } from '../../machines/attachmentViewerMachine';
 import { useSelector } from '@xstate/react';
 import { CallType } from '@xyne/shared';
 import { buildSdlcPath, parseSdlcNavTarget } from '@xyne/shared/sdlc';
@@ -27,6 +28,11 @@ import {
   useRecordingStore,
 } from '../../hooks/useRecordingStore';
 import { getRecordingDefaultLayout } from '../../hooks/useRecordingDefaultLayout';
+import { isViewingNotificationTarget } from '../../utils/notificationViewing';
+import {
+  getChatScreenVisibility,
+  isThreadMessagesShowing,
+} from '../../stores/chatScreenVisibilityStore';
 import { sendSosAlertEvent } from '../../stores/sosAlertStore';
 import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
 import { setExternalMeeting, setMicBusy } from '../../stores/externalMeetingStore';
@@ -73,6 +79,7 @@ interface NotificationData {
       senderName?: string;
       channelTitle?: string;
       messageType?: string;
+      relatedEntityType?: string;
       canvasId?: string;
       blockId?: string;
       commentThreadId?: string;
@@ -310,7 +317,33 @@ export const NotificationHandler: React.FC = () => {
           return;
         }
 
-        if (
+        // A full-screen call or the attachment viewer covers ChatView while it stays mounted.
+        const isChatCovered =
+          roomActor.getSnapshot().context.viewMode === 'full' ||
+          !attachmentViewerActor.getSnapshot().matches('closed');
+        const chatScreen = getChatScreenVisibility();
+        const isViewingTarget =
+          !isChatCovered &&
+          isViewingNotificationTarget(
+            {
+              type: data.notification.type,
+              relatedEntityType: data.notification.data?.relatedEntityType,
+              channelId: data.notification.data?.channelId,
+              conversationId: data.notification.data?.conversationId,
+              messageId: data.notification.data?.messageId,
+              initialMessageId: data.notification.data?.conversation?.initialMessageId,
+            },
+            {
+              ...chatScreen,
+              threadMessagesShowing:
+                !!chatScreen.threadId && isThreadMessagesShowing(chatScreen.threadId),
+              isAppFocused: document.visibilityState === 'visible' && document.hasFocus(),
+            },
+          );
+
+        if (isViewingTarget) {
+          // Already on screen: no sound or banner; still acknowledged below.
+        } else if (
           isElectron &&
           window.electronAPI &&
           typeof window.electronAPI.showNotification === 'function'
