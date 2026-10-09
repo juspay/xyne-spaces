@@ -123,9 +123,7 @@ const startHandoffIntake = (api: NonNullable<Window['electronAPI']>['callWindow'
   // pings when one arrives. Listening before the first read closes the gap
   // where a handoff lands between the two; the id check makes repeats no-ops.
   const take = async (): Promise<void> => {
-    const handoff = (await api.takeHandoff()) as
-      | (CallWindowHandoff & { handoffId: number })
-      | null;
+    const handoff = (await api.takeHandoff()) as (CallWindowHandoff & { handoffId: number }) | null;
     if (!handoff || typeof handoff.handoffId !== 'number') return;
     if (handoff.handoffId === activeHandoffId) return;
     connectHandoff(handoff);

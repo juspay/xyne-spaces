@@ -10,13 +10,16 @@ import { isNativeCallSupported } from './reactNativeBridge';
  * The main window keeps deciding whether there is a call: it fetches the
  * LiveKit token, handles the lobby and rings, exactly as for the in-app
  * overlay. Once it has a token it hands the call to a separate Electron window
- * (route `/newWindow/call`), which owns the LiveKit connection and renders the
+ * (page `/newWindow/call.html`), which owns the LiveKit connection and renders the
  * call UI. The call window reports back with {@link CallWindowStatus}, and the
  * main window's roomActor mirrors that in `connected.windowMode`, the way it
  * mirrors the React Native host in `nativeMode`.
  */
 
-export const CALL_WINDOW_ROUTE = '/newWindow/call';
+// Its own page (newWindow/call.html, entry src/callWindow/main.tsx), not a
+// route of the app, so the window loads only the call. Under /newWindow/ so it
+// counts as a standalone window (isStandaloneWindow).
+export const CALL_WINDOW_ROUTE = '/newWindow/call.html';
 // Off by default: calls open in the in-app overlay unless the user opts in.
 export const CALL_WINDOW_ENABLED_KEY = 'xyne:call-window-enabled';
 

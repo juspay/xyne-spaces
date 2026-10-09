@@ -1232,20 +1232,24 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
     // What the editor starts with, read once it exists. It is made during the first
     // render, so onCreate would set this state before the component had mounted.
+    // Effects here can re-run on an editor TipTap has already destroyed (React
+    // re-runs effects when it re-shows a tree it hid, e.g. under Suspense, and
+    // useEditor destroys on cleanup), so each one skips a destroyed editor.
     useEffect(() => {
-      if (!editor) return;
+      if (!editor || editor.isDestroyed) return;
       setContent(editor.getText().trim().length > 0 ? 'has-content' : '');
       updateEmojiSizeClass(editor);
     }, [editor, updateEmojiSizeClass]);
 
     useEffect(() => {
-      editor?.setEditable(!disabled && !isSending, false);
+      if (!editor || editor.isDestroyed) return;
+      editor.setEditable(!disabled && !isSending, false);
     }, [editor, disabled, isSending]);
 
     // Keep mounted, non-focused editors in sync when another InputBox updates
     // the shared draft value for this lookup id. Skip focused editors where change is happening.
     useEffect(() => {
-      if (!editor || editor.isFocused || value === undefined) return;
+      if (!editor || editor.isDestroyed || editor.isFocused || value === undefined) return;
 
       const nextValue = value;
       if (lastAppliedValueRef.current === nextValue) return;

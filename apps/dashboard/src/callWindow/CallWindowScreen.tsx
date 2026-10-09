@@ -10,15 +10,16 @@ import {
 import { useSelector } from '@xstate/react';
 import { ConnectionState } from 'livekit-client';
 import { RoomAudioRenderer } from '@livekit/components-react';
-import { roomActor } from '../../machines/roomMachine';
-import { useAuth } from '../../hooks/useAuth';
-import { CallStateTransition } from '../../components/Call/CallStateTransition/CallStateTransition';
-import { GlobalCallOverlay } from '../../components/Call/CallOverlay/GlobalCallOverlay';
-import { ScreenPickerHost } from '../../components/ScreenPicker/ScreenPickerHost';
+import { roomActor } from '../machines/roomMachine';
+import { useAuth } from '../hooks/useAuth';
+import { CallStateTransition } from '../components/Call/CallStateTransition/CallStateTransition';
+import { GlobalCallOverlay } from '../components/Call/CallOverlay/GlobalCallOverlay';
+import { ScreenPickerHost } from '../components/ScreenPicker/ScreenPickerHost';
 import { useCallWindowNavigationGuard } from './useCallWindowNavigationGuard';
 
-// Set by the call UI when it mounts, which is only once the app behind it has
-// finished loading (InitialStateLoader holds it until then).
+// Set by the call UI once it shows the call: signed in, Zero up and the handoff
+// received. The workspace data loads behind it (InitialStateLoader in
+// renderBeforeLoaded mode, see CallWindowApp).
 const CallWindowUiReadyContext = createContext<() => void>(() => undefined);
 
 /**
@@ -42,10 +43,10 @@ function CallWindowJoining(): ReactElement {
 }
 
 /**
- * Route element for /newWindow/call. Deliberately outside SplashScreen: the
- * joining screen shows from the first frame instead of the app splash or
- * loader, and the providers (passed as children) load behind it. The call
- * itself started connecting before any of this — see utils/callWindowHost.
+ * The call window page's root (see CallWindowApp). The joining screen shows
+ * from the first frame, and the providers (passed as children) load behind it.
+ * The call itself started connecting before any of this — see
+ * utils/callWindowHost.
  */
 export function CallWindowRoot({ children }: { children: ReactNode }): ReactElement {
   const { isLoading, isAuthenticated } = useAuth();
@@ -53,6 +54,13 @@ export function CallWindowRoot({ children }: { children: ReactNode }): ReactElem
   const [isUiReady, setUiReady] = useState(false);
   const markUiReady = useCallback(() => setUiReady(true), []);
   useCallWindowNavigationGuard();
+
+  // Electron keeps this window, hidden, after a call ends. Back to the joining
+  // screen while idle, so the next call opens onto it and not a blank window.
+  const isIdle = useSelector(roomActor, state => state.matches('idle'));
+  useEffect(() => {
+    if (isIdle) setUiReady(false);
+  }, [isIdle]);
 
   return (
     <div className='h-screen w-screen overflow-hidden bg-[#131314] text-[#e3e3e3]'>

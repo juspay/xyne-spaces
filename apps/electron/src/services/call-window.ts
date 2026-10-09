@@ -28,8 +28,14 @@ import { registerScreenPickerWindow } from './screen-picker';
  * so a late "ended" from the previous call can never tear down the next one.
  */
 
-const ROUTE_PATH = '/newWindow/call';
+// The dashboard's call window page: its own small entry, not an app route.
+const ROUTE_PATH = '/newWindow/call.html';
 const DESTROY_AFTER_HIDE_MS = 15_000;
+// How long a window is kept, hidden, after its call ends. A kept window is
+// already signed in and synced, so the next call opens as fast as the in-app
+// overlay. Closed after this idle stretch so the renderer does not sit in
+// memory all day.
+const KEEP_WARM_MS = 30 * 60_000;
 const LEAVE_TIMEOUT_MS = 3_000;
 const BOUNDS_KEY = 'callWindowBounds';
 // First-open size (later opens reuse the last bounds): a share of the work
@@ -198,7 +204,7 @@ function isCallWindowTopFrame(event: IpcMainEvent | IpcMainInvokeEvent): boolean
 function routeUrl(workspaceId: string | null): string {
   const query = workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : '';
   return config.useBundledUI
-    ? `${getBundledUIUrl()}newWindow/call${query}`
+    ? `${getBundledUIUrl()}${ROUTE_PATH.slice(1)}${query}`
     : `${new URL(ROUTE_PATH, config.FRONTEND_URL).toString()}${query}`;
 }
 
@@ -333,6 +339,23 @@ function hideWhileLeaving(): void {
   callWindow.hide();
 }
 
+/**
+ * The call is over: keep the window, hidden and already booted, for the next
+ * call (see KEEP_WARM_MS). A full-screen window is closed instead, for the
+ * same macOS reason as in hideWhileLeaving.
+ */
+function parkCallWindow(): void {
+  if (!callWindow || callWindow.isDestroyed()) return;
+  if (callWindow.isFullScreen()) {
+    destroyCallWindow();
+    return;
+  }
+  cancelScheduledDestroy();
+  destroyTimer = setTimeout(destroyCallWindow, KEEP_WARM_MS);
+  if (callWindow.isVisible()) callWindow.hide();
+  log.info('[CallWindow] Window kept for the next call');
+}
+
 function requestLeave(win: BrowserWindow): Promise<void> {
   if (leavePrompt) return leavePrompt;
 
@@ -367,6 +390,8 @@ function createCallWindow(workspaceId: string | null): BrowserWindow {
   rendererLoaded = false;
   allowClose = false;
   callWindowWorkspaceId = workspaceId;
+  const createdAt = Date.now();
+  log.info('[CallWindow] Creating window');
 
   const win = new BrowserWindow({
     ...bounds,
@@ -423,6 +448,9 @@ function createCallWindow(workspaceId: string | null): BrowserWindow {
 
   win.webContents.on('did-finish-load', () => {
     rendererLoaded = true;
+    // The page's own scripts still have to run after this; the renderer logs
+    // when the handoff is read.
+    log.info(`[CallWindow] Page loaded ${Date.now() - createdAt}ms after creation`);
   });
 
   // A reload or navigation of the page itself (View › Reload from the menu
@@ -508,6 +536,7 @@ function openCallWindow(handoff: Record<string, unknown>, workspaceId: string | 
     callWindow && !callWindow.isDestroyed() && callWindowWorkspaceId === workspaceId;
 
   if (reusable && callWindow) {
+    log.info(`[CallWindow] Handoff ${handoffId} to the existing window`);
     callWindow.webContents.send('call-window:handoff-ready');
     if (callWindow.isMinimized()) callWindow.restore();
     callWindow.show();
@@ -530,6 +559,7 @@ function prepareCallWindow(workspaceId: string | null): void {
   cancelScheduledDestroy();
   if (callWindow && !callWindow.isDestroyed()) {
     if (callWindowWorkspaceId === workspaceId) {
+      log.info('[CallWindow] Prepared: showing the existing window');
       if (callWindow.isMinimized()) callWindow.restore();
       callWindow.show();
       callWindow.focus();
@@ -546,7 +576,7 @@ function prepareCallWindow(workspaceId: string | null): void {
 /** The join it was opened for did not happen (lobby, error, cancelled). */
 function cancelPreparedCallWindow(): void {
   if (!handoffSettled || pendingHandoff) return;
-  destroyCallWindow();
+  parkCallWindow();
 }
 
 export function setupCallWindowHandlers(): void {
@@ -599,9 +629,8 @@ export function setupCallWindowHandlers(): void {
     const previousPhase = lastStatus?.handoffId === next.handoffId ? lastStatus.phase : null;
     publishStatus(next);
     if (next.phase === 'ended') {
-      // As Slack does with a huddle: the window closes when the call does, and
-      // the next call gets a fresh one.
-      destroyCallWindow();
+      // Out of sight when the call ends, but kept booted for the next one.
+      parkCallWindow();
     } else if (next.phase === 'ending') {
       hideWhileLeaving();
     } else if (

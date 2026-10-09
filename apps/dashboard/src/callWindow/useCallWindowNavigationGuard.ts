@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useBlocker } from 'react-router-dom';
-import { CALL_WINDOW_ROUTE } from '../../utils/callWindow';
-import { toRegularPath } from '../../utils/electronApp';
+import { CALL_WINDOW_ROUTE } from '../utils/callWindow';
+import { toRegularPath } from '../utils/electronApp';
 
 /**
  * In-app navigation away from the call belongs to the main window: following

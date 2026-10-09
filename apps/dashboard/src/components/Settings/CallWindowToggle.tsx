@@ -12,8 +12,8 @@ export function CallWindowToggle(): ReactElement | null {
       <div>
         <p className='text-sm font-medium text-foreground'>Open calls in a separate window</p>
         <p className='text-xs text-muted-foreground mt-0.5'>
-          Show calls in their own window you can move, resize or keep beside your work. Turn off
-          to show calls inside the app. Applies to the next call you join.
+          Show calls in their own window you can move, resize or keep beside your work. Turn off to
+          show calls inside the app. Applies to the next call you join.
         </p>
       </div>
       <Switch

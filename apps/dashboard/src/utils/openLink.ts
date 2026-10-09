@@ -1,4 +1,4 @@
-import { isElectronApp } from './electronApp';
+import { isElectronApp, isStandaloneWindow } from './electronApp';
 import { detectReactNativeWebView, reactNativeBridge } from './reactNativeBridge';
 import { browserPanelActor } from '../machines/browserPanelMachine';
 import { isCallWindowRoute } from './callWindow';
@@ -21,9 +21,20 @@ export const subscribeLinkOpenPref = (listener: () => void): (() => void) => {
 export const getLinkOpenExternalDefault = (): boolean =>
   localStorage.getItem(LINK_OPEN_EXTERNAL_KEY) !== 'false';
 
+// Only the main window may write browser settings (Electron rejects any other
+// sender), and it syncs on load. Detached windows (the call window, SDLC) share
+// its localStorage, so they have nothing to add.
 const syncLinkOpenPrefToMain = (value: boolean): void => {
-  if (!isElectronApp()) return;
-  void window.electronAPI?.setBrowserSettings?.({ openLinksExternally: value });
+  if (!isElectronApp() || isStandaloneWindow()) return;
+  window.electronAPI
+    ?.setBrowserSettings?.({ openLinksExternally: value })
+    ?.catch?.((error: unknown) => {
+      logger.warn(Event.FRONTEND_ERROR, {
+        type: 'browser_settings_sync_failed',
+        message: 'Could not sync the open-links preference to the desktop app',
+        error,
+      });
+    });
 };
 
 syncLinkOpenPrefToMain(getLinkOpenExternalDefault());
