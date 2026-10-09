@@ -4,7 +4,7 @@ import { NotificationBellOn, NotificationBellOff } from '@xyne/icons';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { DropdownMenuItem } from '../../ui/dropdown-menu';
-import { useIsTicketStakeholder } from './useIsTicketStakeholder';
+import { useIsTicketStakeholder } from '../../../hooks/useIsTicketStakeholder';
 
 const UNSUBSCRIBE_LABEL = 'Unsubscribe from ticket updates';
 const SUBSCRIBE_LABEL = 'Subscribe to ticket updates';

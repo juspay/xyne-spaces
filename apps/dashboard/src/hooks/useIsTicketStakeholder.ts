@@ -5,9 +5,9 @@ import {
   FormFieldType,
   extractFormFieldUserIds,
 } from '@xyne/shared';
-import { useAuth } from '../../../hooks/useAuth';
-import { useQuery } from '../../../hooks/useQuery';
-import { queries } from '../../../zero/queries';
+import { useAuth } from './useAuth';
+import { useQuery } from './useQuery';
+import { queries } from '../zero/queries';
 
 export const useIsTicketStakeholder = (
   ticketId: string | null | undefined,
