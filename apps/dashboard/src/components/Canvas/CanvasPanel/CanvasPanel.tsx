@@ -50,6 +50,7 @@ import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
 import { canvasService } from '../../../services/Canvas/canvasService';
 import { usePersistedCanvasPreferences } from '../../../hooks/usePersistedCanvasPreferences';
 import { useCanvasArchiveToggle } from '../useCanvasArchiveToggle';
+import { CanvasRenderBoundary } from '../CanvasRenderBoundary';
 
 export type CanvasPanelOutletContext = {
   leftHeaderSlot?: ReactElement | null;
@@ -251,6 +252,10 @@ const CanvasPanel = (): ReactElement => {
   );
 
   const handleArchiveToggleCanvas = useCanvasArchiveToggle();
+
+  const handleCanvasRenderError = useCallback(() => {
+    setLastCanvasId(null);
+  }, [setLastCanvasId]);
 
   const handleDuplicateCanvas = useCallback(
     (canvasOrId: Canvas | string, canvasFromList?: Canvas) => {
@@ -541,7 +546,9 @@ const CanvasPanel = (): ReactElement => {
     if (!isOnIndexRoute) {
       return (
         <div className='flex flex-col h-full bg-background w-screen'>
-          <Outlet />
+          <CanvasRenderBoundary canvasId={selectedCanvasId} onError={handleCanvasRenderError}>
+            <Outlet />
+          </CanvasRenderBoundary>
         </div>
       );
     }
@@ -594,7 +601,13 @@ const CanvasPanel = (): ReactElement => {
                   {canvasPanelOutletContext.leftHeaderSlot}
                 </div>
               )}
-              {isOnIndexRoute ? renderPlaceholder() : <Outlet context={canvasPanelOutletContext} />}
+              {isOnIndexRoute ? (
+                renderPlaceholder()
+              ) : (
+                <CanvasRenderBoundary canvasId={selectedCanvasId} onError={handleCanvasRenderError}>
+                  <Outlet context={canvasPanelOutletContext} />
+                </CanvasRenderBoundary>
+              )}
             </div>
           </div>
         </Panel>
