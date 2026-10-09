@@ -2,6 +2,7 @@ import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import vespa from '@/vespa/client';
 import { vespaQueue } from '@/queues/vespaQueue';
+import { isSupportedMimeType } from '@/services/fileProcessor';
 import {
   channelSchema,
   fileSchema,
@@ -49,7 +50,14 @@ export interface SdlcHubSyncResult {
  * Recomputing the whole hub keeps renames, moves and deletes right with one code path; hubs
  * are small, and a moved folder only re-feeds containers, never the documents under it.
  */
-export async function syncSdlcHub(hubId: string): Promise<SdlcHubSyncResult | null> {
+export interface SdlcHubSyncOptions {
+  /** Where to queue the Vespa jobs: the live ingestion queue by default; an admin backfill
+   *  passes its own queue so a full re-index does not hold up live writes. */
+  queue?: Pick<typeof vespaQueue, 'addJob'>;
+}
+
+export async function syncSdlcHub(hubId: string, options: SdlcHubSyncOptions = {}): Promise<SdlcHubSyncResult | null> {
+  const queue = options.queue ?? vespaQueue;
   invalidateSdlcHubIndex(hubId);
   const index = await loadSdlcHubIndex(hubId);
   if (!index) {
@@ -73,8 +81,8 @@ export async function syncSdlcHub(hubId: string): Promise<SdlcHubSyncResult | nu
   }
   // A field-scoped update of a document Vespa does not have yet is a no-op, so a document that
   // was never indexed (created before indexing ran, or by a path that skipped it) gets a full
-  // feed instead, which carries its SDLC fields too. Uploads are left to the upload path, which
-  // only indexes the file types it can read.
+  // feed instead, which carries its SDLC fields too. A missing upload is fed only when its file
+  // type is one the upload path indexes (attachmentController); others are never in Vespa.
   const indexedFiles = await existingIds(fileSchema, [...index.canvases.keys(), ...index.attachments.keys()]);
   let fedDocuments = 0;
   for (const canvasId of index.canvases.keys()) {
@@ -85,9 +93,24 @@ export async function syncSdlcHub(hubId: string): Promise<SdlcHubSyncResult | nu
       fedDocuments++;
     }
   }
+  const missingUploads = [...index.attachments.keys()].filter(id => !indexedFiles.has(id));
+  const readableUploads = new Set(
+    missingUploads.length
+      ? (await db.messageAttachment.findMany({
+          where: { id: { in: missingUploads }, isDeleted: false },
+          select: { id: true, mimetype: true },
+        }))
+          .filter(a => isSupportedMimeType(a.mimetype))
+          .map(a => a.id)
+      : [],
+  );
   for (const attachmentId of index.attachments.keys()) {
-    if (!indexedFiles.has(attachmentId)) continue;
-    jobs.push({ schema: fileSchema, jobType: 'update', docId: attachmentId, app: SubApp.CHAT_ATTACHMENT, fields: fileFields, ...base });
+    if (indexedFiles.has(attachmentId)) {
+      jobs.push({ schema: fileSchema, jobType: 'update', docId: attachmentId, app: SubApp.CHAT_ATTACHMENT, fields: fileFields, ...base });
+    } else if (readableUploads.has(attachmentId)) {
+      jobs.push({ schema: fileSchema, jobType: 'feed', docId: attachmentId, app: SubApp.CHAT_ATTACHMENT, ...base });
+      fedDocuments++;
+    }
   }
   // Tickets and messages the same way: placed if Vespa has them, fed in full if it does not
   // (a ticket's thread message is written on the server, and may never have been indexed).
@@ -152,7 +175,7 @@ export async function syncSdlcHub(hubId: string): Promise<SdlcHubSyncResult | nu
   }
 
   for (const job of jobs) {
-    await vespaQueue.addJob(job);
+    await queue.addJob(job);
   }
 
   const result: SdlcHubSyncResult = {
