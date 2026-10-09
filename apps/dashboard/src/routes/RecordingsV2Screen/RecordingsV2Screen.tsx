@@ -35,7 +35,6 @@ import { RecordingsEmptyStateIllustration } from './components/RecordingsEmptySt
 import { RecordingDateFilter } from './components/RecordingDateFilter';
 import RecordingControlsOverlay from './components/RecordingControlsOverlay';
 import { RecordingLabelFilter } from './components/RecordingLabelFilter';
-import { RecordingPeopleFilter } from './components/RecordingPeopleFilter';
 import { RecordingSharedWithMeTab } from './components/RecordingSharedWithMeTab';
 import RecordingAskAIModal from './components/RecordingAskAIModal';
 import RecordingsV2Pill, {
@@ -75,7 +74,6 @@ const RecordingsV2Screen = (): ReactElement => {
   // "Created by me" is the default tab; "All" and "Shared" are explicit `?tab=` values.
   const activeListTab: RecordingOwnershipTab =
     listTabParam === 'all' || listTabParam === 'shared' ? listTabParam : 'created';
-  const [selectedCreatorId, setSelectedCreatorId] = useState<string | null>(null);
   const [selectedDatePreset, setSelectedDatePreset] = useState<RecordingDatePreset>('all-time');
   const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
   const [selectedSharerIds, setSelectedSharerIds] = useState<string[]>([]);
@@ -90,7 +88,7 @@ const RecordingsV2Screen = (): ReactElement => {
     isLoading,
     error,
     refreshRecordings,
-  } = usePaginatedOatsRecordings(activeListTab, selectedCreatorId);
+  } = usePaginatedOatsRecordings(activeListTab, null);
   const currentUser = useSelf();
   const { requestLeave, ConfirmDialog } = useLeaveRecording();
   const users = useUsers();
@@ -145,14 +143,9 @@ const RecordingsV2Screen = (): ReactElement => {
     [availableLabels, isResolved, isManualLabel],
   );
 
-  /**
-   * The People filter is applied server-side by the recordings query, so only the
-   * tab's shared-by picker still narrows the loaded page — and an explicit pick in
-   * the People filter wins over it.
-   */
   const ownershipFilteredRecordings = useMemo(
-    () => filterRecordingsByOwnership(recordings, selectedCreatorId ? [] : selectedSharerIds),
-    [recordings, selectedCreatorId, selectedSharerIds],
+    () => filterRecordingsByOwnership(recordings, selectedSharerIds),
+    [recordings, selectedSharerIds],
   );
 
   const liveRecording = useMemo(() => {
@@ -169,10 +162,8 @@ const RecordingsV2Screen = (): ReactElement => {
   const liveRecordingStartedAt =
     liveRecording?.startedAt ?? (isLocalRecordingActive ? recordingStartTime : null);
   const liveRecordingTitle = liveRecording?.title ?? recordingTitle ?? DEFAULT_RECORDING_TITLE;
-  const isOwnRecordingView =
-    activeListTab !== 'shared' && (!selectedCreatorId || selectedCreatorId === currentUser?.id);
   const showLiveRecording =
-    isOwnRecordingView && liveRecordingStartedAt !== null && isLocalRecordingActive;
+    activeListTab !== 'shared' && liveRecordingStartedAt !== null && isLocalRecordingActive;
   const hiddenLiveRecordingId =
     recordingCallId ?? (recordingStatus === 'starting' ? liveRecording?.externalId : null);
 
@@ -278,16 +269,11 @@ const RecordingsV2Screen = (): ReactElement => {
       if (tab === activeListTab) return;
 
       setActiveListTab(tab);
-      setSelectedCreatorId(null);
       setSelectedLabels([]);
       setSelectedSharerIds([]);
     },
     [activeListTab, setActiveListTab],
   );
-
-  const handleCreatorChange = useCallback((creatorId: string | null): void => {
-    setSelectedCreatorId(creatorId);
-  }, []);
 
   const handleOpenRecording = useCallback(
     (recordingId: string): void => {
@@ -450,7 +436,7 @@ const RecordingsV2Screen = (): ReactElement => {
       )}
       <div ref={setScrollContainer} className='h-full w-full overflow-y-scroll'>
         <div className='flex min-h-full w-full flex-col items-center px-4'>
-          <header className='max-w-[860px] w-full sticky top-0 bg-background z-20 pt-6 pb-6 sm:pb-3'>
+          <header className='max-w-[852px] w-full sticky top-0 bg-background z-20 pt-6 pb-6 sm:pb-3'>
             <div className='grid grid-cols-[minmax(0,1fr)_auto] items-center gap-y-6'>
               <div className='col-start-1 row-start-1 min-w-0'>
                 <h1 id='xyne-scribe-heading' className='text-3xl font-semibold text-foreground'>
@@ -509,12 +495,6 @@ const RecordingsV2Screen = (): ReactElement => {
 
                 <RecordingDateFilter value={selectedDatePreset} onChange={setSelectedDatePreset} />
 
-                <RecordingPeopleFilter
-                  currentUserId={currentUser?.id}
-                  selectedUserId={selectedCreatorId}
-                  onUserChange={handleCreatorChange}
-                />
-
                 <RecordingLabelFilter
                   labels={manualLabels}
                   selectedLabels={selectedLabels}
@@ -556,7 +536,7 @@ const RecordingsV2Screen = (): ReactElement => {
             {showLiveRecording && (
               <motion.div
                 key='live-recording-pill'
-                className='w-full max-w-[860px]'
+                className='w-full max-w-[852px]'
                 initial={shouldReduceMotion ? { opacity: 1 } : { height: 0, opacity: 0 }}
                 animate={shouldReduceMotion ? { opacity: 1 } : { height: 'auto', opacity: 1 }}
                 exit={shouldReduceMotion ? { opacity: 0 } : { height: 0, opacity: 0 }}
@@ -598,7 +578,7 @@ const RecordingsV2Screen = (): ReactElement => {
             )}
           </AnimatePresence>
 
-          <main className='flex w-full max-w-[860px] flex-1 flex-col'>
+          <main className='flex w-full max-w-[852px] flex-1 flex-col'>
             {showInitialSkeleton ? (
               <RecordingsV2Skeleton />
             ) : error && recordings.length === 0 ? (
@@ -627,8 +607,7 @@ const RecordingsV2Screen = (): ReactElement => {
               <div className='flex flex-1 flex-col items-center justify-center px-6 pb-28 text-center'>
                 <RecordingsEmptyStateIllustration />
                 <h2 className='text-base font-semibold text-foreground'>
-                  {selectedCreatorId !== null ||
-                  selectedSharerIds.length > 0 ||
+                  {selectedSharerIds.length > 0 ||
                   selectedLabels.length > 0 ||
                   ownershipFilteredRecordings.length > 0
                     ? 'No matching recordings'
@@ -641,11 +620,9 @@ const RecordingsV2Screen = (): ReactElement => {
                     ? 'No recordings match the selected labels.'
                     : ownershipFilteredRecordings.length > 0
                       ? `No recordings found for ${getRecordingDatePresetLabel(selectedDatePreset).toLowerCase()}.`
-                      : selectedCreatorId
-                        ? 'Try another ownership tab or person.'
-                        : activeListTab === 'shared'
-                          ? 'Recordings shared with you by others will appear here.'
-                          : 'Capture a conversation and explore it with Ask AI.'}
+                      : activeListTab === 'shared'
+                        ? 'Recordings shared with you by others will appear here.'
+                        : 'Capture a conversation and explore it with Ask AI.'}
                 </p>
               </div>
             ) : filteredRecordings.length > 0 && scrollContainer ? (

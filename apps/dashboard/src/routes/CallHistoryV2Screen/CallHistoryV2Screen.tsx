@@ -620,7 +620,7 @@ const CallHistoryV2Screen = (): ReactElement => {
       )}
       <div className='w-full flex flex-col items-center'>
         {/* Sticky header */}
-        <div className='max-w-[820px] w-full sticky top-0 bg-background z-50 flex flex-col px-6 pt-8 sm:px-8'>
+        <div className='max-w-[884px] w-full sticky top-0 bg-background z-50 flex flex-col px-4 pt-8'>
           <CallHistorySearchPanel
             variant='v2'
             callMentionSearchType={callMentionSearchType}
@@ -644,7 +644,7 @@ const CallHistoryV2Screen = (): ReactElement => {
           />
         </div>
         {/* Page body */}
-        <div className='max-w-[820px] w-full flex flex-col gap-6 px-6 pb-20 sm:px-8'>
+        <div className='max-w-[884px] w-full flex flex-col gap-6 px-4 pb-20'>
           {/* UPCOMING section */}
           {(!hasCallSearch || isVespaCallSearching || hasUpcomingCallsToday) && (
             <div className='flex flex-col gap-3'>

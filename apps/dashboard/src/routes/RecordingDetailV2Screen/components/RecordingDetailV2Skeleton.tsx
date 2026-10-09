@@ -16,7 +16,7 @@ export function RecordingDetailV2Skeleton(): ReactElement {
     >
       <span className='sr-only'>Loading recording</span>
       <div aria-hidden='true' className='h-full w-full overflow-y-scroll'>
-        <div className='mx-auto flex min-h-full w-full max-w-[860px] flex-col px-4 py-6'>
+        <div className='mx-auto flex min-h-full w-full max-w-[884px] flex-col px-4 py-6'>
           <div className='-mx-4 -mt-6 flex flex-col bg-background px-4 pt-6'>
             <header className='mb-6'>
               <div className='mb-3 flex h-5 items-center gap-1.5'>
