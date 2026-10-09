@@ -33,9 +33,9 @@ import type { BoundAgent } from "./store.js";
  * Getting this backwards is how the agent ended up telling someone to approve
  * a card that was never on their screen.
  */
-function replyFormatFor(channel: MessagingChannelKey): { replyFormat?: { maxSections: number; maxWords: number } } {
+function replyFormatFor(channel: MessagingChannelKey): { replyFormat: { maxSections: number; maxWords: number } | undefined } {
   const sections = getChannel(channel)?.capabilities.resultSections;
-  return sections ? { replyFormat: { maxSections: sections.maxSections, maxWords: sections.maxWords } } : {};
+  return { replyFormat: sections ? { maxSections: sections.maxSections, maxWords: sections.maxWords } : undefined };
 }
 
 function channelSurfaceInstructions(channel: MessagingChannelKey): string {

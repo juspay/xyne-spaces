@@ -40,8 +40,9 @@ describe("truncateWords", () => {
 
 describe("planSectionedReply", () => {
   it("sends each section on its own without a file when everything fits", () => {
-    const plan = planSectionedReply("## A\nshort\n\n## B\nalso short", limits);
-    expect(plan).toEqual({ messages: ["## A\nshort", "## B\nalso short"], overflow: false });
+    const md = `## A\n${words(60)}\n\n## B\n${words(60)}`;
+    const plan = planSectionedReply(md, limits);
+    expect(plan).toEqual({ messages: [`## A\n${words(60)}`, `## B\n${words(60)}`], overflow: false });
   });
 
   it("caps each section at 100 words and points to the file", () => {
@@ -53,7 +54,7 @@ describe("planSectionedReply", () => {
   });
 
   it("sends at most 5 sections and moves the rest to the file", () => {
-    const md = Array.from({ length: 7 }, (_, i) => `## S${i + 1}\nbody ${i + 1}`).join("\n\n");
+    const md = Array.from({ length: 7 }, (_, i) => `## S${i + 1}\n${words(30)}`).join("\n\n");
     const plan = planSectionedReply(md, limits);
     expect(plan.messages).toHaveLength(5);
     expect(plan.overflow).toBe(true);
@@ -97,5 +98,17 @@ describe("parseReplyFormat", () => {
     expect(parseReplyFormat({ maxSections: 0, maxWords: 100 })).toBeUndefined();
     expect(parseReplyFormat({ maxWords: 100 })).toBeUndefined();
     expect(parseReplyFormat(undefined)).toBeUndefined();
+  });
+});
+
+describe("short answers", () => {
+  const labels = Array.from({ length: 7 }, (_, i) => `**Field ${i}**\nvalue ${i}`).join("\n");
+
+  it("leaves an answer within the word limit as one message, even with many bold label lines", () => {
+    expect(planSectionedReply(labels, limits)).toEqual({ messages: [labels], overflow: false });
+  });
+
+  it("does not ask for a rewrite of a short answer", () => {
+    expect(checkReplyFormat(labels, limits)).toEqual({ ok: true, problems: [] });
   });
 });

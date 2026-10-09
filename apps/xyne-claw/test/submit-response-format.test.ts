@@ -6,7 +6,7 @@ vi.mock("../src/verify-response.js", () => ({ verifyResponse, renderRejection: (
 const { buildVerifiedResponseTool } = await import("../src/verified-response.js");
 
 const replyFormat = { maxSections: 5, maxWords: 100 };
-const tooLong = Array.from({ length: 7 }, (_, i) => `**Part ${i + 1}**\nshort body`).join("\n\n");
+const tooLong = Array.from({ length: 7 }, (_, i) => `**Part ${i + 1}**\n${Array.from({ length: 30 }, () => "word").join(" ")}`).join("\n\n");
 const fits = "**Answer**\nAll good.";
 
 function tool(withFormat: boolean) {

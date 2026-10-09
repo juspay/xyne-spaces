@@ -60,6 +60,10 @@ export function truncateWords(text: string, maxWords: number): { text: string; t
 }
 
 export function planSectionedReply(markdown: string, limits: ResultSectionLimits): SectionedReply {
+  if (countWords(markdown) <= limits.maxWords) {
+    const whole = markdown.trim();
+    return { messages: whole ? [whole] : [], overflow: false };
+  }
   const sections = splitIntoSections(markdown);
   let overflow = sections.length > limits.maxSections;
   const messages = sections.slice(0, limits.maxSections).map((section) => {
@@ -85,6 +89,7 @@ function sectionTitle(section: string): string {
 }
 
 export function checkReplyFormat(markdown: string, limits: ResultSectionLimits): ReplyFormatCheck {
+  if (countWords(markdown) <= limits.maxWords) return { ok: true, problems: [] };
   const sections = splitIntoSections(markdown);
   const problems: string[] = [];
   if (sections.length > limits.maxSections) {
