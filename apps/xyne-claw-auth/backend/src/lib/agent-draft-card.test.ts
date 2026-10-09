@@ -27,6 +27,14 @@ describe("draftSpecFromCreateAgentParams", () => {
   it("derives a slug from the name when none is given", () => {
     expect(draftSpecFromCreateAgentParams({ ...base })?.slug).toBe("pr-review-agent");
     expect(draftSpecFromCreateAgentParams({ ...base, name: "  Weird   Name!! " })?.slug).toBe("weird-name");
+    expect(draftSpecFromCreateAgentParams({ ...base, name: "--- Dashed --- Name ---" })?.slug).toBe("dashed-name");
+  });
+
+  it("derives a slug from a long run of separators in linear time", () => {
+    const name = `a${"-".repeat(100_000)}b${"-".repeat(100_000)}`;
+    const started = performance.now();
+    expect(draftSpecFromCreateAgentParams({ ...base, name })?.slug).toBe("a-b");
+    expect(performance.now() - started).toBeLessThan(500);
   });
 
   it("prefers an explicit slug", () => {
