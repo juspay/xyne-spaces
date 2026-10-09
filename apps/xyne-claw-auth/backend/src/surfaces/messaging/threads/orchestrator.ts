@@ -68,7 +68,7 @@ function bucket(requests: string[], n: number): string[] {
 export function taskText(raw: string, reading: string, run: { split: boolean; hasHistory: boolean }): string {
   const hint = reading.trim();
   if (!hint || hint === raw.trim()) return raw;
-  if (run.split) return `${raw}\n\n(This run handles one part of that message; the rest is handled separately: ${hint})`;
+  if (run.split) return `${raw}\n\n(This run handles only this part of that message: ${hint}. The other parts are handled separately.)`;
   if (run.hasHistory) return raw;
   return `${raw}\n\n(Read against the rest of this chat, that most likely means: ${hint}. Where this differs from the message, go by the message.)`;
 }

@@ -98,7 +98,7 @@ describe("taskText", () => {
   it("tells each run of a split message which part is its own", () => {
     const text = taskText("flights to Goa and a cab", "book a cab", { split: true, hasHistory: true });
     expect(text.startsWith("flights to Goa and a cab\n\n")).toBe(true);
-    expect(text).toContain("one part of that message");
+    expect(text).toContain("only this part of that message: book a cab");
     expect(text).toContain("book a cab");
   });
   it("adds nothing when the reading is empty or says the same", () => {
@@ -164,7 +164,7 @@ describe("handleThreaded", () => {
     await handleThreaded(args("flights and hotels in Goa"));
     const [first, second] = dispatched();
     expect(first!.conversationId).toBe(home);
-    expect(first!.task).toContain("one part of that message; the rest is handled separately: flights to Goa");
+    expect(first!.task).toContain("only this part of that message: flights to Goa");
     expect(second!.conversationId.startsWith(`${home}-t-`)).toBe(true);
     expect(second!.task).toContain("hotels in Goa");
   });
