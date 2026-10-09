@@ -2,8 +2,8 @@ apiVersion: v2
 name: xyne-transcription-agent
 description: Xyne Spaces transcription agent (Python) - LiveKit agent worker that transcribes calls and serves the voice-input HTTP endpoints
 type: application
-version: 0.1.0-app.1.474.5-release-20261008.3
-appVersion: "1.474.5-release-20261008.3"
+version: 0.1.0-app.1.447.0-release-20261001.5
+appVersion: "1.447.0-release-20261001.5"
 keywords:
   - xyne
   - transcription
