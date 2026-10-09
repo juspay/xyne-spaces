@@ -617,9 +617,16 @@ export class TicketController {
 
       // Determine the actual channel to check its type
       let actualChannelId = channelId;
-      if (!actualChannelId && sourceConversationId) {
+      if (sourceConversationId) {
         const sourceConv = await this.conversationRepository.findById(sourceConversationId);
         if (sourceConv) {
+          if (channelId && channelId !== sourceConv.channelId) {
+            res.status(400).json({
+              error: 'channelId does not match the channel of sourceConversationId',
+              code: 'CHANNEL_CONVERSATION_MISMATCH',
+            });
+            return;
+          }
           actualChannelId = sourceConv.channelId;
         }
       }
@@ -814,12 +821,16 @@ export class TicketController {
         }
       }
 
+      // The one channel this ticket is created in. Everything below (the access check and the
+      // attachment rows written inside the transaction) uses this, never the raw request channelId.
+      const effectiveChannelId = sourceConversationId ? validatedConversation?.channelId : channelId;
+
       // Wrap all database operations in a transaction for data integrity
       let ticket: Awaited<ReturnType<typeof createTicketTx>>['ticket'];
       try {
-        ({ ticket } = await createTicketTx(projectId, sourceConversationId, validatedConversation, this, requestedTicketId, title, description, userId, finalAssignedTo, userGroupId, boardId, effectiveStatusV2, priority, eta, metadata, closedAt, closedBy, sourceMessageId, effectiveTicketType, effectiveStageName, dynamicFields, formFieldChangesForEmit, channelId, excludedChatAttachmentIds, entityLinkOwner, fromTicketsTab, initialMessageId, board, uploadedFiles, draftAttachmentIds, (req.user.isApiKeyUser && req.user.role === 'admin') ? undefined : {
+        ({ ticket } = await createTicketTx(projectId, sourceConversationId, validatedConversation, this, requestedTicketId, title, description, userId, finalAssignedTo, userGroupId, boardId, effectiveStatusV2, priority, eta, metadata, closedAt, closedBy, sourceMessageId, effectiveTicketType, effectiveStageName, dynamicFields, formFieldChangesForEmit, effectiveChannelId, excludedChatAttachmentIds, entityLinkOwner, fromTicketsTab, initialMessageId, board, uploadedFiles, draftAttachmentIds, (req.user.isApiKeyUser && req.user.role === 'admin') ? undefined : {
           workspaceId: req.user.workspaceId,
-          channelIds: [channelId, sourceConversationId ? validatedConversation?.channelId : undefined],
+          channelId: effectiveChannelId,
           boardId,
           isGuest: req.user.role === 'GUEST',
           trustedChannelId: supportChannelId,

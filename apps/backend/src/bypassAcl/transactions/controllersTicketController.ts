@@ -293,7 +293,7 @@ export class TicketCreateAccessError extends Error {
 
 export interface TicketCreateAccessInput {
   workspaceId: string;
-  channelIds: Array<string | null | undefined>;
+  channelId: string | null | undefined;
   boardId: string | null | undefined;
   isGuest?: boolean;
   trustedChannelId?: string;
@@ -312,11 +312,11 @@ async function assertTicketCreateAccess(tx: Prisma.TransactionClient, userId: st
     new TicketCreateAccessError('CHANNEL_NOT_ACCESSIBLE', 'Access denied - you do not have permission to create tickets in this channel');
   const boardDenied = () =>
     new TicketCreateAccessError('BOARD_NOT_ACCESSIBLE', 'Access denied - you do not have permission to create tickets on this board');
-  const channelIds = [...new Set(access.channelIds.filter((id): id is string => !!id))];
+  const channelId = access.channelId;
   let anchorWorkspaceId = access.workspaceId;
   let usesTrustedChannel = false;
 
-  for (const channelId of channelIds) {
+  if (channelId) {
     const channel = await tx.channel.findUnique({
       where: { id: channelId },
       select: { workspaceId: true, visibility: true, isArchived: true },
