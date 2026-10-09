@@ -99,6 +99,11 @@ async function buildMemoryYql(params: {
   // Scope filter: 'my' restricts to user's own documents
   if (scope === 'my') {
     conditions.push(`userId contains "${escapeYqlString(user?.email)}"`);
+  } else if (user?.workspaceId) {
+    // 'all' means "shared within the caller's workspace", never across tenants. Without
+    // this, a doc written by any workspace is returned to (and can poison) every other one.
+    // Internal callers pass no userId and stay unscoped.
+    conditions.push(`workspaceId contains "${escapeYqlString(user.workspaceId)}"`);
   }
 
   // DocType filter
@@ -358,6 +363,19 @@ export async function getMemoryById(
  * Insert a memory document into Vespa
  */
 export async function insertMemory(doc: VespaMemoryDocument): Promise<void> {
+  // Always derive the tenant server-side from the owner (doc.userId is the owner's email or
+  // id); never trust a caller-supplied workspaceId/orgId.
+  const prisma = DatabaseClient.getInstance();
+  const owner = await prisma.user.findFirst({
+    where: { OR: [{ email: doc.userId }, { id: doc.userId }] },
+    select: { workspaceId: true },
+  });
+  if (!owner?.workspaceId) {
+    throw new Error('Cannot determine workspace for memory document owner');
+  }
+  doc.workspaceId = owner.workspaceId;
+  delete doc.orgId;
+
   await vespaClient.insert(doc as any, {
     namespace: NAMESPACE,
     cluster: CLUSTER,

@@ -2,7 +2,8 @@ import { Request, Response } from 'express';
 import type { Prisma } from '@prisma/client';
 import { UserManagementService } from '../services/userManagementService';
 import { getStorageService } from '../services/storage';
-import { GuestEntity, AccessType, CalendarVisibility, WorkspaceRole } from '@xyne/shared';
+import { GuestEntity, AccessType, CalendarVisibility, WorkspaceRole, OrgRole } from '@xyne/shared';
+import { repositories } from '@/database/repositories';
 import { logger } from '../utils/logger';
 import { setSafeInlineImageHeaders } from '../utils/safeAttachmentDownload';
 import { DatabaseClient } from '@/database/client';
@@ -10,6 +11,60 @@ import type { UserWithMappings } from '../types/database';
 
 const storageService = getStorageService();
 const userManagementService = UserManagementService.getInstance();
+
+const ACCESS_RANK: Record<string, number> = {
+  [AccessType.READ]: 1,
+  [AccessType.WRITE]: 2,
+  [AccessType.ADMIN]: 3,
+};
+
+/**
+ * Privilege-escalation guard for grant/revoke endpoints. Holding WRITE on USER-MANAGEMENT
+ * lets a caller edit access, but never beyond what they hold themselves: the level required
+ * on `resourceName` is the higher of the level being granted/revoked and the level the
+ * target currently holds there (so a revoke can't be used to strip an ADMIN either).
+ * Workspace/org owners and admins are exempt.
+ */
+async function canChangeAccess(
+  req: Request,
+  resourceName: string,
+  requestedLevel: AccessType,
+  targetCurrentLevels: AccessType[],
+): Promise<boolean> {
+  const u = req.user!;
+  if (
+    u.orgRole === OrgRole.OWNER ||
+    u.orgRole === OrgRole.ADMIN ||
+    u.role === WorkspaceRole.OWNER ||
+    u.role === WorkspaceRole.ADMIN
+  ) {
+    return true;
+  }
+  const resource = await DatabaseClient.getInstance().resource.findUnique({
+    where: { name: resourceName },
+  });
+  if (!resource) return true; // the grant/revoke itself reports the unknown resource
+  const required = [requestedLevel, ...targetCurrentLevels].reduce(
+    (max, l) => (ACCESS_RANK[l] > ACCESS_RANK[max] ? l : max),
+    AccessType.READ,
+  );
+  return repositories.resourceAccess.hasAccess(u.id, resource.id, required);
+}
+
+async function currentLevels(
+  target: { userId: string } | { groupId: string },
+  resourceName: string,
+): Promise<AccessType[]> {
+  const resource = await DatabaseClient.getInstance().resource.findUnique({
+    where: { name: resourceName },
+  });
+  if (!resource) return [];
+  const rows =
+    'userId' in target
+      ? await repositories.resourceAccess.findUserResourceAccess(target.userId, resource.id)
+      : await repositories.resourceAccess.findByGroup(target.groupId);
+  return rows.filter((r) => r.resourceId === resource.id).map((r) => r.accessType as AccessType);
+}
 
 /**
  * The row fields a user-search caller receives. Kept broad so existing consumers keep
@@ -332,6 +387,21 @@ export class UserManagementController {
           results.failed.push({
             resourceName,
             error: `Invalid action: ${action}. Must be 'grant' or 'revoke'`
+          });
+          continue;
+        }
+
+        if (
+          !(await canChangeAccess(
+            req,
+            resourceName,
+            accessType,
+            await currentLevels({ userId: id }, resourceName),
+          ))
+        ) {
+          results.failed.push({
+            resourceName,
+            error: `Forbidden: you need at least ${accessType} access on ${resourceName} to change it`,
           });
           continue;
         }
@@ -964,6 +1034,21 @@ export class UserManagementController {
           results.failed.push({
             resourceName,
             error: `Invalid action: ${action}. Must be 'grant' or 'revoke'`
+          });
+          continue;
+        }
+
+        if (
+          !(await canChangeAccess(
+            req,
+            resourceName,
+            accessType,
+            await currentLevels({ groupId: id }, resourceName),
+          ))
+        ) {
+          results.failed.push({
+            resourceName,
+            error: `Forbidden: you need at least ${accessType} access on ${resourceName} to change it`,
           });
           continue;
         }
