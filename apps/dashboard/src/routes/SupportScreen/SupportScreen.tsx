@@ -97,6 +97,7 @@ import { queries } from '../../zero/queries';
 import { useTicketKeysetWindow } from '../../hooks/useTicketKeysetWindow';
 import { QueryResultType } from '@rocicorp/zero';
 import ThreadMessages from '../../components/Chat/ThreadPannel';
+import { HubComposer, HubSourceThread } from './HubSourceThread';
 import { useChannel, useEmailChannels, useUserChannelStatuses } from '../../hooks/useChannels';
 import { useRefetchExternalSource } from '../../hooks/useRefetchExternalSource';
 import { useChannelFetchSources } from '../../hooks/useChannelFetchSources';
@@ -375,6 +376,8 @@ const COMPOSE_DISABLED_CHANNEL_TYPES: ReadonlySet<ChannelType | undefined> = new
   ChannelType.SLACK,
   ChannelType.APP,
   ChannelType.SOCIAL_MEDIA,
+  // Hub threads start in their own channels, not from the desk.
+  ChannelType.HUB,
 ]);
 
 const COMPOSE_INSTANCES_KEY_PREFIX = 'xyne:composeInstances:';
@@ -2640,7 +2643,7 @@ const SupportScreen = (): ReactElement => {
   const createChannelMutation = useMutation({
     mutationFn: async (
       data: CreateChannelFormData & {
-        channelType?: 'EMAIL' | 'SLACK' | 'APP' | 'CALL' | undefined;
+        channelType?: 'EMAIL' | 'SLACK' | 'APP' | 'CALL' | 'HUB' | undefined;
         emailDeskOpts?: EmailDeskOpts;
       },
     ) => {
@@ -2668,9 +2671,9 @@ const SupportScreen = (): ReactElement => {
   const handleCreateEmailChannel = (
     data: CreateChannelFormData & {
       connector?: 'google' | 'microsoft' | null;
-      channelType?: 'EMAIL' | 'SLACK' | 'APP' | 'CALL' | 'SOCIAL_MEDIA' | undefined;
+      channelType?: 'EMAIL' | 'SLACK' | 'APP' | 'CALL' | 'SOCIAL_MEDIA' | 'HUB' | undefined;
       assigneeUserGroupId?: string;
-      deskType?: 'EMAIL' | 'DL' | 'SLACK' | 'APP' | 'CALL' | 'SOCIAL_MEDIA';
+      deskType?: 'EMAIL' | 'DL' | 'SLACK' | 'APP' | 'CALL' | 'SOCIAL_MEDIA' | 'HUB';
       callSource?: 'OZONETEL';
       dlEmail?: string;
       slackChannelId?: string;
@@ -2830,6 +2833,19 @@ const SupportScreen = (): ReactElement => {
         ...rest,
         channelType: 'APP',
         emailDeskOpts: { deskType: DeskType.APP, installedAppId },
+      });
+      return;
+    }
+
+    if (deskType === 'HUB') {
+      if (!installedAppId) {
+        toast.error('Please select an app');
+        return;
+      }
+      createChannelMutation.mutate({
+        ...rest,
+        channelType: 'HUB',
+        emailDeskOpts: { deskType: DeskType.HUB, installedAppId },
       });
       return;
     }
@@ -3108,10 +3124,15 @@ const SupportScreen = (): ReactElement => {
                   label: 'Call',
                   className: 'bg-lime-100 text-lime-700 dark:bg-lime-500/20 dark:text-lime-200',
                 }
-              : {
-                  label: 'Mailbox',
-                  className: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-200',
-                };
+              : c.type === ChannelType.HUB
+                ? {
+                    label: 'Hub',
+                    className: 'bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-200',
+                  }
+                : {
+                    label: 'Mailbox',
+                    className: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-200',
+                  };
     const isJoined = joinedChannelIds.has(c.id);
     // Labels apply to email and app desks; mailbox folders come in two forms — the
     // full email set and a single "All items" entry for app desk channel
@@ -5736,6 +5757,13 @@ export const SupportTicketDetail = ({
       threadScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
     });
   };
+  // HUB threads are oldest-first, so a new reply is at the bottom.
+  const scrollThreadToBottom = (): void => {
+    requestAnimationFrame(() => {
+      const container = threadScrollRef.current;
+      container?.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+    });
+  };
 
   const composerOverlayRef = useRef<HTMLDivElement>(null);
   const [composerOverlayHeight, setComposerOverlayHeight] = useState<number>(96);
@@ -6586,6 +6614,15 @@ export const SupportTicketDetail = ({
                     </div>
                   </div>
                 )}
+              {channel?.type === ChannelType.HUB && ticket?.id && channel.id && (
+                <div className='mb-6'>
+                  <HubSourceThread
+                    ticketId={ticket.id}
+                    deskChannelId={channel.id}
+                    onOwnMessage={scrollThreadToBottom}
+                  />
+                </div>
+              )}
               {emails && emails.length > 0 && (
                 <div className='mb-6'>
                   {isAppSourcedTicket ||
@@ -6633,7 +6670,12 @@ export const SupportTicketDetail = ({
               ref={composerOverlayRef}
             >
               <DuplicateTicketsBanner ticketId={mailboxTicketId} />
-              {isAppSourcedTicket ? (
+              {/* HUB tickets reply into the conversation in its own channel. */}
+              {channel?.type === ChannelType.HUB ? (
+                ticket?.id ? (
+                  <HubComposer ticketId={ticket.id} deskChannelId={channel.id} />
+                ) : null
+              ) : isAppSourcedTicket ? (
                 conversationId ? (
                   <SlackComposer
                     conversationId={conversationId}

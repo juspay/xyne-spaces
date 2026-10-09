@@ -216,6 +216,7 @@ import { createSdkPublicRouter, createSdkRouter } from '@/api/sdk';
 import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
 import sdkSsoRoutes from '@/routes/sdk-sso';
 import { authenticateSdk } from '@/middleware/sdkAuth';
+import hubDeskRoutes from '@/routes/hubDesks';
 
 
 export class App {
@@ -385,6 +386,7 @@ export class App {
       this.app.use('/api/sdk', authenticateSdk, createSdkRouter(), sdkErrorHandler);
       logger.info('Public SDK API mounted at /api/sdk');
     }
+    this.app.use('/api/hub-desks', authMiddleware.authenticate, hubDeskRoutes);
 
     this.app.use('/api/automation-webhooks', webhookLimiter, automationWebhookRoutes);
 

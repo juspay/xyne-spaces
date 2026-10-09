@@ -3044,6 +3044,14 @@ export const queries: AnyQueryRegistry = defineQueries({
       .where('workflowType', 'Automations')
       .one();
   }),
+  // HUB desk ticket → its stub thread on the desk, whose metadata names the merchant's thread
+  // (that thread carries no ticket id). Desk members only, through the conversations ACL.
+  hubTicketStub: defineQuery(
+    z.object({ ticketId: z.string(), deskChannelId: z.string() }),
+    ({ args: { ticketId, deskChannelId } }) => {
+      return zql.conversations.where('ticketId', ticketId).where('channelId', deskChannelId).one();
+    },
+  ),
   subTicketsForTicket: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) => {
     return zql.ticket_sub_ticket_mappings
       .where('ticketId', ticketId)
@@ -3121,6 +3129,7 @@ export const queries: AnyQueryRegistry = defineQueries({
             ChannelType.APP,
             ChannelType.CALL,
             ChannelType.SOCIAL_MEDIA,
+            ChannelType.HUB,
           ])
           .related('channelStats'),
       );
@@ -3138,6 +3147,7 @@ export const queries: AnyQueryRegistry = defineQueries({
             ChannelType.APP,
             ChannelType.CALL,
             ChannelType.SOCIAL_MEDIA,
+            ChannelType.HUB,
           ])
           .related('channelStats'),
       );
