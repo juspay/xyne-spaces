@@ -24,6 +24,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowRight,
   BookOpen,
+  Bot,
   Boxes,
   Check,
   ChevronDown,
@@ -45,6 +46,7 @@ import {
   Plus,
   Rocket,
   Search,
+  Server,
   ShieldCheck,
   Sparkles,
   SquareArrowOutUpRight,
@@ -127,6 +129,8 @@ import { SdlcReleases } from './SdlcReleases/SdlcReleases';
 import { SdlcReleaseBreadcrumb, SdlcReleaseThread } from './SdlcReleases/SdlcReleaseDetail';
 import { useReleaseThreadAccess } from './SdlcReleases/useSdlcReleases';
 import { ThreadNavigationContext } from '../../components/Chat/ThreadNavigationContext';
+import LibraryV2 from '../AIScreen/library/LibraryV2';
+import { EnvironmentsView } from '../AIScreen/environments/EnvironmentsView';
 import { SdlcActivityPreview } from './SdlcActivityPreview';
 import { EntityLinkContext, type EntityLinkScope } from '../../contexts/EntityLinkContext';
 import { useScope, useShortcutById } from '../../shortcuts';
@@ -242,7 +246,9 @@ type Section =
   | 'calls'
   | 'releases'
   | 'artifacts'
-  | 'workflows';
+  | 'workflows'
+  | 'agents'
+  | 'environments';
 
 const StableCanvasScreen = memo(CanvasScreen);
 
@@ -254,6 +260,8 @@ const SECTIONS: Array<{ id: Exclude<Section, 'artifacts'>; label: string; icon: 
   { id: 'calls', label: 'Calls', icon: Phone },
   { id: 'releases', label: 'Releases', icon: Rocket },
   { id: 'workflows', label: 'Workflows', icon: Workflow },
+  { id: 'agents', label: 'Agents', icon: Bot },
+  { id: 'environments', label: 'Environments', icon: Server },
 ];
 
 function sizeNameFieldToText(input: HTMLInputElement): void {
@@ -3999,6 +4007,19 @@ export default function SdlcScreen(): ReactElement {
                   onOpenCanvas={openReleaseCanvas}
                   onConnectRepository={() => setHubDialog('manage')}
                 />
+              ) : section === 'agents' ? (
+                <div className='min-h-0 flex-1 overflow-auto bg-background'>
+                  <LibraryV2 channelId={channelId} />
+                </div>
+              ) : section === 'environments' ? (
+                <div className='min-h-0 flex-1 overflow-hidden bg-background'>
+                  <EnvironmentsView
+                    key={channelId}
+                    channelId={channelId}
+                    hubRepoIds={channelRepos.map(repo => repo.id)}
+                    onAddRepository={() => setHubDialog('manage')}
+                  />
+                </div>
               ) : (
                 <>
                   {onTrackPage && selectedTrack && (

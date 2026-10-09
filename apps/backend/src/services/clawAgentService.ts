@@ -313,6 +313,9 @@ export interface S2SClawAgent {
   color: string;
   spacesAppId?: string | null;
   spacesAppUserId?: string | null;
+  ownerUserId?: string | null;
+  /** Set on a user-scoped list: ownerUserId is a Claw id, which Spaces cannot compare. */
+  ownedByScopeUser?: boolean;
 }
 
 export interface S2SRunAgentRequest {

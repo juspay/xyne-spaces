@@ -5,6 +5,7 @@ import { DatabaseClient } from '@/database/client';
 import { AppError } from '@/middleware/errorHandler';
 import { SdlcHubService } from '@/sdlc';
 import { readHubKnowledge } from '@/sdlc/hubKnowledge';
+import { promoteRegisteredAgent } from '@/sdlc/sdlcHubAgents';
 
 const router = Router();
 const prisma = DatabaseClient.getInstance();
@@ -56,6 +57,21 @@ router.post(
     const input = hubKnowledgeSchema.parse(req.body);
     const documents = await readHubKnowledge(input.channelId, input.actorUserId);
     res.status(200).json({ success: true, documents });
+  }),
+);
+
+const agentRegisteredSchema = z.object({
+  agentId: z.string().min(1),
+  botUserId: z.string().min(1),
+});
+
+// claw-auth calls this when an agent's Spaces app is installed, so hub-created agents join their hub.
+router.post(
+  '/registered',
+  route(async (req, res) => {
+    const { agentId, botUserId } = agentRegisteredSchema.parse(req.body);
+    const hubs = await promoteRegisteredAgent(prisma, agentId, botUserId);
+    res.status(200).json({ success: true, hubs });
   }),
 );
 

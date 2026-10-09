@@ -21,7 +21,7 @@ Repositories: call ${T.listRepositories} with the channelId and use only a repoI
 
 Artifacts (PRD, Tech Doc, custom types, Hub Knowledge, Wiki pages) are canvases. Each artifact has an artifact type (PRD, Tech Doc, Hub Knowledge or a custom type), from ${T.listArtifactTypes}. A track folder is a folder a user made inside a track; ${T.listTracks} returns each track's folders and ${T.createTrackFolder} makes one. ${T.listArtifacts} lists artifacts (filter by artifactTypeId, trackId, trackFolderId, kind; repoId narrows Wiki pages to one repository's Wiki). ${T.readArtifact} reads one by canvasId, or an older version with versionId from ${T.listArtifactVersions}; current code wins over old text. ${T.writeArtifact} creates, updates, edits one section, or moves an artifact; ${T.archiveArtifact} archives or restores one. ${T.listEntityLinks} follows what an item is linked to. execution.linked above is the item this conversation discusses, if any.
 
-Code: call sandbox-create once (pass the template below that matches the repository, otherwise omit template), then sdlc-repository-access with the repoId and that sessionId, and clone with the exact cloneUrl it returns; git then works for fetch, commit and push. Open pull requests with ${T.createPullRequest} (repoId, head, base), never a github or bitbucket subagent.
+Code: call sandbox-create once with repoUrl set to the repository url (add profile, a key below, when it has several; sandbox-list-profiles describes them), then sdlc-repository-access with the repoId and that sessionId, and clone with the exact cloneUrl it returns; git then works for fetch, commit and push. Open pull requests with ${T.createPullRequest} (repoId, head, base), never a github or bitbucket subagent.
 
 Cite code as a markdown link pinned to a commit:
 - GitHub: [src/auth.ts L40-58](https://github.com/<owner>/<repo>/blob/<commit>/src/auth.ts#L40-L58)
@@ -29,13 +29,13 @@ Cite code as a markdown link pinned to a commit:
 
 A write that returns "queued for approval" is pending: tell the user to approve it and do not retry or claim it is done.`;
 
-function sandboxTemplateLines(): string {
-  return Object.values(getCachedRepoConfigs())
-    .map((config) => `- ${config.template}: ${config.name}${config.repoUrl ? ` (${config.repoUrl})` : ""}`)
+function sandboxProfileLines(): string {
+  return Object.entries(getCachedRepoConfigs())
+    .map(([key, config]) => `- ${key}: ${config.name}${config.repoUrl ? ` (${config.repoUrl})` : ""}`)
     .join("\n");
 }
 
 /** Everything a run in an SDLC hub adds to the system prompt, in one section. */
 export function buildSdlcRunContextSection(context: Record<string, unknown>): string {
-  return `\n\n## SDLC Run Context\n\nThe platform verified this run context; workspaceId and actorUserId are bound on every SDLC tool. Runtime credentials are intentionally absent.\n\n\`\`\`json\n${JSON.stringify(context, null, 2)}\n\`\`\`\n\n${SDLC_RULES}\n\nSandbox templates:\n${sandboxTemplateLines()}`;
+  return `\n\n## SDLC Run Context\n\nThe platform verified this run context; workspaceId and actorUserId are bound on every SDLC tool. Runtime credentials are intentionally absent.\n\n\`\`\`json\n${JSON.stringify(context, null, 2)}\n\`\`\`\n\n${SDLC_RULES}\n\nSandbox profiles:\n${sandboxProfileLines()}`;
 }
