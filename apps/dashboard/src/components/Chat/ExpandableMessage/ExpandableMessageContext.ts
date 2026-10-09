@@ -1,5 +1,8 @@
 import { createContext, useContext, useEffect } from 'react';
 
+/** Collapsed height (px) of an ExpandableMessage before "Show more"; the default `maxHeight`. */
+export const EXPANDABLE_MESSAGE_MAX_HEIGHT = 500;
+
 interface ExpandableMessageContextValue {
   setChildExpanded: (expanded: boolean) => void;
 }

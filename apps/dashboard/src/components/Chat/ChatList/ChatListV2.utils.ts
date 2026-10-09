@@ -1,3 +1,5 @@
+import { EXPANDABLE_MESSAGE_MAX_HEIGHT } from '../ExpandableMessage/ExpandableMessageContext';
+import { estimateFlowJsonHeight } from './flowJsonHeight';
 import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../../zero/queries';
 import { useMemo } from 'react';
@@ -25,6 +27,13 @@ const CHARS_PER_LINE_MOBILE = 40;
 
 /** Height of one line of text in px. */
 const LINE_HEIGHT = 24;
+// Message tables (global.css `:is(.jp-message-html, …) table / th / td`).
+/** One <tr>: cell padding 10px top + 10px bottom, 24px text line (leading-6), 1px bottom border. */
+const HTML_TABLE_ROW_HEIGHT = 10 + 24 + 10 + 1;
+/** `margin: 8px 0` on the table — 8px above + 8px below. */
+const HTML_TABLE_VERTICAL_MARGIN = 8 + 8;
+/** Table's own 1px top + bottom border, minus the last row's bottom border (removed in CSS). */
+const HTML_TABLE_OUTER_BORDER = 2 - 1;
 
 /** Height bonus for the sender name + timestamp header row. */
 const AVATAR_HEADER_HEIGHT = 22;
@@ -283,6 +292,19 @@ export function estimateMessageHeight(
     }
     remainingHtml = remainingHtml.replace(/<pre[^>]*>([\s\S]*?)<\/pre>/gi, '');
 
+    // 1b. Tables: each <tr> renders as a padded row far taller than a text line
+    // (an 8-row bot table measured ~375px). Count rows, then drop the table so its
+    // cell text isn't also counted as wrapped plain text.
+    const tableMatches = remainingHtml.match(/<table[\s\S]*?<\/table>/gi) || [];
+    for (const table of tableMatches) {
+      const rows = (table.match(/<tr[\s>]/gi) || []).length;
+      totalLines += Math.ceil(
+        (rows * HTML_TABLE_ROW_HEIGHT + HTML_TABLE_VERTICAL_MARGIN + HTML_TABLE_OUTER_BORDER) /
+          LINE_HEIGHT,
+      );
+    }
+    remainingHtml = remainingHtml.replace(/<table[\s\S]*?<\/table>/gi, '');
+
     // 2. Extract all <p> tags and count lines within each
     const pMatches = remainingHtml.match(/<p[^>]*>([\s\S]*?)<\/p>/gi) || [];
     for (const pTag of pMatches) {
@@ -356,8 +378,17 @@ export function estimateMessageHeight(
       height += estimateHtmlHeight(content);
     }
   } else {
-    // Regular message - estimate HTML height directly
-    height += estimateHtmlHeight(content);
+    // Flow cards (`<div data-flow-json="…">`) render through FlowRenderer, not as
+    // HTML text — measure the card layout instead. Every producer writes only the
+    // card div, so there's no surrounding text to add. Falls back to the text
+    // estimate if the card's JSON can't be read.
+    const isFlowCard = content.includes('data-flow-json');
+    const bodyHeight = isFlowCard
+      ? (estimateFlowJsonHeight(content, isMobile) ?? estimateHtmlHeight(content))
+      : estimateHtmlHeight(content);
+    // MessageBubble wraps the body in <ExpandableMessage maxHeight={500}>: anything
+    // taller is clipped behind an overlaid "Show more", which adds no height.
+    height += Math.min(bodyHeight, EXPANDABLE_MESSAGE_MAX_HEIGHT);
   }
 
   // Markdown content has more vertical space (headings, lists, code blocks)
