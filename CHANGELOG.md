@@ -1,3 +1,17 @@
+## [1.447.0-release-20261001.5](https://github.com/juspay/xyne-spaces/compare/v1.447.0-release-20261001.4...v1.447.0-release-20261001.5) (2026-10-09)
+
+
+### Features
+
+* integrated facebook ([#2809](https://github.com/juspay/xyne-spaces/issues/2809)) ([030a8da](https://github.com/juspay/xyne-spaces/commit/030a8dad332b89d18d6d70321bd6e58f58310138))
+* SDLC releases fixes ([#2669](https://github.com/juspay/xyne-spaces/issues/2669)) ([f86cb71](https://github.com/juspay/xyne-spaces/commit/f86cb716444a18541e65642adbbd9cb174b2e259))
+* taking sdlc changes to latest release ([#2627](https://github.com/juspay/xyne-spaces/issues/2627)) ([786ce66](https://github.com/juspay/xyne-spaces/commit/786ce66b217f775be81ce2935a60d534233efeff)), closes [#2531](https://github.com/juspay/xyne-spaces/issues/2531) [#2532](https://github.com/juspay/xyne-spaces/issues/2532) [#2528](https://github.com/juspay/xyne-spaces/issues/2528)
+
+
+### Bug Fixes
+
+* meta integration- [#431](https://github.com/juspay/xyne-spaces/issues/431) to release branch ([#2687](https://github.com/juspay/xyne-spaces/issues/2687)) ([4a1d960](https://github.com/juspay/xyne-spaces/commit/4a1d96015cbc2df4443d014c25e7de2b447645ce))
+
 ## [1.447.0-release-20261001.4](https://github.com/juspay/xyne-spaces/compare/v1.447.0-release-20261001.3...v1.447.0-release-20261001.4) (2026-10-01)
 
 
