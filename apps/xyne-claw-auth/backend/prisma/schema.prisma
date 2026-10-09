@@ -76,6 +76,13 @@ model User {
   agentInstructions   UserAgentInstruction[]
   generatedContent    GeneratedContent[]
 
+  inboxSources   InboxSource[]
+  trackedThreads TrackedThread[]
+  openLoops      OpenLoop[]
+  inboxContacts  InboxContact[]
+  nudgeLogs      NudgeLog[]
+  proactivePrefs ProactivePrefs?
+
   /// Multi-tenancy (phase 1, org-only). Required: every user belongs to exactly
   /// one org (the "Juspay" default until multi-org ships). Enforced NOT NULL by
   /// migration `20260705170000_phase1_orgid_notnull` AFTER the backfill filled
@@ -3059,4 +3066,188 @@ model ConversationArtifact {
   @@index([refService, refId])
   @@index([orgId])
   @@map("conversation_artifacts")
+}
+
+/// A feed the proactive inbox listens to for one user: their Gmail (through
+/// the existing Google OAuth connection) or their Spaces mentions and DMs.
+/// Off until the user opts in. `cursor` is the Gmail historyId or the Spaces
+/// message watermark the next ingest starts from.
+model InboxSource {
+  id                  String    @id @default(cuid())
+  userId              String
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orgId               String
+  /// "gmail" | "spaces"
+  kind                String
+  /// The mailbox address Gmail push notifications name.
+  address             String?
+  enabled             Boolean   @default(false)
+  /// "active" | "resync" | "revoked" | "error"
+  status              String    @default("active")
+  cursor              String?
+  watchExpiresAt      DateTime?
+  lastPushAt          DateTime?
+  lastSyncedAt        DateTime?
+  consecutiveFailures Int       @default(0)
+  lastError           String?   @db.Text
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  threads TrackedThread[]
+
+  @@unique([userId, kind])
+  @@index([kind, address])
+  @@index([enabled, watchExpiresAt])
+  @@map("inbox_sources")
+}
+
+/// One email thread or Spaces conversation the user is part of. Holds IDs,
+/// timestamps and triage scores only; message bodies are fetched from the
+/// source when needed and never stored. `lastInboundAt > lastUserReplyAt`
+/// means the user owes a reply.
+model TrackedThread {
+  id              String      @id @default(cuid())
+  userId          String
+  user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceId        String
+  inboxSource     InboxSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  /// "gmail" | "spaces"
+  source          String
+  /// Gmail threadId or Spaces conversationId.
+  externalId      String
+  subject         String?
+  /// [{ key, name?, role: "from" | "to" | "cc" }]
+  participants    Json?
+  lastMessageId   String?
+  lastInboundAt   DateTime?
+  lastInboundFrom String?
+  lastUserReplyAt DateTime?
+  /// Jev triage: importance and needsReply/hasDeadline are 0..1, kind is
+  /// "ask" | "deadline" | "reply" | "fyi" | "noise".
+  importance      Float?
+  needsReply      Float?
+  hasDeadline     Float?
+  kind            String?
+  summary         String?     @db.Text
+  /// "open" | "replied" | "done" | "ignored"
+  state           String      @default("open")
+  triagedAt       DateTime?
+  extractedAt     DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  loops OpenLoop[]
+
+  @@unique([userId, source, externalId])
+  @@index([userId, state, lastInboundAt])
+  @@index([sourceId])
+  @@map("tracked_threads")
+}
+
+/// Something pending for the user: a reply they owe, an answer they are
+/// waiting on, a deadline, or an explicit watch. `dueAt` is when to consider
+/// nudging, not the deadline itself; the sweep claims rows by (status, dueAt).
+model OpenLoop {
+  id           String         @id @default(cuid())
+  userId       String
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  threadId     String?
+  thread       TrackedThread? @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  /// "awaiting_user" | "awaiting_them" | "deadline" | "watch"
+  kind         String
+  title        String
+  ask          String?        @db.Text
+  counterpart  String?
+  deadlineAt   DateTime?
+  dueAt        DateTime?
+  /// Only for kind = "watch": { gmailQuery?, intent }.
+  condition    Json?
+  confidence   Float?
+  /// "open" | "nudged" | "resolved" | "expired" | "dismissed"
+  status       String         @default("open")
+  /// "triage" | "agent" | "user"
+  createdBy    String
+  nudgeCount   Int            @default(0)
+  lastNudgedAt DateTime?
+  resolvedAt   DateTime?
+  /// Why it closed: "user_replied" | "counterpart_replied" | "expired" | ...
+  resolution   String?
+  expiresAt    DateTime?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  nudges NudgeLog[]
+
+  @@index([status, dueAt])
+  @@index([userId, status])
+  @@index([threadId])
+  @@map("open_loops")
+}
+
+/// A person the user corresponds with, and how much they matter, learned from
+/// behaviour: how often the user answers them and how fast.
+model InboxContact {
+  id              String    @id @default(cuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Lowercased email address or Spaces user id.
+  key             String
+  name            String?
+  inboundCount    Int       @default(0)
+  userReplyCount  Int       @default(0)
+  avgReplyMins    Float?
+  weight          Float     @default(0.5)
+  lastInboundAt   DateTime?
+  lastUserReplyAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([userId, key])
+  @@map("inbox_contacts")
+}
+
+/// One interrupt decision for a loop, including the ones that chose not to
+/// message the user, and how the user reacted. Rate limits and dedupe read it.
+model NudgeLog {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  loopId    String
+  loop      OpenLoop  @relation(fields: [loopId], references: [id], onDelete: Cascade)
+  agentId   String?
+  /// "ignore" | "later" | "text"
+  decision  String
+  reason    String?   @db.Text
+  /// True when PROACTIVE_INBOX_MODE=shadow: decided, never sent.
+  shadow    Boolean   @default(false)
+  channel   String?
+  runId     String?
+  sentAt    DateTime?
+  /// "acted" | "dismissed" | "none"
+  reaction  String?
+  reactedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, createdAt])
+  @@index([loopId])
+  @@map("nudge_logs")
+}
+
+/// The user's rules for being interrupted, and which agent texts them.
+model ProactivePrefs {
+  userId          String   @id
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orgId           String
+  agentId         String?
+  timezone        String   @default("Asia/Kolkata")
+  quietStartHour  Int      @default(22)
+  quietEndHour    Int      @default(8)
+  maxNudgesPerDay Int      @default(3)
+  replySlaHours   Int      @default(24)
+  /// Contact keys never to nudge about.
+  mutedContacts   Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("proactive_prefs")
 }
