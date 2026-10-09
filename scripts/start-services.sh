@@ -579,6 +579,7 @@ else
         # Push schema with force-reset (first time setup - ensures tables are created)
         echo -e "${BLUE}  Creating database schema...${NC}"
         pnpm exec dotenv -e .env.local -- pnpm exec prisma db push --force-reset --accept-data-loss --skip-generate
+        pnpm exec dotenv -e .env.local -- pnpm exec prisma db execute --file prisma/sql/poll-question-results.sql
 
         # Push common database schema (same postgres, different DB)
         echo -e "${BLUE}  Creating common database schema...${NC}"
@@ -609,6 +610,7 @@ else
         # Existing DB — sync schema without dropping data
         echo -e "${BLUE}  Syncing database schema...${NC}"
         pnpm exec dotenv -e .env.local -- pnpm exec prisma db push
+        pnpm exec dotenv -e .env.local -- pnpm exec prisma db execute --file prisma/sql/poll-question-results.sql
 
         echo -e "${BLUE}  Syncing common database schema...${NC}"
         pnpm exec dotenv -e .env.local -- pnpm exec prisma db push --schema prisma-common/schema.prisma --accept-data-loss --skip-generate
