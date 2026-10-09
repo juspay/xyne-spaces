@@ -15,6 +15,7 @@ import { createLogger } from "../../logger.js";
 import { errMsg } from "../../lib/errors.js";
 import { DONE_REACTION, EMPTY_RESULT_TEXT, ERROR_REACTION, FAILURE_TEXT, OUTBOX_TTL_S, REDIS_PREFIX, TYPING_COUNT_TTL_S } from "./const.js";
 import { forgetActiveRun } from "./commands.js";
+import { mapSentMessage } from "./threads/registry.js";
 import { chunkText } from "./format.js";
 import { countWords, splitIntoSections } from "xyne-claw-shared";
 import { fitCard, renderCardAsText } from "./cards.js";
@@ -30,7 +31,7 @@ export interface OutboxAttachment {
 }
 
 export type OutboxItem =
-  | { kind: "text"; chatId: string; text: string; quoted?: MessageRef; markdown?: boolean; mentions?: string[] }
+  | { kind: "text"; chatId: string; text: string; quoted?: MessageRef; markdown?: boolean; mentions?: string[]; conversationId?: string }
   | { kind: "resolve-target"; target: string }
   | { kind: "list-groups" }
   | {
@@ -44,6 +45,9 @@ export type OutboxItem =
       statusReactions?: boolean;
       /** False while another run is still working in this chat. */
       stopTyping?: boolean;
+      /** Threaded path only: the task conversation this reply belongs to, so
+       *  the sent message is mapped back to its task for quote-reply routing. */
+      conversationId?: string;
     }
   | { kind: "typing"; chatId: string; on: boolean; messageId?: string }
   | { kind: "react"; ref: MessageRef; emoji: string }
@@ -208,6 +212,7 @@ export async function deliverChannelResult(input: {
     ...(input.attachments?.length ? { attachments: input.attachments } : {}),
     ...(input.target.quoted ? { quoted: input.target.quoted } : {}),
     ...(input.target.statusReactions ? { statusReactions: true } : {}),
+    ...(input.target.conversationId ? { conversationId: input.target.conversationId } : {}),
     stopTyping: await typingFinished(input.target.connectedSurfaceId, input.target.chatId),
   });
   // Whatever happened, nothing is running here any more.
@@ -285,6 +290,7 @@ async function sendItem(
     case "text": {
       const text = item.markdown === false ? item.text : (plugin.formatText?.(item.text) ?? item.text);
       const ref = await sendChunked(plugin, handle, item.chatId, text, item.quoted, item.mentions, sent);
+      if (ref && item.conversationId) await mapSentMessage(ref.messageId, item.conversationId);
       return ref ? { ok: true, ref } : { ok: true };
     }
     case "result": {
@@ -314,7 +320,10 @@ async function sendItem(
             .react(handle, item.quoted, completed ? DONE_REACTION : ERROR_REACTION)
             .catch((err) => log.warn(`[channel-delivery] status reaction failed: ${errMsg(err)}`));
         }
-        if (!silentWithFiles) await sendMessages(plugin, handle, item.chatId, messages, item.quoted, sent);
+        if (!silentWithFiles) {
+          const firstRef = await sendMessages(plugin, handle, item.chatId, messages, item.quoted, sent);
+          if (firstRef && item.conversationId) await mapSentMessage(firstRef.messageId, item.conversationId);
+        }
         if (files.length) await sendAttachments(plugin, handle, item.chatId, files, sent);
       } finally {
         // Another run is still working here — leaving the indicator alone is
