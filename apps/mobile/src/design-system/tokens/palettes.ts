@@ -22,7 +22,7 @@ const PALETTES = {
     light: {
       background: neutral[0],
       foreground: neutral[900],
-      muted: neutral[500],
+      muted: neutral[600],
       surface: neutral[100],
       accent: coral[500],
       'accent-foreground': neutral[0],
@@ -30,7 +30,7 @@ const PALETTES = {
     dark: {
       background: neutral[900],
       foreground: neutral[0],
-      muted: neutral[500],
+      muted: neutral[400],
       surface: neutral[800],
       accent: coral[500],
       'accent-foreground': neutral[0],
