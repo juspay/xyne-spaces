@@ -28,6 +28,7 @@ export const PROACTIVE = {
   hitImportance: envNumber("PROACTIVE_HIT_IMPORTANCE", 0.5),
   hitNeedsReply: envNumber("PROACTIVE_HIT_NEEDS_REPLY", 0.6),
   hitDeadline: envNumber("PROACTIVE_HIT_DEADLINE", 0.6),
+  urgentImportance: envNumber("PROACTIVE_URGENT_IMPORTANCE", 0.8),
   laterDelayMs: envNumber("PROACTIVE_LATER_DELAY_MS", 4 * 60 * 60_000),
   maxNudgesPerLoop: envNumber("PROACTIVE_MAX_NUDGES_PER_LOOP", 2),
   maxLaterPerLoop: envNumber("PROACTIVE_MAX_LATER_PER_LOOP", 3),

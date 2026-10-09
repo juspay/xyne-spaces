@@ -35,7 +35,7 @@ export function deadlineNudgeAt(deadline: Date, now: Date): Date {
 
 export function planLoop(
   input: PlannedLoopInput,
-  ctx: { now: Date; lastInboundAt: Date | null; lastUserReplyAt: Date | null; replySlaHours: number },
+  ctx: { now: Date; lastInboundAt: Date | null; lastUserReplyAt: Date | null; replySlaHours: number; urgent?: boolean },
 ): PlannedLoop {
   const now = ctx.now;
   const deadline = input.deadlineAt ? new Date(input.deadlineAt) : null;
@@ -52,7 +52,7 @@ export function planLoop(
   } else {
     dueAt = validDeadline ?? new Date((ctx.lastUserReplyAt ?? now).getTime() + AWAITING_THEM_WAIT_MS);
   }
-  if (dueAt.getTime() < now.getTime()) dueAt = now;
+  if (dueAt.getTime() < now.getTime() || (ctx.urgent && kind !== "awaiting_them")) dueAt = now;
 
   const expiresAt = validDeadline
     ? new Date(Math.max(validDeadline.getTime() + DAY, now.getTime() + DAY))

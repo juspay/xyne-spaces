@@ -166,5 +166,6 @@ export async function handleGmailPush(body: unknown): Promise<number> {
     await prisma.inboxSource.update({ where: { id: s.id }, data: { lastPushAt: new Date() } });
     await enqueueInboxIngest(s.id);
   }
+  log.info(`[proactive] push historyId=${push.historyId} sources=${sources.length}`);
   return sources.length;
 }
