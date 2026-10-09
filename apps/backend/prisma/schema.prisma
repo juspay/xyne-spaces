@@ -124,7 +124,7 @@ model Ticket {
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
   statusUpdatedAt  DateTime          @default(now()) // Timestamp when statusV2 was last changed
-  merchantId       String?           // Merchant ID to which the ticket is linked
+  merchantId       String?           // DEPRECATED: read-only, no longer written. Will be dropped soon after data migration — do not build new features on it.
   conversationId   String            // The xyne chat conversation to which the ticket is linked
   messageId        String?           @unique 
   channelId        String            // The channel to which the ticket is linked
