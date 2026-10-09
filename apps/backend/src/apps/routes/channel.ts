@@ -6,9 +6,11 @@ import { repositories } from '@/database/repositories';
 import { ChannelController } from '../controllers/channelController';
 import { validateChannelAccessForPost } from '../middelware/channelValidation';
 import { requirePermission } from '@/middleware/requirePermission';
+import { AppChannelController } from '../controllers/appChannelController';
 
 const router = Router();
 const channelController = new ChannelController();
+const appChannelController = new AppChannelController();
 
 // workspaceId is intentionally NOT accepted from the body: the tenant is
 // derived from the verified app token (req.user.workspaceId) so an app
@@ -56,5 +58,7 @@ router.post('/info', requirePermission('channels:read'), validateChannelAccessFo
 router.post('/deskChannelConfig', requirePermission('desk:read'), validateChannelAccessForPost, channelController.getDeskConfig);
 
 router.get('/list', requirePermission('channels:read'), channelController.listChannels);
+
+router.post('/create', requirePermission('channels:write'), appChannelController.create);
 
 export default router;

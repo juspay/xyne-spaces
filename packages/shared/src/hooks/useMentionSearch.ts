@@ -43,6 +43,8 @@ export interface UseMentionSearchResult {
 export interface UseMentionSearchOptions {
   includeSpecialMentions?: boolean;
   excludeSelf?: boolean;
+  /** Only the channel's members, and no groups: guests can mention no one else. */
+  membersOnly?: boolean;
 }
 
 function emailLocalPart(email: string | null | undefined): string {
@@ -153,7 +155,7 @@ export const useMentionSearch = (
   threadParticipantIds?: ReadonlySet<string>,
   options: UseMentionSearchOptions = {},
 ): UseMentionSearchResult => {
-  const { includeSpecialMentions = true, excludeSelf = true } = options;
+  const { includeSpecialMentions = true, excludeSelf = true, membersOnly = false } = options;
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   // Gates the Vespa membership fetch — fires only after the picker has been
@@ -280,10 +282,13 @@ export const useMentionSearch = (
     // Keep yourself only in a self-DM (or when the caller opted out of this
     // chat-specific default, e.g. the automation composer); otherwise you're
     // never a mention candidate.
-    return src.filter((u) =>
-      isSelfDm || !excludeSelf ? true : u.id !== currentUserId,
+    return src.filter(
+      (u) =>
+        (isSelfDm || !excludeSelf ? true : u.id !== currentUserId) &&
+        (!membersOnly || memberIds.has(u.id)),
     );
   }, [
+    membersOnly,
     shouldSearch,
     usersData,
     usesLocalParticipants,
@@ -342,7 +347,7 @@ export const useMentionSearch = (
 
     // Groups & special mentions are channel / group-DM concepts; a 1:1 DM is not a channel.
     const groupCandidates = (
-      !isOneToOneDm && shouldSearch ? (userGroupsData ?? []) : []
+      !isOneToOneDm && !membersOnly && shouldSearch ? (userGroupsData ?? []) : []
     ).map((g) => buildGroupCandidate(g, searchQuery));
     const specialCandidates = includeSpecialMentions
       ? eligibleSpecials({
@@ -376,6 +381,7 @@ export const useMentionSearch = (
     currentUserId,
     rankingConfig,
     includeSpecialMentions,
+    membersOnly,
   ]);
 
   const users = useMemo(
