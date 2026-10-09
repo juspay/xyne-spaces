@@ -88,6 +88,7 @@ import { BaseTicketType,
   WorkspaceRole,
   OrgRole,
   AccessType,
+  UserType,
 } from '@xyne/shared';
 import { CommitAnalysisController } from './commitAnalysisController';
 import { isReleaseTicket } from '@xyne/shared';
@@ -375,19 +376,20 @@ export class TicketController {
    */
   createBulkTicket = async (req: Request, res: Response): Promise<void> => {
     try {
-      if (req.originalUrl.includes('/api/tickets/claw')) {
-        res.status(403).json({
-          error: 'Bulk ticket creation is not available for app credentials',
-          code: 'BULK_NOT_ALLOWED_FOR_APP',
-        });
-        return;
-      }
-
       const user = req.user;
       const userId = user?.id;
       const workspaceId = user?.workspaceId;
       if (!user || !userId || !workspaceId) {
         res.status(401).json({ error: 'User not authenticated' });
+        return;
+      }
+
+      const caller = await db.user.findUnique({ where: { id: userId }, select: { userType: true } });
+      if (caller?.userType !== UserType.USER) {
+        res.status(403).json({
+          error: 'Bulk ticket creation is only available to users',
+          code: 'BULK_NOT_ALLOWED_FOR_NON_USER',
+        });
         return;
       }
 
