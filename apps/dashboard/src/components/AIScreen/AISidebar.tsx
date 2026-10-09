@@ -80,7 +80,6 @@ type NavIcon = ComponentType<SVGProps<SVGSVGElement> & { size?: number }>;
 export interface AINavItem {
   key: string;
   label: string;
-  /** What the page holds, as for NavigationItem.description. */
   description: string;
   icon: NavIcon;
   to: string;
@@ -94,6 +93,21 @@ export interface AINavItem {
   orgManagerOnly?: boolean;
   /** Hidden unless the user has the scheduled morning brief switched on. */
   dailyBriefOnly?: boolean;
+}
+
+export function useVisibleAINavItems(onDailyBriefRoute = false): AINavItem[] {
+  const { user } = useAuth();
+  const { isAdmin } = useClawAdminAccessQuery(user?.id);
+  const { canManage: canManageOrg } = useClawOrgManageAccess();
+  const isSdlcAdmin = useHasResourceAccess('SDLC');
+  const { enabled: dailyBriefEnabled } = useDailyBriefEnabled();
+  return NAV_ITEMS.filter(
+    item =>
+      (!item.adminOnly || isAdmin) &&
+      (!item.sdlcAdminOnly || isAdmin || isSdlcAdmin) &&
+      (!item.orgManagerOnly || canManageOrg) &&
+      (!item.dailyBriefOnly || dailyBriefEnabled === true || onDailyBriefRoute),
+  );
 }
 
 export const NAV_ITEMS: AINavItem[] = [
@@ -593,19 +607,7 @@ export function AISidebar({
 
   const routedActiveItem = NAV_ITEMS.find(item => pathname.includes(item.matchPath ?? item.to));
 
-  const { user } = useAuth();
-  const { isAdmin } = useClawAdminAccessQuery(user?.id);
-  const { canManage: canManageOrg } = useClawOrgManageAccess();
-  const isSdlcAdmin = useHasResourceAccess('SDLC');
-  const { enabled: dailyBriefEnabled } = useDailyBriefEnabled();
-  const onDailyBriefRoute = pathname.includes('/ai/daily-brief');
-  const visibleNavItems = NAV_ITEMS.filter(
-    item =>
-      (!item.adminOnly || isAdmin) &&
-      (!item.sdlcAdminOnly || isAdmin || isSdlcAdmin) &&
-      (!item.orgManagerOnly || canManageOrg) &&
-      (!item.dailyBriefOnly || dailyBriefEnabled === true || onDailyBriefRoute),
-  );
+  const visibleNavItems = useVisibleAINavItems(pathname.includes('/ai/daily-brief'));
   const isNewChatActive = !routedActiveItem && !activeSessionId;
 
   // One history across every agent, newest first, 50 at a time; the filter

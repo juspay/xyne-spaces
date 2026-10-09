@@ -4,7 +4,7 @@ import { usePath } from '../../hooks/usePath';
 import { useVisibleNavigationItems } from '../../hooks/useVisibleNavigationItems';
 import type { NavigationItem } from './navigationConfig';
 import { useVisibleOrganisationsGroups } from '../../routes/OrganisationsModule/organisationsSections';
-import { NAV_ITEMS as AI_NAV_ITEMS } from '../AIScreen/AISidebar';
+import { useVisibleAINavItems } from '../AIScreen/AISidebar';
 
 interface Page {
   path: string;
@@ -22,6 +22,7 @@ export const SiteMap = (): ReactElement => {
   const here = usePath();
   const items = useVisibleNavigationItems();
   const adminGroups = useVisibleOrganisationsGroups();
+  const aiPages = useVisibleAINavItems();
 
   /** The pages inside a sidebar entry, from its own sidebar's config. */
   const childrenOf = ({ path, label }: NavigationItem): Page[] => {
@@ -36,9 +37,11 @@ export const SiteMap = (): ReactElement => {
       );
     }
     if (path === '/ai') {
-      return AI_NAV_ITEMS.filter(
-        item => !item.adminOnly && !item.orgManagerOnly && !item.dailyBriefOnly,
-      ).map(item => ({ path: item.to, label: item.label, description: within(item.description) }));
+      return aiPages.map(item => ({
+        path: item.to,
+        label: item.label,
+        description: within(item.description),
+      }));
     }
     return [];
   };
