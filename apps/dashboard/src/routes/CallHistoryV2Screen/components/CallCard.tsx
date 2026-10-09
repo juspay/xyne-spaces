@@ -51,6 +51,7 @@ interface CallHistoryItemProps {
   onDetailClick?: (() => void) | undefined;
   /** Confirmed labels on this call, shown as chips under the meta line. */
   labels?: string[];
+  pendingLabelCount?: number;
   /** Resolves a label value (Tag id) to its display text. Defaults to identity. */
   resolveLabel?: (label: string) => string;
 }
@@ -67,6 +68,7 @@ export const CallCard = ({
   onViewExternalChat,
   onDetailClick,
   labels = [],
+  pendingLabelCount = 0,
   resolveLabel = (label: string): string => label,
 }: CallHistoryItemProps) => {
   const allChannels = useAllChannels();
@@ -256,7 +258,7 @@ export const CallCard = ({
                 </>
               )}
             </div>
-            {(recurrenceOccurrenceLabel || visibleLabels.length > 0) && (
+            {(recurrenceOccurrenceLabel || visibleLabels.length > 0 || pendingLabelCount > 0) && (
               <div className='flex flex-wrap items-center gap-1.5 pt-1'>
                 {recurrenceOccurrenceLabel && (
                   <span className='inline-flex h-6 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-border pl-2 pr-2.5 text-xs font-medium text-muted-foreground'>
@@ -266,6 +268,9 @@ export const CallCard = ({
                 )}
                 {visibleLabels.map(label => (
                   <LabelChip key={label} label={resolveLabel(label)} />
+                ))}
+                {Array.from({ length: pendingLabelCount }, (_, index) => (
+                  <span key={index} className='h-6 w-14 animate-pulse rounded-lg bg-muted' />
                 ))}
               </div>
             )}
