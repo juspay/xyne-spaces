@@ -1,4 +1,4 @@
-import { Fragment, ReactElement, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, ReactElement, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, type Location } from 'react-router-dom';
 import { useRouterSelector, useStableNavigate } from '../../hooks/useStableRouter';
 import { Tooltip } from '../ui/Tooltip/Tooltip';
@@ -399,6 +399,8 @@ const AppSidebar = (): ReactElement => {
     [visibleNavigationItems, toolbarIds],
   );
   const isMoreActive = moreItems.some(item => item.path === activeRoute);
+  const moreDescriptionId = useId();
+  const helpDescriptionId = useId();
 
   const { setAiInToolbar } = useAiLaunchPreference();
   const railIds = useMemo(
@@ -677,6 +679,7 @@ const AppSidebar = (): ReactElement => {
                             ? 'Recordings, new summaries'
                             : item.label
                       }
+                      aria-description={item.description}
                       data-testid={testId}
                       data-track-category='App_Sidebar'
                       data-track-name='Sidebar_Nav_Item'
@@ -788,6 +791,7 @@ const AppSidebar = (): ReactElement => {
                         ref={moreButtonRef}
                         type='button'
                         aria-label='More'
+                        aria-describedby={moreDescriptionId}
                         data-testid='nav-more'
                         data-track-category='App_Sidebar'
                         data-track-name='Sidebar_More_Toggle'
@@ -800,6 +804,9 @@ const AppSidebar = (): ReactElement => {
                         )}
                       >
                         <ThreeDotsMenuHorizontal size={16} />
+                        <span id={moreDescriptionId} className='sr-only'>
+                          {moreItems.map(item => item.label).join(', ')}
+                        </span>
                       </button>
                     }
                   >
@@ -858,8 +865,9 @@ const AppSidebar = (): ReactElement => {
             trigger={
               <button
                 type='button'
-                aria-label='Support'
-                title='Support'
+                aria-label='Help and feedback'
+                aria-describedby={helpDescriptionId}
+                title='Help and feedback'
                 data-testid='nav-support'
                 data-track-category='App_Sidebar'
                 data-track-name='Sidebar_Support_Toggle'
@@ -871,6 +879,9 @@ const AppSidebar = (): ReactElement => {
                 )}
               >
                 <InformationCircle size={16} />
+                <span id={helpDescriptionId} className='sr-only'>
+                  Help: report a problem with Xyne
+                </span>
               </button>
             }
           >
@@ -889,9 +900,11 @@ const AppSidebar = (): ReactElement => {
           <Popover
             trigger={
               hasDisplayStatus ? (
-                <div
+                <button
+                  type='button'
                   className='relative w-[32px] h-14 rounded-lg flex flex-col items-center justify-end transition-opacity hover:opacity-90 cursor-pointer [--avatar-ring:var(--sidebar-avatar-ring)]'
                   data-testid='profile-icon'
+                  aria-label='Profile and settings'
                 >
                   <div className='absolute inset-x-0 top-0 bottom-2 rounded-lg bg-sidebar-border' />
 
@@ -917,11 +930,13 @@ const AppSidebar = (): ReactElement => {
                       </div>
                     )}
                   </div>
-                </div>
+                </button>
               ) : (
-                <div
+                <button
+                  type='button'
                   className='relative w-[32px] flex flex-col items-center justify-end transition-opacity hover:opacity-90 cursor-pointer [--avatar-ring:var(--sidebar-avatar-ring)]'
                   data-testid='profile-icon'
+                  aria-label='Profile and settings'
                 >
                   {/* Avatar at Bottom - overlaps container slightly to match with-status state */}
                   <div className='relative flex'>
@@ -933,7 +948,7 @@ const AppSidebar = (): ReactElement => {
                       </div>
                     )}
                   </div>
-                </div>
+                </button>
               )
             }
             open={isSettingsPopoverOpen}
@@ -1065,6 +1080,7 @@ const SidebarMoreMenu = ({
                     data-track-category='App_Sidebar'
                     data-track-name='Sidebar_More_Item'
                     data-track-metadata={JSON.stringify({ path: item.path, label: item.label })}
+                    aria-description={item.description}
                     className={cn(
                       'flex items-center gap-3 rounded-md px-2.5 py-2 text-sm transition-colors',
                       isActive

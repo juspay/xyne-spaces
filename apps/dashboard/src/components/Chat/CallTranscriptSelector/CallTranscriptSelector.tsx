@@ -151,6 +151,7 @@ export const CallTranscriptSelector: React.FC<CallTranscriptSelectorProps> = ({
 
                 return (
                   <button
+                    aria-current={isActive ? 'true' : undefined}
                     onClick={() => setSelectedCallId(call.id)}
                     className={`w-full text-left px-4 py-3 rounded-lg transition-all border mb-1 ${
                       isActive

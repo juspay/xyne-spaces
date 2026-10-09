@@ -42,6 +42,7 @@ export const DeleteCallModal: React.FC<DeleteCallModalProps> = ({
             <h2 className='text-[15px] font-semibold text-foreground'>Delete Call?</h2>
           </div>
           <button
+            aria-label='Close delete call dialog'
             onClick={onClose}
             data-track-category='CALLS'
             data-track-name='close-delete-modal'

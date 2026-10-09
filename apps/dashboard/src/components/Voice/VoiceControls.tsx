@@ -9,18 +9,16 @@ import { useSpaceToTalk } from './useSpaceToTalk';
 import { voiceDebug } from '../../services/VoiceInput/voiceDebug';
 import type { VoicePhase } from './voiceSession';
 
-// The assistant is working out an answer: routing the request, waiting on Ask AI.
 const isWorking = (phase: VoicePhase): boolean => phase === 'understanding' || phase === 'asking';
 
-// Stop applies while the assistant is working out or speaking an answer.
 export const canStop = (phase: VoicePhase): boolean => isWorking(phase) || phase === 'speaking';
 
-/** A round icon button with its name as tooltip; forwards props so a popover can use it as trigger. */
+/** Forwards props so a popover can use it as its trigger. */
 export function IconButton({
   label,
   className,
   ...props
-}: ComponentProps<typeof Button> & { label: string }): ReactElement {
+}: Omit<ComponentProps<'button'>, 'aria-label'> & { label: string }): ReactElement {
   return (
     <Tooltip content={label} side='top'>
       <Button
@@ -37,13 +35,11 @@ export function IconButton({
 
 interface VoiceOrbButtonProps {
   phase: VoicePhase;
-  /** The stage: Space only talks while focus is inside it (or nowhere). */
   scope: RefObject<HTMLElement | null>;
   onHoldStart: () => void;
   onHoldEnd: () => void;
 }
 
-/** The orb as a hold-to-talk control: press it, or hold Space, to talk and release to send. */
 export function VoiceOrbButton({
   phase,
   scope,
@@ -56,7 +52,6 @@ export function VoiceOrbButton({
   // Pointer up and the capture being lost both end a hold, so only the first one counts.
   const holding = useRef(false);
 
-  // A press while busy is refused, and the debugger says so rather than the press vanishing.
   const press = (source: string): boolean => {
     if (busy) {
       voiceDebug.log('input', 'Press ignored', `${source} while ${phase}`, { level: 'warn' });

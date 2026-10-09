@@ -521,6 +521,7 @@ function BranchNavigator({
     <div className='flex items-center gap-0.5 text-xs text-muted-foreground'>
       <button
         type='button'
+        aria-label='Previous version'
         onClick={() => onNavigate('prev')}
         className='rounded p-0.5 transition-colors hover:bg-muted'
         data-track-category='XyneAI'
@@ -533,6 +534,7 @@ function BranchNavigator({
       </span>
       <button
         type='button'
+        aria-label='Next version'
         onClick={() => onNavigate('next')}
         className='rounded p-0.5 transition-colors hover:bg-muted'
         data-track-category='XyneAI'
@@ -1490,7 +1492,6 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     initialQuery && initialExtras ? withoutPickedContext(initialExtras) : initialExtras,
   );
   const dropZoneRef = useRef<HTMLDivElement | null>(null);
-  // Voice mode covers the transcript, so the composer shows it there.
   const [voiceStageHost, setVoiceStageHost] = useState<HTMLDivElement | null>(null);
   const dragCounterRef = useRef(0);
   const [isDragging, setIsDragging] = useState(false);

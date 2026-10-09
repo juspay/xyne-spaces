@@ -717,6 +717,7 @@ const CallHistoryV2Screen = (): ReactElement => {
                   id='channel-calls-toggle'
                   checked={showChannelCalls}
                   onCheckedChange={setShowChannelCalls}
+                  aria-label='Show channel calls'
                 />
               </div>
             </div>

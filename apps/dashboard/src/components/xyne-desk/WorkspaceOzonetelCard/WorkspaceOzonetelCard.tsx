@@ -671,6 +671,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
                               />
                               <button
                                 type='button'
+                                aria-label={`Remove campaign route ${index + 1}`}
                                 onClick={() =>
                                   setCampaignRoutes(current =>
                                     current.filter((_, entryIndex) => entryIndex !== index),

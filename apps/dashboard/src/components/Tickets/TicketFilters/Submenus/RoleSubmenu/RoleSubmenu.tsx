@@ -200,6 +200,7 @@ export const RoleSubmenu = ({
                             const isDeactivated = isUserDeactivated(user);
                             return (
                               <button
+                                aria-pressed={isSelected}
                                 key={user.id}
                                 type='button'
                                 onClick={() => handleUserToggle(role.id, user.id)}
