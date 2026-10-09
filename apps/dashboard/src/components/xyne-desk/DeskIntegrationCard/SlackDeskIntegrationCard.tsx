@@ -47,6 +47,7 @@ export const SlackDeskIntegrationCard = ({
         'Your existing message history on this desk is kept.',
       ]}
       trackCategory='slack-desk-integration'
+      provider='slack'
     />
   );
 };

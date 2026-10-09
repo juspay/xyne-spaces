@@ -16,12 +16,15 @@ export interface InlineSignatureEditorProps {
   initial?: { id?: string; name: string; content: string } | undefined;
   onSave: (data: { id?: string; name: string; content: string }) => void | Promise<void>;
   onCancel: () => void;
+  /** How many signatures the desk already has — SaveSignature click dimension. */
+  signatureCount?: number;
 }
 
 export const InlineSignatureEditor: React.FC<InlineSignatureEditorProps> = ({
   initial,
   onSave,
   onCancel,
+  signatureCount,
 }) => {
   const [name, setName] = useState(initial?.name ?? '');
   const [isSaving, setIsSaving] = useState(false);
@@ -133,6 +136,10 @@ export const InlineSignatureEditor: React.FC<InlineSignatureEditorProps> = ({
           className='rounded-[10px] bg-desk-accent px-[12px] py-[6px] text-sm font-medium text-white transition-colors hover:bg-desk-accent-hover disabled:cursor-not-allowed disabled:opacity-50'
           data-track-category='DeskSettings'
           data-track-name='SaveSignature'
+          data-track-metadata={JSON.stringify({
+            signatureCount: signatureCount ?? null,
+            isEdit: !!initial?.id,
+          })}
         >
           {isSaving ? 'Saving…' : initial?.id ? 'Save' : 'Add Signature'}
         </button>

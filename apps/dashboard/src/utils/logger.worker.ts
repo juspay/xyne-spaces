@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
-import { shred } from '@xyne/logger';
+import { CLIENT_EVENT_SHRED_OPTIONS, setRedactAllowList, shred } from '@xyne/logger';
 import type { LogEvent } from './logger';
 
 export type LogLevel = 'DEBUG' | 'INFO' | 'WARN' | 'ERROR';
@@ -28,6 +28,7 @@ export interface WorkerMessage {
     | 'SET_ZERO_CLIENT_ID'
     | 'SET_ZERO_CLIENT_GROUP_ID'
     | 'SET_PAGE_VIEW'
+    | 'SET_REDACT_ALLOW_LIST'
     | 'FLUSH'
     | 'SHUTDOWN';
   payload?: {
@@ -51,6 +52,7 @@ export interface WorkerMessage {
     maxBatchSize?: number | undefined;
     maxRetries?: number | undefined;
     version?: string | undefined;
+    redactAllowList?: unknown;
   };
 }
 
@@ -107,6 +109,9 @@ class LoggerWorker {
           break;
         case 'SET_PAGE_VIEW':
           this.handleSetPageView(payload);
+          break;
+        case 'SET_REDACT_ALLOW_LIST':
+          setRedactAllowList(payload?.redactAllowList);
           break;
         case 'FLUSH':
           this.handleFlush();
@@ -179,7 +184,9 @@ class LoggerWorker {
       // Shred secret values out of every field before the entry is buffered
       // for POST. Field names (the frozen analytics contract: event,
       // platformName, emailId, pageUrl, …) are preserved — values only.
-      this.logs.push(shred(logEntry) as LogEntry);
+      // Client events (crash reports, stacks) are exempt from the 64 KB
+      // per-string cap so they reach the logging bridge untruncated.
+      this.logs.push(shred(logEntry, CLIENT_EVENT_SHRED_OPTIONS) as LogEntry);
     }
   }
 

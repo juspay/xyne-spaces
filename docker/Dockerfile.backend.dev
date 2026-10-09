@@ -30,6 +30,7 @@ RUN corepack enable && corepack prepare pnpm@10.15.0 --activate
 WORKDIR /repo
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY packages/shared/package.json           packages/shared/
+COPY packages/logger/package.json           packages/logger/
 COPY packages/storage/package.json          packages/storage/
 COPY packages/framework/package.json        packages/framework/
 COPY apps/backend/package.json              apps/backend/
@@ -43,12 +44,13 @@ COPY apps/backend/eslint-rules/package.json apps/backend/eslint-rules/
 RUN pnpm install --frozen-lockfile --prod=false --ignore-scripts --filter xyne-spaces-backend...
 
 COPY packages/shared    packages/shared
+COPY packages/logger    packages/logger
 COPY packages/storage   packages/storage
 COPY packages/framework packages/framework
 COPY apps/backend       apps/backend
 
 # backend consumes these from their built dist/
-RUN pnpm --filter @xyne/shared --filter @xyne/storage --filter agentic-framework run build
+RUN pnpm --filter @xyne/logger --filter @xyne/shared --filter @xyne/storage --filter agentic-framework run build
 
 # /app is where the entrypoint and the sandbox volume mounts expect the backend
 WORKDIR /repo/apps/backend

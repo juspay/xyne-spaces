@@ -452,7 +452,7 @@ const ConversationItem = ({
         onTouchCancel={isMobile ? handleTouchEnd : undefined}
         data-track-category='XyneAI'
         data-track-name='SELECT_CONVERSATION'
-        data-track-metadata={JSON.stringify({ conversationId: conversation.id })}
+        data-track-metadata={JSON.stringify({ surface: 'panel', conversationId: conversation.id })}
       >
         <div
           className={

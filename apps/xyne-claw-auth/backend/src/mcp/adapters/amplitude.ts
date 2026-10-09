@@ -3,7 +3,10 @@ import type { StdioMcpAdapter } from "../types.js";
 export const amplitudeAdapter: StdioMcpAdapter = {
   transport: "stdio",
   type: "amplitude",
-  healthCheck: { name: "amplitude_track_event", params: { event_name: "mcp_health_check" } },
+  healthCheck: {
+    name: "amplitude_track_event",
+    params: { event_name: "mcp_health_check", device_id: "xyne-health-check" },
+  },
   writeTools: [
     "amplitude_track_event",
     "amplitude_track_pageview",

@@ -595,6 +595,7 @@ export function CustomLiveKitRoom({
             channelId={channelId}
             projectId={currentChannel.projectId}
             selectedBoardId={ticketBoardId}
+            trackSource='call'
             initialTitle={ticketTitle}
             initialDescription={ticketDescription}
             initialAssignee={initialTicketAssignee}
@@ -692,6 +693,7 @@ export function CustomLiveKitRoom({
           channelId={channelId}
           projectId={currentChannel.projectId}
           selectedBoardId={ticketBoardId}
+          trackSource='call'
           initialTitle={ticketTitle}
           initialDescription={ticketDescription}
           initialAssignee={initialTicketAssignee}

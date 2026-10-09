@@ -26,11 +26,14 @@ export interface WikiScope {
   folderId: string;
   name: string;
   hub: boolean;
-  /** A repository that has left the hub keeps its Wiki. */
-  removed: boolean;
+  /** Null on the Hub Wiki, which belongs to no single repository. */
+  repoId: string | null;
 }
 
-/** One folder per repository, then the Hub Wiki as Relationships once the hub has two repositories. */
+/**
+ * One folder per member repository, then the Hub Wiki as Relationships once the hub has two.
+ * A disconnected repository's folder is kept, only hidden, so reconnecting brings its pages back.
+ */
 export function wikiScopes(input: {
   channelId: string;
   edges: readonly HubItemEdge[];
@@ -43,16 +46,18 @@ export function wikiScopes(input: {
   const scopes = input.edges
     .filter(edge => edge.sourceId === rootId && edge.targetType === 'FOLDER')
     .filter(edge => edge.targetId !== hubId || input.memberRepoIds.size > 1)
+    .filter(
+      edge =>
+        !edge.targetId.startsWith(repositoryPrefix) ||
+        input.memberRepoIds.has(edge.targetId.slice(repositoryPrefix.length)),
+    )
     .map(edge => {
       const hub = edge.targetId === hubId;
-      const repoId = edge.targetId.startsWith(repositoryPrefix)
-        ? edge.targetId.slice(repositoryPrefix.length)
-        : null;
       return {
         folderId: edge.targetId,
         name: hub ? 'Relationships' : (input.folderNames.get(edge.targetId) ?? 'Repository'),
         hub,
-        removed: repoId !== null && !input.memberRepoIds.has(repoId),
+        repoId: hub ? null : edge.targetId.slice(repositoryPrefix.length),
       };
     });
   return scopes.sort((left, right) =>

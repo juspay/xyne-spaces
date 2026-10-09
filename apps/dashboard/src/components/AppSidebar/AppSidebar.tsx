@@ -47,12 +47,16 @@ import { useAllVisibleChannels } from '../../hooks/useChannels';
 import { useAllUnreadCount } from '../../hooks/useUnreadCount';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { useVisibleNavigationItems } from '../../hooks/useVisibleNavigationItems';
-import { usePinnedArtifactApps } from '../../hooks/usePinnedArtifactApps';
 import { AppIcon } from '../AppIcon/AppIcon';
-import { useToolbarItems } from '../../hooks/useToolbarItems';
+import { toolbarItemsStore, useAppSnapshots, appIdOf } from '../../hooks/barItems';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { queries } from '../../zero/queries';
 import type { NavigationItem } from './navigationConfig';
+
+/** One slot in the rail: a built-in destination or an artifact app. */
+type RailEntry =
+  | { kind: 'nav'; item: NavigationItem }
+  | { kind: 'app'; appId: string; title: string; icon: string | null };
 import {
   RAIL_SHORTCUT_LIMIT,
   railItemIndexFromEvent,
@@ -176,8 +180,8 @@ const AppSidebar = (): ReactElement => {
   const { user } = useAuth();
   const currentUser = useSelf();
   const visibleNavigationItems = useVisibleNavigationItems();
-  const { toolbarPaths } = useToolbarItems();
-  const { pinnedApps } = usePinnedArtifactApps();
+  const toolbarIds = toolbarItemsStore.useItems();
+  const appSnapshots = useAppSnapshots();
   const missedCallCount = useMissedCallCount();
   const hasOngoingCall = useRailActiveCalls().length > 0;
   const unreadActivityCount = useUnreadActivitiesCount();
@@ -203,6 +207,8 @@ const AppSidebar = (): ReactElement => {
     if (pathname.startsWith('/chat/scheduled')) return '/chat/scheduled';
     if (pathname.startsWith('/migration/confluence')) return '/migration/confluence';
     if (pathname.startsWith('/migration/whatsapp')) return '/migration/whatsapp';
+    // One rail entry per app, so the active route has to carry the app id.
+    if (pathname.startsWith('/app/')) return `/app/${pathname.split('/')[2] ?? ''}`;
     return '/' + (pathname.split('/')[1] || '');
   };
 
@@ -303,15 +309,31 @@ const AppSidebar = (): ReactElement => {
     location.pathname.includes('threadId') ||
     location.hash.includes('threadId');
 
-  // Split the visible items into the toolbar (rendered in the rail) and the
-  // "More" overflow menu, based on the user's customized toolbar selection.
-  const toolbarItems = useMemo(
-    () => visibleNavigationItems.filter(item => toolbarPaths.has(item.path)),
-    [visibleNavigationItems, toolbarPaths],
-  );
+  // The rail in the user's order: nav items and artifact apps interleaved as
+  // the toolbar list says. Ids that no longer resolve — a path the user lost
+  // permission to, an app whose snapshot is gone — are skipped, not rendered.
+  const railEntries = useMemo((): RailEntry[] => {
+    const byPath = new Map(visibleNavigationItems.map(item => [item.path, item]));
+    const entries: RailEntry[] = [];
+    for (const id of toolbarIds) {
+      const appId = appIdOf(id);
+      if (appId) {
+        const snapshot = appSnapshots.get(appId);
+        if (snapshot) {
+          entries.push({ kind: 'app', appId, title: snapshot.title, icon: snapshot.icon });
+        }
+        continue;
+      }
+      const item = byPath.get(id);
+      if (item) entries.push({ kind: 'nav', item });
+    }
+    return entries;
+  }, [visibleNavigationItems, toolbarIds, appSnapshots]);
+  // Everything permitted but not in the rail lives under "More". Apps are
+  // never there: an app is either in the rail or not on the sidebar at all.
   const moreItems = useMemo(
-    () => visibleNavigationItems.filter(item => !toolbarPaths.has(item.path)),
-    [visibleNavigationItems, toolbarPaths],
+    () => visibleNavigationItems.filter(item => !toolbarIds.includes(item.path)),
+    [visibleNavigationItems, toolbarIds],
   );
   const isMoreActive = moreItems.some(item => item.path === activeRoute);
 
@@ -340,10 +362,15 @@ const AppSidebar = (): ReactElement => {
   useShortcutById(
     'global.goToRailItem',
     event => {
-      const item = toolbarItems[railItemIndexFromEvent(event)];
-      if (!item) return;
-      handleNavigationClick(item.label);
-      void navigate(prefixWs(item.path));
+      const entry = railEntries[railItemIndexFromEvent(event)];
+      if (!entry) return;
+      if (entry.kind === 'app') {
+        handleNavigationClick(entry.title);
+        void navigate(prefixWs(`/app/${entry.appId}`));
+        return;
+      }
+      handleNavigationClick(entry.item.label);
+      void navigate(prefixWs(entry.item.path));
     },
     { enabled: railShortcuts && !isSupportContext },
   );
@@ -394,7 +421,7 @@ const AppSidebar = (): ReactElement => {
       {/* Top spacer aligns with the header strip / macOS traffic lights; make it a
           drag region so the window can be moved by its top-left corner in Electron. */}
       <div className='w-full h-[52px] shrink-0' style={APP_DRAG_STYLE} />
-      <div className='flex-1 min-h-0 p-3 flex flex-col items-center justify-between border-t border-r border-sidebar-border-muted'>
+      <div className='app-sidenav-frame flex-1 min-h-0 p-3 flex flex-col items-center justify-between border-t border-r border-sidebar-border-muted'>
         <WorkspaceSwitcher />
         <div className='flex-1 mt-5 space-y-8 overflow-y-auto scrollbar-none min-h-0 pr-2 -mr-2'>
           {isSupportContext ? (
@@ -407,9 +434,52 @@ const AppSidebar = (): ReactElement => {
           ) : (
             <nav>
               <ul className='relative flex flex-col gap-4'>
-                {toolbarItems.map((item, index) => {
+                {railEntries.map((entry, index) => {
                   const shortcutIndex =
                     railShortcuts && index < RAIL_SHORTCUT_LIMIT ? index + 1 : null;
+
+                  if (entry.kind === 'app') {
+                    const path = `/app/${entry.appId}`;
+                    const isAppActive = activeRoute === path;
+                    const initial = entry.title.trim().charAt(0).toUpperCase() || '?';
+                    const appTooltip = shortcutIndex ? (
+                      <span className='flex items-center gap-2'>
+                        {entry.title}
+                        <ShortcutHint keys={`mod+${shortcutIndex}`} />
+                      </span>
+                    ) : (
+                      entry.title
+                    );
+                    return (
+                      <li key={`app:${entry.appId}`} className='relative'>
+                        <Tooltip content={appTooltip} side='right' delayDuration={0}>
+                          <Link
+                            to={prefixWs(path)}
+                            onClick={() => handleNavigationClick(entry.title)}
+                            aria-label={entry.title}
+                            data-testid={`nav-artifact-app-${entry.appId}`}
+                            data-track-category='App_Sidebar'
+                            data-track-name='Sidebar_Pinned_App'
+                            data-track-metadata={JSON.stringify({ appId: entry.appId })}
+                            className={cn(
+                              'relative size-8 flex items-center justify-center rounded-lg cursor-pointer border border-transparent transition-colors text-[11px] font-semibold',
+                              isAppActive
+                                ? 'bg-sidebar-accent border-sidebar-border text-sidebar-accent-foreground'
+                                : 'bg-transparent text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+                            )}
+                          >
+                            {entry.icon ? (
+                              <AppIcon name={entry.icon} size={16} aria-hidden='true' />
+                            ) : (
+                              initial
+                            )}
+                          </Link>
+                        </Tooltip>
+                      </li>
+                    );
+                  }
+
+                  const { item } = entry;
                   const isActive = activeRoute === item.path;
                   const showMissedCallBadge = item.path === '/calls' && missedCallCount > 0;
                   const showOngoingCallDot =
@@ -506,41 +576,6 @@ const AppSidebar = (): ReactElement => {
                           trigger={navLink}
                         />
                       )}
-                    </li>
-                  );
-                })}
-
-                {/* Pinned artifact apps — user-generated apps promoted to the
-                    rail from the AI Library. Stored per-device in localStorage. */}
-                {pinnedApps.map(app => {
-                  const path = `/ai/library/app/${app.id}`;
-                  const isActive = activeRoute === path;
-                  const initial = app.title.trim().charAt(0).toUpperCase() || '?';
-                  return (
-                    <li key={app.id} className='relative'>
-                      <Tooltip content={app.title} side='right' delayDuration={0}>
-                        <Link
-                          to={prefixWs(path)}
-                          onClick={() => handleNavigationClick(app.title)}
-                          aria-label={app.title}
-                          data-testid={`nav-artifact-app-${app.id}`}
-                          data-track-category='App_Sidebar'
-                          data-track-name='Sidebar_Pinned_App'
-                          data-track-metadata={JSON.stringify({ appId: app.id })}
-                          className={cn(
-                            'relative size-8 flex items-center justify-center rounded-lg cursor-pointer border border-transparent transition-colors text-[11px] font-semibold',
-                            isActive
-                              ? 'bg-sidebar-accent border-sidebar-border text-sidebar-accent-foreground'
-                              : 'bg-transparent text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
-                          )}
-                        >
-                          {app.icon ? (
-                            <AppIcon name={app.icon} size={16} aria-hidden='true' />
-                          ) : (
-                            initial
-                          )}
-                        </Link>
-                      </Tooltip>
                     </li>
                   );
                 })}

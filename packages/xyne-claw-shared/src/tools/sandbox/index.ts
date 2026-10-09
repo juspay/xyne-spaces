@@ -18,7 +18,7 @@ export {
   cleanupSdlcSandboxCredentialsForContext,
   buildSandboxStoreKey,
   sandboxConversationIdFromMeta,
-  resolveDynamicSdlcRepositoryConfig,
+  sdlcRepositoryAccess,
   type RepoSetupConfig,
   type SetupStep,
   type HealthCheck,

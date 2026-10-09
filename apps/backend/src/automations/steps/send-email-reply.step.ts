@@ -8,6 +8,11 @@ import { emailService } from '@/services/emailService';
 import { repositories } from '@/database/repositories';
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
+import { ChannelExternalSourceResolver } from '@/services/channelExternalSourceResolver';
+import { ExternalSourcePlatform } from '@/integrations/core/types';
+import type { OutgoingAttachment } from '@/integrations/core/baseMailReplySender';
+import { appendReplyQuote } from '@/utils/replyQuote';
+import { reattachTrailImages } from '@/utils/reattachTrailImages';
 
 const SendEmailReplyConfigSchema = z.object({
   conversationId: variableRef(z.string().min(1)),
@@ -57,12 +62,32 @@ export class SendEmailReplyStep extends BaseActionStep<
     const type = config.replyAll === true ? 'REPLY_ALL' : 'REPLY';
     const prisma = DatabaseClient.getInstance();
 
+    // Gmail needs the trail built client-side; Graph's createReply quotes natively.
+    let replyBody = body;
+    let fileAttachments: OutgoingAttachment[] = [];
+    const conversation = await repositories.conversations.findById(conversationId);
+    const source = conversation
+      ? await new ChannelExternalSourceResolver().resolveForChannel(conversation.channelId)
+      : null;
+    if (source?.sourceType === ExternalSourcePlatform.GOOGLE) {
+      const emails = await repositories.emails.findByConversationId(conversationId); // newest first
+      if (emails[0]) {
+        replyBody = appendReplyQuote(body, emails[0]);
+        fileAttachments = await reattachTrailImages({
+          body: replyBody,
+          excludeCids: [],
+          priorAttachments: await repositories.messageAttachments.findByEmailIds(emails.map(e => e.id)),
+        });
+      }
+    }
+
     const result = await emailService.sendReplyOnConversation({
       conversationId,
-      body,
+      body: replyBody,
       type,
       cc: config.cc as string[] | undefined,
       bcc: config.bcc as string[] | undefined,
+      ...(fileAttachments.length > 0 && { fileAttachments }),
     });
 
     logger.info(

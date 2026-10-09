@@ -1,0 +1,14 @@
+apiVersion: v2
+name: xyne-common
+description: Library chart with the shared templates used by every Xyne Spaces service chart
+type: library
+version: 0.1.0
+keywords:
+  - xyne
+  - library
+home: https://github.com/juspay/xyne-spaces
+sources:
+  - https://github.com/juspay/xyne-spaces
+maintainers:
+  - name: xyne-spaces
+    url: https://github.com/juspay/xyne-spaces

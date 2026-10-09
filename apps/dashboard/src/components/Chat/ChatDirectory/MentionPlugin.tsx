@@ -66,11 +66,13 @@ function normalizePrefix(trigger: string): ChipPrefix | null {
 }
 
 function buildMentionData(
-  item: { id: string; name: string; email?: string },
+  item: { id: string; name: string; email?: string; alias?: string | null },
   type: ChipType,
   trigger: string,
 ): ChipData {
-  const mentionData: ChipData = { id: item.id, name: item.name, type };
+  // A user-group's chip reads its `@`-handle (alias) like the compose box; other kinds have
+  // no alias and fall back to their name.
+  const mentionData: ChipData = { id: item.id, name: item.alias ?? item.name, type };
   const prefix = normalizePrefix(trigger);
   if (prefix) mentionData.prefix = prefix;
   if (item.email) mentionData.email = item.email;
@@ -104,6 +106,16 @@ interface MentionPluginProps {
   availableDates?: Array<{ id: string; name: string }>;
   availableBoards?: Array<{ id: string; name: string }>;
   availableMentionTargets?: Array<{ id: string; name: string; type: ChipType }>;
+  // The bare `@` typeahead's flat list — people interleaved with user-groups, pre-ordered by
+  // the palette. Each item's optional `type` tells `insertMention` which chip to land (a
+  // user vs a `groupMentions` group chip). When absent, USER mode uses `availableUsers`.
+  availableUserMentionItems?: Array<{
+    id: string;
+    name: string;
+    email?: string;
+    type?: ChipType;
+    alias?: string | null;
+  }>;
   onMentionSelect?: (mention: ChipData) => void;
   mentionSearchType?: ChipType | null;
   selectedMentionIndex?: number;
@@ -140,6 +152,7 @@ export function MentionPlugin({
   availableDates = [],
   availableBoards = [],
   availableMentionTargets = [],
+  availableUserMentionItems = [],
   onMentionSelect,
   mentionSearchType,
   selectedMentionIndex = 0,
@@ -249,7 +262,13 @@ export function MentionPlugin({
 
   // Insert mention
   const insertMention = useCallback(
-    (item: { id: string; name: string; email?: string; type?: ChipType }) => {
+    (item: {
+      id: string;
+      name: string;
+      email?: string;
+      type?: ChipType;
+      alias?: string | null;
+    }) => {
       // Set flag to prevent update listener from interfering
       isInsertingMention.current = true;
 
@@ -356,7 +375,8 @@ export function MentionPlugin({
       // USER or CHANNEL, so keying off it would re-open the people/channel typeahead.
       if (wasMentionsTrigger && onMentionsSearch) {
         onMentionsSearch('');
-      } else if (type === ChipType.USER && onUserSearch) {
+      } else if ((type === ChipType.USER || type === ChipType.USER_GROUP) && onUserSearch) {
+        // A user-group is picked from the `@` (user) typeahead, so clearing it closes that list.
         onUserSearch('');
       } else if (type === ChipType.CHANNEL && onChannelSearch) {
         onChannelSearch('');
@@ -408,8 +428,24 @@ export function MentionPlugin({
     // Up/Down/Tab were never registered at all. Enter still worked, because the palette
     // handles that one itself (acceptHighlightedMention), which is what made this look
     // like a navigation-only bug.
-    const itemsByType: Partial<Record<ChipType, ReadonlyArray<{ id: string; name: string }>>> = {
-      [ChipType.USER]: availableUsers,
+    // The bare `@` typeahead is one flat list of people + user-groups, pre-interleaved by the
+    // palette. Each item may carry its own `type` so `insertMention` lands the right chip
+    // (a user vs a `groupMentions` chip); items without a type default to the trigger's type.
+    const itemsByType: Partial<
+      Record<
+        ChipType,
+        ReadonlyArray<{
+          id: string;
+          name: string;
+          email?: string;
+          type?: ChipType;
+          alias?: string | null;
+        }>
+      >
+    > = {
+      [ChipType.USER]: availableUserMentionItems.length
+        ? availableUserMentionItems
+        : availableUsers,
       [ChipType.CHANNEL]: availableChannels,
       [ChipType.PRIORITY]: availablePriorities,
       [ChipType.DATE]: availableDates,
@@ -469,11 +505,9 @@ export function MentionPlugin({
           event?.stopPropagation();
           const item = insertableItems[selectedMentionIndex];
           if (item) {
-            const userItem =
-              mentionSearchType === ChipType.USER
-                ? (item as { id: string; name: string; email?: string })
-                : (item as { id: string; name: string });
-            insertMention(userItem);
+            // The item carries its own `type` (user vs user-group in the `@` list); insertMention
+            // routes on it, falling back to the trigger's type when absent.
+            insertMention(item);
           }
           return true;
         }
@@ -495,11 +529,9 @@ export function MentionPlugin({
           event?.preventDefault();
           const item = insertableItems[selectedMentionIndex];
           if (item) {
-            const userItem =
-              mentionSearchType === ChipType.USER
-                ? (item as { id: string; name: string; email?: string })
-                : (item as { id: string; name: string });
-            insertMention(userItem);
+            // The item carries its own `type` (user vs user-group in the `@` list); insertMention
+            // routes on it, falling back to the trigger's type when absent.
+            insertMention(item);
           }
           return true;
         }
@@ -547,6 +579,7 @@ export function MentionPlugin({
     editor,
     mentionSearchType,
     availableUsers,
+    availableUserMentionItems,
     availableChannels,
     availablePriorities,
     availableDates,

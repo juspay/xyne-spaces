@@ -22,10 +22,13 @@ import { callRecordingService } from '@/services/callRecordingService';
 import { callLabelService } from '@/services/callLabelService';
 import { TagMethod } from '@xyne/shared';
 import { callDocumentService } from '@/services/callDocumentService';
+import { callNotesCanvasService } from '@/services/callNotesCanvasService';
+import { callSubject } from '@/utils/callTypeUtils';
 import { logDetailedSummaryFailed } from '@/services/detailedSummaryFailureLog';
 import { RECORDING_TITLE_PROMPT } from '@/services/recordingSummaryTemplates';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
+import { lockMessageContentAndMetadata } from '@/bypassAcl/rowLockServices';
 
 const SPEAKER_IDENTIFICATION_CAC_KEY = 'speaker_identification_config';
 
@@ -1411,10 +1414,10 @@ export class TranscriptService {
   private async postNotesCanvasReplyIfPresent(conversationId: string, callId: string): Promise<void> {
     try {
       const call = await repositories.calls.findByExternalId(callId);
-      const notesCanvasId = (call?.metadata as Record<string, unknown> | null)
-        ?.notesCanvasId;
+      // Recurring series keep one shared canvas on the series, not on each occurrence.
+      const notesCanvasId = call ? await callNotesCanvasService.resolveNotesCanvasId(call) : null;
 
-      if (typeof notesCanvasId !== 'string' || !notesCanvasId) {
+      if (!notesCanvasId) {
         return;
       }
 
@@ -1436,6 +1439,7 @@ export class TranscriptService {
         callId,
         getCanvasUrl(notesCanvasId),
         channel.workspaceId,
+        callSubject(call),
       );
     } catch (notesError) {
       logger.warn(`[postNotesCanvasReplyIfPresent] Failed to post notes canvas for callId: ${callId}`, notesError);
@@ -1778,9 +1782,7 @@ export class TranscriptService {
           // Serialize with first-chunk Canvas URL attachment: both merge the
           // call-message metadata, so neither can discard the other's fields.
           await db.$transaction(async (tx) => {
-            const [message] = await tx.$queryRaw<Array<{ content: string; metadata: unknown }>>`
-              SELECT "content", "metadata" FROM "messages" WHERE "messageId" = ${messageId} FOR UPDATE
-            `;
+            const message = await lockMessageContentAndMetadata(tx, messageId);
             if (!message) {
               logger.warn(`Call message ${messageId} not found for title update`);
               return;

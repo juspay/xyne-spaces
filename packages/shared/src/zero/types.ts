@@ -120,6 +120,7 @@ export enum AttachmentEntityType {
   WORKFLOW_STEPS = 'WORKFLOW_STEPS',
   DESK_REPORT = 'DESK_REPORT',
   RECORDING = 'RECORDING',
+  SDLC_HUB = 'SDLC_HUB',
 }
 
 // @ts-ignore TS1294
@@ -464,6 +465,13 @@ export enum InvitationResponse {
 }
 
 // @ts-ignore TS1294
+export enum RingStatus {
+  CALLING = 'CALLING',
+  RINGING = 'RINGING',
+  BUSY = 'BUSY',
+}
+
+// @ts-ignore TS1294
 export enum MeetingStatus {
   PENDING = 'PENDING',
   ACCEPTED = 'ACCEPTED',
@@ -575,6 +583,23 @@ export enum ACLAuditTargetType {
   RESOURCE = 'RESOURCE',
   RESOURCE_ACCESS = 'RESOURCE_ACCESS',
   USER_GROUP = 'USER_GROUP',
+}
+
+// Generalized audit trail types. The audit tables live in the non_zero schema —
+// written by the backend audit interceptors, read via REST (GET /api/audit-logs).
+// @ts-ignore TS1294
+export enum AuditAction {
+  CREATE = 'CREATE',
+  UPDATE = 'UPDATE',
+  DELETE = 'DELETE',
+}
+
+// Logical context an audit log belongs to (non_zero.audit_logs.entityType).
+// Determines which screen an audit row is displayed on (audit_logs.entityId).
+// @ts-ignore TS1294
+export enum AuditEntityType {
+  USER_GROUP_ASSIGNMENT_CONFIG = 'USER_GROUP_ASSIGNMENT_CONFIG',
+  BOARD = 'BOARD',
 }
 
 // @ts-ignore TS1294
@@ -796,7 +821,16 @@ export enum FormFieldType {
   MULTI_SELECT = 'MULTI_SELECT',
   USER = 'USER',
   DOC = 'DOC',
+  TICKET = 'TICKET',
 }
+
+/**
+ * Max scope fields on EmailChannelPreference.duplicateScopeConfig. Enforced in the
+ * desk settings picker, both Zero mutators, and the duplicate service's parser —
+ * a config over the limit is treated as malformed and detection falls back to
+ * project-wide, so the three must agree.
+ */
+export const MAX_DUPLICATE_SCOPE_FIELDS = 5;
 
 // @ts-ignore TS1294
 export enum FormContextType {
@@ -1071,6 +1105,7 @@ export enum AppPermissionType {
   READ = 'READ',
   WRITE = 'WRITE',
   DELETE = 'DELETE',
+  START = 'START',
 }
 
 // @ts-ignore TS1294
@@ -1206,6 +1241,7 @@ export const ShareableEntityType = {
   NOTE_TAKER: 'NOTE_TAKER',
   SUMMARY_TEMPLATE: 'SUMMARY_TEMPLATE',
   CALL: 'CALL',
+  WORKFLOW: 'WORKFLOW',
 } as const;
 
 export type ShareableEntityType = typeof ShareableEntityType[keyof typeof ShareableEntityType];

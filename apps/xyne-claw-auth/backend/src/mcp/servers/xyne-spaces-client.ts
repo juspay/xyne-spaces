@@ -67,7 +67,7 @@ export function resolveBaseUrl(override?: string): string {
 }
 
 function sanitizeForLog(value: unknown): string {
-  return String(value).replace(/[\r\n]+/g, " ");
+  return String(value).replace(/\n|\r/g, " ");
 }
 
 // Extract Spaces userId from the JWT token's `sub` claim (user tokens)

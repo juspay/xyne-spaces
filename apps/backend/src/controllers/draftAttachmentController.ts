@@ -225,6 +225,7 @@ export class DraftAttachmentController {
           const attachmentData = {
             url: fileUrl,
             size: file.size,
+            mimetype: uploadedFile.mimeType,
             originalFilename: uploadedFile.originalName,
             width: finalWidth,
             height: finalHeight,
@@ -242,7 +243,6 @@ export class DraftAttachmentController {
                 id: attachmentId,
                 entityId: finalDraftMessageId,
                 entityType: AttachmentEntityType.DRAFT,
-                mimetype: file.mimetype,
                 uploadedByUserId: userId,
                 createdBy: userId,
                 conversationId: conversationId || null,

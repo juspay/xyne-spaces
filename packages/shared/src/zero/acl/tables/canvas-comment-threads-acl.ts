@@ -11,7 +11,7 @@ export class CanvasCommentThreadsACL extends BaseQueryACL<'canvas_comment_thread
   canSelect<TReturn>(
     query: Query<'canvas_comment_threads', Schema, TReturn>,
   ): Query<'canvas_comment_threads', Schema, TReturn> {
-    return query.whereExists('canvas', canvas =>
+    return query.where('workspaceId', this.ctx.workspaceId).whereExists('canvas', canvas =>
       canvas.where(({ or, cmp, exists }) =>
         or(
           cmp('createdBy', this.ctx.userID),

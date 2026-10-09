@@ -22,6 +22,7 @@ import { cn } from '../../../utils/classNames';
 import { Button } from '../../ui/Button/Button';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import Textarea from '../../ui/Textarea/Textarea';
+import { Switch } from '../../ui/Switch';
 import { Tooltip } from '../../ui/Tooltip';
 import {
   type ActionStepConfig,
@@ -154,6 +155,7 @@ export function AutomationBuilder({
   initialConfig,
   initialName,
   initialDescription,
+  initialPriority,
   forkFromSeriesId,
   forkSourceAutomationId,
   onSaved,
@@ -170,6 +172,7 @@ export function AutomationBuilder({
   const [description, setDescription] = useState(
     automation?.description ?? initialDescription ?? '',
   );
+  const [priority, setPriority] = useState(automation?.priority ?? initialPriority ?? false);
   const [config, setConfig] = useState<AutomationConfig>(
     automation?.config ?? initialConfig ?? emptyConfig(),
   );
@@ -312,6 +315,7 @@ export function AutomationBuilder({
     mutationFn: async (payload: {
       name: string;
       description: string;
+      priority: boolean;
       config: AutomationConfig;
     }): Promise<SaveResult> => {
       logger.info(LogEvent.INFO, {
@@ -353,6 +357,7 @@ export function AutomationBuilder({
               description:
                 payload.description.trim().length > 0 ? payload.description.trim() : null,
               createdById: me?.id ?? '',
+              ...(payload.priority ? { priority: true } : {}),
             }),
             configJson: JSON.stringify(payload.config),
             eventType,
@@ -368,6 +373,7 @@ export function AutomationBuilder({
               description:
                 payload.description.trim().length > 0 ? payload.description.trim() : null,
               createdById: me?.id ?? '',
+              ...(payload.priority ? { priority: true } : {}),
             }),
             configJson: JSON.stringify(payload.config),
             eventType,
@@ -382,6 +388,7 @@ export function AutomationBuilder({
           id: targetId,
           name: payload.name,
           description: payload.description,
+          priority: payload.priority,
           status: AutomationStatusValues.DRAFT as SaveResult['automation']['status'],
           config: payload.config,
           createdById: me?.id ?? '',
@@ -772,8 +779,8 @@ export function AutomationBuilder({
       toast.error(nameError);
       return;
     }
-    saveMutation.mutate({ name: trimmedName, description, config });
-  }, [config, description, nameError, saveMutation, trimmedName]);
+    saveMutation.mutate({ name: trimmedName, description, priority, config });
+  }, [config, description, priority, nameError, saveMutation, trimmedName]);
 
   const handleActivate = useCallback((): void => {
     if (!savedId) {
@@ -846,6 +853,11 @@ export function AutomationBuilder({
               {STATUS_LABEL[savedStatus] ?? savedStatus}
             </span>
           )}
+          {!editMode && priority && (
+            <span className='rounded-full border border-violet-500/30 bg-violet-500/10 px-2 py-0.5 text-[11px] font-medium text-violet-700 dark:border-violet-500/40 dark:text-violet-400'>
+              Priority
+            </span>
+          )}
           {!editMode && !readOnlyPreview && versionPosition && (
             <Tooltip
               content={
@@ -898,6 +910,7 @@ export function AutomationBuilder({
                   if (automation) {
                     setName(automation.name);
                     setDescription(automation.description ?? '');
+                    setPriority(automation.priority ?? false);
                     setConfig(automation.config);
                     setErrorMessage(null);
                     setValidation(null);
@@ -1122,6 +1135,19 @@ export function AutomationBuilder({
             readOnly={!editMode}
             className='text-sm text-muted-foreground'
             multiline
+          />
+        </div>
+        {/* Always shown, but greyed out unless you are editing — so an approver can
+            see whether priority is on before they approve it. */}
+        <div className='pl-11 pt-2'>
+          <Switch
+            id={`automation-priority-${savedId ?? 'new'}`}
+            checked={priority}
+            onCheckedChange={setPriority}
+            disabled={!editMode}
+            label='Priority — runs are queued ahead of normal ones'
+            data-track-category='automation-builder'
+            data-track-name='toggle-priority'
           />
         </div>
       </div>

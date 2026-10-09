@@ -1,0 +1,186 @@
+name: Sync Chart Version
+
+on:
+  workflow_call:
+    inputs:
+      version_tag:
+        type: string
+        required: true
+      check_images:
+        type: boolean
+        default: true
+  workflow_dispatch:
+    inputs:
+      version_tag:
+        description: App version to stamp on the charts, e.g. 1.349.0
+        type: string
+        required: true
+      check_images:
+        description: Require ghcr.io images for this version to exist (off for internal GCR builds)
+        type: boolean
+        default: true
+  repository_dispatch:
+    types:
+      - sync-chart-version
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: sync-chart-version
+  cancel-in-progress: false
+
+env:
+  DEPLOYMENTS_BRANCH: deployments
+  TAG_PREFIX: chart-
+
+jobs:
+  sync:
+    name: Stamp charts and tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.CHART_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Restrict to allowed publishers
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          ALLOWED: ${{ vars.IMAGE_BUILDERS }}
+          ACTOR: ${{ github.actor }}
+        run: bash ci/scripts/authorize-actor.sh
+
+      - name: Resolve version and tag
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version_tag }}
+          PAYLOAD_VERSION: ${{ github.event.client_payload.version_tag }}
+          INPUT_CHECK: ${{ inputs.check_images }}
+          PAYLOAD_CHECK: ${{ github.event.client_payload.check_images }}
+        run: |
+          VERSION="${INPUT_VERSION:-${PAYLOAD_VERSION}}"
+          VERSION="${VERSION#v}"
+          if [ -z "${VERSION}" ]; then
+            echo "::error::version_tag was not provided"
+            exit 1
+          fi
+          TAG="${TAG_PREFIX}${VERSION}"
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null; then
+            echo "::error::Tag '${TAG}' already exists on the remote"
+            exit 1
+          fi
+          CHECK="${INPUT_CHECK:-${PAYLOAD_CHECK:-true}}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "check_images=${CHECK}" >> "$GITHUB_OUTPUT"
+
+      - name: Check the images exist
+        if: steps.version.outputs.check_images == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          OWNER: ${{ github.repository_owner }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "${GH_TOKEN}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          owner_lc="$(printf '%s' "${OWNER}" | tr '[:upper:]' '[:lower:]')"
+          missing=0
+          for image in $(jq -r '.[].image' ci/images.json); do
+            if docker manifest inspect "ghcr.io/${owner_lc}/${image}:${VERSION}" >/dev/null 2>&1; then
+              echo "found   ghcr.io/${owner_lc}/${image}:${VERSION}"
+            else
+              echo "::error::missing ghcr.io/${owner_lc}/${image}:${VERSION}"
+              missing=1
+            fi
+          done
+          [ "${missing}" -eq 0 ] || { echo "Run Publish Images for ${VERSION} first."; exit 1; }
+
+      - name: Configure Git
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+      - name: Switch to the deployments branch and merge main
+        run: |
+          git fetch origin main
+          if git ls-remote --exit-code --heads origin "${DEPLOYMENTS_BRANCH}" >/dev/null; then
+            git fetch origin "${DEPLOYMENTS_BRANCH}"
+            git checkout -B "${DEPLOYMENTS_BRANCH}" "origin/${DEPLOYMENTS_BRANCH}"
+            git merge origin/main -X theirs --no-edit
+          else
+            echo "Creating ${DEPLOYMENTS_BRANCH} from main"
+            git checkout -B "${DEPLOYMENTS_BRANCH}" origin/main
+          fi
+
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+        with:
+          version: v3.16.2
+
+      - name: Stamp chart versions
+        run: bash ci/scripts/bump-chart.sh "${{ steps.version.outputs.version }}" origin/main
+
+      - name: Vendor chart dependencies
+        run: |
+          for chart in helm-charts/charts/*/; do
+            name="$(basename "${chart}")"
+            if [ "${name}" = "xyne-common" ] || [ "${name}" = "xyne-spaces" ]; then
+              continue
+            fi
+            helm dependency update "${chart}"
+          done
+          if [ -d helm-charts/charts/xyne-spaces ]; then
+            helm dependency update helm-charts/charts/xyne-spaces
+          fi
+
+      - name: Lint
+        run: |
+          for chart in helm-charts/charts/*/; do
+            [ "$(basename "${chart}")" = "xyne-common" ] && continue
+            helm lint "${chart}"
+          done
+
+      - name: Commit, tag and push
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git add helm-charts
+          git add -f helm-charts/charts/*/charts helm-charts/charts/*/Chart.lock
+          if git diff --cached --quiet; then
+            echo "Charts already at ${VERSION}; tagging the merge commit"
+          else
+            git commit -m "chore(charts): sync charts to ${VERSION} [skip ci]"
+          fi
+          git tag "${TAG}"
+          git push origin "HEAD:${DEPLOYMENTS_BRANCH}" "${TAG}"
+
+      - name: Push charts to GHCR (OCI)
+        env:
+          OWNER: ${{ github.repository_owner }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          owner_lc="$(printf '%s' "${OWNER}" | tr '[:upper:]' '[:lower:]')"
+          echo "${GH_TOKEN}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+          mkdir -p dist
+          for chart in helm-charts/charts/*/; do
+            helm package "${chart}" -d dist
+          done
+          for pkg in dist/*.tgz; do
+            helm push "${pkg}" "oci://ghcr.io/${owner_lc}/charts"
+          done
+
+      - name: Summary
+        run: |
+          {
+            echo "### Charts synced to ${{ steps.version.outputs.version }}"
+            echo ""
+            echo "- Branch: \`${DEPLOYMENTS_BRANCH}\`"
+            echo "- Tag: \`${{ steps.version.outputs.tag }}\`"
+            echo "- OCI: \`oci://ghcr.io/${{ github.repository_owner }}/charts/<chart>\`"
+          } >> "$GITHUB_STEP_SUMMARY"

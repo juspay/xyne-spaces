@@ -14,6 +14,7 @@ WORKDIR /repo
 # Manifests + lockfile first so the install layer caches independently of source.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY packages/shared/package.json            packages/shared/
+COPY packages/logger/package.json            packages/logger/
 COPY packages/icons/package.json             packages/icons/
 COPY apps/dashboard/package.json             apps/dashboard/
 COPY apps/dashboard-external/package.json    apps/dashboard-external/
@@ -28,7 +29,8 @@ RUN pnpm install --frozen-lockfile --prod=false --ignore-scripts \
       --filter xyne-spaces-dashboard-external... --filter xyne-spaces-dashboard...
 
 COPY packages/shared packages/shared
-RUN pnpm --filter @xyne/shared run build
+COPY packages/logger packages/logger
+RUN pnpm --filter @xyne/logger --filter @xyne/shared run build
 
 # dashboard/src imports @xyne/icons (workspace dep of dashboard), consumed from dist/
 COPY packages/icons packages/icons

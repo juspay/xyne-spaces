@@ -1,7 +1,7 @@
 import type { Prisma, SummaryTemplate } from '@prisma/client';
+import { SUMMARY_TEMPLATE_SELECTION_MAX_TRANSCRIPT_CHARS } from '@xyne/shared';
 import { getEnabledSummaryTemplateSections } from './summaryTemplateSections';
 
-const MAX_TRANSCRIPT_CHARS = 60_000;
 const MAX_STRUCTURE_CHARS = 2_000;
 const MAX_SYSTEM_PROMPT_CHARS = 1_000;
 
@@ -83,7 +83,7 @@ TEMPLATE CANDIDATES:
 ${JSON.stringify(candidates, null, 2)}
 
 MEETING TRANSCRIPT:
-${truncate(transcript, MAX_TRANSCRIPT_CHARS)}`;
+${truncate(transcript, SUMMARY_TEMPLATE_SELECTION_MAX_TRANSCRIPT_CHARS)}`;
 }
 
 export function parseSelectedSummaryTemplate(

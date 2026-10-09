@@ -61,6 +61,7 @@ model User {
   twinBehaviorSignals                  TwinBehaviorSignal[]
   localHarnessDevices                  LocalHarnessDevice[]
   localHarnessRuns                     LocalHarnessRun[]
+  localHarnessSessions                 LocalHarnessSession[]
   localHarnessDefaultProvider          String?
 
   /// Daily Brief opt-in (morning digest). When true, the leader-locked daily
@@ -99,13 +100,18 @@ model User {
 /// agent mid-chat. userId NULL = shared across all users of that agent.
 model AgentMemoryFile {
   id           String   @id @default(cuid())
+  /// Tenant that owns this file. Inherited from `userId` for per-user files and
+  /// stated outright for shared ones: agent slugs are only unique inside an org
+  /// (see Agent.@@unique([orgId, slug])), so without this two tenants' agents
+  /// named alike share one row and each overwrites the other.
+  orgId        String
   /// Which agent these files belong to (agent slug, e.g. "digital-twin").
   agentSlug    String
   /// Owner user for per-user agents (the twin). NULL = shared across all users
   /// of this agent (regular agent knowledge files).
   userId       String?
   user         User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  /// Stable name / key, unique per (agent, user). Ends in `.md` by convention.
+  /// Stable name / key, unique per (org, agent, user). Ends in `.md` by convention.
   name         String
   /// Verbatim document content (≤ 20k chars, enforced in the app layer).
   content      String   @default("")
@@ -121,7 +127,7 @@ model AgentMemoryFile {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  @@unique([agentSlug, userId, name])
+  @@unique([orgId, agentSlug, userId, name])
   @@index([agentSlug, userId, loadInPrompt])
   @@map("agent_memory_files")
 }
@@ -296,9 +302,48 @@ model ConnectedSurface {
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
+  channelAuthState ChannelAuthState[]
+
   @@unique([orgId, surfaceId, surfaceTenantId])
   @@index([orgId])
   @@map("connected_surfaces")
+}
+
+/// Encrypted key/value state a messaging-channel plugin must persist for one
+/// account (a ConnectedSurface row): WhatsApp Web creds + Signal keys, a
+/// Telegram bot token, ... `category`/`keyId` are plugin-defined (Baileys uses
+/// its key-store types as categories; single-valued entries use keyId ""). The
+/// value is AES-GCM `ciphertext:iv:authTag` via encryptSurfaceSecret — never
+/// plaintext. Rows die with the account (Cascade) and on logout.
+
+/// A pairing request from a sender a messaging-channel account does not know
+/// yet (dmPolicy "pairing"): the sender is handed a short code and an org
+/// admin (or the sender themself, once signed in to claw) links the code to a
+/// claw user, which creates the UserSurfaceIdentity row. One live request per
+/// (account, sender); codes expire after an hour.
+/// Everything needed to authenticate as one channel account: the Cloud API's
+/// tokens, and for Baileys the full Signal AuthenticationState — creds plus its
+/// pre-key/session/sender-key entries. Named for what it holds rather than
+/// "secrets", because most of it is protocol state that cannot be reissued,
+/// not a credential you could paste. One row per key so a write touches only
+/// that key: the Signal store rewrites these constantly, and it would
+/// otherwise share connected_surfaces.config with unlocked config merges.
+// workspace-check:ignore — tenant scope inherited via connectedSurfaceId -> ConnectedSurface.orgId (FK, onDelete: Cascade); never queried cross-tenant.
+model ChannelAuthState {
+  id                 String           @id @default(cuid())
+  connectedSurfaceId String
+  connectedSurface   ConnectedSurface @relation(fields: [connectedSurfaceId], references: [id], onDelete: Cascade)
+  /// Plugin-defined: "creds" | "pre-key" | "session" | "access-token" | ...
+  category           String
+  /// "" when the category holds a single value.
+  keyId              String           @default("")
+  encryptedValue     String
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  @@unique([connectedSurfaceId, category, keyId])
+  @@index([connectedSurfaceId])
+  @@map("channel_auth_state")
 }
 
 model UserSurfaceIdentity {
@@ -666,22 +711,22 @@ model DailyBriefActivity {
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  orgId  String
+  orgId String
 
   /// "view" | "regenerate" | "switch".
-  kind       String
+  kind           String
   /// Calendar bucket the activity happened on (IST), matching GeneratedContent.
-  dateBucket String
+  dateBucket     String
   /// How many times this user did this on this day.
-  count      Int      @default(1)
+  count          Int      @default(1)
   /// Regenerations that signal dissatisfaction — excludes retry_after_failure.
   /// A counter rather than an origin string: the row is unique per user/kind/day,
   /// so a single value would be last-write-wins across mixed origins.
-  rejectionCount Int  @default(0)
+  rejectionCount Int      @default(0)
   /// First occurrence on this day.
-  occurredAt DateTime @default(now())
+  occurredAt     DateTime @default(now())
   /// Most recent occurrence on this day.
-  lastSeenAt DateTime @default(now())
+  lastSeenAt     DateTime @default(now())
 
   @@unique([userId, kind, dateBucket])
   @@index([orgId])
@@ -807,49 +852,119 @@ model UserProviderCredentials {
 }
 
 model LocalHarnessDevice {
-  id         String   @id @default(cuid())
-  userId     String
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  orgId      String
-  deviceName String
-  platform   String
-  tokenHash  String   @unique
-  installations Json  @default("[]")
-  lastSeenAt DateTime?
-  revokedAt  DateTime?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  runs       LocalHarnessRun[]
+  id            String            @id @default(cuid())
+  userId        String
+  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orgId         String
+  deviceName    String
+  platform      String
+  tokenHash     String            @unique
+  installations Json              @default("[]")
+  lastSeenAt    DateTime?
+  revokedAt     DateTime?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  runs          LocalHarnessRun[]
+  surfaceCalls  SurfaceCall[]
+  focusedAt     DateTime?
+  appRoute      String?
 
   @@index([userId, revokedAt])
   @@map("local_harness_devices")
 }
 
+model ArtifactComment {
+  id             String   @id @default(cuid())
+  /// Tenant that owns this comment, inherited from the artifact it hangs off.
+  orgId          String
+  conversationId String
+  artifactId     String
+  userId         String
+  body           String
+  anchor         Json?
+  resolved       Boolean  @default(false)
+  byAgent        Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([artifactId, createdAt])
+  @@index([conversationId, createdAt])
+  @@index([orgId])
+  @@map("artifact_comments")
+}
+
+model SurfaceCall {
+  id        String             @id @default(cuid())
+  /// Tenant that owns this call, inherited from the run that placed it.
+  orgId     String
+  userId    String
+  deviceId  String
+  device    LocalHarnessDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  sessionId String?
+  toolName  String
+  args      Json               @default("{}")
+  status    String             @default("PENDING")
+  ok        Boolean?
+  content   String?
+  image     Json?
+  claimedAt DateTime?
+  expiresAt DateTime
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+
+  @@index([deviceId, status, createdAt])
+  @@index([userId, createdAt])
+  @@index([orgId])
+  @@map("surface_calls")
+}
+
 model LocalHarnessRun {
-  id            String   @id @default(cuid())
-  sessionId     String   @unique
-  userId        String
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  orgId         String
-  agentSlug     String
-  provider      String
-  model         String?
-  deviceId      String?
-  device        LocalHarnessDevice? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
-  status        String   @default("queued")
-  envelope      Json
-  progressUrl   String   @db.Text
-  callbackUrl   String   @db.Text
-  error         String?  @db.Text
-  claimedAt     DateTime?
-  finishedAt    DateTime?
-  expiresAt     DateTime
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id              String              @id @default(cuid())
+  sessionId       String              @unique
+  userId          String
+  user            User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orgId           String
+  agentSlug       String
+  provider        String
+  model           String?
+  deviceId        String?
+  device          LocalHarnessDevice? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  status          String              @default("queued")
+  envelope        Json
+  progressUrl     String              @db.Text
+  callbackUrl     String              @db.Text
+  error           String?             @db.Text
+  cliSessionId    String?
+  pendingAction   Json?
+  pendingActionId String?
+  claimedAt       DateTime?
+  finishedAt      DateTime?
+  expiresAt       DateTime
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
 
   @@index([userId, status, createdAt])
   @@index([status, expiresAt])
+  @@index([pendingActionId])
   @@map("local_harness_runs")
+}
+
+// workspace-check:ignore — tenant scope inherited via userId -> User (FK, onDelete: Cascade); rows are keyed by that user's conversation and never read cross-user.
+model LocalHarnessSession {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversationId String
+  provider       String
+  cliSessionId   String
+  storagePath    String?
+  sizeBytes      Int?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([conversationId, provider])
+  @@index([userId, updatedAt])
+  @@map("local_harness_sessions")
 }
 
 model UserSubagentConfig {
@@ -1110,8 +1225,18 @@ model AgentRun {
   /// runs ↔ assistant messages is ambiguous. Populated in the chat-callback.
   chatMessageId    String?
   orgId            String
+  /// Set when another run spawned this one through A2A `call-agent`: the
+  /// caller's sessionId. Null for a user-invoked run.
+  parentSessionId  String?
+  /// The caller's slug, denormalized so listing child runs needs no second
+  /// lookup per row.
+  parentAgentSlug  String?
+  /// The `call-agent` tool call that spawned this run, lining a child row up
+  /// with its row in the caller's trace.
+  parentToolCallId String?
 
   @@index([userId, status, startedAt])
+  @@index([parentSessionId])
   @@index([agentSlug, startedAt])
   @@index([provider, completedAt])
   @@index([chatMessageId])
@@ -1188,6 +1313,10 @@ model ChatMessage {
   /// above the message when a chat is reloaded. Null on assistant rows and on
   /// legacy rows written before this column existed.
   attachedContext Json?
+
+  pendingActions Json?
+
+  runProvider String?
 
   attachments ChatAttachment[]
   orgId       String
@@ -1322,22 +1451,22 @@ model ArtifactAppVersion {
 /// third value into a role column the client models as user|assistant. This is
 /// an event stream the thread merges in by time instead.
 model ArtifactAppRestore {
-  id          String @id @default(cuid())
+  id                String   @id @default(cuid())
   /// Denormalized tenant key, stamped from the parent app on insert — same
   /// discipline as ArtifactAppVersion.
-  workspaceId String
-  appId       String
+  workspaceId       String
+  appId             String
   /// The version head moved TO.
-  versionId     String
-  versionNumber Int
+  versionId         String
+  versionNumber     Int
   /// The version head moved FROM. Null only for an app that had no head yet,
   /// which is why this column — not the pointer — is the record of what was
   /// left behind.
   fromVersionId     String?
   fromVersionNumber Int?
   /// Who restored. Owner-only today; kept because Step 4 opens apps to a group.
-  userId    String
-  createdAt DateTime @default(now())
+  userId            String
+  createdAt         DateTime @default(now())
 
   app ArtifactApp @relation(fields: [appId], references: [id], onDelete: Cascade)
 
@@ -1511,6 +1640,12 @@ enum AgentAuditEvent {
   AGENT_DEMOTED
   AGENT_SHARED
   AGENT_UNSHARED
+  /// Ownership of an agent moved from one user to another (immediate, no
+  /// acceptance step). The new owner inherits the agent's stored provider
+  /// credentials and MCP connections (both keyed by agentId), so this event is
+  /// the only durable trace of who handed what to whom — keep actor, previous
+  /// owner and new owner in the metadata.
+  AGENT_OWNERSHIP_TRANSFERRED
   ROLE_GRANTED
   ROLE_REVOKED
   AGENT_CREATED
@@ -1949,18 +2084,18 @@ model ScheduledJobRun {
 // validation rejects names that collide with built-ins at create time so
 // the runtime resolver can simply prefer built-ins on lookup.
 model SubagentDefinition {
-  id               String          @id @default(cuid())
+  id               String                  @id @default(cuid())
   name             String
   description      String
   progressLabels   Json
-  systemPrompt     String          @db.Text
-  paramName        String          @default("question")
+  systemPrompt     String                  @db.Text
+  paramName        String                  @default("question")
   paramDescription String
   // Same JSON shape as Agent.config.tools — parsed by parseToolsConfig
   // in xyne-claw-shared. Defines which tools the subagent's child LLM
   // can call.
   tools            Json
-  enabled          Boolean         @default(true)
+  enabled          Boolean                 @default(true)
   /// Per-MCP-server instance pin. Companion to AgentMcpConnection.slug —
   /// lets the subagent restrict itself to ONE agent-pinned MCP instance
   /// per server type. Example:
@@ -1974,10 +2109,10 @@ model SubagentDefinition {
   /// route fills this with the requester's userId on create and uses it as
   /// the ACL anchor (owner + shares + admin can edit; everyone reads).
   createdByUserId  String?
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @updatedAt
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
   orgId            String
-  org              Organization    @relation(fields: [orgId], references: [id], onDelete: Restrict)
+  org              Organization            @relation(fields: [orgId], references: [id], onDelete: Restrict)
   skills           SubagentSkill[]
   shares           SubagentShare[]
   mcpConnections   SubagentMcpConnection[]
@@ -2611,6 +2746,34 @@ model ServiceRegistry {
   @@map("service_registry")
 }
 
+/// Pending self-service MCP-gateway registrations awaiting admin approval.
+/// A UI registration lands here as `pending`; on approval it is written to
+/// `service_registry` (which is therefore always "approved and live").
+/// Scoped by `tenantUniqueId` (the gateway tenant), like `service_registry` —
+/// this is platform gateway config, not spaces workspace/org data.
+// workspace-check:ignore
+model GatewayServiceRequest {
+  id                String    @id @default(uuid())
+  tenantUniqueId    String    @map("tenant_unique_id")
+  orgId             String?   @map("org_id")
+  serviceName       String    @map("service_name")
+  backendId         String    @map("backend_id")
+  backendUrl        String    @map("backend_url")
+  tokenEndpointUrl  String?   @map("token_endpoint_url")
+  xAuthHeaderName   String?   @map("x_auth_header_name")
+  tools             Json
+  status            String    @default("pending") // pending | approved | rejected
+  requestedByUserId String    @map("requested_by_user_id")
+  reviewedByUserId  String?   @map("reviewed_by_user_id")
+  reviewedAt        DateTime? @map("reviewed_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  @@index([tenantUniqueId, status])
+  @@index([requestedByUserId])
+  @@map("gateway_service_requests")
+}
+
 // Error-pipeline bucket taxonomy + routing rules (Grafana → Claw auto-fix).
 // The classifier in xyne-claw fetches these at runtime: marker regexes give
 // the deterministic fast-path, descriptions feed the LLM fallback's prompt,
@@ -2736,11 +2899,11 @@ model AgentAwakeningState {
   /// heartbeat later synthesises the whole period AND reads what the reflexes
   /// already did (requirement 7). Sharing one watermark would let a reflex
   /// consume events the heartbeat then never sees.
-  reflexNextCheckAt  DateTime?
-  reflexWatermarkAt  DateTime?
+  reflexNextCheckAt DateTime?
+  reflexWatermarkAt DateTime?
   /// Last time a reflex actually dispatched — enforces the minimum gap between
   /// reflex runs so a busy channel cannot fire one every check.
-  reflexLastRunAt    DateTime?
+  reflexLastRunAt   DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2797,4 +2960,37 @@ model AgentAwakeningRun {
   @@index([agentId, windowStartMs])
   @@index([orgId, startedAt])
   @@map("agent_awakening_runs")
+}
+
+model ConversationArtifact {
+  id             String  @id @default(cuid())
+  conversationId String
+  messageId      String?
+  runId          String?
+
+  kind String
+
+  refService String
+
+  refId String
+
+  url              String?
+  provider         String?
+  latestVersionRef String?
+  title            String
+
+  status String @default("ACTIVE")
+
+  pinned          Boolean @default(false)
+  createdByUserId String
+  orgId           String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([conversationId, kind, refId])
+  @@index([conversationId, createdAt])
+  @@index([refService, refId])
+  @@index([orgId])
+  @@map("conversation_artifacts")
 }

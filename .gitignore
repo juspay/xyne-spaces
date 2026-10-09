@@ -170,6 +170,7 @@ dist
 
 # Gatsby files
 .cache/
+.venv/
 
 # Storybook build outputs
 .out

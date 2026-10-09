@@ -18,8 +18,10 @@ WORKDIR /repo
 # Manifests + lockfile first so the install layer caches independently of source.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY packages/shared/package.json           packages/shared/
+COPY packages/logger/package.json           packages/logger/
 COPY packages/storage/package.json          packages/storage/
 COPY packages/framework/package.json        packages/framework/
+COPY packages/cache/package.json            packages/cache/
 COPY apps/backend/package.json              apps/backend/
 COPY apps/backend/eslint-rules/package.json apps/backend/eslint-rules/
 
@@ -35,12 +37,15 @@ RUN pnpm --filter xyne-spaces-backend add -O @napi-rs/canvas-linux-arm64-gnu || 
 RUN npm install -g @xyne/xyne-cli@latest || echo "xyne-cli installation failed, continuing..."
 
 COPY packages/shared    packages/shared
+COPY packages/logger    packages/logger
 COPY packages/storage   packages/storage
 COPY packages/framework packages/framework
+COPY packages/cache     packages/cache
 COPY apps/backend       apps/backend
+COPY scripts            scripts
 
 # backend consumes both from their built dist/
-RUN pnpm --filter @xyne/shared --filter @xyne/storage --filter agentic-framework run build
+RUN pnpm --filter @xyne/logger --filter @xyne/shared --filter @xyne/storage --filter agentic-framework --filter @xyne/cache run build
 
 # Cache-busting argument to ensure db:generate always runs
 ARG CACHEBUST=1

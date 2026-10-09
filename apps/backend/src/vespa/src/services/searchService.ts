@@ -103,6 +103,17 @@ interface SearchOptions {
   captureDebug?: (info: VespaSearchDebugInfo) => void;
   // Display name(s) of scoped mention chips, highlighted as exact phrases in results (not in YQL).
   mentionHighlights?: string[];
+  /**
+   * The query is text the user has not sent — a composer draft. It is kept out of
+   * the logs and the search analytics; the search itself is unchanged.
+   */
+  privateQuery?: boolean;
+  /**
+   * Search the query as plain text: words like "today" or "latest" stay search terms
+   * instead of turning into a time filter, and a query in double quotes is not an
+   * exact phrase. For prose, such as a draft, rather than a search someone typed.
+   */
+  literalQuery?: boolean;
 }
 
 export interface ILogger {
@@ -303,6 +314,8 @@ export class SearchService {
         mentionHighlights = [],
         workspaceId,
         captureDebug,
+        privateQuery = false,
+        literalQuery = false,
       } = options;
 
       // Derive workspaceId from userId when not explicitly provided
@@ -315,6 +328,7 @@ export class SearchService {
       // with no fuzzy/semantic broadening. Detect on the raw query, before any keyword stripping.
       const rawTrimmedQuery = query?.trim() ?? '';
       const isExactMatch =
+        !literalQuery &&
         rawTrimmedQuery.length >= 2 &&
         rawTrimmedQuery.startsWith('"') &&
         rawTrimmedQuery.endsWith('"') &&
@@ -322,7 +336,7 @@ export class SearchService {
 
       // Parse time keywords from query — skipped for exact match so a quoted word like
       // "yesterday" is searched literally instead of being consumed as a time filter.
-      const parsedQuery: ParsedTimeQuery = parseTimeKeywords(isExactMatch ? '' : query);
+      const parsedQuery: ParsedTimeQuery = parseTimeKeywords(isExactMatch || literalQuery ? '' : query);
       const searchQuery = isExactMatch
         ? rawTrimmedQuery.slice(1, -1).trim()
         : parsedQuery.cleanedQuery || query;
@@ -389,7 +403,7 @@ export class SearchService {
       // For mail's involvement rank terms (from/to hold email addresses)
       let personalizationUserEmail: string | undefined;
 
-      if (rankProfile === RankProfile.personalizedRank) {
+      if (rankProfile === RankProfile.personalizedRank || rankProfile === RankProfile.unifiedRank ) {
         try {
           const userDoc = await this.vespa.getDocument({docId:userId,schema:userSchema,namespace:config.namespace});
           channelWeights = userDoc?.fields?.channelWeights || {};
@@ -461,7 +475,7 @@ export class SearchService {
           // Exact match turns off the default searchrules.sr rewriting (stopword removal + ranking
           // boosts): stripping a word like "is"/"the" mid-query silently breaks phrase adjacency.
           ...(isExactMatch ? { "rules.off": true } : {}),
-          ...(rankProfile === RankProfile.personalizedRank && {
+          ...((rankProfile === RankProfile.personalizedRank || rankProfile === RankProfile.unifiedRank) && {
             "input.query(channel_personalization_weights)": channelWeights,
             "input.query(user_personalization_weights)": userWeights,
             "input.query(saturation_point)": 100.0,
@@ -501,7 +515,7 @@ export class SearchService {
         {}
       );
       const payload = buildPayload(false, useSemanticAnyway, enableWorkspaceFiltering ? effectiveWorkspaceId : undefined);
-      this.logger.info(`Payload: ${JSON.stringify(payload)}`);
+      this.logger.info(`Payload: ${privateQuery ? '(private query, not logged)' : JSON.stringify(payload)}`);
       if (captureDebug) {
         captureDebug({
           stage: "exact",
@@ -512,7 +526,7 @@ export class SearchService {
 
       const totalStartTime = Date.now();
       const exactStartTime = Date.now();
-      let response = await this.vespa.search<VespaSearchResponse>(payload);
+      let response = await this.vespa.search<VespaSearchResponse>(payload, { privateQuery });
       const exactDuration = Date.now() - exactStartTime;
 
        // Filter by nativerank if enabled
@@ -589,7 +603,9 @@ export class SearchService {
         response,
         async () => {
           const fuzzyPayload = buildPayload(true, useSemanticAnyway, enableWorkspaceFiltering ? effectiveWorkspaceId : undefined);
-          this.logger.info(`Fuzzy Search Payload: ${JSON.stringify(fuzzyPayload)}`);
+          this.logger.info(
+            `Fuzzy Search Payload: ${privateQuery ? '(private query, not logged)' : JSON.stringify(fuzzyPayload)}`
+          );
           if (captureDebug) {
             captureDebug({
               stage: "fuzzy-fallback",
@@ -597,7 +613,7 @@ export class SearchService {
               vespaParams: fuzzyPayload as Record<string, unknown>,
             });
           }
-          return this.vespa.search<VespaSearchResponse>(fuzzyPayload);
+          return this.vespa.search<VespaSearchResponse>(fuzzyPayload, { privateQuery });
         },
         
         {
@@ -682,7 +698,7 @@ export class SearchService {
         searchId: searchId || '',
         userId,
         apps: app.join(','),
-        searchQuery: searchQuery || '',
+        searchQuery: privateQuery ? '' : searchQuery || '',
         queryLength: searchQuery?.trim()?.split(/\s+/)?.filter(Boolean)?.length || 0,
         rankProfile,
         useSemanticAnyway,
@@ -699,7 +715,8 @@ export class SearchService {
       return response;
 
     } catch (error) {
-      this.logger.error(`Error in searchVespa with query "${query}": ${getErrorMessage(error)}`);
+      const loggedQuery = options.privateQuery ? '(private)' : `"${query}"`;
+      this.logger.error(`Error in searchVespa with query ${loggedQuery}: ${getErrorMessage(error)}`);
       throw error;
     }
   };

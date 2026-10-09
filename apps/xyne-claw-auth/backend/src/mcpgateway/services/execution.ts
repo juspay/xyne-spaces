@@ -24,7 +24,7 @@ function encodePathSegment(value: unknown): string {
 }
 
 function sanitizeForLog(value: unknown): string {
-  return String(value).replace(/[\r\n]+/g, " ");
+  return String(value).replace(/\n|\r/g, " ");
 }
 
 /**
@@ -236,7 +236,9 @@ export async function executeTool(
     });
 
     const fullUrl = `${selectedBackend.backendUrl}${pathWithParams}`;
-    log.info(`[execute] Calling service=${String(serviceName).replace(/[\r\n]+/g, " ")} tool=${String(toolName).replace(/[\r\n]+/g, " ")} method=${String(tool.method || "POST").replace(/[\r\n]+/g, " ")}`);
+    log.info(
+      `[execute] Calling service=${sanitizeForLog(serviceName)} tool=${sanitizeForLog(toolName)} method=${sanitizeForLog(tool.method || "POST")}`
+    );
 
     // Strip path params from body
     const requestArgEntries = new Map<string, unknown>();
@@ -256,7 +258,7 @@ export async function executeTool(
       "Content-Type": "application/json",
       [xAuthHeaderName]: authToken,
     };
-    log.info(`[execute] Forward request prepared service=${String(serviceName).replace(/[\r\n]+/g, " ")} tool=${String(toolName).replace(/[\r\n]+/g, " ")} method=${String(httpMethod).replace(/[\r\n]+/g, " ")}`);
+    log.info(`[execute] Forward request prepared service=${sanitizeForLog(serviceName)} tool=${sanitizeForLog(toolName)} method=${sanitizeForLog(httpMethod)}`);
 
     // Execute request
     let backendResponse: { status: number; data: unknown };
@@ -312,7 +314,7 @@ export async function executeTool(
     }
 
     const duration = Date.now() - startTime;
-    log.info(`[execute] SUCCESS service=${String(serviceName).replace(/[\r\n]+/g, " ")} tool=${String(toolName).replace(/[\r\n]+/g, " ")} backend=${String(selectedBackend.backendId).replace(/[\r\n]+/g, " ")} status=${backendResponse.status} duration=${duration}ms`);
+    log.info(`[execute] SUCCESS service=${sanitizeForLog(serviceName)} tool=${sanitizeForLog(toolName)} backend=${sanitizeForLog(selectedBackend.backendId)} status=${backendResponse.status} duration=${duration}ms`);
 
     return {
       success: true,

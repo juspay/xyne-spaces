@@ -62,6 +62,8 @@ import { useSearchMetrics } from '../../../hooks/useSearchMetrics';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import { useUser, useUsers } from '../../../hooks/useUsers';
+import { useUserGroups } from '../../../hooks/useUserGroup';
+import { makeMentionHighlightsBuilder } from '../../../search/mentionHighlights';
 import {
   getDMNames,
   isDMChannel,
@@ -76,6 +78,7 @@ import {
   VALID_DOC_TYPES,
   DOC_TYPE_TO_TAB,
 } from '../ChatDirectory/ChannelCommandMenu.types';
+import { saveCurrentSearchQuery, identityKeyFor } from '../ChatDirectory/RecentSearches';
 import { ChannelCategory } from '../ChatDirectory/ChatDirectory.types';
 import { Channel } from '@xyne/shared';
 import { resolveOrCreateDmChannelId } from '../../../utils/searchNavigation';
@@ -292,6 +295,18 @@ const SearchResults = (): ReactElement => {
     return result;
   }, [starredChannels, regularChannels, dmChannels, allChannelsForNav, currentUserId, usersById]);
 
+  // Reuse this component's existing usersById + allUserGroups (no re-subscription) to resolve
+  // each mention chip's display forms for result highlighting.
+  const allUserGroups = useUserGroups();
+  const userGroupsById = useMemo(
+    () => new Map(allUserGroups.map(group => [group.id, group])),
+    [allUserGroups],
+  );
+  const buildMentionHighlights = useMemo(
+    () => makeMentionHighlightsBuilder(usersById, userGroupsById),
+    [usersById, userGroupsById],
+  );
+
   // Use the exact same hook as the popup modal — no separate search infrastructure
   const {
     searchResults: backendResults,
@@ -305,6 +320,7 @@ const SearchResults = (): ReactElement => {
     setSelectedMentions,
     setIncludeBotMessages,
     setOnlyMyChannels,
+    setExcludeArchived,
     setExactMatch,
     setRankProfile,
     setStructuredFilters,
@@ -317,7 +333,12 @@ const SearchResults = (): ReactElement => {
     allChannels: allChannelsWithCategory,
     mentionSearchType: null,
     defaultOnlyMyChannels: filters.onlyMyChannels,
+    // The Desk and Tickets tabs hide archived tickets by default; the "Show archived" toggle
+    // turns exclusion off. Every other tab leaves archived untouched (flag stays false).
+    defaultExcludeArchived:
+      filters.docType === 'desk' || filters.docType === 'tickets' ? !filters.showArchived : false,
     groupByDocType: true,
+    buildMentionHighlights,
     // The URL follows the results: the hook hands back the query these were fetched for,
     // so the address bar is shareable without anyone pressing Enter.
     onSearchComplete: (_results, searchedQuery) => {
@@ -380,6 +401,15 @@ const SearchResults = (): ReactElement => {
     setOnlyMyChannels(filters.onlyMyChannels);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters.onlyMyChannels]);
+
+  // Sync archived scope → hook. The Desk and Tickets tabs hide archived (and their "Show
+  // archived" toggle opts back in); other tabs never exclude, matching pre-existing behavior.
+  useEffect(() => {
+    setExcludeArchived(
+      filters.docType === 'desk' || filters.docType === 'tickets' ? !filters.showArchived : false,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters.docType, filters.showArchived]);
 
   // Sync exact-match → hook; the hook quotes the query when the request is built.
   useEffect(() => {
@@ -450,34 +480,51 @@ const SearchResults = (): ReactElement => {
       )?.name,
     [allBoardsList],
   );
+  // Prefer the `@`-handle (alias), matching the cmd+K picker — else the same group chip reads
+  // `@rockers` here but `@rock-team` in the popup.
+  const mentionUserGroupName = useCallback(
+    (id: string): string | undefined => {
+      const group = userGroupsById.get(id);
+      return group ? (group.alias ?? group.name) : undefined;
+    },
+    [userGroupsById],
+  );
   const filterResolvers = useMemo(
     (): FilterResolvers => ({
       userName: mentionUserName,
       channelName: mentionChannelName,
+      userGroupName: mentionUserGroupName,
       boardName,
     }),
-    [mentionUserName, mentionChannelName, boardName],
+    [mentionUserName, mentionChannelName, mentionUserGroupName, boardName],
   );
 
-  // Sync every chip filter (from/to/with/in/assignee/priority + bare @/#) → hook mentions
-  useEffect(() => {
-    setSelectedMentions(
-      buildChips({ ...filters, inChannelIds: channelIdsForSearch }, filterResolvers),
-    );
+  // The active filter chips (from/to/with/in/assignee/priority + bare @/#), rebuilt only when a
+  // chip-relevant filter changes. One build shared by the hook-sync effect and the save snapshot.
+  const activeFilterChips = useMemo(
+    () => buildChips({ ...filters, inChannelIds: channelIdsForSearch }, filterResolvers),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    filters.fromUserIds,
-    filters.fromEmails,
-    filters.toEmails,
-    channelIdsForSearch,
-    filters.assigneeIds,
-    filters.withUserIds,
-    filters.mentionUserIds,
-    filters.mentionChannelIds,
-    filters.priority,
-    mentionUserName,
-    mentionChannelName,
-  ]);
+    [
+      filters.fromUserIds,
+      filters.fromEmails,
+      filters.toEmails,
+      channelIdsForSearch,
+      filters.assigneeIds,
+      filters.withUserIds,
+      filters.mentionUserIds,
+      filters.mentionChannelIds,
+      filters.mentionUserGroupIds,
+      filters.priority,
+      mentionUserName,
+      mentionChannelName,
+      mentionUserGroupName,
+    ],
+  );
+
+  // Sync the chip filters → the shared search hook.
+  useEffect(() => {
+    setSelectedMentions(activeFilterChips);
+  }, [activeFilterChips, setSelectedMentions]);
 
   // Declared above the memo that uses it, so the callback is reached through a ref.
   const handleFiltersChangeRef = useRef<(next: SearchResultsFilters) => void>(() => undefined);
@@ -599,6 +646,27 @@ const SearchResults = (): ReactElement => {
   );
   handleQuerySubmitRef.current = handleQuerySubmit;
 
+  /**
+   * Identity key of the last query saved as a recent. Opening several results from one search fires
+   * the save on each click with the same query, so keying off this stores it once and skips the rest
+   * until the query or its filters actually change.
+   */
+  const lastSavedKeyRef = useRef<string | null>(null);
+
+  const saveCurrentSearchAsRecent = useCallback((): void => {
+    const identityKey = identityKeyFor({ text: query, filterChips: activeFilterChips });
+    if (identityKey === lastSavedKeyRef.current) return;
+    lastSavedKeyRef.current = identityKey;
+
+    saveCurrentSearchQuery(authContext.workspaceId ?? '', currentUserId, {
+      text: query,
+      filterChips: activeFilterChips,
+      tab: docTypeToTabType(filters.docType),
+      onlyMyChannels: filters.onlyMyChannels,
+      includeBotMessages: filters.includeBotMessages,
+    });
+  }, [authContext.workspaceId, currentUserId, query, filters, activeFilterChips]);
+
   // Use filteredLocalChannels from the hook (same data pipeline as cmdK).
   // Guard against empty query so we don't show all channels before the user types.
   const localChannelResults = useMemo((): DisplaySearchResult[] => {
@@ -700,19 +768,26 @@ const SearchResults = (): ReactElement => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fullSearchKey]);
 
-  const handleSelectThread = useCallback((thread: SearchResultsThread) => {
-    setSelectedPanel({ kind: 'thread', thread });
-  }, []);
+  // The save lives on the two message-open handlers (thread + message context), not the card
+  // click, because every message-open affordance (body, keyboard, reply button) converges here.
+  const handleSelectThread = useCallback(
+    (thread: SearchResultsThread) => {
+      saveCurrentSearchAsRecent();
+      setSelectedPanel({ kind: 'thread', thread });
+    },
+    [saveCurrentSearchAsRecent],
+  );
   const handleSelectUser = useCallback((userId: string) => {
     setSelectedPanel({ kind: 'profile', userId });
   }, []);
-  const handleSelectChannelContext = useCallback(
+  const handleSelectMessageContext = useCallback(
     (
       channelId: string,
       conversationId: string,
       conversationCreatedAt?: number,
       matchedMessageId?: string | null,
     ) => {
+      saveCurrentSearchAsRecent();
       setSelectedPanel({
         kind: 'channel',
         channelId,
@@ -721,7 +796,7 @@ const SearchResults = (): ReactElement => {
         matchedMessageId: matchedMessageId ?? null,
       });
     },
-    [],
+    [saveCurrentSearchAsRecent],
   );
   // Open a user's 1:1 DM chat in the right pane, creating the DM if it doesn't exist.
   // Async; drops the result if the search changed while the DM was being created.
@@ -745,6 +820,8 @@ const SearchResults = (): ReactElement => {
     (result: DisplaySearchResult): void => {
       const action = resolveResultClick(result, allChannelsForNav);
       if (!action) return;
+      // Recents capture content searches — opening a person or channel is navigation, not a query to replay.
+      if (result.type !== 'user' && result.type !== 'channel') saveCurrentSearchAsRecent();
       switch (action.kind) {
         case 'panel':
           setSelectedPanel(action.panel);
@@ -757,7 +834,7 @@ const SearchResults = (): ReactElement => {
           return;
       }
     },
-    [allChannelsForNav, navigate, openUserDm],
+    [allChannelsForNav, navigate, openUserDm, saveCurrentSearchAsRecent],
   );
   const handleClosePanel = (): void => {
     setSelectedPanel(null);
@@ -767,9 +844,10 @@ const SearchResults = (): ReactElement => {
     () => ({
       onSelectThread: handleSelectThread,
       onSelectUser: handleSelectUser,
-      onSelectChannelContext: handleSelectChannelContext,
+      onSelectMessageContext: handleSelectMessageContext,
+      onResultOpen: saveCurrentSearchAsRecent,
     }),
-    [handleSelectThread, handleSelectUser, handleSelectChannelContext],
+    [handleSelectThread, handleSelectUser, handleSelectMessageContext, saveCurrentSearchAsRecent],
   );
 
   const currentTab = docTypeToTabType(filters.docType);
@@ -1341,6 +1419,13 @@ function ResultsBody({
               {senderName}
               {recipientCount > 0 && ` +${recipientCount} more`}
             </span>
+            {/* Assignee of the linked desk ticket, when set — same muted style as the
+                sender line above (mirrors the cmdK desk row). */}
+            {result.searchContext?.assigneeName && (
+              <span className='block min-w-0 truncate text-xs text-muted-foreground'>
+                {`Assigned to ${result.searchContext.assigneeName}`}
+              </span>
+            )}
             {result.context && (
               <div className='mt-0.5 text-xs text-muted-foreground'>
                 <SearchSnippetRenderer message={result.context} wordLimit={40} />

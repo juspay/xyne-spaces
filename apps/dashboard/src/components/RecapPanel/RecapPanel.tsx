@@ -1,4 +1,4 @@
-import { ReactElement, useState, useEffect, useCallback, useMemo } from 'react';
+import { ReactElement, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import DOMPurify from 'dompurify';
 import { Link, useNavigate, useParams, Outlet } from 'react-router-dom';
 import {
@@ -19,16 +19,13 @@ import { RecapSubscription, RecapCard } from './RecapPanel.types';
 import { getYesterdayIST, formatRecapDate } from './RecapPanel.utils';
 import RecapSettings from './RecapSettings';
 import { RecapCalendarView } from './RecapCalendarView';
-import ProjectRecapPanel from './ProjectRecapPanel';
 import { useZero } from '../../hooks/useZero';
 import { mutators } from '../../zero/mutators';
 import { usePlatform } from '../../hooks/usePlatform';
-import { useCacConfig } from '@xyne/shared/hooks';
 import { xyneAIActor, type ThreadInfo } from '../../machines/xyneAIMachine';
 import { XyneAIStar } from '../icons/xyne-ai';
 import { Tooltip } from '../ui/Tooltip';
-
-type RecapTab = 'channel' | 'project';
+import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
 
 // Random greetings for the recap header
 const RECAP_GREETINGS = [
@@ -56,19 +53,15 @@ const RecapPanel = (): ReactElement => {
   const params = useParams<{ channelId?: string; conversationId?: string }>();
   const zero = useZero();
   const { isMobile } = usePlatform();
-  const { config: projectRecapEnabled } = useCacConfig<boolean>({
-    key: 'project_recap_enabled',
-    fallbackConfig: false,
-  });
 
   // Show right panel when a cited thread is open
   const showThreadPanel = !!params.channelId;
 
   // Use the cached recap data hook
-  const { recapData, subscriptions, isLoadingSubscriptions, isFirstTime } = useRecapData();
+  const { recapData, subscriptions, isLoadingSubscriptions, isFirstTime, unreadCount } =
+    useRecapData();
 
   // Active tab: channel or project
-  const [activeTab, setActiveTab] = useState<RecapTab>('channel');
 
   // Settings modal state
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -122,6 +115,30 @@ const RecapPanel = (): ReactElement => {
 
   // Determine if we're in historical view based on selectedDate, not just data presence
   const isHistoricalView = selectedDate !== null;
+
+  // Impression: a recap with cards is on screen. The clicks below (open channel,
+  // citation, ask AI, mark read) have no denominator without this. Latched per
+  // date + kind so re-renders and read/unread toggles don't refire; a different
+  // date picked from the calendar is a new impression. No card content rides.
+  const recapViewedKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    const data = isHistoricalView ? historicalRecapData : recapData;
+    if (!data || data.cards.length === 0) return;
+    const customRecapCount = data.cards.filter(card => card.hasCustomRecap).length;
+    const recapType = customRecapCount > 0 ? 'custom' : 'base';
+    const key = `${data.date}:${recapType}`;
+    if (recapViewedKeyRef.current === key) return;
+    recapViewedKeyRef.current = key;
+    globalClickTracker.trackManualEvent('RECAP_PANEL', 'RECAP_VIEWED', undefined, {
+      recapType,
+      customRecapCount,
+      channelCount: data.cards.length,
+      date: data.date,
+      isToday: !isHistoricalView,
+      unreadCount: isHistoricalView ? 0 : unreadCount,
+      totalMessages: data.meta.totalMessages,
+    });
+  }, [isHistoricalView, historicalRecapData, recapData, unreadCount]);
 
   // Split cards into unread and read sections (moved up to be used in handleMarkAllAsRead)
   const { unreadCards, readCards } = useMemo(() => {
@@ -359,6 +376,7 @@ const RecapPanel = (): ReactElement => {
         channelId: card.channelId,
         threadInfo,
         startFreshChat: true,
+        trackSource: 'recap_panel',
       });
     },
     [buildAskAIThreadInfo],
@@ -745,35 +763,6 @@ const RecapPanel = (): ReactElement => {
                 )}
                 <h3 className='font-bold text-foreground text-xl'>Recap</h3>
                 <Sparkles size={20} className='text-blue-500' />
-                {/* Channel / Project toggle — only shown when project recap is enabled */}
-                {projectRecapEnabled && (
-                  <div className='flex items-center gap-0.5 ml-2 bg-muted rounded-md p-0.5'>
-                    <button
-                      onClick={() => setActiveTab('channel')}
-                      className={`px-2 py-0.5 text-xs font-medium rounded transition-colors ${
-                        activeTab === 'channel'
-                          ? 'bg-background text-foreground shadow-sm'
-                          : 'text-muted-foreground hover:text-foreground'
-                      }`}
-                      data-track-category='RECAP_PANEL'
-                      data-track-name='TAB_CHANNEL'
-                    >
-                      Channel
-                    </button>
-                    <button
-                      onClick={() => setActiveTab('project')}
-                      className={`px-2 py-0.5 text-xs font-medium rounded transition-colors ${
-                        activeTab === 'project'
-                          ? 'bg-background text-foreground shadow-sm'
-                          : 'text-muted-foreground hover:text-foreground'
-                      }`}
-                      data-track-category='RECAP_PANEL'
-                      data-track-name='TAB_PROJECT'
-                    >
-                      Project
-                    </button>
-                  </div>
-                )}
               </div>
               {!isFirstTime && (
                 <div className='flex items-center gap-1'>
@@ -832,9 +821,7 @@ const RecapPanel = (): ReactElement => {
           </div>
 
           {/* Scrollable recap cards */}
-          <div className='flex-1 overflow-y-auto bg-muted/30'>
-            {activeTab === 'channel' ? renderChannelContent() : <ProjectRecapPanel />}
-          </div>
+          <div className='flex-1 overflow-y-auto bg-muted/30'>{renderChannelContent()}</div>
         </div>
 
         {/* Right: Thread panel — full screen on mobile, half width on desktop */}

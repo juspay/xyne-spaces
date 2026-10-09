@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useId, useMemo } from 'react';
+import { useAskAIAvailable } from '../../../contexts/AskAIAvailabilityContext';
 import { useZero } from '../../../hooks/useZero';
 import { useSummaryCache } from '../../../hooks/useSummaryQuery';
 import { MessageBubble } from '../../ui/MessageBubble/MessageBubble';
@@ -10,6 +11,7 @@ import { TicketActivityMessage } from '../TicketActivityMessage/TicketActivityMe
 import { ConversationTabContext } from '../ConversationTabContext';
 
 import { hoveredMessage } from './hoveredMessageRef';
+import { usePendingByMessageId } from '@xyne/shared/messages';
 import {
   registerMessageHoverActions,
   unregisterMessageHoverActions,
@@ -123,7 +125,6 @@ interface ChatBubbleProps {
   context?: 'channel' | 'thread';
   isFirstInThread?: boolean;
   isTicketThread?: boolean;
-  isFlowStep?: boolean;
   onEmojiPickerOpenChange?: (isOpen: boolean) => void;
   allThreadAttachments?: AttachmentRef[];
   workflowNumber?: number | undefined;
@@ -139,7 +140,6 @@ interface ChatBubbleProps {
   /** Tag being inspected from the thread header; messages carrying it show a chip. */
   inspectedTag?: string | null;
   afterTextContent?: React.ReactNode;
-  isThreadTicketSubTicket?: boolean;
 }
 
 export const ChatBubble: React.FC<ChatBubbleProps> = ({
@@ -156,7 +156,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   context = 'channel',
   isFirstInThread = false,
   isTicketThread = false,
-  isFlowStep = false,
   onEmojiPickerOpenChange,
   allThreadAttachments,
   workflowNumber,
@@ -170,9 +169,10 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   highlightMessageId,
   inspectedTag = null,
   afterTextContent,
-  isThreadTicketSubTicket = false,
 }) => {
   const { user } = useAuthContext();
+  // Off inside hosts that embed chat for one purpose (the related-context popup).
+  const askAIAvailable = useAskAIAvailable();
   const { copyImage } = useClipboard();
   const [isCreateTicketModalOpen, setIsCreateTicketModalOpen] = useState(false);
   const [isSubTicketModalOpen, setIsSubTicketModalOpen] = useState(false);
@@ -190,7 +190,9 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const location = useLocation();
   const { conversationId } = useParams<{ conversationId?: string }>();
   const { isEditingMessage, requestEdit, stopEditing } = useMessageEdit();
-  const { setSkipMarkAsRead } = React.useContext(ConversationTabContext);
+  // channelHasBoards rides on the context rather than a per-bubble query: it is
+  // constant per channel and this component renders once per message.
+  const { setSkipMarkAsRead, channelHasBoards } = React.useContext(ConversationTabContext);
   const { isMobile } = usePlatform();
   const channel = useChannel(channelId);
   // Get sender info from useUser hook
@@ -315,8 +317,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     return ((initMsg?.metadata as Record<string, unknown>)?.['ticketId'] as string) || '';
   }, [context, isTicketThread, conversation]);
 
-  const canNestSubTicket = !isThreadTicketSubTicket || isFlowStep;
-
   // Mark activities as read when message becomes visible
   // const observerRef = useIntersectionObserver(() => {
   //   void zero.mutate(mutators.activities.markActivitiesSeenByMessageId({
@@ -405,6 +405,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     // This shows the thread header but doesn't load old conversation
     xyneAIActor.send({
       type: 'OPEN',
+      trackSource: 'message_bubble',
       channelId,
       threadInfo,
       startFreshChat: true,
@@ -839,11 +840,12 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const handleCopyImage = (): void => {
     const attachment = imageAttachments[0];
     if (!attachment) return;
-    fetchFile(attachment.id, attachment.originalFilename, attachment.mimetype)
-      .then(file => copyImage(file))
-      .catch(() => {
-        toast.error('Failed to copy image');
-      });
+    // Hand copyImage a thunk instead of awaiting the download first: the clipboard
+    // write must be issued inside this click's task or the browser blocks it.
+    // copyImage reports its own failure toast, including the underlying reason.
+    void copyImage(() =>
+      fetchFile(attachment.id, attachment.originalFilename, attachment.mimetype),
+    );
   };
 
   const canModifyMessage = user?.id ? isMessageEditable(message, user.id) : false;
@@ -910,9 +912,17 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     message.msgType === MessageType.SYSTEM &&
     metadata?.['ticketId'] !== undefined &&
     !isTicketActivity;
+  // The scheduled-call pill is attributed to the organizer, so like a ticket-creation
+  // message it must NOT count as a system message — that is what gives it the sender's
+  // avatar and a bold name header instead of the anonymous system treatment.
+  const isScheduledCallPill =
+    message.msgType === MessageType.SYSTEM && metadata?.['isScheduledCallPill'] === true;
   // Check if this is a system message (channel join, etc.) - not ticket activities or ticket creation
   const isSystemMessage =
-    message.msgType === MessageType.SYSTEM && !isTicketActivity && !isTicketCreationMessage;
+    message.msgType === MessageType.SYSTEM &&
+    !isTicketActivity &&
+    !isTicketCreationMessage &&
+    !isScheduledCallPill;
 
   // Check if this is a showInChannel message (thread reply shown in main channel)
   const isShowInChannel = message.showInChannel === true;
@@ -981,6 +991,10 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   // the overlay can derive them at show time. Hover never sets state here.
 
   const hoverToolbarKey = useId();
+
+  // Non-null while this message still has a pending entry, i.e. the server has
+  // not confirmed it (in flight, or failed and awaiting retry/discard).
+  const hasPendingCopy = usePendingByMessageId(message?.messageId ?? '') !== null;
 
   const appliedThreadTypes = useMemo(
     () => parseThreadTypes(conversation?.threadType),
@@ -1062,13 +1076,14 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         !isSystemMessage &&
         !isMessageDeleted &&
         !hasTicket &&
+        // No linked boards means nowhere to put a ticket, so don't offer it.
+        channelHasBoards &&
         channelScopeType === ChannelScopeType.DEFAULT && {
           onCreateTicket: handleCreateTicket,
         }),
       ...(context === 'thread' &&
         !isMessageDeleted &&
         isTicketThread &&
-        canNestSubTicket &&
         !isFirstInThread &&
         !spawnedTicketMessageIds?.has(message.messageId) && {
           onCreateSubTicket: handleCreateSubTicket,
@@ -1110,6 +1125,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           onPinMessage: handlePinMessage,
         }),
       ...(!disableAskAI &&
+        askAIAvailable &&
         ((conversation && (context === 'channel' || isFirstInThread)) || isCallMessage) &&
         (!isSystemMessage || isCallMessage) &&
         !isMessageDeleted && { onAskAI: handleAskAI }),
@@ -1135,6 +1151,16 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           onShowAllShortcuts: () => setShortcutModalOpen(true),
         }),
     };
+
+    // Nothing in the hover toolbar works on a message the server has not
+    // confirmed — reply, edit, ticket, pin, bookmark, forward and the rest all
+    // target a row that does not exist yet. Registering nothing means the shared
+    // overlay renders no toolbar at all (MessageHoverToolbar bails on an
+    // unregistered key). Retry and discard live on the line under the bubble.
+    if (hasPendingCopy) {
+      unregisterMessageHoverActions(hoverToolbarKey);
+      return;
+    }
 
     registerMessageHoverActions(hoverToolbarKey, actions);
   });
@@ -1195,6 +1221,20 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         // every sub-layout (message, link/canvas previews, reply layout) is
         // covered uniformly and stays in sync with the toolbar.
         'data-[hovered]:bg-muted/50',
+        // Keyboard navigation adds an outline on top of the same tint, so a
+        // selected row and a hovered row can be on screen together and stay
+        // distinct. The outline is drawn by an ::after overlay rather than a
+        // ring on the root: an inset ring paints on the root's own background
+        // layer, which rows that bring their own backgrounds — pinned (plus
+        // its status bar), bookmarked, system — then cover. The overlay is the
+        // row's last child, so it sits above them; z-10 clears descendants
+        // that raise themselves, and pointer-events-none keeps clicks and
+        // hover actions reaching the message underneath.
+        'data-[keyboard-selected]:bg-muted/50',
+        'data-[keyboard-selected]:after:pointer-events-none data-[keyboard-selected]:after:absolute',
+        'data-[keyboard-selected]:after:inset-0 data-[keyboard-selected]:after:z-10',
+        'data-[keyboard-selected]:after:rounded-sm data-[keyboard-selected]:after:ring-2',
+        'data-[keyboard-selected]:after:ring-inset data-[keyboard-selected]:after:ring-primary',
       )}
       style={
         isMobile
@@ -1400,6 +1440,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 !isSystemMessage &&
                 !isMessageDeleted &&
                 !hasTicket &&
+                // No linked boards means nowhere to put a ticket, so don't offer it.
+                channelHasBoards &&
                 channelScopeType === ChannelScopeType.DEFAULT && {
                   onCreateTicket: handleCreateTicket,
                 })}
@@ -1445,6 +1487,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                   onPinMessage: handlePinMessage,
                 })}
               {...(!disableAskAI &&
+                askAIAvailable &&
                 ((conversation && (context === 'channel' || isFirstInThread)) || isCallMessage) &&
                 (!isSystemMessage || isCallMessage) &&
                 !isMessageDeleted && { onAskAI: handleAskAI })}
@@ -1530,19 +1573,16 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       )}
 
       {/* SubTicket Modal for ticket threads */}
-      {conversation &&
-        context === 'thread' &&
-        isTicketThread &&
-        canNestSubTicket &&
-        isSubTicketModalOpen && (
-          <SubTicketModal
-            isOpen
-            onClose={() => setIsSubTicketModalOpen(false)}
-            ticketId={threadTicketId}
-            conversationId={conversation.conversationId}
-            sourceMessageId={message.messageId}
-          />
-        )}
+      {conversation && context === 'thread' && isTicketThread && isSubTicketModalOpen && (
+        <SubTicketModal
+          isOpen
+          onClose={() => setIsSubTicketModalOpen(false)}
+          ticketId={threadTicketId}
+          conversationId={conversation.conversationId}
+          sourceMessageId={message.messageId}
+          trackSource='chat_message'
+        />
+      )}
 
       {isReminderOptionsOpen && (
         <Dialog

@@ -1,6 +1,7 @@
 import { logger, Event as LogEvent } from '../../../utils/logger';
 import { ReactElement, useState, useEffect, useCallback, useRef } from 'react';
 import { xyneAIActor, type SelectionInfo } from '../../../machines/xyneAIMachine';
+import { useAskAIAvailable } from '../../../contexts/AskAIAvailabilityContext';
 
 interface SelectionAskAIProps {
   canvasTitle?: string;
@@ -25,6 +26,7 @@ export const SelectionAskAI = ({
     show: false,
   });
   const [selectedText, setSelectedText] = useState<string>('');
+  const askAIAvailable = useAskAIAvailable();
   const hideTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const handleSelectionChange = useCallback(() => {
@@ -115,6 +117,7 @@ export const SelectionAskAI = ({
     // Open XyneAI with canvas context and selection info
     xyneAIActor.send({
       type: 'OPEN',
+      trackSource: 'canvas_selection',
       canvasInfo: {
         canvasId,
         ...(canvasTitle ? { title: canvasTitle } : {}),
@@ -145,8 +148,8 @@ export const SelectionAskAI = ({
     };
   }, [handleSelectionChange]);
 
-  // Don't render if not visible
-  if (!selectionPosition.show || !selectedText) {
+  // Don't render if not visible, or where the host screen leaves Ask AI out.
+  if (!selectionPosition.show || !selectedText || !askAIAvailable) {
     return null;
   }
 

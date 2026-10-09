@@ -1,5 +1,6 @@
 export {
   searchUsers,
+  searchUsersWithScores,
   useUsers,
   useUsersById,
   useUser,

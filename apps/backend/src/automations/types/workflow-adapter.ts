@@ -25,6 +25,7 @@ export interface AutomationView {
   updatedAt: Date;
   automationSeriesId: string | null;
   eventType: WorkflowEventType;
+  priority?: boolean;
 }
 
 /** What the run-history list renders. No context blobs — see AutomationRunView. */
@@ -46,6 +47,12 @@ interface AutomationMetadata {
   description: string | null;
   createdById: string;
   drainInFlight?: boolean;
+  /**
+   * When on, this automation's runs skip ahead of other runs waiting in the queue.
+   * It has no effect on scheduled runs, or on a run once it has passed a DELAY step:
+   * those wait on a clock instead of waiting in the queue, so there is nothing to skip.
+   */
+  priority?: boolean;
 }
 
 export function triggerTypeToEventType(triggerType: string): WorkflowEventType {
@@ -63,6 +70,7 @@ export function parseAutomationMetadata(raw: string | null): AutomationMetadata 
       description: parsed.description ?? null,
       createdById: parsed.createdById ?? '',
       ...(parsed.drainInFlight ? { drainInFlight: true } : {}),
+      ...(parsed.priority ? { priority: true } : {}),
     };
   } catch {
     return { description: null, createdById: '' };
@@ -94,6 +102,7 @@ export function workflowToAutomation(workflow: Workflow): AutomationView {
     updatedAt: workflow.updatedAt,
     automationSeriesId: workflow.automationSeriesId ?? null,
     eventType: triggerTypeToEventType(workflow.eventType),
+    priority: metadata.priority === true,
   };
 }
 

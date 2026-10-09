@@ -97,7 +97,7 @@ function buildArtifactTask(
     '',
     `Write the ${cfg.artifactType} document titled "${cfg.artifactTitle}".`,
     `Hub (channelId): ${cfg.channelId}`,
-    `Artifact type (folderId): ${folderId}`,
+    `Artifact type (artifactTypeId): ${folderId}`,
     'It describes the hub itself: pass no trackId and no repoIds, and do not call '
     + 'spaces-sdlc-list-tracks or spaces-sdlc-create-track.',
   ];
@@ -113,7 +113,7 @@ function buildArtifactTask(
     '',
     'Before writing, call spaces-sdlc-list-artifacts for this hub and look for an existing '
     + `artifact titled "${cfg.artifactTitle}" in this artifact type. If one exists, update it `
-    + 'with spaces-sdlc-mutate-artifact action "update" using its canvasId. Only if none '
+    + 'with spaces-sdlc-write-artifact action "update" using its canvasId. Only if none '
     + 'exists, create it with action "create". Never create a second copy.',
   );
 

@@ -25,6 +25,7 @@ import { redisService } from '@/services/redisService'
 //import { vespaWorker } from '@/workers/vespaWorker'
 import { workerScheduler } from './workers';
 import { initializeOpenTelemetry, shutdownOpenTelemetry } from '@/services/otel';
+import { startLogRedactAllowListSync } from '@/services/logRedactAllowList';
 import { callTimeoutWorker } from '@/workers/callTimeoutWorker';
 import { callValidationWorker } from '@/workers/callValidationWorker';
 import { initializeBotRegistry } from '@/bots/registry';
@@ -53,6 +54,7 @@ import { recoveryService } from './workflows/services/recovery-service'
 import { aiProvisioningWorker } from '@/workers/aiProvisioningWorker';
 import { socialMediaSyncWorker } from '@/workers/socialMediaSyncWorker';
 import { workflowsWorker } from '@/workers/workflowsWorker';
+import { heicRenditionQueue } from '@/queues/heicRenditionQueue';
 config()
 
 process.on('unhandledRejection', reason => {
@@ -71,6 +73,7 @@ class WorkerService {
     try {
       // Initialize metrics
       initializeOpenTelemetry();
+      startLogRedactAllowListSync();
 
       await DatabaseClient.connect()
       const isCommonDatabaseConnected = await CommonDatabaseClient.connect()
@@ -97,7 +100,7 @@ class WorkerService {
       const workerSchedulerEnabled = appConfig.workerSchedulerEnabled
       const proactiveNudgeWorkerEnabled = process.env.ENABLE_PROACTIVE_NUDGE_WORKER === 'true'
       const callValidationEnabled = process.env.ENABLE_CALL_VALIDATION_WORKER === 'true'
-      const socialMediaSyncEnabled = process.env.ENABLE_SOCIAL_MEDIA_SYNC_WORKER === 'true'
+      const socialMediaSyncEnabled = appConfig.enableSocialMediaSyncWorker
       const workflowsEnabled = appConfig.workflows.workerEnabled
       const messageClassificationEnabled = appConfig.messageClassificationEnabled
           // Only schedule recovery if not disabled (recovery should run in separate pod)
@@ -240,6 +243,12 @@ class WorkerService {
         const { stitchWorker } = await import('@/workers/stitchWorker');
         stitchWorker.start();
       }
+
+      // HEIC → WebP renditions. Always consumed here: the decode runs on a
+      // worker_threads pool
+      logger.info('Starting HEIC rendition worker...');
+      await heicRenditionQueue.initialize();
+      heicRenditionQueue.startProcessing();
 
       if (appConfig.enableScheduledMessageWorker) {
         logger.info('Initializing notification service for scheduled message worker...');
@@ -431,7 +440,7 @@ class WorkerService {
       const workerSchedulerEnabled = appConfig.workerSchedulerEnabled
       const proactiveNudgeWorkerEnabled = process.env.ENABLE_PROACTIVE_NUDGE_WORKER === 'true'
       const callValidationEnabled = process.env.ENABLE_CALL_VALIDATION_WORKER === 'true'
-      const socialMediaSyncEnabled = process.env.ENABLE_SOCIAL_MEDIA_SYNC_WORKER === 'true'
+      const socialMediaSyncEnabled = appConfig.enableSocialMediaSyncWorker
       const workflowsEnabled = appConfig.workflows.workerEnabled
       const messageClassificationEnabled = appConfig.messageClassificationEnabled
       const enableRecovery = process.env.ENABLE_WORKFLOW_RECOVERY !== 'false'
@@ -504,6 +513,8 @@ class WorkerService {
         logger.info('Closing workflow step GCS sync queue...');
         await workflowStepGcsSyncQueue.close();
       }
+
+      await heicRenditionQueue.shutdown();
 
       if (appConfig.enableConversationIngestionWorker) {
         await conversationIngestionWorker.shutdown();

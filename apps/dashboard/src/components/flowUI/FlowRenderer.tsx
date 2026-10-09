@@ -132,7 +132,14 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
       if (props?.name) {
         const value = state.values[props.name];
         newTouched[props.name] = true;
-        if (props.required && (value === undefined || value === '' || value === null)) {
+        // An empty array counts as "no value" too — a required multi-select
+        // (multiselect, or a dropdown with multiple: true) submits [] otherwise.
+        const isEmpty =
+          value === undefined ||
+          value === '' ||
+          value === null ||
+          (Array.isArray(value) && value.length === 0);
+        if (props.required && isEmpty) {
           newErrors[props.name] = 'This field is required';
           isValid = false;
         } else if (props.validation) {
@@ -159,7 +166,7 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
   }, [validatedFlow, state.values]);
 
   const executeAction = useCallback(
-    async (action: FlowAction) => {
+    async (action: FlowAction): Promise<boolean> => {
       if (!validatedFlow) {
         logger.warn(LogEvent.FRONTEND_ERROR, {
           type: 'migrated_console_warn',
@@ -167,7 +174,7 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
             '[FlowRenderer] executeAction called but validatedFlow is null — skipping',
           ),
         });
-        return;
+        return false;
       }
 
       logger.info(LogEvent.INFO, {
@@ -179,7 +186,7 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
       // Client-only: update_state, close_screen, navigate
       if (action.type === 'update_state') {
         setState(prev => ({ ...prev, values: { ...prev.values, ...action.stateUpdates } }));
-        return;
+        return true;
       }
       if (action.type === 'copy') {
         const { value, successMessage } = action as { value: string; successMessage?: string };
@@ -188,6 +195,7 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
           // on a non-localhost host), so report failure rather than throwing.
           await navigator.clipboard.writeText(value);
           toast.success(successMessage ?? 'Copied to clipboard');
+          return true;
         } catch (error) {
           logger.error(LogEvent.FRONTEND_ERROR, {
             type: 'migrated_console_error',
@@ -195,8 +203,8 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
             context: [error],
           });
           toast.error('Could not copy — select the URL in the message instead.');
+          return false;
         }
-        return;
       }
       if (action.type === 'close_screen' || action.type === 'navigate') {
         const closeAction = action as { type: string; finalMessage?: string };
@@ -204,7 +212,7 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
           ? { type: 'close_screen', finalMessage: closeAction.finalMessage }
           : { type: 'close_screen' };
         onAppAction(closeResponse);
-        return;
+        return true;
       }
 
       // submit / inputChange — network action
@@ -221,7 +229,7 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
           ),
         });
         toast.error('Message context not ready yet. Please try again in a moment.');
-        return;
+        return false;
       }
       if (!isInputChange) {
         setState(prev => {
@@ -255,9 +263,10 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
 
         if (response.type === 'error') {
           toast.error(response.message);
-        } else {
-          onAppAction(response);
+          return false;
         }
+        onAppAction(response);
+        return true;
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Action failed';
         logger.error(LogEvent.FRONTEND_ERROR, {
@@ -272,6 +281,7 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
               : message,
           );
         }
+        return false;
       } finally {
         if (!isInputChange) {
           setState(prev => {

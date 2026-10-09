@@ -7,12 +7,15 @@ import { logger, Logger } from '../../../utils/logger';
 
 interface ConnectionStatusIndicatorsProps {
   room: Room | null;
+  /** Render nothing while both links are connected — only surface trouble. */
+  hideWhenHealthy?: boolean | undefined;
 }
 
 type ConnectionStatus = 'connected' | 'reconnecting' | 'connecting' | 'disconnected';
 
 export function ConnectionStatusIndicators({
   room,
+  hideWhenHealthy = false,
 }: ConnectionStatusIndicatorsProps): React.ReactElement | null {
   const [wsState, setWsState] = useState<ConnectionStatus>('disconnected');
   const [rtcState, setRtcState] = useState<ConnectionStatus>('disconnected');
@@ -176,6 +179,11 @@ export function ConnectionStatusIndicators({
   }, [room, isBrowserOffline]);
 
   if (!room) {
+    return null;
+  }
+
+  // State tracking (and its logging) keeps running; only the chips are hidden.
+  if (hideWhenHealthy && wsState === 'connected' && rtcState === 'connected') {
     return null;
   }
 

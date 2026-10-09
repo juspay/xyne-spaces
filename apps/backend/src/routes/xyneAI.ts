@@ -81,6 +81,13 @@ router.get('/v2/conversations', authMiddleware.authenticate, xyneAIControllerV2.
 // GET /api/xyne-ai/v2/conversations/:convId/messages - Get conversation messages from claw
 router.get('/v2/conversations/:convId/messages', authMiddleware.authenticate, xyneAIControllerV2.getConversationMessages);
 router.get('/v2/conversations/:convId/debug', authMiddleware.authenticate, xyneAIControllerV2.getConversationDebug);
+
+router.get('/v2/conversations/:convId/artifacts', authMiddleware.authenticate, xyneAIControllerV2.listConversationArtifacts);
+router.get('/v2/artifacts/:id', authMiddleware.authenticate, xyneAIControllerV2.getConversationArtifact);
+router.patch('/v2/artifacts/:id', authMiddleware.authenticate, xyneAIControllerV2.updateConversationArtifact);
+router.get('/v2/artifacts/:id/comments', authMiddleware.authenticate, xyneAIControllerV2.listArtifactComments);
+router.post('/v2/artifacts/:id/comments', authMiddleware.authenticate, xyneAIControllerV2.addArtifactComment);
+router.patch('/v2/artifacts/:id/comments/:commentId', authMiddleware.authenticate, xyneAIControllerV2.resolveArtifactComment);
 // POST /api/xyne-ai/v2/messages/:messageId/rate - persist 👍/👎 (+ comment) for
 // the run that produced an assistant message (proxies to claw-auth agent_runs.rating).
 router.post('/v2/messages/:messageId/rate', authMiddleware.authenticate, xyneAIControllerV2.rateRun);

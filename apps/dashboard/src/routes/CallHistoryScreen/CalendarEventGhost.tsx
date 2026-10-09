@@ -1,5 +1,6 @@
 import { ReactElement } from 'react';
 import { cn } from '../../utils/classNames';
+import { HATCH_BACKGROUND } from './CalenderViewUtils';
 
 interface CalendarEventGhostProps {
   top: number;
@@ -18,18 +19,13 @@ export function CalendarEventGhost({
   return (
     <div
       className={cn(
-        'absolute rounded pointer-events-none z-[4]',
+        'absolute overflow-hidden rounded-lg border-2 border-dashed border-primary/70 bg-primary/10 text-primary pointer-events-none z-[4]',
         compact ? 'left-1 right-1' : 'left-2 right-2',
       )}
-      style={{
-        top,
-        height,
-        backgroundColor: '#0077FF0D',
-        borderLeft: '3px dashed #0077FF',
-      }}
+      style={{ top, height, backgroundImage: HATCH_BACKGROUND }}
     >
-      <div className={compact ? 'px-1.5 py-1' : 'px-2 py-1'}>
-        <span style={{ color: '#092E58', fontSize: '10px', lineHeight: '14px', opacity: 0.8 }}>
+      <div className={compact ? 'px-1.5 py-1' : 'px-3 py-1'}>
+        <span className='truncate text-xs font-semibold leading-tight text-primary'>
           {formattedTime}
         </span>
       </div>

@@ -482,14 +482,14 @@ if [ "$ENABLE_STORAGE" = "1" ]; then
     fi
 
     # Wait for MinIO
-    echo -e "${BLUE}Waiting for MinIO...${NC}"
+    echo -e "${BLUE}Waiting for S3 storage (RustFS)...${NC}"
     for i in {1..30}; do
-        if curl -s $CURL_TIMEOUT http://localhost:9000/minio/health/live > /dev/null 2>&1; then
-            echo -e "${GREEN}  MinIO is ready${NC}"
+        if curl -s $CURL_TIMEOUT http://localhost:9000/health > /dev/null 2>&1; then
+            echo -e "${GREEN}  S3 storage is ready${NC}"
             break
         fi
         if [ $i -eq 30 ]; then
-            echo -e "${YELLOW}  MinIO not ready (optional, continuing)${NC}"
+            echo -e "${YELLOW}  S3 storage not ready (optional, continuing)${NC}"
             break
         fi
         sleep 1
@@ -902,7 +902,7 @@ echo -e "    - claw_auth_db     (claw-auth)"
 echo -e "  Redis:               ${GREEN}localhost:6379${NC}"
 echo -e "  Zero-cache:          ${GREEN}localhost:4848${NC}"
 echo -e "  Fake GCS:            ${GREEN}localhost:4443${NC}"
-echo -e "  MinIO:               ${GREEN}localhost:9000${NC} (console: ${GREEN}localhost:9001${NC})"
+echo -e "  S3 (RustFS):         ${GREEN}localhost:9000${NC} (console: ${GREEN}localhost:9001${NC})"
 if echo "$SELECTED_FEATURES" | grep -qw "3"; then
     echo -e "  Y-Sweet:             ${GREEN}localhost:8080${NC}"
 fi

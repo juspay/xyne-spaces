@@ -37,6 +37,9 @@ import {
   resolveSchema,
 } from './SchemaForm.utils';
 
+/** Array items and record rows have no sibling fields to scope against. */
+const NO_SIBLINGS: Record<string, unknown> = {};
+
 export function SchemaForm(props: SchemaFormProps): React.ReactElement {
   const root = useMemo(() => resolveSchema(props.schema), [props.schema]);
   return (
@@ -131,6 +134,7 @@ function ObjectFields({
             issues={issues}
             pathPrefix={pathPrefix}
             variableSources={variableSources}
+            siblingValues={value}
           />
         );
       })}
@@ -148,6 +152,8 @@ interface FieldProps {
   issues: ValidationIssue[] | null;
   pathPrefix: string;
   variableSources: VariablePickerSource[];
+  /** The whole object this field belongs to, for fields scoped by a sibling. */
+  siblingValues: Record<string, unknown>;
 }
 
 function Field({
@@ -160,6 +166,7 @@ function Field({
   issues,
   pathPrefix,
   variableSources,
+  siblingValues,
 }: FieldProps): React.ReactElement {
   const kind = detectFieldKind(schema);
   const label = displayLabel ?? schema.title ?? labelForFieldKey(fieldKey) ?? humanise(fieldKey);
@@ -169,6 +176,18 @@ function Field({
   const hasError = !!errorMessage;
   const labelText = required ? `${label} *` : label;
   const entityKind = detectEntityKind(fieldKey);
+
+  // Boards and channels hang off a project, so their pickers only offer what
+  // the sibling project/board fields allow. A `{{variable}}` isn't a concrete
+  // id, so it leaves the list unscoped rather than emptying it.
+  const scopeProjectIds = useMemo(
+    () => concreteIds(siblingValues['projectIds'] ?? siblingValues['projectId']),
+    [siblingValues],
+  );
+  const scopeBoardIds = useMemo(
+    () => concreteIds(siblingValues['boardIds'] ?? siblingValues['boardId']),
+    [siblingValues],
+  );
 
   const seededRef = useRef(false);
   useEffect(() => {
@@ -300,6 +319,8 @@ function Field({
                   value={typeof value === 'string' ? value : undefined}
                   onChange={onChange}
                   placeholder={`Pick a ${entityKindLabel(entityKind)}`}
+                  projectIds={scopeProjectIds}
+                  boardIds={scopeBoardIds}
                 />
               ) : (
                 <RawInput
@@ -327,6 +348,28 @@ function Field({
     );
   }
 
+  // Booleans read as one statement, so the checkbox sits inline to the LEFT of its
+  // label + description instead of under a FieldHeader. Keeping the description out
+  // of the Checkbox's own label is what stops it rendering twice.
+  if (kind === 'boolean') {
+    return (
+      <div className='flex flex-col gap-1'>
+        <div className='flex items-start gap-2'>
+          <span className='flex h-[18px] items-center'>
+            <Checkbox
+              checked={value === true}
+              onChange={checked => onChange(checked === true)}
+              label=''
+              ariaLabel={label}
+            />
+          </span>
+          <FieldHeader label={labelText} description={description} />
+        </div>
+        {hasError && <FieldError message={errorMessage} />}
+      </div>
+    );
+  }
+
   if (kind === 'string' || kind === 'textarea') {
     if (entityKind) {
       const isRef = isVariableRefValue(value);
@@ -347,6 +390,8 @@ function Field({
                   value={typeof value === 'string' ? value : undefined}
                   onChange={onChange}
                   placeholder={`Pick a ${entityKindLabel(entityKind)}`}
+                  projectIds={scopeProjectIds}
+                  boardIds={scopeBoardIds}
                 />
               </div>
               {variableSources.length > 0 ? (
@@ -401,6 +446,8 @@ function Field({
             value={arrayValue}
             onChange={next => onChange(next)}
             placeholder={`Pick ${entityKindLabel(entityArrayKind)}s`}
+            projectIds={scopeProjectIds}
+            boardIds={scopeBoardIds}
           />
           {hasError && <FieldError message={errorMessage} />}
         </div>
@@ -434,7 +481,9 @@ function Field({
     if (itemKind === 'string' && !itemIsRef) {
       const arrayValue = Array.isArray(value)
         ? (value as unknown[]).filter((v): v is string => typeof v === 'string')
-        : [];
+        : typeof value === 'string' && value.length > 0
+          ? [value]
+          : [];
       return (
         <div className='flex flex-col gap-1'>
           <FieldHeader label={labelText} description={description} />
@@ -609,9 +658,8 @@ function RawInput({
       <Checkbox
         checked={value === true}
         onChange={checked => onChange(checked === true)}
-        label={
-          schema.description ? (sanitiseDescription(schema.description) ?? 'Enabled') : 'Enabled'
-        }
+        label=''
+        ariaLabel={typeof schema.title === 'string' ? schema.title : 'Toggle'}
       />
     );
   }
@@ -736,6 +784,7 @@ function ArrayField({
                   issues={issues}
                   pathPrefix={`${joinPath(pathPrefix, fieldKey)}`}
                   variableSources={variableSources}
+                  siblingValues={NO_SIBLINGS}
                 />
               </div>
               <button
@@ -893,6 +942,7 @@ function RecordRow({
           issues={null}
           pathPrefix={pathPrefix}
           variableSources={variableSources}
+          siblingValues={NO_SIBLINGS}
           displayLabel=' '
         />
       </div>
@@ -941,6 +991,14 @@ function primitiveToString(value: unknown): string {
     return String(value);
   }
   return '';
+}
+
+/** Concrete ids out of a field value, dropping `{{variable}}` references. */
+function concreteIds(raw: unknown): string[] {
+  const list = Array.isArray(raw) ? raw : [raw];
+  return list.filter(
+    (v): v is string => typeof v === 'string' && v.length > 0 && !isVariableRefValue(v),
+  );
 }
 
 function entityKindLabel(kind: EntityKind): string {

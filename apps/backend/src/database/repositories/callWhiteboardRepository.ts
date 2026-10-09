@@ -7,6 +7,7 @@ import {
   AttachmentEntityType,
   MessageType,
 } from '@xyne/shared';
+import { advisoryXactLock } from '@/bypassAcl/lockServices';
 
 export interface SaveCallWhiteboardAttachmentInput {
   callId: string;
@@ -44,7 +45,9 @@ export class CallWhiteboardRepository {
 
     return await this.db.$transaction(
       async tx => {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+        await advisoryXactLock(tx, ['MessageAttachment'],
+          'call whiteboard: serialize get-or-create of the whiteboard attachment for a call page',
+          lockKey);
 
         const existing = await tx.messageAttachment.findFirst({
           where: {

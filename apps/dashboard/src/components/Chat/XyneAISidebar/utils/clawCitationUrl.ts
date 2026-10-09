@@ -24,6 +24,8 @@ function buildSupportUrl(
   if (conversationId) params.set('conversationId', conversationId);
   if (ticketId) params.set('ticketId', ticketId);
   if (mailId) params.set('mail', mailId);
+  // Arrival attribution for SUPPORT_TICKET_VIEWED — a URL has no router state.
+  params.set('src', 'citation');
   const qs = params.toString();
   const base = `/support/${channelId}/${xyneId}`;
   return qs ? `${base}?${qs}` : base;

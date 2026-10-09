@@ -31,6 +31,7 @@ const TICKET_FILTER_SCHEMA: Record<string, TicketFilterFieldDescriptor> = {
   tags:                { col: tagCols.name,            enumValues: null },
   stages:              { col: ticketCols.stageName,    enumValues: null },
   ticketTypes:         { col: ticketCols.ticketType,   enumValues: null },
+  merchantIds:         { col: ticketCols.merchantId,   enumValues: null },
   sourceChannels:      { col: ticketCols.channelId,    enumValues: null },
   dueDateStart:        { col: ticketCols.eta,          enumValues: null },
   dueDateEnd:          { col: ticketCols.eta,          enumValues: null },

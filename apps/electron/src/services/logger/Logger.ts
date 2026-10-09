@@ -8,7 +8,7 @@
 
 import log from 'electron-log/main';
 import { v4 as uuidv4 } from 'uuid';
-import { shred } from '@xyne/logger';
+import { CLIENT_EVENT_SHRED_OPTIONS, shred, shredError } from '@xyne/logger';
 import type { EnrollmentEventType } from './enrollment-events';
 import * as os from 'os';
 import { net, app } from 'electron';
@@ -66,17 +66,30 @@ const errorFrom = (value: unknown): Error | undefined => {
   ) as Error | undefined;
 };
 
-export const installElectronLogStackHook = (): void => {
+// Local file/console output skips Logger.log, so shred it here too. Errors stay
+// Errors (multi-line stacks) via shredError.
+const shredLogMessage: (typeof log.hooks)[number] = message => ({
+  ...message,
+  data: message.data.map(item =>
+    item instanceof Error
+      ? shredError(item, CLIENT_EVENT_SHRED_OPTIONS)
+      : shred(item, CLIENT_EVENT_SHRED_OPTIONS)
+  ),
+});
+
+export const installElectronLogHooks = (): void => {
   log.hooks.push(message => {
     if (message.level !== 'error') return message;
     const error = message.data.map(errorFrom).find(Boolean);
     if (error) message.data.push({ error: serializeError(error) });
     return message;
   });
+  log.hooks.push(shredLogMessage);
 };
 
 // Create logger instance for errors and warnings only
 export const errorLogger = log.create({ logId: 'error' });
+errorLogger.hooks.push(shredLogMessage);
 errorLogger.transports.file.fileName = 'errors.log';
 errorLogger.transports.file.level = 'error'; // Only error
 errorLogger.transports['console'].level = false;
@@ -275,7 +288,8 @@ class LoggerService {
 
     // Shred secret values out of every field before it reaches any sink
     // (log files + the POST buffer). Field names are preserved — values only.
-    const safeEntry = shred(logEntry) as LogEntry;
+    // Client events are exempt from the 64 KB per-string cap (crash reports).
+    const safeEntry = shred(logEntry, CLIENT_EVENT_SHRED_OPTIONS) as LogEntry;
 
     // Write to main log (all levels)
     log.info(`[${logType ?? 'EnrollmentLogger'}]`, JSON.stringify(safeEntry));

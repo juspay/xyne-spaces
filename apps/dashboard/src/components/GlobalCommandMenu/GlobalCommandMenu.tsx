@@ -37,6 +37,8 @@ interface GlobalCommandMenuProps {
   onOpenChange?: (open: boolean) => void;
   contextSelectionMode?: boolean;
   contextItems?: ContextItem[];
+  selectionVariant?: 'filled' | 'outline';
+  compactTabs?: boolean;
   onContextItemToggle?: (item: ContextItem) => void;
   onContextSelectionConfirm?: () => void;
   enabledTabs?: TabType[];
@@ -49,6 +51,9 @@ interface GlobalCommandMenuProps {
   restoreQueryFromUrl?: boolean;
   // Opened by the `mod+/` shortcut in screen mode: seed the box with `/` so it lands in command mode.
   seedCommand?: boolean;
+  // Show the inline AI overview above the results. Only the cmd+K search overlay sets it;
+  // the pickers built on this menu leave it off.
+  aiOverview?: boolean;
 }
 
 const GlobalCommandMenu = ({
@@ -56,6 +61,8 @@ const GlobalCommandMenu = ({
   onOpenChange: controlledOnOpenChange,
   contextSelectionMode,
   contextItems,
+  selectionVariant,
+  compactTabs,
   onContextItemToggle,
   onContextSelectionConfirm,
   enabledTabs,
@@ -67,6 +74,7 @@ const GlobalCommandMenu = ({
   hideTabs,
   restoreQueryFromUrl,
   seedCommand,
+  aiOverview,
 }: GlobalCommandMenuProps = {}): ReactElement | null => {
   const context = useAuthContextValues();
   const channelData = useAllChannels();
@@ -360,6 +368,8 @@ const GlobalCommandMenu = ({
       restoreFromLastSearch={restoreFromLastSearch}
       {...(contextSelectionMode !== undefined ? { contextSelectionMode } : {})}
       {...(contextItems !== undefined ? { contextItems } : {})}
+      {...(selectionVariant !== undefined ? { selectionVariant } : {})}
+      {...(compactTabs !== undefined ? { compactTabs } : {})}
       {...(onContextItemToggle !== undefined ? { onContextItemToggle } : {})}
       {...(onContextSelectionConfirm !== undefined ? { onContextSelectionConfirm } : {})}
       {...(effectiveEnabledTabs !== undefined ? { enabledTabs: effectiveEnabledTabs } : {})}
@@ -368,6 +378,7 @@ const GlobalCommandMenu = ({
       {...(contextualTab !== undefined ? { initialTab: contextualTab } : {})}
       {...(disableAutoFocus !== undefined ? { disableAutoFocus } : {})}
       {...(effectiveHideTabs ? { hideTabs: effectiveHideTabs } : {})}
+      {...(aiOverview !== undefined ? { aiOverview } : {})}
       deskMergeEnabled={deskMergeEnabled}
     />
   );

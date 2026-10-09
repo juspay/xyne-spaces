@@ -10,6 +10,9 @@ export const isTestEnv =
 export const isSandBox = hostname.includes('sandbox');
 export const isProd = !isLocalhost && !isSandBox && !isSandboxLocal;
 
+/** The guest call app (apps/dashboard-external) reuses dashboard code but has no session. */
+export const isExternalApp = __APP_VERSION__ === 'external';
+
 // Availability in the client is prod-agnostic now; the server's LOCAL_HARNESS_ENABLED
 // flag is the real gate for whether runs actually route to a local device.
 export const isLocalHarnessAvailable = (): boolean =>

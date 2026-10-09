@@ -1,27 +1,41 @@
 import type { Session } from '@xyne/kata-sdk';
-import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync, execFileSync } from 'node:child_process';
+import {
+  createCipheriv,
+  diffieHellman,
+  generateKeyPairSync,
+  hkdfSync,
+  randomBytes,
+  type KeyObject,
+} from 'node:crypto';
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  buildSdlcPostCommitHook,
-  installSdlcGitCredentialBootstrap,
+  buildSdlcGitCleanupScript,
+  buildSdlcRepositoryAccessScript,
+  installSdlcRepositoryAccess,
 } from './sdlc-credential-bootstrap.js';
 
-const binding = {
-  agentSlug: 'sdlc-agent' as const,
-  operation: 'INTERACTIVE' as const,
-  interactiveGrant: 'grant-1',
-  conversationId: 'conversation-1',
-  repoId: 'repo-1',
+const binding = { repoId: 'repo-1', workspaceId: 'ws-1', actorUserId: 'user-1' };
+const transport = {
+  authUrl: 'https://claw-auth.example/',
+  s2sKey: 's2s-key',
+  runSessionId: 'wf-run-1',
+  sessionToken: 'session-token',
+};
+const repository = {
+  name: 'torana',
+  cloneUrl: 'https://bb.example.net/scm/lp/torana.git',
+  baseBranch: 'master',
 };
 
-function mockSession(id: string, preflightExitCode = 0, publicKey = 'sandbox-public-key'): Session {
+function mockSession(id: string, preflightExitCode = 0): Session {
   const run = vi.fn()
     .mockResolvedValueOnce({ exitCode: preflightExitCode, stdout: '', stderr: '' })
-    .mockResolvedValueOnce({ exitCode: 0, stdout: publicKey, stderr: '' })
-    .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' });
+    .mockResolvedValueOnce({ exitCode: 0, stdout: 'sandbox-public-key', stderr: '' })
+    .mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
   return {
     id,
     commands: { run },
@@ -29,118 +43,166 @@ function mockSession(id: string, preflightExitCode = 0, publicKey = 'sandbox-pub
   } as unknown as Session;
 }
 
-function envelope() {
+/** Mirrors the backend's encryptSandboxCredentialEnvelope. */
+function envelopeFor(
+  sandboxPublicKey: KeyObject,
+  aad: Record<string, unknown>,
+  credential: Record<string, unknown>,
+) {
+  const ephemeral = generateKeyPairSync('x25519');
+  const salt = randomBytes(32);
+  const iv = randomBytes(12);
+  const aadText = JSON.stringify({ version: 1, ...aad });
+  const secret = diffieHellman({ privateKey: ephemeral.privateKey, publicKey: sandboxPublicKey });
+  const key = Buffer.from(hkdfSync('sha256', secret, salt, Buffer.from(aadText), 32));
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  cipher.setAAD(Buffer.from(aadText));
+  const ciphertext = Buffer.concat([cipher.update(JSON.stringify(credential)), cipher.final()]);
   return {
     version: 1,
     algorithm: 'X25519-HKDF-SHA256-AES-256-GCM',
-    ephemeralPublicKey: 'ephemeral',
-    salt: 'salt',
-    iv: 'iv',
-    authTag: 'tag',
-    ciphertext: 'ciphertext',
-    aad: '{}',
-    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    ephemeralPublicKey: ephemeral.publicKey.export({ format: 'der', type: 'spki' }).toString('base64'),
+    salt: salt.toString('base64'),
+    iv: iv.toString('base64'),
+    authTag: cipher.getAuthTag().toString('base64'),
+    ciphertext: ciphertext.toString('base64'),
+    aad: aadText,
+    expiresAt: String(aad['expiresAt']),
   };
 }
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  delete process.env.SPACES_BACKEND_URL;
-  delete process.env.XYNE_CLAW_S2S_KEY;
 });
 
-describe('SDLC sandbox credential bootstrap', () => {
-  it('fails closed before network redemption when Node crypto is unavailable', async () => {
+describe('installSdlcRepositoryAccess', () => {
+  it('fails closed before asking for credentials when Node crypto is unavailable', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
-    await expect(installSdlcGitCredentialBootstrap(mockSession('sandbox-1', 1), binding))
+    await expect(installSdlcRepositoryAccess(mockSession('sandbox-1', 1), binding, transport))
       .rejects.toThrow('Node.js 20+');
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('requests a fresh public-key-bound envelope when a cached sandbox is reused', async () => {
-    process.env.SPACES_BACKEND_URL = 'https://spaces.example';
-    process.env.XYNE_CLAW_S2S_KEY = 's2s-key';
+  it('asks for the Actor and repository, never a grant, and returns anonymous access as such', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ envelope: envelope() }),
+      json: async () => ({ success: true, anonymous: true, repository }),
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await installSdlcGitCredentialBootstrap(mockSession('sandbox-1', 0, 'public-key-1'), binding);
-    await installSdlcGitCredentialBootstrap(mockSession('sandbox-1', 0, 'public-key-2'), binding);
+    const result = await installSdlcRepositoryAccess(mockSession('sandbox-1'), binding, transport);
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    const calls = fetchMock.mock.calls.map(([url, init]) => ({
-      url,
-      body: JSON.parse(String((init as RequestInit).body)),
-    }));
-    expect(calls.map(({ url }) => url)).toEqual([
-      'https://spaces.example/api/internal/sdlc/vcs/runtime-credentials/bootstrap',
-      'https://spaces.example/api/internal/sdlc/vcs/runtime-credentials/bootstrap',
-    ]);
-    expect(calls.map(({ body }) => body.sandboxId)).toEqual(['sandbox-1', 'sandbox-1']);
-    expect(calls.map(({ body }) => body.sandboxPublicKey)).toEqual(['public-key-1', 'public-key-2']);
-    expect(calls.every(({ body }) => body.agentSlug === 'sdlc-agent')).toBe(true);
-    expect(calls.every(({ body }) => body.grantId === undefined)).toBe(true);
+    expect(result).toEqual({ mode: 'anonymous', repository });
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe('https://claw-auth.example/claw/api/v1/sessions/wf-run-1/sdlc/runtime-credentials/bootstrap');
+    expect((init as RequestInit).headers).toMatchObject({
+      'x-s2s-key': 's2s-key',
+      Authorization: 'Bearer session-token',
+    });
+    expect(JSON.parse(String((init as RequestInit).body))).toEqual({
+      ...binding,
+      sandboxId: 'sandbox-1',
+      sandboxPublicKey: 'sandbox-public-key',
+    });
   });
 
-  it('keeps PAT identity discovery and commit attribution inside the sandbox script', async () => {
-    process.env.SPACES_BACKEND_URL = 'https://spaces.example';
-    process.env.XYNE_CLAW_S2S_KEY = 's2s-key';
+  it('surfaces the backend refusal reason', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ envelope: envelope() }),
+      ok: false,
+      status: 403,
+      json: async () => ({ error: 'You are not a member of this repository' }),
     }));
-    const session = mockSession('sandbox-identity');
-
-    await installSdlcGitCredentialBootstrap(session, binding);
-
-    const writes = vi.mocked(session.files.write).mock.calls;
-    const script = Buffer.from(writes[2]?.[1] as Uint8Array).toString('utf8');
-    expect(() => new Function(script)).not.toThrow();
-    const hookBase64 = script.match(/post-commit",Buffer\.from\("([A-Za-z0-9+/=]+)","base64"\)/)?.[1];
-    expect(hookBase64).toBeTruthy();
-    const hook = Buffer.from(hookBase64!, 'base64').toString('utf8');
-    expect(() => new Function(hook.replace(/^#![^\n]*\n/, ''))).not.toThrow();
-    expect(hook).toContain('GIT_AUTHOR_NAME = identity.name');
-    expect(hook).toContain('GIT_COMMITTER_NAME = identity.name');
-    expect(script).toContain('https://api.github.com/user');
-    expect(script).toContain('@users.noreply.github.com');
-    expect(script).toContain('core.hooksPath');
-    expect(script).not.toContain('userEmail');
-    expect(script).not.toContain('userName');
+    await expect(installSdlcRepositoryAccess(mockSession('sandbox-1'), binding, transport))
+      .rejects.toThrow('HTTP 403): You are not a member of this repository');
   });
 
-  it('rewrites both commit author and committer to the sandbox-fetched PAT identity', () => {
-    const root = mkdtempSync(join(tmpdir(), 'sdlc-pat-identity-'));
-    try {
-      const repo = join(root, 'repo');
-      const hooks = join(root, 'hooks');
-      const identity = join(root, 'identity.json');
-      execFileSync('git', ['init', repo], { stdio: 'ignore' });
-      mkdirSync(hooks);
-      writeFileSync(identity, JSON.stringify({
-        name: 'PAT Account',
-        email: '123+pat-account@users.noreply.github.com',
-      }), { mode: 0o600 });
-      writeFileSync(join(hooks, 'post-commit'), buildSdlcPostCommitHook(identity), { mode: 0o700 });
-      execFileSync('git', ['-C', repo, 'config', 'user.name', 'Wrong User']);
-      execFileSync('git', ['-C', repo, 'config', 'user.email', 'wrong@example.com']);
-      execFileSync('git', ['-C', repo, 'config', 'core.hooksPath', hooks]);
-      writeFileSync(join(repo, 'file.txt'), 'test\n');
-      execFileSync('git', ['-C', repo, 'add', 'file.txt']);
-      execFileSync('git', ['-C', repo, 'commit', '-m', 'test'], { stdio: 'ignore' });
-      const identityLine = execFileSync(
-        'git',
-        ['-C', repo, 'show', '-s', '--format=%an|%ae|%cn|%ce'],
-        { encoding: 'utf8' },
-      ).trim();
-      expect(identityLine).toBe(
-        'PAT Account|123+pat-account@users.noreply.github.com|PAT Account|123+pat-account@users.noreply.github.com',
+  it('fails before calling claw-auth when the run session token is missing', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const session = mockSession('sandbox-1');
+    await expect(installSdlcRepositoryAccess(session, binding, { ...transport, sessionToken: '' }))
+      .rejects.toThrow('Claw auth URL, S2S key or session token is unavailable');
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(session.commands.run).toHaveBeenLastCalledWith('rm -f /tmp/.sdlc-private-key', 5_000);
+  });
+});
+
+describe('sandbox git access scripts', () => {
+  const roots: string[] = [];
+  afterEach(() => {
+    for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  });
+
+  function sandbox() {
+    const root = mkdtempSync(join(tmpdir(), 'sdlc-access-'));
+    roots.push(root);
+    const env = { ...process.env, GIT_CONFIG_GLOBAL: join(root, 'gitconfig'), GIT_CONFIG_NOSYSTEM: '1', HOME: root };
+    writeFileSync(env.GIT_CONFIG_GLOBAL, '');
+    const git = (...args: string[]) => execFileSync('git', args, { env, encoding: 'utf8' }).trim();
+    const node = (script: string) => {
+      const path = join(root, '.sdlc-run.cjs');
+      writeFileSync(path, script);
+      return spawnSync('node', [path], { env, encoding: 'utf8' });
+    };
+    const install = (repoId: string, cloneUrl: string, token: string, account: string, aadRepoId = repoId) => {
+      const keys = generateKeyPairSync('x25519');
+      writeFileSync(join(root, '.sdlc-private-key'), keys.privateKey.export({ format: 'der', type: 'pkcs8' }));
+      const envelope = envelopeFor(
+        keys.publicKey,
+        { repoId: aadRepoId, sandboxId: 'sandbox-1', expiresAt: new Date(Date.now() + 60_000).toISOString() },
+        {
+          provider: 'BITBUCKET_SERVER',
+          host: 'bb.example.net',
+          cloneUrl,
+          username: `${account}.login`,
+          password: token,
+          accountName: `Account ${account}`,
+          accountEmail: `${account}@example.com`,
+        },
       );
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
+      writeFileSync(join(root, '.sdlc-envelope.json'), JSON.stringify(envelope));
+      return node(buildSdlcRepositoryAccessScript({ sandboxId: 'sandbox-1', repoId, root }));
+    };
+    const fill = (path: string) =>
+      execFileSync('git', ['credential', 'fill'], {
+        env,
+        encoding: 'utf8',
+        input: `protocol=https\nhost=bb.example.net\npath=${path}\n\n`,
+      });
+    const identityOf = (cloneUrl: string) => {
+      const repo = mkdtempSync(join(root, 'repo-'));
+      git('init', '-q', repo);
+      git('-C', repo, 'remote', 'add', 'origin', cloneUrl);
+      return `${git('-C', repo, 'config', 'user.name')} <${git('-C', repo, 'config', 'user.email')}>`;
+    };
+    return { root, git, node, install, fill, identityOf };
+  }
+
+  it('gives each repository its own token and commit identity, then cleanup removes both', () => {
+    const box = sandbox();
+    const torana = 'https://bb.example.net/scm/lp/torana.git';
+    const pluto = 'https://bb.example.net/scm/lp/pluto.git';
+    expect(box.install('repo-1', torana, 'tokenAAAAAAAAAAAAAAAAAAAA', 'alice').status).toBe(0);
+    expect(box.install('repo-2', pluto, 'tokenBBBBBBBBBBBBBBBBBBBB', 'bob').status).toBe(0);
+
+    expect(box.fill('scm/lp/torana.git')).toContain('password=tokenAAAAAAAAAAAAAAAAAAAA');
+    expect(box.fill('scm/lp/pluto.git')).toContain('password=tokenBBBBBBBBBBBBBBBBBBBB');
+    expect(box.identityOf(torana)).toBe('Account alice <alice@example.com>');
+    expect(box.identityOf(pluto)).toBe('Account bob <bob@example.com>');
+    expect(readdirSync(box.root)).not.toContain('.sdlc-private-key');
+    expect(readdirSync(box.root)).not.toContain('.sdlc-envelope.json');
+
+    expect(box.node(buildSdlcGitCleanupScript(box.root)).status).toBe(0);
+    expect(box.git('config', '--global', '--list')).toBe('credential.https://bb.example.net.usehttppath=true');
+    expect(readdirSync(box.root).filter((name) => name.startsWith('.sdlc-'))).toEqual([]);
+  });
+
+  it('refuses an envelope bound to another repository', () => {
+    const box = sandbox();
+    const result = box.install('repo-1', 'https://bb.example.net/scm/lp/torana.git', 'tokenAAAAAAAAAAAAAAAAAAAA', 'alice', 'repo-9');
+    expect(result.status).toBe(1);
+    expect(box.git('config', '--global', '--list')).toBe('');
+    expect(existsSync(join(box.root, '.sdlc-private-key'))).toBe(false);
   });
 });

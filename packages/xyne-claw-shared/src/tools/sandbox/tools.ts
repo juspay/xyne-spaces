@@ -1,18 +1,16 @@
 import { KataClient } from "@xyne/kata-sdk";
 import type { Session } from "@xyne/kata-sdk";
 import type { ToolDefinition, ToolExecutionContext } from "../types.js";
-import { SDLC_AGENT_SLUG } from "../../sdlc/registry.js";
-import { resolveSdlcRepositoryIntoMeta } from "../../sdlc/resolve.js";
+import { SDLC_META_KEYS } from "../../sdlc/meta.js";
 import { redactSecrets, redactAndStringify } from "./redact.js";
-import { rotateTemplate, isSameTemplateFamily } from "./template-rotation.js";
+import { rotateTemplate, isSameTemplateFamily, rotatedTemplateNames } from "./template-rotation.js";
 import { formatSandboxUnavailable, isSandboxUnavailableDeferEnabled } from "./unavailable-signal.js";
 import { createLogger } from "../../logger.js";
 import { createReadStream } from "node:fs";
 import { resolve, join, sep } from "node:path";
 import {
   cleanupSdlcGitCredentialMaterial,
-  installSdlcGitCredentialBootstrap,
-  type SdlcRuntimeCredentialBinding,
+  installSdlcRepositoryAccess,
 } from "./sdlc-credential-bootstrap.js";
 
 const sandboxLog = createLogger("sandbox-tools");
@@ -574,8 +572,6 @@ export interface RepoSetupConfig {
   /** Generic repositories are not baked into their template. Skip the golden
    * clone probe and clone them immediately. */
   skipBakedCloneWait?: boolean;
-  /** Durable binding used to mint a fresh one-use envelope for each sandbox bootstrap. */
-  runtimeCredentialBinding?: SdlcRuntimeCredentialBinding;
 }
 
 export function buildRepoCloneCommand(
@@ -649,6 +645,18 @@ async function pinnedTemplateForContext(context: ToolExecutionContext): Promise<
   return REPO_CONFIGS[pinnedRepo]?.template;
 }
 
+/** An unknown template name from the LLM falls back to the agent's or default template instead of failing the claim. */
+async function knownTemplate(value: unknown): Promise<string | undefined> {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const { REPO_CONFIGS } = await import("./repo-configs.js");
+  const known = new Set([
+    "kata-workspace-template",
+    ...Object.values(REPO_CONFIGS).map((config) => config.template),
+    ...rotatedTemplateNames(),
+  ]);
+  return known.has(value.trim()) ? value.trim() : undefined;
+}
+
 /**
  * Create a persistent sandbox session. Returns a sessionId for follow-up tool calls.
  */
@@ -694,7 +702,7 @@ export const sandboxCreate: ToolDefinition = {
     // A UI-pinned sandbox repo wins over whatever template the LLM passed —
     // a pinned agent must always get its own sandbox, never the legacy kata one.
     const pinnedTemplate = await pinnedTemplateForContext(context);
-    const requestedTemplate = pinnedTemplate ?? (params["template"] as string | undefined);
+    const requestedTemplate = pinnedTemplate ?? (await knownTemplate(params["template"]));
     // ROTATE, exactly as the repo-setup path does. Without this, every
     // sandbox-create on a pinned agent clones the BASE template's single
     // snapshot: pinnedTemplateForContext returns REPO_CONFIGS[repo].template,
@@ -1233,11 +1241,20 @@ export const sandboxCopyIn: ToolDefinition = {
       // endpoint per chunk and appends server-side, so no single request is
       // large and no workspace-image change is needed. 256 KiB keeps a clear
       // margin under the observed cap.
-      const { bytesWritten } = await session.files.writeStream(
-        destPath,
-        createReadStream(sourceAbs),
-        { chunkBytes: 256 * 1024 },
-      );
+      // A read stream reports ENOENT through an async 'error' event, not by
+      // rejecting writeStream, so without this race the failure escapes the
+      // catch below and reaches the process handler — killing a pod that is
+      // serving every other session. Racing it makes a missing spill file an
+      // ordinary rejection, which is what the ENOENT branch below expects.
+      const source = createReadStream(sourceAbs);
+      const sourceFailure = new Promise<never>((_, reject) => {
+        source.once("error", reject);
+      });
+      void sourceFailure.catch(() => {});
+      const { bytesWritten } = await Promise.race([
+        session.files.writeStream(destPath, source, { chunkBytes: 256 * 1024 }),
+        sourceFailure,
+      ]).finally(() => source.destroy());
       return JSON.stringify({ sourcePath: relPath, destPath, bytes: bytesWritten, copied: true });
     } catch (err) {
       if (isStaleSessionError(err)) {
@@ -1700,18 +1717,6 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
             : cached.id.includes("agent-workspace") || cached.id.includes("docker-dev");
           if (isRepoTemplate && await probeSession(cached, storeKey)) {
             log.push(`Reusing existing sandbox session ${cached.id}`);
-            if (config.runtimeCredentialBinding) {
-              await cleanupSdlcGitCredentialMaterial(cached).catch(() => undefined);
-              const credentialMode = await installSdlcGitCredentialBootstrap(
-                cached,
-                config.runtimeCredentialBinding,
-              );
-              log.push(
-                credentialMode === "credential"
-                  ? "SDLC bootstrap refreshed: PAT helper and PAT-account commit identity installed."
-                  : "SDLC bootstrap refreshed: anonymous read-only Git access selected.",
-              );
-            }
             try {
               // The pod prebakes a shallow clone of the default branch.
               // branchName might be:
@@ -1744,11 +1749,7 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
             // Refresh git identity on reuse too — the userEmail/userName in
             // meta come from the caller's /run payload, so if a different
             // user picks up the conversation we want their identity now.
-            if (config.runtimeCredentialBinding) {
-              log.push("SDLC Git access binding refreshed for this run.");
-            } else {
-              await configureGitIdentity(cached, allWorkDirs, userEmail, userName, log);
-            }
+            await configureGitIdentity(cached, allWorkDirs, userEmail, userName, log);
             return JSON.stringify({
               sessionId: cached.id,
               branch: branchName,
@@ -1783,23 +1784,6 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
       rememberSession(storeKey, session, claimTemplate, ownerFromContext(context));
       await reportExperimentSandboxCreated(context, session, claimTemplate);
       log.push(`Session created: ${session.id}`);
-      if (config.runtimeCredentialBinding) {
-        try {
-          const credentialMode = await installSdlcGitCredentialBootstrap(
-            session,
-            config.runtimeCredentialBinding,
-          );
-          log.push(
-            credentialMode === "credential"
-              ? "SDLC bootstrap completed: PAT helper and PAT-account commit identity installed."
-              : "SDLC bootstrap completed: anonymous read-only Git access selected.",
-          );
-        } catch (error) {
-          await session.destroy().catch(() => undefined);
-          evictSession(session, storeKey);
-          throw error;
-        }
-      }
 
       const pollUntilDone = async (jobId: string, label: string, timeoutMs: number) => {
         const deadline = Date.now() + timeoutMs;
@@ -2043,11 +2027,7 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
 
       // Author every commit as the human who triggered this run, with
       // Xyne Spaces as committer. Runs across primary + aux workdirs.
-      if (config.runtimeCredentialBinding) {
-        log.push("SDLC Git access binding configured for this run.");
-      } else {
-        await configureGitIdentity(session, allWorkDirs, userEmail, userName, log);
-      }
+      await configureGitIdentity(session, allWorkDirs, userEmail, userName, log);
 
       const jobIds: Record<string, string> = {};
 
@@ -2350,10 +2330,9 @@ export const sandboxRepoSetup: ToolDefinition = {
   slug: "sandbox-repo-setup",
   name: "Sandbox Repository Setup",
   description:
-    "Set up a repository workspace. Trusted SDLC repository contexts always receive one write-capable " +
-    "workspace, independent of request type. Access capability does not authorize mutation: agents must only " +
-    "edit/build/commit when their task explicitly requires implementation. Non-SDLC read-first repositories " +
-    "retain their shared read-only default.",
+    "Set up a workspace for one of the platform's configured repositories (REPO_CONFIGS). Read-first repositories " +
+    "default to the shared read-only workspace; write:true claims a writable one. SDLC hub repositories are not set " +
+    "up here: create a sandbox and call sdlc-repository-access instead.",
   source: "custom:sandbox",
   configSchema: SANDBOX_CONFIG_SCHEMA,
   inputSchema: {
@@ -2363,17 +2342,10 @@ export const sandboxRepoSetup: ToolDefinition = {
         type: "string",
         description: "Repository name (e.g. 'xyne-spaces', 'hyperswitch'). Must match a key in REPO_CONFIGS.",
       },
-      repoId: {
-        type: "string",
-        description:
-          "SDLC repository id, when the run did not start with one pinned. Get it from " +
-          "spaces-sdlc-list-repositories; never guess or retype it. Ignored once a repository is already pinned.",
-      },
       write: {
         type: "boolean",
         description:
-          "For SDLC repository contexts this is normalized to true. For other read-first repositories, " +
-          "false uses the shared read-only workspace and true claims a writable workspace.",
+          "For read-first repositories, false uses the shared read-only workspace and true claims a writable workspace.",
       },
       branchName: {
         type: "string",
@@ -2395,30 +2367,8 @@ export const sandboxRepoSetup: ToolDefinition = {
     // ignore whatever repoName the LLM passed. This is what makes the setup
     // deterministic — the operator picks the repo in the agent UI, not the model.
     const pinnedRepo = context.meta?.["sandboxRepo"]?.trim();
-    const hasSdlcRepositoryMetadata = [
-      "sdlcRepositoryId",
-      "sdlcRepositoryName",
-      "sdlcRepositoryUrl",
-      "sdlcRepositoryBaseBranch",
-    ].some((key) => context.meta?.[key] !== undefined);
-    const sdlcRequired =
-      hasSdlcRepositoryMetadata || context.meta?.["requireSdlcRepository"] === "true";
-    const selectedRepoId = String(params["repoId"] ?? "").trim();
-    if (sdlcRequired && !hasSdlcRepositoryMetadata && selectedRepoId && context.meta) {
-      try {
-        await resolveSdlcRepositoryIntoMeta(context.meta as Record<string, string>, selectedRepoId);
-      } catch (error) {
-        return `Error: ${error instanceof Error ? error.message : String(error)}`;
-      }
-    }
-    const dynamicRepo = resolveDynamicSdlcRepositoryConfig(context);
-    if (!dynamicRepo && sdlcRequired) {
-      return hasSdlcRepositoryMetadata || selectedRepoId
-        ? "Error: Valid SDLC repository context is required; refusing to fall back to a static repository."
-        : "Error: No SDLC repository selected. Call spaces-sdlc-list-repositories with this conversation's channelId, then pass the chosen repoId to sandbox-repo-setup.";
-    }
-    const repoName = dynamicRepo?.name || pinnedRepo || (params["repoName"] as string);
-    const wantWrite = Boolean(dynamicRepo) || params["write"] === true;
+    const repoName = pinnedRepo || (params["repoName"] as string);
+    const wantWrite = params["write"] === true;
     const requestedBranchName = params["branchName"] as string;
     const sessionDurationMs = params["sessionDurationMs"] as number | undefined;
     // Import here to avoid circular dependency
@@ -2440,11 +2390,11 @@ export const sandboxRepoSetup: ToolDefinition = {
     const forcedReadOnly =
       (isReadOnlyJob(context.meta?.["eventType"], context.meta?.["conversationId"]) && !allowWriteInReadOnlyJob) ||
       context.meta?.["forceReadOnlySandbox"] === "true";
-    if (forcedReadOnly && !dynamicRepo) {
+    if (forcedReadOnly) {
       return resolveSbxGit(repoName, context);
     }
 
-    let config = dynamicRepo?.config ?? REPO_CONFIGS[repoName];
+    const config = REPO_CONFIGS[repoName];
 
     // 2. Per-repo READ-FIRST (config.readFirst, e.g. xyne-spaces): default every
     //    interactive run to read-only sbx-git; only claim a writable golden dev
@@ -2461,28 +2411,6 @@ export const sandboxRepoSetup: ToolDefinition = {
       const availableRepos = Object.keys(REPO_CONFIGS).join(", ");
       return `Error: Repository '${repoName}' not found. Available repos: ${availableRepos}`;
     }
-    if (dynamicRepo) {
-      const operation = context.meta?.["sdlcRuntimeCredentialOperation"]?.trim();
-      const conversationId = context.meta?.["sdlcConversationId"]?.trim();
-      const interactiveGrant = context.meta?.["sdlcInteractiveGrant"]?.trim();
-      const agentSlug = context.meta?.["agentSlug"]?.trim();
-      if (agentSlug !== SDLC_AGENT_SLUG) {
-        return "Error: SDLC runtime credentials are restricted to the sdlc-agent profile.";
-      }
-      if (operation !== "INTERACTIVE" || !interactiveGrant || !conversationId) {
-        return "Error: Incomplete SDLC runtime credential grant context.";
-      }
-      config = {
-        ...config,
-        runtimeCredentialBinding: {
-          agentSlug: "sdlc-agent",
-          operation,
-          interactiveGrant,
-          conversationId,
-          repoId: dynamicRepo.repoId,
-        },
-      };
-    }
     // branchName is now optional in the schema (read-first calls don't pass it).
     // On the writable path, default a missing branch to the repo's defaultBranch
     // so a non-read-first (legacy) repo — or a write:true call that forgot the
@@ -2490,7 +2418,7 @@ export const sandboxRepoSetup: ToolDefinition = {
     // feature branch afterwards via sandbox-run before pushing.
     const effectiveBranch = requestedBranchName || config.defaultBranch;
     if (!isSafeGitRef(effectiveBranch)) {
-      return "Error: Invalid branch name for SDLC sandbox.";
+      return "Error: Invalid branch name.";
     }
 
     // On-demand write sandbox lifetime: per-repo writeSessionTimeoutMs when set
@@ -2547,8 +2475,6 @@ export const sandboxRepoSetup: ToolDefinition = {
       if (isSandboxUnavailableDeferEnabled()) {
         return formatSandboxUnavailable(firstLine);
       }
-      // SDLC repositories never fall back to a static mirror or sbx-git.
-      if (dynamicRepo) return result;
       const reason =
         `the writable dev sandbox could NOT be provisioned right now (${firstLine}) — likely no capacity for a fresh machine.`;
       const ro = await resolveSbxGit(repoName, context, reason);
@@ -2565,58 +2491,80 @@ function isSafeGitRef(value: string): boolean {
     !value.includes("..") && !value.includes("//") && !value.endsWith(".") && !value.endsWith("/");
 }
 
-export function resolveDynamicSdlcRepositoryConfig(
-  context: ToolExecutionContext,
-): { repoId: string; name: string; config: RepoSetupConfig } | null {
-  const rawId = context.meta?.["sdlcRepositoryId"]?.trim();
-  const rawUrl = context.meta?.["sdlcRepositoryUrl"]?.trim();
-  const rawName = context.meta?.["sdlcRepositoryName"]?.trim();
-  const baseBranch = context.meta?.["sdlcRepositoryBaseBranch"]?.trim() || "main";
-  if (!rawId || !rawUrl || !rawName) return null;
-  if (!isSafeGitRef(baseBranch)) return null;
-
-  let parsed: URL;
-  try {
-    parsed = new URL(rawUrl);
-  } catch {
-    return null;
-  }
-  if (
-    parsed.protocol !== "https:" ||
-    parsed.hostname.toLowerCase() !== "github.com" ||
-    parsed.username ||
-    parsed.password ||
-    parsed.search ||
-    parsed.hash
-  ) {
-    return null;
-  }
-  const segments = parsed.pathname.replace(/\.git$/, "").split("/").filter(Boolean);
-  if (segments.length !== 2 || segments.some((part) => !/^[A-Za-z0-9_.-]+$/.test(part))) {
-    return null;
-  }
-  const name = rawName.replace(/[^A-Za-z0-9_.-]/g, "-").slice(0, 80) || segments[1]!;
-  const repoUrl = `https://github.com/${segments[0]}/${segments[1]}.git`;
-  return {
-    repoId: rawId,
-    name,
-    config: {
-      slug: "sandbox-sdlc-repository-setup",
-      name: `SDLC repository: ${name}`,
-      description: "Run-scoped public GitHub repository attached to an SDLC hub.",
-      repoUrl,
-      defaultBranch: baseBranch,
-      cloneDepth: 1,
-      workDir: `/workspace/${name}`,
-      template: "kata-workspace-template",
-      sessionTimeoutMs: 60 * 60 * 1000,
-      idleTimeoutMs: 20 * 60 * 1000,
-      readyTimeoutMs: 10 * 60 * 1000,
-      steps: [],
-      skipBakedCloneWait: true,
+export const sdlcRepositoryAccess: ToolDefinition = {
+  slug: "sdlc-repository-access",
+  name: "SDLC Repository Access",
+  description:
+    "Give a sandbox git access to one SDLC repository. Installs that repository's credential and commit identity, " +
+    "then returns its clone URL and base branch. Afterwards use plain git in the sandbox: " +
+    "`git clone <cloneUrl>`, commit, push. Clone with the exact cloneUrl returned, or commits lose their identity. " +
+    "Call it once per repository per run; access is removed when the run ends. Get repoId from " +
+    "spaces-sdlc-list-repositories and sessionId from sandbox-create.",
+  source: "custom:sandbox",
+  configSchema: SANDBOX_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {
+      repoId: { type: "string", description: "SDLC repository id from spaces-sdlc-list-repositories." },
+      sessionId: { type: "string", description: "Sandbox session id from sandbox-create." },
     },
-  };
-}
+    required: ["repoId", "sessionId"],
+  },
+
+  async execute(params, context) {
+    if (!context) return "Error: No execution context available.";
+    const repoId = String(params["repoId"] ?? "").trim();
+    const sessionId = String(params["sessionId"] ?? "").trim();
+    if (!repoId || !sessionId) return "Error: repoId and sessionId are required.";
+    const workspaceId = context.meta?.[SDLC_META_KEYS.workspaceId]?.trim();
+    const actorUserId = context.meta?.[SDLC_META_KEYS.actorUserId]?.trim();
+    if (!workspaceId || !actorUserId) {
+      return "Error: SDLC repository access is only available in a run started from an SDLC hub or with a repository selected.";
+    }
+    if (actorUserId !== context.meta?.["userId"]?.trim()) {
+      return "Error: SDLC run context does not belong to this run's user.";
+    }
+    // The tool's sessionId is the sandbox. claw-auth checks the run session the token was minted for.
+    const runSessionId = context.sessionId;
+    const sessionToken = context.sessionToken;
+    if (!runSessionId || !sessionToken) return "Error: SDLC repository access needs a claw-auth run session.";
+    const session = SESSION_STORE.get(sessionId);
+    if (!session) return `Error: Session ${sessionId} not found. Call sandbox-create first.`;
+    if (!isSessionOwnedByContext(session, sessionId, context)) {
+      return unauthorizedSessionMessage(sessionId);
+    }
+    if (READONLY_SESSIONS.has(session.id) || SHARED_SESSIONS.has(session.id)) {
+      return "Error: A shared read-only sandbox cannot hold repository credentials. Call sandbox-create for your own sandbox.";
+    }
+    try {
+      const { mode, repository } = await installSdlcRepositoryAccess(
+        session,
+        { repoId, workspaceId, actorUserId },
+        {
+          authUrl: context.config["XYNE_CLAW_AUTH_URL"] ?? process.env["XYNE_CLAW_AUTH_URL"] ?? AUTH_URL_DEFAULT,
+          s2sKey: context.s2sKey ?? context.config["XYNE_CLAW_S2S_KEY"] ?? process.env["XYNE_CLAW_S2S_KEY"] ?? "",
+          runSessionId,
+          sessionToken,
+        },
+      );
+      return JSON.stringify({
+        sessionId,
+        repoId,
+        access: mode === "credential" ? "read-write" : "anonymous read-only (public repository, no credential)",
+        name: repository.name,
+        cloneUrl: repository.cloneUrl,
+        baseBranch: repository.baseBranch,
+        next: `git clone --branch ${repository.baseBranch} ${repository.cloneUrl} /workspace/${repository.name}`,
+      });
+    } catch (err) {
+      if (isStaleSessionError(err)) {
+        evictSession(session);
+        return `Error: Session ${sessionId} died (sandbox pod replaced). Call sandbox-create again.`;
+      }
+      return sandboxErr(err);
+    }
+  },
+};
 
 /**
  * Destroy a sandbox session and free its resources.

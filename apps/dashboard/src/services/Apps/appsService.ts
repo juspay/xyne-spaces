@@ -26,6 +26,11 @@ export interface UpdateAppRequest {
   webhookUrl?: string;
 }
 
+export interface AttachedResource {
+  id: string;
+  name: string;
+}
+
 export interface BotChannel {
   id: string;
   name: string;
@@ -470,6 +475,38 @@ export class AppsService {
    */
   async activateInstalledPermissions(installedAppId: string): Promise<void> {
     await apiInstance.post(`/apps/installed/${installedAppId}/permissions/activate`);
+  }
+
+  /**
+   * Individual resources this install may act on — see the backend's
+   * `attachableResources` registry for the kinds. Absent from the list means the app
+   * cannot act on it; there is no approval step, changes take effect immediately.
+   */
+  async getInstalledResources(
+    installedAppId: string,
+    resourceType: string,
+  ): Promise<AttachedResource[]> {
+    const response = await apiInstance.get<{ items: AttachedResource[] }>(
+      `/apps/installed/${installedAppId}/resources/${resourceType}`,
+    );
+    return response.data.items;
+  }
+
+  /**
+   * Apply just what the admin changed. A delta rather than the whole set, so a resource
+   * attached by someone else while this page was open is not silently dropped. Returns
+   * the attached set as the server now sees it.
+   */
+  async updateInstalledResources(
+    installedAppId: string,
+    resourceType: string,
+    changes: { added: string[]; removed: string[] },
+  ): Promise<AttachedResource[]> {
+    const response = await apiInstance.patch<{ items: AttachedResource[] }>(
+      `/apps/installed/${installedAppId}/resources/${resourceType}`,
+      changes,
+    );
+    return response.data.items;
   }
 
   /** Read-only snapshot of the install's commands/shortcuts. */

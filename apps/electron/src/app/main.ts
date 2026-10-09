@@ -12,7 +12,7 @@ import {
 } from '../services/request-interceptor';
 import { setupMTLS } from '../services/mtls';
 import { agentAuthService } from '../services/agent-auth';
-import { installElectronLogStackHook, Logger } from '../services/logger/Logger';
+import { installElectronLogHooks, Logger } from '../services/logger/Logger';
 import { localHarnessBridge } from '../services/local-harness';
 import { BrowserWindow } from 'electron';
 import { EnrollmentEvent } from '../services/logger/enrollment-events';
@@ -41,7 +41,7 @@ app.setAppUserModelId(config.APP_ID);
 // Initialize electron-log for main process
 process.setSourceMapsEnabled(true);
 log.initialize();
-installElectronLogStackHook();
+installElectronLogHooks();
 log.transports.file.level = 'info';
 log.transports['console'].level = 'info';
 log.info('[Main] Electron app starting...');
@@ -293,6 +293,13 @@ app.on('web-contents-created', (_event, webContents) => {
         const urlObj = new URL(url);
         if (urlObj.protocol === 'http:' || urlObj.protocol === 'https:') {
           const mainWindow = getMainWindow();
+          // The renderer that embedded this webview is the one holding the
+          // handler for it. In the main window that is the main window; for a
+          // folder opened in its own window it is that window, and sending the
+          // popup to the main one instead would throw the page into the app's
+          // browser panel — the thing the embedded tabs exist to avoid.
+          const host = webContents.hostWebContents;
+          const embedder = host && !host.isDestroyed() ? host : null;
           if (mainWindow && !mainWindow.isDestroyed()) {
             // A call invite followed inside the browser panel still belongs to
             // the app, not to another panel tab.
@@ -300,8 +307,14 @@ app.on('web-contents-created', (_event, webContents) => {
             if (invitePath) {
               mainWindow.webContents.send('navigate-to', invitePath);
             } else {
-              mainWindow.webContents.send('open-in-browser-panel', url);
+              (embedder ?? mainWindow.webContents).send(
+                'open-in-browser-panel',
+                url,
+                webContents.id,
+              );
             }
+          } else if (embedder) {
+            embedder.send('open-in-browser-panel', url, webContents.id);
           }
         }
       } catch (e) {

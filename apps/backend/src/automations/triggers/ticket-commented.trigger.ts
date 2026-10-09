@@ -19,6 +19,10 @@ import type { TicketLike } from './ticket-context';
 export const TICKET_COMMENTED_EVENT = 'TICKET_COMMENTED';
 
 const TicketCommentedConfigSchema = z.object({
+  projectIds: z
+    .array(z.string())
+    .optional()
+    .describe('Limit to tickets on these projects. Empty matches every project.'),
   boardIds: z
     .array(z.string())
     .optional()
@@ -27,10 +31,6 @@ const TicketCommentedConfigSchema = z.object({
     .array(z.string())
     .optional()
     .describe('Limit to tickets posted to these channels. Empty matches every channel.'),
-  projectIds: z
-    .array(z.string())
-    .optional()
-    .describe('Limit to tickets on these projects. Empty matches every project.'),
   contentContains: z
     .string()
     .optional()

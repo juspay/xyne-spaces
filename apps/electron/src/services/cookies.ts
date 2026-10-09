@@ -54,7 +54,8 @@ export async function setCookiesFromHeaders(
       }
     }
 
-    log.info(`Setting cookie: ${name}=${value}, Max-Age=${maxAge}, Expires=${expires}`);
+    // Never log the cookie VALUE — it is a session credential.
+    log.info(`Setting cookie: ${name}, Max-Age=${maxAge}, Expires=${expires}`);
     // Calculate expirationDate
     let expirationDate: number | undefined;
 

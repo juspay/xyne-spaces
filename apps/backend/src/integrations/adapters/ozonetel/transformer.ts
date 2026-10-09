@@ -76,6 +76,7 @@ export class OzonetelTransformer extends BaseTransformer<OzonetelPreprocessedPay
           timestamp,
           source: 'ozonetel',
           ozonetelChannelId: payload.channelId,
+          targetConversationId: payload.targetConversationId,
           ozonetelWorkspaceId: event.workspaceId,
           ozonetelStatus: event.status,
           ozonetelDirection: event.direction,

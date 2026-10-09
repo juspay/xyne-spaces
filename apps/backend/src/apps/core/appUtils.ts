@@ -7,6 +7,7 @@ import jwt from 'jsonwebtoken';
 import { isValidUrl } from '@/utils/urlUtils';
 import { db } from '@/database/client';
 import { withWorkspaceScope } from '@/database/tenant/context';
+import { claimAppSigningSecret } from '@/bypassAcl/appServices';
 
 /**
  * Install an external app
@@ -88,9 +89,7 @@ export async function installApp(appId: string, workspaceId: string) {
     let signingSecretEnc = app.signingSecret;
     if (!signingSecretEnc) {
       const fresh = await encrypt(crypto.randomBytes(32).toString('hex'));
-      const rows = await db.$queryRaw<{ signingSecret: string | null }[]>`
-        UPDATE apps SET "signingSecret" = COALESCE("signingSecret", ${fresh})
-        WHERE id = ${appId} RETURNING "signingSecret"`;
+      const rows = await claimAppSigningSecret(appId, fresh);
       signingSecretEnc = rows[0]?.signingSecret ?? fresh;
     }
     const signingSecret = decrypt(signingSecretEnc);

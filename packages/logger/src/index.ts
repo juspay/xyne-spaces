@@ -14,8 +14,20 @@ export {
   shred,
   shredText,
   shredRecordInPlace,
+  shredError,
   isSecretKey,
+  CLIENT_EVENT_SHRED_OPTIONS,
   type ShredOptions,
 } from "./shredder.js";
+
+export {
+  REDACT_ALLOW_CONFIG_KEY,
+  parseRedactAllowList,
+  getRedactAllowList,
+  setRedactAllowList,
+  syncRedactAllowList,
+  type RedactAllowList,
+  type RedactAllowSyncOptions,
+} from "./policy.js";
 
 export { SetOnceContext, emptyContext } from "./context.js";

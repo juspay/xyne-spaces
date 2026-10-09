@@ -15,6 +15,7 @@ import { useAffinityCallback } from '../../../hooks/useAffinityCallback';
 import { useAuth } from '../../../hooks/useAuth';
 import {
   useChannelSearch,
+  useChannelMentionSearch,
   useAllChannels,
   useAllVisibleChannels,
 } from '../../../hooks/useChannels';
@@ -362,21 +363,18 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
 
   // Channel mention search for # mentions in optional message
   const [channelMentionQuery, setChannelMentionQuery] = useState('');
-  const channelMentionResults = useChannelSearch(channelMentionQuery, 10);
+  const channelMentionResults = useChannelMentionSearch(channelMentionQuery, 10);
 
   const channelMentionItems = useMemo(() => {
     if (!channelMentionResults || channelMentionResults.length === 0) return [];
 
-    // Filter channels to only show DEFAULT scope (exclude DM, GROUP_DM, TICKET, DOCUMENT)
-    return channelMentionResults
-      .filter(channel => channel.scopeType === ChannelScopeType.DEFAULT)
-      .map(channel => ({
-        id: channel.id,
-        name: channel.name,
-        isPrivate: channel.visibility === ChannelVisibility.PRIVATE,
-        ...(channel.description && { description: channel.description }),
-        hasAccess: true,
-      }));
+    return channelMentionResults.map(channel => ({
+      id: channel.id,
+      name: channel.name,
+      isPrivate: channel.visibility === ChannelVisibility.PRIVATE,
+      ...(channel.description && { description: channel.description }),
+      hasAccess: true,
+    }));
   }, [channelMentionResults]);
 
   const handleChannelMentionSearch = (query: string): void => {

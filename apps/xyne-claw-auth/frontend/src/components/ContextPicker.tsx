@@ -40,14 +40,7 @@ export function ContextPicker({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<ContextItem[]>([]);
-  const tabs = useMemo(
-    () => slug === "sdlc-agent" ? [...TABS, { id: "repository" as const, label: "Repositories" }] : TABS,
-    [slug],
-  );
-
-  useEffect(() => {
-    if (slug !== "sdlc-agent" && tab === "repository") onTabChange("all");
-  }, [slug, tab, onTabChange]);
+  const tabs = useMemo(() => [...TABS, { id: "repository" as const, label: "Repositories" }], []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedQuery(query), 300);
@@ -134,9 +127,7 @@ export function ContextPicker({
           <input
             value={query}
             onChange={(e) => onQueryChange(e.target.value)}
-            placeholder={slug === "sdlc-agent"
-              ? "Search channels, tickets, canvases, calls, repositories..."
-              : "Search channels, tickets, canvases, calls..."}
+            placeholder="Search channels, tickets, canvases, calls, repositories..."
             className="w-full bg-transparent text-sm text-zinc-200 placeholder-zinc-600 outline-none"
             autoFocus
           />

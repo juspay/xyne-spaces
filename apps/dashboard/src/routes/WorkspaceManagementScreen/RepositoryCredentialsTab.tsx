@@ -1,32 +1,49 @@
-import { ReactElement, useCallback, useEffect, useState } from 'react';
-import { CheckCircle2, Github, KeyRound, ShieldAlert, Unplug } from 'lucide-react';
+import { ReactElement, useCallback, useEffect, useId, useState } from 'react';
+import { CheckCircle2, GitBranch, Github, KeyRound, Plus, ShieldAlert, Trash2 } from 'lucide-react';
 import { WorkspaceRole } from '@xyne/shared';
 import { toast } from 'sonner';
 import { Button } from '../../components/ui/Button/Button';
 import Input from '../../components/ui/Input/Input';
+import { SegmentedToggle } from '../../components/ui/SegmentedToggle';
 import { useSelf } from '../../hooks/useUsers';
 import { apiInstance } from '../../services/clients/apiClient';
 
+type Provider = 'GITHUB' | 'BITBUCKET_SERVER';
+
 interface CredentialMetadata {
-  provider: 'GITHUB';
+  id: string;
+  name: string;
+  provider: Provider;
+  host: string;
   status: string;
-  revision: number;
   identityLogin: string | null;
-  repositoryOwner: string | null;
+  accountName: string | null;
+  accountEmail: string | null;
+  linkedRepositoryCount: number;
   repositoryCount: number | null;
   validationStatus: string;
   validatedAt: string | null;
-  validationErrorCode: string | null;
   validationErrorMessage: string | null;
-  canManage: boolean;
+}
+
+const PROVIDER_LABEL: Record<Provider, string> = {
+  GITHUB: 'GitHub',
+  BITBUCKET_SERVER: 'Bitbucket',
+};
+
+function errorMessage(error: unknown, fallback: string): string {
+  const response = (error as { response?: { data?: { error?: string; message?: string } } })
+    ?.response?.data;
+  return (
+    response?.error || response?.message || (error instanceof Error ? error.message : fallback)
+  );
 }
 
 export function RepositoryCredentialsTab({ isActive }: { isActive: boolean }): ReactElement {
   const self = useSelf();
-  const [credential, setCredential] = useState<CredentialMetadata | null>(null);
+  const [credentials, setCredentials] = useState<CredentialMetadata[]>([]);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [token, setToken] = useState('');
+  const [adding, setAdding] = useState(false);
   const canManage = self?.role === WorkspaceRole.OWNER || self?.role === WorkspaceRole.ADMIN;
 
   const load = useCallback(async (): Promise<void> => {
@@ -35,7 +52,7 @@ export function RepositoryCredentialsTab({ isActive }: { isActive: boolean }): R
       const response = await apiInstance.get<{ credentials: CredentialMetadata[] }>(
         '/sdlc/vcs/credentials',
       );
-      setCredential(response.data.credentials.find(item => item.provider === 'GITHUB') ?? null);
+      setCredentials(response.data.credentials);
     } catch {
       toast.error('Could not load repository credential settings');
     } finally {
@@ -47,196 +64,344 @@ export function RepositoryCredentialsTab({ isActive }: { isActive: boolean }): R
     if (isActive) void load();
   }, [isActive, load]);
 
-  const save = async (): Promise<void> => {
-    if (!token.trim()) return;
-    setBusy('save');
-    try {
-      await apiInstance.put('/sdlc/vcs/credentials/github', { token: token.trim() });
-      setToken('');
-      toast.success('GitHub credential validated and saved');
-      await load();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'GitHub credential validation failed');
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const disconnect = async (): Promise<void> => {
-    if (
-      !window.confirm(
-        'Disconnect the workspace GitHub credential? Private repository access and Start Work will be blocked until another credential is validated.',
-      )
-    )
-      return;
-    setBusy('disconnect');
-    try {
-      await apiInstance.delete('/sdlc/vcs/credentials/github');
-      toast.success('GitHub credential disconnected');
-      await load();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Could not disconnect credential');
-    } finally {
-      setBusy(null);
-    }
-  };
-
   return (
     <div className='space-y-4'>
-      <div>
-        <h2 className='text-lg font-semibold text-foreground'>Repository credentials</h2>
-        <p className='text-sm text-muted-foreground'>
-          One workspace credential powers private repository checks, clone, feature-branch push, and
-          draft pull requests.
-        </p>
-      </div>
-
-      <div className='rounded-xl border border-border bg-card p-6 shadow-sm'>
-        <div className='flex items-start justify-between gap-4'>
-          <div className='flex items-start gap-3'>
-            <div className='rounded-lg bg-muted p-2'>
-              <Github className='h-5 w-5' />
-            </div>
-            <div>
-              <h3 className='font-semibold'>GitHub.com</h3>
-              <p className='text-sm text-muted-foreground'>Fine-grained personal access token</p>
-            </div>
-          </div>
-          {credential?.status === 'CONNECTED' && (
-            <span
-              className={
-                credential.validationStatus === 'VALID'
-                  ? 'inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-1 text-xs font-medium text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
-                  : 'inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-1 text-xs font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-300'
-              }
-            >
-              <CheckCircle2 className='h-3.5 w-3.5' />
-              {credential.validationStatus === 'VALID' ? 'Connected' : 'Replace key'}
-            </span>
-          )}
+      <div className='flex items-start justify-between gap-4'>
+        <div>
+          <h2 className='text-lg font-semibold text-foreground'>Repository credentials</h2>
+          <p className='text-sm text-muted-foreground'>
+            Each repository uses one credential for clone, push and pull requests. Commits are made
+            as the credential&apos;s account.
+          </p>
         </div>
-
-        {loading ? (
-          <p className='mt-6 text-sm text-muted-foreground'>Loading credential status…</p>
-        ) : credential?.status === 'CONNECTED' ? (
-          <div className='mt-6 space-y-4'>
-            <dl className='grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3'>
-              <Metadata label='GitHub account' value={credential.identityLogin || 'Unknown'} />
-              <Metadata label='Token for' value={credential.repositoryOwner || 'Unknown'} />
-              <Metadata
-                label='Repos it can access'
-                value={credential.repositoryCount?.toString() ?? 'Unknown'}
-              />
-            </dl>
-            <p className='text-xs text-muted-foreground'>
-              {credential.validationStatus === 'VALID'
-                ? 'Validated once and active until GitHub rejects it, it is replaced, or it is disconnected'
-                : `Validation: ${credential.validationStatus.toLowerCase()}`}
-              {credential.validatedAt
-                ? ` · ${new Date(credential.validatedAt).toLocaleString()}`
-                : ''}
-            </p>
-            {credential.validationErrorMessage && (
-              <div className='flex gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200'>
-                <ShieldAlert className='mt-0.5 h-4 w-4 shrink-0' />
-                {credential.validationErrorMessage}
-              </div>
-            )}
-            {canManage ? (
-              <div className='flex flex-wrap gap-2'>
-                <Button
-                  variant='outline'
-                  onClick={() => setCredential({ ...credential, status: 'REPLACING' })}
-                  data-track-category='workspace-management'
-                  data-track-name='REPLACE_GITHUB_CREDENTIAL'
-                >
-                  <KeyRound className='h-4 w-4' /> Replace
-                </Button>
-                <Button
-                  variant='outline'
-                  loading={busy === 'disconnect'}
-                  onClick={() => void disconnect()}
-                  data-track-category='workspace-management'
-                  data-track-name='DISCONNECT_GITHUB_CREDENTIAL'
-                >
-                  <Unplug className='h-4 w-4' /> Disconnect
-                </Button>
-              </div>
-            ) : (
-              <p className='text-sm text-muted-foreground'>
-                Ask a workspace admin to replace this credential.
-              </p>
-            )}
-          </div>
-        ) : canManage ? (
-          <CredentialForm
-            token={token}
-            replacing={credential?.status === 'REPLACING'}
-            busy={busy === 'save'}
-            onToken={setToken}
-            onSubmit={() => void save()}
-          />
-        ) : (
-          <div className='mt-6 rounded-lg border border-dashed p-4 text-sm text-muted-foreground'>
-            No GitHub credential connected. Ask a workspace admin to configure one here.
-          </div>
+        {canManage && !adding && (
+          <Button
+            variant='outline'
+            onClick={() => setAdding(true)}
+            data-track-category='workspace-management'
+            data-track-name='ADD_REPOSITORY_CREDENTIAL'
+          >
+            <Plus className='h-4 w-4' /> Add credential
+          </Button>
         )}
       </div>
+
+      {adding && (
+        <AddCredentialForm
+          onCancel={() => setAdding(false)}
+          onSaved={() => {
+            setAdding(false);
+            void load();
+          }}
+        />
+      )}
+
+      {loading ? (
+        <p className='text-sm text-muted-foreground'>Loading credentials…</p>
+      ) : credentials.length === 0 ? (
+        <div className='rounded-lg border border-dashed p-4 text-sm text-muted-foreground'>
+          {canManage
+            ? 'No repository credentials yet. Add one for GitHub or a Bitbucket host.'
+            : 'No repository credentials yet. Ask a workspace admin to add one.'}
+        </div>
+      ) : (
+        credentials.map(credential => (
+          <CredentialCard
+            key={credential.id}
+            credential={credential}
+            canManage={canManage}
+            onChanged={() => void load()}
+          />
+        ))
+      )}
     </div>
   );
 }
 
-function CredentialForm(props: {
-  token: string;
-  replacing: boolean;
-  busy: boolean;
-  onToken: (value: string) => void;
-  onSubmit: () => void;
+function CredentialCard(props: {
+  credential: CredentialMetadata;
+  canManage: boolean;
+  onChanged: () => void;
 }): ReactElement {
+  const { credential } = props;
+  const [replacing, setReplacing] = useState(false);
+  const [token, setToken] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+  const valid = credential.status === 'CONNECTED' && credential.validationStatus === 'VALID';
+  const Icon = credential.provider === 'GITHUB' ? Github : GitBranch;
+  const tokenId = useId();
+
+  const replace = async (): Promise<void> => {
+    setBusy('replace');
+    try {
+      await apiInstance.patch(`/sdlc/vcs/credentials/${credential.id}`, { token: token.trim() });
+      toast.success('Token validated and replaced');
+      setToken('');
+      setReplacing(false);
+      props.onChanged();
+    } catch (error) {
+      toast.error(errorMessage(error, 'Token validation failed'));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const revalidate = async (): Promise<void> => {
+    setBusy('validate');
+    try {
+      await apiInstance.post(`/sdlc/vcs/credentials/${credential.id}/validate`);
+      toast.success('Credential is valid');
+    } catch (error) {
+      toast.error(errorMessage(error, 'Credential validation failed'));
+    } finally {
+      setBusy(null);
+      props.onChanged();
+    }
+  };
+
+  const remove = async (): Promise<void> => {
+    const linked = credential.linkedRepositoryCount;
+    if (
+      !window.confirm(
+        `Delete "${credential.name}"?${linked > 0 ? ` ${linked} repositor${linked === 1 ? 'y loses' : 'ies lose'} private access until a credential for ${credential.host} is added.` : ''}`,
+      )
+    )
+      return;
+    setBusy('delete');
+    try {
+      await apiInstance.delete(`/sdlc/vcs/credentials/${credential.id}`);
+      toast.success('Credential deleted');
+      props.onChanged();
+    } catch (error) {
+      toast.error(errorMessage(error, 'Could not delete credential'));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className='rounded-xl border border-border bg-card p-6 shadow-sm'>
+      <div className='flex items-start justify-between gap-4'>
+        <div className='flex items-start gap-3'>
+          <div className='rounded-lg bg-muted p-2'>
+            <Icon className='h-5 w-5' />
+          </div>
+          <div>
+            <h3 className='font-semibold'>{credential.name}</h3>
+            <p className='text-sm text-muted-foreground'>
+              {PROVIDER_LABEL[credential.provider]} · {credential.host}
+            </p>
+          </div>
+        </div>
+        <span
+          className={
+            valid
+              ? 'inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-1 text-xs font-medium text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+              : 'inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-1 text-xs font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-300'
+          }
+        >
+          <CheckCircle2 className='h-3.5 w-3.5' />
+          {valid ? 'Connected' : 'Replace token'}
+        </span>
+      </div>
+
+      <dl className='mt-6 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3'>
+        <Metadata
+          label='Commits as'
+          value={
+            credential.accountName
+              ? `${credential.accountName} <${credential.accountEmail ?? 'no email'}>`
+              : credential.identityLogin || 'Resolved on first use'
+          }
+        />
+        <Metadata
+          label='Repos it can access'
+          value={credential.repositoryCount?.toString() ?? 'Unknown'}
+        />
+        <Metadata label='Linked repositories' value={String(credential.linkedRepositoryCount)} />
+      </dl>
+
+      {credential.validationErrorMessage && (
+        <div className='mt-4 flex gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200'>
+          <ShieldAlert className='mt-0.5 h-4 w-4 shrink-0' />
+          {credential.validationErrorMessage}
+        </div>
+      )}
+
+      {props.canManage &&
+        (replacing ? (
+          <form
+            className='mt-4 flex flex-wrap items-end gap-2'
+            onSubmit={event => {
+              event.preventDefault();
+              void replace();
+            }}
+          >
+            <label htmlFor={tokenId} className='min-w-64 flex-1 text-sm font-medium'>
+              New token
+              <Input
+                id={tokenId}
+                className='mt-2'
+                type='password'
+                value={token}
+                onChange={event => setToken(event.target.value)}
+                autoComplete='new-password'
+                required
+              />
+            </label>
+            <Button type='submit' loading={busy === 'replace'} disabled={!token.trim()}>
+              Validate and replace
+            </Button>
+            <Button type='button' variant='outline' onClick={() => setReplacing(false)}>
+              Cancel
+            </Button>
+          </form>
+        ) : (
+          <div className='mt-4 flex flex-wrap gap-2'>
+            <Button
+              variant='outline'
+              onClick={() => setReplacing(true)}
+              data-track-category='workspace-management'
+              data-track-name='REPLACE_REPOSITORY_CREDENTIAL'
+            >
+              <KeyRound className='h-4 w-4' /> Replace token
+            </Button>
+            <Button
+              variant='outline'
+              loading={busy === 'validate'}
+              onClick={() => void revalidate()}
+              data-track-category='workspace-management'
+              data-track-name='VALIDATE_REPOSITORY_CREDENTIAL'
+            >
+              <CheckCircle2 className='h-4 w-4' /> Revalidate
+            </Button>
+            <Button
+              variant='outline'
+              loading={busy === 'delete'}
+              onClick={() => void remove()}
+              data-track-category='workspace-management'
+              data-track-name='DELETE_REPOSITORY_CREDENTIAL'
+            >
+              <Trash2 className='h-4 w-4' /> Delete
+            </Button>
+          </div>
+        ))}
+    </div>
+  );
+}
+
+function AddCredentialForm(props: { onCancel: () => void; onSaved: () => void }): ReactElement {
+  const [provider, setProvider] = useState<Provider>('GITHUB');
+  const [name, setName] = useState('');
+  const [host, setHost] = useState('');
+  const [token, setToken] = useState('');
+  const [busy, setBusy] = useState(false);
+  const fieldId = useId();
+
+  const save = async (): Promise<void> => {
+    setBusy(true);
+    try {
+      await apiInstance.post('/sdlc/vcs/credentials', {
+        provider,
+        name: name.trim(),
+        token: token.trim(),
+        ...(provider === 'BITBUCKET_SERVER' ? { host: host.trim() } : {}),
+      });
+      toast.success(`${PROVIDER_LABEL[provider]} credential validated and saved`);
+      props.onSaved();
+    } catch (error) {
+      toast.error(errorMessage(error, 'Credential validation failed'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <form
-      className='mt-6 space-y-4'
+      className='space-y-4 rounded-xl border border-border bg-card p-6 shadow-sm'
       onSubmit={event => {
         event.preventDefault();
-        props.onSubmit();
+        void save();
       }}
     >
+      <SegmentedToggle<Provider>
+        options={[
+          { value: 'GITHUB', label: 'GitHub' },
+          { value: 'BITBUCKET_SERVER', label: 'Bitbucket' },
+        ]}
+        value={provider}
+        onChange={setProvider}
+      />
       <div className='rounded-lg bg-muted p-4 text-sm text-muted-foreground'>
-        Paste a fine-grained PAT. Grant repository <strong>Contents: read/write</strong>,{' '}
-        <strong>Pull requests: read/write</strong>, and <strong>Workflows: read/write</strong>.
-        GitHub requires Workflows permission when a task changes files under{' '}
-        <code>.github/workflows</code>. Metadata read access is added automatically. Do not grant
-        administration or branch-protection bypass.
+        {provider === 'GITHUB' ? (
+          <>
+            Paste a fine-grained PAT. Grant repository <strong>Contents: read/write</strong>,{' '}
+            <strong>Pull requests: read/write</strong>, and <strong>Workflows: read/write</strong>.
+            Do not grant administration or branch-protection bypass.
+          </>
+        ) : (
+          <>
+            Paste a <strong>personal</strong> HTTP access token with{' '}
+            <strong>Repository write</strong> permission. Project and repository tokens are rejected
+            because commits need a real account with an email.
+          </>
+        )}
       </div>
-      <div className='grid gap-4'>
-        <label className='text-sm font-medium' htmlFor='sdlc-vcs-token'>
-          Fine-grained PAT
+      <div className='grid gap-4 sm:grid-cols-2'>
+        <label htmlFor={`${fieldId}-name`} className='text-sm font-medium'>
+          Name
           <Input
-            id='sdlc-vcs-token'
+            id={`${fieldId}-name`}
+            className='mt-2'
+            value={name}
+            onChange={event => setName(event.target.value)}
+            placeholder={provider === 'GITHUB' ? 'GitHub bot' : 'Bitbucket LP team'}
+            required
+          />
+        </label>
+        {provider === 'BITBUCKET_SERVER' && (
+          <label htmlFor={`${fieldId}-host`} className='text-sm font-medium'>
+            Host
+            <Input
+              id={`${fieldId}-host`}
+              className='mt-2'
+              value={host}
+              onChange={event => setHost(event.target.value)}
+              placeholder='bitbucket.juspay.net'
+              required
+            />
+          </label>
+        )}
+        <label htmlFor={`${fieldId}-token`} className='text-sm font-medium sm:col-span-2'>
+          Token
+          <Input
+            id={`${fieldId}-token`}
             className='mt-2'
             type='password'
-            value={props.token}
-            onChange={event => props.onToken(event.target.value)}
-            placeholder='github_pat_••••••••'
+            value={token}
+            onChange={event => setToken(event.target.value)}
+            placeholder={provider === 'GITHUB' ? 'github_pat_••••••••' : '••••••••'}
             autoComplete='new-password'
             required
           />
         </label>
       </div>
-      <Button
-        type='submit'
-        loading={props.busy}
-        disabled={!props.token.trim()}
-        data-track-category='workspace-management'
-        data-track-name='SAVE_GITHUB_CREDENTIAL'
-      >
-        Validate and save
-      </Button>
-      {props.replacing && (
-        <p className='text-xs text-muted-foreground'>
-          Existing credential stays active unless replacement validates.
-        </p>
-      )}
+      <div className='flex gap-2'>
+        <Button
+          type='submit'
+          loading={busy}
+          disabled={
+            !name.trim() || !token.trim() || (provider === 'BITBUCKET_SERVER' && !host.trim())
+          }
+          data-track-category='workspace-management'
+          data-track-name='SAVE_REPOSITORY_CREDENTIAL'
+        >
+          Validate and save
+        </Button>
+        <Button type='button' variant='outline' onClick={props.onCancel}>
+          Cancel
+        </Button>
+      </div>
     </form>
   );
 }
@@ -245,7 +410,7 @@ function Metadata({ label, value }: { label: string; value: string }): ReactElem
   return (
     <div>
       <dt className='text-muted-foreground'>{label}</dt>
-      <dd className='mt-1 font-medium'>{value}</dd>
+      <dd className='mt-1 break-all font-medium'>{value}</dd>
     </div>
   );
 }

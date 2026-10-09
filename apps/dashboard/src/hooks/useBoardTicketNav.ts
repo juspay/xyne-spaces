@@ -43,13 +43,16 @@ export function useBoardTicketNav(ticketId: string): BoardTicketNavState {
   const [, setSearchParams] = useSearchParams();
   const goTo = useCallback(
     (row: { id: string; conversationId: string | null }): void => {
-      setSearchParams(prev => {
-        const next = new URLSearchParams(prev);
-        next.set('ticketId', row.id);
-        if (row.conversationId) next.set('conversationId', row.conversationId);
-        next.set('nofocus', '1');
-        return next;
-      });
+      setSearchParams(
+        prev => {
+          const next = new URLSearchParams(prev);
+          next.set('ticketId', row.id);
+          if (row.conversationId) next.set('conversationId', row.conversationId);
+          next.set('nofocus', '1');
+          return next;
+        },
+        { state: { trackSource: 'board_nav' } },
+      );
     },
     [setSearchParams],
   );

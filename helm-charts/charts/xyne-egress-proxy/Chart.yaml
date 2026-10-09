@@ -1,0 +1,17 @@
+apiVersion: v2
+name: xyne-egress-proxy
+description: Allowlist-only Squid forward proxy that is the sole internet path for Kata sandbox workspaces
+type: application
+version: 0.1.0
+appVersion: "6.6-24.04_beta"
+keywords:
+  - xyne
+  - squid
+  - egress
+home: https://github.com/juspay/xyne-spaces
+sources:
+  - https://github.com/canonical/squid-rock
+dependencies:
+  - name: xyne-common
+    version: 0.1.0
+    repository: file://../xyne-common

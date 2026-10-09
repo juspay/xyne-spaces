@@ -10,6 +10,7 @@ WORKDIR /repo
 # Manifests + lockfile first so the install layer caches independently of source.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY packages/storage/package.json      packages/storage/
+COPY packages/logger/package.json       packages/logger/
 COPY apps/dashboard-edge/package.json   apps/dashboard-edge/
 
 # --ignore-scripts: only manifests exist at this layer; @xyne/storage's
@@ -17,7 +18,8 @@ COPY apps/dashboard-edge/package.json   apps/dashboard-edge/
 RUN pnpm install --frozen-lockfile --prod=false --ignore-scripts --filter xyne-spaces-dashboard-edge...
 
 COPY packages/storage packages/storage
-RUN pnpm --filter @xyne/storage run build
+COPY packages/logger packages/logger
+RUN pnpm --filter @xyne/logger --filter @xyne/storage run build
 
 COPY apps/dashboard-edge/tsconfig.json apps/dashboard-edge/
 COPY apps/dashboard-edge/src           apps/dashboard-edge/src

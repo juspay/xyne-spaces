@@ -8,6 +8,7 @@ import {
   type ShareParams,
   type ShareResult,
 } from '../services/claw/shareAgentConversationService';
+import { globalClickTracker } from '../services/Analytics/globalClickTracker';
 
 export const useShareAgentConversationStatus = (args: {
   channelId: string | undefined;
@@ -57,4 +58,16 @@ export const useAgentConversationPreview = (args: {
 export const useShareAgentConversation = () =>
   useMutation<ShareResult, Error, ShareParams>({
     mutationFn: params => shareAgentConversationToChannel(params),
+    // The share button is rendered by the forward modal, whose click is generic;
+    // the outcome is what says an AI answer left the assistant and reached a channel.
+    onSuccess: (result, params) => {
+      globalClickTracker.trackManualEvent('XyneAI', 'CONVERSATION_SHARED', undefined, {
+        target: 'channel',
+        conversationId: params.sourceConversationId,
+        agentSlug: params.agentSlug,
+        channelId: params.channelId,
+        messageCount: result.sharedMessageCount,
+        reusedExisting: result.reusedExisting,
+      });
+    },
   });

@@ -123,7 +123,7 @@ export class CallsACL extends BaseQueryACL<'calls'> {
         exists('channel', (ch) =>
           ch
             .where('workspaceId', '=', this.ctx.workspaceId)
-            .whereExists('participants', (p) => p.where('userId', this.ctx.userID))
+            .whereExists('participants', (p) => p.where('userId', this.ctx.userID)),
         ),
       ),
     );

@@ -37,6 +37,44 @@ export class BitbucketService {
     return `${webBase}/projects/${projectKey}/repos/${repositorySlug}/commits/${commitId}#${filePath}`;
   }
 
+  /**
+   * Every file path in the repo (recursive) at the given ref, or the default
+   * branch when omitted. Paginates Bitbucket Server's files endpoint and caps
+   * the total so a huge monorepo can't unbounded-grow the AI-suggestion input.
+   */
+  async listFilePaths(ref?: string): Promise<string[]> {
+    const { projectKey, repositorySlug } = this.config;
+    if (!projectKey || !repositorySlug) {
+      throw new Error('projectKey and repositorySlug are required to list files');
+    }
+    // Bitbucket keys/slugs are [A-Za-z0-9_.-]; anything else (e.g. `..`, `%2F`) is a URL
+    // parse artefact, not a repo — reject rather than interpolate into the request path.
+    const SAFE_SEGMENT = /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/;
+    if (!SAFE_SEGMENT.test(projectKey) || !SAFE_SEGMENT.test(repositorySlug)) {
+      throw new Error('Invalid Bitbucket project key or repository slug');
+    }
+    const paths: string[] = [];
+    const PAGE = 1000;
+    const MAX = 10000;
+    let start = 0;
+    for (;;) {
+      const params = new URLSearchParams({ limit: String(PAGE), start: String(start) });
+      if (ref) params.set('at', ref);
+      const page = await this.makeRequest<{
+        values?: string[];
+        isLastPage?: boolean;
+        nextPageStart?: number | null;
+      }>(`/projects/${encodeURIComponent(projectKey)}/repos/${encodeURIComponent(repositorySlug)}/files?${params.toString()}`);
+      const before = paths.length;
+      for (const p of page.values ?? []) paths.push(p);
+      if (page.isLastPage || page.nextPageStart == null || paths.length >= MAX || paths.length === before) {
+        break;
+      }
+      start = page.nextPageStart;
+    }
+    return paths;
+  }
+
   private getRetryDelay(attempt: number): number {
     // Exponential backoff: baseDelay * 2^attempt, capped at maxDelay
     const exponentialDelay = this.BASE_DELAY_MS * Math.pow(2, attempt);
@@ -532,7 +570,7 @@ export class BitbucketService {
         `Found ${commitIds.length} commit(s) between ${sinceCommitId} and ${untilCommitId}${branch ? ` on branch ${branch}` : ''} in ${projectKey}/${repositorySlug}`
       );
 
-      return [...commitIds, sinceCommitId];
+      return commitIds;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       logger.error(

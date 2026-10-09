@@ -9,6 +9,7 @@ import { storageService } from '@/services/storage';
 import { decodeCursor, paginateResults } from './paginationUtils';
 import { MessagesSideEffectHandler } from '@/zero/side-effects/tables/messages-handler';
 import { buildUserQueryContext } from '@/utils/queryContext';
+import { deleteMessageSearchRow } from '@/bypassAcl/searchIndexServices';
 
 /**
  * Find or create a conversation and add a message
@@ -204,14 +205,18 @@ export async function deleteConversationMessage(
       });
       const otherMessages = allMessages.filter(m => m.messageId !== messageId);
       const isInitialMessage = currentConversation.initialMessageId === messageId;
-      const shouldSoftDelete = isInitialMessage && otherMessages.length > 0;
+      // A ticket thread must outlive its messages: Ticket.conversation is a required relation, so
+      // hard-deleting the conversation would throw P2014. Tombstone the initial message instead.
+      const hasTicket =
+        (await tx.ticket.count({ where: { conversationId: currentConversation.conversationId } })) > 0;
+      const shouldSoftDelete = isInitialMessage && (otherMessages.length > 0 || hasTicket);
 
       await tx.messageAttachment.deleteMany({
         where: { entityId: messageId, entityType: AttachmentEntityType.CHAT },
       });
       await tx.reaction.deleteMany({ where: { messageId } });
       await tx.reactionCount.deleteMany({ where: { messageId } });
-      await tx.$executeRawUnsafe('DELETE FROM message_search WHERE "messageId" = $1', messageId);
+      await deleteMessageSearchRow(tx, messageId);
 
       if (shouldSoftDelete) {
         const updateResult = await tx.message.updateMany({
@@ -231,7 +236,7 @@ export async function deleteConversationMessage(
         otherMessages[0]?.messageId === currentConversation.initialMessageId &&
         otherMessages[0]?.isDeleted === true;
 
-      if (otherMessages.length === 0 || isOnlyOtherInitialDeleted) {
+      if (!hasTicket && (otherMessages.length === 0 || isOnlyOtherInitialDeleted)) {
         if (isOnlyOtherInitialDeleted && otherMessages[0]) {
           await tx.message.deleteMany({ where: { messageId: otherMessages[0].messageId } });
         }
@@ -245,7 +250,12 @@ export async function deleteConversationMessage(
       }
 
       const channelCopies = await tx.conversation.findMany({
-        where: { initialMessageId: messageId, NOT: { conversationId: currentConversation.conversationId } },
+        // Skip copies that carry a ticket — deleting them would throw P2014 (see hasTicket above).
+        where: {
+          initialMessageId: messageId,
+          NOT: { conversationId: currentConversation.conversationId },
+          tickets: { none: {} },
+        },
         select: { conversationId: true },
       });
       for (const channelCopy of channelCopies) {

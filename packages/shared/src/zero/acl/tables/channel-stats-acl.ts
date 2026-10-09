@@ -24,8 +24,12 @@ export class ChannelStatsACL extends BaseQueryACL<'channel_stats'> {
       return query.whereExists('channel', scalarChannelBody(this.ctx, channelId, isMember), SCALAR);
     }
 
+    // Pin the join direction — see tickets-acl.ts for the full rationale. Left
+    // free, prod flipped this exists into an unconstrained `SELECT … FROM
+    // "channels" ORDER BY "id"` scan (the access OR cannot be pushed down).
     return query.whereExists('channel', (ch) =>
-      ch.where(channelAccessWhere(this.ctx))
+      ch.where(channelAccessWhere(this.ctx)),
+      { flip: false },
     );
   }
 }

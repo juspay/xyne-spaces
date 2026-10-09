@@ -112,8 +112,9 @@ function buildDynamicDefinition(row: McpServer): ResolvedConnectorDefinition {
       const headersTemplate = asRecord(http["headers"]);
       const headers: Record<string, string> = {};
       for (const [k, v] of Object.entries(headersTemplate)) headers[k] = applyTemplate(String(v), credentials);
+      const templatedUrl = applyTemplate(String(http["url"] ?? ""), credentials).trim();
       return {
-        url: applyTemplate(String(http["url"] ?? ""), credentials),
+        url: templatedUrl || row.url,
         headers,
       };
     },

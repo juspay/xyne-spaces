@@ -23,7 +23,7 @@ export async function register(req: GatewayRequest, res: Response): Promise<void
     backendId: req.body.backendId,
     toolCount: Array.isArray(req.body.tools) ? req.body.tools.length : 0,
     xAuthHeaderName: req.body.xAuthHeaderName || req.body["x-auth-headerName"] || null,
-    tokenEndpointUrlPresent: Boolean(tokenEndpointUrl),
+    hasTokenEndpointUrl: Boolean(tokenEndpointUrl),
   });
 
   const registration: ServiceRegistration = {

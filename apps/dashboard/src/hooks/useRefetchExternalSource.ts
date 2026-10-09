@@ -2,7 +2,7 @@ import { useCallback } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { apiInstance } from '../services/clients/apiClient';
-import { fetchGooglePlayReviews } from '../services/clients/socialMediaDeskApi';
+import { fetchSocialMediaReviews } from '../services/clients/socialMediaDeskApi';
 
 export interface RefetchResponseInline {
   success: boolean;
@@ -44,8 +44,11 @@ export const useRefetchExternalSource = (
   >({
     mutationFn: async range => {
       if (!channelId) throw new Error('channelId required');
-      if (isSocialMedia) return fetchGooglePlayReviews(channelId);
-      const body = range?.startDate && range?.endDate ? range : undefined;
+      const body =
+        range?.startDate && range?.endDate
+          ? { startDate: range.startDate, endDate: range.endDate }
+          : undefined;
+      if (isSocialMedia) return fetchSocialMediaReviews(channelId, body);
       const response = await apiInstance.post<RefetchResponse>(
         `/external-source-sync/${channelId}/refetch`,
         body,
@@ -69,15 +72,13 @@ export const useRefetchExternalSource = (
             toast.success(
               result.synced > 0
                 ? `Processed ${result.synced} review interaction${result.synced === 1 ? '' : 's'}`
-                : 'Google Play reviews are up to date',
+                : 'Reviews are up to date',
             );
             return;
           }
           if (result.queued) {
             toast.success(
-              isSocialMedia
-                ? 'Fetching Google Play reviews in background'
-                : 'Fetching emails in background',
+              isSocialMedia ? 'Fetching reviews in background' : 'Fetching emails in background',
               {
                 description: 'We’ll notify you when this finishes.',
               },

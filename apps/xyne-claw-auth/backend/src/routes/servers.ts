@@ -727,4 +727,4 @@ router.delete("/:id", async (req: Request<{ id: string }>, res: Response) => {
   }
 });
 
-export { router as serversRouter };
+export { router as serversRouter, validateConnectorConfig };

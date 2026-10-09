@@ -37,6 +37,7 @@ export function CanvasTicketCreationFlow({
       {...(effectiveChannel?.projectId ? { projectId: effectiveChannel.projectId } : {})}
       allowChannelSelection={!channelId}
       useLocalAttachments={true}
+      trackSource='canvas_selection'
       initialDescription={anchor.blockText}
       onTicketCreated={onTicketCreated}
     />

@@ -70,6 +70,9 @@ export function valuesToFilters(values: ReadonlyArray<SavedConfigValueRow>): Tic
       case 'ticketTypes':
         result.ticketTypes = [...(result.ticketTypes ?? []), fieldValue];
         break;
+      case 'merchantIds':
+        result.merchantIds = [...(result.merchantIds ?? []), fieldValue];
+        break;
       case 'sourceChannels':
         result.sourceChannels = [...(result.sourceChannels ?? []), fieldValue];
         break;
@@ -145,6 +148,7 @@ export function deskFiltersToValues(filters: TicketFilters): DeskValueRow[] {
   filters.createdBy?.forEach(v => addTicket('createdBy', v));
   filters.stages?.forEach(v => addTicket('stages', v));
   filters.ticketTypes?.forEach(v => addTicket('ticketTypes', v));
+  filters.merchantIds?.forEach(v => addTicket('merchantIds', v));
   filters.sourceChannels?.forEach(v => addTicket('sourceChannels', v));
   filters.tags?.forEach(v => addTicket('tags', v));
   if (filters.dueDateStart !== undefined) addTicket('dueDateStart', String(filters.dueDateStart));
@@ -180,6 +184,34 @@ export function deskFiltersToValues(filters: TicketFilters): DeskValueRow[] {
   }
 
   return values;
+}
+
+/** Serialize visible column keys into a single saved-view value row. */
+export function columnKeysToValues(columnKeys: ReadonlySet<string>): DeskValueRow[] {
+  if (columnKeys.size === 0) return [];
+  return [
+    {
+      id: uuidv4(),
+      entityName: SavedConfigEntityName.TICKET,
+      fieldName: '__columns',
+      fieldValue: [...columnKeys].join(','),
+    },
+  ];
+}
+
+/**
+ * Extract saved column keys from view value rows.
+ * Returns null when no column row exists (old view with no column data).
+ */
+export function columnKeysFromValues(
+  values: ReadonlyArray<SavedConfigValueRow>,
+): Set<string> | null {
+  for (const { fieldName, fieldValue } of values) {
+    if (fieldName === '__columns' && fieldValue) {
+      return new Set(fieldValue.split(',').filter(Boolean));
+    }
+  }
+  return null;
 }
 
 interface ShareableView {

@@ -6,6 +6,7 @@ import {
   Phone,
   BookOpen,
   Folder,
+  FolderGit2,
   Activity,
   Paperclip,
   ChevronLeft,
@@ -35,6 +36,8 @@ function iconForType(type: string): ReactElement {
       return <Folder className={className} aria-hidden />;
     case 'file':
       return <FileText className={className} aria-hidden />;
+    case 'local-folder':
+      return <FolderGit2 className={className} aria-hidden />;
     case 'activity':
     default:
       return <Activity className={className} aria-hidden />;

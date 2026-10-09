@@ -1,0 +1,8 @@
+apiVersion: v2
+name: sandbox
+description: Sandbox template, warm pool, network policy and RBAC for the Xyne Spaces agent runtime
+type: application
+version: 0.1.0
+home: https://github.com/juspay/xyne-spaces
+sources:
+  - https://github.com/juspay/xyne-spaces

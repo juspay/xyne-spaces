@@ -5,7 +5,7 @@ import { QueryResultType } from '@rocicorp/zero';
 import { useAuth } from '../../../hooks/useAuth';
 import { callActor } from '../../../machines/callMachine';
 import { roomActor } from '../../../machines/roomMachine';
-import { CallParticipant, Channel } from '@xyne/shared';
+import { CallParticipant, Channel, RingStatus } from '@xyne/shared';
 import { mutators } from '../../../zero/mutators';
 import { queries } from '../../../zero/queries';
 import { useAllChannels } from '../../../hooks/useChannels';
@@ -40,6 +40,9 @@ export function IncomingCallModal(): React.ReactElement | null {
   const processingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastViewModelRef = useRef<IncomingCallViewModel | null>(null);
   const silenceRef = useRef<{ callId: string; reason: RingSilenceReason | null } | null>(null);
+  // callId -> ring status this device already reported, so each Zero sync doesn't re-send it
+  const reportedRingStatusRef = useRef<Map<string, RingStatus>>(new Map());
+  const liveSilenceReasonRef = useRef<RingSilenceReason | null>(null);
 
   // Get active calls from roomActor context and filter for incoming calls (where user is invited)
   const allActiveCalls = useSelector(roomActor, state => state.context.activeCalls);
@@ -95,6 +98,20 @@ export function IncomingCallModal(): React.ReactElement | null {
     });
   });
 
+  // Tell the caller this device has the call: RINGING, or BUSY when it arrives silenced
+  // because the user is already on a call / recording / has the mic in use. The mutator
+  // only ever raises the status, so a second device reporting RINGING can't undo BUSY.
+  const reportRingStatus = useCallback(
+    (callId: string): void => {
+      if (!zero) return;
+      const ringStatus = liveSilenceReasonRef.current ? RingStatus.BUSY : RingStatus.RINGING;
+      if (reportedRingStatusRef.current.get(callId) === ringStatus) return;
+      reportedRingStatusRef.current.set(callId, ringStatus);
+      void zero.mutate(mutators.calls.updateRingStatus({ callId, ringStatus }));
+    },
+    [zero],
+  );
+
   useEffect(() => {
     // Clear any existing timeout
     if (processingTimeoutRef.current) {
@@ -136,6 +153,8 @@ export function IncomingCallModal(): React.ReactElement | null {
           type: 'INCOMING_CALL',
           callData,
         });
+
+        reportRingStatus(callId);
       });
     }, 500); // 500ms delay to allow state transitions to complete
 
@@ -144,7 +163,7 @@ export function IncomingCallModal(): React.ReactElement | null {
         clearTimeout(processingTimeoutRef.current);
       }
     };
-  }, [incomingCalls, incomingCallQueue, canShowIncomingCalls, user?.id]);
+  }, [incomingCalls, incomingCallQueue, canShowIncomingCalls, user?.id, reportRingStatus]);
 
   // The caller hanging up removes the call from activeCalls. Tear the modal
   // down on that change rather than inside the debounce below — half a second
@@ -195,6 +214,8 @@ export function IncomingCallModal(): React.ReactElement | null {
     recordingStatus,
     micBusy,
   });
+
+  liveSilenceReasonRef.current = liveSilenceReason;
 
   // Decided once per call and then held. Recomputing live would mean hanging up
   // on your first call sends the second one into a full-volume ringtone

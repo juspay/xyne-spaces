@@ -1,0 +1,230 @@
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  registry: docker.io
+  repository: rocicorp/zero
+  tag: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+version: ""
+versionedName: false
+
+replicaCount: 2
+revisionHistoryLimit: 3
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+
+command: []
+args: []
+
+containerPorts:
+  - name: http
+    containerPort: 4848
+    protocol: TCP
+
+service:
+  enabled: true
+  type: ClusterIP
+  annotations: {}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+    - name: http-zero
+      port: 4848
+      targetPort: http
+
+env:
+  NODE_ENV: production
+  ZERO_PORT: "4848"
+  ZERO_LOG_LEVEL: info
+  ZERO_MUTATE_URL: http://xyne-backend/api/zero/push
+  ZERO_QUERY_URL: http://xyne-backend/api/zero/query
+  ZERO_MUTATE_FORWARD_COOKIES: "true"
+  ZERO_QUERY_FORWARD_COOKIES: "true"
+  ZERO_REPLICA_FILE: /var/zero/replica.db
+  ZERO_CVR_MAX_CONNS: "10"
+  ZERO_UPSTREAM_MAX_CONNS: "10"
+  ZERO_NUM_SYNC_WORKERS: "5"
+  ZERO_CHANGE_STREAMER_URI: http://xyne-zero-replication:80
+
+secretEnv:
+  ZERO_UPSTREAM_DB:
+    name: xyne-zero-secrets
+    key: ZERO_UPSTREAM_DB
+  ZERO_CVR_DB:
+    name: xyne-zero-secrets
+    key: ZERO_CVR_DB
+  ZERO_CHANGE_DB:
+    name: xyne-zero-secrets
+    key: ZERO_CHANGE_DB
+  ZERO_AUTH_SECRET:
+    name: xyne-zero-secrets
+    key: ZERO_AUTH_SECRET
+  ZERO_ADMIN_PASSWORD:
+    name: xyne-zero-secrets
+    key: ZERO_ADMIN_PASSWORD
+
+envFromSecrets: []
+envFromConfigMaps: []
+extraEnv: []
+
+startupProbe: {}
+livenessProbe:
+  tcpSocket:
+    port: http
+  initialDelaySeconds: 400
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 10
+readinessProbe:
+  tcpSocket:
+    port: http
+  initialDelaySeconds: 100
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 10
+lifecycle: {}
+
+resources:
+  requests:
+    cpu: "2"
+    memory: 10Gi
+  limits:
+    memory: 10Gi
+
+podSecurityContext:
+  fsGroup: 1001
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  seccompProfile:
+    type: RuntimeDefault
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  automount: false
+
+commonLabels: {}
+podLabels: {}
+podAnnotations: {}
+deploymentAnnotations: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAntiAffinityPreset: soft
+topologySpreadConstraints: []
+priorityClassName: ""
+runtimeClassName: ""
+terminationGracePeriodSeconds: 60
+hostAliases: []
+dnsPolicy: ""
+dnsConfig: {}
+
+initContainers: []
+sidecars: []
+
+volumes:
+  - name: replica
+    emptyDir: {}
+volumeMounts:
+  - name: replica
+    mountPath: /var/zero
+
+persistence:
+  enabled: false
+  existingClaim: ""
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+  size: 50Gi
+  mountPath: /var/zero
+  subPath: ""
+  annotations: {}
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+  metrics: []
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      selectPolicy: Max
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60
+    scaleDown:
+      selectPolicy: Max
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 300
+
+pdb:
+  enabled: true
+  minAvailable: 1
+  unhealthyPodEvictionPolicy: ""
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: zero.spaces.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+istio:
+  virtualService:
+    enabled: false
+    hosts: []
+    gateways: []
+    timeout: 0s
+    retries: {}
+    http: []
+  destinationRule:
+    enabled: false
+    exportTo: []
+    trafficPolicy: {}
+    subsets: []
+
+networkPolicy:
+  enabled: false
+  policyTypes:
+    - Ingress
+  ingress: []
+  egress: []
+
+serviceMonitor:
+  enabled: false
+  namespace: ""
+  labels: {}
+  port: http
+  path: /metrics
+  interval: 30s
+  scrapeTimeout: ""
+
+extraObjects: []

@@ -5,12 +5,17 @@ import { withRetry } from '../../utils/retry';
 
 setStorageLogger(logger);
 
+function storageProvider(): StorageConfig['provider'] {
+  const provider = config.fileStorage.provider;
+  return provider === 's3' || provider === 'azure' ? provider : 'gcs';
+}
+
 /** Backend wiring for the shared @xyne/storage provider factory. */
 function buildStorageConfig(): StorageConfig {
   const isEnvTestOrDevelopment = config.env === 'development' || config.isTestEnv;
 
   return {
-    provider: config.fileStorage.provider === 's3' ? 's3' : 'gcs',
+    provider: storageProvider(),
     gcs: {
       projectId: config.gcs.projectId,
       bucketName: config.gcs.bucketName,
@@ -25,6 +30,13 @@ function buildStorageConfig(): StorageConfig {
       ...(config.s3.accessKeyId
         ? { accessKeyId: config.s3.accessKeyId, secretAccessKey: config.s3.secretAccessKey }
         : {}),
+    },
+    azure: {
+      containerName: config.azure.containerName,
+      ...(config.azure.accountName ? { accountName: config.azure.accountName } : {}),
+      ...(config.azure.endpoint ? { endpoint: config.azure.endpoint } : {}),
+      ...(config.azure.connectionString ? { connectionString: config.azure.connectionString } : {}),
+      ...(config.azure.sasToken ? { sasToken: config.azure.sasToken } : {}),
     },
   };
 }

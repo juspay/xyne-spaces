@@ -472,7 +472,7 @@ export function useSlashCommands({
   const runActionCommand = useCallback(
     (kind: SearchCommandKind): void => {
       const handlers: Partial<Record<SearchCommandKind, () => void>> = {
-        askai: () => xyneAIActor.send({ type: 'OPEN' }),
+        askai: () => xyneAIActor.send({ type: 'OPEN', trackSource: 'slash_command' }),
         // Start a recording in place — no navigation. The global RecordingOverlay pill surfaces it
         // wherever the user is. Any state other than idle/error means a recording is live or
         // transitioning (recording/paused/starting/stopping) — show a conflict dialog instead of

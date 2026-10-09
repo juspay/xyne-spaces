@@ -38,7 +38,7 @@ export interface ConfluenceMigrationPreviewResult {
     destination: ConfluenceSectionMapping;
   }>;
   targetProject: { id: string; name: string; code: string | null } | null;
-  targetChannel: { id: string; name: string; projectId: string } | null;
+  targetChannel: { id: string; name: string; projectId: string | null } | null;
   projectChannels: Array<{ id: string; name: string }>;
   visibilitySummary: {
     publicCanvases: number;
@@ -165,7 +165,7 @@ class ConfluenceMigrationPreviewService {
         channelName: input.targetChannelName,
         workspaceId: input.workspaceId,
       });
-      targetProjectId = targetChannel.projectId;
+      targetProjectId = targetChannel.projectId ?? undefined;
     }
 
     if (targetProjectId) {
@@ -263,7 +263,7 @@ class ConfluenceMigrationPreviewService {
     channelId?: string;
     channelName?: string;
     workspaceId: string;
-  }): Promise<{ id: string; name: string; projectId: string }> {
+  }): Promise<{ id: string; name: string; projectId: string | null }> {
     if (input.channelId) {
       const channel = await db.channel.findFirst({
         where: {
