@@ -7,18 +7,18 @@
   :root {
     @variant light {
       --color-spaces-background: #ffffff;
-      --color-spaces-foreground: #17171c;
+      --color-spaces-foreground: #17171C;
       --color-spaces-muted: #555962;
       --color-spaces-surface: #eef0f3;
-      --color-spaces-accent: #f0716a;
+      --color-spaces-accent: #F0716A;
       --color-spaces-accent-foreground: #ffffff;
     }
     @variant dark {
-      --color-spaces-background: #17171c;
+      --color-spaces-background: #17171C;
       --color-spaces-foreground: #ffffff;
       --color-spaces-muted: #555962;
       --color-spaces-surface: #1f222a;
-      --color-spaces-accent: #f0716a;
+      --color-spaces-accent: #F0716A;
       --color-spaces-accent-foreground: #ffffff;
     }
   }

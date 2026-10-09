@@ -89,7 +89,7 @@ export function DmsFilterBar(): ReactElement {
       showsHorizontalScrollIndicator={false}
       keyboardShouldPersistTaps='handled'
       contentContainerStyle={{ gap: 4 }}
-      className='py-3 bg-spaces-background'
+      className='py-3 px-4 bg-spaces-background'
     >
       {DM_FILTERS.map(filter => (
         <Chip

@@ -64,7 +64,7 @@ e
   const renderItem = useCallback(
     ({ item }: { item: string }) => (
       <DmRow id={item} onSelect={onChannelSelect}>
-        <View className='flex-row items-center h-full'>
+        <View className='flex-row items-center h-full px-4'>
           <DmRow.Avatar />
           <View className='flex-1 min-w-0 pr-3 ml-3'>
             <DmRow.Title />
@@ -149,7 +149,6 @@ e
       contentContainerStyle={{
         paddingBottom: bottomInset + 24,
         flexGrow: order.length === 0 ? 1 : undefined,
-        paddingHorizontal: 16,
         paddingBlock: 12,
       }}
       className='bg-spaces-background'
