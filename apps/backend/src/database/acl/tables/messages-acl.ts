@@ -47,7 +47,7 @@ export class MessagesACL extends BaseQueryACL<
                 { workspaceId: this.ctx.workspaceId },
                 {
                   OR: [
-                    { visibility: 'PUBLIC' },
+                    { visibility: 'PUBLIC', NOT: { scopeType: { in: ['DM', 'GROUP_DM'] } } },
                     { participants: { some: { userId: this.ctx.userId } } },
                   ],
                 },
@@ -71,14 +71,17 @@ export class MessagesACL extends BaseQueryACL<
       where: { conversationId: data.conversationId },
       select: {
         channel: {
-          select: { id: true, isArchived: true, visibility: true, workspaceId: true },
+          select: { id: true, isArchived: true, visibility: true, workspaceId: true, scopeType: true },
         },
       },
     })
     if (!conversation || !conversation.channel) return false
     if (conversation.channel.isArchived) return false
     if (conversation.channel.workspaceId !== this.ctx.workspaceId) return false
-    if (conversation.channel.visibility === 'PUBLIC') return true
+    // Same reasoning as getWhereClause: a DM/GROUP_DM's PUBLIC visibility is not trustworthy,
+    // so it must never authorize a write by itself — only participation does.
+    const isDm = conversation.channel.scopeType === 'DM' || conversation.channel.scopeType === 'GROUP_DM'
+    if (conversation.channel.visibility === 'PUBLIC' && !isDm) return true
     const participant = await this.prisma.channelParticipant.findFirst({
       where: { channelId: conversation.channel.id, userId: this.ctx.userId },
       select: { id: true },

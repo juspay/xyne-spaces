@@ -889,11 +889,12 @@ export class ChannelController {
       }
 
       // Create channel
+      const isDmScope = scopeType === ChannelScopeType.DM || scopeType === ChannelScopeType.GROUP_DM;
       const channelData: CreateChannelInput = {
         scopeType,
         name: channelName,
         description,
-        visibility: (visibility || 'PUBLIC') as ChannelVisibility,
+        visibility: (isDmScope ? 'PRIVATE' : (visibility || 'PUBLIC')) as ChannelVisibility,
         createdBy: userId,
         projectId,
         workspaceId: req.user!.workspaceId!,
