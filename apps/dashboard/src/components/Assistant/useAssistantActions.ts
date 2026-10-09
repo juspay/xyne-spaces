@@ -43,9 +43,10 @@ export const useAssistantActions = ({ enabled }: { enabled: boolean }): Assistan
   const { workspaceId } = useParams<{ workspaceId?: string }>();
   const organisations = useOrganisationsAccess();
   const role = useAuth().user?.role;
+  const isGuest = role === WorkspaceRole.GUEST;
   const actions = useMemo(
-    () => (enabled ? visibleActions(ACTIONS, { organisations }) : []),
-    [enabled, organisations],
+    () => (enabled ? visibleActions(ACTIONS, { organisations, isGuest }) : []),
+    [enabled, organisations, isGuest],
   );
   const isAdmin = role === WorkspaceRole.ADMIN || role === WorkspaceRole.OWNER;
   const starters = useMemo(() => starterActions(actions, isAdmin), [actions, isAdmin]);
