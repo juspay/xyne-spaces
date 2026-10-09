@@ -2,7 +2,7 @@ apiVersion: v2
 name: xyne-zero
 description: Rocicorp Zero cache for Xyne Spaces - one chart for both the view-syncer and the replication-manager
 type: application
-version: 0.1.0-app.1.482.1
+version: 0.1.0-app.1.474.5-release-20261008.3
 appVersion: "1.9.0"
 keywords:
   - xyne
