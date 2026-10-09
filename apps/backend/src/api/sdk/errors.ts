@@ -44,7 +44,7 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorDefinition>> = {
     status: 401,
     retryable: false,
     description:
-      'The API key is missing, malformed, unverifiable, expired, or revoked. These are deliberately indistinguishable — mint a new key from the dashboard.',
+      'The Spaces session is missing, invalid, or expired. Sign in again with Xyne SSO.',
   },
   forbidden: {
     status: 403,

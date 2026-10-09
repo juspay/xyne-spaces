@@ -28,11 +28,8 @@ export interface ToolContext {
  * it to drop those from `tools/list` entirely, so an agent attached to a
  * production workspace cannot pick one by accident.
  *
- * There is no `catalog`/`direct` metadata any more. It existed so
- * `scripts/check-operations.mjs` could verify hand-written operation names and
- * argument sets against the backend; now that every call goes through
- * `@xyne/spaces-sdk`, the SDK's own `npm run verify` owns that, and a name or
- * argument this package gets wrong is a compile error rather than a runtime one.
+ * Every call goes through `@xyne/spaces-sdk`, so a method name or argument this
+ * package gets wrong is a compile error rather than a runtime one.
  */
 export interface ToolDef {
 	name: string;
