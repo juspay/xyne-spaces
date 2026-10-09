@@ -103,7 +103,7 @@ import {
   serializeTicketMd,
 } from '@xyne/shared';
 import { TicketCardV2 } from '../../Tickets/TicketCardV2/TicketCardV2';
-import { isUserDeactivated } from '../../../utils/userDisplayName';
+import { isNonHumanUser, isUserDeactivated } from '../../../utils/userDisplayName';
 import type { SidePanelState } from './SidePanel/PanelTypes';
 import { SearchResultsSidePanel } from './SidePanel/SidePanel';
 import { resolveResultClick } from './SidePanel/ResultClickResolver';
@@ -615,7 +615,16 @@ const SearchResults = (): ReactElement => {
 
   const handleFiltersChange = useCallback(
     (newFilters: SearchResultsFilters) => {
-      setFilters(newFilters);
+      // A `from:` bot/app/agent finds nothing while bot messages are excluded, so the Bot
+      // toggle follows it: on when the first one is added, off when the last is removed. Only
+      // a change in that flips it, so toggling the pill by hand is left alone.
+      const hasBotAuthor = (f: SearchResultsFilters): boolean =>
+        f.fromUserIds.some(id => isNonHumanUser(usersById.get(id)));
+      setFilters(prev =>
+        hasBotAuthor(prev) === hasBotAuthor(newFilters)
+          ? newFilters
+          : { ...newFilters, includeBotMessages: hasBotAuthor(newFilters) },
+      );
       // Immediately sync tab, member-scope flag, and mentions to hook
       if (newFilters.docType !== 'channels') {
         const effectiveTab =
@@ -637,6 +646,7 @@ const SearchResults = (): ReactElement => {
       setStructuredFilters,
       mentionUserName,
       mentionChannelName,
+      usersById,
     ],
   );
   handleFiltersChangeRef.current = handleFiltersChange;
