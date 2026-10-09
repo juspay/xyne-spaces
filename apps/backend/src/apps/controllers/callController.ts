@@ -6,6 +6,7 @@ import { callShareService } from '@/services/callShareService';
 import { transcriptService } from '@/services/transcriptService';
 import { convertBlockNoteToMarkdown } from '@/services/canvasService';
 import { readFromYSweet } from '@/utils/ysweetUtils';
+import { isTranscriptUnlinked } from '@/utils/transcriptUnlink';
 import { summaryTemplateService } from '@/services/summaryTemplateService';
 import { INITIATED_BY_INSTALLED_APP_ID_KEY } from '@/services/callSummaryAppEventService';
 import { logger } from '@/utils/logger';
@@ -76,7 +77,8 @@ export class AppCallController {
 
       const [participants, hasTranscript] = await Promise.all([
         repositories.calls.findParticipantsForApps(call.externalId),
-        transcriptService.transcriptExists(call.externalId),
+        // An admin-unlinked transcript still sits in storage; report it as absent.
+        isTranscriptUnlinked(call) ? false : transcriptService.transcriptExists(call.externalId),
       ]);
 
       const metadata =
@@ -144,7 +146,8 @@ export class AppCallController {
         return;
       }
 
-      const transcript = await transcriptService.getTranscriptContent(call.externalId);
+      // An admin-unlinked transcript still sits in storage; treat it as absent.
+      const transcript = isTranscriptUnlinked(call) ? null : await transcriptService.getTranscriptContent(call.externalId);
       if (transcript === null) {
         res.status(404).json({ success: false, error: 'Transcript not available for this call' });
         return;

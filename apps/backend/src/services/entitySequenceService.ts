@@ -23,6 +23,7 @@ export const SequenceEntityType = {
   PROJECT_TICKET: 'PROJECT_TICKET', // entityValue = projectId; ticket numbering (e.g. XYNE-0001)
   BOARD_STAGE: 'BOARD_STAGE', // entityValue = boardId; monotonic stage sequence numbers
   FORM_FIELD: 'FORM_FIELD', // entityValue = formId; monotonic field sequence numbers
+  SECRET_VERSION: 'SECRET_VERSION', // entityValue = secretDefinitionId; monotonic secret version numbers
 } as const;
 
 export type SequenceEntityType =

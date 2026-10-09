@@ -28,7 +28,7 @@ import {
   type ProgressEmitter,
   type Attachment,
 } from "../agent.js";
-import {
+import { parseReplyFormat,
   frameSseEvent,
   KEEPALIVE_FRAME,
   type ClawStreamEvent,
@@ -1783,7 +1783,10 @@ export async function processTask(
 
     // Task commands are parsed before custom-tool loading so command-owned
     // tools can be force-mounted for this run without mutating Agent.config.
-    const forcedTaskCommandTools = new Set(taskCommand?.autoTools ?? []);
+    const forcedTaskCommandTools = new Set([
+      ...(taskCommand?.autoTools ?? []),
+      ...(parseReplyFormat(agentConfig?.["replyFormat"]) ? ["create-pdf"] : []),
+    ]);
 
     const meta: Record<string, string> = { userId };
     if (userName) meta["userName"] = userName;
@@ -1963,7 +1966,7 @@ export async function processTask(
       undefined,
       runtimeProviderConfig,
       emitUiWidgetForCustom,
-      taskCommand?.autoTools ?? [],
+      [...forcedTaskCommandTools],
     );
     const {
       tools: customToolDefs,
@@ -3081,6 +3084,8 @@ export async function processTask(
     // casual chat (rhetorical questions, no verifiable deliverable), so the
     // GLOBAL default skips Twin agents; an explicit per-agent `true` still
     // honors them. Always yields to structured output (it owns delivery).
+    const replyFormat = parseReplyFormat(agentConfig?.["replyFormat"]);
+    if (replyFormat) log(`replyFormat enabled — ≤${replyFormat.maxSections} sections of ≤${replyFormat.maxWords} words`);
     const verifyAllDefault =
       (process.env["RESPONSE_VERIFY_ALL"] ?? "off").toLowerCase() === "on";
     const verifyCfg = agentConfig?.["verifyResponses"] as boolean | undefined;
@@ -3120,6 +3125,7 @@ export async function processTask(
           evidenceRef,
           agentSlug,
           ...(verifyResponseCriteria ? { criteria: verifyResponseCriteria } : {}),
+          ...(replyFormat ? { replyFormat } : {}),
         }),
       );
       log(
@@ -4165,6 +4171,7 @@ export async function processTask(
           ? { verifyResponsesRef: evidenceRef }
           : {}),
         citationReflection,
+        replyFormat,
         autoToolCitations,
         // Thread invocations (Spaces/Slack replies — channelId present) keep a
         // clean posted reply = the last 2 assistant turns; ask-ai and every other

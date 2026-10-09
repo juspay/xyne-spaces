@@ -8,7 +8,6 @@ import { callSideEffectService } from '@/services/callSideEffectService';
 import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
 import { logDetailedSummaryFailed } from '@/services/detailedSummaryFailureLog';
 import { userActivityStatusService } from '@/services/userActivityStatusService';
-import { validateCallTx } from '@/bypassAcl/transactions/callValidationWorker';
 
 const POLL_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 
@@ -322,7 +321,7 @@ export class CallValidationWorker {
   }
 
   private async validateCall(call: Call, roomInfoMap: Map<string, any>): Promise<void> {
-    const { id: callId, externalId, status } = call;
+    const { externalId } = call;
     
     try {
       // Get room info from the pre-fetched map (no API call needed)
@@ -350,19 +349,9 @@ export class CallValidationWorker {
 
       // Mark call as ended if either condition is true
       if (shouldEndCall) {
-        const endedAt = new Date();
-
-        // Use transaction to atomically update call and system message
-        await validateCallTx(callId, endedAt, externalId, status, reason, call);
+        await callSideEffectService.endOrphanedCall(call, reason);
 
         logger.info('[CallValidationWorker] Transcript will be processed when user views the ended call message');
-
-        // Emit analytics events (call_ended + per-participant) for the Calls dashboards
-        try {
-          await callSideEffectService.logCallAnalytics(call as Parameters<typeof callSideEffectService.logCallAnalytics>[0], endedAt);
-        } catch (analyticsError) {
-          logger.error(`[CallValidationWorker] Failed to log call analytics for ${externalId}:`, analyticsError);
-        }
       }
     } catch (error) {
       logger.error(`[CallValidationWorker] Failed to validate call ${externalId}:`, error);

@@ -55,6 +55,9 @@ const instructions = [
 	"Authentication is a Spaces session from Xyne SSO, lasting as long as a Spaces login. If a tool reports you are not signed in or the " +
 		"session has expired, call spaces_login and ask the user to approve the link it returns.",
 	"A session acts as its user: anything that user cannot see, these tools cannot return.",
+	config.readOnly
+		? ""
+		: "To mention someone in a message, write @Name[userId] with their user id; a bare @Name notifies nobody.",
 	config.readOnly ? "This server is in read-only mode; no write tools are available." : "",
 ]
 	.filter(Boolean)

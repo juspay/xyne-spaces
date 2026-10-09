@@ -31,6 +31,7 @@ import {
   BookmarkDefault,
   SendPlaneSlant,
   ListAiGenerated,
+  KeySlant,
 } from '@xyne/icons';
 import { AudioLines, Radar } from 'lucide-react';
 
@@ -221,6 +222,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     popout: true,
   },
   { path: '/team-intelligence', label: 'Team Intelligence', icon: Atom, popout: true },
+  { path: '/secrets', label: 'Secrets', icon: KeySlant, iconSize: 18, popout: true },
 ];
 
 // Rail items that were folded into a combined screen. A toolbar pin stored on

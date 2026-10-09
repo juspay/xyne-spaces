@@ -1,4 +1,5 @@
 import { sanitizeAgentHandoff } from "./multi-agent-chat.js";
+import { scopeReplyFormat } from "./reply-format-scope.js";
 import { randomUUID } from "crypto";
 import { isMessagingChannelKey, type MessagingChannelKey } from "../surfaces/messaging/plugin.js";
 import { prisma } from "../db.js";
@@ -1018,10 +1019,13 @@ export async function prepareRun(
       requireSdlcRepository: _storedSdlcRequirement,
       ...storedAgentConfig
     } = agent.agentConfig;
-    let mergedAgentConfig = stripPlatformConfigKeys({
-      ...storedAgentConfig,
-      ...((body as { agentConfig?: Record<string, unknown> }).agentConfig ?? {}),
-    });
+    let mergedAgentConfig = stripPlatformConfigKeys(
+      scopeReplyFormat(
+        storedAgentConfig,
+        (body as { agentConfig?: Record<string, unknown> }).agentConfig,
+        channelDelivery !== undefined,
+      ),
+    );
     if (!isInternalRun) {
       const {
         sdlcContext: _untrustedSdlcContext,

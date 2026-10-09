@@ -22,7 +22,7 @@ import { toReactionToken } from "../emoji.js";
 import type { Related } from "../render.js";
 import { first } from "../render.js";
 import type { ToolDef } from "./shared.js";
-import { users } from "./shared.js";
+import { MENTION_GUIDE, users } from "./shared.js";
 
 /**
  * The message list joins its attachments; the SDK types columns only, so the
@@ -138,7 +138,8 @@ const messageSend: ToolDef = {
 		"spaces_threads_list, spaces_thread_get, or a search hit. To start a new thread in a channel instead, use " +
 		"spaces_thread_create. Returns the new Message ID. " +
 		"Re-resolve the conversation id immediately before calling and copy it verbatim; a message posted to the " +
-		"wrong thread is visible to everyone in that channel and cannot be recalled from here.",
+		"wrong thread is visible to everyone in that channel and cannot be recalled from here. " +
+			MENTION_GUIDE,
 	inputSchema: {
 		type: "object",
 		properties: {
@@ -147,7 +148,7 @@ const messageSend: ToolDef = {
 				type: "string",
 				description:
 					"Message body. Plain text or simple HTML — Spaces stores rich text as HTML, so <p>, <strong> and " +
-					"<ul><li> render as written.",
+					"<ul><li> render as written. Mention people as @Name[userId], never a bare @Name.",
 			},
 			type: {
 				type: "string",
@@ -198,12 +199,18 @@ const messageUpdate: ToolDef = {
 	description:
 		"Edit the text of a Xyne Spaces message you sent. The message is marked as edited for everyone who can see it. " +
 		"Needs the message id, which spaces_messages_list returns on every message. You can only edit your own " +
-		"messages — an attempt on someone else's is refused by the server.",
+		"messages — an attempt on someone else's is refused by the server. Editing in a new mention notifies that " +
+			"person. " +
+			MENTION_GUIDE,
 	inputSchema: {
 		type: "object",
 		properties: {
 			message_id: { type: "string", description: "Message to edit, from spaces_messages_list." },
-			content: { type: "string", description: "Replacement body. Replaces the message text entirely." },
+			content: {
+				type: "string",
+				description:
+					"Replacement body. Replaces the message text entirely. Mention people as @Name[userId], never a bare @Name.",
+			},
 		},
 		required: ["message_id", "content"],
 		additionalProperties: false,

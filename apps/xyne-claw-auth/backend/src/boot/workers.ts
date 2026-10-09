@@ -33,6 +33,8 @@ import { closeBackfillQueue } from "../queue/digital-twin-backfill-queue.js";
 import { bootstrapCustomTools } from "../bootstrap-tools.js";
 import { beginLocalHarnessDrain } from "../routes/local-harness.js";
 import { initLocalHarnessExpirySweep } from "../services/localHarnessExpiry.js";
+import { initProactiveWorkers, closeProactiveWorkers } from "../queue/proactive-workers.js";
+import { closeProactiveQueues } from "../queue/proactive-queue.js";
 import { initMemoryCron } from "../services/memoryCronService.js";
 import { initSlackConfigTokenCron } from "../surfaces/slack/config-token-cron.js";
 import { initMessagingAccountManager, closeMessagingAccountManager } from "../surfaces/messaging/bootstrap.js";
@@ -101,6 +103,8 @@ const WORKERS: WorkerEntry[] = [
   { name: "awakening-reflex-worker", init: initAwakeningReflexWorker, close: closeAwakeningReflexWorker },
   { name: "awakening-queues", close: closeAwakeningQueues },
   { name: "local-harness-expiry", init: initLocalHarnessExpirySweep },
+  { name: "proactive-workers", init: initProactiveWorkers, close: closeProactiveWorkers },
+  { name: "proactive-queues", close: closeProactiveQueues },
 ];
 
 const SHUTDOWN_SEQUENCE: string[] = [
@@ -125,6 +129,8 @@ const SHUTDOWN_SEQUENCE: string[] = [
   "awakening-window-worker",
   "awakening-reflex-worker",
   "awakening-queues",
+  "proactive-workers",
+  "proactive-queues",
   "scheduled-jobs-queue",
   "daily-brief-worker",
   "daily-brief-queue",

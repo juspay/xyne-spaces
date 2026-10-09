@@ -219,6 +219,20 @@ export function AgentBehaviourTabV2({
           </BehaviourRow>
 
           <BehaviourRow
+            title='Post live preview link'
+            hint='Post a message with the browser, code and terminal links in the thread when a sandbox starts. Turn off to keep busy threads readable.'
+          >
+            <BehaviourToggle
+              checked={!sandbox.hideLivePreview}
+              editable={editable}
+              disabled={busy}
+              label='Post live preview link'
+              trackName='Agent detail v2: toggle live preview message'
+              onChange={next => setSandbox({ hideLivePreview: !next }, 'Live preview updated')}
+            />
+          </BehaviourRow>
+
+          <BehaviourRow
             title='Research product'
             hint='Used by query-codebase and review-pull-request. Takes priority over the repository below.'
           >

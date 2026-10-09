@@ -43,6 +43,16 @@ import {
 import { classificationApi } from '../../../api/classificationApi';
 import { getIconForFieldType } from '../../Tickets/TicketFilters/fieldTypeIcons';
 import { DeskMetricsDateRangePicker, matchPreset } from './DeskMetricsDateRangePicker';
+import {
+  SUB_ISSUE_COLUMN,
+  customFieldColumns,
+  customFieldValue,
+  formatHms,
+  formatStageMove,
+  formatStageMoves,
+  subIssueFields,
+} from './ticketColumns';
+import { isGuestVisible } from './guestVisibility';
 import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
 import {
   Bar,
@@ -293,14 +303,8 @@ const tickIntervalFor = (pointCount: number): number => {
   return Math.floor(pointCount / 6);
 };
 
-// The same desk-wide number as the Avg Resolution KPI, just over time — so on desks saved
-// before this chart existed it follows whatever that KPI is set to. Resolved At follows RT
-// the same way, since Created At + RT gives it away.
-const inheritedVisibilityKey = (key: string): string | undefined => {
-  if (key === 'chart:resolutionTrend') return 'kpi:avgResolution';
-  if (key === 'column:resolvedAt') return 'column:rt';
-  return undefined;
-};
+/** Moves listed in a table cell before the rest collapse into "+N more". */
+const MAX_STAGE_MOVES_SHOWN = 4;
 
 interface SeriesChart {
   rows: Array<Record<string, number | string>>;
@@ -431,12 +435,9 @@ const trendLabels = (
   });
 };
 
-const getCustomFieldKeys = (tickets: DeskMetricsTicketRow[]): string[] =>
-  [...new Set(tickets.flatMap(t => Object.keys(t.customFields ?? {})))].sort();
-
 const downloadCsv = (tickets: DeskMetricsTicketRow[]): string => {
   const filename = 'desk-metrics.csv';
-  const customKeys = getCustomFieldKeys(tickets);
+  const customKeys = customFieldColumns(tickets);
   const headers = [
     'ID',
     'Title',
@@ -451,6 +452,8 @@ const downloadCsv = (tickets: DeskMetricsTicketRow[]): string => {
     ...customKeys,
     'Created At',
     'Resolved At',
+    'Resolved By',
+    'Stage Movement',
     'Age',
   ];
   const rows = tickets.map(t => [
@@ -460,16 +463,18 @@ const downloadCsv = (tickets: DeskMetricsTicketRow[]): string => {
     t.priority,
     `"${(t.stageName ?? '—').replace(/"/g, '""')}"`,
     t.statusV2,
-    formatDuration(t.frtSeconds),
-    formatDuration(t.rtSeconds),
+    formatHms(t.frtSeconds),
+    formatHms(t.rtSeconds),
     t.csatScore !== null ? `${t.csatScore.toFixed(1)}/5` : (t.csatRating ?? '—'),
     `"${(t.tags ?? [])
       .map(tg => `${tg.tagCategory}:${tg.tag}`)
       .join('; ')
       .replace(/"/g, '""')}"`,
-    ...customKeys.map(k => `"${(t.customFields?.[k] ?? '').replace(/"/g, '""')}"`),
+    ...customKeys.map(k => `"${customFieldValue(t.customFields, k).replace(/"/g, '""')}"`),
     `"${formatTicketTimestamp(t.createdAt)}"`,
     t.resolvedAt !== null ? `"${formatTicketTimestamp(t.resolvedAt)}"` : '—',
+    `"${(t.resolvedByName ?? '—').replace(/"/g, '""')}"`,
+    `"${(formatStageMoves(t.stageMoves) || '—').replace(/"/g, '""')}"`,
     `${ageInDays(t.createdAt)}d`,
   ]);
   const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
@@ -539,8 +544,8 @@ const downloadAgentCsv = (agents: DeskMetricsAgentRow[]): string => {
       a.resolved,
       a.reopened,
       rate !== null ? `${Math.round(rate * 100)}%` : '',
-      formatDuration(a.avgFrtSeconds),
-      formatDuration(a.avgRtSeconds),
+      formatHms(a.avgFrtSeconds),
+      formatHms(a.avgRtSeconds),
       a.csatAvgScore !== null ? a.csatAvgScore.toFixed(1) : '',
       a.csatGood,
       a.csatBad,
@@ -855,10 +860,10 @@ const MetricsAgentTable = ({
                     )}
                   </td>
                   <td className='whitespace-nowrap px-4 py-2 text-right font-mono text-xs tabular-nums'>
-                    {formatDuration(row.avgFrtSeconds)}
+                    {formatHms(row.avgFrtSeconds)}
                   </td>
                   <td className='whitespace-nowrap px-4 py-2 text-right font-mono text-xs tabular-nums'>
-                    {formatDuration(row.avgRtSeconds)}
+                    {formatHms(row.avgRtSeconds)}
                   </td>
                   <td className='whitespace-nowrap px-4 py-2 text-right text-xs'>
                     {row.csatAvgScore !== null ? (
@@ -904,8 +909,13 @@ const MetricsTicketTable = ({
   const [page, setPage] = useState(0);
   const totalPages = Math.ceil(tickets.length / PAGE_SIZE);
   const pageRows = tickets.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
-  const customFieldKeys = useMemo(() => getCustomFieldKeys(tickets), [tickets]);
+  const customFieldKeys = useMemo(() => customFieldColumns(tickets), [tickets]);
+  const subIssueFieldNames = useMemo(() => subIssueFields(tickets), [tickets]);
   const hide = (column: string): boolean => !canSee(`column:${column}`);
+  const canSeeField = (field: string): boolean => !hide(`field:${field}`);
+  // The merged Sub Issue column shows while any of its fields may be seen.
+  const hideFieldColumn = (column: string): boolean =>
+    column === SUB_ISSUE_COLUMN ? !subIssueFieldNames.some(canSeeField) : !canSeeField(column);
 
   useEffect(() => {
     setPage(0);
@@ -972,8 +982,10 @@ const MetricsTicketTable = ({
             hide('rt') && '[&_td:nth-child(7)]:hidden [&_th:nth-child(7)]:hidden',
             hide('csat') && '[&_td:nth-child(8)]:hidden [&_th:nth-child(8)]:hidden',
             hide('tags') && '[&_td:nth-child(9)]:hidden [&_th:nth-child(9)]:hidden',
-            hide('createdAt') && '[&_td:nth-last-child(3)]:hidden [&_th:nth-last-child(3)]:hidden',
-            hide('resolvedAt') && '[&_td:nth-last-child(2)]:hidden [&_th:nth-last-child(2)]:hidden',
+            hide('createdAt') && '[&_td:nth-last-child(5)]:hidden [&_th:nth-last-child(5)]:hidden',
+            hide('resolvedAt') && '[&_td:nth-last-child(4)]:hidden [&_th:nth-last-child(4)]:hidden',
+            hide('resolvedBy') && '[&_td:nth-last-child(3)]:hidden [&_th:nth-last-child(3)]:hidden',
+            hide('stageMoves') && '[&_td:nth-last-child(2)]:hidden [&_th:nth-last-child(2)]:hidden',
             hide('age') && '[&_td:nth-last-child(1)]:hidden [&_th:nth-last-child(1)]:hidden',
           )}
         >
@@ -1010,7 +1022,7 @@ const MetricsTicketTable = ({
                 <th
                   key={key}
                   className='whitespace-nowrap px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground'
-                  hidden={hide(`field:${key}`)}
+                  hidden={hideFieldColumn(key)}
                 >
                   {key}
                 </th>
@@ -1020,6 +1032,12 @@ const MetricsTicketTable = ({
               </th>
               <th className='px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground'>
                 Resolved At
+              </th>
+              <th className='whitespace-nowrap px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground'>
+                Resolved By
+              </th>
+              <th className='whitespace-nowrap px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground'>
+                Stage Movement
               </th>
               <th className='px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground'>
                 Age
@@ -1105,10 +1123,10 @@ const MetricsTicketTable = ({
                   {row.stageName ?? '—'}
                 </td>
                 <td className='whitespace-nowrap px-4 py-2 font-mono text-xs'>
-                  {formatDuration(row.frtSeconds)}
+                  {formatHms(row.frtSeconds)}
                 </td>
                 <td className='whitespace-nowrap px-4 py-2 font-mono text-xs'>
-                  {formatDuration(row.rtSeconds)}
+                  {formatHms(row.rtSeconds)}
                 </td>
                 <td className='whitespace-nowrap px-4 py-2 text-xs'>
                   {row.csatScore !== null
@@ -1136,9 +1154,11 @@ const MetricsTicketTable = ({
                   <td
                     key={key}
                     className='whitespace-nowrap px-4 py-2 text-xs text-muted-foreground'
-                    hidden={hide(`field:${key}`)}
+                    hidden={hideFieldColumn(key)}
                   >
-                    <div className='max-w-[160px] truncate'>{row.customFields?.[key] || '—'}</div>
+                    <div className='max-w-[160px] truncate'>
+                      {customFieldValue(row.customFields, key, canSeeField) || '—'}
+                    </div>
                   </td>
                 ))}
                 <td className='whitespace-nowrap px-4 py-2 font-mono text-xs text-muted-foreground'>
@@ -1146,6 +1166,26 @@ const MetricsTicketTable = ({
                 </td>
                 <td className='whitespace-nowrap px-4 py-2 font-mono text-xs text-muted-foreground'>
                   {row.resolvedAt !== null ? formatTicketTimestamp(row.resolvedAt) : '—'}
+                </td>
+                <td className='px-4 py-2 text-xs text-muted-foreground'>
+                  <div className='max-w-[140px] truncate'>{row.resolvedByName ?? '—'}</div>
+                </td>
+                <td className='px-4 py-2 font-mono text-xs text-muted-foreground'>
+                  {row.stageMoves && row.stageMoves.length > 0 ? (
+                    <div
+                      className='flex flex-col gap-0.5 whitespace-nowrap'
+                      title={formatStageMoves(row.stageMoves)}
+                    >
+                      {row.stageMoves.slice(0, MAX_STAGE_MOVES_SHOWN).map((move, i) => (
+                        <span key={`${i}:${move.at}`}>{formatStageMove(move)}</span>
+                      ))}
+                      {row.stageMoves.length > MAX_STAGE_MOVES_SHOWN && (
+                        <span>+{row.stageMoves.length - MAX_STAGE_MOVES_SHOWN} more</span>
+                      )}
+                    </div>
+                  ) : (
+                    '—'
+                  )}
                 </td>
                 <td className='whitespace-nowrap px-4 py-2 font-mono text-xs text-muted-foreground'>
                   {ageInDays(row.createdAt)}d
@@ -1344,7 +1384,7 @@ const AgentAverageTable = ({
                   {row.count}
                 </td>
                 <td className='px-4 py-2 text-right font-mono text-xs tabular-nums text-foreground'>
-                  {formatDuration(row.seconds)}
+                  {formatHms(row.seconds)}
                 </td>
               </tr>
             ))}
@@ -1565,13 +1605,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
   );
 
   // Guests see what the desk owner didn't turn off (Desk Settings → Metrics); others see everything.
-  const canSee = (key: string): boolean => {
-    if (!isGuest) return true;
-    const visibility = data?.guestVisibility;
-    if (visibility?.[key] !== undefined) return visibility[key] !== false;
-    const inherited = inheritedVisibilityKey(key);
-    return inherited ? visibility?.[inherited] !== false : true;
-  };
+  const canSee = (key: string): boolean => !isGuest || isGuestVisible(data?.guestVisibility, key);
 
   useEffect(() => {
     if (selectedTagCategory === null) {
@@ -3025,13 +3059,10 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                     <KpiCard label='Tickets Created' value={String(data.counts.openedInRange)} />
                   )}
                   {canSee('kpi:avgFirstResponse') && (
-                    <KpiCard
-                      label='Avg First Response'
-                      value={formatDuration(data.frt.avgSeconds)}
-                    />
+                    <KpiCard label='Avg First Response' value={formatHms(data.frt.avgSeconds)} />
                   )}
                   {canSee('kpi:avgResolution') && (
-                    <KpiCard label='Avg Resolution' value={formatDuration(data.rt.avgSeconds)} />
+                    <KpiCard label='Avg Resolution' value={formatHms(data.rt.avgSeconds)} />
                   )}
                   {canSee('kpi:csat') && (
                     <KpiCard

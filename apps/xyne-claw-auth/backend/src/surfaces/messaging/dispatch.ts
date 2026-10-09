@@ -33,6 +33,11 @@ import type { BoundAgent } from "./store.js";
  *    nothing. A write approval is real and must not be suppressed: the run
  *    paused and an Approve/Decline prompt follows (approvals.ts).
  */
+function replyFormatFor(channel: MessagingChannelKey): { replyFormat: { maxSections: number; maxWords: number } | undefined } {
+  const sections = getChannel(channel)?.capabilities.resultSections;
+  return { replyFormat: sections ? { maxSections: sections.maxSections, maxWords: sections.maxWords } : undefined };
+}
+
 export function channelSurfaceInstructions(channel: MessagingChannelKey): string {
   const plugin = getChannel(channel);
   const name = channel.startsWith("whatsapp") ? "WhatsApp" : channel;
@@ -52,7 +57,12 @@ export function channelSurfaceInstructions(channel: MessagingChannelKey): string
     "- Never mention tools, subagents, systems or what you are \"calling\". Talk about the work, not the plumbing.",
     "",
     "**Long answers**",
-    "- Nobody reads a wall of text on a phone. If the full answer runs past about 10 short lines — a report, a long list, a table, a document, a lot of code — text the 1–3 line takeaway and put the full thing in a file instead of pasting it.",
+    ...(caps?.resultSections
+      ? [
+          `- Anything longer than a few lines goes out as at most ${caps.resultSections.maxSections} short sections, most important first. Start each with a bold heading line (**Heading**) and keep each under ${caps.resultSections.maxWords} words — every section arrives as its own message.`,
+        ]
+      : []),
+    "- Nobody reads a wall of text on a phone. If the full answer needs more than that — a report, a long list, a table, a document, a lot of code — text the takeaway and put the full thing in a file instead of pasting it.",
     ...(caps?.media
       ? [`- For that, use ${channel.replace(/-/g, "_")}_send_document: pass the full content as markdown and it arrives as a PDF straight away. Files you build yourself reach them only through a tool that sends files (sandbox-deliver-files and the like) — writing one into your workspace sends nothing.`]
       : ["- Files can't be sent here: give the most important part as text and offer to go through the rest."]),
@@ -64,7 +74,7 @@ export function channelSurfaceInstructions(channel: MessagingChannelKey): string
     "- Those lines are already on their screen. Your final answer gives the conclusion; it doesn't repeat them.",
     "",
     "**Formatting**",
-    "- Write markdown: **bold**, _italic_, ~~strike~~, `code`, code blocks and `- ` bullets. It's converted to WhatsApp styling on the way out. No headings, no tables, no markdown links — write the URL itself.",
+    "- Write markdown: **bold**, _italic_, ~~strike~~, `code`, code blocks and `- ` bullets. It's converted to WhatsApp styling on the way out. No # headings (a bold line is the heading), no tables, no markdown links — write the URL itself.",
     "- Bold only the few names they'll scan for: a person, a ticket, a file.",
     "- Don't write citation tokens like [clf-…] or a sources section. They can't be shown here and are removed.",
     `- Replies longer than ${caps?.maxTextChars ?? 4000} characters are split into several messages — one more reason to keep them short.`,
@@ -125,7 +135,8 @@ export function notificationSurfaceInstructions(): string {
  *
  * Plan cards and the citation-reflection nudge are off: neither has anything
  * to show here, and the nudge rewrites a finished answer to add [clf-…]
- * tokens that are only stripped again on the way out.
+ * tokens that are only stripped again on the way out. `replyFormat` carries
+ * the chat's section limits, which claw enforces on the final answer.
  */
 export function channelAgentConfig(
   config: unknown,
@@ -145,6 +156,9 @@ export function channelAgentConfig(
     ...base,
     planTracking: false,
     citationReflection: false,
+    // claw holds the final answer to the chat's section format (≤N sections
+    // of ≤M words) and nudges a rewrite when it does not fit.
+    ...replyFormatFor(channel),
     ...(tools ? { tools: { ...tools, direct: direct(tools["direct"]) } } : {}),
   };
 }

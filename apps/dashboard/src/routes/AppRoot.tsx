@@ -37,6 +37,7 @@ import KnowledgeBaseV2Screen from '../components/knowledgeBaseV2/KnowledgeBaseV2
 import { LegacyKbRedirect } from '../components/knowledgeBaseV2/LegacyKbRedirect';
 import { FileViewerLayout } from '../components/knowledgeBase/layout/FileViewerLayout';
 import AnalyticsScreen from './AnalyticsScreen/AnalyticsScreen';
+import SecretsScreen from './SecretsScreen/SecretsScreen';
 import ProjectsScreen from './ProjectsScreen/ProjectsScreen';
 import UserGroupsScreen from './UserGroupsScreen/UserGroupsScreen';
 import ProjectDetailScreen from './ProjectDetailScreen/ProjectDetailScreen';
@@ -114,6 +115,7 @@ import NotFoundScreen from './NotFoundScreen/NotFoundScreen';
 import ChatRedirect from '../components/Chat/ChatRedirect/ChatRedirect';
 import DirectoryRedirect from '../components/Chat/DirectoryRedirect/DirectoryRedirect';
 import CallsRoute from './CallsRoute/CallsRoute';
+import CallsAdminScreen from './CallsAdminScreen/CallsAdminScreen';
 import CallDetailScreen from './CallDetailScreen/CallDetailScreen';
 import RecordingsRoute from './RecordingsRoute/RecordingsRoute';
 import RecordingDetailRoute from './RecordingDetailRoute/RecordingDetailRoute';
@@ -1578,6 +1580,14 @@ export const router = createBrowserRouter(
                   ),
                 },
                 {
+                  path: 'secrets',
+                  element: (
+                    <ResourceProtectedRoute resourceName='SECRETS'>
+                      <SecretsScreen />
+                    </ResourceProtectedRoute>
+                  ),
+                },
+                {
                   path: 'projects',
                   element: (
                     <ResourceProtectedRoute resourceName='PROJECTS'>
@@ -1718,6 +1728,15 @@ export const router = createBrowserRouter(
                       element: <CallDetailScreen />,
                     },
                   ],
+                },
+                {
+                  // Deliberately not ResourceProtectedRoute: non-SCRIBE users manage their own calls here.
+                  path: 'calls/admin',
+                  element: (
+                    <ToolbarProtectedRoute path='/calls'>
+                      <CallsAdminScreen />
+                    </ToolbarProtectedRoute>
+                  ),
                 },
                 {
                   path: 'calls/:callId/:callType',

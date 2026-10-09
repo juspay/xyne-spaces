@@ -168,10 +168,7 @@ const ConversationPanelV2 = ({
 
   // Get this channel's tabs — its own customized set where allowed, otherwise
   // the built-in list.
-  const { availableTabs, getDefaultTab, isValidTab } = useConversationTabs(
-    channelId,
-    channel?.scopeType,
-  );
+  const { availableTabs, getDefaultTab, isValidTab } = useConversationTabs(channelId, channel);
 
   const urlHashValue = location.hash.match(/origin=([^&#]+)/);
 

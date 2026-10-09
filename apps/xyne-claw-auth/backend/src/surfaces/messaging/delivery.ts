@@ -16,6 +16,7 @@ import { errMsg } from "../../lib/errors.js";
 import { DONE_REACTION, EMPTY_RESULT_TEXT, ERROR_REACTION, FAILURE_TEXT, OUTBOX_TTL_S, REDIS_PREFIX, TYPING_COUNT_TTL_S } from "./const.js";
 import { forgetActiveRun } from "./commands.js";
 import { chunkText, stripCitationMarkup } from "./format.js";
+import { countWords, planSectionedReply, splitIntoSections } from "xyne-claw-shared";
 import { fitCard, renderCardAsText } from "./cards.js";
 import type { AnyChannelPlugin, ChannelDeliveryTarget, FormMessage, InteractiveCard, MessageRef, MessageTemplate } from "./plugin.js";
 
@@ -346,11 +347,11 @@ async function sendItem(
       // with anything" over the top of them would be wrong.
       const silentWithFiles = completed && !item.result.trim() && !!item.attachments?.length;
       const body = completed ? item.result.trim() || EMPTY_RESULT_TEXT : FAILURE_TEXT;
-      // An answer that would arrive as a wall of messages becomes its opening
-      // lines plus the whole thing as a PDF.
-      const long = completed && caps.media && plugin.sendMedia ? await asLeadAndDocument(body).catch(() => null) : null;
-      const text = outboundText(plugin, long?.text ?? body);
-      const files = [...(long ? [long.document] : []), ...(completed ? (item.attachments ?? []) : [])];
+      // Citation markup goes first, so it is neither counted nor sent.
+      const clean = stripCitationMarkup(body);
+      const reply = completed ? await shapeLongAnswer(plugin, clean) : null;
+      const messages = (reply?.messages ?? [clean]).map((m) => plugin.formatText?.(m) ?? m);
+      const files = [...(reply?.document ? [reply.document] : []), ...(completed ? (item.attachments ?? []) : [])];
       try {
         // The outcome reaction first: it replaces the 👀 that has been sitting
         // there since the run started, so it should land with the answer
@@ -360,7 +361,7 @@ async function sendItem(
             .react(handle, item.quoted, completed ? DONE_REACTION : ERROR_REACTION)
             .catch((err) => log.warn(`[channel-delivery] status reaction failed: ${errMsg(err)}`));
         }
-        if (!silentWithFiles) await sendChunked(plugin, handle, item.chatId, text, item.quoted, undefined, sent);
+        if (!silentWithFiles) await sendMessages(plugin, handle, item.chatId, messages, item.quoted, sent);
         if (files.length) await sendAttachments(plugin, handle, item.chatId, files, sent);
       } finally {
         // Another run is still working here — leaving the indicator alone is
@@ -374,14 +375,43 @@ async function sendItem(
   }
 }
 
-/** Past this an answer reads as a wall on a phone (several screens of text). */
+/**
+ * A long answer, shaped for a phone (the plugin's `resultSections`):
+ *  - within the section budget, one message per heading section — the agent
+ *    is asked to write it that way (replyFormat, claw nudges a rewrite);
+ *  - past the whole budget, the first sections with the "full answer in the
+ *    attached file" note, and the full answer as that file, a PDF — a dozen
+ *    messages in a row is the wall this exists to prevent.
+ * Null when the answer is short enough to go as it is.
+ */
+async function shapeLongAnswer(
+  plugin: AnyChannelPlugin,
+  markdown: string,
+): Promise<{ messages: string[]; document?: OutboxAttachment } | null> {
+  const limits = plugin.capabilities.resultSections;
+  if (!limits || countWords(markdown) <= limits.maxWords) return null;
+  if (countWords(markdown) > limits.maxSections * limits.maxWords && plugin.capabilities.media && plugin.sendMedia) {
+    const plan = planSectionedReply(markdown, limits);
+    const document = plan.overflow ? await overflowDocument(markdown).catch(() => null) : null;
+    if (document) return { messages: plan.messages, document };
+  }
+  return { messages: splitIntoSections(markdown) };
+}
+
+async function overflowDocument(markdown: string, title = "Full answer"): Promise<OutboxAttachment> {
+  const { renderMarkdownToPdf } = await import("../../lib/result-pdf.js");
+  const pdf = await renderMarkdownToPdf(markdown, { title });
+  return { fileName: `${title.replace(/\s+/g, "-").toLowerCase()}.pdf`, mimeType: "application/pdf", data: pdf.toString("base64") };
+}
+
+/** Past this a notification reads as a wall on a phone (several screens). */
 export const LONG_ANSWER_CHARS = 2_000;
 const LEAD_CHARS = 500;
 
 /**
- * A too-long answer as its opening paragraphs plus the full text as a PDF —
- * the agent is asked to do this itself (the channel's send-document tool), so
- * this is the backstop for when it does not. Null when the answer is short.
+ * A notification too long for a chat — a scheduled run's report, which no
+ * replyFormat shaped — as its opening paragraphs plus the full text as a PDF.
+ * Null when it is short enough to send as it is.
  */
 export async function asLeadAndDocument(
   markdown: string,
@@ -395,12 +425,7 @@ export async function asLeadAndDocument(
     lead = lead ? `${lead}\n\n${paragraph}` : paragraph;
   }
   if (lead.length > LEAD_CHARS * 1.5) lead = `${lead.slice(0, LEAD_CHARS)}…`;
-  const { renderMarkdownToPdf } = await import("../../lib/result-pdf.js");
-  const pdf = await renderMarkdownToPdf(clean, { title });
-  return {
-    text: `${lead}\n\nThe full version is in the PDF.`,
-    document: { fileName: `${title.replace(/\s+/g, "-").toLowerCase()}.pdf`, mimeType: "application/pdf", data: pdf.toString("base64") },
-  };
+  return { text: `${lead}\n\nThe full version is in the PDF.`, document: await overflowDocument(clean, title) };
 }
 
 /** What every agent-written message goes through on its way out: citation
@@ -420,6 +445,27 @@ export function templateParam(text: string): string {
     .replace(/ {4,}/g, "   ")
     .trim();
   return flat.length <= 900 ? flat : `${flat.slice(0, 899)}…`;
+}
+
+async function sendMessages(
+  plugin: AnyChannelPlugin,
+  handle: unknown,
+  chatId: string,
+  messages: string[],
+  quoted?: MessageRef,
+  sent?: OutboxProgress,
+): Promise<MessageRef | null> {
+  const chunks = messages.flatMap((m) => chunkText(m, plugin.capabilities.maxTextChars));
+  const already = sent?.chunks ?? 0;
+  let firstRef: MessageRef | null = null;
+  for (let i = 0; i < chunks.length; i++) {
+    if (i < already) continue;
+    const first = i === 0;
+    const ref = await plugin.sendText(handle, chatId, chunks[i]!, first && quoted ? { quoted } : {});
+    if (first) firstRef = ref;
+    if (sent) sent.chunks = i + 1;
+  }
+  return firstRef;
 }
 
 async function sendChunked(

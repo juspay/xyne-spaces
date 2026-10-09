@@ -14,9 +14,13 @@
  *   3. Fill arguments that are required by a schema but meaningless to a caller:
  *      ACL hints like `isMember`, page defaults, `null` placeholders for optional
  *      filters that are nullable rather than omissible.
+ *
+ * Message bodies also get their mention shorthand (`@Name[userId]`) expanded to
+ * the markup that makes a mention notify — see `mentions.ts`.
  */
 
 import { randomUUID } from 'crypto';
+import { expandMentions } from './mentions';
 import type { V1Parsed, V1Parser } from './types';
 
 /** Server-side row id, in the same format Zero's own clients generate. */
@@ -644,7 +648,7 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
   'conversations.create': (args): V1Parsed => ({
     args: {
       channelId: args.channelId,
-      content: args.content,
+      content: expandMentions(args.content),
       type: args.type ?? 'USER',
       conversationId: args.conversationId,
       messageId: args.messageId,
@@ -847,7 +851,7 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
   'messages.send': (args): V1Parsed => ({
     args: {
       conversationId: args.conversationId,
-      content: args.content,
+      content: expandMentions(args.content),
       type: args.type ?? 'USER',
       messageId: args.messageId,
       timestamp: now(),
@@ -856,6 +860,9 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
         : {}),
       ...(args.attachmentIds ? { attachmentIds: args.attachmentIds } : {}),
     },
+  }),
+  'messages.update': (args): V1Parsed => ({
+    args: { ...args, content: expandMentions(args.content) },
   }),
   'messages.react': (args): V1Parsed => ({
     args: {
@@ -893,7 +900,7 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
     args: {
       id: args.id,
       channelId: args.channelId,
-      content: args.content,
+      content: expandMentions(args.content),
       scheduledFor: args.scheduledFor,
       ...(args.conversationId ? { conversationId: args.conversationId } : {}),
       timestamp: now(),
@@ -910,7 +917,7 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
       },
   }),
   'messages.editScheduled': (args): V1Parsed => ({
-    args: { id: args.id, content: args.content, updatedAt: now() },
+    args: { id: args.id, content: expandMentions(args.content), updatedAt: now() },
   }),
   'messages.sendScheduledNow': (args): V1Parsed => ({
     args: { id: args.id, timestamp: now() },

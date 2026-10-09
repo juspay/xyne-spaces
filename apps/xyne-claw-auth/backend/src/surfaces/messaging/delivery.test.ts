@@ -59,15 +59,29 @@ describe("sendOutbound", () => {
 });
 
 describe("long answers", () => {
-  it("arrive as their opening lines plus the whole answer as a PDF", async () => {
+  const sections = { maxWords: 100, maxSections: 5 };
+  const section = (i: number, words: number) => `**Part ${i}**\n${Array.from({ length: words }, (_, w) => `w${w}`).join(" ")}`;
+
+  it("go out one heading section per message while they fit the chat's budget", async () => {
     const sendMedia = vi.fn(async (_h: unknown, chatId: string, _file: unknown) => ({ chatId, messageId: "doc" }));
-    const p = plugin({ sendMedia });
-    const answer = ["Short lead paragraph.", ...Array.from({ length: 60 }, (_, i) => `Section ${i}: ${"detail ".repeat(10)}`)].join("\n\n");
+    const p = plugin({ sendMedia, capabilities: { groups: false, reactions: true, typing: true, media: true, maxTextChars: 4096, resultSections: sections } });
+    const answer = [1, 2, 3].map((i) => section(i, 60)).join("\n\n") + " [clf-toolu_01x#2]";
     await sendOutbound(p, {}, { kind: "result", chatId: "919", status: "completed", result: answer });
     const texts = (p as unknown as { sendText: ReturnType<typeof vi.fn> }).sendText.mock.calls.map((c) => c[2] as string);
-    expect(texts).toHaveLength(1);
-    expect(texts[0]).toContain("Short lead paragraph.");
-    expect(texts[0]).toContain("The full version is in the PDF.");
+    expect(texts).toHaveLength(3);
+    expect(texts[0]).toMatch(/^\*Part 1\*/);
+    expect(texts.join(" ")).not.toContain("clf-");
+    expect(sendMedia).not.toHaveBeenCalled();
+  });
+
+  it("past the whole budget, send the first sections and the full answer as a PDF", async () => {
+    const sendMedia = vi.fn(async (_h: unknown, chatId: string, _file: unknown) => ({ chatId, messageId: "doc" }));
+    const p = plugin({ sendMedia, capabilities: { groups: false, reactions: true, typing: true, media: true, maxTextChars: 4096, resultSections: sections } });
+    const answer = Array.from({ length: 8 }, (_, i) => section(i + 1, 80)).join("\n\n");
+    await sendOutbound(p, {}, { kind: "result", chatId: "919", status: "completed", result: answer });
+    const texts = (p as unknown as { sendText: ReturnType<typeof vi.fn> }).sendText.mock.calls.map((c) => c[2] as string);
+    expect(texts).toHaveLength(5);
+    expect(texts[4]).toContain("Full answer in the attached file.");
     expect(sendMedia.mock.calls[0]?.[2]).toMatchObject({ fileName: "full-answer.pdf", mimeType: "application/pdf" });
   });
 });

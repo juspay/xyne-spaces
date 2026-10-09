@@ -865,11 +865,16 @@ export enum FormFieldType {
  */
 export const MAX_DUPLICATE_SCOPE_FIELDS = 5;
 
-/**
- * Max artifact apps on EmailChannelPreference.deskAppIds. Enforced by both Zero
- * mutators and the desk's app picker; matches the per-bar cap on the other bars.
- */
-export const MAX_DESK_APPS = 8;
+/** Max apps published to one channel, DM, group DM or desk (channel_published_tabs). */
+export const MAX_PUBLISHED_APPS = 8;
+
+/** channel_published_tabs.entityType — what a published channel tab points at. */
+export const ChannelPublishedEntityType = {
+  APP: 'APP',
+} as const;
+
+export type ChannelPublishedEntityType =
+  typeof ChannelPublishedEntityType[keyof typeof ChannelPublishedEntityType];
 
 // @ts-ignore TS1294
 export enum FormContextType {

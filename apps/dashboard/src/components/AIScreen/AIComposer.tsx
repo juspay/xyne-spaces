@@ -172,6 +172,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     messages: seed.messages,
     people: seed.people,
     sharedFiles: seed.sharedFiles,
+    apps: seed.apps,
     localFolders: seed.localFolders,
   }));
   const [userTags, setUserTags] = useState<Record<string, UserTag>>({});
@@ -272,6 +273,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       messages: selections.messages ?? [],
       people: selections.people ?? [],
       sharedFiles: selections.sharedFiles ?? [],
+      apps: selections.apps ?? [],
       userTags,
       localFolders: selections.localFolders,
       collections,
@@ -462,6 +464,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       messages: [],
       people: [],
       sharedFiles: [],
+      apps: [],
     };
     selectionsRef.current = next;
     setSelections(next);
@@ -543,6 +546,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
           messages: next.messages ?? [],
           people: next.people ?? [],
           sharedFiles: next.sharedFiles ?? [],
+          apps: next.apps ?? [],
           localFolders: next.localFolders,
         });
         setCollections(next.collections);

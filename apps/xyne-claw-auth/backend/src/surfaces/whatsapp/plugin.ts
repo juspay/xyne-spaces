@@ -33,7 +33,7 @@ import type {
 } from "../messaging/plugin.js";
 import { MAX_INBOUND_BYTES, TYPING_MAX_MS } from "../messaging/const.js";
 import { makeStoredAuthState } from "./auth-state.js";
-import { formatForWhatsApp } from "../whatsapp-shared/format.js";
+import { formatForWhatsApp, WHATSAPP_RESULT_SECTIONS } from "../whatsapp-shared/format.js";
 import { labelMentions, toInbound, type MediaDescriptor, type SelfIdentity } from "./messages.js";
 import { jidFromTarget, phoneFromJid, whatsappChannelConfigSchema, type WhatsAppChannelConfig } from "./schema.js";
 
@@ -560,6 +560,7 @@ export const whatsappPlugin: ChannelPlugin<WhatsAppHandle, WhatsAppChannelConfig
     maxTextChars: MAX_TEXT_CHARS,
     maxImageBytes: MAX_IMAGE_BYTES,
     maxFileBytes: MAX_FILE_BYTES,
+    resultSections: WHATSAPP_RESULT_SECTIONS,
   },
   channelConfigSchema: whatsappChannelConfigSchema,
 

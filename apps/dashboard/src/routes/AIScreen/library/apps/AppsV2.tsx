@@ -4,7 +4,9 @@ import { cn } from '@/utils/classNames';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/hooks/useAuth';
 import { listArtifactApps, type ArtifactAppSummary } from '@/services/claw/artifactAppsService';
-import { Pin } from 'lucide-react';
+import { Pin, Share2 } from 'lucide-react';
+import { toast } from 'sonner';
+import { copyTextToClipboard } from '@/utils/clipboardUtils';
 import { AppIcon } from '@/components/AppIcon/AppIcon';
 import UserAvatar, { AvatarShape, AvatarSize } from '@/components/UserAvatar/UserAvatar';
 import { LibraryCard, LibraryIconTile } from '../shared/components/LibraryCard';
@@ -27,6 +29,23 @@ const AppsV2 = ({ query }: { query: string }): ReactElement => {
   const prefixWs = (path: string): string => (workspaceId ? `/${workspaceId}${path}` : path);
   const { user } = useAuth();
   const { isPinned, togglePin, isFull } = useToolbarApps();
+
+  // The app's Agent Hub URL. Pasted into any chat it renders as an app chip
+  // (InternalXyneLink); opening it is still checked by claw-auth, so a private
+  // app only opens for its owner.
+  const shareApp = (app: ArtifactAppSummary): void => {
+    const url = `${window.location.origin}${prefixWs(`/ai/library/app/${app.id}`)}`;
+    copyTextToClipboard(url)
+      .then(() =>
+        toast.success('App link copied', {
+          description:
+            app.visibility === 'WORKSPACE'
+              ? 'Paste it in any chat — it shows as the app and opens it in Agent Hub.'
+              : 'Only you can open this app until you publish it to the workspace.',
+        }),
+      )
+      .catch(() => toast.error('Could not copy the link'));
+  };
 
   const mine = useQuery({
     queryKey: ['artifact-apps', 'mine'],
@@ -138,7 +157,7 @@ const AppsV2 = ({ query }: { query: string }): ReactElement => {
           key: section.key,
           label: section.label,
           items: section.apps.map(app => (
-            <div key={app.id} className='group/card relative [&>a]:pr-11'>
+            <div key={app.id} className='group/card relative [&>a]:pr-20'>
               <LibraryCard
                 to={prefixWs(`/ai/library/app/${app.id}`)}
                 testId='artifact-app-card'
@@ -161,43 +180,65 @@ const AppsV2 = ({ query }: { query: string }): ReactElement => {
                   z-10`, and a pin at the same level paints over it on scroll —
                   the buttons slid across the "Agent Hub" title and the tab bar.
                   One is enough to clear the Link, which is unpositioned. */}
-              <button
-                type='button'
-                onClick={e => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  togglePin({ id: app.id, title: app.title, icon: app.icon });
-                }}
-                disabled={!isPinned(app.id) && isFull}
-                aria-label={isPinned(app.id) ? `Unpin ${app.title}` : `Pin ${app.title}`}
-                title={
-                  isPinned(app.id)
-                    ? 'Unpin from sidebar'
-                    : isFull
-                      ? 'Sidebar is full — unpin something first'
-                      : 'Pin to sidebar'
-                }
-                className={cn(
-                  'absolute right-2 top-2 z-[1] rounded-md p-1.5 transition-all',
-                  'hover:bg-accent disabled:pointer-events-none disabled:opacity-40',
-                  // An unpinned pin is an offer, not information: at full
-                  // strength on every card it read as a state and made a grid
-                  // look busy. Dimmed until pointed at — but never hidden, so
-                  // it stays reachable on touch. A PINNED one is state, and
-                  // state is always visible.
-                  isPinned(app.id)
-                    ? 'text-primary hover:text-primary'
-                    : 'text-muted-foreground/40 hover:text-foreground focus-visible:text-foreground group-hover/card:text-muted-foreground',
-                )}
-                data-track-category='AskAI'
-                data-track-name='ArtifactAppPin'
-                data-track-metadata={JSON.stringify({ pinned: !isPinned(app.id) })}
-              >
-                <Pin
-                  className={cn('h-3.5 w-3.5', isPinned(app.id) && 'fill-current')}
-                  aria-hidden='true'
-                />
-              </button>
+              <div className='absolute right-2 top-2 z-[1] flex items-center gap-0.5'>
+                <button
+                  type='button'
+                  onClick={e => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    shareApp(app);
+                  }}
+                  aria-label={`Share ${app.title}`}
+                  title='Copy a link to share this app'
+                  className={cn(
+                    'rounded-md p-1.5 transition-all hover:bg-accent',
+                    // Same dimmed-until-hovered treatment as an unpinned pin.
+                    'text-muted-foreground/40 hover:text-foreground focus-visible:text-foreground group-hover/card:text-muted-foreground',
+                  )}
+                  data-track-category='AskAI'
+                  data-track-name='ArtifactAppShare'
+                  data-track-metadata={JSON.stringify({ visibility: app.visibility })}
+                >
+                  <Share2 className='h-3.5 w-3.5' aria-hidden='true' />
+                </button>
+                <button
+                  type='button'
+                  onClick={e => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    togglePin({ id: app.id, title: app.title, icon: app.icon });
+                  }}
+                  disabled={!isPinned(app.id) && isFull}
+                  aria-label={isPinned(app.id) ? `Unpin ${app.title}` : `Pin ${app.title}`}
+                  title={
+                    isPinned(app.id)
+                      ? 'Unpin from sidebar'
+                      : isFull
+                        ? 'Sidebar is full — unpin something first'
+                        : 'Pin to sidebar'
+                  }
+                  className={cn(
+                    'rounded-md p-1.5 transition-all',
+                    'hover:bg-accent disabled:pointer-events-none disabled:opacity-40',
+                    // An unpinned pin is an offer, not information: at full
+                    // strength on every card it read as a state and made a grid
+                    // look busy. Dimmed until pointed at — but never hidden, so
+                    // it stays reachable on touch. A PINNED one is state, and
+                    // state is always visible.
+                    isPinned(app.id)
+                      ? 'text-primary hover:text-primary'
+                      : 'text-muted-foreground/40 hover:text-foreground focus-visible:text-foreground group-hover/card:text-muted-foreground',
+                  )}
+                  data-track-category='AskAI'
+                  data-track-name='ArtifactAppPin'
+                  data-track-metadata={JSON.stringify({ pinned: !isPinned(app.id) })}
+                >
+                  <Pin
+                    className={cn('h-3.5 w-3.5', isPinned(app.id) && 'fill-current')}
+                    aria-hidden='true'
+                  />
+                </button>
+              </div>
             </div>
           )),
         }))}
