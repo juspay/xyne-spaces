@@ -7610,6 +7610,20 @@ export async function updateChannelAccount(
   return data.account;
 }
 
+/** Publish the WhatsApp question form (Flows) into the business account, so
+ *  multi-part questions arrive as one native form. Returns the form id. */
+export async function publishChannelQuestionForm(
+  channel: MessagingChannelKey,
+  accountId: string,
+  wabaId: string,
+): Promise<string> {
+  const data = await request<{ success: boolean; questionFormId: string }>(
+    `${channelBase(channel)}/accounts/${encodeURIComponent(accountId)}/question-form`,
+    { method: "POST", body: JSON.stringify({ wabaId }) },
+  );
+  return data.questionFormId;
+}
+
 export async function deleteChannelAccount(channel: MessagingChannelKey, accountId: string): Promise<void> {
   await request<{ success: boolean }>(`${channelBase(channel)}/accounts/${encodeURIComponent(accountId)}`, {
     method: "DELETE",

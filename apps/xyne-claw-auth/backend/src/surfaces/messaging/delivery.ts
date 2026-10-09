@@ -16,10 +16,10 @@ import { errMsg } from "../../lib/errors.js";
 import { DONE_REACTION, EMPTY_RESULT_TEXT, ERROR_REACTION, FAILURE_TEXT, OUTBOX_TTL_S, REDIS_PREFIX, TYPING_COUNT_TTL_S } from "./const.js";
 import { forgetActiveRun } from "./commands.js";
 import { mapSentMessage } from "./threads/registry.js";
-import { chunkText } from "./format.js";
-import { countWords, splitIntoSections } from "xyne-claw-shared";
+import { chunkText, stripCitationMarkup } from "./format.js";
+import { countWords, planSectionedReply, splitIntoSections } from "xyne-claw-shared";
 import { fitCard, renderCardAsText } from "./cards.js";
-import type { AnyChannelPlugin, ChannelDeliveryTarget, InteractiveCard, MessageRef } from "./plugin.js";
+import type { AnyChannelPlugin, ChannelDeliveryTarget, FormMessage, InteractiveCard, MessageRef, MessageTemplate } from "./plugin.js";
 
 const log = createLogger("channel-delivery");
 
@@ -31,7 +31,23 @@ export interface OutboxAttachment {
 }
 
 export type OutboxItem =
-  | { kind: "text"; chatId: string; text: string; quoted?: MessageRef; markdown?: boolean; mentions?: string[]; conversationId?: string }
+  | {
+      kind: "text";
+      chatId: string;
+      text: string;
+      quoted?: MessageRef;
+      markdown?: boolean;
+      mentions?: string[];
+      /** Send this instead when the reply window has closed (notifications
+       *  can land days after the person last wrote). */
+      template?: MessageTemplate;
+      /** What the template carries, when it should differ from `text` (no
+       *  files follow a template, so a "see the PDF" line must not either). */
+      templateText?: string;
+      /** Threaded path only: the task conversation this message belongs to,
+       *  so a quote-reply to it routes back to that task. */
+      conversationId?: string;
+    }
   | { kind: "resolve-target"; target: string }
   | { kind: "list-groups" }
   | {
@@ -51,7 +67,11 @@ export type OutboxItem =
     }
   | { kind: "typing"; chatId: string; on: boolean; messageId?: string }
   | { kind: "react"; ref: MessageRef; emoji: string }
-  | { kind: "card"; chatId: string; card: InteractiveCard; quoted?: MessageRef };
+  | { kind: "card"; chatId: string; card: InteractiveCard; quoted?: MessageRef }
+  /** One file on its own, outside a run result (a long code block or diff
+   *  a widget turned into a document). */
+  | { kind: "file"; chatId: string; attachment: OutboxAttachment; caption?: string }
+  | { kind: "form"; chatId: string; form: FormMessage };
 
 /** How much of a multi-part send already landed. A long reply goes out as
  *  several messages; if the third fails, re-sending from the first would
@@ -77,7 +97,14 @@ export class PartialSendError extends Error {
 export type OutboxRequest = OutboxItem & { replyKey?: string; __progress?: OutboxProgress };
 
 export type OutboxReply =
-  | { ok: true; ref?: MessageRef; targetId?: string; groups?: Array<{ id: string; name: string; participants: number }> }
+  | {
+      ok: true;
+      ref?: MessageRef;
+      targetId?: string;
+      groups?: Array<{ id: string; name: string; participants: number }>;
+      /** The text went out as the account's template, not as written. */
+      viaTemplate?: boolean;
+    }
   | { ok: false; error: string };
 
 export function outboxKey(accountId: string): string {
@@ -253,10 +280,12 @@ async function sendItem(
   const caps = plugin.capabilities;
   switch (item.kind) {
     case "typing":
+      // Best-effort: an indicator that cannot be shown is never worth a retry
+      // loop, and must not hold up the message queued behind it.
       if (plugin.setTyping && caps.typing) {
-        await plugin.setTyping(handle, item.chatId, item.on, {
-          ...(item.messageId ? { messageId: item.messageId } : {}),
-        });
+        await plugin
+          .setTyping(handle, item.chatId, item.on, { ...(item.messageId ? { messageId: item.messageId } : {}) })
+          .catch((err) => log.warn(`[channel-delivery] typing ${item.on ? "on" : "off"} failed chat=${item.chatId}: ${errMsg(err)}`));
       }
       return { ok: true };
     case "react":
@@ -277,21 +306,41 @@ async function sendItem(
       // fallback is not a degraded path: the numbered menu it produces is
       // matched back to the same parked options (cards.ts).
       const limits = caps.interactive;
+      // The body is the one card field shown as formatted text.
+      const card = { ...item.card, body: outboundText(plugin, item.card.body) };
       if (plugin.sendInteractive && limits) {
-        const ref = await plugin.sendInteractive(handle, item.chatId, fitCard(item.card, limits), {
+        const ref = await plugin.sendInteractive(handle, item.chatId, fitCard(card, limits), {
           ...(item.quoted ? { quoted: item.quoted } : {}),
         });
         return { ok: true, ref };
       }
-      const rendered = renderCardAsText(item.card);
+      const rendered = renderCardAsText(card);
       const ref = await sendChunked(plugin, handle, item.chatId, rendered, item.quoted);
       return ref ? { ok: true, ref } : { ok: true };
     }
+    case "form": {
+      if (!plugin.sendForm) return { ok: false, error: "forms are not supported on this channel" };
+      return { ok: true, ref: await plugin.sendForm(handle, item.chatId, item.form) };
+    }
+    case "file": {
+      if (item.caption) await sendChunked(plugin, handle, item.chatId, plugin.formatText?.(item.caption) ?? item.caption);
+      await sendAttachments(plugin, handle, item.chatId, [item.attachment]);
+      return { ok: true };
+    }
     case "text": {
-      const text = item.markdown === false ? item.text : (plugin.formatText?.(item.text) ?? item.text);
-      const ref = await sendChunked(plugin, handle, item.chatId, text, item.quoted, item.mentions, sent);
-      if (ref && item.conversationId) await mapSentMessage(ref.messageId, item.conversationId);
-      return ref ? { ok: true, ref } : { ok: true };
+      const text = item.markdown === false ? item.text : outboundText(plugin, item.text);
+      try {
+        const ref = await sendChunked(plugin, handle, item.chatId, text, item.quoted, item.mentions, sent);
+        if (ref && item.conversationId) await mapSentMessage(ref.messageId, item.conversationId);
+        return ref ? { ok: true, ref } : { ok: true };
+      } catch (err) {
+        // Nothing landed and the window is shut: the template is the only
+        // way through. Anything else (or a half-sent message) is a real error.
+        if (sent.chunks > 0 || !item.template || !plugin.sendTemplate || !plugin.isReplyWindowClosed?.(err)) throw err;
+        log.info(`[channel-delivery] reply window closed chat=${item.chatId}; sending template ${item.template.name}`);
+        const ref = await plugin.sendTemplate(handle, item.chatId, item.template, [templateParam(item.templateText ?? item.text)]);
+        return { ok: true, ref, viaTemplate: true };
+      }
     }
     case "result": {
       const completed = item.status === "completed";
@@ -307,10 +356,11 @@ async function sendItem(
       // with anything" over the top of them would be wrong.
       const silentWithFiles = completed && !item.result.trim() && !!item.attachments?.length;
       const body = completed ? item.result.trim() || EMPTY_RESULT_TEXT : FAILURE_TEXT;
-      const sections =
-        completed && caps.resultSections && countWords(body) > caps.resultSections.maxWords ? splitIntoSections(body) : [];
-      const messages = (sections.length ? sections : [body]).map((m) => plugin.formatText?.(m) ?? m);
-      const files = completed ? item.attachments ?? [] : [];
+      // Citation markup goes first, so it is neither counted nor sent.
+      const clean = stripCitationMarkup(body);
+      const reply = completed ? await shapeLongAnswer(plugin, clean) : null;
+      const messages = (reply?.messages ?? [clean]).map((m) => plugin.formatText?.(m) ?? m);
+      const files = [...(reply?.document ? [reply.document] : []), ...(completed ? (item.attachments ?? []) : [])];
       try {
         // The outcome reaction first: it replaces the 👀 that has been sitting
         // there since the run started, so it should land with the answer
@@ -335,6 +385,78 @@ async function sendItem(
       return { ok: true };
     }
   }
+}
+
+/**
+ * A long answer, shaped for a phone (the plugin's `resultSections`):
+ *  - within the section budget, one message per heading section — the agent
+ *    is asked to write it that way (replyFormat, claw nudges a rewrite);
+ *  - past the whole budget, the first sections with the "full answer in the
+ *    attached file" note, and the full answer as that file, a PDF — a dozen
+ *    messages in a row is the wall this exists to prevent.
+ * Null when the answer is short enough to go as it is.
+ */
+async function shapeLongAnswer(
+  plugin: AnyChannelPlugin,
+  markdown: string,
+): Promise<{ messages: string[]; document?: OutboxAttachment } | null> {
+  const limits = plugin.capabilities.resultSections;
+  if (!limits || countWords(markdown) <= limits.maxWords) return null;
+  if (countWords(markdown) > limits.maxSections * limits.maxWords && plugin.capabilities.media && plugin.sendMedia) {
+    const plan = planSectionedReply(markdown, limits);
+    const document = plan.overflow ? await overflowDocument(markdown).catch(() => null) : null;
+    if (document) return { messages: plan.messages, document };
+  }
+  return { messages: splitIntoSections(markdown) };
+}
+
+async function overflowDocument(markdown: string, title = "Full answer"): Promise<OutboxAttachment> {
+  const { renderMarkdownToPdf } = await import("../../lib/result-pdf.js");
+  const pdf = await renderMarkdownToPdf(markdown, { title });
+  return { fileName: `${title.replace(/\s+/g, "-").toLowerCase()}.pdf`, mimeType: "application/pdf", data: pdf.toString("base64") };
+}
+
+/** Past this a notification reads as a wall on a phone (several screens). */
+export const LONG_ANSWER_CHARS = 2_000;
+const LEAD_CHARS = 500;
+
+/**
+ * A notification too long for a chat — a scheduled run's report, which no
+ * replyFormat shaped — as its opening paragraphs plus the full text as a PDF.
+ * Null when it is short enough to send as it is.
+ */
+export async function asLeadAndDocument(
+  markdown: string,
+  title = "Full answer",
+): Promise<{ text: string; document: OutboxAttachment } | null> {
+  if (markdown.length <= LONG_ANSWER_CHARS) return null;
+  const clean = stripCitationMarkup(markdown);
+  let lead = "";
+  for (const paragraph of clean.split(/\n{2,}/)) {
+    if (lead && lead.length + paragraph.length > LEAD_CHARS) break;
+    lead = lead ? `${lead}\n\n${paragraph}` : paragraph;
+  }
+  if (lead.length > LEAD_CHARS * 1.5) lead = `${lead.slice(0, LEAD_CHARS)}…`;
+  return { text: `${lead}\n\nThe full version is in the PDF.`, document: await overflowDocument(clean, title) };
+}
+
+/** What every agent-written message goes through on its way out: citation
+ *  markup no messenger can render is dropped, then the plugin's dialect. */
+function outboundText(plugin: AnyChannelPlugin, markdown: string): string {
+  const clean = stripCitationMarkup(markdown);
+  return plugin.formatText?.(clean) ?? clean;
+}
+
+/** A template body parameter may not hold newlines, tabs or runs of spaces,
+ *  and is capped well under the body limit. */
+export function templateParam(text: string): string {
+  const flat = stripCitationMarkup(text)
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/\s*\n+\s*/g, " · ")
+    .replace(/\t/g, " ")
+    .replace(/ {4,}/g, "   ")
+    .trim();
+  return flat.length <= 900 ? flat : `${flat.slice(0, 899)}…`;
 }
 
 async function sendMessages(
@@ -404,6 +526,20 @@ async function sendAttachments(
   const empty: string[] = [];
   const wrongType: string[] = [];
   const failed: string[] = [];
+  const linked: Array<{ name: string; url: string }> = [];
+  /** A file the messenger refuses (type or size) is still the answer: park
+   *  it and send a link. False when even that fails. */
+  const linkInstead = async (attachment: OutboxAttachment, data: Buffer): Promise<boolean> => {
+    try {
+      const { hostFile } = await import("./hosted-files.js");
+      const url = await hostFile({ channel: plugin.key, fileName: attachment.fileName, mimeType: attachment.mimeType, data });
+      linked.push({ name: attachment.fileName, url });
+      return true;
+    } catch (err) {
+      log.warn(`[channel-delivery] could not host ${attachment.fileName}: ${errMsg(err)}`);
+      return false;
+    }
+  };
   for (const [index, attachment] of attachments.entries()) {
     if (index < already) continue;
     try {
@@ -424,12 +560,13 @@ async function sendAttachments(
         if (sent) sent.attachments = index + 1;
         continue;
       }
-      if (cap !== undefined && data.length > cap) {
-        log.warn(
-          `[channel-delivery] attachment over the channel cap`,
-          { fileName: attachment.fileName, bytes: data.length, cap },
+      const refusedType = plugin.acceptsFile?.(attachment.mimeType) === false;
+      if (refusedType || (cap !== undefined && data.length > cap)) {
+        log.info(
+          `[channel-delivery] attachment sent as a link`,
+          { fileName: attachment.fileName, mimeType: attachment.mimeType, bytes: data.length, cap },
         );
-        skipped.push(attachment.fileName);
+        if (!(await linkInstead(attachment, data))) (refusedType ? wrongType : skipped).push(attachment.fileName);
         if (sent) sent.attachments = index + 1;
         continue;
       }
@@ -441,6 +578,16 @@ async function sendAttachments(
       log.warn(`[channel-delivery] attachment send failed`, { fileName: attachment.fileName, error });
       (UNSUPPORTED_TYPE_RE.test(error) ? wrongType : failed).push(attachment.fileName);
     }
+  }
+  if (linked.length > 0) {
+    const lines = linked.map((file) => `${file.name}: ${file.url}`);
+    await plugin
+      .sendText(
+        handle,
+        chatId,
+        `${linked.length === 1 ? "This one opens" : "These open"} in your browser (links work for 7 days):\n${lines.join("\n")}`,
+      )
+      .catch(() => undefined);
   }
   if (skipped.length > 0) {
     await plugin

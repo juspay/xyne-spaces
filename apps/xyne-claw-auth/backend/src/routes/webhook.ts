@@ -104,7 +104,7 @@ import {
   setAutomationRunDispatcher,
 } from "../lib/agent-run-queue.js";
 import { deliverSlackResult } from "../surfaces/slack/delivery.js";
-import { deliverChannelResult } from "../surfaces/messaging/delivery.js";
+import { deliverChannelResult, enqueueOutbound } from "../surfaces/messaging/delivery.js";
 import { sendInterimMessage } from "../surfaces/messaging/interim.js";
 import { claimOrQueue } from "../lib/conversation-gate.js";
 import { buildHandoffContext, downloadRootAttachments, mergeHandoffAttachments, toRootAttachmentRefs } from "../lib/workflow-handoff.js";
@@ -1079,6 +1079,18 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         log.warn(failureLabel, { error: errMsg(err) });
       });
     },
+    attach: async (file) => {
+      await postGeneratedMarkdownFile({
+        channelId: payload.channelId,
+        conversationId: payload.conversationId,
+        userId: commandAgent.spacesAppUserId,
+        appToken: commandAgent.appToken,
+        filename: file.fileName,
+        markdown: file.content,
+        mimeType: file.mimeType,
+        summary: file.summary,
+      });
+    },
     reconcileStoppedRuns,
   });
   if (commandOutcome.kind === "handled") return;
@@ -1837,7 +1849,7 @@ interface StopReconcileSummary {
   hadRunningRows: boolean;
 }
 
-async function reconcileStoppedRuns(conversationId: string, targetAgentSlug: string): Promise<StopReconcileSummary> {
+export async function reconcileStoppedRuns(conversationId: string, targetAgentSlug: string): Promise<StopReconcileSummary> {
   const runningRuns = (await agentRunRepository.listRunningByConversation(conversationId))
     .filter((run) => run.agentSlug === targetAgentSlug);
   const queued = await clearQueue(conversationId, targetAgentSlug);
@@ -3273,7 +3285,9 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         (inv) => inv.toolName === "memory-search" && inv.isError !== true,
       ).length
     : 0;
-  if (payload.status === "completed" && resultWithCitations.trim() && memorySearchCount > 0) {
+  // Not on a messenger: a footer line about the agent's own plumbing reads as
+  // a bot talking, which is the opposite of what a chat there should feel like.
+  if (payload.status === "completed" && resultWithCitations.trim() && memorySearchCount > 0 && !ctx?.channelDelivery) {
     const label = memorySearchCount === 1 ? "time" : "times";
     resultWithCitations = `${resultWithCitations.trimEnd()}\n\n_Searched agent memory ${memorySearchCount} ${label}._`;
   }
@@ -3633,6 +3647,13 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         .then((msg) => persistCallbackAttachments(msg.id, channelUserId, payload.attachments))
         .catch((e) => clog.warn(`[webhook/result] failed to save channel assistant ChatMessage session=${sessionId}: ${errMsg(e)}`));
     }
+    // A silent run (an /experiment checker) records its result but never
+    // speaks in the chat — a verdict landing after the person's next message
+    // would read as an answer to it.
+    if (ctx.suppressThreadReply) {
+      clog.info(`[webhook/result] silent channel run finished session=${sessionId}`);
+      return;
+    }
     await deliverChannelResult({
       target: channelTarget,
       status: channelStatus,
@@ -3641,6 +3662,19 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     }).catch((err) => {
       clog.warn(`[webhook/result] channel delivery failed for session ${sessionId}: ${errMsg(err)}`);
     });
+    // Cards the run queued, translated for the messenger — after the reply,
+    // so each lands under the text that explains it.
+    if (channelUserId) {
+      await deliverChannelRunCards({
+        sessionId,
+        ctx,
+        target: channelTarget,
+        userId: channelUserId,
+        payload,
+      }).catch((err) => {
+        clog.warn(`[webhook/result] channel cards failed for session ${sessionId}: ${errMsg(err)}`);
+      });
+    }
     // A gated write needs a human even when the human is on WhatsApp. Queued
     // AFTER the reply so the card lands under the text that explains it.
     if (channelPendingActions?.length && channelUserId) {
@@ -3654,6 +3688,35 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       }).catch((err) => {
         clog.warn(`[webhook/result] channel approval cards failed for session ${sessionId}: ${errMsg(err)}`);
       });
+    }
+    // /goal in a chat: same relooper as a Spaces thread — judge the turn, then
+    // end the loop or fire the next turn while this one still holds the slot.
+    if (channelStatus === "completed" && resultWithCitations.trim() && ctx.conversationId && ctx.agentSlug && channelUserId) {
+      try {
+        const decision = await recordTurnAndDecide({
+          conversationId: ctx.conversationId,
+          lastTurnResult: resultWithCitations,
+        });
+        if (decision.kind === "terminated") {
+          await enqueueOutbound(channelTarget.connectedSurfaceId, { kind: "text", chatId: channelTarget.chatId, text: decision.replyToUser });
+          clog.info(`[goal] terminated for chat conv ${ctx.conversationId}: ${decision.reason}`);
+        } else if (decision.kind === "continue") {
+          const { dispatchGoalTurn } = await import("../surfaces/messaging/busy.js");
+          const next = await dispatchGoalTurn({
+            target: channelTarget,
+            userId: channelUserId,
+            agentSlug: ctx.agentSlug,
+            task: decision.nextTurnTask,
+            idempotencyKey: `goal-${sessionId}`,
+          });
+          if (next) {
+            goalContinues = true;
+            clog.info(`[goal] continuing for chat conv ${ctx.conversationId} session=${next}`);
+          }
+        }
+      } catch (err) {
+        clog.warn(`[goal] chat relooper hook errored — leaving goal in current state: ${errMsg(err)}`);
+      }
     }
     return;
   }
@@ -6251,6 +6314,65 @@ export async function deliverXyneAiWidget(args: {
   return flow;
 }
 
+/**
+ * The result-payload cards of a messaging-channel run: connector and
+ * provider suggestions as sign-in links, and the question set the run asked
+ * (also published live, so the widget claim keeps it to one delivery).
+ */
+async function deliverChannelRunCards(args: {
+  sessionId: string;
+  ctx: SessionContext;
+  target: NonNullable<SessionContext["channelDelivery"]>;
+  userId: string;
+  payload: {
+    pendingConnectorSuggestions?: PendingConnectorSuggestions;
+    pendingProviderSuggestions?: PendingProviderSuggestions;
+    blockedConnectors?: string[];
+    pendingAgentCard?: { variant: string; slug?: string; slugs?: string[] };
+  };
+}): Promise<void> {
+  const { ctx, target, userId, payload } = args;
+  const { deliverChannelAgentCards, deliverChannelConnectorCards, deliverChannelProviderCards } = await import("../surfaces/messaging/widgets.js");
+  const agentCard = payload.pendingAgentCard;
+  if (agentCard && ctx.agentOrgId && agentCard.variant !== "draft") {
+    await deliverChannelAgentCards({
+      target,
+      userId,
+      orgId: ctx.agentOrgId,
+      currentAgentSlug: ctx.agentSlug,
+      card:
+        agentCard.variant === "profile-list"
+          ? { variant: "profile-list", slugs: agentCard.slugs ?? [] }
+          : agentCard.variant === "summary"
+            ? { variant: "summary" }
+            : { variant: "profile", ...(agentCard.slug ? { slug: agentCard.slug } : {}) },
+    });
+  }
+  if (payload.pendingConnectorSuggestions) {
+    await deliverChannelConnectorCards({
+      target,
+      userId,
+      agentSlug: ctx.agentSlug,
+      agentOrgId: ctx.agentOrgId ?? null,
+      suggestions: payload.pendingConnectorSuggestions,
+      blockedConnectors: payload.blockedConnectors,
+    });
+  }
+  if (payload.pendingProviderSuggestions) {
+    await deliverChannelProviderCards({ target, userId, suggestions: payload.pendingProviderSuggestions });
+  }
+  const pendingQuestions = (payload as { pendingQuestions?: Array<{ questionId: string; questions?: import("xyne-claw-shared").UserQuestion[] }> }).pendingQuestions;
+  for (const q of pendingQuestions ?? []) {
+    if (!q.questions?.length) continue;
+    await renderUiWidget(args.sessionId, {
+      id: `question:${q.questionId}`,
+      type: "question",
+      operation: "create",
+      payload: { questionId: q.questionId, questions: q.questions },
+    }, ctx.conversationId, ctx.agentSlug, ctx);
+  }
+}
+
 async function renderUiWidget(
   sessionId: string,
   widget: UiWidget,
@@ -6268,6 +6390,22 @@ async function renderUiWidget(
   let delivered = false;
   try {
     const ctx = knownContext ?? await resolveSessionContext(sessionId, conversationId ?? null, agentSlug ?? null);
+    // Messaging channels have no Flow renderer: the card is translated into
+    // the messenger's own buttons, lists and files instead. A question waits
+    // for the result callback (knownContext set) so it lands under the reply
+    // that introduces it rather than ahead of it.
+    if (ctx?.channelDelivery) {
+      if (widget.type === "question" && !knownContext) return false;
+      const { deliverChannelWidget } = await import("../surfaces/messaging/widgets.js");
+      delivered = await deliverChannelWidget({
+        target: ctx.channelDelivery,
+        userId: ctx.targetUserId ?? ctx.mentionedUserId ?? ctx.senderId ?? "",
+        widget,
+        agentSlug: ctx.agentSlug,
+        conversationId: ctx.conversationId,
+      });
+      return delivered;
+    }
     if (!ctx || !ctx.channelId || !ctx.appToken) return false;
     // Static/live artifacts historically render only for conversation replies;
     // clarification questions also support approval-mode agent runs.

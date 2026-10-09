@@ -665,7 +665,13 @@ function JobCard({
       <div className="flex flex-col gap-1.5 pl-11">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-[12px] text-xyne-fg-tertiary">output:</span>
-          {/* replyMode toggle */}
+          {/* A job set up from WhatsApp texts its owner back there; there is no
+              Spaces thread or channel to switch it to. */}
+          {replyMode === "whatsapp" ? (
+            <span className="rounded-lg border border-xyne-border bg-xyne-surface px-2.5 py-1 text-[12px] text-xyne-fg-primary">
+              WhatsApp message to you
+            </span>
+          ) : (
           <div className="inline-flex overflow-hidden rounded-lg border border-xyne-border bg-xyne-surface">
             {(["thread", "channel"] as const).map((mode) => (
               <button
@@ -683,6 +689,7 @@ function JobCard({
               </button>
             ))}
           </div>
+          )}
           {/* Channel chip — only when mode is "channel", job is active, and not saving */}
           {replyMode === "channel" && isActive && !savingChannel && (
             <ChannelPicker

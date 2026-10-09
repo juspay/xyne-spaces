@@ -191,7 +191,8 @@ export interface ScheduledJob {
   readonly nextRunAt: string | null;
   readonly lastRunAt: string | null;
   readonly label: string | null;
-  readonly replyMode: "thread" | "channel";
+  /** "whatsapp": set up from a WhatsApp chat, results are texted back to its owner. */
+  readonly replyMode: "thread" | "channel" | "whatsapp";
   /** Override target channel for `replyMode = "channel"`. Null = use the
    *  originating `channelId`. Settable from the Scheduled Jobs UI. */
   readonly targetChannelId: string | null;

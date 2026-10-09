@@ -331,6 +331,7 @@ export async function handleEval(
         spacesAppId: ctx.agent.spacesAppId,
         spacesAppUserId: ctx.agent.spacesAppUserId,
         traceId: `${traceId}-${armKey(target)}`,
+        ...(ctx.channelDelivery ? { channelDelivery: ctx.channelDelivery } : {}),
       }),
     ),
   );
@@ -375,6 +376,7 @@ export async function handleEval(
     spacesAppUserId: ctx.agent.spacesAppUserId,
     appToken: ctx.agent.appToken,
     dispatches: dispatched,
+    ...(ctx.channelDelivery ? { channelDelivery: ctx.channelDelivery } : {}),
   });
 }
 
@@ -404,15 +406,21 @@ export async function finalizeEval(state: EvalState, log: WebhookCommandCtx["log
     `${unfinished ? ` · ${unfinished} did not complete` : ""}` +
     `\nThe file has each provider's answer and its full execution trace.`;
 
-  await postGeneratedMarkdownFile({
-    channelId: state.channelId,
-    conversationId: state.conversationId,
-    userId: state.spacesAppUserId,
-    appToken: state.appToken,
-    filename: `eval-${state.agentSlug}-${state.id}.html`,
-    markdown: html,
-    mimeType: "text/html",
-    summary,
-  });
+  const filename = `eval-${state.agentSlug}-${state.id}.html`;
+  if (state.channelDelivery) {
+    const { sendGeneratedFile } = await import("../../surfaces/messaging/hosted-files.js");
+    await sendGeneratedFile(state.channelDelivery, { fileName: filename, mimeType: "text/html", content: html, summary });
+  } else {
+    await postGeneratedMarkdownFile({
+      channelId: state.channelId,
+      conversationId: state.conversationId,
+      userId: state.spacesAppUserId,
+      appToken: state.appToken,
+      filename,
+      markdown: html,
+      mimeType: "text/html",
+      summary,
+    });
+  }
   log.info("/eval comparison posted", { eval: state.id, providers: results.length });
 }

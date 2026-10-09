@@ -1360,6 +1360,31 @@ export async function prepareRun(
       mergedAgentConfig = withAwakeningSendTool(mergedAgentConfig);
     }
 
+    // Same two-gate rule for the WhatsApp notify tool (routes/mcp.ts lists and
+    // gates it; claw would strip it from a stored selection that lacks it —
+    // and a virtual server's tool survives claw's gate only as a direct pick).
+    // An agent with no selection gets an empty one in claw unless it is an
+    // orchestrator, which is unrestricted: inventing a selection there would
+    // restrict it to this one tool, so it is left alone.
+    const storedTools = mergedAgentConfig["tools"];
+    const selection =
+      storedTools && typeof storedTools === "object" && !Array.isArray(storedTools)
+        ? (storedTools as Record<string, unknown>)
+        : agent.delegationTier === "orchestrator"
+          ? null
+          : {};
+    if (selection) {
+      const { canNotifyOnWhatsApp } = await import("../routes/mcp.js");
+      const { NOTIFY_TOOL_NAME } = await import("../surfaces/messaging/agent-tools.js");
+      if (await canNotifyOnWhatsApp(resolved.userId, { channelDelivery, agentOrgId: agent.orgId })) {
+        const tools = selection;
+        const direct = Array.isArray(tools["direct"]) ? tools["direct"].filter((v): v is string => typeof v === "string") : [];
+        if (!direct.includes(NOTIFY_TOOL_NAME)) {
+          mergedAgentConfig = { ...mergedAgentConfig, tools: { ...tools, direct: [...direct, NOTIFY_TOOL_NAME] } };
+        }
+      }
+    }
+
     if (injectedCallbackUrl) {
       try {
         const [ciphertext, iv, authTag] = (agent.spacesAppToken ?? "").split(":");
@@ -1551,6 +1576,9 @@ export async function prepareRun(
       ...(isRegenerate ? { isRegenerate: true } : {}),
       ...(detached === true ? { detached: true } : {}),
       fastMode: effectiveFastMode,
+      // /compact — every surface sends this, and dropping it here meant the
+      // session was never actually compacted, only summarised.
+      ...((body as { compactBeforeRun?: unknown }).compactBeforeRun === true ? { compactBeforeRun: true } : {}),
       ...(resumedFromHandoff === true ? { resumedFromHandoff: true } : {}),
       ...(typeof judgeBackend === "string" && JUDGE_BACKENDS.has(judgeBackend) ? { judgeBackend } : {}),
       ...(typeof optimizations === "string" && /^[a-z0-9_,+\-]{1,400}$/i.test(optimizations) ? { optimizations } : {}),

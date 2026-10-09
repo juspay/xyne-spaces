@@ -21,7 +21,7 @@ export async function deliverNudge(input: {
   if (!input.agentId) return { ok: false, reason: "no_agent" };
   const agent = await prisma.agent.findUnique({
     where: { id: input.agentId },
-    select: { id: true, slug: true, name: true, orgId: true, config: true, enabled: true },
+    select: { id: true, slug: true, name: true, orgId: true, config: true, enabled: true, delegationTier: true },
   });
   if (!agent || !agent.enabled) return { ok: false, reason: "agent_unavailable" };
 
