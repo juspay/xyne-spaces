@@ -22,6 +22,8 @@ export interface ViewingState {
   listChannelId: string | null;
   /** Thread whose replies ChatView shows, uncovered. */
   threadId: string | null;
+  /** Whether that thread's panel is on its messages tab rather than Details/Files/RCA. */
+  threadMessagesShowing: boolean;
 }
 
 /**
@@ -47,5 +49,9 @@ export function isViewingNotificationTarget(
   // Thread reply: shown only by that thread's panel.
   const isThreadReply = !!target.initialMessageId || type === 'THREAD_REPLY';
   if (!isThreadReply) return false; // can't tell which — alert to be safe
-  return !!target.conversationId && viewing.threadId === target.conversationId;
+  return (
+    !!target.conversationId &&
+    viewing.threadId === target.conversationId &&
+    viewing.threadMessagesShowing
+  );
 }

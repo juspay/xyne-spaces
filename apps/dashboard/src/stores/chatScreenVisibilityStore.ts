@@ -26,3 +26,23 @@ export function clearChatScreenVisibility(writer: symbol): void {
 export function getChatScreenVisibility(): ChatScreenVisibility {
   return current;
 }
+
+// Which tab each mounted ThreadMessages shows. ChatView only sees ?selectedTab,
+// but the panel keeps its own tab when that param is absent.
+const threadMessagesShowing = new Map<symbol, { threadId: string; showing: boolean }>();
+
+export function setThreadMessagesShowing(writer: symbol, threadId: string, showing: boolean): void {
+  threadMessagesShowing.set(writer, { threadId, showing });
+}
+
+export function clearThreadMessagesShowing(writer: symbol): void {
+  threadMessagesShowing.delete(writer);
+}
+
+/** False until a panel for `threadId` reports its messages tab. */
+export function isThreadMessagesShowing(threadId: string): boolean {
+  for (const entry of threadMessagesShowing.values()) {
+    if (entry.threadId === threadId && entry.showing) return true;
+  }
+  return false;
+}
