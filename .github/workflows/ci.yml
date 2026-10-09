@@ -175,7 +175,9 @@ jobs:
           # One-click view: a self-contained summary page (failures + screenshots, passes collapsed)
           # built from Gauge's json-report. Uploaded first so it's the first thing in the message.
           if [ -n "$RUN_DIR" ] && [ -f "$RUN_DIR/json-report/result.json" ]; then
-            node tools/xyne-automation/scripts/build-summary-report.mjs "$RUN_DIR" "$RUNNER_TEMP/automation-report.html"
+            # ts-node resolves from the package dir, so hand it an absolute run dir.
+            (cd tools/xyne-automation && pnpm exec ts-node --project tsconfig.json \
+              scripts/build-summary-report.ts "$GITHUB_WORKSPACE/$RUN_DIR" "$RUNNER_TEMP/automation-report.html")
             UPLOAD_ARGS+=(-F "files=@$RUNNER_TEMP/automation-report.html;type=text/html")
           fi
           # Full detail: the endpoint accepts at most 10 files, and Gauge's html-report needs its

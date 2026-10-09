@@ -189,6 +189,8 @@ Tests do **not** use real Google OAuth. Test auth flow:
 
 `setAsNewUser=true` creates fresh user; `setAsNewUser=false` logs in existing user. All test emails follow pattern `test-(user|admin)-email-<N>@xyne-test.local`.
 
+Workspace roles: the first login of a run creates the org, so that user (`user-1` in baseline order) is workspace `OWNER`; `admin-N` users are `ADMIN`; other `user-N` users are `MEMBER`. Use `user-2`+ for non-admin negative checks.
+
 `setAsNewUser` only controls onboarding flow: `true` may trigger onboarding steps, `false` skips them. Test auth endpoint always creates user on backend regardless — not a "create vs login" toggle.
 
 ### Multi-browser login
@@ -332,6 +334,7 @@ Optional overrides:
 - `BROWSER` - one of `chromium`, `chrome`, `firefox`, `webkit`. Default: `chrome`
 - `ENABLE_BROWSER_CONSOLE_LOGS` - default: true for `test`/`local-test`, false otherwise
 - `PARALLEL` - number of parallel Gauge workers. Default: 3 for `local`/`local-test`, 1 otherwise
+- `DESK_MOCK_DL_EMAIL` / `DESK_MOCK_SHARED_MAILBOX` - mock Desk addresses (`config.desk`). Defaults use the backend's `DESK_MOCK_DEFAULT_EMAIL_DOMAIN` (`desk-mock.xyne.test`)
 
 If config doesn't expose something needed:
 
