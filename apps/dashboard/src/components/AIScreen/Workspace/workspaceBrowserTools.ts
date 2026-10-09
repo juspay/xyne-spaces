@@ -15,13 +15,42 @@ const NAVIGATE_TIMEOUT_MS = 15000;
 const SETTLE_MS = 500;
 
 let registeredWebview: ElectronWebviewElement | null = null;
+let registeredConversationId: string | null = null;
+let pending: Promise<unknown> = Promise.resolve();
 
-export function registerWorkspaceWebview(el: ElectronWebviewElement | null): void {
+export function registerWorkspaceWebview(
+  el: ElectronWebviewElement,
+  conversationId: string | null,
+): () => void {
   registeredWebview = el;
+  registeredConversationId = conversationId;
+  return () => {
+    if (registeredWebview !== el) return;
+    registeredWebview = null;
+    registeredConversationId = null;
+  };
 }
 
 export function getWorkspaceWebview(): ElectronWebviewElement | null {
   return registeredWebview;
+}
+
+export function otherConversationShown(conversationId: unknown): boolean {
+  return (
+    typeof conversationId === 'string' &&
+    conversationId !== '' &&
+    registeredConversationId !== null &&
+    registeredConversationId !== conversationId
+  );
+}
+
+export const OTHER_CONVERSATION =
+  "The browser panel is showing a different conversation, so this run's page is not on screen. Ask the user to open this conversation on the Xyne AI screen, then try again.";
+
+export function runExclusive<T>(task: () => Promise<T>): Promise<T> {
+  const run = pending.then(task, task);
+  pending = run.catch(() => undefined);
+  return run;
 }
 
 function delay(ms: number): Promise<void> {
@@ -81,13 +110,15 @@ const SNAPSHOT_SCRIPT = `(function () {
     var name = el.getAttribute('aria-label') || '';
     if (!name) { name = (el.innerText || el.textContent || '').trim(); }
     if (!name) { name = el.getAttribute('placeholder') || ''; }
-    if (!name && typeof el.value === 'string') { name = el.value; }
+    var secret = tag === 'input' && /^(password|hidden)$/i.test(el.type || '') || /one-time-code|cc-|password/i.test(el.getAttribute('autocomplete') || '');
+    if (!name && !secret && typeof el.value === 'string') { name = el.value; }
     if (!name) { name = el.getAttribute('title') || el.getAttribute('name') || ''; }
     name = String(name).replace(/\\s+/g, ' ').trim().slice(0, 80);
     var href = '';
     if (tag === 'a' && el.getAttribute('href')) {
       try { href = new URL(el.getAttribute('href'), location.href).href; } catch (e) { href = el.getAttribute('href'); }
     }
+    if (tag === 'input' && el.type) { kind += '[' + String(el.type).toLowerCase() + ']'; }
     lines.push('[' + ref + '] ' + kind + ' "' + name + '"' + (href ? ' ' + href : ''));
   }
   return { title: document.title || '', url: location.href, lines: lines, truncated: truncated };

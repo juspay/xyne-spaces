@@ -17,6 +17,7 @@ vi.mock("../claw-auth-url.js", () => ({ clawAuthUrl: () => "http://claw-auth" })
 import { pageClick, pageRead } from "./tools.js";
 
 const serverRun = { sessionId: "s1", meta: { userId: "u1" }, s2sKey: "k" } as never;
+const runOn = (sessionId: string) => ({ sessionId, meta: { userId: "u1" }, s2sKey: "k" }) as never;
 
 function answer(data: Record<string, unknown>) {
   return vi.fn(async () => new Response(JSON.stringify({ success: true, data }), { status: 200 }));
@@ -46,12 +47,12 @@ describe("browser panel tools on a server run", () => {
 
   it("falls back to the sandbox browser when the desktop panel is unavailable", async () => {
     vi.stubGlobal("fetch", answer({ ok: false, content: "not from the Xyne AI screen", unavailable: true }));
-    expect(await pageClick.execute({ ref: "e3" }, serverRun)).toBe("sandbox:sandbox-pw-click");
+    expect(await pageClick.execute({ ref: "e3" }, runOn("s2"))).toBe("sandbox:sandbox-pw-click");
   });
 
   it("falls back to the sandbox browser when claw-auth cannot be reached", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 502 })));
-    expect(await pageRead.execute({}, serverRun)).toBe("sandbox:sandbox-pw-evaluate");
+    expect(await pageRead.execute({}, runOn("s3"))).toBe("sandbox:sandbox-pw-evaluate");
   });
 
   it("does not try the desktop without a session", async () => {

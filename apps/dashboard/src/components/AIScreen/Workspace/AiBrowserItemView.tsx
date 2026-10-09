@@ -1,4 +1,4 @@
-import { useCallback, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { Copy, ExternalLink } from 'lucide-react';
 import { openLink } from '../../../utils/openLink';
 import type { ElectronWebviewElement } from '../../../types/electron';
@@ -31,7 +31,13 @@ const EDITABLE_PROVIDERS = new Set(['google_docs', 'google_sheets', 'google_slid
  * surface has — the header row, the sign-in offer, the selection capture, and
  * the registration that lets the agent's page tools drive it.
  */
-export function AiBrowserItemView({ item }: { item: WorkspaceItem }): ReactElement {
+export function AiBrowserItemView({
+  item,
+  conversationId,
+}: {
+  item: WorkspaceItem;
+  conversationId: string | null;
+}): ReactElement {
   const url = safeHttpUrl(item.url ?? null);
   const [atSignIn, setAtSignIn] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -41,9 +47,13 @@ export function AiBrowserItemView({ item }: { item: WorkspaceItem }): ReactEleme
   const [openThread, setOpenThread] = useState<InlineCommentTarget | null>(null);
 
   const onView = useCallback((next: ElectronWebviewElement | null) => {
-    registerWorkspaceWebview(next);
     setView(next);
   }, []);
+
+  useEffect(
+    () => (view ? registerWorkspaceWebview(view, conversationId) : undefined),
+    [view, conversationId],
+  );
 
   const onNavigate = useCallback((next: string) => {
     setAtSignIn(looksLikeSignIn(next));

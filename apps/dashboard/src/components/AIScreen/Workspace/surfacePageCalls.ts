@@ -1,4 +1,11 @@
-import { executePageTool, getWorkspaceWebview, type PageToolResult } from './workspaceBrowserTools';
+import {
+  OTHER_CONVERSATION,
+  executePageTool,
+  getWorkspaceWebview,
+  otherConversationShown,
+  runExclusive,
+  type PageToolResult,
+} from './workspaceBrowserTools';
 import { getSdlcWebview, requestSdlcBrowser } from './sdlcBrowserTarget';
 import type { ElectronWebviewElement } from '../../../types/electron';
 
@@ -36,12 +43,14 @@ function httpUrl(value: unknown): string | null {
 export function splitSurfaceArgs(raw: Record<string, unknown>): {
   surface: BrowserSurface;
   runId: string;
+  conversationId: string;
   args: Record<string, unknown>;
 } {
-  const { xyneSurface, xyneRunId, ...args } = raw;
+  const { xyneSurface, xyneRunId, xyneConversationId, ...args } = raw;
   return {
     surface: xyneSurface === 'sdlc' ? 'sdlc' : 'xyne-ai',
     runId: typeof xyneRunId === 'string' ? xyneRunId : '',
+    conversationId: typeof xyneConversationId === 'string' ? xyneConversationId : '',
     args,
   };
 }
@@ -99,11 +108,21 @@ async function openUrl(
   };
 }
 
-export async function runSurfacePageCall(
+export function runSurfacePageCall(
   toolName: string,
   rawArgs: Record<string, unknown>,
 ): Promise<PageToolResult> {
-  const { surface, args } = splitSurfaceArgs(rawArgs);
+  return runExclusive(() => runCall(toolName, rawArgs));
+}
+
+async function runCall(
+  toolName: string,
+  rawArgs: Record<string, unknown>,
+): Promise<PageToolResult> {
+  const { surface, conversationId, args } = splitSurfaceArgs(rawArgs);
+  if (surface === 'xyne-ai' && otherConversationShown(conversationId)) {
+    return { ok: false, content: OTHER_CONVERSATION };
+  }
   if (toolName === OPEN_URL_TOOL) return openUrl(surface, args);
   if (!toolName.startsWith('page-'))
     return { ok: false, content: `Unknown browser tool ${toolName}` };

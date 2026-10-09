@@ -58,3 +58,46 @@ export function surfaceResultText(result: SurfaceResult, toolName = "screenshot"
   }
   return result.content ?? "";
 }
+
+const DESKTOP_PIN_MS = 6 * 60 * 60 * 1000;
+const MAX_PINNED_RUNS = 5000;
+const desktopRuns = new Map<string, number>();
+
+function desktopPinned(sessionId: string): boolean {
+  const at = desktopRuns.get(sessionId);
+  if (at === undefined) return false;
+  if (Date.now() - at <= DESKTOP_PIN_MS) return true;
+  desktopRuns.delete(sessionId);
+  return false;
+}
+
+function pinDesktop(sessionId: string): void {
+  desktopRuns.delete(sessionId);
+  desktopRuns.set(sessionId, Date.now());
+  if (desktopRuns.size > MAX_PINNED_RUNS) {
+    const oldest = desktopRuns.keys().next().value;
+    if (oldest !== undefined) desktopRuns.delete(oldest);
+  }
+}
+
+export async function callDesktopBrowser(
+  toolName: string,
+  params: Record<string, unknown>,
+  context: ToolExecutionContext | undefined,
+): Promise<string | null> {
+  const sessionId = context?.sessionId ?? "";
+  if (!sessionId || !context?.meta?.["userId"]) return null;
+  const outcome = await requestSurfaceCall(toolName, params, context);
+  if (!("error" in outcome) && !outcome.result.unavailable) {
+    pinDesktop(sessionId);
+    return surfaceResultText(outcome.result, toolName);
+  }
+  if (!desktopPinned(sessionId)) return null;
+  const reason = ("error" in outcome ? outcome.error : (outcome.result.content ?? "")).replace(/^Error:\s*/, "").trim();
+  return (
+    `Error: ${toolName} could not reach the browser panel in the user's Xyne desktop app` +
+    (reason ? ` (${reason})` : "") +
+    ". This run is working in that browser, so the call was not moved to the sandbox browser. " +
+    "Ask the user to keep this conversation open on the Xyne AI screen, then try again."
+  );
+}

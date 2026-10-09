@@ -47,10 +47,28 @@ export interface PagePanelResult {
 export interface PagePanelCall {
   id: string;
   runId: string;
+  conversationId?: string | null;
   toolName: string;
   args: Record<string, unknown>;
   expiresAt: number;
+  expiresInMs?: number;
 }
+
+const BLOCKED_HOSTS = new Set(["metadata.google.internal", "metadata", "0.0.0.0", "[::]", "[fd00:ec2::254]"]);
+
+export function blockedBrowserUrl(raw: unknown): boolean {
+  if (typeof raw !== "string") return false;
+  let host: string;
+  try {
+    host = new URL(raw.trim()).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  return BLOCKED_HOSTS.has(host) || /^169\.254\.\d{1,3}\.\d{1,3}$/.test(host) || host.startsWith("[fe80:");
+}
+
+export const BLOCKED_URL_MESSAGE =
+  "Error: that is a cloud metadata or link-local address, which the browser panel does not open.";
 
 const presenceKey = (runId: string) => `claw:page-panel:presence:${runId}`;
 const queueKey = (runId: string) => `claw:page-panel:queue:${runId}`;
@@ -188,7 +206,14 @@ export async function callPagePanelTool(input: {
   }
 
   const deadlineMs = DEADLINES_MS[toolName] ?? READ_DEADLINE_MS;
-  const call: PagePanelCall = { id: randomUUID(), runId, toolName, args, expiresAt: Date.now() + deadlineMs };
+  const call: PagePanelCall = {
+    id: randomUUID(),
+    runId,
+    conversationId: owner.conversationId,
+    toolName,
+    args,
+    expiresAt: Date.now() + deadlineMs,
+  };
   await redis.set(callKey(call.id), JSON.stringify({ userId, runId }), "EX", RESULT_TTL_SECONDS);
   await redis.rpush(queueKey(runId), JSON.stringify(call));
   await redis.expire(queueKey(runId), QUEUE_TTL_SECONDS);
@@ -263,7 +288,8 @@ export async function nextPagePanelCall(
       if (!raw) break;
       try {
         const call = JSON.parse(raw) as PagePanelCall;
-        if (call.expiresAt > Date.now()) return call;
+        const expiresInMs = call.expiresAt - Date.now();
+        if (expiresInMs > 0) return { ...call, expiresInMs };
       } catch (err) {
         log.warn(`[page-panel] dropped unreadable call run=${runId}: ${errMsg(err)}`);
       }

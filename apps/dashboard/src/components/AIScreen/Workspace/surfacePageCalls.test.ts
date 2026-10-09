@@ -5,9 +5,17 @@ const targets = vi.hoisted(() => ({
   sdlc: null as unknown,
   framePosts: 0,
   executed: [] as Array<{ tool: string; target: unknown }>,
+  shownConversation: null as string | null,
 }));
 
 vi.mock('./workspaceBrowserTools', () => ({
+  OTHER_CONVERSATION: 'other conversation',
+  otherConversationShown: (id: unknown): boolean =>
+    typeof id === 'string' &&
+    id !== '' &&
+    targets.shownConversation !== null &&
+    targets.shownConversation !== id,
+  runExclusive: <T>(task: () => Promise<T>): Promise<T> => task(),
   getWorkspaceWebview: () => targets.workspace,
   executePageTool: vi.fn((tool: string, _args: unknown, target?: unknown) => {
     targets.executed.push({ tool, target: target === undefined ? 'workspace' : target });
@@ -36,12 +44,21 @@ describe('surface page calls', () => {
     targets.sdlc = null;
     targets.framePosts = 0;
     targets.executed.length = 0;
+    targets.shownConversation = null;
   });
 
   it('strips the routing fields the server adds', () => {
-    expect(splitSurfaceArgs({ ref: 'e1', xyneSurface: 'sdlc', xyneRunId: 'r1' })).toEqual({
+    expect(
+      splitSurfaceArgs({
+        ref: 'e1',
+        xyneSurface: 'sdlc',
+        xyneRunId: 'r1',
+        xyneConversationId: 'c1',
+      }),
+    ).toEqual({
       surface: 'sdlc',
       runId: 'r1',
+      conversationId: 'c1',
       args: { ref: 'e1' },
     });
     expect(splitSurfaceArgs({ ref: 'e1' }).surface).toBe('xyne-ai');

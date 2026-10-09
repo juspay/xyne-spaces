@@ -1,6 +1,13 @@
 import { ClawApiError, clawApiRequest } from '../../../services/claw/clawRequest';
 import { xyneAIStreamManager } from '../../../services/XyneAI/XyneAIStreamManager';
-import { executePageTool, getWorkspaceWebview, type PageToolResult } from './workspaceBrowserTools';
+import {
+  OTHER_CONVERSATION,
+  executePageTool,
+  getWorkspaceWebview,
+  otherConversationShown,
+  runExclusive,
+  type PageToolResult,
+} from './workspaceBrowserTools';
 
 const POLL_MS = 1000;
 const UNSUPPORTED_BACKOFF_MS = 5 * 60 * 1000;
@@ -9,6 +16,8 @@ interface PagePanelCall {
   id: string;
   toolName: string;
   args?: Record<string, unknown>;
+  conversationId?: string | null;
+  expiresInMs?: number;
 }
 
 export function streamingRunIds(): string[] {
@@ -21,13 +30,18 @@ export function streamingRunIds(): string[] {
   return Array.from(ids);
 }
 
-async function runCall(call: PagePanelCall): Promise<PageToolResult> {
+async function runCall(call: PagePanelCall, deadline: number): Promise<PageToolResult | null> {
   if (!call.toolName.startsWith('page-'))
     return { ok: false, content: `Unknown page tool: ${call.toolName}` };
-  return executePageTool(call.toolName, call.args ?? {}).catch(() => ({
-    ok: false,
-    content: 'Tool failed',
-  }));
+  if (otherConversationShown(call.conversationId))
+    return { ok: false, content: OTHER_CONVERSATION };
+  return runExclusive(async () => {
+    if (Date.now() >= deadline) return null;
+    return executePageTool(call.toolName, call.args ?? {}).catch(() => ({
+      ok: false,
+      content: 'Tool failed',
+    }));
+  });
 }
 
 export function startPagePanelPoller(): () => void {
@@ -50,11 +64,15 @@ export function startPagePanelPoller(): () => void {
         );
         const call = data?.call;
         if (call && typeof call.id === 'string' && typeof call.toolName === 'string') {
-          const result = await runCall(call);
-          await clawApiRequest(`/surface/page-calls/${encodeURIComponent(call.id)}/result`, {
-            method: 'POST',
-            body: JSON.stringify(result),
-          }).catch(() => undefined);
+          const deadline =
+            typeof call.expiresInMs === 'number' ? Date.now() + call.expiresInMs : Infinity;
+          const result = await runCall(call, deadline);
+          if (result) {
+            await clawApiRequest(`/surface/page-calls/${encodeURIComponent(call.id)}/result`, {
+              method: 'POST',
+              body: JSON.stringify(result),
+            }).catch(() => undefined);
+          }
           next = 0;
         }
       } catch (err) {
