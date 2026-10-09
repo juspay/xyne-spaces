@@ -67,6 +67,12 @@ export interface ChannelCapabilities {
    *  trims to them and falls back to numbered text when this is absent. */
   interactive?: InteractiveLimits;
   resultSections?: ResultSectionsCapability;
+  /** The channel can run several linked tasks in one chat at once, each its
+   *  own session, replies threaded by quote. Present only on messengers whose
+   *  reply model makes interleaved answers legible (WhatsApp). Actual use is
+   *  still gated per account by the threads flag; absent ⇒ the one-at-a-time
+   *  path, unchanged. `maxParallel` caps concurrent tasks per chat. */
+  concurrentThreads?: { maxParallel: number };
 }
 
 export interface ResultSectionsCapability {
@@ -158,6 +164,10 @@ export interface InboundMessage {
   mentionedSelf: boolean;
   /** The message quotes/replies to one the account sent. */
   replyToSelf: boolean;
+  /** The id of the message this one quotes/replies to, when the channel
+   *  reports it. Lets the threaded path route an answer back to the task whose
+   *  message was quoted. */
+  replyToMessageId?: string;
   /** Sent by the account itself (own echo) — always dropped by the core. */
   fromSelf: boolean;
   /** Typed by the person who owns this account, on the device they linked —
@@ -388,6 +398,10 @@ export interface ChannelDeliveryTarget {
    *  Carried on the target because the result comes back on a pod that has
    *  no idea what this account's reaction settings are. */
   statusReactions?: boolean;
+  /** The task conversation this delivery belongs to. Set only on the threaded
+   *  path so the sent message can be mapped back to its task for quote-reply
+   *  routing; unused by the one-at-a-time path. */
+  conversationId?: string;
 }
 
 // ── registry ──

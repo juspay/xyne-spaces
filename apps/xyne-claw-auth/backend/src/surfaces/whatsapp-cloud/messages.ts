@@ -182,6 +182,7 @@ export function parseCloudWebhook(payload: unknown): CloudInbound[] {
           mentionedSelf: false,
           // Any quoted message in a business chat is one we sent.
           replyToSelf: Boolean(messageRaw.context?.id),
+          ...(messageRaw.context?.id ? { replyToMessageId: messageRaw.context.id } : {}),
           fromSelf: false,
           ref: { chatId: from, messageId: id },
           ...(cardReplyId ? { cardReplyId } : {}),
