@@ -952,6 +952,7 @@ const StartCallPill = ({ onInstantCall, onScheduleCall }: StartCallPillProps): R
           <Button
             variant='ghost'
             size='inline'
+            aria-haspopup='dialog'
             data-testid='start-instant-call-option'
             data-track-category='CALLS'
             data-track-name='start-instant-call'

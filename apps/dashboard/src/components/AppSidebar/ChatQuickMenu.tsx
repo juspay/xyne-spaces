@@ -32,6 +32,7 @@ export const ChatQuickMenu = ({
               onDismiss?.();
             }}
             className={QUICK_NAV_ROW_CLASS}
+            aria-description={item.description}
             data-track-category='App_Sidebar'
             data-track-name='Chat_Quick_Nav'
             data-track-metadata={JSON.stringify({ path: item.to, label: item.label })}

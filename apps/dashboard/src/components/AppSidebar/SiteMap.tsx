@@ -2,7 +2,9 @@ import { ReactElement } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { usePath } from '../../hooks/usePath';
 import { useVisibleNavigationItems } from '../../hooks/useVisibleNavigationItems';
-import type { NavigationItem } from './navigationConfig';
+import { chatNavItems, type NavigationItem } from './navigationConfig';
+import { useAuth } from '../../hooks/useAuth';
+import { useRadarEnabled } from '../../hooks/radarCacConfig';
 import { useVisibleOrganisationsGroups } from '../../routes/OrganisationsModule/organisationsSections';
 import { useVisibleAINavItems } from '../AIScreen/AISidebar';
 
@@ -23,6 +25,8 @@ export const SiteMap = (): ReactElement => {
   const items = useVisibleNavigationItems();
   const adminGroups = useVisibleOrganisationsGroups();
   const aiPages = useVisibleAINavItems();
+  const auth = useAuth();
+  const inboxPages = chatNavItems(useRadarEnabled(auth.user?.email));
 
   /** The pages inside a sidebar entry, from its own sidebar's config. */
   const childrenOf = ({ path, label }: NavigationItem): Page[] => {
@@ -42,6 +46,13 @@ export const SiteMap = (): ReactElement => {
         label: item.label,
         description: within(item.description),
       }));
+    }
+    if (path === '/chat/dir') {
+      return inboxPages.flatMap(item =>
+        item.description
+          ? [{ path: item.to, label: item.label, description: within(item.description) }]
+          : [],
+      );
     }
     return [];
   };

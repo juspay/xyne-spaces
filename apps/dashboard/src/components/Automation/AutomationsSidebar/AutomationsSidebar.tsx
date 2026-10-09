@@ -10,12 +10,27 @@ type NavIcon = ComponentType<SVGProps<SVGSVGElement>>;
 interface AutomationsNavItem {
   to: string;
   label: string;
+  /** What the page holds, for screen readers and the assistant. */
+  description: string;
+  trackName: string;
   icon: NavIcon;
 }
 
 const NAV_ITEMS: AutomationsNavItem[] = [
-  { to: '/automations', label: 'Automations', icon: LightningThunderElectricOn as NavIcon },
-  { to: '/automations/approvals', label: 'Approvals', icon: CheckTickSingle as NavIcon },
+  {
+    to: '/automations',
+    label: 'Automations',
+    description: 'Automation rules and their runs',
+    trackName: 'OPEN_AUTOMATIONS',
+    icon: LightningThunderElectricOn as NavIcon,
+  },
+  {
+    to: '/automations/approvals',
+    label: 'Approvals',
+    description: 'Automation steps waiting for someone to approve or reject them',
+    trackName: 'OPEN_AUTOMATION_APPROVALS',
+    icon: CheckTickSingle as NavIcon,
+  },
 ];
 
 const isItemActive = (pathname: string, to: string): boolean => {
@@ -43,7 +58,7 @@ const AutomationsSidebar = (): ReactElement => {
         </div>
 
         <div className='flex-1 min-h-0 overflow-y-auto no-scrollbar px-0.5 pt-1'>
-          {NAV_ITEMS.map(({ to, label, icon: IconComponent }) => {
+          {NAV_ITEMS.map(({ to, label, description, trackName, icon: IconComponent }) => {
             const isActive = isItemActive(pathname, to);
 
             return (
@@ -51,6 +66,9 @@ const AutomationsSidebar = (): ReactElement => {
                 key={to}
                 to={to}
                 aria-current={isActive ? 'page' : undefined}
+                aria-description={description}
+                data-track-category='automations'
+                data-track-name={trackName}
                 data-testid={`automations-nav-${label.toLowerCase()}`}
                 className={cn(
                   'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent',

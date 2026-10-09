@@ -880,6 +880,7 @@ const CallHistoryScreen = (): ReactElement => {
           {/* Action cards */}
           <div className='grid grid-cols-2 gap-3' data-testid='new-call-button'>
             <button
+              aria-haspopup='dialog'
               data-testid='start-instant-call-option'
               onClick={() => setIsInstantCallModalOpen(true)}
               data-track-category='CALLS'

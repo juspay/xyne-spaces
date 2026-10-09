@@ -81,71 +81,85 @@ const mobileNavigationItems = [
   {
     path: '/chat/dir',
     label: 'Home',
+    description: 'The inbox: channels, threads, unreads, bookmarks, drafts and recap',
     icon: HomeDefault,
   },
   {
     path: '/chat/dm',
     label: 'DMs',
+    description: 'Direct and group conversations',
     icon: ChatDefault,
   },
   {
     path: '/calls',
     label: 'Calls',
+    description: 'Call history and upcoming calls',
     icon: PhoneDefault,
   },
   {
     path: '/chat/activity',
     label: 'Activity',
+    description: 'Notifications: mentions, replies and reactions',
     icon: NotificationBellOn,
   },
   {
     path: '/analytics',
     label: 'Analytics',
+    description: 'Workspace usage metrics',
     icon: GraphTrendLine,
   },
   {
     path: '/chat/canvas',
     label: 'Canvas',
+    description: 'Your canvas documents',
     icon: FileText,
   },
   {
     path: '/dashboards',
     label: 'Dashboards',
+    description: 'Charts and reports built from data sources',
     icon: GridDashboard01,
   },
   {
     path: '/recorder',
     label: 'Record',
+    description: 'Record a meeting or note on this phone',
     icon: MicMicrophone,
   },
   {
     path: '/chat/bookmarks',
     label: 'Bookmarks',
+    description: 'Messages you saved',
     icon: BookmarkDefault,
   },
   {
     path: '/rca',
     label: 'RCA',
+    description: 'Root cause analysis of incidents',
     icon: ClipboardCheck,
   },
   {
     path: '/chat/threads',
     label: 'Threads',
+    description: 'Threads you follow and their replies',
     icon: ChatDefault,
   },
   {
     path: '/chat/recap',
     label: 'Recap',
+    description: 'AI summary of what you missed',
     icon: SparkleAi01,
   },
   {
     path: '/error-report',
     label: 'Report Issue',
+    description: 'Report a problem with Xyne',
     icon: AlertCircle,
   },
   {
     path: '/guide',
     label: 'Guide',
+    description: 'Product docs, feature guides and keyboard shortcuts',
     icon: QuestionMarkCircle,
   },
 ];
@@ -1001,6 +1015,7 @@ const MobileNavbar = ({
   filteredNavigationItems: {
     path: string;
     label: string;
+    description: string;
     icon: React.ElementType;
   }[];
   activeRoute: string;
@@ -1092,6 +1107,7 @@ const MobileNavbar = ({
                 <Link
                   to={prefixWs(item.path)}
                   key={item.path}
+                  aria-description={item.description}
                   onClick={() => onNavigationClick(item.label)}
                   data-track-category='Mobile_Sidebar'
                   data-track-name='Mobile_Nav_Item'
@@ -1222,6 +1238,7 @@ const MobileNavbar = ({
                       <Link
                         to={prefixWs(item.path)}
                         key={item.path}
+                        aria-description={item.description}
                         className={`flex items-center gap-3 px-4 py-3 transition-colors ${
                           isActive ? 'bg-accent' : 'hover:bg-accent'
                         }`}

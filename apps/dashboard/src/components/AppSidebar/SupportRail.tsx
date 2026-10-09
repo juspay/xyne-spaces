@@ -28,6 +28,8 @@ interface RailContext {
 interface SupportRailItem {
   key: string;
   label: string;
+  /** What the page holds, as for NavigationItem.description. */
+  description: string;
   icon: PikaIcon;
   path: string;
   gatedPath?: string;
@@ -53,6 +55,7 @@ const SUPPORT_RAIL_ITEMS: SupportRailItem[] = [
   {
     key: 'inbox',
     label: 'Inbox',
+    description: 'Support conversations from every channel',
     icon: InboxDefault,
     path: '/support/all',
     isActive: ctx => ctx.activeRoute === '/support',
@@ -60,6 +63,7 @@ const SUPPORT_RAIL_ITEMS: SupportRailItem[] = [
   {
     key: 'activity',
     label: 'Activity',
+    description: 'Notifications: mentions, replies and reactions',
     icon: NotificationBellOn,
     path: '/chat/activity',
     isActive: ctx => ctx.activeRoute === '/chat/activity',
@@ -67,6 +71,7 @@ const SUPPORT_RAIL_ITEMS: SupportRailItem[] = [
   {
     key: 'calls',
     label: 'Calls',
+    description: 'Call history and upcoming calls',
     icon: PhoneDefault,
     path: '/calls',
     isActive: ctx => ctx.activeRoute === '/calls',
@@ -74,6 +79,7 @@ const SUPPORT_RAIL_ITEMS: SupportRailItem[] = [
   {
     key: 'ai-agent',
     label: 'AI Agent',
+    description: 'Also called Ask AI: AI chats, agents and knowledge',
     icon: SparkleAi01,
     path: '/ai',
     isActive: ctx => ctx.activeRoute === '/ai',
@@ -81,6 +87,7 @@ const SUPPORT_RAIL_ITEMS: SupportRailItem[] = [
   {
     key: 'automations',
     label: 'Automations',
+    description: 'Automation rules, runs and approvals',
     icon: LightningThunderElectricOn,
     path: '/automations',
     gatedPath: '/automations',
@@ -89,6 +96,7 @@ const SUPPORT_RAIL_ITEMS: SupportRailItem[] = [
   {
     key: 'dashboards',
     label: 'Dashboards',
+    description: 'Charts and reports built from data sources',
     icon: BubbleChart,
     path: '/analytics-dashboard',
     gatedPath: '/analytics',
@@ -97,6 +105,7 @@ const SUPPORT_RAIL_ITEMS: SupportRailItem[] = [
   {
     key: 'help-center',
     label: 'Help Center',
+    description: 'Also called the Knowledge Base: files and folders Ask AI can search',
     icon: Notebook,
     path: '/knowledge-base',
     gatedPath: '/knowledge-base',
@@ -185,6 +194,7 @@ export const SupportRail = ({
               to={prefixWs(item.path)}
               onClick={() => onNavigationClick(`Support: ${item.label}`)}
               aria-label={item.label}
+              aria-description={item.description}
               aria-current={active ? 'page' : undefined}
               data-testid={`support-rail-${item.key}`}
               data-track-category='App_Sidebar'
