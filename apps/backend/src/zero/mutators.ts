@@ -17241,6 +17241,15 @@ export function createMutators(
             ...(isPrivate !== undefined && { isPrivate }),
             updatedAt: timestamp,
           });
+          // Folders carry their own copy of isPrivate and Zero's ACL reads each row's own copy,
+          // so a visibility change must reach every folder under this root or they keep syncing
+          // to the whole workspace after the root goes private.
+          if (isPrivate !== undefined && !collection.parentId) {
+            const folders = await tx.run(zql.collections.where('rootCollectionId', id));
+            for (const folder of folders) {
+              await tx.mutate.collections.update({ id: folder.id, isPrivate, updatedAt: timestamp });
+            }
+          }
         },
       ),
 

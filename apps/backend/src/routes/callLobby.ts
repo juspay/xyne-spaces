@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { CallStatus } from '@xyne/shared';
+import { CallStatus, InvitationResponse } from '@xyne/shared';
 import type { Request, Response, NextFunction } from 'express';
 import { callLobbyController } from '@/controllers/callLobbyController';
 import { db } from '@/database/client';
@@ -109,7 +109,13 @@ async function requireCallParticipant(
   try {
     const lobbyReq = req as CallLobbyRequest;
 
+    // Only admitted participants may touch call chat / participants / recording.
+    // A cookie alone is not enough: REQUESTED and DECLINED guests also hold one.
     if (lobbyReq.callSession) {
+      if (lobbyReq.callSession.response !== InvitationResponse.ACCEPTED) {
+        res.status(403).json({ error: 'Not admitted for this call' });
+        return;
+      }
       lobbyReq.callParticipantId = lobbyReq.callSession.participantId;
       next();
       return;
