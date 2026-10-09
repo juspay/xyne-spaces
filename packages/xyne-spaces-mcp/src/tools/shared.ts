@@ -169,3 +169,17 @@ class UserDirectory {
 
 /** One directory per process, shared by every tool. */
 export const users = new UserDirectory();
+
+// ── Mentions ────────────────────────────────────────────────────────────────
+
+/**
+ * How to mention someone in a message body, quoted into every tool that writes
+ * one. Spaces only notifies on its own mention markup; the server expands this
+ * shorthand into it (`apps/backend/src/api/sdk/v1/mentions.ts`), so plain
+ * `@Name` is just text and notifies nobody.
+ */
+export const MENTION_GUIDE =
+	"To mention (tag and notify) a person, write @Name[userId] — e.g. @Priya Sharma[cmhesdd48001ghu4rc6bcb9m0] — " +
+	"using the id from spaces_users_list, spaces_channel_participants or spaces_whoami. A plain @Name, or an @ " +
+	"followed by an email, is ordinary text and notifies nobody. Mention a team as @alias[group:GROUP_ID:Group Name]. " +
+	"@channel and @here notify every member, or every active member, of the channel: use them only when asked to.";
