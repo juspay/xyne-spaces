@@ -20,3 +20,20 @@ export function channelConversationId(
 ): string {
   return `${channel}-${sanitizeId(accountKey)}-${sanitizeId(agentSlug)}-${sanitizeId(chatId)}`;
 }
+
+/**
+ * A conversation id for one concurrent task inside a chat. It extends the
+ * chat's own id with a task discriminator, so each task gets its own runtime
+ * session and its own busy slot (both keyed off the conversation id) while
+ * still delivering to the same chat. Only the threaded WhatsApp path mints
+ * these; every other surface keeps using {@link channelConversationId}.
+ */
+export function taskConversationId(
+  channel: MessagingChannelKey,
+  accountKey: string,
+  agentSlug: string,
+  chatId: string,
+  taskId: string,
+): string {
+  return `${channelConversationId(channel, accountKey, agentSlug, chatId)}-t-${sanitizeId(taskId)}`;
+}

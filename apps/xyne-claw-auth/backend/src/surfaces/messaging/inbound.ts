@@ -34,6 +34,8 @@ import { handleControlCommand, parseControlCommand, rememberActiveRun } from "./
 import { runSerialized } from "./serialize.js";
 import { accountForSender } from "./shared-number.js";
 import { isAudio, transcribeAudio, transcriptionEnabled } from "./transcribe.js";
+import { threadsEnabled } from "./threads/config.js";
+import { handleThreaded } from "./threads/orchestrator.js";
 import { findDefaultAgent, findOrgAgentBySlug, listOrgAgents, type BoundAgent } from "./store.js";
 
 const log = createLogger("channel-inbound");
@@ -437,6 +439,30 @@ async function handleOne(ctx: InboundContext, msg: InboundMessage): Promise<void
   // to this sender.
   const overheard = msg.isGroup && policy.groupHistoryLimit > 0 ? await readGroupContext(account.id, msg.chatId) : [];
   const contextBlock = renderGroupContext(overheard);
+
+  // The threaded path (WhatsApp with the flag on) runs linked tasks in this
+  // chat concurrently instead of one at a time. Every other surface, and
+  // WhatsApp with the flag off, falls through to the serial dispatch below.
+  if (plugin.capabilities.concurrentThreads && threadsEnabled(account)) {
+    const { accepted } = await handleThreaded({
+      plugin,
+      account,
+      agent,
+      userId,
+      msg,
+      rawTask: task,
+      contextBlock,
+      target,
+      ...(msg.attachments?.length ? { attachments: msg.attachments } : {}),
+      ...(msg.senderName ? { senderName: msg.senderName } : {}),
+    });
+    if (accepted) {
+      await consumeGroupContext(account.id, msg.chatId, overheard.length);
+    } else if (plugin.capabilities.typing && (await typingFinished(account.id, msg.chatId))) {
+      await enqueueOutbound(account.id, { kind: "typing", chatId: msg.chatId, on: false });
+    }
+    return;
+  }
 
   try {
     const outcome = await dispatchOrQueueChannelRun({

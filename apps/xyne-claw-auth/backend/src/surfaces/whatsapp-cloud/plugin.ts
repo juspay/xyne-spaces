@@ -186,6 +186,9 @@ export const whatsappCloudPlugin: ChannelPlugin<CloudHandle, WhatsAppCloudConfig
     maxImageBytes: MAX_IMAGE_BYTES,
     maxFileBytes: MAX_FILE_BYTES,
     resultSections: WHATSAPP_RESULT_SECTIONS,
+    // Quote-reply makes interleaved answers legible, so several linked tasks
+    // can run in one chat. Gated per account by the threads flag.
+    concurrentThreads: { maxParallel: 3 },
     // Meta's published caps for interactive messages. They are rejections,
     // not truncations: one over-long row fails the whole send, so the core
     // trims to these before calling sendInteractive.
