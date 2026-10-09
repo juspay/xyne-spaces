@@ -137,12 +137,25 @@ export interface UpdateCallInput {
   metadata?: any;
   aiSummary?: string;
   title?: string;
-  transcript?: string;
+  transcript?: string | null;
   startedAt?: Date;
   recordingUrl?: string | null;
   labels?: string[];
   markedItems?: Prisma.InputJsonValue[];
   summaryTemplateId?: string | null;
+}
+
+export interface CallAdminListFilters {
+  workspaceId: string;
+  /** SELF tier: only calls this user created or participates in. */
+  participantUserId?: string;
+  statuses?: CallStatus[];
+  callType?: CallType;
+  /** Case-insensitive title match, or an exact externalId. */
+  search?: string;
+  /** Matches Call.metadata.detailedSummaryStatus; "ready" also takes a canvas with no status. */
+  summaryStatuses?: Array<'pending' | 'ready' | 'failed'>;
+  hasTranscript?: boolean;
 }
 
 export interface CreateCallWithParticipantsInput {
@@ -525,6 +538,147 @@ export class CallRepository {
     }
 
     return { calls, nextCursor };
+  }
+
+  /**
+   * Calls admin panel list: every call in the workspace, newest first, cursor-paged
+   * the same way as findByUserAndType. `participantUserId` narrows it to calls that
+   * user created or is a participant of (the panel's SELF tier).
+   */
+  async findForAdminList(
+    filters: CallAdminListFilters,
+    options: { limit: number; cursor?: { startedAt: Date; id: string } },
+  ): Promise<{ calls: Call[]; nextCursor: { startedAt: Date; id: string } | null }> {
+    const conditions: Prisma.CallWhereInput[] = [{ workspaceId: filters.workspaceId }];
+
+    if (filters.participantUserId) {
+      conditions.push({
+        OR: [
+          { createdByUserId: filters.participantUserId },
+          { participants: { some: { userId: filters.participantUserId } } },
+        ],
+      });
+    }
+    if (filters.statuses?.length) conditions.push({ status: { in: filters.statuses } });
+    if (filters.callType) conditions.push({ callType: filters.callType });
+    if (filters.search) {
+      // Support pastes a call id as often as a title, so match either.
+      conditions.push({
+        OR: [
+          { title: { contains: filters.search, mode: 'insensitive' } },
+          { externalId: filters.search },
+        ],
+      });
+    }
+    if (filters.summaryStatuses?.length) {
+      conditions.push({
+        OR: filters.summaryStatuses.flatMap((status): Prisma.CallWhereInput[] => {
+          const byStatus: Prisma.CallWhereInput = {
+            metadata: { path: ['detailedSummaryStatus'], equals: status },
+          };
+          if (status !== 'ready') return [byStatus];
+          // A channel call's own post-call summary records only the canvas, no status;
+          // count those as ready, as readSummaryStatus in callAdminService does.
+          return [
+            byStatus,
+            {
+              AND: [
+                { metadata: { path: ['detailedSummaryStatus'], equals: Prisma.AnyNull } },
+                { NOT: { metadata: { path: ['detailedSummaryCanvasId'], equals: Prisma.AnyNull } } },
+              ],
+            },
+          ];
+        }),
+      });
+    }
+    if (filters.hasTranscript !== undefined) {
+      conditions.push({ transcript: filters.hasTranscript ? { not: null } : null });
+    }
+    if (options.cursor) {
+      conditions.push({
+        OR: [
+          { startedAt: { lt: options.cursor.startedAt } },
+          { startedAt: options.cursor.startedAt, id: { lt: options.cursor.id } },
+        ],
+      });
+    }
+
+    // Fetch one extra to determine if there is a next page
+    const calls = await DatabaseClient.getInstance().call.findMany({
+      where: { AND: conditions },
+      orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
+      take: options.limit + 1,
+    });
+
+    let nextCursor: { startedAt: Date; id: string } | null = null;
+    if (calls.length > options.limit) {
+      calls.pop(); // discard the sentinel item (not part of the current page)
+      const lastInPage = calls[calls.length - 1];
+      nextCursor = { startedAt: lastInPage.startedAt, id: lastInPage.id };
+    }
+
+    return { calls, nextCursor };
+  }
+
+  /**
+   * Hand calls to a new owner: `newOwnerId` becomes createdByUserId (and organizerId
+   * where one is set) and is upserted as a participant with an ACCEPTED RSVP, the way
+   * createCallWithParticipants seeds an organizer. The previous owner keeps their
+   * participant row. Ownership deliberately stays out of UpdateCallInput — this is
+   * the only write path for it.
+   *
+   * Returns the writes unsent, for the caller to commit in one batch transaction with
+   * its own (a series moving with its calls). Participant previews are not among them:
+   * refresh those once the batch commits.
+   */
+  async transferOwnershipOps(callIds: string[], newOwnerId: string): Promise<Prisma.PrismaPromise<unknown>[]> {
+    if (callIds.length === 0) return [];
+
+    const db = DatabaseClient.getInstance();
+    const [calls, existingParticipants] = await Promise.all([
+      db.call.findMany({
+        where: { id: { in: callIds } },
+        select: { id: true, workspaceId: true, createdByUserId: true },
+      }),
+      db.callParticipant.findMany({
+        where: { callId: { in: callIds }, userId: newOwnerId },
+        select: { callId: true },
+      }),
+    ]);
+    const alreadyParticipant = new Set(existingParticipants.map(participant => participant.callId));
+    const now = new Date();
+
+    return [
+      db.call.updateMany({
+        where: { id: { in: callIds } },
+        data: { createdByUserId: newOwnerId },
+      }),
+      db.call.updateMany({
+        where: { id: { in: callIds }, organizerId: { not: null } },
+        data: { organizerId: newOwnerId },
+      }),
+      db.callParticipant.createMany({
+        data: calls
+          .filter(call => !alreadyParticipant.has(call.id))
+          .map(call => ({
+            id: uuidv4(),
+            callId: call.id,
+            workspaceId: call.workspaceId,
+            userId: newOwnerId,
+            invitedBy: call.createdByUserId,
+            invitedAt: now,
+            response: InvitationResponse.INVITED,
+            meetingStatus: MeetingStatus.ACCEPTED,
+            respondedAt: now,
+          })),
+        skipDuplicates: true,
+      }),
+      // After the create, so a row added since the read (which skipDuplicates passed over) is accepted too.
+      db.callParticipant.updateMany({
+        where: { callId: { in: callIds }, userId: newOwnerId },
+        data: { meetingStatus: MeetingStatus.ACCEPTED, respondedAt: now },
+      }),
+    ];
   }
 
   async delete(id: string): Promise<void> {
