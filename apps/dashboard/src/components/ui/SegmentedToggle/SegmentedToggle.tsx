@@ -1,12 +1,14 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { cn } from '../../../utils/classNames';
 
-export interface SegmentedToggleOption<T extends string> {
+export type SegmentedToggleOption<T extends string> = {
   value: T;
   icon?: React.ReactNode;
-  label?: string;
-  title?: string;
-}
+} & (
+  | { label: string; title?: string }
+  // Icon-only options have no visible text, so they must at least carry a title.
+  | { label?: undefined; title: string }
+);
 
 const TONE = {
   accent: { pill: 'bg-action-primary', label: 'text-action-primary-foreground' },
@@ -94,6 +96,8 @@ export function SegmentedToggle<T extends string>({
             }
             data-track-metadata={JSON.stringify({ value: option.value })}
             title={option.title}
+            aria-label={hasLabel ? undefined : option.title}
+            aria-pressed={isActive}
             className={cn(
               'relative z-10 flex h-full items-center justify-center gap-1.5 rounded-full whitespace-nowrap',
               hasLabel ? 'px-2.5 text-sm font-normal' : 'size-8',

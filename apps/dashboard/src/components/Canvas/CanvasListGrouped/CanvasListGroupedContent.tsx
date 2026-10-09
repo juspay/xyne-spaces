@@ -236,6 +236,7 @@ const FolderGroupSection: React.FC<FolderGroupSectionProps> = ({
             className='flex items-center gap-2 shrink-0'
             onClick={() => onToggleFolder(folderGroup.folder.id)}
             title={isCollapsed ? 'Expand folder' : 'Collapse folder'}
+            aria-label={isCollapsed ? 'Expand folder' : 'Collapse folder'}
             data-track-category='CANVAS'
             data-track-name='TOGGLE_CANVAS_FOLDER_ICON'
           >
@@ -283,6 +284,7 @@ const FolderGroupSection: React.FC<FolderGroupSectionProps> = ({
             onClick={() => void onCreateCanvasInFolder(folderGroup.folder)}
             disabled={isCreatingCanvas}
             title='Create canvas in folder'
+            aria-label={`Create canvas in ${folderGroup.folder.name}`}
             data-ph-capture-attribute-track-id='create_canvas_in_folder'
             data-track-category='CANVAS'
             data-track-name='CREATE_CANVAS_IN_FOLDER'
@@ -296,6 +298,7 @@ const FolderGroupSection: React.FC<FolderGroupSectionProps> = ({
                   className={HOVER_ACTION_CLASS}
                   onClick={event => event.stopPropagation()}
                   title='Folder actions'
+                  aria-label={`More actions for ${folderGroup.folder.name}`}
                   data-track-category='CANVAS'
                   data-track-name='CANVAS_FOLDER_ACTIONS_MENU'
                 >
@@ -537,6 +540,7 @@ const ChannelSection: React.FC<ChannelSectionProps> = ({
                 ? 'Archived channels cannot create canvases or folders'
                 : 'Create canvas in channel'
             }
+            aria-label={`Create canvas in ${channelGroup.channel.name}`}
             data-track-category='CANVAS'
             data-track-name='OPEN_CHANNEL_CANVAS_CREATE'
           >
@@ -750,6 +754,7 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({
                 className={HOVER_ACTION_CLASS}
                 onClick={event => event.stopPropagation()}
                 title='Create canvas or folder'
+                aria-label='Create canvas or folder'
                 disabled={isCreatingCanvas}
                 data-track-category='CANVAS'
                 data-track-name='OPEN_PROJECT_CANVAS_CREATE'
@@ -928,6 +933,7 @@ const SharedPersonalSection: React.FC<SharedPersonalSectionProps> = ({
             className='flex items-center gap-2 shrink-0'
             onClick={() => onToggleFolder(SHARED_PERSONAL_FOLDER_ID)}
             title={isCollapsed ? 'Expand folder' : 'Collapse folder'}
+            aria-label={isCollapsed ? 'Expand folder' : 'Collapse folder'}
             data-track-category='CANVAS'
             data-track-name='TOGGLE_SHARED_CANVAS_FOLDER_ICON'
           >
@@ -1178,6 +1184,7 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
                 className={HOVER_ACTION_CLASS}
                 onClick={event => event.stopPropagation()}
                 title='Create personal canvas or folder'
+                aria-label='Create personal canvas or folder'
                 disabled={isCreatingCanvas}
                 data-track-category='CANVAS'
                 data-track-name='OPEN_PERSONAL_CANVAS_CREATE'

@@ -146,6 +146,7 @@ const FilesystemBlockComponent = ({ jsonSource }: FilesystemBlockProps): ReactEl
               disabled={downloading}
               className='flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-muted-foreground hover:bg-accent transition-colors disabled:opacity-50'
               title='Download as D2 project (ZIP) — open in d2studio.ai'
+              aria-label='Download as D2 project (ZIP) — open in d2studio.ai'
               data-track-category='FilesystemBlock'
               data-track-name='DOWNLOAD_D2'
             >

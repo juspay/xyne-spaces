@@ -137,6 +137,7 @@ export const StagesSubmenu = ({
               const isSelected = selectedStages.includes(stage.name);
               return (
                 <button
+                  aria-pressed={isSelected}
                   key={stage.name}
                   type='button'
                   onClick={() => handleStageToggle(stage.name)}

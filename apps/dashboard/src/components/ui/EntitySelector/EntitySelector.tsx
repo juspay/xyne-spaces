@@ -299,6 +299,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
         </span>
         {showClearButton && selectedOption ? (
           <button
+            aria-label='Clear selection'
             onClick={handleClear}
             data-track-category={trackCategory}
             data-track-name={clearTrackName}
@@ -398,6 +399,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
         />
         {showClearButton && selectedOption ? (
           <button
+            aria-label='Clear selection'
             onClick={handleClear}
             data-track-category={trackCategory}
             data-track-name={clearTrackName}

@@ -2284,6 +2284,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                             <DropdownMenuTrigger asChild>
                               <button
                                 type='button'
+                                aria-label='Send options'
                                 disabled={disabled || sendDisabled || isSending}
                                 className={`p-1.5 flex items-center justify-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 ${
                                   hasSendableContent && !sendDisabled
@@ -2377,6 +2378,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                               <DropdownMenuTrigger asChild>
                                 <button
                                   type='button'
+                                  aria-label='Schedule for later'
                                   disabled={disabled || isSending || !hasSendableContent}
                                   className={`p-1.5 flex items-center justify-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 ${
                                     hasSendableContent

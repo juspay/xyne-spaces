@@ -5284,7 +5284,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                             })
                                           }
                                           className='text-muted-foreground hover:text-foreground transition-colors border border-input rounded-md p-1.5'
-                                          aria-label='View form'
+                                          aria-label={`View form for ${previousStage?.name || 'Unknown Stage'}`}
                                           data-track-category='Tickets'
                                           data-track-name='ViewStageForm'
                                           data-track-metadata={JSON.stringify({
@@ -5348,7 +5348,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                         })
                                       }
                                       className='text-muted-foreground hover:text-foreground transition-colors border border-input rounded-md p-1.5'
-                                      aria-label='View form'
+                                      aria-label={`View form for ${previousStage?.name || 'Unknown Stage'}`}
                                       data-track-category='Tickets'
                                       data-track-name='ViewApprovedStageForm'
                                       data-track-metadata={JSON.stringify({
@@ -5483,7 +5483,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                     });
                                   }}
                                   className='text-muted-foreground hover:text-foreground transition-colors border border-input rounded-md p-1.5'
-                                  aria-label='View form'
+                                  aria-label={`View form for ${previousStage?.name || 'Unknown Stage'}`}
                                   data-track-category='Tickets'
                                   data-track-name='ViewStageFormNoApprovers'
                                   data-track-metadata={JSON.stringify({

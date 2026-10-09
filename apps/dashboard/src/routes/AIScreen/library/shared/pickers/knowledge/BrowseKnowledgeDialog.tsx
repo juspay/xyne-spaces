@@ -204,6 +204,7 @@ function CollectionCard({
   return (
     <button
       type='button'
+      aria-current={selected ? 'true' : undefined}
       onClick={onOpen}
       data-track-category='Claw Agents'
       data-track-name='Create agent v2: open KB collection'

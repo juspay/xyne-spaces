@@ -416,6 +416,7 @@ export function AutoLabelWizard({
                   : usersById.get(label.createdBy)?.name?.trim() || undefined;
                 return (
                   <button
+                    aria-current={selected ? 'true' : undefined}
                     key={label.id}
                     type='button'
                     onClick={() =>

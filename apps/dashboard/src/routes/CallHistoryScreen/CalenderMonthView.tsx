@@ -459,6 +459,7 @@ const CalendarMonthView = ({
                                     </span>
                                   </div>
                                   <button
+                                    aria-label='Close'
                                     onClick={() => {
                                       setOpenOverflowDay(null);
                                       setOpenOverflowCallId(null);

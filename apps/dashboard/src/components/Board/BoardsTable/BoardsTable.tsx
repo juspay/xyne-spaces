@@ -78,6 +78,7 @@ const BoardActionsDropdown = ({
         variant='secondary'
         size='iconSm'
         title='Board actions'
+        aria-label='Board actions'
         data-testid='board-actions-button'
         data-track-category='Board'
         data-track-name='Board_Actions_Dropdown_Trigger'
@@ -336,6 +337,7 @@ export const BoardsTable = ({
                         data-track-category='Board'
                         data-track-name='COPY_BOARD_ID'
                         title='Copy board ID'
+                        aria-label='Copy board ID'
                       >
                         {copiedBoardId === mainBoard.id ? <Check size={12} /> : <Copy size={12} />}
                       </Button>
@@ -428,6 +430,7 @@ export const BoardsTable = ({
                         data-track-category='Board'
                         data-track-name='COPY_BOARD_ID'
                         title='Copy board ID'
+                        aria-label='Copy board ID'
                       >
                         {copiedBoardId === board.id ? <Check size={12} /> : <Copy size={12} />}
                       </Button>
@@ -497,6 +500,7 @@ export const BoardsTable = ({
                       data-track-category='Board'
                       data-track-name='COPY_BOARD_ID'
                       title='Copy board ID'
+                      aria-label='Copy board ID'
                     >
                       {copiedBoardId === board.id ? <Check size={12} /> : <Copy size={12} />}
                     </Button>

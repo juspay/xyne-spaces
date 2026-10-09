@@ -110,6 +110,7 @@ export const CandidateRow = ({
             <Tooltip side='top' content='Save edit'>
               <button
                 type='button'
+                aria-label='Save edit'
                 onClick={() => void handleSave()}
                 data-ph-capture-attribute-track-id='digital_twin_save_candidate_edit'
                 data-track-category='Claw Agents'
@@ -127,6 +128,7 @@ export const CandidateRow = ({
             <Tooltip side='top' content='Cancel'>
               <button
                 type='button'
+                aria-label='Cancel'
                 onClick={() => {
                   setText(committed);
                   setEditing(false);
@@ -148,6 +150,7 @@ export const CandidateRow = ({
             <Tooltip side='top' content='Edit'>
               <button
                 type='button'
+                aria-label='Edit'
                 onClick={() => setEditing(true)}
                 data-track-category='Claw Agents'
                 data-track-name='Digital Twin edit candidate'
@@ -163,6 +166,7 @@ export const CandidateRow = ({
             <Tooltip side='top' content={isDirty ? 'Save & approve' : 'Approve'}>
               <button
                 type='button'
+                aria-label={isDirty ? 'Save & approve' : 'Approve'}
                 onClick={() => void handleApprove()}
                 data-ph-capture-attribute-track-id='digital_twin_approve_candidate'
                 data-track-category='Claw Agents'
@@ -180,6 +184,7 @@ export const CandidateRow = ({
             <Tooltip side='top' content='Reject'>
               <button
                 type='button'
+                aria-label='Reject'
                 onClick={() => void handleReject()}
                 data-ph-capture-attribute-track-id='digital_twin_reject_candidate'
                 data-track-category='Claw Agents'

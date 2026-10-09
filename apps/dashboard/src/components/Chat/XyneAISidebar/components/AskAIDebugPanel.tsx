@@ -424,6 +424,7 @@ function JsonViewerModal({
             onClick={onClose}
             className='rounded p-1 text-xyne-fg-muted hover:bg-black/5 dark:hover:bg-white/10 hover:text-xyne-fg-primary'
             title='Close'
+            aria-label='Close'
           >
             <X size={15} />
           </button>
@@ -470,6 +471,7 @@ function JsonViewer({
             onClick={() => setExpanded(true)}
             className='rounded p-1 text-xyne-fg-muted hover:bg-black/5 dark:hover:bg-white/10 hover:text-xyne-fg-primary'
             title='Open expanded JSON viewer'
+            aria-label='Open expanded JSON viewer'
           >
             <Maximize2 size={12} />
           </button>
@@ -556,6 +558,7 @@ function ToolResultView({ value }: { value: unknown }) {
               onClick={() => setExpanded(true)}
               className='rounded p-1 text-xyne-fg-muted hover:bg-black/5 dark:hover:bg-white/10 hover:text-xyne-fg-primary'
               title='Open expanded viewer'
+              aria-label='Open expanded viewer'
             >
               <Maximize2 size={12} />
             </button>

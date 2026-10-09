@@ -119,6 +119,7 @@ export const ArrayObjectField: React.FC<ArrayObjectFieldProps> = ({
               data-track-name='REMOVE_ARRAY_ITEM'
               className='h-8 w-8 text-muted-foreground hover:text-destructive transition-colors shrink-0'
               title='Remove item'
+              aria-label='Remove item'
             >
               <Trash2 size={14} />
             </Button>

@@ -17,6 +17,7 @@ export const AutoAgentRow = ({
   labelClassName,
 }: AutoAgentRowProps): ReactElement => (
   <button
+    aria-current={selected ? 'true' : undefined}
     onClick={onSelect}
     className={cn(SELECTOR_ROW_CLASS, 'justify-between', selected && SELECTOR_ROW_SELECTED_CLASS)}
     data-track-category='XyneAI'

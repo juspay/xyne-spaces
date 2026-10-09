@@ -229,6 +229,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
             {callDisplayName ? `Start a call in ${callDisplayName}` : 'Start an Instant Call'}
           </h2>
           <Button
+            aria-label='Close participants dialog'
             variant='outline'
             size='icon'
             className='size-7 rounded-lg'
@@ -283,6 +284,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
                     </span>
                     <button
                       type='button'
+                      aria-label={`Remove ${getUserDisplayName(user)}`}
                       onClick={() => {
                         hasUserModifiedRef.current = true;
                         const valueToRemove = `user:${user.id}`;

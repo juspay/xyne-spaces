@@ -653,6 +653,7 @@ export default function CallDetailScreen(): ReactElement {
             <div className='mt-3.5 flex items-center gap-2.5 border-b border-border pb-3'>
               {canScrollLeft && (
                 <button
+                  aria-label='Scroll tabs left'
                   onClick={() => {
                     tabScrollRef.current?.scrollBy({ left: -120, behavior: 'smooth' });
                     updateScrollButtons();
@@ -700,6 +701,7 @@ export default function CallDetailScreen(): ReactElement {
               </div>
               {canScrollRight && (
                 <button
+                  aria-label='Scroll tabs right'
                   onClick={() => {
                     tabScrollRef.current?.scrollBy({ left: 120, behavior: 'smooth' });
                     updateScrollButtons();

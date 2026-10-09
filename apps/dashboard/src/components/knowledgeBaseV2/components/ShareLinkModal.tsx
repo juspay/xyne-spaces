@@ -47,6 +47,7 @@ export const ShareLinkModal = ({
         <div className='flex items-center justify-between mb-6'>
           <h2 className='text-lg font-semibold text-foreground truncate pr-4'>Share {title}</h2>
           <button
+            aria-label='Close share link dialog'
             onClick={onClose}
             className='p-1 hover:bg-muted rounded transition-colors flex-shrink-0'
             data-track-category='knowledge-base'

@@ -76,6 +76,7 @@ const SidebarItem = ({
 
   return (
     <button
+      aria-current={isActive ? 'true' : undefined}
       onClick={onClick}
       data-testid={dataTestId}
       className={cn(

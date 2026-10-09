@@ -107,6 +107,7 @@ export const ShortcutPickerModal: React.FC<ShortcutPickerModalProps> = ({
             </h2>
           </div>
           <Button
+            aria-label='Close shortcut picker'
             variant='ghost'
             size='sm'
             className='h-7 w-7 p-0'

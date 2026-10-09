@@ -1273,6 +1273,7 @@ export const ThreadMessages = ({
           {!isStandaloneWindow() && askAIAvailable && (
             <Tooltip content='Ask AI Conversation'>
               <Button
+                aria-label='Ask AI Conversation'
                 size='sm'
                 variant='ghost'
                 onClick={() => {
@@ -1354,6 +1355,7 @@ export const ThreadMessages = ({
                   actionIconClass,
                 )}
                 title='More'
+                aria-label='More'
                 data-testid='thread-more-options-button'
               >
                 <ThreeDotsMenuVertical size={16} />
@@ -1545,6 +1547,7 @@ export const ThreadMessages = ({
               {!isStandaloneWindow() && askAIAvailable && (
                 <Tooltip content='Ask AI Conversation'>
                   <Button
+                    aria-label='Ask AI Conversation'
                     size='sm'
                     variant='ghost'
                     onClick={() => {
@@ -1597,6 +1600,7 @@ export const ThreadMessages = ({
                       actionIconClass,
                     )}
                     title='More'
+                    aria-label='More'
                     data-testid='thread-more-options-button'
                   >
                     <ThreeDotsMenuVertical size={16} />

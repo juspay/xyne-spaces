@@ -869,13 +869,14 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
               >
                 <button
                   type='button'
+                  aria-label='Starred only'
+                  aria-pressed={showStarredOnly}
                   className={`flex size-7 shrink-0 items-center justify-center rounded-md transition-colors ${
                     showStarredOnly
                       ? 'bg-amber-50 text-amber-600'
                       : 'text-muted-foreground hover:bg-accent'
                   }`}
                   onClick={() => setShowStarredOnly(prev => !prev)}
-                  aria-label='Show starred canvases'
                   data-track-category='CANVAS'
                   data-track-name='TOGGLE_CHANNEL_STARRED_CANVAS_FILTER'
                 >

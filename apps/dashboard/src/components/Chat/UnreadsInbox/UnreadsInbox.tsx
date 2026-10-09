@@ -251,6 +251,7 @@ const UnreadsInbox = (): ReactElement => {
                     className={`border rounded-lg bg-card transition-colors shadow-sm relative ${isOpen ? 'isolate overflow-visible border-border/50' : 'overflow-hidden border-border/30 hover:bg-accent'}`}
                   >
                     <div
+                      aria-expanded={isOpen}
                       role='button'
                       tabIndex={0}
                       onClick={e => handleItemClick(e, channel.id)}

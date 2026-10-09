@@ -143,6 +143,7 @@ export const StatusSuggestionsView: React.FC<StatusViewProps> = ({ setView }) =>
     <div className='space-y-4 p-6'>
       <div className='flex gap-2 items-center'>
         <Button
+          aria-label='Back'
           variant='ghost'
           size='sm'
           onClick={() => setView('default')}
@@ -425,6 +426,7 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
       <div className='flex items-center justify-between'>
         <h2 className='text-lg font-semibold'>Set a status</h2>
         <Button
+          aria-label='Close'
           variant='ghost'
           size='sm'
           onClick={() => setView('default')}
@@ -493,6 +495,7 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
 
         {isEditingMode && (
           <button
+            aria-label='Clear status'
             onClick={handleClearStatus}
             className='flex-shrink-0 text-muted-foreground hover:text-muted-foreground'
             data-track-category='STATUS'

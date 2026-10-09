@@ -1915,6 +1915,8 @@ export const CanvasList: React.FC<CanvasListProps> = ({
             : 'text-sidebar-foreground',
         )}
         onClick={e => onSelect(e, canvas)}
+        aria-label={canvas.title || 'Untitled Canvas'}
+        aria-current={isSelected ? 'true' : undefined}
         data-track-category='CANVAS'
         data-track-name='Open_Canvas'
         data-track-metadata={JSON.stringify({
@@ -2047,7 +2049,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                 data-track-category='CANVAS'
                 data-track-name='Open_Canvas_Menu'
                 data-track-metadata={JSON.stringify({ canvasId: canvas.id })}
-                aria-label='Canvas actions'
+                aria-label={`More actions for ${canvas.title || 'Untitled Canvas'}`}
               >
                 <MoreVertical className='size-3.5' strokeWidth={2.5} />
               </button>

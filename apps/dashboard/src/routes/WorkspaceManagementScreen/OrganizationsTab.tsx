@@ -179,6 +179,7 @@ export const OrganizationsTab = (): ReactElement => {
                 </p>
               </div>
               <Button
+                aria-label='Close create organization dialog'
                 variant='ghost'
                 size='sm'
                 onClick={() => setShowCreateDialog(false)}
@@ -333,6 +334,7 @@ export const OrganizationsTab = (): ReactElement => {
                   </div>
 
                   <Button
+                    aria-label={`Remove ${org.name}`}
                     variant='ghost'
                     size='sm'
                     onClick={() => handleRemoveOrg(org.orgId, org.name)}

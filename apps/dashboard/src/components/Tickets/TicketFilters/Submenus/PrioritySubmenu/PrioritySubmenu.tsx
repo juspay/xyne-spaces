@@ -82,6 +82,7 @@ export const PrioritySubmenu = ({
 
               return (
                 <button
+                  aria-pressed={isSelected}
                   key={priority}
                   onClick={() => handleToggle(priority as TicketPriority)}
                   type='button'

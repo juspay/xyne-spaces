@@ -301,6 +301,7 @@ const DmListItemComponent = ({
 
   return (
     <div
+      aria-current={isSelected ? 'true' : undefined}
       key={`dm-${channel.id}`}
       onClick={handleClick}
       onKeyDown={handleKeyDown}

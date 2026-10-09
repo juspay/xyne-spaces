@@ -172,6 +172,7 @@ export const UserListView = ({
           </div>
           <div className='flex items-center gap-2'>
             <Button
+              aria-label='Previous page'
               variant='ghost'
               size='sm'
               onClick={handlePrevPage}
@@ -186,6 +187,7 @@ export const UserListView = ({
               Page {currentPage} of {totalPages}
             </span>
             <Button
+              aria-label='Next page'
               variant='ghost'
               size='sm'
               onClick={handleNextPage}

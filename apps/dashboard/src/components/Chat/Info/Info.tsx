@@ -323,6 +323,7 @@ const Info = ({
           </div>
         </div>
         <button
+          aria-label='Close channel info'
           onClick={onClose}
           className='w-7 h-7 flex items-center justify-center border border-border rounded-[8px] cursor-pointer'
           data-track-category='CHAT_INFO'

@@ -255,6 +255,7 @@ export const AppsTable = ({
                 data-track-category='Apps'
                 data-track-name='COPY_BOT_USER_ID'
                 title='Copy bot user ID'
+                aria-label='Copy bot user ID'
                 className='h-6 w-6 p-0'
               >
                 <Copy size={14} />
@@ -335,6 +336,9 @@ export const AppsTable = ({
               title={
                 canCopy ? 'Copy JWT to clipboard' : "You don't have permission to copy this token"
               }
+              aria-label={
+                canCopy ? 'Copy JWT to clipboard' : "You don't have permission to copy this token"
+              }
             >
               <Copy size={14} />
             </Button>
@@ -363,6 +367,11 @@ export const AppsTable = ({
               disabled={!canCopy}
               className='h-6 w-6 p-0'
               title={
+                canCopy
+                  ? 'Copy signing secret to clipboard'
+                  : 'Only admin or app creator can copy this secret'
+              }
+              aria-label={
                 canCopy
                   ? 'Copy signing secret to clipboard'
                   : 'Only admin or app creator can copy this secret'

@@ -116,6 +116,7 @@ export const AICategorySubmenu = ({
 
               return (
                 <button
+                  aria-pressed={isSelected}
                   key={category}
                   onClick={() => handleToggle(category)}
                   type='button'

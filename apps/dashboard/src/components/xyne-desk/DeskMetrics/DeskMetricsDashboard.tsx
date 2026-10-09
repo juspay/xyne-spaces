@@ -149,6 +149,7 @@ const TagsInCategorySubmenu = ({
               const isSelected = selectedTags.includes(tagKey);
               return (
                 <button
+                  aria-pressed={isSelected}
                   key={tagKey}
                   type='button'
                   onClick={() => toggle(tagKey)}
@@ -719,6 +720,7 @@ const MetricsAgentTable = ({
             <div className='flex items-center gap-1 text-xs text-muted-foreground'>
               <button
                 type='button'
+                aria-label='Previous page'
                 onClick={() => setPage(p => Math.max(0, p - 1))}
                 disabled={safePage === 0}
                 className='flex h-6 w-6 items-center justify-center rounded hover:bg-accent disabled:opacity-40'
@@ -732,6 +734,7 @@ const MetricsAgentTable = ({
               </span>
               <button
                 type='button'
+                aria-label='Next page'
                 onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
                 disabled={safePage === totalPages - 1}
                 className='flex h-6 w-6 items-center justify-center rounded hover:bg-accent disabled:opacity-40'
@@ -934,6 +937,7 @@ const MetricsTicketTable = ({
             <div className='flex items-center gap-1 text-xs text-muted-foreground'>
               <button
                 type='button'
+                aria-label='Previous page'
                 onClick={() => setPage(p => Math.max(0, p - 1))}
                 disabled={page === 0}
                 className='flex h-6 w-6 items-center justify-center rounded hover:bg-accent disabled:opacity-40'
@@ -947,6 +951,7 @@ const MetricsTicketTable = ({
               </span>
               <button
                 type='button'
+                aria-label='Next page'
                 onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
                 disabled={page === totalPages - 1}
                 className='flex h-6 w-6 items-center justify-center rounded hover:bg-accent disabled:opacity-40'
@@ -1249,6 +1254,7 @@ const FixedTrendCard = ({
         type='button'
         onClick={onExpand}
         title='Expand'
+        aria-label='Expand'
         data-track-category='DeskMetrics'
         data-track-name='ExpandChart'
         data-track-metadata={trackMetadata}
@@ -2754,6 +2760,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                     isFetching && 'cursor-not-allowed opacity-60',
                   )}
                   title='Refresh metrics'
+                  aria-label='Refresh metrics'
                   data-track-category='DeskMetrics'
                   data-track-name='Refresh'
                 >
@@ -3125,6 +3132,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                             type='button'
                             onClick={() => setExpandedChart(chartView)}
                             title='Expand'
+                            aria-label='Expand'
                             data-track-category='DeskMetrics'
                             data-track-name='ExpandChart'
                             data-track-metadata={metricsClickMetadata}
@@ -3363,6 +3371,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
               </h2>
               <button
                 type='button'
+                aria-label='Close expanded chart'
                 onClick={() => setExpandedChart(null)}
                 data-track-category='DeskMetrics'
                 data-track-name='CloseExpandedChart'

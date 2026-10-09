@@ -290,6 +290,7 @@ export const SurfaceNudgeList: React.FC<SurfaceNudgeListProps> = ({
             <div className='mt-2 flex items-center justify-center gap-3'>
               <button
                 type='button'
+                aria-label='Previous nudge'
                 disabled={activeIndex === 0}
                 onClick={() => setActiveIndex(prev => prev - 1)}
                 className={cn(
@@ -311,6 +312,7 @@ export const SurfaceNudgeList: React.FC<SurfaceNudgeListProps> = ({
 
               <button
                 type='button'
+                aria-label='Next nudge'
                 disabled={activeIndex === nudges.length - 1}
                 onClick={() => setActiveIndex(prev => prev + 1)}
                 className={cn(

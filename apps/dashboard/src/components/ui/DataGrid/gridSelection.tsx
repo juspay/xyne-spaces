@@ -108,6 +108,7 @@ export function createGridSelectionRenderers<T>(
       >
         {isSelected ? (
           <button
+            aria-label='Deselect row'
             className='flex items-center justify-center w-4 h-4 bg-blue-600 rounded cursor-pointer'
             onClick={e => {
               e.stopPropagation();

@@ -968,6 +968,7 @@ export const FilterRuleBuilder: React.FC<FilterRuleBuilderProps> = ({
         {renderValueEditor(condition, fieldConfig)}
 
         <Button
+          aria-label='Remove filter condition'
           variant='ghost'
           size='iconSm'
           onClick={() => removeCondition(condition.id)}

@@ -2389,6 +2389,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
             variant='ghost'
             size='icon'
             title='Attach a file'
+            aria-label='Attach a file'
             disabled={form.state.isSubmitting}
             className='size-6'
             data-testid='ticket-attachment-button'
@@ -2418,6 +2419,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
             </Button>
           )}{' '}
           <Button
+            aria-label='Close create ticket dialog'
             variant='ghost'
             size='icon'
             onClick={requestClose}

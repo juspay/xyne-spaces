@@ -491,6 +491,7 @@ const ActionTray: React.FC<{
               }}
               className='p-2 rounded-md text-foreground hover:bg-muted transition-colors'
               title='Copy Image'
+              aria-label='Copy Image'
               data-track-category='MESSAGE_ATTACHMENT'
               data-track-name='CopyImage'
             >
@@ -661,6 +662,7 @@ const InlineTextFile: React.FC<{
             data-ph-capture-attribute-track-id='download_text_file'
             className='p-2 hover:bg-accent rounded-lg transition-colors'
             title='Download file'
+            aria-label='Download file'
             data-track-category='MESSAGE'
             data-track-name='DOWNLOAD_TEXT_FILE'
             data-track-metadata={JSON.stringify({ fileName, attachmentId })}
@@ -700,6 +702,7 @@ const InlineTextFile: React.FC<{
           data-ph-capture-attribute-track-id='download_text_file_inline'
           className='p-2 hover:bg-accent rounded-lg transition-colors'
           title='Download file'
+          aria-label='Download file'
           data-track-category='MESSAGE'
           data-track-name='DOWNLOAD_TEXT_FILE_INLINE'
           data-track-metadata={JSON.stringify({ fileName, attachmentId })}
@@ -825,6 +828,7 @@ const InlineCodeFile: React.FC<{
           data-ph-capture-attribute-track-id='download_code_file'
           className='p-2 hover:bg-accent rounded-lg transition-colors'
           title='Download file'
+          aria-label='Download file'
           data-track-category='MESSAGE'
           data-track-name='DOWNLOAD_CODE_FILE'
           data-track-metadata={JSON.stringify({ fileName, attachmentId })}
@@ -1031,7 +1035,7 @@ const InlineVideoPlayer: React.FC<{
           type='button'
           className='p-1.5 rounded-md bg-background/90 backdrop-blur-sm text-foreground transition-colors opacity-0 group-hover:opacity-100 border border-border'
           title='More options'
-          aria-label='More options'
+          aria-label={`More options for ${fileName}`}
         >
           <MoreVertical className='h-4 w-4' />
         </button>

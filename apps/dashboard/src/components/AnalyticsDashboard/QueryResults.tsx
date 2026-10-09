@@ -460,6 +460,7 @@ const QueryResults: React.FC<QueryResultsProps> = ({
                             size='iconSm'
                             onClick={() => setExpandedQueryId(r.queryId)}
                             title='Expand view'
+                            aria-label='Expand view'
                             className='hover:bg-primary/10 hover:text-primary transition-colors'
                             data-track-category='ANALYTICS'
                             data-track-name='Expand_Query_Card'
@@ -479,6 +480,7 @@ const QueryResults: React.FC<QueryResultsProps> = ({
                             if (query) handleRefreshQuery(r.queryId, r.mappingId, query.queryJson);
                           }}
                           title='Refresh query'
+                          aria-label='Refresh query'
                           className='hover:bg-primary/10 hover:text-primary transition-colors'
                           data-track-category='ANALYTICS'
                           data-track-name='Refresh_Query'
@@ -501,6 +503,7 @@ const QueryResults: React.FC<QueryResultsProps> = ({
                                 });
                             }}
                             title='Edit query'
+                            aria-label='Edit query'
                             className='hover:bg-primary/10 hover:text-primary transition-colors'
                             data-track-category='ANALYTICS'
                             data-track-name='Edit_Query'
@@ -514,6 +517,7 @@ const QueryResults: React.FC<QueryResultsProps> = ({
                           size='iconSm'
                           onClick={() => void handleDelete(r.queryId)}
                           title='Delete query'
+                          aria-label='Delete query'
                           className='hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/30 dark:hover:text-red-400 transition-colors'
                           data-track-category='ANALYTICS'
                           data-track-name='Delete_Query'
@@ -590,6 +594,7 @@ const QueryResults: React.FC<QueryResultsProps> = ({
                 size='iconSm'
                 onClick={() => setExpandedQueryId(null)}
                 title='Close'
+                aria-label='Close'
                 className='hover:bg-muted transition-colors'
                 data-track-category='ANALYTICS'
                 data-track-name='Close_Expanded_Query'

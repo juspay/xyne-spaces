@@ -217,7 +217,7 @@ export function UpcomingCallRowV2({
                 onClick={e => e.stopPropagation()}
                 data-track-category='CALLS'
                 data-track-name='upcoming-call-more-options'
-                aria-label='More options'
+                aria-label={`More options for ${title}`}
               >
                 <ThreeDotsMenuHorizontal className='size-4' />
               </Button>

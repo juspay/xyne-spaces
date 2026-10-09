@@ -173,6 +173,7 @@ export const DateRangeFilter = ({
           data-track-metadata={JSON.stringify({ filterType: 'dateRange', startDate, endDate })}
           className='absolute -top-1 -right-1 bg-muted hover:bg-border rounded-full p-1 transition-colors'
           title={`Clear ${label.toLowerCase()} filter`}
+          aria-label={`Clear ${label.toLowerCase()} filter`}
         >
           <X className='w-3 h-3 text-muted-foreground' />
         </button>

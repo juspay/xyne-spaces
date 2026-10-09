@@ -356,6 +356,7 @@ const ConversationHeader = ({
         >
           <Tooltip content={channelUserStatus?.isStarred ? 'Unstar' : 'Star'}>
             <Button
+              aria-label={channelUserStatus?.isStarred ? 'Unstar' : 'Star'}
               variant='ghost'
               size='sm'
               onClick={e => {
@@ -455,6 +456,7 @@ const ConversationHeader = ({
               {!isCompact && channelUserStatus && (
                 <Tooltip content='Notifications'>
                   <Button
+                    aria-label='Notifications'
                     variant='ghost'
                     size='sm'
                     onClick={() => {
@@ -496,6 +498,7 @@ const ConversationHeader = ({
                   side='bottom'
                 >
                   <Button
+                    aria-label='Ask AI'
                     variant='ghost'
                     size='sm'
                     onClick={() => {

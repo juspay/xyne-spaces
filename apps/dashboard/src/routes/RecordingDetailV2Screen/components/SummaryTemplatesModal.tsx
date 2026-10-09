@@ -1426,6 +1426,7 @@ export function SummaryTemplatesModal({
                     const Icon = option.icon;
                     return (
                       <Button
+                        aria-current={selected ? 'true' : undefined}
                         key={option.value}
                         type='button'
                         variant='ghost'

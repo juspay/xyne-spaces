@@ -133,6 +133,7 @@ export const SourceChannelsSubmenu = ({
               const isSelected = selectedChannels.includes(channel.id);
               return (
                 <button
+                  aria-pressed={isSelected}
                   key={channel.id}
                   type='button'
                   onClick={() => handleChannelToggle(channel.id)}

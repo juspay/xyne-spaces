@@ -487,6 +487,7 @@ const OrgMembersSection = ({
                   </DropdownMenu>
 
                   <Button
+                    aria-label={`Remove ${member.email}`}
                     variant='ghost'
                     size='sm'
                     onClick={() => void handleRemove(member.memberId, member.email)}
@@ -816,6 +817,7 @@ export const OrganisationsScreen = (): ReactElement => {
 
                           return (
                             <button
+                              aria-pressed={isSelected}
                               key={option.value}
                               type='button'
                               disabled={isCreatingCommunityWorkspace}
@@ -980,6 +982,7 @@ export const OrganisationsScreen = (): ReactElement => {
                   </p>
                 </div>
                 <Button
+                  aria-label='Close create organisation dialog'
                   variant='ghost'
                   size='sm'
                   onClick={() => setShowCreateDialog(false)}

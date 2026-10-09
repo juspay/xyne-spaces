@@ -502,6 +502,7 @@ const FilterEditor = ({ column, kind }: FilterEditorProps): ReactElement => {
         const isOn = label === 'any' ? want === null : want === label;
         return (
           <button
+            aria-pressed={isOn}
             key={label}
             type='button'
             onClick={() => column.setFilterValue(label === 'any' ? undefined : label)}

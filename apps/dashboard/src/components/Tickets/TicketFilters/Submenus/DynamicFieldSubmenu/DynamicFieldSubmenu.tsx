@@ -246,6 +246,7 @@ export const DynamicFieldSubmenu = ({
                 const isSelected = selectedValues.includes(option);
                 return (
                   <button
+                    aria-pressed={isSelected}
                     key={option}
                     type='button'
                     onClick={() => handleToggle(option)}

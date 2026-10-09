@@ -5324,6 +5324,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               >
                 {showGroupHeader && (
                   <button
+                    aria-expanded={isExpanded}
                     onClick={() => toggleGroupExpansion(group.key)}
                     className={`flex items-center gap-3 px-4 py-3 bg-muted transition-colors w-full text-left ${isExpanded ? 'border-b border-border' : 'border-none'} `}
                     data-track-category='Tickets'
@@ -5468,6 +5469,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                   >
                     {showGroupHeader && (
                       <button
+                        aria-expanded={isExpanded}
                         onClick={() => toggleGroupExpansion(group.key)}
                         data-track-category='KANBAN'
                         data-track-name='ToggleGroupExpansion'

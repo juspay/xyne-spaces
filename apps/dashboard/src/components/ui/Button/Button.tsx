@@ -66,8 +66,24 @@ const buttonVariants = cva(
   },
 );
 
-interface ButtonProps extends React.ComponentProps<'button'>, VariantProps<typeof buttonVariants> {
-  asChild?: boolean;
+type ButtonSize = NonNullable<VariantProps<typeof buttonVariants>['size']>;
+type IconButtonSize = 'icon' | 'iconSm' | 'iconLg';
+
+/**
+ * Icon-sized buttons have no visible text, so they must say what they do. An
+ * `asChild` button is exempt: its child element carries the name.
+ */
+type AccessibleName =
+  | Required<Pick<React.AriaAttributes, 'aria-label'>>
+  | Required<Pick<React.AriaAttributes, 'aria-labelledby'>>
+  | { title: string };
+
+type ButtonSizing =
+  | { asChild: true; size?: ButtonSize | null }
+  | { asChild?: false; size?: Exclude<ButtonSize, IconButtonSize> | null }
+  | ({ asChild?: false; size: ButtonSize } & AccessibleName);
+
+interface ButtonExtraProps {
   loading?: boolean;
   /**
    * Stable id describing this button's PURPOSE (e.g. `send_message`,
@@ -93,6 +109,11 @@ interface ButtonProps extends React.ComponentProps<'button'>, VariantProps<typeo
   trackProps?: EventProperties;
 }
 
+type ButtonProps = React.ComponentProps<'button'> &
+  Omit<VariantProps<typeof buttonVariants>, 'size'> &
+  ButtonSizing &
+  ButtonExtraProps;
+
 function Button({
   className,
   variant,
@@ -114,6 +135,10 @@ function Button({
   // Callers pass `trackProps` as inline object literals, so a useMemo here would
   // miss every render anyway — just build the attributes directly.
   const captureAttributes = buildCaptureAttributes(trackId, trackProps);
+
+  // An icon button has no text, so its title doubles as its accessible name.
+  const isIconSize = size === 'icon' || size === 'iconSm' || size === 'iconLg';
+  const titleName = isIconSize && !props['aria-labelledby'] ? props.title : undefined;
 
   const handleClick = React.useCallback(
     (event: React.MouseEvent<HTMLButtonElement>): void => {
@@ -146,6 +171,7 @@ function Button({
       className={cn(buttonVariants({ variant, size, className }))}
       disabled={isDisabled}
       onClick={handleClick}
+      aria-label={titleName}
       {...captureAttributes}
       {...props}
     >

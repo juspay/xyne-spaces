@@ -79,6 +79,7 @@ export const BrowserSettingsMenu: React.FC<BrowserSettingsMenuProps> = ({ isOpen
         <button
           className='p-1.5 rounded-md hover:bg-border text-muted-foreground transition-colors'
           title='Browser Settings'
+          aria-label='Browser Settings'
         >
           <Settings size={16} />
         </button>

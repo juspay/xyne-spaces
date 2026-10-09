@@ -567,6 +567,7 @@ export function DeskSavedViewsControls({
 
                   return (
                     <div
+                      aria-current={isActive ? 'true' : undefined}
                       key={view.id}
                       role='button'
                       tabIndex={0}
@@ -610,6 +611,7 @@ export function DeskSavedViewsControls({
                           }}
                           className='ml-2 p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors shrink-0 opacity-0 group-hover:opacity-100'
                           title='Delete view'
+                          aria-label='Delete view'
                           data-track-category={trackCategory}
                           data-track-name='OpenDeleteDeskViewDialog'
                           tabIndex={-1}

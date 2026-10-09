@@ -52,6 +52,7 @@ const DirectorySectionHeader = ({
         renderAddButton()
       ) : onAdd ? (
         <button
+          aria-label={`Add to ${title}`}
           onClick={onAdd}
           className='text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent p-1 rounded transition-colors'
           data-track-category='CHAT_DIRECTORY'

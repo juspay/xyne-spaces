@@ -1066,6 +1066,7 @@ const AuthMethodOption = ({
 }): ReactElement => (
   <button
     type='button'
+    aria-current={selected ? 'true' : undefined}
     onClick={onSelect}
     data-track-category='claw-settings'
     data-track-name={`SelectAuthMethod-${label}`}

@@ -428,6 +428,7 @@ export const TicketListRow = ({
 
   return (
     <div
+      aria-current={isActive ? 'true' : undefined}
       onClick={handleRowClick}
       data-track-category='Tickets'
       data-track-name='ClickTicketListRow'

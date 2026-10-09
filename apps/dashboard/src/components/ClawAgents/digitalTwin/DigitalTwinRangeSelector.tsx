@@ -43,6 +43,7 @@ export const DigitalTwinRangeSelector = ({
             const isSelected = r.selection === 'preset' && r.presetIdx === i;
             return (
               <button
+                aria-pressed={isSelected}
                 key={preset.label}
                 type='button'
                 onClick={() => r.selectPreset(i)}

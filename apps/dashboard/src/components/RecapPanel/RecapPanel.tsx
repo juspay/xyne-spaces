@@ -755,6 +755,7 @@ const RecapPanel = (): ReactElement => {
                     onClick={handleBackToCurrent}
                     className='p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors'
                     title='Back to today'
+                    aria-label='Back to today'
                     data-track-category='RECAP_PANEL'
                     data-track-name='BACK_TO_TODAY'
                   >

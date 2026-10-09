@@ -339,6 +339,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
       {!lockedValues?.has(option.value) && (
         <button
           type='button'
+          aria-label={`Remove ${option.label}`}
           onClick={e => {
             e.stopPropagation();
             toggleValue(option.value);
@@ -414,6 +415,8 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
                   )}
                   <button
                     type='button'
+                    aria-label={isOpen ? 'Collapse members' : 'Expand members'}
+                    aria-expanded={isOpen}
                     data-track-category='CALLS'
                     data-track-name='toggle-channel-members-expand'
                     onClick={e => {
@@ -432,6 +435,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
               )}
             <button
               type='button'
+              aria-label={`Remove ${selectedGroupOrChannel.label}`}
               onClick={e => {
                 e.stopPropagation();
                 toggleValue(selectedGroupOrChannel.value);

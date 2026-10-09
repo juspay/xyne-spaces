@@ -179,6 +179,8 @@ const ChannelItemV2 = memo(
         to={`/chat/dir/${channel.id}`}
         onClick={handleChannelClick}
         aria-label={isDM ? displayName : undefined}
+        aria-description={isDM ? 'Direct message' : 'Channel'}
+        aria-current={isActive ? 'page' : undefined}
         data-track-category='CHAT_SIDEBAR'
         data-track-name='OPEN_CHANNEL'
         data-track-label='Open channel'
@@ -250,7 +252,7 @@ const ChannelItemV2 = memo(
                     e.stopPropagation();
                   }}
                   onPointerDown={e => e.stopPropagation()}
-                  aria-label='Channel section options'
+                  aria-label={`Sidebar options for ${displayName}`}
                   data-track-category='CHAT_SIDEBAR'
                   data-track-name='CHANNEL_SECTION_MENU'
                 >
@@ -322,6 +324,7 @@ const ChannelItemV2 = memo(
               type='button'
               className='group-hover:block hidden p-1 rounded-md -blue'
               onClick={handleCloseDm}
+              aria-label={`Close ${displayName}`}
               data-ph-capture-attribute-track-id='close_dm_channel'
               data-track-category='CHAT_SIDEBAR'
               data-track-name='CLOSE_DM_CHANNEL'

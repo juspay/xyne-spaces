@@ -75,6 +75,7 @@ export function CallNotesPanel({
           onClick={onClose}
           className='p-1 hover:bg-muted rounded-full transition-colors'
           title='Close'
+          aria-label='Close'
           data-track-category='CALLS'
           data-track-name='CLOSE_CALL_NOTES'
         >

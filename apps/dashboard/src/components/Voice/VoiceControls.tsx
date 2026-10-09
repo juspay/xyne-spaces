@@ -20,7 +20,7 @@ export function IconButton({
   label,
   className,
   ...props
-}: ComponentProps<typeof Button> & { label: string }): ReactElement {
+}: Omit<ComponentProps<'button'>, 'aria-label'> & { label: string }): ReactElement {
   return (
     <Tooltip content={label} side='top'>
       <Button

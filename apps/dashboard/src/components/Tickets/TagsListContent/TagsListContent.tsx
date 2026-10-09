@@ -197,6 +197,7 @@ export const TagsListContent = ({
               const isSelected = selectedTags.includes(tag);
               return (
                 <button
+                  aria-pressed={isSelected}
                   key={tag}
                   type='button'
                   onClick={() => handleTagToggle(tag)}

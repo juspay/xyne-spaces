@@ -280,6 +280,7 @@ const Settings = ({
                 trackId='clear_user_status'
                 className='flex-shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
                 title='Clear status'
+                aria-label='Clear status'
                 data-track-category='Settings'
                 data-track-name='ClearUserStatus'
               >
@@ -312,6 +313,7 @@ const Settings = ({
                 size='lg'
                 className='flex-shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
                 title='Resume notifications'
+                aria-label='Resume notifications'
                 onClick={handleResumeNotifications}
                 trackId='resume_notifications'
                 data-track-category='Settings'

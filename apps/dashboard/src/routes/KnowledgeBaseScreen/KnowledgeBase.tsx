@@ -195,6 +195,7 @@ const KnowledgeBaseScreen = (): ReactElement => {
                         disabled={deletingId === doc.id}
                         className='p-2 text-muted-foreground hover:text-red-500 hover:bg-red-50/10 rounded transition-colors disabled:opacity-50'
                         title='Delete document'
+                        aria-label='Delete document'
                         data-track-category='knowledge-base'
                         data-track-name='DeleteDocument'
                         data-track-metadata={JSON.stringify({ documentId: doc.id })}
@@ -218,6 +219,7 @@ const KnowledgeBaseScreen = (): ReactElement => {
                   </span>
                   <div className='flex items-center gap-2'>
                     <button
+                      aria-label='Previous page'
                       onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                       disabled={currentPage === 1}
                       className='p-1.5 rounded border bg-background hover:bg-muted/50 disabled:opacity-50 disabled:cursor-not-allowed'
@@ -228,6 +230,7 @@ const KnowledgeBaseScreen = (): ReactElement => {
                       <ChevronLeft size={16} />
                     </button>
                     <button
+                      aria-label='Next page'
                       onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                       disabled={currentPage === totalPages}
                       className='p-1.5 rounded border bg-background hover:bg-muted/50 disabled:opacity-50 disabled:cursor-not-allowed'

@@ -36,6 +36,7 @@ export function BriefListView({
               <li key={item.date}>
                 <button
                   type='button'
+                  aria-current={isActive ? 'true' : undefined}
                   onClick={() => onSelect(item.date, 'history_menu')}
                   data-track-category='DailyBrief'
                   data-track-name='daily-brief-history-item'

@@ -721,7 +721,7 @@ const AppSidebar = (): ReactElement => {
             trigger={
               <button
                 type='button'
-                aria-label='Support'
+                aria-label='Help and feedback'
                 aria-describedby={helpDescriptionId}
                 title='Support'
                 data-testid='nav-support'
@@ -759,6 +759,8 @@ const AppSidebar = (): ReactElement => {
                 <div
                   className='relative w-[32px] h-14 rounded-lg flex flex-col items-center justify-end transition-opacity hover:opacity-90 cursor-pointer [--avatar-ring:var(--sidebar-avatar-ring)]'
                   data-testid='profile-icon'
+                  role='button'
+                  aria-label='Profile and settings'
                 >
                   <div className='absolute inset-x-0 top-0 bottom-2 rounded-lg bg-sidebar-border' />
 
@@ -789,6 +791,8 @@ const AppSidebar = (): ReactElement => {
                 <div
                   className='relative w-[32px] flex flex-col items-center justify-end transition-opacity hover:opacity-90 cursor-pointer [--avatar-ring:var(--sidebar-avatar-ring)]'
                   data-testid='profile-icon'
+                  role='button'
+                  aria-label='Profile and settings'
                 >
                   {/* Avatar at Bottom - overlaps container slightly to match with-status state */}
                   <div className='relative flex'>

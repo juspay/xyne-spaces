@@ -378,6 +378,7 @@ const AddMembersDialog = ({
               const selected = pending.has(u.id);
               return (
                 <button
+                  aria-pressed={selected}
                   key={u.id}
                   type='button'
                   onClick={() => toggle(u.id)}

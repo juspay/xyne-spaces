@@ -86,6 +86,7 @@ function ViewRow({
 
   return (
     <div
+      aria-current={isActive ? 'true' : undefined}
       role='button'
       tabIndex={0}
       onClick={e => {

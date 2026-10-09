@@ -89,6 +89,7 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
             onClick={onClearSelection}
             className='p-1 text-foreground hover:text-muted-foreground transition-colors flex-shrink-0'
             title='Clear selection'
+            aria-label='Clear selection'
             data-track-category='Tickets'
             data-track-name='ClearTicketSelection'
           >

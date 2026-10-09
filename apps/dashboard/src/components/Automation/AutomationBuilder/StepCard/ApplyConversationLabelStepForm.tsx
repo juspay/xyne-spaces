@@ -152,6 +152,7 @@ export function ApplyConversationLabelStepForm({
                 (cfg.labelName ?? '').trim().toLowerCase() === label.name.toLowerCase();
               return (
                 <button
+                  aria-current={selected ? 'true' : undefined}
                   key={label.id}
                   type='button'
                   onClick={() =>

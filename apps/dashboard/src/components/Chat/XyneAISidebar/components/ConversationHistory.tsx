@@ -73,6 +73,7 @@ export const ConversationHistory = ({
         {isSearchExpanded ? (
           <>
             <button
+              aria-label='Close search'
               onClick={() => {
                 setIsSearchExpanded(false);
                 setSearchQuery('');
@@ -105,6 +106,7 @@ export const ConversationHistory = ({
             </div>
             {!isMobile && (
               <button
+                aria-label='Close chat history'
                 onClick={handleClose}
                 className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors'
                 data-track-category='XyneAI'
@@ -118,6 +120,7 @@ export const ConversationHistory = ({
           <>
             <div className='flex items-center gap-2'>
               <button
+                aria-label='Back to chat'
                 onClick={onBack}
                 className={
                   isMobile
@@ -140,6 +143,7 @@ export const ConversationHistory = ({
                 />
               )}
               <button
+                aria-label='Search chats'
                 onClick={() => setIsSearchExpanded(true)}
                 className={
                   isMobile
@@ -157,6 +161,7 @@ export const ConversationHistory = ({
               </button>
               {!isMobile && (
                 <button
+                  aria-label='Close chat history'
                   onClick={handleClose}
                   className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors'
                   data-track-category='XyneAI'
@@ -499,6 +504,7 @@ const ConversationItem = ({
           sideOffset={4}
           trigger={
             <button
+              aria-label={`More actions for ${conversation.title}`}
               onClick={e => e.stopPropagation()}
               className='opacity-0 group-hover:opacity-100 p-1 hover:bg-accent rounded'
               data-track-category='XyneAI'

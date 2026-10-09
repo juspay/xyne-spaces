@@ -1030,6 +1030,7 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
                 </p>
               </span>
               <Button
+                aria-label='Close schedule call dialog'
                 variant='outline'
                 size='icon'
                 tabIndex={-1}
@@ -1970,6 +1971,7 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
                     >
                       <button
                         type='button'
+                        aria-label='About call notifications'
                         className='text-muted-foreground hover:text-foreground transition-colors'
                       >
                         <Info className='size-3.5' strokeWidth={2} />

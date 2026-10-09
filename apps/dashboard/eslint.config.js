@@ -21,6 +21,7 @@ const localRules = {
     'no-rocicorp-use-zero': require('./eslint-rules/no-rocicorp-use-zero.cjs'),
     'no-date-now-or-uuid-in-mutators': require('./eslint-rules/no-date-now-or-uuid-in-mutators.cjs'),
     'require-tracking-on-click': require('./eslint-rules/require-tracking-on-click.cjs'),
+    'require-accessible-name-on-icon-control': require('./eslint-rules/require-accessible-name-on-icon-control.cjs'),
     'require-is-deleted-filter': require('../../packages/shared/eslint-rules/require-is-deleted-filter.cjs'),
     'require-initial-message-md-in-conversation-insert': require('./eslint-rules/require-initial-message-md-in-conversation-insert.cjs'),
     'no-direct-message-lookup-in-mutators': require('./eslint-rules/no-direct-message-lookup-in-mutators.cjs'),
@@ -92,6 +93,16 @@ export default tseslint.config(
       ...jsxA11yPlugin.configs.recommended.rules,
       // Autofocus is intentional for modals, comboboxes, and editors (see Canvas, chat input).
       "jsx-a11y/no-autofocus": "off",
+      // Screen readers and the in-app assistant find controls by role and name.
+      "jsx-a11y/control-has-associated-label": ["error", {
+        labelAttributes: ["aria-label", "aria-labelledby", "title"],
+        ignoreElements: ["audio", "canvas", "embed", "input", "textarea", "tr", "th", "td", "video", "select", "option"],
+        ignoreRoles: [
+          "grid", "listbox", "menu", "menubar", "radiogroup", "row", "tablist", "toolbar", "tree", "treegrid",
+          "separator", "option", "gridcell", "cell", "columnheader", "rowheader", "presentation", "none", "tabpanel",
+        ],
+        depth: 5,
+      }],
       "react/react-in-jsx-scope": "off",
       "react/prop-types": "off",
       "local-rules/no-fetch-use-axios": "error",
@@ -107,6 +118,11 @@ export default tseslint.config(
       "local-rules/require-tracking-on-click": ["error", {
         exemptComponents: [],
         exemptDataTestIds: [],
+      }],
+      // Icon-only controls, which the jsx-a11y rule above takes for labelled.
+      "local-rules/require-accessible-name-on-icon-control": ["warn", {
+        nameAttributes: ["aria-label", "aria-labelledby"],
+        componentNameProps: ["label", "title"],
       }],
     },
   },

@@ -444,6 +444,7 @@ export const PptSlideViewer: React.FC<PptSlideViewerProps> = props => {
           {total > 1 && (
             <div className='flex items-center justify-center gap-3 py-2 border-t border-border'>
               <button
+                aria-label='Previous slide'
                 onClick={prev}
                 disabled={idx === 0}
                 className='p-1 rounded hover:bg-accent disabled:opacity-30 transition-colors'
@@ -456,6 +457,7 @@ export const PptSlideViewer: React.FC<PptSlideViewerProps> = props => {
                 {idx + 1} / {total}
               </span>
               <button
+                aria-label='Next slide'
                 onClick={next}
                 disabled={idx === total - 1}
                 className='p-1 rounded hover:bg-accent disabled:opacity-30 transition-colors'
@@ -492,6 +494,7 @@ export const PptSlideViewer: React.FC<PptSlideViewerProps> = props => {
           >
             {/* Close */}
             <button
+              aria-label='Exit full screen'
               style={{
                 position: 'absolute',
                 top: 16,
@@ -557,6 +560,7 @@ export const PptSlideViewer: React.FC<PptSlideViewerProps> = props => {
               {/* Prev arrow — left edge overlay */}
               {total > 1 && (
                 <button
+                  aria-label='Previous slide'
                   onClick={prev}
                   disabled={idx === 0}
                   style={{
@@ -586,6 +590,7 @@ export const PptSlideViewer: React.FC<PptSlideViewerProps> = props => {
               {/* Next arrow — right edge overlay */}
               {total > 1 && (
                 <button
+                  aria-label='Next slide'
                   onClick={next}
                   disabled={idx === total - 1}
                   style={{

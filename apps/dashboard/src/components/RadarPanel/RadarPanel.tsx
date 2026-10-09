@@ -3485,6 +3485,7 @@ const RadarPanel = (): ReactElement => {
           <h1 className='text-xl font-bold text-foreground'>Radar</h1>
           <button
             title='Refresh the feed'
+            aria-label='Refresh the feed'
             className='p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors disabled:opacity-50'
             disabled={loading}
             data-track-category='RADAR'
@@ -3495,6 +3496,7 @@ const RadarPanel = (): ReactElement => {
           </button>
           <button
             title='Radar settings'
+            aria-label='Radar settings'
             aria-haspopup='dialog'
             className='p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors'
             data-track-category='RADAR'
@@ -3715,6 +3717,7 @@ const RadarPanel = (): ReactElement => {
               <Bug className='size-4 text-foreground' />
               <span className='text-sm font-bold text-foreground'>Thread debug</span>
               <button
+                aria-label='Close thread debug'
                 className='ml-auto p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent'
                 data-track-category='RADAR'
                 data-track-name='CLOSE_THREAD_DEBUG'

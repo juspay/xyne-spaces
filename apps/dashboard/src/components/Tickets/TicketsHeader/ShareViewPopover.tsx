@@ -402,6 +402,7 @@ export const ShareViewPopover = ({ viewId, viewName }: ShareViewPopoverProps): R
                           <button
                             type='button'
                             title='Remove access'
+                            aria-label='Remove access'
                             disabled={pendingId === candidateKey(row.entityType, row.entityId)}
                             onClick={() => void revoke(row)}
                             className='flex size-[22px] shrink-0 items-center justify-center rounded-md text-muted-foreground/50 hover:bg-foreground/10 hover:text-foreground'

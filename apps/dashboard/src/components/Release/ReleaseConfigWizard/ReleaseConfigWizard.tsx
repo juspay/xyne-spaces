@@ -88,6 +88,7 @@ const SelectionCard = ({
 }: SelectionCardProps): ReactElement => (
   <button
     type='button'
+    aria-current={isSelected ? 'step' : undefined}
     onClick={onClick}
     data-track-category='Release'
     data-track-name='WIZARD_STEP_CLICK'

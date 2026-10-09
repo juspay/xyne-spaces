@@ -498,6 +498,7 @@ const AvailabilitySection: FC<{ state: PreferencesState }> = ({ state }) => (
               size='lg'
               className='flex-shrink-0 p-1 h-auto hover:bg-accent'
               title='Resume assignment'
+              aria-label='Resume assignment'
               onClick={state.resumeAssignment}
               data-track-category='PREFERENCES'
               data-track-name='ResumeAssignment'
@@ -1028,6 +1029,7 @@ const PasswordSection: FC = () => {
             />
             <button
               type='button'
+              aria-label={showCurrent ? 'Hide current password' : 'Show current password'}
               onClick={() => setShowCurrent(!showCurrent)}
               className='absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground'
               data-track-category='PREFERENCES'
@@ -1049,6 +1051,7 @@ const PasswordSection: FC = () => {
             />
             <button
               type='button'
+              aria-label={showNew ? 'Hide new password' : 'Show new password'}
               onClick={() => setShowNew(!showNew)}
               className='absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground'
               data-track-category='PREFERENCES'
@@ -1070,6 +1073,7 @@ const PasswordSection: FC = () => {
             />
             <button
               type='button'
+              aria-label={showConfirm ? 'Hide password confirmation' : 'Show password confirmation'}
               onClick={() => setShowConfirm(!showConfirm)}
               className='absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground'
               data-track-category='PREFERENCES'
@@ -1298,6 +1302,7 @@ const ChannelSelect: FC<{
                 const isSelected = channel.id === selected.id;
                 return (
                   <button
+                    aria-current={isSelected ? 'true' : undefined}
                     key={channel.id}
                     type='button'
                     onClick={() => {
@@ -1479,6 +1484,7 @@ const Preferences = ({ open, onClose, initialSection }: PreferencesProps): React
                 onClick={onClose}
                 className='!p-2 border border-border rounded-md hover:bg-accent'
                 title='Close'
+                aria-label='Close'
                 data-track-category='PREFERENCES'
                 data-track-name='Close'
               >

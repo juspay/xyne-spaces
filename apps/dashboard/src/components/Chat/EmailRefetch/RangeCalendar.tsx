@@ -111,6 +111,7 @@ export const RangeCalendar: React.FC<RangeCalendarProps> = ({
           <div className='flex items-center gap-1'>
             <button
               type='button'
+              aria-label='Previous month'
               onClick={() => setDisplayDate(new Date(year, month - 1, 1))}
               className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted'
               data-track-category='Support'
@@ -120,6 +121,7 @@ export const RangeCalendar: React.FC<RangeCalendarProps> = ({
             </button>
             <button
               type='button'
+              aria-label='Next month'
               onClick={() => setDisplayDate(new Date(year, month + 1, 1))}
               className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted'
               data-track-category='Support'
@@ -179,6 +181,7 @@ export const RangeCalendar: React.FC<RangeCalendarProps> = ({
                 {bgLayer}
                 <button
                   type='button'
+                  aria-pressed={isSelected}
                   disabled={disabled}
                   onClick={() => onSelect(d)}
                   className={cn(
@@ -227,6 +230,7 @@ export const RangeCalendar: React.FC<RangeCalendarProps> = ({
         <div className='flex items-center gap-1'>
           <button
             type='button'
+            aria-label='Previous year'
             onClick={() => setDisplayDate(new Date(year - 1, month, 1))}
             className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted'
             data-track-category='Support'
@@ -236,6 +240,7 @@ export const RangeCalendar: React.FC<RangeCalendarProps> = ({
           </button>
           <button
             type='button'
+            aria-label='Next year'
             onClick={() => setDisplayDate(new Date(year + 1, month, 1))}
             className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted'
             data-track-category='Support'
@@ -285,6 +290,7 @@ export const RangeCalendar: React.FC<RangeCalendarProps> = ({
           <div className='flex items-center gap-1'>
             <button
               type='button'
+              aria-label='Previous 12 years'
               onClick={() =>
                 setDisplayDate(new Date(baseStart - 12 + (year - baseStart), month, 1))
               }
@@ -296,6 +302,7 @@ export const RangeCalendar: React.FC<RangeCalendarProps> = ({
             </button>
             <button
               type='button'
+              aria-label='Next 12 years'
               onClick={() =>
                 setDisplayDate(new Date(baseStart + 12 + (year - baseStart), month, 1))
               }

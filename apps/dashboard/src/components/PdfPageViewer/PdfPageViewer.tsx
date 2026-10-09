@@ -263,6 +263,7 @@ export const PdfPageViewer: React.FC<PdfPageViewerProps> = ({
                 Download
               </button>
               <button
+                aria-label='Exit full screen'
                 onClick={exitPresent}
                 style={{
                   display: 'flex',

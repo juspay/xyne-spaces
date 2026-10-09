@@ -140,6 +140,7 @@ export const CreateDashboardModal = ({ onClose }: CreateDashboardModalProps): Re
               const isActive = visibility === opt.value;
               return (
                 <button
+                  aria-pressed={isActive}
                   key={opt.value}
                   type='button'
                   onClick={() => setVisibility(opt.value)}

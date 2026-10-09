@@ -50,6 +50,7 @@ export const AliasManager = ({
             </p>
           </div>
           <button
+            aria-label='Close alias manager'
             onClick={onClose}
             data-track-category='XYNE_AI_SIDEBAR'
             data-track-name='CLOSE_ALIAS_MANAGER'
@@ -129,6 +130,7 @@ export const AliasManager = ({
                             data-track-name='EDIT_ACTIVITY_ALIAS'
                             className='p-1.5 text-muted-foreground hover:text-primary hover:bg-muted rounded transition-colors'
                             title='Edit alias'
+                            aria-label='Edit alias'
                             type='button'
                           >
                             <Edit2 className='w-4 h-4' />
@@ -162,6 +164,7 @@ export const AliasManager = ({
                               data-track-name='START_DELETE_ALIAS'
                               className='p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded transition-colors'
                               title='Delete alias'
+                              aria-label='Delete alias'
                               type='button'
                             >
                               <Trash2 className='w-4 h-4' />

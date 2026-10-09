@@ -283,6 +283,7 @@ const AttachmentSearchResultItem = ({
                 }}
                 className='p-1 text-muted-foreground hover:text-accent-foreground hover:bg-accent rounded transition-colors focus-visible:outline-none focus-visible:ring-0'
                 title='Preview file'
+                aria-label='Preview file'
                 data-track-category='GLOBAL_SEARCH'
                 data-track-name='PREVIEW_SEARCH_RESULT'
                 data-track-metadata={JSON.stringify({

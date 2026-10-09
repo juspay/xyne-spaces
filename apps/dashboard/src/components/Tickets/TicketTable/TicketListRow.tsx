@@ -97,6 +97,7 @@ export const TicketListRow: React.FC<TicketListRowProps> = ({
       >
         {isSelected ? (
           <button
+            aria-label={`Deselect ${ticket.title}`}
             // The app's checkbox colours (see ui/Checkbox): primary fill, primary-foreground tick.
             className='flex h-4 w-4 cursor-pointer items-center justify-center rounded border border-primary bg-primary'
             onClick={e => {

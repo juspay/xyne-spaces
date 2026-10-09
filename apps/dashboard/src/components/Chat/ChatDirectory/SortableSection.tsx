@@ -123,7 +123,7 @@ const SortableSection = ({
                 'flex items-center justify-center p-1 mr-0.5 rounded-md hover:bg-sidebar-accent shrink-0 text-sidebar-foreground hover:text-sidebar-accent-foreground transition-opacity ease-in-out duration-300',
                 menuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
               )}
-              aria-label='Section options'
+              aria-label={`${section.name} section options`}
               data-track-category='CHAT_SIDEBAR'
               data-track-name='SECTION_OPTIONS_MENU'
             >

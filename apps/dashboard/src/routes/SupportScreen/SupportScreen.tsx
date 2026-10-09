@@ -1457,6 +1457,7 @@ const SupportScreen = (): ReactElement => {
                   Math.abs(filters.lastEmailAtEnd - v.endDate.getTime()) < 1000;
                 return (
                   <button
+                    aria-current={isActive ? 'true' : undefined}
                     key={preset.label}
                     type='button'
                     data-track-category='Support'
@@ -1511,6 +1512,7 @@ const SupportScreen = (): ReactElement => {
                   Math.abs(filters.createdDateEnd - v.endDate.getTime()) < 1000;
                 return (
                   <button
+                    aria-current={isActive ? 'true' : undefined}
                     key={preset.label}
                     type='button'
                     data-track-category='Support'
@@ -3132,6 +3134,7 @@ const SupportScreen = (): ReactElement => {
     return (
       <div key={c.id}>
         <div
+          aria-current={isActive ? 'true' : undefined}
           role='button'
           tabIndex={0}
           className={cn(
@@ -3406,6 +3409,7 @@ const SupportScreen = (): ReactElement => {
                           onClick={() => setIsSidebarOpen(true)}
                           className='p-1.5 rounded hover:bg-muted text-muted-foreground transition-colors mr-1'
                           title='Open Channels'
+                          aria-label='Open Channels'
                           data-track-category='Support'
                           data-track-name='OpenChannelsSidebar'
                         >
@@ -3521,6 +3525,7 @@ const SupportScreen = (): ReactElement => {
                               <span>
                                 <Tooltip content={dlMemberSyncTooltip} side='bottom'>
                                   <button
+                                    aria-label={dlMemberSyncTooltip}
                                     disabled={isRefetching}
                                     className={cn(
                                       'p-1.5 rounded transition-colors text-muted-foreground hover:text-foreground hover:bg-muted',
@@ -3655,6 +3660,17 @@ const SupportScreen = (): ReactElement => {
                             side='bottom'
                           >
                             <button
+                              aria-label={
+                                isRefetching
+                                  ? 'Fetching latest…'
+                                  : isFacebookDesk
+                                    ? 'Fetch from Facebook'
+                                    : isSocialMediaDesk
+                                      ? 'Fetch reviews'
+                                      : isCallDesk
+                                        ? 'Fetch missed calls'
+                                        : 'Fetch latest emails'
+                              }
                               onClick={() => {
                                 // Single-source desks skip the picker but still
                                 // get a titled dialog (and exact-source fetch).
@@ -3685,6 +3701,7 @@ const SupportScreen = (): ReactElement => {
                       {isSelectedChannelJoined && selectedChannelId !== ALL_CHANNELS_ID && (
                         <Tooltip content='Ask AI' side='bottom'>
                           <button
+                            aria-label='Ask AI'
                             onClick={() => {
                               if (!selectedChannelId) return;
                               xyneAIActor.send({
@@ -3706,6 +3723,7 @@ const SupportScreen = (): ReactElement => {
                         <Tooltip content='Insights' side='bottom'>
                           <button
                             type='button'
+                            aria-label='Insights'
                             onClick={() => {
                               if (activeInsightsSection) closeInsights();
                               else showInsights(insightsSections[0] ?? null, false);
@@ -3743,6 +3761,7 @@ const SupportScreen = (): ReactElement => {
                               : 'text-muted-foreground hover:text-foreground hover:bg-accent',
                           )}
                           title='Inbox settings'
+                          aria-label='Inbox settings'
                           data-track-category='Support'
                           data-track-name='ToggleInboxSettings'
                         >
@@ -3785,6 +3804,7 @@ const SupportScreen = (): ReactElement => {
                             </div>
                             <div ref={columnsNarrowTwinRef} className='flex items-center'>
                               <Button
+                                aria-label='Columns'
                                 variant='outline'
                                 size='sm'
                                 className='rounded-[10px] border-border text-muted-foreground'
@@ -3832,6 +3852,7 @@ const SupportScreen = (): ReactElement => {
                       {selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID && (
                         <Tooltip content='Search emails' side='bottom'>
                           <button
+                            aria-label='Search emails'
                             onClick={() => invokeShortcut('mod+f')}
                             className='p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors'
                             data-track-category='Support'
@@ -4082,6 +4103,7 @@ const SupportScreen = (): ReactElement => {
                                       !!filters.conversationLabelId);
                                   const menuButton = (
                                     <button
+                                      aria-current={isActive ? 'true' : undefined}
                                       ref={el => {
                                         menuItemRefs.current[item.id] = el;
                                       }}
@@ -4320,6 +4342,7 @@ const SupportScreen = (): ReactElement => {
                                 : 'text-muted-foreground hover:text-foreground hover:bg-muted',
                             )}
                             title='Kanban View'
+                            aria-label='Kanban View'
                             data-track-category='Support'
                             data-track-name='SetKanbanView'
                             data-track-metadata={JSON.stringify({
@@ -4338,6 +4361,7 @@ const SupportScreen = (): ReactElement => {
                                 : 'text-muted-foreground hover:text-foreground hover:bg-muted',
                             )}
                             title='List View'
+                            aria-label='List View'
                             data-track-category='Support'
                             data-track-name='SetListView'
                             data-track-metadata={JSON.stringify({
@@ -4356,6 +4380,7 @@ const SupportScreen = (): ReactElement => {
                                 : 'text-muted-foreground hover:text-foreground hover:bg-muted',
                             )}
                             title='Table View'
+                            aria-label='Table View'
                             data-track-category='Support'
                             data-track-name='SetTableView'
                             data-track-metadata={JSON.stringify({
@@ -4374,6 +4399,7 @@ const SupportScreen = (): ReactElement => {
                                 : 'text-muted-foreground hover:text-foreground hover:bg-muted',
                             )}
                             title='Calendar View'
+                            aria-label='Calendar View'
                             data-track-category='Support'
                             data-track-name='SetCalendarView'
                             data-track-metadata={JSON.stringify({
@@ -4412,6 +4438,7 @@ const SupportScreen = (): ReactElement => {
                           )}
                         {ticketId && (
                           <Button
+                            aria-label='Close ticket panel'
                             size='sm'
                             variant='ghost'
                             onClick={() => {
@@ -5974,6 +6001,7 @@ export const SupportTicketDetail = ({
                       >
                         <button
                           type='button'
+                          aria-label='Previous ticket'
                           onClick={() => void navigateAdjacent('backward')}
                           className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
                           data-track-category='Support'
@@ -6000,6 +6028,7 @@ export const SupportTicketDetail = ({
                       >
                         <button
                           type='button'
+                          aria-label='Next ticket'
                           onClick={() => void navigateAdjacent('forward')}
                           className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
                           data-track-category='Support'
@@ -6068,6 +6097,7 @@ export const SupportTicketDetail = ({
                                 <span>Labels</span>
                                 <button
                                   type='button'
+                                  aria-label='Close label picker'
                                   onClick={() => setLabelPickerOpen(false)}
                                   className='text-muted-foreground hover:text-foreground transition-colors'
                                   data-track-category='Support'
@@ -6455,6 +6485,7 @@ export const SupportTicketDetail = ({
                             >
                               <button
                                 type='button'
+                                aria-label={emailSummaryState === 'error' ? 'Retry' : 'Regenerate summary'}
                                 onClick={() => void fetchEmailSummary(true)}
                                 className='p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
                                 data-track-category='Support'
@@ -6466,6 +6497,7 @@ export const SupportTicketDetail = ({
                           )}
                           <button
                             type='button'
+                            aria-label='Dismiss summary'
                             onClick={() => setShowEmailSummary(false)}
                             className='p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
                             data-track-category='Support'

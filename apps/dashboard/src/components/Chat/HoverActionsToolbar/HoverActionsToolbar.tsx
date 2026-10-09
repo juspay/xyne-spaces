@@ -305,6 +305,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             className='size-7 text-muted-foreground'
             onClick={e => onReplyInThread(e)}
             title='Reply in thread'
+            aria-label='Reply in thread'
             data-testid='hover-action-reply-in-thread'
             data-track-category='HOVER_ACTIONS_TOOLBAR'
             data-track-name='REPLY_IN_THREAD'
@@ -323,6 +324,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             className='size-7 text-muted-foreground'
             onClick={onCreateTicket}
             title='Create ticket'
+            aria-label='Create ticket'
             data-testid='hover-action-create-ticket'
             data-track-category='HOVER_ACTIONS_TOOLBAR'
             data-track-name='CREATE_TICKET_FROM_MESSAGE'
@@ -345,6 +347,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             className='size-7 text-muted-foreground'
             onClick={onCreateSubTicket}
             title='Create subticket'
+            aria-label='Create subticket'
             data-testid='hover-action-create-subticket'
             data-track-category='HOVER_ACTIONS_TOOLBAR'
             data-track-name='CREATE_SUBTICKET_FROM_MESSAGE'
@@ -364,6 +367,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             onClick={onInitiateCall}
             disabled={isCallDisabled}
             title={isCallDisabled ? 'Call in progress' : 'Start call'}
+            aria-label={isCallDisabled ? 'Call in progress' : 'Start call'}
             data-testid='hover-action-initiate-call'
             data-track-category='HOVER_ACTIONS_TOOLBAR'
             data-track-name='INITIATE_CALL'
@@ -383,6 +387,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             onClick={onStartRecording}
             disabled={isRecordingDisabled}
             title={isRecordingDisabled ? 'Recording in progress' : 'Take notes'}
+            aria-label={isRecordingDisabled ? 'Recording in progress' : 'Take notes'}
             data-testid='hover-action-start-recording'
             data-track-category='HOVER_ACTIONS_TOOLBAR'
             data-track-name='START_RECORDING_FROM_MESSAGE'
@@ -401,6 +406,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             className='size-7 text-muted-foreground'
             onClick={onAskAI}
             title='Ask AI'
+            aria-label='Ask AI'
             data-testid='hover-action-ask-ai'
             data-track-category='HOVER_ACTIONS_TOOLBAR'
             data-track-name='ASK_AI'
@@ -423,6 +429,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                   : 'size-7 text-muted-foreground'
               }
               title='More actions'
+              aria-label='More actions'
               data-testid='hover-action-more'
             >
               {compact ? (

@@ -73,6 +73,7 @@ export function MessageCard({
 
   return (
     <div
+      aria-current={selected ? 'true' : undefined}
       role='button'
       tabIndex={0}
       onClick={onClick}

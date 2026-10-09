@@ -348,6 +348,7 @@ export const DashboardShareModal = ({
                       onClick={() => handleRemoveParticipant(participant.userId)}
                       className='p-1 hover:bg-red-100 rounded text-red-600'
                       title='Remove participant'
+                      aria-label='Remove participant'
                       data-track-category='DYNAMIC_DASHBOARD'
                       data-track-name='Remove_Participant'
                     >

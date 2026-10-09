@@ -51,6 +51,7 @@ const SubagentCard = ({
   <div className='group relative min-w-0'>
     <button
       type='button'
+      aria-current={selected ? 'true' : undefined}
       onClick={onOpen}
       data-track-category='Claw Agents'
       data-track-name='Create agent v2: open subagent detail'

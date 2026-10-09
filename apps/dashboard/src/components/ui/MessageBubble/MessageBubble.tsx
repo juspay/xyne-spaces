@@ -262,6 +262,8 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
             </span>
             <button
               type='button'
+              aria-label={isExpanded ? 'Collapse attachment list' : 'Expand attachment list'}
+              aria-expanded={isExpanded}
               onClick={() => setIsExpanded(!isExpanded)}
               data-track-category='MESSAGE'
               data-track-name='TOGGLE_ATTACHMENT_LIST'

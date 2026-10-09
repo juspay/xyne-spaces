@@ -335,6 +335,7 @@ export const CallCard = ({
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
+                      aria-label={`More actions for ${call.title || 'call'}`}
                       variant='outline'
                       size='icon'
                       className='size-7 text-muted-foreground hover:text-foreground hover:bg-border rounded-lg'

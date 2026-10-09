@@ -206,6 +206,7 @@ export const VoiceSignatureModal: React.FC<VoiceSignatureModalProps> = ({
               </div>
             </div>
             <button
+              aria-label='Close voice signature dialog'
               onClick={handleClose}
               data-track-category='voice-signature'
               data-track-name='close-modal'
@@ -314,6 +315,7 @@ export const VoiceSignatureModal: React.FC<VoiceSignatureModalProps> = ({
                             <span className='absolute inline-flex h-14 w-14 rounded-full bg-destructive/20 animate-ping' />
                             <span className='absolute inline-flex h-10 w-10 rounded-full bg-destructive/30 animate-ping [animation-delay:150ms]' />
                             <button
+                              aria-label='Stop recording'
                               onClick={handleStopRecording}
                               data-track-category='voice-signature'
                               data-track-name='stop-recording'
@@ -351,6 +353,7 @@ export const VoiceSignatureModal: React.FC<VoiceSignatureModalProps> = ({
                       ) : (
                         <>
                           <button
+                            aria-label='Start recording'
                             onClick={() => void handleStartRecording()}
                             data-track-category='voice-signature'
                             data-track-name='start-recording'

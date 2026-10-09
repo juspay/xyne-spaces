@@ -373,6 +373,7 @@ const ImageWithDownload = ({
         onClick={handleDownload}
         className='absolute top-2 right-2 p-1.5 rounded-md bg-background/90 backdrop-blur-sm border border-border shadow-sm opacity-0 group-hover:opacity-100 transition-all duration-200 hover:bg-background z-10'
         title='Download image'
+        aria-label='Download image'
         data-track-category='XyneAI'
         data-track-name='download-image'
       >
@@ -840,6 +841,7 @@ const AttachmentImagePreview = ({
         disabled={isDownloading}
         className='absolute top-2 right-2 p-1.5 rounded-md bg-background/90 backdrop-blur-sm border border-border shadow-sm opacity-0 group-hover/image:opacity-100 transition-all duration-200 hover:bg-background disabled:opacity-50'
         title='Download image'
+        aria-label='Download image'
         data-track-category='XyneAI'
         data-track-name='download-image'
       >
@@ -1117,6 +1119,7 @@ const BranchNavigator = ({
   <div className='flex items-center gap-0.5 text-xs text-muted-foreground'>
     <button
       type='button'
+      aria-label='Previous version'
       onClick={() => onNavigate('prev')}
       className='p-0.5 hover:bg-muted rounded transition-colors'
       data-track-category='XyneAI'
@@ -1129,6 +1132,7 @@ const BranchNavigator = ({
     </span>
     <button
       type='button'
+      aria-label='Next version'
       onClick={() => onNavigate('next')}
       className='p-0.5 hover:bg-muted rounded transition-colors'
       data-track-category='XyneAI'
@@ -1707,6 +1711,7 @@ export const MessageItem = React.memo(
                   onClick={handleCopy}
                   className='p-1.5 rounded transition-colors hover:bg-accent'
                   title={copied ? 'Copied!' : 'Copy'}
+                  aria-label={copied ? 'Copied!' : 'Copy'}
                   data-track-category='XyneAI'
                   data-track-name='COPY_USER_MESSAGE'
                   data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
@@ -1729,6 +1734,7 @@ export const MessageItem = React.memo(
                   }}
                   className='p-1.5 rounded transition-colors hover:bg-accent'
                   title='Edit message'
+                  aria-label='Edit message'
                   data-track-category='XyneAI'
                   data-track-name='EDIT_MESSAGE'
                 >
@@ -2802,6 +2808,7 @@ const MessageActions = ({
           data-ph-capture-attribute-track-id='regenerate_message'
           className='p-1.5 rounded transition-colors hover:bg-accent'
           title='Regenerate response'
+          aria-label='Regenerate response'
           data-track-category='XyneAI'
           data-track-name='REGENERATE_MESSAGE'
           data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
@@ -2828,6 +2835,7 @@ const MessageActions = ({
             data-ph-capture-attribute-track-id='like_message'
             className='p-1.5 rounded transition-colors hover:bg-accent'
             title='Like'
+            aria-label='Like'
             data-track-category='XyneAI'
             data-track-name='LIKE_MESSAGE'
             data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
@@ -2871,6 +2879,7 @@ const MessageActions = ({
             data-ph-capture-attribute-track-id='dislike_message'
             className='p-1.5 rounded transition-colors hover:bg-accent'
             title='Dislike'
+            aria-label='Dislike'
             data-track-category='XyneAI'
             data-track-name='DISLIKE_MESSAGE'
             data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
@@ -2933,6 +2942,7 @@ const MessageActions = ({
     ) && (
       <Tooltip content='Powered By searXNG' side='left'>
         <a
+          aria-label='Powered By searXNG'
           href='https://github.com/searxng/searxng'
           target='_blank'
           rel='noopener noreferrer'

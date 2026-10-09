@@ -1485,6 +1485,7 @@ const BoardEditScreen = ({
         <header className='flex items-center justify-between px-[18px] py-4'>
           <div className='flex items-center gap-2'>
             <Button
+              aria-label='Go back'
               onClick={() => (onBack ? onBack() : onClose())}
               variant='ghost'
               size='iconSm'
@@ -1781,6 +1782,7 @@ const BoardEditScreen = ({
                                     >
                                       <Button
                                         type='button'
+                                        aria-label={copiedFieldId === field.id ? 'Field ID copied' : 'Copy field ID'}
                                         variant='ghost'
                                         size='iconSm'
                                         className='h-6 w-6 p-0 text-muted-foreground hover:text-foreground'
@@ -1798,6 +1800,7 @@ const BoardEditScreen = ({
                                   ) : (
                                     <Button
                                       type='button'
+                                      aria-label='Copy field ID'
                                       variant='ghost'
                                       size='iconSm'
                                       className='h-6 w-6 p-0 text-muted-foreground'
@@ -1822,6 +1825,8 @@ const BoardEditScreen = ({
                                       Required
                                     </span>
                                     <button
+                                      aria-label={`Required for ${field.label}`}
+                                      aria-pressed={field.required}
                                       onClick={e => {
                                         e.stopPropagation();
                                         setFields(prev =>
@@ -1867,6 +1872,8 @@ const BoardEditScreen = ({
                                       Show in Create
                                     </span>
                                     <button
+                                      aria-label={`Show ${field.label} in Create`}
+                                      aria-pressed={field.visibleInCreate}
                                       onClick={e => {
                                         e.stopPropagation();
                                         setFields(prev =>
@@ -1910,6 +1917,8 @@ const BoardEditScreen = ({
                                       Show in Create
                                     </span>
                                     <button
+                                      aria-label={`Show ${field.label} in Create`}
+                                      aria-pressed={field.visibleInCreate}
                                       onClick={e => {
                                         e.stopPropagation();
                                         setFields(prev =>
@@ -1947,6 +1956,7 @@ const BoardEditScreen = ({
                                   <>
                                     <div className='w-[1px] h-[20px] bg-muted mx-1' />
                                     <Button
+                                      aria-label={`Delete ${field.label}`}
                                       onClick={e => {
                                         e.stopPropagation();
                                         void confirm({

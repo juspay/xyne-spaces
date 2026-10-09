@@ -503,6 +503,7 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
             type='button'
             className='p-1 rounded text-muted-foreground hover:bg-accent hover:text-foreground transition-colors'
             title='Text Color'
+            aria-label='Text Color'
             data-track-category='email-editor'
             data-track-name='open-text-color-picker'
           >
@@ -541,6 +542,7 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
             type='button'
             className='p-1 rounded text-muted-foreground hover:bg-accent hover:text-foreground transition-colors'
             title='Highlight Color'
+            aria-label='Highlight Color'
             data-track-category='email-editor'
             data-track-name='open-highlight-color-picker'
           >
@@ -700,6 +702,7 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
               {hasSelection ? 'Edit link' : 'Insert link'}
             </h2>
             <button
+              aria-label='Close link dialog'
               onClick={() => setLinkDialogOpen(false)}
               className='p-1 hover:bg-accent rounded text-muted-foreground hover:text-muted-foreground'
               data-track-category='email-editor'

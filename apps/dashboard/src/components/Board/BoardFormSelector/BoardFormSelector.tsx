@@ -169,6 +169,8 @@ export const BoardFormSelector = ({
 
                   {/* Accordion Toggle - Independent of checkbox */}
                   <div
+                    aria-label={isExpanded ? `Collapse ${form.formName}` : `Expand ${form.formName}`}
+                    aria-expanded={isExpanded}
                     className={`flex-shrink-0 ml-2 transition-transform cursor-pointer ${
                       isExpanded ? 'rotate-90' : ''
                     }`}

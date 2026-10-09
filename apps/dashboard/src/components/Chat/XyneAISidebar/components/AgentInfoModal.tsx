@@ -85,6 +85,7 @@ export const AgentInfoModal = ({
             <h2 className='text-lg font-semibold text-foreground'>{agent.name}</h2>
           </div>
           <button
+            aria-label='Close agent info'
             onClick={onClose}
             className='p-2 rounded-lg hover:bg-accent transition-colors'
             data-track-category='XyneAI'

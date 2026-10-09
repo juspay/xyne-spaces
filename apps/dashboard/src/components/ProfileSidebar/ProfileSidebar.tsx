@@ -89,6 +89,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({ className }) => 
             onClick={handleClose}
             className='!p-2 border border-border rounded-md hover:bg-accent'
             title='Close'
+            aria-label='Close'
             data-track-category='PROFILE'
             data-track-name='CloseDeactivatedPreview'
             data-track-metadata={JSON.stringify({ userId })}
@@ -159,6 +160,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({ className }) => 
             onClick={handleClose}
             className='!p-2 border border-border rounded-md hover:bg-accent'
             title='Close'
+            aria-label='Close'
             data-track-category='PROFILE'
             data-track-name='CloseProfileSidebar'
             data-track-metadata={JSON.stringify({ channelId, userId })}

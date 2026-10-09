@@ -302,6 +302,7 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
 
   return (
     <div
+      aria-current={isSelected ? 'true' : undefined}
       role='button'
       tabIndex={0}
       onClick={handleCardClick}

@@ -135,6 +135,7 @@ export const MerchantIdSubmenu = ({
               const isSelected = selectedSet.has(merchantId);
               return (
                 <button
+                  aria-pressed={isSelected}
                   key={merchantId}
                   type='button'
                   onClick={() => handleToggle(merchantId)}

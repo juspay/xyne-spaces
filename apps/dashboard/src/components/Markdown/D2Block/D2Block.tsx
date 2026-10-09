@@ -112,6 +112,7 @@ const D2BlockComponent = ({ source }: D2BlockProps): ReactElement => {
             onClick={() => setViewMode('diagram')}
             className={iconBtn(viewMode === 'diagram')}
             title='Diagram'
+            aria-label='Diagram'
             data-track-category='D2'
             data-track-name='VIEW_DIAGRAM'
           >
@@ -121,6 +122,7 @@ const D2BlockComponent = ({ source }: D2BlockProps): ReactElement => {
             onClick={() => setViewMode('code')}
             className={iconBtn(viewMode === 'code')}
             title='Code'
+            aria-label='Code'
             data-track-category='D2'
             data-track-name='VIEW_CODE'
           >
@@ -134,6 +136,7 @@ const D2BlockComponent = ({ source }: D2BlockProps): ReactElement => {
               onClick={handleDownloadImage}
               className='flex items-center justify-center rounded-md p-1 text-muted-foreground transition-colors hover:text-foreground'
               title='Download as PNG'
+              aria-label='Download as PNG'
               data-track-category='D2'
               data-track-name='DOWNLOAD_PNG'
             >
@@ -144,6 +147,7 @@ const D2BlockComponent = ({ source }: D2BlockProps): ReactElement => {
               onClick={() => void handleCopyCode()}
               className='flex items-center justify-center rounded-md p-1 text-muted-foreground transition-colors hover:text-foreground'
               title='Copy code'
+              aria-label='Copy code'
               data-track-category='D2'
               data-track-name='COPY_CODE'
             >

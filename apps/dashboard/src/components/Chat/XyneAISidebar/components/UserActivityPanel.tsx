@@ -240,6 +240,7 @@ export const UserActivityPanel = ({
       <div className='h-14 p-4 flex items-center justify-between gap-2 self-stretch border-b border-border flex-shrink-0'>
         <div className='flex items-center gap-2'>
           <button
+            aria-label='Close activity panel'
             onClick={handleClose}
             data-track-category='XYNE_AI_SIDEBAR'
             data-track-name='CLOSE_ACTIVITY_PANEL'
@@ -263,6 +264,7 @@ export const UserActivityPanel = ({
               data-track-name='OPEN_ALIAS_MANAGER'
               className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-border flex justify-center items-center gap-2 overflow-hidden hover:bg-accent transition-colors'
               title='Manage activity aliases'
+              aria-label='Manage activity aliases'
               type='button'
             >
               <Settings className='w-4 h-4 text-muted-foreground' />
@@ -270,6 +272,7 @@ export const UserActivityPanel = ({
           )}
           {!isMobile && (
             <button
+              aria-label='Close Xyne AI'
               onClick={handleXyneAIClose}
               data-track-category='XYNE_AI_SIDEBAR'
               data-track-name='CLOSE_XYNE_AI'

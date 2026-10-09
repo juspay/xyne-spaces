@@ -41,6 +41,7 @@ export const TablePagination: React.FC<TablePaginationProps> = ({
 
       <div className='flex items-center gap-2'>
         <button
+          aria-label='Previous page'
           onClick={() => onPageChange(currentPage - 1)}
           data-track-category='TABLE'
           data-track-name='PREV_PAGE'
@@ -53,6 +54,7 @@ export const TablePagination: React.FC<TablePaginationProps> = ({
           {currentPage} / {totalPages}
         </span>
         <button
+          aria-label='Next page'
           onClick={() => onPageChange(currentPage + 1)}
           data-track-category='TABLE'
           data-track-name='NEXT_PAGE'

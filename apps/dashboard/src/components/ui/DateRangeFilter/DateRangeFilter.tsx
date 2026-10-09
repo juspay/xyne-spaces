@@ -186,6 +186,7 @@ export const CalendarView: React.FC<{
       <div className='flex items-center justify-between mb-2'>
         <button
           type='button'
+          aria-label='Previous month'
           onClick={prevMonth}
           data-track-category='DATE_RANGE_FILTER'
           data-track-name='PREV_MONTH'
@@ -196,6 +197,7 @@ export const CalendarView: React.FC<{
         <span className='text-sm font-medium text-foreground'>{monthLabel}</span>
         <button
           type='button'
+          aria-label='Next month'
           onClick={nextMonth}
           data-track-category='DATE_RANGE_FILTER'
           data-track-name='NEXT_MONTH'
@@ -392,6 +394,7 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
             {dateRange && (
               <button
                 type='button'
+                aria-label='Clear date range'
                 data-id='date-range-clear'
                 onClick={handleClear}
                 data-track-category='DATE_RANGE_FILTER'

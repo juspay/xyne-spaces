@@ -147,6 +147,13 @@ const ContainerDropZone = ({
   );
 };
 
+/** What each sidebar group is called, so its options button says which group it is for. */
+const GROUP_NAMES: Record<SidebarGroup, string> = {
+  starred: 'Starred',
+  channels: 'Channels',
+  dms: 'Direct messages',
+};
+
 const GroupSettingsMenu = ({
   group,
   trackName,
@@ -191,7 +198,7 @@ const GroupSettingsMenu = ({
             e.preventDefault();
             e.stopPropagation();
           }}
-          aria-label='Section options'
+          aria-label={`${GROUP_NAMES[group]} section options`}
           data-track-category='CHAT_SIDEBAR'
           data-track-name={trackName}
         >
@@ -1312,6 +1319,7 @@ const ChatDirectory = ({
                             e.stopPropagation();
                             void navigate('/chat/search?mode=channels');
                           }}
+                          aria-label='Browse channels'
                           data-track-category='CHAT_SIDEBAR'
                           data-track-name='BROWSE_CHANNELS'
                         >
@@ -1335,6 +1343,7 @@ const ChatDirectory = ({
                             e.stopPropagation();
                             setShowAddChannelForm(true);
                           }}
+                          aria-label='Create channel'
                           data-testid='create-new-channel'
                           data-track-event='BUTTON_CLICK'
                           data-track-category='CHAT_SIDEBAR'
@@ -1439,6 +1448,7 @@ const ChatDirectory = ({
                           e.stopPropagation();
                           handleAddDirectMessage();
                         }}
+                        aria-label='Add direct message'
                         data-testid='create-new-dm'
                         data-track-event='BUTTON_CLICK'
                         data-track-category='CHAT_SIDEBAR'

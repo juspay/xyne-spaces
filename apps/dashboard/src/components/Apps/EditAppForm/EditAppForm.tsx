@@ -94,6 +94,7 @@ const CommandRow = ({
           data-track-category='app-command'
           data-track-name='EDIT_COMMAND'
           title='Edit command'
+          aria-label='Edit command'
         >
           <Pencil size={13} />
         </Button>
@@ -106,6 +107,7 @@ const CommandRow = ({
           data-track-category='app-command'
           data-track-name='DELETE_COMMAND'
           title='Delete command'
+          aria-label='Delete command'
         >
           <Trash2 size={13} />
         </Button>
@@ -326,6 +328,7 @@ const ShortcutRow = ({
           data-track-category='app-shortcut'
           data-track-name='EDIT_SHORTCUT'
           title='Edit shortcut'
+          aria-label='Edit shortcut'
         >
           <Pencil size={13} />
         </Button>
@@ -338,6 +341,7 @@ const ShortcutRow = ({
           data-track-category='app-shortcut'
           data-track-name='DELETE_SHORTCUT'
           title='Delete shortcut'
+          aria-label='Delete shortcut'
         >
           <Trash2 size={13} />
         </Button>
@@ -1726,6 +1730,7 @@ export const EditAppForm = ({
                       </div>
                       <Button
                         type='button'
+                        aria-label='Confirm webhook name'
                         variant='ghost'
                         size='sm'
                         onClick={() => void handleRenameWebhook(webhook.id)}
@@ -1738,6 +1743,7 @@ export const EditAppForm = ({
                       </Button>
                       <Button
                         type='button'
+                        aria-label='Cancel renaming webhook'
                         variant='ghost'
                         size='sm'
                         onClick={() => {
@@ -1788,6 +1794,7 @@ export const EditAppForm = ({
                           }}
                           className='h-7 w-7 p-0 text-muted-foreground hover:text-foreground'
                           title='Rename'
+                          aria-label='Rename'
                           data-track-category='INCOMING_WEBHOOKS'
                           data-track-name='Edit_Webhook_Name'
                         >
@@ -1800,6 +1807,7 @@ export const EditAppForm = ({
                           onClick={() => setRevokeTargetId(webhook.id)}
                           className='h-7 w-7 p-0 text-muted-foreground hover:text-destructive'
                           title='Revoke webhook'
+                          aria-label='Revoke webhook'
                           data-track-category='INCOMING_WEBHOOKS'
                           data-track-name='Revoke_Webhook'
                         >
@@ -1817,6 +1825,7 @@ export const EditAppForm = ({
                     />
                     <Button
                       type='button'
+                      aria-label='Copy webhook URL'
                       variant='outline'
                       size='sm'
                       onClick={() => handleCopyWebhookUrl(webhook.webhookUrl)}
@@ -1839,6 +1848,7 @@ export const EditAppForm = ({
                   <div className='flex gap-1'>
                     <Button
                       type='button'
+                      aria-label='Previous page'
                       variant='outline'
                       size='sm'
                       disabled={!hasPrev}
@@ -1851,6 +1861,7 @@ export const EditAppForm = ({
                     </Button>
                     <Button
                       type='button'
+                      aria-label='Next page'
                       variant='outline'
                       size='sm'
                       disabled={!hasNext}

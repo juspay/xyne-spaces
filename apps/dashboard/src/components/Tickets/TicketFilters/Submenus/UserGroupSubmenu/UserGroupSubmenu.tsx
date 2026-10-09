@@ -141,6 +141,7 @@ export const UserGroupSubmenu = ({
               const isSelected = selectedGroups.includes(group.id);
               return (
                 <button
+                  aria-pressed={isSelected}
                   key={group.id}
                   type='button'
                   onClick={() => handleGroupToggle(group.id)}

@@ -609,6 +609,7 @@ export function BrowserTabsScreen({
                   onClick={handleOpenExternal}
                   className='p-1.5 rounded-md hover:bg-border text-muted-foreground'
                   title='Open in system browser'
+                  aria-label='Open in system browser'
                   data-track-category='BROWSER'
                   data-track-name='OpenInSystemBrowser'
                   data-track-metadata={JSON.stringify({ url: activeTab.url })}
@@ -620,6 +621,7 @@ export function BrowserTabsScreen({
                 onClick={handleClosePanel}
                 className='p-1.5 rounded-md hover:bg-border text-muted-foreground'
                 title='Close browser panel'
+                aria-label='Close browser panel'
                 data-track-category='BROWSER'
                 data-track-name='CloseBrowserPanel'
                 data-track-metadata={JSON.stringify({ urls: tabs.map(t => t.url) })}
@@ -641,6 +643,7 @@ export function BrowserTabsScreen({
                   onClick={handleOpenExternal}
                   className='p-1.5 rounded-md hover:bg-border text-muted-foreground'
                   title='Open in system browser'
+                  aria-label='Open in system browser'
                   data-track-category='BROWSER'
                   data-track-name='OpenInSystemBrowser'
                   data-track-metadata={JSON.stringify({ url: activeTab.url })}
@@ -671,6 +674,7 @@ export function BrowserTabsScreen({
                   />
                 )}
                 <button
+                  aria-current={isActive ? 'true' : undefined}
                   onClick={() => handleSwitchTab(tab.id)}
                   className={`flex items-center gap-2 rounded-sm group transition-colors ${
                     isPanel
@@ -707,6 +711,7 @@ export function BrowserTabsScreen({
                   )}
                   <span className='truncate flex-1 text-left font-medium'>{tab.title}</span>
                   <button
+                    aria-label={`Close ${tab.title}`}
                     onClick={e => handleCloseTab(tab.id, e)}
                     className='p-0.5 hover:bg-muted-foreground/20 rounded transition-colors flex-shrink-0'
                     data-track-category='BROWSER'
@@ -724,6 +729,7 @@ export function BrowserTabsScreen({
           onClick={() => handleCreateTab('https://www.google.com')}
           className='p-1.5 rounded-md hover:bg-border text-muted-foreground'
           title='New tab'
+          aria-label='New tab'
           data-track-category='BROWSER'
           data-track-name='CreateNewTab'
           data-track-metadata={JSON.stringify({ url: 'https://www.google.com' })}
@@ -734,6 +740,7 @@ export function BrowserTabsScreen({
           onClick={isPanel ? handleOpenFullscreen : handleMinimizeToPanel}
           className='p-1.5 rounded-md hover:bg-border text-muted-foreground'
           title={isPanel ? 'Open in fullscreen browser' : 'Minimize to docked panel'}
+          aria-label={isPanel ? 'Open in fullscreen browser' : 'Minimize to docked panel'}
           data-track-category='BROWSER'
           data-track-name={isPanel ? 'OpenFullscreenBrowser' : 'MinimizeToDocked'}
           data-track-metadata={JSON.stringify({ urls: tabs.map(t => t.url) })}
@@ -746,6 +753,7 @@ export function BrowserTabsScreen({
             areControlsVisible ? 'text-foreground' : 'text-muted-foreground'
           }`}
           title={areControlsVisible ? 'Hide browser controls' : 'Show browser controls'}
+          aria-label={areControlsVisible ? 'Hide browser controls' : 'Show browser controls'}
           aria-pressed={areControlsVisible}
           data-track-category='BROWSER'
           data-track-name='ToggleBrowserControls'
@@ -764,6 +772,7 @@ export function BrowserTabsScreen({
             onClick={handleClosePanel}
             className='p-1.5 rounded-md hover:bg-border text-muted-foreground'
             title='Close browser panel'
+            aria-label='Close browser panel'
             data-track-category='BROWSER'
             data-track-name='CloseBrowserPanel'
             data-track-metadata={JSON.stringify({ urls: tabs.map(t => t.url) })}
@@ -785,6 +794,7 @@ export function BrowserTabsScreen({
             disabled={!activeTab?.canGoBack}
             className='p-1 rounded-md hover:bg-border disabled:opacity-30 disabled:cursor-not-allowed'
             title='Go back'
+            aria-label='Go back'
             data-track-category='BROWSER'
             data-track-name='GoBack'
             data-track-metadata={JSON.stringify({ url: activeTab?.url })}
@@ -796,6 +806,7 @@ export function BrowserTabsScreen({
             disabled={!activeTab?.canGoForward}
             className='p-1 rounded-md hover:bg-border disabled:opacity-30 disabled:cursor-not-allowed'
             title='Go forward'
+            aria-label='Go forward'
             data-track-category='BROWSER'
             data-track-name='GoForward'
             data-track-metadata={JSON.stringify({ url: activeTab?.url })}
@@ -807,6 +818,7 @@ export function BrowserTabsScreen({
             disabled={!activeTabId}
             className='p-1 rounded-md hover:bg-border disabled:opacity-30 disabled:cursor-not-allowed'
             title='Reload'
+            aria-label='Reload'
             data-track-category='BROWSER'
             data-track-name='ReloadPage'
             data-track-metadata={JSON.stringify({ url: activeTab?.url })}
@@ -900,6 +912,7 @@ export function BrowserTabsScreen({
               disabled={findResults.matches === 0}
               className='p-1.5 rounded-md hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed'
               title='Previous match (Shift+Enter)'
+              aria-label='Previous match (Shift+Enter)'
               data-track-category='BROWSER'
               data-track-name='FIND_PREVIOUS_MATCH'
             >
@@ -910,6 +923,7 @@ export function BrowserTabsScreen({
               disabled={findResults.matches === 0}
               className='p-1.5 rounded-md hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed'
               title='Next match (Enter)'
+              aria-label='Next match (Enter)'
               data-track-category='BROWSER'
               data-track-name='FIND_NEXT_MATCH'
             >
@@ -919,6 +933,7 @@ export function BrowserTabsScreen({
               onClick={handleCloseFindBar}
               className='p-1.5 rounded-md hover:bg-muted text-muted-foreground'
               title='Close (Esc)'
+              aria-label='Close (Esc)'
               data-track-category='BROWSER'
               data-track-name='CLOSE_FIND_BAR'
             >

@@ -203,6 +203,8 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
           </label>
           <button
             type='button'
+            aria-label='Prompt guide'
+            aria-expanded={showPromptGuide}
             onClick={() => setShowPromptGuide(v => !v)}
             className='flex shrink-0 items-center gap-1 text-xs text-desk-muted'
             disabled={fieldDisabled}
@@ -441,6 +443,7 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
                       onClick={() => handleDeleteRule(mapping.id)}
                       className='text-red-500 hover:text-red-600 transition-colors'
                       title='Delete rule'
+                      aria-label='Delete rule'
                       data-track-category='DeskSettings'
                       data-track-name='DeleteClassificationRule'
                       data-ph-capture-attribute-track-id='desk_classification_rule_delete'

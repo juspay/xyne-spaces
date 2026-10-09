@@ -837,6 +837,7 @@ export const BoardForm = ({
                   </div>
                   {stages.length > 1 && (
                     <button
+                      aria-label={`Remove stage ${stage.name || index + 1}`}
                       onClick={() => removeStage(index)}
                       disabled={isLoading}
                       className='flex-shrink-0 text-red-500 hover:text-red-700 p-1'

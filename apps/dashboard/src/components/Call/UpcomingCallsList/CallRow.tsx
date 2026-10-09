@@ -116,7 +116,7 @@ export function CallRow({
             data-track-category='CALLS'
             data-track-name='upcoming-call-more-options'
             onClick={e => e.stopPropagation()}
-            aria-label='More options'
+            aria-label={`More options for ${title}`}
           >
             <MoreVertical className='size-3.5' />
           </Button>

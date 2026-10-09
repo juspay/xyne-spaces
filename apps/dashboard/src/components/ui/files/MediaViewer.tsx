@@ -210,6 +210,7 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({
               data-track-name='DOWNLOAD_FROM_MEDIA_VIEWER'
               className='p-2 rounded-full hover:bg-background/10 transition-colors text-white'
               title='Download file'
+              aria-label='Download file'
             >
               <Download className='h-6 w-6' />
             </button>
@@ -220,6 +221,7 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({
             data-track-name='CLOSE_MEDIA_VIEWER'
             className='p-2 rounded-full hover:bg-background/10 transition-colors text-white'
             title='Close (Esc)'
+            aria-label='Close (Esc)'
           >
             <X className='h-6 w-6' />
           </button>

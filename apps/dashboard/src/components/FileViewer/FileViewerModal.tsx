@@ -774,11 +774,13 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
               data-track-category='FileViewer'
               data-track-name='COPY_IMAGE_FROM_MODAL'
               title='Copy Image'
+              aria-label='Copy Image'
             >
               {copied ? <CopyCopied className='h-4 w-4' /> : <CopyDefault className='h-4 w-4' />}
             </button>
           )}
           <button
+            aria-label='Download file'
             onClick={() => void handleDownload()}
             className='inline-flex items-center gap-2 justify-center w-9 h-9 text-sm font-medium text-white/90 hover:text-white hover:bg-background/10 rounded-md transition-colors'
             data-track-category='FileViewer'
@@ -1516,6 +1518,7 @@ const AttachmentGalleryModalInner: React.FC = () => {
               data-track-category='FileViewer'
               data-track-name='CopyImageGallery'
               title='Copy Image'
+              aria-label='Copy Image'
               className='inline-flex items-center gap-2 justify-center w-9 h-9 text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
             >
               {copiedGallery ? (
@@ -1526,6 +1529,7 @@ const AttachmentGalleryModalInner: React.FC = () => {
             </button>
           )}
           <button
+            aria-label='Download file'
             onClick={() => void handleDownload()}
             data-track-category='FileViewer'
             data-track-name='DownloadFile'

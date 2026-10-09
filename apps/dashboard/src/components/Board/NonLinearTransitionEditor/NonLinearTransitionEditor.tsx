@@ -556,6 +556,7 @@ const StageActionsPanel: React.FC<StageActionsPanelProps> = ({
         </div>
         <button
           type='button'
+          aria-label='Close stage actions'
           onClick={onClose}
           data-track-category='board_stage_config'
           data-track-name='close_stage_actions'
@@ -778,11 +779,13 @@ const EdgeSettingsPanel: React.FC<EdgeSettingsPanelProps> = props => {
             data-track-name='remove_transition'
             className='p-1.5 rounded-md hover:bg-red-50 text-muted-foreground hover:text-red-500 transition-colors'
             title='Remove'
+            aria-label='Remove'
           >
             <Trash2 size={13} />
           </button>
           <button
             type='button'
+            aria-label='Save and close'
             onClick={onClose}
             data-track-category='board_stage_config'
             data-track-name='close_transition_config'
@@ -859,6 +862,7 @@ const EdgeSettingsPanel: React.FC<EdgeSettingsPanelProps> = props => {
                 <div className='flex items-center gap-1'>
                   <button
                     type='button'
+                    aria-label='Edit transition form'
                     onClick={onOpenEdgeForm}
                     data-track-category='board_stage_config'
                     data-track-name='edit_transition_form'
@@ -868,6 +872,7 @@ const EdgeSettingsPanel: React.FC<EdgeSettingsPanelProps> = props => {
                   </button>
                   <button
                     type='button'
+                    aria-label='Remove transition form'
                     onClick={() => onUpdateMeta({ formId: null })}
                     data-track-category='board_stage_config'
                     data-track-name='remove_transition_form'
@@ -898,6 +903,7 @@ const EdgeSettingsPanel: React.FC<EdgeSettingsPanelProps> = props => {
                 <div className='flex items-center gap-2.5 select-none'>
                   <button
                     type='button'
+                    aria-label='Require approval'
                     role='switch'
                     aria-checked={meta.requiresApproval}
                     onClick={() =>

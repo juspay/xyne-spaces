@@ -177,6 +177,7 @@ export const ImageNode: React.FC<ImageNodeProps> = ({ node }) => {
                 }}
                 className='p-2 rounded-md text-foreground hover:bg-muted transition-colors'
                 title='Copy Image'
+                aria-label='Copy Image'
                 data-track-category='FLOW_IMAGE'
                 data-track-name='CopyImage'
               >

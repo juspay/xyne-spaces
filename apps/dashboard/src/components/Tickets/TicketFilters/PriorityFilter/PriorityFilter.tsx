@@ -61,6 +61,7 @@ export const PriorityFilter = ({
           data-track-metadata={JSON.stringify({ filterType: 'priority', selectedPriorities })}
           className='absolute -top-1 -right-1 p-1'
           title='Clear priority filter'
+          aria-label='Clear priority filter'
           size='icon'
           variant='ghost'
         >
