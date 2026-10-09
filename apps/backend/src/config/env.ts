@@ -282,6 +282,9 @@ const envSchema = Joi.object({
   // Same CALL_LITELLM_API_KEY for both; both fall back to CALL_LITELLM_MODEL.
   CALL_RECORDING_FAST_LITELLM_MODEL: Joi.string().allow('').default(''),
   CALL_RECORDING_THINKING_LITELLM_MODEL: Joi.string().allow('').default(''),
+  // Run call/recording/summary-template LLM tasks on the Claw `call-intelligence`
+  // agent instead of calling LiteLLM directly.
+  CALL_AI_USE_CLAW_AGENT: Joi.boolean().default(false),
   ACTIVITY_CLASSIFICATION_MODEL: Joi.string().default(''),
   // Working Hours Configuration (in IST)
   WORKING_HOUR_START: Joi.number().default(11),
@@ -771,6 +774,9 @@ export const config = {
       envVars.CALL_RECORDING_FAST_LITELLM_MODEL || envVars.CALL_LITELLM_MODEL,
     callRecordingThinkingLitellmModel:
       envVars.CALL_RECORDING_THINKING_LITELLM_MODEL || envVars.CALL_LITELLM_MODEL,
+  },
+  callAi: {
+    useClawAgent: envVars.CALL_AI_USE_CLAW_AGENT as boolean,
   },
   activityClassification: {
     litellmApiKey: envVars.ACTIVITY_CLASSIFICATION_LITELLM_API_KEY,

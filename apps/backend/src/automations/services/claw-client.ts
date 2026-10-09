@@ -153,3 +153,103 @@ async function safeReadText(res: Response): Promise<string> {
 }
 
 export const clawClient = new ClawClient();
+
+const AGENT_LIST_CACHE_TTL_MS = 60_000;
+let agentListCache: { agents: ClawAgent[]; fetchedAt: number } | null = null;
+
+async function listAgentsCached(): Promise<ClawAgent[]> {
+  if (agentListCache && Date.now() - agentListCache.fetchedAt < AGENT_LIST_CACHE_TTL_MS) {
+    return agentListCache.agents;
+  }
+  const agents = await clawClient.listAgents();
+  agentListCache = { agents, fetchedAt: Date.now() };
+  return agents;
+}
+
+/**
+ * The Spaces app id to dispatch `agentSlug` through for `workspaceId`: the
+ * configured one when it belongs to the workspace, else the catalog agent whose
+ * app is in the workspace (or its org) when the slug exists in several orgs.
+ */
+export async function resolveAgentSpacesAppId(
+  agentSlug: string,
+  workspaceId: string,
+  configuredSpacesAppId?: string | null,
+): Promise<string> {
+  const configured = (configuredSpacesAppId ?? '').trim();
+  if (configured) {
+    if (await appBelongsToWorkspace(configured, workspaceId)) return configured;
+    throw new Error(
+      `[RUN_AGENT] configured spacesAppId ${configured} for agent "${agentSlug}" does not belong to workspace ${workspaceId} — re-select the agent in the automation builder`,
+    );
+  }
+
+  const agents = await listAgentsCached();
+  const candidates = agents.filter(a => a.slug === agentSlug && a.spacesAppId);
+  if (candidates.length === 0) {
+    throw new Error(
+      `[RUN_AGENT] agent "${agentSlug}" not found in the claw catalog (disabled, deleted, or never published as a Spaces app)`,
+    );
+  }
+  if (candidates.length === 1) return candidates[0].spacesAppId as string;
+
+  const candidateIds = candidates.map(a => a.spacesAppId as string);
+  const apps = await db.apps.findMany({
+    where: { id: { in: candidateIds } },
+    select: { id: true, workspaceId: true, orgId: true },
+  });
+  const inWorkspace = apps.filter(a => a.workspaceId === workspaceId);
+  if (inWorkspace.length === 1) return inWorkspace[0].id;
+
+  const wsOrgs = await db.workspaceOrganization.findMany({
+    where: { workspaceId, leftAt: null },
+    select: { orgId: true },
+  });
+  const orgIds = new Set(wsOrgs.map(w => w.orgId));
+  const inOrg = apps.filter(a => orgIds.has(a.orgId));
+  if (inOrg.length === 1) return inOrg[0].id;
+
+  throw new Error(
+    `[RUN_AGENT] agent slug "${agentSlug}" matches ${candidates.length} agents across orgs and workspace ${workspaceId} does not disambiguate — re-select the agent in the builder so the config pins its spacesAppId`,
+  );
+}
+
+async function appBelongsToWorkspace(appId: string, workspaceId: string): Promise<boolean> {
+  const app = await db.apps.findUnique({
+    where: { id: appId },
+    select: { workspaceId: true, orgId: true },
+  });
+  if (!app) return false;
+  if (app.workspaceId === workspaceId) return true;
+  const member = await db.workspaceOrganization.findFirst({
+    where: { workspaceId, orgId: app.orgId, leftAt: null },
+    select: { id: true },
+  });
+  return Boolean(member);
+}
+
+/**
+ * Queue workers do not have a browser cookie. Resolve the workspace context
+ * from Spaces itself and send it as optional metadata, preserving the legacy
+ * raw userId field for older Claw deployments.
+ */
+export async function resolveHeadlessIdentityContext(
+  userId: string,
+  workspaceId: string,
+): Promise<{ spacesWorkspaceId: string; spacesOrgId: string; spacesOrgMemberId: string }> {
+  const [workspace, user] = await Promise.all([
+    db.workspace.findUnique({ where: { id: workspaceId }, select: { orgId: true } }),
+    db.user.findUnique({ where: { id: userId }, select: { orgMemberId: true } }),
+  ]);
+  if (!workspace?.orgId) {
+    throw new Error(`[RUN_AGENT] workspace ${workspaceId} has no organization`);
+  }
+  if (!user?.orgMemberId) {
+    throw new Error(`[RUN_AGENT] user ${userId} has no orgMemberId`);
+  }
+  return {
+    spacesWorkspaceId: workspaceId,
+    spacesOrgId: workspace.orgId,
+    spacesOrgMemberId: user.orgMemberId,
+  };
+}
