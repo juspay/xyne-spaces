@@ -1,21 +1,19 @@
 import { LIMITS } from './constants';
 
-/** What Buddy saw of one control, as plain data. */
 export interface MenuItem {
   track: string;
   text: string;
   label: string;
   href?: string;
   use: 'click' | 'point';
+  opens?: boolean;
 }
 
-/** A menu Buddy opened on screen during this request, and what was in it. */
 export interface Peeked<V extends MenuItem> {
   opener: V;
   items: readonly MenuItem[];
 }
 
-/** An item inside a closed menu, reached by clicking its opener first. */
 export interface HiddenTarget<V extends MenuItem> extends MenuItem {
   id: string;
   opener: V;
@@ -23,10 +21,7 @@ export interface HiddenTarget<V extends MenuItem> extends MenuItem {
 
 const keyOf = ({ track, text }: MenuItem): string => `${track}|${text}`;
 
-/**
- * The items of the peeked menus as options: each label once, never one already on screen, and
- * no more than leaves the visible controls within LIMITS.options.
- */
+/** The peeked menus' items as options: each label once, never one already on screen, within LIMITS.options. */
 export function hiddenTargets<V extends MenuItem>(
   visible: readonly V[],
   menus: readonly Peeked<V>[],
