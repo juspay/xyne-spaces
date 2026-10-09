@@ -1,6 +1,7 @@
 import { logger } from '@/utils/logger';
 import { deliverDelayedServerMessage } from '@/services/messageDeliveryService';
 import { db } from '@/database/client';
+import type { PollDraft } from '@xyne/shared';
 
 export interface DeliverDelayedMessageInput {
   delayedMessageId: string;
@@ -9,6 +10,7 @@ export interface DeliverDelayedMessageInput {
   senderId: string;
   content: string;
   hasAttachment: boolean;
+  poll?: PollDraft | null;
 }
 
 export interface DeliverDelayedMessageResult {
@@ -57,6 +59,7 @@ export async function deliverDelayedMessage(
       conversationId,
       senderId,
       content,
+      poll: input.poll,
     });
 
     return {

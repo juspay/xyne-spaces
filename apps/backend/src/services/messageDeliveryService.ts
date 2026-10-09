@@ -1,5 +1,5 @@
 import { conversationService } from '@/services/conversationService';
-import { AttachmentEntityType, MessageType } from '@xyne/shared';
+import { AttachmentEntityType, MessageType, type PollDraft } from '@xyne/shared';
 import type { UploadedFileResult } from '@/services/fileUploadService';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
@@ -7,6 +7,10 @@ import { MessagesSideEffectHandler } from '@/zero/side-effects/tables/messages-h
 import { ConversationsSideEffectHandler } from '@/zero/side-effects/tables/conversations-handler';
 import type { QueryContext } from '@/zero/acl/core/types';
 import { cleanupSourceTransactionTx } from '@/bypassAcl/transactions/messageDeliveryService';
+import {
+  deliverScheduledPollTx,
+  type ScheduledPollDeliveryClient,
+} from '@/bypassAcl/transactions/scheduledPollDelivery';
 
 type DeliverySource =
   | { kind: 'DRAFT'; id: string }
@@ -214,8 +218,31 @@ export async function deliverDelayedServerMessage(params: {
   conversationId: string | null | undefined;
   senderId: string;
   content: string;
+  poll?: PollDraft | null;
 }): Promise<DeliverServerMessageResult> {
-  return deliverServerMessage({
+  if (params.poll) {
+    const delivered = await deliverScheduledPollTx({
+      delayedMessageId: params.delayedMessageId,
+      expectedChannelId: params.channelId,
+      expectedSenderId: params.senderId,
+      timestamp: Date.now(),
+      client: db as unknown as ScheduledPollDeliveryClient,
+    });
+    if (delivered.created) {
+      await runSideEffects(
+        params.senderId,
+        delivered.messageId,
+        delivered.conversationId,
+        true,
+      );
+    }
+    return {
+      conversationId: delivered.conversationId,
+      messageId: delivered.messageId,
+    };
+  }
+
+  const delivered = await deliverServerMessage({
     senderId: params.senderId,
     channelId: params.channelId,
     conversationId: params.conversationId,
@@ -224,6 +251,7 @@ export async function deliverDelayedServerMessage(params: {
     timestamp: Date.now(),
     source: { kind: 'DELAYED_MESSAGE', id: params.delayedMessageId },
   });
+  return delivered;
 }
 
 export async function deliverDraftServerMessage(params: {

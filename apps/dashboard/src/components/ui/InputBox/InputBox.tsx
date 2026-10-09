@@ -28,7 +28,15 @@ import LinkExtension from '@tiptap/extension-link';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import { all, createLowlight } from 'lowlight';
 import { Plus, Loader2, X, Ticket, FileText, Clock } from 'lucide-react';
-import { ArrowUp, AtMark, ChevronBigDown, FontAa, Hashtag, PaperclipSlant } from '@xyne/icons';
+import {
+  ArrowUp,
+  AtMark,
+  ChevronBigDown,
+  FontAa,
+  Hashtag,
+  PaperclipSlant,
+  Poll,
+} from '@xyne/icons';
 import Tooltip from '../Tooltip/Tooltip';
 import { ShortcutHint } from '../ShortcutHint';
 import Avatar from '../Avatar/Avatar';
@@ -280,6 +288,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       isDMThread = false,
       onCreateTicket,
       onCreateCanvas,
+      onCreatePoll,
       onTranscriptSelect,
       onScheduleSend,
       showSchedulePresets = false,
@@ -2077,6 +2086,18 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         >
                           <FileText className='h-4 w-4' /> Canvas
                         </DropdownMenuItem>
+                        {onCreatePoll && (
+                          <DropdownMenuItem
+                            onClick={() => {
+                              setIsPlusMenuOpen(false);
+                              onCreatePoll();
+                            }}
+                            data-track-category='CHAT_INPUT'
+                            data-track-name='CREATE_POLL'
+                          >
+                            <Poll className='h-4 w-4' /> Create poll
+                          </DropdownMenuItem>
+                        )}
                       </DropdownMenuContent>
                     </DropdownMenu>
                   )}

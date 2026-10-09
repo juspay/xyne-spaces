@@ -66,6 +66,7 @@ export type {
 export * from './types/research';
 export * from './tickets';
 export * from './nudges';
+export * from './polls/index.js';
 export * from './crypto/index.js';
 export * from './templates/callInvitation';
 export * from './templates/callInvitationIcs';

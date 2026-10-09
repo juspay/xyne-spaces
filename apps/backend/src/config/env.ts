@@ -287,6 +287,7 @@ const envSchema = Joi.object({
   WORKING_HOUR_START: Joi.number().default(11),
   WORKING_HOUR_END: Joi.number().default(19),
   ENABLE_NOTIFICATION_WORKER: Joi.boolean().default(false),
+  ENABLE_POLL_LIFECYCLE_WORKER: Joi.boolean().default(false),
   ENABLE_MESSAGE_CLASSIFICATION: Joi.boolean().default(false),
   // What the dedicated classification key serves.
   MESSAGE_CLASSIFIER_MODEL: Joi.string().default('open-fast'),
@@ -815,6 +816,7 @@ export const config = {
   enableEtaDeadlineWorker: envVars.ENABLE_ETA_DEADLINE_WORKER,
   enableAutomationWorker: envVars.ENABLE_AUTOMATION_WORKER,
   enableDelayedMessageWorker: envVars.ENABLE_DELAYED_MESSAGE_WORKER,
+  enablePollLifecycleWorker: envVars.ENABLE_POLL_LIFECYCLE_WORKER,
   enableEmailFetchWorker: envVars.ENABLE_EMAIL_FETCH_WORKER,
   enableCalendarSyncWorker: envVars.ENABLE_CALENDAR_SYNC_WORKER,
   enableSocialMediaSyncWorker: envVars.ENABLE_SOCIAL_MEDIA_SYNC_WORKER,

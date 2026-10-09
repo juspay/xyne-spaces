@@ -10,7 +10,7 @@ generator client {
 
 generator zero {
   provider      = "prisma-generator-zero"
-  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource", "WorkflowFolder", "WorkflowCredential", "AgentConversationShare", "OrgMemberCredential"]
+  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource", "WorkflowFolder", "WorkflowCredential", "AgentConversationShare", "OrgMemberCredential", "PollReminderDelivery"]
 }
 
 datasource db {
@@ -2521,6 +2521,7 @@ model Message {
   reactions      Reaction[]
   reactionCounts ReactionCount[]
   externalMessages   ExternalMessage[] @relation("ExternalMessageEntity")
+  poll           Poll?
 
   @@index([conversationId, createdAt]) // Fast conversation message lookup
   @@index([workspaceId]) // ACL workspace filtering
@@ -2535,6 +2536,164 @@ model Message {
   // messageId` — without this, every thread fetch pays a temp B-tree sort.
   @@index([conversationId, messageId])
   @@map("messages")
+  @@schema("public")
+}
+
+model Poll {
+  id                   String   @id
+  workspaceId          String
+  messageId            String   @unique
+  createdBy            String
+  allowAudienceChoices Boolean  @default(false)
+  isAnonymous          Boolean  @default(false)
+  resultVisibility     String   @default("EVERYONE")
+  sortResultsByVotes   Boolean  @default(false)
+  closedAt             DateTime?
+  createdAt            DateTime @default(now())
+
+  message   Message              @relation(fields: [messageId], references: [messageId], onDelete: Cascade)
+  questions PollQuestion[]
+  votes     PollVote[]
+  results   PollQuestionResult[]
+  jobs      PollJob[]
+
+  @@index([workspaceId])
+  @@index([createdBy])
+  @@map("polls")
+  @@schema("public")
+}
+
+model PollQuestion {
+  id          String   @id
+  workspaceId String
+  pollId      String
+  question    String
+  position    Int
+  responseType String  @default("SINGLE_CHOICE")
+  createdAt   DateTime @default(now())
+
+  poll    Poll         @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  options PollOption[]
+  votes   PollVote[]
+  result  PollQuestionResult?
+
+  @@unique([pollId, position])
+  @@index([workspaceId])
+  @@index([pollId])
+  @@map("poll_questions")
+  @@schema("public")
+}
+
+model PollOption {
+  id             String   @id
+  workspaceId    String
+  questionId     String
+  text           String
+  normalizedText String
+  position       Int
+  createdBy      String
+  createdAt      DateTime @default(now())
+
+  question PollQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([questionId, normalizedText])
+  @@index([workspaceId])
+  @@index([questionId, position, createdAt])
+  @@map("poll_options")
+  @@schema("public")
+}
+
+model PollVote {
+  id          String   @id
+  workspaceId String
+  pollId      String
+  questionId  String
+  userId      String
+  optionIds   Json
+  textAnswer  String?  @db.Text
+  rankedOptionIds Json?
+  rating      Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  poll     Poll         @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  question PollQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([questionId, userId])
+  @@index([workspaceId])
+  @@index([pollId])
+  @@index([userId])
+  @@map("poll_votes")
+  @@schema("public")
+}
+
+model PollQuestionResult {
+  questionId   String   @id
+  workspaceId  String
+  pollId       String
+  voterCount   Int      @default(0)
+  optionCounts Json     @default("{}")
+  responseCount Int     @default(0)
+  rankTotals Json       @default("{}")
+  rankResponseCount Int @default(0)
+  ratingCounts Json     @default("{}")
+  ratingTotal   Int     @default(0)
+  updatedAt    DateTime @updatedAt
+
+  poll     Poll         @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  question PollQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([pollId])
+  @@map("poll_question_results")
+  @@schema("public")
+}
+
+model PollJob {
+  id          String    @id
+  workspaceId String
+  pollId      String
+  kind        String
+  runAt       DateTime
+  status      String    @default("PENDING")
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(5)
+  leaseOwner  String?
+  leaseExpiresAt DateTime?
+  completedAt DateTime?
+  failedAt    DateTime?
+  lastError   String?   @db.Text
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  poll               Poll                   @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  reminderDeliveries PollReminderDelivery[]
+
+  @@unique([pollId, kind])
+  @@index([workspaceId, status, runAt])
+  @@index([status, runAt, leaseExpiresAt])
+  @@index([pollId])
+  @@map("poll_jobs")
+  @@schema("public")
+}
+
+// Server-only delivery ledger. It is excluded from the Zero generator and its
+// request-principal Prisma ACL denies reads and writes.
+model PollReminderDelivery {
+  id          String   @id
+  workspaceId String
+  pollJobId   String
+  userId      String
+  status      String   @default("CLAIMED")
+  deliveredAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  pollJob PollJob @relation(fields: [pollJobId], references: [id], onDelete: Cascade)
+
+  @@unique([pollJobId, userId])
+  @@index([workspaceId, status])
+  @@map("poll_reminder_deliveries")
   @@schema("public")
 }
 
@@ -4594,6 +4753,7 @@ model DelayedMessage {
   conversationId  String?                // Target conversation (for thread replies, no FK constraint)
   senderId        String                 // User who scheduled the message (no FK constraint)
   content         String                 // Message content (HTML)
+  pollDraft       Json?                  // Poll payload published when this delayed message is delivered
   hasAttachment   Boolean                @default(false)
   scheduledFor    Float                  // Unix ms timestamp when the message should be sent
   status          String               @default("PENDING")
@@ -5215,4 +5375,3 @@ model RadarRule {
   @@map("radar_rules")
   @@schema("non_zero")
 }
-
