@@ -101,6 +101,13 @@ export function createZeroAuditLookup(tx: Transaction<Schema>): AuditLookup {
         boardIds: [...boardIds],
       }));
     },
+    deskChannelIds: async channelIds => {
+      if (channelIds.length === 0) return [];
+      const rows = await tx.run(
+        zql.email_channel_preferences.where('channelId', 'IN', channelIds),
+      );
+      return rows.map(row => row.channelId);
+    },
   };
 }
 

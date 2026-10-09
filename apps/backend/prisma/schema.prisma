@@ -1947,6 +1947,21 @@ model Channel {
   @@schema("public")
 }
 
+model ChannelPublishedTab {
+  id          String   @id
+  workspaceId String
+  channelId   String
+  entityType  String   // APP
+  entityId    String   // for APP: artifact app id (claw-auth); no FK — different database
+  position    Int
+  publishedBy String
+  createdAt   DateTime @default(now())
+
+  @@unique([channelId, entityType, entityId])
+  @@map("channel_published_tabs")
+  @@schema("public")
+}
+
 // Additive channel-to-board association. Board.projectId remains the source of
 // project ownership for ticket-producing operations.
 model ChannelBoardMapping {
@@ -2442,7 +2457,7 @@ model EmailChannelPreference {
   deskReportRangeDays    Int?     @default(1) // 1 = "Last 1 day", 7 = "Last 1 week"
   duplicateScopeConfig   String?    // Scoped duplicate detection: JSON-serialized { enabled, scopeFieldGlobalIds }; stored as string for Zero compatibility, parsed at code level (null = project-wide legacy behavior)
   slackDeskTriggerMode   String?  // ALL_MESSAGES | MENTION_ONLY; null == ALL_MESSAGES
-  deskAppIds             String?  // JSON-serialised string[] of artifact app ids shown on this desk, in order; set by the desk owner or a channel admin
+  deskAppIds             String?  // DEPRECATED: moved to channel_published_tabs
   @@index([ownerUserId])
   @@index([assigneeUserGroupId])
   @@index([boardId])

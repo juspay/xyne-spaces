@@ -35,12 +35,16 @@ import {
   ConversationTabListType,
   isChannelTabsCustomizable,
 } from '../ConversationPannel/ConversationPannel.utils';
-import { getChannelTabsStore } from '../../../hooks/barItems';
+import { appIdOf, useChannelTabsStore } from '../../../hooks/barItems';
+import { useChannelPublishedApps } from '../../../hooks/useChannelPublishedApps';
 import {
   BarAddMenu,
   BarRemoveButton,
   SortableBar,
+  useChannelAppPublishing,
+  useStagedAppPublishing,
   SortableBarItem,
+  type AppPublishOptions,
   useChannelTabBuiltIns,
 } from '../../BarCustomize';
 import { Button } from '../../ui/Button';
@@ -58,7 +62,7 @@ import { standaloneNavigate, APP_DRAG_STYLE, APP_NO_DRAG_STYLE } from '../../../
 import { usePlatform } from '../../../hooks/usePlatform';
 import { XyneAIStar } from '../../icons/xyne-ai';
 import { invokeShortcut } from '../../../shortcuts';
-import { CalendarEvent, PencilEdit, PlusDefault } from '@xyne/icons';
+import { CalendarEvent, Globe, PencilEdit, PlusDefault } from '@xyne/icons';
 import { xyneCalendarActor } from '../../../machines/xyneCalendarMachine';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
@@ -83,6 +87,12 @@ interface ChannelTabTriggerProps {
   isActive: boolean;
   /** Reserves room for the "×" drawn over the label while the strip is in edit mode. */
   removable: boolean;
+  /**
+   * The published-app globe is drawn OUTSIDE this button, as its own unpublish
+   * control (a button can't contain a button), so the inline badge is dropped
+   * and room is reserved for it.
+   */
+  globeAsControl?: boolean;
   onSelect: (tab: string, e?: React.MouseEvent) => void;
 }
 
@@ -91,6 +101,7 @@ const ChannelTabTrigger = ({
   tab,
   isActive,
   removable,
+  globeAsControl = false,
   onSelect,
 }: ChannelTabTriggerProps): JSX.Element => {
   const trigger = (
@@ -104,6 +115,7 @@ const ChannelTabTrigger = ({
         className={cn(
           'flex items-center justify-center gap-2 px-2.5 py-1.5 rounded-lg transition-colors duration-100 cursor-pointer',
           removable && 'pr-7',
+          globeAsControl && 'pr-12',
           isActive
             ? 'bg-muted text-foreground'
             : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
@@ -113,6 +125,13 @@ const ChannelTabTrigger = ({
           {cloneElement(tab.icon, { color: 'currentColor' } as { color: string })}
         </span>
         <span className={cn('text-sm font-medium tracking-[-0.28px]')}>{tab.label}</span>
+        {tab.published && !globeAsControl && (
+          <Globe
+            size={12}
+            className='shrink-0 text-muted-foreground'
+            aria-label='Published to this channel'
+          />
+        )}
       </button>
     </Tabs.Trigger>
   );
@@ -135,6 +154,54 @@ interface ConversationHeaderProps {
   onClose?: () => void;
 }
 
+// × only hides a published app for this person; this is how someone who can
+// publish takes it away from everyone. Applied on Save.
+const UnpublishTabButton = ({
+  tab,
+  publish,
+  pending,
+}: {
+  tab: ConversationTabListType;
+  publish: AppPublishOptions;
+  pending: boolean;
+}): JSX.Element => {
+  const label = tab.label.trim();
+  return (
+    <Tooltip
+      content={
+        pending
+          ? 'Unpublishes on Save — click to keep it'
+          : 'Unpublish — remove from everyone’s tabs'
+      }
+      side='bottom'
+    >
+      <button
+        type='button'
+        aria-label={pending ? `Keep ${label} published` : `Unpublish ${label} from everyone's tabs`}
+        aria-pressed={pending}
+        onClick={event => {
+          // The tab beneath is a trigger; this must not select it.
+          event.preventDefault();
+          event.stopPropagation();
+          const appId = appIdOf(tab.value);
+          if (appId) publish.setPublished(appId, pending);
+        }}
+        className={cn(
+          'absolute right-6 top-1/2 z-[1] flex size-5 -translate-y-1/2 items-center justify-center rounded-full transition-colors',
+          pending
+            ? 'text-muted-foreground opacity-50 hover:opacity-100'
+            : 'text-primary hover:bg-primary/10',
+        )}
+        data-track-category='CHANNELS'
+        data-track-name={pending ? 'KeepChannelAppPublished' : 'UnpublishChannelAppFromTab'}
+        data-track-metadata={JSON.stringify({ tab: tab.value })}
+      >
+        <Globe size={12} aria-hidden='true' />
+      </button>
+    </Tooltip>
+  );
+};
+
 const ConversationHeader = ({
   channelId,
   previousChannelId,
@@ -148,25 +215,38 @@ const ConversationHeader = ({
   const channel = useVisibleChannel(channelId);
   const askAIAvailable = useAskAIAvailable();
   const channelTabBuiltIns = useChannelTabBuiltIns(channel?.scopeType);
-  // Null in a DM, a group DM or a ticket/document channel: those show the
-  // built-in tabs with no ×, no + and no dragging.
-  const tabsStore = isChannelTabsCustomizable(channel?.scopeType)
-    ? getChannelTabsStore(channelId)
-    : null;
+  // Null in a ticket/document channel or a desk: those show the built-in tabs
+  // with no ×, no + and no dragging. Channels, DMs and group DMs are editable.
+  const publishedAppIds = useChannelPublishedApps(channelId);
+  const layeredTabsStore = useChannelTabsStore(channelId, publishedAppIds);
+  const tabsStore = isChannelTabsCustomizable(channel) ? layeredTabsStore : null;
+  // Channel admins get step 2 in the app picker: publish to everyone's tabs.
+  const appPublishing = useChannelAppPublishing(channelId, channel, publishedAppIds);
+  const stagedPublishing = useStagedAppPublishing(appPublishing);
+  const editPublishing = stagedPublishing.publish;
+  const { commit: commitPublishing, discard: discardPublishing } = stagedPublishing;
+  const publishedAppIdSet = useMemo(() => new Set(publishedAppIds), [publishedAppIds]);
   const channelTabIds = useMemo(() => (channelTabs ?? []).map(tab => tab.value), [channelTabs]);
   const [editSnapshot, setEditSnapshot] = useState<readonly string[] | null>(null);
   const isEditingTabs = !!tabsStore && editSnapshot !== null;
   const startEditingTabs = useCallback(() => {
     if (tabsStore) setEditSnapshot(tabsStore.get());
   }, [tabsStore]);
-  const saveTabs = useCallback(() => setEditSnapshot(null), []);
+  const saveTabs = useCallback(() => {
+    commitPublishing();
+    setEditSnapshot(null);
+  }, [commitPublishing]);
   const cancelTabs = useCallback(() => {
+    discardPublishing();
     if (tabsStore && editSnapshot) tabsStore.set(editSnapshot);
     setEditSnapshot(null);
-  }, [tabsStore, editSnapshot]);
-  // Every edit is already persisted, so leaving the channel mid-edit keeps it —
-  // the same as Save. Only the mode itself must not follow into the next channel.
-  useEffect(() => setEditSnapshot(null), [channelId]);
+  }, [tabsStore, editSnapshot, discardPublishing]);
+  // Tab edits are already persisted, so leaving the channel mid-edit keeps them;
+  // unsaved publish changes are dropped. The mode must not follow into the next channel.
+  useEffect(() => {
+    setEditSnapshot(null);
+    discardPublishing();
+  }, [channelId, discardPublishing]);
   useEffect(() => {
     if (!isEditingTabs) return undefined;
     const onKey = (e: KeyboardEvent): void => {
@@ -666,8 +746,16 @@ const ConversationHeader = ({
                       tab={tab}
                       isActive={activeTab === tab.value}
                       removable={!tabsStore.locked.includes(tab.value)}
+                      globeAsControl={!!tab.published && !!editPublishing}
                       onSelect={handleTabSelect}
                     />
+                    {tab.published && editPublishing && (
+                      <UnpublishTabButton
+                        tab={tab}
+                        publish={editPublishing}
+                        pending={stagedPublishing.isPendingUnpublish(appIdOf(tab.value) ?? '')}
+                      />
+                    )}
                     <BarRemoveButton
                       store={tabsStore}
                       id={tab.value}
@@ -681,6 +769,8 @@ const ConversationHeader = ({
               <BarAddMenu
                 store={tabsStore}
                 builtIns={channelTabBuiltIns}
+                {...(editPublishing ? { publish: editPublishing } : {})}
+                publishedAppIds={publishedAppIdSet}
                 trackCategory='CHANNELS'
                 side='bottom'
                 align='start'

@@ -59,6 +59,7 @@ import {
   RecapEntityType,
   UserType,
   ViewAccessEntityType,
+  ChannelPublishedEntityType,
 } from '@xyne/shared';
 
 export const zql = createBuilder(schema);
@@ -4474,6 +4475,16 @@ export const queries: AnyQueryRegistry = defineQueries({
         .where(helpers => helpers.cmp('id', 'IN', boardIds))
         .orderBy('createdAt', 'desc');
     },
+  ),
+
+  channelPublishedApps: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ args: { channelId } }) =>
+      zql.channel_published_tabs
+        .where('channelId', channelId)
+        .where('entityType', ChannelPublishedEntityType.APP)
+        .orderBy('position', 'asc')
+        .orderBy('createdAt', 'asc'),
   ),
 
   // Boards mapped to a channel via ChannelBoardMapping.
