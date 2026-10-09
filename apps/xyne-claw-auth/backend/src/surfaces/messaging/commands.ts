@@ -6,14 +6,18 @@
  * stage — they never start a run, and the two that change something do so
  * through the platform's own endpoints rather than any state of ours.
  */
+import { IMMEDIATE_TASK_COMMAND_RE } from "xyne-claw-shared";
 import { CONFIG } from "../../config.js";
 import { errMsg } from "../../lib/errors.js";
+import { parseSlashCommand } from "../../lib/parseSlashCommand.js";
+import type { PendingGoalStart } from "../../lib/webhook-commands/context.js";
 import { createLogger } from "../../logger.js";
 import { redisService } from "../../redis.js";
 import { ACTIVE_RUN_TTL_S, REDIS_PREFIX } from "./const.js";
 import { enqueueOutbound, typingCancelled } from "./delivery.js";
 import { channelConversationId } from "./ids.js";
-import type { ChannelAccount } from "./plugin.js";
+import type { ChannelAccount, ChannelDeliveryTarget } from "./plugin.js";
+import type { BoundAgent } from "./store.js";
 
 const log = createLogger("channel-commands");
 
@@ -182,3 +186,142 @@ export async function handleControlCommand(input: {
       : "Couldn't clear the conversation. Please try again.",
   );
 }
+
+// ── which chat a conversation belongs to ──
+
+/** Long-lived on purpose: an /experiment or a /goal keeps reporting into its
+ *  chat for days. */
+const CHAT_TARGET_TTL_S = 30 * 24 * 60 * 60;
+
+function chatTargetKey(conversationId: string): string {
+  return `${REDIS_PREFIX}:conv-chat:${conversationId}`;
+}
+
+/**
+ * Remember where a chat conversation answers, so work that only knows the
+ * conversation id — an /experiment epoch, an /eval arm, a /goal turn — can
+ * still reach the chat. Stored without the triggering message: later replies
+ * must not quote or react to it.
+ */
+export async function rememberChatTarget(conversationId: string, target: ChannelDeliveryTarget): Promise<void> {
+  const { quoted: _quoted, statusReactions: _reactions, ...bare } = target;
+  await redisService
+    .getConnection()
+    .set(chatTargetKey(conversationId), JSON.stringify(bare), "EX", CHAT_TARGET_TTL_S)
+    .catch((err) => log.warn(`[commands] could not remember chat for ${conversationId}: ${errMsg(err)}`));
+}
+
+export async function chatTargetFor(conversationId: string | null | undefined): Promise<ChannelDeliveryTarget | null> {
+  if (!conversationId) return null;
+  try {
+    const raw = await redisService.getConnection().get(chatTargetKey(conversationId));
+    return raw ? (JSON.parse(raw) as ChannelDeliveryTarget) : null;
+  } catch {
+    return null;
+  }
+}
+
+// ── the Spaces slash commands, in a chat ──
+
+const FAST_COMMAND_RE = /^\/fast(?:\s|$)/i;
+/** The /experiment family (lib/experiment.ts parseExperimentCommand), matched
+ *  by prefix here so a plain message never loads that module. */
+const EXPERIMENT_COMMAND_RE = /^\/(?:experiment|understanding|framework|security-scan|repo-history)\b/i;
+
+/** Whether the shared slash-command layer has something to say about this
+ *  message. Cheap and pure, so plain messages never pay for the layer. */
+export function isSlashCommand(text: string): boolean {
+  const trimmed = text.trim();
+  return (
+    parseSlashCommand(trimmed) !== null ||
+    EXPERIMENT_COMMAND_RE.test(trimmed) ||
+    IMMEDIATE_TASK_COMMAND_RE.test(trimmed) ||
+    FAST_COMMAND_RE.test(trimmed)
+  );
+}
+
+export type ChatCommandOutcome =
+  | { kind: "handled" }
+  /** Run the agent with this task (and these flags) instead of the message. */
+  | {
+      kind: "dispatch";
+      task: string;
+      compactBeforeRun: boolean;
+      explicitQueueOnly: boolean;
+      pendingGoalStart: PendingGoalStart | null;
+    };
+
+/**
+ * Spaces' slash commands (/debug, /status, /goal, /compact, /queue, /fast,
+ * /eval, /experiment, /design…, /help) for a chat — the same handlers
+ * (lib/webhook-commands), answering into the chat instead of a thread: text
+ * through the outbox, generated files as documents or links.
+ *
+ * `/stop` (and WhatsApp's /cancel, /abort) runs the shared stop — cancel the
+ * agent's runs, drop queued messages, clear an active goal — and then the
+ * chat's own cleanup, so the number stops typing straight away.
+ */
+export async function runChatSlashCommand(input: {
+  account: ChannelAccount;
+  target: ChannelDeliveryTarget;
+  userId: string;
+  agent: BoundAgent;
+  text: string;
+}): Promise<ChatCommandOutcome> {
+  const { account, target, userId, agent } = input;
+  const isStop = parseControlCommand(input.text) === "stop";
+  const text = isStop ? "/stop" : input.text.trim();
+  const [{ handleWebhookCommands }, { reconcileStoppedRuns }, { sendGeneratedFile }] = await Promise.all([
+    import("../../lib/webhook-commands/index.js"),
+    import("../../routes/webhook.js"),
+    import("./hosted-files.js"),
+  ]);
+  const conversationId = channelConversationId(account.channel, account.accountKey, agent.slug, target.chatId);
+  // Before the command runs: an /experiment or /eval it starts reports back
+  // by looking the chat up from the conversation, possibly within seconds.
+  await rememberChatTarget(conversationId, target);
+  const config = (agent.config as Record<string, unknown> | null) ?? {};
+  const outcome = await handleWebhookCommands({
+    agent: {
+      id: agent.id,
+      slug: agent.slug,
+      name: agent.name,
+      orgId: agent.orgId,
+      appToken: "",
+      spacesAppId: "",
+      spacesAppUserId: "",
+      isDefault: false,
+    },
+    payload: { conversationId, channelId: target.chatId, userId },
+    log,
+    userText: text,
+    taskCommandText: text,
+    immediateTaskCommand: IMMEDIATE_TASK_COMMAND_RE.test(text),
+    autoGoalEnabled: config["autoGoal"] === true,
+    isTwin: false,
+    reply: async (markdownText, failureLabel) => {
+      await enqueueOutbound(account.id, { kind: "text", chatId: target.chatId, text: markdownText }).catch((err) =>
+        log.warn(`[commands] ${failureLabel}: ${errMsg(err)}`),
+      );
+    },
+    attach: (file) => sendGeneratedFile(target, file),
+    reconcileStoppedRuns,
+    channelDelivery: target,
+  });
+  if (isStop) {
+    const running = await activeRun(account.id, target.chatId);
+    if (running) await cancelRun(running.sessionId);
+    await forgetActiveRun(account.id, target.chatId);
+    await typingCancelled(account.id, target.chatId);
+    await enqueueOutbound(account.id, { kind: "typing", chatId: target.chatId, on: false });
+  }
+  if (outcome.kind === "handled") return outcome;
+  return {
+    kind: "dispatch",
+    task: outcome.task,
+    compactBeforeRun: outcome.compactBeforeRun,
+    explicitQueueOnly: outcome.explicitQueueOnly,
+    pendingGoalStart: outcome.pendingGoalStart,
+  };
+}
+

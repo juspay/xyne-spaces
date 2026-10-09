@@ -19,6 +19,7 @@ import { createLogger } from "../../logger.js";
 import { errMsg } from "../../lib/errors.js";
 import type { ChannelPlugin, InboundAttachment, InteractiveCard, OutboundFile, AuthStateStore } from "../messaging/plugin.js";
 import { formatForWhatsApp, WHATSAPP_RESULT_SECTIONS } from "../whatsapp-shared/format.js";
+import { publishQuestionForm } from "./forms.js";
 import { parseCloudWebhook, type CloudMediaRef } from "./messages.js";
 import {
   GRAPH_ORIGIN,
@@ -41,6 +42,20 @@ const TYPING_REFRESH_MS = 20_000;
 /** Meta's media caps: images are far smaller than documents. */
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const MAX_FILE_BYTES = 100 * 1024 * 1024;
+/** Meta's document + image allowlist. Anything else (HTML above all) is
+ *  rejected by the upload, so it is offered as a link instead. */
+const SENDABLE_TYPES = new Set([
+  "text/plain",
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "image/jpeg",
+  "image/png",
+]);
 
 export interface CloudHandle {
   phoneNumberId: string;
@@ -51,25 +66,44 @@ interface GraphError {
   error?: { message?: string; code?: number; error_subcode?: number; error_data?: { details?: string } };
 }
 
+/** A Graph rejection that keeps Meta's numeric code: the text is for people,
+ *  the code is what decides between "retry", "send a template" and "give up". */
+export class GraphApiError extends Error {
+  constructor(
+    message: string,
+    readonly code: number | undefined,
+  ) {
+    super(message);
+    this.name = "GraphApiError";
+  }
+}
+
+/** "Message not delivered (24-hour window expired)". Free-form text cannot
+ *  reach someone who has not written in a day; only a template can. */
+const REPLY_WINDOW_CLOSED_CODE = 131047;
+
 function messagesUrl(handle: CloudHandle): string {
   return `${GRAPH_ORIGIN}/${GRAPH_VERSION}/${handle.phoneNumberId}/messages`;
 }
 
-/** One place to talk to Graph, so every error reads the same to the agent. */
-async function graphPost(handle: CloudHandle, body: Record<string, unknown>): Promise<{ messageId: string }> {
-  const response = await httpFetch(messagesUrl(handle), {
+async function graphRequest<T>(handle: CloudHandle, url: string, body: Record<string, unknown>, label: string): Promise<T> {
+  const response = await httpFetch(url, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${handle.accessToken}` },
     body: JSON.stringify(body),
   });
-  const payload = (await response.json().catch(() => null)) as
-    | (GraphError & { messages?: Array<{ id?: string }> })
-    | null;
+  const payload = (await response.json().catch(() => null)) as (GraphError & T) | null;
   if (!response.ok) {
     const detail = payload?.error?.error_data?.details ?? payload?.error?.message ?? `HTTP ${response.status}`;
-    throw new Error(`WhatsApp Cloud API: ${detail}`);
+    throw new GraphApiError(`${label}: ${detail}`, payload?.error?.code);
   }
-  return { messageId: payload?.messages?.[0]?.id ?? "" };
+  return (payload ?? {}) as T;
+}
+
+/** One place to talk to Graph, so every error reads the same to the agent. */
+async function graphPost(handle: CloudHandle, body: Record<string, unknown>): Promise<{ messageId: string }> {
+  const payload = await graphRequest<{ messages?: Array<{ id?: string }> }>(handle, messagesUrl(handle), body, "WhatsApp Cloud API");
+  return { messageId: payload.messages?.[0]?.id ?? "" };
 }
 
 /** Upload bytes, then send by media id. A link would have to be publicly
@@ -365,6 +399,63 @@ export const whatsappCloudPlugin: ChannelPlugin<CloudHandle, WhatsAppCloudConfig
   },
 
   formatText: formatForWhatsApp,
+
+  acceptsFile(mimeType) {
+    return SENDABLE_TYPES.has(mimeType.split(";")[0]!.trim().toLowerCase());
+  },
+
+  isReplyWindowClosed(err) {
+    return err instanceof GraphApiError && err.code === REPLY_WINDOW_CLOSED_CODE;
+  },
+
+  async sendTemplate(handle, chatId, template, bodyParams) {
+    const { messageId } = await graphPost(handle, {
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: chatId,
+      type: "template",
+      template: {
+        name: template.name,
+        language: { code: template.language },
+        ...(bodyParams.length
+          ? { components: [{ type: "body", parameters: bodyParams.map((text) => ({ type: "text", text })) }] }
+          : {}),
+      },
+    });
+    return { chatId, messageId };
+  },
+
+  async publishForm(handle, businessAccountId) {
+    return publishQuestionForm(handle.accessToken, businessAccountId);
+  },
+
+  /** A WhatsApp Flow opened at its first screen with this send's data — no
+   *  endpoint involved, so one published Flow renders any question set. */
+  async sendForm(handle, chatId, form) {
+    const { messageId } = await graphPost(handle, {
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: chatId,
+      type: "interactive",
+      interactive: {
+        type: "flow",
+        ...(form.header ? { header: { type: "text", text: form.header.slice(0, 60) } } : {}),
+        body: { text: form.body.slice(0, 1024) },
+        action: {
+          name: "flow",
+          parameters: {
+            flow_message_version: "3",
+            flow_token: form.token,
+            flow_id: form.formId,
+            flow_cta: form.cta.slice(0, 30),
+            flow_action: "navigate",
+            flow_action_payload: { screen: form.screen, data: form.data },
+          },
+        },
+      },
+    });
+    return { chatId, messageId };
+  },
 
   // The Cloud API reports `from` as bare digits in full international form,
   // which is exactly what waIdFromTarget produces, so an identity row keys on

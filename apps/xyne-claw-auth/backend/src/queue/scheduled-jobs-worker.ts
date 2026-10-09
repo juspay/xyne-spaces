@@ -19,6 +19,8 @@ import {
 } from "../lib/agent-run-queue.js";
 
 import { createLogger } from "../logger.js";
+import { WHATSAPP_REPLY_MODE } from "../surfaces/messaging/const.js";
+import { notificationSurfaceInstructions } from "../surfaces/messaging/dispatch.js";
 const log = createLogger("scheduled-jobs-worker");
 
 let worker: Worker<ScheduledJobData> | undefined;
@@ -102,10 +104,14 @@ async function processJob(job: Job<ScheduledJobData>, token?: string): Promise<v
   const fastModeEnabled = await resolveFastMode(runConversationId, agentSlug, agentRow?.config);
 
   const progressUrl = `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`;
+  // A job set up from a WhatsApp chat answers there (scheduled-jobs.ts
+  // result handler), so its run writes for a phone.
+  const textsBack = row.replyMode === WHATSAPP_REPLY_MODE;
   const dispatchPayload = {
     userId,
     task,
     context: scheduledContext,
+    ...(textsBack ? { additionalInstructions: notificationSurfaceInstructions() } : {}),
     agentSlug,
     orgId: row.orgId,
     channelId: channelId ?? "",

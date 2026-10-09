@@ -39,7 +39,13 @@ export type CardAction =
   | { kind: "approve-write"; label: string }
   | { kind: "decline-write"; label: string }
   | { kind: "agent"; slug: string }
-  | { kind: "reply"; text: string };
+  | { kind: "reply"; text: string }
+  /** One choice on an ask-user-question card (questions.ts). Index-bound, so
+   *  a tap on an old card cannot answer the question asked after it. */
+  | { kind: "answer"; questionId: string; index: number; value: string }
+  /** "Connect this one" on a multi-connector list: answered with that
+   *  connector's own sign-in link (widgets.ts). */
+  | { kind: "connect"; serverType: string };
 
 export interface ParkedOption {
   action: CardAction;
@@ -187,6 +193,13 @@ function clip(value: string, max: number): string {
   return flat.length <= max ? flat : `${flat.slice(0, Math.max(1, max - 1))}…`;
 }
 
+/** A card body keeps its paragraphs — it is the one field a messenger renders
+ *  as text — while titles and rows are single lines. */
+function clipBody(value: string, max: number): string {
+  const body = value.replace(/[ \t]+/g, " ").replace(/ *\n */g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  return body.length <= max ? body : `${body.slice(0, Math.max(1, max - 1))}…`;
+}
+
 /**
  * Trim a card to what the messenger will actually accept. Meta rejects the
  * whole send for a single over-long row, so this runs before every native
@@ -194,7 +207,7 @@ function clip(value: string, max: number): string {
  */
 export function fitCard(card: InteractiveCard, limits: InteractiveLimits): InteractiveCard {
   const base = {
-    body: clip(card.body, limits.bodyChars),
+    body: clipBody(card.body, limits.bodyChars),
     ...(card.header ? { header: clip(card.header, limits.headerChars) } : {}),
     ...(card.footer ? { footer: clip(card.footer, limits.footerChars) } : {}),
   };

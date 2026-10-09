@@ -122,6 +122,27 @@ export type InteractiveCard =
   | { kind: "list"; body: string; header?: string; footer?: string; button: string; sections: CardListSection[] }
   | { kind: "cta"; body: string; header?: string; footer?: string; label: string; url: string };
 
+/** A template registered with the messenger ahead of time, addressed by name.
+ *  Its body takes one text parameter: the message being delivered. */
+export interface MessageTemplate {
+  name: string;
+  language: string;
+}
+
+/** A native multi-field form: one published form definition (`formId`) that
+ *  renders whatever `data` it is sent with. The submission comes back as an
+ *  InboundMessage carrying `formReply`, matched on `token`. */
+export interface FormMessage {
+  formId: string;
+  token: string;
+  /** The form's first screen. */
+  screen: string;
+  data: Record<string, unknown>;
+  body: string;
+  header?: string;
+  cta: string;
+}
+
 /** Opaque reference to a message on the messenger (for quoting / reacting). */
 export interface MessageRef {
   chatId: string;
@@ -182,6 +203,9 @@ export interface InboundMessage {
    *  option's `id`. Set only by plugins with native cards — a text fallback
    *  comes back as ordinary text and is matched by cards.ts instead. */
   cardReplyId?: string;
+  /** The person submitted a native form we sent (sendForm): the token we sent
+   *  it with and the submitted fields. */
+  formReply?: { token: string; fields: Record<string, unknown> };
   timestamp?: number;
   raw?: unknown;
 }
@@ -316,6 +340,10 @@ export interface ChannelPlugin<Handle = unknown, ChannelConfig = unknown> {
   // ── outbound ──
   sendText(handle: Handle, chatId: string, text: string, opts?: { quoted?: MessageRef; mentions?: string[] }): Promise<MessageRef>;
   sendMedia?(handle: Handle, chatId: string, file: OutboundFile, opts?: { caption?: string }): Promise<MessageRef>;
+  /** Whether the messenger takes this MIME type as a file at all. Absent
+   *  means anything goes; WhatsApp Cloud has a short allowlist (no HTML), and
+   *  a refused type is sent as a link instead (hosted-files.ts). */
+  acceptsFile?(mimeType: string): boolean;
   /** Send a card natively. Only called when `capabilities.interactive` is set;
    *  the core has already trimmed the card to those limits. */
   sendInteractive?(handle: Handle, chatId: string, card: InteractiveCard, opts?: { quoted?: MessageRef }): Promise<MessageRef>;
@@ -326,6 +354,20 @@ export interface ChannelPlugin<Handle = unknown, ChannelConfig = unknown> {
   react?(handle: Handle, ref: MessageRef, emoji: string): Promise<void>;
   /** Markdown → the messenger's dialect. Default: text passes through. */
   formatText?(markdown: string): string;
+  /** Send a pre-approved template. Only messengers with a reply window need
+   *  it: WhatsApp Cloud refuses free-form text 24 hours after the person's
+   *  last message, and a template is the one thing that still goes through. */
+  sendTemplate?(handle: Handle, chatId: string, template: MessageTemplate, bodyParams: string[]): Promise<MessageRef>;
+  /** True when a send failed only because the reply window is closed, so a
+   *  template is the fix rather than a retry. */
+  isReplyWindowClosed?(err: unknown): boolean;
+  /** Send a native form (WhatsApp Flows). Only for plugins that can, and only
+   *  when the account has a published form to send (questions.ts). */
+  sendForm?(handle: Handle, chatId: string, form: FormMessage): Promise<MessageRef>;
+  /** Publish the question form into the messenger account that owns this
+   *  number (WhatsApp: the Business Account id). Returns the form id to store
+   *  as the account's `questionFormId`. */
+  publishForm?(handle: Handle, businessAccountId: string): Promise<string>;
 
   // ── agent actions (optional; used by the channel tool set) ──
   /** Turn a human target ("+91 98765…", "…@g.us", a group name) into a chat id.

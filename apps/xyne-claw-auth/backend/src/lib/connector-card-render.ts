@@ -44,6 +44,13 @@ export interface ConnectorCardIdentity {
   spacesAppId: string | undefined;
 }
 
+export interface ResolvedConnectorSuggestions {
+  connectors: Array<{ serverType: string; name: string; description?: string; connected: boolean }>;
+  /** The roster ("what can I connect?") rather than named suggestions. */
+  listAll: boolean;
+  totalCount?: number;
+}
+
 /**
  * Connector suggestion card. Display + client-side connect only — there is no
  * server-side action or terminal state for this card on any surface.
@@ -52,13 +59,16 @@ export interface ConnectorCardIdentity {
  * org-shared credentials) is dropped — offering to connect it again is noise —
  * unless one of its calls failed with 401/403 this turn (`blockedConnectors`):
  * then the working credential is not working, and reconnecting is the fix.
+ *
+ * This resolves WHICH connectors the card offers — the half every surface
+ * shares; messaging channels render the same list as buttons
+ * (surfaces/messaging/widgets.ts). Null when nothing is left to offer.
  */
-export async function renderConnectorSuggestCard(args: {
+export async function resolveSuggestedConnectors(args: {
   suggestions: PendingConnectorSuggestions;
   blockedConnectors: string[] | undefined;
-  id: ConnectorCardIdentity;
-  target: FlowCardTarget;
-}): Promise<FlowDefinition | null> {
+  id: Pick<ConnectorCardIdentity, "agentSlug" | "agentOrgId" | "userId">;
+}): Promise<ResolvedConnectorSuggestions | null> {
   const { suggestions, id } = args;
   // Roster mode: the user asked what exists, so the SERVER picks the sample —
   // the model must not decide which connectors represent the catalog.
@@ -120,6 +130,19 @@ export async function renderConnectorSuggestCard(args: {
     );
     return null;
   }
+  return { connectors, listAll, ...(totalCount !== undefined ? { totalCount } : {}) };
+}
+
+export async function renderConnectorSuggestCard(args: {
+  suggestions: PendingConnectorSuggestions;
+  blockedConnectors: string[] | undefined;
+  id: ConnectorCardIdentity;
+  target: FlowCardTarget;
+}): Promise<FlowDefinition | null> {
+  const { suggestions, id } = args;
+  const resolved = await resolveSuggestedConnectors(args);
+  if (!resolved) return null;
+  const { connectors, listAll, totalCount } = resolved;
 
   const flow = withSpacesAppId(
     buildMcpSuggestFlow({

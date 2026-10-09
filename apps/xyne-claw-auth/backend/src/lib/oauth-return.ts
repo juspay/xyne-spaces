@@ -37,6 +37,9 @@ function allowedOrigins(): Set<string> {
     [
       originOf(CONFIG.frontendUrl),
       originOf(CONFIG.spacesAppUrl),
+      // Our own pages: a sign-in started from a chat link returns to
+      // /surfaces/:channel/connect/:token/done here.
+      originOf(CONFIG.selfUrl),
       ...configured,
     ].filter((entry): entry is string => !!entry),
   );

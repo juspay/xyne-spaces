@@ -16,7 +16,16 @@ import { GITHUB_INSIGHTS_TOOLS, isGithubInsightsTool, handleGithubInsightsTool }
 import { GRAFANA_CUSTOM_TOOLS, handleGrafanaQueryLogs, handleGrafanaListMetrics, handleGrafanaQueryMetrics, handleGrafanaQueryDatabase, buildUpstreamGrafanaCitation, prefixChunk } from "../mcp/adapters/grafana.js";
 import { type Citation } from "xyne-claw-shared";
 import { SLACK_CUSTOM_TOOLS, handleSlackFindChannel } from "../mcp/adapters/slack.js";
-import { channelAgentTools, handleChannelAgentTool, isChannelAgentTool } from "../surfaces/messaging/agent-tools.js";
+import {
+  channelAgentTools,
+  findNotifyTarget,
+  handleChannelAgentTool,
+  isChannelAgentTool,
+  NOTIFY_SERVER_TYPE,
+  NOTIFY_TOOL,
+  NOTIFY_TOOL_NAME,
+  notifyUser,
+} from "../surfaces/messaging/agent-tools.js";
 import { getChannel, isMessagingChannelKey, MESSAGING_CHANNEL_KEYS } from "../surfaces/messaging/plugin.js";
 import { POSTMAN_CUSTOM_TOOLS, handleRunMonitor } from "../mcp/adapters/postman.js";
 import {
@@ -707,14 +716,36 @@ const CUSTOM_TOOL_INJECTIONS: ReadonlyArray<{
   { match: (t) => t === "slack", tools: SLACK_CUSTOM_TOOLS, createIfMissing: true },
   // Messaging channels (WhatsApp over Baileys, WhatsApp Cloud API, …): fully
   // virtual — no upstream MCP server, every tool executes in claw-auth against
-  // the account's connection.
+  // the account's connection. A getter, not a value: the list depends on the
+  // channel plugin's capabilities, and plugins register at boot, after this
+  // module loads — computed here it saw no plugin, so only the
+  // capability-free send tool was ever offered.
   ...MESSAGING_CHANNEL_KEYS.map((key) => ({
     match: (t: string) => t === key,
-    tools: channelAgentTools(key),
+    get tools() {
+      return channelAgentTools(key);
+    },
     createIfMissing: true,
   })),
+  // "Message me on WhatsApp" for runs that did not start in a chat — granted
+  // per run only when the user can be reached (canNotifyOnWhatsApp below).
+  { match: (t) => t === NOTIFY_SERVER_TYPE, tools: [NOTIFY_TOOL], createIfMissing: true },
   { match: isGrafanaFamilyType, tools: GRAFANA_CUSTOM_TOOLS, createIfMissing: true },
 ];
+
+/**
+ * Whether this run gets the WhatsApp notify tool: it did not start in a chat
+ * (those reply with the channel's own send tool) and its user has a WhatsApp
+ * to be reached on. Shared by the listing, the call gate and start-run's
+ * forwarded config, so the three can never disagree.
+ */
+export async function canNotifyOnWhatsApp(
+  userId: string | undefined,
+  runCtx: { channelDelivery?: unknown; agentOrgId?: string | null | undefined } | null | undefined,
+): Promise<boolean> {
+  if (!userId || runCtx?.channelDelivery) return false;
+  return (await findNotifyTarget(userId, runCtx?.agentOrgId ?? null).catch(() => null)) !== null;
+}
 
 /**
  * Append each injection's custom tools to every matching server in `data`,
@@ -835,6 +866,7 @@ export async function withSurfaceDefaultToolsConfig(
   config: AgentToolsConfig | undefined,
   sessionId: string,
   sessionSpacesAppId?: string,
+  sessionUserId?: string,
 ): Promise<AgentToolsConfig | undefined> {
   if (!config) return undefined;
 
@@ -893,6 +925,11 @@ export async function withSurfaceDefaultToolsConfig(
   // permitted — see awakening/write-policy.ts, enforced at /mcp/call.
   if (runCtx?.triggerSource === "heartbeat" || runCtx?.triggerSource === "reflex") {
     effective = withDirectTool(effective, AWAKENING_SEND_TOOL);
+  }
+
+  // A run that can reach its user on WhatsApp may message them there.
+  if (await canNotifyOnWhatsApp(sessionUserId, runCtx)) {
+    effective = withDirectTool(effective, NOTIFY_TOOL_NAME);
   }
 
   // A run in an SDLC hub gets the SDLC tools; start-run adds the same ones to the config claw filters by.
@@ -1177,6 +1214,10 @@ async function buildMcpResolutionEntries(args: {
     log.info(`[mcp/tools] added virtual ${channel} entry (channel account) for userId=${userId}`);
   }
 
+  if (await canNotifyOnWhatsApp(userId, runCtx)) {
+    entries.push({ type: "user", serverType: NOTIFY_SERVER_TYPE, serverName: "WhatsApp", enforcementType: "virtual" });
+  }
+
   log.info(`[mcp/tools] final entries=${entries.map((e) => `${e.serverType}:${e.type}`).join(",")}`);
   return { entries, automationAppSwap, runCtx };
 }
@@ -1189,7 +1230,7 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
     const sessionAgentOrgId = await resolveSessionAgentOrgId(userId, spacesAppId);
     const sessionAgentTools = await loadSessionAgentToolsContext(agentSlug, spacesAppId, sessionAgentOrgId);
     const strictAgentToolsConfig = isStrictAgentToolsEnabled()
-      ? await withSurfaceDefaultToolsConfig(sessionAgentTools?.toolsConfig, req.params.sessionId, spacesAppId)
+      ? await withSurfaceDefaultToolsConfig(sessionAgentTools?.toolsConfig, req.params.sessionId, spacesAppId, userId)
       : undefined;
     const tenantUniqueId = resolveGatewayTenantForRequest();
 
@@ -1566,7 +1607,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     const sessionAgentOrgId = await resolveSessionAgentOrgId(userId, spacesAppId);
     const sessionAgentTools = await loadSessionAgentToolsContext(agentSlug, spacesAppId, sessionAgentOrgId);
     const strictAgentToolsConfig = isStrictAgentToolsEnabled()
-      ? await withSurfaceDefaultToolsConfig(sessionAgentTools?.toolsConfig, req.params.sessionId, spacesAppId)
+      ? await withSurfaceDefaultToolsConfig(sessionAgentTools?.toolsConfig, req.params.sessionId, spacesAppId, userId)
       : undefined;
     const { serverType, tool, params, permission, backendId, subagentId } = req.body as {
       serverType?: string;
@@ -1716,6 +1757,28 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
       !subagentReferencingTool(sessionAgentTools?.subagentToolRefs ?? [], { name: tool })
     ) {
       res.status(403).json({ success: false, error: "MCP tool is not enabled for this agent" });
+      return;
+    }
+
+    // WhatsApp notify — virtual server. The recipient is the session's own
+    // user, never a parameter, and the grant is re-checked here because the
+    // listing is not the authority.
+    if (serverType === NOTIFY_SERVER_TYPE) {
+      const { getSession } = await import("./webhook.js");
+      const notifyCtx = await getSession(req.params.sessionId).catch(() => null);
+      if (tool !== NOTIFY_TOOL_NAME || !(await canNotifyOnWhatsApp(userId, notifyCtx))) {
+        res.status(403).json({ success: false, error: "WhatsApp notifications are not available for this run" });
+        return;
+      }
+      const text = typeof (params as Record<string, unknown> | undefined)?.["text"] === "string"
+        ? ((params as Record<string, unknown>)["text"] as string).trim()
+        : "";
+      if (!text) {
+        res.json({ success: true, data: { content: JSON.stringify({ ok: false, error: "text is required" }) } });
+        return;
+      }
+      const sent = await notifyUser({ userId, orgId: notifyCtx?.agentOrgId ?? null, text });
+      res.json({ success: true, data: { content: JSON.stringify(sent) } });
       return;
     }
 
