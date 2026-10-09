@@ -246,7 +246,7 @@ export function draftSpecFromCreateAgentParams(params: Record<string, unknown>):
   const systemPrompt = str("systemPrompt");
   if (!name || !systemPrompt) return null;
 
-  const slug = str("slug") ?? name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  const slug = str("slug") ?? name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   if (!slug) return null;
 
   const knowledge =
