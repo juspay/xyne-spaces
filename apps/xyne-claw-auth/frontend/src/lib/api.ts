@@ -763,6 +763,111 @@ export async function decideDelegationRequest(
   return data.data;
 }
 
+export type RunSource = "automation" | "scheduled" | "people" | "workflow" | "delegated" | "awakening";
+export type InflightState = "live" | "stuck" | "lost";
+type SourceCounts = Partial<Record<RunSource, { completed: number; failed: number; lost: number }>>;
+
+export interface AgentRunHealth {
+  windowDays: number;
+  sampled: boolean;
+  sources: Array<{
+    id: RunSource | "all";
+    runs: number;
+    completed: number;
+    failed: number;
+    cancelled: number;
+    lost: number;
+    p50Ms: number | null;
+    p90Ms: number | null;
+  }>;
+  inflight: Array<{
+    sessionId: string;
+    state: InflightState;
+    source: RunSource;
+    task: string;
+    startedAt: string;
+    ageMs: number;
+    idleMs: number;
+    owned: boolean;
+    currentStep: string | null;
+  }>;
+  daily: Array<{ day: string; bySource: SourceCounts }>;
+  reasons: Array<{ error: string; count: number; lastAt: string; bySource: Partial<Record<RunSource, number>> }>;
+  models: Array<{
+    provider: string;
+    model: string;
+    runs: number;
+    failed: number;
+    llmP50Ms: number | null;
+    bySource: Partial<Record<RunSource, { runs: number; failed: number }>>;
+  }>;
+  recentRuns: Array<{
+    sessionId: string;
+    source: RunSource;
+    status: string;
+    startedBy: string | null;
+    startedAt: string;
+    durationMs: number | null;
+    model: string | null;
+    task: string;
+  }>;
+  thresholds: { liveIdleMs: number; lostIdleMs: number };
+}
+
+export interface AgentRunDetail {
+  run: {
+    sessionId: string;
+    agentSlug: string;
+    status: string;
+    triggerSource: string;
+    task: string;
+    result: string | null;
+    error: string | null;
+    provider: string | null;
+    model: string | null;
+    conversationId: string | null;
+    channelId: string | null;
+    parentSessionId: string | null;
+    currentToolLabel: string | null;
+    toolInvocations: ToolInvocation[] | null;
+    tokensIn: number | null;
+    tokensOut: number | null;
+    llmTotalMs: number | null;
+    toolMs: number | null;
+    llmTurns: number | null;
+    llmRetries: number | null;
+    lastRetryReason: string | null;
+    startedAt: string;
+    completedAt: string | null;
+  };
+  source: RunSource;
+  inflight: { state: InflightState; idleMs: number; owned: boolean } | null;
+  requester: { id: string; name: string | null; email: string | null } | null;
+  children: Array<{ sessionId: string; agentSlug: string; status: string; startedAt: string; durationMs: number | null; task: string }>;
+}
+
+export async function getAgentRunDetail(slug: string, sessionId: string): Promise<AgentRunDetail> {
+  const data = await request<{ success: boolean; data: AgentRunDetail }>(
+    `${AUTH_API_URL}/api/v1/agents/${encodeURIComponent(slug)}/monitor/runs/${encodeURIComponent(sessionId)}`,
+  );
+  return data.data;
+}
+
+export async function getAgentRunHealth(slug: string, days: number): Promise<AgentRunHealth> {
+  const data = await request<{ success: boolean; data: AgentRunHealth }>(
+    `${AUTH_API_URL}/api/v1/agents/${encodeURIComponent(slug)}/monitor?days=${days}`,
+  );
+  return data.data;
+}
+
+export async function closeLostRuns(slug: string, sessionIds?: string[]): Promise<{ closed: string[]; skipped: string[] }> {
+  const data = await request<{ success: boolean; data: { closed: string[]; skipped: string[] } }>(
+    `${AUTH_API_URL}/api/v1/agents/${encodeURIComponent(slug)}/monitor/close-lost`,
+    { method: "POST", body: JSON.stringify(sessionIds ? { sessionIds } : {}) },
+  );
+  return data.data;
+}
+
 export async function revokeDelegationRequest(slug: string, grantId: string): Promise<AgentDelegationGrant> {
   const data = await request<{ success: boolean; data: AgentDelegationGrant }>(
     `${AUTH_API_URL}/api/v1/agents/${encodeURIComponent(slug)}/delegation-requests/${encodeURIComponent(grantId)}/revoke`,
@@ -2948,11 +3053,26 @@ export interface ChatMsg {
   reasoning?: string | null;
   /** Tree parent for branching conversations. Null/undefined = root child. */
   parentId?: string | null;
+  /** Agent this turn was sent to / answered by. A chat can switch agents
+   *  mid-conversation, so identity is per message, not per conversation. */
+  agentSlug?: string;
   attachments?: ChatAttachmentMeta[];
   contextItems?: AttachedContextRef[];
 }
 
-export type ContextType = "channel" | "ticket" | "canvas" | "call" | "repository";
+/** `conversation` = every agent's turns in a direct chat, for a window that
+ *  lets the user switch agents mid-conversation. Omitted = one agent's turns. */
+export type ChatReadScope = "conversation";
+
+function chatReadQuery(allRuns: boolean, scope?: ChatReadScope): string {
+  const params = new URLSearchParams();
+  if (allRuns) params.set("allRuns", "1");
+  if (scope) params.set("scope", scope);
+  const qs = params.toString();
+  return qs ? `?${qs}` : "";
+}
+
+export type ContextType = "channel" | "ticket" | "canvas" | "call" | "app" | "repository";
 export type ContextSearchType = ContextType | "all";
 
 export interface ContextItem {
@@ -3506,13 +3626,14 @@ export async function pollChatMessages(
   // the normal chat window shows only the caller's own turns — the backend ACL
   // gates on ?allRuns=1 AND admin, so passing this from a non-admin is a no-op.
   allRuns = false,
+  scope?: ChatReadScope,
 ): Promise<ChatHistory> {
   const data = await request<{
     success: boolean;
     data: ChatMsg[];
     invocationsByMsgId?: Record<string, ToolInvocation[]>;
   }>(
-    `${AUTH_API_URL}/api/v1/agent-chat/${slug}/chat/${conversationId}/messages${allRuns ? "?allRuns=1" : ""}`,
+    `${AUTH_API_URL}/api/v1/agent-chat/${slug}/chat/${conversationId}/messages${chatReadQuery(allRuns, scope)}`,
   );
   const invocationsByMsgId = new Map<string, ToolInvocation[]>();
   if (data.invocationsByMsgId) {
@@ -3569,12 +3690,13 @@ export function subscribeLiveConversation(
   callbacks: LiveStreamCallbacks,
   // OPT-IN cross-user live stream (admin "All Runs" only) — mirrors pollChatMessages.
   allRuns = false,
+  scope?: ChatReadScope,
 ): () => void {
   const controller = new AbortController();
   void (async () => {
     let res: Response;
     try {
-      res = await fetch(`${AUTH_API_URL}/api/v1/agent-chat/${slug}/chat/${conversationId}/live${allRuns ? "?allRuns=1" : ""}`, {
+      res = await fetch(`${AUTH_API_URL}/api/v1/agent-chat/${slug}/chat/${conversationId}/live${chatReadQuery(allRuns, scope)}`, {
         credentials: "include",
         headers: { "x-user-id": userId, Accept: "text/event-stream" },
         signal: controller.signal,
@@ -3692,18 +3814,41 @@ export async function fetchConversationDebugArtifacts(
   return data.data;
 }
 
+/** One row of the chat history: a chat the user switched agents in is one row. */
 export interface ConversationSummary {
+  /** Unique per row (a Spaces thread is listed once per agent). */
+  rowId: string;
   conversationId: string;
   title: string;
   messageCount: number;
   lastMessageAt: string;
+  /** The agent to open and continue the chat with — the most recent one. */
+  agentSlug: string;
+  /** Every agent that answered, in first-use order. */
+  agentSlugs: string[];
 }
 
-export async function listChatConversations(slug: string, userId: string): Promise<ConversationSummary[]> {
-  const data = await request<{ success: boolean; data: ConversationSummary[] }>(
-    `${AUTH_API_URL}/api/v1/agent-chat/${slug}/conversations?userId=${userId}`,
+export interface ConversationPage {
+  conversations: ConversationSummary[];
+  /** Pass back as `cursor` for the next page; null on the last one. */
+  nextCursor: string | null;
+}
+
+/** One page of the user's chat history across every agent — newest first, 50
+ *  rows a page with every pinned chat on the first; the same endpoint the
+ *  Spaces AI screen and sidebar use. `agentSlug` keeps only that agent's chats. */
+export async function listChatConversations(
+  userId: string,
+  opts: { agentSlug?: string | null; cursor?: string | null; limit?: number } = {},
+): Promise<ConversationPage> {
+  const query = new URLSearchParams({ userId });
+  if (opts.agentSlug) query.set("agentSlug", opts.agentSlug);
+  if (opts.cursor) query.set("cursor", opts.cursor);
+  if (opts.limit) query.set("limit", String(opts.limit));
+  const data = await request<{ success: boolean; data: ConversationSummary[]; nextCursor?: string | null }>(
+    `${AUTH_API_URL}/api/v1/agent-chat/conversations?${query.toString()}`,
   );
-  return data.data;
+  return { conversations: data.data, nextCursor: data.nextCursor ?? null };
 }
 // ── Knowledge Base (spaces collections) ──────────────────────────────
 
@@ -7214,6 +7359,43 @@ export async function saveErrorPipelineRule(
 export async function deleteErrorPipelineRule(userId: string, name: string): Promise<void> {
   await request(
     `${AUTH_API_URL}/api/v1/admin/error-pipeline/rules/${encodeURIComponent(name)}`,
+    { method: "DELETE", headers: { "x-user-id": userId } },
+  );
+}
+
+export interface SandboxRepoConfigRow {
+  key: string;
+  source: "database" | "default";
+  hasDefault: boolean;
+  enabled: boolean;
+  active: boolean;
+  config: Record<string, unknown>;
+  updatedAt: string | null;
+  updatedByUserId: string | null;
+}
+
+export async function listSandboxRepoConfigs(userId: string): Promise<SandboxRepoConfigRow[]> {
+  const data = await request<{ success: boolean; data: SandboxRepoConfigRow[] }>(
+    `${AUTH_API_URL}/api/v1/admin/sandbox-repos`,
+    { headers: { "x-user-id": userId } },
+  );
+  return data.data;
+}
+
+export async function saveSandboxRepoConfig(
+  userId: string,
+  key: string,
+  body: { config: unknown; enabled: boolean },
+): Promise<void> {
+  await request(
+    `${AUTH_API_URL}/api/v1/admin/sandbox-repos/${encodeURIComponent(key)}`,
+    { method: "PUT", headers: { "x-user-id": userId, "Content-Type": "application/json" }, body: JSON.stringify(body) },
+  );
+}
+
+export async function deleteSandboxRepoConfig(userId: string, key: string): Promise<void> {
+  await request(
+    `${AUTH_API_URL}/api/v1/admin/sandbox-repos/${encodeURIComponent(key)}`,
     { method: "DELETE", headers: { "x-user-id": userId } },
   );
 }

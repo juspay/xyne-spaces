@@ -53,8 +53,11 @@ export type ClawDoneStatus = {
 export type ClawStreamEvent =
   | { event: "started";         seq: number; sessionId: string }
   | { event: "invocation";      seq: number; sessionId: string; toolInvocation: unknown; toolLabel?: string | undefined; meta?: ClawStreamMeta | undefined }
-  | { event: "reasoning";       seq: number; sessionId: string; reasoningDelta: string }
-  | { event: "delta";           seq: number; sessionId: string; textDelta: string }
+  /** `partId` names the thinking/text block the delta belongs to
+   *  (`<llm call>:<content index>`), so consumers can rebuild the turn as
+   *  ordered parts. Optional: older pods omit it. */
+  | { event: "reasoning";       seq: number; sessionId: string; reasoningDelta: string; partId?: string | undefined }
+  | { event: "delta";           seq: number; sessionId: string; textDelta: string; partId?: string | undefined }
   | { event: "attachment";      seq: number; sessionId: string; attachment: ClawAttachmentPayload }
   | { event: "sandbox-preview"; seq: number; sessionId: string; payload: ClawSandboxPreviewPayload }
   /** @deprecated Rolling-deploy compatibility for claw pods predating ui-widget. */

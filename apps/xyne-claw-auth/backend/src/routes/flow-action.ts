@@ -61,6 +61,7 @@ import { emitAgentWorkingSignal } from "../surfaces/spaces/client.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
 import { dispatchXyneAiContinuationRun } from "../lib/xyne-ai-continuation.js";
 import { applyCreateSkill, isCreateSkillAction } from "../lib/skill-apply.js";
+import { applyArtifactAppAction, isArtifactAppAction } from "../lib/artifact-app-apply.js";
 import { isClawAdmin } from "../middleware/agent-acl.js";
 import { applyAgentToolAction, AGENT_TOOL_SLUGS } from "../lib/agent-tools-apply.js";
 import { applyConversationFork } from "../lib/conversation-fork.js";
@@ -1245,6 +1246,26 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         return;
       }
 
+      // ── publish-app: artifact apps live in claw-auth's own tables ───────────
+      // No MCP connector. Applied as the card-signed write owner; ownership is
+      // re-checked against the app row inside applyArtifactAppAction.
+      if (isArtifactAppAction(serverType, tool)) {
+        const outcome = await applyArtifactAppAction(tool, params, writeClawUserId);
+        if (!outcome.ok) {
+          res.json({ type: "error", message: outcome.error } satisfies AppActionResponse);
+          return;
+        }
+        resp = { type: "close_screen", finalMessage: outcome.message };
+        if (xyneAiCard) {
+          await finishTextWriteOnRow({ card: xyneAiCard, tool, ok: true, heading: outcome.message });
+          res.json(resp);
+          return;
+        }
+        res.json(resp);
+        void replaceFlowCardWithText(messageId, agentSlug, outcome.message, conversationId, undefined, spacesAppId);
+        return;
+      }
+
       // MCP-based tools
       const { callTool } = await import("../mcp/runner.js");
       const { hasConnectorDefinition } = await import("../mcp/connector-definitions.js");
@@ -2041,6 +2062,10 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       const cardSpacesAppId = data["spacesAppId"] as string | undefined;
       const cardChannelId = data["channelId"] as string | undefined;
       const cardConversationId = (data["conversationId"] as string | undefined) ?? conversationId;
+      // A draft proposed on Xyne AI lives on a chat row, not a Spaces message.
+      const cardChatMessageId = data["chatMessageId"] as string | undefined;
+      const xyneAiChatMessageId =
+        data["surface"] === "xyne-ai" && cardChatMessageId ? cardChatMessageId : undefined;
 
       if (!requestId || !cardUserId) {
         res.status(400).json({ type: "error", message: "Missing agent-card fields in flowJSON.data" } satisfies AppActionResponse);
@@ -2085,7 +2110,10 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         }
         resp = { type: "close_screen", finalMessage: result.error };
         res.json(resp);
-        void replaceFlowCardWithText(messageId, cardAgentSlug, `${result.error}`, cardConversationId, cardChannelId, cardSpacesAppId);
+        // Xyne AI has no Spaces message to flatten; the toast carries the reason.
+        if (!xyneAiChatMessageId) {
+          void replaceFlowCardWithText(messageId, cardAgentSlug, `${result.error}`, cardConversationId, cardChannelId, cardSpacesAppId);
+        }
         return;
       }
 
@@ -2111,36 +2139,60 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             : "Agent draft declined.";
 
       resp = { type: "close_screen", finalMessage: finalText };
-      res.json(resp);
       // Update the SAME card in place — the identity stays visible, the chip and
-      // footer flip to the decided state. Falls back to text if the card can't
-      // be rebuilt, so the buttons never survive a decision either way.
-      void replaceFlowCardWithFlow(
-        messageId,
-        cardAgentSlug,
-        buildAgentCardFlow(
-          {
-            variant: "draft",
-            phase,
-            agent: result.identity,
-            toolSelection: result.toolSelection,
-            ...(result.note ? { note: result.note } : {}),
-            ...(deciderName ? { decidedBy: deciderName } : {}),
-            ...(decidedNow ? { decidedById: callerUserId } : {}),
-            ...(decidedNow ? { decidedAt: new Date().toISOString() } : {}),
-          },
-          {
-            requestId,
-            agentSlug: cardAgentSlug ?? "",
-            userId: cardUserId,
-            ...(cardConversationId ? { conversationId: cardConversationId } : {}),
-            ...(cardChannelId ? { channelId: cardChannelId } : {}),
-          },
-        ),
-        cardConversationId,
-        cardChannelId,
-        cardSpacesAppId,
+      // footer flip to the decided state.
+      const decidedFlow = buildAgentCardFlow(
+        {
+          variant: "draft",
+          phase,
+          agent: result.identity,
+          toolSelection: result.toolSelection,
+          ...(result.note ? { note: result.note } : {}),
+          ...(deciderName ? { decidedBy: deciderName } : {}),
+          ...(decidedNow ? { decidedById: callerUserId } : {}),
+          ...(decidedNow ? { decidedAt: new Date().toISOString() } : {}),
+        },
+        {
+          requestId,
+          agentSlug: cardAgentSlug ?? "",
+          userId: cardUserId,
+          ...(cardConversationId ? { conversationId: cardConversationId } : {}),
+          ...(cardChannelId ? { channelId: cardChannelId } : {}),
+        },
       );
+      if (xyneAiChatMessageId) {
+        // Xyne AI swaps the card on its chat row FIRST — the client re-reads it
+        // on the response (same ordering as write-approval cards).
+        const { replaceFlowCardOnRow } = await import("../lib/flow-card-delivery.js");
+        const replaced = await replaceFlowCardOnRow({
+          chatMessageId: xyneAiChatMessageId,
+          screenId: decidedFlow.screenId,
+          flow: {
+            ...decidedFlow,
+            data: {
+              ...(decidedFlow.data ?? {}),
+              surface: "xyne-ai",
+              chatMessageId: xyneAiChatMessageId,
+              ...(cardSpacesAppId ? { spacesAppId: cardSpacesAppId } : {}),
+            },
+          },
+          userId: callerUserId,
+        });
+        if (!replaced) log.warn(`[flow-action] agent-card xyne-ai card not replaced request=${requestId}`);
+        res.json(resp);
+      } else {
+        res.json(resp);
+        // Falls back to text if the card can't be rebuilt, so the buttons never
+        // survive a decision either way.
+        void replaceFlowCardWithFlow(
+          messageId,
+          cardAgentSlug,
+          decidedFlow,
+          cardConversationId,
+          cardChannelId,
+          cardSpacesAppId,
+        );
+      }
       log.info(`[flow-action] agent-card ${decision} request=${requestId} by=${callerUserId} phase=${phase}`);
       return;
     }

@@ -124,7 +124,7 @@ const CHIP_GAP = 10;
  *
  * Fit is measured, not guessed: an off-screen twin renders every chip at its
  * natural width plus a worst-case toggle, and we walk it counting what fits in
- * the live track — the approach ContextPillRow uses for the composer's context
+ * the live track — the approach the composer's ContextTray uses for its context
  * pills. That is what makes the "do they all fit?" answer correct, so a group
  * that fits on one line shows no toggle at all.
  */

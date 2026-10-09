@@ -13,6 +13,7 @@ import { BaseWatchProvider, WatchResult, SubscriptionRecord } from '../pubsubTyp
 import { GoogleService } from '@/services/googleService';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
+import { disconnectDeskSourceBySystem } from '@/integrations/core/deskSourceDisconnect';
 import { seedSyncCursor } from '@/services/syncCursorRecovery';
 
 export class GmailWatchProvider extends BaseWatchProvider {
@@ -81,7 +82,13 @@ export class GmailWatchProvider extends BaseWatchProvider {
     );
   }
 
-  async markError(id: string): Promise<void> {
-    await this.externalSourceRepo.update(id, { isActive: false });
+  async markError(id: string, error?: string): Promise<void> {
+    // unauthorized_client is a fault in our own OAuth client, so reconnecting cannot fix it:
+    // deactivate as before, but do not ask the desk's managers to reconnect.
+    if (error && /unauthorized_client/i.test(error)) {
+      await this.externalSourceRepo.update(id, { isActive: false });
+      return;
+    }
+    await disconnectDeskSourceBySystem(id, { clearCredentials: false });
   }
 }

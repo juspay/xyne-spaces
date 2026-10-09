@@ -1,4 +1,4 @@
-import { forwardRef, useImperativeHandle, useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { Fragment, forwardRef, useImperativeHandle, useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -77,7 +77,7 @@ import { DebugDrawer } from "../../components/DebugDrawer";
 import { MessageRatingButtons } from "../../components/MessageRatingButtons";
 import type { AgentLight } from "../../lib/types";
 import { Avatar, nameToHsl } from "./ui/Avatar";
-import { ReadonlyContextPills } from "./ReadonlyContextPills";
+import { ReadonlyContextPills, iconForType } from "./ReadonlyContextPills";
 import { Dialog } from "./ui/Dialog";
 import { SessionExportMenu } from "./ui/SessionExportMenu";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
@@ -240,7 +240,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   codex: "OpenAI Codex",
 };
 
-type ConversationWithAgent = ConversationSummary & { agentSlug: string };
+type ConversationWithAgent = ConversationSummary;
 
 /* ── provider select ─────────────────────────────────────────────── */
 
@@ -1569,6 +1569,7 @@ function MessageThread({
   sending,
   toolLabel,
   agent,
+  agents,
   userAbbr,
   streamingMsgId,
   liveInvocations,
@@ -1599,6 +1600,8 @@ function MessageThread({
   sending: boolean;
   toolLabel: string | null;
   agent: AgentLight;
+  /** Resolves each message's own agent: a chat can switch agents mid-way. */
+  agents: AgentLight[];
   userAbbr: string;
   streamingMsgId: string | null;
   liveInvocations: ToolInvocation[];
@@ -1712,6 +1715,17 @@ function MessageThread({
   // button. Older assistants are reachable via the branch pager instead.
   const lastAssistantId = [...messages].reverse().find((msg) => msg.role === "assistant")?.id;
 
+  // Each turn renders as the agent it was sent to. Rows from before per-message
+  // identity (or an agent the user can no longer see) fall back to the slug, and
+  // a row with no slug at all to the conversation's current agent.
+  const agentFor = (msg: ChatMsg | undefined): AgentLight => {
+    const slug = msg?.agentSlug;
+    if (!slug || slug === agent.slug) return agent;
+    return agents.find((a) => a.slug === slug)
+      ?? { ...agent, id: slug, slug, name: slug, description: "" };
+  };
+  const multiAgent = new Set(messages.map((msg) => msg.agentSlug).filter(Boolean)).size > 1;
+
   return (
     // min-h-0 on the wrapper is REQUIRED — flex children default to
     // `min-height: auto`, which lets the inner thread expand to fit its
@@ -1737,12 +1751,27 @@ function MessageThread({
 
         if (isUser) {
           const isEditing = editingUserId === msg.id;
+          const recipient = msg.agentSlug ? agentFor(msg) : null;
           return (
-            <div key={msg.id} data-id="user-message" className="flex flex-row-reverse items-end gap-2">
+            <Fragment key={msg.id}>
+            <div data-id="user-message" className="flex flex-row-reverse items-end gap-2">
               <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-xyne-fg-primary text-[9px] font-bold text-xyne-fg-inverse">
                 {userAbbr}
               </div>
               <div className="flex flex-col items-end gap-1" style={{ maxWidth: "75%" }}>
+                {/* Who this question went to — a chat can switch agents. */}
+                {recipient && !isEditing && (
+                  <span data-id="message-recipient" className="flex items-center gap-1 pr-1 text-[11px] text-xyne-fg-muted">
+                    To
+                    <span
+                      className="flex h-3.5 w-3.5 items-center justify-center rounded-full text-[7px] font-bold text-white"
+                      style={{ backgroundColor: nameToHsl(recipient.name) }}
+                    >
+                      {initials(recipient.name)}
+                    </span>
+                    <span className="font-medium text-xyne-fg-secondary">{recipient.name}</span>
+                  </span>
+                )}
                 {isEditing ? (
                   <div className="flex w-[min(520px,75vw)] flex-col gap-2 rounded-[14px] rounded-tr-[4px] bg-xyne-brand px-3 py-2.5">
                     <textarea
@@ -1821,6 +1850,7 @@ function MessageThread({
                 )}
               </div>
             </div>
+            </Fragment>
           );
         }
 
@@ -1840,15 +1870,22 @@ function MessageThread({
         const showThinkingPill = isStream && !hasInvocations && !hasReasoning && !hasText;
         const designVersion = designVersionByMessageId?.get(msg.id);
 
+        const msgAgent = agentFor(msg);
         return (
-          <div key={msg.id} data-id="agent-message" className="flex items-start gap-2">
+          <div key={msg.id} data-id="agent-message" data-agent-slug={msgAgent.slug} className="flex items-start gap-2">
             <div
               className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[9px] font-bold text-white"
-              style={{ backgroundColor: nameToHsl(agent.name) }}
+              style={{ backgroundColor: nameToHsl(msgAgent.name) }}
+              title={msgAgent.name}
             >
-              {initials(agent.name)}
+              {initials(msgAgent.name)}
             </div>
             <div className="flex min-w-0 flex-col gap-1.5" style={{ maxWidth: "75%" }}>
+              {multiAgent && (
+                <span data-id="agent-message-name" className="text-[11px] font-medium text-xyne-fg-tertiary">
+                  {msgAgent.name}
+                </span>
+              )}
               {showThinkingPill && (
                 <div className="inline-flex w-fit items-center gap-2 rounded-full bg-xyne-surface px-3 py-1.5 text-[11px] text-xyne-fg-tertiary ring-1 ring-xyne-border-subtle">
                   <span className="inline-block h-1.5 w-1.5 animate-bounce rounded-full bg-xyne-fg-muted [animation-delay:-0.3s]" />
@@ -1974,7 +2011,7 @@ function MessageThread({
       })}
 
       {sending && !isStreaming && lastMsg?.role === "user" && (
-        <TypingIndicator agent={agent} />
+        <TypingIndicator agent={agentFor(lastMsg)} />
       )}
       </div>
     </div>
@@ -2000,12 +2037,25 @@ function MessageThread({
 
 /* ── left panel ──────────────────────────────────────────────────── */
 
+/** The agents that answered in a chat the user switched agents in. */
+function participantsFor(
+  conv: ConversationWithAgent,
+  agents: AgentLight[],
+): Array<{ slug: string; name: string; color: string }> | undefined {
+  if (!conv.agentSlugs || conv.agentSlugs.length < 2) return undefined;
+  return conv.agentSlugs.map((slug) => {
+    const known = agents.find((a) => a.slug === slug);
+    return known ? { slug, name: known.name, color: known.color } : { slug, name: slug, color: "#6366f1" };
+  });
+}
+
 function ConvItem({
   conv,
   isActive,
   pinned,
   displayTitle,
   agent,
+  participants,
   onSelect,
   onTogglePin,
   onRename,
@@ -2017,6 +2067,8 @@ function ConvItem({
   /** Custom title from localStorage, otherwise the server-derived first-message title. */
   displayTitle: string;
   agent?: AgentLight | null;
+  /** Every agent that answered in this chat, when the user switched agents. */
+  participants?: Array<{ slug: string; name: string; color: string }>;
   onSelect: () => void;
   onTogglePin: () => void;
   onRename: (next: string) => void;
@@ -2090,7 +2142,18 @@ function ConvItem({
           {/* Spacer so the kebab can sit flush right without shifting the title. */}
           <span className="w-5 shrink-0" aria-hidden="true" />
         </div>
-        {agent && (
+        {participants && participants.length > 1 ? (
+          <div data-id="conv-agents" className="mt-0.5 flex min-w-0 items-center gap-1.5">
+            <span className="flex shrink-0 -space-x-1">
+              {participants.map((p) => (
+                <Avatar key={p.slug} name={p.name} color={p.color} size={14} shape="circle" />
+              ))}
+            </span>
+            <span className="truncate text-[11px] text-xyne-fg-tertiary">
+              {participants.map((p) => p.name).join(", ")}
+            </span>
+          </div>
+        ) : agent && (
           <div className="mt-0.5 flex items-center gap-1.5">
             <Avatar name={agent.name} color={agent.color} size={14} shape="circle" />
             <span className="text-[11px] text-xyne-fg-tertiary">{agent.name}</span>
@@ -2185,11 +2248,53 @@ function ConvItem({
   );
 }
 
+/** The bottom of the paged conversation list: loads the next page as it
+ *  scrolls into view (a little early), nothing once every page is loaded. */
+function ConversationListEnd({
+  hasMore,
+  loading,
+  onLoadMore,
+}: {
+  hasMore: boolean;
+  loading: boolean;
+  onLoadMore: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const loadMoreRef = useRef(onLoadMore);
+  loadMoreRef.current = onLoadMore;
+  useEffect(() => {
+    const node = ref.current;
+    if (!node || !hasMore || loading) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) loadMoreRef.current();
+      },
+      { rootMargin: "200px 0px" },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [hasMore, loading]);
+  if (!hasMore) return null;
+  return (
+    <div ref={ref} data-id="conv-list-end" className="flex h-8 items-center justify-center">
+      {loading && (
+        <span
+          aria-label="Loading more conversations"
+          className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-xyne-fg-muted border-t-transparent"
+        />
+      )}
+    </div>
+  );
+}
+
 function LeftPanel({
   activeAgent,
   agents,
   conversations,
   convLoading,
+  hasMoreConversations,
+  loadingMoreConversations,
+  onLoadMoreConversations,
   activeConvId,
   selectedProvider,
   providers,
@@ -2210,6 +2315,10 @@ function LeftPanel({
   agents: AgentLight[];
   conversations: ConversationWithAgent[];
   convLoading: boolean;
+  /** More rows exist past the loaded pages. */
+  hasMoreConversations: boolean;
+  loadingMoreConversations: boolean;
+  onLoadMoreConversations: () => void;
   activeConvId: string | undefined;
   selectedProvider: string;
   providers: ProviderCredential[];
@@ -2415,9 +2524,10 @@ function LeftPanel({
                     const agent = agents.find((a) => a.slug === conv.agentSlug);
                     return (
                       <ConvItem
-                        key={`${conv.agentSlug}-${conv.conversationId}`}
+                        key={conv.rowId}
                         conv={conv}
                         agent={agent}
+                        participants={participantsFor(conv, agents)}
                         isActive={activeConvId === conv.conversationId}
                         pinned
                         displayTitle={titleFor(conv)}
@@ -2449,9 +2559,10 @@ function LeftPanel({
                 const agent = agents.find((a) => a.slug === conv.agentSlug);
                 return (
                   <ConvItem
-                    key={`${conv.agentSlug}-${conv.conversationId}`}
+                    key={conv.rowId}
                     conv={conv}
                     agent={agent}
+                    participants={participantsFor(conv, agents)}
                     isActive={activeConvId === conv.conversationId}
                     pinned={false}
                     displayTitle={titleFor(conv)}
@@ -2463,6 +2574,11 @@ function LeftPanel({
                 );
               })}
             </div>
+            <ConversationListEnd
+              hasMore={hasMoreConversations}
+              loading={loadingMoreConversations}
+              onLoadMore={onLoadMoreConversations}
+            />
           </>
         )}
       </div>
@@ -2962,7 +3078,7 @@ export const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function In
                   className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-xyne-border-subtle bg-xyne-surface-subtle px-2.5 py-0.5 text-[11px] text-xyne-fg-secondary"
                   title={`${item.type} · ${item.title}`}
                 >
-                  <AtIcon size={10} className="shrink-0 text-xyne-fg-tertiary" />
+                  {iconForType(item.type, 11)}
                   <span className="truncate">{item.title}</span>
                   <button
                     type="button"
@@ -4952,7 +5068,7 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
     declinePendingAction,
   } = useChat();
 
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   // URL ?agent= takes precedence on mount, but global context survives navigation
   // and lets the in-flight chat resume when the user comes back to /v3/chat.
   const urlAgent = searchParams.get("agent");
@@ -4972,10 +5088,23 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
   );
   const consumedDeepLinkRef = useRef<string | null>(null);
   const activeAgentSlug = urlAgent ?? ctxAgentSlug;
+  // ?agent= outranks the context, so a pick made after arriving by a deep link
+  // must move the URL too — otherwise the picker changes and nothing else does.
   const setActiveAgentSlug = useCallback(
-    (slug: string | null) => setCtxAgentSlug(slug),
-    [setCtxAgentSlug],
+    (slug: string | null) => {
+      setCtxAgentSlug(slug);
+      if (urlAgent && urlAgent !== slug) {
+        const next = new URLSearchParams(searchParams);
+        if (slug) next.set("agent", slug);
+        else next.delete("agent");
+        setSearchParams(next, { replace: true });
+      }
+    },
+    [setCtxAgentSlug, urlAgent, searchParams, setSearchParams],
   );
+  // Set by a mid-conversation agent switch so the per-agent composer reset
+  // below keeps the user's fast mode and thinking level for the next turn.
+  const carryComposerOnSwitchRef = useRef(false);
 
   // On mount, sync ?agent= from the URL into the context once.
   useEffect(() => {
@@ -4983,6 +5112,58 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [urlAgent]);
   const [conversations, setConversations]     = useState<ConversationWithAgent[]>([]);
+  /** Next page of the sidebar list (50 rows a page); null once all are loaded. */
+  const [conversationsCursor, setConversationsCursor] = useState<string | null>(null);
+  const [loadingMoreConversations, setLoadingMoreConversations] = useState(false);
+  /** Rows in an agent's view open with that agent. */
+  const rowsForView = useCallback(
+    (convs: ConversationSummary[]): ConversationWithAgent[] =>
+      activeAgentSlug ? convs.map((c) => ({ ...c, agentSlug: activeAgentSlug })) : convs,
+    [activeAgentSlug],
+  );
+  // The view a list answer belongs to; one landing after a switch is dropped.
+  const conversationViewRef = useRef(activeAgentSlug);
+  conversationViewRef.current = activeAgentSlug;
+  const conversationsRef = useRef(conversations);
+  conversationsRef.current = conversations;
+  /** Refresh the sidebar list for the current view (one agent's chats, or
+   *  every agent's) by re-reading its first page — where new activity lands —
+   *  and keeping any older pages already scrolled in. */
+  const reloadConversations = useCallback(() => {
+    const view = activeAgentSlug;
+    return listChatConversations(userId, { agentSlug: view }).then(({ conversations: convs, nextCursor }) => {
+      const rows = rowsForView(convs);
+      if (conversationViewRef.current !== view) return rows;
+      const prev = conversationsRef.current;
+      const fresh = new Set(rows.map((c) => c.rowId));
+      setConversations(
+        [...rows, ...prev.filter((c) => !fresh.has(c.rowId))].sort(
+          (a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime(),
+        ),
+      );
+      // Past the first page the cursor already points after the last loaded
+      // row; only a list showing just the first page takes the fresh one.
+      if (prev.length <= rows.length) setConversationsCursor(nextCursor);
+      return rows;
+    });
+  }, [userId, activeAgentSlug, rowsForView]);
+  const loadMoreConversations = useCallback(() => {
+    if (!conversationsCursor || loadingMoreConversations) return;
+    const view = activeAgentSlug;
+    setLoadingMoreConversations(true);
+    listChatConversations(userId, { agentSlug: view, cursor: conversationsCursor })
+      .then(({ conversations: more, nextCursor }) => {
+        if (conversationViewRef.current !== view) return;
+        const rows = rowsForView(more);
+        setConversations((prev) => {
+          const seen = new Set(prev.map((c) => c.rowId));
+          return [...prev, ...rows.filter((c) => !seen.has(c.rowId))];
+        });
+        setConversationsCursor(nextCursor);
+      })
+      .catch(() => {})
+      .finally(() => setLoadingMoreConversations(false));
+  }, [userId, activeAgentSlug, conversationsCursor, loadingMoreConversations, rowsForView]);
   const [convLoading, setConvLoading]         = useState(false);
   const [inputValue, setInputValue]           = useState("");
   const [designSelection, setDesignSelection] = useState<DesignNodeSelection | null>(null);
@@ -5143,22 +5324,11 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
     } catch (err) {
       console.error("[chat] delete failed:", err);
       // Pull the fresh list so we re-show it if the delete actually failed.
-      listChatConversations(target.agentSlug, userId)
-        .then((convs) => {
-          setConversations((prev) => {
-            const others = prev.filter((c) => c.agentSlug !== target.agentSlug);
-            return [...others, ...convs.map((c) => ({ ...c, agentSlug: target.agentSlug }))]
-              .sort(
-                (a, b) =>
-                  new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime(),
-              );
-          });
-        })
-        .catch(() => {});
+      reloadConversations().catch(() => {});
     } finally {
       setPendingDelete(null);
     }
-  }, [pendingDelete, userId, conversationId, clear, convMeta]);
+  }, [pendingDelete, userId, conversationId, clear, convMeta, reloadConversations]);
 
   const activeAgent = useMemo(
     () => agents.find((a) => a.slug === activeAgentSlug) ?? null,
@@ -5209,7 +5379,7 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
   // gets a chatMessageId on finalize, and that's what the debugger keys by.
   useEffect(() => {
     if (sending || !conversationId || !activeAgentSlug) return;
-    listRuns(userId, { conversationId, agentSlug: activeAgentSlug, limit: 200 })
+    listRuns(userId, { conversationId, limit: 200 })
       .then((runs) => {
         setRunByMsgId(buildRunByMsgId(runs));
       })
@@ -5261,8 +5431,12 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
    * (no litellm credential, or error) ⇒ the picker hides itself. */
   useEffect(() => {
     setSelectedModel("");
-    setThinkingLevel(null);
-    setFastMode(readStoredFastMode(activeAgentSlug));
+    if (carryComposerOnSwitchRef.current) {
+      carryComposerOnSwitchRef.current = false;
+    } else {
+      setThinkingLevel(null);
+      setFastMode(readStoredFastMode(activeAgentSlug));
+    }
     if (!activeAgentSlug || !userId) {
       setLitellmModels([]);
       setLitellmDefaultModel(null);
@@ -5292,9 +5466,11 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
 
     if (activeAgentSlug) {
       setConvLoading(true);
-      listChatConversations(activeAgentSlug, userId)
-        .then((convs) => {
+      setConversationsCursor(null);
+      listChatConversations(userId, { agentSlug: activeAgentSlug })
+        .then(({ conversations: convs, nextCursor }) => {
           setConversations(convs.map((c) => ({ ...c, agentSlug: activeAgentSlug })));
+          setConversationsCursor(nextCursor);
           // Deep-link via ?conversation=<id> — load that specific conv
           // instead of the most recent one. Only honor it once per page
           // load so an in-page conversation switch doesn't keep snapping
@@ -5325,7 +5501,7 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
               (!conversationId && !sending && messages.length === 0));
           if (shouldLoad && targetConvId) {
             if (deepLinkTarget) consumedDeepLinkRef.current = deepLinkTarget;
-            pollChatMessages(activeAgentSlug, targetConvId, allRunsActive(targetConvId))
+            pollChatMessages(activeAgentSlug, targetConvId, allRunsActive(targetConvId), "conversation")
               .then(({ messages: msgs, invocationsByMsgId, reasoningByMsgId }) => {
                 // Skip auto-load if the user started sending while we were
                 // fetching — the draft session is already the active one.
@@ -5338,7 +5514,7 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
             // needs to pick the right run under branching. Independent of the
             // messages fetch — runs are an admin-side projection, not part of
             // the chat thread, so failure here is silent.
-            listRuns(userId, { conversationId: targetConvId, agentSlug: activeAgentSlug, limit: 200 })
+            listRuns(userId, { conversationId: targetConvId, limit: 200 })
               .then((runs) => {
                 setRunByMsgId(buildRunByMsgId(runs));
               })
@@ -5347,27 +5523,21 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
         })
         .catch(() => setConversations([]))
         .finally(() => setConvLoading(false));
-    } else if (agents.length > 0) {
-      // All-agents view: fetch conversations for every agent, merge and sort
+    } else {
+      // All-agents view: every agent's chats, newest first, a switched chat
+      // once (the endpoint the Spaces AI screen uses too).
       setConvLoading(true);
-      Promise.all(
-        agents.map((agent) =>
-          listChatConversations(agent.slug, userId)
-            .then((convs) => convs.map((c) => ({ ...c, agentSlug: agent.slug } as ConversationWithAgent)))
-            .catch(() => [] as ConversationWithAgent[]),
-        ),
-      )
-        .then((results) => {
-          const all = results
-            .flat()
-            .sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime());
-          setConversations(all);
+      setConversationsCursor(null);
+      listChatConversations(userId)
+        .then(({ conversations: convs, nextCursor }) => {
+          setConversations(convs);
+          setConversationsCursor(nextCursor);
         })
         .catch(() => setConversations([]))
         .finally(() => setConvLoading(false));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeAgentSlug, userId, agents, urlConversation]);
+  }, [activeAgentSlug, userId, urlConversation]);
 
   /* Live tool calls for a VIEWED (not driven) conversation. Spaces-originated
    * runs report over the callback webhook; subscribe to the /live SSE so this
@@ -5391,7 +5561,7 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
         applyLiveEvent(convId, { type: "done" });
         let attempts = 0;
         const tryLoad = () => {
-          pollChatMessages(slug, convId, allRunsActive(convId))
+          pollChatMessages(slug, convId, allRunsActive(convId), "conversation")
             .then(({ messages: msgs, invocationsByMsgId: invMap, reasoningByMsgId: reasonMap }) => {
               const last = msgs[msgs.length - 1];
               if (last?.role !== "assistant" && attempts < 4) {
@@ -5405,7 +5575,7 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
         };
         tryLoad();
       },
-    }, allRunsActive(convId));
+    }, allRunsActive(convId), "conversation");
     return close;
   }, [conversationId, activeAgentSlug, userId, sending, applyLiveEvent, loadConversation, allRunsActive]);
 
@@ -5415,29 +5585,19 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
   useEffect(() => {
     if (!userId) return;
     return onConversationCreated(({ agentSlug, conversationId: newConvId }) => {
-      listChatConversations(agentSlug, userId)
-        .then((convs) => {
-          const withAgent = convs.map((c) => ({ ...c, agentSlug }));
-          setConversations((prev) => {
-            // If we're in the "all agents" view, merge in just this agent's
-            // conversations without dropping the others.
-            if (activeAgentSlug) return withAgent;
-            const otherAgents = prev.filter((c) => c.agentSlug !== agentSlug);
-            const merged = [...otherAgents, ...withAgent];
-            return merged.sort(
-              (a, b) =>
-                new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime(),
-            );
-          });
+      reloadConversations()
+        .then((rows) => {
           // Optimistic fallback in case the backend hasn't indexed it yet —
           // synthesize a placeholder so the sidebar entry is never missing.
-          if (!convs.some((c) => c.conversationId === newConvId)) {
+          if (!rows.some((c) => c.conversationId === newConvId)) {
             const placeholder: ConversationWithAgent = {
+              rowId: newConvId,
               conversationId: newConvId,
               title: "New conversation",
               messageCount: 1,
               lastMessageAt: new Date().toISOString(),
               agentSlug,
+              agentSlugs: [agentSlug],
             };
             setConversations((prev) =>
               prev.some((c) => c.conversationId === newConvId)
@@ -5448,16 +5608,25 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
         })
         .catch(() => {});
     });
-  }, [userId, activeAgentSlug, onConversationCreated]);
+  }, [userId, reloadConversations, onConversationCreated]);
 
   const handleSelectAgent = useCallback((slug: string) => {
     if (slug === activeAgentSlug) return;
+    setSelectedCitation(null);
+    setConversations([]);
+    if (conversationId) {
+      // Mid-conversation switch: stay in this chat. The next turn goes to the
+      // new agent in the SAME conversation (claw-auth hands it the turns it
+      // has not seen), and the composer keeps the user's draft, fast mode and
+      // thinking level. The sidebar list is per agent, so it refetches.
+      carryComposerOnSwitchRef.current = true;
+      setActiveAgentSlug(slug);
+      return;
+    }
     setActiveAgentSlug(slug);
     clear();
     setInputValue("");
-    setConversations([]);
-    setSelectedCitation(null);
-  }, [activeAgentSlug, clear]);
+  }, [activeAgentSlug, clear, conversationId, setActiveAgentSlug]);
 
   /**
    * Clear the active agent filter — sidebar reverts to the merged "all agents"
@@ -5516,7 +5685,7 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
   const handleSelectConv = useCallback(async (conv: ConversationWithAgent) => {
     const switchingAgent = conv.agentSlug !== activeAgentSlug;
     try {
-      const { messages: msgs, invocationsByMsgId, reasoningByMsgId } = await pollChatMessages(conv.agentSlug, conv.conversationId, allRunsActive(conv.conversationId));
+      const { messages: msgs, invocationsByMsgId, reasoningByMsgId } = await pollChatMessages(conv.agentSlug, conv.conversationId, allRunsActive(conv.conversationId), "conversation");
       loadConversation(msgs, conv.conversationId, invocationsByMsgId, reasoningByMsgId);
       setSelectedCitation(null);
       // Per-chat model pick doesn't carry across conversations — start each at
@@ -5528,7 +5697,7 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
       }
       // Refresh the debugger's msg→sessionId map for the new conversation so
       // "Debug this response" picks the right run under branching.
-      listRuns(userId, { conversationId: conv.conversationId, agentSlug: conv.agentSlug, limit: 200 })
+      listRuns(userId, { conversationId: conv.conversationId, limit: 200 })
         .then((runs) => {
           setRunByMsgId(buildRunByMsgId(runs));
         })
@@ -5804,9 +5973,7 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
           setManualEdits([]);
           setActiveVersionIndex(null);
         }
-        listChatConversations(activeAgentSlug, userId)
-          .then((convs) => setConversations(convs.map((c) => ({ ...c, agentSlug: activeAgentSlug }))))
-          .catch(() => {});
+        reloadConversations().catch(() => {});
       } finally {
         // Revoke object URLs whether send succeeded or not — they're a memory leak.
         previewsToRevoke.forEach((u) => {
@@ -5820,19 +5987,29 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
     void dispatch();
   }, [inputValue, pendingFiles, selectedContext, activeAgentSlug, userId, sending, send, mode, selectedModel, speedOverride, thinkingOverride, designSelection, designEditScope, designPreviewSource, manualEdits, editedDesignHtml]);
 
+  // A pending action belongs to the agent that proposed it — after a switch
+  // that may not be the agent now picked, and approving runs the tool with
+  // the proposing agent's tools and credentials.
+  const agentForMessage = useCallback(
+    (msgId: string): string | null => messages.find((m) => m.id === msgId)?.agentSlug ?? activeAgentSlug,
+    [messages, activeAgentSlug],
+  );
+
   const handleApproveAction = useCallback(async (msgId: string, action: PendingAction) => {
-    if (!activeAgentSlug) throw new Error("No active agent selected");
-    const resultText = await approveChatAction(activeAgentSlug, userId, action);
+    const ownerSlug = agentForMessage(msgId);
+    if (!ownerSlug) throw new Error("No active agent selected");
+    const resultText = await approveChatAction(ownerSlug, userId, action);
     approvePendingAction(msgId, action, resultText);
-  }, [activeAgentSlug, userId, approvePendingAction]);
+  }, [agentForMessage, userId, approvePendingAction]);
 
   const handleApproveAndContinueAction = useCallback(async (msgId: string, action: PendingAction) => {
-    if (!activeAgentSlug) throw new Error("No active agent selected");
+    const ownerSlug = agentForMessage(msgId);
+    if (!ownerSlug) throw new Error("No active agent selected");
 
     const latestUserIntent = [...messages].reverse().find((m) => m.role === "user")?.content?.trim();
 
     try {
-      const resultText = await approveChatAction(activeAgentSlug, userId, action);
+      const resultText = await approveChatAction(ownerSlug, userId, action);
       approvePendingAction(msgId, action, resultText);
 
       const normalized = (resultText ?? "").trim();
@@ -5848,7 +6025,7 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
         `Approved result:\n${cappedResult || "(empty output)"}`,
       ].filter(Boolean).join("\n\n");
 
-      await send(activeAgentSlug, userId, "Continue with approved result.", {
+      await send(ownerSlug, userId, "Continue with approved result.", {
         disableTools: true,
         additionalInstructions,
       });
@@ -5865,13 +6042,13 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
         "Do not call tools in this turn.",
       ].filter(Boolean).join("\n\n");
 
-      await send(activeAgentSlug, userId, "Continue after failed approved action.", {
+      await send(ownerSlug, userId, "Continue after failed approved action.", {
         disableTools: true,
         additionalInstructions,
       });
       throw err;
     }
-  }, [activeAgentSlug, userId, approvePendingAction, messages, send]);
+  }, [agentForMessage, userId, approvePendingAction, messages, send]);
 
   const handleDeclineAction = useCallback((msgId: string, action: PendingAction) => {
     declinePendingAction(msgId, action);
@@ -5888,6 +6065,9 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
             agents={agents}
             conversations={conversations}
             convLoading={convLoading}
+            hasMoreConversations={conversationsCursor !== null}
+            loadingMoreConversations={loadingMoreConversations}
+            onLoadMoreConversations={loadMoreConversations}
             activeConvId={conversationId}
             selectedProvider={selectedProvider}
             providers={providers}
@@ -5990,6 +6170,7 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
                     sending={sending}
                     toolLabel={toolLabel}
                     agent={activeAgent}
+                    agents={agents}
                     userAbbr={userAbbr}
                     streamingMsgId={streamingMsgId}
                     liveInvocations={liveInvocations}

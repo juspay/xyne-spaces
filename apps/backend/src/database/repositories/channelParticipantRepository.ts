@@ -217,6 +217,18 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
   }
 
   /**
+   * User IDs of the app/agent participants of a channel, filtered in the DB via
+   * the participant → user relation so human members are never loaded.
+   */
+  async getAppParticipantUserIds(channelId: string): Promise<string[]> {
+    const participants = await this.db.channelParticipant.findMany({
+      where: { channelId, user: { userType: { in: [UserType.APP, UserType.AGENT] } } },
+      select: { userId: true },
+    });
+    return participants.map(p => p.userId);
+  }
+
+  /**
    * Get all participants for a channel with their user details.
    * ChannelParticipant has no Prisma FK relation to User, so we do a two-step
    * batch fetch: participants → user IDs → users (same pattern as callRepository).

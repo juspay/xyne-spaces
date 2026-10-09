@@ -23,7 +23,7 @@ import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import { AGENT, LITELLM, SERVER } from "./config.js";
 import { runWithSubagentMcpId } from "./subagent-mcp-context.js";
 import { ensureSessionDebugDir, sessionDir } from "./session-store.js";
-import { SUBAGENT_DEFINITIONS, findSubagentDefinitionForServer, isPresentationToolSource, getSandboxSession, probeSession, REPO_CONFIGS, buildSandboxStoreKey, type SubagentDefinition, type SetupStep } from "xyne-claw-shared";
+import { SUBAGENT_DEFINITIONS, findSubagentDefinitionForServer, isPresentationToolSource, getSandboxSession, probeSession, buildSandboxStoreKey, type SubagentDefinition, type SetupStep } from "xyne-claw-shared";
 import { acquireFollowUpLock, isValidFollowUpHandle } from "./subagent-followup.js";
 import { matchesDirectPick } from "./tool-resolution.js";
 import { optEnabled } from "./optimizations.js";
@@ -578,11 +578,13 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
     `[Subagent — nested LLM run, expensive] ${directFirst}${def.description} ` +
     `(If you have multiple independent questions for this subagent, batch them into ONE call with a single combined question; ` +
     `if you must fire it more than once, fire ALL the calls in the SAME assistant turn so they run in parallel.)`;
-  const tool: ToolDefinition & { progressLabels?: string[] } = {
+  const tool: ToolDefinition & { progressLabels?: string[]; subagent?: true } = {
     name: def.name,
     label: def.name,
     description: taggedDescription,
     progressLabels: def.progressLabels,
+    // Lets the run mark this tool's calls as subagent calls (ToolInvocation.subagentName).
+    subagent: true,
     parameters: Type.Object({
       [def.paramName]: Type.String({ description: def.paramDescription }),
       // Only exposed on the top-level run (where a background registry exists).

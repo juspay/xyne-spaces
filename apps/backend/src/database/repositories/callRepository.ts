@@ -344,7 +344,7 @@ export class CallRepository {
       );
     }
     queueCallVespaFeed(result.id, { source: CallVespaFeedSource.CallRepositoryUpdate });
-    queueScheduledCallPillSync(result.id, 'callRepository.update');
+    queueScheduledCallPillSync(result.id, result.externalId, 'callRepository.update');
     return result;
   }
 
@@ -962,7 +962,7 @@ export class CallRepository {
    */
   async findCallsWithStrandedParticipants(
     take: number,
-  ): Promise<Array<{ id: string; endedAt: Date | null }>> {
+  ): Promise<Array<{ id: string; externalId: string; endedAt: Date | null }>> {
     const stranded = await DatabaseClient.getInstance().callParticipant.findMany({
       where: {
         response: InvitationResponse.ACCEPTED,
@@ -977,7 +977,7 @@ export class CallRepository {
 
     return await DatabaseClient.getInstance().call.findMany({
       where: { id: { in: stranded.map((p) => p.callId) } },
-      select: { id: true, endedAt: true },
+      select: { id: true, externalId: true, endedAt: true },
       orderBy: { endedAt: 'asc' },
     });
   }
@@ -1042,7 +1042,7 @@ export class CallRepository {
     const result = await handleParticipantLeaveTx(callExternalId, userId, this, leftAt);
     queueCallVespaFeed(result.call?.id, { source: CallVespaFeedSource.CallRepositoryHandleParticipantLeaving });
     if (result.call) {
-      queueScheduledCallPillSync(result.call.id, 'callRepository.handleParticipantLeave');
+      queueScheduledCallPillSync(result.call.id, result.call.externalId, 'callRepository.handleParticipantLeave');
     }
     return result;
   }
@@ -1062,7 +1062,7 @@ export class CallRepository {
     const result = await handleRoomFinishedTx(callExternalId, endedAt, this);
     queueCallVespaFeed(result.call?.id, { source: CallVespaFeedSource.CallRepositoryHandleRoomFinished });
     if (result.call) {
-      queueScheduledCallPillSync(result.call.id, 'callRepository.handleRoomFinished');
+      queueScheduledCallPillSync(result.call.id, result.call.externalId, 'callRepository.handleRoomFinished');
     }
     return result;
   }
@@ -1118,7 +1118,7 @@ export class CallRepository {
       await messageMetadataService.syncInitialMessageMd(activatedCallMeta.conversationId);
     }
     queueCallVespaFeed(callParam.id, { source: CallVespaFeedSource.CallRepositoryActivateScheduledCall });
-    queueScheduledCallPillSync(callParam.id, 'callRepository.activateScheduledCall');
+    queueScheduledCallPillSync(callParam.id, callParam.externalId, 'callRepository.activateScheduledCall');
   }
 
   /**
@@ -1312,7 +1312,7 @@ export class CallRepository {
       return [];
     }
 
-    logger.info(`[getParticipantsInfo] Resolved call: externalId=${callExternalId}, internalId=${call.id}`);
+    logger.info(`[getParticipantsInfo] Resolved call: externalId=${callExternalId}`);
 
     // Fetch participants with response status
     const callParticipants = await DatabaseClient.getInstance().callParticipant.findMany({
@@ -1329,7 +1329,7 @@ export class CallRepository {
       },
     });
 
-    logger.info(`[getParticipantsInfo] Found ${callParticipants.length} call_participant records for callId=${call.id}, userIds: ${callParticipants.map(p => p.userId).join(', ')}`);
+    logger.info(`[getParticipantsInfo] Found ${callParticipants.length} call_participant records for callId=${callExternalId}, userIds: ${callParticipants.map(p => p.userId).join(', ')}`);
 
     const userIds = callParticipants.map(p => p.userId);
     if (userIds.length === 0) {
@@ -1475,7 +1475,7 @@ export class CallRepository {
     const updatedCall = await updateScheduledCallTx(db, title, startsAt, endsAt, channelId, metadata, callUpdatesChannel, callId, removeUserIds, addUserIds, invitedByUserId, externalInvitees, summaryTemplateId);
 
     queueCallVespaFeed(callId, { source: CallVespaFeedSource.CallRepositoryUpdateScheduledCall });
-    queueScheduledCallPillSync(callId, 'callRepository.updateScheduledCall');
+    queueScheduledCallPillSync(callId, updatedCall.externalId, 'callRepository.updateScheduledCall');
     return updatedCall;
   }
 

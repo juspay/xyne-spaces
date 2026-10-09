@@ -7,7 +7,7 @@ import {
   buildSandboxStoreKey,
   sandboxConversationIdFromMeta,
   getSandboxSession,
-  REPO_CONFIGS,
+  getRepoConfig,
 } from "../sandbox/index.js";
 import { generateSceneHtml } from "./scene-html.js";
 import {
@@ -193,7 +193,7 @@ async function sceneCode(
     return `// Refused to read ${scene.file}\n// Code scenes are restricted to the sandbox workspace.`;
   }
   const pinnedRepo = context.meta?.["sandboxRepo"];
-  const repoRoot = pinnedRepo ? REPO_CONFIGS[pinnedRepo]?.workDir : undefined;
+  const repoRoot = pinnedRepo ? (await getRepoConfig(pinnedRepo))?.workDir : undefined;
   const candidates = normalized.startsWith("/")
     ? [normalized]
     : [

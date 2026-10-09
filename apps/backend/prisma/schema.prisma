@@ -10,7 +10,7 @@ generator client {
 
 generator zero {
   provider      = "prisma-generator-zero"
-  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource", "WorkflowFolder", "WorkflowCredential", "AgentConversationShare"]
+  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource", "WorkflowFolder", "WorkflowCredential", "AgentConversationShare", "OrgMemberCredential"]
 }
 
 datasource db {
@@ -1586,6 +1586,17 @@ model OrgMember {
   @@index([orgId, joinedAt])
   @@map("org_members")
   @@schema("public")
+}
+
+model OrgMemberCredential {
+  id           String    @id @default(cuid())
+  memberId     String    @unique // OrgMember.memberId (no FK constraint, matches OrgMember's own convention)
+  orgId        String    // Denormalized from OrgMember.orgId — tenant key for workspace-scoped ACL (no FK constraint)
+  passwordHash String
+  updatedAt    DateTime  @updatedAt
+
+  @@map("org_member_credentials")
+  @@schema("non_zero")
 }
 
 model WorkspaceOrganization {

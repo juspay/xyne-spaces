@@ -30,6 +30,8 @@ import sandboxRouter from "../routes/sandbox.js";
 import sandboxAccessRouter from "../routes/sandbox-access.js";
 import { adminRouter } from "../routes/admin.js";
 import { adminDigitalTwinRouter } from "../routes/admin-digital-twin.js";
+import { adminSandboxReposRouter } from "../routes/admin-sandbox-repos.js";
+import { sandboxReposInternalRouter } from "../routes/sandbox-repos-internal.js";
 import { organizationsRouter } from "../routes/organizations.js";
 // TEMPORARY — delete after backfill of agents.signingSecret is complete.
 import { adminBackfillSigningSecretsRouter } from "../routes/admin-backfill-signing-secrets.js";
@@ -45,7 +47,6 @@ import { sessionsArchiveRouter } from "../routes/sessions-archive.js";
 import { surfaceInternalRouter } from "../routes/surface-internal.js";
 import { pagePanelRouter } from "../routes/page-panel.js";
 import { experimentsInternalRouter } from "../routes/experiments-internal.js";
-import { artifactAppsInternalRouter } from "../routes/artifact-apps-internal.js";
 import { errorPipelineIngestRouter, errorPipelineInternalRouter } from "../routes/error-pipeline.js";
 import { connectorsInternalRouter } from "../routes/connectors-internal.js";
 import { providersInternalRouter } from "../routes/providers-internal.js";
@@ -87,7 +88,7 @@ import { slackRouter } from "../surfaces/slack/routes/index.js";
 import { mcpGatewayRouter } from "../mcpgateway/index.js";
 import { requireAuth, requireNoAccessToken, allowReadAccessToken, allowScopedAccessToken, requireStrictS2S, requireInternalS2S, requireUserAuth, optionalAuth, s2sKeyMatches } from "../middleware/require-auth.js";
 import { requireClawAdmin, requireSearchEvalAccess } from "../middleware/agent-acl.js";
-import { apiLimiter, sampleClientIp } from "../middleware/rate-limiters.js";
+import { apiLimiter, sampleClientIp, isUnlimitedInternalS2S } from "../middleware/rate-limiters.js";
 
 const SIGNED_INGRESS_PREFIXES = ["/webhook"] as const;
 
@@ -131,6 +132,10 @@ function mountRequestContext(app: Express): void {
       return;
     }
     sampleClientIp(req);
+    if (isUnlimitedInternalS2S(req)) {
+      next();
+      return;
+    }
     apiLimiter(req, res, next);
   });
 }
@@ -188,6 +193,7 @@ function mountCoreApi(app: Express): void {
   app.use(`${BASE}/sandbox`, requireAuth, requireNoAccessToken, sandboxRouter);
   app.use(`${BASE}/organizations`, requireAuth, requireNoAccessToken, organizationsRouter);
   app.use(`${BASE}/admin/digital-twin`, requireAuth, requireNoAccessToken, requireClawAdmin, adminDigitalTwinRouter);
+  app.use(`${BASE}/admin/sandbox-repos`, requireAuth, requireNoAccessToken, requireClawAdmin, adminSandboxReposRouter);
   app.use(`${BASE}/admin`, requireAuth, requireNoAccessToken, adminRouter);
   // TEMPORARY — delete this mount + the import above + the file after backfill.
   app.use(`${BASE}/admin`, requireAuth, requireNoAccessToken, adminBackfillSigningSecretsRouter);
@@ -214,10 +220,10 @@ function mountCoreApi(app: Express): void {
   // org/workspace/user upserts — see services/clawSpacesSyncClient.ts in Spaces.
   app.use(`${BASE}/internal/spaces-sync`, requireStrictS2S, spacesSyncRouter);
   app.use(`${BASE}/internal/experiments`, requireStrictS2S, experimentsInternalRouter);
-  app.use(`${BASE}/internal/artifact-apps`, requireStrictS2S, artifactAppsInternalRouter); // create-app reads the conversation's head build before an incremental update
   app.use(`${BASE}/error-pipeline`, errorPipelineIngestRouter); // Grafana webhook ingest (JWT-authed inside)
   app.use(`${BASE}/internal/error-pipeline`, requireStrictS2S, errorPipelineInternalRouter); // run-result callback from xyne-claw (S2S only)
   app.use(`${BASE}/internal/tts`, requireStrictS2S, ttsRouter);
+  app.use(`${BASE}/internal/sandbox-repos`, requireStrictS2S, sandboxReposInternalRouter);
   app.use(`${BASE}/internal/connectors`, requireStrictS2S, connectorsInternalRouter); // connector availability lookup for xyne-claw (S2S only)
   app.use(`${BASE}/internal/providers`, requireStrictS2S, providersInternalRouter); // AI provider availability lookup for xyne-claw (S2S only)
 }

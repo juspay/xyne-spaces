@@ -11,7 +11,12 @@
 // Shared by BOTH run entrypoints — agent-chat.ts (v3 chat) and run-stream.ts
 // (Spaces AI / Ask AI v2) — so a viewer's GET /agent-chat/:slug/chat/:convId/live
 // works for either driver over the same live-conversation-bus.
-import { publishLiveEvent } from "./live-conversation-bus.js";
+//
+// It also folds the run into ordered parts (thinking / text / tool calls, see
+// @xyne/shared assistantParts) so a mid-run reload and live viewers get the
+// turn as a timeline, not one text blob and one reasoning blob.
+import { applyPartDelta, applyToolPart, type AssistantPart } from "./chat-run-record.js";
+import { publishLiveEvent, type LiveDeltaChunk } from "./live-conversation-bus.js";
 import { chatMessageRepository, agentRunRepository } from "../repositories/index.js";
 
 interface DeltaBuf {
@@ -25,8 +30,11 @@ interface DeltaBuf {
   userIdPromise: Promise<string | undefined> | null;
   batchText: string; // accumulated since the last live flush
   batchReasoning: string;
+  /** The same batch as ordered per-part chunks, for viewers that build the timeline. */
+  batchChunks: LiveDeltaChunk[];
   accText: string; // run total (absolute → idempotent persist)
-  accReasoning: string;
+  /** The run so far as ordered parts (absolute → idempotent persist). */
+  parts: AssistantPart[];
   liveTimer: ReturnType<typeof setTimeout> | null;
   persistTimer: ReturnType<typeof setTimeout> | null;
   /** Self-expiry, re-armed on every delta: drops the entry on pods that saw this
@@ -65,8 +73,10 @@ function flushDeltaLive(sessionId: string): void {
   if (!buf.batchText && !buf.batchReasoning) return;
   const textDelta = buf.batchText || undefined;
   const reasoningDelta = buf.batchReasoning || undefined;
+  const chunks = buf.batchChunks;
   buf.batchText = "";
   buf.batchReasoning = "";
+  buf.batchChunks = [];
   const publish = (uid: string) =>
     publishLiveEvent(buf.convId, {
       type: "delta",
@@ -75,6 +85,7 @@ function flushDeltaLive(sessionId: string): void {
       userId: uid,
       ...(textDelta ? { textDelta } : {}),
       ...(reasoningDelta ? { reasoningDelta } : {}),
+      ...(chunks.length > 0 ? { chunks } : {}),
       ts: Date.now(),
     });
   if (buf.userId) { publish(buf.userId); return; }
@@ -90,10 +101,46 @@ function flushDeltaPersist(sessionId: string): void {
   if (!buf.assistantMessageId) return;
   // Conditional (status='running') write — the final /callback flips status off
   // "running", so a late/cross-pod partial write matches 0 rows and can never
-  // clobber the final content. Accumulated (absolute) → idempotent.
+  // clobber the final content. Accumulated (absolute) → idempotent. Thinking
+  // lives in the parts (readers fill `reasoning` from them).
   chatMessageRepository
-    .updatePartialContent(buf.assistantMessageId, { content: buf.accText, ...(buf.accReasoning ? { reasoning: buf.accReasoning } : {}) })
+    .updatePartialContent(buf.assistantMessageId, { content: buf.accText, ...(buf.parts.length > 0 ? { parts: buf.parts } : {}) })
     .catch(() => {});
+}
+
+function coalescerFor(
+  sessionId: string,
+  convId: string,
+  slug: string,
+  assistantMessageId: string | undefined,
+  knownUserId: string | undefined,
+): DeltaBuf {
+  let buf = deltaCoalescers.get(sessionId);
+  if (!buf) {
+    buf = {
+      convId, slug, assistantMessageId, userId: undefined, userIdPromise: null,
+      batchText: "", batchReasoning: "", batchChunks: [], accText: "", parts: [],
+      liveTimer: null, persistTimer: null, idleTimer: null,
+    };
+    // Resolve the userId once. Prefer the caller's already-resolved id (the SSE
+    // paths) — same value the invocation/label publishes use, so the /live
+    // allow() filter treats delta events identically — else look it up.
+    if (knownUserId) { buf.userId = knownUserId; buf.userIdPromise = Promise.resolve(knownUserId); }
+    else {
+      const created = buf;
+      buf.userIdPromise = liveUserIdForSession(sessionId).then((uid) => { created.userId = uid; return uid; }).catch(() => undefined);
+    }
+    deltaCoalescers.set(sessionId, buf);
+  }
+  if (assistantMessageId && !buf.assistantMessageId) buf.assistantMessageId = assistantMessageId;
+  return buf;
+}
+
+function armTimers(sessionId: string, buf: DeltaBuf, live: boolean): void {
+  if (live && !buf.liveTimer) buf.liveTimer = setTimeout(() => flushDeltaLive(sessionId), DELTA_LIVE_MS);
+  if (!buf.persistTimer) buf.persistTimer = setTimeout(() => flushDeltaPersist(sessionId), DELTA_PERSIST_MS);
+  if (buf.idleTimer) clearTimeout(buf.idleTimer);
+  buf.idleTimer = setTimeout(() => endDeltaCoalescer(sessionId), DELTA_IDLE_MS);
 }
 
 export function pushDelta(
@@ -104,28 +151,45 @@ export function pushDelta(
   textDelta: string | undefined,
   reasoningDelta: string | undefined,
   knownUserId?: string,
+  /** The block the delta belongs to (claw's `<llm call>:<content index>`). */
+  partId?: string,
 ): void {
-  let buf = deltaCoalescers.get(sessionId);
-  if (!buf) {
-    buf = {
-      convId, slug, assistantMessageId, userId: undefined, userIdPromise: null,
-      batchText: "", batchReasoning: "", accText: "", accReasoning: "",
-      liveTimer: null, persistTimer: null, idleTimer: null,
-    };
-    // Resolve the userId once. Prefer the caller's already-resolved id (the SSE
-    // paths) — same value the invocation/label publishes use, so the /live
-    // allow() filter treats delta events identically — else look it up.
-    if (knownUserId) { buf.userId = knownUserId; buf.userIdPromise = Promise.resolve(knownUserId); }
-    else buf.userIdPromise = liveUserIdForSession(sessionId).then((uid) => { if (buf) buf.userId = uid; return uid; }).catch(() => undefined);
-    deltaCoalescers.set(sessionId, buf);
+  const buf = coalescerFor(sessionId, convId, slug, assistantMessageId, knownUserId);
+  const at = new Date().toISOString();
+  if (textDelta) {
+    buf.batchText += textDelta;
+    buf.accText += textDelta;
+    buf.batchChunks.push({ type: "text", delta: textDelta, ...(partId ? { partId } : {}) });
+    buf.parts = applyPartDelta(buf.parts, { type: "text", partId, delta: textDelta, at });
   }
-  if (assistantMessageId && !buf.assistantMessageId) buf.assistantMessageId = assistantMessageId;
-  if (textDelta) { buf.batchText += textDelta; buf.accText += textDelta; }
-  if (reasoningDelta) { buf.batchReasoning += reasoningDelta; buf.accReasoning += reasoningDelta; }
-  if (!buf.liveTimer) buf.liveTimer = setTimeout(() => flushDeltaLive(sessionId), DELTA_LIVE_MS);
-  if (!buf.persistTimer) buf.persistTimer = setTimeout(() => flushDeltaPersist(sessionId), DELTA_PERSIST_MS);
-  if (buf.idleTimer) clearTimeout(buf.idleTimer);
-  buf.idleTimer = setTimeout(() => endDeltaCoalescer(sessionId), DELTA_IDLE_MS);
+  if (reasoningDelta) {
+    buf.batchReasoning += reasoningDelta;
+    buf.batchChunks.push({ type: "reasoning", delta: reasoningDelta, ...(partId ? { partId } : {}) });
+    buf.parts = applyPartDelta(buf.parts, { type: "reasoning", partId, delta: reasoningDelta, at });
+  }
+  armTimers(sessionId, buf, true);
+}
+
+/** Record a tool call's place in the run's parts. The invocation itself is
+ *  published and persisted by the caller, as before. */
+export function pushToolPart(
+  sessionId: string,
+  convId: string,
+  slug: string,
+  assistantMessageId: string | undefined,
+  invocation: { toolCallId?: unknown; parentToolCallId?: unknown },
+  knownUserId?: string,
+): void {
+  const toolCallId = typeof invocation.toolCallId === "string" ? invocation.toolCallId : undefined;
+  if (!toolCallId) return;
+  const buf = coalescerFor(sessionId, convId, slug, assistantMessageId, knownUserId);
+  const parentToolCallId = typeof invocation.parentToolCallId === "string" ? invocation.parentToolCallId : null;
+  const next = applyToolPart(buf.parts, { toolCallId, parentToolCallId }, new Date().toISOString());
+  if (next === buf.parts) return;
+  // Text streamed before this call belongs before it on the viewer's timeline.
+  if (buf.liveTimer) { clearTimeout(buf.liveTimer); flushDeltaLive(sessionId); }
+  buf.parts = next;
+  armTimers(sessionId, buf, false);
 }
 
 /** Stop + drop a session's coalescer (terminal callback, or idle self-expiry).
@@ -134,7 +198,8 @@ export function pushDelta(
 export function endDeltaCoalescer(sessionId: string): void {
   const buf = deltaCoalescers.get(sessionId);
   if (!buf) return;
-  if (buf.liveTimer) clearTimeout(buf.liveTimer);
+  // Viewers get the last batch before `done` rather than losing it.
+  if (buf.liveTimer) { clearTimeout(buf.liveTimer); flushDeltaLive(sessionId); }
   if (buf.persistTimer) clearTimeout(buf.persistTimer);
   if (buf.idleTimer) clearTimeout(buf.idleTimer);
   deltaCoalescers.delete(sessionId);

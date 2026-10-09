@@ -1,7 +1,7 @@
 import { transaction } from '../base';
 import type { SdlcActor } from '@/sdlc/types';
 import { AppError } from '@/middleware/errorHandler';
-import { sdlcChannelCanvasParticipant } from '@/sdlc/sdlcCanvasAccess';
+import { sdlcCanvasParticipants } from '@/sdlc/sdlcCanvasAccess';
 import { newConnectId, createConnectGroupForEntity, ConnectEntityType } from '@/database/connectGroup';
 import { ensureHubKnowledgeFolder, placeHubItem, ensureHubWikiFolder, ensureRepositoryWikiFolder } from '@/sdlc/hubFolders';
 import { ensureLink, refileFolderEdges } from '@/sdlc/entityLinkService';
@@ -112,7 +112,7 @@ export function createArtifactFromClawTx(self: SdlcHubService, actor: SdlcActor,
         connectId,
         metadata: {} as Prisma.InputJsonValue,
         participants: {
-          create: sdlcChannelCanvasParticipant(actor.workspaceId, channelId, connectId),
+          create: sdlcCanvasParticipants(actor.workspaceId, channelId, actor.userId, connectId),
         },
       },
     });

@@ -3,6 +3,7 @@ import { errMsg } from "../lib/errors.js";
 import { randomUUID } from "node:crypto";
 import { CONFIG } from "../config.js";
 import type { FlowDefinition } from "xyne-claw-shared";
+import type { DraftAgentSpec } from "../lib/agent-card.js";
 import { requireAuth, requireNoAccessToken, requireResultToken, s2sKeyMatches } from "../middleware/require-auth.js";
 import { matchesAuthenticatedUserId } from "../middleware/pin-user-id-param.js";
 import { resolveCanonicalUserIdOrSelf } from "../lib/users-jit.js";
@@ -15,6 +16,8 @@ import { awaitTurnHandoff, isTurnControlCommand } from "../lib/run-turn-handoff.
 import { dispatchLocalHarnessRun, localHarnessProviderLabel, pinnedModelForProvider, resolveLocalHarnessTarget, resolveLocalHarnessTargetForProvider, resolveLocalSandbox } from "../lib/local-harness.js";
 import { isLocalHarnessProvider, IMMEDIATE_TASK_COMMAND_RE, parseLocalSandboxCommand } from "xyne-claw-shared";
 import { planServerContinuation } from "../lib/local-harness-continuation.js";
+import { buildAgentHandoff, conversationPath, handoffMessagesFrom } from "../lib/multi-agent-chat.js";
+import { isDirectChatConversation } from "../lib/conversation-kind.js";
 import { applyAiScreenCommand } from "../lib/ai-screen-commands.js";
 import { parseSlashCommand } from "../lib/parseSlashCommand.js";
 import { localHarnessSessionRepository } from "../repositories/localHarnessSessionRepository.js";
@@ -41,14 +44,15 @@ import {
 import { consumeClawStream } from "../lib/consume-claw-stream.js";
 import { mintChatSessionId, beginChatRun, failChatRun } from "../lib/chat-run-record.js";
 import { recordUploadedArtifacts } from "../lib/conversation-artifact-signals.js";
-import { attachArtifactToSessionApp } from "../lib/artifact-app-session.js";
+import { attachArtifactToApp, type ArtifactAppTarget } from "../lib/artifact-app-session.js";
 import { recordDeliveredArtifacts } from "../lib/delivered-artifacts.js";
 import { publishLiveEvent } from "../lib/live-conversation-bus.js";
 import {
   withAiScreenPresentationTools,
   withAiScreenPresentationInstructions,
 } from "../lib/ai-screen-presentation-tools.js";
-import { pushDelta, endDeltaCoalescer } from "../lib/live-delta-coalescer.js";
+import { pushDelta, pushToolPart, endDeltaCoalescer } from "../lib/live-delta-coalescer.js";
+import { finalTurnFields, type AssistantPart } from "../lib/chat-run-record.js";
 import { redisService } from "../redis.js";
 import {
   branchPiConversationId,
@@ -85,6 +89,8 @@ interface PendingStream {
     followUpSuggestions?: string[] | undefined;
     followUpsPending?: boolean | undefined;
     clawRunOrigin?: Record<string, unknown> | undefined;
+    /** The turn as ordered thinking / text / tool parts (null: render from content). */
+    parts?: AssistantPart[] | null | undefined;
   }) => void;
   reject: (error: Error) => void;
   setClosed: () => void;
@@ -170,6 +176,8 @@ const SESSION_LOCKED_USER_MESSAGE =
    ───────────────────────────────────────────────────────────────────── */
 const STREAM_EVENTS_CHANNEL = "run-stream:events";
 const STREAM_PERSIST_KEY_PREFIX = "run-stream:msg-persisted:";
+/** Turn text when a propose-agent draft could not be put up for approval. */
+const AGENT_DRAFT_DELIVERY_FAILED = "I drafted the agent but couldn't post it for approval. Please try again.";
 
 interface PersistedAttachment {
   id: string;
@@ -195,6 +203,7 @@ type StreamBusEvent =
       toolInvocations?: unknown;
       followUpSuggestions?: string[];
       followUpsPending?: boolean;
+      parts?: AssistantPart[] | null;
     }
   | { kind: "follow_ups"; streamId: string; suggestions: string[] };
 
@@ -241,8 +250,14 @@ function ensureStreamEventsSubscriber(): void {
       ...(msg.toolInvocations !== undefined ? { toolInvocations: msg.toolInvocations } : {}),
       ...(msg.followUpSuggestions?.length ? { followUpSuggestions: msg.followUpSuggestions } : {}),
       ...(msg.followUpsPending === true ? { followUpsPending: true } : {}),
+      ...(msg.parts ? { parts: msg.parts } : {}),
     });
   });
+}
+
+/** The `partId` a claw progress body carries, for the client's step timeline. */
+function partIdOf(body: Record<string, unknown>): { partId?: string } {
+  return typeof body.partId === "string" && body.partId ? { partId: body.partId } : {};
 }
 
 function publishStreamEvent(event: StreamBusEvent): void {
@@ -357,8 +372,13 @@ export async function persistRunStreamResult(args: {
    *  linkage, and the SSE `done` payload's stable id. */
   assistantMessageId?: string;
   runProvider?: string;
+  /** The turn's ordered parts and/or whole reasoning (lib/chat-run-record finalTurnFields). */
+  turn?: { parts: AssistantPart[] | null; reasoning?: string };
 }): Promise<{ messageId: string; persistedAttachments: PersistedAttachment[] } | null> {
-  const runProviderField = args.runProvider ? { runProvider: args.runProvider } : {};
+  const runProviderField = {
+    ...(args.runProvider ? { runProvider: args.runProvider } : {}),
+    ...(args.turn ? { parts: args.turn.parts, ...(args.turn.reasoning ? { reasoning: args.turn.reasoning } : {}) } : {}),
+  };
   // A run that produced no text did not succeed, whatever it reported. Saying
   // "completed" with an empty body leaves the reader staring at a blank turn
   // with nothing to act on — the budget rejections read exactly like that.
@@ -432,16 +452,17 @@ export async function persistRunStreamResult(args: {
         // via the /agents/:convId/messages path and be missing from this run.
         let attachmentMetadata = att.metadata as Record<string, unknown> | undefined;
 
-        // A conversation owns ONE app. This mirrors the identical hook in
+        // Land the build on its target app. This mirrors the identical hook in
         // agent-chat.ts's persistAssistantResult: the dashboard's AI screen
-        // streams through THIS path, not /agent-chat, so scoping only that one
+        // streams through THIS path, not /agent-chat, so handling only that one
         // left every AI-screen artifact unversioned and unowned.
         const sessionArtifact = attachmentMetadata?.["reactArtifact"];
         if (sessionArtifact && typeof sessionArtifact === "object") {
-          const session = await attachArtifactToSessionApp({
+          const session = await attachArtifactToApp({
             conversationId: args.conversationId,
             userId: args.userId,
             payload: buffer,
+            target: sessionArtifact as ArtifactAppTarget,
           });
           if (session) {
             attachmentMetadata = {
@@ -896,6 +917,12 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
           parentId: (m as { parentId?: string | null }).parentId ?? null,
           createdAt: m.createdAt,
         }));
+    // Multi-agent direct chat: the tip of the selected path this turn answers
+    // after (hand-off note), and the agent whose session a regenerate/edit
+    // would clone. A turn owned by ANOTHER agent has no session of this agent
+    // to clone — that branch starts fresh and the note carries the path.
+    let handoffLeafId: string | null = null;
+    let cloneOwnerSlug: string | null = null;
 
     let assistantParentId: string | null = null;
     let createdUserMessageId: string | undefined;
@@ -944,6 +971,8 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         convId,
       );
       cloneBranchMode = "beforeLastUser";
+      handoffLeafId = followUpHistoryLeafId;
+      cloneOwnerSlug = existingMessageRows.find((m) => m.id === (existingAssistantId ?? resolvedParentUserMessageId))?.agentSlug ?? null;
     } else if (isEditUserMessageFlag && editedUserMessageIdStr) {
       const requestedParent = parentAssistantMessageIdStr
         ? existingMessages.find((m) => m.id === parentAssistantMessageIdStr && m.role === "assistant")
@@ -960,6 +989,8 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       );
       cloneBranchMode = "beforeLastUser";
       followUpHistoryLeafId = requestedParent?.id ?? null;
+      handoffLeafId = requestedParent?.id ?? null;
+      cloneOwnerSlug = existingMessageRows.find((m) => m.id === editedUserMessageIdStr)?.agentSlug ?? null;
 
       if (convId && userId) {
         try {
@@ -996,6 +1027,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
             (message) => message.role === "assistant" && message.agentSlug === slug,
           )?.id ?? null;
       piConversationId = resolvePiConversationIdForPath(existingMessages, userParentId, convId);
+      handoffLeafId = userParentId;
 
       if (convId && userId) {
         try {
@@ -1081,7 +1113,12 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     }
 
     // Branched PI session clone (regenerate / edit-user).
-    if (cloneSourcePiConversationId && assistantMsg) {
+    if (cloneSourcePiConversationId && assistantMsg && cloneOwnerSlug && cloneOwnerSlug !== slug) {
+      piConversationId = branchPiConversationId(convId, assistantMsg.id);
+      log.info(
+        `[run-stream] branch turn owned by ${cloneOwnerSlug}, answered by ${slug} — fresh branch session conv=${convId}`,
+      );
+    } else if (cloneSourcePiConversationId && assistantMsg) {
       piConversationId = branchPiConversationId(convId, assistantMsg.id);
       const cloneSourceSessionKey = piSessionStoreKey(cloneSourcePiConversationId, slug);
       const cloneTargetSessionKey = piSessionStoreKey(piConversationId, slug);
@@ -1322,6 +1359,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       followUpSuggestions?: string[] | undefined;
       followUpsPending?: boolean | undefined;
       clawRunOrigin?: Record<string, unknown> | undefined;
+      parts?: AssistantPart[] | null | undefined;
     }>((resolve, reject) => {
       let closed = false;
       pendingStreams.set(streamId, {
@@ -1471,7 +1509,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     let localFolderItem: LocalFolderContextItem | null = splitContext.localFolders[0] ?? null;
     if (!localFolderItem && convId) {
       const sticky = await chatMessageRepository
-        .latestLocalFolderContext(convId, slug)
+        .latestLocalFolderContext(convId, isDirectChatConversation(convId) ? null : slug)
         .catch(() => null);
       const stickySplit = splitLocalFolderContext(sticky ? [sticky] : []);
       localFolderItem = stickySplit.localFolders[0] ?? null;
@@ -1534,10 +1572,27 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       ...(generateFollowUpSuggestions === true ? { generateFollowUpSuggestions: true } : {}),
       __persistedByCaller: true,
       fastMode: fastModeEnabled,
+      // /compact shrinks the session before answering, not just summarises it.
+      ...(compactRequested ? { compactBeforeRun: true } : {}),
     };
 
+    // Multi-agent direct chat: hand this agent the turns its own session has
+    // not seen. Null whenever the path holds a single agent — those turns run
+    // exactly as before. When present it already covers the local-harness
+    // turns the provider catch-up below would add, so that one is skipped.
+    const handoffMessages = isDirectChatConversation(convId) ? handoffMessagesFrom(existingMessageRows) : [];
+    const agentHandoff = buildAgentHandoff({
+      path: conversationPath(handoffMessages, handoffLeafId),
+      agentSlug: slug,
+      isOwnSessionTurn: (m) => !isLocalHarnessProvider(m.runProvider),
+    });
+    if (agentHandoff) {
+      runRequestBody["agentHandoff"] = agentHandoff;
+      log.info(`[run-stream] multi-agent hand-off note conv=${convId} agent=${slug}`);
+    }
+
     try {
-      const serverCatchUp = await planServerContinuation({
+      const serverCatchUp = agentHandoff ? null : await planServerContinuation({
         conversationId: convId,
         agentSlug: slug,
         excludeMessageIds: [createdUserMessageId, assistantMsg?.id].filter((id): id is string => Boolean(id)),
@@ -1602,7 +1657,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         const auth = await getSpacesAuthForUser(userId, "agent-chat", requestWorkspaceHint(req));
         const normalized = normalizeAttachedContext(forwardedAttachedContext);
         if (auth && normalized.items.length > 0) {
-          const payload = await buildAttachedContextPayload(normalized.items, auth);
+          const payload = await buildAttachedContextPayload(normalized.items, auth, { userId });
           attachedContextPrefix = payload.promptPrefix ?? '';
           attachedContextFiles = payload.contextFiles ?? [];
         }
@@ -1746,6 +1801,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         continuation: {
           agentSlug: slug,
           excludeMessageIds: [createdUserMessageId, assistantMsg?.id].filter((id): id is string => Boolean(id)),
+          ...(agentHandoff ? { multiAgent: { messages: handoffMessages, leafId: handoffLeafId } } : {}),
         },
       });
 
@@ -1826,6 +1882,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
           ...(result.attachments?.length ? { attachments: result.attachments } : {}),
           ...(result.followUpSuggestions?.length ? { followUpSuggestions: result.followUpSuggestions } : {}),
           ...(result.followUpsPending === true ? { followUpsPending: true } : {}),
+          ...(result.parts ? { parts: result.parts } : {}),
         })}\n\n`);
         if (result.followUpsPending === true) await holdForLateFollowUps(res, streamId, assistantMsg?.id);
         if (!res.writableEnded) res.end();
@@ -1909,6 +1966,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         ...(result.attachments?.length ? { attachments: result.attachments } : {}),
         ...(result.followUpSuggestions?.length ? { followUpSuggestions: result.followUpSuggestions } : {}),
         ...(result.followUpsPending === true ? { followUpsPending: true } : {}),
+        ...(result.parts ? { parts: result.parts } : {}),
       })}\n\n`);
       if (result.followUpsPending === true) await holdForLateFollowUps(res, streamId, assistantMsg?.id);
       if (!res.writableEnded) res.end();
@@ -2042,9 +2100,9 @@ internalRouter.post("/:streamId/progress", (req: Request<{ streamId: string }>, 
         agentRunRepository.appendToolInvocation(sessionId, inv).catch(() => {});
       }
     } else if (body.reasoningDelta !== undefined) {
-      events.push({ event: "reasoning", data: { delta: body.reasoningDelta } });
+      events.push({ event: "reasoning", data: { delta: body.reasoningDelta, ...partIdOf(body) } });
     } else if (body.textDelta !== undefined) {
-      events.push({ event: "delta", data: { content: body.textDelta } });
+      events.push({ event: "delta", data: { content: body.textDelta, ...partIdOf(body) } });
     } else if (Array.isArray(body.todos)) {
       events.push({ event: "plan", data: { todos: body.todos, ...(typeof body.planTitle === "string" ? { title: body.planTitle } : {}) } });
     } else if (body.kind === "ui-widget" && body.widget) {
@@ -2207,7 +2265,7 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
       ? `I couldn't reach **${localHarnessProviderLabel(typeof body["localHarnessProvider"] === "string" ? body["localHarnessProvider"] : "your local harness")}** on your machine, and running this on Xyne's servers instead didn't start either. Open the Xyne desktop app (or turn off the local harness for this agent) and try again.`
       : undefined;
 
-    const content = harnessUnreachableNotice
+    const baseContent = harnessUnreachableNotice
       ? harnessUnreachableNotice
       : isSessionLockedFailure
       ? SESSION_LOCKED_USER_MESSAGE
@@ -2251,6 +2309,72 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
     // (cross-pod safe), streamMeta is the same-pod fast path.
     const assistantMessageId = queryAssistantMessageId ?? meta?.assistantMessageId;
 
+    // propose-agent ends its run with an EMPTY result on purpose — the draft
+    // card is the deliverable. The Spaces-thread path (webhook.ts) intercepts
+    // it; without the same branch here the empty-result guard in
+    // persistRunStreamResult rewrites the turn as "The model returned
+    // nothing…" and the draft is lost. So: persist the AgentRequest, put the
+    // card on the assistant row, and use the agent's own summary as the turn's
+    // text. Runs BEFORE persistence so the content is right the first time.
+    const pendingAgentCard = body["pendingAgentCard"] as
+      | { variant?: string; slug?: string; slugs?: string[]; agent?: DraftAgentSpec }
+      | undefined;
+    let draftCardFlow: FlowDefinition | undefined;
+    let draftContent: string | undefined;
+    if (
+      pendingAgentCard?.variant === "draft" &&
+      pendingAgentCard.agent &&
+      status === "completed" &&
+      !rawResult.trim()
+    ) {
+      const spec = pendingAgentCard.agent;
+      // claw retries callbacks; only the first delivery may create the
+      // AgentRequest + append the card (Redis down fails open, like persist).
+      // Keyed per assistant reply (not per session) so a later draft in the
+      // same conversation still gets its own card.
+      const claimed = assistantMessageId
+        ? await redisService.getConnection()
+            .set(`${STREAM_PERSIST_KEY_PREFIX}agent-draft:${assistantMessageId}`, "1", "EX", 86_400, "NX")
+            .catch(() => "OK" as const)
+        : "OK";
+      try {
+        const { prepareAgentDraftCard, agentDraftLeadIn } = await import("../lib/agent-card-render.js");
+        draftContent = agentDraftLeadIn(spec);
+        if (claimed === "OK") {
+          const { resolveXyneAiCardTarget, postFlowCard } = await import("../lib/flow-card-delivery.js");
+          const draftTarget = await resolveXyneAiCardTarget({ assistantMessageId });
+          if (!draftTarget) {
+            log.warn(`[agent-card] xyne-ai draft skipped — no assistant row for stream=${streamId}`);
+            draftContent = AGENT_DRAFT_DELIVERY_FAILED;
+          } else {
+            const prepared = await prepareAgentDraftCard(spec, {
+              agentSlug: draftTarget.agentSlug,
+              orgId: draftTarget.orgId,
+              userId: draftTarget.userId,
+              conversationId: draftTarget.conversationId,
+              channelId: "",
+              spacesAppId: draftTarget.spacesAppId,
+            });
+            if (!prepared.ok) {
+              draftContent = prepared.message;
+            } else {
+              // postFlowCard stamps surface/chatMessageId (so approval is
+              // routed back to this row) and persists it in uiFlows, so the
+              // card survives a reload.
+              draftCardFlow = await postFlowCard(prepared.flow, draftTarget);
+              log.info(
+                `[agent-card] xyne-ai draft card slug=${spec.slug} request=${prepared.requestId} conv=${draftTarget.conversationId}`,
+              );
+            }
+          }
+        }
+      } catch (draftErr) {
+        log.error(`[agent-card] xyne-ai draft card failed slug=${spec.slug}:`, errMsg(draftErr));
+        draftContent = AGENT_DRAFT_DELIVERY_FAILED;
+      }
+    }
+    const content = draftContent ?? baseContent;
+
     // DURABLE write: persist the assistant message + attachments here, on
     // whichever pod received the callback. SETNX guard on sessionId stops
     // claw's 3 retries (and the SSE transport's localhost replay) from
@@ -2259,6 +2383,17 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
     // UPDATEs that row instead of creating a new one — keeps the assistant id
     // stable so the SSE `done` payload, AgentRun.chatMessageId, and any
     // attachments all point at the same row.
+    // The turn's ordered parts (or, without them, its whole reasoning) — the
+    // same value is stored and sent on `done`.
+    const turn = await finalTurnFields({
+      status,
+      modelAnswer: rawResult,
+      storedAnswer: content,
+      callbackParts: body["parts"],
+      callbackReasoning: body["reasoning"],
+      assistantMessageId,
+    });
+
     if (meta?.conversationId && meta.userId) {
       try {
         const persistedResult = await persistRunStreamResult({
@@ -2273,6 +2408,7 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
           ...(assistantMessageId ? { assistantMessageId } : {}),
           ...(pendingActions?.length ? { pendingActions } : {}),
           ...(provider ? { runProvider: provider } : {}),
+          turn,
         });
         if (persistedResult?.persistedAttachments.length) {
           void recordDeliveredArtifacts({
@@ -2298,10 +2434,19 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
     }
 
 
-    const pendingAgentCard = body["pendingAgentCard"] as
-      | { variant?: string; slug?: string; slugs?: string[] }
-      | undefined;
-    if (pendingAgentCard?.variant) {
+    if (draftCardFlow) {
+      // Same reason as the sibling cards below: the terminal payload has no
+      // uiFlows slot, so the card goes on the wire to paint without a refetch.
+      const draftStream = pendingStreams.get(streamId);
+      if (draftStream) draftStream.sendEvent("ui-flow", { flow: draftCardFlow });
+      else
+        publishStreamEvent({
+          kind: "progress",
+          streamId,
+          events: [{ event: "ui-flow", data: { flow: draftCardFlow } }],
+        });
+    }
+    if (pendingAgentCard?.variant && pendingAgentCard.variant !== "draft") {
       try {
         const { resolveXyneAiCardTarget } = await import("../lib/flow-card-delivery.js");
         const cardTarget = await resolveXyneAiCardTarget({ assistantMessageId });
@@ -2520,6 +2665,7 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
         followUpSuggestions,
         ...(followUpsPending ? { followUpsPending: true } : {}),
         ...(callbackRunOrigin ? { clawRunOrigin: callbackRunOrigin } : {}),
+        parts: turn.parts,
       });
     } else if (meta?.conversationId) {
       // Stream lives on another pod (the multi-replica case that returns
@@ -2539,6 +2685,7 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
         ...(toolInvocations !== undefined ? { toolInvocations } : {}),
         ...(followUpSuggestions?.length ? { followUpSuggestions } : {}),
         ...(followUpsPending ? { followUpsPending: true } : {}),
+        ...(turn.parts ? { parts: turn.parts } : {}),
       });
     } else {
       log.warn(`[run-stream] callback streamId=${streamId} resolved without local stream or conversationId — no SSE done frame will be sent`);
@@ -2705,19 +2852,21 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
         // shared live-conversation-bus that GET /agent-chat/:slug/chat/:convId/live
         // reads (same convId + slug as this run — no separate viewer bus needed).
         if (CONFIG.liveToolCallsEnabled && !internalFollowUp) {
+          // The call's place in the turn's timeline, then the call itself.
+          pushToolPart(sessionId, convId, slug, assistantMessageId, toolInvocation as Record<string, unknown>, userId);
           publishLiveEvent(convId, { type: "invocation", conversationId: convId, agentSlug: slug, userId, toolInvocation, ts: Date.now() });
         }
       },
-      onReasoning: (sid, delta) => {
+      onReasoning: (sid, delta, partId) => {
         if (!delta) return;
-        stream.sendEvent("reasoning", { delta });
+        stream.sendEvent("reasoning", { delta, ...(partId ? { partId } : {}) });
         // Coalesce reasoning → live bus + partial persist (viewers stream it).
-        if (CONFIG.liveToolCallsEnabled && sid) pushDelta(sid, convId, slug, assistantMessageId, undefined, delta, userId);
+        if (CONFIG.liveToolCallsEnabled && sid) pushDelta(sid, convId, slug, assistantMessageId, undefined, delta, userId, partId);
       },
-      onTextDelta: (sid, delta) => {
+      onTextDelta: (sid, delta, partId) => {
         if (!delta) return;
-        stream.sendEvent("delta", { content: delta });
-        if (CONFIG.liveToolCallsEnabled && sid) pushDelta(sid, convId, slug, assistantMessageId, delta, undefined, userId);
+        stream.sendEvent("delta", { content: delta, ...(partId ? { partId } : {}) });
+        if (CONFIG.liveToolCallsEnabled && sid) pushDelta(sid, convId, slug, assistantMessageId, delta, undefined, userId, partId);
       },
       onAttachment: (_sid, attachment) => {
         stream.sendEvent("attachment", attachment);

@@ -1,4 +1,4 @@
-import type { FlowDefinition } from '@xyne/shared';
+import type { AssistantPart, FlowDefinition } from '@xyne/shared';
 import type { ToolOutput as GeniusToolOutput } from '../../../../types/toolOutput';
 import type { AttachedContextItem } from '../components/ContextPickerPanel';
 
@@ -105,6 +105,15 @@ export interface StoredMessage {
   reasoning?: string;
 
   /**
+   * The turn in order — thinking, text and tool calls as they happened (v2).
+   * Rendered as the step timeline; absent on messages saved before it existed,
+   * which render from `reasoning`, `toolInvocations` and `content` instead.
+   */
+  parts?: AssistantPart[];
+  /** How long the turn took to answer, start to finish ("Worked for 2m 31s"). */
+  durationMs?: number;
+
+  /**
    * Tool invocations made during the response (v2)
    */
   toolInvocations?: ToolInvocation[];
@@ -190,6 +199,8 @@ export interface ToolInvocation {
   background?: boolean;
   backgroundState?: 'running' | 'completed' | 'error';
   backgroundTaskId?: string;
+  /** ISO time the call started. */
+  startedAt?: string;
 }
 
 /**
@@ -289,6 +300,12 @@ export interface ConversationHistory {
   isStarred?: boolean;
   branchSelections?: Record<string, string>; // parentId → selected childId for branching
   lastInputContext?: LastInputContext;
+  /** Every agent that answered, in first-use order. The all-agents history
+   *  always sets it; the legacy per-agent list only for a switched chat. */
+  agentSlugs?: string[];
+  /** The agent to open and continue this conversation with — the one active
+   *  most recently. Set by the all-agents history. */
+  agentSlug?: string;
 }
 
 // ============================================================================
@@ -545,6 +562,9 @@ export interface PlanTodo {
 }
 
 export interface Message {
+  /** Agent this turn was sent to / answered by. A chat can switch agents
+   *  mid-conversation, so identity is per message. Absent on v1 rows. */
+  agentSlug?: string;
   planTodos?: PlanTodo[];
   planTitle?: string;
   /** FlowUI artifact cards posted on this message, deduped by `screenId`. */
@@ -612,6 +632,15 @@ export interface Message {
    * Reasoning/thinking content from the agent (v2)
    */
   reasoning?: string;
+
+  /**
+   * The turn in order — thinking, text and tool calls as they happened (v2).
+   * Rendered as the step timeline; absent on messages saved before it existed,
+   * which render from `reasoning`, `toolInvocations` and `content` instead.
+   */
+  parts?: AssistantPart[];
+  /** How long the turn took to answer, start to finish ("Worked for 2m 31s"). */
+  durationMs?: number;
 
   /**
    * Tool invocations made during the response (v2)

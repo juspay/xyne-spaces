@@ -368,7 +368,7 @@ const ChatDirectory = ({
       const otherId = dmCounterpartByChannelId.get(channel.id);
       if (!otherId) return false;
       const userType = usersById.get(otherId)?.userType;
-      return userType === UserType.BOT || userType === UserType.APP;
+      return userType === UserType.BOT || userType === UserType.APP || userType === UserType.AGENT;
     },
     [dmCounterpartByChannelId, usersById],
   );
@@ -382,7 +382,8 @@ const ChatDirectory = ({
     for (const [channelId, otherId] of dmCounterpartByChannelId) {
       const weight = affinityService.getUserWeight(otherId);
       const userType = usersById.get(otherId)?.userType;
-      const isBot = userType === UserType.BOT || userType === UserType.APP;
+      const isBot =
+        userType === UserType.BOT || userType === UserType.APP || userType === UserType.AGENT;
       if (weight > 0 && !isBot) hasAffinity = true;
       weights.set(channelId, weight);
     }

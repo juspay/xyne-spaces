@@ -1,5 +1,6 @@
 import { isLocalHarnessProvider } from "xyne-claw-shared";
 import { createLogger } from "../logger.js";
+import { buildAgentHandoff, conversationPath, type HandoffMessage } from "./multi-agent-chat.js";
 import { chatMessageRepository } from "../repositories/chatMessageRepository.js";
 import { localHarnessSessionRepository } from "../repositories/localHarnessSessionRepository.js";
 
@@ -64,13 +65,50 @@ async function loadMessages(args: {
     }));
 }
 
+/**
+ * Multi-agent direct chat on a local harness. The CLI session row is keyed by
+ * (conversation, provider) only, so after an agent switch it may hold ANOTHER
+ * agent's CLI session. It belongs to whichever agent ran the newest turn on
+ * this provider (the row is overwritten by every run), so resume it only when
+ * that is the agent answering now; otherwise start a fresh CLI session and
+ * hand it the whole path.
+ */
+async function planMultiAgentHarnessContinuation(args: {
+  conversationId: string;
+  agentSlug: string;
+  provider: string;
+  multiAgent: { messages: HandoffMessage[]; leafId: string | null };
+}): Promise<{ resumeSessionId: string | null; context: string | null } | null> {
+  const { messages, leafId } = args.multiAgent;
+  const handoff = buildAgentHandoff({
+    path: conversationPath(messages, leafId),
+    agentSlug: args.agentSlug,
+    isOwnSessionTurn: (message) => message.runProvider === args.provider,
+  });
+  if (!handoff) return null;
+  const session = await localHarnessSessionRepository.find(args.conversationId, args.provider);
+  const newestOnProvider = [...messages]
+    .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+    .reverse()
+    .find((message) => message.role === "assistant" && message.runProvider === args.provider);
+  if (session && newestOnProvider?.agentSlug === args.agentSlug) {
+    return { resumeSessionId: session.cliSessionId, context: handoff.resume };
+  }
+  return { resumeSessionId: null, context: handoff.fresh };
+}
+
 export async function planHarnessContinuation(args: {
   conversationId: string;
   agentSlug: string;
   provider: string;
   excludeMessageIds?: string[];
+  multiAgent?: { messages: HandoffMessage[]; leafId: string | null };
 }): Promise<{ resumeSessionId: string | null; context: string | null }> {
   try {
+    if (args.multiAgent) {
+      const planned = await planMultiAgentHarnessContinuation({ ...args, multiAgent: args.multiAgent });
+      if (planned) return planned;
+    }
     const [session, messages] = await Promise.all([
       localHarnessSessionRepository.find(args.conversationId, args.provider),
       loadMessages(args),

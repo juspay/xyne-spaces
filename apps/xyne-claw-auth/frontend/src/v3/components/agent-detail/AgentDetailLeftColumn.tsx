@@ -1519,6 +1519,8 @@ interface Props {
   // route every run to the shared sbx-git sandbox (grep all repos, no clone/write).
   draftForceReadOnlySandbox: boolean;
   onDraftForceReadOnlySandboxChange: (v: boolean) => void;
+  draftAllowWriteInReadOnlyJob: boolean;
+  onDraftAllowWriteInReadOnlyJobChange: (v: boolean) => void;
   // Operator-selected repo focus for read-only agents (agent.config.sbxGitRepos).
   draftSbxGitRepos: string[];
   onDraftSbxGitReposChange: (v: string[]) => void;
@@ -1752,6 +1754,8 @@ export function AgentDetailLeftColumn({
   onDraftSandboxRepoChange,
   draftForceReadOnlySandbox,
   onDraftForceReadOnlySandboxChange,
+  draftAllowWriteInReadOnlyJob,
+  onDraftAllowWriteInReadOnlyJobChange,
   draftSbxGitRepos,
   onDraftSbxGitReposChange,
   sbxGitRepoOptions,
@@ -3128,6 +3132,7 @@ export function AgentDetailLeftColumn({
       {(canEdit
         || draftSandboxRepo
         || draftForceReadOnlySandbox
+        || draftAllowWriteInReadOnlyJob
         || draftResearchAgentProductId
         || draftResearchAgentRepositoryId) && (
         <SettingGroup
@@ -3217,6 +3222,23 @@ export function AgentDetailLeftColumn({
             </SettingRow>
           )}
 
+          {(canEdit || draftAllowWriteInReadOnlyJob) && (
+            <SettingRow
+              title="Writable sandbox for automations"
+              summary="Let automation and scheduled runs edit, build and push code."
+              detail="At most 3 of these runs go at once; the rest wait their turn. Has no effect while the read-only multi-repo sandbox is on."
+              enabled={draftAllowWriteInReadOnlyJob}
+              control={
+                <Switch
+                  checked={draftAllowWriteInReadOnlyJob}
+                  onChange={onDraftAllowWriteInReadOnlyJobChange}
+                  disabled={!canEdit || draftForceReadOnlySandbox}
+                  ariaLabel="Writable sandbox for automations"
+                />
+              }
+            />
+          )}
+
           {(canEdit || draftResearchAgentProductId || draftResearchAgentRepositoryId) && (
             <SettingRow
               title="Research agent context"
@@ -3283,6 +3305,7 @@ export function AgentDetailLeftColumn({
       </div>
       )}
       </div>
+
 
       {/* Delete moved to the page header (owner-only Trash button there) so
           it's reachable without scrolling to the bottom of the config. */}

@@ -631,6 +631,7 @@ const BoardStageConfigScreen = ({
     fromTempId: number;
     toTempId: number;
   } | null>(null);
+  const [editingEdgeCondition, setEditingEdgeCondition] = useState<StageCondition | null>(null);
   const [isEdgeCreateFormOpen, setIsEdgeCreateFormOpen] = useState(false);
   const [_pendingEdgeFormCondition, setPendingEdgeFormCondition] = useState<StageCondition | null>(
     null,
@@ -1588,21 +1589,44 @@ const BoardStageConfigScreen = ({
 
   // ── Edge Condition Handlers (NON_LINEAR boards) ─────────────────────────────
 
-  const handleAddConditionForEdge = useCallback((from: number, to: number) => {
-    setSelectedEdgeForCondition({ fromTempId: from, toTempId: to });
-    setIsEdgeConditionModalOpen(true);
-  }, []);
+  const handleAddConditionForEdge = useCallback(
+    (from: number, to: number, condition?: StageCondition) => {
+      setEditingEdgeCondition(condition ?? null);
+      setSelectedEdgeForCondition({ fromTempId: from, toTempId: to });
+      setIsEdgeConditionModalOpen(true);
+    },
+    [],
+  );
 
   const handleCloseEdgeConditionModal = useCallback(() => {
     setIsEdgeConditionModalOpen(false);
     setSelectedEdgeForCondition(null);
   }, []);
 
+  const handleDeleteEdgeCondition = useCallback((conditionId: string) => {
+    setStages(prev =>
+      prev.map(stage => ({
+        ...stage,
+        prStatuses: stage.prStatuses.filter(ps => `pr-${stage.tempId}-${ps}` !== conditionId),
+      })),
+    );
+  }, []);
+
   const handleSaveEdgeCondition = useCallback(
     (condition: StageCondition) => {
       if (!selectedEdgeForCondition) return;
       const { fromTempId, toTempId } = selectedEdgeForCondition;
-      if (condition.thenField === 'form') {
+      if (editingEdgeCondition) handleDeleteEdgeCondition(editingEdgeCondition.id);
+      if (condition.whenField === 'pr_status' && condition.thenField === 'status') {
+        const prStatus = condition.whenValue as PRStatusEvent;
+        setStages(prev =>
+          prev.map(stage =>
+            stage.name === condition.thenValue && !stage.prStatuses?.includes(prStatus)
+              ? { ...stage, prStatuses: [...(stage.prStatuses || []), prStatus] }
+              : stage,
+          ),
+        );
+      } else if (condition.thenField === 'form') {
         updateTransitionMeta(fromTempId, toTempId, {
           formId: condition.thenValue,
         });
@@ -1614,7 +1638,13 @@ const BoardStageConfigScreen = ({
       }
       handleCloseEdgeConditionModal();
     },
-    [selectedEdgeForCondition, updateTransitionMeta, handleCloseEdgeConditionModal],
+    [
+      selectedEdgeForCondition,
+      editingEdgeCondition,
+      handleDeleteEdgeCondition,
+      updateTransitionMeta,
+      handleCloseEdgeConditionModal,
+    ],
   );
 
   const handleOpenEdgeCreateForm = useCallback((condition?: StageCondition) => {
@@ -2504,6 +2534,8 @@ const BoardStageConfigScreen = ({
                   isOpen={true}
                   onClose={handleCloseEdgeConditionModal}
                   onSave={handleSaveEdgeCondition}
+                  condition={editingEdgeCondition}
+                  onDelete={handleDeleteEdgeCondition}
                   onOpenCreateForm={handleOpenEdgeCreateForm}
                   nextStageName={
                     selectedEdgeForCondition
@@ -2511,11 +2543,13 @@ const BoardStageConfigScreen = ({
                         undefined)
                       : undefined
                   }
-                  allStages={stages.map(s => ({
-                    name: s.name,
-                    sequenceNumber: s.sequenceNumber,
-                    ...(s.formId && { formId: s.formId }),
-                  }))}
+                  allStages={stages
+                    .filter(s => s.tempId === selectedEdgeForCondition?.toTempId)
+                    .map(s => ({
+                      name: s.name,
+                      sequenceNumber: s.sequenceNumber,
+                      ...(s.formId && { formId: s.formId }),
+                    }))}
                 />
               </div>
             )}

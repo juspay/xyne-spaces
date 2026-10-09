@@ -20,6 +20,9 @@ export interface SelectedTicket {
   title: string;
   xyneId?: string;
   status?: string;
+  /** Where the ticket lives — what opening it from a sent message needs. */
+  channelId?: string;
+  conversationId?: string;
 }
 
 export interface SelectedCanvas {
@@ -61,6 +64,33 @@ export interface SelectedRecording {
   externalId?: string;
 }
 
+/** A single Spaces message picked in the composer's @ menu. */
+export interface SelectedMessage {
+  /** The messageId. */
+  id: string;
+  /** "Sender: preview…" — what the pill shows. */
+  title: string;
+  conversationId?: string;
+  channelId?: string;
+}
+
+/** A person picked in the composer's @ menu. */
+export interface SelectedPerson {
+  /** The user id. */
+  id: string;
+  name: string;
+}
+
+/** A file shared in a conversation (a message attachment, not a KB file). */
+export interface SelectedSharedFile {
+  /** The message attachment id. */
+  id: string;
+  name: string;
+  conversationId?: string;
+  /** The channel it was shared in — where it opens from a sent message. */
+  channelId?: string;
+}
+
 export interface SelectedLocalFolder {
   path: string;
   name: string;
@@ -74,6 +104,11 @@ export interface ContextSelections {
   canvases: SelectedCanvas[];
   transcripts: SelectedTranscript[];
   recordings: SelectedRecording[];
+  /** Picked from the composer's @ menu. Optional so older callers that only
+   *  know the original buckets keep compiling; absent means empty. */
+  messages?: SelectedMessage[];
+  people?: SelectedPerson[];
+  sharedFiles?: SelectedSharedFile[];
   /** KB files scoped from the composer's "+" picker or the KB file viewer's Ask AI chip. */
   files?: { id: string; name: string }[];
   /** KB sub-folders (non-root collection nodes) scoped the same way. */
@@ -97,18 +132,38 @@ export interface AttachedContextItem {
     | 'collection'
     | 'folder'
     | 'file'
-    | 'local-folder';
+    | 'local-folder'
+    | 'message'
+    | 'user'
+    | 'attachment';
   id: string;
   title: string;
   threadId?: string;
   /** Canvas items only — see SelectedCanvas.canvasRole. */
   canvasRole?: CanvasRole;
+  /** Activity fields, a local folder's path — and for @-picked items, where
+   *  they live (`channelId`, `canvasId`, a ticket's `xyneId`), so the sent
+   *  message can name and open them. */
   // For activity items
   eventName?: string;
   eventCategory?: string;
   timestamp?: string;
   metadata?: Record<string, unknown>;
   relatedData?: Record<string, unknown>;
+}
+
+/** `metadata` with just the ids that are set, or nothing. */
+function withLocation(
+  ids: Record<string, string | undefined>,
+): { metadata: Record<string, string> } | Record<string, never> {
+  const set = Object.entries(ids).filter((entry): entry is [string, string] => !!entry[1]);
+  return set.length > 0 ? { metadata: Object.fromEntries(set) } : {};
+}
+
+/** A string field of an item's metadata. */
+export function metadataString(item: AttachedContextItem, key: string): string | undefined {
+  const value = item.metadata?.[key];
+  return typeof value === 'string' && value ? value : undefined;
 }
 
 /**
@@ -146,6 +201,11 @@ export function toAttachedContext(selections: ContextSelections): AttachedContex
       type: 'ticket',
       id: ticket.id,
       title: ticket.title,
+      ...withLocation({
+        xyneId: ticket.xyneId,
+        channelId: ticket.channelId,
+        conversationId: ticket.conversationId,
+      }),
     });
   }
 
@@ -155,6 +215,7 @@ export function toAttachedContext(selections: ContextSelections): AttachedContex
       id: canvas.id,
       title: canvas.title,
       ...(canvas.canvasRole ? { canvasRole: canvas.canvasRole } : {}),
+      ...withLocation({ canvasId: canvas.canvasId }),
     });
   }
 
@@ -165,6 +226,7 @@ export function toAttachedContext(selections: ContextSelections): AttachedContex
       id: transcript.id,
       title: transcript.title,
       ...(transcript.conversationId ? { threadId: transcript.conversationId } : {}),
+      ...withLocation({ channelId: transcript.channelId }),
     });
   }
 
@@ -174,6 +236,30 @@ export function toAttachedContext(selections: ContextSelections): AttachedContex
       id: recording.id,
       title: recording.title,
       ...(recording.conversationId ? { threadId: recording.conversationId } : {}),
+    });
+  }
+
+  for (const message of selections.messages ?? []) {
+    items.push({
+      type: 'message',
+      id: message.id,
+      title: message.title,
+      ...(message.conversationId ? { threadId: message.conversationId } : {}),
+      ...withLocation({ channelId: message.channelId }),
+    });
+  }
+
+  for (const person of selections.people ?? []) {
+    items.push({ type: 'user', id: person.id, title: person.name });
+  }
+
+  for (const file of selections.sharedFiles ?? []) {
+    items.push({
+      type: 'attachment',
+      id: file.id,
+      title: file.name,
+      ...(file.conversationId ? { threadId: file.conversationId } : {}),
+      ...withLocation({ channelId: file.channelId }),
     });
   }
 
@@ -221,6 +307,9 @@ export function attachedContextToSelections(items: AttachedContextItem[]): Reusa
     canvases: [],
     transcripts: [],
     recordings: [],
+    messages: [],
+    people: [],
+    sharedFiles: [],
     localFolders: [],
     collections: [],
     fileScopes: [],
@@ -231,23 +320,39 @@ export function attachedContextToSelections(items: AttachedContextItem[]): Reusa
       case 'channel':
         result.channels.push({ id: item.id, name: item.title, isPrivate: false });
         break;
-      case 'ticket':
-        result.tickets.push({ id: item.id, title: item.title });
+      case 'ticket': {
+        const xyneId = metadataString(item, 'xyneId');
+        const channelId = metadataString(item, 'channelId');
+        const conversationId = metadataString(item, 'conversationId');
+        result.tickets.push({
+          id: item.id,
+          title: item.title,
+          ...(xyneId ? { xyneId } : {}),
+          ...(channelId ? { channelId } : {}),
+          ...(conversationId ? { conversationId } : {}),
+        });
         break;
-      case 'canvas':
+      }
+      case 'canvas': {
+        const canvasId = metadataString(item, 'canvasId');
         result.canvases.push({
           id: item.id,
           title: item.title,
           ...(item.canvasRole ? { canvasRole: item.canvasRole } : {}),
+          ...(canvasId ? { canvasId } : {}),
         });
         break;
-      case 'call':
+      }
+      case 'call': {
+        const channelId = metadataString(item, 'channelId');
         result.transcripts.push({
           id: item.id,
           title: item.title,
           ...(item.threadId ? { conversationId: item.threadId } : {}),
+          ...(channelId ? { channelId } : {}),
         });
         break;
+      }
       case 'local-folder': {
         const metadata: Record<string, unknown> = item.metadata ?? {};
         const path = typeof metadata['path'] === 'string' ? metadata['path'] : item.id;
@@ -270,6 +375,29 @@ export function attachedContextToSelections(items: AttachedContextItem[]): Reusa
       case 'file':
         result.fileScopes.push({ id: item.id, name: item.title });
         break;
+      case 'message': {
+        const channelId = metadataString(item, 'channelId');
+        result.messages?.push({
+          id: item.id,
+          title: item.title,
+          ...(item.threadId ? { conversationId: item.threadId } : {}),
+          ...(channelId ? { channelId } : {}),
+        });
+        break;
+      }
+      case 'user':
+        result.people?.push({ id: item.id, name: item.title });
+        break;
+      case 'attachment': {
+        const channelId = metadataString(item, 'channelId');
+        result.sharedFiles?.push({
+          id: item.id,
+          name: item.title,
+          ...(item.threadId ? { conversationId: item.threadId } : {}),
+          ...(channelId ? { channelId } : {}),
+        });
+        break;
+      }
       default:
         // 'activity' and any future type — nothing to re-attach as a pill.
         break;

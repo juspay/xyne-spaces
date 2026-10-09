@@ -128,3 +128,16 @@ export const assistantRouteLimiter: RateLimitRequestHandler = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 });
+
+/** Per-user limiter for search feedback. Each post @-mentions the whole search group, so a script or a stuck key must not be able to flood them. */
+export const searchFeedbackLimiter: RateLimitRequestHandler = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 5,
+  keyGenerator: (req): string => req.user?.id ?? ipKeyGenerator(req.ip ?? 'unknown'),
+  message: {
+    success: false,
+    error: 'Too many feedback posts. Please wait a minute and try again.',
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});

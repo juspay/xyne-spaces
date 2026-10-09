@@ -1,8 +1,9 @@
-import type { ReactElement } from 'react';
+import { Fragment, type ReactElement } from 'react';
 import { ArrowDown, Sparkles } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
 import type { Message } from '../../Chat/XyneAISidebar/utils/XyneAITypes';
 import { MessageBubble } from './MessageBubble';
+import { AgentRecipient } from '../../AIScreen/ConversationAgents';
 import { useStickyScroll } from './useStickyScroll';
 
 interface MessageListProps {
@@ -32,13 +33,19 @@ export function MessageList({ messages, onRetry }: MessageListProps): ReactEleme
         onScroll={onScroll}
         className='flex h-full min-h-0 flex-col gap-2 overflow-y-auto px-3 py-3'
       >
-        {messages.map(message => (
-          <MessageBubble
-            key={message.id}
-            message={message}
-            {...(message.type === 'bot' && message.errorInfo && onRetry ? { onRetry } : {})}
-          />
-        ))}
+        {messages.map(message => {
+          return (
+            <Fragment key={message.id}>
+              {message.type === 'user' && message.agentSlug && (
+                <AgentRecipient slug={message.agentSlug} className='-mb-1' />
+              )}
+              <MessageBubble
+                message={message}
+                {...(message.type === 'bot' && message.errorInfo && onRetry ? { onRetry } : {})}
+              />
+            </Fragment>
+          );
+        })}
       </div>
       {!isAtBottom && (
         <button

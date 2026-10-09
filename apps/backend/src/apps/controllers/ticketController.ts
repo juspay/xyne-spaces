@@ -22,7 +22,7 @@ import {
   isDeskChannelType,
 } from '@xyne/shared';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
-import { emitEventToWorkspaceApps } from '../core/eventSubscriptionUtils';
+import { emitEventToChannelApps } from '../core/eventSubscriptionUtils';
 import { AppEventType, AdditionalFormFieldUpdatedPayload, BaseAppEvent } from '../types';
 import { emailService } from '@/services/emailService';
 import { uploadFiles } from '@/services/fileUploadService';
@@ -2020,7 +2020,7 @@ export class TicketController {
 
       logger.info(`[TicketController] Form field "${fieldName}" updated to "${stringValue}" on ticket ${ticketId}`);
 
-      // Emit ADDITIONAL_FORM_FIELD_UPDATED event to all apps in the workspace
+      // Emit ADDITIONAL_FORM_FIELD_UPDATED event to the apps in the ticket's channel
       // Apps (like Genius) filter by fieldName and boardName to handle specific cases
       try {
         const board = await prismaClient.board.findUnique({
@@ -2056,7 +2056,7 @@ export class TicketController {
           };
 
           // Fire and forget - don't block the response.
-          void emitEventToWorkspaceApps(workspaceId, event);
+          void emitEventToChannelApps(payload.channelId, event);
           
           logger.info(`[TicketController] Emitted ADDITIONAL_FORM_FIELD_UPDATED for field "${fieldName}" on ticket ${ticketId}`);
         }

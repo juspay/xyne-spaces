@@ -16,6 +16,7 @@ import { instagramOAuthStateService } from '../../adapters/social-media/instagra
 import type { InstagramCredentials } from '../../adapters/social-media/instagram/types';
 import { authorizeSocialMediaManager, canAccessSocialMediaChannel } from './access';
 import { oauthDeskStartSchema, parseOAuthPlatform, validateOAuthDeskSetup } from './deskSetup';
+import { disconnectDeskSourceBySystem } from '../../core/deskSourceDisconnect';
 
 const TAG = '[InstagramRoutes]';
 const router = express.Router();
@@ -742,15 +743,20 @@ router.post(
 
       if (igUserId) {
         // externalIdentifier stores igUserId directly (set at channel creation) — no decryption needed.
-        const result = await db.externalSource.updateMany({
+        const active = await db.externalSource.findMany({
           where: {
             sourceType: ExternalSourcePlatform.INSTAGRAM,
             externalIdentifier: igUserId,
             isActive: true,
           },
-          data: { isActive: false, credentials: '' },
+          select: { id: true },
         });
-        logger.info(`${TAG} Deactivated ${result.count} source(s) for igUserId=${igUserId}`);
+        // One at a time, so only a source this request actually flipped is notified about.
+        let deactivated = 0;
+        for (const { id } of active) {
+          if (await disconnectDeskSourceBySystem(id, { clearCredentials: true })) deactivated++;
+        }
+        logger.info(`${TAG} Deactivated ${deactivated} source(s) for igUserId=${igUserId}`);
       }
 
       const confirmationCode = `xyne-del-${Date.now()}`;

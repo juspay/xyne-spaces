@@ -379,15 +379,18 @@ const AboutChannel = ({
         {/* Email + View full profile — only for 1:1 DMs */}
         {isDM && dmUserId && (
           <div className='bg-card rounded-[12px] border border-border overflow-hidden'>
-            <div className='p-[12px]'>
-              <p className='text-xs font-medium text-muted-foreground uppercase tracking-wide mb-0.5'>
-                Email
-              </p>
-              <p className='text-sm text-foreground'>{dmUser?.email || '—'}</p>
-            </div>
+            {/* Email is blank for community members (masked in useUsers) */}
+            {dmUser?.email && (
+              <div className='p-[12px]'>
+                <p className='text-xs font-medium text-muted-foreground uppercase tracking-wide mb-0.5'>
+                  Email
+                </p>
+                <p className='text-sm text-foreground'>{dmUser.email}</p>
+              </div>
+            )}
             <button
               onClick={handleViewProfile}
-              className='px-[12px] pb-[10px] text-xs font-sans font-semibold text-muted-foreground underline text-left hover:text-foreground transition-colors'
+              className={`px-[12px] pb-[10px] ${dmUser?.email ? '' : 'pt-[10px] '}text-xs font-sans font-semibold text-muted-foreground underline text-left hover:text-foreground transition-colors`}
               data-track-category='ABOUT_CHANNEL_FORM'
               data-track-name='View_Full_Profile'
               data-track-metadata={JSON.stringify({ channelId: channel?.id, userId: dmUserId })}

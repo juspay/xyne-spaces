@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { Loader2, Check, X, Shield } from 'lucide-react';
 import type { PendingAction } from '../utils/XyneAITypes';
+import { humanizeToolName } from './activityShared';
 import {
   getStoredPendingActionResolution,
   subscribeToPendingActionResolutions,
@@ -11,21 +12,6 @@ interface PendingActionBlockProps {
   actions: PendingAction[];
   onApprove?: (action: PendingAction, index: number) => Promise<void> | void;
   onDecline?: (action: PendingAction, index: number) => Promise<void> | void;
-}
-
-/**
- * Turn a raw tool name into a user-facing label.
- * Strips prefixes and title-cases.
- */
-function humanizeToolName(raw: string): string {
-  if (!raw) return raw;
-  const stripped = raw.includes('__') ? raw.split('__').slice(1).join('__') : raw;
-  const trimmed = stripped.includes(':') ? stripped.split(':').slice(-1)[0]! : stripped;
-  return trimmed
-    .split(/[-_]/)
-    .filter(Boolean)
-    .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
-    .join(' ');
 }
 
 export function PendingActionBlock({

@@ -64,7 +64,9 @@ export async function consumeConversationLiveStream(
       // (`res.body.getReader()`) — axios can't stream in the browser.
       // eslint-disable-next-line local-rules/no-fetch-use-axios
       const res = await fetch(
-        `${BASE_URL}/xyne-ai/v2/conversations/${encodeURIComponent(conversationId)}/live?agentSlug=${encodeURIComponent(agentSlug)}`,
+        // scope=conversation: an in-flight turn may belong to whichever agent
+        // the user last switched to, not the one this viewer was opened with.
+        `${BASE_URL}/xyne-ai/v2/conversations/${encodeURIComponent(conversationId)}/live?agentSlug=${encodeURIComponent(agentSlug)}&scope=conversation`,
         {
           credentials: 'include',
           headers: { Accept: 'text/event-stream' },
