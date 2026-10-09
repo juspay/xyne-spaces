@@ -1182,10 +1182,11 @@ export function createMutators(
            desktopNotificationLevel: z.enum(['ALL', 'MENTIONS_ONLY', 'THREADS_ONLY', 'NONE']).nullable().optional(),
            mobileNotificationLevel: z.enum(['ALL', 'MENTIONS_ONLY', 'THREADS_ONLY', 'NONE']).nullable().optional(),
            threadReplyNotificationsEnabled: z.boolean().nullable().optional(),
+           ticketUpdateNotificationsEnabled: z.boolean().nullable().optional(),
            channelWideMentionsEnabled: z.boolean().nullable().optional(),
            timestamp: z.number(),
          }),
-         async ({ tx, args: { channelId, desktopNotificationLevel, mobileNotificationLevel, threadReplyNotificationsEnabled, channelWideMentionsEnabled, timestamp } }) => {
+         async ({ tx, args: { channelId, desktopNotificationLevel, mobileNotificationLevel, threadReplyNotificationsEnabled, ticketUpdateNotificationsEnabled, channelWideMentionsEnabled, timestamp } }) => {
            // Get channel user status
            const userStatus = await tx.run(
              zql.channel_user_status
@@ -1205,6 +1206,7 @@ export function createMutators(
              ...(desktopNotificationLevel !== undefined && { desktopNotificationLevel: desktopNotificationLevel ?? null }),
              ...(mobileNotificationLevel !== undefined && { mobileNotificationLevel: mobileNotificationLevel ?? null }),
              ...(threadReplyNotificationsEnabled !== undefined && { threadReplyNotificationsEnabled: threadReplyNotificationsEnabled ?? null }),
+             ...(ticketUpdateNotificationsEnabled !== undefined && { ticketUpdateNotificationsEnabled: ticketUpdateNotificationsEnabled ?? null }),
              ...(channelWideMentionsEnabled !== undefined && { channelWideMentionsEnabled: channelWideMentionsEnabled ?? null }),
              updatedAt: timestamp,
            });
@@ -3401,11 +3403,10 @@ export function createMutators(
 
           if (existingParticipant) {
             // User already exists, just update isSubscribed to true
-            if (!existingParticipant.isSubscribed || existingParticipant.unsubscribedAt) {
+            if (!existingParticipant.isSubscribed) {
               await tx.mutate.conversation_participants.update({
                 id: existingParticipant.id,
                 isSubscribed: true,
-                unsubscribedAt: null,
               });
             }
             return;
@@ -3442,10 +3443,8 @@ export function createMutators(
       unsubscribeFromConversation: defineMutator(
         z.object({
           conversationId: z.string(),
-          timestamp: z.number().optional(),
-          participantId: z.string().optional(),
         }),
-        async ({ tx, args: { conversationId, timestamp = Date.now(), participantId = uuidv4() } }) => {
+        async ({ tx, args: { conversationId } }) => {
           // Find user's subscription
           const subscription = await tx.run(
             zql.conversation_participants
@@ -3455,44 +3454,11 @@ export function createMutators(
           );
 
           if (!subscription) {
-            const conversation = await tx.run(
-              zql.conversations.where('conversationId', conversationId).one()
-            );
-
-            if (!conversation) {
-              throw new Error('Conversation not found');
-            }
-
-            let trueLastReplyAt: number | undefined = undefined;
-            if (conversation.replyCount > 0) {
-              const latestReply = await tx.run(
-                zql.messages
-                  .where('conversationId', conversationId)
-                  .where('messageId', '!=', conversation.initialMessageId)
-                  .orderBy('createdAt', 'desc')
-                  .limit(1)
-              );
-              if (latestReply[0]) {
-                trueLastReplyAt = latestReply[0].createdAt;
-              }
-            }
-
-            await tx.mutate.conversation_participants.insert({
-              workspaceId: authData.workspaceId,
-              id: participantId,
-              conversationId,
-              userId: authData.sub,
-              isSubscribed: false,
-              unsubscribedAt: timestamp,
-              joinedAt: timestamp,
-              lastReadAt: timestamp,
-              channelId: conversation.channelId,
-              ...(trueLastReplyAt ? { lastReplyAt: trueLastReplyAt } : {}),
-            });
+            // User is not a participant
             return;
           }
 
-          if (!subscription.isSubscribed && subscription.unsubscribedAt) {
+          if (!subscription.isSubscribed) {
             // Already unsubscribed
             return;
           }
@@ -3501,7 +3467,69 @@ export function createMutators(
           await tx.mutate.conversation_participants.update({
             id: subscription.id,
             isSubscribed: false,
-            unsubscribedAt: timestamp,
+          });
+        }
+      ),
+      setTicketUpdatesSubscription: defineMutator(
+        z.object({
+          conversationId: z.string(),
+          subscribed: z.boolean(),
+          timestamp: z.number(),
+          participantId: z.string(),
+        }),
+        async ({ tx, args: { conversationId, subscribed, timestamp, participantId } }) => {
+          const participant = await tx.run(
+            zql.conversation_participants
+              .where('conversationId', conversationId)
+              .where('userId', authData.sub)
+              .one()
+          );
+
+          if (participant) {
+            await tx.mutate.conversation_participants.update({
+              id: participant.id,
+              ticketUpdatesUnsubscribedAt: subscribed ? null : timestamp,
+            });
+            return;
+          }
+
+          if (subscribed) {
+            return;
+          }
+
+          const conversation = await tx.run(
+            zql.conversations.where('conversationId', conversationId).one()
+          );
+
+          if (!conversation) {
+            throw new Error('Conversation not found');
+          }
+
+          let trueLastReplyAt: number | undefined = undefined;
+          if (conversation.replyCount > 0) {
+            const latestReply = await tx.run(
+              zql.messages
+                .where('conversationId', conversationId)
+                .where('messageId', '!=', conversation.initialMessageId)
+                .orderBy('createdAt', 'desc')
+                .limit(1)
+            );
+            if (latestReply[0]) {
+              trueLastReplyAt = latestReply[0].createdAt;
+            }
+          }
+
+          await tx.mutate.conversation_participants.insert({
+            workspaceId: authData.workspaceId,
+            id: participantId,
+            conversationId,
+            userId: authData.sub,
+            isSubscribed: false,
+            ticketUpdatesUnsubscribedAt: timestamp,
+            joinedAt: timestamp,
+            lastReadAt: timestamp,
+            channelId: conversation.channelId,
+            ...(trueLastReplyAt ? { lastReplyAt: trueLastReplyAt } : {}),
           });
         }
       ),
@@ -4071,7 +4099,7 @@ export function createMutators(
                   .one());
 
                 // Only delete if they're MENTIONED type (keep AUTHOR participants)
-                if (participant && participant.participationType === ConversationParticipation.MENTIONED && (participant.isSubscribed || !participant.unsubscribedAt)) {
+                if (participant && participant.participationType === ConversationParticipation.MENTIONED && !participant.ticketUpdatesUnsubscribedAt) {
                   await tx.mutate.conversation_participants.delete({
                     id: participant.id
                   });
@@ -4545,7 +4573,7 @@ export function createMutators(
                   .one());
 
                 // Only delete if they're MENTIONED type (keep AUTHOR participants for now)
-                if (participant && participant.participationType === ConversationParticipation.MENTIONED && (participant.isSubscribed || !participant.unsubscribedAt)) {
+                if (participant && participant.participationType === ConversationParticipation.MENTIONED && !participant.ticketUpdatesUnsubscribedAt) {
                   await tx.mutate.conversation_participants.delete({
                     id: participant.id
                   });
@@ -4574,7 +4602,7 @@ export function createMutators(
                 .one());
 
               // Remove AUTHOR participant (they have no more messages)
-              if (senderParticipant && senderParticipant.participationType === ConversationParticipation.AUTHOR && (senderParticipant.isSubscribed || !senderParticipant.unsubscribedAt)) {
+              if (senderParticipant && senderParticipant.participationType === ConversationParticipation.AUTHOR && !senderParticipant.ticketUpdatesUnsubscribedAt) {
                 await tx.mutate.conversation_participants.delete({
                   id: senderParticipant.id
                 });
@@ -16756,6 +16784,7 @@ export function createMutators(
           globalDesktopNotificationLevel: z.enum(['ALL', 'MENTIONS_ONLY', 'THREADS_ONLY', 'NONE']).optional(),
           globalMobileNotificationLevel: z.enum(['ALL', 'MENTIONS_ONLY', 'THREADS_ONLY', 'NONE']).optional(),
           threadReplyNotificationsEnabled: z.boolean().optional(),
+          ticketUpdateNotificationsEnabled: z.boolean().optional(),
           channelWideMentionsEnabled: z.boolean().optional(),
           timestamp: z.number(),
         }),
@@ -16766,6 +16795,7 @@ export function createMutators(
             globalDesktopNotificationLevel,
             globalMobileNotificationLevel,
             threadReplyNotificationsEnabled,
+            ticketUpdateNotificationsEnabled,
             channelWideMentionsEnabled,
             timestamp,
           },
@@ -16779,6 +16809,7 @@ export function createMutators(
               ...(globalDesktopNotificationLevel !== undefined && { globalDesktopNotificationLevel: globalDesktopNotificationLevel as NotificationLevel }),
               ...(globalMobileNotificationLevel !== undefined && { globalMobileNotificationLevel: globalMobileNotificationLevel as NotificationLevel }),
               ...(threadReplyNotificationsEnabled !== undefined && { threadReplyNotificationsEnabled }),
+              ...(ticketUpdateNotificationsEnabled !== undefined && { ticketUpdateNotificationsEnabled }),
               ...(channelWideMentionsEnabled !== undefined && { channelWideMentionsEnabled }),
               updatedAt: timestamp,
             });
@@ -16793,6 +16824,7 @@ export function createMutators(
               globalDesktopNotificationLevel: (globalDesktopNotificationLevel ?? NotificationLevel.MENTIONS_ONLY) as NotificationLevel,
               globalMobileNotificationLevel: (globalMobileNotificationLevel ?? NotificationLevel.MENTIONS_ONLY) as NotificationLevel,
               threadReplyNotificationsEnabled: threadReplyNotificationsEnabled ?? true,
+              ticketUpdateNotificationsEnabled: ticketUpdateNotificationsEnabled ?? true,
               channelWideMentionsEnabled: channelWideMentionsEnabled ?? true,
               notificationKeywords: '[]',
               showThreadTags: false,

@@ -108,7 +108,7 @@ async function notifyDevTicketsOnReleaseStatusChange(params: NotifyParams): Prom
         },
       });
 
-      // Actors follow the ticket unless they unsubscribed from it.
+      // Actors follow the ticket unless they unsubscribed from its ticket updates.
       const actorIds = await excludeTicketOptOuts(dev.id, [dev.createdBy, dev.assignedTo].filter(
         (id): id is string => Boolean(id) && id !== bot.id,
       ));
@@ -118,7 +118,7 @@ async function notifyDevTicketsOnReleaseStatusChange(params: NotifyParams): Prom
       try {
         const participants = await withWorkspaceScope(() =>
           db.conversationParticipant.findMany({
-            where: { conversationId: dev.conversationId!, isSubscribed: true },
+            where: { conversationId: dev.conversationId!, isSubscribed: true, ticketUpdatesUnsubscribedAt: null },
             select: { userId: true },
           }),
         );

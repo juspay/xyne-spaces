@@ -534,6 +534,7 @@ export const mutators = defineMutators({
            .nullable()
            .optional(),
          threadReplyNotificationsEnabled: z.boolean().nullable().optional(),
+         ticketUpdateNotificationsEnabled: z.boolean().nullable().optional(),
          channelWideMentionsEnabled: z.boolean().nullable().optional(),
          timestamp: z.number(),
        }),
@@ -545,6 +546,7 @@ export const mutators = defineMutators({
            desktopNotificationLevel,
            mobileNotificationLevel,
            threadReplyNotificationsEnabled,
+           ticketUpdateNotificationsEnabled,
            channelWideMentionsEnabled,
            timestamp,
          },
@@ -567,6 +569,7 @@ export const mutators = defineMutators({
            ...(desktopNotificationLevel !== undefined && { desktopNotificationLevel: desktopNotificationLevel ?? null }),
            ...(mobileNotificationLevel !== undefined && { mobileNotificationLevel: mobileNotificationLevel ?? null }),
            ...(threadReplyNotificationsEnabled !== undefined && { threadReplyNotificationsEnabled: threadReplyNotificationsEnabled ?? null }),
+           ...(ticketUpdateNotificationsEnabled !== undefined && { ticketUpdateNotificationsEnabled: ticketUpdateNotificationsEnabled ?? null }),
            ...(channelWideMentionsEnabled !== undefined && { channelWideMentionsEnabled: channelWideMentionsEnabled ?? null }),
            updatedAt: timestamp,
          });
@@ -2325,11 +2328,10 @@ export const mutators = defineMutators({
 
         if (existingParticipant) {
           // User already exists, just update isSubscribed to true
-          if (!existingParticipant.isSubscribed || existingParticipant.unsubscribedAt) {
+          if (!existingParticipant.isSubscribed) {
             await tx.mutate.conversation_participants.update({
               id: existingParticipant.id,
               isSubscribed: true,
-              unsubscribedAt: null,
             });
           }
           return;
@@ -2365,10 +2367,8 @@ export const mutators = defineMutators({
     unsubscribeFromConversation: defineMutator(
       z.object({
         conversationId: z.string(),
-        timestamp: z.number(),
-        participantId: z.string(),
       }),
-      async ({ tx, ctx, args: { conversationId, timestamp, participantId } }) => {
+      async ({ tx, ctx, args: { conversationId } }) => {
         // Find user's subscription
         const subscription = await tx.run(
           zql.conversation_participants
@@ -2378,44 +2378,11 @@ export const mutators = defineMutators({
         );
 
         if (!subscription) {
-          const conversation = await tx.run(
-            zql.conversations.where('conversationId', conversationId).one(),
-          );
-
-          if (!conversation) {
-            throw new Error('Conversation not found');
-          }
-
-          let trueLastReplyAt: number | undefined = undefined;
-          if (conversation.replyCount > 0) {
-            const latestReply = await tx.run(
-              zql.messages
-                .where('conversationId', conversationId)
-                .where('messageId', '!=', conversation.initialMessageId)
-                .orderBy('createdAt', 'desc')
-                .limit(1)
-            );
-            if (latestReply[0]) {
-              trueLastReplyAt = latestReply[0].createdAt;
-            }
-          }
-
-          await tx.mutate.conversation_participants.insert({
-            workspaceId: ctx.workspaceId,
-            id: participantId,
-            conversationId,
-            userId: ctx.userID,
-            isSubscribed: false,
-            unsubscribedAt: timestamp,
-            joinedAt: timestamp,
-            lastReadAt: timestamp,
-            channelId: conversation.channelId,
-            lastReplyAt: trueLastReplyAt || null,
-          });
+          // User is not a participant
           return;
         }
 
-        if (!subscription.isSubscribed && subscription.unsubscribedAt) {
+        if (!subscription.isSubscribed) {
           // Already unsubscribed
           return;
         }
@@ -2424,7 +2391,69 @@ export const mutators = defineMutators({
         await tx.mutate.conversation_participants.update({
           id: subscription.id,
           isSubscribed: false,
-          unsubscribedAt: timestamp,
+        });
+      },
+    ),
+    setTicketUpdatesSubscription: defineMutator(
+      z.object({
+        conversationId: z.string(),
+        subscribed: z.boolean(),
+        timestamp: z.number(),
+        participantId: z.string(),
+      }),
+      async ({ tx, ctx, args: { conversationId, subscribed, timestamp, participantId } }) => {
+        const participant = await tx.run(
+          zql.conversation_participants
+            .where('conversationId', conversationId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
+
+        if (participant) {
+          await tx.mutate.conversation_participants.update({
+            id: participant.id,
+            ticketUpdatesUnsubscribedAt: subscribed ? null : timestamp,
+          });
+          return;
+        }
+
+        if (subscribed) {
+          return;
+        }
+
+        const conversation = await tx.run(
+          zql.conversations.where('conversationId', conversationId).one(),
+        );
+
+        if (!conversation) {
+          throw new Error('Conversation not found');
+        }
+
+        let trueLastReplyAt: number | undefined = undefined;
+        if (conversation.replyCount > 0) {
+          const latestReply = await tx.run(
+            zql.messages
+              .where('conversationId', conversationId)
+              .where('messageId', '!=', conversation.initialMessageId)
+              .orderBy('createdAt', 'desc')
+              .limit(1)
+          );
+          if (latestReply[0]) {
+            trueLastReplyAt = latestReply[0].createdAt;
+          }
+        }
+
+        await tx.mutate.conversation_participants.insert({
+          workspaceId: ctx.workspaceId,
+          id: participantId,
+          conversationId,
+          userId: ctx.userID,
+          isSubscribed: false,
+          ticketUpdatesUnsubscribedAt: timestamp,
+          joinedAt: timestamp,
+          lastReadAt: timestamp,
+          channelId: conversation.channelId,
+          lastReplyAt: trueLastReplyAt || null,
         });
       },
     ),
@@ -3074,7 +3103,7 @@ export const mutators = defineMutators({
               if (
                 participant &&
                 participant.participationType === ConversationParticipation.MENTIONED &&
-                (participant.isSubscribed || !participant.unsubscribedAt)
+                !participant.ticketUpdatesUnsubscribedAt
               ) {
                 await tx.mutate.conversation_participants.delete({
                   id: participant.id,
@@ -3103,7 +3132,7 @@ export const mutators = defineMutators({
           if (
             senderParticipant &&
             senderParticipant.participationType === ConversationParticipation.AUTHOR &&
-            (senderParticipant.isSubscribed || !senderParticipant.unsubscribedAt)
+            !senderParticipant.ticketUpdatesUnsubscribedAt
           ) {
             await tx.mutate.conversation_participants.delete({
               id: senderParticipant.id,
@@ -10591,6 +10620,7 @@ export const mutators = defineMutators({
         globalDesktopNotificationLevel: z.nativeEnum(NotificationLevel).optional(),
         globalMobileNotificationLevel: z.nativeEnum(NotificationLevel).optional(),
         threadReplyNotificationsEnabled: z.boolean().optional(),
+        ticketUpdateNotificationsEnabled: z.boolean().optional(),
         channelWideMentionsEnabled: z.boolean().optional(),
         timestamp: z.number(),
       }),
@@ -10602,6 +10632,7 @@ export const mutators = defineMutators({
           globalDesktopNotificationLevel,
           globalMobileNotificationLevel,
           threadReplyNotificationsEnabled,
+          ticketUpdateNotificationsEnabled,
           channelWideMentionsEnabled,
           timestamp,
         },
@@ -10615,6 +10646,7 @@ export const mutators = defineMutators({
             ...(globalDesktopNotificationLevel !== undefined && { globalDesktopNotificationLevel }),
             ...(globalMobileNotificationLevel !== undefined && { globalMobileNotificationLevel }),
             ...(threadReplyNotificationsEnabled !== undefined && { threadReplyNotificationsEnabled }),
+            ...(ticketUpdateNotificationsEnabled !== undefined && { ticketUpdateNotificationsEnabled }),
             ...(channelWideMentionsEnabled !== undefined && { channelWideMentionsEnabled }),
             updatedAt: timestamp,
           });
@@ -10629,6 +10661,7 @@ export const mutators = defineMutators({
             globalDesktopNotificationLevel: globalDesktopNotificationLevel ?? NotificationLevel.MENTIONS_ONLY,
             globalMobileNotificationLevel: globalMobileNotificationLevel ?? NotificationLevel.MENTIONS_ONLY,
             threadReplyNotificationsEnabled: threadReplyNotificationsEnabled ?? true,
+            ticketUpdateNotificationsEnabled: ticketUpdateNotificationsEnabled ?? true,
             channelWideMentionsEnabled: channelWideMentionsEnabled ?? true,
             notificationKeywords: '[]',
             showThreadTags: false,

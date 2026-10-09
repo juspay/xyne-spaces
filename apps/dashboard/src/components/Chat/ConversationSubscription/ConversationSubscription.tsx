@@ -8,13 +8,11 @@ import { queries } from '../../../zero/queries';
 import { v4 as uuidv4 } from 'uuid';
 import { ConversationWithTicket } from '../../ui/MessageBubble/MessageBubble.types';
 import { cn } from '../../../utils/classNames';
-import { useIsTicketStakeholder } from './useIsTicketStakeholder';
 
 interface ParticipantData {
   id: string;
   isSubscribed: boolean;
   participationType?: string | null;
-  unsubscribedAt?: number | null;
 }
 
 interface SubscriptionLabelProps {
@@ -43,7 +41,6 @@ export const ConversationSubscription = React.forwardRef<
   (
     {
       conversationId,
-      conversation,
       participant: participantProp,
       variant = 'icon-only',
       className = '',
@@ -54,15 +51,15 @@ export const ConversationSubscription = React.forwardRef<
     const zero = useZero();
     const [activated, setActivated] = useState(false);
 
-    const isOpen =
-      variant === 'lazy-icon'
-        ? activated
-        : variant === 'dropdown' || variant === 'full'
-          ? menuOpen === true
-          : true;
-
     // Query is only enabled when participant is NOT provided from parent
-    const shouldFetch = participantProp !== undefined ? false : isOpen;
+    const shouldFetch =
+      participantProp !== undefined
+        ? false
+        : variant === 'lazy-icon'
+          ? activated
+          : variant === 'dropdown' || variant === 'full'
+            ? menuOpen === true
+            : true;
 
     const [queriedParticipant, participantDetails] = useQuery(
       queries.conversationParticipantByConversationId({ conversationId }),
@@ -71,21 +68,14 @@ export const ConversationSubscription = React.forwardRef<
 
     const participant = participantProp !== undefined ? participantProp : queriedParticipant;
 
-    const { isStakeholder, isResolving: isStakeholderResolving } = useIsTicketStakeholder(
-      conversation?.ticketId,
-      isOpen,
-    );
-
     const isResolving =
-      (participantProp === undefined &&
-        variant !== 'lazy-icon' &&
-        participantDetails.type !== 'complete') ||
-      isStakeholderResolving;
+      participantProp === undefined &&
+      variant !== 'lazy-icon' &&
+      participantDetails.type !== 'complete';
 
     if (participantProp === undefined && variant !== 'lazy-icon' && !shouldFetch) return null;
 
-    const isSubscribed =
-      (participant?.isSubscribed ?? false) || (isStakeholder && !participant?.unsubscribedAt);
+    const isSubscribed = participant?.isSubscribed ?? false;
     const participationType = participant?.participationType;
     const subscriptionLabel = isResolving
       ? LOADING_SUBSCRIPTION_LABEL
@@ -119,8 +109,6 @@ export const ConversationSubscription = React.forwardRef<
         void zero.mutate(
           mutators.conversations.unsubscribeFromConversation({
             conversationId,
-            timestamp,
-            participantId: uuidv4(),
           }),
         );
       } else {

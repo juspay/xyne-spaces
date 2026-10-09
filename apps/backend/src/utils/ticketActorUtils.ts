@@ -90,8 +90,7 @@ export async function excludeTicketOptOuts(ticketId: string, userIds: string[]):
         where: {
           conversationId: ticket.conversationId,
           userId: { in: userIds },
-          isSubscribed: false,
-          unsubscribedAt: { not: null },
+          ticketUpdatesUnsubscribedAt: { not: null },
         },
         select: { userId: true },
       }),
@@ -121,9 +120,9 @@ export async function clearTicketOptOut(ticketId: string, userId: string): Promi
         where: {
           conversationId: ticket.conversationId,
           userId,
-          unsubscribedAt: { not: null },
+          ticketUpdatesUnsubscribedAt: { not: null },
         },
-        data: { unsubscribedAt: null },
+        data: { ticketUpdatesUnsubscribedAt: null },
       }),
     );
   } catch (error) {

@@ -973,6 +973,7 @@ model UserPreference {
   globalDesktopNotificationLevel  String?            // Default level for all channels (desktop)
   globalMobileNotificationLevel   String?            // Default level for all channels (mobile)
   threadReplyNotificationsEnabled Boolean           @default(true) // Receive thread reply notifications globally
+  ticketUpdateNotificationsEnabled Boolean          @default(true)
   channelWideMentionsEnabled      Boolean           @default(true) // Receive @channel and @here mention notifications
   notificationKeywords            String?             // Global keyword-notification list (max 50, each <= 80 chars)
   createdAt               DateTime @default(now())
@@ -2076,6 +2077,7 @@ model ChannelUserStatus {
   desktopNotificationLevel  String?               // Channel notification preference (desktop); null = inherit UserPreference.globalDesktopNotificationLevel
   mobileNotificationLevel   String?              // Channel notification preference (mobile); null = inherit UserPreference.globalMobileNotificationLevel
   threadReplyNotificationsEnabled Boolean?       // Per-channel override: null = inherit UserPreference.threadReplyNotificationsEnabled
+  ticketUpdateNotificationsEnabled Boolean?
   channelWideMentionsEnabled      Boolean?       // Per-channel override: null = inherit UserPreference.channelWideMentionsEnabled
 
   isDeleted                 Boolean     @default(false) // Soft delete flag
@@ -2195,7 +2197,7 @@ model ConversationParticipant {
   userId            String                        // User ID (no FK constraint)
   participationType String?                       // AUTHOR, MENTIONED, or NULL (manual subscription)
   isSubscribed      Boolean                       @default(true) // Notification subscription status
-  unsubscribedAt    DateTime?
+  ticketUpdatesUnsubscribedAt DateTime?
   joinedAt          DateTime                      @default(now())
   lastReadAt        DateTime?                     // Track when user last read this thread conversation
   lastReplyAt       DateTime?                     // Denormalized: set to conversation.lastActivityAt when a reply is sent. NULL = no replies.

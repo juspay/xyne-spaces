@@ -444,6 +444,22 @@ const NotificationsSection: FC<{ state: PreferencesState }> = () => {
           />
         </div>
 
+        <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+          <div>
+            <p className='text-sm font-medium text-foreground'>Ticket update notifications</p>
+            <p className='text-xs text-muted-foreground mt-0.5'>
+              Receive notifications for changes to your tickets
+            </p>
+          </div>
+          <Switch
+            id='ticket-update-notifications'
+            checked={settings.ticketUpdateNotificationsEnabled}
+            onCheckedChange={checked =>
+              settings.update({ ticketUpdateNotificationsEnabled: checked })
+            }
+          />
+        </div>
+
         <MeetingDetectionToggle />
 
         <NotificationKeywordsCard />

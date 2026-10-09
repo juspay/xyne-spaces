@@ -633,6 +633,7 @@ export const userPreferenceTable = table('user_preferences')
     globalDesktopNotificationLevel: enumeration<NotificationLevel>().optional(), // Default desktop level across all channels
     globalMobileNotificationLevel: enumeration<NotificationLevel>().optional(),  // Default mobile level across all channels
     threadReplyNotificationsEnabled: boolean(), // Receive thread reply notifications globally
+    ticketUpdateNotificationsEnabled: boolean().optional(),
     channelWideMentionsEnabled: boolean(),      // Receive @channel and @here notifications
     notificationKeywords: string().optional(), // Stringified JSON array of keywords (max 50, each <= 80 chars)
     showThreadTags: boolean(), // Render thread classification chips in chat; opt-in
@@ -860,6 +861,7 @@ export const channelUserStatusTable = table('channel_user_status')
     desktopNotificationLevel: string().optional(), // null = inherit UserPreference.globalDesktopNotificationLevel
     mobileNotificationLevel: string().optional(),  // null = inherit UserPreference.globalMobileNotificationLevel
     threadReplyNotificationsEnabled: boolean().optional(), // null = inherit UserPreference.threadReplyNotificationsEnabled
+    ticketUpdateNotificationsEnabled: boolean().optional(),
     channelWideMentionsEnabled: boolean().optional(),      // null = inherit UserPreference.channelWideMentionsEnabled
     isDeleted: boolean(),
     updatedAt: number(),
@@ -917,7 +919,7 @@ export const conversationParticipantTable = table('conversation_participants')
     channelId: string().optional(),
     participationType: enumeration<ConversationParticipation>().optional(),
     isSubscribed: boolean(),
-    unsubscribedAt: number().optional(),
+    ticketUpdatesUnsubscribedAt: number().optional(),
     joinedAt: number(),
     lastReadAt: number().optional(),
     lastReplyAt: number().optional(),

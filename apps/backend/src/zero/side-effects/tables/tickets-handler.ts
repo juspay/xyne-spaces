@@ -332,6 +332,7 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
             where: {
               conversationId: ticket.conversationId,
               isSubscribed: true,
+              ticketUpdatesUnsubscribedAt: null,
             },
             select: { userId: true },
           }),

@@ -48,7 +48,7 @@ import { ChatInput } from './ChatInput';
 import ThreadList from './ThreadList/ThreadList';
 import { useDragAndDropAreaRef } from '../../hooks/useDragAndDropAreaRef';
 import { DragAndDropOverlay } from './DragAndDropOverlay';
-import { ConversationSubscription } from './ConversationSubscription';
+import { ConversationSubscription, TicketUpdatesSubscription } from './ConversationSubscription';
 import { useChannelSubscription } from '../../hooks/useChannelSubscription';
 import { insertDateSeparatorsForThreadMessages } from '../../utils/chatUtils';
 import { htmlToPlainText } from '../../utils/sanitizer';
@@ -277,10 +277,8 @@ export const ThreadMessages = ({
     return !!source;
   }, [propConversationParticipant, conversation?.participants]);
 
-  const subscriptionParticipant =
-    conversationDetails.type === 'complete'
-      ? { participant: conversation?.participants ?? null }
-      : {};
+  const ownParticipant =
+    conversationDetails.type === 'complete' ? (conversation?.participants ?? null) : undefined;
 
   const ticket = useMemo(() => parseTicketMd(conversation?.ticket_md), [conversation?.ticket_md]);
   const derivedTicketId = ticketId || conversation?.ticketId || '';
@@ -1146,7 +1144,6 @@ export const ThreadMessages = ({
                               <ConversationSubscription
                                 conversationId={derivedConversationId}
                                 {...(conversation && { conversation })}
-                                {...subscriptionParticipant}
                                 variant='icon-only'
                                 className='flex items-center justify-center'
                               />
@@ -1388,12 +1385,18 @@ export const ThreadMessages = ({
                   <ConversationSubscription
                     conversationId={derivedConversationId}
                     {...(conversation && { conversation })}
-                    {...subscriptionParticipant}
                     variant='dropdown'
                     menuOpen
                     className='px-2 py-1.5'
                   />
                 </DropdownMenuItem>
+              )}
+              {derivedConversationId && derivedTicketId && (
+                <TicketUpdatesSubscription
+                  conversationId={derivedConversationId}
+                  ticketId={derivedTicketId}
+                  participant={ownParticipant}
+                />
               )}
               {showThreadTags && !channel?.isArchived && (
                 <DropdownMenuSub>
@@ -1516,7 +1519,6 @@ export const ThreadMessages = ({
                 <ConversationSubscription
                   conversationId={derivedConversationId}
                   {...(conversation && { conversation })}
-                  {...subscriptionParticipant}
                   variant='icon-only'
                   className={cn(
                     'h-7 w-7 rounded-lg flex items-center justify-center transition-colors hover:bg-accent dark:hover:bg-accent/50',
@@ -1620,12 +1622,18 @@ export const ThreadMessages = ({
                       <ConversationSubscription
                         conversationId={derivedConversationId}
                         {...(conversation && { conversation })}
-                        {...subscriptionParticipant}
                         variant='dropdown'
                         menuOpen
                         className='px-2 py-1.5'
                       />
                     </DropdownMenuItem>
+                  )}
+                  {derivedConversationId && derivedTicketId && (
+                    <TicketUpdatesSubscription
+                      conversationId={derivedConversationId}
+                      ticketId={derivedTicketId}
+                      participant={ownParticipant}
+                    />
                   )}
                   {!isMobile && (
                     <DropdownMenuItem
