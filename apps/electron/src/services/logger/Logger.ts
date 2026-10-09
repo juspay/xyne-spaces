@@ -8,7 +8,7 @@
 
 import log from 'electron-log/main';
 import { v4 as uuidv4 } from 'uuid';
-import { CLIENT_EVENT_SHRED_OPTIONS, shred } from '@xyne/logger';
+import { CLIENT_EVENT_SHRED_OPTIONS, shred, shredError } from '@xyne/logger';
 import type { EnrollmentEventType } from './enrollment-events';
 import * as os from 'os';
 import { net, app } from 'electron';
@@ -66,11 +66,15 @@ const errorFrom = (value: unknown): Error | undefined => {
   ) as Error | undefined;
 };
 
-// Local file/console output skips Logger.log, so shred it here too. Errors are
-// left as-is so their stacks stay multi-line; the stack hook adds a redacted copy.
+// Local file/console output skips Logger.log, so shred it here too. Errors stay
+// Errors (multi-line stacks) via shredError.
 const shredLogMessage: (typeof log.hooks)[number] = message => ({
   ...message,
-  data: message.data.map(item => (item instanceof Error ? item : shred(item, CLIENT_EVENT_SHRED_OPTIONS))),
+  data: message.data.map(item =>
+    item instanceof Error
+      ? shredError(item, CLIENT_EVENT_SHRED_OPTIONS)
+      : shred(item, CLIENT_EVENT_SHRED_OPTIONS)
+  ),
 });
 
 export const installElectronLogHooks = (): void => {

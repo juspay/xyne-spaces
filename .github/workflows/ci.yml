@@ -117,6 +117,33 @@ jobs:
         if: matrix.task == 'build'
         run: pnpm --filter xyne-spaces-dashboard run build
 
+  # Log redaction: a log path that lets a secret through fails here.
+  logger:
+    name: Logger redaction tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      # --ignore-scripts skips xyne-claw-shared's Playwright browser download.
+      - name: Install dependencies
+        run: pnpm install ${{ env.PNPM_FLAGS }} --ignore-scripts --filter @xyne/logger... --filter xyne-claw-shared...
+
+      - name: Build @xyne/logger
+        run: pnpm --filter @xyne/logger run build
+
+      - name: Shredder tests
+        run: pnpm --filter @xyne/logger run test
+
+      - name: Claw logger probe test
+        run: pnpm --filter xyne-claw-shared exec vitest run src/logger.test.ts
+
   test:
     name: Automation tests
     if: github.event_name == 'merge_group' && vars.RUN_TEST_CASE == 'true'

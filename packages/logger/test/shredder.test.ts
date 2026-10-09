@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { shred, shredText, shredRecordInPlace, isSecretKey, CLIENT_EVENT_SHRED_OPTIONS } from "../src/shredder.js";
+import { shred, shredText, shredRecordInPlace, shredError, isSecretKey, CLIENT_EVENT_SHRED_OPTIONS } from "../src/shredder.js";
 
 // A stringified clone is the easiest way to assert "no secret survives anywhere".
 const flat = (v: unknown) => JSON.stringify(shred(v));
@@ -257,5 +257,86 @@ describe("shred — client events (CLIENT_EVENT_SHRED_OPTIONS)", () => {
     expect(out.accessToken).toBe("[REDACTED]");
     expect(out.note).toContain("Bearer [REDACTED]");
     expect(out.blob.length).toBe(100000);
+  });
+});
+
+const PROBE = "Bearer zzPROBEzz1234567890abcdef";
+
+describe("shredRecordInPlace leaves no field unchecked", () => {
+  it("redacts a secret in every string key except winston-owned `level`", () => {
+    const err = new Error(`boom ${PROBE}`);
+    const rec: Record<string, unknown> = {
+      level: "info",
+      message: `m ${PROBE}`,
+      timestamp: PROBE,
+      stack: PROBE,
+      module: PROBE,
+      service: PROBE,
+      requestId: PROBE,
+      detail: PROBE,
+      apiKey: "raw",
+      details: ["ok", PROBE],
+      nested: { deeper: { detail: PROBE } },
+      map: new Map([["detail", PROBE]]),
+      error: err,
+    };
+    shredRecordInPlace(rec);
+    expect(JSON.stringify(rec)).not.toContain("zzPROBEzz");
+    expect(rec.level).toBe("info");
+    expect(rec.apiKey).toBe("[REDACTED]");
+  });
+
+  it("redacts a non-string message", () => {
+    const rec: Record<string, unknown> = { level: "info", message: { detail: PROBE } };
+    shredRecordInPlace(rec);
+    expect(JSON.stringify(rec)).not.toContain("zzPROBEzz");
+  });
+});
+
+describe("timestamp is checked but never altered when it is a real time", () => {
+  it("keeps caller-supplied ISO and claw-format timestamps byte for byte", () => {
+    for (const ts of ["2026-10-09T10:00:00.000Z", "2026-10-09 15:30:00", "15:30:00", "1760000000000", new Date(0).toString()]) {
+      const rec: Record<string, unknown> = { level: "info", message: "analytics_event", timestamp: ts };
+      shredRecordInPlace(rec);
+      expect(rec.timestamp).toBe(ts);
+    }
+  });
+
+  it("leaves Date and number timestamps untouched (same type and value)", () => {
+    const d = new Date(0);
+    const a: Record<string, unknown> = { level: "info", message: "m", timestamp: d };
+    const b: Record<string, unknown> = { level: "info", message: "m", timestamp: 1760000000000 };
+    shredRecordInPlace(a);
+    shredRecordInPlace(b);
+    expect(a.timestamp).toBe(d);
+    expect(b.timestamp).toBe(1760000000000);
+  });
+
+  it("redacts a secret hidden in timestamp", () => {
+    const rec: Record<string, unknown> = { level: "info", message: "m", timestamp: PROBE };
+    shredRecordInPlace(rec);
+    expect(rec.timestamp).toBe("Bearer [REDACTED]");
+  });
+});
+
+describe("shredError", () => {
+  it("returns an Error with a multi-line, redacted stack and message", () => {
+    const err = new Error(`connect failed ${PROBE}`);
+    const out = shredError(err);
+    expect(out).toBeInstanceOf(Error);
+    expect(out.name).toBe("Error");
+    expect(out.message).toBe("connect failed Bearer [REDACTED]");
+    expect(out.stack).toContain("\n    at ");
+    expect(out.stack).not.toContain("zzPROBEzz");
+    expect(err.message).toContain("zzPROBEzz");
+  });
+
+  it("redacts a PEM block that spans lines and shreds extra fields", () => {
+    const pem = "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA\n-----END RSA PRIVATE KEY-----";
+    const err = Object.assign(new Error(`bad key\n${pem}`), { code: "EKEY", token: "raw" });
+    const out = shredError(err) as Error & { code?: string; token?: string };
+    expect(out.message).toBe("bad key\n[REDACTED_PEM]");
+    expect(out.code).toBe("EKEY");
+    expect(out.token).toBe("[REDACTED]");
   });
 });

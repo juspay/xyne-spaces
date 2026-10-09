@@ -14,6 +14,7 @@ export {
   shred,
   shredText,
   shredRecordInPlace,
+  shredError,
   isSecretKey,
   CLIENT_EVENT_SHRED_OPTIONS,
   type ShredOptions,

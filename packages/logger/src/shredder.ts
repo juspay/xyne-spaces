@@ -121,11 +121,20 @@ function scrubControlChars(s: string): string {
   return s.replace(/[\t\n\r\v\f]/g, " ").replace(/[\x00-\x08\x0E-\x1F\x7F]/g, "");
 }
 
-function redactString(s: string, max: number): string {
-  let out = scrubControlChars(s);
+function applyValuePatterns(s: string, max: number): string {
+  let out = s;
   for (const [re, rep] of VALUE_PATTERNS) out = out.replace(re, rep);
   if (out.length > max) out = out.slice(0, max) + `…[truncated ${out.length - max} chars]`;
   return out;
+}
+
+function redactString(s: string, max: number): string {
+  return applyValuePatterns(scrubControlChars(s), max);
+}
+
+// Same as redactString but keeps "\n", for multi-line text printed by a trusted sink (stacks).
+function redactKeepingLines(s: string, max: number): string {
+  return applyValuePatterns(s.split("\n").map(scrubControlChars).join("\n"), max);
 }
 
 /** Whether a field name denotes a secret (and is not a safe sibling). */
@@ -269,6 +278,25 @@ export function shred(value: unknown, opts?: ShredOptions): LogValueOut {
   return shredAt(value, o, "", allow);
 }
 
+/**
+ * Redacted copy of an Error that stays an Error with a multi-line stack, for
+ * sinks that print Errors natively. Own enumerable fields are shredded too.
+ */
+export function shredError(err: Error, opts?: ShredOptions): Error {
+  const o = { ...DEFAULTS, ...opts };
+  try {
+    const copy = new Error(redactKeepingLines(err.message, o.maxStringLength));
+    copy.name = err.name;
+    if (typeof err.stack === "string") copy.stack = redactKeepingLines(err.stack, o.maxStringLength);
+    else delete copy.stack;
+    const extra = shred({ ...err }, opts);
+    if (extra !== null && typeof extra === "object" && !Array.isArray(extra)) Object.assign(copy, extra);
+    return copy;
+  } catch {
+    return new Error("[unserializable]");
+  }
+}
+
 /** Redact secrets from a plain string (a message/log line). Returns a string. Never throws. */
 export function shredText(text: string, opts?: ShredOptions): string {
   try {
@@ -278,9 +306,10 @@ export function shredText(text: string, opts?: ShredOptions): string {
   }
 }
 
-// Redact a record IN PLACE over its string keys; skips `level`/`timestamp` and
-// leaves symbol keys (winston's Symbol(level)/Symbol(splat)) untouched. `message`
-// keeps its key, value-pattern redacted. Mutates (not clones) for winston formats.
+// Redact a record IN PLACE over its string keys; skips `level` (winston-owned, may
+// carry colour codes) and leaves symbol keys (winston's Symbol(level)/Symbol(splat))
+// untouched. `message` and string `timestamp` get value patterns only, so a real
+// time is unchanged. Mutates (not clones) for winston formats.
 export function shredRecordInPlace<T extends Record<string, unknown>>(
   record: T,
   opts?: ShredOptions,
@@ -292,12 +321,16 @@ export function shredRecordInPlace<T extends Record<string, unknown>>(
   try {
     const allow = allowedPathsFor(rec.module);
     for (const key of Object.keys(rec)) {
-      if (key === "level" || key === "timestamp") continue;
+      if (key === "level") continue;
       // Property-injection / prototype-pollution guard.
       if (key === "__proto__" || key === "constructor" || key === "prototype") continue;
       const value = rec[key];
       if (key === "message") {
         rec[key] = typeof value === "string" ? redactString(value, o.maxStringLength) : shredAt(value, o, key, allow);
+        continue;
+      }
+      if (key === "timestamp") {
+        if (typeof value === "string") rec[key] = redactString(value, o.maxStringLength);
         continue;
       }
       rec[key] = redactByKey(key, value, key, allow) ? REDACTED : shredAt(value, o, key, allow);
