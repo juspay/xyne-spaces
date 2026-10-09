@@ -1,11 +1,24 @@
-variable "region" {
-  type = string
+# ---------------------------------------------------------------------------
+# Cluster access
+#
+# The cloud stacks read a token from their provider. On-prem the operator
+# supplies a kubeconfig instead.
+# ---------------------------------------------------------------------------
+
+variable "kubeconfig" {
+  type        = string
+  description = "Path to the kubeconfig for the target cluster."
 }
 
-variable "profile" {
-  type    = string
-  default = ""
+variable "kube_context" {
+  type        = string
+  default     = ""
+  description = "Context within the kubeconfig. Empty uses its current-context."
 }
+
+# ---------------------------------------------------------------------------
+# 01-infra remote state
+# ---------------------------------------------------------------------------
 
 variable "state_bucket" {
   type = string
@@ -18,8 +31,17 @@ variable "state_key" {
 
 variable "state_region" {
   type    = string
-  default = ""
+  default = "default"
 }
+
+variable "state_endpoint" {
+  type        = string
+  description = "S3 endpoint holding the state bucket, typically the same Ceph RGW."
+}
+
+# ---------------------------------------------------------------------------
+# Platform
+# ---------------------------------------------------------------------------
 
 variable "namespace" {
   type    = string
@@ -90,6 +112,14 @@ variable "argocd_values" {
   default = ""
 }
 
+# Namespaces the AppProject may deploy into, beyond those derived from the
+# built-in addons. Any overlay_sources entry targeting its own namespace needs
+# to be listed here or ArgoCD rejects it as an invalid destination.
+variable "argocd_extra_destinations" {
+  type    = list(string)
+  default = []
+}
+
 variable "enable_vespa" {
   type    = bool
   default = false
@@ -106,11 +136,6 @@ variable "enable_sandbox" {
 }
 
 variable "enable_hindsight" {
-  type    = bool
-  default = false
-}
-
-variable "enable_workflows" {
   type    = bool
   default = false
 }
