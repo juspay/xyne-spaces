@@ -17,6 +17,11 @@ import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { emailService } from '@/services/email/factory';
 import { communityJoinApprovedEmailHtml } from '@/services/email/templates/community-join-approved';
+import {
+  enterpriseJoinApprovedEmailHtml,
+  enterpriseJoinApprovedEmailSubject,
+  enterpriseJoinApprovedEmailText,
+} from '@/services/email/templates/enterprise-join-approved';
 import { grantPermissionsForRole } from '@/services/permissionMatrix';
 import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { organizationDomainService } from '@/services/organizationDomainService';
@@ -686,32 +691,21 @@ export class CommunityWorkspaceService {
     try {
       const workspace = await this.prisma.workspace.findUnique({
         where: { id: request.workspaceId },
-        select: { name: true },
+        select: { name: true, workspaceType: true, organization: { select: { name: true } } },
       });
 
-      const workspaceName = workspace?.name || 'your';
-      const joinLink = this.buildCommunityJoinLink(request.workspaceId);
-      const templateValues = {
-        workspaceName,
-        workspaceId: request.workspaceId,
-        joinLink,
-        email: request.email,
-      };
-      const text = this.renderEmailTemplate(
-        config.communityJoinApprovedEmail.message,
-        templateValues
-      );
+      const workspaceType = workspace?.workspaceType ?? null;
+      const joinLink = this.buildJoinLink(request.workspaceId, workspaceType);
+      const email =
+        workspaceType === WorkspaceType.COMMUNITY
+          ? this.buildCommunityApprovalEmail(request, workspace?.name || 'your', joinLink)
+          : this.buildEnterpriseApprovalEmail(
+              workspace?.name || 'your workspace',
+              workspace?.organization?.name ?? null,
+              joinLink
+            );
 
-      const result = await emailService.sendEmail({
-        to: request.email,
-        subject: `Your request to join ${workspaceName} Community is approved`,
-        text,
-        html: communityJoinApprovedEmailHtml({
-          workspaceName,
-          joinLink,
-          message: text,
-        }),
-      });
+      const result = await emailService.sendEmail({ to: request.email, ...email });
 
       if (!result.success) {
         logger.warn('[CommunityWorkspaceService] Failed to send join request approval email', {
@@ -739,10 +733,51 @@ export class CommunityWorkspaceService {
     }
   }
 
-  private buildCommunityJoinLink(workspaceId: string): string {
+  /**
+   * Enterprise workspaces are approved by the requester's own org admin, so this
+   * email says nothing about communities.
+   */
+  private buildEnterpriseApprovalEmail(
+    workspaceName: string,
+    orgName: string | null,
+    joinLink: string
+  ): { subject: string; text: string; html: string } {
+    const params = { workspaceName, orgName, joinLink };
+    return {
+      subject: enterpriseJoinApprovedEmailSubject(params),
+      text: enterpriseJoinApprovedEmailText(params),
+      html: enterpriseJoinApprovedEmailHtml(params),
+    };
+  }
+
+  private buildCommunityApprovalEmail(
+    request: CommunityJoinRequestListItem,
+    workspaceName: string,
+    joinLink: string
+  ): { subject: string; text: string; html: string } {
+    const text = this.renderEmailTemplate(config.communityJoinApprovedEmail.message, {
+      workspaceName,
+      workspaceId: request.workspaceId,
+      joinLink,
+      email: request.email,
+    });
+    return {
+      subject: `Your request to join ${workspaceName} Community is approved`,
+      text,
+      html: communityJoinApprovedEmailHtml({ workspaceName, joinLink, message: text }),
+    };
+  }
+
+  /**
+   * Link in the approval email. Enterprise workspaces get `/enterprise/join`, which
+   * starts enterprise login and opens this workspace once the user is signed in;
+   * community workspaces keep `/community/join`.
+   */
+  private buildJoinLink(workspaceId: string, workspaceType: string | null): string {
     const frontendUrl = (config.frontendUrl || config.slackFrontendUrl || '').replace(/\/+$/, '');
     const baseUrl = frontendUrl || 'http://localhost:5173';
-    return `${baseUrl}/community/join?workspaceId=${encodeURIComponent(workspaceId)}`;
+    const path = workspaceType === WorkspaceType.COMMUNITY ? '/community/join' : '/enterprise/join';
+    return `${baseUrl}${path}?workspaceId=${encodeURIComponent(workspaceId)}`;
   }
 
   private renderEmailTemplate(

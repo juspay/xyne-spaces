@@ -31,6 +31,15 @@ export const clearEnterpriseLoginIntent = (): void => {
 };
 
 /**
+ * Enterprise workspace the user was approved to join, set by the
+ * `/enterprise/join?workspaceId=...` link in the approval email. After login it
+ * takes priority over the last active workspace (see getPreferredWorkspaceId).
+ * Kept separate from PENDING_WORKSPACE_ID_KEY, which means "join this community
+ * workspace" and disables the enterprise login intent.
+ */
+export const PENDING_ENTERPRISE_WORKSPACE_ID_KEY = 'pending_enterprise_workspace_id';
+
+/**
  * The enterprise intent only applies when the user is not joining a pending
  * community workspace — a pending community join always wins so gmail users
  * can still sign in to join communities.
@@ -215,6 +224,21 @@ const createClearedContext = (): AuthContext => ({
 
 const getWorkspaces = (output?: OAuthCallbackOutput): Workspace[] => {
   return output?.workspaces || [];
+};
+
+/**
+ * Workspace to open automatically after login: a pending enterprise join wins,
+ * then the last active workspace — each only if the user can access it.
+ */
+const getPreferredWorkspaceId = (email: string, workspaces: Workspace[]): string | null => {
+  const isAvailable = (workspaceId: string | null): workspaceId is string =>
+    !!workspaceId && workspaces.some(workspace => workspace.id === workspaceId);
+
+  const pendingEnterpriseWorkspaceId = localStorage.getItem(PENDING_ENTERPRISE_WORKSPACE_ID_KEY);
+  if (isAvailable(pendingEnterpriseWorkspaceId)) return pendingEnterpriseWorkspaceId;
+
+  const lastActiveWorkspaceId = getLastActiveWorkspaceId(email);
+  return isAvailable(lastActiveWorkspaceId) ? lastActiveWorkspaceId : null;
 };
 
 // Domain-conflict fields arrive as URL params on the web callback (processingOAuthCallback) and
@@ -403,7 +427,7 @@ export const authMachine = createMachine(
               actions: assign(({ context, event }) => {
                 const output = event.output as OAuthCallbackOutput | undefined;
                 const email = output?.pendingUserData?.email;
-                const lastWorkspaceId = email ? getLastActiveWorkspaceId(email) : null;
+                const lastWorkspaceId = email ? getPreferredWorkspaceId(email, getWorkspaces(output)) : null;
                 return {
                   ...context,
                   workspaces: getWorkspaces(output),
@@ -809,6 +833,7 @@ export const authMachine = createMachine(
       },
       authenticated: {
         entry: ({ context }) => {
+          localStorage.removeItem(PENDING_ENTERPRISE_WORKSPACE_ID_KEY);
           if (context.user?.id) {
             posthogService.identify(context.user);
           }
@@ -908,7 +933,7 @@ export const authMachine = createMachine(
               actions: assign(({ context, event }) => {
                 const output = (event as XStateEvent).output;
                 const email = output?.pendingUserData?.email;
-                const lastWorkspaceId = email ? getLastActiveWorkspaceId(email) : null;
+                const lastWorkspaceId = email ? getPreferredWorkspaceId(email, getWorkspaces(output)) : null;
                 return {
                   ...context,
                   workspaces: getWorkspaces(output),
@@ -1011,7 +1036,7 @@ export const authMachine = createMachine(
               actions: assign(({ context, event }) => {
                 const output = (event as XStateEvent).output;
                 const email = output?.pendingUserData?.email;
-                const lastWorkspaceId = email ? getLastActiveWorkspaceId(email) : null;
+                const lastWorkspaceId = email ? getPreferredWorkspaceId(email, getWorkspaces(output)) : null;
                 return {
                   ...context,
                   workspaces: getWorkspaces(output),
@@ -1095,7 +1120,7 @@ export const authMachine = createMachine(
               actions: assign(({ context, event }) => {
                 const output = (event as XStateEvent).output;
                 const email = output?.pendingUserData?.email;
-                const lastWorkspaceId = email ? getLastActiveWorkspaceId(email) : null;
+                const lastWorkspaceId = email ? getPreferredWorkspaceId(email, getWorkspaces(output)) : null;
                 return {
                   ...context,
                   workspaces: getWorkspaces(output),
@@ -1242,11 +1267,8 @@ export const authMachine = createMachine(
         const e = event as { output?: OAuthCallbackOutput };
         const email = e.output?.pendingUserData?.email;
         if (!email) return false;
-        const lastWorkspaceId = getLastActiveWorkspaceId(email);
-        if (!lastWorkspaceId) return false;
-        return getWorkspaces(e.output).some(
-          (workspace: Workspace) => workspace.id === lastWorkspaceId,
-        );
+        // Also covers a pending enterprise join (see getPreferredWorkspaceId).
+        return !!getPreferredWorkspaceId(email, getWorkspaces(e.output));
       },
       hasWorkspaces: ({ event }) => {
         const e = event as { output?: OAuthCallbackOutput };
@@ -1273,6 +1295,7 @@ export const authMachine = createMachine(
         localStorage.removeItem('user_email');
         localStorage.removeItem(PENDING_WORKSPACE_ID_KEY);
         localStorage.removeItem(PENDING_WORKSPACE_NAME_KEY);
+        localStorage.removeItem(PENDING_ENTERPRISE_WORKSPACE_ID_KEY);
         clearEnterpriseLoginIntent();
         clearOnboardingCookie();
         decryptionCache.clear();
