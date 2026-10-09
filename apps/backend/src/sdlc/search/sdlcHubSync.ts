@@ -50,14 +50,7 @@ export interface SdlcHubSyncResult {
  * Recomputing the whole hub keeps renames, moves and deletes right with one code path; hubs
  * are small, and a moved folder only re-feeds containers, never the documents under it.
  */
-export interface SdlcHubSyncOptions {
-  /** Where to queue the Vespa jobs: the live ingestion queue by default; an admin backfill
-   *  passes its own queue so a full re-index does not hold up live writes. */
-  queue?: Pick<typeof vespaQueue, 'addJob'>;
-}
-
-export async function syncSdlcHub(hubId: string, options: SdlcHubSyncOptions = {}): Promise<SdlcHubSyncResult | null> {
-  const queue = options.queue ?? vespaQueue;
+export async function syncSdlcHub(hubId: string): Promise<SdlcHubSyncResult | null> {
   invalidateSdlcHubIndex(hubId);
   const index = await loadSdlcHubIndex(hubId);
   if (!index) {
@@ -175,7 +168,7 @@ export async function syncSdlcHub(hubId: string, options: SdlcHubSyncOptions = {
   }
 
   for (const job of jobs) {
-    await queue.addJob(job);
+    await vespaQueue.addJob(job);
   }
 
   const result: SdlcHubSyncResult = {
