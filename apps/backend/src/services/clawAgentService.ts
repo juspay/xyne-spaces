@@ -1661,6 +1661,30 @@ export async function listS2SClawAgents(): Promise<S2SClawAgent[]> {
   return json.data.filter((a) => a.enabled);
 }
 
+/** The skills a user can see: global ones and their own personal ones. */
+export async function listS2SClawSkills(
+  userId: string,
+  workspaceId?: string
+): Promise<Array<{ id: string; scope: string; ownerUserId: string | null }>> {
+  const url = `${getClawBaseUrl()}/claw/api/v1/skills?userId=${encodeURIComponent(userId)}`;
+  const res = await fetch(url, {
+    // The pinned user scopes the list to their org.
+    headers: {
+      'Content-Type': 'application/json',
+      ...getS2SHeaders(),
+      ...extractUserIdHeader(userId, workspaceId),
+    },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!res.ok) {
+    throw new Error(`[ClawAgentService] listS2SClawSkills: HTTP ${res.status} — ${await safeReadText(res)}`);
+  }
+  const json = (await res.json()) as {
+    data?: Array<{ id: string; scope: string; ownerUserId: string | null }>;
+  };
+  return json.data ?? [];
+}
+
 /**
  * A slug that names no agent this caller can reach.
  *
