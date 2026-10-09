@@ -113,10 +113,17 @@ const devFormat = winston.format.combine(
 
 const isDev = process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test";
 
+// Stdio MCP children: stdout is the JSON-RPC channel, so every level must go to stderr.
+const logToStderr = process.env.LOG_TO_STDERR === "1";
+
 export const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || "info",
   format: isDev ? devFormat : productionFormat,
-  transports: [new winston.transports.Console()],
+  transports: [
+    new winston.transports.Console(
+      logToStderr ? { stderrLevels: Object.keys(winston.config.npm.levels) } : {},
+    ),
+  ],
   exitOnError: false,
   defaultMeta: {
     version: "1.0",

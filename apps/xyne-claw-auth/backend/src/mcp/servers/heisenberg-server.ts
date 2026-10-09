@@ -7,6 +7,9 @@ import {
   type CallToolResult,
 } from "@modelcontextprotocol/sdk/types.js";
 import { HEISENBERG_TOOLS } from "./heisenberg-tools.js";
+import { createLogger } from "../../logger.js";
+
+const log = createLogger("heisenberg-server");
 
 const server = new Server(
   { name: "heisenberg", version: "0.1.0" },
@@ -31,7 +34,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToo
     return await tool.handler((args ?? {}) as Record<string, unknown>);
   } catch (error) {
     const message = errMsg(error);
-    process.stderr.write(`[heisenberg-server] tool=${name} failed: ${message}\n`);
+    log.error(`[heisenberg-server] tool=${name} failed: ${message}`);
     return {
       content: [{ type: "text", text: `Heisenberg MCP error: ${message}` }],
       isError: true,
@@ -41,7 +44,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToo
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
-process.stderr.write("[heisenberg-server] Connected and listening on stdio\n");
+log.info("[heisenberg-server] Connected and listening on stdio");
 
 process.on("SIGINT", async () => {
   await server.close();

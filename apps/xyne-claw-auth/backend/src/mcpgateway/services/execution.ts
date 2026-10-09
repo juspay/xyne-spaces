@@ -8,6 +8,7 @@ import * as registryDb from "../db/registry.js";
 import * as tokenCache from "../cache/token-cache.js";
 import { signGatewayJwt } from "../crypto/jwt.js";
 import { httpRequest, HttpRequestError } from "./http-client.js";
+import { createLogger } from "../../logger.js";
 import type {
   Service,
   Tool,
@@ -15,6 +16,8 @@ import type {
   ExecuteToolResult,
   FetchedToken,
 } from "../types/index.js";
+
+const log = createLogger("gateway/execute");
 
 function encodePathSegment(value: unknown): string {
   return encodeURIComponent(String(value));
@@ -82,7 +85,7 @@ async function fetchAuthToken(
   // Call token endpoint with JWT for verification
   const tokenUrl = `${backendUrl}${tokenEndpointUrl}`;
   
-  console.log(`[auth] Fetching new token from ${tokenUrl} for service=${serviceName}`);
+  log.info(`[auth] Fetching new token from ${tokenUrl} for service=${serviceName}`);
 
   const tokenRequestHeaders: Record<string, string> = {
     "Content-Type": "application/json",
@@ -103,13 +106,13 @@ async function fetchAuthToken(
     });
 
     const { token } = extractAuthToken(response.data);
-    console.log(`[auth] Token fetched from backend for service=${serviceName}`);
+    log.info(`[auth] Token fetched from backend for service=${serviceName}`);
 
     // Cache token
     // Cache token for 15 minutes
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
     await tokenCache.setToken(tenantId, serviceName, authEmail, token, expiresAt);
-    console.log(`[auth] Token cached for 15 minutes for service=${serviceName}`);
+    log.info(`[auth] Token cached for 15 minutes for service=${serviceName}`);
 
     return { authToken: token, fromCache: false };
   } catch (error) {
@@ -133,7 +136,7 @@ export async function executeTool(
 ): Promise<ExecuteToolResult> {
   const startTime = Date.now();
   const { serviceName, toolName, arguments: toolArgs, backendId } = request;
-  console.log(`[execute] START service=${sanitizeForLog(serviceName)} tool=${sanitizeForLog(toolName)} backend=${sanitizeForLog(backendId ?? "auto")}`);
+  log.info(`[execute] START service=${sanitizeForLog(serviceName)} tool=${sanitizeForLog(toolName)} backend=${sanitizeForLog(backendId ?? "auto")}`);
 
   if (!isGatewayEnabled) {
     return {
@@ -233,7 +236,7 @@ export async function executeTool(
     });
 
     const fullUrl = `${selectedBackend.backendUrl}${pathWithParams}`;
-    console.log(`[execute] Calling service=${String(serviceName).replace(/[\r\n]+/g, " ")} tool=${String(toolName).replace(/[\r\n]+/g, " ")} method=${String(tool.method || "POST").replace(/[\r\n]+/g, " ")}`);
+    log.info(`[execute] Calling service=${String(serviceName).replace(/[\r\n]+/g, " ")} tool=${String(toolName).replace(/[\r\n]+/g, " ")} method=${String(tool.method || "POST").replace(/[\r\n]+/g, " ")}`);
 
     // Strip path params from body
     const requestArgEntries = new Map<string, unknown>();
@@ -253,7 +256,7 @@ export async function executeTool(
       "Content-Type": "application/json",
       [xAuthHeaderName]: authToken,
     };
-    console.log(`[execute] Forward request prepared service=${String(serviceName).replace(/[\r\n]+/g, " ")} tool=${String(toolName).replace(/[\r\n]+/g, " ")} method=${String(httpMethod).replace(/[\r\n]+/g, " ")}`);
+    log.info(`[execute] Forward request prepared service=${String(serviceName).replace(/[\r\n]+/g, " ")} tool=${String(toolName).replace(/[\r\n]+/g, " ")} method=${String(httpMethod).replace(/[\r\n]+/g, " ")}`);
 
     // Execute request
     let backendResponse: { status: number; data: unknown };
@@ -309,7 +312,7 @@ export async function executeTool(
     }
 
     const duration = Date.now() - startTime;
-    console.log(`[execute] SUCCESS service=${String(serviceName).replace(/[\r\n]+/g, " ")} tool=${String(toolName).replace(/[\r\n]+/g, " ")} backend=${String(selectedBackend.backendId).replace(/[\r\n]+/g, " ")} status=${backendResponse.status} duration=${duration}ms`);
+    log.info(`[execute] SUCCESS service=${String(serviceName).replace(/[\r\n]+/g, " ")} tool=${String(toolName).replace(/[\r\n]+/g, " ")} backend=${String(selectedBackend.backendId).replace(/[\r\n]+/g, " ")} status=${backendResponse.status} duration=${duration}ms`);
 
     return {
       success: true,
@@ -321,7 +324,7 @@ export async function executeTool(
     };
   } catch (error) {
     const duration = Date.now() - startTime;
-    console.log(`[execute] FAILED service=${sanitizeForLog(serviceName)} tool=${sanitizeForLog(toolName)} duration=${duration}ms error=${sanitizeForLog(error instanceof Error ? error.message : "unknown")}`);
+    log.error(`[execute] FAILED service=${sanitizeForLog(serviceName)} tool=${sanitizeForLog(toolName)} duration=${duration}ms error=${sanitizeForLog(error instanceof Error ? error.message : "unknown")}`);
 
     if (error instanceof HttpRequestError) {
       if (error.code === "http") {

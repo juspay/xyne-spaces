@@ -1140,7 +1140,7 @@ const toIST = (d: Date | string | number): string => {
   // Guard against a bad value silently rendering as a wrong/absurd date. Sane
   // range: 2000-01-01 .. 2100-01-01. Outside it (or NaN), degrade gracefully.
   if (Number.isNaN(ms) || ms < 946684800000 || ms > 4102444800000) {
-    if (!Number.isNaN(ms)) console.warn(`toIST: timestamp out of sane range: ${String(d)}`);
+    if (!Number.isNaN(ms)) log.warn(`toIST: timestamp out of sane range: ${String(d)}`);
     return "(date n/a)";
   }
   return date.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
@@ -6183,7 +6183,7 @@ const spacesThreadAttachments: ToolDef = {
       const deduped = (rowsRaw ?? []).filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)));
       const rows = deduped.slice(offset, offset + limit);
 
-      console.error(
+      log.info(
         `[spaces-thread-attachments] conv=${conversationId} msgsWithAttach=${messageIds.length} attachments=${rows.length}`,
       );
 

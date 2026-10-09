@@ -22,6 +22,7 @@
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { errMsg } from "../../lib/errors.js";
+import { createLogger } from "../../logger.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
@@ -34,12 +35,10 @@ const API_KEY = process.env["TWITTERAPI_IO_KEY"];
 const BASE = "https://api.twitterapi.io";
 const REQUEST_TIMEOUT_MS = 30_000;
 
-function logErr(msg: string): void {
-  console.error(`[x-news] ${msg}`);
-}
+const log = createLogger("x-news");
 
 if (!API_KEY) {
-  logErr("TWITTERAPI_IO_KEY must be set — exiting");
+  log.error("[x-news] TWITTERAPI_IO_KEY must be set — exiting");
   process.exit(1);
 }
 

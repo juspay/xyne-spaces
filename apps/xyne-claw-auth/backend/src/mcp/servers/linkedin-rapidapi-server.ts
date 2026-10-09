@@ -25,6 +25,7 @@
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { errMsg } from "../../lib/errors.js";
+import { createLogger } from "../../logger.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
@@ -41,13 +42,10 @@ const RETRY_429_BASE_DELAY_MS = 2_000;
 
 const RAPIDAPI_KEY = process.env["RAPIDAPI_KEY"];
 
-function logErr(msg: string): void {
-  // stdout is the MCP transport; logs MUST go to stderr.
-  console.error(`[linkedin-rapidapi] ${msg}`);
-}
+const log = createLogger("linkedin-rapidapi");
 
 if (!RAPIDAPI_KEY) {
-  logErr("RAPIDAPI_KEY env var is required — exiting");
+  log.error("[linkedin-rapidapi] RAPIDAPI_KEY env var is required — exiting");
   process.exit(1);
 }
 
@@ -98,7 +96,7 @@ async function rapidFetch(
       const delay = Number.isFinite(retryAfter) && retryAfter > 0
         ? Math.min(retryAfter * 1000, 10_000)
         : RETRY_429_BASE_DELAY_MS * (attempt + 1);
-      logErr(`429 on ${url} — retrying in ${delay}ms (attempt ${attempt + 1}/${RETRY_429_MAX})`);
+      log.warn(`[linkedin-rapidapi] 429 on ${url} — retrying in ${delay}ms (attempt ${attempt + 1}/${RETRY_429_MAX})`);
       await sleep(delay);
       attempt++;
       continue;
@@ -142,7 +140,7 @@ function ok(data: unknown): CallToolResult {
 
 function fail(err: unknown): CallToolResult {
   const msg = errMsg(err);
-  logErr(`tool error: ${msg}`);
+  log.error(`[linkedin-rapidapi] tool error: ${msg}`);
   return { content: [{ type: "text", text: `Error: ${msg}` }], isError: true };
 }
 
@@ -422,7 +420,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 });
 
-logErr("server starting");
+log.info("[linkedin-rapidapi] server starting");
 const transport = new StdioServerTransport();
 await server.connect(transport);
-logErr("server connected on stdio");
+log.info("[linkedin-rapidapi] server connected on stdio");

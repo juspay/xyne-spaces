@@ -351,7 +351,7 @@ async function spawnSession(
     transport = new StdioClientTransport({
       command: launch.command,
       args: launch.args,
-      env: { ...process.env, ...env } as Record<string, string>,
+      env: { ...process.env, ...env, LOG_TO_STDERR: "1" } as Record<string, string>,
       cwd: "/tmp",
     });
   }

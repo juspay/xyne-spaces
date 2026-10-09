@@ -20,6 +20,7 @@
 
 import { createHmac, randomBytes } from "node:crypto";
 import { errMsg } from "../../lib/errors.js";
+import { createLogger } from "../../logger.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -35,13 +36,10 @@ const ACCESS_TOKEN = process.env["ACCESS_TOKEN"];
 const ACCESS_TOKEN_SECRET = process.env["ACCESS_TOKEN_SECRET"];
 const REQUEST_TIMEOUT_MS = 30_000;
 
-function logErr(msg: string): void {
-  // stdout is the MCP transport; logs MUST go to stderr.
-  console.error(`[twitter] ${msg}`);
-}
+const log = createLogger("twitter");
 
 if (!API_KEY || !API_SECRET_KEY || !ACCESS_TOKEN || !ACCESS_TOKEN_SECRET) {
-  logErr("API_KEY, API_SECRET_KEY, ACCESS_TOKEN and ACCESS_TOKEN_SECRET must all be set — exiting");
+  log.error("[twitter] API_KEY, API_SECRET_KEY, ACCESS_TOKEN and ACCESS_TOKEN_SECRET must all be set — exiting");
   process.exit(1);
 }
 

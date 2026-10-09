@@ -397,7 +397,7 @@ export async function buildAvailableToolsCatalog(tenantUniqueId: string | undefi
           orderBy: [{ serviceName: "asc" }],
         });
         if (gatewayRows.length > 0) {
-          console.warn(
+          log.warn(
             `[tools] using default gateway tenant (${DEFAULT_GATEWAY_TENANT}) as fallback for workspace tenant ${tenantUniqueId}`,
           );
         }

@@ -28,6 +28,7 @@
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { errMsg } from "../../lib/errors.js";
+import { createLogger } from "../../logger.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
@@ -43,17 +44,14 @@ const PASSWORD = process.env["NEO4J_PASSWORD"] ?? "";
 const READ_ONLY = (process.env["NEO4J_READ_ONLY"] ?? "true").trim().toLowerCase() !== "false";
 const REQUEST_TIMEOUT_MS = Number(process.env["NEO4J_HTTP_TIMEOUT_MS"] ?? 60_000);
 
-function logErr(msg: string): void {
-  // stdout is the MCP transport; logs MUST go to stderr.
-  console.error(`[neo4j-http] ${msg}`);
-}
+const log = createLogger("neo4j-http");
 
 if (!RAW_BASE) {
-  logErr("NEO4J_HTTP_URL env var is required — exiting");
+  log.error("[neo4j-http] NEO4J_HTTP_URL env var is required — exiting");
   process.exit(1);
 }
 if (!PASSWORD) {
-  logErr("NEO4J_PASSWORD env var is required — exiting");
+  log.error("[neo4j-http] NEO4J_PASSWORD env var is required — exiting");
   process.exit(1);
 }
 
@@ -192,7 +190,7 @@ function ok(data: unknown): CallToolResult {
 
 function fail(err: unknown): CallToolResult {
   const msg = errMsg(err);
-  logErr(`tool error: ${msg}`);
+  log.error(`[neo4j-http] tool error: ${msg}`);
   return { content: [{ type: "text", text: `Error: ${msg}` }], isError: true };
 }
 
@@ -301,7 +299,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 });
 
-logErr(`server starting → ${QUERY_URL} (db=${DATABASE}, readOnly=${READ_ONLY})`);
+log.info(`[neo4j-http] server starting → ${QUERY_URL} (db=${DATABASE}, readOnly=${READ_ONLY})`);
 const transport = new StdioServerTransport();
 await server.connect(transport);
-logErr("server connected on stdio");
+log.info("[neo4j-http] server connected on stdio");

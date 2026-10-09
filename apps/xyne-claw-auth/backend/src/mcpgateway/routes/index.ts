@@ -5,6 +5,9 @@
 import { Router } from "express";
 import { gatewayTenantAuth, gatewayRegistrationAuth } from "../middleware/gateway-auth.js";
 import { registrationController } from "../controllers/index.js";
+import { createLogger } from "../../logger.js";
+
+const log = createLogger("gateway/routes");
 
 const router = Router();
 
@@ -16,7 +19,7 @@ router.post("/registry/register", gatewayTenantAuth, gatewayRegistrationAuth, as
   try {
     await registrationController.register(req, res);
   } catch (error) {
-    console.error("[gateway/register] error:", error);
+    log.error("[gateway/register] error:", error);
     res.status(500).json({
       success: false,
       error: "Registration failed",
@@ -32,7 +35,7 @@ router.delete("/registry/:serviceName", gatewayTenantAuth, gatewayRegistrationAu
   try {
     await registrationController.deregister(req, res);
   } catch (error) {
-    console.error("[gateway/deregister] error:", error);
+    log.error("[gateway/deregister] error:", error);
     if (error instanceof Error && error.message.includes("not found")) {
       res.status(404).json({ success: false, error: "Service not found" });
       return;

@@ -9,6 +9,9 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { ListToolsRequestSchema, CallToolRequestSchema, type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { tools } from "./xyne-spaces-tools.js";
+import { createLogger } from "../../logger.js";
+
+const log = createLogger("xyne-spaces-server");
 
 const url = process.env["XYNE_SPACES_URL"];
 const token = process.env["XYNE_SPACES_TOKEN"];
@@ -19,16 +22,16 @@ const userId = process.env["XYNE_USER_ID"] ?? "";
 const authMode: "user" | "app" = process.env["XYNE_SPACES_AUTH_MODE"] === "app" ? "app" : "user";
 
 if (!url || !token) {
-  process.stderr.write("xyne-spaces-server: XYNE_SPACES_URL and XYNE_SPACES_TOKEN must be set\n");
+  log.error("[xyne-spaces-server] XYNE_SPACES_URL and XYNE_SPACES_TOKEN must be set");
   process.exit(1);
 }
 
 const directVespa = process.env["DIRECT_VESPA_SEARCH"] === "true";
 const vespaEndpoint = process.env["VESPA_QUERY_ENDPOINT"] ?? "http://localhost:8081";
 if (directVespa && vespaEndpoint.includes("localhost")) {
-  process.stderr.write(
+  log.warn(
     `[xyne-spaces-server] WARNING: DIRECT_VESPA_SEARCH=true but VESPA_QUERY_ENDPOINT is still "${vespaEndpoint}" — ` +
-    "set VESPA_QUERY_ENDPOINT to the production Vespa search node in non-local environments\n",
+    "set VESPA_QUERY_ENDPOINT to the production Vespa search node in non-local environments",
   );
 }
 

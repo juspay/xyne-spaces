@@ -18,6 +18,9 @@ import { expandSpacesMentions, resolveUnboundMentions } from "../../lib/mention-
 import { buildSpacesMentionLookupsDb } from "../../lib/mention-lookups.js";
 import { spacesDbAvailable } from "../../lib/spaces-db.js";
 import { tools as spacesTools } from "./xyne-spaces-tools.js";
+import { createLogger } from "../../logger.js";
+
+const log = createLogger("xyne-spaces-app-tools");
 
 const APP_TOKEN = process.env["XYNE_SPACES_APP_TOKEN"] ?? "";
 const SPACES_URL = process.env["XYNE_SPACES_URL"] ?? "";
@@ -44,9 +47,9 @@ async function prepareMessageContent(rawContent: string): Promise<string> {
   let resolvedCount = 0;
 
   if (!WORKSPACE_ID) {
-    console.warn("[apps-send-message] mention resolution skipped reason=no_workspace_id");
+    log.warn("[apps-send-message] mention resolution skipped reason=no_workspace_id");
   } else if (!spacesDbAvailable()) {
-    console.warn("[apps-send-message] mention resolution skipped reason=spaces_db_unavailable");
+    log.warn("[apps-send-message] mention resolution skipped reason=spaces_db_unavailable");
   } else {
     try {
       const beforeCount = countBracketedMentions(rawContent);
@@ -57,13 +60,13 @@ async function prepareMessageContent(rawContent: string): Promise<string> {
       resolvedCount = Math.max(0, countBracketedMentions(resolved) - beforeCount);
     } catch (err) {
       resolved = rawContent;
-      console.warn(
+      log.warn(
         `[apps-send-message] mention resolution skipped reason=error err=${errMsg(err)}`,
       );
     }
   }
 
-  console.error(
+  log.info(
     `[apps-send-message] mention resolution resolved-count=${resolvedCount} workspaceId=${WORKSPACE_ID || "(none)"}`,
   );
   return expandSpacesMentions(resolved);
@@ -230,7 +233,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToo
           return { content: [{ type: "text", text: failMsg }], isError: true };
         }
         // Non-fatal join error — still attempt the post
-        console.error("[apps-send-message] join failed (will still attempt post):", e);
+        log.warn("[apps-send-message] join failed (will still attempt post):", e);
       }
 
       await spacesAppFetch("/chat/postMessage", { channelId: targetChannelId, text: content });

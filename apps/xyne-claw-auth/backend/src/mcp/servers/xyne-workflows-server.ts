@@ -2,13 +2,16 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { ListToolsRequestSchema, CallToolRequestSchema, type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { tools } from "./xyne-workflows-tools.js";
+import { createLogger } from "../../logger.js";
+
+const log = createLogger("xyne-workflows-server");
 
 const url = process.env["XYNE_SPACES_URL"];
 const token = process.env["XYNE_SPACES_TOKEN"];
 const userId = process.env["XYNE_USER_ID"] ?? "";
 
 if (!url || !token) {
-  process.stderr.write("xyne-workflows-server: XYNE_SPACES_URL and XYNE_SPACES_TOKEN must be set\n");
+  log.error("[xyne-workflows-server] XYNE_SPACES_URL and XYNE_SPACES_TOKEN must be set");
   process.exit(1);
 }
 

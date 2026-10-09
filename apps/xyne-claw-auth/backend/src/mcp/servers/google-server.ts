@@ -16,10 +16,13 @@ import { errMsg } from "../../lib/errors.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { ListToolsRequestSchema, CallToolRequestSchema, type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { getAllCustomTools } from "xyne-claw-shared";
+import { createLogger } from "../../logger.js";
+
+const log = createLogger("google-server");
 
 const token = process.env["GOOGLE_ACCESS_TOKEN"];
 if (!token) {
-  process.stderr.write("google-server: GOOGLE_ACCESS_TOKEN must be set\n");
+  log.error("[google-server] GOOGLE_ACCESS_TOKEN must be set");
   process.exit(1);
 }
 

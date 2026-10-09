@@ -12,6 +12,9 @@
  */
 
 import { errMsg } from "../../lib/errors.js";
+import { createLogger } from "../../logger.js";
+
+const log = createLogger("spaces-client");
 
 export interface SpacesAuthContext {
   token?: string;
@@ -183,7 +186,7 @@ export async function spacesFetch(path: string, init?: RequestInit, auth?: Space
   ) {
     const safePath = sanitizeForLog(path);
     const safeClawless = sanitizeForLog(clawless);
-    console.warn(
+    log.warn(
       `[spaces-client] /claw route unavailable (${res.status ?? "network"}) for ${safePath} — falling back to ${safeClawless}`,
     );
     res = await attempt(clawless);
@@ -353,7 +356,7 @@ const SPACES_CLIENT_DEBUG = process.env["SPACES_CLIENT_DEBUG"] === "1";
 export async function interact(ast: QueryAST, auth?: SpacesAuthContext): Promise<unknown> {
   const payload = JSON.stringify(ast);
   if (SPACES_CLIENT_DEBUG) {
-    console.error(`[spaces-client] POST /api/query/claw model=${ast.model} op=${ast.operation}`);
+    log.info(`[spaces-client] POST /api/query/claw model=${ast.model} op=${ast.operation}`);
   }
   const result = (await spacesFetch("/api/query/claw", {
     method: "POST",

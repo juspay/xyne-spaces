@@ -9,6 +9,7 @@
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { errMsg } from "../../lib/errors.js";
+import { createLogger } from "../../logger.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
@@ -16,6 +17,8 @@ import {
   type CallToolResult,
   type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
+
+const log = createLogger("research-agent-mcp-server");
 
 interface ManifestTool {
   name: string;
@@ -82,11 +85,11 @@ async function loadManifests(failOnAuth: boolean): Promise<Manifest[]> {
     const res = await fetchText(url, { headers: apiKeyHeaders() });
     if (res.status === 401) {
       if (failOnAuth) throw new Error("Invalid Research Agent MCP API key");
-      console.error("[research-agent-mcp] API key rejected while listing tools");
+      log.warn("[research-agent-mcp] API key rejected while listing tools");
       return [];
     }
     if (!res.ok) {
-      console.error(`[research-agent-mcp] skipping manifest ${path}: HTTP ${res.status}: ${res.text.slice(0, 500)}`);
+      log.warn(`[research-agent-mcp] skipping manifest ${path}: HTTP ${res.status}: ${res.text.slice(0, 500)}`);
       continue;
     }
     manifests.push(JSON.parse(res.text) as Manifest);
@@ -195,7 +198,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToo
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error("[research-agent-mcp-server] Connected and listening on stdio");
+log.info("[research-agent-mcp-server] Connected and listening on stdio");
 
 process.on("SIGINT", async () => { await server.close(); process.exit(0); });
 process.on("SIGTERM", async () => { await server.close(); process.exit(0); });

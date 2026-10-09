@@ -17,10 +17,13 @@ import { errMsg } from "../../lib/errors.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { ListToolsRequestSchema, CallToolRequestSchema, type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { getAllCustomTools } from "xyne-claw-shared";
+import { createLogger } from "../../logger.js";
+
+const log = createLogger("microsoft-server");
 
 const token = process.env["MICROSOFT_ACCESS_TOKEN"];
 if (!token) {
-  process.stderr.write("microsoft-server: MICROSOFT_ACCESS_TOKEN must be set\n");
+  log.error("[microsoft-server] MICROSOFT_ACCESS_TOKEN must be set");
   process.exit(1);
 }
 
