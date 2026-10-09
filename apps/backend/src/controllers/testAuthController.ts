@@ -292,7 +292,7 @@ export class TestAuthController {
             { name: 'ANALYTICS', description: 'Analytics and reporting' },
             { name: 'USER-GROUPS', description: 'User group management' },
             { name: 'LISTPROJECTS', description: 'Project list view' },
-            { name: 'USERS', description: 'User management endpoints' },
+            { name: 'USER-MANAGEMENT', description: 'User and user-group administration endpoints' },
             { name: 'FORMS', description: 'Form management' },
             { name: 'SUPPORT', description: 'Support ticket management' },
             { name: 'PROJECTS', description: 'Project board management' },

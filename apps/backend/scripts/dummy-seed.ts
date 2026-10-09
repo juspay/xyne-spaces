@@ -284,7 +284,7 @@ async function main() {
       // Create Resources for ACL (check if they already exist)
       console.log('  Creating Resources...');
       const resources = [];
-      const resourceNames = ['TICKETS', 'USERS', 'WORKFLOWS', 'AGENTS', 'TOOLS', 'CHAT'];
+      const resourceNames = ['TICKETS', 'USER-MANAGEMENT', 'WORKFLOWS', 'AGENTS', 'TOOLS', 'CHAT'];
       
       for (const name of resourceNames) {
         // Check if resource already exists

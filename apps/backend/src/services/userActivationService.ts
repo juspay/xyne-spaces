@@ -55,7 +55,7 @@ export class UserActivationService {
    * @param userIds - Array of user IDs to update
    * @param status - Target status (ACTIVE or INACTIVE)
    * @param workspaceId - Caller's workspace; all operations are scoped to it so a
-   *                      USERS-admin cannot touch users in other workspaces/tenants
+   *                      USER-MANAGEMENT admin cannot touch users in other workspaces/tenants
    * @returns Result with successful updates and failures
    */
   async bulkUpdateUserStatus(userIds: string[], status: UserStatus, workspaceId: string): Promise<BulkStatusUpdateResult> {

@@ -6,22 +6,41 @@ import { zql } from '../../queries';
 import { assertGuestWriteBlocked } from '../core/guest-access';
 
 export class ResourceAccessACL extends BaseACL<'resource_access'> {
-  // Helper to check if user is User Management admin (ADMIN on USERS resource)
+  // Helper to check if user is User Management admin (ADMIN on USER-MANAGEMENT,
+  // granted directly or through any of their user groups)
   private async isUserManagementAdmin(tx: Transaction<Schema>): Promise<boolean> {
-    const usersResource = await tx.run(zql.resources.where('name', 'USERS').one());
-    if (!usersResource) {
+    const userManagementResource = await tx.run(
+      zql.resources.where('name', 'USER-MANAGEMENT').one(),
+    );
+    if (!userManagementResource) {
       return false;
     }
 
-    const adminAccess = await tx.run(
+    const directAccess = await tx.run(
       zql.resource_access
         .where('userId', this.ctx.userID)
-        .where('resourceId', usersResource.id)
+        .where('resourceId', userManagementResource.id)
+        .where('accessType', AccessType.ADMIN)
+        .one(),
+    );
+    if (directAccess) {
+      return true;
+    }
+
+    const groupMappings = await tx.run(zql.user_group_mappings.where('userId', this.ctx.userID));
+    if (groupMappings.length === 0) {
+      return false;
+    }
+
+    const groupAccess = await tx.run(
+      zql.resource_access
+        .where('groupId', 'IN', groupMappings.map(mapping => mapping.userGroupId))
+        .where('resourceId', userManagementResource.id)
         .where('accessType', AccessType.ADMIN)
         .one(),
     );
 
-    return !!adminAccess;
+    return !!groupAccess;
   }
 
   async canInsert(
