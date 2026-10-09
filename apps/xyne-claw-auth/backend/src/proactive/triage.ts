@@ -39,6 +39,12 @@ export function buildTriageState(message: ParsedMessage, contact: ContactStats |
   ].join("\n");
 }
 
+export function isUrgent(scores: TriageScores | null, t: HitThresholds & { urgentImportance: number }): boolean {
+  if (!scores || scores.kind === "noise" || scores.kind === "fyi") return false;
+  const actionable = (scores.needsReply ?? 0) >= t.hitNeedsReply || (scores.hasDeadline ?? 0) >= t.hitDeadline;
+  return actionable && (scores.importance ?? 0) >= t.urgentImportance;
+}
+
 export function isHit(scores: TriageScores | null, message: ParsedMessage, t: HitThresholds): boolean {
   if (!scores) return message.important && message.userRole === "to";
   if (scores.kind === "noise" || scores.kind === "fyi") return false;

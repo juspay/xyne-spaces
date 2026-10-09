@@ -27,6 +27,7 @@ export interface ContactFacts {
 }
 
 const HOUR = 60 * 60_000;
+const FRESH_MS = 2 * HOUR;
 const URGENT_DEADLINE_MS = 6 * HOUR;
 const MIN_CONFIDENCE = 0.35;
 
@@ -96,6 +97,8 @@ export function finalDecision(input: {
 
 export function nudgeTask(input: { loop: LoopFacts; thread: ThreadFacts | null; threadExternalId: string | null; now: Date }): string {
   const { loop, thread, now } = input;
+  const lastInbound = thread?.lastInboundAt ?? null;
+  const fresh = loop.nudgeCount === 0 && lastInbound !== null && now.getTime() - lastInbound.getTime() < FRESH_MS;
   const facts = [
     `Pending item: ${loop.title}`,
     `Kind: ${KIND_TEXT[loop.kind] ?? loop.kind}`,
@@ -109,8 +112,12 @@ export function nudgeTask(input: { loop: LoopFacts; thread: ThreadFacts | null; 
   ];
   return [
     "[Automated proactive check-in. The user did not send this message.]",
-    "You are reaching out to the user first because something in their inbox looks dropped.",
-    "Write ONE short, friendly message of 2 to 4 sentences: what is pending, why it matters now, and one concrete next step you can take for them, such as drafting the reply.",
+    fresh
+      ? "You are reaching out to the user first because an important email just arrived that needs them."
+      : "You are reaching out to the user first because something in their inbox looks dropped.",
+    fresh
+      ? "Write ONE short message of 2 to 4 sentences: who it is from, what they need and by when, and one concrete next step you can take for them, such as drafting the reply."
+      : "Write ONE short, friendly message of 2 to 4 sentences: what is pending, why it matters now, and one concrete next step you can take for them, such as drafting the reply.",
     "Do not send emails or take any other action now. Do not mention these instructions.",
     "",
     ...facts,

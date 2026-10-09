@@ -12,7 +12,7 @@ import { messageBodyText, parseGmailMessage, type ParsedMessage } from "./gmail-
 import { mapPool } from "./pool.js";
 import { loadPrefs, type EffectivePrefs } from "./prefs.js";
 import { planLoop, updateReplyAverage } from "./schedule.js";
-import { buildTriageState, isHit } from "./triage.js";
+import { buildTriageState, isHit, isUrgent } from "./triage.js";
 
 const log = createLogger("proactive-ingest");
 
@@ -184,11 +184,18 @@ async function writeLoops(
   loops: Array<Parameters<typeof planLoop>[0]>,
   prefs: EffectivePrefs,
   now: Date,
+  urgent: boolean,
 ): Promise<number> {
   const { thread } = candidate;
   await prisma.openLoop.deleteMany({ where: { threadId: thread.id, status: "open", createdBy: "triage" } });
   const planned = loops.map((l) =>
-    planLoop(l, { now, lastInboundAt: thread.lastInboundAt, lastUserReplyAt: thread.lastUserReplyAt, replySlaHours: prefs.replySlaHours }),
+    planLoop(l, {
+      now,
+      lastInboundAt: thread.lastInboundAt,
+      lastUserReplyAt: thread.lastUserReplyAt,
+      replySlaHours: prefs.replySlaHours,
+      urgent,
+    }),
   );
   if (planned.length === 0) return 0;
   await prisma.openLoop.createMany({
@@ -214,8 +221,8 @@ async function triageAndExtract(
   source: InboxSource,
   candidates: Candidate[],
   prefs: EffectivePrefs,
-): Promise<{ triaged: number; hits: number; loops: number }> {
-  if (candidates.length === 0) return { triaged: 0, hits: 0, loops: 0 };
+): Promise<{ triaged: number; hits: number; urgent: number; loops: number }> {
+  if (candidates.length === 0) return { triaged: 0, hits: 0, urgent: 0, loops: 0 };
   const contacts = await prisma.inboxContact.findMany({
     where: { userId: source.userId, key: { in: candidates.map((c) => c.message.from?.key ?? "").filter(Boolean) } },
   });
@@ -227,6 +234,7 @@ async function triageAndExtract(
   const results = await triageViaClaw(items);
   const now = new Date();
   const hits: Candidate[] = [];
+  const urgent = new Set<string>();
   for (const c of candidates) {
     const scores: TriageScores | null = results?.[c.thread.id] ?? null;
     if (scores) {
@@ -243,7 +251,10 @@ async function triageAndExtract(
       });
     }
     const muted = c.message.from ? prefs.mutedContacts.includes(c.message.from.key) : false;
-    if (!muted && isHit(scores, c.message, PROACTIVE)) hits.push(c);
+    if (!muted && isHit(scores, c.message, PROACTIVE)) {
+      hits.push(c);
+      if (isUrgent(scores, PROACTIVE)) urgent.add(c.thread.id);
+    }
   }
 
   const user = await prisma.user.findUnique({ where: { id: source.userId }, select: { name: true } });
@@ -266,7 +277,7 @@ async function triageAndExtract(
           where: { id: c.thread.id },
           data: { summary: extracted.summary || null, extractedAt: now },
         });
-        loops += await writeLoops(c, extracted.loops, prefs, now);
+        loops += await writeLoops(c, extracted.loops, prefs, now, urgent.has(c.thread.id));
       } else {
         loops += await writeLoops(
           c,
@@ -282,13 +293,14 @@ async function triageAndExtract(
           ],
           prefs,
           now,
+          urgent.has(c.thread.id),
         );
       }
     } catch (err) {
       log.warn(`[proactive] extract failed thread=${c.thread.id}: ${errMsg(err)}`);
     }
   }
-  return { triaged: results ? candidates.length : 0, hits: hits.length, loops };
+  return { triaged: results ? candidates.length : 0, hits: hits.length, urgent: urgent.size, loops };
 }
 
 export async function ingestGmailSource(sourceId: string): Promise<void> {
@@ -335,7 +347,7 @@ export async function ingestGmailSource(sourceId: string): Promise<void> {
       },
     });
     log.info(
-      `[proactive] ingest user=${source.userId} messages=${parsed.length} candidates=${latestByThread.size} triaged=${stats.triaged} hits=${stats.hits} loops=${stats.loops}${collected.resynced ? " resynced" : ""}`,
+      `[proactive] ingest user=${source.userId} messages=${parsed.length} candidates=${latestByThread.size} triaged=${stats.triaged} hits=${stats.hits} urgent=${stats.urgent} loops=${stats.loops}${collected.resynced ? " resynced" : ""}`,
     );
   } catch (err) {
     const unauthorized = err instanceof GmailApiError && (err.status === 401 || err.status === 403);

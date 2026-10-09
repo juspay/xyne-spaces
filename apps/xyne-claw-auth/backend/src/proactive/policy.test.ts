@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildInterruptState, fallbackDecision, finalDecision, nudgeTask, type LoopFacts } from "./policy.js";
-import { buildTriageState, isHit } from "./triage.js";
+import { buildTriageState, isHit, isUrgent } from "./triage.js";
 import { parsePushEnvelope } from "./sources.js";
 import type { ParsedMessage } from "./gmail-message.js";
 
@@ -46,6 +46,14 @@ describe("triage", () => {
     expect(isHit({ importance: 0.9, needsReply: 0.9, hasDeadline: 0.9, kind: "fyi" }, parsed, thresholds)).toBe(false);
   });
 
+  it("marks only very important actionable mail as urgent", () => {
+    const t = { ...thresholds, urgentImportance: 0.8 };
+    expect(isUrgent({ importance: 0.85, needsReply: 0.9, hasDeadline: 0.1, kind: "ask" }, t)).toBe(true);
+    expect(isUrgent({ importance: 0.7, needsReply: 0.9, hasDeadline: 0.1, kind: "ask" }, t)).toBe(false);
+    expect(isUrgent({ importance: 0.9, needsReply: 0.1, hasDeadline: 0.1, kind: "ask" }, t)).toBe(false);
+    expect(isUrgent(null, t)).toBe(false);
+  });
+
   it("falls back to Gmail's important label when Jev is unavailable", () => {
     expect(isHit(null, parsed, thresholds)).toBe(true);
     expect(isHit(null, { ...parsed, userRole: "cc" }, thresholds)).toBe(false);
@@ -86,6 +94,13 @@ describe("interrupt policy", () => {
     expect(task.startsWith("[Automated proactive check-in.")).toBe(true);
     expect(task).toContain("Do not send emails");
     expect(task).toContain("Gmail thread id: 18c0");
+    expect(task).toContain("looks dropped");
+  });
+
+  it("frames a first nudge on a just-arrived email as a heads-up", () => {
+    const thread = { subject: "Sign-off", summary: null, importance: 0.9, lastInboundAt: new Date("2026-10-09T07:50:00Z") };
+    expect(nudgeTask({ loop, thread, threadExternalId: null, now })).toContain("an important email just arrived");
+    expect(nudgeTask({ loop: { ...loop, nudgeCount: 1 }, thread, threadExternalId: null, now })).toContain("looks dropped");
   });
 });
 

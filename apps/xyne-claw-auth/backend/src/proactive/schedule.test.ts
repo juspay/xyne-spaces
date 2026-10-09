@@ -37,6 +37,13 @@ describe("planLoop", () => {
     expect(loop.dueAt.toISOString()).toBe("2026-10-12T08:00:00.000Z");
   });
 
+  it("makes an urgent loop due now but keeps waiting on the other side", () => {
+    const urgent = { ...ctx, urgent: true };
+    expect(planLoop({ ...base, kind: "awaiting_user", deadlineAt: null }, urgent).dueAt).toEqual(now);
+    expect(planLoop({ ...base, kind: "deadline", deadlineAt: "2026-10-10T08:00:00Z" }, urgent).dueAt).toEqual(now);
+    expect(planLoop({ ...base, kind: "awaiting_them", deadlineAt: null }, urgent).dueAt.toISOString()).toBe("2026-10-12T08:00:00.000Z");
+  });
+
   it("never schedules in the past", () => {
     const stale = { ...ctx, lastInboundAt: new Date("2026-10-01T00:00:00Z") };
     expect(planLoop({ ...base, kind: "awaiting_user", deadlineAt: null }, stale).dueAt).toEqual(now);
