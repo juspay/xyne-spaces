@@ -24,7 +24,8 @@ export type PickKind =
   | 'attachment'
   | 'canvas'
   | 'ticket'
-  | 'call';
+  | 'call'
+  | 'app';
 
 /** A pill's identity — what links the tray pill and the inline mention. */
 export interface ContextRef {
@@ -54,6 +55,7 @@ export type PickedContext = ContextRef & {
         conversationId?: string;
       }
     | { kind: 'call'; channelId?: string; conversationId?: string; externalId?: string }
+    | { kind: 'app' }
   );
 
 /** One pill in the context tray above the composer. */

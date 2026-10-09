@@ -169,6 +169,7 @@ export function sentMentionToken(item: {
     case 'attachment':
     case 'canvas':
     case 'call':
+    case 'app':
       return mentionToken('person', title);
     case 'message': {
       // The pill reads "Sender: text"; the inline token is "First's message".
@@ -204,6 +205,7 @@ export function countAttached(s: ContextSelections): number {
     (s.messages?.length ?? 0) +
     (s.people?.length ?? 0) +
     (s.sharedFiles?.length ?? 0) +
+    (s.apps?.length ?? 0) +
     (s.files?.length ?? 0) +
     (s.folders?.length ?? 0) +
     (s.collections?.length ?? 0) +
@@ -222,6 +224,7 @@ export function pickedRefsOf(s: ContextSelections): Set<string> {
   s.messages?.forEach(m => refs.add(refKey({ kind: 'message', id: m.id })));
   s.people?.forEach(p => refs.add(refKey({ kind: 'person', id: p.id })));
   s.sharedFiles?.forEach(f => refs.add(refKey({ kind: 'attachment', id: f.id })));
+  s.apps?.forEach(a => refs.add(refKey({ kind: 'app', id: a.id })));
   return refs;
 }
 
@@ -329,6 +332,8 @@ export function addPicked(
           ],
         },
       };
+    case 'app':
+      return { next: { ...s, apps: [...(s.apps ?? []), { id: item.id, title: item.label }] } };
   }
 }
 
@@ -349,6 +354,8 @@ export function removePicked(s: ContextSelections, ref: ContextRef): ContextSele
       return { ...s, tickets: without(s.tickets) };
     case 'call':
       return { ...s, transcripts: without(s.transcripts), recordings: without(s.recordings) };
+    case 'app':
+      return { ...s, apps: without(s.apps ?? []) };
   }
 }
 
