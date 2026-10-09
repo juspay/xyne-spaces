@@ -4,6 +4,7 @@ import { ReactElement } from 'react';
 import { Event } from '../../utils/logger';
 import { useLoadingAnimationLog } from '../../hooks/useLoadingAnimationLog';
 import { usePlatform } from '../../hooks/usePlatform';
+import { BOOT_SPLASH_MARK, BOOT_SPLASH_WORDMARK } from '../../utils/bootSplashAssets';
 
 const SplashScreen = (): ReactElement => {
   const { isLoading, isAuthenticated, signInWithGoogle, state } = useAuth();
@@ -80,22 +81,19 @@ const SplashLoadingScreen = ({
     );
   }
 
+  // Deliberately the same picture as the boot splash in index.html: same ground, same two marks
+  // at the same size and spacing, no spinner and no caption. This is the third screen of a cold
+  // start — Electron's assets/loading.html, then index.html's splash, then this — and the earlier
+  // two are already identical, so a spinner and a "Getting Xyne Spaces ready..." line here was
+  // the only thing that made the sequence read as more than one loader.
   return (
-    <div className='min-h-screen w-full overflow-x-hidden overflow-y-auto relative bg-background'>
-      <div className='flex min-h-screen items-center justify-center px-6 py-12'>
-        <div className='w-full max-w-md text-center'>
-          <div className='mb-8 flex justify-center'>
-            <img src='/svgs/xyne.svg' alt='Xyne Logo' className='h-5 w-auto' />
-          </div>
-
-          <div className='mt-10 flex flex-col items-center gap-5'>
-            <XyneLoader />
-            <p className='text-sm sm:text-base text-muted-foreground'>
-              Getting Xyne Spaces ready...
-            </p>
-          </div>
-        </div>
-      </div>
+    <div
+      className='fixed inset-0 flex flex-col items-center justify-center gap-4 bg-background'
+      role='status'
+      aria-label='Loading Xyne Spaces'
+    >
+      <img src={BOOT_SPLASH_MARK} alt='' className='h-20 w-20' />
+      <img src={BOOT_SPLASH_WORDMARK} alt='' className='w-[120px]' />
     </div>
   );
 };
