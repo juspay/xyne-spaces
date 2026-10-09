@@ -320,6 +320,9 @@ export const EVENTS = defineEvents({
       finalCited: plain(),
     },
   },
+  reply_format: {
+    fields: { phase: plain(), ok: plain(), problems: plain() },
+  },
   twin_deliver_reflection: {
     fields: { phase: plain(), round: plain(), delivered: plain(), action: plain(), answersAsk: plain(), grounded: plain(), actionFits: plain(), destination: plain(), overall: plain(), source: plain(), ms: plain() },
   },
@@ -355,6 +358,7 @@ export const LEGACY_EVENT_KINDS = [
   "auto_retry_start",
   "auto_retry_end",
   "citation_reflection",
+  "reply_format",
   "twin_deliver_reflection",
   "follow_up_generation_start",
   "follow_up_generation_end",

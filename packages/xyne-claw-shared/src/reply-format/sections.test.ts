@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { OVERFLOW_NOTE, countWords, planSectionedReply, splitIntoSections, truncateWords } from "./sections.js";
+import { OVERFLOW_NOTE, checkReplyFormat, parseReplyFormat, countWords, planSectionedReply, replyFormatNudge, splitIntoSections, truncateWords } from "./sections.js";
 
 const limits = { maxWords: 100, maxSections: 5 };
 const words = (n: number, w = "word") => Array.from({ length: n }, () => w).join(" ");
@@ -65,5 +65,37 @@ describe("planSectionedReply", () => {
   it("treats an answer without headings as one section", () => {
     const plan = planSectionedReply(words(40), limits);
     expect(plan).toEqual({ messages: [words(40)], overflow: false });
+  });
+});
+
+describe("checkReplyFormat", () => {
+  it("passes an answer that already fits", () => {
+    expect(checkReplyFormat("**A**\nshort\n\n**B**\nalso short", limits)).toEqual({ ok: true, problems: [] });
+  });
+
+  it("names every violation so the agent knows what to fix", () => {
+    const md = [`**Root cause**\n${words(120)}`, ...Array.from({ length: 5 }, (_, i) => `**S${i}**\nx`)].join("\n\n");
+    const check = checkReplyFormat(md, limits);
+    expect(check.ok).toBe(false);
+    expect(check.problems).toEqual(["6 sections (max 5)", 'section "Root cause" has 122 words (max 100)']);
+  });
+});
+
+describe("replyFormatNudge", () => {
+  it("lists the problems and the limits", () => {
+    const nudge = replyFormatNudge(["6 sections (max 5)"], limits);
+    expect(nudge).toContain("6 sections (max 5)");
+    expect(nudge).toContain("at most 5 sections");
+    expect(nudge).toContain("under 100 words");
+  });
+});
+
+describe("parseReplyFormat", () => {
+  it("accepts positive integer limits and rejects anything else", () => {
+    expect(parseReplyFormat({ maxSections: 5, maxWords: 100 })).toEqual({ maxSections: 5, maxWords: 100 });
+    expect(parseReplyFormat({ maxSections: "5", maxWords: "100" })).toEqual({ maxSections: 5, maxWords: 100 });
+    expect(parseReplyFormat({ maxSections: 0, maxWords: 100 })).toBeUndefined();
+    expect(parseReplyFormat({ maxWords: 100 })).toBeUndefined();
+    expect(parseReplyFormat(undefined)).toBeUndefined();
   });
 });

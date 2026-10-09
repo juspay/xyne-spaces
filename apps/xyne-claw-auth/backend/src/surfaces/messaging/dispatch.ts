@@ -4,7 +4,7 @@
  * and the result callback can never drift apart per entry point (the Slack
  * surface's phase-4 parity lesson, see surfaces/slack/dispatch.ts).
  */
-import { isAgentInvocableBy } from "xyne-claw-shared";
+import { isAgentInvocableBy, replyFormatInstruction } from "xyne-claw-shared";
 import { fetch as httpFetch } from "undici";
 import { CONFIG } from "../../config.js";
 import { resolveAgentProviderConfigs, resolveSubagentProviderMode } from "../../lib/agent-provider-config.js";
@@ -33,6 +33,11 @@ import type { BoundAgent } from "./store.js";
  * Getting this backwards is how the agent ended up telling someone to approve
  * a card that was never on their screen.
  */
+function replyFormatFor(channel: MessagingChannelKey): { replyFormat?: { maxSections: number; maxWords: number } } {
+  const sections = getChannel(channel)?.capabilities.resultSections;
+  return sections ? { replyFormat: { maxSections: sections.maxSections, maxWords: sections.maxWords } } : {};
+}
+
 function channelSurfaceInstructions(channel: MessagingChannelKey): string {
   const plugin = getChannel(channel);
   const name = channel.startsWith("whatsapp") ? "WhatsApp" : channel;
@@ -63,7 +68,9 @@ function channelSurfaceInstructions(channel: MessagingChannelKey): string {
     "- Bold the names you hand back — a channel, a person, a ticket, a file — so they are findable in a wall of phone text.",
     "- They are waiting on a phone. When a task takes more than one step, write one short line of what you have found so far next to your next tool call — it is sent to them straight away. Say findings, not plumbing: \"2 of your 3 PRs have failing CI\", never \"calling the GitHub tool\". Skip it when you have nothing new to say.",
     "- Those lines are already on their screen. Your final answer should not repeat them — give the conclusion.",
-    `- Be brief. Replies longer than ${limit} characters are split across several messages.`,
+    plugin?.capabilities.resultSections
+      ? `- ${replyFormatInstruction(plugin.capabilities.resultSections)}`
+      : `- Be brief. Replies longer than ${limit} characters are split across several messages.`,
   ];
   if (plugin?.capabilities.media) {
     // The old wording here ("files you produce are sent as attachments") was
@@ -159,7 +166,11 @@ export async function buildChannelRun(input: ChannelRunInput): Promise<ChannelRu
       additionalInstructions: channelSurfaceInstructions(input.target.channel),
       subagentProviderMode: resolveSubagentProviderMode(input.agent.config),
       optimizations: CHANNEL_RUN_OPTIMIZATIONS,
-      agentConfig: { ...((input.agent.config as Record<string, unknown> | null) ?? {}), planTracking: false },
+      agentConfig: {
+        ...((input.agent.config as Record<string, unknown> | null) ?? {}),
+        planTracking: false,
+        ...replyFormatFor(input.target.channel),
+      },
     },
     sessionContext: {
       mentionedUserId: input.userId,

@@ -16,7 +16,7 @@ import { errMsg } from "../../lib/errors.js";
 import { DONE_REACTION, EMPTY_RESULT_TEXT, ERROR_REACTION, FAILURE_TEXT, OUTBOX_TTL_S, REDIS_PREFIX, TYPING_COUNT_TTL_S } from "./const.js";
 import { forgetActiveRun } from "./commands.js";
 import { chunkText } from "./format.js";
-import { planSectionedReply } from "./sections.js";
+import { planSectionedReply } from "xyne-claw-shared";
 import { renderMarkdownToHtml } from "../../lib/result-html.js";
 import { fitCard, renderCardAsText } from "./cards.js";
 import type { AnyChannelPlugin, ChannelDeliveryTarget, InteractiveCard, MessageRef } from "./plugin.js";
