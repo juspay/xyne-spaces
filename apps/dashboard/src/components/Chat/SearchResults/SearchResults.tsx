@@ -76,7 +76,9 @@ import {
 } from '../../../search/filterRegistry';
 import { DisplaySearchResult } from '../../../types/search';
 import { SearchResultMessageCard } from './SearchResultMessageCard';
-import SearchSectionSkeleton from '../ChatDirectory/SearchSectionSkeleton';
+import SearchSectionSkeleton, {
+  type SkeletonVariant,
+} from '../ChatDirectory/SearchSectionSkeleton';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
 import { SearchSnippetRenderer } from '../RenderMessageWithHTML/searchSnippetRender';
 import { SearchResultsContext, SearchResultsThread } from './SearchResultsContext';
@@ -429,6 +431,7 @@ const SearchResults = (): ReactElement => {
     searchResults: backendResults,
     isGrouped,
     isSearching: isLoading,
+    isLoadingMore,
     isSearchPending,
     searchError: error,
     text: searchedText,
@@ -1365,6 +1368,8 @@ const SearchResults = (): ReactElement => {
 
   /** True when the search returned results. Controls the result count and Compare button. */
   const hasResultsRow = results.length > 0 || (!!query && totalCount > 0);
+  // An empty box with no filters has nothing to count, so nothing to hold a place for.
+  const showCountSkeleton = isSearchPending && (!!displayQuery || filtersActive);
 
   // Filter labels sent with feedback.
   const feedbackFilters = useMemo(
@@ -1462,12 +1467,20 @@ const SearchResults = (): ReactElement => {
         </div>
         {/* Shown for any query or active filter so Feedback is available even with no results.
             The result count and Compare still need results. */}
-        {(hasResultsRow || (canPostFeedback && (!!displayQuery || filtersActive))) && (
+        {(hasResultsRow ||
+          showCountSkeleton ||
+          (canPostFeedback && (!!displayQuery || filtersActive))) && (
           <div className='flex items-center justify-between gap-3 pb-2'>
-            {hasResultsRow && (
-              <p className='text-xs text-muted-foreground tabular-nums'>
-                {(totalCount || results.length).toLocaleString()} results
-              </p>
+            {/* The count row stays mounted while a search is in flight, so the skeleton
+                rows below sit exactly where the results land. */}
+            {showCountSkeleton ? (
+              <span aria-hidden='true' className='block h-4 w-16 rounded search-skeleton-bar' />
+            ) : (
+              hasResultsRow && (
+                <p className='text-xs text-muted-foreground tabular-nums'>
+                  {(totalCount || results.length).toLocaleString()} results
+                </p>
+              )
             )}
             <div className='flex items-center gap-2 ml-auto'>
               {canPostFeedback && (
@@ -1520,8 +1533,6 @@ const SearchResults = (): ReactElement => {
         className={cn(
           // pb-16 so the last card clears the bottom of the viewport instead of sitting
           // flush against it (and above the floating compare bar when it's up).
-          // A re-search keeps the previous results on screen rather than blanking to a
-          // spinner — ResultsBody dims the backend results while the new ones land.
           'flex-1 min-h-0 overflow-y-auto px-4 pb-16',
         )}
       >
@@ -1534,6 +1545,7 @@ const SearchResults = (): ReactElement => {
             isSearchPending={isSearchPending}
             isLocalSearchPending={localResultsPending}
             isLoading={isLoading}
+            isLoadingMore={isLoadingMore}
             error={error}
             results={results}
             loadMoreRef={loadMoreRef}
@@ -1667,6 +1679,7 @@ interface ResultsBodyProps {
   /** The local people/channel matches haven't caught up with the query yet. */
   isLocalSearchPending: boolean;
   isLoading: boolean;
+  isLoadingMore: boolean;
   error: string | null;
   results: DisplaySearchResult[];
   loadMoreRef: React.RefObject<HTMLDivElement | null>;
@@ -1717,10 +1730,22 @@ const BACKEND_GROUP_ORDER = [
   'desk',
 ] as const;
 
-// Loading skeletons follow the Cmd+K palette: a specific tab shows one list only when its results
-// come from the backend. ALL shows Messages + Tickets sections like Cmd+K, plus Attachments —
-// the full page has room for it and files are common enough not to vanish on most searches.
+// Loading skeletons mirror Cmd+K: one list on a backend-sourced tab, sections on ALL. ALL adds
+// Attachments — the page has room for it.
 const SKELETON_GROUP_KEYS = ['conversation', 'ticket', 'attachment'] as const;
+/** Skeleton shape per section / per tab — the page's cards, not cmdK's rows. */
+const FULLPAGE_SKELETON_VARIANTS: Record<string, SkeletonVariant> = {
+  conversation: 'page-message',
+  ticket: 'page-ticket',
+  attachment: 'page-file',
+  desk: 'page-desk',
+};
+const DOC_TYPE_SKELETON_VARIANTS: Partial<Record<string, SkeletonVariant>> = {
+  messages: 'page-message',
+  tickets: 'page-ticket',
+  files: 'page-file',
+  desk: 'page-desk',
+};
 const SKELETON_DOC_TYPES = new Set<SearchResultsFilters['docType']>([
   'messages',
   'tickets',
@@ -1737,7 +1762,8 @@ const GROUP_LABELS: Record<string, string> = {
   transcript: 'Calls',
   recording: 'Recordings',
   desk: 'Desk',
-  others: 'Others',
+  // The flat list is every backend type in one score-ordered list, not a leftovers bucket.
+  others: 'Results',
 };
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -1826,6 +1852,7 @@ function ResultsBody({
   isSearchPending,
   isLocalSearchPending,
   isLoading,
+  isLoadingMore,
   error,
   results,
   loadMoreRef,
@@ -2177,11 +2204,8 @@ function ResultsBody({
     <>
       {/* Sentinel for load-more */}
       <div ref={loadMoreRef} className='h-1' />
-      {isLoading && (
-        <div className='flex justify-center py-4'>
-          <Loader2 className='animate-spin text-muted-foreground' size={20} />
-        </div>
-      )}
+      {/* The next page arrives as rows, so it loads as rows. */}
+      {isLoadingMore && <SearchSectionSkeleton rows={4} variant='page-message' />}
     </>
   );
 
@@ -2344,9 +2368,10 @@ function ResultsBody({
     const hasLocalSections =
       showLocalSections && (userResults.length > 0 || filteredLocalChannels.length > 0);
     const hasBackendSections = backendOnly.length > 0;
-    // Same loading rule as the Cmd+K palette: while a search is pending with no backend results,
-    // Messages and Tickets render skeleton sections; existing results stay, dimmed.
-    const showBackendSkeleton = (isSearchPending || isLocalSearchPending) && !hasBackendSections;
+    // Pending → skeleton sections in place of backend results (they answer the previous query).
+    // Local sections stay put. While only the local people/channel lists lag, a skeleton holds
+    // the space if nothing else is on screen yet.
+    const showBackendSkeleton = isSearchPending || (isLocalSearchPending && !hasBackendSections);
 
     // True empty: nothing to show at all
     if (!hasLocalSections && !hasBackendSections) {
@@ -2394,19 +2419,28 @@ function ResultsBody({
         {/* Backend results: grouped into per-docType sections when the backend
             grouped the response, otherwise a single flat (e.g. time-sorted) list.
             Local users/channels above stay categorized regardless. */}
-        {/* The skeleton ignores `isGrouped`: the backend answers every zero-result search with
-            `grouped: false`, which would otherwise change the loading layout between searches. */}
+        {/* Follows `isGrouped`: flat mode is one mixed list, not sections. */}
         {showBackendSkeleton ? (
-          SKELETON_GROUP_KEYS.map(gk => (
-            <div key={gk} className='mb-6'>
+          isGrouped ? (
+            SKELETON_GROUP_KEYS.map(gk => (
+              <div key={gk} className='mb-6'>
+                <p className='px-1 pb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide font-mono'>
+                  {GROUP_LABELS[gk]}
+                </p>
+                <SearchSectionSkeleton variant={FULLPAGE_SKELETON_VARIANTS[gk] ?? 'message'} />
+              </div>
+            ))
+          ) : (
+            <div className='mb-6'>
+              {/* Same heading as the flat results, so rows don't shift. */}
               <p className='px-1 pb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide font-mono'>
-                {GROUP_LABELS[gk]}
+                {GROUP_LABELS['others']}
               </p>
-              <SearchSectionSkeleton />
+              <SearchSectionSkeleton rows={4} variant='page-message' />
             </div>
-          ))
+          )
         ) : (
-          <div className={cn('transition-opacity', isSearchPending && 'opacity-60')}>
+          <div>
             {isGrouped
               ? BACKEND_GROUP_ORDER.filter(gk => grouped.has(gk)).map(gk => (
                   <div key={gk} className='mb-6'>
@@ -2437,20 +2471,24 @@ function ResultsBody({
   }
 
   // ── Flat view — specific docType tabs and compare mode ──────────────────
+  // One skeleton list while a backend-sourced tab is pending. Before the results branch, so a
+  // refined query replaces the old rows.
+  if (isSearchPending && SKELETON_DOC_TYPES.has(docType) && (displayQuery || hasActiveFilters)) {
+    return (
+      <div className='w-full pt-2 pb-6'>
+        <SearchSectionSkeleton
+          rows={4}
+          variant={DOC_TYPE_SKELETON_VARIANTS[docType] ?? 'message'}
+        />
+      </div>
+    );
+  }
   if (results.length === 0) {
     if (!displayQuery && !searchedByFilter) {
       return (
         emptyQueryContent ?? (
           <EmptyState title='Search for messages, files, and tickets' subtitle='Type to search' />
         )
-      );
-    }
-    // Same as a Cmd+K tab: one headerless skeleton list while a backend-sourced tab is pending.
-    if (isSearchPending && SKELETON_DOC_TYPES.has(docType)) {
-      return (
-        <div className='w-full pt-2 pb-6'>
-          <SearchSectionSkeleton rows={4} />
-        </div>
       );
     }
     // isSearchPending is primary (race-proof); isLoading backstops a real in-flight fetch.
@@ -2473,12 +2511,7 @@ function ResultsBody({
     );
   }
   return (
-    <div
-      className={cn(
-        'w-full space-y-2 pt-2 pb-6 transition-opacity',
-        isSearchPending && 'opacity-60',
-      )}
-    >
+    <div className='w-full space-y-2 pt-2 pb-6'>
       {results.map((result, index) => {
         const el = renderCard(result, index);
         if (!el) return null;
