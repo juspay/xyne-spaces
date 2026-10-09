@@ -13,6 +13,8 @@
     "build:mac": "pnpm run build:mic-monitor && tsc && electron-builder --config build.prod.json",
     "build:win": "tsc && electron-builder --config build.prod.json --win nsis --x64",
     "build:win:arm64": "tsc && electron-builder --config build.prod.json --win nsis --arm64",
+    "build:linux": "tsc && electron-builder --config build.prod.json --linux",
+    "build:prepare": "pnpm run build:mic-monitor && tsc",
     "build:sandbox:mac": "pnpm run build:mic-monitor && tsc && electron-builder --config build.sbx.json",
     "build:sandbox:win": "tsc && electron-builder --config build.sbx.json --win nsis --x64",
     "copy-ui": "rimraf ui-active && cpy \"../dashboard/dist/**\" ui-active",

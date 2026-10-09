@@ -208,6 +208,8 @@ Thumbs.db
 apps/electron/release/
 apps/electron/dist/
 apps/electron/ui-active/
+# Compiled by native/mic-monitor/build.sh during every electron build.
+apps/electron/native/mic-monitor/mic-monitor
 
 # App Specific
 apps/xyne-spaces/.yarn/*

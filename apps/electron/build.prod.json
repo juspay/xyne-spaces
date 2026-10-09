@@ -44,6 +44,10 @@
         "arch": ["universal"]
       },
       {
+        "target": "dmg",
+        "arch": ["universal"]
+      },
+      {
         "target": "zip",
         "arch": ["universal"]
       }
@@ -132,22 +136,6 @@
       {
         "target": "rpm",
         "arch": ["x64", "arm64"]
-      },
-      {
-        "target": "snap",
-        "arch": ["x64"]
-      },
-      {
-        "target": "pacman",
-        "arch": ["x64"]
-      },
-      {
-        "target": "flatpak",
-        "arch": ["x64"]
-      },
-      {
-        "target": "tar.gz",
-        "arch": ["x64", "arm64"]
       }
     ]
   },
@@ -180,57 +168,5 @@
   },
   "appImage": {
     "artifactName": "${productName}-${version}-${arch}.${ext}"
-  },
-  "snap": {
-    "summary": "Xyne Spaces - collaborative workspace for teams",
-    "description": "Xyne Spaces desktop application for team collaboration, meetings, and screen sharing.",
-    "base": "core22",
-    "confinement": "strict",
-    "grade": "stable",
-    "allowNativeWayland": true,
-    "compression": "xz",
-    "plugs": [
-      "default",
-      "audio-playback",
-      "audio-record",
-      "camera",
-      "screen-inhibit-control",
-      "network",
-      "network-bind",
-      "password-manager-service"
-    ],
-    "stagePackages": ["default"]
-  },
-  "flatpak": {
-    "runtime": "org.freedesktop.Platform",
-    "runtimeVersion": "23.08",
-    "sdk": "org.freedesktop.Sdk",
-    "base": "org.electronjs.Electron2.BaseApp",
-    "baseVersion": "23.08",
-    "finishArgs": [
-      "--share=ipc",
-      "--socket=x11",
-      "--socket=wayland",
-      "--socket=pulseaudio",
-      "--share=network",
-      "--device=dri",
-      "--device=all",
-      "--filesystem=home",
-      "--talk-name=org.freedesktop.Notifications"
-    ],
-    "useWaylandFlags": true
-  },
-  "pacman": {
-    "depends": [
-      "c-ares",
-      "gtk3",
-      "libnotify",
-      "nss",
-      "libxss",
-      "libxtst",
-      "xdg-utils",
-      "libsecret"
-    ],
-    "compression": "xz"
   }
 }

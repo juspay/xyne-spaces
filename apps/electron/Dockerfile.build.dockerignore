@@ -1,0 +1,29 @@
+# Ignore list for apps/electron/Dockerfile.build (BuildKit prefers
+# `<dockerfile>.dockerignore` over the root .dockerignore).
+#
+# A dedicated list is required: the root .dockerignore excludes `apps/electron`
+# and every `dist/`, both of which the electron build needs.
+#
+# Strategy is deny-all then re-include, so a new unrelated top-level directory
+# cannot silently inflate the build context. Order matters — later patterns win.
+*
+
+# Workspace root manifests. pnpm-workspace.yaml names its members explicitly, so
+# `pnpm install --frozen-lockfile` needs every member's package.json.
+!package.json
+!pnpm-workspace.yaml
+!pnpm-lock.yaml
+!.npmrc
+!**/package.json
+
+# The app itself, including ui-active staged by `make electron-ui-copy`.
+!apps/electron
+
+# Never ship dependency trees or previous output, even from the re-includes above.
+**/node_modules
+apps/electron/release
+apps/electron/dist
+apps/electron/certs/*.key
+**/.env
+**/.env.*
+**/.git

@@ -1,0 +1,89 @@
+# syntax=docker/dockerfile:1
+#
+# Electron desktop app builder — Linux and Windows targets.
+#
+# Driven by `make electron-build-linux` / `make electron-build-win`.
+#
+# Why buildx with a `scratch` output stage instead of `docker run -v`:
+# CI agents talk to a REMOTE Docker daemon (DOCKER_HOST=tcp://…dind), so a bind
+# mount resolves on the daemon's pod rather than on the agent and nothing comes
+# back. Sending the context and retrieving `--output type=local` works over the
+# API regardless of where the daemon lives. apps/dashboard/Dockerfile exposes its
+# bundle through a `scratch` stage for the same reason.
+#
+# macOS is deliberately absent: `pkg` and `dmg` need productbuild and hdiutil,
+# which cannot run in a Linux container. See `make electron-build-mac`.
+#
+# The ignore list for this build is apps/electron/Dockerfile.build.dockerignore
+# (BuildKit prefers `<dockerfile>.dockerignore` over the root one). It must be
+# used, because the root .dockerignore excludes both apps/electron and every
+# dist/ — exactly what this build needs.
+
+ARG BUILDER_IMAGE=electronuserland/builder:wine
+
+FROM ${BUILDER_IMAGE} AS build
+
+# Platform flag passed through to electron-builder (`--linux` / `--win`),
+# optionally followed by an explicit target list. Deliberately unquoted below so
+# a multi-word value splits into separate arguments. The default target list for
+# each platform stays in the electron-builder config, so this image never
+# duplicates it.
+ARG ELECTRON_PLATFORM=--linux
+ARG ELECTRON_BUILD_CONFIG=build.prod.json
+ARG PNPM_VERSION=10.15.0
+
+# Unsigned by design in phase 1: the macOS pkg installs via MDM, which sets no
+# quarantine attribute. Pinned off so electron-builder cannot pick up an
+# identity from the build host and silently change what it produces.
+ENV CI=true \
+    CSC_IDENTITY_AUTO_DISCOVERY=false \
+    ELECTRON_CACHE=/root/.cache/electron \
+    ELECTRON_BUILDER_CACHE=/root/.cache/electron-builder
+
+WORKDIR /repo
+
+RUN corepack enable pnpm && corepack prepare pnpm@${PNPM_VERSION} --activate
+
+# The whole (heavily filtered) context in one layer. pnpm-workspace.yaml lists
+# its members explicitly, so `--frozen-lockfile` needs every member's
+# package.json present; copying manifests selectively would mean tracking that
+# list in a second place.
+COPY . .
+
+# pnpm store is cached across builds; the Electron and electron-builder download
+# caches avoid re-fetching ~100MB of runtime per build.
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile --prefer-offline --filter xyne-spaces-electron...
+
+# electron-builder is invoked directly rather than through a package script with
+# `pnpm run <script> -- <args>`: pnpm 10 forwards the `--` itself, so
+# electron-builder received a bare `--` and silently ignored `--config`, falling
+# back to its default `dist` output and colliding with tsc's outDir.
+#
+# ui-active is the app's offline fallback UI, listed in the electron-builder
+# config's `files`. It is staged into the context by `make electron-ui-copy`
+# rather than built here, so it keeps the deployment's VITE_* configuration.
+RUN --mount=type=cache,target=/root/.cache/electron \
+    --mount=type=cache,target=/root/.cache/electron-builder \
+    cd apps/electron \
+ && pnpm run build:prepare \
+ && pnpm exec electron-builder --config "${ELECTRON_BUILD_CONFIG}" ${ELECTRON_PLATFORM}
+
+# Collect the installers into one flat directory. Done here, not in the scratch
+# stage, because electron-builder's output tree also holds the unpacked app
+# (linux-unpacked/, win-unpacked/, .icon-set/) — hundreds of MB that must not
+# cross into `--output type=local`. `find` rather than a fixed path because
+# electron-builder expands ${os} in `directories.output` itself.
+RUN mkdir -p /artifacts \
+ && find apps/electron/release -type f \( \
+        -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \
+        -o -name '*.exe' -o -name '*.msi' -o -name '*.zip' \
+        -o -name '*.blockmap' -o -name 'latest*.yml' \
+    \) -exec cp -f {} /artifacts/ \; \
+ && ls -la /artifacts \
+ && [ -n "$(ls -A /artifacts)" ] || { echo "no installers produced" >&2; exit 1; }
+
+# Installers only — `--output type=local` writes this stage's filesystem to the
+# host, so nothing but artifacts belongs here.
+FROM scratch AS artifacts
+COPY --from=build /artifacts /
