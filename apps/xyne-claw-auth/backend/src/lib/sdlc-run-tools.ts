@@ -12,6 +12,11 @@ export async function markSdlcRun(sessionId: string, channelId: string): Promise
   await redisService.getConnection().set(sdlcRunKey(sessionId), channelId, "EX", SDLC_RUN_TTL_SECONDS);
 }
 
+/** The hub a run started in, or null when it did not start in one. */
+export async function sdlcRunChannelId(sessionId: string): Promise<string | null> {
+  return redisService.getConnection().get(sdlcRunKey(sessionId)).catch(() => null);
+}
+
 /** The gate's view of the SDLC tools for a run: the agent's stored selection plus the SDLC profile when the run is in a hub. */
 export async function withSdlcRunTools(
   config: AgentToolsConfig | undefined,

@@ -57,8 +57,8 @@ import {
 import { EntitySelector } from '../../components/ui/EntitySelector/EntitySelector';
 import { Tabs } from '../../components/ui/Tabs';
 import NotFoundScreen from '../NotFoundScreen/NotFoundScreen';
-import { SdlcArchiveMenu } from './SdlcArchiveMenu';
 import { SdlcHubDialog } from './SdlcHubDialog';
+import { SdlcKnowledgeSection } from './SdlcKnowledgeSection';
 import { SdlcHubRepositoriesDialog } from './SdlcHubRepositoriesDialog';
 import {
   SdlcExplorerHeader,
@@ -79,7 +79,6 @@ import { isSdlcDocumentWindow } from './useSdlcFrameBridge';
 import { toast } from 'sonner';
 import AppNavigator from '../../components/AppNavigator/AppNavigator';
 import { Button } from '../../components/ui/Button';
-import { Checkbox } from '../../components/ui/Checkbox/Checkbox';
 import { XyneAIStar } from '../../components/icons/xyne-ai';
 import { FolderDefault, PhoneDefault, TicketToken } from '@xyne/icons';
 import { IconPicker } from '../../components/AppIcon/IconPicker';
@@ -321,7 +320,7 @@ type SdlcDocumentKind = 'artifact' | 'knowledge' | 'wiki';
 
 const HUB_DOCUMENT_HINT: Record<SdlcDocumentKind, string> = {
   artifact: 'Adding to this hub',
-  knowledge: 'Read by SDLC Assistant in every chat in this hub',
+  knowledge: 'Listed for agents in this hub. A hub admin can pin it',
   wiki: 'Adding to the Wiki you are viewing',
 };
 
@@ -2064,7 +2063,11 @@ export default function SdlcScreen(): ReactElement {
     });
   }, [askSdlcAssistant]);
 
-  const renderWorkflowControls = (label: string, workflow: HubWorkflow): ReactElement => {
+  const renderWorkflowControls = (
+    label: string,
+    workflow: HubWorkflow,
+    startLabel = 'Start',
+  ): ReactElement => {
     const running = workflow.phase === 'RUNNING';
     const busyKey = `hub-workflow:${label}`;
     return (
@@ -2087,7 +2090,7 @@ export default function SdlcScreen(): ReactElement {
             data-track-name={running ? 'HubWorkflowRunCancelled' : 'HubWorkflowRunStarted'}
             data-track-metadata={JSON.stringify({ label })}
           >
-            {running ? 'Cancel' : 'Start'}
+            {running ? 'Cancel' : startLabel}
           </Button>
         ) : null}
       </div>
@@ -2098,7 +2101,9 @@ export default function SdlcScreen(): ReactElement {
     icon: typeof Boxes;
     title: string;
     description: string;
-    workflow: HubWorkflow;
+    /** Either the workflow the page runs, or its own actions. */
+    workflow?: HubWorkflow;
+    actions?: ReactNode;
   }): ReactElement => {
     const Icon = input.icon;
     return (
@@ -2112,7 +2117,7 @@ export default function SdlcScreen(): ReactElement {
             <p className='mt-0.5 text-sm text-muted-foreground'>{input.description}</p>
           </div>
         </div>
-        {renderWorkflowControls(input.title, input.workflow)}
+        {input.actions ?? (input.workflow && renderWorkflowControls(input.title, input.workflow))}
       </div>
     );
   };
@@ -2429,7 +2434,7 @@ export default function SdlcScreen(): ReactElement {
     clearArtifactDialogFields();
     setArtifactDialog(
       kind === 'knowledge'
-        ? { id: knowledgeFolderId ?? '', name: 'Hub Knowledge document', kind }
+        ? { id: knowledgeFolderId ?? '', name: 'Knowledge File', kind }
         : { id: wikiScope?.folderId ?? '', name: 'Wiki page', kind },
     );
   };
@@ -4076,7 +4081,8 @@ export default function SdlcScreen(): ReactElement {
                                 {readyCount} document{readyCount === 1 ? '' : 's'} ready
                               </p>
                             </div>
-                            {renderWorkflowControls('Hub Knowledge', state)}
+                            {/* Hidden only: the workflow trigger API has no hub admin check yet. Move the rule there once workflow auth is decided. */}
+                            {isHubAdmin && renderWorkflowControls('Hub Knowledge', state)}
                           </div>
                         </div>
                         <div className='mt-5 overflow-hidden rounded-xl border bg-background'>
@@ -4093,120 +4099,64 @@ export default function SdlcScreen(): ReactElement {
                     {section === 'tracks' && renderTrack()}
 
                     {section === 'knowledge' && (
-                      <section className='mx-auto max-w-5xl'>
-                        {renderWorkflowHeader({
-                          icon: ShieldCheck,
-                          title: 'Hub Knowledge',
-                          description:
-                            'Given to SDLC Assistant in every chat. Admins edit; members read.',
-                          workflow: state,
-                        })}
-                        <div className='mb-4 flex items-center justify-between gap-3'>
-                          <Checkbox
-                            size='sm'
-                            label='Show archived'
-                            checked={showArchivedKnowledge}
-                            onChange={setShowArchivedKnowledge}
-                            data-track-category='SdlcHub'
-                            data-track-name='HubKnowledgeArchivedToggled'
-                          />
-                          {isHubAdmin && knowledgeFolderId && (
-                            <Button
-                              type='button'
-                              size='sm'
-                              onClick={() => openHubDocumentCreate('knowledge')}
-                              data-track-category='SdlcHub'
-                              data-track-name='HubKnowledgeDocCreateOpened'
-                            >
-                              <Plus size={15} />
-                              New document
-                            </Button>
+                      <section className='mx-auto max-w-6xl'>
+                        <SdlcKnowledgeSection
+                          renderHeader={actions =>
+                            renderWorkflowHeader({
+                              icon: ShieldCheck,
+                              title: 'Hub Knowledge',
+                              description:
+                                'What agents know in this hub. Pinned items are given in full, the rest by name.',
+                              actions,
+                            })
+                          }
+                          generateControl={renderWorkflowControls(
+                            'Hub Knowledge',
+                            state,
+                            'Generate',
                           )}
-                        </div>
-                        <div className='grid grid-cols-2 gap-4'>
-                          {knowledgeDocs.map(canvas => {
-                            const generating = canvas.sdlcArtifact?.artifactStatus === 'DRAFT';
-                            const archived = canvas.sdlcArtifact?.artifactStatus === 'ARCHIVED';
-                            return (
-                              <div
-                                key={canvas.id}
-                                role='button'
-                                tabIndex={0}
-                                onClick={() => openCanvas(canvas.id)}
-                                data-track-category='SdlcHub'
-                                data-track-name='HubKnowledgeCanvasOpened'
-                                data-track-metadata={JSON.stringify({ canvasId: canvas.id })}
-                                onKeyDown={event => {
-                                  // The archive menu lives inside this card.
-                                  if (event.target !== event.currentTarget) return;
-                                  if (event.key === 'Enter' || event.key === ' ') {
-                                    event.preventDefault();
-                                    openCanvas(canvas.id);
-                                  }
-                                }}
-                                className={cn(
-                                  'group cursor-pointer rounded-xl border bg-background p-5 transition-colors hover:border-primary/35 hover:bg-muted/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                                  archived && 'opacity-60',
-                                )}
-                              >
-                                <div className='flex items-start justify-between gap-2'>
-                                  <div className='grid size-9 place-items-center rounded-lg bg-primary/10 text-primary'>
-                                    <BookOpen size={18} />
-                                  </div>
-                                  <div className='flex items-start gap-1'>
-                                    {archived ? (
-                                      <span className='rounded-full bg-muted px-2 py-1 text-xs font-medium text-muted-foreground'>
-                                        Archived
-                                      </span>
-                                    ) : generating ? (
-                                      <span className='rounded-full bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-700'>
-                                        Generating
-                                      </span>
-                                    ) : (
-                                      <span className='flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-300'>
-                                        <Check size={12} />
-                                        Ready
-                                      </span>
-                                    )}
-                                    {isHubAdmin && (
-                                      <SdlcArchiveMenu
-                                        title={canvas.title}
-                                        archived={archived}
-                                        trackingScope='HubKnowledge'
-                                        className='-mr-1'
-                                        onToggle={next => archiveArtifact(canvas.id, next)}
-                                      />
-                                    )}
-                                  </div>
-                                </div>
-                                <h3 className='mt-4 font-semibold'>{canvas.title}</h3>
-                                <p className='mt-1 text-xs text-muted-foreground'>
-                                  Updated {updatedAtLabel(canvas.lastEditedAt ?? canvas.updatedAt)}
-                                  {' · '}
-                                  {typeof canvas.sdlcArtifact?.generationCommit === 'string'
-                                    ? canvas.sdlcArtifact.generationCommit.slice(0, 8)
-                                    : 'repository HEAD'}
-                                </p>
-                                <div className='mt-5 flex items-center justify-between gap-3'>
-                                  <span className='text-xs font-medium text-muted-foreground transition-colors group-hover:text-foreground'>
-                                    Open document
-                                  </span>
-                                </div>
-                              </div>
+                          channelId={channel.id}
+                          isHubAdmin={isHubAdmin}
+                          files={knowledgeDocs.map(canvas => ({
+                            id: canvas.id,
+                            title: canvas.title,
+                            status:
+                              canvas.sdlcArtifact?.artifactStatus === 'ARCHIVED'
+                                ? 'archived'
+                                : canvas.sdlcArtifact?.artifactStatus === 'DRAFT'
+                                  ? 'generating'
+                                  : 'ready',
+                            detail: `Updated ${updatedAtLabel(canvas.lastEditedAt ?? canvas.updatedAt)} · ${
+                              typeof canvas.sdlcArtifact?.generationCommit === 'string'
+                                ? canvas.sdlcArtifact.generationCommit.slice(0, 8)
+                                : 'repository HEAD'
+                            }`,
+                          }))}
+                          showArchived={showArchivedKnowledge}
+                          onShowArchivedChange={setShowArchivedKnowledge}
+                          emptyFilesText={
+                            knowledgeRunning
+                              ? 'Hub Knowledge generation is in progress.'
+                              : 'No Knowledge Files yet. A hub admin can start the Hub Knowledge workflow or add one.'
+                          }
+                          onOpenFile={openCanvas}
+                          onArchiveFile={archiveArtifact}
+                          onNewFile={() => openHubDocumentCreate('knowledge')}
+                          onCreateWithAi={draft => {
+                            const asFile = `a Knowledge File through the spaces-sdlc-write-artifact create call with artifactTypeId ${JSON.stringify(knowledgeFolderId ?? '')}`;
+                            const saveAs = {
+                              file: `Save it as ${asFile}.`,
+                              skill: 'Save it as a skill: call create-skill.',
+                              auto: `Save it as ${asFile}, or as a skill through create-skill when it is a generic procedure.`,
+                            }[draft.kind];
+                            askSdlcAssistant(
+                              `Add this to this hub's Hub Knowledge now. Do not ask me anything first, write the full content yourself.\n` +
+                                `Name: ${draft.name}\nWhat it covers: ${draft.description}\n${saveAs}`,
+                              undefined,
+                              true,
                             );
-                          })}
-                          {knowledgeDocs.length === 0 && (
-                            <EmptyCard
-                              text={
-                                knowledgeRunning
-                                  ? 'Hub Knowledge generation is in progress.'
-                                  : isHubAdmin
-                                    ? 'Start the Hub Knowledge workflow, or add a document yourself.'
-                                    : 'Start the Hub Knowledge workflow to generate these documents.'
-                              }
-                            />
-                          )}
-                        </div>
+                          }}
+                        />
                       </section>
                     )}
 
