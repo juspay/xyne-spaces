@@ -23,6 +23,7 @@ import { queueCallCalendarPush, queueCallCalendarPushMany } from '@/queues/callC
 import { buildCallInviteUrl } from '@/utils/urlUtils';
 import { messageMetadataService } from '@/services/messageMetadataService';
 import { summaryTemplateService } from '@/services/summaryTemplateService';
+import { channelService } from '@/services/channelService';
 import { withWorkspaceScope } from '@/database/tenant/context';
 
 // Number of milliseconds to buffer recurring call instances ahead of time (60 days)
@@ -245,6 +246,9 @@ export class ScheduleCallController {
           repositories.channelParticipants,
           req.user!.workspaceId!,
         );
+      } else if (!channelId) {
+        // Guest-only series: no teammates to put in a DM, so back it with the organizer's self-DM.
+        finalChannelId = await channelService.ensureSelfDmExists(userId, req.user!.workspaceId!);
       }
 
       const seriesId = uuidv4();
@@ -359,6 +363,9 @@ export class ScheduleCallController {
           repositories.channelParticipants,
           req.user!.workspaceId!,
         );
+      } else if (!channelId) {
+        // Guest-only call: no teammates to put in a DM, so back it with the organizer's self-DM.
+        finalChannelId = await channelService.ensureSelfDmExists(userId, req.user!.workspaceId!);
       }
 
       // Generate IDs

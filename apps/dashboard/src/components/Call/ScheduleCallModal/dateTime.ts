@@ -116,3 +116,34 @@ export const getWeekdayOccurrence = (
     ordinalWord: ORDINAL_WORDS[occurrence - 1] || `${occurrence}th`,
   };
 };
+
+const isOffsetName = (name: string): boolean =>
+  !name || name.startsWith('GMT') || name.startsWith('UTC');
+
+/**
+ * Viewer's timezone for `date`, e.g. "IST · GMT+5:30". Intl only abbreviates zones
+ * the viewer's locale knows (en-US renders IST as "GMT+5:30"), so otherwise the
+ * abbreviation is built from the long name's initials ("India Standard Time" → IST).
+ * Names too short to abbreviate reliably ("Nepal Time") show just the offset.
+ */
+export const getTimezoneLabel = (date: Date): string => {
+  const at = isValidDate(date) ? date : new Date();
+  const part = (locale: string | undefined, style: 'short' | 'shortOffset' | 'long'): string => {
+    try {
+      return (
+        new Intl.DateTimeFormat(locale, { timeZoneName: style })
+          .formatToParts(at)
+          .find(p => p.type === 'timeZoneName')?.value ?? ''
+      );
+    } catch {
+      return '';
+    }
+  };
+  const offset = part('en-US', 'shortOffset');
+  const abbr = part(undefined, 'short');
+  if (!isOffsetName(abbr)) return offset ? `${abbr} · ${offset}` : abbr;
+  const words = part('en-US', 'long').split(/\s+/);
+  if (isOffsetName(words[0] ?? '') || words[0] === 'Coordinated' || words.length < 3) return offset;
+  const initials = words.map(w => w[0]?.toUpperCase() ?? '').join('');
+  return offset ? `${initials} · ${offset}` : initials;
+};

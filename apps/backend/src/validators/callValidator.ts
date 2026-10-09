@@ -112,8 +112,12 @@ export const ScheduleCallSchema = z.object({
   // Pins the detailed-summary template so no LLM template selection runs for this call.
   summaryTemplateId: z.string().trim().min(1).optional(),
 }).refine(
-  (data) => data.channelId || (data.targetUserIds && data.targetUserIds.length > 0),
-  'Either channelId or targetUserIds is required'
+  // A guest-only call has no channel or teammates; it is backed by the organizer's self-DM.
+  (data) =>
+    data.channelId ||
+    (data.targetUserIds && data.targetUserIds.length > 0) ||
+    (data.externalInvitees && data.externalInvitees.length > 0),
+  'Either channelId, targetUserIds or externalInvitees is required'
 ).refine(
   (data) => data.startsAt < data.endsAt,
   'endsAt must be after startsAt'
@@ -168,8 +172,12 @@ export const RecurringScheduleCallSchema = z
     summaryTemplateId: z.string().trim().min(1).optional(),
   })
   .refine(
-    (data) => data.channelId || (data.targetUserIds && data.targetUserIds.length > 0),
-    'Either channelId or targetUserIds is required',
+    // A guest-only series has no channel or teammates; it is backed by the organizer's self-DM.
+    (data) =>
+      data.channelId ||
+      (data.targetUserIds && data.targetUserIds.length > 0) ||
+      (data.externalInvitees && data.externalInvitees.length > 0),
+    'Either channelId, targetUserIds or externalInvitees is required',
   )
   .refine(
     (data) => !data.endsOn || data.endsOn > data.startsOn,

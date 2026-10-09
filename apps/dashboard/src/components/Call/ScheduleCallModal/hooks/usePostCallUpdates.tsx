@@ -11,10 +11,9 @@ interface PostCallUpdatesChannel {
 
 interface UsePostCallUpdatesParams {
   channels: PostCallUpdatesChannel[];
-  participantCount: number;
 }
 
-export function usePostCallUpdates({ channels, participantCount }: UsePostCallUpdatesParams) {
+export function usePostCallUpdates({ channels }: UsePostCallUpdatesParams) {
   const [postCallUpdates, setPostCallUpdates] = useState(false);
   const [updateChannelId, setUpdateChannelId] = useState<string | null>(null);
   const [channelSearchQuery, setChannelSearchQuery] = useState('');
@@ -22,7 +21,6 @@ export function usePostCallUpdates({ channels, participantCount }: UsePostCallUp
   const channelInputRef = useRef<HTMLInputElement>(null);
 
   const updateChannelError = postCallUpdates && !updateChannelId;
-  const showPostCallUpdates = participantCount > 0 || postCallUpdates;
 
   const channelComboboxItems = useMemo((): DropdownListItemType[] => {
     const q = channelSearchQuery.toLowerCase();
@@ -63,12 +61,6 @@ export function usePostCallUpdates({ channels, participantCount }: UsePostCallUp
     setChannelPickerOpen(false);
   }, []);
 
-  useEffect(() => {
-    if (!showPostCallUpdates && postCallUpdates) {
-      resetPostCallUpdates();
-    }
-  }, [showPostCallUpdates, postCallUpdates, resetPostCallUpdates]);
-
   const didInitRef = useRef(false);
   useEffect(() => {
     if (!didInitRef.current) {
@@ -93,7 +85,6 @@ export function usePostCallUpdates({ channels, participantCount }: UsePostCallUp
     setChannelSearchQuery,
     setPostCallUpdates,
     setUpdateChannelId,
-    showPostCallUpdates,
     updateChannelError,
     updateChannelId,
   };
