@@ -156,7 +156,7 @@ export function SandboxModeSwitch({
           const selected = option.value === mode;
           return (
             <button
-              aria-current={selected ? 'true' : undefined}
+              aria-pressed={selected}
               key={option.value}
               type='button'
               title={option.description}
