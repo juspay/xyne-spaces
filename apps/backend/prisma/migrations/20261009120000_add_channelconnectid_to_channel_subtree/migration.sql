@@ -3,6 +3,8 @@
 -- handle and its workspace ACL resolved via connect_group. Column only: nullable, no default, so each
 -- ADD COLUMN is a metadata-only change (no table rewrite). Rows with no channel stay NULL and keep
 -- workspaceId truth. Writing and reading the column come in later changes.
+-- Also `canvasConnectId` on sdlc_artifacts: its artifactId IS a canvas id, so like the other canvas
+-- children it carries the parent canvas's own connect handle (canvases.connectId).
 
 -- AlterTable
 -- channel children (messaging, calls, extras, activities, AI) + canvases / canvas_participants
@@ -79,6 +81,7 @@ ALTER TABLE "workflow"."external_step_responses" ADD COLUMN "channelConnectId" T
 ALTER TABLE "workflow"."external_messages" ADD COLUMN "channelConnectId" TEXT;
 ALTER TABLE "public"."sdlc_artifacts" ADD COLUMN "channelConnectId" TEXT;
 ALTER TABLE "public"."sdlc_tracks" ADD COLUMN "channelConnectId" TEXT;
+ALTER TABLE "public"."sdlc_artifacts" ADD COLUMN "canvasConnectId" TEXT;
 
 -- CreateIndex
 -- CONCURRENTLY: many of these (messages, tickets, ticket_activities, emails, workflow_steps, …) are large
@@ -158,3 +161,4 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "external_step_responses_channelConnectI
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "external_messages_channelConnectId_idx" ON "workflow"."external_messages"("channelConnectId");
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "sdlc_artifacts_channelConnectId_idx" ON "public"."sdlc_artifacts"("channelConnectId");
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "sdlc_tracks_channelConnectId_idx" ON "public"."sdlc_tracks"("channelConnectId");
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "sdlc_artifacts_canvasConnectId_idx" ON "public"."sdlc_artifacts"("canvasConnectId");

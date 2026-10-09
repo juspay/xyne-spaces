@@ -3719,6 +3719,7 @@ model SdlcItemComment {
 model SdlcArtifact {
   workspaceId         String
   channelConnectId    String? // Slack Connect: the owning channel's connect_group handle (via its parent); null when none / un-backfilled
+  canvasConnectId     String? // Slack Connect: resolved from parent canvas (null until backfilled)
   artifactId          String   @id // canvas id (the only artifact kind for now) - Primary key
   /// @deprecated -> repository comes from the link table; no new reads or writes. Still set, and still
   /// read by the wiki and baseline lookups, until per-repo Wiki/Baseline folders replace it.
@@ -3742,6 +3743,7 @@ model SdlcArtifact {
   @@index([workspaceId])
   @@index([artifactType, artifactStatus])
   @@index([channelConnectId])
+  @@index([canvasConnectId])
   @@map("sdlc_artifacts")
   @@schema("public")
 }
