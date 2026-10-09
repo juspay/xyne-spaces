@@ -83,16 +83,6 @@ export interface IntentSpec {
    */
   readonly actionable: boolean;
   /**
-   * Where a detection is allowed to act.
-   *
-   * `public-channels` is the original, conservative setting: the message is in a
-   * public channel, so suggesting something about it reveals nothing. `anywhere`
-   * lifts that to private channels and DMs. Classification itself runs
-   * regardless — the gate is applied per intent after scoring, so one intent
-   * widening its reach does not widen the others'.
-   */
-  readonly scope: 'public-channels' | 'anywhere';
-  /**
    * Optional routing table. When present, clearing `threshold` is not enough to
    * act — a topic must also resolve (see `TOPIC_FLOOR` / `TOPIC_MARGIN`).
    * Absent means the intent has a single action and needs no routing.
@@ -158,9 +148,6 @@ export const INTENTS = [
     // Re-read from the production score histogram before widening. See §7.
     threshold: 0.6,
     actionable: true,
-    // Proposing a call is as natural in a private channel or a group DM as in a
-    // public one, and the suggestion renders locally for the sender only.
-    scope: 'anywhere',
   },
   {
     // Platform how-to questions: "how do I do X in this product".
@@ -211,7 +198,6 @@ export const INTENTS = [
     // topic and fires a purely local toast — see `topics` below. The absorber
     // behaviour is unchanged for anything that does NOT resolve to a topic.
     actionable: true,
-    scope: 'public-channels',
     topics: [
       {
         // Converges with the `start-call` intent on the same action, reached

@@ -89,21 +89,16 @@ interface PendingJob {
   text: string;
   messageId: string | null;
   surface: IntentSurface;
-  /**
-   * Whether the message was sent in a public channel. Read in `record()` against
-   * each intent's `scope` — see IntentSpec.scope.
-   */
-  inPublicChannel: boolean;
   /** Playground requests resolve a promise and skip telemetry entirely. */
   resolve: ((result: ClassificationResult) => void) | null;
   reject: ((error: Error) => void) | null;
 }
 
 /**
- * Fail closed. `undefined` covers the channel still loading and any unknown
- * visibility value — both count as not public, so only `anywhere` intents act.
+ * Public channels only, fail closed. `undefined` covers the channel still loading
+ * and any unknown visibility value — both must not classify.
  */
-export function isPublicChannel(channel: ClassifiableChannel | undefined | null): boolean {
+export function isEligible(channel: ClassifiableChannel | undefined | null): boolean {
   return channel?.visibility === ChannelVisibility.PUBLIC;
 }
 
@@ -263,14 +258,15 @@ class IntentClassifier {
       trace('main', '0. gate — SKIPPED, disabled in Settings → Developer');
       return;
     }
-    // Channel visibility no longer blocks classification — it is checked per
-    // intent in record(), because `start-call` acts anywhere while the how-to
-    // intents stay public-only.
-    const inPublicChannel = isPublicChannel(params.channel);
-    trace('main', '0. gate — classifying', {
+    if (!isEligible(params.channel)) {
+      trace('main', '0. gate — SKIPPED, channel is not public', {
+        visibility: params.channel?.visibility ?? '(unknown)',
+      });
+      return;
+    }
+    trace('main', '0. gate — public channel, classifying', {
       messageId: params.messageId,
       surface: params.surface,
-      visibility: params.channel?.visibility ?? '(unknown)',
     });
 
     this.enqueue({
@@ -278,7 +274,6 @@ class IntentClassifier {
       text: params.text,
       messageId: params.messageId,
       surface: params.surface,
-      inPublicChannel,
       resolve: null,
       reject: null,
     });
@@ -300,7 +295,6 @@ class IntentClassifier {
       this.enqueue({
         requestId: `p${++this.requestCounter}`,
         surface: 'channel',
-        inPublicChannel: true,
         text,
         messageId: null,
         resolve,
@@ -427,14 +421,10 @@ class IntentClassifier {
     const routesByTopic = result.topic !== null;
     const topicId = result.topic?.topicId;
     const topicResolved = topicId !== undefined && topicId !== UNRESOLVED_TOPIC;
-    // Per-intent reach. Fail closed: no job means no channel, so public-only
-    // intents stay quiet.
-    const inScope = intent?.scope === 'anywhere' || job?.inPublicChannel === true;
     const triggered =
       INTENT_TRIGGER_ENABLED &&
       actionable &&
       clearsThreshold &&
-      inScope &&
       messageId !== null &&
       job !== null &&
       (!routesByTopic || topicResolved);
@@ -478,19 +468,16 @@ class IntentClassifier {
           : result.topIntent === UNCLASSIFIED
             ? `7. unclassified — best was ${result.topScore.toFixed(4)}, under the ` +
               `${MIN_INTENT_SCORE} floor, so no intent claims this. Nothing shown.`
-            : !inScope
-              ? `7. '${result.topIntent}' claimed at ${result.topScore.toFixed(4)} but its scope ` +
-                `is public channels only and this channel is not public. Nothing shown.`
-              : !actionable
-                ? `7. '${result.topIntent}' is an absorber (actionable: false) — it claimed this ` +
-                  `at ${result.topScore.toFixed(4)} so no other intent fires. Working as intended.`
-                : clearsThreshold && routesByTopic && !topicResolved
-                  ? `7. '${result.topIntent}' claimed at ${result.topScore.toFixed(4)} but no topic ` +
-                    `resolved — best was ${result.topic?.all[0]?.topicId} @ ` +
-                    `${(result.topic?.score ?? 0).toFixed(4)} (margin ` +
-                    `${(result.topic?.margin ?? 0).toFixed(4)}). Absorbed and staying quiet, which ` +
-                    `is correct for a how-to with no destination in the product.`
-                  : `7. below threshold — ${result.topScore.toFixed(4)} < ${intent?.threshold ?? '?'}; no action`,
+            : !actionable
+              ? `7. '${result.topIntent}' is an absorber (actionable: false) — it claimed this ` +
+                `at ${result.topScore.toFixed(4)} so no other intent fires. Working as intended.`
+              : clearsThreshold && routesByTopic && !topicResolved
+                ? `7. '${result.topIntent}' claimed at ${result.topScore.toFixed(4)} but no topic ` +
+                  `resolved — best was ${result.topic?.all[0]?.topicId} @ ` +
+                  `${(result.topic?.score ?? 0).toFixed(4)} (margin ` +
+                  `${(result.topic?.margin ?? 0).toFixed(4)}). Absorbed and staying quiet, which ` +
+                  `is correct for a how-to with no destination in the product.`
+                : `7. below threshold — ${result.topScore.toFixed(4)} < ${intent?.threshold ?? '?'}; no action`,
     );
   }
 

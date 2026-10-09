@@ -1,6 +1,6 @@
 export {
   intentClassifier,
-  isPublicChannel,
+  isEligible,
   type ClassifiableChannel,
   type IntentSurface,
   type IntentDetection,

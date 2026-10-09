@@ -10,13 +10,19 @@
  *             rings the room, so naming its members adds noise, not information.
  *             Same call the header's phone button starts.
  *
+ * Public channels only — the classifier never sees a private channel or DM
+ * message (see intentClassifier.isEligible), so there is no DM branch here.
+ *
  * Start call starts it right here; Schedule opens the usual Schedule Call modal
  * with the same people prefilled. Everything goes through the hooks the header
  * and thread buttons already use, so an active call, the "switch calls?" prompt
  * and the SDLC frame bridge all behave as they do there.
+ *
+ * The card stays mounted until the call is actually connected: both call hooks
+ * keep their "disconnect, then start" step in a ref, so unmounting on click
+ * would drop a pending switch on the floor.
  */
-import React, { useCallback, useMemo, useState } from 'react';
-import { ChannelScopeType } from '@xyne/shared';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CalendarDefault, PhoneDefault, SparkleAi01 } from '@xyne/icons';
 import { X } from 'lucide-react';
 import { Button } from '../../ui/Button';
@@ -31,7 +37,6 @@ import { useCallConfirmation } from '../../../hooks/useCallConfirmation';
 import { useCallJoinOrInitiate } from '../../../hooks/useCallJoinOrInitiate';
 import { useChannel } from '../../../hooks/useChannels';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
-import { useChannelMemberIds } from '../../../hooks/useChannelMemberIds';
 import { useUsersById } from '../../../hooks/useUsers';
 import { queries } from '../../../zero/queries';
 import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
@@ -84,11 +89,6 @@ export const IntentCallSuggestionCard: React.FC<IntentCallSuggestionCardProps> =
   const [conversation] = useCachedQuery(queries.getConversationById({ conversationId }), {
     enabled: isThread,
   });
-  // A 1:1 DM call targets the other person explicitly, as the header does; a
-  // channel or group DM call rings the room. Members are only needed for that.
-  const isOneToOneDm = channel?.scopeType === ChannelScopeType.DM;
-  const { memberIds } = useChannelMemberIds(!isThread && isOneToOneDm ? channelId : undefined);
-
   // Thread participants, others only — self is added back when the call is
   // placed, and "you" in the avatar row says nothing. Same rule as
   // CallParticipantsSelectionModal: only people who authored or were mentioned,
@@ -116,11 +116,11 @@ export const IntentCallSuggestionCard: React.FC<IntentCallSuggestionCardProps> =
 
   // --- starting the call -------------------------------------------------------
 
-  const targetUserIds = useMemo((): string[] | undefined => {
-    if (isThread) return [...threadUserIds, currentUserId];
-    if (isOneToOneDm) return [...memberIds].filter(id => id !== currentUserId);
-    return undefined;
-  }, [isThread, isOneToOneDm, threadUserIds, memberIds, currentUserId]);
+  // A channel call rings the room, so it carries no explicit targets.
+  const targetUserIds = useMemo(
+    (): string[] | undefined => (isThread ? [...threadUserIds, currentUserId] : undefined),
+    [isThread, threadUserIds, currentUserId],
+  );
 
   const { initiateCall } = useCallJoinOrInitiate();
   const { handleCallClick, hasActiveCallInChannel, isUserInCurrentChannelCall, isInCall } =
@@ -144,6 +144,9 @@ export const IntentCallSuggestionCard: React.FC<IntentCallSuggestionCardProps> =
     });
 
   const threadCallActive = isThread && !!conversation?.callId;
+  // handleCallClick toggles: in this channel's call it would LEAVE. Not from here.
+  const alreadyInThisCall = !isThread && isUserInCurrentChannelCall;
+  const callInProgress = threadCallActive || alreadyInThisCall;
   // Channel-side: a live channel call makes this a join, which handleCallClick
   // already does; the label says so.
   const joinsExisting = !isThread && hasActiveCallInChannel && !isUserInCurrentChannelCall;
@@ -160,7 +163,23 @@ export const IntentCallSuggestionCard: React.FC<IntentCallSuggestionCardProps> =
     [intentKey, detection.surface, shownAt],
   );
 
+  // Set when the call has been asked for; the effect below removes the card once
+  // the room machine reports a live call that began after that point.
+  const [starting, setStarting] = useState(false);
+  const sawIdleSinceStart = useRef(false);
+  useEffect(() => {
+    if (!starting) return;
+    if (!isInCall) {
+      // Either we were idle to begin with, or the old call has been dropped
+      // ahead of the switch. Either way the next connect is ours.
+      sawIdleSinceStart.current = true;
+      return;
+    }
+    if (sawIdleSinceStart.current) dismissIntentCallSuggestion(detection.messageId);
+  }, [starting, isInCall, detection.messageId]);
+
   const placeCall = useCallback((): void => {
+    setStarting(true);
     if (isThread) {
       initiateCall({
         channelId,
@@ -183,8 +202,8 @@ export const IntentCallSuggestionCard: React.FC<IntentCallSuggestionCardProps> =
 
   const onStartCall = (): void => {
     track(joinsExisting ? 'Join call' : 'Start call');
+    // Runs placeCall now, or after the "switch calls?" prompt is confirmed.
     handleCallAction(placeCall);
-    dismissIntentCallSuggestion(detection.messageId);
   };
 
   const onSchedule = (): void => {
@@ -202,12 +221,9 @@ export const IntentCallSuggestionCard: React.FC<IntentCallSuggestionCardProps> =
     dismissIntentCallSuggestion(detection.messageId);
   };
 
-  const title = isThread
-    ? 'Start a thread call'
-    : channel?.scopeType === ChannelScopeType.DEFAULT
-      ? 'Start a call in this channel'
-      : 'Start a call';
-  const startLabel = joinsExisting ? 'Join call' : 'Start call';
+  const title = isThread ? 'Start a thread call' : 'Start a call in this channel';
+  const startLabel = starting ? 'Starting…' : joinsExisting ? 'Join call' : 'Start call';
+  const startDisabled = callInProgress || starting;
 
   return (
     <div className='mt-3 flex flex-col items-start gap-3' data-testid='intent-call-suggestion'>
@@ -261,14 +277,22 @@ export const IntentCallSuggestionCard: React.FC<IntentCallSuggestionCardProps> =
               <CalendarDefault size={18} />
               Schedule
             </Button>
-            <Tooltip content={threadCallActive ? 'Call already in progress' : startLabel}>
+            <Tooltip
+              content={
+                alreadyInThisCall
+                  ? 'You are already in this call'
+                  : threadCallActive
+                    ? 'Call already in progress'
+                    : startLabel
+              }
+            >
               <span>
                 <Button
                   className={cn(
                     'h-10 gap-2 rounded-lg px-4 text-sm font-medium',
-                    threadCallActive && 'pointer-events-none',
+                    startDisabled && 'pointer-events-none',
                   )}
-                  disabled={threadCallActive}
+                  disabled={startDisabled}
                   onClick={onStartCall}
                 >
                   <PhoneDefault size={18} />
