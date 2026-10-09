@@ -17,7 +17,15 @@ import { useIsDmReadOnly } from '../../hooks/useIsDmReadOnly';
 import { useRouteContext } from '../../hooks/useRouteContext';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useIsInPanelWebview } from '../../hooks/useIsInPanelWebview';
-import { X, FileText, ClipboardCheck, Hash, Tag as TagIcon, ChevronRight } from 'lucide-react';
+import {
+  X,
+  FileText,
+  ClipboardCheck,
+  Hash,
+  Lock,
+  Tag as TagIcon,
+  ChevronRight,
+} from 'lucide-react';
 import {
   ArrowLeft,
   ArrowTurnDownRight,
@@ -68,6 +76,7 @@ import {
   MessageType,
   ChannelScopeType,
   ChannelType,
+  ChannelVisibility,
   BaseTicketType,
   parseTicketMd,
 } from '@xyne/shared';
@@ -369,6 +378,7 @@ export const ThreadMessages = ({
   const { displayName: channelDisplayName } = useChannelDisplayName(channel, currentUser?.id ?? '');
   const isDmThread =
     channel?.scopeType === ChannelScopeType.DM || channel?.scopeType === ChannelScopeType.GROUP_DM;
+  const isPrivateChannel = !isDmThread && channel?.visibility === ChannelVisibility.PRIVATE;
 
   // Tab state - default to 'details' when opening from a ticket card
   const [activeTab, setActiveTab] = useState<TabType>(selectedTab);
@@ -991,7 +1001,7 @@ export const ThreadMessages = ({
 
   const showBreadcrumb = (isFocusedThread || showChannelLink) && !isStandaloneWindow() && !!channel;
   const focusedChannelBreadcrumb = showBreadcrumb ? (
-    <Tooltip content={`Open ${isDmThread ? '' : '#'}${channelDisplayName}`}>
+    <Tooltip content={`Open ${isDmThread || isPrivateChannel ? '' : '#'}${channelDisplayName}`}>
       <button
         type='button'
         onClick={onChannelLinkClick ?? handleOpenInChannel}
@@ -1001,9 +1011,18 @@ export const ThreadMessages = ({
         className='group/chan flex shrink-0 items-center gap-1 max-w-[180px] rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
         style={APP_NO_DRAG_STYLE}
       >
-        {!isDmThread && (
-          <Hash className='size-3.5 shrink-0 opacity-60 transition-opacity group-hover/chan:opacity-100' />
-        )}
+        {!isDmThread &&
+          (isPrivateChannel ? (
+            <Lock
+              data-testid='thread-breadcrumb-private-icon'
+              className='size-3.5 shrink-0 opacity-60 transition-opacity group-hover/chan:opacity-100'
+            />
+          ) : (
+            <Hash
+              data-testid='thread-breadcrumb-public-icon'
+              className='size-3.5 shrink-0 opacity-60 transition-opacity group-hover/chan:opacity-100'
+            />
+          ))}
         <span className='truncate text-sm font-medium group-hover/chan:underline'>
           {channelDisplayName}
         </span>
