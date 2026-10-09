@@ -1,6 +1,6 @@
 import type { ToolDefinition, ToolExecutionContext } from "../types.js";
 import { SANDBOX_PW_TOOLS } from "../sandbox-pw/tools.js";
-import { requestSurfaceCall, surfaceResultText } from "../surface-call.js";
+import { callDesktopBrowser } from "../surface-call.js";
 
 const SOURCE = "custom:workspace-browser";
 
@@ -23,10 +23,7 @@ async function viaDesktop(
   params: Record<string, unknown>,
   context: ToolExecutionContext | undefined,
 ): Promise<string | null> {
-  if (!context?.sessionId || !context.meta?.["userId"]) return null;
-  const outcome = await requestSurfaceCall(slug, params, context);
-  if ("error" in outcome || outcome.result.unavailable) return null;
-  return surfaceResultText(outcome.result, slug);
+  return callDesktopBrowser(slug, params, context);
 }
 
 const ONLY_ON_DESKTOP =

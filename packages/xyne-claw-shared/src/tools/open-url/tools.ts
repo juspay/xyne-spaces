@@ -1,6 +1,6 @@
 import type { ToolDefinition } from "../types.js";
 import { SANDBOX_PW_TOOLS } from "../sandbox-pw/tools.js";
-import { requestSurfaceCall, surfaceResultText } from "../surface-call.js";
+import { callDesktopBrowser } from "../surface-call.js";
 
 const navigate = SANDBOX_PW_TOOLS.find((tool) => tool.slug === "sandbox-pw-navigate");
 
@@ -26,11 +26,9 @@ export const openUrl: ToolDefinition = {
     if (!/^https?:\/\//i.test(url)) {
       return "Error: url must be an absolute http(s) URL (starting with http:// or https://).";
     }
-    if (context?.sessionId && context.meta?.["userId"]) {
-      const title = typeof params["title"] === "string" ? params["title"] : undefined;
-      const outcome = await requestSurfaceCall("open-url", { url, ...(title ? { title } : {}) }, context);
-      if (!("error" in outcome) && !outcome.result.unavailable) return surfaceResultText(outcome.result, "open-url");
-    }
+    const title = typeof params["title"] === "string" ? params["title"] : undefined;
+    const desktop = await callDesktopBrowser("open-url", { url, ...(title ? { title } : {}) }, context);
+    if (desktop !== null) return desktop;
     if (!navigate) return `Error: the sandbox browser is not available, so ${url} could not be opened.`;
     const result = await navigate.execute({ url }, context);
     if (result.startsWith("Error")) return result;

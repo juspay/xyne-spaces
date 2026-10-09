@@ -50,7 +50,11 @@ class WorkspaceBrowserBridge {
     });
   }
 
-  async call(toolName: string, args: Record<string, unknown>): Promise<WorkspacePageToolResult> {
+  async call(
+    toolName: string,
+    args: Record<string, unknown>,
+    timeoutMs = RESPONSE_TIMEOUT_MS,
+  ): Promise<WorkspacePageToolResult> {
     this.ensureListener();
 
     const win = getMainWindow();
@@ -67,7 +71,7 @@ class WorkspaceBrowserBridge {
           ok: false,
           content: `The Xyne window did not answer ${toolName} in time. It may be busy or on a screen without that surface.`,
         });
-      }, RESPONSE_TIMEOUT_MS);
+      }, Math.min(timeoutMs, RESPONSE_TIMEOUT_MS));
 
       this.pending.set(id, { resolve, timer });
 

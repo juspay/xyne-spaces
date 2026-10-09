@@ -39,7 +39,7 @@ describe("open-url on a server run", () => {
 
   it("falls back to the sandbox browser otherwise", async () => {
     vi.stubGlobal("fetch", answer({ ok: false, content: "not watching", unavailable: true }));
-    const result = await openUrl.execute({ url: "https://docs.google.com/" }, serverRun);
+    const result = await openUrl.execute({ url: "https://docs.google.com/" }, { sessionId: "s2", meta: { userId: "u1" } } as never);
     expect(result).toContain("sandbox browser");
     expect(navigated).toEqual(["https://docs.google.com/"]);
   });

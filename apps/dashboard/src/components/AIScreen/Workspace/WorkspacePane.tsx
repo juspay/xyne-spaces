@@ -553,7 +553,7 @@ function WorkspacePaneInner({
               if (item.kind === 'html-doc') return <AiDocItemView item={item} />;
               if (SHARED_ITEM_KINDS.has(item.kind)) return null;
               if (item.kind === 'link' || item.kind === 'page') {
-                return <AiBrowserItemView item={item} />;
+                return <AiBrowserItemView item={item} conversationId={conversationId} />;
               }
               return (
                 <ArtifactInlineView
