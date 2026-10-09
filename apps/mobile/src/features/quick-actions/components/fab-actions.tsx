@@ -19,13 +19,13 @@ import { useCSSVariable } from 'uniwind';
 import { haptics } from '@/src/utils/haptics';
 
 import {
-  DMS_FAB_ACTIONS_GAP,
-  DMS_FAB_ACTION_SPACING,
-  DMS_FAB_GAP,
-  DMS_FAB_SLIDE_X,
-  DMS_FAB_SPRING,
-} from '../../constants';
-import { DMS_FAB_ACTIONS, type DmsFabActionId } from '../../model/fab-actions';
+  FAB_ACTIONS_GAP,
+  FAB_ACTION_SPACING,
+  FAB_GAP,
+  FAB_SLIDE_X,
+  FAB_SPRING,
+} from '../constants';
+import type { QuickAction, QuickActionId } from '../model/actions';
 
 type ActionRowProps = {
   isOpen: SharedValue<boolean>;
@@ -61,12 +61,9 @@ function ActionRow({
 
     return {
       transform: [
-        { translateX: withSpring(open ? 0 : DMS_FAB_SLIDE_X, DMS_FAB_SPRING) },
+        { translateX: withSpring(open ? 0 : FAB_SLIDE_X, FAB_SPRING) },
         {
-          translateY: withSpring(
-            open ? 0 : height - index * (height / numberOfRows),
-            DMS_FAB_SPRING,
-          ),
+          translateY: withSpring(open ? 0 : height - index * (height / numberOfRows), FAB_SPRING),
         },
       ],
     };
@@ -98,7 +95,9 @@ function ActionPill({ label, icon, onPress }: PillProps): ReactElement {
 
 export type FabActionsProps = {
   isOpen: SharedValue<boolean>;
-  onSelect?: ((id: DmsFabActionId) => void) | undefined;
+  /** What this screen offers, already in display order. */
+  actions: readonly QuickAction[];
+  onSelect: (id: QuickActionId) => void;
 };
 
 /**
@@ -108,7 +107,7 @@ export type FabActionsProps = {
  * right inset, so the pills and the button line up on one edge however the
  * bar is sized.
  */
-export function FabActions({ isOpen, onSelect }: FabActionsProps): ReactElement {
+export function FabActions({ isOpen, actions, onSelect }: FabActionsProps): ReactElement {
   const barHeight = useSpacesTabBarHeight();
   const iconColor = useCSSVariable('--color-spaces-foreground') as string;
 
@@ -128,19 +127,19 @@ export function FabActions({ isOpen, onSelect }: FabActionsProps): ReactElement 
         {
           position: 'absolute',
           right: TAB_BAR_HORIZONTAL_PADDING,
-          bottom: barHeight + DMS_FAB_GAP + SEARCH_BUTTON_SIZE + DMS_FAB_ACTIONS_GAP,
+          bottom: barHeight + FAB_GAP + SEARCH_BUTTON_SIZE + FAB_ACTIONS_GAP,
           alignItems: 'flex-end',
-          gap: DMS_FAB_ACTION_SPACING,
+          gap: FAB_ACTION_SPACING,
         },
       ]}
     >
-      {DMS_FAB_ACTIONS.map((action, index) => {
+      {actions.map((action, index) => {
         const Icon = action.icon;
         return (
           <ActionRow
             key={action.id}
             index={index}
-            numberOfRows={DMS_FAB_ACTIONS.length}
+            numberOfRows={actions.length}
             containerHeight={containerHeight}
             isOpen={isOpen}
           >
@@ -150,7 +149,7 @@ export function FabActions({ isOpen, onSelect }: FabActionsProps): ReactElement 
               onPress={() => {
                 void haptics.buttonTap();
                 isOpen.set(false);
-                onSelect?.(action.id);
+                onSelect(action.id);
               }}
             />
           </ActionRow>

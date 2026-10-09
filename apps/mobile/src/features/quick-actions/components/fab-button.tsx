@@ -17,7 +17,7 @@ import {
 import { useSpacesTabBarHeight } from '@/src/features/bottom-navigation';
 import { haptics } from '@/src/utils/haptics';
 
-import { DMS_FAB_GAP } from '../../constants';
+import { FAB_GAP } from '../constants';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
@@ -57,7 +57,7 @@ export function FabButton({ isOpen }: { isOpen: SharedValue<boolean> }): ReactEl
         width: SEARCH_BUTTON_SIZE,
         height: SEARCH_BUTTON_SIZE,
         borderRadius: SEARCH_BAR_RADIUS,
-        bottom: barHeight + DMS_FAB_GAP,
+        bottom: barHeight + FAB_GAP,
         right: TAB_BAR_HORIZONTAL_PADDING,
       }}
     >
