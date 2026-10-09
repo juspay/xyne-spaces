@@ -1,3 +1,4 @@
+import { sanitizeCanvasContent } from '@xyne/shared';
 import { logger, Event as LogEvent } from './logger';
 import { createPreviewUrl } from '../services/clients/fileFetchService';
 import { BASE_URL } from '../services/clients/apiClient';
@@ -9,17 +10,19 @@ import type {
   StyleSchema,
 } from '@blocknote/core';
 
-export const removeUnknownBlocks = <T extends { type?: string; children?: unknown }>(
+export const removeUnknownBlocks = <
+  T extends { type?: string; children?: unknown; content?: unknown },
+>(
   blocks: T[],
   knownBlockTypes: ReadonlySet<string>,
-): T[] =>
-  blocks
-    .filter(block => !block?.type || knownBlockTypes.has(block.type))
-    .map(block =>
-      Array.isArray(block.children) && block.children.length > 0
-        ? { ...block, children: removeUnknownBlocks(block.children as T[], knownBlockTypes) }
-        : block,
-    );
+  canvasId?: string,
+): T[] => {
+  const { content, changed } = sanitizeCanvasContent(blocks, knownBlockTypes);
+  if (changed) {
+    logger.warn(LogEvent.CANVAS_CONTENT_REPAIRED, { canvasId });
+  }
+  return content;
+};
 
 export const knownBlockTypesOf = (schema: unknown): ReadonlySet<string> =>
   new Set(Object.keys((schema as { blockSchema: Record<string, unknown> }).blockSchema));

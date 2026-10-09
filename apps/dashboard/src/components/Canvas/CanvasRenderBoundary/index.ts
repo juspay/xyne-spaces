@@ -1,0 +1,1 @@
+export { CanvasRenderBoundary } from './CanvasRenderBoundary';

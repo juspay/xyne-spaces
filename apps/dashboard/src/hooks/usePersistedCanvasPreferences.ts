@@ -90,6 +90,12 @@ const updatePreferences = (updater: (prefs: CanvasPreferences) => CanvasPreferen
   subscribers.forEach(listener => listener());
 };
 
+export const clearLastCanvasIdIfMatches = (canvasId: string): boolean => {
+  if (!canvasId || preferences.lastCanvasId !== canvasId) return false;
+  updatePreferences(prev => ({ ...prev, lastCanvasId: null }));
+  return true;
+};
+
 export interface CanvasPreferencesResult {
   filter: FilterTab;
   setFilter: (filter: FilterTab) => void;

@@ -51,7 +51,9 @@ import {
   resolveFileUrl,
   extractHeadingsFromBlocks,
   scrollToHeading,
+  removeUnknownBlocks,
 } from '../../../utils/canvasUtils';
+import { CanvasRenderBoundary } from '../CanvasRenderBoundary';
 import {
   exportCanvasAsMarkdown,
   exportCanvasAsPDF,
@@ -65,7 +67,12 @@ import { insertGroupMention } from 'blocknote-layout-extensions';
 import { buildMentionProps, CanvasMentionContext } from '../CanvasMentionSpec';
 import { useCanvasBlockShortcuts, withBlockShortcutBadges } from '../canvasBlockShortcuts';
 import { withHeadingsTogether, withUnifiedUpload } from '../canvasSlashMenu';
-import { canvasSchema, canvasTableOptions, canvasTiptapOptions } from '../canvasSchema';
+import {
+  canvasSchema,
+  canvasTableOptions,
+  canvasTiptapOptions,
+  knownCanvasBlockTypes,
+} from '../canvasSchema';
 import { createElement } from 'react';
 import { RiGroupLine } from 'react-icons/ri';
 import Avatar from '../../ui/Avatar/Avatar';
@@ -149,7 +156,7 @@ interface CollaborativeCanvasEditorProps {
   header?: React.ReactNode;
 }
 
-export const CollaborativeCanvasEditor = forwardRef<
+const CollaborativeCanvasEditorContent = forwardRef<
   CollaborativeCanvasEditorRef,
   CollaborativeCanvasEditorProps
 >(
@@ -542,14 +549,17 @@ export const CollaborativeCanvasEditor = forwardRef<
             (Array.isArray(firstBlock.content) && firstBlock.content.length === 0)));
 
       if (isDocumentEmpty) {
-        editor.replaceBlocks(currentBlocks, initialLegacyContent);
+        editor.replaceBlocks(
+          currentBlocks,
+          removeUnknownBlocks(initialLegacyContent, knownCanvasBlockTypes, canvasId),
+        );
         hasMigratedContentRef.current = true;
         // Reset auto-focus so cursor-at-end logic runs again after content is loaded
         hasAutoFocusedRef.current = false;
       } else {
         hasMigratedContentRef.current = true;
       }
-    }, [editor, isEditorReady, isCollaborationReady, initialLegacyContent]);
+    }, [editor, isEditorReady, isCollaborationReady, initialLegacyContent, canvasId]);
 
     const [tocHeadings, setTocHeadings] = useState<TocHeading[]>([]);
     const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -951,5 +961,16 @@ export const CollaborativeCanvasEditor = forwardRef<
     );
   },
 );
+
+CollaborativeCanvasEditorContent.displayName = 'CollaborativeCanvasEditorContent';
+
+export const CollaborativeCanvasEditor = forwardRef<
+  CollaborativeCanvasEditorRef,
+  CollaborativeCanvasEditorProps
+>((props, ref) => (
+  <CanvasRenderBoundary surface='collaborative-canvas-editor' canvasId={props.canvasId}>
+    <CollaborativeCanvasEditorContent {...props} ref={ref} />
+  </CanvasRenderBoundary>
+));
 
 CollaborativeCanvasEditor.displayName = 'CollaborativeCanvasEditor';
