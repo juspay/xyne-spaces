@@ -86,7 +86,6 @@ export const BoardForm = ({
     todo: boardMetadata?.ticketFormConfig?.todo || DEFAULT_CONFIG.todo,
     workflows: boardMetadata?.ticketFormConfig?.workflows || DEFAULT_CONFIG.workflows,
     labels: boardMetadata?.ticketFormConfig?.labels || DEFAULT_CONFIG.labels,
-    merchantId: boardMetadata?.ticketFormConfig?.merchantId || DEFAULT_CONFIG.merchantId,
     ticketType: boardMetadata?.ticketFormConfig?.ticketType || DEFAULT_CONFIG.ticketType,
   };
   const [ticketFormConfig, setTicketFormConfig] =

@@ -280,7 +280,7 @@ export function createTicketWithConversationTx(self: TicketController, conversat
     return ticket;
   });
 }
-export function createTicketTx(projectId: string, sourceConversationId: string | undefined, validatedConversation: any, self: TicketController, requestedTicketId: string | undefined, title: string, description: string, userId: string, finalAssignedTo: string | undefined, userGroupId: string | undefined, boardId: string, effectiveStatusV2: TicketStatusV2, priority: TicketPriority | undefined, eta: Date | undefined, metadata: Record<string, unknown> | undefined, closedAt: Date | undefined, closedBy: string | undefined, merchantId: string | undefined, sourceMessageId: string | undefined, effectiveTicketType: string | undefined, effectiveStageName: string | undefined, dynamicFields: Record<string, string | string[]>, formFieldChangesForEmit: FormFieldChanges | undefined, channelId: string | undefined, excludedChatAttachmentIds: string[] | undefined, entityLinkOwner: { sourceId: string; sourceType: "CANVAS" | "ATTACHMENT" | "TRACK" | "FOLDER" | "LINK"; } | undefined, fromTicketsTab: boolean, initialMessageId: `${string}-${string}-${string}-${string}-${string}`, board: { name: string; boardType: BoardType; projectId: string; } | null, uploadedFiles: UploadedFileResult[], draftAttachmentIds: string[] | undefined) {
+export function createTicketTx(projectId: string, sourceConversationId: string | undefined, validatedConversation: any, self: TicketController, requestedTicketId: string | undefined, title: string, description: string, userId: string, finalAssignedTo: string | undefined, userGroupId: string | undefined, boardId: string, effectiveStatusV2: TicketStatusV2, priority: TicketPriority | undefined, eta: Date | undefined, metadata: Record<string, unknown> | undefined, closedAt: Date | undefined, closedBy: string | undefined, sourceMessageId: string | undefined, effectiveTicketType: string | undefined, effectiveStageName: string | undefined, dynamicFields: Record<string, string | string[]>, formFieldChangesForEmit: FormFieldChanges | undefined, channelId: string | undefined, excludedChatAttachmentIds: string[] | undefined, entityLinkOwner: { sourceId: string; sourceType: "CANVAS" | "ATTACHMENT" | "TRACK" | "FOLDER" | "LINK"; } | undefined, fromTicketsTab: boolean, initialMessageId: `${string}-${string}-${string}-${string}-${string}`, board: { name: string; boardType: BoardType; projectId: string; } | null, uploadedFiles: UploadedFileResult[], draftAttachmentIds: string[] | undefined) {
   return transaction(['Board', 'Channel', 'Conversation', 'ConversationParticipant', 'MessageAttachment', 'Project', 'SdlcEntityLink', 'Stage', 'StageTransition', 'Ticket', 'TicketActivity', 'TicketStageEta'], 'createTicket: ticket, conversation, participant, attachment and entity-link writes must commit atomically; tx is not ACL-wrapped', prisma, async (tx) => {
     // Generate xyneId using project-scoped format
     const xyneId = await generateTicketId(tx, projectId);
@@ -315,7 +315,6 @@ export function createTicketTx(projectId: string, sourceConversationId: string |
         metadata,
         closedAt,
         closedBy,
-        merchantId,
         xyneId,
         sourceMessageId: sourceMessageId ?? existingConversation.initialMessageId ?? undefined,
         ticketType: effectiveTicketType,
@@ -467,7 +466,6 @@ export function createTicketTx(projectId: string, sourceConversationId: string |
         metadata,
         closedAt,
         closedBy,
-        merchantId,
         xyneId,
         sourceMessageId: sourceMessageId ?? initialMessageId,
         ticketType: effectiveTicketType,
