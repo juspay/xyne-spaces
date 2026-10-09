@@ -24,9 +24,10 @@ import {
   File02Ai,
   SidebarLeftClose,
 } from '@xyne/icons';
-import { X } from 'lucide-react';
+import { Server, X } from 'lucide-react';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useClawAdminAccessQuery } from '../../hooks/useClawAdminAccess';
+import { useHasResourceAccess } from '../../hooks/usePermissions';
 import { useClawOrgManageAccess } from '../../hooks/useClawOrganization';
 import { useAuth } from '../../hooks/useAuth';
 import { useDailyBriefEnabled } from '../../hooks/useDailyBriefEnabled';
@@ -86,6 +87,8 @@ export interface AINavItem {
   /** Analytics name; emitted as data-track-* on the nav link when set. */
   trackName?: string;
   adminOnly?: boolean;
+  /** Claw admins and SDLC admins. */
+  sdlcAdminOnly?: boolean;
   orgManagerOnly?: boolean;
   /** Hidden unless the user has the scheduled morning brief switched on. */
   dailyBriefOnly?: boolean;
@@ -94,6 +97,13 @@ export interface AINavItem {
 export const NAV_ITEMS: AINavItem[] = [
   { key: 'knowledge', label: 'Knowledge', icon: Notebook as NavIcon, to: '/ai/knowledge' },
   { key: 'agent-hub', label: 'Agent Hub', icon: LayoutGridStackDown as NavIcon, to: '/ai/library' },
+  {
+    key: 'environments',
+    label: 'Environments',
+    icon: Server as NavIcon,
+    to: '/ai/environments',
+    sdlcAdminOnly: true,
+  },
   { key: 'digital-twin', label: 'Digital twin', icon: UserTwo as NavIcon, to: '/ai/digital-twin' },
   {
     key: 'organization',
@@ -543,11 +553,13 @@ export function AISidebar({
   const { user } = useAuth();
   const { isAdmin } = useClawAdminAccessQuery(user?.id);
   const { canManage: canManageOrg } = useClawOrgManageAccess();
+  const isSdlcAdmin = useHasResourceAccess('SDLC');
   const { enabled: dailyBriefEnabled } = useDailyBriefEnabled();
   const onDailyBriefRoute = pathname.includes('/ai/daily-brief');
   const visibleNavItems = NAV_ITEMS.filter(
     item =>
       (!item.adminOnly || isAdmin) &&
+      (!item.sdlcAdminOnly || isAdmin || isSdlcAdmin) &&
       (!item.orgManagerOnly || canManageOrg) &&
       (!item.dailyBriefOnly || dailyBriefEnabled === true || onDailyBriefRoute),
   );

@@ -3,6 +3,7 @@ export const SDLC_META_KEYS = {
   channelId: "sdlcChannelId",
   repositoryId: "sdlcRepositoryId",
   repositoryName: "sdlcRepositoryName",
+  repositoryUrl: "sdlcRepositoryUrl",
   // The Actor, from backend context only: sdlc-repository-access sends these for the access check.
   workspaceId: "sdlcWorkspaceId",
   actorUserId: "sdlcActorUserId",
@@ -34,8 +35,10 @@ export function packSdlcRunMeta(sdlcContext: unknown): Record<string, string> {
   if (repository) {
     const id = str(repository["id"]);
     const name = str(repository["name"]);
+    const url = str(repository["url"]);
     if (id) meta[SDLC_META_KEYS.repositoryId] = id;
     if (name) meta[SDLC_META_KEYS.repositoryName] = name;
+    if (url) meta[SDLC_META_KEYS.repositoryUrl] = url;
   }
 
   return meta;
