@@ -1,3 +1,39 @@
+## [1.485.0](https://github.com/juspay/xyne-spaces/compare/v1.484.0...v1.485.0) (2026-10-09)
+
+
+### Features
+
+* add assignedToUser/createdByUser to app GET /ticket/:xyneId ([#2793](https://github.com/juspay/xyne-spaces/issues/2793)) ([cc3d6ce](https://github.com/juspay/xyne-spaces/commit/cc3d6ce23e23f042902ac7f9e3190545afdd0ef8))
+* Add storage SDK to developers tab ([#2842](https://github.com/juspay/xyne-spaces/issues/2842)) ([6ae0ee3](https://github.com/juspay/xyne-spaces/commit/6ae0ee3d7054f9a00e30403241fcbfc3a4d97a03))
+* Enable Channel admins to publish app for all users ([#2625](https://github.com/juspay/xyne-spaces/issues/2625)) ([4159e6b](https://github.com/juspay/xyne-spaces/commit/4159e6be6447318af98da607e8c730c36521d8fc))
+* Spaces MCP enhancements ([#2834](https://github.com/juspay/xyne-spaces/issues/2834)) ([ffe6dbb](https://github.com/juspay/xyne-spaces/commit/ffe6dbb15561e0a0ad335dd711539a6b74bb986e))
+
+## [1.484.0](https://github.com/juspay/xyne-spaces/compare/v1.483.1...v1.484.0) (2026-10-09)
+
+
+### Features
+
+* desk metric changes ([#2660](https://github.com/juspay/xyne-spaces/issues/2660)) ([211473d](https://github.com/juspay/xyne-spaces/commit/211473de8b56b4bc74af1af5506e5bf67a14adf3))
+
+
+### Bug Fixes
+
+* secrets key rotation framework ([#2223](https://github.com/juspay/xyne-spaces/issues/2223)) ([d8d83c1](https://github.com/juspay/xyne-spaces/commit/d8d83c16eb6c022e6b34c136b6a73a6ca2322850))
+
+## [1.483.1](https://github.com/juspay/xyne-spaces/compare/v1.483.0...v1.483.1) (2026-10-09)
+
+
+### Bug Fixes
+
+* Fix detailed summary generation failed log ([#2835](https://github.com/juspay/xyne-spaces/issues/2835)) ([40d1e6e](https://github.com/juspay/xyne-spaces/commit/40d1e6e1a0b1959f15fc9d564cd5dea85a35b974))
+
+## [1.483.0](https://github.com/juspay/xyne-spaces/compare/v1.482.1...v1.483.0) (2026-10-09)
+
+
+### Features
+
+* open the Ask AI panel for guests after onboarding ([#2805](https://github.com/juspay/xyne-spaces/issues/2805)) ([79478b5](https://github.com/juspay/xyne-spaces/commit/79478b5205e8b4c9c07f46fd168c20f09778f8e1))
+
 ## [1.482.1](https://github.com/juspay/xyne-spaces/compare/v1.482.0...v1.482.1) (2026-10-09)
 
 

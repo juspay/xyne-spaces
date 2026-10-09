@@ -19,7 +19,6 @@ export const DEFAULT_CONFIG: Required<TicketFormConfig> = {
   todo: { enabled: true, mandatory: false },
   workflows: { enabled: true, mandatory: false },
   labels: { enabled: true, mandatory: false },
-  merchantId: { enabled: false, mandatory: false },
   ticketType: { enabled: true, mandatory: false },
 };
 
@@ -176,39 +175,6 @@ export const BoardTicketFormConfig = ({
                 id='labels-mandatory'
                 checked={config.labels.mandatory ?? false}
                 onCheckedChange={() => handleToggle('labels', 'mandatory')}
-                disabled={disabled}
-              />
-            </div>
-          )}
-        </div>
-
-        {/* Merchant ID */}
-        <div className='py-2 border-t border-border'>
-          <div className='flex items-center justify-between mb-2'>
-            <div className='flex-1'>
-              <label htmlFor='merchantId' className='text-sm font-medium text-foreground'>
-                Merchant ID Field
-              </label>
-              <p className='text-xs text-muted-foreground mt-0.5'>
-                Show/hide merchant ID field in ticket form
-              </p>
-            </div>
-            <Switch
-              id='merchantId'
-              checked={config.merchantId.enabled}
-              onCheckedChange={() => handleToggle('merchantId', 'enabled')}
-              disabled={disabled}
-            />
-          </div>
-          {config.merchantId.enabled && (
-            <div className='flex items-center justify-between ml-4 pl-4 border-l-2 border-input'>
-              <label htmlFor='merchantId-mandatory' className='text-xs text-muted-foreground'>
-                Make mandatory
-              </label>
-              <Switch
-                id='merchantId-mandatory'
-                checked={config.merchantId.mandatory ?? false}
-                onCheckedChange={() => handleToggle('merchantId', 'mandatory')}
                 disabled={disabled}
               />
             </div>

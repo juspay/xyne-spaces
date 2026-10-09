@@ -7,6 +7,7 @@ import { findDeveloperTool, type DeveloperTool } from '../developerTools';
 import { CliDoc } from './CliDoc';
 import { McpDoc } from './McpDoc';
 import { SdkDoc } from './SdkDoc';
+import { StorageDoc } from './StorageDoc';
 
 function Header({ tool }: { tool: DeveloperTool }): ReactElement {
   return (
@@ -66,7 +67,15 @@ const DeveloperToolDetailV2 = (): ReactElement => {
         {tool ? (
           <>
             <Header tool={tool} />
-            {tool.id === 'mcp' ? <McpDoc /> : tool.id === 'sdk' ? <SdkDoc /> : <CliDoc />}
+            {tool.id === 'mcp' ? (
+              <McpDoc />
+            ) : tool.id === 'sdk' ? (
+              <SdkDoc />
+            ) : tool.id === 'storage' ? (
+              <StorageDoc />
+            ) : (
+              <CliDoc />
+            )}
           </>
         ) : (
           <p className='py-16 text-center text-sm text-muted-foreground'>

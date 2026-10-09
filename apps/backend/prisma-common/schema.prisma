@@ -1,5 +1,7 @@
 // Prisma schema for the "common" database — a separate Postgres instance that
-// holds cross-cutting shared state (currently entity sequence counters).
+// holds cross-cutting shared state: entity sequence counters, and the secrets
+// vault (SecretDefinition/SecretVersion — moved here from the main schema so
+// version allocation and the row insert share one database instead of two).
 // Intentionally minimal: no zero generator; all tables live in the "common"
 // Postgres schema (not "public").
 
@@ -31,5 +33,44 @@ model EntitySequence {
 
   @@unique([entityType, entityValue])
   @@map("entity_sequences")
+  @@schema("common")
+}
+
+// Secrets vault: one row per logical s2s secret (e.g. a GCP service account key).
+// rotateFn/verifyFn and rotation interval are intentionally not columns here —
+// that mapping is static per `name` and lives in code (secretConfig registry).
+model SecretDefinition {
+  id            String   @id @default(cuid())
+  name          String   @unique
+  rotationState String   @default("idle") // idle | claimed — CAS lock for the rotation cron
+  createdBy     String
+  updatedBy     String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("secret_definitions")
+  @@schema("common")
+}
+
+// One row per minted value for a SecretDefinition. History is kept (retired/revoked
+// rows are not deleted immediately) so at most one row per secretDefinitionId has
+// status "active". No `@relation` field to SecretDefinition — we never join/include
+// across this relation, only query by secretDefinitionId directly, so there's no
+// Postgres FK constraint here (Prisma only generates one via a declared relation
+// field); referential integrity is enforced at the application layer only.
+model SecretVersion {
+  id                 String    @id @default(cuid())
+  secretDefinitionId String
+  version            Int // allocated via EntitySequenceService, same DB as this table now
+  value              String    @db.Text // encrypted
+  encryptionImpl     String // generic | custom — which impl encrypted this value
+  status             String    @default("pending") // pending | active | retired | revoked | failed
+  createdAt          DateTime  @default(now())
+  verifiedAt         DateTime?
+  retiredAt          DateTime?
+
+  @@unique([secretDefinitionId, version])
+  @@index([secretDefinitionId, status])
+  @@map("secret_versions")
   @@schema("common")
 }

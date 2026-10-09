@@ -810,6 +810,19 @@ export const channelBoardMappingTable = table('channel_board_mappings' /* Channe
   })
   .primaryKey('id');
 
+export const channelPublishedTabTable = table('channel_published_tabs' /* ChannelPublishedTab */)
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    channelId: string(),
+    entityType: string(),
+    entityId: string(),
+    position: number(),
+    publishedBy: string(),
+    createdAt: number(),
+  })
+  .primaryKey('id');
+
 export const channelStatsTable = table('channel_stats')
   .columns({
     workspaceId: string(), // denormalized tenant key (stamped on insert)
@@ -1743,7 +1756,6 @@ export const emailChannelPreferenceTable = table('email_channel_preferences')
     deskReportRangeDays: number().optional(),
     duplicateScopeConfig: string().optional(),
     slackDeskTriggerMode: enumeration<SlackDeskTriggerMode>().optional(),
-    deskAppIds: string().optional(),
   })
   .primaryKey('channelId');
 
@@ -3457,6 +3469,11 @@ export const channelTableRelationships = relationships(channelTable, ({ one, man
     destField: ['channelId'],
     destSchema: channelBoardMappingTable,
   }),
+  publishedTabs: many({
+    sourceField: ['id'],
+    destField: ['channelId'],
+    destSchema: channelPublishedTabTable,
+  }),
   ticketDescriptions: many({
     sourceField: ['id'],
     destField: ['channelId'],
@@ -3476,6 +3493,17 @@ export const channelBoardMappingTableRelationships = relationships(
       sourceField: ['boardId'],
       destField: ['id'],
       destSchema: boardTable,
+    }),
+  }),
+);
+
+export const channelPublishedTabTableRelationships = relationships(
+  channelPublishedTabTable,
+  ({ one }) => ({
+    channel: one({
+      sourceField: ['channelId'],
+      destField: ['id'],
+      destSchema: channelTable,
     }),
   }),
 );
@@ -5042,6 +5070,7 @@ export const schema = createSchema({
     guestAccessTable,
     channelTable,
     channelBoardMappingTable,
+    channelPublishedTabTable,
     channelStatsTable,
     channelParticipantTable,
     channelUserStatusTable,
@@ -5179,6 +5208,7 @@ export const schema = createSchema({
     conversationParticipantTableRelationships,
     channelTableRelationships,
     channelBoardMappingTableRelationships,
+    channelPublishedTabTableRelationships,
     channelStatsTableRelationships,
     repoTableRelationships,
     sdlcEntityLinkTableRelationships,
@@ -5321,6 +5351,7 @@ export type Invitation = Row<typeof schema.tables.invitations>;
 export type GuestAccess = Row<typeof schema.tables.guest_access>;
 export type Channel = Row<typeof schema.tables.channels>;
 export type ChannelBoardMapping = Row<typeof schema.tables.channel_board_mappings>;
+export type ChannelPublishedTab = Row<typeof schema.tables.channel_published_tabs>;
 export type ChannelStats = Row<typeof schema.tables.channel_stats>;
 export type ChannelParticipant = Row<typeof schema.tables.channel_participants>;
 export type ChannelUserStatus = Row<typeof schema.tables.channel_user_status>;

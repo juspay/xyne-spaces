@@ -18,7 +18,7 @@ import type { Conversation, MessageType } from "@xyne/spaces-sdk";
 import type { Related } from "../render.js";
 import { first } from "../render.js";
 import type { ToolDef } from "./shared.js";
-import { users } from "./shared.js";
+import { MENTION_GUIDE, users } from "./shared.js";
 
 interface MessageRef {
 	messageId?: string;
@@ -159,7 +159,8 @@ const threadCreate: ToolDef = {
 		"channel that is not a reply. To reply inside a thread that already exists, use spaces_message_send with that " +
 		"thread's conversation id instead. Returns the new Conversation ID and Message ID. " +
 		"Resolve the channel id with spaces_channels_list immediately before calling this and copy it verbatim — " +
-		"posting into the wrong channel cannot be undone from here.",
+		"posting into the wrong channel cannot be undone from here. " +
+		MENTION_GUIDE,
 	inputSchema: {
 		type: "object",
 		properties: {
@@ -168,7 +169,7 @@ const threadCreate: ToolDef = {
 				type: "string",
 				description:
 					"Message body. Plain text or simple HTML — Spaces stores rich text as HTML, so <p>, <strong> and " +
-					"<ul><li> render as written.",
+					"<ul><li> render as written. Mention people as @Name[userId], never a bare @Name.",
 			},
 			type: {
 				type: "string",

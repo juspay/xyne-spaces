@@ -1,4 +1,4 @@
-import { ChannelType, DeskType, MAX_DESK_APPS } from '../zero/types.js';
+import { ChannelRole, ChannelScopeType, ChannelType, DeskType } from '../zero/types.js';
 
 /** Desk channel types — EMAIL, SLACK, APP, CALL and SOCIAL_MEDIA channels all feed into Xyne Desk. */
 export const DESK_CHANNEL_TYPES: ReadonlySet<ChannelType> = new Set([
@@ -30,26 +30,57 @@ export function deskTypeForChannelType(type: string | null | undefined): DeskTyp
 }
 
 /**
- * The artifact apps on a desk (EmailChannelPreference.deskAppIds), in order.
- * The column is a JSON string[] so Zero can sync it; anything malformed reads as
- * no apps rather than throwing, since a bad value must not break the desk.
+ * Whether a channel has member-customizable tabs: public and private channels,
+ * DMs and group DMs — never a desk (desks are DEFAULT-scoped too, but show their
+ * published apps in the desk's Apps menu instead) and never a ticket or document
+ * channel.
  */
-export function parseDeskAppIds(raw: string | null | undefined): string[] {
-  if (!raw) return [];
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    const ids = parsed.filter((id): id is string => typeof id === 'string' && id.length > 0);
-    return [...new Set(ids)].slice(0, MAX_DESK_APPS);
-  } catch {
-    return [];
-  }
+export function supportsChannelApps(channel: {
+  scopeType?: ChannelScopeType | null;
+  type?: string | null;
+}): boolean {
+  const scope = channel.scopeType;
+  const isConversation =
+    scope === ChannelScopeType.DEFAULT ||
+    scope === ChannelScopeType.DM ||
+    scope === ChannelScopeType.GROUP_DM;
+  return isConversation && !isDeskChannelType(channel.type);
 }
 
-/** Write-side twin of parseDeskAppIds: de-duplicated, order kept, empty → null. */
-export function serializeDeskAppIds(ids: readonly string[] | null): string | null {
-  const unique = [...new Set(ids ?? [])];
-  return unique.length > 0 ? JSON.stringify(unique) : null;
+/**
+ * Who may publish apps to a channel, DM or group DM (not a desk — see
+ * canPublishAppsTo), given the caller's participant role (null when they are not
+ * a participant). In a channel, only its ADMINs; in a DM or group DM every
+ * participant is a peer, so any of them may.
+ */
+export function canPublishChannelApps(
+  scopeType: ChannelScopeType | null | undefined,
+  participantRole: ChannelRole | null | undefined,
+): boolean {
+  if (!participantRole) return false;
+  if (scopeType === ChannelScopeType.DM || scopeType === ChannelScopeType.GROUP_DM) return true;
+  return scopeType === ChannelScopeType.DEFAULT && participantRole === ChannelRole.ADMIN;
+}
+
+/** Longest app id accepted in channel_published_tabs.appId (ids are 25-char cuids). */
+export const MAX_PUBLISHED_APP_ID_LENGTH = 64;
+
+/**
+ * Who may publish or unpublish an app (channel_published_tabs) — the single rule
+ * the mutators, the table's ACL and the dashboard all use:
+ *  - desk: its owner (email_channel_preferences.ownerUserId) or a channel ADMIN;
+ *  - channel: ADMINs only; DM / group DM: any participant;
+ *  - anything else (ticket, document): nobody.
+ */
+export function canPublishAppsTo(
+  channel: { scopeType?: ChannelScopeType | null; type?: string | null },
+  participantRole: ChannelRole | null | undefined,
+  isDeskOwner: boolean,
+): boolean {
+  if (isDeskChannelType(channel.type)) {
+    return isDeskOwner || participantRole === ChannelRole.ADMIN;
+  }
+  return supportsChannelApps(channel) && canPublishChannelApps(channel.scopeType, participantRole);
 }
 
 export const CHANNEL_NAME_MIN_LENGTH = 2;

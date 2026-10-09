@@ -75,13 +75,16 @@ import {
 import { useMaxCameraHeight, filterQualityOptionsByMax } from '../../../hooks/useMaxCameraQuality';
 import { useParams } from 'react-router-dom';
 import { ChannelScopeType } from '@xyne/shared';
+import { useChannelPublishedApps } from '../../../hooks/useChannelPublishedApps';
 import { AI_TOOLBAR_PATH, useAiLaunchPreference } from '../../../hooks/useAiLaunchPreference';
 import {
   toolbarItemsStore,
   inboxItemsStore,
-  getChannelTabsStore,
+  useChannelTabsStore,
+  useEnsureAppSnapshots,
   type BarItemsStore,
 } from '../../../hooks/barItems';
+import { isChannelTabsCustomizable } from '../../Chat/ConversationPannel/ConversationPannel.utils';
 import { useAllVisibleChannels } from '../../../hooks/useChannels';
 import { useLastVisitedChannel } from '../../../hooks/useLastVisitedChannel';
 import ChannelIcon from '../../Chat/ChannelIcon/ChannelIcon';
@@ -93,7 +96,12 @@ import {
   MIN_RELATED_CONTEXT_DEBOUNCE_MS,
   clampDebounceMs,
 } from '../../../hooks/useRelatedContext';
-import { useToolbarBuiltIns, useInboxBuiltIns, useChannelTabBuiltIns } from '../../BarCustomize';
+import {
+  useToolbarBuiltIns,
+  useInboxBuiltIns,
+  useChannelTabBuiltIns,
+  useChannelAppPublishing,
+} from '../../BarCustomize';
 import { BarCustomizer } from './BarCustomizer';
 import type { PreferenceSection, PreferencesProps, NavItem } from '.';
 import { disconnectCalendar } from '../../../services/clients/calendarApi';
@@ -1341,7 +1349,14 @@ const ChannelTabsSection: FC<{ state: PreferencesState }> = () => {
   const channels = useMemo(
     () =>
       allChannels
-        .filter(channel => channel.scopeType === ChannelScopeType.DEFAULT && !channel.isArchived)
+        // Channels only. DMs and group DMs are customizable too, but from their own
+        // tab bar: their `name` is a participant id, not something to list here.
+        .filter(
+          channel =>
+            channel.scopeType === ChannelScopeType.DEFAULT &&
+            isChannelTabsCustomizable(channel) &&
+            !channel.isArchived,
+        )
         .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')),
     [allChannels],
   );
@@ -1357,6 +1372,12 @@ const ChannelTabsSection: FC<{ state: PreferencesState }> = () => {
   }, [picked, routeChannelId, lastVisitedChannelId, channels]);
 
   const builtIns = useChannelTabBuiltIns(selected?.scopeType);
+  // Hooks run before the empty-state return below, so they take a placeholder id.
+  const publishedIds = useChannelPublishedApps(selected?.id);
+  const store = useChannelTabsStore(selected?.id ?? 'unknown', publishedIds);
+  const publish = useChannelAppPublishing(selected?.id ?? 'unknown', selected, publishedIds);
+  const publishedSet = useMemo(() => new Set(publishedIds), [publishedIds]);
+  useEnsureAppSnapshots(publishedIds);
 
   if (!selected) {
     return (
@@ -1375,8 +1396,11 @@ const ChannelTabsSection: FC<{ state: PreferencesState }> = () => {
       // flight) carries over from the channel being left.
       key={selected.id}
       title='Channel tabs'
-      subtitle='Tabs are per channel — what you choose here applies to this channel only. DMs always show the standard tabs.'
-      store={getChannelTabsStore(selected.id)}
+      subtitle='Tabs are per channel — what you choose here applies to you, in this channel only. Apps a channel admin published show for everyone; you can still remove them for yourself. DMs and group DMs are customized from their own tab bar (pencil icon).'
+      store={store}
+      resetLabel='Reset to channel layout'
+      publishedAppIds={publishedSet}
+      {...(publish ? { publish } : {})}
       builtIns={builtIns}
       trackCategory='PREFERENCES_CHANNEL_TABS'
       headerSlot={<ChannelSelect channels={channels} selected={selected} onSelect={setPicked} />}

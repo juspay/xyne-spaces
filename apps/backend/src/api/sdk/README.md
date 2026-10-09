@@ -1,6 +1,6 @@
 # `/api/sdk` — the Xyne Spaces public API
 
-The HTTP surface behind [`@xyne/spaces-sdk`](../../../../packages/xyne-spaces-sdk).
+The HTTP surface behind [`@xyne/spaces-sdk`](https://www.npmjs.com/package/@xyne/spaces-sdk).
 It authenticates via session cookies (same as the dashboard), then hands the work
 to code the product itself already runs.
 
@@ -58,7 +58,7 @@ second thing to keep correct.
 | `GET` | `/api/sdk/health` | Read availability. **Unauthenticated** |
 
 Both are mounted *before* the auth middleware on purpose, so a probe can tell
-"the API is misconfigured" from "your key is bad".
+"the API is misconfigured" from "your session is bad".
 
 ### v1
 
@@ -117,7 +117,7 @@ multipart uploads, search, and identity:
 
 | | |
 |---|---|
-| `GET /api/sdk/v1/me` | Who the credential acts as, plus `keyExpiresAt` |
+| `GET /api/sdk/v1/me` | Who the session acts as |
 | `POST /api/sdk/v1/channels` | Create a channel |
 | `POST /api/sdk/v1/channels/check-duplicate` | Name availability |
 | `POST /api/sdk/v1/tickets` | Create a ticket (sequence allocator) |
@@ -288,7 +288,7 @@ produce lands on exactly one of them.
 | Code | Status | Retryable | Means |
 |---|---|---|---|
 | `validation_failed` | 400 | | Bad arguments, **or a business rule refused it** |
-| `unauthenticated` | 401 | | Key missing, malformed, expired, or revoked |
+| `unauthenticated` | 401 | | Session missing, invalid, or expired |
 | `forbidden` | 403 | | The Zero ACL said no |
 | `not_found` | 404 | | No such endpoint, operation, or visible resource |
 | `not_connected` | 409 | | The viewer has no usable connection for this connector |
@@ -375,7 +375,7 @@ under `/api/sdk` — a URL-keyed ACL, or nothing.
 |---|---|---|
 | `SDK_API_ENABLED` | `false` | Master switch. The router is not mounted when false |
 | `DATABASE_READ_REPLICA_POOL_URL` | — | Where reads go. Required in production; outside it, falls back to the primary pool |
-| `JWT_SECRET` | — | Signs and verifies keys. Already required by the app for session tokens |
+| `JWT_SECRET` | — | Signs and verifies session tokens. Already required by the app |
 
 No dedicated signing key, no client registry, no callback URLs.
 
@@ -400,11 +400,9 @@ spend their own API budget.
 ## Extending it
 
 **A new Zero query or mutator** needs one entry in `v1/mapper.ts` to be
-reachable, plus one in `v1/parser.ts` if its arguments need shaping.
-`pnpm run sdk:coverage` fails until it is either mapped or listed in
-`v1/exclusions.json` with a written reason — and it checks both directions, so a
-mapper entry no SDK method calls is an error too. That gate is what makes
-"complete" verifiable.
+reachable, plus one in `v1/parser.ts` if its arguments need shaping. If it is
+deliberately not exposed, list it in `v1/exclusions.json` with a written reason
+instead. Nothing checks this automatically, so keep the two in step by hand.
 
 `v1/exclusions.json` is the other half of `v1/mapper.ts`: between them they
 partition the catalog, and every operation must be in exactly one. An entry
@@ -423,10 +421,9 @@ the versioned surface is for.
 `controller` (writes an Express response, gets captured) or a `service` (returns a
 value). Never both — the type enforces it.
 
-**Changing the error envelope** means `handler.ts` and `errors.ts` together.
-The SDK's `npm run contract-check` reads `errors.ts` and `schemas/search.ts`
-directly, so a code or a search parameter that changes here without the SDK
-following fails that build.
+**Changing the error envelope** means `handler.ts` and `errors.ts` together,
+and the SDK's `core/errors.ts` by hand: nothing checks that the two agree, so a
+code or a search parameter changed here needs a matching SDK change.
 
 **A breaking change to the surface** is what `v2/` is for. Retargeting an
 existing id onto a different catalog operation is fine and needs no new version;
