@@ -32,7 +32,6 @@ import { useShortcut } from '../../../shortcuts';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import type { SearchResultsFilters } from '../../../hooks/useSearchResultsScreen';
 import { useQuerySuggestions } from './filters/useQuerySuggestions';
-import { parseSearchFilters } from '../../../utils/searchFilterParser';
 
 /** An applied filter, shown as a token inside the box the way Slack shows them. */ // HMRPROBE2
 export interface QueryToken {
@@ -157,13 +156,10 @@ export function SearchQueryInput({
   const valueRef = useRef(value);
   valueRef.current = value;
 
-  // Re-seed only on a genuine outside change (back/forward, a fresh cmd+K search). The URL
-  // catching up to what was typed would otherwise fight the caret mid-word. The URL gets the
-  // text the search actually ran — filter syntax stripped — so a half-typed `issue from:`
-  // commits `issue`; that is still a catch-up, not a reason to wipe the `from:`.
+  // Re-seed only on a genuine outside change (back/forward, a fresh cmd+K search). Enter
+  // commits what is already in the box, so that one is skipped to keep the caret put.
   useEffect(() => {
-    const typed = valueRef.current.trim();
-    if (query === typed || query === parseSearchFilters(typed).searchText.trim()) return;
+    if (query === valueRef.current.trim()) return;
     setValue(query);
   }, [query]);
 

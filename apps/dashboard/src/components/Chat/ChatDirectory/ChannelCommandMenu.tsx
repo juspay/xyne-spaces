@@ -14,7 +14,6 @@ import {
   Phone,
   MicOn,
   EnvelopeDefault,
-  Spinner,
   ArrowLeft,
   ArrowRight,
   ArrowUp,
@@ -101,7 +100,7 @@ import { CallConfirmationModal } from '../../Call/CallConfirmationModal';
 import { ActionModal } from '../../Call/ActionModal';
 import { cn } from '../../../utils/classNames';
 import SearchResultItem from './SearchResultItem';
-import SearchSectionSkeleton from './SearchSectionSkeleton';
+import SearchSectionSkeleton, { type SkeletonVariant } from './SearchSectionSkeleton';
 import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
 import { LexicalSearchInput, type InitialQueryData } from './LexicalSearchInput';
 import { StatusIndicator } from '../../ui/StatusIndicator';
@@ -2896,8 +2895,9 @@ const ChannelCommandMenuContent = ({
         return 'Recordings';
       case 'desk':
         return 'Desk';
+      // The flat ALL list is every backend type in one score-ordered list, not a leftovers bucket.
       case 'others':
-        return 'Others';
+        return 'Results';
       default:
         return '';
     }
@@ -2912,7 +2912,7 @@ const ChannelCommandMenuContent = ({
       filteredLocalUsers.length > 0) ||
     (activeTab !== TabType.CHANNELS && activeTab !== TabType.USERS && backendResults.length > 0);
 
-  const showEmptyState = searchText.trim() && !isLoading && !isSearchPending && !hasResults;
+  const showEmptyState = searchText.trim() && !isSearchPending && !hasResults;
 
   // Auto-select first result when search results change. Reset the
   // navigation flag when either the free-text query OR the active filter
@@ -3099,24 +3099,37 @@ const ChannelCommandMenuContent = ({
     );
   };
 
-  // Loading state for backend sections while `isSearchPending` (keystroke → latest search
-  // settles): an empty section shows a skeleton, a non-empty one keeps its stale results dimmed.
-  // Local sections (People / Channels / DMs) resolve synchronously and never get either. A ticket
-  // view has its own skeleton (`showTicketViewSkeleton`), so these stand down while it shows.
-  const pendingDimClass = `transition-opacity ${isSearchPending ? 'opacity-60' : ''}`;
+  // Backend sections shimmer while `isSearchPending`; local ones (People / Channels / DMs) are
+  // synchronous and never do.
   const tabBackendGroupKeys = BACKEND_GROUP_KEYS.filter(groupKey =>
     backendGroupBelongsToTab(groupKey, activeTab),
   );
-  // A specific tab is one entity type: while pending with nothing to show it renders a single
-  // headerless skeleton list instead of one skeleton per group.
+  // A specific tab is one entity type: one skeleton list under the tab's heading, replacing any
+  // results on screen — they answer the previous query.
   const showTabSkeleton =
     isSearchPending &&
     !showTicketViewSkeleton &&
     activeTab !== TabType.ALL &&
-    tabBackendGroupKeys.length > 0 &&
-    tabBackendGroupKeys.every(groupKey => !groupedBackendResults[groupKey]?.length);
-  // On ALL only Messages and Tickets shimmer (the sections that nearly always return), and only
-  // when the tab is enabled here and the active filters can still target it.
+    tabBackendGroupKeys.length > 0;
+  // On ALL only Messages and Tickets shimmer, and only if the tab is enabled and the filters can
+  // still target it.
+  // Each tab/group draws a different row in SearchResultItem, so the skeleton follows it.
+  const tabSkeletonVariant: SkeletonVariant =
+    activeTab === TabType.TICKETS
+      ? 'ticket'
+      : activeTab === TabType.ATTACHMENTS
+        ? 'file'
+        : activeTab === TabType.DESK
+          ? 'desk'
+          : 'message';
+  const groupSkeletonVariant = (groupKey: string): SkeletonVariant =>
+    groupKey === 'ticket'
+      ? 'ticket'
+      : groupKey === 'desk'
+        ? 'desk'
+        : groupKey === 'conversation'
+          ? 'message'
+          : 'file';
   const isAllTabSkeletonGroup = (groupKey: string): boolean => {
     const tab = ALL_TAB_SKELETON_GROUPS[groupKey];
     return !!tab && activeEnabledTabs.includes(tab) && (!relevantTabs || relevantTabs.has(tab));
@@ -3125,11 +3138,19 @@ const ChannelCommandMenuContent = ({
   // Render backend results for the search-active branch (flat list filtered by activeTab)
   const renderSearchBackendResults = () => (
     <>
-      {/* The backend answers every zero-result search with `grouped: false`, so an empty flat
-          view only means the previous search found nothing — fall through to the sectioned
-          skeleton so the loading state looks the same on every search. */}
-      {isFlatAllView && flatAllBackendResults.length > 0 ? (
-        <div className={`mb-4 ${pendingDimClass}`}>
+      {/* Flat mode loads as one list: sectioned skeletons would promise a layout it never renders. */}
+      {isFlatAllView && isSearchPending ? (
+        <div className='mb-4'>
+          {/* Same heading as the results, so rows don't shift. */}
+          <Command.Group
+            heading={getGroupLabel('others')}
+            className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+          >
+            <SearchSectionSkeleton rows={4} />
+          </Command.Group>
+        </div>
+      ) : isFlatAllView && flatAllBackendResults.length > 0 ? (
+        <div className='mb-4'>
           <Command.Group
             heading={`${getGroupLabel('others')} (${flatAllBackendResults.length})`}
             className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
@@ -3155,18 +3176,21 @@ const ChannelCommandMenuContent = ({
         </div>
       ) : showTabSkeleton ? (
         <div className='mb-4'>
-          <SearchSectionSkeleton rows={4} />
+          {/* Heading keeps the rows where the results land. The tab's label, not a group's: Files
+              covers four groups, so naming one would be wrong when another answers. */}
+          <Command.Group
+            heading={allTabDefinitions.find(tab => tab.id === activeTab)?.label ?? ''}
+            className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+          >
+            <SearchSectionSkeleton rows={4} variant={tabSkeletonVariant} />
+          </Command.Group>
         </div>
       ) : (
         tabBackendGroupKeys.map(groupKey => {
           const items = groupedBackendResults[groupKey];
-          if (!items || items.length === 0) {
-            if (
-              !isSearchPending ||
-              showTicketViewSkeleton ||
-              activeTab !== TabType.ALL ||
-              !isAllTabSkeletonGroup(groupKey)
-            ) {
+          // Pending → skeleton, even with results already here: they answer the previous query.
+          if (!items || items.length === 0 || isSearchPending) {
+            if (!isSearchPending || activeTab !== TabType.ALL || !isAllTabSkeletonGroup(groupKey)) {
               return null;
             }
             return (
@@ -3178,6 +3202,7 @@ const ChannelCommandMenuContent = ({
                   <SearchSectionSkeleton
                     // Screen mode previews 2 rows per section; match it to avoid a height jump.
                     rows={searchMode === 'screen' ? 2 : 3}
+                    variant={groupSkeletonVariant(groupKey)}
                   />
                 </Command.Group>
               </div>
@@ -3204,7 +3229,7 @@ const ChannelCommandMenuContent = ({
           const showSeeMore = !!sectionTab && !isInTicketView && (!isScreenAll || hiddenCount > 0);
 
           return (
-            <div key={groupKey} className={`mb-4 ${pendingDimClass}`}>
+            <div key={groupKey} className='mb-4'>
               <Command.Group
                 heading={
                   isScreenAll
@@ -3247,15 +3272,10 @@ const ChannelCommandMenuContent = ({
         })
       )}
 
-      {/* Infinite scroll trigger and loading indicator */}
+      {/* Infinite scroll trigger. The next page arrives as rows, so it loads as rows. */}
       {backendResults.length > 0 && paginationState[activeTab].hasMore && (
-        <div ref={loadMoreRef} className='py-4 flex justify-center'>
-          {isLoadingMore && (
-            <div className='flex items-center gap-2 text-sm text-muted-foreground'>
-              <Spinner className='h-4 w-4 animate-spin' />
-              <span>Loading more results...</span>
-            </div>
-          )}
+        <div ref={loadMoreRef}>
+          {isLoadingMore && <SearchSectionSkeleton rows={4} variant={tabSkeletonVariant} />}
         </div>
       )}
     </>
@@ -3345,16 +3365,9 @@ const ChannelCommandMenuContent = ({
           );
         })}
 
-      {/* Infinite scroll trigger and loading indicator */}
+      {/* Infinite scroll trigger — rows, like the page it is fetching. */}
       {paginationState[activeTab].hasMore && (
-        <div ref={loadMoreRef} className='py-4 flex justify-center'>
-          {isLoadingMore && (
-            <div className='flex items-center gap-2 text-sm text-muted-foreground'>
-              <Spinner className='h-4 w-4 animate-spin' />
-              <span>Loading more results...</span>
-            </div>
-          )}
-        </div>
+        <div ref={loadMoreRef}>{isLoadingMore && <SearchSectionSkeleton rows={4} />}</div>
       )}
     </>
   );
@@ -5417,7 +5430,7 @@ const ChannelCommandMenuContent = ({
                               heading={getGroupLabel('ticket')}
                               className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
                             >
-                              <SearchSectionSkeleton rows={4} />
+                              <SearchSectionSkeleton rows={4} variant='ticket' />
                             </Command.Group>
                           </div>
                         )}

@@ -48,7 +48,9 @@ import {
 } from '../../../search/filterRegistry';
 import { DisplaySearchResult } from '../../../types/search';
 import { SearchResultMessageCard } from './SearchResultMessageCard';
-import SearchSectionSkeleton from '../ChatDirectory/SearchSectionSkeleton';
+import SearchSectionSkeleton, {
+  type SkeletonVariant,
+} from '../ChatDirectory/SearchSectionSkeleton';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
 import { SearchSnippetRenderer } from '../RenderMessageWithHTML/searchSnippetRender';
 import { SearchResultsContext, SearchResultsThread } from './SearchResultsContext';
@@ -210,6 +212,12 @@ const SearchResults = (): ReactElement => {
   const [filters, setFilters] = useState<SearchResultsFilters>(() =>
     parseFiltersFromParams(searchParams),
   );
+  // The query whose filter syntax that parse lifted into `filters` (a palette handoff typed
+  // `bug status:todo`). Only this copy is stripped from the URL below: syntax typed on this
+  // page was never lifted, stays in the box as text, and the URL has to keep it too.
+  const [liftedQuery] = useState<string | null>(() =>
+    parseSearchFilters(query).searchText.trim() !== query ? query : null,
+  );
 
   // —— Search feedback popover ——
   const [feedbackOpen, setFeedbackOpen] = useState(false);
@@ -318,7 +326,7 @@ const SearchResults = (): ReactElement => {
   const {
     searchResults: backendResults,
     isGrouped,
-    isSearching: isLoading,
+    isLoadingMore,
     isSearchPending,
     searchError: error,
     text: searchedText,
@@ -350,11 +358,6 @@ const SearchResults = (): ReactElement => {
       filters.docType === 'desk' || filters.docType === 'tickets' ? !filters.showArchived : false,
     groupByDocType: true,
     buildMentionHighlights,
-    // The URL follows the results: the hook hands back the query these were fetched for,
-    // so the address bar is shareable without anyone pressing Enter.
-    onSearchComplete: (_results, searchedQuery) => {
-      handleQuerySubmitRef.current(searchedQuery.trim());
-    },
   });
 
   // One search session per visit to this screen, for metrics. Mount-only via a ref (as in
@@ -373,7 +376,9 @@ const SearchResults = (): ReactElement => {
   // stale URL param. Falls back to `query` on first paint before the sync effect runs.
   const displayQuery = searchedText.trim() || query;
 
-  // Sync hook text whenever the URL query param changes; also close sidebar on new search
+  // Sync hook text whenever the URL query param changes; also close sidebar on new search.
+  // Typing never writes the URL (only Enter does, as in cmd+K the query lives in state), so
+  // every change here is a real one: Enter, back/forward, a cmd+K handoff.
   useEffect(() => {
     setText(query);
     setSelectedPanel(null);
@@ -385,7 +390,13 @@ const SearchResults = (): ReactElement => {
   // URL filter params → filter state. Covers the palette handoff into an already-mounted
   // page, the "See N more" links, back/forward, and a pasted results URL.
   const urlFilterKey = useMemo(() => serializeFilterParams(searchParams), [searchParams]);
+  // The key `filters` was first built from. That parse read the full URL, query included, so
+  // re-reading the params alone at mount would drop filters typed into the query
+  // (`?query=bug status:open` lost `status`). Skipped until the key first moves.
+  const mountFilterKeyRef = useRef<string | null>(urlFilterKey);
   useEffect(() => {
+    if (urlFilterKey === mountFilterKeyRef.current) return;
+    mountFilterKeyRef.current = null;
     setFilters(prev => parseFiltersFromParams(new URLSearchParams(urlFilterKey), prev));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [urlFilterKey]);
@@ -549,8 +560,6 @@ const SearchResults = (): ReactElement => {
 
   // Declared above the memo that uses it, so the callback is reached through a ref.
   const handleFiltersChangeRef = useRef<(next: SearchResultsFilters) => void>(() => undefined);
-  // handleQuerySubmit isn't declared where the hook options are built.
-  const handleQuerySubmitRef = useRef<(next: string) => void>(() => undefined);
 
   /**
    * Applied filters as search-box tokens, labelled with the syntax that expresses them, so
@@ -593,15 +602,17 @@ const SearchResults = (): ReactElement => {
   const desiredSearch = useMemo(() => {
     const params = new URLSearchParams(searchParams);
     writeFiltersToParams(filters, params);
-    // Filter syntax in the query has been lifted into `filters` by parseFiltersFromParams;
-    // strip it so it isn't shown twice — once as its token, once as raw words.
-    const cleanedQuery = parseSearchFilters(params.get('query') ?? '').searchText;
-    if (cleanedQuery) params.set('query', cleanedQuery);
-    else params.delete('query');
+    // Syntax parseFiltersFromParams lifted into `filters` is stripped so it isn't shown twice —
+    // once as its token, once as raw words. Anything else in the query is left as typed.
+    if (liftedQuery !== null && params.get('query')?.trim() === liftedQuery) {
+      const cleanedQuery = parseSearchFilters(liftedQuery).searchText.trim();
+      if (cleanedQuery) params.set('query', cleanedQuery);
+      else params.delete('query');
+    }
     if (displayLabel) params.set('display', displayLabel);
     else params.delete('display');
     return params.toString();
-  }, [searchParams, filters, displayLabel]);
+  }, [searchParams, filters, displayLabel, liftedQuery]);
 
   // Always replaces: refining the search edits this screen, it doesn't navigate. Back
   // leaves the screen rather than walking every intermediate refinement.
@@ -665,7 +676,6 @@ const SearchResults = (): ReactElement => {
     },
     [query, setSearchParams],
   );
-  handleQuerySubmitRef.current = handleQuerySubmit;
 
   /**
    * Identity key of the last query saved as a recent. Opening several results from one search fires
@@ -919,8 +929,12 @@ const SearchResults = (): ReactElement => {
     return map;
   }, [results]);
 
+  // An empty box with no filters shows "Type to search", not results — the people list the
+  // hook still returns for it is nothing to count.
+  const hasSearch = !!displayQuery || filtersActive;
   /** True when the search returned results. Controls the result count and Compare button. */
-  const hasResultsRow = results.length > 0 || (!!query && totalCount > 0);
+  const hasResultsRow = hasSearch && (results.length > 0 || totalCount > 0);
+  const showCountSkeleton = isSearchPending && hasSearch;
 
   // Filter labels sent with feedback.
   const feedbackFilters = useMemo(
@@ -981,12 +995,20 @@ const SearchResults = (): ReactElement => {
         </div>
         {/* Shown for any query or active filter so Feedback is available even with no results.
             The result count and Compare still need results. */}
-        {(hasResultsRow || (canPostFeedback && (!!displayQuery || filtersActive))) && (
+        {(hasResultsRow ||
+          showCountSkeleton ||
+          (canPostFeedback && (!!displayQuery || filtersActive))) && (
           <div className='flex items-center justify-between gap-3 pb-2'>
-            {hasResultsRow && (
-              <p className='text-xs text-muted-foreground tabular-nums'>
-                {(totalCount || results.length).toLocaleString()} results
-              </p>
+            {/* The count row stays mounted while a search is in flight, so the skeleton
+                rows below sit exactly where the results land. */}
+            {showCountSkeleton ? (
+              <span aria-hidden='true' className='block h-4 w-16 rounded search-skeleton-bar' />
+            ) : (
+              hasResultsRow && (
+                <p className='text-xs text-muted-foreground tabular-nums'>
+                  {(totalCount || results.length).toLocaleString()} results
+                </p>
+              )
             )}
             <div className='flex items-center gap-2 ml-auto'>
               {canPostFeedback && (
@@ -1039,8 +1061,6 @@ const SearchResults = (): ReactElement => {
         className={cn(
           // pb-16 so the last card clears the bottom of the viewport instead of sitting
           // flush against it (and above the floating compare bar when it's up).
-          // A re-search keeps the previous results on screen rather than blanking to a
-          // spinner — ResultsBody dims the backend results while the new ones land.
           'flex-1 min-h-0 overflow-y-auto px-4 pb-16',
         )}
       >
@@ -1050,7 +1070,7 @@ const SearchResults = (): ReactElement => {
             displayQuery={displayQuery}
             hasActiveFilters={filtersActive}
             isSearchPending={isSearchPending}
-            isLoading={isLoading}
+            isLoadingMore={isLoadingMore}
             error={error}
             results={results}
             loadMoreRef={loadMoreRef}
@@ -1155,7 +1175,7 @@ interface ResultsBodyProps {
   displayQuery: string;
   hasActiveFilters: boolean;
   isSearchPending: boolean;
-  isLoading: boolean;
+  isLoadingMore: boolean;
   error: string | null;
   results: DisplaySearchResult[];
   loadMoreRef: React.RefObject<HTMLDivElement | null>;
@@ -1206,10 +1226,22 @@ const BACKEND_GROUP_ORDER = [
   'desk',
 ] as const;
 
-// Loading skeletons follow the Cmd+K palette: a specific tab shows one list only when its results
-// come from the backend. ALL shows Messages + Tickets sections like Cmd+K, plus Attachments —
-// the full page has room for it and files are common enough not to vanish on most searches.
+// Loading skeletons mirror Cmd+K: one list on a backend-sourced tab, sections on ALL. ALL adds
+// Attachments — the page has room for it.
 const SKELETON_GROUP_KEYS = ['conversation', 'ticket', 'attachment'] as const;
+/** Skeleton shape per section / per tab — the page's cards, not cmdK's rows. */
+const FULLPAGE_SKELETON_VARIANTS: Record<string, SkeletonVariant> = {
+  conversation: 'page-message',
+  ticket: 'page-ticket',
+  attachment: 'page-file',
+  desk: 'page-desk',
+};
+const DOC_TYPE_SKELETON_VARIANTS: Partial<Record<string, SkeletonVariant>> = {
+  messages: 'page-message',
+  tickets: 'page-ticket',
+  files: 'page-file',
+  desk: 'page-desk',
+};
 const SKELETON_DOC_TYPES = new Set<SearchResultsFilters['docType']>([
   'messages',
   'tickets',
@@ -1226,7 +1258,8 @@ const GROUP_LABELS: Record<string, string> = {
   transcript: 'Calls',
   recording: 'Recordings',
   desk: 'Desk',
-  others: 'Others',
+  // The flat list is every backend type in one score-ordered list, not a leftovers bucket.
+  others: 'Results',
 };
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -1312,7 +1345,7 @@ function ResultsBody({
   displayQuery,
   hasActiveFilters,
   isSearchPending,
-  isLoading,
+  isLoadingMore,
   error,
   results,
   loadMoreRef,
@@ -1616,11 +1649,8 @@ function ResultsBody({
     <>
       {/* Sentinel for load-more */}
       <div ref={loadMoreRef} className='h-1' />
-      {isLoading && (
-        <div className='flex justify-center py-4'>
-          <Loader2 className='animate-spin text-muted-foreground' size={20} />
-        </div>
-      )}
+      {/* The next page arrives as rows, so it loads as rows. */}
+      {isLoadingMore && <SearchSectionSkeleton rows={4} variant='page-message' />}
     </>
   );
 
@@ -1748,9 +1778,9 @@ function ResultsBody({
     const hasLocalSections =
       showLocalSections && (userResults.length > 0 || filteredLocalChannels.length > 0);
     const hasBackendSections = backendOnly.length > 0;
-    // Same loading rule as the Cmd+K palette: while a search is pending with no backend results,
-    // Messages and Tickets render skeleton sections; existing results stay, dimmed.
-    const showBackendSkeleton = isSearchPending && !hasBackendSections;
+    // Pending → skeleton sections in place of backend results (they answer the previous query).
+    // Local sections are synchronous and stay put.
+    const showBackendSkeleton = isSearchPending;
 
     // True empty: nothing to show at all
     if (!hasLocalSections && !hasBackendSections) {
@@ -1760,8 +1790,7 @@ function ResultsBody({
         );
       }
     }
-    // isSearchPending is primary (race-proof); isLoading backstops a real in-flight fetch.
-    if (!hasLocalSections && !hasBackendSections && !isSearchPending && !isLoading) {
+    if (!hasLocalSections && !hasBackendSections && !isSearchPending) {
       return (
         <EmptyState
           title='No results found'
@@ -1777,32 +1806,41 @@ function ResultsBody({
     return (
       <div className='w-full pt-2 pb-6'>
         {/* Local sections — same order as cmdK non-screen popup ALL tab:
-            Starred → Users → Group DMs (not collapsible) → Channels
+            Starred → Users → Group DMs → Channels, each folded at the display limit
             1:1 DMs are intentionally omitted in search mode (matches cmdK) */}
         {showLocalSections && (
           <>
             {renderLocalChannelSection(ChannelCategory.STARRED, starredItems)}
             {renderUserSection()}
-            {renderLocalChannelSection(ChannelCategory.GROUP_DMS, groupDmItems, false)}
+            {renderLocalChannelSection(ChannelCategory.GROUP_DMS, groupDmItems)}
             {renderLocalChannelSection(ChannelCategory.CHANNELS, regularItems)}
           </>
         )}
         {/* Backend results: grouped into per-docType sections when the backend
             grouped the response, otherwise a single flat (e.g. time-sorted) list.
             Local users/channels above stay categorized regardless. */}
-        {/* The skeleton ignores `isGrouped`: the backend answers every zero-result search with
-            `grouped: false`, which would otherwise change the loading layout between searches. */}
+        {/* Follows `isGrouped`: flat mode is one mixed list, not sections. */}
         {showBackendSkeleton ? (
-          SKELETON_GROUP_KEYS.map(gk => (
-            <div key={gk} className='mb-6'>
+          isGrouped ? (
+            SKELETON_GROUP_KEYS.map(gk => (
+              <div key={gk} className='mb-6'>
+                <p className='px-1 pb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide font-mono'>
+                  {GROUP_LABELS[gk]}
+                </p>
+                <SearchSectionSkeleton variant={FULLPAGE_SKELETON_VARIANTS[gk] ?? 'message'} />
+              </div>
+            ))
+          ) : (
+            <div className='mb-6'>
+              {/* Same heading as the flat results, so rows don't shift. */}
               <p className='px-1 pb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide font-mono'>
-                {GROUP_LABELS[gk]}
+                {GROUP_LABELS['others']}
               </p>
-              <SearchSectionSkeleton />
+              <SearchSectionSkeleton rows={4} variant='page-message' />
             </div>
-          ))
+          )
         ) : (
-          <div className={cn('transition-opacity', isSearchPending && 'opacity-60')}>
+          <div>
             {isGrouped
               ? BACKEND_GROUP_ORDER.filter(gk => grouped.has(gk)).map(gk => (
                   <div key={gk} className='mb-6'>
@@ -1833,22 +1871,25 @@ function ResultsBody({
   }
 
   // ── Flat view — specific docType tabs and compare mode ──────────────────
+  // One skeleton list while a backend-sourced tab is pending. Before the results branch, so a
+  // refined query replaces the old rows.
+  if (isSearchPending && SKELETON_DOC_TYPES.has(docType) && (displayQuery || hasActiveFilters)) {
+    return (
+      <div className='w-full pt-2 pb-6'>
+        <SearchSectionSkeleton
+          rows={4}
+          variant={DOC_TYPE_SKELETON_VARIANTS[docType] ?? 'message'}
+        />
+      </div>
+    );
+  }
   if (results.length === 0) {
     if (!displayQuery && !hasActiveFilters) {
       return (
         <EmptyState title='Search for messages, files, and tickets' subtitle='Type to search' />
       );
     }
-    // Same as a Cmd+K tab: one headerless skeleton list while a backend-sourced tab is pending.
-    if (isSearchPending && SKELETON_DOC_TYPES.has(docType)) {
-      return (
-        <div className='w-full pt-2 pb-6'>
-          <SearchSectionSkeleton rows={4} />
-        </div>
-      );
-    }
-    // isSearchPending is primary (race-proof); isLoading backstops a real in-flight fetch.
-    if (isLoading || isSearchPending) {
+    if (isSearchPending) {
       return (
         <div className='flex items-center justify-center h-full'>
           <Loader2 className='animate-spin text-muted-foreground' size={32} />
@@ -1867,12 +1908,7 @@ function ResultsBody({
     );
   }
   return (
-    <div
-      className={cn(
-        'w-full space-y-2 pt-2 pb-6 transition-opacity',
-        isSearchPending && 'opacity-60',
-      )}
-    >
+    <div className='w-full space-y-2 pt-2 pb-6'>
       {results.map((result, index) => {
         const el = renderCard(result, index);
         if (!el) return null;

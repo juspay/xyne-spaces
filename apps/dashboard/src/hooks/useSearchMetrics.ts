@@ -1086,6 +1086,20 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
             cumulativeCount: results.length,
           },
         }));
+      } else if (activeTab === TabType.CHANNELS) {
+        // Channels are local-only (filteredLocalChannels), so there is nothing to fetch —
+        // the backend call would only be discarded by the caller.
+        setSearchResults([]);
+        setPaginationState(prev => ({
+          ...prev,
+          [activeTab]: {
+            page: 1,
+            hasMore: false,
+            total: 0,
+            offset: 0,
+            cumulativeCount: 0,
+          },
+        }));
       } else if (hasActiveMentionFilter(query, selectedMentions)) {
         setSearchResults([]);
         setPaginationState(prev => ({
@@ -1351,8 +1365,11 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               // A newer search superseded this one — drop this out-of-order response.
               if (isStale()) return;
 
-              // Honor the backend grouping decision: flat response => flat ALL view.
-              setIsGrouped(vespaResponse.grouped);
+              // Honor the backend grouping decision: flat response => flat ALL view. Skip empty
+              // ones: they are always `grouped: false` and say nothing about the mode.
+              if (vespaResponse.results.length > 0) {
+                setIsGrouped(vespaResponse.grouped);
+              }
 
               // Merge local people only when the active filters make the People category relevant.
               // from:/in:/assignee:/with:/@/# and non-people type: filters scope to content — people
@@ -1430,7 +1447,9 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
 
             setSearchResults(mergedResults);
             latestResultsRef.current = mergedResults;
-            latestQueryRef.current = searchText;
+            // As typed, filter syntax included: the results page writes this back into the URL and
+            // the box, and the stripped text would silently drop a typed `status:open`.
+            latestQueryRef.current = query;
 
             setPaginationState(prev => ({
               ...prev,
@@ -1529,6 +1548,9 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     ticketViewKey: 'null',
   });
 
+  // The rank profile alone decides flat vs sectioned ALL, so it is known before any request.
+  const isFlatAllRank = flatAllRankProfiles.has(rankProfile || allDefaultRankProfile);
+
   // Debounced backend search with pagination reset
   useEffect(() => {
     if (options.mentionSearchType) {
@@ -1548,6 +1570,11 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     // "Query parameter q is required" and the palette drops to People and Channels only).
     const queryText = unwrapExactSearchQuery(text).trim() ? text : '';
     const normalizedText = queryText.trimEnd();
+
+    // Claim the layout now, so the skeleton is in the right mode for the whole debounce rather
+    // than switching when the request goes out. Above the dedup check: toggling the rank back
+    // to the last searched one returns early but must still restore that layout.
+    if (activeTab === TabType.ALL) setIsGrouped(!isFlatAllRank);
 
     // Skip if text, tab, mentions, and includeBotMessages are all the same as last search
     // This prevents unnecessary API calls when typing only spaces
@@ -1646,6 +1673,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     includeDebugInfo,
     structuredFiltersKey,
     ticketViewKey,
+    isFlatAllRank,
   ]);
 
   // Intent classification for the inline AI answer: its own request and abort handle, so a
