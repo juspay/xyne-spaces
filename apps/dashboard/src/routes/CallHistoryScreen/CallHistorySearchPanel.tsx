@@ -354,6 +354,7 @@ export function CallHistorySearchPanel(props: CallHistorySearchPanelProps): Reac
               id='channel-calls-toggle'
               checked={props.showChannelCalls}
               onCheckedChange={props.setShowChannelCalls}
+              aria-label='Show channel calls'
             />
             <Tooltip
               content='Show calls from your channels where you were not a direct participant'

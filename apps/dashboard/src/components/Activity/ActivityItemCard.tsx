@@ -320,6 +320,7 @@ export const ActivityItemCard = ({
           <button
             onClick={e => e.stopPropagation()}
             tabIndex={0}
+            aria-label={`View ${actorName}'s profile`}
             data-track-category='ACTIVITY'
             data-track-name='VIEW_USER_AVATAR'
             data-track-metadata={JSON.stringify({ activityId: activity.id, userId: actorId })}

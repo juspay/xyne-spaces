@@ -94,7 +94,7 @@ const ChannelTabTrigger = ({
   onSelect,
 }: ChannelTabTriggerProps): JSX.Element => {
   const trigger = (
-    <Tabs.Trigger value={tab.value} asChild>
+    <Tabs.Trigger value={tab.value} aria-description={tab.description} asChild>
       <button
         data-testid={`channel-tab-${tab.value}`}
         data-track-category='CHANNELS'
@@ -438,6 +438,7 @@ const ConversationHeader = ({
                         setIsInfoOpen(true);
                       }}
                       className={cn('h-7 gap-1.5 px-2 rounded-[10px]', actionIconClass)}
+                      aria-label={`Channel members (${channel.channelStats?.participantCount ?? 0})`}
                       data-track-category='CHANNELS'
                       data-track-name='VIEW_MEMBERS'
                       data-track-metadata={JSON.stringify({ channelId })}
@@ -519,6 +520,7 @@ const ConversationHeader = ({
                     size='sm'
                     onClick={() => invokeShortcut('mod+f')}
                     className={cn('h-7 w-7 rounded-lg', actionIconClass)}
+                    aria-label='Search in this channel'
                     data-track-category='CHANNELS'
                     data-track-name='SEARCH_IN_CHANNEL'
                     data-track-metadata={JSON.stringify({ channelId })}
@@ -551,6 +553,7 @@ const ConversationHeader = ({
                       variant='ghost'
                       size='sm'
                       className={cn('h-7 w-7 rounded-lg', actionIconClass)}
+                      aria-label='Channel options'
                       data-track-category='CHANNELS'
                       data-track-name='OPEN_CHANNEL_MENU'
                     >
