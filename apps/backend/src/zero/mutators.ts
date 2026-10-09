@@ -143,6 +143,20 @@ import {
   type ChannelPublishedTab,
 } from '@xyne/shared';
 import {
+  buildPollMessageSummary,
+  pollDraftSchema,
+  pollScheduleSchema,
+  pollResponseSchema,
+  nextBallotOptionIds,
+  POLL_LIMITS,
+  assertPollMessageActive,
+  assertPollPlacement,
+  isPollMessageMetadata,
+  isPollClosedAt,
+  normalizePollChoice,
+  type PollSchedule,
+} from '@xyne/shared';
+import {
   evaluateEta,
   buildEtaActivityIntents,
   stageEtaActivityOutbox,
@@ -402,11 +416,11 @@ async function assertCanReviewStageRequest(
   tx: Transaction<Schema>,
   ticket: { boardId: string; stageName: string | null },
   stageId: string,
-  userId: string,
+  userId: string
 ): Promise<void> {
   const board = await tx.run(zql.boards.where('id', ticket.boardId).one());
-  let approverIds: string[] = [];
-  let roleIds: string[] = [];
+  const approverIds: string[] = [];
+  const roleIds: string[] = [];
 
   if (board?.boardType === BoardType.NON_LINEAR) {
     const currentStage = ticket.stageName
@@ -640,7 +654,7 @@ async function addMentionedConversationParticipants(
     if (existing) {
       const shouldUpdateParticipationType = existing.participationType === null;
       const shouldUpdateIsSubscribed = !existing.isSubscribed;
-      
+
       if (shouldUpdateParticipationType || shouldUpdateIsSubscribed || lastReplyAt != null) {
         await tx.mutate.conversation_participants.update({
           id: existing.id,
@@ -1112,6 +1126,98 @@ async function createNonParticipantSystemMessages(
   }
 }
 
+async function insertPollGraph(
+  tx: Transaction<Schema>,
+  draft: z.infer<typeof pollDraftSchema>,
+  messageId: string,
+  workspaceId: string,
+  userId: string,
+  timestamp: number,
+  schedule: PollSchedule = {}
+): Promise<void> {
+  const poll = draft;
+  if (schedule.publishAt) {
+    throw new ApplicationError('Scheduled publication must use the delayed message workflow');
+  }
+  if (schedule.closeAt && Date.parse(schedule.closeAt) <= timestamp) {
+    throw new ApplicationError('Poll close time must be in the future');
+  }
+  if (schedule.remindAt && Date.parse(schedule.remindAt) <= timestamp) {
+    throw new ApplicationError('Poll reminder time must be in the future');
+  }
+  await tx.mutate.polls.insert({
+    id: poll.pollId,
+    workspaceId,
+    messageId,
+    createdBy: userId,
+    allowAudienceChoices: poll.allowAudienceChoices,
+    isAnonymous: poll.isAnonymous,
+    resultVisibility: poll.resultVisibility,
+    sortResultsByVotes: poll.sortResultsByVotes,
+    closedAt: null,
+    createdAt: timestamp,
+  });
+  for (const [questionPosition, question] of poll.questions.entries()) {
+    await tx.mutate.poll_questions.insert({
+      id: question.id,
+      workspaceId,
+      pollId: poll.pollId,
+      question: question.question,
+      position: questionPosition,
+      responseType: question.responseType,
+      createdAt: timestamp,
+    });
+    await tx.mutate.poll_question_results.insert({
+      questionId: question.id,
+      workspaceId,
+      pollId: poll.pollId,
+      voterCount: 0,
+      optionCounts: {},
+      responseCount: 0,
+      rankTotals: {},
+      rankResponseCount: 0,
+      ratingCounts: {},
+      ratingTotal: 0,
+      updatedAt: timestamp,
+    });
+    for (const [optionPosition, option] of question.options.entries()) {
+      await tx.mutate.poll_options.insert({
+        id: option.id,
+        workspaceId,
+        questionId: question.id,
+        text: option.text,
+        normalizedText: normalizePollChoice(option.text),
+        position: optionPosition,
+        createdBy: userId,
+        createdAt: timestamp,
+      });
+    }
+  }
+  const jobs = [
+    schedule.closeAt ? { kind: 'CLOSE', runAt: Date.parse(schedule.closeAt) } : null,
+    schedule.remindAt ? { kind: 'REMINDER', runAt: Date.parse(schedule.remindAt) } : null,
+  ].filter((job): job is { kind: string; runAt: number } => job !== null);
+  for (const job of jobs) {
+    await tx.mutate.poll_jobs.insert({
+      id: `${poll.pollId}:${job.kind}`,
+      workspaceId,
+      pollId: poll.pollId,
+      kind: job.kind,
+      runAt: job.runAt,
+      status: 'PENDING',
+      attempts: 0,
+      maxAttempts: 5,
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      completedAt: null,
+      failedAt: null,
+      lastError: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+  }
+}
+
 export function createMutators(
   authData: AuthData,
   asyncTasks: Array<() => Promise<void>>,
@@ -1137,6 +1243,8 @@ export function createMutators(
   };
 
   const bookmarkByEntityQuery = (entityId: string, entityType: BookmarkEntityType) =>
+    // Intentionally includes soft-deleted bookmarks so bookmark mutations can restore them.
+    // eslint-disable-next-line local-rules/require-is-deleted-filter
     zql.bookmarks
       .where('userId', authData.sub)
       .where('entityId', entityId)
@@ -1145,30 +1253,27 @@ export function createMutators(
   const getBookmarkIncludingDeleted = async (
     tx: Transaction<Schema>,
     entityId: string,
-    entityType: BookmarkEntityType,
+    entityType: BookmarkEntityType
   ) => {
-    return tx.run(
-      // eslint-disable-next-line local-rules/require-is-deleted-filter
-      bookmarkByEntityQuery(entityId, entityType).one(),
-    );
+    return tx.run(bookmarkByEntityQuery(entityId, entityType).one());
   };
 
   const getActiveBookmark = async (
     tx: Transaction<Schema>,
     entityId: string,
-    entityType: BookmarkEntityType,
+    entityType: BookmarkEntityType
   ) => {
     return tx.run(
       bookmarkByEntityQuery(entityId, entityType)
         .where('isDeleted', false)
         .where('isCompleted', false)
-        .one(),
+        .one()
     );
   };
 
   const buildCompletedBookmarkMetadata = (
     metadata: unknown,
-    completedAt: number,
+    completedAt: number
   ): ReadonlyJSONValue => {
     const nextMetadata =
       metadata && typeof metadata === 'object' && !Array.isArray(metadata)
@@ -2791,7 +2896,10 @@ export function createMutators(
 
           // Detach channels in this section so they fall back to the default group.
           const assigned = await tx.run(
-            zql.channel_user_status.where('userId', authData.sub).where('sectionId', id),
+            zql.channel_user_status
+              .where('userId', authData.sub)
+              .where('sectionId', id)
+              .where('isDeleted', false)
           );
           for (const status of assigned) {
             await tx.mutate.channel_user_status.update({
@@ -2817,6 +2925,8 @@ export function createMutators(
           timestamp: z.number(),
           attachmentIds: z.array(z.string()).optional(),
           entityLinkContext: entityLinkContextSchema.optional(),
+          poll: pollDraftSchema.optional(),
+          pollSchedule: pollScheduleSchema.optional(),
         }),
         async ({
           tx,
@@ -2829,15 +2939,18 @@ export function createMutators(
             timestamp,
             attachmentIds,
             entityLinkContext,
+            poll,
+            pollSchedule,
           },
         }) => {
-          if (content === '') {
+          if (content === '' && !poll) {
             throw new Error('Message content or files are required to start a conversation');
           }
           content = await guestSafeContent(tx, authData.role, channelId, content);
 
           const user = await tx.run(zql.users.where('id', authData.sub).one());
           const now = timestamp;
+          const messageContent = poll ? buildPollMessageSummary(poll) : content.trim();
 
           const participant = await tx.run(zql.channel_participants
             .where('userId', authData.sub)
@@ -2993,16 +3106,16 @@ export function createMutators(
             conversationId,
             workspaceId: authData.workspaceId,
             senderId: authData.sub,
-            content: content.trim(),
+            content: messageContent,
             msgType: type,
             hasAttachment: false,
             edited: false,
             showInChannel: false,
             createdAt: now,
-            metadata: undefined,
+            metadata: poll ? { messageSubtype: 'poll' } : undefined,
             visibleTo: null,
             isDeleted: false,
-            isSent: true
+            isSent: true,
           };
 
           if (attachmentIds !== undefined) {
@@ -3080,7 +3193,20 @@ export function createMutators(
           }
 
           await tx.mutate.messages.insert(message);
-          logger.info(`💬 [MUTATOR-CREATE-MESSAGE] Message ${message.messageId} created, type: ${type}`);
+          if (poll) {
+            await insertPollGraph(
+              tx,
+              poll,
+              messageId,
+              authData.workspaceId,
+              authData.sub,
+              now,
+              pollSchedule
+            );
+          }
+          logger.info(
+            `💬 [MUTATOR-CREATE-MESSAGE] Message ${message.messageId} created, type: ${type}`
+          );
 
           if (type === MessageType.USER) {
             const userProfile = await tx.run(zql.user_profiles.where('userId', authData.sub).one());
@@ -3666,6 +3792,206 @@ export function createMutators(
         }
       ),
     },
+    polls: {
+      respond: defineMutator(
+        z.object({
+          responseId: z.string(),
+          pollId: z.string(),
+          response: pollResponseSchema,
+          timestamp: z.number(),
+        }),
+        async ({ tx, args }) => {
+          const [poll, question, existing, options] = await Promise.all([
+            tx.run(zql.polls.where('id', '=', args.pollId).related('message').one()),
+            tx.run(zql.poll_questions.where('id', '=', args.response.questionId).one()),
+            tx.run(
+              zql.poll_votes
+                .where('questionId', '=', args.response.questionId)
+                .where('userId', '=', authData.sub)
+                .one()
+            ),
+            tx.run(zql.poll_options.where('questionId', '=', args.response.questionId)),
+          ]);
+          if (
+            !poll ||
+            !question ||
+            question.pollId !== poll.id ||
+            question.responseType !== args.response.responseType
+          )
+            throw new ApplicationError('Poll question is not available');
+          assertPollMessageActive(poll.message);
+          if (isPollClosedAt(poll, args.timestamp))
+            throw new ApplicationError('This poll is closed');
+          const rankedOptionIds = args.response.rankedOptionIds ?? [];
+          const validIds = new Set(options.map((option) => option.id));
+          if (rankedOptionIds.some((id) => !validIds.has(id)))
+            throw new ApplicationError('Poll option is not available');
+          if (
+            question.responseType === 'RANKING' &&
+            (rankedOptionIds.length !== options.length ||
+              new Set(rankedOptionIds).size !== options.length)
+          )
+            throw new ApplicationError('Rank every option once');
+          const row = {
+            optionIds: [],
+            textAnswer: args.response.textAnswer ?? null,
+            rankedOptionIds: args.response.rankedOptionIds ?? null,
+            rating: args.response.rating ?? null,
+            updatedAt: args.timestamp,
+          };
+          if (existing) await tx.mutate.poll_votes.update({ id: existing.id, ...row });
+          else
+            await tx.mutate.poll_votes.insert({
+              id: args.responseId,
+              workspaceId: authData.workspaceId,
+              pollId: poll.id,
+              questionId: question.id,
+              userId: authData.sub,
+              ...row,
+              createdAt: args.timestamp,
+            });
+        }
+      ),
+      vote: defineMutator(
+        z.object({
+          voteId: z.string(),
+          pollId: z.string(),
+          questionId: z.string(),
+          optionId: z.string(),
+          selected: z.boolean(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args }) => {
+          const [poll, question, option, existing] = await Promise.all([
+            tx.run(zql.polls.where('id', '=', args.pollId).related('message').one()),
+            tx.run(zql.poll_questions.where('id', '=', args.questionId).one()),
+            tx.run(zql.poll_options.where('id', '=', args.optionId).one()),
+            tx.run(
+              zql.poll_votes
+                .where('questionId', '=', args.questionId)
+                .where('userId', '=', authData.sub)
+                .one(),
+            ),
+          ]);
+          if (
+            !poll ||
+            poll.workspaceId !== authData.workspaceId ||
+            !question ||
+            question.pollId !== poll.id ||
+            !option ||
+            option.questionId !== question.id
+          ) {
+            throw new ApplicationError('Poll option is not available');
+          }
+          assertPollMessageActive(poll.message);
+          if (isPollClosedAt(poll, args.timestamp)) {
+            throw new ApplicationError('This poll is closed');
+          }
+          if (
+            question.responseType !== 'SINGLE_CHOICE' &&
+            question.responseType !== 'MULTIPLE_CHOICE'
+          ) {
+            throw new ApplicationError('This question does not accept choice votes');
+          }
+          const optionIds = nextBallotOptionIds(
+            existing?.optionIds ?? [],
+            args.optionId,
+            args.selected,
+            question.responseType
+          );
+          if (optionIds.length === 0) {
+            if (existing) await tx.mutate.poll_votes.delete({ id: existing.id });
+            return;
+          }
+          if (existing) {
+            await tx.mutate.poll_votes.update({
+              id: existing.id,
+              optionIds,
+              updatedAt: args.timestamp,
+            });
+            return;
+          }
+          await tx.mutate.poll_votes.insert({
+            id: args.voteId,
+            workspaceId: authData.workspaceId,
+            pollId: poll.id,
+            questionId: question.id,
+            userId: authData.sub,
+            optionIds,
+            createdAt: args.timestamp,
+            updatedAt: args.timestamp,
+          });
+        },
+      ),
+      close: defineMutator(
+        z.object({ pollId: z.string(), timestamp: z.number() }),
+        async ({ tx, args }) => {
+          const poll = await tx.run(zql.polls.where('id', '=', args.pollId).one());
+          if (!poll || poll.createdBy !== authData.sub) {
+            throw new ApplicationError('Only the poll creator can close this poll');
+          }
+          if (poll.closedAt === null || poll.closedAt === undefined) {
+            await tx.mutate.polls.update({ id: poll.id, closedAt: args.timestamp });
+          }
+        },
+      ),
+      addOption: defineMutator(
+        z.object({
+          id: z.string(),
+          questionId: z.string(),
+          text: z.string().trim().min(1).max(POLL_LIMITS.maxOptionLength),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args }) => {
+          const question = await tx.run(
+            zql.poll_questions
+              .where('id', '=', args.questionId)
+              .related('poll', poll => poll.related('message'))
+              .one(),
+          );
+          if (!question?.poll || question.workspaceId !== authData.workspaceId) {
+            throw new ApplicationError('Poll question is not available');
+          }
+          assertPollMessageActive(question.poll.message);
+          if (question.poll.closedAt !== null && question.poll.closedAt !== undefined) {
+            throw new ApplicationError('This poll is closed');
+          }
+          if (
+            question.poll.createdBy !== authData.sub &&
+            !question.poll.allowAudienceChoices
+          ) {
+            throw new ApplicationError('This poll does not allow audience choices');
+          }
+          const options = await tx.run(
+            zql.poll_options.where('questionId', '=', args.questionId),
+          );
+          const normalizedText = normalizePollChoice(args.text);
+          // The normalized-text unique constraint closes duplicate races. Two distinct
+          // concurrent additions can briefly exceed the cap; that bounded race is
+          // accepted until option creation moves to a serialized server transaction.
+          if (options.length >= POLL_LIMITS.maxOptions) {
+            throw new ApplicationError('This question already has the maximum number of choices');
+          }
+          if (options.some(option => option.normalizedText === normalizedText)) {
+            throw new ApplicationError('This choice already exists');
+          }
+          const position = options.reduce(
+            (maximum, option) => Math.max(maximum, option.position),
+            -1,
+          ) + 1;
+          await tx.mutate.poll_options.insert({
+            id: args.id,
+            workspaceId: authData.workspaceId,
+            questionId: args.questionId,
+            text: args.text,
+            normalizedText,
+            position,
+            createdBy: authData.sub,
+            createdAt: args.timestamp,
+          });
+        },
+      ),
+    },
     messages: {
       send: defineMutator(
         z.object({
@@ -3677,29 +4003,54 @@ export function createMutators(
           messageId: z.string(),
           childConversationId: z.string().optional(),
           attachmentIds: z.array(z.string()).optional(),
+          poll: pollDraftSchema.optional(),
+          pollSchedule: pollScheduleSchema.optional(),
         }),
-        async ({ tx, args: { conversationId, content, type, showInChannel = false, timestamp, messageId, childConversationId, attachmentIds } }) => {
-          if (content === '') {
+        async ({
+          tx,
+          args: {
+            conversationId,
+            content,
+            type,
+            showInChannel = false,
+            timestamp,
+            messageId,
+            childConversationId,
+            attachmentIds,
+            poll,
+            pollSchedule,
+          },
+        }) => {
+          assertPollPlacement(poll, 'thread');
+          if (content === '' && !poll) {
             throw new Error('Message content or files are required to start a conversation');
           }
 
-          const conversation = await tx.run(zql.conversations
-            .where('conversationId', conversationId)
-            .one());
+          const messageContent = poll ? buildPollMessageSummary(poll) : content.trim();
+
+          const conversation = await tx.run(
+            zql.conversations.where('conversationId', conversationId).one()
+          );
           if (!conversation) {
             throw new Error("Message doesn't belong to a conversation");
           }
           content = await guestSafeContent(tx, authData.role, conversation.channelId, content);
           const [channel, participant, channelDrafts] = await Promise.all([
             tx.run(zql.channels.where('id', conversation.channelId).related('project').one()),
-            tx.run(zql.channel_participants
-              .where('userId', authData.sub)
-              .where('channelId', conversation.channelId)
-              .one()),
-            tx.run(zql.draft_messages
-              .where('channelId', conversation.channelId)
-              .where('userId', authData.sub)
-              .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null)))),
+            tx.run(
+              zql.channel_participants
+                .where('userId', authData.sub)
+                .where('channelId', conversation.channelId)
+                .one()
+            ),
+            tx.run(
+              zql.draft_messages
+                .where('channelId', conversation.channelId)
+                .where('userId', authData.sub)
+                .where(({ or, cmp }) =>
+                  or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null))
+                )
+            ),
           ]);
           if (!channel) {
             throw new Error("Channel doesn't exists");
@@ -3732,17 +4083,17 @@ export function createMutators(
             conversationId,
             workspaceId: authData.workspaceId,
             senderId: authData.sub,
-            content: content.trim(),
+            content: messageContent,
             msgType: type,
             hasAttachment: false,
             edited: false,
             showInChannel,
             createdAt: timestamp,
             childConversationId: showInChannel ? childConversationId : null,
-            metadata: null,
+            metadata: poll ? { messageSubtype: 'poll' } : null,
             visibleTo: null,
             isDeleted: false,
-            isSent: true
+            isSent: true,
           };
 
           if (attachmentIds !== undefined) {
@@ -3830,7 +4181,20 @@ export function createMutators(
           }
 
           await tx.mutate.messages.insert(message);
-          logger.info(`💬 [MUTATOR-CREATE-REPLY] Reply message ${message.messageId} created in conversation ${conversationId}, type: ${type}`);
+          if (poll) {
+            await insertPollGraph(
+              tx,
+              poll,
+              messageId,
+              authData.workspaceId,
+              authData.sub,
+              timestamp,
+              pollSchedule
+            );
+          }
+          logger.info(
+            `💬 [MUTATOR-CREATE-REPLY] Reply message ${message.messageId} created in conversation ${conversationId}, type: ${type}`
+          );
 
           if (type === MessageType.USER) {
             asyncTasks.push(async () => {
@@ -3953,7 +4317,7 @@ export function createMutators(
             const needsUpgrade = existingParticipant.participationType !== ConversationParticipation.AUTHOR;
             const needsResubscribe = !existingParticipant.isSubscribed;
             const needsUpdate = needsUpgrade || needsResubscribe || existingParticipant.lastReplyAt !== timestamp;
-            
+
             if (needsUpdate) {
               await tx.mutate.conversation_participants.update({
                 id: existingParticipant.id,
@@ -3985,7 +4349,7 @@ export function createMutators(
               .where('channelId', channel.id));
 
             for (const dmParticipant of dmParticipants) {
-              // Skip if this is the sender 
+              // Skip if this is the sender
               if (dmParticipant.userId === authData.sub) {
                 continue;
               }
@@ -4114,6 +4478,10 @@ export function createMutators(
           const message = await tx.run(zql.messages.where('messageId', messageId).one());
           if (!message) {
             throw new Error('Message not available');
+          }
+
+          if (isPollMessageMetadata(message.metadata)) {
+            throw new ApplicationError('Poll messages cannot be edited');
           }
 
           // For forwarded messages, empty content is allowed (clearing optional message)
@@ -4677,6 +5045,13 @@ export function createMutators(
               });
             })
           );
+
+          // Removing the poll row also covers soft-deleted roots; PostgreSQL
+          // cascades questions, choices and ballots in the authoritative write.
+          const poll = await tx.run(zql.polls.where('messageId', '=', messageId).one());
+          if (poll) {
+            await tx.mutate.polls.delete({ id: poll.id });
+          }
 
           // Get all OTHER messages in the conversation (excluding the one being deleted)
           const allMessages = await tx.run(zql.messages
@@ -5881,7 +6256,7 @@ export function createMutators(
           }
 
           // Update ConversationParticipant.lastReadAt to track when user last read this thread
-          let participant = await tx.run(
+          const participant = await tx.run(
             zql.conversation_participants
               .where('conversationId', conversationId)
               .where('userId', authData.sub)
@@ -12650,7 +13025,7 @@ export function createMutators(
             zql.channel_participants
               .where('channelId', args.channelId)
               .where('userId', authData.sub)
-              .one()
+              .one(),
           );
           if (!participant) {
             throw new Error('Hub membership required');
@@ -12765,7 +13140,7 @@ export function createMutators(
             zql.channel_participants
               .where('channelId', args.channelId)
               .where('userId', authData.sub)
-              .one(),
+              .one()
           );
           if (!participant) {
             throw new Error('Hub membership required');
@@ -12899,7 +13274,7 @@ export function createMutators(
                 }
                 return candidateProjectId;
               };
-  
+
               if (projectId) {
                 return validateProject(projectId);
               }
@@ -12916,7 +13291,7 @@ export function createMutators(
                   if (board?.workspaceId === workspaceId) return board.projectId;
                 }
               }
-  
+
               return undefined;
             };
             const scopedProjectId = await resolveScopedProjectId();
@@ -15904,7 +16279,11 @@ export function createMutators(
         }),
         async ({ tx, ctx, args: { channelId, prompt, timestamp: _timestamp } }) => {
           const status = await tx.run(
-            zql.channel_user_status.where('userId', ctx.userID).where('channelId', channelId).one(),
+            zql.channel_user_status
+              .where('userId', ctx.userID)
+              .where('channelId', channelId)
+              .where('isDeleted', false)
+              .one(),
           );
 
           if (!status) {
@@ -15988,7 +16367,7 @@ export function createMutators(
               .where('userId', ctx.userID)
               .where('channelId', channelId)
               .where('isDeleted', false)
-              .one(),
+              .one()
           );
 
           if (!status) {
@@ -18095,13 +18474,24 @@ export function createMutators(
           channelId: z.string(),
           conversationId: z.string().optional(),
           content: z.string(),
+          poll: pollDraftSchema.optional(),
+          pollSchedule: pollScheduleSchema.optional(),
           scheduledFor: z.number(),
           timestamp: z.number(),
         }),
         async ({
           tx,
           ctx,
-          args: { id, channelId, conversationId, content, scheduledFor, timestamp },
+          args: {
+            id,
+            channelId,
+            conversationId,
+            content,
+            poll,
+            pollSchedule,
+            scheduledFor,
+            timestamp,
+          },
         }) => {
           if (scheduledFor <= Date.now()) {
             throw new Error('Scheduled time must be in the future');
@@ -18145,6 +18535,7 @@ export function createMutators(
             conversationId: conversationId ?? null,
             senderId: ctx.userID,
             content: content.trim(),
+            pollDraft: poll ? { poll, schedule: pollSchedule ?? {} } : null,
             hasAttachment: scheduledAttachments.length > 0,
             scheduledFor,
             status: DelayedMessageStatus.PENDING,

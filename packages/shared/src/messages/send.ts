@@ -4,6 +4,7 @@ import { MessageType } from '../zero/schema.js';
 import type { EntityLinkContextInput } from '../sdlc.js';
 import { mutators } from '../zero/mutators.js';
 import type { ConversationRef } from './conversationRef.js';
+import type { PollDraft } from '../polls/index.js';
 import { clearDraft } from './draft.js';
 import { emitMessageSent } from './events.js';
 import { subscribeSendLifecycle } from './mutationLifecycle.js';
@@ -25,6 +26,7 @@ export type SendPayload = {
   timestamp?: number;
   attachments?: PendingAttachment[];
   entityLinkContext?: EntityLinkContextInput;
+  poll?: PollDraft;
 };
 
 export type SendResult = {
@@ -74,6 +76,7 @@ export function sendMessage(
     ...(childConversationId !== undefined && { childConversationId }),
     ...(attachments.length > 0 && { attachments }),
     ...(payload.entityLinkContext !== undefined && { entityLinkContext: payload.entityLinkContext }),
+    ...(payload.poll !== undefined && { poll: payload.poll }),
     sessionId: getCurrentSessionId(),
     zeroStateAtSend,
     mutatorFired: false,
@@ -129,6 +132,7 @@ export function sendMessage(
             ...(payload.entityLinkContext !== undefined && {
               entityLinkContext: payload.entityLinkContext,
             }),
+            ...(payload.poll !== undefined && { poll: payload.poll }),
           }),
         )
       : zero.mutate(
@@ -143,6 +147,7 @@ export function sendMessage(
               showInChannel: payload.alsoSendToChannel,
             }),
             ...(childConversationId !== undefined && { childConversationId }),
+            ...(payload.poll !== undefined && { poll: payload.poll }),
           }),
         );
 

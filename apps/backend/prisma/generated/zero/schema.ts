@@ -646,6 +646,9 @@ export const boardComplexityScoreTable = table("board_complexity_scores")
     boardId: string(),
     weight: number(),
     usePercentage: boolean(),
+    percentageWindowDays: number().optional(),
+    percentageShareBasis: string().optional(),
+    percentageWindowStartAt: number().optional(),
     createdAt: number(),
     updatedAt: number(),
     createdBy: string(),
@@ -1121,6 +1124,20 @@ export const channelTable = table("channels")
     isArchived: boolean(),
     showTicketsTabTicketsInChat: boolean().optional(),
     callSummaryPrompt: string().optional(),
+    connectId: string().optional(),
+  })
+  .primaryKey("id");
+
+export const channelPublishedTabTable = table("channel_published_tabs")
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    channelId: string(),
+    entityType: string(),
+    entityId: string(),
+    position: number(),
+    publishedBy: string(),
+    createdAt: number(),
   })
   .primaryKey("id");
 
@@ -1132,6 +1149,21 @@ export const channelBoardMappingTable = table("channel_board_mappings")
     workspaceId: string(),
     isDefault: boolean(),
     createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const connectGroupTable = table("connect_group")
+  .columns({
+    id: string(),
+    entityType: string(),
+    entityId: string(),
+    hostWorkspaceId: string(),
+    invitedEntityId: string().optional(),
+    invitedWorkspaceId: string().optional(),
+    connectId: string(),
+    status: string(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1406,6 +1438,7 @@ export const emailChannelPreferenceTable = table("email_channel_preferences")
     deskReportRangeDays: number().optional(),
     duplicateScopeConfig: string().optional(),
     slackDeskTriggerMode: string().optional(),
+    deskAppIds: string().optional(),
   })
   .primaryKey("channelId");
 
@@ -1462,6 +1495,98 @@ export const messageTable = table("messages")
     messageActs: string().optional(),
   })
   .primaryKey("messageId");
+
+export const pollTable = table("polls")
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    messageId: string(),
+    createdBy: string(),
+    allowAudienceChoices: boolean(),
+    isAnonymous: boolean(),
+    resultVisibility: string(),
+    sortResultsByVotes: boolean(),
+    closedAt: number().optional(),
+    createdAt: number(),
+  })
+  .primaryKey("id");
+
+export const pollQuestionTable = table("poll_questions")
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    pollId: string(),
+    question: string(),
+    position: number(),
+    responseType: string(),
+    createdAt: number(),
+  })
+  .primaryKey("id");
+
+export const pollOptionTable = table("poll_options")
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    questionId: string(),
+    text: string(),
+    normalizedText: string(),
+    position: number(),
+    createdBy: string(),
+    createdAt: number(),
+  })
+  .primaryKey("id");
+
+export const pollVoteTable = table("poll_votes")
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    pollId: string(),
+    questionId: string(),
+    userId: string(),
+    optionIds: json(),
+    textAnswer: string().optional(),
+    rankedOptionIds: json().optional(),
+    rating: number().optional(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const pollQuestionResultTable = table("poll_question_results")
+  .columns({
+    questionId: string(),
+    workspaceId: string(),
+    pollId: string(),
+    voterCount: number(),
+    optionCounts: json(),
+    responseCount: number(),
+    rankTotals: json(),
+    rankResponseCount: number(),
+    ratingCounts: json(),
+    ratingTotal: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("questionId");
+
+export const pollJobTable = table("poll_jobs")
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    pollId: string(),
+    kind: string(),
+    runAt: number(),
+    status: string(),
+    attempts: number(),
+    maxAttempts: number(),
+    leaseOwner: string().optional(),
+    leaseExpiresAt: number().optional(),
+    completedAt: number().optional(),
+    failedAt: number().optional(),
+    lastError: string().optional(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
 
 export const messageArtifactTable = table("message_artifacts")
   .columns({
@@ -1906,6 +2031,7 @@ export const canvasTable = table("canvases")
     entryFile: string().optional(),
     quartoDocumentType: string().optional(),
     gcsPath: string().optional(),
+    connectId: string().optional(),
   })
   .primaryKey("id");
 
@@ -1920,6 +2046,7 @@ export const canvasVersionTable = table("canvas_versions")
     createdBy: string().optional(),
     createdAt: number(),
     updatedAt: number(),
+    canvasConnectId: string().optional(),
   })
   .primaryKey("id");
 
@@ -1937,6 +2064,7 @@ export const canvasCommentThreadTable = table("canvas_comment_threads")
     statusUpdatedAt: number().optional(),
     createdBy: string(),
     createdAt: number(),
+    canvasConnectId: string().optional(),
   })
   .primaryKey("id");
 
@@ -1953,6 +2081,7 @@ export const canvasCommentTable = table("canvas_comments")
     editedAt: number().optional(),
     deletedAt: number().optional(),
     createdAt: number(),
+    canvasConnectId: string().optional(),
   })
   .primaryKey("id");
 
@@ -1967,6 +2096,7 @@ export const canvasParticipantTable = table("canvas_participants")
     role: string(),
     joinedAt: number(),
     updatedAt: number(),
+    canvasConnectId: string().optional(),
   })
   .primaryKey("id");
 
@@ -1979,6 +2109,7 @@ export const canvasUserStatusTable = table("canvas_user_status")
     isStarred: boolean(),
     createdAt: number(),
     updatedAt: number().optional(),
+    canvasConnectId: string().optional(),
   })
   .primaryKey("id");
 
@@ -2116,6 +2247,7 @@ export const sdlcFolderTable = table("sdlc_folders")
     workspaceId: string(),
     id: string(),
     name: string(),
+    icon: string().optional(),
     createdBy: string(),
     createdAt: number(),
     updatedAt: number(),
@@ -2129,6 +2261,7 @@ export const sdlcTrackTable = table("sdlc_tracks")
     repoId: string().optional(),
     name: string(),
     description: string().optional(),
+    icon: string().optional(),
     status: string(),
     createdBy: string(),
     createdAt: number(),
@@ -2746,6 +2879,7 @@ export const delayedMessageTable = table("delayed_messages")
     conversationId: string().optional(),
     senderId: string(),
     content: string(),
+    pollDraft: json().optional(),
     hasAttachment: boolean(),
     scheduledFor: number(),
     status: string(),
@@ -3120,6 +3254,20 @@ export const executionRunLogTable = table("execution_run_logs")
     dedupChecks: json().optional(),
     error: string().optional(),
     durationMs: number().optional(),
+    createdAt: number(),
+  })
+  .primaryKey("id");
+
+export const radarPrLinkTable = table("radar_pr_links")
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    prUrl: string(),
+    scopeKey: string(),
+    channelId: string(),
+    conversationId: string(),
+    messageId: string(),
+    postedAt: number(),
     createdAt: number(),
   })
   .primaryKey("id");
@@ -4378,6 +4526,14 @@ export const channelBoardMappingTableRelationships = relationships(channelBoardM
   })
 }));
 
+export const connectGroupTableRelationships = relationships(connectGroupTable, ({ one }) => ({
+  canvasEntity: one({
+    sourceField: ["entityId"],
+    destField: ["id"],
+    destSchema: canvasTable,
+  })
+}));
+
 export const channelStatsTableRelationships = relationships(channelStatsTable, ({ one }) => ({
   channel: one({
     sourceField: ["channelId"],
@@ -4551,6 +4707,104 @@ export const messageTableRelationships = relationships(messageTable, ({ one, man
     sourceField: ["messageId"],
     destField: ["entityId"],
     destSchema: externalMessageTable,
+  }),
+  poll: one({
+    sourceField: ["messageId"],
+    destField: ["messageId"],
+    destSchema: pollTable,
+  })
+}));
+
+export const pollTableRelationships = relationships(pollTable, ({ one, many }) => ({
+  message: one({
+    sourceField: ["messageId"],
+    destField: ["messageId"],
+    destSchema: messageTable,
+  }),
+  questions: many({
+    sourceField: ["id"],
+    destField: ["pollId"],
+    destSchema: pollQuestionTable,
+  }),
+  votes: many({
+    sourceField: ["id"],
+    destField: ["pollId"],
+    destSchema: pollVoteTable,
+  }),
+  results: many({
+    sourceField: ["id"],
+    destField: ["pollId"],
+    destSchema: pollQuestionResultTable,
+  }),
+  jobs: many({
+    sourceField: ["id"],
+    destField: ["pollId"],
+    destSchema: pollJobTable,
+  })
+}));
+
+export const pollQuestionTableRelationships = relationships(pollQuestionTable, ({ one, many }) => ({
+  poll: one({
+    sourceField: ["pollId"],
+    destField: ["id"],
+    destSchema: pollTable,
+  }),
+  options: many({
+    sourceField: ["id"],
+    destField: ["questionId"],
+    destSchema: pollOptionTable,
+  }),
+  votes: many({
+    sourceField: ["id"],
+    destField: ["questionId"],
+    destSchema: pollVoteTable,
+  }),
+  result: one({
+    sourceField: ["id"],
+    destField: ["questionId"],
+    destSchema: pollQuestionResultTable,
+  })
+}));
+
+export const pollOptionTableRelationships = relationships(pollOptionTable, ({ one }) => ({
+  question: one({
+    sourceField: ["questionId"],
+    destField: ["id"],
+    destSchema: pollQuestionTable,
+  })
+}));
+
+export const pollVoteTableRelationships = relationships(pollVoteTable, ({ one }) => ({
+  poll: one({
+    sourceField: ["pollId"],
+    destField: ["id"],
+    destSchema: pollTable,
+  }),
+  question: one({
+    sourceField: ["questionId"],
+    destField: ["id"],
+    destSchema: pollQuestionTable,
+  })
+}));
+
+export const pollQuestionResultTableRelationships = relationships(pollQuestionResultTable, ({ one }) => ({
+  poll: one({
+    sourceField: ["pollId"],
+    destField: ["id"],
+    destSchema: pollTable,
+  }),
+  question: one({
+    sourceField: ["questionId"],
+    destField: ["id"],
+    destSchema: pollQuestionTable,
+  })
+}));
+
+export const pollJobTableRelationships = relationships(pollJobTable, ({ one }) => ({
+  poll: one({
+    sourceField: ["pollId"],
+    destField: ["id"],
+    destSchema: pollTable,
   })
 }));
 
@@ -4712,6 +4966,11 @@ export const canvasTableRelationships = relationships(canvasTable, ({ one, many 
     sourceField: ["id"],
     destField: ["artifactId"],
     destSchema: sdlcArtifactTable,
+  }),
+  connectGroups: many({
+    sourceField: ["id"],
+    destField: ["entityId"],
+    destSchema: connectGroupTable,
   })
 }));
 
@@ -5338,7 +5597,9 @@ export const schema = createSchema(
       stagePrStatusMappingTable,
       stageTransitionTable,
       channelTable,
+      channelPublishedTabTable,
       channelBoardMappingTable,
+      connectGroupTable,
       channelStatsTable,
       channelParticipantTable,
       channelUserStatusTable,
@@ -5357,6 +5618,12 @@ export const schema = createSchema(
       classificationMappingTable,
       boardSlaPolicyTable,
       messageTable,
+      pollTable,
+      pollQuestionTable,
+      pollOptionTable,
+      pollVoteTable,
+      pollQuestionResultTable,
+      pollJobTable,
       messageArtifactTable,
       messageAttachmentTable,
       reactionTable,
@@ -5460,6 +5727,7 @@ export const schema = createSchema(
       executionThreadStateTable,
       executionItemMutationTable,
       executionRunLogTable,
+      radarPrLinkTable,
       radarRuleTable,
     ],
     relationships: [
@@ -5518,6 +5786,7 @@ export const schema = createSchema(
       stageTransitionTableRelationships,
       channelTableRelationships,
       channelBoardMappingTableRelationships,
+      connectGroupTableRelationships,
       channelStatsTableRelationships,
       channelParticipantTableRelationships,
       channelUserStatusTableRelationships,
@@ -5530,6 +5799,12 @@ export const schema = createSchema(
       conversationLabelMappingTableRelationships,
       deskAutoLabelRuleReferenceTableRelationships,
       messageTableRelationships,
+      pollTableRelationships,
+      pollQuestionTableRelationships,
+      pollOptionTableRelationships,
+      pollVoteTableRelationships,
+      pollQuestionResultTableRelationships,
+      pollJobTableRelationships,
       messageAttachmentTableRelationships,
       reactionTableRelationships,
       reactionCountTableRelationships,
@@ -5656,7 +5931,9 @@ export type Stage = Row<typeof schema.tables.stages>;
 export type StagePRStatusMapping = Row<typeof schema.tables.stage_pr_status_mappings>;
 export type StageTransition = Row<typeof schema.tables.stage_transitions>;
 export type Channel = Row<typeof schema.tables.channels>;
+export type ChannelPublishedTab = Row<typeof schema.tables.channel_published_tabs>;
 export type ChannelBoardMapping = Row<typeof schema.tables.channel_board_mappings>;
+export type ConnectGroup = Row<typeof schema.tables.connect_group>;
 export type ChannelStats = Row<typeof schema.tables.channel_stats>;
 export type ChannelParticipant = Row<typeof schema.tables.channel_participants>;
 export type ChannelUserStatus = Row<typeof schema.tables.channel_user_status>;
@@ -5675,6 +5952,12 @@ export type EmailChannelPreference = Row<typeof schema.tables.email_channel_pref
 export type ClassificationMapping = Row<typeof schema.tables.classification_mappings>;
 export type BoardSlaPolicy = Row<typeof schema.tables.board_sla_policies>;
 export type Message = Row<typeof schema.tables.messages>;
+export type Poll = Row<typeof schema.tables.polls>;
+export type PollQuestion = Row<typeof schema.tables.poll_questions>;
+export type PollOption = Row<typeof schema.tables.poll_options>;
+export type PollVote = Row<typeof schema.tables.poll_votes>;
+export type PollQuestionResult = Row<typeof schema.tables.poll_question_results>;
+export type PollJob = Row<typeof schema.tables.poll_jobs>;
 export type MessageArtifact = Row<typeof schema.tables.message_artifacts>;
 export type MessageAttachment = Row<typeof schema.tables.message_attachments>;
 export type Reaction = Row<typeof schema.tables.reactions>;
@@ -5778,4 +6061,5 @@ export type ExecutionItem = Row<typeof schema.tables.execution_items>;
 export type ExecutionThreadState = Row<typeof schema.tables.execution_thread_states>;
 export type ExecutionItemMutation = Row<typeof schema.tables.execution_item_mutations>;
 export type ExecutionRunLog = Row<typeof schema.tables.execution_run_logs>;
+export type RadarPrLink = Row<typeof schema.tables.radar_pr_links>;
 export type RadarRule = Row<typeof schema.tables.radar_rules>;

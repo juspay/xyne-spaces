@@ -6,6 +6,7 @@ import { mutators } from '../zero/mutators.js';
 import { MessageType } from '../zero/schema.js';
 import type { EntityLinkContextInput } from '../sdlc.js';
 import type { ConversationRef } from './conversationRef.js';
+import type { PollDraft } from '../polls/index.js';
 import { subscribeSendLifecycle } from './mutationLifecycle.js';
 
 const PENDING_STORAGE_KEY = 'pendingMessages';
@@ -52,6 +53,7 @@ export type PendingMessage = {
   childConversationId?: string;
   attachments?: PendingAttachment[];
   entityLinkContext?: EntityLinkContextInput;
+  poll?: PollDraft;
   sessionId: string;
   zeroStateAtSend: ZeroStateName;
   mutatorFired: boolean;
@@ -210,6 +212,7 @@ export function firePendingMutator(zero: Zero, entry: PendingMessage): void {
         type: entry.type,
         attachmentIds,
         ...(entry.entityLinkContext !== undefined && { entityLinkContext: entry.entityLinkContext }),
+        ...(entry.poll !== undefined && { poll: entry.poll }),
       }),
     );
   } else {
@@ -225,6 +228,7 @@ export function firePendingMutator(zero: Zero, entry: PendingMessage): void {
           showInChannel: entry.alsoSendToChannel,
         }),
         ...(childConversationId !== undefined && { childConversationId }),
+        ...(entry.poll !== undefined && { poll: entry.poll }),
       }),
     );
   }

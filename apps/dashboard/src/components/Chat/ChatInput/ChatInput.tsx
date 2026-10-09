@@ -24,6 +24,8 @@ import {
   ChannelType,
   BaseTicketType,
   CommandAccessibility,
+  type PollDraft,
+  type PollSchedule,
 } from '@xyne/shared';
 import { BLOCKED_EXTENSIONS } from '../../ui/utils/files';
 import { getAllChannels, useChannel, useChannelMentionSearch } from '../../../hooks/useChannels';
@@ -113,6 +115,8 @@ import { RelatedContextDialog } from './RelatedContextDialog';
 import { openSearchResult } from '../../../utils/searchNavigation';
 import { isElectronApp } from '../../../utils/electronApp';
 import type { RelatedItem } from '../../../types/search';
+import { PollComposerDialog } from '../Polls/PollComposerDialog';
+import { publishPollToChannel } from '../Polls/publishPoll';
 
 const CHAT_MESSAGE_SENT_EVENT = 'xyne:chat-message-sent';
 
@@ -463,6 +467,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     const { handleTyping, stopTyping } = useTypingIndicator(currentSessionId);
     const [typingUsers, setTypingUsers] = useState<Array<{ userId: string; username: string }>>([]);
     const [alsoSendToChannel, setAlsoSendToChannel] = useState(false);
+    const [pollComposerOpen, setPollComposerOpen] = useState(false);
     const [isCreateTicketModalOpen, setIsCreateTicketModalOpen] = useState(false);
     // Which surface opened the create form (composer button vs intent toast).
     const [createTicketSource, setCreateTicketSource] = useState('chat_composer');
@@ -819,6 +824,28 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         }
       },
       [channelId, conversationId, navigate],
+    );
+
+    const handlePublishPoll = useCallback(
+      async (poll: PollDraft, pollSchedule: PollSchedule): Promise<void> => {
+        if (!user?.id) throw new Error('Sign in before publishing a poll');
+
+        await publishPollToChannel(
+          { poll, pollSchedule, channelId },
+          {
+            createId: uuidv4,
+            schedule: async input => {
+              const result = await zero.mutate(mutators.delayedMessages.create(input)).server;
+              if (result.type === 'error') {
+                throw new Error(result.error?.message ?? 'Failed to schedule poll');
+              }
+            },
+            send: (ref, payload) =>
+              sendMessage(zero as Parameters<typeof sendMessage>[0], ref, payload),
+          },
+        );
+      },
+      [channelId, user?.id, zero],
     );
 
     const handleMentionSearch = useCallback(
@@ -1690,6 +1717,8 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                 inputBoxRef.current?.insertContent(content);
               }}
               onCreateCanvas={handleCreateCanvasFromComposer}
+              {...(!messageId &&
+                !conversationId && { onCreatePoll: () => setPollComposerOpen(true) })}
               hasTicket={hasTicket}
               sendDisabled={isOffline || isAttachmentUploading}
               {...(isAttachmentUploading && {
@@ -1745,6 +1774,12 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
             onTicketCreated={handleTicketCreated}
           />
         ) : null}
+        <PollComposerDialog
+          open={pollComposerOpen}
+          isPublishing={false}
+          onClose={() => setPollComposerOpen(false)}
+          onPublish={handlePublishPoll}
+        />
         {relatedEnabled && (
           <RelatedContextDialog
             open={relatedPopup.open}
