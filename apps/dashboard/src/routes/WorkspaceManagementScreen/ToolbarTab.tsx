@@ -11,7 +11,6 @@ import { WorkspaceRole } from '@xyne/shared';
 import {
   NAVIGATION_ITEMS,
   NON_RAIL_TOOLBAR_ITEMS,
-  TOOLBAR_ITEM_DESCRIPTIONS,
   TOOLBAR_UNMANAGED_PATHS,
 } from '../../components/AppSidebar/navigationConfig';
 import { PATH_TO_RESOURCE } from '../../components/AppSidebar/utils/resourceMapping';
@@ -126,11 +125,7 @@ export const ToolbarTab = ({ isActive: _isActive = false }: ToolbarTabProps): Re
                     </div>
                     <div className='min-w-0'>
                       <p className='text-sm font-medium text-foreground truncate'>{item.label}</p>
-                      {TOOLBAR_ITEM_DESCRIPTIONS[item.path] && (
-                        <p className='text-xs text-muted-foreground truncate'>
-                          {TOOLBAR_ITEM_DESCRIPTIONS[item.path]}
-                        </p>
-                      )}
+                      <p className='text-xs text-muted-foreground truncate'>{item.description}</p>
                     </div>
                   </div>
                   <span

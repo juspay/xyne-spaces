@@ -79,6 +79,8 @@ type NavIcon = ComponentType<SVGProps<SVGSVGElement> & { size?: number }>;
 export interface AINavItem {
   key: string;
   label: string;
+  /** What the page holds, as for NavigationItem.description. */
+  description: string;
   icon: NavIcon;
   to: string;
   /** Prefix for active matching when `to` points at one sub-route of a section. */
@@ -92,22 +94,61 @@ export interface AINavItem {
 }
 
 export const NAV_ITEMS: AINavItem[] = [
-  { key: 'knowledge', label: 'Knowledge', icon: Notebook as NavIcon, to: '/ai/knowledge' },
-  { key: 'agent-hub', label: 'Agent Hub', icon: LayoutGridStackDown as NavIcon, to: '/ai/library' },
-  { key: 'digital-twin', label: 'Digital twin', icon: UserTwo as NavIcon, to: '/ai/digital-twin' },
+  {
+    key: 'knowledge',
+    label: 'Knowledge',
+    description: 'Documents and memories the AI draws on',
+    icon: Notebook as NavIcon,
+    to: '/ai/knowledge',
+  },
+  {
+    key: 'agent-hub',
+    label: 'Agent Hub',
+    description: 'Agents, also called bots or AI helpers, with their skills and MCP tools',
+    icon: LayoutGridStackDown as NavIcon,
+    to: '/ai/library',
+  },
+  {
+    key: 'digital-twin',
+    label: 'Digital twin',
+    description: 'Your AI double and what it remembers',
+    icon: UserTwo as NavIcon,
+    to: '/ai/digital-twin',
+  },
   {
     key: 'organization',
     label: 'Organization',
+    description: 'AI setup for the whole organization',
     icon: BuildingApartmentTwo as NavIcon,
     to: '/ai/organization',
     orgManagerOnly: true,
   },
-  { key: 'metrics', label: 'Metrics', icon: Piechart01 as NavIcon, to: '/ai/metrics' },
-  { key: 'settings', label: 'Settings', icon: Settings01 as NavIcon, to: '/ai/settings' },
-  { key: 'admin', label: 'Admin', icon: UserShield as NavIcon, to: '/ai/admin', adminOnly: true },
+  {
+    key: 'metrics',
+    label: 'Metrics',
+    description: 'AI usage metrics',
+    icon: Piechart01 as NavIcon,
+    to: '/ai/metrics',
+  },
+  {
+    key: 'settings',
+    label: 'Settings',
+    description: 'AI preferences and custom instructions',
+    icon: Settings01 as NavIcon,
+    to: '/ai/settings',
+  },
+  {
+    key: 'admin',
+    label: 'Admin',
+    description: 'AI administration and access requests',
+    icon: UserShield as NavIcon,
+    to: '/ai/admin',
+    adminOnly: true,
+  },
   {
     key: 'daily-brief',
     label: 'Morning Brief',
+    description: "Today's AI summary of your work",
     icon: File02Ai as NavIcon,
     to: '/ai/daily-brief/today',
     matchPath: '/ai/daily-brief',
@@ -321,6 +362,7 @@ function SessionHistory({
                   <button
                     type='button'
                     onClick={() => onSelect(session)}
+                    aria-label={`Open chat: ${session.title}`}
                     className={cn(
                       'flex min-w-0 flex-1 items-center self-stretch pr-1 text-left text-sm transition-[padding] group-hover:pr-14',
                       openDropdownId === session.id && 'pr-14',
@@ -663,13 +705,14 @@ export function AISidebar({
               active={isNewChatActive}
               onClick={onCreateChat}
             />
-            {visibleNavItems.map(({ key, label, icon: Icon, to, trackName }) => {
+            {visibleNavItems.map(({ key, label, description, icon: Icon, to, trackName }) => {
               const isActive = routedActiveItem?.key === key;
               return (
                 <Link
                   key={key}
                   to={prefixWs(to)}
                   aria-current={isActive ? 'page' : undefined}
+                  aria-description={description}
                   {...(trackName
                     ? { 'data-track-category': 'XyneAI', 'data-track-name': trackName }
                     : {})}

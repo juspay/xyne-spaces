@@ -157,7 +157,11 @@ export const Tooltip = ({
 }: TooltipProps): React.ReactElement => {
   return (
     <TooltipPrimitive.Root data-slot='tooltip' delayDuration={delayDuration} {...rootProps}>
-      <TooltipPrimitive.Trigger asChild data-slot='tooltip-trigger'>
+      <TooltipPrimitive.Trigger
+        asChild
+        data-slot='tooltip-trigger'
+        aria-description={typeof content === 'string' ? content : undefined}
+      >
         {children}
       </TooltipPrimitive.Trigger>
       <TooltipPrimitive.Portal>

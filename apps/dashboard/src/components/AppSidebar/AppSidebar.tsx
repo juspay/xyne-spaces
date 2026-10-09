@@ -1,4 +1,4 @@
-import { ReactElement, useEffect, useMemo, useRef, useState } from 'react';
+import { ReactElement, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, type Location } from 'react-router-dom';
 import { useRouterSelector, useStableNavigate } from '../../hooks/useStableRouter';
 import { Tooltip } from '../ui/Tooltip/Tooltip';
@@ -388,6 +388,8 @@ const AppSidebar = (): ReactElement => {
     [visibleNavigationItems, toolbarIds],
   );
   const isMoreActive = moreItems.some(item => item.path === activeRoute);
+  const moreDescriptionId = useId();
+  const helpDescriptionId = useId();
 
   const permittedGlobalPaths = useMemo(
     () => new Set(visibleNavigationItems.map(item => item.path)),
@@ -566,6 +568,7 @@ const AppSidebar = (): ReactElement => {
                         }
                       }}
                       aria-label={showPendingDmDot ? 'DMs unread' : item.label}
+                      aria-description={item.description}
                       data-testid={testId}
                       data-track-category='App_Sidebar'
                       data-track-name='Sidebar_Nav_Item'
@@ -647,6 +650,7 @@ const AppSidebar = (): ReactElement => {
                       <button
                         type='button'
                         aria-label='More'
+                        aria-describedby={moreDescriptionId}
                         data-testid='nav-more'
                         data-track-category='App_Sidebar'
                         data-track-name='Sidebar_More_Toggle'
@@ -658,6 +662,9 @@ const AppSidebar = (): ReactElement => {
                         )}
                       >
                         <ThreeDotsMenuHorizontal size={16} />
+                        <span id={moreDescriptionId} className='sr-only'>
+                          {moreItems.map(item => item.label).join(', ')}
+                        </span>
                       </button>
                     }
                   >
@@ -715,6 +722,7 @@ const AppSidebar = (): ReactElement => {
               <button
                 type='button'
                 aria-label='Support'
+                aria-describedby={helpDescriptionId}
                 title='Support'
                 data-testid='nav-support'
                 data-track-category='App_Sidebar'
@@ -727,6 +735,9 @@ const AppSidebar = (): ReactElement => {
                 )}
               >
                 <InformationCircle size={16} />
+                <span id={helpDescriptionId} className='sr-only'>
+                  Help: report a problem with Xyne
+                </span>
               </button>
             }
           >
@@ -891,6 +902,7 @@ const SidebarMoreMenu = ({
                   data-track-category='App_Sidebar'
                   data-track-name='Sidebar_More_Item'
                   data-track-metadata={JSON.stringify({ path: item.path, label: item.label })}
+                  aria-description={item.description}
                   className={cn(
                     'flex items-center gap-3 rounded-md px-2.5 py-2 text-sm transition-colors',
                     isActive
