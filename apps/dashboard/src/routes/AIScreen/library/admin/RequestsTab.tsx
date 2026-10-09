@@ -43,12 +43,12 @@ import { TabMessage } from './components/TabMessage';
 import { RegistrationFlowDialog } from './components/RegistrationFlowDialog';
 import {
   adminAgentsPrefix,
-  agentDetailKey,
   mcpPublishKey,
   pendingRequestsKey,
   pendingRequestsPrefix,
   workflowRequestsKey,
 } from './hooks/adminQueryKeys';
+import { clawAgentDetailKey } from '@/hooks/useClawAgentDetail';
 import { orgLabel } from './orgLabel';
 import { PersonPill } from '../shared/primitives/PersonPill';
 import { AdminToolbarPortal } from './components/AdminToolbarSlot';
@@ -120,14 +120,36 @@ interface DetailEntry {
   scrollable?: boolean;
 }
 
+const asText = (value: unknown): string | undefined =>
+  typeof value === 'string' && value.trim() ? value : undefined;
+
+const asTextList = (value: unknown): string[] | undefined => {
+  if (!Array.isArray(value)) return undefined;
+  const items = value.filter((v): v is string => typeof v === 'string' && v.trim().length > 0);
+  return items.length > 0 ? items : undefined;
+};
+
 const parseProposedAgent = (raw: string | null | undefined): ProposedAgent | null => {
   if (!raw) return null;
+  let parsed: unknown;
   try {
-    const parsed: unknown = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' ? (parsed as ProposedAgent) : null;
+    parsed = JSON.parse(raw);
   } catch {
     return null;
   }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  const record = parsed as Record<string, unknown>;
+  return {
+    ...(asText(record['description'])
+      ? { description: asText(record['description']) as string }
+      : {}),
+    ...(asText(record['systemPrompt'])
+      ? { systemPrompt: asText(record['systemPrompt']) as string }
+      : {}),
+    ...(asTextList(record['tools']) ? { tools: asTextList(record['tools']) as string[] } : {}),
+    ...(asTextList(record['mcps']) ? { mcps: asTextList(record['mcps']) as string[] } : {}),
+    ...(asText(record['summary']) ? { summary: asText(record['summary']) as string } : {}),
+  };
 };
 
 const configToolNames = (config: Record<string, unknown>): string[] => {
@@ -198,7 +220,7 @@ const ProposedAgentDetail = ({ proposed }: { proposed: ProposedAgent }): ReactEl
 
 const ExistingAgentDetail = ({ slug }: { slug: string }): ReactElement => {
   const { data, isPending, isError } = useQuery({
-    queryKey: agentDetailKey(slug),
+    queryKey: clawAgentDetailKey(slug),
     queryFn: () => getClawAgentDetail(slug),
     staleTime: 5 * 60 * 1000,
   });
@@ -449,7 +471,7 @@ export function RequestsTab({
         onReject: note => runRejectAgent({ requestId: request.id, ...(note ? { note } : {}) }),
         ...(proposed
           ? { detail: <ProposedAgentDetail proposed={proposed} /> }
-          : !isSkill && slug
+          : !isDraft && !isSkill && slug
             ? { detail: <ExistingAgentDetail slug={slug} /> }
             : {}),
         isDraft,
