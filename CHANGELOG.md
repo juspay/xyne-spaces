@@ -1,3 +1,10 @@
+## [1.474.5-release-20261008.4](https://github.com/juspay/xyne-spaces/compare/v1.474.5-release-20261008.3...v1.474.5-release-20261008.4) (2026-10-09)
+
+
+### Bug Fixes
+
+* skip other users' 1:1 DMs in DM search for admins ([#2848](https://github.com/juspay/xyne-spaces/issues/2848)) ([8fd5514](https://github.com/juspay/xyne-spaces/commit/8fd55143c4068914261524c0e0500ff63fbc16ec))
+
 ## [1.474.5-release-20261008.3](https://github.com/juspay/xyne-spaces/compare/v1.474.5-release-20261008.2...v1.474.5-release-20261008.3) (2026-10-09)
 
 
