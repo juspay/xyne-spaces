@@ -1,3 +1,10 @@
+## [1.474.5-release-20261008.3](https://github.com/juspay/xyne-spaces/compare/v1.474.5-release-20261008.2...v1.474.5-release-20261008.3) (2026-10-09)
+
+
+### Bug Fixes
+
+* fixing emitting events to all apps of workspace. ([#2812](https://github.com/juspay/xyne-spaces/issues/2812)) ([#2820](https://github.com/juspay/xyne-spaces/issues/2820)) ([50d2b85](https://github.com/juspay/xyne-spaces/commit/50d2b85056793bdba82763b1bd828f642418ee35))
+
 ## [1.474.5-release-20261008.2](https://github.com/juspay/xyne-spaces/compare/v1.474.5-release-20261008.1...v1.474.5-release-20261008.2) (2026-10-08)
 
 
