@@ -1,8 +1,11 @@
 import { CLAW_API_BASE, ClawApiError, clawApiRequest } from '../../../services/claw/clawRequest';
 import { xyneAIStreamManager } from '../../../services/XyneAI/XyneAIStreamManager';
 import {
+  OTHER_CONVERSATION,
   executePageTool,
   hasWorkspacePages,
+  otherConversationShown,
+  runExclusive,
   subscribeToWorkspacePages,
   type PageToolResult,
 } from './workspaceBrowserTools';
@@ -17,6 +20,9 @@ interface PagePanelCall {
   id: string;
   toolName: string;
   args?: Record<string, unknown>;
+  conversationId?: string | null;
+  /** How long the server waits for the answer; past it the call is dropped, not run. */
+  expiresInMs?: number;
 }
 
 /** How serving a set of runs ended. */
@@ -48,26 +54,36 @@ export function streamingRunIds(): string[] {
 
 function callFrom(value: unknown): PagePanelCall | null {
   if (typeof value !== 'object' || value === null) return null;
-  const { id, toolName, args } = value as Record<string, unknown>;
+  const { id, toolName, args, conversationId, expiresInMs } = value as Record<string, unknown>;
   if (typeof id !== 'string' || typeof toolName !== 'string') return null;
   return {
     id,
     toolName,
     ...(typeof args === 'object' && args !== null && { args: args as Record<string, unknown> }),
+    ...((typeof conversationId === 'string' || conversationId === null) && { conversationId }),
+    ...(typeof expiresInMs === 'number' && { expiresInMs }),
   };
 }
 
-async function runCall(call: PagePanelCall): Promise<PageToolResult> {
+/** Runs a call, one at a time; null when it expired waiting its turn, so it isn't run late. */
+async function runCall(call: PagePanelCall, deadline: number): Promise<PageToolResult | null> {
   if (!call.toolName.startsWith('page-'))
     return { ok: false, content: `Unknown page tool: ${call.toolName}` };
-  return executePageTool(call.toolName, call.args ?? {}).catch(() => ({
-    ok: false,
-    content: 'Tool failed',
-  }));
+  if (otherConversationShown(call.conversationId)) return { ok: false, content: OTHER_CONVERSATION };
+  return runExclusive(async () => {
+    if (Date.now() >= deadline) return null;
+    return executePageTool(call.toolName, call.args ?? {}).catch(() => ({
+      ok: false,
+      content: 'Tool failed',
+    }));
+  });
 }
 
 async function answer(call: PagePanelCall): Promise<void> {
-  const result = await runCall(call);
+  const deadline =
+    typeof call.expiresInMs === 'number' ? Date.now() + call.expiresInMs : Infinity;
+  const result = await runCall(call, deadline);
+  if (!result) return;
   await clawApiRequest(`/surface/page-calls/${encodeURIComponent(call.id)}/result`, {
     method: 'POST',
     body: JSON.stringify(result),

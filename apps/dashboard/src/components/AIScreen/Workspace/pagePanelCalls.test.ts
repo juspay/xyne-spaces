@@ -13,13 +13,46 @@ vi.mock('../../../services/XyneAI/XyneAIStreamManager', () => ({
   },
 }));
 
+const tools = vi.hoisted(() => ({
+  executePageTool: vi.fn(async () => ({ ok: true, content: 'page text' })),
+}));
+
 vi.mock('./workspaceBrowserTools', () => ({
-  executePageTool: vi.fn(),
+  OTHER_CONVERSATION: 'other conversation shown',
+  executePageTool: tools.executePageTool,
   hasWorkspacePages: vi.fn(() => false),
+  otherConversationShown: (id: unknown) => id === 'conv-other',
+  runExclusive: <T,>(task: () => Promise<T>) => task(),
   subscribeToWorkspacePages: vi.fn(() => () => undefined),
 }));
 
+const api = vi.hoisted(() => ({ posts: [] as Array<{ path: string; body: unknown }> }));
+vi.mock('../../../services/claw/clawRequest', () => ({
+  CLAW_API_BASE: '',
+  ClawApiError: class extends Error {
+    status = 0;
+  },
+  clawApiRequest: vi.fn(async (path: string, init?: { body?: string }) => {
+    api.posts.push({ path, body: init?.body ? JSON.parse(init.body) : undefined });
+    return {};
+  }),
+}));
+
 import { startPagePanelCalls, streamingRunIds, subscribeToArtifactChanges } from './pagePanelCalls';
+
+/** Opens the stream with these `call` events, and leaves it open as the server does. */
+function streamCalls(calls: unknown[]): void {
+  const encoder = new TextEncoder();
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const call of calls) {
+        controller.enqueue(encoder.encode(`event: call\ndata: ${JSON.stringify(call)}\n\n`));
+      }
+    },
+  });
+  vi.stubGlobal('window', globalThis);
+  vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(body, { status: 200 }))));
+}
 
 describe('page panel calls', () => {
   it('serves only runs that are still streaming', () => {
@@ -51,5 +84,45 @@ describe('page panel calls', () => {
     stop();
     unsubscribe();
     vi.unstubAllGlobals();
+  });
+
+  describe('answering a page call', () => {
+    const settle = () => new Promise(resolve => setTimeout(resolve, 20));
+
+    it('runs a call for the conversation on screen and posts its result', async () => {
+      api.posts.length = 0;
+      tools.executePageTool.mockClear();
+      streamCalls([{ id: 'c1', toolName: 'page-read', args: {}, conversationId: 'conv-1', expiresInMs: 8000 }]);
+      const stop = startPagePanelCalls();
+      await vi.waitFor(() => expect(api.posts).toHaveLength(1));
+      expect(api.posts[0]).toEqual({ path: '/surface/page-calls/c1/result', body: { ok: true, content: 'page text' } });
+      stop();
+      vi.unstubAllGlobals();
+    });
+
+    it('refuses a call made for another conversation (otherConversationShown)', async () => {
+      api.posts.length = 0;
+      tools.executePageTool.mockClear();
+      streamCalls([{ id: 'c2', toolName: 'page-click', args: { ref: 'e1' }, conversationId: 'conv-other' }]);
+      const stop = startPagePanelCalls();
+      await vi.waitFor(() => expect(api.posts).toHaveLength(1));
+      expect(api.posts[0]?.body).toEqual({ ok: false, content: 'other conversation shown' });
+      expect(tools.executePageTool).not.toHaveBeenCalled();
+      stop();
+      vi.unstubAllGlobals();
+    });
+
+    it('drops a call whose expiresInMs ran out before its turn, without running or answering it', async () => {
+      api.posts.length = 0;
+      tools.executePageTool.mockClear();
+      streamCalls([{ id: 'c3', toolName: 'page-type', args: { ref: 'e1', text: 'x' }, expiresInMs: 0 }]);
+      const stop = startPagePanelCalls();
+      await settle();
+      await settle();
+      expect(tools.executePageTool).not.toHaveBeenCalled();
+      expect(api.posts).toHaveLength(0);
+      stop();
+      vi.unstubAllGlobals();
+    });
   });
 });

@@ -33,7 +33,7 @@ export function parseSurfaceCall(raw: string): PendingSurfaceCall | null {
     const call = JSON.parse(raw) as Partial<PendingSurfaceCall> | null;
     if (!call || typeof call.id !== 'string' || typeof call.toolName !== 'string') return null;
     const args = call.args && typeof call.args === 'object' ? call.args : {};
-    return { id: call.id, toolName: call.toolName, args };
+    return { id: call.id, toolName: call.toolName, args, deadline: deadlineFrom(call.expiresInMs) };
   } catch {
     return null;
   }
@@ -45,6 +45,12 @@ interface PendingSurfaceCall {
   id: string;
   toolName: string;
   args: Record<string, unknown>;
+  deadline?: number;
+  expiresInMs?: number;
+}
+
+function deadlineFrom(expiresInMs: unknown): number | undefined {
+  return typeof expiresInMs === 'number' && Number.isFinite(expiresInMs) ? Date.now() + expiresInMs : undefined;
 }
 
 export class SurfaceCallWatcher {
@@ -54,6 +60,7 @@ export class SurfaceCallWatcher {
   private streamUnsupportedUntil = 0;
   private streamAbort: AbortController | null = null;
   private focusTimer: NodeJS.Timeout | null = null;
+  private queue: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly baseUrl: () => string,
@@ -141,7 +148,7 @@ export class SurfaceCallWatcher {
           buffer = buffer.slice(boundary + 2);
           if (message?.event === 'call') {
             const call = parseSurfaceCall(message.data);
-            if (call) void this.answer(token, call).catch(() => undefined);
+            if (call) this.enqueue(token, call);
           }
           boundary = buffer.indexOf('\n\n');
         }
@@ -168,12 +175,26 @@ export class SurfaceCallWatcher {
     const body = (await res.json()) as { data?: { call?: PendingSurfaceCall | null } };
     const call = body.data?.call;
     if (!call || typeof call.id !== 'string' || typeof call.toolName !== 'string') return null;
-    return { id: call.id, toolName: call.toolName, args: call.args ?? {} };
+    return {
+      id: call.id,
+      toolName: call.toolName,
+      args: call.args ?? {},
+      deadline: deadlineFrom(call.expiresInMs),
+    };
+  }
+
+  private enqueue(token: string, call: PendingSurfaceCall): void {
+    this.queue = this.queue.then(() => this.answer(token, call)).catch(() => undefined);
   }
 
   private async answer(token: string, call: PendingSurfaceCall): Promise<void> {
+    const remaining = call.deadline === undefined ? undefined : call.deadline - Date.now();
+    if (remaining !== undefined && remaining <= 0) {
+      log.info(`[LocalHarness] dropped expired surface call ${call.toolName}`);
+      return;
+    }
     const result = isAnswerableSurfaceTool(call.toolName)
-      ? await workspaceBrowserBridge.call(call.toolName, call.args)
+      ? await workspaceBrowserBridge.call(call.toolName, call.args, remaining)
       : { ok: false, content: `Unknown app tool: ${call.toolName}` };
 
     await net.fetch(

@@ -134,8 +134,12 @@ export function ArtifactInlineView({
         <HtmlDocView url={attachmentDownloadUrl(artifact.openRef.refId)} title={artifact.title} />
       );
     case 'LINK':
-      return <AiBrowserItemView item={itemFromArtifact(artifact)} />;
     case 'PAGE':
-      return <AiBrowserItemView item={itemFromArtifact(artifact)} />;
+      return (
+        <AiBrowserItemView
+          item={itemFromArtifact(artifact)}
+          conversationId={artifact.conversationId || null}
+        />
+      );
   }
 }

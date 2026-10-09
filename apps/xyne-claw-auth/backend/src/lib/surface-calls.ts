@@ -1,6 +1,8 @@
 import { prisma } from "../db.js";
 import { createLogger } from "../logger.js";
 import {
+  BLOCKED_URL_MESSAGE,
+  blockedBrowserUrl,
   browserAccessForRun,
   callPagePanelTool,
   isPagePanelTool,
@@ -91,6 +93,9 @@ export async function callSurfaceTool(input: {
   if (tooBig(args)) {
     return { ok: false, content: "Arguments are too large for an app tool." };
   }
+  if ((toolName === "open-url" || toolName === "page-navigate") && blockedBrowserUrl(args["url"])) {
+    return { ok: false, content: BLOCKED_URL_MESSAGE };
+  }
   const browserTool = isPagePanelTool(toolName);
   const access = browserTool ? await browserAccessForRun(userId, input.sessionId) : null;
   if (browserTool && !access) {
@@ -143,7 +148,14 @@ export async function callSurfaceTool(input: {
   }
 
   const deadlineMs = access ? pagePanelDeadlineMs(toolName) : deadlineFor(toolName);
-  const callArgs = access ? { ...args, xyneSurface: access.surface, xyneRunId: access.runId } : args;
+  const callArgs = access
+    ? {
+        ...args,
+        xyneSurface: access.surface,
+        xyneRunId: access.runId,
+        ...(access.conversationId ? { xyneConversationId: access.conversationId } : {}),
+      }
+    : args;
   const call = await prisma.surfaceCall.create({
     data: {
       userId,
@@ -196,12 +208,13 @@ export async function nextSurfaceCall(deviceId: string): Promise<{
   id: string;
   toolName: string;
   args: Record<string, unknown>;
+  expiresInMs: number;
 } | null> {
   const now = new Date();
   const row = await prisma.surfaceCall.findFirst({
     where: { deviceId, status: "PENDING", expiresAt: { gt: now } },
     orderBy: { createdAt: "asc" },
-    select: { id: true, toolName: true, args: true },
+    select: { id: true, toolName: true, args: true, expiresAt: true },
   });
   if (!row) return null;
 
@@ -215,6 +228,7 @@ export async function nextSurfaceCall(deviceId: string): Promise<{
     id: row.id,
     toolName: row.toolName,
     args: (row.args ?? {}) as Record<string, unknown>,
+    expiresInMs: Math.max(0, row.expiresAt.getTime() - now.getTime()),
   };
 }
 

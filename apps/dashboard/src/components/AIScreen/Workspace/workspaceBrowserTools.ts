@@ -68,6 +68,39 @@ export function hasWorkspacePages(): boolean {
   return pages.size > 0;
 }
 
+/** The conversation whose workspace is on screen; null when none is. */
+let shownConversationId: string | null = null;
+/** Browser calls run one at a time, in the order they came. */
+let pending: Promise<unknown> = Promise.resolve();
+
+/** Says which conversation's workspace is on screen; what it returns says it no longer is. */
+export function showWorkspaceConversation(conversationId: string | null): () => void {
+  shownConversationId = conversationId;
+  return () => {
+    if (shownConversationId === conversationId) shownConversationId = null;
+  };
+}
+
+/** Whether a call made for `conversationId` would act on another conversation's pages. */
+export function otherConversationShown(conversationId: unknown): boolean {
+  return (
+    typeof conversationId === 'string' &&
+    conversationId !== '' &&
+    shownConversationId !== null &&
+    shownConversationId !== conversationId
+  );
+}
+
+export const OTHER_CONVERSATION =
+  "The browser panel is showing a different conversation, so this run's page is not on screen. Ask the user to open this conversation on the Xyne AI screen, then try again.";
+
+/** Runs `task` after every browser call before it has finished. */
+export function runExclusive<T>(task: () => Promise<T>): Promise<T> {
+  const run = pending.then(task, task);
+  pending = run.catch(() => undefined);
+  return run;
+}
+
 /** Hears pages open, close, or another show. */
 export function subscribeToWorkspacePages(listener: () => void): () => void {
   pageListeners.add(listener);
@@ -175,13 +208,15 @@ const SNAPSHOT_SCRIPT = `(function () {
     var name = el.getAttribute('aria-label') || '';
     if (!name) { name = (el.innerText || el.textContent || '').trim(); }
     if (!name) { name = el.getAttribute('placeholder') || ''; }
-    if (!name && typeof el.value === 'string') { name = el.value; }
+    var secret = tag === 'input' && /^(password|hidden)$/i.test(el.type || '') || /one-time-code|cc-|password/i.test(el.getAttribute('autocomplete') || '');
+    if (!name && !secret && typeof el.value === 'string') { name = el.value; }
     if (!name) { name = el.getAttribute('title') || el.getAttribute('name') || ''; }
     name = String(name).replace(/\\s+/g, ' ').trim().slice(0, 80);
     var href = '';
     if (tag === 'a' && el.getAttribute('href')) {
       try { href = new URL(el.getAttribute('href'), location.href).href; } catch (e) { href = el.getAttribute('href'); }
     }
+    if (tag === 'input' && el.type) { kind += '[' + String(el.type).toLowerCase() + ']'; }
     lines.push('[' + ref + '] ' + kind + ' "' + name + '"' + (href ? ' ' + href : ''));
   }
   return { title: document.title || '', url: location.href, lines: lines, truncated: truncated };

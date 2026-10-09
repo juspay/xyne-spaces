@@ -24,6 +24,7 @@ import { useConversationArtifacts } from './useConversationArtifacts';
 import { ArtifactList } from './ArtifactList';
 import { ArtifactInlineView, artifactInlineActions } from './ArtifactInlineView';
 import { AiBrowserItemView, isWorkspacePagePlaying } from './AiBrowserItemView';
+import { showWorkspaceConversation } from './workspaceBrowserTools';
 import { AiDocItemView } from './AiDocItemView';
 import { useReviewGuide } from './useReviewGuide';
 import { registerArtifactCommentStore } from './artifactCommentStore';
@@ -198,6 +199,8 @@ function WorkspacePaneInner({
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [previewKept, setPreviewKept] = useState(false);
   const { artifacts, isLoading, isError, patch } = useConversationArtifacts(conversationId);
+  // Page calls made for another conversation are refused while this one is on screen.
+  useEffect(() => showWorkspaceConversation(conversationId), [conversationId]);
   const citations = useCitationDocs();
   const citationActiveId = citations?.activeId ?? null;
   const studio = useDesignStudio();
