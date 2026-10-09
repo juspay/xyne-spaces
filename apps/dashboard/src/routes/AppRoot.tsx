@@ -62,6 +62,7 @@ import CanvasRedirectPage from './CanvasRedirect/CanvasRedirectPage';
 import { ClawOverlay } from '../components/Claw/ClawOverlay';
 import { ArtifactAppHostRoute } from '../components/ArtifactApp/ArtifactAppHostRoute';
 import AppSidebar from '../components/AppSidebar/AppSidebar';
+import { SiteMap } from '../components/AppSidebar/SiteMap';
 import { ReactElement, ReactNode, useRef, useEffect, useState } from 'react';
 import ZeroProvider from '../providers/ZeroProvider';
 import { EditProvider } from '../providers/EditProvider';
@@ -925,6 +926,7 @@ const AppRoot = (): ReactElement => {
                                       <EditWarningModal />
                                       <Outlet />
                                     </main>
+                                    <SiteMap />
                                   </div>
                                 </Panel>
                                 <Separator className='w-2 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
@@ -949,6 +951,7 @@ const AppRoot = (): ReactElement => {
                               <EditWarningModal />
                               <Outlet />
                             </main>
+                            <SiteMap />
                           </div>
                         </AppSidebarHost>
                       )}
