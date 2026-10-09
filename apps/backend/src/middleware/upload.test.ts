@@ -11,11 +11,25 @@ jest.mock('@xyne/shared', () => ({
   isHeicBuffer: jest.fn(() => false),
 }));
 
-import { classifyUpload } from './upload';
+import { Readable } from 'node:stream';
+import { __screenExecutableContentForTest, classifyUpload } from './upload';
 
 describe('classifyUpload', () => {
   it('allows a fig file', () => {
     expect(classifyUpload('application/octet-stream', 'design.fig')).toBe('allowed');
+  });
+
+  it('allows Zip-headed fig content through upload screening', async () => {
+    const content = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x01, 0x02]);
+    expect(classifyUpload('application/octet-stream', 'design.fig')).toBe('allowed');
+    const screened = await __screenExecutableContentForTest(
+      Readable.from([content]),
+      'design.fig',
+      'application/octet-stream',
+    );
+    const chunks: Buffer[] = [];
+    for await (const chunk of screened) chunks.push(chunk as Buffer);
+    expect(Buffer.concat(chunks)).toEqual(content);
   });
 
   it('still blocks a Windows executable', () => {
