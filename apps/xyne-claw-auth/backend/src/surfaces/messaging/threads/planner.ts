@@ -55,6 +55,7 @@ const SYSTEM = [
   "- If the message answers or refines an existing open task, set continueIndex to that task's number; otherwise null (a new task).",
   "- Put every durable fact you learn (origin, destination, dates, number of travellers, nights, budget...) into slots so sibling tasks can use it.",
   "- Keep each request self-contained so it can run on its own.",
+  "- Never answer or carry out the message yourself. A request restates what the person asked for, in their words where possible: a greeting stays a greeting, a question stays that question.",
 ].join("\n");
 
 function buildUser(text: string, state: ChatState, tasks: ChatTask[]): string {
