@@ -1783,7 +1783,10 @@ export async function processTask(
 
     // Task commands are parsed before custom-tool loading so command-owned
     // tools can be force-mounted for this run without mutating Agent.config.
-    const forcedTaskCommandTools = new Set(taskCommand?.autoTools ?? []);
+    const forcedTaskCommandTools = new Set([
+      ...(taskCommand?.autoTools ?? []),
+      ...(parseReplyFormat(agentConfig?.["replyFormat"]) ? ["create-pdf"] : []),
+    ]);
 
     const meta: Record<string, string> = { userId };
     if (userName) meta["userName"] = userName;
@@ -1963,7 +1966,7 @@ export async function processTask(
       undefined,
       runtimeProviderConfig,
       emitUiWidgetForCustom,
-      taskCommand?.autoTools ?? [],
+      [...forcedTaskCommandTools],
     );
     const {
       tools: customToolDefs,

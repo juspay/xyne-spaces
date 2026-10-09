@@ -560,7 +560,7 @@ export const whatsappPlugin: ChannelPlugin<WhatsAppHandle, WhatsAppChannelConfig
     maxTextChars: MAX_TEXT_CHARS,
     maxImageBytes: MAX_IMAGE_BYTES,
     maxFileBytes: MAX_FILE_BYTES,
-    resultSections: { ...WHATSAPP_RESULT_SECTIONS, fileMimeType: "text/html" },
+    resultSections: WHATSAPP_RESULT_SECTIONS,
   },
   channelConfigSchema: whatsappChannelConfigSchema,
 
