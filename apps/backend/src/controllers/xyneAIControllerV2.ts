@@ -75,12 +75,15 @@ const SelectionContextSchema = z
 // list — the dashboard already knows each one's cuid + name client-side.
 // `message`/`user`/`attachment` (a Spaces message, a person, a file shared in
 // a conversation) come from the composer's @ picker; claw-auth resolves them.
+// `app` is an artifact app from the context picker; claw-auth checks the
+// user can read it.
 const AttachedContextItemSchema = z.object({
   type: z.enum([
     'channel',
     'ticket',
     'canvas',
     'call',
+    'app',
     'activity',
     'collection',
     'file',

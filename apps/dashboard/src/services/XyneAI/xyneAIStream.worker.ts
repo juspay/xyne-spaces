@@ -24,6 +24,7 @@ export interface WorkerStartStreamMessage {
           | 'ticket'
           | 'canvas'
           | 'call'
+          | 'app'
           | 'activity'
           | 'collection'
           | 'folder'
