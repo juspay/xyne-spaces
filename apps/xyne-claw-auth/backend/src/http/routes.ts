@@ -69,6 +69,7 @@ import { oauthTokenRouter } from "../routes/oauth-token.js";
 import { rapidApiLinkedInRouter } from "../routes/rapidapi-linkedin.js";
 import { scheduledJobsRouter } from "../routes/scheduled-jobs.js";
 import { dailyBriefRouter } from "../routes/daily-brief.js";
+import { proactiveInboxRouter, gmailPushRouter } from "../routes/proactive-inbox.js";
 import { pendingQuestionsRouter } from "../routes/pending-questions.js";
 import { ttsRouter } from "../routes/tts.js";
 import { settingsRouter } from "../routes/settings.js";
@@ -208,6 +209,8 @@ function mountCoreApi(app: Express): void {
   app.use(`${BASE}/design-shares`, requireAuth, requireNoAccessToken, designSharesRouter);
   app.use(`${BASE}/conversation-artifacts`, requireAuth, requireNoAccessToken, conversationArtifactsRouter);
   app.use(`${BASE}/daily-brief`, requireAuth, requireNoAccessToken, dailyBriefRouter);
+  app.use(`${BASE}/proactive-inbox`, requireAuth, requireNoAccessToken, proactiveInboxRouter);
+  app.use(`${BASE}/public/gmail-push`, gmailPushRouter);
   app.use(`${BASE}/internal/agent-chat`, requireStrictS2S, agentChatInternalRouter); // progress/callback from xyne-claw
   app.use(`${BASE}/internal/twin-draft`, requireInternalS2S, twinDraftInternalRouter);  // Spaces → approve/decline an in-thread Twin reply draft (INTERNAL_S2S_KEY)
   app.use(`${BASE}/internal/attachments`, requireInternalS2S, attachmentsInternalRouter); // Spaces → extract document text via claw's converters (INTERNAL_S2S_KEY)
