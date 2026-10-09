@@ -49,7 +49,7 @@ export class XyneCommentService {
     let allComments: any[] = [];
 
     if (isGitHubPR) {
-      const githubService = createGitHubService(projectName, repoName);
+      const githubService = await createGitHubService(projectName, repoName);
       allComments = await githubService.getUnresolvedPullRequestComments(prId);
 
       logger.info(`[Xyne-Comment] Fetched ${allComments.length} comments from GitHub for PR #${prId}`, {

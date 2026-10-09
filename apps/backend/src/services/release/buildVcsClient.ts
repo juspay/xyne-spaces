@@ -3,6 +3,7 @@
 // releaseNotesService all dispatch the same way.
 
 import { config } from '@/config/env';
+import { resolveSecret } from '@/config/secretResolver';
 import { logger } from '@/utils/logger';
 import { BitbucketService } from '../bitbucketService';
 import { GitHubService } from '../githubService';
@@ -17,17 +18,18 @@ export function normalizeBitbucketApiBaseUrl(baseUrl: string | undefined): strin
   return baseUrl.endsWith('/rest/api/latest') ? baseUrl : `${baseUrl}/rest/api/latest`;
 }
 
-export function buildVcsClient(provider: VCSProviderType | null | undefined): VcsClient {
+export async function buildVcsClient(provider: VCSProviderType | null | undefined): Promise<VcsClient> {
   if (provider === VCSProviderType.GITHUB) {
     const githubConfig = config.github;
-    if (!githubConfig?.token) {
+    const token = await resolveSecret('github-token', githubConfig?.token);
+    if (!token) {
       logger.warn(
-        'GitHub VCS provider selected but GITHUB_TOKEN is not set — anonymous access will hit ' +
-        'rate limits (60 req/hr) and 404 on private repos.',
+        'GitHub VCS provider selected but no token is available (vault has no active version and ' +
+        'GITHUB_TOKEN is not set) — anonymous access will hit rate limits (60 req/hr) and 404 on private repos.',
       );
     }
     return new GitHubService({
-      token: githubConfig?.token,
+      token,
       apiUrl: githubConfig?.apiUrl,
     });
   }
