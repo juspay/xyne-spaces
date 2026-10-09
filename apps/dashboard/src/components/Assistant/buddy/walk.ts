@@ -1,4 +1,12 @@
-import { MAX_STEPS, MESSAGES, MIN_PROBABILITY, STOPPED, SURE_CLICK, SURE_NONE } from './constants';
+import {
+  LIMITS,
+  MAX_STEPS,
+  MESSAGES,
+  MIN_PROBABILITY,
+  STOPPED,
+  SURE_CLICK,
+  SURE_NONE,
+} from './constants';
 import { decide, type Decision, type JevResult } from './decide';
 import { groupControls } from './options';
 import { hiddenTargets, type HiddenTarget, type MenuItem, type Peeked } from './paths';
@@ -41,6 +49,8 @@ interface Round<C extends WalkControl> {
   decision: Decision;
   /** Worth looking in menus: nothing fits and it is not plainly a question. */
   unsure: boolean;
+  /** Jev's top pick, however weak: a menu it leans to is looked in first. */
+  leaning?: string;
   /** The pick the check turned down: it only looked like what was asked. */
   offTarget?: Option<C>;
   /** The menu left open for the pick inside it, closed again if the pick is not used. */
@@ -94,7 +104,8 @@ async function choose<C extends WalkControl>(
   const result = await env.route(request, options);
   if (env.aborted()) return null;
   env.log('Jev answered', result.route, result);
-  const optionOf = (id: string): Option<C> | undefined => groups.find(g => g.id === id)?.members[0];
+  const byId = new Map(groups.map(group => [group.id, group.members[0]]));
+  const optionOf = (id: string): Option<C> | undefined => byId.get(id);
   // On a page the walk went into on purpose, a likely link onward is followed, not asked about;
   // a control that does something still has to be sure.
   const pick = result.route === 'unavailable' ? undefined : optionOf(result.chosen ?? '');
@@ -104,7 +115,8 @@ async function choose<C extends WalkControl>(
   const plainlyQuestion =
     result.route !== 'unavailable' && result.chosen === 'none' && probability >= SURE_NONE;
   const unsure = decision.kind === 'ask_ai' && !plainlyQuestion;
-  const round = { optionOf, decision, unsure };
+  const leaning = result.route === 'unavailable' ? undefined : result.chosen;
+  const round = { optionOf, decision, unsure, ...(leaning && { leaning }) };
   // While looking in menus only a pick inside one counts, so the rest need no check.
   if (menus.length > 0 && !menuItemOf(round) && !asksAboutMenu(round)) return round;
   return checked(request, env, round);
@@ -114,7 +126,10 @@ async function choose<C extends WalkControl>(
 const pickedIds = (decision: Decision): string[] =>
   decision.kind === 'act' ? [decision.id] : decision.kind === 'ask' ? decision.ids : [];
 
-/** Turns down picks that are not what was asked, so the walk looks further instead of using them. */
+/**
+ * Turns down picks that are not what was asked, so the walk looks further instead of using them;
+ * a "which one?" offers only the picks that pass.
+ */
 async function checked<C extends WalkControl>(
   request: string,
   env: WalkEnv<C>,
@@ -132,7 +147,9 @@ async function checked<C extends WalkControl>(
     const why = `the closest was "${first.text}", which is something else`;
     return { ...round, decision: { kind: 'ask_ai', why }, unsure: true, offTarget: first };
   }
-  return round;
+  if (round.decision.kind !== 'ask') return round;
+  const ids = picks.filter((_, i) => verdicts[i] !== 'other').map(pick => pick.id);
+  return { ...round, decision: { ...round.decision, ids } };
 }
 
 /** After a look in a menu, Jev is now sure of a visible control it first only leaned to. */
@@ -186,17 +203,18 @@ async function act<C extends WalkControl>(
 }
 
 /**
- * Menus Jev picks or asks about are looked inside, like branches; an unsure pick checks them all,
- * but not on a page the walk went into on purpose.
+ * Menus Jev picks, asks about or leans to are looked inside, like branches; when it is unsure and
+ * leans nowhere useful, all of them, but not on a page the walk went into on purpose.
  */
 function menusToLookIn<C extends WalkControl>(
-  { decision, unsure }: Round<C>,
+  { decision, unsure, leaning }: Round<C>,
   openers: C[],
   onTheWay: boolean,
 ): C[] {
-  const picked = pickedIds(decision);
+  const picked = [...pickedIds(decision), ...(leaning ? [leaning] : [])];
   const branches = openers.filter(opener => picked.includes(opener.id));
-  return branches.length > 0 ? branches : unsure && !onTheWay ? openers : [];
+  if (branches.length > 0) return branches;
+  return unsure && !onTheWay ? openers.slice(0, LIMITS.peeks) : [];
 }
 
 /** One screen: read it, ask Jev, and look inside its menus when that is worth it. */

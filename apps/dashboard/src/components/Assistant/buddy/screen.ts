@@ -139,9 +139,20 @@ const controlsIn = (root: ParentNode): HTMLElement[] =>
   [...root.querySelectorAll<HTMLElement>(SELECTORS.control)].filter(isUsable);
 
 /** One control per label, in screen order. */
+/** The first item of each key, in order. */
+const uniqueBy = <T>(items: T[], keyOf: (item: T) => string): T[] => {
+  const seen = new Set<string>();
+  return items.filter(item => {
+    const key = keyOf(item);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
 function controlsOf(found: HTMLElement[]): Control[] {
   const controls = found.slice(0, LIMITS.controls).map((el, i) => toControl(el, `c${i}`));
-  return controls.filter((control, i) => controls.findIndex(c => c.label === control.label) === i);
+  return uniqueBy(controls, control => control.label);
 }
 
 const topDialog = (): HTMLElement | undefined =>
@@ -175,11 +186,7 @@ function isOpener({ el, use }: Control): boolean {
 
 /** Menus worth a peek, in screen order: one per track name, since row menus share one. */
 function openersOf(controls: Control[]): Control[] {
-  const openers = controls.filter(isOpener);
-  const keyOf = (opener: Control): string => opener.track || opener.text;
-  return openers
-    .filter((opener, i) => openers.findIndex(o => keyOf(o) === keyOf(opener)) === i)
-    .slice(0, LIMITS.peeks);
+  return uniqueBy(controls.filter(isOpener), opener => opener.track || opener.text);
 }
 
 /** The controls on screen, and the menus among them worth a peek. */

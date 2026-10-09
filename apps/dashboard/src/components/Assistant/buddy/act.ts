@@ -122,6 +122,10 @@ function outcomeOf(control: Control, before: Snapshot, after: Snapshot): string 
   return changed ? MESSAGES.done(control.text) : MESSAGES.alreadyOpen(control.text);
 }
 
+/** The same control on the screen as it is now, which a re-render may have replaced. */
+const live = (control: Control): Control | undefined =>
+  control.el.isConnected ? control : findControl(control, document, control.id);
+
 /** Rings it, then presses it once the user has seen it; null when stopped first. */
 async function show(control: Control, signal: AbortSignal): Promise<Pressed | null> {
   const clear = highlight(control.el, control.text);
@@ -140,13 +144,15 @@ async function show(control: Control, signal: AbortSignal): Promise<Pressed | nu
 }
 
 export async function click(control: Control, signal: AbortSignal): Promise<string> {
-  const pressed = await show(control, signal);
-  return pressed ? outcomeOf(control, pressed.before, pressed.after) : STOPPED;
+  const target = live(control) ?? control;
+  const pressed = await show(target, signal);
+  return pressed ? outcomeOf(target, pressed.before, pressed.after) : STOPPED;
 }
 
 export function point(control: Control, signal: AbortSignal): string {
-  holdRings([highlight(control.el, control.text)], signal);
-  control.el.focus({ preventScroll: true });
+  const { el } = live(control) ?? control;
+  holdRings([highlight(el, control.text)], signal);
+  el.focus({ preventScroll: true });
   log('pointed at', `${control.id} "${control.text}": it changes data, so not clicked`);
   return MESSAGES.pointAt(control.text);
 }
@@ -198,10 +204,6 @@ export async function peek(opener: Control): Promise<Peeked<Control>> {
   );
   return { opener, items };
 }
-
-/** The same control on the screen as it is now, which going back may have rebuilt. */
-const live = (control: Control): Control | undefined =>
-  control.el.isConnected ? control : findControl(control, document, control.id);
 
 /** Opens the item's menu and finds the item live in it; null when stopped. */
 async function reveal(
