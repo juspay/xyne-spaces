@@ -25,7 +25,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
-import { ChevronDown, ChevronUp, Info, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, Info, Pencil, X } from 'lucide-react';
 import { DatePicker } from '../../ui/DatePicker/DatePicker';
 import { TimePicker } from '../../ui/TimePicker/TimePicker';
 import { RadioGroup, Radio } from '../../ui/RadioGroup/RadioGroup';
@@ -47,7 +47,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Checkbox } from '../../ui/Checkbox/Checkbox';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
 import { Combobox } from '../../ui/Combobox/Combobox';
-import { ExternalInviteesInput } from './ExternalInviteesInput';
+import { ExternalInviteesInput, type ExternalInviteesInputHandle } from './ExternalInviteesInput';
 import { InvitationPreviewStep } from './InvitationPreviewStep';
 import type {
   MonthlyType,
@@ -58,6 +58,7 @@ import type {
 import {
   applyHHMMToDate,
   getDefaultScheduledStartTime,
+  getTimezoneLabel,
   getWeekdayOccurrence,
   isValidDate,
   parseTimeAndUpdateDate,
@@ -77,6 +78,19 @@ import {
 import { logger, Event } from '../../../utils/logger';
 
 export type { EditCallData } from './types';
+
+type BlockerKey = 'title' | 'start' | 'end' | 'weekday' | 'people' | 'guests' | 'updatesChannel';
+
+const DURATION_OPTIONS = [
+  { minutes: 15, label: '15m' },
+  { minutes: 30, label: '30m' },
+  { minutes: 45, label: '45m' },
+  { minutes: 60, label: '1h' },
+] as const;
+
+/** Lead times offered by the quick-start split button. */
+const QUICK_START_MINUTES = [5, 10, 15, 30] as const;
+const DEFAULT_QUICK_START_MINUTES = 15;
 
 const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
   isOpen,
@@ -171,13 +185,12 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
     reset,
     setError,
     clearErrors,
+    setFocus,
+    trigger,
     formState: { errors, isSubmitting },
   } = useForm<ScheduleCallFormData>({
     defaultValues: {
-      title: (() => {
-        const displayName = getUserDisplayName(user);
-        return displayName !== 'Unknown' ? `${displayName.split(' ')[0]}'s Call` : '';
-      })(),
+      title: '',
       startsAt: defaultStart,
       endsAt: new Date(defaultStart.getTime() + 60 * 60 * 1000), // Default 1 hours after start time
       participants: [],
@@ -234,18 +247,16 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
     setChannelSearchQuery,
     setPostCallUpdates,
     setUpdateChannelId,
-    showPostCallUpdates,
     updateChannelError,
     updateChannelId,
-  } = usePostCallUpdates({
-    channels,
-    participantCount: participants.length,
-  });
+  } = usePostCallUpdates({ channels });
 
-  const participantLabel = useMemo(() => {
-    if (participants.some(v => v.startsWith('channel:'))) return 'Selected Channel';
-    return 'Internal Users';
-  }, [participants]);
+  // Inline field errors stay quiet until the first submit attempt; before that only the
+  // muted "Still needed" hint beside the button lists what's missing.
+  const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [invalidGuestCount, setInvalidGuestCount] = useState(0);
+  const peopleInputRef = useRef<HTMLInputElement>(null);
+  const guestInputRef = useRef<ExternalInviteesInputHandle>(null);
 
   // Search query state (not in form)
   const [searchQuery, setSearchQuery] = React.useState('');
@@ -466,38 +477,71 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
     [participantsOnly, initialCall, user?.id],
   );
 
+  /** Current call length in minutes, or the 1h default when the times are unusable. */
+  const durationMs =
+    isValidDate(startsAt) && isValidDate(endsAt) && endsAt > startsAt
+      ? endsAt.getTime() - startsAt.getTime()
+      : 60 * 60 * 1000;
+  const durationMinutes = Math.round(durationMs / 60000);
+
+  /** Moves the start and carries the end along so the chosen duration is kept. */
+  const moveStart = useCallback(
+    (newStartsAt: Date): void => {
+      const newEndsAt = new Date(newStartsAt.getTime() + durationMs);
+      setValue('startsAt', newStartsAt, { shouldValidate: true });
+      setValue('endsAt', newEndsAt, { shouldValidate: true });
+      setRecurringStartTime(toHHMM(newStartsAt));
+      setRecurringEndTime(toHHMM(newEndsAt));
+      validateTimes(newStartsAt, newEndsAt);
+    },
+    [durationMs, setValue, setRecurringStartTime, setRecurringEndTime, validateTimes],
+  );
+
   const handleStartTimeChange = useCallback(
     (timeString: string): void => {
       const newStartsAt = parseTimeAndUpdateDate(timeString, startsAt);
-      if (newStartsAt) {
-        setValue('startsAt', newStartsAt, { shouldValidate: true });
-        setRecurringStartTime(toHHMM(newStartsAt));
-
-        // Auto-adjust end time to be 1 hour after start time if end time is before start time
-        let effectiveEndsAt = endsAt;
-        if (endsAt && newStartsAt >= endsAt) {
-          const newEndsAt = new Date(newStartsAt.getTime() + 60 * 60 * 1000);
-          setValue('endsAt', newEndsAt, { shouldValidate: true });
-          effectiveEndsAt = newEndsAt;
-          setRecurringEndTime(toHHMM(newEndsAt));
-        }
-
-        validateTimes(newStartsAt, effectiveEndsAt);
-      }
+      if (newStartsAt) moveStart(newStartsAt);
     },
-    [startsAt, endsAt, setValue, parseTimeAndUpdateDate, validateTimes],
+    [startsAt, moveStart],
   );
 
+  // The end time is read against the start: a time at or before the start means the call
+  // crosses midnight, so it ends the next day (and the end date appears).
   const handleEndTimeChange = useCallback(
     (time: string): void => {
-      const newEndsAt = parseTimeAndUpdateDate(time, endsAt);
-      if (newEndsAt) {
-        setValue('endsAt', newEndsAt, { shouldValidate: true });
-        setRecurringEndTime(toHHMM(newEndsAt));
-        validateTimes(startsAt, newEndsAt);
-      }
+      const sameDayEnd = parseTimeAndUpdateDate(time, startsAt);
+      if (!sameDayEnd) return;
+      const newEndsAt =
+        sameDayEnd <= startsAt
+          ? new Date(new Date(sameDayEnd).setDate(sameDayEnd.getDate() + 1))
+          : sameDayEnd;
+      setValue('endsAt', newEndsAt, { shouldValidate: true });
+      setRecurringEndTime(toHHMM(newEndsAt));
+      validateTimes(startsAt, newEndsAt);
     },
-    [startsAt, endsAt, setValue, parseTimeAndUpdateDate, validateTimes],
+    [startsAt, setValue, setRecurringEndTime, validateTimes],
+  );
+
+  const applyDuration = useCallback(
+    (minutes: number): void => {
+      if (!isValidDate(startsAt)) return;
+      const newEndsAt = new Date(startsAt.getTime() + minutes * 60 * 1000);
+      setValue('endsAt', newEndsAt, { shouldValidate: true });
+      setRecurringEndTime(toHHMM(newEndsAt));
+      validateTimes(startsAt, newEndsAt);
+    },
+    [startsAt, setValue, setRecurringEndTime, validateTimes],
+  );
+
+  // Lead time shown on "Start in N min"; picking one from its menu applies it.
+  const [quickStartMinutes, setQuickStartMinutes] = useState<number>(DEFAULT_QUICK_START_MINUTES);
+  const startIn = useCallback(
+    (minutes: number): void => {
+      const start = new Date(Date.now() + minutes * 60 * 1000);
+      start.setSeconds(0, 0);
+      moveStart(start);
+    },
+    [moveStart],
   );
 
   /** Recurring-mode-only handlers: update the string state directly, no Date mutation needed. */
@@ -564,17 +608,11 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
         return;
       }
 
-      // ── Step advance: externals present and still on Step 1 ──────────────
-      // Invitation preview + Send happens on Step 2.
-      if (!isEditMode && (data.externalEmails ?? []).length > 0 && step === 'participants') {
-        goToStep('invitation');
-        return;
-      }
-
-      // Step 2 has no participants field, so RHF's silent error never shows.
-      if (data.participants.length === 0) {
-        toast.error('Add at least one participant', {
-          description: 'A scheduled call needs at least one teammate from this channel.',
+      // Step 2 has no participants field, so an inline error there would never show.
+      // A guest-only call is fine — the backend backs it with the organizer's self-DM.
+      if (data.participants.length === 0 && (data.externalEmails ?? []).length === 0) {
+        toast.error('Add at least one person', {
+          description: 'A scheduled call needs at least one teammate or guest.',
           duration: 3000,
         });
         return;
@@ -843,9 +881,8 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
 
   // Reset form and close modal
   const handleClose = useCallback((): void => {
-    const displayName = getUserDisplayName(user);
     reset({
-      title: displayName !== 'Unknown' ? `${displayName.split(' ')[0]}'s Call` : '',
+      title: '',
       startsAt: defaultStart,
       endsAt: new Date(defaultStart.getTime() + 60 * 60 * 1000),
       participants: [],
@@ -859,12 +896,15 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
     setStep('participants');
     setSearchQuery('');
     setNotFoundUsers([]);
+    setSubmitAttempted(false);
+    setInvalidGuestCount(0);
+    setQuickStartMinutes(DEFAULT_QUICK_START_MINUTES);
     expandedGroupMembersRef.current.clear();
     resetRecurringState(defaultStart);
     setEditEntireSeries(false);
     resetPostCallUpdates();
     onClose();
-  }, [reset, onClose, user]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [reset, onClose]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const isDesigningInvitation = step === 'invitation';
   const dialogSizing = isDesigningInvitation
@@ -901,48 +941,123 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
       ? rawInvitationPreviewEndsAt
       : new Date(invitationPreviewStartsAt.getTime() + 60 * 60 * 1000);
 
-  // Single source of truth for the submit button: drives `disabled`, the
-  // hover-tooltip contents, and the label.
+  // Single source of truth for what blocks scheduling, in form order. Drives the muted
+  // "Still needed" hint beside the button, the inline errors after a submit attempt, and
+  // where focus lands. The button itself stays enabled.
   // A restricted editor submits the invite list and nothing else, and every other field is
   // hidden or disabled for them — so gating Save on those fields would strand them behind a
   // requirement they cannot see or fix.
-  const missingRequirements: string[] = [];
-  if (participants.length === 0) missingRequirements.push('Add at least one participant');
+  const guestCount = participantsOnly ? 0 : externalEmails.length;
+  const hasNoPeople = participants.length === 0 && guestCount === 0;
+  const blockers: { key: BlockerKey; hint: string }[] = [];
+  if (!participantsOnly && (!title.trim() || errors.title)) {
+    blockers.push({ key: 'title', hint: title.trim() ? 'a shorter title' : 'a title' });
+  }
   if (!participantsOnly) {
-    if (!title.trim()) missingRequirements.push('Add a title');
     if (!scheduleStartIsValid || errors.startsAt) {
-      missingRequirements.push('Pick a valid start time');
+      blockers.push({ key: 'start', hint: 'a future start time' });
     }
-    if (!scheduleEndIsValid || errors.endsAt) missingRequirements.push('Pick a valid end time');
+    if (!scheduleEndIsValid || errors.endsAt) {
+      blockers.push({ key: 'end', hint: 'a valid end time' });
+    }
     if (isRecurring && recurrenceFrequency === 'WEEK' && recurrenceDays.length === 0) {
-      missingRequirements.push('Pick at least one weekday');
-    }
-    if (postCallUpdates && !updateChannelId) {
-      missingRequirements.push('Pick a channel for post-call updates');
+      blockers.push({ key: 'weekday', hint: 'a day to repeat on' });
     }
   }
+  if (hasNoPeople) blockers.push({ key: 'people', hint: 'at least one person' });
   if (allChannelMembersExcluded) {
-    missingRequirements.push('Include at least one channel participant');
+    blockers.push({ key: 'people', hint: 'one channel member' });
   }
-  const submitDisabled = isSubmitting || missingRequirements.length > 0;
+  if (!participantsOnly && invalidGuestCount > 0) {
+    blockers.push({ key: 'guests', hint: 'valid guest emails' });
+  }
+  if (!participantsOnly && postCallUpdates && !updateChannelId) {
+    blockers.push({ key: 'updatesChannel', hint: 'a channel for call updates' });
+  }
+
+  const focusBlocker = (key: BlockerKey): void => {
+    switch (key) {
+      case 'title':
+        setFocus('title');
+        break;
+      case 'start':
+        document.getElementById('call-start-time')?.focus();
+        break;
+      case 'end':
+        document.getElementById('call-end-time')?.focus();
+        break;
+      case 'weekday':
+        document.getElementById('call-recurrence-trigger')?.focus();
+        break;
+      case 'people':
+        peopleInputRef.current?.focus();
+        break;
+      case 'guests':
+        guestInputRef.current?.focus();
+        break;
+      case 'updatesChannel':
+        setChannelPickerOpen(true);
+        channelInputRef.current?.focus();
+        break;
+    }
+  };
+
+  /** Shows inline errors and focuses the first gap; true when nothing blocks. */
+  const checkReadyToSubmit = async (): Promise<boolean> => {
+    // Title rules (length) live in RHF, so run them too before trusting `blockers`.
+    const rulesOk = participantsOnly ? true : await trigger('title');
+    const first = blockers[0];
+    if (first || !rulesOk) {
+      setSubmitAttempted(true);
+      focusBlocker(first?.key ?? 'title');
+      return false;
+    }
+    return true;
+  };
+
+  const submitHint =
+    blockers.length > 0
+      ? `Still needed: ${Array.from(new Set(blockers.map(b => b.hint))).join(', ')}`
+      : null;
+  const titleError =
+    errors.title?.message ??
+    (submitAttempted && !participantsOnly && !title.trim() ? 'Give this call a name' : undefined);
+  const showPeopleError = submitAttempted && hasNoPeople;
+  const canCustomizeInvitation = !isEditMode && canUseExternalInvitees && externalEmails.length > 0;
   const submitLabel = isSubmitting
     ? isEditMode
       ? 'Saving...'
       : isRecurring
         ? 'Creating...'
         : 'Scheduling...'
-    : !isEditMode && canUseExternalInvitees && externalEmails.length > 0
-      ? 'Next: Customize invitation'
-      : isEditMode
-        ? 'Save Changes'
-        : isRecurring
-          ? 'Create Series'
-          : 'Schedule Call';
+    : isEditMode
+      ? 'Save changes'
+      : isRecurring
+        ? 'Create series'
+        : 'Schedule call';
+  const timezoneLabel = getTimezoneLabel(startsAt);
+  // The end date only matters when the call crosses midnight.
+  const showEndDate =
+    !isRecurring &&
+    isValidDate(startsAt) &&
+    isValidDate(endsAt) &&
+    endsAt.toDateString() !== startsAt.toDateString();
+  const endsNextDay =
+    showEndDate &&
+    endsAt.toDateString() ===
+      new Date(new Date(startsAt).setDate(startsAt.getDate() + 1)).toDateString();
+  const formatPickerTime = (date: Date | null | undefined): string =>
+    date ? date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '';
 
   return (
     <Dialog
       open={isOpen}
       onOpenChange={open => !open && handleClose()}
+      onOpenAutoFocus={e => {
+        if (participantsOnly) return;
+        e.preventDefault();
+        document.getElementById('call-title')?.focus();
+      }}
       className={cn(
         dialogSizing,
         'rounded-xl flex flex-col transition-[max-width,width,height] duration-300 ease-out',
@@ -1015,26 +1130,24 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
             exit={{ x: -slideDir * 32, opacity: 0 }}
             transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
             className='flex flex-col w-full'
-            onSubmit={e => void handleSubmit(onSubmit)(e)}
+            onSubmit={e => {
+              e.preventDefault();
+              void checkReadyToSubmit().then(ok => {
+                if (ok) void handleSubmit(onSubmit, () => setSubmitAttempted(true))();
+              });
+            }}
           >
             {/* Header */}
-            <div className='flex items-start justify-between px-5 py-3.5 border-b border-border '>
-              <span>
-                <h2 className='text-[15px] font-semibold text-foreground leading-5'>
-                  {isEditMode ? 'Edit Call Details' : 'Schedule a Call'}
-                </h2>
-                <p className='text-sidebar-secondary-foreground text-[13px] font-medium leading-5'>
-                  {isEditMode
-                    ? 'Edit time or participants for this call'
-                    : 'Schedule call with people, groups or channel'}
-                </p>
-              </span>
+            <div className='flex items-center justify-between px-5 py-3.5 border-b border-border'>
+              <h2 className='text-[15px] font-semibold text-foreground leading-5'>
+                {isEditMode ? 'Edit call' : 'Schedule a call'}
+              </h2>
               <Button
-                variant='outline'
+                variant='ghost'
                 size='icon'
-                tabIndex={-1}
                 type='button'
-                className='size-7 rounded-lg'
+                aria-label='Close'
+                className='size-7 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring'
                 onClick={handleClose}
                 data-track-category='CALLS'
                 data-track-name='CLOSE_SCHEDULE_CALL_MODAL'
@@ -1042,301 +1155,254 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
                 <X className='size-4' />
               </Button>
             </div>
-            <div className='flex flex-col gap-8 pt-4 px-5'>
-              {/* Tiltte Input */}
+            <div className='flex flex-col gap-6 pt-5 px-5'>
+              {/* Title */}
               <div>
-                <Controller
-                  name='title'
-                  control={control}
-                  render={({ field }) => (
-                    <Input
-                      {...field}
-                      id='call-title'
-                      type='text'
-                      placeholder='Enter call title'
-                      disabled={participantsOnly}
-                      tabIndex={0}
-                      className={cn(
-                        '!text-[22px] truncate',
-                        'px-0 border-none focus-visible:ring-0 rounded-none',
-                        'font-semibold text-foreground placeholder:text-xl placeholder:text-muted-foreground',
-                        errors.title && 'border-red-500',
-                      )}
-                    />
+                <div
+                  className={cn(
+                    'flex items-center gap-2 border-b transition-colors',
+                    titleError
+                      ? 'border-red-500'
+                      : 'border-dashed border-border focus-within:border-solid',
                   )}
-                  // No rules for a restricted editor: the field is disabled and the title is
-                  // never sent, so an existing empty or over-long title must not block Save.
-                  rules={
-                    participantsOnly
-                      ? {}
-                      : {
-                          required: 'Title is required',
-                          maxLength: {
-                            value: 80,
-                            message: 'Title must be less than 80 characters',
-                          },
-                          validate: value => value.trim().length > 0 || 'Title cannot be empty',
-                        }
-                  }
-                />
-                {errors.title && (
-                  <p className='text-red-500 text-xs mt-1'>{errors.title.message}</p>
-                )}
-              </div>
-              <div className={cn('flex flex-col gap-3', participantsOnly && 'hidden')}>
-                {isRecurring ? (
-                  /* ── Recurring mode: date on its own row, times side-by-side below ── */
-                  <>
-                    {/* Series start date */}
-                    <div className='space-y-3'>
-                      <label
-                        htmlFor='series-starts-on'
-                        className='text-[13px] text-sidebar-secondary-foreground font-medium leading-5'
-                      >
-                        Series starts on
-                      </label>
-                      <Controller
-                        name='startsAt'
-                        control={control}
-                        render={({ field }) => (
-                          <DatePicker
-                            id='series-starts-on'
-                            selectedDate={startsAt}
-                            onSelect={date => {
-                              if (date) {
-                                const previousStart = field.value ?? startsAt;
-                                const merged = mergeDateWithTime(date, previousStart);
-                                const shiftedEnd = endsAt
-                                  ? new Date(
-                                      merged.getTime() +
-                                        Math.max(
-                                          endsAt.getTime() - previousStart.getTime(),
-                                          60 * 60 * 1000,
-                                        ),
-                                    )
-                                  : endsAt;
-                                field.onChange(merged);
-                                setRecurringStartTime(toHHMM(merged));
-                                if (shiftedEnd) {
-                                  setValue('endsAt', shiftedEnd, { shouldValidate: true });
-                                  setRecurringEndTime(toHHMM(shiftedEnd));
-                                }
-                                validateTimes(merged, shiftedEnd);
-                              }
-                            }}
-                            placeholder='Select start date'
-                            minDate={new Date(new Date().setHours(0, 0, 0, 0))}
-                            inputClassName={cn(
-                              'text-sm leading-5 bg-transparent !px-3 rounded-lg !h-9 gap-2.5 w-full',
-                              errors.startsAt && 'border-red-500',
-                            )}
-                            showClearButton={false}
-                          />
+                >
+                  <Controller
+                    name='title'
+                    control={control}
+                    render={({ field }) => (
+                      <Input
+                        {...field}
+                        id='call-title'
+                        type='text'
+                        placeholder='Name this call'
+                        disabled={participantsOnly}
+                        aria-invalid={!!titleError}
+                        aria-describedby={titleError ? 'call-title-error' : undefined}
+                        className={cn(
+                          '!text-[22px] truncate h-11',
+                          'px-0 border-none shadow-none focus-visible:ring-0 rounded-none bg-transparent',
+                          'font-semibold text-foreground placeholder:text-[22px] placeholder:font-semibold placeholder:text-muted-foreground/70',
                         )}
                       />
-                      {errors.startsAt && (
-                        <p className='text-red-500 text-xs'>{errors.startsAt.message}</p>
-                      )}
-                    </div>
-                    {/* Call time: start → end on one row */}
-                    <div className='space-y-3'>
-                      <label
-                        htmlFor='call-time-start'
-                        className='text-[13px] text-sidebar-secondary-foreground font-medium leading-5'
-                      >
-                        Call time
-                      </label>
-                      <div className='flex items-center gap-2'>
-                        <Controller
-                          name='startsAt'
-                          control={control}
-                          render={({ field }) => (
-                            <TimePicker
-                              id='call-time-start'
-                              value={
-                                field.value
-                                  ? field.value.toLocaleTimeString('en-US', {
-                                      hour: '2-digit',
-                                      minute: '2-digit',
-                                    })
-                                  : ''
-                              }
-                              onChange={handleRecurringStartTimeChange}
-                              onClose={validateTimes}
-                              placeholder='Start time'
-                              disabled={false}
-                            />
-                          )}
-                        />
-                        <span className='text-gray-400 text-sm shrink-0'>→</span>
-                        <Controller
-                          name='endsAt'
-                          control={control}
-                          render={({ field }) => (
-                            <TimePicker
-                              value={
-                                field.value
-                                  ? field.value.toLocaleTimeString('en-US', {
-                                      hour: '2-digit',
-                                      minute: '2-digit',
-                                    })
-                                  : ''
-                              }
-                              onChange={handleRecurringEndTimeChange}
-                              onClose={validateTimes}
-                              placeholder='End time'
-                              disabled={false}
-                            />
-                          )}
-                        />
-                      </div>
-                      {errors.endsAt && (
-                        <p className='text-red-500 text-xs'>{errors.endsAt.message}</p>
-                      )}
-                    </div>
-                  </>
-                ) : (
-                  /* ── One-time mode: original two-row layout ── */
-                  <>
-                    <div className='space-y-3'>
-                      <label
-                        htmlFor='start-time'
-                        className='text-[13px] text-sidebar-secondary-foreground font-medium leading-5'
-                      >
-                        Start Date and time
-                      </label>
-                      <div className='flex items-center justify-between gap-3'>
-                        <Controller
-                          name='startsAt'
-                          control={control}
-                          render={({ field }) => (
-                            <DatePicker
-                              selectedDate={startsAt}
-                              onSelect={date => {
-                                if (date) {
-                                  const previousStart = field.value ?? startsAt;
-                                  const merged = mergeDateWithTime(date, previousStart);
-                                  const shiftedEnd = endsAt
-                                    ? new Date(
-                                        merged.getTime() +
-                                          Math.max(
-                                            endsAt.getTime() - previousStart.getTime(),
-                                            60 * 60 * 1000,
-                                          ),
-                                      )
-                                    : endsAt;
-                                  field.onChange(merged);
-                                  setRecurringStartTime(toHHMM(merged));
-                                  if (shiftedEnd) {
-                                    setValue('endsAt', shiftedEnd, { shouldValidate: true });
-                                    setRecurringEndTime(toHHMM(shiftedEnd));
-                                  }
-                                  validateTimes(merged, shiftedEnd);
-                                }
-                              }}
-                              placeholder='Select start date'
-                              minDate={new Date(new Date().setHours(0, 0, 0, 0))}
-                              inputClassName={cn(
-                                'text-sm leading-5 bg-transparent !px-3 rounded-lg !h-9 gap-2.5 w-full',
-                                errors.startsAt && 'border-red-500',
-                              )}
-                              showClearButton={false}
-                            />
-                          )}
-                        />
-                        <Controller
-                          name='startsAt'
-                          control={control}
-                          render={({ field }) => (
-                            <TimePicker
-                              value={
-                                field.value
-                                  ? field.value.toLocaleTimeString('en-US', {
-                                      hour: '2-digit',
-                                      minute: '2-digit',
-                                    })
-                                  : ''
-                              }
-                              onChange={handleStartTimeChange}
-                              onClose={validateTimes}
-                              placeholder='Select start time'
-                              disabled={false}
-                            />
-                          )}
-                        />
-                      </div>
-                      {errors.startsAt && (
-                        <p className='text-red-500 text-xs'>{errors.startsAt.message}</p>
-                      )}
-                    </div>
-
-                    <div className='space-y-3'>
-                      <label
-                        htmlFor='end-time'
-                        className='text-[13px] text-sidebar-secondary-foreground font-medium leading-5'
-                      >
-                        End Date and time
-                      </label>
-                      <div className='flex items-center justify-between gap-3'>
-                        <Controller
-                          name='endsAt'
-                          control={control}
-                          render={({ field }) => (
-                            <DatePicker
-                              selectedDate={field.value}
-                              onSelect={date => {
-                                if (date) {
-                                  const merged = mergeDateWithTime(date, field.value);
-                                  field.onChange(merged);
-                                  setRecurringEndTime(toHHMM(merged));
-                                  validateTimes(startsAt, merged);
-                                }
-                              }}
-                              placeholder='Select end date'
-                              minDate={
-                                startsAt
-                                  ? new Date(new Date(startsAt).setHours(0, 0, 0, 0))
-                                  : new Date(new Date().setHours(0, 0, 0, 0))
-                              }
-                              inputClassName={cn(
-                                'text-sm leading-5 bg-transparent !px-3 rounded-lg !h-9 gap-2.5 w-full',
-                                errors.endsAt && 'border-red-500',
-                              )}
-                              showClearButton={false}
-                            />
-                          )}
-                        />
-                        <Controller
-                          name='endsAt'
-                          control={control}
-                          render={({ field }) => (
-                            <TimePicker
-                              value={
-                                field.value
-                                  ? field.value.toLocaleTimeString('en-US', {
-                                      hour: '2-digit',
-                                      minute: '2-digit',
-                                    })
-                                  : ''
-                              }
-                              onChange={handleEndTimeChange}
-                              onClose={validateTimes}
-                              placeholder='Select end time'
-                              disabled={false}
-                            />
-                          )}
-                        />
-                      </div>
-                      {errors.endsAt && (
-                        <p className='text-red-500 text-xs'>{errors.endsAt.message}</p>
-                      )}
-                    </div>
-                  </>
+                    )}
+                    // No rules for a restricted editor: the field is disabled and the title is
+                    // never sent, so an existing empty or over-long title must not block Save.
+                    rules={
+                      participantsOnly
+                        ? {}
+                        : {
+                            required: 'Give this call a name',
+                            maxLength: {
+                              value: 80,
+                              message: 'Title must be less than 80 characters',
+                            },
+                            validate: value => value.trim().length > 0 || 'Give this call a name',
+                          }
+                    }
+                  />
+                  {!participantsOnly && (
+                    <label
+                      htmlFor='call-title'
+                      className='shrink-0 cursor-text text-muted-foreground'
+                      aria-hidden
+                    >
+                      <Pencil className='size-4' />
+                    </label>
+                  )}
+                </div>
+                {titleError && (
+                  <p id='call-title-error' className='text-red-500 text-xs mt-1'>
+                    {titleError}
+                  </p>
                 )}
-                {/* Repeat Toggle + Recurrence Options */}
-                {!(isEditMode && !initialCall?.recurringSeriesId) && !threadConversationId && (
-                  <div className='flex flex-col gap-3'>
-                    <div className='flex items-center'>
+              </div>
+
+              {/* When — date · start → end, durations, repeat */}
+              <section className={cn('flex flex-col gap-2', participantsOnly && 'hidden')}>
+                <p className='text-[13px] text-muted-foreground leading-5'>When</p>
+                <div className='flex flex-wrap items-center gap-2'>
+                  <Controller
+                    name='startsAt'
+                    control={control}
+                    render={({ field }) => (
+                      <DatePicker
+                        id='call-date'
+                        selectedDate={startsAt}
+                        onSelect={date => {
+                          if (date) {
+                            const previousStart = field.value ?? startsAt;
+                            const merged = mergeDateWithTime(date, previousStart);
+                            const shiftedEnd = endsAt
+                              ? new Date(
+                                  merged.getTime() +
+                                    Math.max(
+                                      endsAt.getTime() - previousStart.getTime(),
+                                      60 * 60 * 1000,
+                                    ),
+                                )
+                              : endsAt;
+                            field.onChange(merged);
+                            setRecurringStartTime(toHHMM(merged));
+                            if (shiftedEnd) {
+                              setValue('endsAt', shiftedEnd, { shouldValidate: true });
+                              setRecurringEndTime(toHHMM(shiftedEnd));
+                            }
+                            validateTimes(merged, shiftedEnd);
+                          }
+                        }}
+                        placeholder={isRecurring ? 'Series starts on' : 'Select date'}
+                        minDate={new Date(new Date().setHours(0, 0, 0, 0))}
+                        inputClassName={cn(
+                          'text-sm leading-5 bg-transparent !px-3 rounded-lg !h-9 gap-2.5 shrink-0',
+                          errors.startsAt && 'border-red-500',
+                        )}
+                        showClearButton={false}
+                      />
+                    )}
+                  />
+                  <div className='w-[124px] shrink-0'>
+                    <Controller
+                      name='startsAt'
+                      control={control}
+                      render={({ field }) => (
+                        <TimePicker
+                          id='call-start-time'
+                          value={formatPickerTime(field.value)}
+                          onChange={
+                            isRecurring ? handleRecurringStartTimeChange : handleStartTimeChange
+                          }
+                          onClose={validateTimes}
+                          placeholder='Start'
+                        />
+                      )}
+                    />
+                  </div>
+                  <span className='text-muted-foreground text-sm shrink-0' aria-hidden>
+                    →
+                  </span>
+                  <div className='w-[124px] shrink-0'>
+                    <Controller
+                      name='endsAt'
+                      control={control}
+                      render={({ field }) => (
+                        <TimePicker
+                          id='call-end-time'
+                          value={formatPickerTime(field.value)}
+                          onChange={
+                            isRecurring ? handleRecurringEndTimeChange : handleEndTimeChange
+                          }
+                          onClose={validateTimes}
+                          placeholder='End'
+                        />
+                      )}
+                    />
+                  </div>
+                  <span className='ml-auto text-xs text-muted-foreground whitespace-nowrap'>
+                    {timezoneLabel}
+                  </span>
+                </div>
+                {showEndDate && (
+                  <div className='flex items-center gap-2'>
+                    <span className='text-[13px] text-muted-foreground whitespace-nowrap'>
+                      {endsNextDay ? 'Ends next day' : 'Ends on'}
+                    </span>
+                    <Controller
+                      name='endsAt'
+                      control={control}
+                      render={({ field }) => (
+                        <DatePicker
+                          id='call-end-date'
+                          selectedDate={field.value}
+                          onSelect={date => {
+                            if (date) {
+                              const merged = mergeDateWithTime(date, field.value);
+                              field.onChange(merged);
+                              setRecurringEndTime(toHHMM(merged));
+                              validateTimes(startsAt, merged);
+                            }
+                          }}
+                          placeholder='End date'
+                          minDate={
+                            startsAt
+                              ? new Date(new Date(startsAt).setHours(0, 0, 0, 0))
+                              : new Date(new Date().setHours(0, 0, 0, 0))
+                          }
+                          inputClassName={cn(
+                            'text-sm leading-5 bg-transparent !px-3 rounded-lg !h-9 gap-2.5 shrink-0',
+                            errors.endsAt && 'border-red-500',
+                          )}
+                          showClearButton={false}
+                        />
+                      )}
+                    />
+                  </div>
+                )}
+                {errors.startsAt && (
+                  <p className='text-red-500 text-xs'>{errors.startsAt.message}</p>
+                )}
+                {errors.endsAt && <p className='text-red-500 text-xs'>{errors.endsAt.message}</p>}
+                <div className='flex flex-wrap items-center gap-1.5'>
+                  {DURATION_OPTIONS.map(({ minutes, label }) => (
+                    <button
+                      key={minutes}
+                      type='button'
+                      aria-pressed={durationMinutes === minutes}
+                      onClick={() => applyDuration(minutes)}
+                      data-track-category='CALLS'
+                      data-track-name={`set-call-duration-${minutes}`}
+                      className={cn(
+                        'h-8 px-2.5 rounded-lg border text-[13px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                        durationMinutes === minutes
+                          ? 'border-foreground/30 bg-muted text-foreground font-medium'
+                          : 'border-border text-muted-foreground hover:bg-muted hover:text-foreground',
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                  <span className='mx-1 h-4 w-px bg-border' aria-hidden />
+                  {/* One button: clicking anywhere opens the lead-time menu; picking applies it. */}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        type='button'
+                        data-track-category='CALLS'
+                        data-track-name='OPEN_QUICK_START_MENU'
+                        className='h-8 py-1 px-3 flex gap-2 rounded-lg bg-transparent hover:bg-secondary/80 border border-border text-foreground'
+                      >
+                        <span className='text-[13px] font-normal leading-5'>
+                          Start in {quickStartMinutes} min
+                        </span>
+                        <ChevronDown className='size-4' strokeWidth={2.3} />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent
+                      align='start'
+                      sideOffset={6}
+                      className='rounded-xl p-1.5 min-w-0 w-[var(--radix-dropdown-menu-trigger-width)]'
+                    >
+                      {QUICK_START_MINUTES.map(minutes => (
+                        <DropdownMenuItem
+                          key={minutes}
+                          className={cn(
+                            'text-[13px] rounded-lg px-2 py-1.5',
+                            minutes === quickStartMinutes && 'font-medium bg-muted',
+                          )}
+                          onClick={() => {
+                            setQuickStartMinutes(minutes);
+                            startIn(minutes);
+                          }}
+                          data-track-category='CALLS'
+                          data-track-name={`start-call-in-${minutes}-min`}
+                        >
+                          Start in {minutes} min
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                  {/* Repeat — not offered when editing a one-off call or from a thread */}
+                  {!(isEditMode && !initialCall?.recurringSeriesId) && !threadConversationId && (
+                    <div className='ml-auto'>
                       <DropdownMenu
                         onOpenChange={open => {
                           if (!open) setShowCustomPanel(false); // reset when dropdown closes
@@ -1344,11 +1410,23 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
                       >
                         <DropdownMenuTrigger asChild>
                           <Button
+                            id='call-recurrence-trigger'
+                            type='button'
                             data-track-category='CALLS'
                             data-track-name='OPEN_RECURRENCE_MENU'
-                            className='py-2 px-3 flex gap-2.5 rounded-lg bg-transparent hover:bg-secondary/80 border border-border text-foreground'
+                            className={cn(
+                              'h-8 py-1 px-3 flex gap-2 rounded-lg bg-transparent hover:bg-secondary/80 border text-foreground',
+                              submitAttempted &&
+                                isRecurring &&
+                                recurrenceFrequency === 'WEEK' &&
+                                recurrenceDays.length === 0
+                                ? 'border-red-500'
+                                : 'border-border',
+                            )}
                           >
-                            <span className='text-sm font-normal leading-6'>{recurrenceLabel}</span>
+                            <span className='text-[13px] font-normal leading-5'>
+                              {recurrenceLabel}
+                            </span>
                             <ChevronDown className='size-4' strokeWidth={2.3} />
                           </Button>
                         </DropdownMenuTrigger>
@@ -1487,10 +1565,10 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
                                         }
                                       }}
                                       className='rounded-lg border py-2 px-3 pr-8 focus-visible:ring-0
-                                  [&::-webkit-outer-spin-button]:appearance-none
-                                  [&::-webkit-inner-spin-button]:appearance-none
-                                  [&::-webkit-inner-spin-button]:m-0
-                                  [appearance:textfield]'
+                              [&::-webkit-outer-spin-button]:appearance-none
+                              [&::-webkit-inner-spin-button]:appearance-none
+                              [&::-webkit-inner-spin-button]:m-0
+                              [appearance:textfield]'
                                     />
                                     <span className='flex flex-col absolute top-1.5 right-3'>
                                       <ChevronUp
@@ -1853,18 +1931,21 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </div>
-                  </div>
-                )}
-              </div>
+                  )}
+                </div>
+              </section>
 
-              {/* Internal Users — channel members (Xyne users). */}
-              <div className='space-y-2'>
-                <p className='text-muted-foreground text-[13px] leading-5'>{participantLabel}</p>
+              {/* People — internal picker, then guests */}
+              <section className='flex flex-col gap-2'>
+                <p className='text-[13px] text-muted-foreground leading-5'>People</p>
                 <Controller
                   name='participants'
                   control={control}
                   render={({ field }) => (
                     <SearchParticipants
+                      ref={peopleInputRef}
+                      placeholder='Search people, groups or channels'
+                      hasError={showPeopleError || allChannelMembersExcluded}
                       options={rankedParticipantOptions}
                       prefilledOptions={selectedParticipantOptions}
                       disableClientFiltering
@@ -1895,148 +1976,175 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
                   )}
                 />
                 {allChannelMembersExcluded && (
-                  <p className='text-red-500 text-xs mt-1'>
+                  <p className='text-red-500 text-xs'>
                     Include at least one participant — all channel members are currently excluded.
                   </p>
                 )}
                 {errors.participants && (
                   <p className='text-red-500 text-xs'>{errors.participants.message}</p>
                 )}
-              </div>
-
-              {canUseExternalInvitees && !participantsOnly && (
-                <div className='space-y-2 -mb-3'>
-                  <div className='flex items-baseline justify-between'>
-                    <p className='text-muted-foreground text-[13px] leading-5'>External Users</p>
-                    <p className='text-[11px] text-muted-foreground/80'>
-                      Invited by email · join via link
-                    </p>
-                  </div>
-                  <Controller
-                    name='externalEmails'
-                    control={control}
-                    render={({ field }) => (
-                      <ExternalInviteesInput
-                        value={field.value}
-                        onChange={field.onChange}
-                        suggestedEmails={suggestedExternalEmails}
-                        prefillKey={threadConversationId ?? 'none'}
-                      />
-                    )}
-                  />
-                </div>
-              )}
-
-              {/* Edit entire series checkbox — only for recurring calls in edit mode. Restricted
-                  editors get it too: without it their invite changes would land on this one
-                  occurrence and silently vanish from the rest of the series. */}
-              {isEditMode && initialCall?.recurringSeriesId && (
-                <Checkbox
-                  checked={editEntireSeries}
-                  onChange={setEditEntireSeries}
-                  data-track-category='CALLS'
-                  data-track-name='APPLY_TO_SERIES_TOGGLE'
-                  label={
-                    participantsOnly
-                      ? 'Apply these people to all calls in this series'
-                      : 'Apply to all calls in this series'
-                  }
-                />
-              )}
-
-              {/* Post call updates to channel — shown whenever participants are added; the broadcast
-                  channel is independent of the call's own channel. */}
-              {showPostCallUpdates && !participantsOnly && (
-                <div className='space-y-4'>
-                  <div className='flex items-center gap-1.5 w-full'>
-                    <Checkbox
-                      checked={postCallUpdates}
-                      onChange={checked => {
-                        setPostCallUpdates(checked);
-                        if (!checked) {
-                          setUpdateChannelId(null);
-                          setChannelSearchQuery('');
-                        }
-                      }}
-                      data-track-category='CALLS'
-                      data-track-name='POST_UPDATES_TO_CHANNEL_TOGGLE'
-                      label='Post call updates to channel'
+                {canUseExternalInvitees && !participantsOnly && (
+                  <>
+                    <Controller
+                      name='externalEmails'
+                      control={control}
+                      render={({ field }) => (
+                        <ExternalInviteesInput
+                          ref={guestInputRef}
+                          value={field.value}
+                          onChange={field.onChange}
+                          suggestedEmails={suggestedExternalEmails}
+                          prefillKey={threadConversationId ?? 'none'}
+                          onInvalidCountChange={setInvalidGuestCount}
+                          hasError={showPeopleError}
+                        />
+                      )}
                     />
-                    <Tooltip
-                      content='Only selected participants will receive call notifications, and the summaries will be posted to the chosen channel.'
-                      side='top'
-                      sideOffset={6}
-                      className='max-w-60'
-                    >
-                      <button
-                        type='button'
-                        className='text-muted-foreground hover:text-foreground transition-colors'
-                      >
-                        <Info className='size-3.5' strokeWidth={2} />
-                      </button>
-                    </Tooltip>
-                  </div>
-                  {postCallUpdates && (
-                    <div className='w-full space-y-1'>
-                      <div className='flex w-full items-center gap-2'>
-                        {selectedChannelItem && (
-                          <div className='flex max-w-[45%] min-w-0 shrink-0 items-center gap-1 rounded-lg border border-border bg-card px-2 h-8 text-sm'>
-                            <span className='shrink-0'>{selectedChannelItem.leftSlot}</span>
-                            <span className='flex-1 truncate text-foreground'>
-                              {selectedChannelItem.label}
-                            </span>
-                            <button
-                              type='button'
-                              onClick={() => {
-                                setUpdateChannelId(null);
-                                setChannelSearchQuery('');
-                                setChannelPickerOpen(true);
-                                requestAnimationFrame(() => channelInputRef.current?.focus());
-                              }}
-                              className='ml-0.5 shrink-0 rounded p-0.5 text-foreground hover:bg-muted'
-                              aria-label={`Remove ${selectedChannelItem.label}`}
-                              data-track-category='CALLS'
-                              data-track-name='remove-post-call-channel'
-                            >
-                              <X className='size-3' />
-                            </button>
-                          </div>
-                        )}
-                        <div className='min-w-0 flex-1'>
-                          <Combobox
-                            ref={channelInputRef}
-                            items={channelComboboxItems}
-                            value={selectedChannelItem}
-                            queryString={channelSearchQuery}
-                            placeholder={
-                              selectedChannelItem ? 'Search to change channel' : 'Select channel'
-                            }
-                            onInputValueChange={setChannelSearchQuery}
-                            onValueChange={value => {
-                              setUpdateChannelId(value);
+                    <div className='flex items-center justify-between gap-3'>
+                      <p className='text-xs text-muted-foreground'>
+                        Guests get an email invite and join via link
+                      </p>
+                      {canCustomizeInvitation && (
+                        <button
+                          type='button'
+                          onClick={() => {
+                            void checkReadyToSubmit().then(ok => ok && goToStep('invitation'));
+                          }}
+                          data-track-category='CALLS'
+                          data-track-name='CUSTOMIZE_INVITATION'
+                          className='text-xs font-medium text-foreground underline underline-offset-2 decoration-border hover:decoration-foreground rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+                        >
+                          Customize invitation
+                        </button>
+                      )}
+                    </div>
+                  </>
+                )}
+                {showPeopleError && (
+                  <p className='text-red-500 text-xs'>
+                    {participantsOnly
+                      ? 'Add at least one person'
+                      : 'Add at least one person — a teammate, group, channel or guest email'}
+                  </p>
+                )}
+              </section>
+
+              {/* Options — always present so the footer doesn't jump */}
+              {(!participantsOnly || (isEditMode && initialCall?.recurringSeriesId)) && (
+                <section className='flex flex-col gap-2'>
+                  <p className='text-[13px] text-muted-foreground leading-5'>Options</p>
+                  {/* Edit entire series checkbox — only for recurring calls in edit mode. Restricted
+                      editors get it too: without it their invite changes would land on this one
+                      occurrence and silently vanish from the rest of the series. */}
+                  {isEditMode && initialCall?.recurringSeriesId && (
+                    <Checkbox
+                      checked={editEntireSeries}
+                      onChange={setEditEntireSeries}
+                      data-track-category='CALLS'
+                      data-track-name='APPLY_TO_SERIES_TOGGLE'
+                      label={
+                        participantsOnly
+                          ? 'Apply these people to all calls in this series'
+                          : 'Apply to all calls in this series'
+                      }
+                    />
+                  )}
+                  {/* The broadcast channel is independent of the call's own channel. */}
+                  {!participantsOnly && (
+                    <div className='space-y-3'>
+                      <div className='flex items-center gap-1.5 w-full'>
+                        <Checkbox
+                          checked={postCallUpdates}
+                          onChange={checked => {
+                            setPostCallUpdates(checked);
+                            if (!checked) {
+                              setUpdateChannelId(null);
                               setChannelSearchQuery('');
-                              setChannelPickerOpen(false);
-                            }}
-                            open={channelPickerOpen}
-                            onOpenChange={setChannelPickerOpen}
-                            onBlur={() => setChannelPickerOpen(false)}
-                            autoHighlight
-                          />
-                        </div>
+                            }
+                          }}
+                          data-track-category='CALLS'
+                          data-track-name='POST_UPDATES_TO_CHANNEL_TOGGLE'
+                          label='Post call updates to channel'
+                        />
+                        <Tooltip
+                          content='Only selected participants will receive call notifications, and the summaries will be posted to the chosen channel.'
+                          side='top'
+                          sideOffset={6}
+                          className='max-w-60'
+                        >
+                          <button
+                            type='button'
+                            aria-label='About call updates'
+                            className='text-muted-foreground hover:text-foreground transition-colors'
+                          >
+                            <Info className='size-3.5' strokeWidth={2} />
+                          </button>
+                        </Tooltip>
                       </div>
-                      {updateChannelError && (
-                        <p className='text-red-500 text-xs mt-1'>
-                          Select a channel to post call updates.
-                        </p>
+                      {postCallUpdates && (
+                        <div className='w-full space-y-1'>
+                          <div className='flex w-full items-center gap-2'>
+                            {selectedChannelItem && (
+                              <div className='flex max-w-[45%] min-w-0 shrink-0 items-center gap-1 rounded-lg border border-border bg-card px-2 h-8 text-sm'>
+                                <span className='shrink-0'>{selectedChannelItem.leftSlot}</span>
+                                <span className='flex-1 truncate text-foreground'>
+                                  {selectedChannelItem.label}
+                                </span>
+                                <button
+                                  type='button'
+                                  onClick={() => {
+                                    setUpdateChannelId(null);
+                                    setChannelSearchQuery('');
+                                    setChannelPickerOpen(true);
+                                    requestAnimationFrame(() => channelInputRef.current?.focus());
+                                  }}
+                                  className='ml-0.5 shrink-0 rounded p-0.5 text-foreground hover:bg-muted'
+                                  aria-label={`Remove ${selectedChannelItem.label}`}
+                                  data-track-category='CALLS'
+                                  data-track-name='remove-post-call-channel'
+                                >
+                                  <X className='size-3' />
+                                </button>
+                              </div>
+                            )}
+                            <div className='min-w-0 flex-1'>
+                              <Combobox
+                                ref={channelInputRef}
+                                items={channelComboboxItems}
+                                value={selectedChannelItem}
+                                queryString={channelSearchQuery}
+                                placeholder={
+                                  selectedChannelItem
+                                    ? 'Search to change channel'
+                                    : 'Select channel'
+                                }
+                                onInputValueChange={setChannelSearchQuery}
+                                onValueChange={value => {
+                                  setUpdateChannelId(value);
+                                  setChannelSearchQuery('');
+                                  setChannelPickerOpen(false);
+                                }}
+                                open={channelPickerOpen}
+                                onOpenChange={setChannelPickerOpen}
+                                onBlur={() => setChannelPickerOpen(false)}
+                                autoHighlight
+                              />
+                            </div>
+                          </div>
+                          {updateChannelError && (
+                            <p className='text-red-500 text-xs mt-1'>
+                              Select a channel to post call updates.
+                            </p>
+                          )}
+                        </div>
                       )}
                     </div>
                   )}
-                </div>
+                </section>
               )}
 
               <SubmitFooter
-                missingRequirements={missingRequirements}
-                disabled={submitDisabled}
+                hint={submitHint}
                 isSubmitting={isSubmitting}
                 label={submitLabel}
                 onCancel={handleClose}
@@ -2061,6 +2169,7 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
                   externalInviteeCount: externalEmails.length,
                   isEditMode,
                   step,
+                  blockerCount: blockers.length,
                 }}
               />
             </div>
@@ -2072,38 +2181,21 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
 };
 
 const SubmitFooter: React.FC<{
-  missingRequirements: string[];
-  disabled: boolean;
+  /** Muted "Still needed: …" line; null when nothing blocks. */
+  hint: string | null;
   isSubmitting: boolean;
   label: string;
   onCancel: () => void;
   trackMetadata: Record<string, unknown>;
-}> = ({ missingRequirements, disabled, isSubmitting, label, onCancel, trackMetadata }) => {
+}> = ({ hint, isSubmitting, label, onCancel, trackMetadata }) => {
   const serialisedTrackMetadata = JSON.stringify(trackMetadata);
-  // The <span> lets the Tooltip pick up pointer events even when the
-  // wrapped Button is disabled.
-  const submitButton = (
-    <span className='inline-flex'>
-      <Button
-        size='sm'
-        type='submit'
-        disabled={disabled}
-        data-track-category='CALLS'
-        data-track-name='SUBMIT_SCHEDULE_CALL'
-        data-track-metadata={serialisedTrackMetadata}
-        className='rounded-lg text-[13px] px-4 h-9 text-primary-foreground bg-primary hover:bg-primary hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed'
-      >
-        {label}
-      </Button>
-    </span>
-  );
 
   return (
-    <div className='flex items-center justify-between pb-5'>
+    <div className='flex items-center justify-between gap-3 pb-5'>
       <Button
         variant='outline'
         size='sm'
-        className='rounded-lg text-[13px] px-4 h-9'
+        className='rounded-lg text-[13px] px-4 h-9 shrink-0'
         onClick={onCancel}
         data-track-category='CALLS'
         data-track-name='CANCEL_SCHEDULE_CALL'
@@ -2113,26 +2205,25 @@ const SubmitFooter: React.FC<{
       >
         Cancel
       </Button>
-      {missingRequirements.length === 0 ? (
-        submitButton
-      ) : (
-        <Tooltip
-          content={
-            <div className='text-left'>
-              <p className='font-medium mb-1'>Still needed to schedule:</p>
-              <ul className='list-disc pl-4 space-y-0.5'>
-                {missingRequirements.map(m => (
-                  <li key={m}>{m}</li>
-                ))}
-              </ul>
-            </div>
-          }
-          side='top'
-          delayDuration={150}
+      <div className='flex items-center gap-3 min-w-0'>
+        {hint && (
+          <p className='text-xs text-muted-foreground text-right line-clamp-2' aria-live='polite'>
+            {hint}
+          </p>
+        )}
+        {/* Stays enabled with gaps: clicking surfaces inline errors and focuses the first. */}
+        <Button
+          size='sm'
+          type='submit'
+          disabled={isSubmitting}
+          data-track-category='CALLS'
+          data-track-name='SUBMIT_SCHEDULE_CALL'
+          data-track-metadata={serialisedTrackMetadata}
+          className='rounded-lg text-[13px] px-4 h-9 shrink-0 text-primary-foreground bg-primary hover:bg-primary hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed'
         >
-          {submitButton}
-        </Tooltip>
-      )}
+          {label}
+        </Button>
+      </div>
     </div>
   );
 };
