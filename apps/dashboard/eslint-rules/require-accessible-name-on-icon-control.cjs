@@ -17,10 +17,7 @@
  * Elements with a spread attribute are skipped, the spread may carry the name.
  *
  * Options:
- * - iconSources: import sources whose bindings count as icons (globs with *)
- * - controlComponents: extra component names to treat as controls
  * - nameAttributes: attributes that give a name (default aria-label, aria-labelledby, title)
- * - nameProps: extra props that count as a name on any element
  * - componentNameProps: extra props that count as a name on components only,
  *   for wrappers that turn them into an aria-label (for example `label`, `title`)
  *
@@ -46,8 +43,8 @@ const INTERACTIVE_ROLES = new Set([
   'option',
 ]);
 const NAME_ATTRIBUTES = ['aria-label', 'aria-labelledby', 'title'];
-const DEFAULT_ICON_SOURCES = ['lucide-react', '@xyne/icons', 'react-icons/*', '*/icons/*', '*/icons'];
-const DEFAULT_CONTROL_COMPONENT_PATTERN = /(Button|Trigger|Toggle|Link)$/;
+const ICON_SOURCES = ['lucide-react', '@xyne/icons', 'react-icons/*', '*/icons/*', '*/icons'];
+const CONTROL_COMPONENT_PATTERN = /(Button|Trigger|Toggle|Link)$/;
 
 function sourceMatches(source, patterns) {
   return patterns.some((pattern) => {
@@ -64,7 +61,6 @@ module.exports = {
     docs: {
       description: 'Require an accessible name on controls whose only content is an icon',
       category: 'Accessibility',
-      recommended: true,
     },
     fixable: null,
     messages: {
@@ -75,9 +71,6 @@ module.exports = {
       {
         type: 'object',
         properties: {
-          iconSources: { type: 'array', items: { type: 'string' } },
-          controlComponents: { type: 'array', items: { type: 'string' } },
-          nameProps: { type: 'array', items: { type: 'string' } },
           nameAttributes: { type: 'array', items: { type: 'string' } },
           componentNameProps: { type: 'array', items: { type: 'string' } },
         },
@@ -88,9 +81,7 @@ module.exports = {
 
   create(context) {
     const options = context.options[0] || {};
-    const iconSources = options.iconSources || DEFAULT_ICON_SOURCES;
-    const extraControls = new Set(options.controlComponents || []);
-    const nameAttributes = new Set([...(options.nameAttributes || NAME_ATTRIBUTES), ...(options.nameProps || [])]);
+    const nameAttributes = new Set(options.nameAttributes || NAME_ATTRIBUTES);
     const componentNameProps = new Set(options.componentNameProps || []);
     const importedIcons = new Set();
 
@@ -254,12 +245,12 @@ module.exports = {
       if (attributes.some((attr) => attr.type === 'JSXAttribute' && attr.name && attr.name.name === 'onClick')) {
         return true;
       }
-      return extraControls.has(name) || DEFAULT_CONTROL_COMPONENT_PATTERN.test(name);
+      return CONTROL_COMPONENT_PATTERN.test(name);
     }
 
     return {
       ImportDeclaration(node) {
-        if (!sourceMatches(String(node.source.value), iconSources)) {
+        if (!sourceMatches(String(node.source.value), ICON_SOURCES)) {
           return;
         }
         for (const specifier of node.specifiers) {
