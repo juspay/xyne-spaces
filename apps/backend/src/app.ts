@@ -33,6 +33,7 @@ import analyticsRoutes from '@/routes/analytics';
 import apiKeyRoutes from '@/routes/api-keys';
 import userManagementRoutes from '@/routes/userManagement';
 import userActivationRoutes from '@/routes/userActivation';
+import secretsVaultRoutes from '@/routes/secretsVault';
 import channelRoutes from '@/routes/channels';
 import microsoftDeskAuthRoutes from '@/integrations/routes/microsoft-desk-auth';
 import conversationRoutes from '@/routes/conversations';
@@ -71,6 +72,7 @@ import userRoutes from '@/routes/users';
 import notificationRoutes from '@/routes/notifications';
 import draftRoutes from '@/routes/draftAttachments';
 import callRoutes from '@/routes/calls';
+import callAdminRoutes from '@/routes/callAdmin';
 import calendarSyncRoutes from '@/routes/calendarSync';
 import calendarOAuthRoutes from '@/routes/calendarOAuth';
 import driveOAuthRoutes from '@/routes/driveOAuth';
@@ -534,6 +536,8 @@ export class App {
 
     this.app.use('/api/messages', authMiddleware.authenticate, reactionRoutes);
 
+    // Calls admin panel — must be before /api/calls, whose /:callId routes would shadow it
+    this.app.use('/api/calls/admin', authMiddleware.authenticate, callAdminRoutes);
     // Claw MCP route (user + app auth) — must be before /api/calls
     this.app.use('/api/calls/claw', authenticateUserOrApp, callRoutes);
     this.app.use('/api/calls', authMiddleware.authenticate, callRoutes); // Calling feature routes
@@ -720,6 +724,8 @@ export class App {
 
     // user deactivation from dashboard 
     this.app.use('/api/user-activation', userActivationRoutes);
+
+    this.app.use('/api/secrets-vault', authMiddleware.authenticate, secretsVaultRoutes);
 
     // Project routes (auth and ACL required)
     this.app.use('/api/projects', authMiddleware.authenticate, projectRoutes);

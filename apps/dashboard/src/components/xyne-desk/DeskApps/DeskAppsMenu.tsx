@@ -1,7 +1,7 @@
 import { ReactElement, useState } from 'react';
-import { toast } from 'sonner';
+import { v4 as uuidv4 } from 'uuid';
 import { Grid01, PlusDefault as Plus, CheckTickSingle as Check } from '@xyne/icons';
-import { MAX_DESK_APPS } from '@xyne/shared';
+import { MAX_PUBLISHED_APPS } from '@xyne/shared';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -14,7 +14,9 @@ import Tooltip from '../../ui/Tooltip';
 import { AppIcon } from '../../AppIcon/AppIcon';
 import { AppPickerDialog } from '../../BarCustomize/AppPickerDialog';
 import type { ArtifactAppSummary } from '../../../services/claw/artifactAppsService';
-import { useUpdateEmailChannelPreference } from '../../../hooks/useEmailChannelPreference';
+import { useZero } from '../../../hooks/useZero';
+import { mutators } from '../../../zero/mutators';
+import { surfaceMutationError } from '../../../utils/zeroMutationToast';
 import type { DeskApps } from './useDeskApps';
 
 const TRACK = 'Support';
@@ -37,10 +39,11 @@ interface DeskAppsMenuProps {
  * can open them; the desk owner and channel admins also get "Add or remove
  * apps…". Hidden entirely when there is nothing to show and nothing to manage.
  *
- * The list is EmailChannelPreference.deskAppIds — shared by everyone on the
- * desk, unlike the per-device bars elsewhere — written through the same upsert
- * mutator the desk settings use, so the server ACL (owner or channel admin) is
- * what actually decides whether a change sticks.
+ * The list is the desk's channel_published_tabs rows — shared by everyone on the
+ * desk, unlike the per-device bars elsewhere — added and removed one app at a
+ * time through channel.publishApp / unpublishApp. The server re-checks every
+ * change (the mutators and ChannelPublishedTabsACL both run canPublishAppsTo:
+ * the desk owner or a channel admin), so that is what decides whether it sticks.
  */
 export const DeskAppsMenu = ({
   channelId,
@@ -50,24 +53,35 @@ export const DeskAppsMenu = ({
   onOpenApp,
 }: DeskAppsMenuProps): ReactElement | null => {
   const [pickerOpen, setPickerOpen] = useState(false);
-  const { mutateAsync: updatePreference } = useUpdateEmailChannelPreference();
+  const zero = useZero();
   const { ids, apps, unavailableIds } = deskApps;
 
   if (!canManage && apps.length === 0) return null;
 
-  const save = (next: string[]): void => {
-    updatePreference({ channelId, deskAppIds: next }).catch((error: unknown) => {
-      toast.error(error instanceof Error ? error.message : 'Could not update desk apps');
-    });
+  // One app per call, against the row set as it stands on the server, so two
+  // admins changing the desk at once don't overwrite each other.
+  const publish = (appId: string): void => {
+    void surfaceMutationError(
+      zero.mutate(
+        mutators.channel.publishApp({ id: uuidv4(), channelId, appId, timestamp: Date.now() }),
+      ),
+      'Could not add the app to this desk',
+    );
+  };
+  const unpublish = (appId: string): void => {
+    void surfaceMutationError(
+      zero.mutate(mutators.channel.unpublishApp({ channelId, appId })),
+      'Could not remove the app from this desk',
+    );
   };
 
   const onToggle = (app: ArtifactAppSummary, next: boolean): void => {
-    save(next ? [...ids, app.id] : ids.filter(id => id !== app.id));
+    if (next) publish(app.id);
+    else unpublish(app.id);
   };
 
   const removeUnavailable = (): void => {
-    const gone = new Set(unavailableIds);
-    save(ids.filter(id => !gone.has(id)));
+    unavailableIds.forEach(unpublish);
   };
 
   return (
@@ -148,12 +162,12 @@ export const DeskAppsMenu = ({
           open={pickerOpen}
           onOpenChange={setPickerOpen}
           addedAppIds={new Set(ids)}
-          isFull={ids.length >= MAX_DESK_APPS}
+          isFull={ids.length >= MAX_PUBLISHED_APPS}
           onToggle={onToggle}
           appFilter={isWorkspaceApp}
           description='Apps added here appear on this desk for everyone. Only apps published to the workspace can be added.'
           limitNote={{
-            normal: `Up to ${MAX_DESK_APPS} apps per desk.`,
+            normal: `Up to ${MAX_PUBLISHED_APPS} apps per desk.`,
             full: 'This desk already has the maximum number of apps. Switch one off to add another.',
           }}
           trackCategory={TRACK}

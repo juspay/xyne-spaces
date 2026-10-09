@@ -16,6 +16,8 @@ import { errMsg } from "../../lib/errors.js";
 import { DONE_REACTION, EMPTY_RESULT_TEXT, ERROR_REACTION, FAILURE_TEXT, OUTBOX_TTL_S, REDIS_PREFIX, TYPING_COUNT_TTL_S } from "./const.js";
 import { forgetActiveRun } from "./commands.js";
 import { chunkText } from "./format.js";
+import { planSectionedReply } from "xyne-claw-shared";
+import { renderMarkdownToHtml } from "../../lib/result-html.js";
 import { fitCard, renderCardAsText } from "./cards.js";
 import type { AnyChannelPlugin, ChannelDeliveryTarget, InteractiveCard, MessageRef } from "./plugin.js";
 
@@ -300,7 +302,12 @@ async function sendItem(
       // with anything" over the top of them would be wrong.
       const silentWithFiles = completed && !item.result.trim() && !!item.attachments?.length;
       const body = completed ? item.result.trim() || EMPTY_RESULT_TEXT : FAILURE_TEXT;
-      const text = plugin.formatText?.(body) ?? body;
+      const sectioned = completed && caps.resultSections ? planSectionedReply(body, caps.resultSections) : null;
+      const messages = (sectioned?.messages.length ? sectioned.messages : [body]).map((m) => plugin.formatText?.(m) ?? m);
+      const files = [
+        ...(sectioned?.overflow && caps.resultSections ? [await overflowAttachment(body, caps.resultSections.fileMimeType)] : []),
+        ...(completed ? item.attachments ?? [] : []),
+      ];
       try {
         // The outcome reaction first: it replaces the 👀 that has been sitting
         // there since the run started, so it should land with the answer
@@ -310,8 +317,8 @@ async function sendItem(
             .react(handle, item.quoted, completed ? DONE_REACTION : ERROR_REACTION)
             .catch((err) => log.warn(`[channel-delivery] status reaction failed: ${errMsg(err)}`));
         }
-        if (!silentWithFiles) await sendChunked(plugin, handle, item.chatId, text, item.quoted, undefined, sent);
-        if (completed && item.attachments?.length) await sendAttachments(plugin, handle, item.chatId, item.attachments, sent);
+        if (!silentWithFiles) await sendMessages(plugin, handle, item.chatId, messages, item.quoted, sent);
+        if (files.length) await sendAttachments(plugin, handle, item.chatId, files, sent);
       } finally {
         // Another run is still working here — leaving the indicator alone is
         // the whole point of the count.
@@ -322,6 +329,32 @@ async function sendItem(
       return { ok: true };
     }
   }
+}
+
+async function overflowAttachment(markdown: string, mimeType: string): Promise<OutboxAttachment> {
+  const html = await renderMarkdownToHtml(markdown, { title: "Full answer" });
+  return { fileName: "answer.html", mimeType, data: html.toString("base64") };
+}
+
+async function sendMessages(
+  plugin: AnyChannelPlugin,
+  handle: unknown,
+  chatId: string,
+  messages: string[],
+  quoted?: MessageRef,
+  sent?: OutboxProgress,
+): Promise<MessageRef | null> {
+  const chunks = messages.flatMap((m) => chunkText(m, plugin.capabilities.maxTextChars));
+  const already = sent?.chunks ?? 0;
+  let firstRef: MessageRef | null = null;
+  for (let i = 0; i < chunks.length; i++) {
+    if (i < already) continue;
+    const first = i === 0;
+    const ref = await plugin.sendText(handle, chatId, chunks[i]!, first && quoted ? { quoted } : {});
+    if (first) firstRef = ref;
+    if (sent) sent.chunks = i + 1;
+  }
+  return firstRef;
 }
 
 async function sendChunked(

@@ -1,6 +1,5 @@
 import { useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
-import { WorkspaceRole } from '@xyne/shared';
 import { useAuth } from '../../hooks/useAuth';
 import { usePlatform } from '../../hooks/usePlatform';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
@@ -15,15 +14,14 @@ export const AssistantPanelTrigger = (): null => {
   const { pathname } = useLocation();
   const { isMobile } = usePlatform();
   const userId = user?.id;
-  const isGuest = user?.role === WorkspaceRole.GUEST;
 
   useEffect(() => {
-    if (!userId || isGuest || isMobile || !isChatRoute(pathname)) return;
+    if (!userId || isMobile || !isChatRoute(pathname)) return;
     if (!hasJustOnboarded(userId)) return;
     xyneAIActor.send({ type: 'OPEN', trackSource: 'setup', startFreshChat: true });
     // OPEN is ignored while a modal holds the panel closed; keep the mark and retry on the next page.
     if (xyneAIActor.getSnapshot().matches('open')) clearJustOnboarded(userId);
-  }, [userId, isGuest, isMobile, pathname]);
+  }, [userId, isMobile, pathname]);
 
   return null;
 };
