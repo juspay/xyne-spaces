@@ -128,6 +128,7 @@ model Ticket {
   conversationId   String            // The xyne chat conversation to which the ticket is linked
   messageId        String?           @unique 
   channelId        String            // The channel to which the ticket is linked
+  channelConnectId String?           // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
   eta              DateTime?         // Calculated ETA for a ticket based on ETA of task Type
   firstRespondedAt DateTime?         // Timestamp of the first outbound agent reply (set once, never overwritten)
   priority         String            @default("LOW")
@@ -208,6 +209,7 @@ model Ticket {
   @@index([workspaceId, createdBy, statusV2, isArchived, createdAt(sort: Desc), id])
   @@index([xyneId])
   @@unique([workspaceId, xyneId])
+  @@index([channelConnectId])
   @@map("tickets")
   @@schema("public")
 }
@@ -216,6 +218,7 @@ model TicketDescription {
   ticketId    String @id
   workspaceId String
   channelId   String
+  channelConnectId String? // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
   description String
   createdAt   DateTime
   updatedAt   DateTime
@@ -224,6 +227,7 @@ model TicketDescription {
   ticket      Ticket  @relation(fields: [ticketId], references: [id])
   channel     Channel @relation(fields: [channelId], references: [id])
 
+  @@index([channelConnectId])
   @@map("ticket_descriptions")
   @@schema("public")
 }
@@ -233,6 +237,7 @@ model SubTicket {
   title             String
   description       String?
   workspaceId       String    // Workspace for ACL optimization
+  channelConnectId  String?   // Slack Connect: the owning channel's connect_group handle (via its parent); null when none / un-backfilled
   mappedTicketId    String?   // Refers to L1 ticket of the other team (optional - set later when linking)
   createdBy         String    // The user who created the sub ticket
   updatedBy         String    // Refers to updatedBy of mappedTicket (mandatory)
@@ -255,12 +260,14 @@ model SubTicket {
   @@index([updatedBy])
   @@index([assignedTo])
   @@index([conversationId])
+  @@index([channelConnectId])
   @@map("sub_tickets")
   @@schema("public")
 }
 
 model TicketSubTicketMapping {
   workspaceId String // denormalized tenant key (stamped on insert)
+  channelConnectId String? // Slack Connect: the owning channel's connect_group handle (via its parent); null when none / un-backfilled
   id          String @id @default(cuid())
   ticketId    String // Parent ticket ID
   subTicketId String // Sub ticket ID
@@ -275,12 +282,14 @@ model TicketSubTicketMapping {
   @@index([subTicketId])
 
   @@index([ticketId, id])
+  @@index([channelConnectId])
   @@map("ticket_sub_ticket_mappings")
   @@schema("public")
 }
 
 model TicketAssignment {
   workspaceId String // denormalized tenant key (stamped on insert)
+  channelConnectId String? // Slack Connect: the owning channel's connect_group handle (via its parent); null when none / un-backfilled
   id                 String             @id @default(cuid())
   ticketId           String             // Foreign key to Ticket
   userId             String?             // User ID assigned to this responsibility
@@ -298,6 +307,7 @@ model TicketAssignment {
 
   @@index([ticketId, id])
   @@unique([ticketId, roleId])
+  @@index([channelConnectId])
   @@map("ticket_assignments")
   @@schema("public")
 }
@@ -311,6 +321,7 @@ model TicketActivity {
   activityType String       // Type of data stored in value (STRING, NUMBER, JSON, OBJECT)
   value        Json         // The value containing field info, old/new values, etc.
   channelId    String?      // Denormalized from Ticket so desk metrics can query this table alone (no FK constraint)
+  channelConnectId String?      // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
 
   // Relations
   ticket        Ticket @relation(fields: [ticketId], references: [id])
@@ -319,12 +330,14 @@ model TicketActivity {
   @@index([ticketId])
   @@index([updatedBy])
   @@index([channelId, timestamp])
+  @@index([channelConnectId])
   @@map("ticket_activities")
   @@schema("public")
 }
 
 model TicketEntityMapping {
   workspaceId String // denormalized tenant key (stamped on insert)
+  channelConnectId String? // Slack Connect: the owning channel's connect_group handle (via its parent); null when none / un-backfilled
   id         String     @id @default(cuid())
   ticketId   String     // Ticket reference
   entityType String     // MERCHANT or GATEWAY
@@ -334,12 +347,14 @@ model TicketEntityMapping {
   ticket Ticket @relation(fields: [ticketId], references: [id])
 
   @@index([ticketId])
+  @@index([channelConnectId])
   @@map("ticket_entity_mappings")
   @@schema("public")
 }
 
 model TicketTag {
   workspaceId String // denormalized tenant key (stamped on insert)
+  channelConnectId String? // Slack Connect: the owning channel's connect_group handle (via its parent); null when none / un-backfilled
   id       String @id @default(cuid())
   name     String // Tag provided by user
   ticketId String // Ticket reference
@@ -348,6 +363,7 @@ model TicketTag {
   ticket Ticket @relation(fields: [ticketId], references: [id])
 
   @@index([ticketId])
+  @@index([channelConnectId])
   @@map("ticket_tags")
   @@schema("public")
 }
@@ -399,6 +415,7 @@ model TicketExport {
 
 model TicketReferenceMapping {
   workspaceId String // denormalized tenant key (stamped on insert)
+  channelConnectId String? // Slack Connect: the owning channel's connect_group handle (via its parent); null when none / un-backfilled
   id             String                   @id @default(cuid())
   sourceTicketId String                   // Ticket owning the reference
   targetTicketId String                   // Referenced ticket
@@ -413,12 +430,14 @@ model TicketReferenceMapping {
   @@index([sourceTicketId])
   @@index([targetTicketId])
   @@unique([sourceTicketId, targetTicketId, relationType])
+  @@index([channelConnectId])
   @@map("ticket_reference_mappings")
   @@schema("public")
 }
 
 model TicketStageEta {
   workspaceId String // denormalized tenant key (stamped on insert)
+  channelConnectId String? // Slack Connect: the owning channel's connect_group handle (via its parent); null when none / un-backfilled
   id             String    @id @default(cuid())
   ticketId       String
   stageId        String
@@ -438,6 +457,7 @@ model TicketStageEta {
   @@index([ticketId, stageId])
   @@index([ticketId, stageId, version])
   @@index([stageId])
+  @@index([channelConnectId])
   @@map("ticket_stage_eta")
   @@index([stageLeftAt])
   @@index([stageEta])
@@ -448,6 +468,7 @@ model Workflow {
   id               String    @id @default(cuid())
   ticketId         String?   // Foreign key
   workspaceId      String
+  channelConnectId String? // Slack Connect: the owning channel's connect_group handle (via its parent); null when none / un-backfilled
   context          String? // Initial context for workflow (readonly input) - only for top-level workflows
   status           String    @default("NEW") // NEW/PENDING/SCHEDULED/SUCCESS/FAILURE/PAUSED/INTERACTIVE
   workflowName     String?
@@ -478,12 +499,14 @@ model Workflow {
   @@index([automationSeriesId])
   @@index([workspaceId, eventType, status])
   @@index([workspaceId, workflowType, createdAt(sort: Desc)])
+  @@index([channelConnectId])
   @@map("workflows")
   @@schema("public")
 }
 
 model WorkflowExecution {
   workspaceId String // denormalized tenant key (stamped on insert)
+  channelConnectId String? // Slack Connect: the owning channel's connect_group handle (via its parent); null when none / un-backfilled
   id                        String   @id @default(cuid())
   workflowId                String
   workflowType              String? // For child executions - type of workflow being executed
@@ -517,12 +540,14 @@ model WorkflowExecution {
   @@index([workflowId, createdAt(sort: Desc), id])
   @@index([parentWorkflowExecutionId])
   @@index([status, workflowType, createdAt])
+  @@index([channelConnectId])
   @@map("workflow_executions")
   @@schema("workflow")
 }
 
 model WorkflowExecutionState {
   workspaceId String // denormalized tenant key (stamped on insert)
+  channelConnectId String? // Slack Connect: the owning channel's connect_group handle (via its parent); null when none / un-backfilled
   id                  String  @id @default(cuid())
   workflowExecutionId String  @unique
   context             String? // For child executions - initial context (JSON)
@@ -538,6 +563,7 @@ model WorkflowExecutionState {
 
   @@index([workflowExecutionId])
   @@index([fireAt])
+  @@index([channelConnectId])
   @@map("workflow_execution_states")
   @@schema("workflow")
 }
@@ -565,6 +591,7 @@ model WorkflowMapping {
 /// This table is retained for reference and will be dropped in a future migration.
 model WorkflowExecutionLock {
   workspaceId String // denormalized tenant key (stamped on insert)
+  channelConnectId String? // Slack Connect: the owning channel's connect_group handle (via its parent); null when none / un-backfilled
   id                  String   @id @default(cuid())
   workflowExecutionId String   @unique
   workerId            String
@@ -575,6 +602,7 @@ model WorkflowExecutionLock {
   // Relations
   workflowExecution WorkflowExecution @relation(fields: [workflowExecutionId], references: [id], onDelete: Cascade)
 
+  @@index([channelConnectId])
   @@map("workflow_execution_locks")
   @@schema("workflow")
 }
@@ -599,6 +627,7 @@ model WorkflowExecutionUsers {
 
 model WorkflowStep {
   workspaceId String // denormalized tenant key (stamped on insert)
+  channelConnectId String? // Slack Connect: the owning channel's connect_group handle (via its parent); null when none / un-backfilled
   id                  String   @id @default(cuid())
   workflowExecutionId String
   stepExecutorType    String // deterministic/parallel/agent/loops/conditional
@@ -620,6 +649,7 @@ model WorkflowStep {
   @@index([stepSubType])
   @@index([workflowExecutionId])
   @@unique([workflowExecutionId, stepName])
+  @@index([channelConnectId])
   @@map("workflow_steps")
   @@schema("workflow")
 }
@@ -724,6 +754,7 @@ model AgentStep {
 
 model ExternalStepResponse {
   workspaceId String // denormalized tenant key (stamped on insert)
+  channelConnectId String? // Slack Connect: the owning channel's connect_group handle (via its parent); null when none / un-backfilled
   id                  String   @id @default(cuid())
   workflowExecutionId String
   workflowStepId      String   @unique // Make this unique for one-to-one relation
@@ -736,6 +767,7 @@ model ExternalStepResponse {
   workflowStep      WorkflowStep      @relation(fields: [workflowStepId], references: [id], onDelete: Cascade)
 
   @@index([workflowExecutionId])
+  @@index([channelConnectId])
   @@map("external_step_responses")
   @@schema("workflow")
 }
@@ -1017,6 +1049,7 @@ model QuestionnaireResponse {
 // Scheduled Messages – recurring messages posted to channels via Bull cron jobs
 model ScheduledMessage {
   workspaceId String // denormalized tenant key (stamped on insert)
+  channelConnectId   String?     // Slack Connect: channel channelConnectId, stamped on insert
   id             String   @id @default(cuid())
   title          String
   messageContent String   @db.Text
@@ -1032,6 +1065,7 @@ model ScheduledMessage {
 
   @@index([channelId])
   @@index([createdBy])
+  @@index([channelConnectId])
   @@map("scheduled_messages")
   @@schema("non_zero")
 }
@@ -1039,6 +1073,7 @@ model ScheduledMessage {
 // Call messages — in-call chat for both internal and external users
 model CallMessage {
   workspaceId String // denormalized tenant key (stamped on insert)
+  channelConnectId   String?     // Slack Connect: channel channelConnectId, stamped on insert
   id            String   @id @default(cuid())
   callId        String
   participantId String
@@ -1046,6 +1081,7 @@ model CallMessage {
   createdAt     DateTime @default(now())
 
   @@index([callId, createdAt])
+  @@index([channelConnectId])
   @@map("call_messages")
   @@schema("non_zero")
 }
@@ -1340,6 +1376,7 @@ model AuditLogChange {
 // PR Analytics models
 model PullRequests {
   workspaceId String // denormalized tenant key (stamped on insert)
+  channelConnectId String? // Slack Connect: the owning channel's connect_group handle (via its parent); null when none / un-backfilled
   id                      String    @id @default(cuid())
   prId                    Int       // ID of PR
   workflowExecutionId     String?   // Links to workflow execution (and through it to ticket) - handled in code, no FK
@@ -1361,6 +1398,7 @@ model PullRequests {
   @@index([date])
   @@index([ticketId, date(sort: Desc)], map: "pull_requests_ticketId_date_idx")
   @@index([prUrl])
+  @@index([channelConnectId])
   @@map("pull_requests")
   @@schema("public")
 }
@@ -1376,6 +1414,7 @@ model PrThreadLink {
   repositorySlug String
   conversationId String   // Thread where the PR link was posted
   channelId      String
+  channelConnectId String? // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
   messageId      String   // The button message posted in that thread
   workspaceId    String   // Denormalized for workspace scoping (matches channels.workspaceId convention)
   createdAt      DateTime // Supplied by the application — no DB default
@@ -1384,6 +1423,7 @@ model PrThreadLink {
   @@unique([prUrl, conversationId]) // Idempotency guard against duplicate side-effect delivery
   @@index([prId])
   @@index([conversationId])
+  @@index([channelConnectId])
   @@map("pr_thread_links")
   @@schema("non_zero")
 }
@@ -1720,6 +1760,7 @@ model Invitation {
   entityId     String?        // projectId | channelId | canvasId
   entityType   String?   // PROJECT | CHANNEL | CANVAS
   channelId    String?       // For PROJECT guests: the specific channel to grant access to
+  channelConnectId String?       // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
   isOrgApproved Boolean?
   inviteEmailSentAt DateTime?  // Approval flow: when the invite email actually went out. null on an approved invite = email failed, resend needed
   createdAt    DateTime      @default(now())
@@ -1736,6 +1777,7 @@ model Invitation {
   @@index([entityId])
   @@index([createdAt(sort: Desc), id])
   @@index([orgId, isOrgApproved])
+  @@index([channelConnectId])
   @@map("invitations")
   @@schema("public")
 }
@@ -1913,6 +1955,7 @@ model Channel {
   showTicketsTabTicketsInChat Boolean?   @default(true)
   callSummaryPrompt String?              // Per-channel detailed call summary sections override; null = default
   connectId       String?                // Slack Connect: this channel's connect_group handle (null until backfilled)
+  connectGroups   ConnectGroup[] @relation("ChannelConnectGroups")
 
   // Relations
   conversations      Conversation[]
@@ -1967,6 +2010,7 @@ model ChannelPublishedTab {
 model ChannelBoardMapping {
   id          String   @id @default(cuid())
   channelId   String
+  channelConnectId String? // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
   boardId     String
   workspaceId String
   isDefault   Boolean
@@ -1979,6 +2023,7 @@ model ChannelBoardMapping {
 
   @@unique([channelId, boardId])
   @@index([channelId])
+  @@index([channelConnectId])
   @@map("channel_board_mappings")
   @@schema("public")
 }
@@ -2004,6 +2049,12 @@ model ConnectGroup {
   // channel group it simply points at no canvas — relationMode="prisma", so nothing enforces it and
   // we never `include` it). Cascade: deleting a canvas drops its connect_group rows.
   canvasEntity       Canvas   @relation("CanvasConnectGroups", fields: [entityId], references: [id], onDelete: Cascade)
+  // Slack Connect — filter-only relation back to the channel (entityId == channel.id), mirroring
+  // canvasEntity above. Typed non-optional for the same reason; for a canvas group it points at no
+  // channel (relationMode="prisma", nothing enforces it, never `include`d). `map` only gives the emulated
+  // relation a distinct name from canvasEntity's on the shared entityId — no DB constraint is created.
+  // Cascade: deleting a channel drops its connect_group rows.
+  channelEntity      Channel  @relation("ChannelConnectGroups", fields: [entityId], references: [id], onDelete: Cascade, map: "connect_group_channel_entityId_fkey")
 
   // (connectId, invitedWorkspaceId) unique also serves every `connectId = ?` probe via its
   // leftmost prefix. hostWorkspaceId and invitedWorkspaceId are each indexed for the
@@ -2020,6 +2071,7 @@ model ConnectGroup {
 
 model ChannelStats {
   workspaceId String // denormalized tenant key (stamped on insert)
+  channelConnectId   String?     // Slack Connect: channel channelConnectId, stamped on insert (native/DM/groupDM)
   channelId        String                @id
   lastActivityAt   DateTime              
   participantCount Int                   @default(0)
@@ -2034,12 +2086,14 @@ model ChannelStats {
   // lets ORDER BY lastActivityAt DESC walk the index so take(N) bounds the scan
   // instead of a full-table temp-sort on every hydration.
   @@index([workspaceId, lastActivityAt(sort: Desc), channelId(sort: Desc)])
+  @@index([channelConnectId])
   @@map("channel_stats")
   @@schema("public")
 }
 
 model ChannelParticipant {
   workspaceId String // denormalized tenant key (stamped on insert)
+  channelConnectId   String?     // Slack Connect: channel channelConnectId, stamped on insert (native/DM/groupDM)
   id                        String      @id @default(cuid())
   channelId                 String      // Channel ID (no FK constraint)
   userId                    String      // User ID (no FK constraint)
@@ -2065,12 +2119,14 @@ model ChannelParticipant {
   @@index([userId, role, id])
 
   @@index([channelId, id])
+  @@index([channelConnectId])
   @@map("channel_participants")
   @@schema("public")
 }
 
 model ChannelUserStatus {
   workspaceId String // denormalized tenant key (stamped on insert)
+  channelConnectId   String?     // Slack Connect: channel channelConnectId, stamped on insert (native/DM/groupDM)
   id                        String      @id @default(cuid())
   channelId                 String      // Channel ID (no FK constraint)
   userId                    String      // User ID (no FK constraint)
@@ -2109,6 +2165,7 @@ model ChannelUserStatus {
 
   @@index([userId, isDeleted, id])
   @@index([userId, sectionId]) // Fast lookup of channels within a section + cleanup on section delete
+  @@index([channelConnectId])
   @@map("channel_user_status")
   @@schema("public")
 }
@@ -2161,6 +2218,7 @@ model Conversation {
   createdBy         String   // User who started the thread (no FK constraint)
   initialMessageId  String   // First message - use this for thread preview (no FK constraint)
   workspaceId       String  // Workspace for ACL optimization (denormalized from channel)
+  channelConnectId   String?     // Slack Connect: channel channelConnectId, stamped on insert
   parentMessageId   String?  // Parent message that this conversation is replying to (no FK constraint)
   lastActivityAt    DateTime @default(now())
   replyCount        Int      @default(0)
@@ -2198,6 +2256,7 @@ model Conversation {
   @@index([createdBy])
   @@index([initialMessageId])
   @@index([parentMessageId])
+  @@index([channelConnectId])
   @@map("conversations")
   @@schema("public")
 }
@@ -2205,6 +2264,7 @@ model Conversation {
 // Conversation Participant Models (track who participated in threads)
 model ConversationParticipant {
   workspaceId String // denormalized tenant key (stamped on insert)
+  channelConnectId   String?     // Slack Connect: channel channelConnectId, stamped on insert
   id                String                        @id @default(cuid())
   conversationId    String                        // Conversation ID (no FK constraint)
   userId            String                        // User ID (no FK constraint)
@@ -2228,6 +2288,7 @@ model ConversationParticipant {
   @@index([userId, isSubscribed, lastReplyAt(sort: Desc), id(sort: Desc)], map: "conversation_participants_thread_list_idx")
 
   @@index([userId, id])
+  @@index([channelConnectId])
   @@map("conversation_participants")
   @@schema("public")
 }
@@ -2245,6 +2306,7 @@ model Email {
   replyTo String[] @default([])
   conversationId String
   channelId String
+  channelConnectId String? // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
   externalThreadId String
   externalMessageId String
   sentByUserId String?            // User who sent this outbound email (REPLY / REPLY_ALL / COMPOSE). Null for inbound and automation/system sends. Powers the per-desk "Sent" view.
@@ -2264,6 +2326,7 @@ model Email {
   @@index([conversationId, id])
   @@index([sentByUserId, createdAt(sort: Desc)]) // "Sent by me" list, ordered newest-first
   @@index([channelId, type, id, createdAt]) // desk auto-label backfill: keyset walk of one channel's inbound mail, within the lookback window
+  @@index([channelConnectId])
   @@map("emails")
   @@schema("public")
 }
@@ -2274,6 +2337,7 @@ model EmailDraft {
   conversationId String? // null = a brand-new compose draft (no thread yet); set = a reply draft
   userId String?
   channelId String
+  channelConnectId String? // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
   draftContent String
   subject String? // compose-draft subject (reply drafts inherit the thread subject)
   fromAddress String? // compose-draft "From" (sender alias)
@@ -2293,12 +2357,14 @@ model EmailDraft {
   @@index([userId, conversationId, id])
   @@index([conversationId])
   @@index([channelId])
+  @@index([channelConnectId])
   @@map("email_drafts")
   @@schema("public")
 }
 
 model EmailRead {
   workspaceId String // denormalized tenant key (stamped on insert)
+  channelConnectId String? // Slack Connect: the owning channel's connect_group handle (via its parent); null when none / un-backfilled
   id              String   @id @default(cuid())
   ticketId        String
   userId          String
@@ -2317,6 +2383,7 @@ model EmailRead {
   @@unique([ticketId, userId])
   @@index([userId])
   @@index([ticketId])
+  @@index([channelConnectId])
   @@map("email_reads")
   @@schema("public")
 }
@@ -2330,6 +2397,7 @@ model ConversationLabel {
   name        String
   color       String?  // hex color, mirrors Gmail label color
   channelId   String   // Channel (desk) scope — labels belong to a desk (no FK constraint)
+  channelConnectId String?  // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
   projectId   String?  // Project (denormalized from channel)
   workspaceId String   // Workspace for ACL optimization (denormalized from channel)
   createdBy   String   // Owner — labels are private to this user (no FK constraint)
@@ -2340,6 +2408,7 @@ model ConversationLabel {
   // Also serves per-user catalog reads + ACL via its (channelId, createdBy) prefix,
   // with the trailing "name" matching the catalog query's orderBy('name').
   @@unique([channelId, createdBy, name]) // No duplicate label names per user within a desk
+  @@index([channelConnectId])
   @@map("conversation_labels")
   @@schema("public")
 }
@@ -2350,6 +2419,7 @@ model ConversationLabelMapping {
   labelName      String   // Denormalized from ConversationLabel.name for fast reads
   conversationId String
   channelId      String   // Denormalized for ACL (channel membership/visibility)
+  channelConnectId String?  // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
   workspaceId    String
   createdBy      String   // Owner — the agent who applied the label (no FK constraint)
   createdAt      DateTime @default(now())
@@ -2361,6 +2431,7 @@ model ConversationLabelMapping {
   // The unique's conversationId prefix also serves the per-thread chips read.
   @@unique([conversationId, labelId]) // A label can only be applied once per conversation
   @@index([labelId]) // label-panel read, label→mappings correlation, deleteLabel cascade
+  @@index([channelConnectId])
   @@map("conversation_label_mappings")
   @@schema("public")
 }
@@ -2374,6 +2445,7 @@ model DeskAutoLabelRuleReference {
   workspaceId       String
   ownerId           String
   channelId         String
+  channelConnectId  String? // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
   filterFingerprint String
   createdAt         DateTime
 
@@ -2385,6 +2457,7 @@ model DeskAutoLabelRuleReference {
   @@index([workspaceId, ownerId, channelId, createdAt(sort: Desc), id(sort: Desc)], map: "desk_auto_label_rule_refs_owner_channel_idx")
   @@index([workspaceId, channelId], map: "desk_auto_label_rule_refs_channel_idx")
   @@index([workspaceId, labelId], map: "desk_auto_label_rule_refs_label_idx")
+  @@index([channelConnectId])
   @@map("desk_auto_label_rule_references")
   @@schema("non_zero")
 }
@@ -2398,6 +2471,7 @@ model TicketUserMailbox {
   ticketId    String       // The shared ticket this overlay files (no FK constraint)
   userId      String       // Owner — the overlay is private to this agent (no FK constraint)
   channelId   String       // Denormalized for ACL + per-user view filtering
+  channelConnectId String?      // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
   workspaceId String       // Denormalized
   state       String?       // No DDL default on the custom enum type — mutators always write it; readers treat null/absent as INBOX
   starred     Boolean      @default(false)
@@ -2407,6 +2481,7 @@ model TicketUserMailbox {
   // Also serves the setState/setStarred upsert lookup and the tickets.userMailbox
   // correlation (spam/starred exists() + related() overlay) via its ticketId prefix.
   @@unique([ticketId, userId]) // one overlay row per agent per ticket
+  @@index([channelConnectId])
   @@map("ticket_user_mailbox")
   @@schema("public")
 }
@@ -2428,6 +2503,7 @@ model EmailSignature {
 
 model EmailChannelPreference {
   channelId                    String   @id // Channel ID (no FK constraint) - Primary key
+  channelConnectId             String?  // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
   ownerUserId                  String?  // User ID who owns this preference (no FK constraint)
   assigneeUserGroupId          String?  // User group ID for assignee (no FK constraint)
   boardId                      String?  // Target board for ticket creation (no FK constraint)
@@ -2462,6 +2538,7 @@ model EmailChannelPreference {
   @@index([assigneeUserGroupId])
   @@index([boardId])
   @@unique([workspaceId, dlEmail])
+  @@index([channelConnectId])
   @@map("email_channel_preferences")
   @@schema("public")
 }
@@ -2470,6 +2547,7 @@ model ClassificationMapping {
   workspaceId String // denormalized tenant key (stamped on insert)
   id         String   @id @default(cuid())
   channelId  String
+  channelConnectId String? // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
   category   String
   subCategory String?
   userGroupId String
@@ -2477,6 +2555,7 @@ model ClassificationMapping {
 
   @@index([channelId])
   @@index([channelId, category])
+  @@index([channelConnectId])
   @@map("classification_mappings")
   @@schema("public")
 }
@@ -2515,6 +2594,7 @@ model Message {
   childConversationId String?     // Child conversation created from this message (no FK constraint)
   senderId            String      // User who sent the message (no FK constraint)
   workspaceId         String     // Workspace for ACL optimization (denormalized from conversation)
+  channelConnectId   String?     // Slack Connect: channel channelConnectId, stamped on insert
   content             String      // Text content
   msgType             String      @default("USER") // USER | BOT | SYSTEM
   hasAttachment       Boolean     @default(false) // Quick check for attachments
@@ -2549,6 +2629,7 @@ model Message {
   // Zero's related-messages source fill runs `WHERE conversationId = ? ORDER BY
   // messageId` — without this, every thread fetch pays a temp B-tree sort.
   @@index([conversationId, messageId])
+  @@index([channelConnectId])
   @@map("messages")
   @@schema("public")
 }
@@ -2562,6 +2643,7 @@ model Message {
 model MessageArtifact {
   id               String   @id @default(cuid())
   workspaceId      String
+  channelConnectId   String?     // Slack Connect: channel channelConnectId, stamped on insert
   messageId        String   @unique
   channelId        String
   conversationId   String
@@ -2575,6 +2657,7 @@ model MessageArtifact {
 
   @@index([workspaceId, status, messageCreatedAt])
   @@index([channelId])
+  @@index([channelConnectId])
   @@map("message_artifacts")
   @@schema("public")
 }
@@ -2585,6 +2668,7 @@ model MessageAttachment {
   entityType         String                // TICKET, CHAT, DRAFT, DELAYED_MESSAGE, etc.
   entityId           String                // Ticket id or message id (mandatory)
   workspaceId        String                // Workspace for ACL optimization
+  channelConnectId   String?     // Slack Connect: channel channelConnectId, stamped on insert
   storageProvider    String                // Storage provider where file is stored
   originalFilename   String                // Original filename uploaded by user
   mimetype           String                // image/png, application/pdf, etc.
@@ -2612,6 +2696,7 @@ model MessageAttachment {
   @@index([entityId, id])
   @@index([entityId, position])
   @@index([workspaceId, channelId, createdAt(sort: Desc), id])
+  @@index([channelConnectId])
   @@map("message_attachments")
   @@schema("public")
 }
@@ -2619,6 +2704,7 @@ model MessageAttachment {
 // Reaction Models
 model Reaction {
   workspaceId String // denormalized tenant key (stamped on insert)
+  channelConnectId   String?     // Slack Connect: channel channelConnectId, stamped on insert
   reactionId  String   @id @default(cuid())
   messageId   String   // Message being reacted to (no FK constraint)
   userId      String   // User who reacted (no FK constraint)
@@ -2631,12 +2717,14 @@ model Reaction {
   @@unique([messageId, userId, emojiName]) // User can only react once per emoji per message
   @@index([messageId]) // Fast lookup of message reactions
   @@index([messageId, reactionId])
+  @@index([channelConnectId])
   @@map("reactions")
   @@schema("public")
 }
 
 model ReactionCount {
   workspaceId String // denormalized tenant key (stamped on insert)
+  channelConnectId   String?     // Slack Connect: channel channelConnectId, stamped on insert
   countId     String   @id @default(cuid())
   messageId   String   // Message being counted (no FK constraint)
   emojiName   String   // The emoji being counted
@@ -2649,6 +2737,7 @@ model ReactionCount {
   @@unique([messageId, emojiName]) // One count record per emoji per message
   @@index([messageId]) // Fast lookup of message reaction counts
   @@index([messageId, countId])
+  @@index([channelConnectId])
   @@map("reaction_counts")
   @@schema("public")
 }
@@ -2674,6 +2763,7 @@ model Activity {
   id              String   @id @default(cuid())
   userId          String   // User who receives this notification (no FK constraint)
   workspaceId     String  // Workspace for ACL optimization
+  channelConnectId   String?     // Slack Connect: channel channelConnectId, stamped on insert
   actorAction     String   // Action performed: 'mentioned_user', 'group_mention', 'replied', 'added', 'created', etc.
   /// @deprecated Use messageId, reactionId, or callId instead. Will be removed in future migration.
   actionSource    String   // Source entity: 'message', 'reaction', 'channel' (singular)
@@ -2731,6 +2821,7 @@ model Activity {
 
   @@index([userId, updatedAt(sort: Desc), id])
   @@index([userId, actorAction, isRead, id])
+  @@index([channelConnectId])
   @@map("activities")
   @@schema("public")
 }
@@ -2765,6 +2856,7 @@ model ExternalSource {
   sourceType      String                    // "zoho", "slack", "jira", "google_calendar", "microsoft_calendar", etc. - flexible string
   displayName     String                    // "Zoho (Euler Team)" or user email for calendar sources
   channelId       String?                   // Target workspace channel for messages
+  channelConnectId String?                   // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
   externalIdentifier String?                // External provider identifier: Google Calendar channel id, Microsoft subscription id, etc.
   workspaceId     String                    // denormalized tenant key (stamped on insert)
   boardId         String?                   // @deprecated - Use EmailChannelPreference.boardId instead. Target board for ticket creation (no FK constraint) - N:1 with Board
@@ -2781,12 +2873,14 @@ model ExternalSource {
   @@index([displayName])
   @@index([channelId])
   @@index([externalIdentifier])
+  @@index([channelConnectId])
   @@map("external_sources")
   @@schema("workflow")
 }
 
 model ExternalMessage {
   workspaceId String // denormalized tenant key (stamped on insert)
+  channelConnectId String? // Slack Connect: the owning channel's connect_group handle (via its parent); null when none / un-backfilled
   id                 String   @id @default(cuid())
   externalSourceId   String                // External source ID (no FK constraint)
   externalId         String                // Message ID in external system (for deduplication)
@@ -2805,12 +2899,14 @@ model ExternalMessage {
   @@index([externalSourceId, externalThreadId])  // Fast lookup by thread
   @@index([messageId])                           // Fast lookup by message
   @@index([externalId])
+  @@index([channelConnectId])
   @@map("external_messages")
   @@schema("workflow")
 }
 
 model ProactiveNudge {
   workspaceId String // denormalized tenant key (stamped on insert)
+  channelConnectId   String?     // Slack Connect: channel channelConnectId, stamped on insert
   id                      String             @id @default(cuid())
   messageId               String
 
@@ -2830,6 +2926,7 @@ model ProactiveNudge {
 
   @@unique([messageId])
   @@index([state])
+  @@index([channelConnectId])
   @@map("proactive_nudges")
   @@schema("public")
 }
@@ -2859,6 +2956,7 @@ model SurfaceNudge {
 
 model SurfaceNudgeCount {
   workspaceId String // denormalized tenant key (stamped on insert)
+  channelConnectId   String?     // Slack Connect: channel channelConnectId, stamped on insert
   id             String   @id
   nudgeCount     Int
   userId         String?
@@ -2888,6 +2986,7 @@ model SurfaceNudgeCount {
   @@index([conversationId, userId])
   @@index([conversationId, channelId])
   @@index([conversationId, gid, gidType])
+  @@index([channelConnectId])
   @@map("surface_nudge_counts")
   @@schema("public")
 }
@@ -2956,6 +3055,7 @@ model BrowserNotificationSubscription {
 // Call Models
 model Call {
   workspaceId String // denormalized tenant key (stamped on insert)
+  channelConnectId   String?     // Slack Connect: channel channelConnectId, stamped on insert
   id               String      @id @default(cuid())
   externalId       String      @unique // Public ID for linking/sharing
   title            String?     // Meeting/call title
@@ -3020,6 +3120,7 @@ model Call {
   // scheduled ones by when they start.
   @@index([channelId, status, endedAt(sort: Desc)])
   @@index([channelId, status, startsAt])
+  @@index([channelConnectId])
   @@map("calls")
   @@schema("public")
 }
@@ -3034,6 +3135,7 @@ model Call {
 model EntityAccess {
   id                  String   @id @default(cuid())
   workspaceId         String
+  channelConnectId   String?     // Slack Connect: channel channelConnectId, stamped on insert
   shareableEntityType String   // NOTE_TAKER (see ShareableEntityType in @xyne/shared; app-validated, no DB enum)
   entityId            String   // Polymorphic id, resolved by shareableEntityType (no FK constraint)
 
@@ -3051,6 +3153,7 @@ model EntityAccess {
   @@index([workspaceId, userId])
   @@index([workspaceId, userGroupId])
   @@index([workspaceId, channelId])
+  @@index([channelConnectId])
   @@map("entity_access")
   @@schema("public")
 }
@@ -3076,6 +3179,7 @@ model SummaryTemplate {
 
 model CallParticipant {
   workspaceId String // denormalized tenant key (stamped on insert)
+  channelConnectId   String?     // Slack Connect: channel channelConnectId, stamped on insert
   id           String              @id @default(cuid())
   callId       String              // Call ID (no FK constraint)
   userId       String              // User ID (no FK constraint)
@@ -3102,6 +3206,7 @@ model CallParticipant {
   @@index([email]) // Fast external invitee lookup
   @@index([callId, leftAt]) // Fast active participants lookup
   @@index([response]) // Fast response lookup
+  @@index([channelConnectId])
   @@map("call_participants")
   @@schema("public")
 }
@@ -3113,6 +3218,7 @@ model CallParticipant {
 // express it) — it is the single-active concurrency lock.
 model CallRecording {
   workspaceId String // denormalized tenant key (stamped on insert)
+  channelConnectId   String?     // Slack Connect: channel channelConnectId, stamped on insert
   id            String          @id @default(cuid())
   callId        String
   egressId      String?         @unique          // webhook correlation key
@@ -3133,12 +3239,14 @@ model CallRecording {
   starter User @relation(fields: [startedBy], references: [id], onDelete: Cascade)
 
   @@index([callId])
+  @@index([channelConnectId])
   @@map("call_recordings")
   @@schema("non_zero")
 }
 
 model RecurringCallSeries {
   workspaceId String // denormalized tenant key (stamped on insert)
+  channelConnectId   String?     // Slack Connect: channel channelConnectId, stamped on insert
   id             String                    @id @default(cuid())
   title          String                    // Series title
   description    String?                   // Series description/agenda
@@ -3164,6 +3272,7 @@ model RecurringCallSeries {
   @@index([organizerId])  // Fast lookup of series created by a user
   @@index([channelId])    // Fast lookup of series in a channel
   @@index([status])       // Fast lookup of active series
+  @@index([channelConnectId])
   @@index([workspaceId, createdAt(sort: Desc), id]) // Calls admin panel series list, keyset-paged
   @@map("recurring_call_series")
   @@schema("public")
@@ -3171,6 +3280,7 @@ model RecurringCallSeries {
 
 model RecurringCallParticipant {
   workspaceId String // denormalized tenant key (stamped on insert)
+  channelConnectId   String?     // Slack Connect: channel channelConnectId, stamped on insert
   id                String              @id @default(cuid())
   recurringSeriesId String              // RecurringCallSeries ID
   userId            String              // User ID for internal participants; synthetic ID for external invitees
@@ -3193,6 +3303,7 @@ model RecurringCallParticipant {
   @@index([userId])
   @@index([email])
   @@index([isExternal])
+  @@index([channelConnectId])
   @@map("recurring_call_participants")
   @@schema("public")
 }
@@ -3206,6 +3317,7 @@ model CanvasFolder {
   id        String   @id @default(cuid())
   projectId String?
   channelId String?
+  channelConnectId String? // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
   name      String
   createdBy String
   createdAt DateTime @default(now())
@@ -3222,6 +3334,7 @@ model CanvasFolder {
   @@index([channelId])
   @@index([projectId, channelId])
   @@index([createdBy])
+  @@index([channelConnectId])
   @@map("canvas_folders")
   @@schema("public")
 }
@@ -3268,6 +3381,7 @@ model Canvas {
   quartoDocumentType String?    // "docs" | "book" | "slides" | "website" (type of Quarto document)
   gcsPath      String?          // Path in GCS where the bundle is stored
   connectId    String?          // Slack Connect: this canvas's connect_group handle (null until backfilled)
+  channelConnectId String?      // Slack Connect: the home channel's connect_group handle; null when not in a channel / un-backfilled
   // Slack Connect: filter-only relation to this canvas's connect_group rows (connect_group.entityId ==
   // canvas.id). Lets the Prisma ACL authorize reach with a correlated EXISTS — "is my workspace a host
   // or invited member of this canvas's group?" — instead of materialising every reachable canvas id.
@@ -3288,6 +3402,7 @@ model Canvas {
   @@index([createdBy, updatedAt(sort: Desc), id])
   @@index([docType, updatedAt(sort: Desc), id])
   @@index([connectId])
+  @@index([channelConnectId])
   @@map("canvases")
   @@schema("public")
 }
@@ -3377,6 +3492,7 @@ model CanvasParticipant {
   joinedAt    DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
   canvasConnectId   String?    // Slack Connect: resolved from parent canvas (null until backfilled)
+  channelConnectId  String?    // Slack Connect: connect_group handle of this row's own channelId (the share target); null when channelId is null / un-backfilled
 
   // Relations (no FK constraints - consistent with userId and canvasId)
   canvas    Canvas     @relation(fields: [canvasId], references: [id])
@@ -3389,6 +3505,7 @@ model CanvasParticipant {
   @@index([userGroupId])
   @@index([channelId])
   @@index([canvasConnectId])
+  @@index([channelConnectId])
   @@map("canvas_participants")
   @@schema("public")
 }
@@ -3441,6 +3558,7 @@ model Bookmark {
 // Link Sharing Feature Models
 model Link {
   workspaceId String // denormalized tenant key (stamped on insert)
+  channelConnectId   String?     // Slack Connect: channel channelConnectId, stamped on insert
   id          String         @id @default(cuid())
   url         String
   title       String
@@ -3458,12 +3576,14 @@ model Link {
   @@index([createdBy, url, channelId])
   @@index([channelId, visibility]) // Fast lookup of channel links by visibility
   @@index([channelId, createdBy]) // Fast lookup of user's links in channel
+  @@index([channelConnectId])
   @@map("links")
   @@schema("public")
 }
 
 model LinkAccess {
   workspaceId String // denormalized tenant key (stamped on insert)
+  channelConnectId   String?     // Slack Connect: channel channelConnectId, stamped on insert
   id        String   @id @default(cuid())
   linkId    String   // Link ID (no FK constraint)
   userId    String   // User ID (no FK constraint)
@@ -3472,6 +3592,7 @@ model LinkAccess {
   @@unique([linkId, userId]) // User can only have one access record per link
   @@index([userId]) // Fast lookup of links shared with user
   @@index([linkId]) // Fast lookup of users with access to link
+  @@index([channelConnectId])
   @@map("link_access")
   @@schema("public")
 }
@@ -3516,6 +3637,7 @@ model Repo {
   projectId            String?
   /// @deprecated -> membership is the CHANNEL -> REPOSITORY edge in sdlc_entity_links; never written since multi-repo
   channelId            String?
+  channelConnectId     String? // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
   /// @deprecated -> written only by the removed SDLC worker
   sdlcSetupExecutionId String? @unique
   accessCapabilities   Json?
@@ -3540,6 +3662,7 @@ model Repo {
   @@index([projectId])
   @@index([workspaceId, projectId])
   @@index([vcsCredentialId])
+  @@index([channelConnectId])
   @@map("repos")
   @@schema("public")
 }
@@ -3554,6 +3677,7 @@ model SdlcEntityLink {
   /// Nullable in Postgres for pre-multirepo rows; required here so no new write
   /// can omit the edge's scope.
   channelId    String
+  channelConnectId String? // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
   sourceType   String
   sourceId     String
   targetType   String
@@ -3577,6 +3701,7 @@ model SdlcEntityLink {
   @@index([workspaceId, repoId]) // deprecated
   @@index([repoId, sourceType, sourceId]) // deprecated
   @@index([repoId, targetType, targetId]) // deprecated
+  @@index([channelConnectId])
   @@map("sdlc_entity_links")
   @@schema("public")
 }
@@ -3610,6 +3735,8 @@ model SdlcItemComment {
 // sourceReferences holds stringified JSON: [{path, commitSha, symbol?, startLine?, endLine?}]
 model SdlcArtifact {
   workspaceId         String
+  channelConnectId    String? // Slack Connect: the owning channel's connect_group handle (via its parent); null when none / un-backfilled
+  canvasConnectId     String? // Slack Connect: resolved from parent canvas (null until backfilled)
   artifactId          String   @id // canvas id (the only artifact kind for now) - Primary key
   /// @deprecated -> repository comes from the link table; no new reads or writes. Still set, and still
   /// read by the wiki and baseline lookups, until per-repo Wiki/Baseline folders replace it.
@@ -3632,6 +3759,8 @@ model SdlcArtifact {
   @@index([workflowExecutionId])
   @@index([workspaceId])
   @@index([artifactType, artifactStatus])
+  @@index([channelConnectId])
+  @@index([canvasConnectId])
   @@map("sdlc_artifacts")
   @@schema("public")
 }
@@ -3667,6 +3796,7 @@ model SdlcFolder {
 
 model SdlcTrack {
   workspaceId String
+  channelConnectId String? // Slack Connect: the owning channel's connect_group handle (via its parent); null when none / un-backfilled
   id          String   @id @default(cuid())
   /// @deprecated -> scope is the CHANNEL -> TRACK edge in sdlc_entity_links; never written since multi-repo
   repoId      String?
@@ -3684,6 +3814,7 @@ model SdlcTrack {
 
   @@index([repoId, status]) // deprecated
   @@index([workspaceId])
+  @@index([channelConnectId])
   @@map("sdlc_tracks")
   @@schema("public")
 }
@@ -3874,6 +4005,7 @@ model Merchant {
 
 model DraftMessage {
   workspaceId String // denormalized tenant key (stamped on insert)
+  channelConnectId   String?     // Slack Connect: channel channelConnectId, stamped on insert
   id              String      @id @default(cuid())
   channelId       String      // Channel this draft belongs to (no FK constraint)
   conversationId  String?     // Conversation this draft belongs to (no FK constraint)
@@ -3889,6 +4021,7 @@ model DraftMessage {
   @@index([channelId, conversationId, messageId, userId]) // Fast lookup of user's draft for a conversation
   @@index([userId, id]) // for userDrafts
   @@index([userId, origin])
+  @@index([channelConnectId])
   @@map("draft_messages")
   @@schema("public")
 }
@@ -4014,6 +4147,7 @@ model CollectionPermission {
   // VIEWER (enforced in the grantPermission mutator), and only offered for
   // workspace-scoped collections (no home channel of their own) in the UI.
   channelId    String?
+  channelConnectId String? // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
   role         String
   canShare     Boolean        @default(false)
   grantedBy    String?
@@ -4031,6 +4165,7 @@ model CollectionPermission {
   @@index([userGroupId])
   @@index([channelId])
   @@index([collectionId, userId, id], map: "idx_collection_permissions_collection_user_id")
+  @@index([channelConnectId])
   @@map("collection_permissions")
   @@schema("public")
 }
@@ -4073,6 +4208,7 @@ model Application {
   boardId            String    @unique // Application release board ID
   mainReleaseBoardId String?   // Owning main release board ID
   channelId          String?   // Channel ID (no FK constraint)
+  channelConnectId   String?   // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
   regex              String    // Used to identify service
   repoUrl            String
   deployedCommit     String?   // Commit-range deployment state
@@ -4091,6 +4227,7 @@ model Application {
   @@index([channelId])
   @@index([boardId])
   @@index([mainReleaseBoardId])
+  @@index([channelConnectId])
   @@map("applications")
   @@schema("public")
 }
@@ -4152,6 +4289,7 @@ model ReleaseEvent {
   userId                String?           // NULL = system event
   userName              String?           // Name of the user
   channelId             String            // Channel where release lives
+  channelConnectId      String?           // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
   conversationId        String            // Thread for this release
   payload               Json?             // Flat, event-specific data
   createdAt             DateTime          @default(now())
@@ -4164,6 +4302,7 @@ model ReleaseEvent {
   // Serves releaseEventsByReleaseId (filter releaseId, order createdAt desc, id desc);
   // avoids a zero-cache TEMP B-TREE sort. Built CONCURRENTLY in a raw migration.
   @@index([releaseId, createdAt(sort: Desc), id(sort: Desc)], map: "release_events_releaseId_createdAt_id_idx")
+  @@index([channelConnectId])
   @@map("release_events")
   @@schema("public")
 }
@@ -4349,6 +4488,7 @@ model Recap {
 // userId = "" for base recaps, userId = actual user ID for custom recaps
 model ChannelDailyRecap {
   workspaceId String // denormalized tenant key (stamped on insert)
+  channelConnectId   String?     // Slack Connect: channel channelConnectId, stamped on insert
   id        String   @id @default(cuid())
   channelId String
   recapDate DateTime @db.Date
@@ -4357,6 +4497,7 @@ model ChannelDailyRecap {
 
   @@index([recapDate])
   @@index([userId])
+  @@index([channelConnectId])
   @@map("channel_daily_recaps")
   @@schema("public")
 }
@@ -4364,6 +4505,7 @@ model ChannelDailyRecap {
 // Stores AI-generated summaries for each channel (replacement for ChannelDailyRecap)
 model ChannelRecap {
   workspaceId String // denormalized tenant key (stamped on insert)
+  channelConnectId   String?     // Slack Connect: channel channelConnectId, stamped on insert
   id        String   @id @default(cuid())
   channelId String
   recapDate DateTime @db.Date
@@ -4372,6 +4514,7 @@ model ChannelRecap {
 
   @@index([recapDate])
   @@index([userId])
+  @@index([channelConnectId])
   @@map("channel_recaps")
   @@schema("public")
 }
@@ -4497,6 +4640,7 @@ model AppIncomingWebhook {
   id             String    @id @default(cuid())
   installedAppId String
   channelId      String
+  channelConnectId String? // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
   boardId        String?
   name           String
   type           String                 @default("SLACK")
@@ -4518,6 +4662,7 @@ model AppIncomingWebhook {
   @@index([installedAppId, channelId])
   @@index([installedAppId])
   @@index([secret])
+  @@index([channelConnectId])
   @@map("app_incoming_webhooks")
   @@schema("workflow")
 }
@@ -4606,6 +4751,7 @@ model ViewAccess {
 // Scheduled Message Models
 model DelayedMessage {
   workspaceId String // denormalized tenant key (stamped on insert)
+  channelConnectId   String?     // Slack Connect: channel channelConnectId, stamped on insert
   id              String                 @id @default(cuid())
   channelId       String                 // Target channel (no FK constraint)
   conversationId  String?                // Target conversation (for thread replies, no FK constraint)
@@ -4623,6 +4769,7 @@ model DelayedMessage {
   @@index([senderId, scheduledFor])
   @@index([scheduledFor, status])
   @@index([channelId, status])
+  @@index([channelConnectId])
   @@map("delayed_messages")
   @@schema("public")
 }
@@ -5085,6 +5232,7 @@ model ExecutionItem {
   // conversation: reparenting rewrites it in the same transaction that moves
   // the thread, so a feed may scope on it directly.
   channelId       String
+  channelConnectId String? // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
   sourceMessageId String // message that created the ask; >1 item per source = split
   title           String
   contextSummary  String?
@@ -5110,6 +5258,7 @@ model ExecutionItem {
   @@index([pendingOn], type: Gin) // feed: Pending Me membership
   @@index([requestedBy], type: Gin) // feed: Waiting On membership
   @@index([workspaceId, status, updatedAt(sort: Desc)]) // feed: Pending Others ordering
+  @@index([channelConnectId])
   @@map("execution_items")
   @@schema("non_zero")
 }
@@ -5202,6 +5351,7 @@ model RadarPrLink {
   prUrl          String // canonical, lowercased: https://<host>/<owner>/<repo>/pull/<n> (GitHub) or https://<host>/projects/<KEY>/repos/<slug>/pull-requests/<n> (Bitbucket)
   scopeKey       String // the Radar scope the link was posted in (conversationId, or dm:<channelId>)
   channelId      String
+  channelConnectId String? // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
   conversationId String // the conversation of the message itself (no FK constraint, as elsewhere here)
   messageId      String
   postedAt       DateTime // the message's createdAt
@@ -5211,6 +5361,7 @@ model RadarPrLink {
   @@unique([messageId, prUrl])
   // The only read: every link to one PR in a workspace.
   @@index([workspaceId, prUrl])
+  @@index([channelConnectId])
   @@map("radar_pr_links")
   @@schema("non_zero")
 }
