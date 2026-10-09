@@ -24,7 +24,7 @@ export function RecordingLoadError({
       className='relative flex h-full w-full flex-col overflow-hidden bg-background shadow-md md:rounded-2xl'
     >
       <div className='h-full w-full overflow-y-auto'>
-        <div className='mx-auto flex min-h-full w-full max-w-[860px] flex-col px-4 py-6'>
+        <div className='mx-auto flex min-h-full w-full max-w-[884px] flex-col px-4 py-6'>
           <header className='mb-6'>
             {/* The one live control up here: getting back out. */}
             <nav aria-label='Breadcrumb' className='mb-3'>

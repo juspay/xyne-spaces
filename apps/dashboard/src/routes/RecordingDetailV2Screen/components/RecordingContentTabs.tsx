@@ -73,6 +73,11 @@ export const RecordingContentTabs = ({
 }: RecordingContentTabsProps): ReactElement => {
   const shouldReduceMotion = useReducedMotion();
   const [isTemplateMenuOpen, setIsTemplateMenuOpen] = useState(false);
+  const [hasInteracted, setHasInteracted] = useState(false);
+  const pillTransition =
+    shouldReduceMotion || !hasInteracted
+      ? { duration: 0 }
+      : { type: 'spring' as const, stiffness: 420, damping: 34 };
 
   useEffect(() => {
     if (visibleTab !== 'summary') setIsTemplateMenuOpen(false);
@@ -105,9 +110,7 @@ export const RecordingContentTabs = ({
           <motion.span
             layoutId={TAB_INDICATOR_ID}
             className='absolute inset-0 rounded-full bg-background shadow-sm ring-1 ring-border/60'
-            transition={
-              shouldReduceMotion ? { duration: 0 } : { type: 'spring', stiffness: 420, damping: 34 }
-            }
+            transition={pillTransition}
             aria-hidden='true'
           />
         )}
@@ -138,9 +141,7 @@ export const RecordingContentTabs = ({
       <motion.span
         layoutId={TAB_INDICATOR_ID}
         className='absolute inset-0 rounded-full bg-background shadow-sm ring-1 ring-border/60'
-        transition={
-          shouldReduceMotion ? { duration: 0 } : { type: 'spring', stiffness: 420, damping: 34 }
-        }
+        transition={pillTransition}
         aria-hidden='true'
       />
     ) : null;
@@ -177,17 +178,21 @@ export const RecordingContentTabs = ({
         {indicator}
         <span className='relative z-10 flex items-center gap-2'>
           {icon}
-          <AnimatePresence mode='popLayout' initial={false}>
-            <motion.span
-              key={label}
-              initial={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: 4 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: -4 }}
-              transition={{ duration: shouldReduceMotion ? 0 : 0.14 }}
-            >
-              {label}
-            </motion.span>
-          </AnimatePresence>
+          {hasInteracted ? (
+            <AnimatePresence mode='popLayout' initial={false}>
+              <motion.span
+                key={label}
+                initial={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: -4 }}
+                transition={{ duration: shouldReduceMotion ? 0 : 0.14 }}
+              >
+                {label}
+              </motion.span>
+            </AnimatePresence>
+          ) : (
+            <span>{label}</span>
+          )}
           <AnimatePresence initial={false}>
             {isRegenerating && hasSummary && (
               <motion.span
@@ -265,6 +270,7 @@ export const RecordingContentTabs = ({
     <div
       role='tablist'
       aria-label='Recording content'
+      onClickCapture={() => setHasInteracted(true)}
       className='inline-flex items-center gap-1 rounded-full bg-muted/60 p-1'
     >
       {renderTab(
