@@ -12,8 +12,9 @@
 import { randomUUID } from "node:crypto";
 import { createLogger } from "../../../logger.js";
 import { errMsg } from "../../../lib/errors.js";
+import { isSlotBusy } from "../../../lib/message-queue.js";
 import { dispatchOrQueueChannelRun } from "../busy.js";
-import { taskConversationId } from "../ids.js";
+import { channelConversationId, taskConversationId } from "../ids.js";
 import { rememberActiveRun } from "../commands.js";
 import { enqueueOutbound } from "../delivery.js";
 import type {
@@ -55,6 +56,23 @@ function bucket(requests: string[], n: number): string[] {
   return out;
 }
 
+/**
+ * What one run is asked to do. The person's own words always lead: the
+ * planner is a small model whose `request` is a paraphrase, and a bad one
+ * replaced the message outright ("Hi" reached the agent as "Respond to the
+ * user's greeting…", "What is 10 + 10" as "20"). Its reading is added only
+ * where it tells the run something it cannot work out itself — which part of
+ * a split message is this run's, or what the message means to a run that
+ * starts without the chat's history.
+ */
+export function taskText(raw: string, reading: string, run: { split: boolean; hasHistory: boolean }): string {
+  const hint = reading.trim();
+  if (!hint || hint === raw.trim()) return raw;
+  if (run.split) return `${raw}\n\n(This run handles one part of that message; the rest is handled separately: ${hint})`;
+  if (run.hasHistory) return raw;
+  return `${raw}\n\n(Read against the rest of this chat, that most likely means: ${hint}. Where this differs from the message, go by the message.)`;
+}
+
 export async function handleThreaded(args: ThreadedInboundArgs): Promise<{ accepted: boolean }> {
   const { plugin, account, agent, userId, msg, rawTask, contextBlock, target } = args;
   const accountId = account.id;
@@ -87,17 +105,29 @@ export async function handleThreaded(args: ThreadedInboundArgs): Promise<{ accep
     .filter((a) => !(a.continueIndex !== null && open[a.continueIndex! - 1]))
     .map((a) => a.label);
 
+  const split = plan.actions.length > 1;
   let accepted = false;
 
   for (const action of continues) {
     const task = open[action.continueIndex! - 1]!;
-    const request = `${stateBlock}${contextBlock}${action.request}`;
+    const request = `${stateBlock}${contextBlock}${taskText(rawTask, action.request, { split, hasHistory: true })}`;
     if (await dispatchTask(args, task.conversationId, task.label, request)) accepted = true;
   }
 
+  // A new task goes into the chat's own conversation — the one with its
+  // history, and the one /new clears — unless that is already busy. Only then
+  // does it fork a conversation of its own, which starts empty: forking every
+  // new request left an ordinary chat with no memory of its last message.
+  const home = channelConversationId(account.channel, account.accountKey, agent.slug, chatId);
+  let homeFree =
+    !continues.some((a) => open[a.continueIndex! - 1]!.conversationId === home) && !(await isSlotBusy(home, agent.slug));
+
   for (let i = 0; i < fresh.length; i++) {
-    const taskId = randomUUID();
-    const conversationId = taskConversationId(account.channel, account.accountKey, agent.slug, chatId, taskId);
+    const intoHome = homeFree;
+    homeFree = false;
+    const conversationId = intoHome
+      ? home
+      : taskConversationId(account.channel, account.accountKey, agent.slug, chatId, randomUUID());
     const label = (freshLabels[i] ?? "request").slice(0, 40);
     await createTask(accountId, chatId, {
       conversationId,
@@ -106,7 +136,7 @@ export async function handleThreaded(args: ThreadedInboundArgs): Promise<{ accep
       originMessageId: msg.messageId,
       createdAt: Date.now(),
     });
-    const request = `${stateBlock}${contextBlock}${fresh[i]!}`;
+    const request = `${stateBlock}${contextBlock}${taskText(rawTask, fresh[i]!, { split, hasHistory: intoHome })}`;
     if (await dispatchTask(args, conversationId, label, request)) accepted = true;
   }
 

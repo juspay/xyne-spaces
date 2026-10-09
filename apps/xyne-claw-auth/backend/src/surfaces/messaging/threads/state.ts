@@ -30,6 +30,15 @@ export async function loadChatState(accountId: string, chatId: string): Promise<
   }
 }
 
+/** /new: the facts belonged to the conversation being forgotten. */
+export async function clearChatState(accountId: string, chatId: string): Promise<void> {
+  try {
+    await redisService.getConnection().del(stateKey(accountId, chatId));
+  } catch (err) {
+    log.warn(`[threads-state] clear failed account=${accountId} chat=${chatId}: ${errMsg(err)}`);
+  }
+}
+
 /** Merge new slot values over the existing ones; empty strings clear a slot. */
 export async function mergeChatState(
   accountId: string,
