@@ -6,13 +6,13 @@ import { authorize } from '@/middleware/authorize';
 
 const router = Router();
 
-// Middleware to check for USERS admin access (same as user-management)
-const usersAdminAuth = authorize('USERS', AccessType.ADMIN);
+// Middleware to check for USER-MANAGEMENT admin access
+const userManagementAdminAuth = authorize('USER-MANAGEMENT', AccessType.ADMIN);
 
 /**
  * @route POST /api/user-activation
  * @desc Bulk update user status (activate/deactivate multiple users)
- * @access USERS Admin only
+ * @access USER-MANAGEMENT Admin only
  *
  * Request Body:
  * {
@@ -31,7 +31,7 @@ const usersAdminAuth = authorize('USERS', AccessType.ADMIN);
 router.post(
   '/',
   authMiddleware.authenticate,
-  usersAdminAuth,
+  userManagementAdminAuth,
   userActivationController.bulkUpdateUserStatus
 );
 
