@@ -226,6 +226,7 @@ const AppSidebar = (): ReactElement => {
   const hasChannelOrThreadId = useRouterSelector(({ location }) =>
     isChannelOrThreadLocation(location),
   );
+  const openChannelId = useRouterSelector(({ params }) => params['channelId']);
   const prefixWs = (path: string): string => (workspaceId ? `/${workspaceId}${path}` : path);
   const { user } = useAuth();
   const currentUser = useSelf();
@@ -402,10 +403,14 @@ const AppSidebar = (): ReactElement => {
   };
 
   const hasPendingDirectMessages = useMemo(() => {
+    // The open DM is being read, so its incoming messages shouldn't light the rail dot.
     return visibleChannels.some(
-      channel => isDMChannel(channel.scopeType) && (unreadCounts[channel.id] ?? 0) > 0,
+      channel =>
+        channel.id !== openChannelId &&
+        isDMChannel(channel.scopeType) &&
+        (unreadCounts[channel.id] ?? 0) > 0,
     );
-  }, [visibleChannels, unreadCounts]);
+  }, [visibleChannels, unreadCounts, openChannelId]);
 
   const handleNavigationClick = (_label: string, _openedInNewWindow = false): void => {};
 
