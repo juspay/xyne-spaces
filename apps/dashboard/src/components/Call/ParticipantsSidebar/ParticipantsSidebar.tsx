@@ -11,7 +11,6 @@ import {
   Check,
   XIcon,
   Hand,
-  Search,
   MoreVertical,
   ShieldCheck,
 } from 'lucide-react';
@@ -42,11 +41,6 @@ import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDispla
 import { cn } from '../../../utils/classNames';
 import { logger, Event } from '../../../utils/logger';
 import { getRingStatusLabel, useIsBroadcastChannelCall } from '../ringStatus.utils';
-
-function matchesSearch(name: string, query: string): boolean {
-  const q = query.trim().toLowerCase();
-  return !q || name.toLowerCase().includes(q);
-}
 
 interface ParticipantsSidebarProps {
   callId: string;
@@ -165,7 +159,6 @@ interface ParticipantItemProps {
   removingParticipantId: string | null;
   onMuteParticipant: (participantUserId: string) => void | Promise<void>;
   onRemoveParticipant: (participantUserId: string, name: string) => void | Promise<void>;
-  searchQuery: string;
   /** Channel broadcast calls never ring anyone, so invitees read "Invited". */
   isBroadcastChannelCall: boolean;
 }
@@ -184,7 +177,6 @@ function ParticipantItem({
   removingParticipantId,
   onMuteParticipant,
   onRemoveParticipant,
-  searchQuery,
   isBroadcastChannelCall,
 }: ParticipantItemProps): React.ReactElement | null {
   const { response, userId, displayName } = participant;
@@ -224,11 +216,6 @@ function ParticipantItem({
   const isRaised = raisedHands.includes(userId);
   const isSelf = !!currentUserId && userId === currentUserId;
   const isHostRow = !!hostUserId && userId === hostUserId;
-
-  // Names resolve per row (some via a user lookup), so search filters here.
-  if (!matchesSearch(participantName, searchQuery)) {
-    return null;
-  }
 
   const statusLine = wasRemovedByHost ? (
     <span className='text-red-500'>Removed by host</span>
@@ -376,7 +363,6 @@ interface RequestedParticipantItemProps {
   rejectingId: string | null;
   onApprove: (participantId: string) => void;
   onReject: (participantId: string) => void;
-  searchQuery: string;
 }
 
 // Inner component for requested participants — looks up user name via useUser
@@ -387,16 +373,11 @@ function RequestedParticipantItem({
   rejectingId,
   onApprove,
   onReject,
-  searchQuery,
 }: RequestedParticipantItemProps): React.ReactElement | null {
   const { userId, displayName, isExternal } = participant;
   const participantUser = useUser(!isExternal ? userId : '');
   const resolvedName = displayName || participantUser?.name || 'Guest';
   const initial = resolvedName.charAt(0).toUpperCase();
-
-  if (!matchesSearch(resolvedName, searchQuery)) {
-    return null;
-  }
 
   return (
     <div className='flex items-center gap-3 px-4 py-2 transition-colors hover:bg-muted/60'>
@@ -473,7 +454,6 @@ export function ParticipantsSidebar({
   hostName,
 }: ParticipantsSidebarProps): React.ReactElement {
   const [showInviteModal, setShowInviteModal] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
   const [isAttendeesExpanded, setIsAttendeesExpanded] = useState(true);
   const [isAlsoInvitedExpanded, setIsAlsoInvitedExpanded] = useState(true);
   const [isRequestedExpanded, setIsRequestedExpanded] = useState(true);
@@ -708,7 +688,6 @@ export function ParticipantsSidebar({
     removingParticipantId,
     onMuteParticipant: handleMuteParticipant,
     onRemoveParticipant: handleRemoveParticipant,
-    searchQuery,
   };
 
   return (
@@ -776,82 +755,52 @@ export function ParticipantsSidebar({
           </div>
         </div>
 
-        <div className='space-y-3 px-4 pb-3'>
-          {/* Primary actions, side by side above search */}
-          {(!hideInvite || canMuteAll) && (
-            <div className='flex items-center gap-2'>
-              {!hideInvite && (
-                <button
-                  type='button'
-                  onClick={() => setShowInviteModal(true)}
-                  className='flex h-9 items-center gap-2 rounded-full bg-[#0b57d0] pl-3 pr-4 text-sm font-medium text-white transition-colors hover:bg-[#0a4ebb] dark:bg-[#a8c7fa] dark:text-[#062e6f] dark:hover:bg-[#bcd4fb]'
-                  title='Add people'
-                  data-testid='add-people-button'
-                  data-track-category='CALLS'
-                  data-track-name='ADD_PEOPLE_TO_CALL'
-                  data-track-metadata={JSON.stringify({ callId })}
-                >
-                  <UserPlus size={16} />
-                  Add people
-                </button>
-              )}
-              {canMuteAll && (
-                <button
-                  type='button'
-                  onClick={() => void handleMuteAll()}
-                  disabled={isMuting}
-                  className='flex h-9 items-center gap-2 rounded-full border border-border pl-3 pr-4 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50'
-                  title='Mute everyone except you'
-                  data-testid='mute-all-button'
-                  data-ph-capture-attribute-track-id='mute_all_participants'
-                  data-track-category='CALLS'
-                  data-track-name='MUTE_ALL_PARTICIPANTS'
-                  data-track-metadata={JSON.stringify({ callId })}
-                >
-                  <MicOff size={16} />
-                  {isMuting ? 'Muting…' : 'Mute all'}
-                </button>
-              )}
-            </div>
-          )}
-
-          <label className='flex items-center gap-2 rounded-lg border border-border px-3 py-2 focus-within:border-[#0b57d0] focus-within:ring-1 focus-within:ring-[#0b57d0] dark:focus-within:border-[#a8c7fa] dark:focus-within:ring-[#a8c7fa]'>
-            <Search size={18} className='flex-shrink-0 text-muted-foreground' />
-            <input
-              type='text'
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              placeholder='Search for people'
-              aria-label='Search for people'
-              data-track-category='CALLS'
-              data-track-name='SEARCH_CALL_PARTICIPANTS'
-              className='min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground'
-            />
-            {searchQuery && (
+        {/* Primary actions, side by side */}
+        {(!hideInvite || canMuteAll) && (
+          <div className='flex items-center gap-2 px-4 pb-3'>
+            {!hideInvite && (
               <button
                 type='button'
-                onClick={() => setSearchQuery('')}
-                className='text-muted-foreground hover:text-foreground'
-                aria-label='Clear search'
+                onClick={() => setShowInviteModal(true)}
+                className='flex h-9 items-center gap-2 rounded-full bg-[#0b57d0] pl-3 pr-4 text-sm font-medium text-white transition-colors hover:bg-[#0a4ebb] dark:bg-[#a8c7fa] dark:text-[#062e6f] dark:hover:bg-[#bcd4fb]'
+                title='Add people'
+                data-testid='add-people-button'
                 data-track-category='CALLS'
-                data-track-name='CLEAR_CALL_PARTICIPANT_SEARCH'
+                data-track-name='ADD_PEOPLE_TO_CALL'
+                data-track-metadata={JSON.stringify({ callId })}
               >
-                <X size={16} />
+                <UserPlus size={16} />
+                Add people
               </button>
             )}
-          </label>
-        </div>
+            {canMuteAll && (
+              <button
+                type='button'
+                onClick={() => void handleMuteAll()}
+                disabled={isMuting}
+                className='flex h-9 items-center gap-2 rounded-full border border-border pl-3 pr-4 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50'
+                title='Mute everyone except you'
+                data-testid='mute-all-button'
+                data-ph-capture-attribute-track-id='mute_all_participants'
+                data-track-category='CALLS'
+                data-track-name='MUTE_ALL_PARTICIPANTS'
+                data-track-metadata={JSON.stringify({ callId })}
+              >
+                <MicOff size={16} />
+                {isMuting ? 'Muting…' : 'Mute all'}
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Participants List */}
         <div className='flex-1 space-y-3 overflow-y-auto px-4 pb-4' data-testid='participants-list'>
-          {!searchQuery && (
-            <AgentCard
-              callId={callId}
-              isHost={isHost}
-              hostName={hostName}
-              agentControls={agentControls}
-            />
-          )}
+          <AgentCard
+            callId={callId}
+            isHost={isHost}
+            hostName={hostName}
+            agentControls={agentControls}
+          />
 
           {/* Requested Section — participants waiting for approval (host or any attendee) */}
           {canActOnLobbyRequests && requested.length > 0 && (
@@ -876,7 +825,6 @@ export function ParticipantsSidebar({
                       rejectingId={rejectingId}
                       onApprove={handleApprove}
                       onReject={handleReject}
-                      searchQuery={searchQuery}
                     />
                   ))}
                 </div>
