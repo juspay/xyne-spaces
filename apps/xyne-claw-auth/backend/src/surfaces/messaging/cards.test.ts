@@ -32,7 +32,7 @@ const redis = {
 
 vi.mock("../../redis.js", () => ({ redisService: { getConnection: () => redis } }));
 
-const { parkOptions, consumeOption, peekOption } = await import("./cards.js");
+const { parkOptions, consumeOption, peekOption, fitCard } = await import("./cards.js");
 
 const option = (over: Record<string, unknown> = {}) => ({
   action: { kind: "approve-write", label: "spaces-create-ticket" },
@@ -78,3 +78,17 @@ describe("card options", () => {
     expect(await consumeOption("acc", "t")).not.toBeNull();
   });
 });
+
+describe("fitCard", () => {
+  const limits = { buttons: 3, buttonTitleChars: 20, listRows: 10, rowTitleChars: 24, rowDescriptionChars: 72, bodyChars: 1024, headerChars: 60, footerChars: 60, cta: true };
+
+  it("keeps the body's paragraphs while single-lining everything else", () => {
+    const card = fitCard(
+      { kind: "cta", header: "Google\nWorkspace", body: "Connect *Google*   so I can read mail.\n\n\n\nGmail  and Calendar.", label: "Connect", url: "https://x" },
+      limits,
+    );
+    expect(card.body).toBe("Connect *Google* so I can read mail.\n\nGmail and Calendar.");
+    expect(card.header).toBe("Google Workspace");
+  });
+});
+

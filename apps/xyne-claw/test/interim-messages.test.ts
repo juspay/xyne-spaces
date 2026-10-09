@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { pushInterimMessage } from "../src/agent.js";
+import { endedInToolCalls, pushInterimMessage } from "../src/agent.js";
 import { OPTIMIZATIONS } from "../src/optimizations.js";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -22,6 +22,16 @@ describe("pushInterimMessage", () => {
     pushInterimMessage(undefined as never, "sess-1", "hi");
     pushInterimMessage({ invocation: vi.fn() } as never, "sess-1", "hi");
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("fires on the stop reason pi actually reports for a tool-calling turn", () => {
+    // pi-ai's StopReason is "toolUse"; matching only "tool_use" meant no
+    // interim line was ever sent.
+    expect(endedInToolCalls("toolUse")).toBe(true);
+    expect(endedInToolCalls("tool_use")).toBe(true);
+    expect(endedInToolCalls("stop")).toBe(false);
+    expect(endedInToolCalls("aborted")).toBe(false);
+    expect(endedInToolCalls(undefined)).toBe(false);
   });
 
   it("is off unless a run asks for it", () => {

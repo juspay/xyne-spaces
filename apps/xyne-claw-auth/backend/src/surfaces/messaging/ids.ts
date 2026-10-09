@@ -4,7 +4,8 @@
  * imported — and the commands that need an id (/new) have no business
  * standing that up.
  */
-import type { MessagingChannelKey } from "./plugin.js";
+import { ACCOUNT_KEY_PREFIX } from "./const.js";
+import { MESSAGING_CHANNEL_KEYS, type MessagingChannelKey } from "./plugin.js";
 import { sanitizeId } from "./schema.js";
 
 /**
@@ -19,4 +20,15 @@ export function channelConversationId(
   chatId: string,
 ): string {
   return `${channel}-${sanitizeId(accountKey)}-${sanitizeId(agentSlug)}-${sanitizeId(chatId)}`;
+}
+
+/**
+ * The channel a conversation id was minted for, or null when it is not a chat
+ * conversation. Longest key first: "whatsapp-cloud-…" also starts with
+ * "whatsapp-".
+ */
+export function channelOfConversationId(conversationId: string | null | undefined): MessagingChannelKey | null {
+  if (!conversationId) return null;
+  const keys = [...MESSAGING_CHANNEL_KEYS].sort((a, b) => b.length - a.length);
+  return keys.find((key) => conversationId.startsWith(`${key}-${ACCOUNT_KEY_PREFIX}`)) ?? null;
 }

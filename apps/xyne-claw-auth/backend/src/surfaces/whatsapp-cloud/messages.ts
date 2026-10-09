@@ -39,6 +39,9 @@ interface CloudMessage {
     type?: string;
     button_reply?: { id?: string; title?: string };
     list_reply?: { id?: string; title?: string };
+    /** A submitted WhatsApp Flow. `response_json` is a JSON STRING holding
+     *  the flow_token we sent plus the form's `complete` payload. */
+    nfm_reply?: { name?: string; body?: string; response_json?: string };
   };
   /** Present when the user replied to one of our messages. */
   context?: { id?: string; from?: string };
@@ -116,6 +119,23 @@ function extractCardReplyId(message: CloudMessage): string | undefined {
   return message.interactive?.button_reply?.id ?? message.interactive?.list_reply?.id ?? undefined;
 }
 
+/** A submitted form, if this is one. Malformed JSON reads as no reply rather
+ *  than an exception: the payload comes off someone's phone. */
+function extractFormReply(message: CloudMessage): InboundMessage["formReply"] {
+  if (message.type !== "interactive" || message.interactive?.type !== "nfm_reply") return undefined;
+  const raw = message.interactive.nfm_reply?.response_json;
+  if (typeof raw !== "string") return undefined;
+  try {
+    const parsed = asObject(JSON.parse(raw));
+    const token = parsed?.["flow_token"];
+    if (!parsed || typeof token !== "string" || !token) return undefined;
+    const { flow_token: _token, ...fields } = parsed;
+    return { token, fields };
+  } catch {
+    return undefined;
+  }
+}
+
 export function parseCloudWebhook(payload: unknown): CloudInbound[] {
   const root = asObject(payload);
   if (!root || root["object"] !== "whatsapp_business_account") return [];
@@ -141,11 +161,12 @@ export function parseCloudWebhook(payload: unknown): CloudInbound[] {
         if (!from || !id) continue;
         const text = extractText(messageRaw).trim();
         const cardReplyId = extractCardReplyId(messageRaw);
+        const formReply = extractFormReply(messageRaw);
         const media = mediaOf(messageRaw);
         // A tap carries its own meaning even when the title is somehow empty,
         // and a photo sent without a caption is the whole message rather than
         // an empty one — dropping it here used to ignore it silently.
-        if (!text && !cardReplyId && !media) continue;
+        if (!text && !cardReplyId && !formReply && !media) continue;
         const name = names.get(from);
         const timestamp = Number(messageRaw.timestamp);
 
@@ -164,6 +185,7 @@ export function parseCloudWebhook(payload: unknown): CloudInbound[] {
           fromSelf: false,
           ref: { chatId: from, messageId: id },
           ...(cardReplyId ? { cardReplyId } : {}),
+          ...(formReply ? { formReply } : {}),
           ...(Number.isFinite(timestamp) ? { timestamp } : {}),
         });
       }

@@ -48,6 +48,11 @@ function validateChannelResidue(plugin: AnyChannelPlugin, residue: unknown): { o
   return parsed.success ? { ok: true, value: parsed.data } : { ok: false, error: parsed.error.message };
 }
 
+function mergeResidue(current: unknown, incoming: Record<string, unknown>): Record<string, unknown> {
+  const base = current && typeof current === "object" && !Array.isArray(current) ? (current as Record<string, unknown>) : {};
+  return Object.fromEntries(Object.entries({ ...base, ...incoming }).filter(([, value]) => value !== null));
+}
+
 async function accountView(row: AccountRow, plugin: AnyChannelPlugin) {
   const account = toChannelAccount(row);
   const [bound, holder] = await Promise.all([findDefaultAgent(account, account.surfaceId), leaseHolder(account.id)]);
@@ -199,7 +204,10 @@ router.patch("/accounts/:id", async (req: Request, res: Response) => {
   }
   const patch: Record<string, unknown> = { ...policyPatch };
   if (channel !== undefined) {
-    const residue = validateChannelResidue(resolved.plugin, channel);
+    // Merged over what is stored: a client saving one setting must not wipe
+    // the others (the published question form, the notification template).
+    // A null clears a key.
+    const residue = validateChannelResidue(resolved.plugin, mergeResidue(account.channelConfig, channel));
     if (!residue.ok) {
       res.status(400).json({ success: false, error: residue.error });
       return;
@@ -210,6 +218,50 @@ router.patch("/accounts/:id", async (req: Request, res: Response) => {
   await accountManager.wake(account.id);
   const fresh = await prisma.connectedSurface.findUniqueOrThrow({ where: { id: account.id }, include: { surface: { select: { key: true } } } });
   res.json({ success: true, account: await accountView(fresh, resolved.plugin) });
+});
+
+/**
+ * Publish the question form (WhatsApp Flows) into the business account and
+ * point this number at it, so a multi-part ask-user-question arrives as one
+ * native form. Needs the WhatsApp Business Account id, and a token that may
+ * manage it (whatsapp_business_management) — Meta's own error is returned if
+ * not.
+ */
+router.post("/accounts/:id/question-form", async (req: Request, res: Response) => {
+  const resolved = await resolveAccountRequest(req);
+  if (!resolved.ok) {
+    res.status(resolved.status).json({ success: false, error: resolved.error });
+    return;
+  }
+  const { plugin } = resolved;
+  if (!plugin.publishForm || !plugin.openHandle) {
+    res.status(400).json({ success: false, error: `${plugin.displayName} has no native forms` });
+    return;
+  }
+  const body = (req.body ?? {}) as { wabaId?: unknown };
+  const wabaId = typeof body.wabaId === "string" ? body.wabaId.trim() : "";
+  if (!/^\d+$/.test(wabaId)) {
+    res.status(400).json({ success: false, error: "wabaId (the WhatsApp Business Account ID) is required" });
+    return;
+  }
+  const account = toChannelAccount(resolved.account);
+  let formId: string;
+  try {
+    const handle = await plugin.openHandle(account, authStateFor(account.id));
+    formId = await plugin.publishForm(handle, wabaId);
+  } catch (err) {
+    log.warn(`[channels] question form publish failed account=${account.id}: ${errMsg(err)}`);
+    res.status(502).json({ success: false, error: errMsg(err) });
+    return;
+  }
+  const residue = validateChannelResidue(plugin, mergeResidue(account.channelConfig, { questionFormId: formId }));
+  if (!residue.ok) {
+    res.status(500).json({ success: false, error: residue.error });
+    return;
+  }
+  await updateAccountConfig(account.id, { channel: residue.value });
+  log.info(`[channels] question form published account=${account.id} form=${formId} by=${resolved.userId}`);
+  res.json({ success: true, questionFormId: formId });
 });
 
 router.delete("/accounts/:id", async (req: Request, res: Response) => {

@@ -30,7 +30,24 @@ import type { AnyChannelPlugin, ChannelAccount, ChannelDeliveryTarget, InboundMe
 import { chatIsAnswerable, evaluatePolicy } from "./policy.js";
 import { formatAgentList, namesAnAgent, parseAgentRoute } from "./routing.js";
 import { policyOf } from "./schema.js";
-import { handleControlCommand, parseControlCommand, rememberActiveRun } from "./commands.js";
+import {
+  activeRun,
+  handleControlCommand,
+  isSlashCommand,
+  parseControlCommand,
+  rememberActiveRun,
+  runChatSlashCommand,
+  type ChatCommandOutcome,
+} from "./commands.js";
+import {
+  answerFromFormReply,
+  answerPendingQuestion,
+  clearPendingQuestion,
+  interpretTypedAnswer,
+  pendingQuestion,
+  type AnswerOutcome,
+} from "./questions.js";
+import { sendConnectorLink } from "./widgets.js";
 import { runSerialized } from "./serialize.js";
 import { accountForSender } from "./shared-number.js";
 import { isAudio, transcribeAudio, transcriptionEnabled } from "./transcribe.js";
@@ -130,7 +147,7 @@ export async function handleInbound(ctx: InboundContext, msg: InboundMessage): P
   }
   // A bare @mention of the account is someone getting its attention: it is
   // answered with a prompt below rather than dropped as empty.
-  if (!msg.text.trim() && !msg.cardReplyId && !hasMedia && !msg.mentionedSelf) {
+  if (!msg.text.trim() && !msg.cardReplyId && !msg.formReply && !hasMedia && !msg.mentionedSelf) {
     log.info(`[inbound] nothing in it account=${account.id} chat=${msg.chatId}`);
     return;
   }
@@ -148,6 +165,26 @@ export async function handleInbound(ctx: InboundContext, msg: InboundMessage): P
   await runSerialized(`${account.id}:${msg.chatId}`, () => handleOne(ctx, msg)).catch((err) =>
     log.error(`[inbound] handling failed account=${account.id} chat=${msg.chatId}: ${errMsg(err)}`),
   );
+}
+
+/** Where a reply to this message goes, for paths that answer before a run
+ *  exists (a connector link sent from a tap). */
+function chatTarget(account: ChannelAccount, msg: InboundMessage): ChannelDeliveryTarget {
+  return {
+    channel: account.channel,
+    connectedSurfaceId: account.id,
+    accountKey: account.accountKey,
+    chatId: msg.chatId,
+    senderId: msg.senderId,
+    isGroup: msg.isGroup,
+    quoted: msg.ref,
+  };
+}
+
+/** Answers go back to the agent that asked, in the conversation it asked in
+ *  — named explicitly, since the chat's default agent may be another one. */
+function asAgentRequest(outcome: Extract<AnswerOutcome, { kind: "done" }>): string {
+  return outcome.agentSlug ? `/${outcome.agentSlug} ${outcome.task}` : outcome.task;
 }
 
 async function handleOne(ctx: InboundContext, msg: InboundMessage): Promise<void> {
@@ -184,6 +221,9 @@ async function handleOne(ctx: InboundContext, msg: InboundMessage): Promise<void
   const tappedToken =
     msg.cardReplyId ??
     (plugin.capabilities.interactive ? null : await menuToken(account.id, msg.chatId, text, msg.senderId));
+  // Set once this message has answered a question, so it is not read as an
+  // answer a second time below.
+  let answered = false;
   if (tappedToken) {
     // Look before spending it. A numbered menu is addressed to the whole chat,
     // so anyone in a group can type "1" — if that consumed the token, a
@@ -215,6 +255,26 @@ async function handleOne(ctx: InboundContext, msg: InboundMessage): Promise<void
     } else if (option.action.kind === "approve-write" || option.action.kind === "decline-write") {
       await redeemApproval({ account, option, senderId: msg.senderId, chatId: msg.chatId });
       return;
+    } else if (option.action.kind === "connect") {
+      await sendConnectorLink({
+        target: chatTarget(account, msg),
+        userId: option.userId,
+        serverType: option.action.serverType,
+        ...(option.agentSlug ? { agentSlug: option.agentSlug } : {}),
+      });
+      return;
+    } else if (option.action.kind === "answer") {
+      const asked = await pendingQuestion(account.id, msg.chatId, msg.senderId);
+      const outcome: AnswerOutcome = asked
+        ? await answerPendingQuestion(asked, option.action.value, { questionId: option.action.questionId, index: option.action.index })
+        : { kind: "stale" };
+      if (outcome.kind === "stale") {
+        await enqueueOutbound(account.id, { kind: "text", chatId: msg.chatId, text: "That one's already been answered." });
+        return;
+      }
+      if (outcome.kind === "next") return;
+      text = asAgentRequest(outcome);
+      answered = true;
     } else {
       // Picker options carry no side effect of their own: they stand in for
       // something the person could have typed, so hand them to normal routing.
@@ -311,18 +371,71 @@ async function handleOne(ctx: InboundContext, msg: InboundMessage): Promise<void
     return;
   }
 
-  const route = parseAgentRoute(text);
-  const bound = await findDefaultAgent(account, account.surfaceId);
-
   // Control commands: about the conversation, not to the agent. Resolved
   // before routing because they never start a run, and answered against the
   // DEFAULT agent's thread — that is the one a person is in when they ask for
   // a fresh start without naming anybody.
-  const command = parseControlCommand(text);
-  if (command) {
+  const command = answered ? null : parseControlCommand(text);
+  if (command === "new") {
+    // A fresh start means the questions on screen no longer matter.
+    await clearPendingQuestion(account.id, msg.chatId, msg.senderId);
+    const bound = await findDefaultAgent(account, account.surfaceId);
     await handleControlCommand({ command, account, chatId: msg.chatId, userId, agentSlug: bound?.agent.slug ?? null, reply });
     return;
   }
+
+  // The agent asked something and is waiting: a submitted form, or a typed
+  // reply, is the answer. A message opening with "/" is a request to an
+  // agent, never an answer, and a form is only answered by submitting it.
+  if (!answered) {
+    const asked = await pendingQuestion(account.id, msg.chatId, msg.senderId);
+    let outcome: AnswerOutcome | null = null;
+    if (asked && msg.formReply) {
+      outcome = await answerFromFormReply(asked, msg.formReply);
+    } else if (asked && !asked.formToken && text && !text.startsWith("/")) {
+      const question = asked.questions[asked.index];
+      if (question) outcome = await answerPendingQuestion(asked, interpretTypedAnswer(question, text));
+    }
+    if (outcome?.kind === "next") return;
+    if (outcome?.kind === "done") {
+      text = asAgentRequest(outcome);
+      answered = true;
+    }
+    if (msg.formReply && outcome?.kind !== "done") {
+      log.info(`[inbound] form reply with nothing waiting on it account=${account.id} chat=${msg.chatId}`);
+      return;
+    }
+  }
+
+  const bound = await findDefaultAgent(account, account.surfaceId);
+
+  // Spaces' slash commands — /debug, /status, /stop, /goal, /compact, /queue,
+  // /fast, /eval, /experiment, /design…, /help — through the same handlers a
+  // thread uses (commands.ts). Checked before agent routing, which would
+  // otherwise read "/debug" as an agent called debug. They act on the agent
+  // working in this chat right now, else the default one.
+  let commandRun: Extract<ChatCommandOutcome, { kind: "dispatch" }> | null = null;
+  let commandAgent: BoundAgent | null = null;
+  if (!answered && (command === "stop" || command === "status" || isSlashCommand(text))) {
+    const running = await activeRun(account.id, msg.chatId);
+    commandAgent = (running ? await findOrgAgentBySlug(running.agentSlug, account.orgId) : null) ?? bound?.agent ?? null;
+    if (!commandAgent) {
+      await reply("This number has no agent assigned yet — ask your admin to bind one.");
+      return;
+    }
+    if (command === "stop") await clearPendingQuestion(account.id, msg.chatId, msg.senderId);
+    const outcome = await runChatSlashCommand({ account, target: chatTarget(account, msg), userId, agent: commandAgent, text });
+    if (outcome.kind === "handled") {
+      log.info(`[inbound] slash command handled account=${account.id} chat=${msg.chatId} agent=${commandAgent.slug}`);
+      return;
+    }
+    commandRun = outcome;
+    text = outcome.task;
+  }
+
+  // A command's task goes to the agent it was typed for, verbatim: "/design …"
+  // must reach the run as written, not be read as an agent called design.
+  const route = commandRun ? { task: text, listAgents: false } : parseAgentRoute(text);
 
   if (route.listAgents) {
     const agents = (await listOrgAgents(account.orgId))
@@ -333,7 +446,9 @@ async function handleOne(ctx: InboundContext, msg: InboundMessage): Promise<void
   }
 
   let agent: BoundAgent | null;
-  if (route.slug) {
+  if (commandAgent && commandRun) {
+    agent = commandAgent;
+  } else if ("slug" in route && route.slug) {
     agent = await findOrgAgentBySlug(route.slug, account.orgId);
     if (!agent || !agent.enabled || !isAgentInvocableBy(agent.config as Record<string, unknown> | null, userId)) {
       await reply(`I don't know an agent called /${route.slug}. Send /agents to see who you can talk to.`);
@@ -346,6 +461,14 @@ async function handleOne(ctx: InboundContext, msg: InboundMessage): Promise<void
       await reply("This number has no agent assigned yet — ask your admin to bind one.");
       return;
     }
+  }
+
+  // autoGoal agents treat every message as `/goal <message>`, as in a thread.
+  if (!commandRun && !answered && route.task && (agent.config as Record<string, unknown> | null)?.["autoGoal"] === true) {
+    const outcome = await runChatSlashCommand({ account, target: chatTarget(account, msg), userId, agent, text: route.task });
+    if (outcome.kind === "handled") return;
+    commandRun = outcome;
+    route.task = outcome.task;
   }
 
   // Nothing to do yet — a bare tag or a bare "/slug". Asked before typing
@@ -442,7 +565,12 @@ async function handleOne(ctx: InboundContext, msg: InboundMessage): Promise<void
     const outcome = await dispatchOrQueueChannelRun({
       agent,
       userId,
-      task: contextBlock ? `${contextBlock}${task}` : task,
+      // A command's task must reach the run at byte zero (claw reads task
+      // commands there), so no overheard-chat preamble in front of it.
+      task: contextBlock && !commandRun ? `${contextBlock}${task}` : task,
+      ...(commandRun?.compactBeforeRun ? { compactBeforeRun: true } : {}),
+      ...(commandRun?.explicitQueueOnly ? { explicitQueueOnly: true } : {}),
+      ...(commandRun?.pendingGoalStart?.providerOverride ? { providerOverride: commandRun.pendingGoalStart.providerOverride } : {}),
       conversationId: channelConversationId(account.channel, account.accountKey, agent.slug, msg.chatId),
       eventType: msg.isGroup ? "APP_MENTIONED" : "DIRECT_MESSAGE",
       idempotencyKey: `${account.channel}:${account.id}:${msg.messageId}`,
@@ -464,6 +592,20 @@ async function handleOne(ctx: InboundContext, msg: InboundMessage): Promise<void
     // Quoted and accepted, so these lines must not reach a second run.
     await consumeGroupContext(account.id, msg.chatId, overheard.length);
     await rememberActiveRun(account.id, msg.chatId, { sessionId, agentSlug: agent.slug, startedAt: Date.now() });
+    // /goal: the loop's first turn is out; the relooper takes it from here
+    // (routes/webhook.ts, chat branch) once this turn reports back.
+    if (commandRun?.pendingGoalStart) {
+      const { persistGoalStart } = await import("../../services/goalRelooper.js");
+      await persistGoalStart({
+        conversationId: channelConversationId(account.channel, account.accountKey, agent.slug, msg.chatId),
+        channelId: msg.chatId,
+        userId,
+        agentSlug: agent.slug,
+        orgId: agent.orgId,
+        condition: commandRun.pendingGoalStart.condition,
+        runPayload: { channel: account.channel, agentSlug: agent.slug, userId, orgId: agent.orgId },
+      }).catch((err) => log.warn(`[inbound] could not persist /goal start — the loop will not continue: ${errMsg(err)}`));
+    }
     log.info(`[inbound] dispatched session=${sessionId} agent=${agent.slug} account=${account.id} chat=${msg.chatId}`);
   } catch (err) {
     const message = errMsg(err);

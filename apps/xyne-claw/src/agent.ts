@@ -1452,6 +1452,17 @@ export function pushInvocation(progressUrl: ProgressDest, sessionId: string, inv
 
 const INTERIM_MESSAGE_MAX_CHARS = 1_500;
 
+/**
+ * Whether an assistant turn ended by calling tools — i.e. the run continues.
+ * pi reports this as "toolUse" (pi-ai StopReason); "tool_use" is the Anthropic
+ * wire spelling this code was written against, which pi never emits, so a
+ * check for that alone is silently never true. The interim-message check was
+ * exactly that: no interim line ever left a run until this.
+ */
+export function endedInToolCalls(stopReason: string | undefined): boolean {
+  return stopReason === "toolUse" || stopReason === "tool_use";
+}
+
 export function pushInterimMessage(progressUrl: ProgressDest, sessionId: string, text: string): void {
   if (!progressUrl || typeof progressUrl !== "string") return;
   fetch(progressUrl, {
@@ -3309,7 +3320,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         if (stopReason !== "tool_use" && stopReason !== "aborted" && stopReason !== "error") {
           recordHandoffBoundary(latency.llmTurns);
         }
-        if (stopReason === "tool_use" && optEnabled("interim_messages")) {
+        if (endedInToolCalls(stopReason) && optEnabled("interim_messages")) {
           const interim = piAssistantText(msg as PiMsg);
           if (interim && sessionId) pushInterimMessage(progressUrl, sessionId, interim);
         }
