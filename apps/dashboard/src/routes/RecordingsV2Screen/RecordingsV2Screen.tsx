@@ -88,7 +88,7 @@ const RecordingsV2Screen = (): ReactElement => {
     isLoading,
     error,
     refreshRecordings,
-  } = usePaginatedOatsRecordings(activeListTab);
+  } = usePaginatedOatsRecordings(activeListTab, null);
   const currentUser = useSelf();
   const { requestLeave, ConfirmDialog } = useLeaveRecording();
   const users = useUsers();
@@ -436,7 +436,7 @@ const RecordingsV2Screen = (): ReactElement => {
       )}
       <div ref={setScrollContainer} className='h-full w-full overflow-y-scroll'>
         <div className='flex min-h-full w-full flex-col items-center px-4'>
-          <header className='max-w-[884px] w-full sticky top-0 bg-background z-20 pt-6 pb-6 sm:pb-3'>
+          <header className='max-w-[852px] w-full sticky top-0 bg-background z-20 pt-6 pb-6 sm:pb-3'>
             <div className='grid grid-cols-[minmax(0,1fr)_auto] items-center gap-y-6'>
               <div className='col-start-1 row-start-1 min-w-0'>
                 <h1 id='xyne-scribe-heading' className='text-3xl font-semibold text-foreground'>
@@ -536,7 +536,7 @@ const RecordingsV2Screen = (): ReactElement => {
             {showLiveRecording && (
               <motion.div
                 key='live-recording-pill'
-                className='w-full max-w-[884px]'
+                className='w-full max-w-[852px]'
                 initial={shouldReduceMotion ? { opacity: 1 } : { height: 0, opacity: 0 }}
                 animate={shouldReduceMotion ? { opacity: 1 } : { height: 'auto', opacity: 1 }}
                 exit={shouldReduceMotion ? { opacity: 0 } : { height: 0, opacity: 0 }}
@@ -578,7 +578,7 @@ const RecordingsV2Screen = (): ReactElement => {
             )}
           </AnimatePresence>
 
-          <main className='flex w-full max-w-[884px] flex-1 flex-col'>
+          <main className='flex w-full max-w-[852px] flex-1 flex-col'>
             {showInitialSkeleton ? (
               <RecordingsV2Skeleton />
             ) : error && recordings.length === 0 ? (

@@ -839,7 +839,7 @@ const CallHistoryScreen = (): ReactElement => {
         )}
       >
         {/* Sticky header */}
-        <div className='max-w-[884px] w-full sticky top-0 bg-background z-50 flex flex-col gap-3 pt-4 pb-6 sm:pb-3'>
+        <div className='max-w-[852px] w-full sticky top-0 bg-background z-50 flex flex-col gap-3 pt-4 pb-6 sm:pb-3'>
           {/* Row 1: Title + calendar sync */}
           <CallHistorySearchPanel
             calendarProvider={calendarProvider}
@@ -873,7 +873,7 @@ const CallHistoryScreen = (): ReactElement => {
         {/* Page body */}
         <div
           className={cn(
-            'max-w-[884px] w-full flex flex-col gap-6',
+            'max-w-[852px] w-full flex flex-col gap-6',
             viewMode === 'calendar' ? 'flex-1 min-h-0' : 'pb-6',
           )}
         >

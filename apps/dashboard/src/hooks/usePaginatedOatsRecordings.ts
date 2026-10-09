@@ -44,13 +44,14 @@ type OatsRecordingQuery = ReturnType<typeof queries.createdOatsRecordings>;
 const recordingQuery = (
   scope: SingleOatsRecordingScope,
   start: RecordingCursor,
+  participantId: string | null,
 ): OatsRecordingQuery =>
   scope === 'created'
-    ? queries.createdOatsRecordings({ limit: FETCH_LIMIT, start, participantId: null })
+    ? queries.createdOatsRecordings({ limit: FETCH_LIMIT, start, participantId })
     : (queries.sharedOatsRecordings({
         limit: FETCH_LIMIT,
         start,
-        participantId: null,
+        participantId,
       }) as unknown as OatsRecordingQuery);
 
 const mergeRecordingPages = (
@@ -80,6 +81,7 @@ export interface UsePaginatedOatsRecordingsReturn {
 
 export function usePaginatedOatsRecordings(
   scope: OatsRecordingScope,
+  participantId: string | null,
 ): UsePaginatedOatsRecordingsReturn {
   const zero = useZero();
   const isAllScope = scope === 'all';
@@ -92,9 +94,9 @@ export function usePaginatedOatsRecordings(
   const recordingsRef = useRef(recordings);
   recordingsRef.current = recordings;
 
-  const [page, details] = useCachedQuery(recordingQuery(queryScope, cursor));
+  const [page, details] = useCachedQuery(recordingQuery(queryScope, cursor, participantId));
   const [sharedPage, sharedDetails] = useCachedQuery(
-    queries.sharedOatsRecordings({ limit: FETCH_LIMIT, start: sharedCursor, participantId: null }),
+    queries.sharedOatsRecordings({ limit: FETCH_LIMIT, start: sharedCursor, participantId }),
     { enabled: isAllScope },
   );
 
@@ -104,7 +106,7 @@ export function usePaginatedOatsRecordings(
     setRecordings([]);
     setHasMoreRecordings(true);
     setHasMoreSharedRecordings(true);
-  }, [scope]);
+  }, [scope, participantId]);
 
   useEffect(() => {
     if (!page || details.type !== 'complete') return;
@@ -169,8 +171,8 @@ export function usePaginatedOatsRecordings(
     if (isAllScope) {
       setSharedCursor(null);
       void Promise.all([
-        zero.run(recordingQuery('created', null), { type: 'complete' }),
-        zero.run(recordingQuery('shared', null), { type: 'complete' }),
+        zero.run(recordingQuery('created', null, participantId), { type: 'complete' }),
+        zero.run(recordingQuery('shared', null, participantId), { type: 'complete' }),
       ])
         .then(([createdResult, sharedResult]) => {
           const createdRows = (createdResult ?? []) as OatsRecordingEntry[];
@@ -184,13 +186,13 @@ export function usePaginatedOatsRecordings(
     }
 
     void zero
-      .run(recordingQuery(queryScope, null), { type: 'complete' })
+      .run(recordingQuery(queryScope, null, participantId), { type: 'complete' })
       .then(result => {
         setRecordings((result ?? []) as OatsRecordingEntry[]);
         setHasMoreRecordings((result?.length ?? 0) === FETCH_LIMIT);
       })
       .catch(() => undefined);
-  }, [isAllScope, queryScope, zero]);
+  }, [isAllScope, participantId, queryScope, zero]);
 
   useEffect(() => {
     refreshListeners.add(refreshRecordings);
