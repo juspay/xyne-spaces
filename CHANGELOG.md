@@ -1,3 +1,10 @@
+## [1.482.1](https://github.com/juspay/xyne-spaces/compare/v1.482.0...v1.482.1) (2026-10-09)
+
+
+### Bug Fixes
+
+* persist and show PR status conditions on non-linear b… ([#2808](https://github.com/juspay/xyne-spaces/issues/2808)) ([61d81b2](https://github.com/juspay/xyne-spaces/commit/61d81b242dc5409ab23c792b04dd6a6f88c1e1b6))
+
 ## [1.482.0](https://github.com/juspay/xyne-spaces/compare/v1.481.2...v1.482.0) (2026-10-08)
 
 
