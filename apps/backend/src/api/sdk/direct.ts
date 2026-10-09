@@ -374,15 +374,11 @@ const ROUTES: readonly DirectRoute[] = [
   },
 
   /**
-   * Who the authenticated user is.
-   *
-   * COOKIE-BASED AUTH: Returns user info from req.user (authData).
-   * API KEY AUTH (COMMENTED OUT): Also returned keyExpiresAt from auth.keyExpiresAt.
+   * Who the authenticated user is, from the session `authMiddleware` verified.
    */
   {
     method: 'get',
     path: '/me',
-    // COOKIE-BASED AUTH (ACTIVE) - uses authData built from req.user
     service: async (_req, authData) => {
       return {
         id: authData.sub,
@@ -394,33 +390,16 @@ const ROUTES: readonly DirectRoute[] = [
         memberId: authData.memberId,
         role: authData.role,
         orgRole: authData.orgRole,
-        // keyExpiresAt is only available with API key auth, omitted for cookie auth
       };
     },
-    // API KEY AUTH (COMMENTED OUT) - used auth.authData and auth.keyExpiresAt
-    // service: async (_req, auth) => {
-    //   const { authData } = auth;
-    //   return {
-    //     id: authData.sub,
-    //     email: authData.email,
-    //     name: authData.name,
-    //     displayName: authData.displayName ?? null,
-    //     workspaceId: authData.workspaceId,
-    //     orgId: authData.orgId,
-    //     memberId: authData.memberId,
-    //     role: authData.role,
-    //     orgRole: authData.orgRole,
-    //     keyExpiresAt: auth.keyExpiresAt.toISOString(),
-    //   };
-    // },
   },
 
   /*
    * Claw runs through Spaces rather than being reached directly.
    *
    * `clawAgentService` already speaks to claw-auth with the deployment's own
-   * service credential, so a caller needs no second login and Claw needs no
-   * knowledge of API keys. The S2S variants are the ones that take an explicit
+   * service credential, so a caller needs no second login and Claw never
+   * sees the caller's session. The S2S variants are the ones that take an explicit
    * identity — `userId`, `userName`, `userEmail`, and the three `spaces*` fields
    * map one-to-one onto `AuthData` — and return a session id that can be polled.
    * The non-S2S `runClawAgent` is the app-mention path: it requires a channel and
@@ -430,14 +409,13 @@ const ROUTES: readonly DirectRoute[] = [
   {
     method: 'get',
     path: '/claw/agents',
-    // COOKIE-BASED AUTH (ACTIVE) - scoped to the acting user, see clawIdentity
+    // Scoped to the acting user; see clawIdentity.
     service: async (req, authData) => listScopedClawAgents(clawIdentity(req, authData)),
   },
   {
     method: 'post',
     path: '/claw/runs',
     body: clawRunBody,
-    // COOKIE-BASED AUTH (ACTIVE) - uses authData built from req.user
     service: async (req, authData) => {
       const input = clawRunBody.parse(req.body);
       const result = await runScopedClawAgent({
@@ -465,7 +443,6 @@ const ROUTES: readonly DirectRoute[] = [
   {
     method: 'get',
     path: '/claw/runs/:sessionId',
-    // COOKIE-BASED AUTH (ACTIVE) - uses authData.sub from req.user
     service: async (req, authData) => {
       const sessionId = req.params['sessionId'];
       if (!sessionId) throw new SdkApiError('validation_failed', 'sessionId is required.');
@@ -484,7 +461,6 @@ const ROUTES: readonly DirectRoute[] = [
   {
     method: 'get',
     path: '/connectors',
-    // COOKIE-BASED AUTH (ACTIVE) - runs as authData.sub
     service: async (_req, authData) => ({ connectors: await listConnectors(authData.sub) }),
   },
   {
@@ -1328,39 +1304,6 @@ function unwrapDeskReportGenerate(raw: unknown): unknown {
   }
   return { started: true };
 }
-
-// API KEY AUTH (COMMENTED OUT) - principalOf was used to build AuthenticatedUser from authData
-// For cookie-based auth, req.user is already set by authMiddleware
-// function principalOf(authData: {
-//   sub: string;
-//   email: string;
-//   name: string;
-//   displayName?: string | null;
-//   workspaceId: string;
-//   role: string;
-//   orgRole: string;
-//   memberId: string;
-// }): AuthenticatedUser {
-//   return {
-//     id: authData.sub,
-//     // Not an OAuth-provider identity on this path. Controllers read id, email,
-//     // and workspaceId; roles come from the verified principal.
-//     googleId: '',
-//     email: authData.email,
-//     name: authData.name,
-//     displayName: authData.displayName ?? null,
-//     workspaceId: authData.workspaceId,
-//     role: authData.role,
-//     orgRole: authData.orgRole,
-//     memberId: authData.memberId,
-//     // Not the `isApiKeyUser` these controllers mean. That flag marks a key minted
-//     // by `apiKeyService` — the environment key and scoped service keys — and two
-//     // branches read it to skip the ACL check outright for an admin-role holder
-//     // (middleware/acl.ts, middleware/auth.ts). An SDK key is a user acting as
-//     // themselves and must get exactly a session's reach, so it stays false.
-//     isApiKeyUser: false,
-//   };
-// }
 
 function controllerError(status: number, body: unknown): SdkApiError {
   const payload = body as { error?: unknown; message?: unknown } | undefined;

@@ -10,6 +10,7 @@ import {
   type SelectedMessage,
   type SelectedPerson,
   type SelectedSharedFile,
+  type SelectedApp,
   type AttachedContextItem,
 } from '../Chat/XyneAISidebar/components/ContextPickerPanel';
 import type { StreamOverrides } from '../../hooks/useXyneAIStream';
@@ -36,6 +37,8 @@ export interface ComposerContext {
   messages: SelectedMessage[];
   people: SelectedPerson[];
   sharedFiles: SelectedSharedFile[];
+  /** Artifact apps from the context picker. */
+  apps: SelectedApp[];
   /** People mentioned inline, for the sent bubble's mention chips. */
   userTags: Record<string, UserTag>;
   localFolders: SelectedLocalFolder[];
@@ -80,6 +83,7 @@ export const EMPTY_COMPOSER_CONTEXT: ComposerContext = {
   messages: [],
   people: [],
   sharedFiles: [],
+  apps: [],
   userTags: {},
   localFolders: [],
   collections: [],
@@ -118,6 +122,7 @@ export function withoutPickedContext(ctx: ComposerContext): ComposerContext {
     messages: [],
     people: [],
     sharedFiles: [],
+    apps: [],
     userTags: {},
   };
 }
@@ -133,6 +138,7 @@ export function hasComposerContext(ctx: ComposerContext): boolean {
     ctx.messages.length > 0 ||
     ctx.people.length > 0 ||
     ctx.sharedFiles.length > 0 ||
+    ctx.apps.length > 0 ||
     ctx.localFolders.length > 0 ||
     ctx.collections.length > 0 ||
     ctx.fileScopes.length > 0 ||
@@ -164,6 +170,7 @@ function toBaseAttachedContext(ctx: ComposerContext): AttachedContextItem[] {
     messages: ctx.messages,
     people: ctx.people,
     sharedFiles: ctx.sharedFiles,
+    apps: ctx.apps,
     localFolders: ctx.localFolders,
     files: ctx.fileScopes,
     folders: ctx.folderScopes,

@@ -1521,6 +1521,9 @@ interface Props {
   onDraftForceReadOnlySandboxChange: (v: boolean) => void;
   draftAllowWriteInReadOnlyJob: boolean;
   onDraftAllowWriteInReadOnlyJobChange: (v: boolean) => void;
+  // Suppress the "Live preview" thread message (agent.config.hideLivePreview).
+  draftHideLivePreview: boolean;
+  onDraftHideLivePreviewChange: (v: boolean) => void;
   // Operator-selected repo focus for read-only agents (agent.config.sbxGitRepos).
   draftSbxGitRepos: string[];
   onDraftSbxGitReposChange: (v: string[]) => void;
@@ -1756,6 +1759,8 @@ export function AgentDetailLeftColumn({
   onDraftForceReadOnlySandboxChange,
   draftAllowWriteInReadOnlyJob,
   onDraftAllowWriteInReadOnlyJobChange,
+  draftHideLivePreview,
+  onDraftHideLivePreviewChange,
   draftSbxGitRepos,
   onDraftSbxGitReposChange,
   sbxGitRepoOptions,
@@ -3133,6 +3138,7 @@ export function AgentDetailLeftColumn({
         || draftSandboxRepo
         || draftForceReadOnlySandbox
         || draftAllowWriteInReadOnlyJob
+        || draftHideLivePreview
         || draftResearchAgentProductId
         || draftResearchAgentRepositoryId) && (
         <SettingGroup
@@ -3234,6 +3240,23 @@ export function AgentDetailLeftColumn({
                   onChange={onDraftAllowWriteInReadOnlyJobChange}
                   disabled={!canEdit || draftForceReadOnlySandbox}
                   ariaLabel="Writable sandbox for automations"
+                />
+              }
+            />
+          )}
+
+          {(canEdit || draftHideLivePreview) && (
+            <SettingRow
+              title="Post live preview link"
+              summary="Post a message with the browser, code and terminal links in the thread when a sandbox starts."
+              detail="Turn off to keep busy threads readable. The preview stays available from the Workspace pane."
+              enabled={!draftHideLivePreview}
+              control={
+                <Switch
+                  checked={!draftHideLivePreview}
+                  onChange={(next) => onDraftHideLivePreviewChange(!next)}
+                  disabled={!canEdit}
+                  ariaLabel="Post live preview link"
                 />
               }
             />

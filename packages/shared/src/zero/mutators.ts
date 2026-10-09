@@ -116,8 +116,18 @@ import {
   MAX_NOTIFICATION_KEYWORD_LENGTH,
   normalizeNotificationKeywords,
 } from '../utils/notificationKeywords.js';
-import { isDeskChannelType, deskTypeForChannelType, serializeDeskAppIds } from '../utils/channel.js';
-import { MAX_DESK_APPS, MAX_DUPLICATE_SCOPE_FIELDS } from './types.js';
+import {
+  isDeskChannelType,
+  deskTypeForChannelType,
+  canPublishAppsTo,
+  MAX_PUBLISHED_APP_ID_LENGTH,
+} from '../utils/channel.js';
+import {
+  ChannelPublishedEntityType,
+  MAX_DUPLICATE_SCOPE_FIELDS,
+  MAX_PUBLISHED_APPS,
+} from './types.js';
+import type { ChannelPublishedTab } from './schema.js';
 import { DEFAULT_ROLE_NAME_TO_ENUM } from '../utils/roleFrameworkUtils.js';
 import { SUMMARY_PROMPT_MAX_LENGTH } from '../templates/callSummary.js';
 import { z } from 'zod';
@@ -132,6 +142,43 @@ import {
 
 const serializeCanvasCommentMentionedUserIds = (mentionedUserIds: string[]): string =>
   JSON.stringify([...new Set(mentionedUserIds)]);
+
+/** Checks the caller may change the channel's published apps; returns its current rows. */
+async function loadChannelForAppPublish(
+  tx: Transaction<Schema>,
+  channelId: string,
+  userId: string,
+): Promise<ChannelPublishedTab[]> {
+  const channel = await tx.run(zql.channels.where('id', channelId).one());
+  if (!channel) {
+    throw new Error("Channel doesn't exist");
+  }
+  if (channel.isArchived) {
+    throw new Error('Cannot publish apps to an archived channel');
+  }
+  const participant = await tx.run(
+    zql.channel_participants.where('channelId', channelId).where('userId', userId).one(),
+  );
+  const isDesk = isDeskChannelType(channel.type);
+  const deskPreference = isDesk
+    ? await tx.run(zql.email_channel_preferences.where('channelId', channelId).one())
+    : undefined;
+  const isDeskOwner = !!deskPreference?.ownerUserId && deskPreference.ownerUserId === userId;
+  if (!canPublishAppsTo(channel, participant?.role, isDeskOwner)) {
+    throw new Error(
+      isDesk
+        ? 'Only the desk owner or a channel admin can change desk apps'
+        : channel.scopeType === ChannelScopeType.DEFAULT
+          ? 'Only channel admins can publish apps to the channel'
+          : 'Apps can only be published to channels, DMs, group DMs and desks',
+    );
+  }
+  return tx.run(
+    zql.channel_published_tabs
+      .where('channelId', channelId)
+      .where('entityType', ChannelPublishedEntityType.APP),
+  );
+}
 
 async function getCanvasThreadCommentCount(
   tx: Transaction<Schema>,
@@ -911,6 +958,40 @@ export const mutators = defineMutators({
           channelId,
           addUserPolicy: policy,
         });
+      },
+    ),
+    publishApp: defineMutator(
+      z.object({
+        id: z.string().min(1).max(64),
+        channelId: z.string(),
+        appId: z.string().min(1).max(MAX_PUBLISHED_APP_ID_LENGTH),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, channelId, appId, timestamp } }) => {
+        const rows = await loadChannelForAppPublish(tx, channelId, ctx.userID);
+        if (rows.some(row => row.entityId === appId)) return;
+        if (rows.length >= MAX_PUBLISHED_APPS) {
+          throw new Error(`Up to ${MAX_PUBLISHED_APPS} apps can be published here`);
+        }
+        await tx.mutate.channel_published_tabs.insert({
+          id,
+          workspaceId: ctx.workspaceId,
+          channelId,
+          entityType: ChannelPublishedEntityType.APP,
+          entityId: appId,
+          position: rows.reduce((top, row) => Math.max(top, row.position), -1) + 1,
+          publishedBy: ctx.userID,
+          createdAt: timestamp,
+        });
+      },
+    ),
+    unpublishApp: defineMutator(
+      z.object({ channelId: z.string(), appId: z.string().min(1).max(MAX_PUBLISHED_APP_ID_LENGTH) }),
+      async ({ tx, ctx, args: { channelId, appId } }) => {
+        const rows = await loadChannelForAppPublish(tx, channelId, ctx.userID);
+        const row = rows.find(r => r.entityId === appId);
+        if (!row) return;
+        await tx.mutate.channel_published_tabs.delete({ id: row.id });
       },
     ),
     updateShowTicketsTabTicketsInChat: defineMutator(
@@ -10658,9 +10739,6 @@ export const mutators = defineMutators({
         deskReportEnabled: z.boolean().optional(),
         deskReportAgentSlug: z.string().optional().nullable(),
         deskReportRangeDays: z.number().optional(),
-        // Artifact apps shown on this desk, in order (see EmailChannelPreference.deskAppIds).
-        // An empty list clears the column.
-        deskAppIds: z.array(z.string().min(1).max(64)).max(MAX_DESK_APPS).nullable().optional(),
         // Scoped duplicate detection config (see EmailChannelPreference.duplicateScopeConfig)
         duplicateScopeConfig: z
           .object({
@@ -10691,7 +10769,6 @@ export const mutators = defineMutators({
           deskReportEnabled,
           deskReportAgentSlug,
           deskReportRangeDays,
-          deskAppIds,
           duplicateScopeConfig,
         },
       }) => {
@@ -10717,7 +10794,6 @@ export const mutators = defineMutators({
             ...(deskReportEnabled !== undefined ? { deskReportEnabled } : {}),
             ...(deskReportAgentSlug !== undefined ? { deskReportAgentSlug } : {}),
             ...(deskReportRangeDays !== undefined ? { deskReportRangeDays } : {}),
-            ...(deskAppIds !== undefined ? { deskAppIds: serializeDeskAppIds(deskAppIds) } : {}),
             ...(duplicateScopeConfig !== undefined
               ? { duplicateScopeConfig: duplicateScopeConfig == null ? null : JSON.stringify(duplicateScopeConfig) }
               : {}),
@@ -10752,7 +10828,6 @@ export const mutators = defineMutators({
             deskReportEnabled: deskReportEnabled ?? false,
             deskReportAgentSlug: deskReportAgentSlug ?? null,
             deskReportRangeDays: deskReportRangeDays ?? 1,
-            deskAppIds: serializeDeskAppIds(deskAppIds ?? null),
             duplicateScopeConfig: duplicateScopeConfig ? JSON.stringify(duplicateScopeConfig) : null,
           });
         }

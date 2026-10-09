@@ -372,7 +372,6 @@ type CreateTicketSeed = {
   assignee?: { type: 'assigneeTo' | 'userGroup'; value: string } | null;
   priority?: TicketPriority | null;
   tags?: string[];
-  merchantId?: string;
   dynamicFields?: Record<string, string | string[]>;
   boardId?: string;
   channelId?: string;
@@ -3789,7 +3788,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     const { inverted, includeUnassigned, ids } = parseAssigneeFilter(filters.assignee ?? []);
     const assigneeId = !inverted && !includeUnassigned && ids.length === 1 ? ids[0] : undefined;
     const userGroupId = filters.userGroups?.length === 1 ? filters.userGroups[0] : undefined;
-    const merchantId = filters.merchantIds?.length === 1 ? filters.merchantIds[0] : undefined;
     return {
       assignee: assigneeId
         ? { type: 'assigneeTo', value: assigneeId }
@@ -3798,7 +3796,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           : null,
       priority: filters.priority?.length === 1 ? (filters.priority[0] ?? null) : null,
       ...(filters.tags?.length === 1 ? { tags: filters.tags } : {}),
-      ...(merchantId ? { merchantId } : {}),
       ...(channelId ? { channelId } : {}),
       ...(channelId && board ? { boardId: board.id } : {}),
     };
@@ -3838,7 +3835,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         stageName: column.stageName,
         assignee: groupAssignee ?? viewCreateTicketSeed?.assignee ?? null,
         priority: group.priority ?? viewCreateTicketSeed?.priority ?? null,
-        ...(groupBy === 'merchantId' && hasGroupValue ? { merchantId: group.key } : {}),
         ...(isFormFieldGroup(groupBy) && hasGroupValue
           ? {
               dynamicFields: {
@@ -5616,7 +5612,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           initialStageName={createTicketSeed?.stageName ?? null}
           initialAssignee={createTicketSeed?.assignee ?? null}
           initialPriority={createTicketSeed?.priority ?? null}
-          initialMerchantId={createTicketSeed?.merchantId}
           initialDynamicFields={createTicketSeed?.dynamicFields}
           onTicketCreated={handleTicketCreated}
         />
@@ -5641,7 +5636,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           initialAssignee={createTicketSeed?.assignee ?? null}
           initialPriority={createTicketSeed?.priority ?? null}
           {...(createTicketSeed?.tags ? { initialTags: createTicketSeed.tags } : {})}
-          initialMerchantId={createTicketSeed?.merchantId}
           initialDynamicFields={createTicketSeed?.dynamicFields}
           onTicketCreated={handleTicketCreated}
         />

@@ -8,8 +8,8 @@ import { PrismaClient } from '@prisma/client';
 import { generateTicketId } from '@/bypassAcl/transactions/ticketIdService';
 
 
-export function createTicketWithConversationTx(prisma: PrismaClient, projectId: string, ticketRepository: TicketRepository, title: string, description: string, userId: string, assignedTo: string | undefined, userGroupId: string | undefined, finalConversationId: string, channelId: string, workspaceId: string, boardId: string, priority: TicketPriority | undefined, stageName: string | undefined, eta: Date | undefined, ticketType: string | undefined, merchantId: string | undefined, formFieldChanges: FormFieldChanges | undefined, customFieldValues: { formId: string; contextId: string; fieldValues: { fieldId: string; fieldValue: string; fieldName?: string | undefined; actualFieldValue?: any; }[]; } | undefined) {
-  return transaction(['Board', 'Conversation', 'FormEntityValues', 'Merchant', 'Project', 'Stage', 'StageTransition', 'Ticket', 'TicketActivity', 'TicketDescription', 'TicketStageEta', 'TicketTag'], 'createTicketWithConversation: ticket creation with sequence allocation, conversation link, and custom fields must commit atomically; tx is not ACL-wrapped', prisma, async (tx) => {
+export function createTicketWithConversationTx(prisma: PrismaClient, projectId: string, ticketRepository: TicketRepository, title: string, description: string, userId: string, assignedTo: string | undefined, userGroupId: string | undefined, finalConversationId: string, channelId: string, workspaceId: string, boardId: string, priority: TicketPriority | undefined, stageName: string | undefined, eta: Date | undefined, ticketType: string | undefined, formFieldChanges: FormFieldChanges | undefined, customFieldValues: { formId: string; contextId: string; fieldValues: { fieldId: string; fieldValue: string; fieldName?: string | undefined; actualFieldValue?: any; }[]; } | undefined) {
+  return transaction(['Board', 'Conversation', 'FormEntityValues', 'Project', 'Stage', 'StageTransition', 'Ticket', 'TicketActivity', 'TicketDescription', 'TicketStageEta', 'TicketTag'], 'createTicketWithConversation: ticket creation with sequence allocation, conversation link, and custom fields must commit atomically; tx is not ACL-wrapped', prisma, async (tx) => {
     // Generate xyneId using project-scoped format
     const xyneId = await generateTicketId(tx, projectId);
     // Create ticket using repository
@@ -30,7 +30,6 @@ export function createTicketWithConversationTx(prisma: PrismaClient, projectId: 
       stageName,
       eta,
       ticketType,
-      merchantId,
       formFieldChanges,
     }, tx);
 

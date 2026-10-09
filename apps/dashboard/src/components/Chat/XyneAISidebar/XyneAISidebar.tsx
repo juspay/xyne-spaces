@@ -67,6 +67,7 @@ import {
   type SelectedMessage,
   type SelectedPerson,
   type SelectedSharedFile,
+  type SelectedApp,
   type ContextSelections,
   toAttachedContext,
   attachedContextToSelections,
@@ -383,6 +384,7 @@ const XyneAISidebar = ({
   const [selectedMessages, setSelectedMessages] = useState<SelectedMessage[]>([]);
   const [selectedPeople, setSelectedPeople] = useState<SelectedPerson[]>([]);
   const [selectedSharedFiles, setSelectedSharedFiles] = useState<SelectedSharedFile[]>([]);
+  const [selectedApps, setSelectedApps] = useState<SelectedApp[]>([]);
   const [browserContext, setBrowserContext] = useState<{
     type: 'browser';
     text: string;
@@ -960,6 +962,7 @@ const XyneAISidebar = ({
     messages: selectedMessages,
     people: selectedPeople,
     sharedFiles: selectedSharedFiles,
+    apps: selectedApps,
     localFolders: [],
     folders: folderScopes,
     files: fileScopes,
@@ -1580,6 +1583,7 @@ const XyneAISidebar = ({
     setSelectedMessages(selections.messages ?? []);
     setSelectedPeople(selections.people ?? []);
     setSelectedSharedFiles(selections.sharedFiles ?? []);
+    setSelectedApps(selections.apps ?? []);
   }, []);
 
   // On switching to a conversation, carry its last user-turn context into the
@@ -1600,6 +1604,7 @@ const XyneAISidebar = ({
     setSelectedMessages(c.messages ?? []);
     setSelectedPeople(c.people ?? []);
     setSelectedSharedFiles(c.sharedFiles ?? []);
+    setSelectedApps(c.apps ?? []);
     setFileScopes(c.fileScopes);
     setFolderScopes(c.folderScopes);
     setSelectedCollectionIds(c.collections.map(col => col.id));
@@ -2097,6 +2102,7 @@ const XyneAISidebar = ({
         setSelectedMessages([]);
         setSelectedPeople([]);
         setSelectedSharedFiles([]);
+        setSelectedApps([]);
         setFileScopes(prev => prev.filter(f => f.id === kbDocIdProp));
         setFolderScopes(prev => prev.filter(f => f.id === kbFolderIdProp));
         setSentNonce(n => n + 1);
@@ -2225,6 +2231,7 @@ const XyneAISidebar = ({
     selectedMessages,
     selectedPeople,
     selectedSharedFiles,
+    selectedApps,
     selectedActivities,
     onActivitiesChange: setSelectedActivities,
     onAbort: () => {

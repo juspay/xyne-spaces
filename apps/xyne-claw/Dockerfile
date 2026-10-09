@@ -10,6 +10,8 @@ RUN apt-get update && apt-get install -y \
     gnupg \
     chromium \
     fonts-liberation \
+    fonts-noto-core \
+    fonts-noto-color-emoji \
     libnss3 \
     libatk-bridge2.0-0 \
     libdrm2 \
