@@ -7227,6 +7227,7 @@ export interface SandboxRepoConfigRow {
   config: Record<string, unknown>;
   updatedAt: string | null;
   updatedByUserId: string | null;
+  workspaceId: string | null;
 }
 
 export async function listSandboxRepoConfigs(userId: string): Promise<SandboxRepoConfigRow[]> {
@@ -7240,7 +7241,7 @@ export async function listSandboxRepoConfigs(userId: string): Promise<SandboxRep
 export async function saveSandboxRepoConfig(
   userId: string,
   key: string,
-  body: { config: unknown; enabled: boolean },
+  body: { config: unknown; enabled: boolean; workspaceId?: string },
 ): Promise<void> {
   await request(
     `${AUTH_API_URL}/api/v1/admin/sandbox-repos/${encodeURIComponent(key)}`,

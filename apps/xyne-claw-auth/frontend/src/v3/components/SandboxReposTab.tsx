@@ -37,6 +37,7 @@ interface Draft {
   key: string;
   isNew: boolean;
   enabled: boolean;
+  workspaceId: string;
   text: string;
 }
 
@@ -75,12 +76,18 @@ export function SandboxReposTab({ userId }: Props) {
 
   const openRow = (row: SandboxRepoConfigRow) => {
     setParseError(null);
-    setDraft({ key: row.key, isNew: false, enabled: row.enabled, text: JSON.stringify(row.config, null, 2) });
+    setDraft({
+      key: row.key,
+      isNew: false,
+      enabled: row.enabled,
+      workspaceId: row.workspaceId ?? "",
+      text: JSON.stringify(row.config, null, 2),
+    });
   };
 
   const openNew = () => {
     setParseError(null);
-    setDraft({ key: "", isNew: true, enabled: true, text: JSON.stringify(NEW_REPO_TEMPLATE, null, 2) });
+    setDraft({ key: "", isNew: true, enabled: true, workspaceId: "", text: JSON.stringify(NEW_REPO_TEMPLATE, null, 2) });
   };
 
   const save = async () => {
@@ -94,6 +101,10 @@ export function SandboxReposTab({ userId }: Props) {
       setParseError(`"${key}" already exists — select it in the list to edit.`);
       return;
     }
+    if (draft.isNew && !draft.workspaceId.trim()) {
+      setParseError("Workspace id is required: a profile without one shows nowhere.");
+      return;
+    }
     let config: unknown;
     try {
       config = JSON.parse(draft.text);
@@ -104,7 +115,11 @@ export function SandboxReposTab({ userId }: Props) {
     setParseError(null);
     setSaving(true);
     try {
-      await saveSandboxRepoConfig(userId, key, { config, enabled: draft.enabled });
+      await saveSandboxRepoConfig(userId, key, {
+        config,
+        enabled: draft.enabled,
+        ...(draft.isNew ? { workspaceId: draft.workspaceId.trim() } : {}),
+      });
       showSnackbar({ variant: "success", title: `Saved "${key}"`, description: "Agents pick it up within about a minute." });
       await load();
       setDraft({ ...draft, key, isNew: false });
@@ -169,6 +184,9 @@ export function SandboxReposTab({ userId }: Props) {
                     variant={row.source === "database" ? "info" : "neutral"}
                     label={row.source === "database" ? (row.hasDefault ? "Override" : "Custom") : "Default"}
                   />
+                  {row.source === "database" && !row.hasDefault && !row.workspaceId && (
+                    <Badge as="span" size="sm" variant="warning" label="Unowned" />
+                  )}
                   {!row.active && <Badge as="span" size="sm" variant="warning" label="Disabled" />}
                 </span>
               </button>
@@ -197,6 +215,15 @@ export function SandboxReposTab({ userId }: Props) {
                     </span>
                   )}
                 </div>
+              )}
+
+              {draft.isNew && (
+                <TextField
+                  label="Workspace id"
+                  value={draft.workspaceId}
+                  placeholder="Spaces workspace that owns this profile"
+                  onChange={(e) => setDraft({ ...draft, workspaceId: e.target.value })}
+                />
               )}
 
               <label className="flex items-center gap-2 text-[13px]">
