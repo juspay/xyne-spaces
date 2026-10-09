@@ -422,9 +422,13 @@ async function showMissingToolingPage(
 }
 
 /**
- * Shows the boot splash — the same mark on the same ground as the dashboard's own inline splash,
- * so the two documents read as one continuous screen rather than a branded page, a white frame,
- * and then a different branded page.
+ * Paints the window's ground colour so the window can be shown at all.
+ *
+ * createMainWindow reveals on 'ready-to-show', which needs a first paint, so skipping this leaves
+ * the window invisible for the whole keychain + TLS + HTML wait. The page is deliberately blank —
+ * the branded splash lives in the dashboard's index.html, where it covers the part of a cold start
+ * that is actually long, and showing a mark here as well made the same logo appear twice across
+ * the document navigation.
  *
  * The theme comes from the main process's own record of it, because this file: document cannot
  * read the renderer's localStorage.
