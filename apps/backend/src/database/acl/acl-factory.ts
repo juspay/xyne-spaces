@@ -23,7 +23,7 @@ import {
   CanvasCommentThreadsACL,
   ChannelParticipantsACL,
   ChannelBoardMappingsACL,
-  ChannelPublishedAppsACL,
+  ChannelPublishedTabsACL,
   ChannelsACL,
   ChannelStatsACL,
   ChannelUserStatusACL,
@@ -202,8 +202,8 @@ export class ACLFactory {
       return new ChannelsACL(ctx, prisma)
     case 'channelBoardMapping':
       return new ChannelBoardMappingsACL(ctx, prisma)
-    case 'channelPublishedApp':
-      return new ChannelPublishedAppsACL(ctx, prisma)
+    case 'channelPublishedTab':
+      return new ChannelPublishedTabsACL(ctx, prisma)
     case 'channelParticipant':
       return new ChannelParticipantsACL(ctx, prisma)
     case 'channelStats':

@@ -81,7 +81,7 @@ const FIELD_LABELS: Record<string, string> = {
   sendAsEmail: 'Send-as alias',
   dlEmail: 'Distribution list',
   dlAliases: 'Additional inbound addresses',
-  appId: 'Desk app',
+  entityId: 'Desk app',
   defaultCc: 'Default CC',
   assigneeUserGroupId: 'Default assignee group',
   boardId: 'Board',

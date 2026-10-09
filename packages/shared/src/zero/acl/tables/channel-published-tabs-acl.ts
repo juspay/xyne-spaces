@@ -10,15 +10,15 @@ import { denyGuestSelect, isGuestContext } from '../core/guest-acl-utils';
  * the channel itself. Guests get none: a published app is only openable by
  * members of its workspace, so there is nothing for a guest to show.
  */
-export class ChannelPublishedAppsACL extends BaseQueryACL<'channel_published_apps'> {
+export class ChannelPublishedTabsACL extends BaseQueryACL<'channel_published_tabs'> {
   constructor(ctx: Context) {
-    super(ctx, 'channel_published_apps');
+    super(ctx, 'channel_published_tabs');
   }
 
   canSelect<TReturn>(
-    query: Query<'channel_published_apps', Schema, TReturn>,
+    query: Query<'channel_published_tabs', Schema, TReturn>,
     args?: SelectArgs,
-  ): Query<'channel_published_apps', Schema, TReturn> {
+  ): Query<'channel_published_tabs', Schema, TReturn> {
     if (isGuestContext(this.ctx)) {
       return denyGuestSelect(query, 'channelId');
     }

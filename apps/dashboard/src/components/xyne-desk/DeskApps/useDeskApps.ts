@@ -22,7 +22,7 @@ export interface DeskApps {
 /**
  * The desk's apps, resolved for the current viewer.
  *
- * The desk stores ids only (channel_published_apps); titles and icons
+ * The desk stores ids only (channel_published_tabs); titles and icons
  * are read live, so a renamed app or a new icon shows up for everyone without
  * touching the desk. Each lookup shares ArtifactAppHost's query key, so opening
  * an app from the desk reuses the fetch the header already made.

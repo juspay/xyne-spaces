@@ -132,11 +132,12 @@ import { ConnectEntityType } from '@xyne/shared';
 import { SDLC_HUB_KNOWLEDGE_FOLDER, sdlcIconNameSchema, sdlcTrackStatusSchema } from '@xyne/shared';
 import { isSdlcTreeItemType, refileSdlcFolderEdges } from '@xyne/shared';
 import {
+  ChannelPublishedEntityType,
   MAX_DUPLICATE_SCOPE_FIELDS,
   MAX_PUBLISHED_APP_ID_LENGTH,
   MAX_PUBLISHED_APPS,
   canPublishAppsTo,
-  type ChannelPublishedApp,
+  type ChannelPublishedTab,
 } from '@xyne/shared';
 import {
   evaluateEta,
@@ -297,7 +298,7 @@ async function loadChannelForAppPublish(
   tx: Transaction<Schema>,
   channelId: string,
   userId: string,
-): Promise<ChannelPublishedApp[]> {
+): Promise<ChannelPublishedTab[]> {
   const channel = await tx.run(zql.channels.where('id', channelId).one());
   if (!channel) {
     throw new Error("Channel doesn't exist");
@@ -322,7 +323,11 @@ async function loadChannelForAppPublish(
           : 'Apps can only be published to channels, DMs, group DMs and desks',
     );
   }
-  return tx.run(zql.channel_published_apps.where('channelId', channelId));
+  return tx.run(
+    zql.channel_published_tabs
+      .where('channelId', channelId)
+      .where('entityType', ChannelPublishedEntityType.APP),
+  );
 }
 
 async function getCanvasThreadCommentCount(
@@ -1628,22 +1633,23 @@ export function createMutators(
       ),
       publishApp: defineMutator(
         z.object({
-            id: z.string().min(1).max(64),
+          id: z.string().min(1).max(64),
           channelId: z.string(),
           appId: z.string().min(1).max(MAX_PUBLISHED_APP_ID_LENGTH),
           timestamp: z.number(),
         }),
         async ({ tx, args: { id, channelId, appId, timestamp } }) => {
           const rows = await loadChannelForAppPublish(tx, channelId, authData.sub);
-          if (rows.some(row => row.appId === appId)) return;
+          if (rows.some(row => row.entityId === appId)) return;
           if (rows.length >= MAX_PUBLISHED_APPS) {
             throw new Error(`Up to ${MAX_PUBLISHED_APPS} apps can be published here`);
           }
-          await tx.mutate.channel_published_apps.insert({
+          await tx.mutate.channel_published_tabs.insert({
             id,
             workspaceId: authData.workspaceId,
             channelId,
-            appId,
+            entityType: ChannelPublishedEntityType.APP,
+            entityId: appId,
             position: rows.reduce((top, row) => Math.max(top, row.position), -1) + 1,
             publishedBy: authData.sub,
             createdAt: timestamp,
@@ -1654,9 +1660,9 @@ export function createMutators(
         z.object({ channelId: z.string(), appId: z.string().min(1).max(MAX_PUBLISHED_APP_ID_LENGTH) }),
         async ({ tx, args: { channelId, appId } }) => {
           const rows = await loadChannelForAppPublish(tx, channelId, authData.sub);
-          const row = rows.find(r => r.appId === appId);
+          const row = rows.find(r => r.entityId === appId);
           if (!row) return;
-          await tx.mutate.channel_published_apps.delete({ id: row.id });
+          await tx.mutate.channel_published_tabs.delete({ id: row.id });
         },
       ),
       updateShowTicketsTabTicketsInChat: defineMutator(

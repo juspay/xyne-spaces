@@ -35,7 +35,7 @@ export interface AppPublishOptions {
  * which is how the picker knows to show no publish controls at all.
  *
  * The rule is the shared `canPublishChannelApps`, which `channel.publishApp` /
- * `unpublishApp` and the channel_published_apps ACL run again server-side —
+ * `unpublishApp` and the channel_published_tabs ACL run again server-side —
  * this only decides what to show.
  */
 export const useChannelAppPublishing = (

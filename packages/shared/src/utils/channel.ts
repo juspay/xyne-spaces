@@ -62,11 +62,11 @@ export function canPublishChannelApps(
   return scopeType === ChannelScopeType.DEFAULT && participantRole === ChannelRole.ADMIN;
 }
 
-/** Longest app id accepted in channel_published_apps.appId (ids are 25-char cuids). */
+/** Longest app id accepted in channel_published_tabs.appId (ids are 25-char cuids). */
 export const MAX_PUBLISHED_APP_ID_LENGTH = 64;
 
 /**
- * Who may publish or unpublish an app (channel_published_apps) — the single rule
+ * Who may publish or unpublish an app (channel_published_tabs) — the single rule
  * the mutators, the table's ACL and the dashboard all use:
  *  - desk: its owner (email_channel_preferences.ownerUserId) or a channel ADMIN;
  *  - channel: ADMINs only; DM / group DM: any participant;

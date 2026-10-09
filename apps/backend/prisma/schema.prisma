@@ -1936,19 +1936,18 @@ model Channel {
   @@schema("public")
 }
 
-model ChannelPublishedApp {
+model ChannelPublishedTab {
   id          String   @id
   workspaceId String
   channelId   String
-  appId       String   // artifact app id (claw-auth); no FK — different database
+  entityType  String   // APP
+  entityId    String   // for APP: artifact app id (claw-auth); no FK — different database
   position    Int
   publishedBy String
   createdAt   DateTime @default(now())
 
-  @@unique([channelId, appId])
-  @@index([channelId, position])
-  @@index([workspaceId])
-  @@map("channel_published_apps")
+  @@unique([channelId, entityType, entityId])
+  @@map("channel_published_tabs")
   @@schema("public")
 }
 
@@ -2447,7 +2446,7 @@ model EmailChannelPreference {
   deskReportRangeDays    Int?     @default(1) // 1 = "Last 1 day", 7 = "Last 1 week"
   duplicateScopeConfig   String?    // Scoped duplicate detection: JSON-serialized { enabled, scopeFieldGlobalIds }; stored as string for Zero compatibility, parsed at code level (null = project-wide legacy behavior)
   slackDeskTriggerMode   String?  // ALL_MESSAGES | MENTION_ONLY; null == ALL_MESSAGES
-  deskAppIds             String?  // DEPRECATED: moved to channel_published_apps
+  deskAppIds             String?  // DEPRECATED: moved to channel_published_tabs
   @@index([ownerUserId])
   @@index([assigneeUserGroupId])
   @@index([boardId])

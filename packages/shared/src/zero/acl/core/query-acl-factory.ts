@@ -25,7 +25,7 @@ import {
   RecapsACL,
   ChannelParticipantsACL,
   ChannelBoardMappingsACL,
-  ChannelPublishedAppsACL,
+  ChannelPublishedTabsACL,
   ChannelsACL,
   ChannelSectionsACL,
   ChannelStatsACL,
@@ -188,8 +188,8 @@ export class QueryACLFactory {
         return new ChannelsACL(ctx) as BaseQueryACL<TTable>;
       case 'channel_board_mappings':
         return new ChannelBoardMappingsACL(ctx) as BaseQueryACL<TTable>;
-      case 'channel_published_apps':
-        return new ChannelPublishedAppsACL(ctx) as BaseQueryACL<TTable>;
+      case 'channel_published_tabs':
+        return new ChannelPublishedTabsACL(ctx) as BaseQueryACL<TTable>;
       case 'channel_stats':
         return new ChannelStatsACL(ctx) as BaseQueryACL<TTable>;
       case 'conversation_participants':

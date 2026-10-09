@@ -15,7 +15,7 @@ import { mergeChannelTabs, splitChannelTabs, type ChannelTabLayers } from './cha
  * module. See `isChannelTabsCustomizable`.
  *
  * On top of that list sit the apps a channel admin published
- * (channel_published_apps). Two more local lists per channel record how this
+ * (channel_published_tabs). Two more local lists per channel record how this
  * member relates to them — `:added` (apps they added themselves) and `:hidden`
  * (published apps they removed) — and `useChannelTabsStore` merges the three
  * into what the member sees. See channelTabLayers.ts.

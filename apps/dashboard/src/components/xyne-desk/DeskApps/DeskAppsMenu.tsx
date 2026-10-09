@@ -39,10 +39,10 @@ interface DeskAppsMenuProps {
  * can open them; the desk owner and channel admins also get "Add or remove
  * apps…". Hidden entirely when there is nothing to show and nothing to manage.
  *
- * The list is the desk's channel_published_apps rows — shared by everyone on the
+ * The list is the desk's channel_published_tabs rows — shared by everyone on the
  * desk, unlike the per-device bars elsewhere — added and removed one app at a
  * time through channel.publishApp / unpublishApp. The server re-checks every
- * change (the mutators and ChannelPublishedAppsACL both run canPublishAppsTo:
+ * change (the mutators and ChannelPublishedTabsACL both run canPublishAppsTo:
  * the desk owner or a channel admin), so that is what decides whether it sticks.
  */
 export const DeskAppsMenu = ({

@@ -2232,7 +2232,7 @@ const SupportScreen = (): ReactElement => {
   const isFacebookDesk = selectedChannelIntegration.sourceType === 'facebook';
   const isCallDesk = selectedChannelFull?.type === ChannelType.CALL;
 
-  // Artifact apps added to this desk (channel_published_apps). Every member sees
+  // Artifact apps added to this desk (channel_published_tabs). Every member sees
   // and opens them; the desk owner and channel admins add/remove them — the same
   // rule the table's ACL enforces on the write (canPublishAppsTo).
   const deskPublishedAppIds = useChannelPublishedApps(preferenceChannelId);

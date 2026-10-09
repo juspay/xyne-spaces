@@ -810,12 +810,13 @@ export const channelBoardMappingTable = table('channel_board_mappings' /* Channe
   })
   .primaryKey('id');
 
-export const channelPublishedAppTable = table('channel_published_apps' /* ChannelPublishedApp */)
+export const channelPublishedTabTable = table('channel_published_tabs' /* ChannelPublishedTab */)
   .columns({
     id: string(),
     workspaceId: string(),
     channelId: string(),
-    appId: string(),
+    entityType: string(),
+    entityId: string(),
     position: number(),
     publishedBy: string(),
     createdAt: number(),
@@ -3468,10 +3469,10 @@ export const channelTableRelationships = relationships(channelTable, ({ one, man
     destField: ['channelId'],
     destSchema: channelBoardMappingTable,
   }),
-  publishedApps: many({
+  publishedTabs: many({
     sourceField: ['id'],
     destField: ['channelId'],
-    destSchema: channelPublishedAppTable,
+    destSchema: channelPublishedTabTable,
   }),
   ticketDescriptions: many({
     sourceField: ['id'],
@@ -3496,8 +3497,8 @@ export const channelBoardMappingTableRelationships = relationships(
   }),
 );
 
-export const channelPublishedAppTableRelationships = relationships(
-  channelPublishedAppTable,
+export const channelPublishedTabTableRelationships = relationships(
+  channelPublishedTabTable,
   ({ one }) => ({
     channel: one({
       sourceField: ['channelId'],
@@ -5069,7 +5070,7 @@ export const schema = createSchema({
     guestAccessTable,
     channelTable,
     channelBoardMappingTable,
-    channelPublishedAppTable,
+    channelPublishedTabTable,
     channelStatsTable,
     channelParticipantTable,
     channelUserStatusTable,
@@ -5207,7 +5208,7 @@ export const schema = createSchema({
     conversationParticipantTableRelationships,
     channelTableRelationships,
     channelBoardMappingTableRelationships,
-    channelPublishedAppTableRelationships,
+    channelPublishedTabTableRelationships,
     channelStatsTableRelationships,
     repoTableRelationships,
     sdlcEntityLinkTableRelationships,
@@ -5350,7 +5351,7 @@ export type Invitation = Row<typeof schema.tables.invitations>;
 export type GuestAccess = Row<typeof schema.tables.guest_access>;
 export type Channel = Row<typeof schema.tables.channels>;
 export type ChannelBoardMapping = Row<typeof schema.tables.channel_board_mappings>;
-export type ChannelPublishedApp = Row<typeof schema.tables.channel_published_apps>;
+export type ChannelPublishedTab = Row<typeof schema.tables.channel_published_tabs>;
 export type ChannelStats = Row<typeof schema.tables.channel_stats>;
 export type ChannelParticipant = Row<typeof schema.tables.channel_participants>;
 export type ChannelUserStatus = Row<typeof schema.tables.channel_user_status>;

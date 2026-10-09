@@ -59,6 +59,7 @@ import {
   RecapEntityType,
   UserType,
   ViewAccessEntityType,
+  ChannelPublishedEntityType,
 } from '@xyne/shared';
 
 export const zql = createBuilder(schema);
@@ -4479,8 +4480,9 @@ export const queries: AnyQueryRegistry = defineQueries({
   channelPublishedApps: defineQuery(
     z.object({ channelId: z.string() }),
     ({ args: { channelId } }) =>
-      zql.channel_published_apps
+      zql.channel_published_tabs
         .where('channelId', channelId)
+        .where('entityType', ChannelPublishedEntityType.APP)
         .orderBy('position', 'asc')
         .orderBy('createdAt', 'asc'),
   ),
