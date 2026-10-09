@@ -257,6 +257,7 @@ import type { ScreenSource } from '../types/electron';
 import ConfluenceMigrationScreen from './ConfluenceMigrationScreen/ConfluenceMigrationScreen';
 import AIScreen from './AIScreen/AIScreen';
 import AILibraryScreen from './AIScreen/screens/AILibraryScreen';
+import AIEnvironmentsScreen from './AIScreen/screens/AIEnvironmentsScreen';
 import AIAdminScreen from './AIScreen/screens/AIAdminScreen';
 import AIAgentCreateScreen from './AIScreen/screens/AIAgentCreateScreen';
 import AISubagentCreateScreen from './AIScreen/screens/AISubagentCreateScreen';
@@ -1172,6 +1173,14 @@ export const router = createBrowserRouter(
                     { path: 'daily-brief', element: <AIDailyBriefScreen /> },
                     { path: 'daily-brief/:briefDate', element: <AIDailyBriefScreen /> },
                     { path: 'library', element: <AILibraryScreen /> },
+                    {
+                      path: 'environments',
+                      element: (
+                        <RequireClawAdmin orSdlcAdmin>
+                          <AIEnvironmentsScreen />
+                        </RequireClawAdmin>
+                      ),
+                    },
                     {
                       path: 'admin',
                       element: (

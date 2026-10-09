@@ -16,17 +16,27 @@ export async function hasSdlcProjectAccess(
   actor: SdlcActor,
   projectId: string
 ): Promise<boolean> {
-  const [user, participant, projectAdmin] = await Promise.all([
+  return (await sdlcAccessibleProjectIds(db, actor, [projectId])).has(projectId);
+}
+
+/** The subset of `projectIds` the actor may work on, in three queries whatever the count. */
+export async function sdlcAccessibleProjectIds(
+  db: Db,
+  actor: SdlcActor,
+  projectIds: string[]
+): Promise<Set<string>> {
+  if (projectIds.length === 0) return new Set();
+  const [user, participants, projectAdmin] = await Promise.all([
     db.user.findFirst({
       where: { id: actor.userId, workspaceId: actor.workspaceId },
       select: { role: true },
     }),
-    db.channelParticipant.findFirst({
+    db.channelParticipant.findMany({
       where: {
         userId: actor.userId,
-        channel: { projectId, workspaceId: actor.workspaceId },
+        channel: { projectId: { in: projectIds }, workspaceId: actor.workspaceId },
       },
-      select: { id: true },
+      select: { channel: { select: { projectId: true } } },
     }),
     db.resourceAccess.findFirst({
       where: {
@@ -46,8 +56,9 @@ export async function hasSdlcProjectAccess(
       select: { id: true },
     }),
   ]);
-  if (!user || user.role === WorkspaceRole.GUEST) return false;
-  return Boolean(participant || projectAdmin);
+  if (!user || user.role === WorkspaceRole.GUEST) return new Set();
+  if (projectAdmin) return new Set(projectIds);
+  return new Set(participants.flatMap((p) => p.channel.projectId ?? []));
 }
 
 export async function requireSdlcProjectAccess(
