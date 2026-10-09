@@ -145,7 +145,8 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
                 collapsible
                 collapsedSize={0}
               >
-                <aside className='w-full h-full'>
+                {/* Collapsed, it is out of reach for keyboard and screen readers too. */}
+                <aside className='w-full h-full' inert={isFullScreenPage}>
                   <ChatDirectory
                     channelData={channelData}
                     allChannelsUserStatus={allChannelsUserStatus}
