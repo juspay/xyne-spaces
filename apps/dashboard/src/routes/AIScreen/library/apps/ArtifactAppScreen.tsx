@@ -1,6 +1,6 @@
 import { ReactElement } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArtifactAppHost } from '@/components/ArtifactApp/ArtifactAppHost';
+import { ArtifactAppSlot } from '@/components/ArtifactApp/ArtifactAppSlot';
 import NotFoundScreen from '@/routes/NotFoundScreen/NotFoundScreen';
 
 /**
@@ -14,7 +14,7 @@ const ArtifactAppScreen = (): ReactElement => {
   if (!appId) return <NotFoundScreen />;
 
   return (
-    <ArtifactAppHost
+    <ArtifactAppSlot
       key={appId}
       appId={appId}
       placement={{ surface: 'library' }}

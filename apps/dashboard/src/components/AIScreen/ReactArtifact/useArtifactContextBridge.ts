@@ -6,6 +6,7 @@ import {
   type XyneAppContext,
 } from './artifactData.constants';
 import type { PreviewClientRef } from './useArtifactDataBridge';
+import { artifactFrame, isFromArtifactFrame } from './artifactFrame';
 
 interface BridgeArgs {
   previewRef: MutableRefObject<PreviewClientRef | null>;
@@ -39,13 +40,9 @@ interface BridgeArgs {
  */
 export function useArtifactContextBridge({ previewRef, contextRef, pushRef }: BridgeArgs): void {
   useEffect(() => {
-    /** The app's window, resolved at call time — the iframe is replaced on reload. */
-    const appWindow = (): Window | null =>
-      previewRef.current?.getClient()?.iframe?.contentWindow ?? null;
-
     const send = (): void => {
       const context = contextRef.current;
-      const target = appWindow();
+      const target = artifactFrame(previewRef);
       if (!context || !target) return;
       const message: HostContextMessage = {
         source: 'xyne-artifact-host',
@@ -54,7 +51,7 @@ export function useArtifactContextBridge({ previewRef, contextRef, pushRef }: Br
         context,
       };
       try {
-        target.postMessage(message, '*');
+        target.window.postMessage(message, target.origin);
       } catch {
         // The app retries its request a few times; a lost push is recovered by
         // the next change, and neither case is worth failing the render over.
@@ -62,7 +59,7 @@ export function useArtifactContextBridge({ previewRef, contextRef, pushRef }: Br
     };
 
     const onMessage = (event: MessageEvent): void => {
-      if (event.source !== appWindow()) return;
+      if (!isFromArtifactFrame(event, previewRef)) return;
       if (!isAppArtifactMessage(event.data)) return;
       if (event.data.type !== 'context-request') return;
       send();

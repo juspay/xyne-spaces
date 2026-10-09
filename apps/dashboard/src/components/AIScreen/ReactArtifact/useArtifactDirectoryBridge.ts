@@ -4,6 +4,7 @@ import { buildArtifactDirectory, directorySourceRefs } from './artifactDirectory
 import { ARTIFACT_DATA_PROTOCOL_VERSION, isAppArtifactMessage } from './artifactData.constants';
 import type { HostDirectoryMessage } from './artifactData.constants';
 import type { PreviewClientRef } from './useArtifactDataBridge';
+import { artifactFrame, isFromArtifactFrame } from './artifactFrame';
 
 interface DirectoryBridgeArgs {
   /** Needed by the canonical DM resolver: it excludes you from participant lists
@@ -36,11 +37,8 @@ export function useArtifactDirectoryBridge({
     let cancelled = false;
     let lastRefs = { users: undefined as unknown, channels: undefined as unknown };
 
-    const appWindow = (): Window | null =>
-      previewRef.current?.getClient()?.iframe?.contentWindow ?? null;
-
     const post = (): void => {
-      const target = appWindow();
+      const target = artifactFrame(previewRef);
       if (!target) return;
       const message: HostDirectoryMessage = {
         source: 'xyne-artifact-host',
@@ -49,7 +47,7 @@ export function useArtifactDirectoryBridge({
         directory: buildArtifactDirectory(currentUserId),
       };
       try {
-        target.postMessage(message, '*');
+        target.window.postMessage(message, target.origin);
       } catch {
         /* structured-clone failure — names simply stay unresolved in the app */
       }
@@ -57,8 +55,7 @@ export function useArtifactDirectoryBridge({
 
     const onMessage = (event: MessageEvent): void => {
       if (!isAppArtifactMessage(event.data)) return;
-      const target = appWindow();
-      if (!target || event.source !== target) return;
+      if (!isFromArtifactFrame(event, previewRef)) return;
       // An iframe reload loses the app's copy; `ready` is how it asks again.
       if (event.data.type === 'ready') post();
     };

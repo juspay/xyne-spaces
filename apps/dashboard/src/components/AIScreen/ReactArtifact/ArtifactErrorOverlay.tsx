@@ -35,6 +35,7 @@ import { AlertTriangle, Check, Copy, Loader2, Sparkles, X } from 'lucide-react';
 import { isAppArtifactMessage } from './artifactData.constants';
 import { useAppCreationModeSignal } from './appCreationModeContext';
 import type { PreviewClientRef } from './useArtifactDataBridge';
+import { isFromArtifactFrame } from './artifactFrame';
 
 interface ArtifactRenderError {
   message: string;
@@ -102,8 +103,7 @@ export const ArtifactErrorOverlay = ({
     });
     const onMessage = (event: MessageEvent): void => {
       if (!isAppArtifactMessage(event.data) || event.data.type !== 'error') return;
-      const target = previewRef.current?.getClient()?.iframe?.contentWindow ?? null;
-      if (!target || event.source !== target) return;
+      if (!isFromArtifactFrame(event, previewRef)) return;
       const { message, componentStack } = event.data;
       const next: ArtifactRenderError = {
         message: message?.trim() || 'Unknown error',

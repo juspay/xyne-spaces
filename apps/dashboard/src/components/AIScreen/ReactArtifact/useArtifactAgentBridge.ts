@@ -19,6 +19,12 @@ import {
   type HostAgentStateMessage,
 } from './artifactData.constants';
 import type { PreviewClientRef } from './useArtifactDataBridge';
+import {
+  artifactFrame,
+  isFromArtifactFrame,
+  isFromFrame,
+  type ArtifactVisibility,
+} from './artifactFrame';
 
 interface AgentBridgeArgs {
   /** Which app this is. Both fields may be absent for a preview that has not
@@ -28,6 +34,8 @@ interface AgentBridgeArgs {
   /** Feature flag only. Authorization is the server's, per the caller's ACLs. */
   canInvokeAgents: boolean;
   previewRef: MutableRefObject<PreviewClientRef | null>;
+  /** While hidden, new runs are refused. */
+  visibility?: ArtifactVisibility;
 }
 
 /** Live-stream event names carrying assistant text, per conversation-bus LiveEvent. */
@@ -57,6 +65,7 @@ export function useArtifactAgentBridge({
   attachmentId,
   canInvokeAgents,
   previewRef,
+  visibility,
 }: AgentBridgeArgs): void {
   useEffect(() => {
     if (!canInvokeAgents) {
@@ -116,14 +125,11 @@ export function useArtifactAgentBridge({
       return state;
     }
 
-    const appWindow = (): Window | null =>
-      previewRef.current?.getClient()?.iframe?.contentWindow ?? null;
-
     function postToApp(message: HostAgentStateMessage | HostAgentEventMessage): void {
-      const target = appWindow();
+      const target = artifactFrame(previewRef);
       if (!target) return;
       try {
-        target.postMessage(message, '*');
+        target.window.postMessage(message, target.origin);
       } catch {
         /* structured-clone failure — the app's own state simply does not advance */
       }
@@ -374,8 +380,7 @@ export function useArtifactAgentBridge({
 
     const onMessage = (event: MessageEvent): void => {
       if (!isAppArtifactMessage(event.data)) return;
-      const target = appWindow();
-      if (!target || event.source !== target) return;
+      if (!isFromArtifactFrame(event, previewRef)) return;
 
       const { type, runKey } = event.data;
       if (type === 'agent-attach' && runKey) {
@@ -383,6 +388,15 @@ export function useArtifactAgentBridge({
         return;
       }
       if (type === 'agent-run' && runKey && event.data.prompt) {
+        // Refused like a write: a run started late would act on what the app saw while hidden.
+        // Event only, not shared state: a run already going under this key must not read as failed.
+        if (visibility && !visibility.isActive()) {
+          postEvent(runKey, {
+            kind: 'error',
+            error: 'This app is in the background, so it cannot start an agent.',
+          });
+          return;
+        }
         void startRun(runKey, event.data.prompt, event.data.agentSlug);
         return;
       }
@@ -403,7 +417,7 @@ export function useArtifactAgentBridge({
         state.watcher?.abort();
       });
     };
-  }, [appId, attachmentId, canInvokeAgents, previewRef]);
+  }, [appId, attachmentId, canInvokeAgents, previewRef, visibility]);
 }
 
 /**
@@ -415,8 +429,8 @@ function attachUnavailableListener(
 ): () => void {
   const onMessage = (event: MessageEvent): void => {
     if (!isAppArtifactMessage(event.data)) return;
-    const target = previewRef.current?.getClient()?.iframe?.contentWindow ?? null;
-    if (!target || event.source !== target) return;
+    const target = artifactFrame(previewRef);
+    if (!target || !isFromFrame(event, target)) return;
     const { type, runKey } = event.data;
     if (type !== 'agent-attach' && type !== 'agent-run') return;
 
@@ -438,7 +452,7 @@ function attachUnavailableListener(
       },
     };
     try {
-      target.postMessage(message, '*');
+      target.window.postMessage(message, target.origin);
     } catch {
       /* nothing useful to do */
     }

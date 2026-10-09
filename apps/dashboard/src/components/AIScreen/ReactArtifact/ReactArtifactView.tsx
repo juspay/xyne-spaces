@@ -38,6 +38,7 @@ import { useArtifactAgentBridge } from './useArtifactAgentBridge';
 import { useArtifactDirectoryBridge } from './useArtifactDirectoryBridge';
 import { useArtifactRequestBridge } from './useArtifactRequestBridge';
 import { useArtifactContextBridge } from './useArtifactContextBridge';
+import type { ArtifactVisibility } from './artifactFrame';
 import type { XyneAppContext } from './artifactData.constants';
 import { ArtifactSavedIndicator } from './ArtifactSavedIndicator';
 import { ArtifactBootOverlay } from './ArtifactBootOverlay';
@@ -105,6 +106,7 @@ const ArtifactSandpack = memo(
     fill,
     contextRef,
     pushContextRef,
+    visibility,
   }: {
     payload: ReactArtifactPayload;
     theme: 'light' | 'dark';
@@ -122,6 +124,7 @@ const ArtifactSandpack = memo(
      *  must reach a RUNNING app as a message, not as a new prop that reboots it. */
     contextRef: MutableRefObject<XyneAppContext | null>;
     pushContextRef: MutableRefObject<(() => void) | null>;
+    visibility: ArtifactVisibility;
     /** Drives the boot overlay's scale and surface. A plain boolean, so the
      *  memo's shallow compare still holds and the iframe is never torn down. */
     fill: boolean;
@@ -137,6 +140,7 @@ const ArtifactSandpack = memo(
       ...(appId ? { appId } : {}),
       previewRef,
       refreshRef,
+      visibility,
     });
 
     // Separate from the data bridge: agent runs outlive the app and must not be
@@ -146,6 +150,7 @@ const ArtifactSandpack = memo(
       ...(appId ? { appId } : {}),
       ...(attachmentId ? { attachmentId } : {}),
       previewRef,
+      visibility,
     });
 
     // Ids are opaque and two of the naming rules are not guessable, so the host
@@ -156,7 +161,7 @@ const ArtifactSandpack = memo(
     // Runs the app's backend SDK / storage fetches as the current viewer: the
     // app tunnels them here (it has no cookie), the host performs the real
     // same-origin fetch, allow-listed to /api/sdk and /claw.
-    useArtifactRequestBridge({ previewRef, ...(appId ? { appId } : {}) });
+    useArtifactRequestBridge({ previewRef, visibility, ...(appId ? { appId } : {}) });
 
     // Where the app is open. Answered on request and pushed on change, so an app
     // that stays alive across a channel switch follows the user.
@@ -212,6 +217,8 @@ export const ReactArtifactView = ({
   onClose,
   titleSlot,
   hideTitle = false,
+  hideSavedIndicator = false,
+  active = true,
   settingsSlot,
   onSave,
   saveState = 'idle',
@@ -237,6 +244,23 @@ export const ReactArtifactView = ({
     // `contextKey` rather than the object: same content must not re-push.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contextKey]);
+  // A stable handle, not a prop, into the sandbox: a changing prop there tears the iframe down.
+  const activeRef = useRef(active);
+  const [resumers] = useState(() => new Set<() => void>());
+  const visibility = useMemo(
+    (): ArtifactVisibility => ({
+      isActive: () => activeRef.current,
+      onResume: fn => {
+        resumers.add(fn);
+        return () => resumers.delete(fn);
+      },
+    }),
+    [resumers],
+  );
+  useEffect(() => {
+    activeRef.current = active;
+    if (active) resumers.forEach(fn => fn());
+  }, [active, resumers]);
   const auth = useAuthContextValues();
   const theme = useMemo(() => sandpackThemeName(), []);
   const { attachmentId, inlineData, savedAppId, versionId } = artifact;
@@ -389,7 +413,7 @@ export const ReactArtifactView = ({
               Can make changes
             </span>
           )}
-          {savedAppId && (
+          {savedAppId && !hideSavedIndicator && (
             <ArtifactSavedIndicator appId={savedAppId} {...(versionId ? { versionId } : {})} />
           )}
           {payload.dataRequirements?.some(r => r.source) && (
@@ -482,6 +506,7 @@ export const ReactArtifactView = ({
           refreshRef={refreshRef}
           contextRef={contextRef}
           pushContextRef={pushContextRef}
+          visibility={visibility}
           fill={fill}
           canWrite
           canInvokeAgents
