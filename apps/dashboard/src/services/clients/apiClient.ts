@@ -11,6 +11,7 @@ import {
   clearAuthTokenTotal,
 } from '../otel';
 import { getDynamicHeaders } from './dynamicHeaders';
+import { AuthLogoutReason, setAuthLogoutReason } from '../../utils/authLogoutReason';
 import { stateMachineActor } from '../../machines/stateMachine';
 import {
   encryptionRequestInterceptor,
@@ -288,6 +289,10 @@ apiConfig.interceptors.response.use(
       });
 
       clearAuthTokens();
+
+      // Tell the login screen this was not a fresh visit, so it can say the session expired
+      // instead of leaving the user to guess why they are back at the login form.
+      setAuthLogoutReason(AuthLogoutReason.SESSION_EXPIRED);
 
       window.location.href = '/auth';
       window.location.reload();

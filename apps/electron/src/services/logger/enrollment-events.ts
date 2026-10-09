@@ -53,6 +53,11 @@ export const EnrollmentEvent = {
   // Errors and edge cases
   PARTIAL_ENROLLMENT_DETECTED: 'partial_enrollment_detected',
   CERTIFICATE_EXPIRED: 'certificate_expired',
+  CERTIFICATE_EXPIRY_CHECK: 'certificate_expiry_check',
+  CERTIFICATE_RECOVERY_STARTED: 'certificate_recovery_started',
+  CERTIFICATE_RECOVERY_REDIRECTED: 'certificate_recovery_redirected',
+  KEYCHAIN_TOOLING_MISSING: 'keychain_tooling_missing',
+  ENROLLMENT_REASON_RECORDED: 'enrollment_reason_recorded',
   CERTIFICATE_INVALID: 'certificate_invalid',
   CERTIFICATE_REVOKED: 'certificate_revoked',
   SSL_ERROR: 'ssl_error',

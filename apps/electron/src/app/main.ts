@@ -171,15 +171,14 @@ async function initializeApp(): Promise<void> {
   void hydrateCachedUserFromCookies();
   setupIpcHandlers();
 
-  // Clear network cache on app start to ensure fresh assets
-  try {
-    const { session } = await import('electron');
-    await session.defaultSession.clearCache();
-    log.info('[App] Network cache cleared on startup');
-  } catch (error) {
-    log.error('[App] Failed to clear cache on startup:', error);
-  }
-
+  // NOTE: the HTTP cache is deliberately NOT cleared here.
+  //
+  // It used to be, "to ensure fresh assets", and it cost every single launch a full re-download
+  // of the dashboard bundle — ~13 MB gzipped across the two entry chunks. Nothing was gained:
+  // nginx already serves index.html as `no-store` and the hashed assets as `immutable`, so a
+  // deploy changes the filenames and the stale ones are simply never requested again. Staleness
+  // is handled where it belongs, by the version checker, which calls reloadIgnoringCache() when
+  // it sees a new build.
   await createMainWindow();
   setWindowReferences();
 

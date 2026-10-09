@@ -123,4 +123,24 @@ globalClickTracker.initialize();
 // interstitial paints.
 maybeOpenInDesktopApp();
 
+/**
+ * Hands the boot splash over to the app.
+ *
+ * The splash in index.html paints on the first frame; React's own <AppLoader /> takes over as
+ * soon as it mounts. Both draw the same mark on the same ground, so the swap is invisible — the
+ * fade only covers the frame where one is removed and the other has not yet committed.
+ */
+const dismissBootSplash = (): void => {
+  const splash = document.getElementById('boot-splash');
+  if (!splash) return;
+  splash.classList.add('is-leaving');
+  splash.addEventListener('transitionend', () => splash.remove(), { once: true });
+  // transitionend never fires if the element is display:none or the user disables animations.
+  setTimeout(() => splash.remove(), 600);
+};
+
 ReactDOM.createRoot(document.getElementById('root')!).render(<App />);
+
+// After paint, not after render: removing the splash in the same frame as the first commit
+// exposes a blank root while the app's own layout settles.
+requestAnimationFrame(() => requestAnimationFrame(dismissBootSplash));

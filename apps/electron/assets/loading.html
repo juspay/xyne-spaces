@@ -1,69 +1,83 @@
 <!DOCTYPE html>
-<html>
+<html lang="en" data-theme="classic">
 
 <head>
     <meta charset="UTF-8">
-    <title>Initializing</title>
+    <title>Xyne Spaces</title>
+    <!--
+      Deliberately blank: the app's ground colour and nothing else.
+
+      This page exists only so the window has something painted. createMainWindow() reveals the
+      window on 'ready-to-show', which fires on the first paint of its webContents, so without a
+      first document the window stays invisible for the whole keychain + TLS + HTML wait and the
+      app reads as "didn't launch". A local file with no requests paints in one frame.
+
+      It carries no branding on purpose. The dashboard's index.html paints its own branded splash
+      the moment it arrives, and that one covers the long part of a cold start — the entry bundle
+      download, parse and mount. A mark here as well meant the user saw the same logo appear
+      twice across a document navigation. The colours below match --boot-bg in the dashboard's
+      index.html and THEME_BACKGROUND in services/app-theme.ts, which is what the window's own
+      backgroundColor is set from, so this page is indistinguishable from an empty window and the
+      hand-off to the branded splash is the only transition left to see.
+    -->
     <style>
+        :root {
+            --splash-bg: #ffffff;
+        }
+
+        [data-theme="midnight"] {
+            --splash-bg: #1a1a1f;
+        }
+
+        html,
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 100vh;
             margin: 0;
-            background-color: #f5f5f5;
-            color: #333;
+            height: 100%;
+            background: var(--splash-bg);
         }
 
-        .container {
+        /* The one thing worth saying here. On macOS the keychain can put a password prompt in
+           front of the app during the identity check, and a user looking at an empty window has
+           no way to know that is what they are waiting for. Held back 4s so a normal start never
+           shows it. */
+        .splash-hint {
+            position: fixed;
+            bottom: 48px;
+            left: 50%;
+            transform: translateX(-50%);
+            max-width: 420px;
+            margin: 0;
+            padding: 0 24px;
             text-align: center;
-            padding: 2rem;
-            max-width: 400px;
-        }
-
-        h1 {
-            font-size: 20px;
-            margin-bottom: 1rem;
-            font-weight: 500;
-        }
-
-        p {
-            margin-bottom: 1rem;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            font-size: 13px;
             line-height: 1.5;
-            color: #666;
-            font-size: 14px;
+            color: #717784;
+            opacity: 0;
+            transition: opacity 0.4s ease-out;
         }
 
-        .spinner {
-            border: 3px solid #f3f3f3;
-            border-top: 3px solid #007bff;
-            border-radius: 50%;
-            width: 24px;
-            height: 24px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 1.5rem auto;
-        }
-
-        @keyframes spin {
-            0% {
-                transform: rotate(0deg);
-            }
-
-            100% {
-                transform: rotate(360deg);
-            }
+        .splash-hint.is-visible {
+            opacity: 1;
         }
     </style>
 </head>
 
 <body>
-    <div class="container">
-        <div class="spinner"></div>
-        <h1>Initializing Xyne Spaces...</h1>
-        <p>Please check for any system prompts asking for password access (e.g. Keychain Access).</p>
-    </div>
+    <p class="splash-hint" id="hint">
+        Still working. Check for any system prompt asking for password access (Keychain Access on
+        macOS).
+    </p>
+    <script>
+        // The theme comes from the main process, which remembers the renderer's last choice.
+        // Without it a midnight user gets a white flash before the dark app paints.
+        const theme = new URLSearchParams(location.search).get('theme');
+        if (theme === 'midnight' || theme === 'dark') {
+            document.documentElement.setAttribute('data-theme', 'midnight');
+        }
+
+        setTimeout(() => document.getElementById('hint').classList.add('is-visible'), 4000);
+    </script>
 </body>
 
 </html>

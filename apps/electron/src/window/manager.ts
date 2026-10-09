@@ -21,9 +21,12 @@ import {
 } from '../services/incoming-call-window';
 
 import { keychain } from '../keychain';
+import { isKeychainToolingError } from '../keychain/errors';
 import { Logger } from '../services/logger/Logger';
 import { EnrollmentEvent } from '../services/logger/enrollment-events';
-import { handleCertificateError, isCertificateError } from '../services/certificate-error-handler';
+import { isClientAuthFailure, recoverFromClientAuthFailure } from '../services/mtls-recovery';
+import { getAppBackgroundColor, getAppTheme } from '../services/app-theme';
+import { EnrollmentReason, setEnrollmentReasonIfAbsent } from '../services/enrollment-reason';
 import { dashboardLoad, enrollmentSkipped, mtlsFrontendLoaded } from '../services/enrollmentMetrics';
 import { safeRecordMetric } from '../services/telemetry';
 import {
@@ -394,33 +397,102 @@ export function setWindowReferences(): void {
   setInterceptorMainWindow(mainWindow);
 }
 
+/**
+ * Shows the "install these packages" page when the platform keystore's external tools are
+ * missing. The install command is passed through the URL query because these asset pages are
+ * plain files with no IPC bootstrap of their own.
+ */
+async function showMissingToolingPage(
+  window: BrowserWindow,
+  missingTools: readonly string[],
+  installHint: string,
+): Promise<void> {
+  const errorPage = path.join(__dirname, '..', '..', 'assets', 'missing-dependencies.html');
+  const search = new URLSearchParams({
+    tools: missingTools.join(', '),
+    hint: installHint,
+  }).toString();
+  await window.loadFile(errorPage, { search });
+}
+
+/**
+ * Paints the window's ground colour so the window can be shown at all.
+ *
+ * createMainWindow reveals on 'ready-to-show', which needs a first paint, so skipping this leaves
+ * the window invisible for the whole keychain + TLS + HTML wait. The page is deliberately blank —
+ * the branded splash lives in the dashboard's index.html, where it covers the part of a cold start
+ * that is actually long, and showing a mark here as well made the same logo appear twice across
+ * the document navigation.
+ *
+ * The theme comes from the main process's own record of it, because this file: document cannot
+ * read the renderer's localStorage.
+ */
+export async function showBootSplash(window: BrowserWindow): Promise<void> {
+  const loadingPage = path.join(__dirname, '..', '..', 'assets', 'loading.html');
+  await window.loadFile(loadingPage, {
+    search: new URLSearchParams({ theme: getAppTheme() }).toString(),
+  });
+}
+
 export async function loadApp(window: BrowserWindow) {
   log.info('[WindowManager] loadApp called');
   log.info('[WindowManager] config.enableMtls:', config.enableMtls);
   log.info('[WindowManager] config.useBundledUI:', config.useBundledUI);
 
-  const loadingPage = path.join(__dirname, '..', '..', 'assets', 'loading.html');
-  await window.loadFile(loadingPage);
+  await showBootSplash(window);
   
   // check mtls
   if (config.enableMtls) {
-    const mtls = await keychain.checkIdentity(config.MTLS_IDENTITY_NAME);
+    // The keystore's external tooling is verified before anything reads it. Without this a host
+    // missing `certutil` (Linux/NSS) reported "no identity" on every launch and the app
+    // re-enrolled over a perfectly good certificate, over and over.
+    try {
+      await keychain.ensureToolingAvailable?.();
+    } catch (error) {
+      if (isKeychainToolingError(error)) {
+        log.error('[WindowManager] Certificate tooling missing:', error.missingTools);
+        await showMissingToolingPage(window, error.missingTools, error.installHint);
+        return;
+      }
+      throw error;
+    }
+
+    let mtls: boolean;
+    try {
+      mtls = await keychain.checkIdentity(config.MTLS_IDENTITY_NAME);
+    } catch (error) {
+      // The keystore could not be read. That is not the same as "not enrolled", so we must not
+      // push the user through enrollment — show the load error and leave the identity alone.
+      Logger.logError(EnrollmentEvent.UNKNOWN_ERROR, error, { error_at: 'check_identity' });
+      log.error('[WindowManager] Identity check failed; not re-enrolling:', error);
+      const errorPage = path.join(__dirname, '..', '..', 'assets', 'load-error.html');
+      await window.loadFile(errorPage);
+      return;
+    }
+
     log.info("[WindowManager] MTLS Identity Present:", mtls);
 
     if (!mtls) {
       const targetUrl = config.MTLS_FRONTEND_URL;
+      // First-run enrollment is the common case here; only overwrite the reason when a recovery
+      // has not already recorded the more specific "we rejected your certificate" on the way in.
+      setEnrollmentReasonIfAbsent(EnrollmentReason.CERTIFICATE_MISSING);
       Logger.info(EnrollmentEvent.MTLS_FRONTEND_LOAD, {
         url: targetUrl,
         has_certificate: false,
       });
       await loadUrl(window, targetUrl, mtlsFrontendLoaded);
       return;
-    } else {
-      const isHealthy = await certificateHealthCheck();
-      if (!isHealthy) {
-        return; // certificateHealthCheck will handle the error case and redirect to enrollment
-      }
     }
+
+    // No pre-flight request here on purpose.
+    //
+    // This used to open a hidden window and fetch /api/health before the real navigation, so
+    // every launch paid an extra TLS handshake and round trip (up to three, serially) to learn
+    // whether the certificate still worked. The navigation below answers the same question for
+    // free: loadUrl() recovers into enrollment the moment the server refuses our client
+    // certificate, and so does any request the dashboard makes afterwards. Validating twice
+    // only made startup slower.
   }
       
   // Enable post-enrollment logging after successful mTLS validation
@@ -462,6 +534,9 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
   mainWindow = new BrowserWindow({
     ...createOpts,
     show: false,
+    // Without this the frame — and every inter-document navigation, splash to dashboard
+    // included — is painted the browser default white, which flashes against both themes.
+    backgroundColor: getAppBackgroundColor(),
     title: config.window.title,
     titleBarStyle: 'hiddenInset',
     // Align the macOS traffic lights with the AppNavigator icons on the 52px
@@ -675,6 +750,22 @@ export async function loadUrl(window: BrowserWindow, url: string, counter?: Coun
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
 
+      // The server refused our client certificate. Retrying presents the same certificate and
+      // fails the same way, so recover straight into enrollment — this is the check the startup
+      // health probe used to perform, now paid for only when it actually fires.
+      if (isClientAuthFailure(lastError.message)) {
+        Logger.logError(EnrollmentEvent.CERTIFICATE_INVALID, lastError, {
+          url,
+          error_at: 'load_url_client_auth',
+        });
+        await recoverFromClientAuthFailure({
+          url,
+          errorCode: lastError.message,
+          trigger: 'load_url',
+        });
+        return;
+      }
+
       if (attempt < LOAD_URL_MAX_RETRIES) {
         Logger.info(EnrollmentEvent.LOAD_URL_RETRY, { url, retry_attempt: attempt, error: lastError });
         await new Promise(resolve => setTimeout(resolve, LOAD_URL_RETRY_DELAY_MS));
@@ -690,88 +781,3 @@ export async function loadUrl(window: BrowserWindow, url: string, counter?: Coun
   await window.loadFile(errorPage);
 }
 
-const MAX_HEALTH_CHECK_RETRIES = 3;
-
-/**
- * Validates certificate health with retry logic to handle network timeout issues
- * Retries up to MAX_HEALTH_CHECK_RETRIES times if loading fails (typically due to network timeout while user approves keychain popup)
- * Shows error page if all retries are exhausted
- */
-async function certificateHealthCheckWithRetry(validationWindow: BrowserWindow): Promise<boolean> {
-  let certErrCount = 0;
-
-  for (let attempt = 0; attempt < MAX_HEALTH_CHECK_RETRIES; attempt++) {
-    try {
-      const healthUrl = `${config.BACKEND_URL}/api/health`;
-      
-      // Attempt to load the URL
-      await validationWindow.loadURL(healthUrl);
-
-      Logger.info(EnrollmentEvent.HEALTH_CHECK_SUCCESS, {
-        certificate_exists: true,
-        validation_passed: true,
-        attempts: attempt + 1,
-      });
-      return true;
-
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      const isLastAttempt = attempt === MAX_HEALTH_CHECK_RETRIES - 1;
-
-      // Track if this was a certificate error
-      if (isCertificateError(errorMessage)) {
-        Logger.logError(EnrollmentEvent.CERTIFICATE_REVOKED, error, {
-          error_at: 'certificate_validation',
-          attempt: attempt + 1,
-        });
-        certErrCount++;
-      }
-
-      // If we have retries left, log it and continue the loop
-      if (!isLastAttempt) {
-        Logger.info(EnrollmentEvent.LOAD_URL_RETRY, {
-          url: `${config.BACKEND_URL}/api/health`,
-          retry_attempt: attempt + 1,
-        });
-        continue; // Go to next iteration
-      }
-      
-      // --- ALL RETRIES FAILED --- (Code reaches here only on the last attempt)
-
-      if (certErrCount === MAX_HEALTH_CHECK_RETRIES) {
-        // Every single error was a certificate error
-        await handleCertificateError({ errorDescription: errorMessage });
-      } else {
-        // Generic failure (timeout, network, or mixed errors)
-        Logger.logError(EnrollmentEvent.UNKNOWN_ERROR, error, {
-          error_at: 'certificate_health_check_max_retries',
-          total_attempts: MAX_HEALTH_CHECK_RETRIES,
-        });
-
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          const errorPage = path.join(__dirname, '..', '..', 'assets', 'timeout-error.html');
-          await mainWindow.loadFile(errorPage);
-        }
-      }
-
-      return false;
-    }
-  }
-
-  return false; // Should not be reachable, but good for type safety
-}
-
-export async function certificateHealthCheck(): Promise<boolean> {
-  const validationWindow = new BrowserWindow({
-    show: false,  // Keep it hidden
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      preload: path.join(__dirname, '..', 'preload.js'),
-    },
-  });
-  // Certificate exists, validate it before loading dashboard
-  const result = await certificateHealthCheckWithRetry(validationWindow);
-  validationWindow.destroy();
-  return result;
-}

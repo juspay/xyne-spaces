@@ -1,5 +1,5 @@
 import log from 'electron-log/main';
-import { exec, execFile } from 'child_process';
+import { execFile } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -10,16 +10,40 @@ import { EnrollmentEvent } from '../services/logger/enrollment-events';
 import { devicePasswordPopup } from '../services/enrollmentMetrics';
 import { safeRecordMetric } from '../services/telemetry';
 import { IKeychain } from './IKeychain';
+import { KeychainToolingError } from './errors';
 
-const execAsync = promisify(exec);
-// Shell-free variant (argument array, no /bin/sh) for commands that handle a value parsed out of
-// an untrusted certificate (the CommonName-derived nickname below), which must never reach a shell.
+// Shell-free throughout: every argument below (nicknames derived from certificate CommonNames,
+// temp paths, passphrases) is passed as an argv entry, never interpolated into /bin/sh.
 const execFileAsync = promisify(execFile);
 const writeFileAsync = promisify(fs.writeFile);
 const unlinkAsync = promisify(fs.unlink);
 const mkdirAsync = promisify(fs.mkdir);
 
 const OPENSSL = 'openssl';
+const CERTUTIL = 'certutil';
+const PK12UTIL = 'pk12util';
+
+/**
+ * Directories searched for the NSS tools in addition to PATH.
+ *
+ * A desktop launcher (.desktop entry, app menu, autostart) starts the app with a far thinner
+ * environment than a login shell — on some Debian setups PATH is only `/usr/bin:/bin`, and under
+ * Flatpak/Snap it is narrower still. Resolving the binaries ourselves means a working host is
+ * never reported as "tool not found" purely because of how the app was launched.
+ */
+const TOOL_SEARCH_DIRS = [
+    '/usr/bin',
+    '/bin',
+    '/usr/local/bin',
+    '/usr/sbin',
+    '/usr/local/sbin',
+    '/snap/bin',
+    '/var/lib/snapd/snap/bin',
+];
+
+const INSTALL_HINT =
+    'Install the NSS certificate tools: Debian/Ubuntu `sudo apt install libnss3-tools`, '
+    + 'Fedora/RHEL `sudo dnf install nss-tools`, Arch `sudo pacman -S nss`.';
 
 /**
  * Linux Keychain Service using NSS database (used by Electron/Chromium on Linux).
@@ -27,10 +51,72 @@ const OPENSSL = 'openssl';
  * Chromium on Linux reads client certificates from the NSS database at ~/.pki/nssdb.
  * We use `certutil` and `pk12util` (from libnss3-tools) to manage certificates,
  * and `openssl` for key generation and CSR creation.
+ *
+ * Every operation here depends on those external binaries, so they are resolved and verified up
+ * front via ensureToolingAvailable(). A missing binary raises KeychainToolingError rather than
+ * degrading into a silent "no certificate" answer.
  */
 class LinuxKeychainService implements IKeychain {
     private privateKeyPem: string | null = null;
     private label: string = "SimulationClient";
+    private toolPathCache = new Map<string, string | null>();
+
+    /**
+     * Resolves a tool to an absolute path, searching TOOL_SEARCH_DIRS first and then PATH.
+     * Returns null when the tool is nowhere to be found. Results are cached for the process
+     * lifetime; a tool the user installs mid-session is picked up after a restart.
+     */
+    private resolveTool(tool: string): string | null {
+        const cached = this.toolPathCache.get(tool);
+        if (cached !== undefined) {
+            return cached;
+        }
+
+        const pathDirs = (process.env.PATH ?? '').split(path.delimiter).filter(Boolean);
+        let resolved: string | null = null;
+
+        for (const dir of [...TOOL_SEARCH_DIRS, ...pathDirs]) {
+            const candidate = path.join(dir, tool);
+            try {
+                fs.accessSync(candidate, fs.constants.X_OK);
+                resolved = candidate;
+                break;
+            } catch {
+                // Not here (or not executable) — keep looking.
+            }
+        }
+
+        this.toolPathCache.set(tool, resolved);
+        return resolved;
+    }
+
+    /**
+     * Verifies every external binary this service needs. Throws KeychainToolingError naming the
+     * missing ones so the caller can show the user an actionable install command instead of
+     * wiping their certificate and looping through enrollment.
+     */
+    async ensureToolingAvailable(): Promise<void> {
+        const missing = [OPENSSL, CERTUTIL, PK12UTIL].filter(tool => this.resolveTool(tool) === null);
+
+        if (missing.length > 0) {
+            Logger.warn(EnrollmentEvent.KEYCHAIN_TOOLING_MISSING, {
+                missing_tools: missing.join(','),
+                searched_path: process.env.PATH ?? '',
+            });
+            throw new KeychainToolingError(missing, INSTALL_HINT);
+        }
+    }
+
+    /**
+     * Runs one of the external tools, resolved to an absolute path.
+     */
+    private async run(tool: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
+        const binary = this.resolveTool(tool);
+        if (!binary) {
+            throw new KeychainToolingError([tool], INSTALL_HINT);
+        }
+        return await execFileAsync(binary, args, { maxBuffer: 8 * 1024 * 1024 });
+    }
 
     private getNssDbDir(): string {
         return path.join(os.homedir(), '.pki', 'nssdb');
@@ -38,6 +124,10 @@ class LinuxKeychainService implements IKeychain {
 
     /**
      * Returns paths to all NSS databases: ~/.pki/nssdb (Chrome) + Firefox profiles.
+     *
+     * Index 0 is always the Chromium database — the only one Electron itself reads, and therefore
+     * the only one whose import has to succeed. The Firefox profiles are a convenience so the
+     * same device certificate works in the browser; failures there are not fatal.
      */
     private getAllNssDbDirs(): string[] {
         const dirs: string[] = [this.getNssDbDir()];
@@ -78,7 +168,7 @@ class LinuxKeychainService implements IKeychain {
         const cert9Path = path.join(nssDir, 'cert9.db');
         if (!fs.existsSync(cert9Path)) {
             // Initialize a new NSS database with an empty password
-            await execAsync(`certutil -d sql:${nssDir} -N --empty-password`);
+            await this.run(CERTUTIL, ['-d', `sql:${nssDir}`, '-N', '--empty-password']);
         }
     }
 
@@ -90,12 +180,15 @@ class LinuxKeychainService implements IKeychain {
         Logger.info(EnrollmentEvent.KEY_GENERATION_START, { label });
 
         try {
-            const { stdout } = await execAsync(`${OPENSSL} ecparam -name secp384r1 -genkey -noout`);
+            await this.ensureToolingAvailable();
+            const { stdout } = await this.run(OPENSSL, ['ecparam', '-name', 'secp384r1', '-genkey', '-noout']);
             this.privateKeyPem = stdout;
             Logger.info(EnrollmentEvent.KEY_GENERATION_SUCCESS, { label });
         } catch (e: any) {
             Logger.logError(EnrollmentEvent.KEY_GENERATION_FAILED, e);
-            throw new Error(`KeyPair Generation Failed: ${e.message}`);
+            throw e instanceof KeychainToolingError
+                ? e
+                : new Error(`KeyPair Generation Failed: ${e.message}`);
         }
     }
 
@@ -110,14 +203,13 @@ class LinuxKeychainService implements IKeychain {
         log.info(`Generating CSR for ${commonName}...`);
 
         const keyPath = path.join(os.tmpdir(), `key_${Date.now()}.pem`);
-        await writeFileAsync(keyPath, this.privateKeyPem);
+        await writeFileAsync(keyPath, this.privateKeyPem, { mode: 0o600 });
 
         try {
-            const cmd = `${OPENSSL} req -new -key "${keyPath}" -subj "/CN=${commonName}" -sha384`;
-            const { stdout } = await execAsync(cmd);
+            const { stdout } = await this.run(OPENSSL, [
+                'req', '-new', '-key', keyPath, '-subj', `/CN=${commonName}`, '-sha384',
+            ]);
             return stdout;
-        } catch (error) {
-            throw error;
         } finally {
             try { await unlinkAsync(keyPath); } catch { }
         }
@@ -126,6 +218,10 @@ class LinuxKeychainService implements IKeychain {
     /**
      * Imports the signed certificate into the NSS database.
      * Creates a PKCS#12 bundle from key + cert, then imports via pk12util.
+     *
+     * The Chromium database (~/.pki/nssdb) import must succeed: it is the store Electron presents
+     * client certificates from, so reporting success without it would hand the user an
+     * "enrollment complete" screen followed by ERR_BAD_SSL_CLIENT_AUTH_CERT on every request.
      */
     async importCertificate(certPem: string): Promise<void> {
         if (!this.privateKeyPem) {
@@ -134,30 +230,51 @@ class LinuxKeychainService implements IKeychain {
 
         Logger.info(EnrollmentEvent.CERTIFICATE_IMPORT_START, { label: this.label });
 
+        await this.ensureToolingAvailable();
         await this.ensureNssDb();
 
         const keyPath = path.join(os.tmpdir(), `key_${Date.now()}.pem`);
         const certPath = path.join(os.tmpdir(), `cert_${Date.now()}.pem`);
         const p12Path = path.join(os.tmpdir(), `identity_${Date.now()}.p12`);
 
-        await writeFileAsync(keyPath, this.privateKeyPem);
-        await writeFileAsync(certPath, certPem);
+        await writeFileAsync(keyPath, this.privateKeyPem, { mode: 0o600 });
+        await writeFileAsync(certPath, certPem, { mode: 0o600 });
 
         try {
             // The bundle is a per-call temp file, imported immediately and removed in the finally
             // below. The passphrase is fixed so the export and import agree.
             // Create PKCS#12 bundle
-            const p12Cmd = `${OPENSSL} pkcs12 -export -in "${certPath}" -inkey "${keyPath}" -out "${p12Path}" -passout pass:changeit -name "${this.label}"`;
-            await execAsync(p12Cmd);
+            await this.run(OPENSSL, [
+                'pkcs12', '-export',
+                '-in', certPath,
+                '-inkey', keyPath,
+                '-out', p12Path,
+                '-passout', 'pass:changeit',
+                '-name', this.label,
+            ]);
 
             // Import PKCS#12 into all NSS databases (Chrome + Firefox)
-            const allNssDirs = this.getAllNssDbDirs();
-            for (const dir of allNssDirs) {
+            const [primaryNssDir, ...secondaryNssDirs] = this.getAllNssDbDirs();
+
+            try {
+                await this.run(PK12UTIL, ['-d', `sql:${primaryNssDir}`, '-i', p12Path, '-W', 'changeit']);
+                log.info(`Certificate imported into NSS DB: ${primaryNssDir}`);
+            } catch (e: any) {
+                // Fatal: without this database Electron has no client certificate to present.
+                const detail = (e.stderr || e.message || '').trim();
+                Logger.logError(EnrollmentEvent.CERTIFICATE_STORAGE_FAILED, e, {
+                    nss_db: primaryNssDir,
+                    stage: 'primary_nss_import',
+                });
+                throw new Error(`Certificate Import Failed for ${primaryNssDir}: ${detail}`);
+            }
+
+            for (const dir of secondaryNssDirs) {
                 try {
-                    const importCmd = `pk12util -d sql:${dir} -i "${p12Path}" -W changeit`;
-                    await execAsync(importCmd);
+                    await this.run(PK12UTIL, ['-d', `sql:${dir}`, '-i', p12Path, '-W', 'changeit']);
                     log.info(`Certificate imported into NSS DB: ${dir}`);
                 } catch (e: any) {
+                    // Best effort — Firefox profiles are a convenience, not the app's trust store.
                     log.warn(`Failed to import certificate into ${dir}:`, e.stderr || e.message);
                 }
             }
@@ -179,7 +296,9 @@ class LinuxKeychainService implements IKeychain {
                     buildVersion: app.getVersion(),
                 });
             });
-            throw new Error(`Certificate Import Failed: ${e.stderr || e.message}`);
+            throw e instanceof KeychainToolingError
+                ? e
+                : new Error(`Certificate Import Failed: ${e.stderr || e.message}`);
         } finally {
             try { await unlinkAsync(keyPath); } catch { }
             try { await unlinkAsync(certPath); } catch { }
@@ -196,16 +315,19 @@ class LinuxKeychainService implements IKeychain {
     async installRootCA(pem: string): Promise<void> {
         Logger.info(EnrollmentEvent.ROOT_CA_INSTALL_START);
 
+        await this.ensureToolingAvailable();
         await this.ensureNssDb();
 
         const tmpPath = path.join(os.tmpdir(), `root_ca_${Date.now()}.pem`);
         const nssDir = this.getNssDbDir();
-        await writeFileAsync(tmpPath, pem);
+        await writeFileAsync(tmpPath, pem, { mode: 0o600 });
 
         try {
-            // Extract Common Name to use as nickname. execFile (no shell) — the CN comes from an
-            // Comes from an untrusted certificate, so it is never interpolated into a shell command.
-            const { stdout: subjectOut } = await execFileAsync(OPENSSL, ['x509', '-in', tmpPath, '-noout', '-subject', '-nameopt', 'multiline']);
+            // Extract Common Name to use as nickname. The CN comes from an untrusted certificate,
+            // so it is passed as an argv entry and never interpolated into a shell command.
+            const { stdout: subjectOut } = await this.run(OPENSSL, [
+                'x509', '-in', tmpPath, '-noout', '-subject', '-nameopt', 'multiline',
+            ]);
             const cnMatch = subjectOut.match(/commonName\s*=\s*(.*)/);
             const rawNickname = cnMatch ? cnMatch[1].trim() : `XyneRootCA_${Date.now()}`;
             // Restrict the nickname to a safe charset: it is used both as a certutil -n value and as a
@@ -215,7 +337,7 @@ class LinuxKeychainService implements IKeychain {
 
             // Check if certificate with same nickname already exists
             try {
-                await execFileAsync('certutil', ['-d', `sql:${nssDir}`, '-L', '-n', nickname]);
+                await this.run(CERTUTIL, ['-d', `sql:${nssDir}`, '-L', '-n', nickname]);
                 // If no error, cert exists
                 Logger.info(EnrollmentEvent.ROOT_CA_INSTALL_SUCCESS, {
                     exists_in_keychain: true,
@@ -231,30 +353,18 @@ class LinuxKeychainService implements IKeychain {
             const allNssDirs = this.getAllNssDbDirs();
             for (const dir of allNssDirs) {
                 try {
-                    const addCmd = `certutil -d sql:${dir} -A -t "CT,," -n "${nickname}" -i "${tmpPath}"`;
-                    await execAsync(addCmd);
+                    await this.run(CERTUTIL, ['-d', `sql:${dir}`, '-A', '-t', 'CT,,', '-n', nickname, '-i', tmpPath]);
                     log.info(`CA installed into NSS DB: ${dir}`);
                 } catch (e: any) {
                     log.warn(`Failed to install CA into ${dir}:`, e.stderr || e.message);
                 }
             }
 
-            // Also install into system trust store so all applications trust it
-            try {
-                // Copy cert to system CA directory and update trust
-                const systemCertPath = `/usr/local/share/ca-certificates/${nickname}.crt`;
-                await execAsync(`sudo cp "${tmpPath}" "${systemCertPath}" && sudo update-ca-certificates`);
-                log.info("CA installed into system trust store.");
-            } catch (e: any) {
-                // Fallback: try RHEL/Fedora method
-                try {
-                    const systemCertPath = `/etc/pki/ca-trust/source/anchors/${nickname}.crt`;
-                    await execAsync(`sudo cp "${tmpPath}" "${systemCertPath}" && sudo update-ca-trust`);
-                    log.info("CA installed into system trust store (RHEL).");
-                } catch {
-                    log.warn("Could not install CA into system trust store:", e.stderr || e.message);
-                }
-            }
+            // Also try the system trust store so other applications trust it. `sudo -n` keeps this
+            // non-interactive: the app has no TTY, so a password prompt would hang startup. When
+            // passwordless sudo is not configured this fails immediately and we move on — NSS
+            // already holds what Electron needs.
+            await this.installRootCAIntoSystemStore(tmpPath, nickname);
 
             log.info("CA installed.");
             Logger.info(EnrollmentEvent.ROOT_CA_INSTALL_SUCCESS, {
@@ -264,9 +374,30 @@ class LinuxKeychainService implements IKeychain {
         } catch (e: any) {
             log.error("CA install failed:", e.stderr);
             Logger.logError(EnrollmentEvent.ROOT_CA_INSTALL_FAILED, e);
-            throw new Error(`Failed to install CA: ${e.stderr || e.message}`);
+            throw e instanceof KeychainToolingError
+                ? e
+                : new Error(`Failed to install CA: ${e.stderr || e.message}`);
         } finally {
             try { await unlinkAsync(tmpPath); } catch { }
+        }
+    }
+
+    private async installRootCAIntoSystemStore(pemPath: string, nickname: string): Promise<void> {
+        const targets: Array<{ dir: string; refresh: string }> = [
+            { dir: '/usr/local/share/ca-certificates', refresh: 'update-ca-certificates' },
+            { dir: '/etc/pki/ca-trust/source/anchors', refresh: 'update-ca-trust' },
+        ];
+
+        for (const target of targets) {
+            if (!fs.existsSync(target.dir)) continue;
+            try {
+                await execFileAsync('sudo', ['-n', 'cp', pemPath, path.join(target.dir, `${nickname}.crt`)]);
+                await execFileAsync('sudo', ['-n', target.refresh]);
+                log.info(`CA installed into system trust store via ${target.refresh}.`);
+                return;
+            } catch (e: any) {
+                log.warn(`Could not install CA via ${target.refresh}:`, e.stderr || e.message);
+            }
         }
     }
 
@@ -276,26 +407,31 @@ class LinuxKeychainService implements IKeychain {
     async deleteIdentity(commonName: string): Promise<void> {
         log.info(`Deleting identity for "${commonName}"...`);
 
-        try {
-            // Delete the certificate from all NSS databases (Chrome + Firefox)
-            const allNssDirs = this.getAllNssDbDirs();
-            for (const dir of allNssDirs) {
-                try {
-                    await execAsync(`certutil -d sql:${dir} -D -n "${commonName}"`);
-                    log.info(`Identity deleted from NSS DB: ${dir}`);
-                } catch (e: any) {
-                    if (e.stderr && (e.stderr.includes('not found') || e.stderr.includes('could not find'))) {
-                        // Not in this DB, skip
-                    } else {
-                        log.warn(`Delete identity warning for ${dir}:`, e.stderr || e.message);
-                    }
+        await this.ensureToolingAvailable();
+
+        let deletedCount = 0;
+
+        // Delete the certificate from all NSS databases (Chrome + Firefox)
+        const allNssDirs = this.getAllNssDbDirs();
+        for (const dir of allNssDirs) {
+            try {
+                await this.run(CERTUTIL, ['-d', `sql:${dir}`, '-D', '-n', commonName]);
+                deletedCount++;
+                log.info(`Identity deleted from NSS DB: ${dir}`);
+            } catch (e: any) {
+                const stderr = String(e.stderr ?? '');
+                if (stderr.includes('not found') || stderr.includes('could not find')) {
+                    // Not in this DB, skip
+                } else {
+                    log.warn(`Delete identity warning for ${dir}:`, e.stderr || e.message);
                 }
             }
-            Logger.info(EnrollmentEvent.IDENTITY_DELETED, { common_name: commonName });
-        } catch (e: any) {
-            log.warn("Delete identity warning:", e.stderr || e.message);
-            Logger.logError(EnrollmentEvent.IDENTITY_DELETE_FAILED, e);
         }
+
+        Logger.info(EnrollmentEvent.IDENTITY_DELETED, {
+            common_name: commonName,
+            deleted_from_db_count: deletedCount,
+        });
 
         // Clear memory just in case
         this.privateKeyPem = null;
@@ -324,64 +460,83 @@ class LinuxKeychainService implements IKeychain {
     /**
      * Checks if a certificate identity exists in the NSS database.
      * Searches by both nickname and certificate subject CN.
+     *
+     * Returns false only when the database was read successfully and holds no matching identity.
+     * A database that cannot be read at all throws, so callers never mistake an unreadable host
+     * for an unenrolled one and re-enroll over a certificate that is actually there.
      */
     async checkIdentity(commonName: string): Promise<boolean> {
         const nssDir = this.getNssDbDir();
         log.info(`Checking identity for "${commonName}"...`);
 
+        await this.ensureToolingAvailable();
+
+        let listing: string;
         try {
-            // List all certificates
-            const { stdout } = await execAsync(`certutil -d sql:${nssDir} -L`);
-
-            // First check: nickname matches directly
-            const lines = stdout.split('\n');
-            for (const line of lines) {
-                if (line.includes(commonName)) {
-                    Logger.info(EnrollmentEvent.IDENTITY_CHECK, { common_name: commonName, found: true });
-                    return true;
-                }
+            const { stdout } = await this.run(CERTUTIL, ['-d', `sql:${nssDir}`, '-L']);
+            listing = stdout;
+        } catch (e: any) {
+            // An empty, freshly initialised database is a legitimate "no identity" answer;
+            // certutil reports it with this message rather than an empty listing.
+            const detail = String(e.stderr ?? e.message ?? '');
+            if (/SEC_ERROR_LEGACY_DATABASE|No certificates found|database.*not.*exist/i.test(detail)) {
+                Logger.info(EnrollmentEvent.IDENTITY_CHECK, { common_name: commonName, found: false });
+                return false;
             }
 
-            // Second check: examine each cert's subject CN (handles nickname != CN mismatch)
-            const nicknames = this.parseNicknames(stdout);
-            for (const nickname of nicknames) {
-                try {
-                    const tmpCert = path.join(os.tmpdir(), `check_cert_${Date.now()}.pem`);
-                    await execAsync(`certutil -d sql:${nssDir} -L -n "${nickname}" -a > "${tmpCert}"`);
-                    try {
-                        const { stdout: subjectOut } = await execAsync(`${OPENSSL} x509 -in "${tmpCert}" -noout -subject -nameopt multiline`);
-                        if (subjectOut.includes(commonName)) {
-                            log.info(`Found identity "${commonName}" under nickname "${nickname}"`);
-                            Logger.info(EnrollmentEvent.IDENTITY_CHECK, { common_name: commonName, found: true });
-                            return true;
-                        }
-                    } finally {
-                        try { await unlinkAsync(tmpCert); } catch { }
-                    }
-                } catch {
-                    // Could not inspect this cert, skip
-                }
-            }
-
-            // Check for partial enrollment
-            if (this.privateKeyPem) {
-                Logger.warn(EnrollmentEvent.PARTIAL_ENROLLMENT_DETECTED, {
-                    common_name: commonName,
-                    has_private_key: true,
-                    has_certificate: false,
-                });
-            }
-
-            Logger.info(EnrollmentEvent.IDENTITY_CHECK, { common_name: commonName, found: false });
-            return false;
-        } catch (e) {
             Logger.error(EnrollmentEvent.UNKNOWN_ERROR, {
                 operation: 'check_identity',
                 common_name: commonName,
-                error: e instanceof Error ? e.message : String(e),
+                error: detail || String(e),
             });
-            return false;
+            throw new Error(`Unable to read NSS database at ${nssDir}: ${detail || String(e)}`);
         }
+
+        // First check: nickname matches directly
+        for (const line of listing.split('\n')) {
+            if (line.includes(commonName)) {
+                Logger.info(EnrollmentEvent.IDENTITY_CHECK, { common_name: commonName, found: true });
+                return true;
+            }
+        }
+
+        // Second check: examine each cert's subject CN (handles nickname != CN mismatch)
+        const nicknames = this.parseNicknames(listing);
+        for (const nickname of nicknames) {
+            try {
+                const { stdout: certPem } = await this.run(CERTUTIL, [
+                    '-d', `sql:${nssDir}`, '-L', '-n', nickname, '-a',
+                ]);
+                const tmpCert = path.join(os.tmpdir(), `check_cert_${Date.now()}.pem`);
+                await writeFileAsync(tmpCert, certPem, { mode: 0o600 });
+                try {
+                    const { stdout: subjectOut } = await this.run(OPENSSL, [
+                        'x509', '-in', tmpCert, '-noout', '-subject', '-nameopt', 'multiline',
+                    ]);
+                    if (subjectOut.includes(commonName)) {
+                        log.info(`Found identity "${commonName}" under nickname "${nickname}"`);
+                        Logger.info(EnrollmentEvent.IDENTITY_CHECK, { common_name: commonName, found: true });
+                        return true;
+                    }
+                } finally {
+                    try { await unlinkAsync(tmpCert); } catch { }
+                }
+            } catch {
+                // Could not inspect this cert, skip
+            }
+        }
+
+        // Check for partial enrollment
+        if (this.privateKeyPem) {
+            Logger.warn(EnrollmentEvent.PARTIAL_ENROLLMENT_DETECTED, {
+                common_name: commonName,
+                has_private_key: true,
+                has_certificate: false,
+            });
+        }
+
+        Logger.info(EnrollmentEvent.IDENTITY_CHECK, { common_name: commonName, found: false });
+        return false;
     }
 }
 

@@ -45,6 +45,7 @@ import {
 import { meetingDetectorService } from '../services/meeting-detector';
 import { browserSettingsService, BrowserSettings } from '../services/browser-settings';
 import { errorReportRecorder } from '../services/error-report-recorder';
+import { getAppTheme, setAppTheme } from '../services/app-theme';
 import { localHarnessBridge, LOCAL_HARNESS_PROVIDERS, type LocalHarnessProvider } from '../services/local-harness';
 
 
@@ -212,6 +213,13 @@ export function setupIpcHandlers(): void {
   setupMTLSIpcHandlers();
 
   // Webview preload path handler
+  // Synchronous by necessity: the preload stamps the theme onto <html> at document start, before
+  // the first paint, so the boot splash is not painted in the wrong theme and corrected a second
+  // later. The value is already in memory in the main process.
+  ipcMain.on('app:get-boot-theme', (event) => {
+    event.returnValue = getAppTheme();
+  });
+
   ipcMain.on('get-webview-preload-path', (event) => {
     // Return absolute path to webview preload script
     const preloadPath = path.join(__dirname, 'webview-preload.js');
@@ -706,6 +714,9 @@ export function setupIpcHandlers(): void {
     if (!isMainWindowSender(event)) return;
     if (theme !== 'light' && theme !== 'dark') return;
     setRecordingPillTheme(theme);
+    // Also remembered for the next cold start, which paints the window background and the boot
+    // splash before any renderer exists to ask.
+    setAppTheme(theme);
   });
 
   ipcMain.on('call:state-changed', (event, inCall: unknown) => {

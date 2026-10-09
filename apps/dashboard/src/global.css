@@ -527,7 +527,12 @@
   #root {
     min-height: 100vh;
     height: 100%;
-    background-color: hsl(var(--sidebar-background));
+    /* --sidebar-background is not defined by any theme, so this resolved to an invalid colour
+       and the document ground fell back to the browser default white — visible on every cold
+       boot until <Wallpaper /> mounted, and behind the app loader, whose --root-bg is
+       transparent. --background is the token the themes actually set, and it matches the
+       --boot-bg values inlined in index.html. */
+    background-color: hsl(var(--background));
     color: hsl(var(--foreground));
     font-family: "Inter", sans-serif;
     overscroll-behavior: none;
