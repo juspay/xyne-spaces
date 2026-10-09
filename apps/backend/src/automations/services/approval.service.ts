@@ -3,6 +3,8 @@ import { AccessType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import type { Workflow } from '@/types/database';
 import { AutomationStatus, isLiveStatus } from '../types/status';
+import { automationScheduleQueue } from '../queue/automation-schedule.queue';
+import { SCHEDULE_EVENT } from '../triggers/schedule.trigger';
 import {
   AUTOMATION_WORKFLOW_TYPE,
   parseAutomationMetadata,
@@ -257,6 +259,16 @@ class ApprovalService {
       const rootId = row.automationSeriesId ?? row.id;
       const archived = await repositories.workflows.archivePriorLiveInLineage(rootId, liveId);
       const archivedCount = archived.length;
+      // The prior version's schedule would otherwise keep firing until its next tick self-check.
+      await Promise.all(
+        archived
+          .filter(prior => prior.eventType === SCHEDULE_EVENT)
+          .map(prior =>
+            automationScheduleQueue.unscheduleCron(prior.id).catch(err =>
+              logger.error(`[approval] unscheduleCron failed for archived ${prior.id}`, err),
+            ),
+          ),
+      );
       logger.info(
         `[approval] toggleLive ACTIVE id=${liveId} actorUserId=${actorUserId} archivedPrior=${archivedCount}`,
       );
