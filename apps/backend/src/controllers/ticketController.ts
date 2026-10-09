@@ -49,6 +49,17 @@ import { TicketsSideEffectHandler } from '@/zero/side-effects/tables/tickets-han
 import { uploadFiles, UploadedFileResult } from '../services/fileUploadService';
 import { config } from '../config/env';
 import { superpositionClient } from '@/services/superpositionClient';
+import { validateChannelAccess } from '@/utils/channelAccess';
+import {
+  createBulkTicketBatch,
+  type BatchTicketInput,
+} from '@/services/tickets/bulkTicketBatchService';
+import {
+  BulkTicketCreationInput,
+  BulkTicketMode,
+  CreateBulkTicketResponse,
+  MAX_BULK_TICKETS,
+} from '@/types/bulkTicket';
 import { randomUUID } from 'crypto';
 import { activityService } from '@/services/activity/activityService';
 import { entityLinkOwnerSchema, type EntityLinkOwner } from '@xyne/shared';
@@ -77,6 +88,7 @@ import { BaseTicketType,
   WorkspaceRole,
   OrgRole,
   AccessType,
+  UserType,
 } from '@xyne/shared';
 import { CommitAnalysisController } from './commitAnalysisController';
 import { isReleaseTicket } from '@xyne/shared';
@@ -132,6 +144,27 @@ const duplicateDecisionsOf = (raw: unknown): { sameAs: string | null; notSame: s
       .slice(0, MAX_DUPLICATE_DECISIONS),
   };
 };
+/**
+ * Bulk request item -> batch row. `createdBy`/`updatedBy` are dropped here
+ * deliberately: the batch takes identity from its context, which comes from the
+ * session, so a body-supplied creator can never take effect.
+ */
+const toBatchTicketInput = (item: BulkTicketCreationInput): BatchTicketInput => ({
+  title: item.title,
+  description: item.description,
+  channelId: item.channelId,
+  projectId: item.projectId,
+  boardId: item.boardId,
+  assignedTo: item.assignedTo,
+  userGroupId: item.userGroupId,
+  eta: item.eta,
+  ticketType: item.ticketType,
+  stageName: item.stageName,
+  priority: item.priority,
+  statusV2: item.statusV2,
+  merchantId: item.merchantId,
+  clientRowId: item.clientRowId,
+});
 
 export class TicketController {
   ticketRepository: TicketRepository;
@@ -258,12 +291,18 @@ export class TicketController {
     projectId: string;
     boardId: string;
     assignedTo?: string;
+    userGroupId?: string;
+    eta?: Date;
+    tags?: string[];
+    ticketType?: string;
+    stageName?: string;
     priority?: string;
     statusV2?: string;
     metadata?: Record<string, any>;
     messageContent?: string;
     messageSubtype?: string;
     entityLinkContext?: EntityLinkOwner;
+    creationMessageId?: string;
   }): Promise<Ticket> {
     const {
       title,
@@ -274,15 +313,21 @@ export class TicketController {
       projectId,
       boardId,
       assignedTo,
+      userGroupId,
+      eta,
+      tags,
+      ticketType,
+      stageName,
       priority = 'MEDIUM',
       statusV2 = 'TODO',
       metadata = {},
       messageContent,
       messageSubtype = 'ai_ticket',
       entityLinkContext,
+      creationMessageId: requestedCreationMessageId,
     } = params;
 
-    const ticket = await createTicketWithConversationTx(this, conversationId, projectId, title, description, createdBy, updatedBy, assignedTo, boardId, statusV2, priority, messageContent, messageSubtype, metadata, entityLinkContext);
+    const ticket = await createTicketWithConversationTx(this, conversationId, projectId, title, description, createdBy, updatedBy, assignedTo, boardId, statusV2, priority, messageContent, messageSubtype, metadata, entityLinkContext, { userGroupId, eta, tags, ticketType, stageName, creationMessageId: requestedCreationMessageId });
 
     // Ticket committed on its initial stage — auto-create the on-entry approval
     // request if that stage's single outgoing transition is configured for it.
@@ -312,6 +357,268 @@ export class TicketController {
 
     return ticket;
   }
+
+  /**
+   * POST /api/tickets/bulk-from-message
+   *
+   * Create many tickets in one request. Identity is taken from the session
+   * (never the body). Every target channel — including each item's own
+   * channelId — is access-checked up front; the batch is rejected as a whole if
+   * any channel is unreachable.
+   *
+   * The batch is written set-based and synchronously, so the caller gets the
+   * created tickets — or the reason none were created — in this response. There
+   * is deliberately no partial success: the whole batch commits or none of it
+   * does, which is what makes retrying a failed request safe.
+   *
+   * Submitting the same batch twice creates it twice, exactly as single-ticket
+   * creation does — there is no idempotency key.
+   */
+  createBulkTicket = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const user = req.user;
+      const userId = user?.id;
+      const workspaceId = user?.workspaceId;
+      if (!user || !userId || !workspaceId) {
+        res.status(401).json({ error: 'User not authenticated' });
+        return;
+      }
+
+      const caller = await db.user.findUnique({ where: { id: userId }, select: { userType: true } });
+      if (caller?.userType !== UserType.USER) {
+        res.status(403).json({
+          error: 'Bulk ticket creation is only available to users',
+          code: 'BULK_NOT_ALLOWED_FOR_NON_USER',
+        });
+        return;
+      }
+
+      const body = req.body as {
+        mode?: string;
+        parent?: {
+          title: string;
+          description?: string;
+          channelId: string;
+          projectId: string;
+          boardId: string;
+          assignedTo?: string;
+          priority?: string;
+          statusV2?: string;
+          clientRowId?: string;
+        };
+        tickets?: Array<Record<string, unknown>>;
+        subTickets?: Array<Record<string, unknown>>;
+        existingParentTicketId?: string;
+        sourceConversationId?: string;
+        projectId?: string;
+        channelId?: string;
+        boardId?: string;
+        fromTicketsTab?: boolean;
+      };
+
+      const mode =
+        body.mode === BulkTicketMode.ALL_PARENTS
+          ? BulkTicketMode.ALL_PARENTS
+          : BulkTicketMode.PARENT_SUB;
+
+      const rawChildren = body.subTickets ?? body.tickets ?? [];
+      if (!Array.isArray(rawChildren) || rawChildren.length === 0) {
+        res.status(400).json({ error: 'At least one ticket is required in "tickets" or "subTickets"' });
+        return;
+      }
+
+      if (rawChildren.length > MAX_BULK_TICKETS) {
+        res.status(400).json({ error: `Cannot create more than ${MAX_BULK_TICKETS} tickets in one request` });
+        return;
+      }
+
+      const topChannelId = body.channelId;
+      const topProjectId = body.projectId;
+      const topBoardId = body.boardId;
+
+      const children: BulkTicketCreationInput[] = rawChildren.map((item) => ({
+        title: String(item.title ?? '').trim(),
+        description: item.description != null ? String(item.description) : '',
+        channelId: String(item.channelId ?? topChannelId ?? ''),
+        projectId: String(item.projectId ?? topProjectId ?? ''),
+        boardId: String(item.boardId ?? topBoardId ?? ''),
+        assignedTo: item.assignedTo != null ? String(item.assignedTo) : undefined,
+        userGroupId: item.userGroupId != null ? String(item.userGroupId) : undefined,
+        priority: item.priority != null ? String(item.priority) : undefined,
+        statusV2: item.statusV2 != null ? String(item.statusV2) : undefined,
+        eta: item.eta != null ? new Date(item.eta as string | number | Date) : undefined,
+        ticketType: item.ticketType != null ? String(item.ticketType) : undefined,
+        stageName: item.stageName != null ? String(item.stageName) : undefined,
+        merchantId: item.merchantId != null ? String(item.merchantId) : undefined,
+        clientRowId: item.clientRowId != null ? String(item.clientRowId) : undefined,
+        createdBy: userId,
+        updatedBy: userId,
+      }));
+
+      for (const it of children) {
+        if (!it.title || !it.channelId || !it.boardId) {
+          res.status(400).json({ error: 'Each ticket requires title, channelId, and boardId' });
+          return;
+        }
+      }
+
+      // The board decides the project, exactly as in single-ticket creation.
+      // Taking projectId from the body would let a request file tickets into a
+      // project it never proved access to — and burn that project's xyneId
+      // sequence doing it. Fetching by workspace also rejects foreign boards.
+      const boardIds = new Set<string>(children.map((c) => c.boardId));
+      if (body.parent?.boardId) {
+        boardIds.add(body.parent.boardId);
+      }
+      const boards = await prisma.board.findMany({
+        where: { id: { in: Array.from(boardIds) }, workspaceId },
+        select: { id: true, projectId: true },
+      });
+      const projectByBoardId = new Map(boards.map((b) => [b.id, b.projectId]));
+      if (projectByBoardId.size !== boardIds.size) {
+        res.status(404).json({ error: 'Board not found in your workspace' });
+        return;
+      }
+      for (const child of children) {
+        child.projectId = projectByBoardId.get(child.boardId)!;
+      }
+
+      const allChannelIds = new Set<string>(children.map((c) => c.channelId));
+      if (body.parent?.channelId) {
+        allChannelIds.add(body.parent.channelId);
+      }
+
+      const accessResults = await Promise.all(
+        Array.from(allChannelIds).map(async (chId) => ({
+          chId,
+          access: await validateChannelAccess(chId, userId, workspaceId),
+        })),
+      );
+      const denied = accessResults.find((r) => !r.access.hasAccess);
+      if (denied) {
+        res
+          .status(403)
+          .json({ error: denied.access.reason ?? 'Access denied', code: 'CHANNEL_ACCESS_DENIED' });
+        return;
+      }
+
+      const parentTicketId: string | null = body.existingParentTicketId ?? null;
+      let parentToCreate: BulkTicketCreationInput | undefined;
+
+      // The parent checks below live inside the parent-sub branch, so the field
+      // must not survive into any other mode — it would reach the service
+      // unvalidated and come back echoed in the response.
+      if (mode !== BulkTicketMode.PARENT_SUB && parentTicketId) {
+        res
+          .status(400)
+          .json({ error: 'existingParentTicketId is only valid in parent-sub mode' });
+        return;
+      }
+
+      if (mode === BulkTicketMode.PARENT_SUB) {
+        if (parentTicketId) {
+          const parent = await prisma.ticket.findUnique({
+            where: { id: parentTicketId },
+            select: { workspaceId: true, channelId: true },
+          });
+          if (!parent || parent.workspaceId !== workspaceId) {
+            res.status(404).json({ error: 'Parent ticket not found in your workspace' });
+            return;
+          }
+          const parentAccess = await validateChannelAccess(parent.channelId, userId, workspaceId);
+          if (!parentAccess.hasAccess) {
+            res.status(403).json({ error: 'You do not have access to the parent ticket channel' });
+            return;
+          }
+        } else if (body.parent) {
+          if (!body.parent.boardId) {
+            res.status(400).json({ error: 'parent requires a boardId' });
+            return;
+          }
+
+          parentToCreate = {
+            ...body.parent,
+            description: body.parent.description ?? '',
+            projectId: projectByBoardId.get(body.parent.boardId)!,
+            createdBy: userId,
+            updatedBy: userId,
+          };
+        } else {
+          res.status(400).json({ error: 'parent or existingParentTicketId is required for parent-sub mode' });
+          return;
+        }
+      }
+
+      // sourceConversationId decides which SDLC owner every ticket inherits, so
+      // it gets the same existence + private-channel check as single creation.
+      if (body.sourceConversationId) {
+        const sourceConversation = await this.conversationRepository.findById(body.sourceConversationId);
+        if (!sourceConversation) {
+          res.status(400).json({ error: 'Source conversation not found' });
+          return;
+        }
+        const sourceChannel = await this.channelRepository.findById(sourceConversation.channelId);
+        if (sourceChannel && sourceChannel.visibility === 'PRIVATE') {
+          const isParticipant = await this.channelParticipantRepository.isParticipant(
+            sourceConversation.channelId,
+            userId
+          );
+          if (!isParticipant) {
+            res.status(403).json({
+              error: 'Access denied - you do not have permission to access this conversation',
+              code: 'NOT_CONVERSATION_PARTICIPANT',
+            });
+            return;
+          }
+        }
+      }
+
+      const batchCtx = {
+        createdBy: userId,
+        workspaceId,
+        queryContext: {
+          userID: userId,
+          workspaceId,
+          role: user.role,
+          orgRole: user.orgRole,
+          memberId: user.memberId,
+        },
+        ...(body.sourceConversationId ? { sourceConversationId: body.sourceConversationId } : {}),
+        fromTicketsTab: body.fromTicketsTab === true,
+      };
+
+      // One transaction for the whole request: parent, children, sub-ticket
+      // links and the parent's rebuilt card all commit together or not at all.
+      const batch = await createBulkTicketBatch(
+        {
+          mode,
+          ...(parentToCreate ? { parent: toBatchTicketInput(parentToCreate) } : {}),
+          ...(parentTicketId ? { existingParentTicketId: parentTicketId } : {}),
+          children: children.map(toBatchTicketInput),
+        },
+        batchCtx
+      );
+
+      const response: CreateBulkTicketResponse = {
+        parentTicketId: batch.parentTicketId ?? undefined,
+        ...(batch.createdParent ? { createdParent: batch.createdParent } : {}),
+        createdTickets: batch.tickets.map(({ ticket, clientRowId }) => ({
+          id: ticket.id,
+          xyneId: ticket.xyneId,
+          title: ticket.title,
+          conversationId: ticket.conversationId,
+          ...(clientRowId ? { clientRowId } : {}),
+        })),
+      };
+
+      res.status(201).json(response);
+    } catch (error) {
+      logger.error('[Bulk Ticket] createBulkTicket failed:', error);
+      // The whole request is one transaction, so a failure here means nothing
+      // was written and the caller can safely retry the same payload.
+      res.status(500).json({ error: 'Failed to create tickets', code: 'BULK_CREATE_FAILED' });
+    }
+  };
 
   getMyTicketBoardIds = async (req: Request, res: Response): Promise<void> => {
     try {

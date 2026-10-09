@@ -66,6 +66,7 @@ import { TicketsHeader } from '../../components/Tickets/TicketsHeader/TicketsHea
 import { hasAnyFilterChip } from '../../components/Tickets/TicketsHeader/filterChips';
 import type { ProjectsScreenOutletContext } from '../ProjectsScreen/ProjectsScreen';
 import { CreateTicketModal } from '../../components/Tickets/CreateTicketModal/CreateTicketModal';
+import { BulkCreateTicketsModal } from '../../components/Tickets/BulkCreateTicketsModal/BulkCreateTicketsModal';
 import {
   clearCreateTicketParams,
   hasCreateTicketFlag,
@@ -107,6 +108,7 @@ import type {
   FlowStepVisibilityOptions,
 } from '@xyne/shared';
 import {
+  BulkTicketMode,
   TicketStatusV2,
   ActivityType,
   FormContextType,
@@ -557,6 +559,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   // ────────────────────────────────────────────────────────────────────
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isBulkCreateModalOpen, setIsBulkCreateModalOpen] = useState(false);
   const [createTicketSeed, setCreateTicketSeed] = useState<CreateTicketSeed | null>(null);
   const [localTickets, setLocalTickets] = useState<Ticket[] | null>([]);
   const [kanbanTicketsByColumn, setKanbanTicketsByColumn] = useState<Record<string, Ticket[]>>({});
@@ -4547,6 +4550,12 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
             : null
         }
         linkBoardsMetadata={JSON.stringify({ channelId, source: 'kanban_header' })}
+        onBulkCreateTicket={
+          isTableLayout && canCreateTicket && scopedProjectId && channel && !channel.isArchived
+            ? (): void => setIsBulkCreateModalOpen(true)
+            : null
+        }
+        bulkCreateTicketMetadata={JSON.stringify({ boardId, channelId })}
         layoutView={layoutView}
         onLayoutChange={handleLayoutChange}
         showLayoutPicker={!isFlowBoard}
@@ -5644,6 +5653,20 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           initialMerchantId={createTicketSeed?.merchantId}
           initialDynamicFields={createTicketSeed?.dynamicFields}
           onTicketCreated={handleTicketCreated}
+        />
+      )}
+
+      {/* Bulk Create Tickets Modal */}
+      {scopedProjectId && channel && (
+        <BulkCreateTicketsModal
+          isOpen={isBulkCreateModalOpen}
+          onClose={() => setIsBulkCreateModalOpen(false)}
+          mode={BulkTicketMode.ALL_PARENTS}
+          fromTicketsTab={true}
+          channelId={channel.id}
+          projectId={scopedProjectId}
+          boardId={currentBoardId ?? ''}
+          boardName={selectedBoardDetail?.name}
         />
       )}
 

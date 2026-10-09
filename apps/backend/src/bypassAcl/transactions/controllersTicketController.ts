@@ -170,7 +170,8 @@ export function transferTicketToBoardTx(targetBoardId: string, ticketId: string,
     return { updatedTicket, etaResult };
   });
 }
-export function createTicketWithConversationTx(self: TicketController, conversationId: string, projectId: string, title: string, description: string, createdBy: string, updatedBy: string, assignedTo: string | undefined, boardId: string, statusV2: string, priority: string, messageContent: string | undefined, messageSubtype: string, metadata: Record<string, any>, entityLinkContext: { sourceId: string; sourceType: "CANVAS" | "ATTACHMENT" | "TRACK" | "FOLDER" | "LINK"; } | undefined) {
+export function createTicketWithConversationTx(self: TicketController, conversationId: string, projectId: string, title: string, description: string, createdBy: string, updatedBy: string, assignedTo: string | undefined, boardId: string, statusV2: string, priority: string, messageContent: string | undefined, messageSubtype: string, metadata: Record<string, any>, entityLinkContext: { sourceId: string; sourceType: "CANVAS" | "ATTACHMENT" | "TRACK" | "FOLDER" | "LINK"; } | undefined, extra: { userGroupId?: string | undefined; eta?: Date | undefined; tags?: string[] | undefined; ticketType?: string | undefined; stageName?: string | undefined; creationMessageId?: string | undefined } = {}) {
+  const { userGroupId, eta, tags, ticketType, stageName, creationMessageId: requestedCreationMessageId } = extra;
   return transaction(['Board', 'Conversation', 'ConversationParticipant', 'Message', 'Project', 'SdlcEntityLink', 'Stage', 'StageTransition', 'Ticket', 'TicketActivity', 'TicketStageEta'], 'createTicketWithConversation: ticket, system message, conversation link and entity links must commit atomically; tx is not ACL-wrapped', prisma, async (tx) => {
     // Get channelId from conversation
     const conversation = await self.conversationRepository.findById(conversationId);
@@ -185,7 +186,7 @@ export function createTicketWithConversationTx(self: TicketController, conversat
     // Generate xyneId using project-scoped format
     const xyneId = await generateTicketId(tx, projectId);
 
-    const creationMessageId = randomUUID();
+    const creationMessageId = requestedCreationMessageId ?? randomUUID();
 
     // Create ticket
     const ticket = await self.ticketRepository.createTicket({
@@ -195,6 +196,11 @@ export function createTicketWithConversationTx(self: TicketController, conversat
       createdBy,
       updatedBy,
       assignedTo: assignedTo || undefined,
+      userGroupId,
+      eta,
+      tags,
+      ticketType,
+      stageName,
       conversationId,
       channelId,
       projectId,
@@ -226,13 +232,31 @@ export function createTicketWithConversationTx(self: TicketController, conversat
       },
     });
 
-    // Update conversation reply count and set ticketId
+    // Update conversation reply count, ticketId, and the ticket card (ticket_md)
+    // so bulk-created tickets render the same chat card as single-ticket creation.
+    const ticketMd = serializeTicketMd({
+      id: ticket.id,
+      title: ticket.title,
+      description: ticket.description,
+      statusV2: ticket.statusV2 as TicketCardSummary['statusV2'],
+      priority: ticket.priority as TicketCardSummary['priority'],
+      assignedTo: ticket.assignedTo ?? null,
+      createdBy: ticket.createdBy,
+      createdAt: ticket.createdAt.getTime(),
+      eta: ticket.eta ? ticket.eta.getTime() : null,
+      xyneId: ticket.xyneId,
+      stageName: ticket.stageName,
+      ticketType: ticket.ticketType ?? null,
+      channelId: ticket.channelId,
+      conversationId: ticket.conversationId,
+    });
     await tx.conversation.update({
       where: { conversationId },
       data: {
         replyCount: { increment: 1 },
         lastActivityAt: now,
         ticketId: ticket.id,
+        ticket_md: ticketMd,
       },
     });
 
