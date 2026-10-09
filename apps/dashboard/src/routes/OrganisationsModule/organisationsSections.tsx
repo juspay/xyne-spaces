@@ -21,6 +21,8 @@ export type { OrganisationsSectionKey };
 export interface OrganisationsSection {
   key: OrganisationsSectionKey;
   label: string;
+  /** What the section holds, as for NavigationItem.description. */
+  description: string;
   icon: PikaIcon;
 }
 
@@ -51,7 +53,14 @@ export const ORGANISATIONS_SECTION_GROUPS: OrganisationsSectionGroup[] = [
     key: 'organisations',
     label: 'Organisations',
     icon: BuildingApartmentTwo,
-    sections: [{ key: 'all', label: 'Organisations', icon: BuildingApartmentTwo }],
+    sections: [
+      {
+        key: 'all',
+        label: 'Organisations',
+        description: 'Organisations and their workspaces',
+        icon: BuildingApartmentTwo,
+      },
+    ],
   },
   {
     key: 'workspace',
@@ -60,25 +69,69 @@ export const ORGANISATIONS_SECTION_GROUPS: OrganisationsSectionGroup[] = [
     description: 'Settings, members and access for this workspace.',
     showsWorkspaceName: true,
     sections: [
-      { key: 'general', label: 'General', icon: Settings01 },
-      { key: 'members', label: 'Members', icon: UserShield },
-      { key: 'invitations', label: 'Invitations', icon: MailIcon },
-      { key: 'guests', label: 'Guest users', icon: GuestIcon },
-      { key: 'repository-credentials', label: 'Repository credentials', icon: GitBranch },
-      { key: 'toolbar', label: 'Toolbar', icon: LayoutGridTwoVertical },
+      {
+        key: 'general',
+        label: 'General',
+        description: 'Workspace name, logo and settings',
+        icon: Settings01,
+      },
+      {
+        key: 'members',
+        label: 'Members',
+        description: 'People in this workspace and their roles',
+        icon: UserShield,
+      },
+      {
+        key: 'invitations',
+        label: 'Invitations',
+        description: 'Pending invites to join this workspace',
+        icon: MailIcon,
+      },
+      {
+        key: 'guests',
+        label: 'Guest users',
+        description: 'Outside people with limited access',
+        icon: GuestIcon,
+      },
+      {
+        key: 'repository-credentials',
+        label: 'Repository credentials',
+        description: 'Git repository access tokens',
+        icon: GitBranch,
+      },
+      {
+        key: 'toolbar',
+        label: 'Toolbar',
+        description: 'Pages shown in the sidebar',
+        icon: LayoutGridTwoVertical,
+      },
     ],
   },
   {
     key: 'user-groups',
     label: 'User Groups',
     icon: UserThree,
-    sections: [{ key: 'user-groups', label: 'User Groups', icon: UserThree }],
+    sections: [
+      {
+        key: 'user-groups',
+        label: 'User Groups',
+        description: 'Teams of users for access and assignment',
+        icon: UserThree,
+      },
+    ],
   },
   {
     key: 'roles',
     label: 'Roles',
     icon: ShieldCheck,
-    sections: [{ key: 'roles', label: 'Roles', icon: ShieldCheck }],
+    sections: [
+      {
+        key: 'roles',
+        label: 'Roles',
+        description: 'Permissions each role grants',
+        icon: ShieldCheck,
+      },
+    ],
   },
 ];
 

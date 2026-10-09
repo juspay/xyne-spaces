@@ -83,6 +83,7 @@ const DmSearchBoxComponent = ({
             : 'w-full pl-9 pr-8 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-ring'
         }
         placeholder='Search DMs (Cmd+K)'
+        aria-label='Search DMs'
         autoFocus={!isMobile}
         value={dmSearchQuery}
         onChange={e => {

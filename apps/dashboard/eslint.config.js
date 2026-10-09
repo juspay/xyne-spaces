@@ -49,7 +49,9 @@ export default tseslint.config(
       "electron/preload.ts",
       // Node-side build/eval scripts. Outside tsconfig.app.json, so the
       // type-checked rules cannot resolve them.
-      "scripts/**/*"
+      "scripts/**/*",
+      // AudioWorklet global scope; plain JS so Vite serves it as a standalone asset.
+      "src/services/VoiceInput/pcmCaptureWorklet.js"
     ],
   },
 

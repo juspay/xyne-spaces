@@ -1,6 +1,6 @@
 /**
- * VoiceInput — self-contained mic button that records audio via MediaRecorder,
- * forwards the blob to POST /api/voice-input/transcribe, and inserts the
+ * VoiceInput — self-contained mic button that captures mic audio as PCM16,
+ * streams it to the voice-input WebSocket, and inserts the
  * resulting transcript into the TipTap editor as typed/mention tokens.
  *
  * Usage in InputBox (desktop):
@@ -16,16 +16,14 @@
  *
  * Expose toggle() via ref so MobileEditor's onVoiceToggle can call it.
  */
-import { useState, useRef, useCallback, useEffect, forwardRef, useImperativeHandle } from 'react';
+import { useRef, useCallback, useEffect, forwardRef, useImperativeHandle } from 'react';
 import type { Editor } from '@tiptap/react';
 import { Loader2 } from 'lucide-react';
 import { MicOn } from '@xyne/icons';
-import { toast } from 'sonner';
 import Tooltip from '../Tooltip/Tooltip';
 import { ShortcutHint } from '../ShortcutHint';
 import type { MentionResult } from '@xyne/shared';
-import { voiceInputService } from '../../../services/VoiceInput/voiceInputService';
-import type { VoiceStreamSession } from '../../../services/VoiceInput/voiceInputService';
+import { useUtterance } from '../../../services/VoiceInput/useUtterance';
 
 const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -114,10 +112,6 @@ function buildVoiceMentionMatcher(source: readonly MentionResult[]): VoiceMentio
 // it does not change what the server streams over the WebSocket.
 const VOICE_REVEAL_INTERVAL_MS = 150;
 
-// Safety net after end-of-audio: if the server never closes the stream, force-close
-// it after this long so the UI doesn't hang in the transcribing state.
-const VOICE_STREAM_FORCE_CLOSE_MS = 12000;
-
 /** Prefix of `target` extended by up to `words` whole words past `shown`. If `shown`
  *  is no longer a prefix of `target` (the server revised earlier words), snap to the
  *  full `target` so we never display stale text. */
@@ -164,15 +158,8 @@ export const VoiceInput = forwardRef<VoiceInputHandle, VoiceInputProps>(
     },
     ref,
   ) => {
-    const [isVoiceRecording, setIsVoiceRecording] = useState(false);
-    const [isVoiceTranscribing, setIsVoiceTranscribing] = useState(false);
-    const voiceRecorderRef = useRef<MediaRecorder | null>(null);
-    const voiceStreamRef = useRef<MediaStream | null>(null);
-    const wsSessionRef = useRef<VoiceStreamSession | null>(null);
     // Tracks the editor range occupied by the current interim (partial) transcript.
     const voiceStreamInterimRangeRef = useRef<{ from: number; to: number } | null>(null);
-    // Set when a send aborts the stream; makes late frames stop touching the editor.
-    const voiceStreamAbortedRef = useRef(false);
     // Word-pacing buffer (see VOICE_REVEAL_INTERVAL_MS): transcript text feeds these
     // refs and a timer drains them into the editor one word at a time.
     const revealTargetRef = useRef(''); // full text we're typing toward (current phrase)
@@ -180,13 +167,6 @@ export const VoiceInput = forwardRef<VoiceInputHandle, VoiceInputProps>(
     const revealMustCommitRef = useRef(false); // target is a final → mention-commit once shown
     const revealPendingPartialRef = useRef<string | null>(null); // partial queued during a commit
     const revealTimerRef = useRef<number | null>(null);
-    // Handle for the post-endAudio force-close safety net (see VOICE_STREAM_FORCE_CLOSE_MS).
-    const voiceStreamCloseTimeoutRef = useRef<number | null>(null);
-
-    // Notify parent whenever recording/transcribing state changes
-    useEffect(() => {
-      onStateChange?.({ isRecording: isVoiceRecording, isTranscribing: isVoiceTranscribing });
-    }, [isVoiceRecording, isVoiceTranscribing, onStateChange]);
 
     // ── Mention resolution ──────────────────────────────────────────────────
     // The matcher is an org-sized RegExp that is expensive to build but only
@@ -383,13 +363,6 @@ export const VoiceInput = forwardRef<VoiceInputHandle, VoiceInputProps>(
       }
     }, []);
 
-    const clearVoiceStreamCloseTimer = useCallback((): void => {
-      if (voiceStreamCloseTimeoutRef.current !== null) {
-        window.clearTimeout(voiceStreamCloseTimeoutRef.current);
-        voiceStreamCloseTimeoutRef.current = null;
-      }
-    }, []);
-
     // Drop the buffer without committing — used on abort and at session start.
     const resetReveal = useCallback((): void => {
       clearRevealTimer();
@@ -476,119 +449,35 @@ export const VoiceInput = forwardRef<VoiceInputHandle, VoiceInputProps>(
       [commitFinal, ensureRevealTimer],
     );
 
-    // ── Media stream helpers ────────────────────────────────────────────────
-    const stopVoiceStream = useCallback((): void => {
-      voiceStreamRef.current?.getTracks().forEach(track => track.stop());
-      voiceStreamRef.current = null;
-    }, []);
-
-    const stopVoiceRecording = useCallback((): void => {
-      const recorder = voiceRecorderRef.current;
-      if (!recorder) return;
-      if (recorder.state !== 'inactive') recorder.stop();
-      setIsVoiceRecording(false);
-    }, []);
-
-    const startVoiceRecording = useCallback(async (): Promise<void> => {
-      if (!navigator.mediaDevices?.getUserMedia) {
-        toast.error('Voice recording is not supported in this browser');
-        return;
-      }
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        voiceStreamRef.current = stream;
-
-        const preferredTypes = [
-          'audio/webm;codecs=opus',
-          'audio/webm',
-          'audio/ogg;codecs=opus',
-          'audio/mp4',
-        ];
-        const mimeType = preferredTypes.find(t => MediaRecorder.isTypeSupported(t)) ?? '';
-        const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
-
-        const session = voiceInputService.openStreamSession();
-        wsSessionRef.current = session;
-        voiceStreamAbortedRef.current = false;
+    // ── Recording ───────────────────────────────────────────────────────────
+    // The server sends the final transcript and closes; the hook then hands it over to be
+    // flushed (committed) into the editor.
+    const {
+      isRecording: isVoiceRecording,
+      isTranscribing: isVoiceTranscribing,
+      start: startUtterance,
+      stop: stopVoiceRecording,
+      cancel: cancelUtterance,
+    } = useUtterance({
+      onEnded: () => {
+        flushReveal();
+        voiceStreamInterimRangeRef.current = null;
+      },
+      onFailed: () => {
         resetReveal();
+        voiceStreamInterimRangeRef.current = null;
+      },
+    });
 
-        session.onMessage(msg => {
-          // Once a send has aborted this stream, ignore any straggler frames so they
-          // can't leak into the (now cleared) next message.
-          if (voiceStreamAbortedRef.current) return;
-          if (msg.type === 'partial' && msg.text) {
-            handleStreamPartial(msg.text);
-          } else if (msg.type === 'final' && msg.text) {
-            handleStreamFinal(msg.text);
-          } else if (msg.type === 'error') {
-            toast.error('Voice transcription failed', {
-              description: msg.message ?? 'Streaming error',
-            });
-          }
-        });
+    // Notify parent whenever recording/transcribing state changes
+    useEffect(() => {
+      onStateChange?.({ isRecording: isVoiceRecording, isTranscribing: isVoiceTranscribing });
+    }, [isVoiceRecording, isVoiceTranscribing, onStateChange]);
 
-        session.onClose(() => {
-          clearVoiceStreamCloseTimer();
-          // Flush remaining buffered words (commit the final) unless a send aborted the
-          // stream, in which case everything in flight is intentionally discarded.
-          if (voiceStreamAbortedRef.current) {
-            resetReveal();
-          } else {
-            flushReveal();
-          }
-          voiceStreamInterimRangeRef.current = null;
-          wsSessionRef.current = null;
-          setIsVoiceTranscribing(false);
-        });
-
-        session.onError(() => {
-          clearVoiceStreamCloseTimer();
-          toast.error('Voice stream disconnected unexpectedly');
-          resetReveal();
-          voiceStreamInterimRangeRef.current = null;
-          wsSessionRef.current = null;
-          setIsVoiceTranscribing(false);
-        });
-
-        // Send each 250ms chunk as a binary frame over the WebSocket. The session
-        // serializes Blob→ArrayBuffer conversion so frames stay in order.
-        recorder.ondataavailable = (event: BlobEvent) => {
-          if (event.data.size > 0) session.sendChunk(event.data);
-        };
-
-        recorder.onstop = () => {
-          // Signal end-of-audio (flushing the last buffered chunk first) but keep the
-          // socket open so the server can stream back the final transcript before it
-          // closes — onClose then clears the transcribing state. Closing here would
-          // drop the tail audio and the final result.
-          session.endAudio();
-          setIsVoiceTranscribing(true);
-          voiceRecorderRef.current = null;
-          stopVoiceStream();
-          // Safety net: if the server never closes after end-of-stream, force-close
-          // so the UI doesn't hang in the transcribing state.
-          voiceStreamCloseTimeoutRef.current = window.setTimeout(() => {
-            voiceStreamCloseTimeoutRef.current = null;
-            session.close();
-          }, VOICE_STREAM_FORCE_CLOSE_MS);
-        };
-
-        recorder.onerror = () => {
-          setIsVoiceRecording(false);
-          stopVoiceStream();
-          session.close();
-          toast.error('Voice recording failed unexpectedly');
-        };
-
-        voiceRecorderRef.current = recorder;
-        recorder.start(250); // 250ms timeslices for low latency
-        setIsVoiceRecording(true);
-      } catch (err) {
-        const isDenied = err instanceof DOMException && err.name === 'NotAllowedError';
-        stopVoiceStream();
-        toast.error(isDenied ? 'Microphone permission denied' : 'Failed to start voice recording');
-      }
-    }, [stopVoiceStream, handleStreamPartial, handleStreamFinal, resetReveal, flushReveal]);
+    const startVoiceRecording = useCallback((): void => {
+      resetReveal();
+      startUtterance({ onPartial: handleStreamPartial, onFinal: handleStreamFinal });
+    }, [handleStreamPartial, handleStreamFinal, resetReveal, startUtterance]);
 
     const handleVoiceToggle = useCallback((): void => {
       if (isVoiceTranscribing || disabled || isSending) return;
@@ -596,7 +485,7 @@ export const VoiceInput = forwardRef<VoiceInputHandle, VoiceInputProps>(
         stopVoiceRecording();
         return;
       }
-      void startVoiceRecording();
+      startVoiceRecording();
     }, [
       isVoiceRecording,
       isVoiceTranscribing,
@@ -611,10 +500,7 @@ export const VoiceInput = forwardRef<VoiceInputHandle, VoiceInputProps>(
     // the final transcript. The trailing interim text is unfinalized, so it's removed
     // from the editor — only already-committed (final) text remains to be sent.
     const abortForSend = useCallback((): void => {
-      if (!wsSessionRef.current && !isVoiceRecording && !isVoiceTranscribing) return;
-
-      voiceStreamAbortedRef.current = true;
-      clearVoiceStreamCloseTimer();
+      if (!cancelUtterance()) return;
       resetReveal();
 
       // Drop the unfinalized interim text from the editor.
@@ -623,27 +509,7 @@ export const VoiceInput = forwardRef<VoiceInputHandle, VoiceInputProps>(
         editor.chain().setTextSelection({ from: range.from, to: range.to }).deleteSelection().run();
       }
       voiceStreamInterimRangeRef.current = null;
-
-      // Stop capture without the draining onstop handler, then hard-close the socket.
-      const recorder = voiceRecorderRef.current;
-      if (recorder) {
-        recorder.onstop = null;
-        if (recorder.state !== 'inactive') recorder.stop();
-      }
-      voiceRecorderRef.current = null;
-      stopVoiceStream();
-      wsSessionRef.current?.close();
-      wsSessionRef.current = null;
-      setIsVoiceRecording(false);
-      setIsVoiceTranscribing(false);
-    }, [
-      editor,
-      isVoiceRecording,
-      isVoiceTranscribing,
-      stopVoiceStream,
-      resetReveal,
-      clearVoiceStreamCloseTimer,
-    ]);
+    }, [editor, resetReveal, cancelUtterance]);
 
     // Expose toggle() so MobileEditor's onVoiceToggle can call it via ref
     useImperativeHandle(ref, () => ({ toggle: handleVoiceToggle, abortForSend }), [
@@ -651,20 +517,8 @@ export const VoiceInput = forwardRef<VoiceInputHandle, VoiceInputProps>(
       abortForSend,
     ]);
 
-    // Release microphone, WebSocket, the reveal timer, and the force-close safety net
-    // on unmount — otherwise the safety-net timeout can outlive this component and
-    // fire session.close() against an already torn-down/stale session.
-    useEffect(() => {
-      return () => {
-        const recorder = voiceRecorderRef.current;
-        if (recorder && recorder.state !== 'inactive') recorder.stop();
-        stopVoiceStream();
-        wsSessionRef.current?.close();
-        wsSessionRef.current = null;
-        clearRevealTimer();
-        clearVoiceStreamCloseTimer();
-      };
-    }, [stopVoiceStream, clearRevealTimer, clearVoiceStreamCloseTimer]);
+    // Release the reveal timer on unmount (the hook releases the microphone and the stream).
+    useEffect(() => clearRevealTimer, [clearRevealTimer]);
 
     // ── Render ──────────────────────────────────────────────────────────────
     if (headless) return null;
@@ -686,7 +540,7 @@ export const VoiceInput = forwardRef<VoiceInputHandle, VoiceInputProps>(
         <button
           type='button'
           onClick={handleVoiceToggle}
-          className={`p-1.5 rounded transition-all duration-200 ease-in-out ${
+          className={`p-1.5 rounded transition-colors duration-200 ease-in-out ${
             isVoiceRecording
               ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400'
               : 'hover:bg-accent text-muted-foreground'

@@ -5,10 +5,16 @@ import type { Socket } from 'net';
 import { authMiddleware } from '@/middleware/auth';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
+import { bridgeToElevenLabs } from '@/services/voiceInputElevenLabsStream';
+import type { VoiceInputUser } from '@/services/voiceInputKeyterms';
 
 const VOICE_STREAM_PATH = '/api/voice-input/stream';
 const MAX_PENDING_FRAMES = 100;
 const AGENT_HANDSHAKE_TIMEOUT_MS = 10_000;
+const MAX_SESSIONS_PER_USER = 2;
+
+// Open voice-input sockets per user, so one user cannot hold unbounded upstream sessions.
+const openSessions = new Map<string, number>();
 
 // Cookie auth alone lets any site open this endpoint with the victim's browser
 // (cookies ride along on the WS handshake) and stream audio/results under their
@@ -19,7 +25,7 @@ function isAllowedOrigin(req: IncomingMessage): boolean {
   return !!origin && config.cors.origin.includes(origin);
 }
 
-async function authenticateUpgrade(req: IncomingMessage): Promise<boolean> {
+async function authenticateUpgrade(req: IncomingMessage): Promise<VoiceInputUser | null> {
   const cookies: Record<string, string> = {};
   const cookieHeader = req.headers.cookie;
   if (cookieHeader) {
@@ -48,15 +54,19 @@ async function authenticateUpgrade(req: IncomingMessage): Promise<boolean> {
     body: {},
   } as any;
 
-  return new Promise<boolean>(resolve => {
+  return new Promise(resolve => {
     const fakeRes = {
-      status: (_code: number) => ({ json: () => resolve(false) }),
+      status: (_code: number) => ({ json: () => resolve(null) }),
       cookie: () => {},
       setHeader: () => {},
     } as any;
 
     void authMiddleware.authenticate(fakeReq, fakeRes, (err?: unknown) => {
-      resolve(!err && !!fakeReq.user);
+      resolve(
+        !err && fakeReq.user
+          ? { userId: fakeReq.user.id, workspaceId: fakeReq.user.workspaceId }
+          : null
+      );
     });
   });
 }
@@ -68,7 +78,10 @@ function proxyToAgent(clientWs: WebSocket, req: IncomingMessage): void {
 
   const urlObj = new URL(req.url ?? '/', 'http://localhost');
   const language = urlObj.searchParams.get('language') ?? '';
-  const agentUrl = `${pythonBase}/transcribe-stream?language=${encodeURIComponent(language)}`;
+  const format = urlObj.searchParams.get('format');
+  const agentUrl =
+    `${pythonBase}/transcribe-stream?language=${encodeURIComponent(language)}` +
+    (format ? `&format=${encodeURIComponent(format)}` : '');
 
   const agentWs = new WebSocket(agentUrl);
 
@@ -186,7 +199,37 @@ export function attachVoiceInputStreamHandler(httpServer: HttpServer): void {
           socket.destroy();
           return;
         }
-        wss.handleUpgrade(req, socket, head, ws => proxyToAgent(ws, req));
+        if ((openSessions.get(authed.userId) ?? 0) >= MAX_SESSIONS_PER_USER) {
+          logger.warn('[VoiceInputStream] Rejected upgrade: too many open sessions for user');
+          socket.write('HTTP/1.1 429 Too Many Requests\r\n\r\n');
+          socket.destroy();
+          return;
+        }
+        // ElevenLabs only accepts raw PCM; older clients still send WebM/Opus and stay on
+        // the Python agent.
+        const params = new URL(req.url ?? '/', 'http://localhost').searchParams;
+        const useElevenLabs =
+          params.get('format') === 'pcm16' &&
+          config.voiceInputStream.provider === 'elevenlabs' &&
+          !!config.elevenLabs.apiKey;
+        wss.handleUpgrade(req, socket, head, ws => {
+          openSessions.set(authed.userId, (openSessions.get(authed.userId) ?? 0) + 1);
+          ws.once('close', () => {
+            const remaining = (openSessions.get(authed.userId) ?? 1) - 1;
+            if (remaining > 0) openSessions.set(authed.userId, remaining);
+            else openSessions.delete(authed.userId);
+          });
+          if (useElevenLabs) {
+            bridgeToElevenLabs(
+              ws,
+              params.get('language') ?? '',
+              params.get('commit') === 'manual' ? 'manual' : 'vad',
+              authed
+            );
+          } else {
+            proxyToAgent(ws, req);
+          }
+        });
       } catch (err) {
         logger.error('[VoiceInputStream] Upgrade error:', err);
         socket.write('HTTP/1.1 500 Internal Server Error\r\n\r\n');

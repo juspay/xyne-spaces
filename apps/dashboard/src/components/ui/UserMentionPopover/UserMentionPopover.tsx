@@ -139,6 +139,7 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({
           e.stopPropagation();
           handleProfileClick();
         }}
+        aria-label={`View ${getUserDisplayName(user)}'s profile`}
         data-track-category='MENTION'
         data-track-name='OPEN_USER_PROFILE_FROM_MENTION'
         onKeyDown={e => {
@@ -166,6 +167,7 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({
             e.stopPropagation();
             handleProfileClick();
           }}
+          aria-label={`View ${getUserDisplayName(user)}'s profile`}
           data-track-category='MENTION'
           data-track-name='OPEN_USER_PROFILE_FROM_MENTION'
           onKeyDown={e => {

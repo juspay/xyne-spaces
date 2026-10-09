@@ -17,6 +17,8 @@ import { getChannelTabsStore, useAppSnapshots, appIdOf, appItemId } from '../../
 export interface ConversationTabListType {
   label: string;
   value: string;
+  /** What the tab holds, as for NavigationItem.description; built-in tabs only. */
+  description?: string;
   icon: ReactElement;
 }
 
@@ -30,26 +32,31 @@ export const STATIC_TABS: ConversationTabListType[] = [
   {
     label: 'Messages ',
     value: DEFAULT_CONVERSATION_TAB,
+    description: "This channel's conversation",
     icon: <ChatDefault size={14} />,
   },
   {
     label: 'Files',
     value: 'files',
+    description: 'Files shared in this channel',
     icon: <FolderDefault size={14} />,
   },
   {
     label: 'Pins',
     value: 'pins',
+    description: 'Messages pinned in this channel',
     icon: <PinDefault size={14} />,
   },
   {
     label: 'Canvas',
     value: 'canvas',
+    description: "This channel's shared canvas",
     icon: <File02Text size={14} />,
   },
   {
     label: 'Links',
     value: 'links',
+    description: 'Links shared in this channel',
     icon: <LinkChainSlant size={14} />,
   },
 ];
@@ -58,6 +65,7 @@ export const STATIC_TABS: ConversationTabListType[] = [
 export const TICKETS_TAB: ConversationTabListType = {
   label: 'Tickets',
   value: 'tickets',
+  description: "This channel's tickets",
   icon: <TicketToken size={14} />,
 };
 

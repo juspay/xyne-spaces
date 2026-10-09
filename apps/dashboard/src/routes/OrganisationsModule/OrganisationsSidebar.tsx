@@ -4,9 +4,18 @@ import { cn } from '../../utils/classNames';
 import { usePlatform } from '../../hooks/usePlatform';
 import AppNavigator from '../../components/AppNavigator/AppNavigator';
 import {
+  type OrganisationsSection,
   useActiveOrganisationsGroup,
   useVisibleOrganisationsGroups,
 } from './organisationsSections';
+
+/** What an entry holds: its page's description, or each of its tabs with theirs. */
+const describeSections = (sections: OrganisationsSection[]): string => {
+  const [only] = sections;
+  return only && sections.length === 1
+    ? only.description
+    : sections.map(({ label, description }) => `${label} (${description})`).join(', ');
+};
 
 const OrganisationsSidebar = (): ReactElement => {
   const { pathname } = useLocation();
@@ -42,6 +51,7 @@ const OrganisationsSidebar = (): ReactElement => {
                 key={group.key}
                 to={to}
                 aria-current={isActive ? 'page' : undefined}
+                aria-description={describeSections(group.sections)}
                 data-testid={`organisations-nav-${group.key}`}
                 data-track-category='organisations'
                 data-track-name={`OPEN_${group.key.toUpperCase().replace(/-/g, '_')}`}

@@ -5,9 +5,15 @@ interface RouteAction {
   description: string;
 }
 
+// Jev's top pick and its share of the vote.
+interface JevPick {
+  chosen?: string;
+  probability?: number;
+}
+
 type RouteResponse =
-  | { route: 'actions'; actionIds: string[] }
-  | { route: 'ask_ai' }
+  | ({ route: 'actions'; actionIds: string[] } & JevPick)
+  | ({ route: 'ask_ai' } & JevPick)
   | { route: 'unavailable' };
 
 const UNAVAILABLE: RouteResponse = { route: 'unavailable' };
@@ -29,11 +35,12 @@ export async function routeWithJev(
   text: string,
   actions: readonly RouteAction[],
   signal: AbortSignal,
+  mode?: 'screen' | 'check',
 ): Promise<RouteResponse> {
   try {
     const response = await apiInstance.post<unknown>(
       '/assistant/route',
-      { text, actions },
+      { text, actions, mode },
       { signal, timeout: ROUTE_DEADLINE_MS },
     );
     return isRouteResponse(response.data) ? response.data : UNAVAILABLE;

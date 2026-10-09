@@ -141,3 +141,17 @@ export const searchFeedbackLimiter: RateLimitRequestHandler = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 });
+
+/** Per-user limiter for text-to-speech (one request per spoken sentence). */
+export const ttsLimiter: RateLimitRequestHandler = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 120,
+  keyGenerator: (req): string => req.user?.id ?? ipKeyGenerator(req.ip ?? 'unknown'),
+  message: () => ({
+    success: false,
+    error: 'Too many text-to-speech requests. Please slow down.',
+    timestamp: new Date().toISOString(),
+  }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});

@@ -178,6 +178,7 @@ const ChannelItemV2 = memo(
         draggable={false}
         to={`/chat/dir/${channel.id}`}
         onClick={handleChannelClick}
+        aria-label={isDM ? displayName : undefined}
         data-track-category='CHAT_SIDEBAR'
         data-track-name='OPEN_CHANNEL'
         data-track-label='Open channel'

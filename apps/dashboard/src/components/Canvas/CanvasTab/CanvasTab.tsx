@@ -875,6 +875,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                       : 'text-muted-foreground hover:bg-accent'
                   }`}
                   onClick={() => setShowStarredOnly(prev => !prev)}
+                  aria-label='Show starred canvases'
                   data-track-category='CANVAS'
                   data-track-name='TOGGLE_CHANNEL_STARRED_CANVAS_FILTER'
                 >
