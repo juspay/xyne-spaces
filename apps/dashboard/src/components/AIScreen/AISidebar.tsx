@@ -93,6 +93,23 @@ export interface AINavItem {
   dailyBriefOnly?: boolean;
 }
 
+/**
+ * The Xyne AI pages this user may open: some are for admins or org managers, and the daily brief
+ * only once it is switched on (or while on it).
+ */
+export function useVisibleAINavItems(onDailyBriefRoute = false): AINavItem[] {
+  const { user } = useAuth();
+  const { isAdmin } = useClawAdminAccessQuery(user?.id);
+  const { canManage: canManageOrg } = useClawOrgManageAccess();
+  const { enabled: dailyBriefEnabled } = useDailyBriefEnabled();
+  return NAV_ITEMS.filter(
+    item =>
+      (!item.adminOnly || isAdmin) &&
+      (!item.orgManagerOnly || canManageOrg) &&
+      (!item.dailyBriefOnly || dailyBriefEnabled === true || onDailyBriefRoute),
+  );
+}
+
 export const NAV_ITEMS: AINavItem[] = [
   {
     key: 'knowledge',
@@ -582,17 +599,7 @@ export function AISidebar({
 
   const routedActiveItem = NAV_ITEMS.find(item => pathname.includes(item.matchPath ?? item.to));
 
-  const { user } = useAuth();
-  const { isAdmin } = useClawAdminAccessQuery(user?.id);
-  const { canManage: canManageOrg } = useClawOrgManageAccess();
-  const { enabled: dailyBriefEnabled } = useDailyBriefEnabled();
-  const onDailyBriefRoute = pathname.includes('/ai/daily-brief');
-  const visibleNavItems = NAV_ITEMS.filter(
-    item =>
-      (!item.adminOnly || isAdmin) &&
-      (!item.orgManagerOnly || canManageOrg) &&
-      (!item.dailyBriefOnly || dailyBriefEnabled === true || onDailyBriefRoute),
-  );
+  const visibleNavItems = useVisibleAINavItems(pathname.includes('/ai/daily-brief'));
   const isNewChatActive = !routedActiveItem && !activeSessionId;
 
   // One history across every agent, newest first, 50 at a time; the filter
