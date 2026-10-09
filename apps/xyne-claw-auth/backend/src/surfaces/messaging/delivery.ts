@@ -16,8 +16,7 @@ import { errMsg } from "../../lib/errors.js";
 import { DONE_REACTION, EMPTY_RESULT_TEXT, ERROR_REACTION, FAILURE_TEXT, OUTBOX_TTL_S, REDIS_PREFIX, TYPING_COUNT_TTL_S } from "./const.js";
 import { forgetActiveRun } from "./commands.js";
 import { chunkText } from "./format.js";
-import { planSectionedReply } from "xyne-claw-shared";
-import { renderMarkdownToHtml } from "../../lib/result-html.js";
+import { countWords, splitIntoSections } from "xyne-claw-shared";
 import { fitCard, renderCardAsText } from "./cards.js";
 import type { AnyChannelPlugin, ChannelDeliveryTarget, InteractiveCard, MessageRef } from "./plugin.js";
 
@@ -302,12 +301,10 @@ async function sendItem(
       // with anything" over the top of them would be wrong.
       const silentWithFiles = completed && !item.result.trim() && !!item.attachments?.length;
       const body = completed ? item.result.trim() || EMPTY_RESULT_TEXT : FAILURE_TEXT;
-      const sectioned = completed && caps.resultSections ? planSectionedReply(body, caps.resultSections) : null;
-      const messages = (sectioned?.messages.length ? sectioned.messages : [body]).map((m) => plugin.formatText?.(m) ?? m);
-      const files = [
-        ...(sectioned?.overflow && caps.resultSections ? [await overflowAttachment(body, caps.resultSections.fileMimeType)] : []),
-        ...(completed ? item.attachments ?? [] : []),
-      ];
+      const sections =
+        completed && caps.resultSections && countWords(body) > caps.resultSections.maxWords ? splitIntoSections(body) : [];
+      const messages = (sections.length ? sections : [body]).map((m) => plugin.formatText?.(m) ?? m);
+      const files = completed ? item.attachments ?? [] : [];
       try {
         // The outcome reaction first: it replaces the 👀 that has been sitting
         // there since the run started, so it should land with the answer
@@ -329,11 +326,6 @@ async function sendItem(
       return { ok: true };
     }
   }
-}
-
-async function overflowAttachment(markdown: string, mimeType: string): Promise<OutboxAttachment> {
-  const html = await renderMarkdownToHtml(markdown, { title: "Full answer" });
-  return { fileName: "answer.html", mimeType, data: html.toString("base64") };
 }
 
 async function sendMessages(

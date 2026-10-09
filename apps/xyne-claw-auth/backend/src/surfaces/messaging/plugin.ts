@@ -72,7 +72,6 @@ export interface ChannelCapabilities {
 export interface ResultSectionsCapability {
   maxWords: number;
   maxSections: number;
-  fileMimeType: string;
 }
 
 /** What a messenger will accept in one interactive message. */

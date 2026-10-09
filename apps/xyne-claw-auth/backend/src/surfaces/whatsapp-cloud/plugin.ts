@@ -185,7 +185,7 @@ export const whatsappCloudPlugin: ChannelPlugin<CloudHandle, WhatsAppCloudConfig
     maxTextChars: MAX_TEXT_CHARS,
     maxImageBytes: MAX_IMAGE_BYTES,
     maxFileBytes: MAX_FILE_BYTES,
-    resultSections: { ...WHATSAPP_RESULT_SECTIONS, fileMimeType: "text/plain" },
+    resultSections: WHATSAPP_RESULT_SECTIONS,
     // Meta's published caps for interactive messages. They are rejections,
     // not truncations: one over-long row fails the whole send, so the core
     // trims to these before calling sendInteractive.
