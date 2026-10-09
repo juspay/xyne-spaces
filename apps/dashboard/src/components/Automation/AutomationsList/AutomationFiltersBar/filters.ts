@@ -61,6 +61,7 @@ export const TRIGGER_TYPE_OPTIONS: { value: WorkflowEventType; label: string }[]
   { value: EventType.EMAIL_RECEIVED, label: 'Email Received' },
   { value: EventType.EMAIL_SENT, label: 'Email Sent' },
   { value: EventType.WEBHOOK, label: 'Webhook' },
+  { value: EventType.CRON, label: 'Schedule' },
   { value: EventType.MESSAGE_RECEIVED, label: 'Message Received' },
   { value: EventType.CALL_EVENT, label: 'Call Event' },
   { value: EventType.TAG_GENERATED, label: 'Tag Generated' },

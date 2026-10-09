@@ -11,6 +11,7 @@ import { messageReceivedTrigger } from './triggers/message-received.trigger';
 import { callTrigger } from './triggers/call.trigger';
 import { webhookTrigger } from './triggers/webhook.trigger';
 import { tagGeneratedTrigger } from './triggers/tag-generated.trigger';
+import { scheduleTrigger } from './triggers/schedule.trigger';
 
 import { conditionalStep } from './steps/conditional.step';
 import { switchStep } from './steps/switch.step';
@@ -44,6 +45,7 @@ import { makeCallStep } from './steps/make-call.step';
 
 import { automationQueue } from './queue/automation.queue';
 import { deskLabelBackfillQueue } from './queue/desk-label-backfill.queue';
+import { automationScheduleQueue } from './queue/automation-schedule.queue';
 
 let initialised = false;
 
@@ -60,6 +62,7 @@ export async function initializeAutomations(): Promise<void> {
   triggerRegistry.register(callTrigger);
   triggerRegistry.register(webhookTrigger);
   triggerRegistry.register(tagGeneratedTrigger);
+  triggerRegistry.register(scheduleTrigger);
 
   stepRegistry.register(conditionalStep);
   stepRegistry.register(switchStep);
@@ -93,6 +96,7 @@ export async function initializeAutomations(): Promise<void> {
 
   await automationQueue.initialize();
   await deskLabelBackfillQueue.initialize();
+  await automationScheduleQueue.initialize();
 
   logger.info(
     `[automations] Initialised — triggers=${triggerRegistry.list().length}, steps=${stepRegistry.list().length}`,
