@@ -31,7 +31,7 @@
     "mammoth": "^1.12.0",
     "pdf-lib": "^1.17.1",
     "tsx": "^4.19.0",
-    "undici": "^7.28.0",
+    "undici": "^6.28.1",
     "unpdf": "^1.6.2",
     "xyne-claw-shared": "workspace:*",
     "yaml": "^2.8.3",
