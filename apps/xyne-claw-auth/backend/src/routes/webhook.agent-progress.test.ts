@@ -150,7 +150,7 @@ describe("/webhook/progress sandbox preview records sandbox ownership", () => {
   const previewBranch = (() => {
     const start = webhook.indexOf("if (sandboxPreviewUrl && sandboxId) {");
     expect(start).toBeGreaterThan(-1);
-    return webhook.slice(start, start + 1500);
+    return webhook.slice(start, start + 2500);
   })();
 
   it("writes the ConversationArtifact owner row the sandbox router's access check reads", () => {
@@ -162,6 +162,15 @@ describe("/webhook/progress sandbox preview records sandbox ownership", () => {
     const modeReturn = previewBranch.indexOf('ctx.responseMode !== "conversation"');
     expect(modeReturn).toBeGreaterThan(-1);
     expect(ingest).toBeLessThan(modeReturn);
+  });
+
+  it("honours agent.config.hideLivePreview only after the ownership row is recorded", () => {
+    const ingest = previewBranch.indexOf("ingestSandboxPreviewSignals(");
+    const optOut = previewBranch.indexOf("isLivePreviewMessageHidden(");
+    const post = previewBranch.indexOf("postAgentMessage(");
+    expect(optOut).toBeGreaterThan(ingest);
+    expect(optOut).toBeLessThan(post);
+    expect(webhook).toMatch(/hideLivePreview\?? === true/);
   });
 
   it("attributes the sandbox to the conversation and the user who started the run", () => {

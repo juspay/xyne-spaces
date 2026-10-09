@@ -247,6 +247,22 @@ async function scheduleCapacityRetryIfNeeded(
 // run-recovery re-delivers the same payload. Bounded (FIFO) so it can't grow
 // unbounded over the process lifetime — every announced sessionId used to be
 // retained forever.
+/**
+ * True when the agent opted out of the "Live preview" thread message via
+ * `agent.config.hideLivePreview`. Read once per run (the announce is one-shot),
+ * fail-open: any lookup error keeps the default behaviour of posting it.
+ */
+async function isLivePreviewMessageHidden(agentId: string | undefined): Promise<boolean> {
+  if (!agentId) return false;
+  try {
+    const agent = await prisma.agent.findUnique({ where: { id: agentId }, select: { config: true } });
+    const config = agent?.config as { hideLivePreview?: unknown } | null | undefined;
+    return config?.hideLivePreview === true;
+  } catch {
+    return false;
+  }
+}
+
 const announcedSandboxPreviews = new Set<string>();
 const ANNOUNCED_PREVIEWS_MAX = 5000;
 function rememberAnnouncedPreview(sessionId: string): void {
@@ -6462,6 +6478,13 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
     );
     if (ctx.responseMode !== "conversation") return;
     const log = createLogger("webhook/progress", ctx.traceId ?? sessionId.slice(0, 8));
+    // Per-agent opt-out (agent.config.hideLivePreview). Only the thread message is
+    // suppressed — the ownership row above is still written, because the sandbox
+    // router's access check (and the Workspace pane) depend on it.
+    if (await isLivePreviewMessageHidden(ctx.agentId)) {
+      log.info(`Sandbox preview message suppressed by agent config (sandboxId=${sandboxId})`);
+      return;
+    }
     try {
       await postAgentMessage(
         { spacesAppUserId: ctx.spacesAppUserId, appToken: ctx.appToken },
