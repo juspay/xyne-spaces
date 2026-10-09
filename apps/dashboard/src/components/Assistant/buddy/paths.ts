@@ -21,7 +21,7 @@ export interface HiddenTarget<V extends MenuItem> extends MenuItem {
   opener: V;
 }
 
-const sameControl = (a: MenuItem, b: MenuItem): boolean => a.track === b.track && a.text === b.text;
+const keyOf = ({ track, text }: MenuItem): string => `${track}|${text}`;
 
 /**
  * The items of the peeked menus as options: each label once, never one already on screen, and
@@ -31,11 +31,10 @@ export function hiddenTargets<V extends MenuItem>(
   visible: readonly V[],
   menus: readonly Peeked<V>[],
 ): HiddenTarget<V>[] {
+  const onScreen = new Set(visible.map(keyOf));
   const labels = new Set<string>();
   const isNew = (item: MenuItem): boolean => {
-    if (visible.some(control => sameControl(control, item)) || labels.has(item.label)) {
-      return false;
-    }
+    if (onScreen.has(keyOf(item)) || labels.has(item.label)) return false;
     labels.add(item.label);
     return true;
   };
