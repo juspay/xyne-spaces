@@ -1,3 +1,15 @@
+## [1.484.0](https://github.com/juspay/xyne-spaces/compare/v1.483.1...v1.484.0) (2026-10-09)
+
+
+### Features
+
+* desk metric changes ([#2660](https://github.com/juspay/xyne-spaces/issues/2660)) ([211473d](https://github.com/juspay/xyne-spaces/commit/211473de8b56b4bc74af1af5506e5bf67a14adf3))
+
+
+### Bug Fixes
+
+* secrets key rotation framework ([#2223](https://github.com/juspay/xyne-spaces/issues/2223)) ([d8d83c1](https://github.com/juspay/xyne-spaces/commit/d8d83c16eb6c022e6b34c136b6a73a6ca2322850))
+
 ## [1.483.1](https://github.com/juspay/xyne-spaces/compare/v1.483.0...v1.483.1) (2026-10-09)
 
 
