@@ -160,6 +160,7 @@ export function updateTicketStageFlowGuardedTx(ticketId: string, oldStatusV2: Ti
         statusV2: newStatusV2,
         updatedBy: updatedBy,
         updatedAt: new Date(),
+        ...(newStatusV2 !== oldStatusV2 ? { statusUpdatedAt: new Date() } : {}),
       },
     });
   });
@@ -358,6 +359,7 @@ export function updateTicketStageTx(isForwardMovement: boolean, currentStage: an
             statusV2: newStatusV2,
             updatedBy: updatedBy,
             updatedAt: now,
+            ...(statusChanged ? { statusUpdatedAt: now } : {}),
             ...(etaResult.etaDecision.changed && etaResult.etaDecision.newEta
               ? { eta: etaResult.etaDecision.newEta }
               : {}),

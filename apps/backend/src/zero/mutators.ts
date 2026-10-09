@@ -6271,6 +6271,8 @@ export function createMutators(
               ...(firstStage.defaultTicketStatusV2 && {
                 statusV2: firstStage.defaultTicketStatusV2
               }),
+              ...(firstStage.defaultTicketStatusV2 &&
+                firstStage.defaultTicketStatusV2 !== ticket.statusV2 && { statusUpdatedAt: now }),
               kanbanPosition: newKanbanPosition,
               updatedAt: now,
               updatedBy: authData.sub
@@ -14745,6 +14747,8 @@ export function createMutators(
                 id: ticket.id,
                 stageName: stage.name,
                 ...(stage.defaultTicketStatusV2 && { statusV2: stage.defaultTicketStatusV2 }),
+                ...(stage.defaultTicketStatusV2 &&
+                  stage.defaultTicketStatusV2 !== ticket.statusV2 && { statusUpdatedAt: updatedAt }),
                 updatedAt,
               });
             } else {
@@ -14752,6 +14756,8 @@ export function createMutators(
                 id: ticket.id,
                 stageName: stage.name,
                 ...(stage.defaultTicketStatusV2 && { statusV2: stage.defaultTicketStatusV2 }),
+                ...(stage.defaultTicketStatusV2 &&
+                  stage.defaultTicketStatusV2 !== ticket.statusV2 && { statusUpdatedAt: updatedAt }),
                 updatedAt,
               });
             }
@@ -15234,6 +15240,8 @@ export function createMutators(
             await tx.mutate.tickets.update({
               id: devTicket.id,
               ...(defaultTicketStatusV2 !== undefined && { statusV2: defaultTicketStatusV2 }),
+              ...(defaultTicketStatusV2 !== undefined &&
+                defaultTicketStatusV2 !== devTicket.statusV2 && { statusUpdatedAt: timestamp }),
               ...(stageName !== undefined && { stageName }),
               updatedAt: timestamp,
             });
@@ -18808,6 +18816,8 @@ export function createMutators(
             ...(targetStage.defaultTicketStatusV2 && {
               statusV2: targetStage.defaultTicketStatusV2,
             }),
+            ...(targetStage.defaultTicketStatusV2 &&
+              targetStage.defaultTicketStatusV2 !== ticket.statusV2 && { statusUpdatedAt: now }),
             updatedAt: now,
             ...(finalEtaMs !== undefined && finalEtaMs !== null ? { eta: finalEtaMs } : {}),
             metadata: mergedMetadata as ReadonlyJSONValue,

@@ -400,6 +400,7 @@ export class TicketRepository {
               statusV2: newStatusV2,
               updatedBy: updatedBy,
               updatedAt: new Date(),
+              ...(statusChanged ? { statusUpdatedAt: new Date() } : {}),
             },
           });
         guardedUpdatedTicket = options.requiredActiveFlowRootId
@@ -909,6 +910,9 @@ export class TicketRepository {
         : null;
     }
     const previousStatus: TicketStatusV2 | null = prevSnapshot?.statusV2 ?? null;
+    if (fields.statusV2 !== undefined && fields.statusV2 !== previousStatus) {
+      data.statusUpdatedAt = data.updatedAt;
+    }
 
     // Same as createTicket: make sure the merchant row exists before linking to it.
     if (fields.merchantId) {
