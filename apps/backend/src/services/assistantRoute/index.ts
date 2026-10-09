@@ -53,7 +53,15 @@ const SCREEN_NONE_DESCRIPTION =
   'None: a question, small talk, or a request to write, summarize or find something, for the ' +
   'AI assistant to answer.';
 
-export type AssistantRouteMode = 'actions' | 'screen';
+// Check mode: `text` holds a request and the control about to be used; the options say whether
+// that control is what was asked, a way to it, or only looks similar.
+const CHECK_INSTRUCTIONS =
+  '`text` holds what the user asked and the control the assistant is about to use. Pick ' +
+  'whether that control is what they asked for, a way to reach it, or something else.';
+
+const CHECK_NONE_DESCRIPTION = 'None: it cannot be told from this.';
+
+export type AssistantRouteMode = 'actions' | 'screen' | 'check';
 
 // Catalog actions are shuffled against position bias; screen controls keep screen order.
 const PROMPTS: Record<
@@ -64,6 +72,11 @@ const PROMPTS: Record<
   screen: {
     instructions: SCREEN_INSTRUCTIONS,
     none: SCREEN_NONE_DESCRIPTION,
+    order: (items) => items,
+  },
+  check: {
+    instructions: CHECK_INSTRUCTIONS,
+    none: CHECK_NONE_DESCRIPTION,
     order: (items) => items,
   },
 };

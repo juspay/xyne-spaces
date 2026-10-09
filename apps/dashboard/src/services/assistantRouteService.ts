@@ -35,7 +35,7 @@ export async function routeWithJev(
   text: string,
   actions: readonly RouteAction[],
   signal: AbortSignal,
-  mode?: 'screen',
+  mode?: 'screen' | 'check',
 ): Promise<RouteResponse> {
   try {
     const response = await apiInstance.post<unknown>(
