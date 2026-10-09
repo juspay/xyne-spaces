@@ -13,6 +13,7 @@ export {
   THREAD_CONVERSATIONS_KEY,
   CALL_HISTORY_KEY,
   RECORDINGS_KEY,
+  CACHE_ENTRY_VERSION,
 } from './queryCacheMachine.js';
 
 export type {
