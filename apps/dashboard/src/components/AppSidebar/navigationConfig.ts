@@ -74,6 +74,7 @@ export interface ChatNavItem {
   to: string;
   icon: PikaIcon;
   trackName: string;
+  description?: string;
   replace?: boolean;
   requiresRadar?: boolean;
   /** disabled_toolbar_paths entry that hides this item for a workspace. */
@@ -87,6 +88,7 @@ export const CHAT_NAV_ITEMS: ChatNavItem[] = [
     to: '/chat/search?mode=dm',
     icon: ChatPlus,
     trackName: 'NEW_MESSAGE',
+    description: 'Start a direct or group message',
     replace: true,
   },
   {
@@ -95,6 +97,7 @@ export const CHAT_NAV_ITEMS: ChatNavItem[] = [
     to: '/chat/dir/threads',
     icon: Subtask,
     trackName: 'OPEN_THREADS',
+    description: 'Threads you follow and their replies',
   },
   {
     key: 'unreads',
@@ -102,6 +105,7 @@ export const CHAT_NAV_ITEMS: ChatNavItem[] = [
     to: '/chat/dir/unreads',
     icon: ChatTyping,
     trackName: 'OPEN_UNREADS',
+    description: 'Conversations with unread messages',
   },
   {
     key: 'bookmarks',
@@ -109,6 +113,7 @@ export const CHAT_NAV_ITEMS: ChatNavItem[] = [
     to: '/chat/bookmarks',
     icon: BookmarkDefault,
     trackName: 'OPEN_BOOKMARKS',
+    description: 'Messages you saved',
   },
   {
     key: 'drafts-sent',
@@ -116,6 +121,7 @@ export const CHAT_NAV_ITEMS: ChatNavItem[] = [
     to: '/chat/drafts-sent',
     icon: SendPlaneSlant,
     trackName: 'OPEN_DRAFTS_AND_SENT',
+    description: 'Messages you are writing or sent',
   },
   {
     key: 'scheduled-messages',
@@ -123,6 +129,7 @@ export const CHAT_NAV_ITEMS: ChatNavItem[] = [
     to: '/scheduled-messages',
     icon: CalendarTimer,
     trackName: 'OPEN_SCHEDULED_MESSAGES',
+    description: 'Messages set to send later',
     toolbarPath: '/scheduled-messages',
   },
   {
@@ -131,6 +138,7 @@ export const CHAT_NAV_ITEMS: ChatNavItem[] = [
     to: '/chat/dir/recap',
     icon: ListAiGenerated,
     trackName: 'OPEN_RECAP',
+    description: 'AI summary of what you missed',
   },
   {
     key: 'radar',
@@ -138,6 +146,7 @@ export const CHAT_NAV_ITEMS: ChatNavItem[] = [
     to: '/chat/dir/radar',
     icon: RadarNavIcon,
     trackName: 'OPEN_RADAR',
+    description: 'Items that need your attention',
     requiresRadar: true,
   },
 ];
@@ -161,9 +170,8 @@ export interface NavigationItem {
   path: string;
   label: string;
   /**
-   * What the page holds and other names people call it, in a few nouns ("Also called the Desk or
-   * Xyne Desk"). Shown in the admin Toolbar tab and read by screen readers and the assistant, which
-   * understands verbs and synonyms itself, so no verbs and nothing another page holds.
+   * A few nouns for what the page holds and other names for it ("Also called the Desk"); no verbs,
+   * as the assistant understands those itself.
    */
   description: string;
   icon: PikaIcon;
