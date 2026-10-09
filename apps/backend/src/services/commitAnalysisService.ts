@@ -1,6 +1,6 @@
 import { BitbucketService } from './bitbucketService';
 import { VcsClient } from '../types/vcs';
-import { TicketRepository } from '@/database/repositories/ticketRepository';
+import { findDevTicketForReleaseAnalysis } from '@/bypassAcl/ticketServices';
 import { DatabaseClient } from '@/database/client';
 import { ApplicationRepository } from '@/database/repositories/applicationRepository';
 import { logger } from '@/utils/logger';
@@ -94,7 +94,6 @@ export class CommitAnalysisService {
   // Structurally typed so a BitbucketService or GitHubService can be passed —
   // the controller picks based on board.vcsProvider.
   private bitbucketService: VcsClient;
-  private ticketRepository: TicketRepository | null = null;
   private applicationRepository: ApplicationRepository | null = null;
   private xyneRelease: XyneRelease | null = null;
   private releaseRepository: ReleaseRepository | null = null;
@@ -126,11 +125,6 @@ export class CommitAnalysisService {
       logger.error('[CommitAnalysisService] Failed to initialize repositories:', error);
     }
 
-  }
-
-  private get tickets(): TicketRepository {
-    this.ticketRepository ??= new TicketRepository();
-    return this.ticketRepository;
   }
 
 
@@ -169,7 +163,9 @@ export class CommitAnalysisService {
     prAuthor?: StubAuthor,
   ): Promise<TicketInfo | null> {
     try {
-      const ticket = await this.tickets.getTicketByXyneId(xyneId, workspaceId);
+      // Not the ACL-scoped repository read: that only returns tickets in channels the user
+      // running the analysis can see, which silently dropped private-channel tickets.
+      const ticket = await findDevTicketForReleaseAnalysis(xyneId, workspaceId);
 
       if (ticket) {
         return {
