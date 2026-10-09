@@ -2023,8 +2023,13 @@ const ChatListV4: React.FC<ChatListProps> = ({
               const prevItem =
                 virtualItem.index > 0 ? combinedMessages[virtualItem.index - 1] : null;
               const dateText = formatDatePill(item.createdAt);
+              // Deep-link target: fixed shape (no inline pill, always the sender header) so
+              // older rows loading above it can't shrink the row and jump it up.
+              const isDeepLinkTarget =
+                item.data.conversationId === deepLinkTargetRef.current?.conversationId;
               const showDatePill =
-                !prevItem || item.createdAt.toDateString() !== prevItem.createdAt.toDateString();
+                !isDeepLinkTarget &&
+                (!prevItem || item.createdAt.toDateString() !== prevItem.createdAt.toDateString());
               const shouldHideInlineDatePill =
                 showDatePill &&
                 dateText === stickyDate &&
@@ -2080,6 +2085,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
                       channelScopeType={channelScopeType}
                       handleOpenThread={handleOpenThread}
                       linkedConversationId={linkedConversationId ?? null}
+                      forceShowAvatar={isDeepLinkTarget}
                     />
                   </div>
                 </div>
