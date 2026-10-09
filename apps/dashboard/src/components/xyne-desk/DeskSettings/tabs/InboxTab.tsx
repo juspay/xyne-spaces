@@ -526,7 +526,8 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
             <div className='text-desk-label'>Duplicate detection window</div>
             <div className='text-desk-helper w-full max-w-[500px]'>
               A ticket is compared against tickets created within this window before it. The check
-              runs when a ticket is created and again when it is opened.
+              runs only when &quot;Limit duplicate detection by field&quot; is on — when a ticket is
+              created and again when it is opened.
             </div>
           </div>
           <div className='flex flex-wrap items-center gap-2'>
@@ -594,9 +595,9 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
             <div className='flex flex-col gap-[4px]'>
               <div className='text-desk-label'>Limit duplicate detection by field</div>
               <div className='text-desk-helper w-full max-w-[500px]'>
-                Restrict possible-duplicate matching to tickets sharing the selected fields. Tickets
-                without a value keep project-wide detection. Select up to{' '}
-                {MAX_DUPLICATE_SCOPE_FIELDS} fields.
+                Possible-duplicate matching runs only when this is on, and only against tickets
+                sharing the selected fields. A ticket without a value for a selected field is not
+                checked. Select up to {MAX_DUPLICATE_SCOPE_FIELDS} fields.
               </div>
             </div>
             <Switch
@@ -708,8 +709,8 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
               {hasUnresolvedScopeField && (
                 <div className='w-full max-w-[500px] text-[13px] leading-[18px] text-destructive'>
                   A selected field is not on the board ticket form for this desk, so duplicate
-                  detection falls back to project-wide here. Remove it and pick a field from the
-                  list to re-enable scoping.
+                  detection is skipped until this is fixed. Remove it and pick a field from the list
+                  to re-enable the check.
                 </div>
               )}
               {!boardId && (

@@ -46,6 +46,20 @@ const DUPLICATE_RELATIONS = [
 // "nothing similar" apart from "couldn't look".
 const SEARCH_UNAVAILABLE_ERROR = 'SEARCH_UNAVAILABLE';
 
+// Why a desk-channel check did not run. A skip is NOT an error and NOT "no duplicates":
+// the analysis carries no error marker so callers don't retry or surface a failure.
+const SKIP_REASON_NOT_CONFIGURED =
+  'Duplicate detection is off for this desk — no scope fields configured in desk settings.';
+const SKIP_REASON_MISSING_SCOPE_VALUES =
+  'Duplicate detection skipped — this ticket has no value for a configured scope field.';
+
+const skippedAnalysis = (reason: string): TicketDuplicateCheckAnalysis => ({
+  isDuplicate: false,
+  duplicateTicketId: null,
+  confidence: 0,
+  reason,
+});
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 // The recheck-on-open result is cached per ticket against a fingerprint of everything the
@@ -58,8 +72,8 @@ const RECHECK_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 /**
  * Earliest createdAt a duplicate candidate may have: the desk's duplicateLookbackDays
- * counted back from `asOf` (the ticket's creation). Undefined means no bound: no desk
- * preference, or 0/null.
+ * counted back from `asOf` (the ticket's creation). Undefined means no time bound:
+ * a non-desk ticket (no preference row applies), or the desk set 0/null = all time.
  */
 const lookbackCutoff = (
   preference: Pick<EmailChannelPreference, 'duplicateLookbackDays'> | null,
@@ -172,8 +186,9 @@ export const buildDuplicateScopeFieldValues = async (params: {
     return [...valuesByFieldId].map(([fieldId, values]) => ({ fieldId, values }));
   } catch (error) {
     // Scope expansion is best-effort: pass nothing scoped rather than risk a
-    // wrongly-built filter — detection falls back to project-wide behavior.
-    logger.warn('[TicketDuplicateService] Failed to build scope field values, falling back to project-wide detection', {
+    // wrongly-built filter — every configured field then reads missing and the
+    // caller skips detection.
+    logger.warn('[TicketDuplicateService] Failed to build scope field values, skipping duplicate detection', {
       boardId,
       error: error instanceof Error ? error.message : String(error),
     });
@@ -212,7 +227,10 @@ const isDismissal = (value: unknown): boolean => {
 };
 
 class TicketDuplicateService {
-  /** The desk's preference row, or null — a failed read means project-wide, all-time detection. */
+  /**
+   * The desk's preference row, or null. For a channel ticket a missing/failed read now
+   * means duplicate detection is skipped entirely — never silently project-wide.
+   */
   private async findChannelPreference(channelId: string | undefined): Promise<EmailChannelPreference | null> {
     if (!channelId) {
       return null;
@@ -220,7 +238,7 @@ class TicketDuplicateService {
     try {
       return await emailChannelPreferenceRepo.findByChannelId(channelId);
     } catch (error) {
-      logger.warn('[TicketDuplicateService] Failed to load channel preference, falling back to project-wide, all-time detection', {
+      logger.warn('[TicketDuplicateService] Failed to load channel preference, skipping duplicate detection', {
         channelId,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -228,6 +246,11 @@ class TicketDuplicateService {
     }
   }
 
+  /**
+   * The desk's enabled scope config, or null when detection must NOT run for its tickets:
+   * no preference, no/malformed config, disabled, no fields selected, or no board. Desk
+   * duplicate detection is opt-in — null means skip, not project-wide.
+   */
   private resolveDuplicateScopeConfig(
     channelId: string | undefined,
     preference: EmailChannelPreference | null,
@@ -268,7 +291,7 @@ class TicketDuplicateService {
       }
       return { config: parsed.data, boardId: preference.boardId };
     } catch (error) {
-      logger.warn('[TicketDuplicateService] Failed to read duplicateScopeConfig, falling back to project-wide detection', {
+      logger.warn('[TicketDuplicateService] Failed to read duplicateScopeConfig, skipping duplicate detection', {
         channelId,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -277,37 +300,33 @@ class TicketDuplicateService {
   }
 
   /**
-   * Turn the channel config + the caller-supplied raw scope values into Vespa
-   * `fieldId::value` tokens, one per configured global field. YqlBuilder's
+   * Turn the resolved channel scope config + the caller-supplied raw scope values into
+   * Vespa `fieldId::value` tokens, one per configured global field. YqlBuilder's
    * dynamicFieldValues ANDs across distinct fieldIds, which is exactly the
    * "candidate must match every scope field" semantic this feature wants.
    *
    * Returns:
-   *  - null      → no scoping applies (project-wide candidates). This is also the
-   *                FALLBACK when the config is enabled but the new ticket lacks a
-   *                configured value — a missing value must never silently drop
-   *                detection.
+   *  - null      → the ticket lacks a value for a configured scope field (or the board
+   *                form could not be read). The caller SKIPS detection on null — a
+   *                missing value now drops the check rather than widening it to
+   *                project-wide.
    *  - string[]  → tokens to pass as ticket.dynamicFieldValues
    */
   private async buildScopeDynamicFieldValues(input: {
+    scope: { config: DuplicateScopeConfig; boardId: string };
     channelId?: string;
-    preference: EmailChannelPreference | null;
     projectId: string;
     scopeFieldValues?: DuplicateScopeFieldValue[];
     excludeTicketId?: string;
   }): Promise<string[] | null> {
-    const { channelId, preference, projectId, scopeFieldValues, excludeTicketId } = input;
-    const scope = this.resolveDuplicateScopeConfig(channelId, preference);
-    if (!scope) {
-      return null;
-    }
+    const { scope, channelId, projectId, scopeFieldValues, excludeTicketId } = input;
     const { config: scopeConfig, boardId } = scope;
 
     // providedScopeFieldIds separates "the ticket carried no value for this key" from
     // "this key is not on the board's form at all" — same log line, different fixes.
-    const logProjectWideFallback = (missingScopeFieldIds: string[]): void => {
+    const logDetectionSkipped = (missingScopeFieldIds: string[]): void => {
       logger.info(
-        '[TicketDuplicateService] Channel scope fields missing on new ticket, using project-wide duplicate search',
+        '[TicketDuplicateService] Channel scope fields missing on new ticket, skipping duplicate detection',
         {
           ticketId: excludeTicketId,
           channelId,
@@ -320,7 +339,7 @@ class TicketDuplicateService {
     };
 
     if (!scopeFieldValues || scopeFieldValues.length === 0) {
-      logProjectWideFallback(scopeConfig.scopeFieldGlobalIds);
+      logDetectionSkipped(scopeConfig.scopeFieldGlobalIds);
       return null;
     }
 
@@ -336,7 +355,7 @@ class TicketDuplicateService {
 
     const missing = scopeConfig.scopeFieldGlobalIds.filter(id => !valuesByFieldId.has(id));
     if (missing.length > 0) {
-      logProjectWideFallback(missing);
+      logDetectionSkipped(missing);
       return null;
     }
 
@@ -352,10 +371,10 @@ class TicketDuplicateService {
    * Re-run duplicate detection after AI classification has written form fields.
    *
    * Detection normally runs once, at ticket creation. For an email-created ticket that
-   * means no custom-field values exist yet, so a scoped channel falls back to a
-   * project-wide search. Classification is the only path where a machine writes to the
-   * ticket afterwards, so if it fills a configured scope key, a scoped pass can now find
-   * what the creation-time run could not.
+   * means no custom-field values exist yet, so on a scoped channel the creation-time run
+   * is SKIPPED (a missing scope value never widens to project-wide). Classification is
+   * the only path where a machine writes to the ticket afterwards, so if it fills a
+   * configured scope key, the run below is the first one able to find anything.
    *
    * APPEND-ONLY: the creation-time result stands. createMany(skipDuplicates) plus the
    * unique (source, target, relationType) constraint means re-running can add rows but
@@ -441,6 +460,18 @@ class TicketDuplicateService {
     const preference = loadedPreference !== undefined
       ? loadedPreference
       : await this.findChannelPreference(ticket.channelId);
+
+    // Unconfigured desk: skip the whole check — no form-value/exclusion reads, no
+    // Vespa search, no LLM call. Non-desk tickets (no channel) fall through to the
+    // legacy project-wide run below.
+    if (ticket.channelId && !this.resolveDuplicateScopeConfig(ticket.channelId, preference)) {
+      return {
+        analysis: skippedAnalysis(SKIP_REASON_NOT_CONFIGURED),
+        candidateCount: 0,
+        linkedTicketId: null,
+      };
+    }
+
     const [savedValues, parentMappings, duplicateReferences, referenceActivities] = await Promise.all([
       prisma.formEntityValues.findMany({
         where: { entityId: ticket.id, entityType: 'TICKET' },
@@ -587,13 +618,29 @@ class TicketDuplicateService {
     const preference = params.preference !== undefined
       ? params.preference
       : await this.findChannelPreference(channelId);
-    const scopeDynamicFieldValues = await this.buildScopeDynamicFieldValues({
-      channelId,
-      preference,
-      projectId,
-      scopeFieldValues,
-      excludeTicketId,
-    });
+
+    // Desk duplicate detection is opt-in: a channel ticket is checked only when the desk
+    // enabled scope fields AND the ticket carries a value for each of them. Anything
+    // short of that SKIPS the check — the old project-wide fallback is gone. A ticket
+    // with no channel at all (non-desk) keeps the legacy project-wide check.
+    let scopeDynamicFieldValues: string[] | undefined;
+    if (channelId) {
+      const scope = this.resolveDuplicateScopeConfig(channelId, preference);
+      if (!scope) {
+        return { candidates: [], analysis: skippedAnalysis(SKIP_REASON_NOT_CONFIGURED) };
+      }
+      const scopeTokens = await this.buildScopeDynamicFieldValues({
+        scope,
+        channelId,
+        projectId,
+        scopeFieldValues,
+        excludeTicketId,
+      });
+      if (!scopeTokens) {
+        return { candidates: [], analysis: skippedAnalysis(SKIP_REASON_MISSING_SCOPE_VALUES) };
+      }
+      scopeDynamicFieldValues = scopeTokens;
+    }
 
     const { candidates, searchFailed } = await this.getDuplicateCandidates({
       title,
@@ -604,7 +651,7 @@ class TicketDuplicateService {
       excludeTicketId,
       parentTicketId,
       excludeTicketIds,
-      dynamicFieldValues: scopeDynamicFieldValues ?? undefined,
+      dynamicFieldValues: scopeDynamicFieldValues,
       createdAfterTimestamp: lookbackCutoff(preference, asOfTimestamp ?? Date.now()),
       createdBeforeTimestamp: asOfTimestamp,
     });
