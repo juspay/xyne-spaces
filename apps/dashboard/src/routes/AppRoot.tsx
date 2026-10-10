@@ -23,6 +23,7 @@ import ChatScreen from './ChatScreen/ChatScreen';
 import ThreadMessages from '../components/Chat/ThreadPannel';
 import TicketView from '../components/Tickets/TicketView/TicketView';
 import { BrowserTabsScreen } from './BrowserTabsScreen';
+import { BrowserPageLayer } from './BrowserTabsScreen/BrowserPageLayer';
 import { getLastActiveWorkspaceId } from '../machines/authMachine';
 import AgentsScreen from './AgentsScreen/AgentScreen';
 // ClawSettingsScreen and ClawMetricsScreen are also mounted at /ai/settings and
@@ -985,6 +986,9 @@ const AppRoot = (): ReactElement => {
                           <CallFromRecentsHandler />
                           <CloudAgentFloatingHost />
                           <BrowserPanelHandler />
+                          {/* The browser's pages: here, where they never move, so
+                              docking or undocking the browser doesn't reload them. */}
+                          <BrowserPageLayer />
                           <GlobalCommandMenu aiOverview ticketScreenScope />
                           <ShortcutsHelpModal
                             isOpen={isShortcutsModalOpen}

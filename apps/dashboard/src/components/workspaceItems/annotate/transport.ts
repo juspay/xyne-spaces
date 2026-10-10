@@ -6,6 +6,34 @@ export interface PickedBlock {
   rect: { top: number; left: number; width: number; height: number };
 }
 
+/**
+ * A block's place as the page measured it, in the app's own pixels. A zoomed page
+ * measures in its own, scaled units — at 125% one of its pixels is 1.25 of the
+ * app's — so the box or thread drawn beside the block would otherwise land short of
+ * it, towards the top left.
+ */
+export function rectOnScreen(rect: PickedBlock['rect'], zoom: number): PickedBlock['rect'] {
+  if (!Number.isFinite(zoom) || zoom <= 0 || zoom === 1) return rect;
+  return {
+    top: rect.top * zoom,
+    left: rect.left * zoom,
+    width: rect.width * zoom,
+    height: rect.height * zoom,
+  };
+}
+
+/** A page's own measurement of a block, taken only as numbers. */
+export function measuredRect(value: unknown): PickedBlock['rect'] | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const { top, left, width, height } = value as Record<string, unknown>;
+  return typeof top === 'number' &&
+    typeof left === 'number' &&
+    typeof width === 'number' &&
+    typeof height === 'number'
+    ? { top, left, width, height }
+    : null;
+}
+
 export interface CommentMark {
   id: string;
   selector: string;

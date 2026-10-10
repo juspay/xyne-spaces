@@ -139,7 +139,7 @@ export function useFindBar(finder: FindProvider | null): {
             aria-label={action.title}
             disabled={found.count === 0}
             onClick={() => step(action.by)}
-            className='flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.08] hover:text-foreground disabled:pointer-events-none disabled:opacity-40'
+            className='outline-none flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.08] focus-visible:bg-foreground/[0.08] hover:text-foreground focus-visible:text-foreground disabled:pointer-events-none disabled:opacity-40'
             data-track-category='FilePreview'
             data-track-name={action.track}
           >
@@ -151,7 +151,7 @@ export function useFindBar(finder: FindProvider | null): {
           title='Close (Esc)'
           aria-label='Close find'
           onClick={close}
-          className='flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.08] hover:text-foreground'
+          className='outline-none flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.08] focus-visible:bg-foreground/[0.08] hover:text-foreground focus-visible:text-foreground'
           data-track-category='FilePreview'
           data-track-name='PreviewFindClosed'
         >

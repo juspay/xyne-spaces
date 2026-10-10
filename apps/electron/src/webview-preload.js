@@ -7,12 +7,15 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 
-// Expose safe API to the webview's window object
-contextBridge.exposeInMainWorld('electronAPI', {
-  sendToHost: (channel, data) => {
-    ipcRenderer.sendToHost(channel, data);
-  }
-});
+// Xyne's own pages, opened in the browser panel, learn they are there by finding
+// `electronAPI.sendToHost` (the dashboard's useIsInPanelWebview). It is only that
+// sign: it passes nothing on. A third-party site gets no electronAPI at all — it
+// could otherwise tell it is inside Xyne, and put words in Ask AI's mouth.
+if (process.argv.includes('--xyne-own-page')) {
+  contextBridge.exposeInMainWorld('electronAPI', {
+    sendToHost: () => undefined,
+  });
+}
 
 // Wait for DOM to be ready
 document.addEventListener('DOMContentLoaded', () => {
@@ -88,7 +91,11 @@ function initializeAskAI() {
     button.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      
+
+      // Only a person's click: the page's own scripts can reach this button, and
+      // must not be able to press it.
+      if (!e.isTrusted) return;
+
       if (currentSelection) {
         const selectedText = currentSelection.text;
         const url = window.location.href;

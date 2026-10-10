@@ -3,7 +3,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { isElectronApp } from '../../../utils/electronApp';
 import { executeAppTool, isAppControlTool, registerAppControlHost } from './appControlTools';
 import { runSurfacePageCall } from './surfacePageCalls';
-import { startPagePanelPoller } from './pagePanelPoller';
+import { startPagePanelCalls } from './pagePanelCalls';
 
 export function useWorkspacePageTools(): void {
   const navigate = useNavigate();
@@ -21,10 +21,9 @@ export function useWorkspacePageTools(): void {
     return () => registerAppControlHost(null);
   }, [navigate, location.pathname, workspaceId]);
 
-  useEffect(() => {
-    if (!isElectronApp()) return undefined;
-    return startPagePanelPoller();
-  }, []);
+  // On the web too: the stream says when artifacts change; page calls come only to
+  // a window with pages, which the desktop app alone has.
+  useEffect(() => startPagePanelCalls(), []);
 
   useEffect(() => {
     if (!isElectronApp() || window.parent !== window) return undefined;

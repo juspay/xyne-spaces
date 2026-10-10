@@ -3,6 +3,7 @@ import type { ConversationArtifact } from "@prisma/client";
 import { prisma } from "../db.js";
 import { orgIdForSpacesUser } from "./users-jit.js";
 import { createLogger } from "../logger.js";
+import { signalArtifacts } from "./panel-signals.js";
 
 const log = createLogger("conversation-artifacts");
 
@@ -177,7 +178,7 @@ export async function recordConversationArtifact(
     orgId,
   });
 
-  return prisma.conversationArtifact.upsert({
+  const recorded = await prisma.conversationArtifact.upsert({
     where: {
       conversationId_kind_refId: { conversationId, kind: input.kind, refId },
     },
@@ -200,6 +201,9 @@ export async function recordConversationArtifact(
       status: "ACTIVE",
     },
   });
+  // A Xyne AI screen showing this conversation fetches its artifacts afresh.
+  signalArtifacts(conversationId);
+  return recorded;
 }
 
 /** Point an existing artifact row at a new version ref without touching its
@@ -221,6 +225,7 @@ export async function setArtifactVersionRef(args: {
       ...(args.messageId ? { messageId: args.messageId } : {}),
     },
   });
+  if (result.count > 0) signalArtifacts(args.conversationId);
   return result.count;
 }
 

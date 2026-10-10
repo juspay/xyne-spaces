@@ -10,12 +10,12 @@
  * Main sends the originating webview's id alongside the url; anything listed
  * here claims its own popups.
  */
-const handlers = new Map<number, (url: string) => void>();
+/** A webview's own popups: where to, and whether to open behind (a ⌘-click). */
+type PopupHandler = (url: string, background: boolean) => void;
 
-export function registerEmbeddedWebview(
-  webContentsId: number,
-  onPopup: (url: string) => void,
-): () => void {
+const handlers = new Map<number, PopupHandler>();
+
+export function registerEmbeddedWebview(webContentsId: number, onPopup: PopupHandler): () => void {
   handlers.set(webContentsId, onPopup);
   return () => {
     if (handlers.get(webContentsId) === onPopup) handlers.delete(webContentsId);
@@ -23,10 +23,14 @@ export function registerEmbeddedWebview(
 }
 
 /** True when the url was claimed, and the browser panel should stay out of it. */
-export function routePopupToEmbeddedWebview(url: string, webContentsId?: number): boolean {
+export function routePopupToEmbeddedWebview(
+  url: string,
+  webContentsId?: number,
+  disposition?: string,
+): boolean {
   if (webContentsId === undefined) return false;
   const handler = handlers.get(webContentsId);
   if (!handler) return false;
-  handler(url);
+  handler(url, disposition === 'background-tab');
   return true;
 }

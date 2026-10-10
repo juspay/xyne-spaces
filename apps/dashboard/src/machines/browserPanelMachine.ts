@@ -1,4 +1,5 @@
 import { setup, createActor, assign } from 'xstate';
+import { arrayMove } from '@dnd-kit/sortable';
 import { RefObject } from 'react';
 import { BrowserSettings, defaultBrowserSettings } from '../types/browserSettings';
 
@@ -6,12 +7,15 @@ export type BrowserPanelState = 'closed' | 'open';
 
 export interface BrowserTab {
   id: string;
+  /** Where the tab is; empty while it shows a new tab's start page. */
   url: string;
   title: string;
   favicon?: string | undefined;
   canGoBack: boolean;
   canGoForward: boolean;
   isLoading: boolean;
+  /** Silenced from its tab's speaker. */
+  muted?: boolean;
 }
 
 export interface BrowserPanelContext {
@@ -19,6 +23,8 @@ export interface BrowserPanelContext {
   pendingUrls: string[];
   tabs: BrowserTab[];
   activeTabId: string | null;
+  /** Tabs closed lately, the last closed last, and where each was: for ⌘⇧T. */
+  closedTabs: Array<{ tab: BrowserTab; index: number }>;
   browserSettings: BrowserSettings;
   // Scroll position per channel — populated when ChatListV3 unmounts due to /browser navigation.
   // One-shot: consumed and cleared on the next mount of the same channel.
@@ -29,7 +35,14 @@ export type BrowserPanelEvent =
   | { type: 'OPEN'; urls?: string[] }
   | { type: 'CLOSE' }
   | { type: 'OPEN_URLS'; urls: string[] }
-  | { type: 'ADD_TAB'; tab: BrowserTab }
+  /** A tab at the end, or just after `after`; opened unless `background`. */
+  | { type: 'ADD_TAB'; tab: BrowserTab; after?: string; background?: boolean }
+  /** A tab dragged onto another's place. */
+  | { type: 'MOVE_TAB'; from: string; to: string }
+  /** The tab closed last, back where it was. */
+  | { type: 'REOPEN_TAB' }
+  /** Tabs kept from before a reload or a restart, ahead of any opened since. */
+  | { type: 'RESTORE_TABS'; tabs: BrowserTab[]; activeTabId: string | null }
   | { type: 'CLOSE_TAB'; tabId: string }
   | { type: 'SWITCH_TAB'; tabId: string }
   | { type: 'UPDATE_TAB'; tabId: string; patch: Partial<BrowserTab> }
@@ -54,6 +67,9 @@ export let globalBrowserPanelRefs: PanelRefs = {
 export const setBrowserPanelRefs = (panelRefs: PanelRefs): void => {
   globalBrowserPanelRefs = panelRefs;
 };
+
+/** How many closed tabs ⌘⇧T can bring back. */
+const MAX_CLOSED_TABS = 25;
 
 export const browserPanelMachine = setup({
   types: {
@@ -88,11 +104,34 @@ export const browserPanelMachine = setup({
         if (event.type !== 'ADD_TAB') return context.tabs;
         const exists = context.tabs.find(t => t.id === event.tab.id);
         if (exists) return context.tabs;
-        return [...context.tabs, event.tab];
+        const at = event.after ? context.tabs.findIndex(t => t.id === event.after) : -1;
+        return at < 0
+          ? [...context.tabs, event.tab]
+          : [...context.tabs.slice(0, at + 1), event.tab, ...context.tabs.slice(at + 1)];
       },
       activeTabId: ({ context, event }) => {
         if (event.type !== 'ADD_TAB') return context.activeTabId;
-        return event.tab.id;
+        return event.background && context.activeTabId ? context.activeTabId : event.tab.id;
+      },
+    }),
+    moveTab: assign({
+      tabs: ({ context, event }) => {
+        if (event.type !== 'MOVE_TAB') return context.tabs;
+        const from = context.tabs.findIndex(t => t.id === event.from);
+        const to = context.tabs.findIndex(t => t.id === event.to);
+        return from < 0 || to < 0 ? context.tabs : arrayMove(context.tabs, from, to);
+      },
+    }),
+    restoreTabs: assign({
+      tabs: ({ context, event }) => {
+        if (event.type !== 'RESTORE_TABS') return context.tabs;
+        const opened = context.tabs.filter(t => !event.tabs.some(kept => kept.id === t.id));
+        return [...event.tabs, ...opened];
+      },
+      activeTabId: ({ context, event }) => {
+        if (event.type !== 'RESTORE_TABS') return context.activeTabId;
+        // A tab opened since — a link followed before the kept ones arrived — stays open.
+        return context.activeTabId ?? event.activeTabId ?? event.tabs[0]?.id ?? null;
       },
     }),
     closeTab: assign({
@@ -100,12 +139,33 @@ export const browserPanelMachine = setup({
         if (event.type !== 'CLOSE_TAB') return context.tabs;
         return context.tabs.filter(t => t.id !== event.tabId);
       },
+      closedTabs: ({ context, event }) => {
+        if (event.type !== 'CLOSE_TAB') return context.closedTabs;
+        const index = context.tabs.findIndex(t => t.id === event.tabId);
+        const tab = context.tabs[index];
+        // A new tab that never went anywhere isn't worth bringing back.
+        if (!tab || !tab.url) return context.closedTabs;
+        return [...context.closedTabs, { tab, index }].slice(-MAX_CLOSED_TABS);
+      },
       activeTabId: ({ context, event }) => {
         if (event.type !== 'CLOSE_TAB') return context.activeTabId;
         if (context.activeTabId !== event.tabId) return context.activeTabId;
+        // The one that takes its place, else the one before it, as in a browser.
+        const index = context.tabs.findIndex(t => t.id === event.tabId);
         const remaining = context.tabs.filter(t => t.id !== event.tabId);
-        return remaining[remaining.length - 1]?.id ?? null;
+        return remaining[index]?.id ?? remaining[index - 1]?.id ?? null;
       },
+    }),
+    reopenTab: assign(({ context }) => {
+      const last = context.closedTabs[context.closedTabs.length - 1];
+      if (!last) return {};
+      const tab = { ...last.tab, isLoading: false, canGoBack: false, canGoForward: false };
+      const at = Math.min(last.index, context.tabs.length);
+      return {
+        tabs: [...context.tabs.slice(0, at), tab, ...context.tabs.slice(at)],
+        activeTabId: tab.id,
+        closedTabs: context.closedTabs.slice(0, -1),
+      };
     }),
     switchTab: assign({
       activeTabId: ({ event }) => {
@@ -148,6 +208,7 @@ export const browserPanelMachine = setup({
     pendingUrls: [],
     tabs: [] as BrowserTab[],
     activeTabId: null as string | null,
+    closedTabs: [],
     browserSettings: defaultBrowserSettings,
     channelScrollPositions: new Map<string, string>(),
   }),
@@ -165,6 +226,15 @@ export const browserPanelMachine = setup({
         },
         ADD_TAB: {
           actions: 'addTab',
+        },
+        MOVE_TAB: {
+          actions: 'moveTab',
+        },
+        RESTORE_TABS: {
+          actions: 'restoreTabs',
+        },
+        REOPEN_TAB: {
+          actions: 'reopenTab',
         },
         CLOSE_TAB: {
           actions: 'closeTab',
@@ -197,6 +267,15 @@ export const browserPanelMachine = setup({
         },
         ADD_TAB: {
           actions: 'addTab',
+        },
+        MOVE_TAB: {
+          actions: 'moveTab',
+        },
+        RESTORE_TABS: {
+          actions: 'restoreTabs',
+        },
+        REOPEN_TAB: {
+          actions: 'reopenTab',
         },
         CLOSE_TAB: {
           actions: 'closeTab',

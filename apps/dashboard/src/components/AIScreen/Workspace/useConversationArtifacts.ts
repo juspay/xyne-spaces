@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { xyneAIStreamManager } from '../../../services/XyneAI/XyneAIStreamManager';
 import {
@@ -9,8 +9,7 @@ import {
   type ConversationArtifact,
   type ConversationArtifactPatch,
 } from '../../../services/XyneAI/XyneAIArtifactsService';
-
-const STREAMING_POLL_MS = 6000;
+import { subscribeToArtifactChanges } from './pagePanelCalls';
 
 function useConversationStreaming(conversationId: string | null): boolean {
   const [streaming, setStreaming] = useState(false);
@@ -31,6 +30,25 @@ function useConversationStreaming(conversationId: string | null): boolean {
   return streaming;
 }
 
+/** Conversations whose list is to be fetched afresh this tick. */
+const refreshing = new Set<string>();
+
+/**
+ * Fetches a conversation's artifacts afresh, once for every screen part showing
+ * them that heard the same news in the same tick. A fetch already running is
+ * replaced, not joined: it may have started before the change it is told of.
+ */
+function refreshSoon(queryClient: QueryClient, conversationId: string): void {
+  if (refreshing.has(conversationId)) return;
+  refreshing.add(conversationId);
+  queueMicrotask(() => {
+    refreshing.delete(conversationId);
+    void queryClient.invalidateQueries({
+      queryKey: conversationArtifactsQueryKey(conversationId),
+    });
+  });
+}
+
 export interface ConversationArtifactsResult {
   artifacts: ConversationArtifact[];
   isLoading: boolean;
@@ -49,8 +67,17 @@ export function useConversationArtifacts(
     queryFn: () => listConversationArtifacts(conversationId as string),
     enabled: Boolean(conversationId),
     staleTime: 15_000,
-    refetchInterval: streaming ? STREAMING_POLL_MS : false,
   });
+
+  // Fetched afresh when the server says the conversation's artifacts changed, and
+  // once more when a run ends.
+  useEffect(() => {
+    if (!conversationId) return undefined;
+    return subscribeToArtifactChanges(changed => {
+      if (changed !== null && changed !== conversationId) return;
+      refreshSoon(queryClient, conversationId);
+    });
+  }, [conversationId, queryClient]);
 
   const wasStreaming = useRef(streaming);
   useEffect(() => {

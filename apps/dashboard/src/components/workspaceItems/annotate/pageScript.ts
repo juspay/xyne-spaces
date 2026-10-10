@@ -1,3 +1,22 @@
+/**
+ * What starts a console line the annotator says from a page with no parent to post
+ * to — a webview, or a page the host holds — for the app to hear as it happens.
+ */
+export const ANNOTATE_SIGNAL = 'xyne-annotate:';
+
+/** An annotator event said on a page's console; null for any other line. */
+export function annotateEventFrom(line: string | undefined): Record<string, unknown> | null {
+  if (!line?.startsWith(ANNOTATE_SIGNAL)) return null;
+  try {
+    const value: unknown = JSON.parse(line.slice(ANNOTATE_SIGNAL.length));
+    return typeof value === 'object' && value !== null && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 const BODY = `(() => {
   const state = { on: false, marks: [], held: null };
   const box = document.createElement('div');
@@ -9,13 +28,28 @@ const BODY = `(() => {
   document.documentElement.appendChild(style);
 
   // An iframe can talk to its parent directly. A webview or a host-held page
-  // has no such parent, so events queue here and the host drains them.
-  window.__xyneAnnotateQueue = window.__xyneAnnotateQueue || [];
+  // has no such parent: it says each event on its console, which the app hears
+  // as it happens. Said through a blank frame's console, which a site that
+  // silences its own can't reach.
   const framed = window.parent && window.parent !== window;
+  const say = (() => {
+    if (framed) return null;
+    try {
+      const quiet = document.createElement('iframe');
+      quiet.style.display = 'none';
+      quiet.setAttribute('aria-hidden', 'true');
+      document.documentElement.appendChild(quiet);
+      const own = quiet.contentWindow && quiet.contentWindow.console;
+      if (own && typeof own.debug === 'function') return own.debug.bind(own);
+    } catch (e) {
+      /* the page's own console, then */
+    }
+    return console.debug.bind(console);
+  })();
   const send = message => {
     const payload = Object.assign({ channel: 'xyne-doc' }, message);
     if (framed) parent.postMessage(payload, '*');
-    else window.__xyneAnnotateQueue.push(payload);
+    else say(${JSON.stringify(ANNOTATE_SIGNAL)} + JSON.stringify(payload));
   };
   window.__xyneAnnotateApply = data => {
     window.dispatchEvent(new MessageEvent('message', { data }));

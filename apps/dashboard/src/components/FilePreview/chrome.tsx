@@ -13,6 +13,8 @@ import type { PreviewSkeleton } from './types';
  */
 interface PreviewFrameContext {
   controls: HTMLElement | null;
+  /** The toolbar's far end, after the download: a control that shows or hides a panel. */
+  trailing: HTMLElement | null;
   meta: HTMLElement | null;
   download: () => void;
   setFinder: (finder: FindProvider | null) => void;
@@ -23,6 +25,7 @@ interface PreviewFrameContext {
 
 export const PreviewFrame = createContext<PreviewFrameContext>({
   controls: null,
+  trailing: null,
   meta: null,
   download: () => undefined,
   setFinder: () => undefined,
@@ -44,10 +47,18 @@ export function usePreviewFind(finder: FindProvider | null): void {
   }, [finder, setFinder]);
 }
 
-/** The previewer's own controls, on the frame's toolbar: a view switch, zoom, wrap. */
-export function PreviewControls(props: { children: ReactNode }): ReactElement | null {
-  const { controls } = useContext(PreviewFrame);
-  return controls ? createPortal(props.children, controls) : null;
+/**
+ * The previewer's own controls, on the frame's toolbar: a view switch, zoom, wrap —
+ * or, `atEnd`, after the find and the download, at the toolbar's far end: where a
+ * button showing or hiding a panel goes.
+ */
+export function PreviewControls(props: {
+  children: ReactNode;
+  atEnd?: boolean;
+}): ReactElement | null {
+  const { controls, trailing } = useContext(PreviewFrame);
+  const slot = props.atEnd ? trailing : controls;
+  return slot ? createPortal(props.children, slot) : null;
 }
 
 /** A fact about the file beside its type and size: "1,204 rows", "1920 × 1080". */
@@ -84,10 +95,10 @@ export function PreviewButton(props: {
       disabled={props.disabled}
       onClick={props.onClick}
       className={cn(
-        'flex size-7 shrink-0 items-center justify-center rounded-md transition-colors disabled:pointer-events-none disabled:opacity-40',
+        'outline-none flex size-7 shrink-0 items-center justify-center rounded-md transition-colors disabled:pointer-events-none disabled:opacity-40',
         props.pressed
           ? 'bg-muted text-foreground'
-          : 'text-muted-foreground hover:bg-foreground/[0.08] hover:text-foreground',
+          : 'text-muted-foreground hover:bg-foreground/[0.08] focus-visible:bg-foreground/[0.08] hover:text-foreground focus-visible:text-foreground',
       )}
       data-track-category='FilePreview'
       data-track-name={props.trackName}
@@ -118,10 +129,10 @@ export function PreviewSegmented<T extends string>(props: {
           aria-checked={props.value === option.value}
           onClick={() => props.onChange(option.value)}
           className={cn(
-            'h-6 rounded-[5px] px-2.5 text-xs font-medium transition-colors',
+            'outline-none h-6 rounded-[5px] px-2.5 text-xs font-medium transition-colors',
             props.value === option.value
               ? 'bg-background text-foreground shadow-sm'
-              : 'text-muted-foreground hover:text-foreground',
+              : 'text-muted-foreground hover:text-foreground focus-visible:text-foreground',
           )}
           data-track-category='FilePreview'
           data-track-name='PreviewViewChanged'
@@ -158,10 +169,10 @@ export function PreviewMessage(props: {
             type='button'
             onClick={action.onClick}
             className={cn(
-              'flex h-8 items-center rounded-lg px-3.5 text-[13px] font-medium transition-colors',
+              'outline-none flex h-8 items-center rounded-lg px-3.5 text-[13px] font-medium transition-colors',
               action.primary
-                ? 'bg-foreground text-background hover:opacity-90'
-                : 'border border-border text-foreground hover:bg-muted',
+                ? 'bg-foreground text-background hover:opacity-90 focus-visible:opacity-90'
+                : 'border border-border text-foreground hover:bg-muted focus-visible:bg-muted',
             )}
             data-track-category='FilePreview'
             data-track-name={action.trackName}

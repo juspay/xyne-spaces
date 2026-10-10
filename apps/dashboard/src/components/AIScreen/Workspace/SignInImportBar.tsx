@@ -1,5 +1,6 @@
-import { useEffect, useState, type ReactElement } from 'react';
-import { isElectronApp } from '../../../utils/electronApp';
+import { useEffect, useRef, useState, type ReactElement } from 'react';
+import { useUserPreference } from '../../../machines/userPreferencesMachine';
+import { listImportBrowsers } from '../../../utils/browserSessions';
 
 const AUTH_HOST_PATTERNS = [
   /^accounts\.google\.com$/,
@@ -27,55 +28,49 @@ export function looksLikeSignIn(url: string): boolean {
   return AUTH_PATH_PATTERNS.some(pattern => pattern.test(parsed.pathname));
 }
 
+/**
+ * Offered on a sign-in page: the reader's own browsers may already be signed in
+ * there. Which browser to bring sign-ins from is chosen in Preferences → Browser,
+ * where every one on this computer is listed.
+ */
 export function SignInImportBar({ onImported }: { onImported: () => void }): ReactElement | null {
   const [available, setAvailable] = useState(false);
-  const [state, setState] = useState<'idle' | 'running' | 'done' | 'failed'>('idle');
   const [dismissed, setDismissed] = useState(false);
 
   useEffect(() => {
-    if (!isElectronApp() || !window.electronAPI?.browserImportAvailable) return;
-    void window.electronAPI
-      .browserImportAvailable()
-      .then(res => setAvailable(Boolean(res?.available)))
-      .catch(() => setAvailable(false));
+    void listImportBrowsers().then(found => setAvailable(found.browsers.length > 0));
   }, []);
 
-  if (!available || dismissed) return null;
+  // An import made from Preferences while this page waits: it can load signed in now.
+  const imports = useUserPreference('browserImports');
+  const seenRef = useRef(imports);
+  const onImportedRef = useRef(onImported);
+  onImportedRef.current = onImported;
+  useEffect(() => {
+    if (imports === seenRef.current) return;
+    seenRef.current = imports;
+    if (Object.keys(imports).length > 0) onImportedRef.current();
+  }, [imports]);
 
-  const runImport = async (): Promise<void> => {
-    if (!window.electronAPI?.importChromeCookies) return;
-    setState('running');
-    try {
-      const res = await window.electronAPI.importChromeCookies();
-      if (res?.success) {
-        setState('done');
-        onImported();
-      } else {
-        setState('failed');
-      }
-    } catch {
-      setState('failed');
-    }
-  };
+  if (!available || dismissed) return null;
 
   return (
     <div className='flex items-center gap-3 border-b border-border bg-secondary/40 px-3 py-2 text-xs text-foreground'>
       <span className='min-w-0 flex-1 truncate'>
-        {state === 'failed'
-          ? 'Could not import from Chrome. Sign in here instead.'
-          : 'Signed out here. Bring your Chrome sign-ins into this browser?'}
+        Signed out here. Bring your sign-ins from another browser?
       </span>
       <button
         type='button'
-        onClick={() => {
-          void runImport();
-        }}
-        disabled={state === 'running'}
-        className='flex-shrink-0 rounded-md bg-primary px-2.5 py-1 font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60'
+        onClick={() =>
+          window.dispatchEvent(
+            new CustomEvent('xyne-open-preferences', { detail: { section: 'browser' } }),
+          )
+        }
+        className='flex-shrink-0 rounded-md bg-primary px-2.5 py-1 font-medium text-primary-foreground transition-opacity hover:opacity-90'
         data-track-category='AskAI'
         data-track-name='workspace-import-chrome-sessions'
       >
-        {state === 'running' ? 'Importing…' : 'Import from Chrome'}
+        Import sign-ins…
       </button>
       <button
         type='button'
