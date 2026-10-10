@@ -20,9 +20,14 @@
  *
  * The card stays mounted until the call is actually connected: both call hooks
  * keep their "disconnect, then start" step in a ref, so unmounting on click
- * would drop a pending switch on the floor.
+ * would drop a pending switch on the floor. If the attempt fails — the room
+ * machine's `failed` state falls straight back to `idle` with no UI of its own —
+ * or nothing happens within START_TIMEOUT_MS, the button resets and a toast
+ * says so, leaving the card as the retry point.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSelector } from '@xstate/react';
+import { toast } from 'sonner';
 import { CalendarDefault, PhoneDefault, SparkleAi01 } from '@xyne/icons';
 import { X } from 'lucide-react';
 import { Button } from '../../ui/Button';
@@ -37,6 +42,8 @@ import { useCallConfirmation } from '../../../hooks/useCallConfirmation';
 import { useCallJoinOrInitiate } from '../../../hooks/useCallJoinOrInitiate';
 import { useChannel } from '../../../hooks/useChannels';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
+import { roomActor } from '../../../machines/roomMachine';
+import { isSdlcSurface } from '../../../config';
 import { useUsersById } from '../../../hooks/useUsers';
 import { queries } from '../../../zero/queries';
 import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
@@ -56,6 +63,12 @@ interface IntentCallSuggestionCardProps {
 const NAMED_PARTICIPANTS = 3;
 
 const TRACK_CATEGORY = 'INTENT_SUGGESTION';
+
+/**
+ * How long "Starting…" may sit before giving up. Generous: a switch has to
+ * disconnect the old call first. Covers a pending action that never fires.
+ */
+const START_TIMEOUT_MS = 20_000;
 
 export const IntentCallSuggestionCard: React.FC<IntentCallSuggestionCardProps> = ({
   detection,
@@ -163,23 +176,58 @@ export const IntentCallSuggestionCard: React.FC<IntentCallSuggestionCardProps> =
     [intentKey, detection.surface, shownAt],
   );
 
-  // Set when the call has been asked for; the effect below removes the card once
-  // the room machine reports a live call that began after that point.
+  // Set when the call has been asked for. From then on the room machine is
+  // watched: idle → (initiating/joining/connecting) → connected dismisses the
+  // card; an attempt that drops back to idle before connecting is a failure.
   const [starting, setStarting] = useState(false);
+  const isConnected = useSelector(roomActor, state => state.matches('connected'));
   const sawIdleSinceStart = useRef(false);
+  const sawAttempt = useRef(false);
+
+  const resetStart = useCallback((message: string): void => {
+    setStarting(false);
+    sawIdleSinceStart.current = false;
+    sawAttempt.current = false;
+    toast.error(message);
+  }, []);
+
   useEffect(() => {
     if (!starting) return;
-    if (!isInCall) {
-      // Either we were idle to begin with, or the old call has been dropped
-      // ahead of the switch. Either way the next connect is ours.
-      sawIdleSinceStart.current = true;
+    if (isConnected && sawIdleSinceStart.current) {
+      dismissIntentCallSuggestion(detection.messageId);
       return;
     }
-    if (sawIdleSinceStart.current) dismissIntentCallSuggestion(detection.messageId);
-  }, [starting, isInCall, detection.messageId]);
+    if (isInCall) {
+      // Either we were idle to begin with, or the old call has been dropped
+      // ahead of the switch. Either way this attempt is ours.
+      if (sawIdleSinceStart.current) sawAttempt.current = true;
+      return;
+    }
+    if (sawAttempt.current) {
+      // `failed` → `idle` without ever reaching `connected`.
+      resetStart("Couldn't start the call. Please try again.");
+      return;
+    }
+    sawIdleSinceStart.current = true;
+  }, [starting, isInCall, isConnected, detection.messageId, resetStart]);
+
+  useEffect(() => {
+    if (!starting) return;
+    const timer = setTimeout(
+      () => resetStart("The call didn't start. Please try again."),
+      START_TIMEOUT_MS,
+    );
+    return (): void => clearTimeout(timer);
+  }, [starting, resetStart]);
 
   const placeCall = useCallback((): void => {
-    setStarting(true);
+    if (isSdlcSurface) {
+      // The host frame owns the call from here and this machine never moves, so
+      // there is nothing to watch — hand it over and clear the card.
+      dismissIntentCallSuggestion(detection.messageId);
+    } else {
+      setStarting(true);
+    }
     if (isThread) {
       initiateCall({
         channelId,
@@ -198,6 +246,7 @@ export const IntentCallSuggestionCard: React.FC<IntentCallSuggestionCardProps> =
     targetUserIds,
     channelDisplayName,
     handleCallClick,
+    detection.messageId,
   ]);
 
   const onStartCall = (): void => {
