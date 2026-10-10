@@ -12,7 +12,7 @@ import { queryClient } from '../../services/clients/queryClient';
 import { NativeInboundMessageType, reactNativeBridge } from '../../utils/reactNativeBridge';
 import { useZero } from '../../hooks/useZero';
 import { callActor } from '../../machines/callMachine';
-import { roomActor } from '../../machines/roomMachine';
+import { isCallHandedToCallWindow, roomActor } from '../../machines/roomMachine';
 import { useSelector } from '@xstate/react';
 import { CallType } from '@xyne/shared';
 import { buildSdlcPath, parseSdlcNavTarget } from '@xyne/shared/sdlc';
@@ -743,13 +743,16 @@ export const NotificationHandler: React.FC = () => {
 
   // Same states useCallJoinOrInitiate treats as "in a call"; `initiating` lands
   // before the mic is enabled, so main knows the upcoming activation is ours.
+  // Main hears about calls in the call window from that window instead (and a
+  // reload here does not end those), so they are not reported from here.
   const isInXyneCall = useSelector(
     roomActor,
     s =>
-      s.matches('initiating') ||
-      s.matches('joining') ||
-      s.matches('connecting') ||
-      s.matches('connected'),
+      (s.matches('initiating') ||
+        s.matches('joining') ||
+        s.matches('connecting') ||
+        s.matches('connected')) &&
+      !isCallHandedToCallWindow(s),
   );
   useEffect(() => {
     if (!isElectron) return;

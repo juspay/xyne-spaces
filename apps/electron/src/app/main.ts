@@ -24,6 +24,7 @@ import { initTray } from '../services/tray';
 import { registerGlobalShortcuts } from '../services/global-shortcuts';
 import { initRecordingPillVisibility } from '../services/recording-controller';
 import { initClawOverlayAuthGate } from '../services/claw-overlay-window';
+import { setupCallWindowHandlers } from '../services/call-window';
 import { registerProtocolScheme, setupCustomProtocol } from '../services/custom-protocol';
 import { initializeUIUpdater } from '../services/ui-updater';
 import { initializeTelemetry } from '../services/telemetry';
@@ -170,6 +171,7 @@ async function initializeApp(): Promise<void> {
   setupXyneSpacesInterceptor();
   void hydrateCachedUserFromCookies();
   setupIpcHandlers();
+  setupCallWindowHandlers();
 
   // Clear network cache on app start to ensure fresh assets
   try {

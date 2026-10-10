@@ -12,8 +12,6 @@ import { useTranscriptionToggleNotice } from '../hooks/useTranscriptionToggleNot
 import { useTranscriptionHostToast } from '../hooks/useTranscriptionHostToast';
 import { useTranscriptionPendingTimeout } from '../hooks/useTranscriptionPendingTimeout';
 import { usePlatform } from '../../../hooks/usePlatform';
-import { AIInviteDialog } from '../CallModals/AIInviteDialog';
-import { CreateTicketModal } from '../../Tickets/CreateTicketModal/CreateTicketModal';
 import { useChannel } from '../../../hooks/useChannels';
 import { useAuth } from '../../../hooks/useAuth';
 import { EndCallModal } from '../EndCallModal/EndCallModal';
@@ -35,8 +33,17 @@ import { playAudio } from '../../../utils/audioPlayer';
 
 import { isParticipantScreenShareEnabled } from '../../../utils/livekitScreenShare';
 import { logger, Logger } from '../../../utils/logger';
-import { CallWhiteboardSync } from '../CallWhiteboard';
+// Straight from its file: the CallWhiteboard index also re-exports the
+// whiteboard itself (Excalidraw), which loads only when opened (lazyPanels).
+import { CallWhiteboardSync } from '../CallWhiteboard/CallWhiteboardSync';
+import {
+  LazyAIInviteDialog,
+  LazyCreateTicketModal,
+  MountOnceOpen,
+  preloadCallPanels,
+} from '../lazyPanels';
 import { callService } from '../../../services/Call/callService';
+import { isCallWindowRoute } from '../../../utils/callWindow';
 import {
   createCallWhiteboardPngBlobs,
   getCallWhiteboardState,
@@ -128,6 +135,15 @@ export function CustomLiveKitRoom({
           localParticipant as NonNullable<typeof room>['localParticipant'],
         )
     : false;
+
+  const isInCallWindow = isCallWindowRoute();
+
+  // The call is up: warm the on-demand panels (chat, notes, whiteboard,
+  // dialogs) in the background so opening one is immediate.
+  const isConnected = snapshot.matches('connected');
+  useEffect(() => {
+    if (isConnected) preloadCallPanels();
+  }, [isConnected]);
 
   // Determine simple machine state string for child components
   // Handle nested states like { connected: 'nativeMode' }
@@ -507,8 +523,9 @@ export function CustomLiveKitRoom({
     return <></>;
   }
 
-  // Route to appropriate view based on viewMode
-  if (machineViewMode === 'mini') {
+  // Route to appropriate view based on viewMode. The desktop call window is
+  // the whole call, always full size; the OS window controls minimize it.
+  if (machineViewMode === 'mini' && !isInCallWindow) {
     // Mobile call UI is in AppRoot; keep whiteboard sync alive. Desktop shows mini view.
     if (isMobile) {
       return <CallWhiteboardSync room={room} />;
@@ -579,30 +596,34 @@ export function CustomLiveKitRoom({
           onStay={handleAFKStay}
           onLeave={handleAFKLeave}
         />
-        <AIInviteDialog
-          isOpen={inviteDialogOpen}
-          onClose={handleCloseInviteDialog}
-          onSend={handleSendInvite}
-          callId={callId}
-          users={inviteUsers}
-          suggestedMessage={inviteSuggestedMessage}
-          roomLink={roomLink || undefined}
-        />
-        {channelId && currentChannel?.projectId && (
-          <CreateTicketModal
-            isOpen={ticketDialogOpen}
-            onClose={handleCloseTicketDialog}
-            channelId={channelId}
-            projectId={currentChannel.projectId}
-            selectedBoardId={ticketBoardId}
-            trackSource='call'
-            initialTitle={ticketTitle}
-            initialDescription={ticketDescription}
-            initialAssignee={initialTicketAssignee}
-            initialEta={initialTicketEta}
-            isFromAI={true}
-            onTicketCreated={handleTicketCreated}
+        <MountOnceOpen open={inviteDialogOpen}>
+          <LazyAIInviteDialog
+            isOpen={inviteDialogOpen}
+            onClose={handleCloseInviteDialog}
+            onSend={handleSendInvite}
+            callId={callId}
+            users={inviteUsers}
+            suggestedMessage={inviteSuggestedMessage}
+            roomLink={roomLink || undefined}
           />
+        </MountOnceOpen>
+        {channelId && currentChannel?.projectId && (
+          <MountOnceOpen open={ticketDialogOpen}>
+            <LazyCreateTicketModal
+              isOpen={ticketDialogOpen}
+              onClose={handleCloseTicketDialog}
+              channelId={channelId}
+              projectId={currentChannel.projectId}
+              selectedBoardId={ticketBoardId}
+              trackSource='call'
+              initialTitle={ticketTitle}
+              initialDescription={ticketDescription}
+              initialAssignee={initialTicketAssignee}
+              initialEta={initialTicketEta}
+              isFromAI={true}
+              onTicketCreated={handleTicketCreated}
+            />
+          </MountOnceOpen>
         )}
       </>
     );
@@ -633,6 +654,7 @@ export function CustomLiveKitRoom({
         onToggleScreenShare={toggleScreenShare}
         onDisconnect={handleDisconnectClick}
         onMinimize={() => roomActor.send({ type: 'TOGGLE_VIEW' })}
+        hideMinimize={isInCallWindow}
         onToggleThread={handleToggleThread}
         onRequestControl={handleRequestControl}
         requestedAiController={isAiControlRequested}
@@ -677,30 +699,34 @@ export function CustomLiveKitRoom({
         onStay={handleAFKStay}
         onLeave={handleAFKLeave}
       />
-      <AIInviteDialog
-        isOpen={inviteDialogOpen}
-        onClose={handleCloseInviteDialog}
-        onSend={handleSendInvite}
-        callId={callId}
-        users={inviteUsers}
-        suggestedMessage={inviteSuggestedMessage}
-        roomLink={roomLink || undefined}
-      />
-      {channelId && currentChannel?.projectId && (
-        <CreateTicketModal
-          isOpen={ticketDialogOpen}
-          onClose={handleCloseTicketDialog}
-          channelId={channelId}
-          projectId={currentChannel.projectId}
-          selectedBoardId={ticketBoardId}
-          trackSource='call'
-          initialTitle={ticketTitle}
-          initialDescription={ticketDescription}
-          initialAssignee={initialTicketAssignee}
-          initialEta={initialTicketEta}
-          isFromAI={true}
-          onTicketCreated={handleTicketCreated}
+      <MountOnceOpen open={inviteDialogOpen}>
+        <LazyAIInviteDialog
+          isOpen={inviteDialogOpen}
+          onClose={handleCloseInviteDialog}
+          onSend={handleSendInvite}
+          callId={callId}
+          users={inviteUsers}
+          suggestedMessage={inviteSuggestedMessage}
+          roomLink={roomLink || undefined}
         />
+      </MountOnceOpen>
+      {channelId && currentChannel?.projectId && (
+        <MountOnceOpen open={ticketDialogOpen}>
+          <LazyCreateTicketModal
+            isOpen={ticketDialogOpen}
+            onClose={handleCloseTicketDialog}
+            channelId={channelId}
+            projectId={currentChannel.projectId}
+            selectedBoardId={ticketBoardId}
+            trackSource='call'
+            initialTitle={ticketTitle}
+            initialDescription={ticketDescription}
+            initialAssignee={initialTicketAssignee}
+            initialEta={initialTicketEta}
+            isFromAI={true}
+            onTicketCreated={handleTicketCreated}
+          />
+        </MountOnceOpen>
       )}
     </>
   );

@@ -1,5 +1,5 @@
 import log from 'electron-log/main';
-import { session, BrowserWindow, app } from 'electron';
+import { session, BrowserWindow, app, webContents } from 'electron';
 import { config } from '../app/config';
 import { clearAllCookies } from './cookies';
 import path from 'path';
@@ -353,12 +353,24 @@ export function setupRequestInterceptor(): void {
   );
 }
 
+// The window that asked for the capture. showScreenPicker uses it only if it
+// hosts a picker (the call window); anything else falls back to the main window.
+function requestingWindow(frame: Electron.WebFrameMain | null): BrowserWindow | null {
+  if (!frame) return null;
+  try {
+    const contents = webContents.fromFrame(frame);
+    return contents ? BrowserWindow.fromWebContents(contents) : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Installs the custom display-media handler that shows the in-app screen picker.
  * Called on startup and re-called after a native OS picker fallback completes.
  */
 function setupDisplayMediaHandler(): void {
-  session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
+  session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
     const safeCallback = (streams: Electron.Streams): void => {
       try {
         callback(streams);
@@ -368,7 +380,7 @@ function setupDisplayMediaHandler(): void {
         Logger.info('[ScreenShare] Cancelled or no stream provided:', String(err));
       }
     };
-    showScreenPicker(safeCallback);
+    showScreenPicker(safeCallback, requestingWindow(request.frame));
   });
 }
 

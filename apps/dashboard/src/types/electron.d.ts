@@ -216,6 +216,24 @@ export interface ElectronAPI {
     setEnabled: (enabled: boolean) => void;
     onEnabledChanged: (callback: (enabled: boolean) => void) => () => void;
   };
+  /** Calls hosted in their own window. Absent on desktop builds that predate it. */
+  callWindow?: {
+    open: (payload: {
+      handoff: Record<string, unknown>;
+      workspaceId: string | null;
+    }) => Promise<number>;
+    getStatus: () => Promise<unknown>;
+    prepare?: (payload: { workspaceId: string | null }) => void;
+    cancelPrepare?: () => void;
+    sendCommand: (command: { type: string; endForAll?: boolean }) => void;
+    focus: () => void;
+    onStatus: (callback: (status: unknown) => void) => () => void;
+    takeHandoff: () => Promise<unknown>;
+    onHandoffReady: (callback: () => void) => () => void;
+    reportStatus: (status: Record<string, unknown>) => void;
+    onCommand: (callback: (command: { type: string; endForAll?: boolean }) => void) => () => void;
+    openInMain: (appPath: string) => void;
+  };
   clawOverlay?: {
     setIgnoreMouse: (ignore: boolean) => void;
     setExpanded: (expanded: boolean) => void;

@@ -2,7 +2,7 @@ import type { Room } from 'livekit-client';
 import { ConnectionQuality, ConnectionState } from 'livekit-client';
 import { Minimize2, MonitorUp, WifiLow } from 'lucide-react';
 import { useSelector } from '@xstate/react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   useParticipantNetworkQuality,
   useNetworkQualityToast,
@@ -11,7 +11,6 @@ import { InvitationResponse, type RecordingType } from '@xyne/shared';
 import type { ParticipantInfo } from '../../../machines/roomMachine';
 import { roomActor } from '../../../machines/roomMachine';
 import { cn } from '../../../utils/classNames';
-import ThreadMessages from '../../Chat/ThreadPannel';
 import { CallControls } from '../CallControls/CallControls';
 import { CallStateTransition } from '../CallStateTransition/CallStateTransition';
 import { ParticipantGrid } from '../ParticipantGrid/ParticipantGrid';
@@ -20,14 +19,12 @@ import { ScreenShareView } from '../ScreenShareView/ScreenShareView';
 import { ControlRequestDialog } from '../CallModals/ControlRequestDialog';
 import { ParticipantsSidebar } from '../ParticipantsSidebar/ParticipantsSidebar';
 import { ParticipantsPill } from '../ParticipantsPill/ParticipantsPill';
-import { CallNotesPanel } from '../CallNotesPanel/CallNotesPanel';
 import { getRingingInvitees, useIsDmCall } from '../ringStatus.utils';
 import { ConnectionStatusIndicators } from '../ConnectionStatusIndicators/ConnectionStatusIndicators';
 import { sendDrawEvent } from '../../../hooks/useDrawStore';
 import { useCallWhiteboardStore } from '../../../stores/callWhiteboardStore';
 import { useReactions } from '../hooks/useReactions';
 import { ReactionsOverlay } from '../components/ReactionsOverlay';
-import { CallChatPanel } from '../CallChatPanel/CallChatPanel';
 import { useCallChatNotifications } from '../hooks/useCallChatNotifications';
 import { recordingService } from '../../../services/Recording/recordingService';
 import { useActiveRecording, type ActiveRecording } from '../hooks/useActiveRecording';
@@ -35,11 +32,18 @@ import { RecordingStopDialog } from '../CallControls/RecordingStopDialog';
 import { CallPrivacyIndicator } from '../CallPrivacyIndicator/CallPrivacyIndicator';
 import { isScreenShareActive } from '../../../utils/livekitScreenShare';
 import { hasJoinedExternalParticipant } from '../callParticipant.utils';
-import { CallWhiteboardView } from '../CallWhiteboard';
 import { useAuth } from '../../../hooks/useAuth';
 import { useTelepresenceEnabled } from '../useTelepresenceEnabled';
 import { useAutoPresentationMode } from '../useAutoPresentationMode';
-import { PresentationModeOverlay } from '../PresentationMode/PresentationModeOverlay';
+import {
+  LazyCallChatPanel,
+  LazyCallNotesPanel,
+  LazyCallWhiteboardView,
+  LazyPresentationModeOverlay,
+  LazyThreadMessages,
+  MountOnceOpen,
+  PanelLoading,
+} from '../lazyPanels';
 import { formatElapsedTime } from '../../../utils/recordingUtils';
 import { logger, Event } from '../../../utils/logger';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -490,14 +494,16 @@ export function FullCallView({
   const renderStage = (): React.ReactElement => {
     if (isWhiteboardOpen) {
       return (
-        <CallWhiteboardView
-          participants={participants}
-          room={room}
-          className='h-full'
-          showSidebar={true}
-          aiController={aiController}
-          requestedAiController={requestedAiController}
-        />
+        <Suspense key='whiteboard' fallback={<PanelLoading />}>
+          <LazyCallWhiteboardView
+            participants={participants}
+            room={room}
+            className='h-full'
+            showSidebar={true}
+            aiController={aiController}
+            requestedAiController={requestedAiController}
+          />
+        </Suspense>
       );
     }
     if (focusedScreenShare) {
@@ -526,6 +532,10 @@ export function FullCallView({
     );
   };
 
+  // Each lazy panel gets its own keyed Suspense boundary. Unkeyed, React would
+  // reuse one boundary across panel switches, and a lazy panel's first render
+  // (which always suspends, even when preloaded) would hide the panel already
+  // showing there — tearing down its editor mid-life.
   const renderPanel = (): React.ReactNode => {
     switch (activePanel) {
       case 'participants':
@@ -550,26 +560,34 @@ export function FullCallView({
           />
         );
       case 'notes':
-        return <CallNotesPanel callId={callId} channelId={channelId} onClose={handleToggleNotes} />;
+        return (
+          <Suspense key='notes' fallback={<PanelLoading />}>
+            <LazyCallNotesPanel callId={callId} channelId={channelId} onClose={handleToggleNotes} />
+          </Suspense>
+        );
       case 'callChat':
         return (
-          <CallChatPanel
-            room={room}
-            externalId={callId}
-            localParticipantId={localParticipantId}
-            onClose={handleToggleCallChat}
-            onNewMessage={onCallChatNewMessage}
-            isExternalUser={isExternalUser}
-          />
+          <Suspense key='callChat' fallback={<PanelLoading />}>
+            <LazyCallChatPanel
+              room={room}
+              externalId={callId}
+              localParticipantId={localParticipantId}
+              onClose={handleToggleCallChat}
+              onNewMessage={onCallChatNewMessage}
+              isExternalUser={isExternalUser}
+            />
+          </Suspense>
         );
       case 'thread':
         return channelId && conversationId ? (
-          <ThreadMessages
-            channelId={channelId}
-            conversationId={conversationId}
-            ticketId={null}
-            onClose={handleToggleThread}
-          />
+          <Suspense key='thread' fallback={<PanelLoading />}>
+            <LazyThreadMessages
+              channelId={channelId}
+              conversationId={conversationId}
+              ticketId={null}
+              onClose={handleToggleThread}
+            />
+          </Suspense>
         ) : null;
       default:
         return null;
@@ -785,12 +803,14 @@ export function FullCallView({
       )}
 
       {/* Presentation Mode Overlay — handles fullscreen + smooth fade transition */}
-      <PresentationModeOverlay
-        callId={callId}
-        isOpen={isPresentationMode}
-        participant={presentationParticipant ?? null}
-        onExit={() => setIsPresentationMode(false)}
-      />
+      <MountOnceOpen open={isPresentationMode}>
+        <LazyPresentationModeOverlay
+          callId={callId}
+          isOpen={isPresentationMode}
+          participant={presentationParticipant ?? null}
+          onExit={() => setIsPresentationMode(false)}
+        />
+      </MountOnceOpen>
     </div>
   );
 }
