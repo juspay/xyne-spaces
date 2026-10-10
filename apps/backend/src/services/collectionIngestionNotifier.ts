@@ -191,7 +191,8 @@ async function notifyIfCollectionDone(rootCollectionId: string): Promise<void> {
       actionSource: 'collection',
       actionSourceId: rootCollectionId,
       workspaceId: collection.workspaceId,
-      classification: ActivityClassification.ACTIONABLE,
+      // A clean run is only a receipt (All only); a run with failures needs the owner to act.
+      classification: failed > 0 ? ActivityClassification.ACTIONABLE : ActivityClassification.NONE,
       // Freeze this run's counts in blockId (unused for KB activities) so each
       // notification keeps its own numbers instead of the UI recomputing live.
       // Format: "succeeded,failed".

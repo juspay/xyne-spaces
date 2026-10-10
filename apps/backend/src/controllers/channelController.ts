@@ -391,7 +391,7 @@ export class ChannelController {
                 messageId: createdMessage.messageId,
                 channelId,
                 isThreadActivity: false,
-                classification: ActivityClassification.PENDING,
+                classification: ActivityClassification.PENDING_CLASSIFY,
                 classificationJobType: ActivityClassificationJobType.SPECIAL_MENTION_AUDIENCE,
               })),
             );

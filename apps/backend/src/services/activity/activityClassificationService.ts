@@ -1,4 +1,3 @@
-import { z } from 'zod';
 import { Activity } from '@prisma/client';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
@@ -6,38 +5,12 @@ import { extractAllMentions } from '@/utils/mentionParser';
 import { extractSpecialMentions } from '@/utils/mentionUtils';
 import { generatePlainTextContent } from '@/utils/contentUtils';
 import { logger } from '@/utils/logger';
-import {
-  getActivityClassificationPrompt,
-  type ActivityClassificationPromptResult,
-} from '@/services/activity/activityClassificationLangfusePrompts';
-import { config as envConfig } from '@/config/env';
-import { LLMClient, createUserMessage } from 'agentic-framework';
-import type { LLMClientConfig } from 'agentic-framework';
-import { OrgLLMServiceAccountPurpose, ActivityClassification } from '@xyne/shared';
-import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
+import { ActivityClassification } from '@xyne/shared';
+import { classifyActivityWithJev } from '@/services/activity/activityClassificationJev';
 
-const ACTIVITY_CLASSIFICATION_REQUEST_MAX_ATTEMPTS = 3;
-const ACTIVITY_CLASSIFICATION_RETRY_BASE_DELAY_MS = 1000;
-const ACTIVITY_CLASSIFICATION_RETRY_MAX_DELAY_MS = 30000;
-
-export const ACTIVITY_CLASSIFICATION_MODEL =
-  envConfig.activityClassification?.model ?? 'glm-latest';
-const LANGFUSE_PROMPT_LABEL = 'production';
-const LANGFUSE_PROMPT_NAMES = {
-  direct_message: 'activityDMPrompt',
-  mention: 'activityGeneralPrompt',
-  audience: 'activityGeneralPrompt',
-} as const;
 const ACTIVITY_CLASSIFICATION_CONTEXT_LIMIT = 0;
 const ACTIVITY_CLASSIFICATION_THREAD_LIMIT = 10;
 const GROUP_MEMBER_LIMIT = 10;
-
-const ActivityClassificationOutputSchema = z.object({
-  classification: z.enum(['ACTIONABLE', 'FYI', 'SKIP']),
-  confidence: z.coerce.number().min(0).max(1).optional(),
-});
-
-type ActivityClassificationOutput = z.infer<typeof ActivityClassificationOutputSchema>;
 
 type GroupMemberSummary = {
   memberCount: number;
@@ -167,48 +140,12 @@ type ThreadContextResult = {
 };
 
 export class ActivityClassificationService {
-  // private readonly model = 'glm-46-fp8';
-  private readonly model = ACTIVITY_CLASSIFICATION_MODEL;
-
-  private async getLLMClient(workspaceId: string | null | undefined): Promise<LLMClient | null> {
-    const credential = await orgLLMCredentialService.getCredentialByWorkspaceId(
-      workspaceId,
-      OrgLLMServiceAccountPurpose.ACTIVITY_CLASSIFICATION,
-    );
-
-    if (!credential) {
-      return null;
-    }
-
-    const llmConfig: LLMClientConfig = {
-      provider: {
-        type: 'litellm',
-        config: {
-          apiKey: credential.apiKey,
-          baseUrl: credential.baseUrl,
-          timeout: envConfig.llm?.requestTimeoutMs,
-          customHeaders: {
-            'x-litellm-disable-logging': 'true',
-          },
-        },
-      },
-      defaultModel: credential.defaultModel ?? this.model,
-      temperature: 0.2,
-      retry: {
-        maxAttempts: ACTIVITY_CLASSIFICATION_REQUEST_MAX_ATTEMPTS,
-        baseDelay: ACTIVITY_CLASSIFICATION_RETRY_BASE_DELAY_MS,
-        maxDelay: ACTIVITY_CLASSIFICATION_RETRY_MAX_DELAY_MS,
-        exponentialBackoff: true,
-      },
-    };
-    return new LLMClient(llmConfig);
-  }
 
   async classifyActivity(activityId: string): Promise<{
     status: 'classified' | 'pending' | 'error' | 'skipped';
     classification?: ActivityClassification;
     confidence?: number | null;
-    usedLLM?: boolean;
+    usedJev?: boolean;
     reason?: string;
   }> {
     logger.debug('[ActivityClassification] Starting classification', { activityId });
@@ -224,6 +161,7 @@ export class ActivityClassificationService {
     if (activity.classification) {
       const pendingStates = new Set<ActivityClassification>([
         ActivityClassification.PENDING,
+        ActivityClassification.PENDING_CLASSIFY,
         ActivityClassification.PROCESSING,
       ]);
       if (!pendingStates.has(activity.classification as ActivityClassification)) {
@@ -245,17 +183,8 @@ export class ActivityClassificationService {
         status: 'classified',
         classification: ActivityClassification.FYI,
         confidence: null,
-        usedLLM: false,
+        usedJev: false,
       };
-    }
-
-    const llmClient = await this.getLLMClient(activity.workspaceId);
-    if (!llmClient) {
-      logger.warn('[ActivityClassification] Org LiteLLM credentials are not configured. Skipping classification.', {
-        activityId,
-        workspaceId: activity.workspaceId,
-      });
-      return { status: 'pending', usedLLM: false, reason: 'llm_unavailable' };
     }
 
     logger.debug('[ActivityClassification] Building classification input', { activityId });
@@ -263,91 +192,38 @@ export class ActivityClassificationService {
     if (!inputPayload) {
       logger.error('[ActivityClassification] Failed to build classification input', { activityId });
       await this.updateClassification(activity.id, ActivityClassification.ERROR, null);
-      return { status: 'error', usedLLM: false, reason: 'input_build_failed' };
+      return { status: 'error', usedJev: false, reason: 'input_build_failed' };
     }
 
-    const promptType =
-      inputPayload.actorAction === 'direct_message' ? 'direct_message' : 'mention';
-    const promptName = LANGFUSE_PROMPT_NAMES[promptType];
-    const inputJson = JSON.stringify(inputPayload, null, 2);
-    let promptResult: ActivityClassificationPromptResult;
-    try {
-      promptResult = await getActivityClassificationPrompt({
-        name: promptName,
-        label: LANGFUSE_PROMPT_LABEL,
-        templateVariables: { INPUT_JSON: inputJson },
-      });
-    } catch (error) {
-      logger.error('[ActivityClassification] Failed to resolve Langfuse prompt', {
-        activityId,
-        promptType,
-        promptName,
-        promptLabel: LANGFUSE_PROMPT_LABEL,
-        errorMessage: error instanceof Error ? error.message : String(error ?? 'unknown error'),
-      });
-      await this.updateClassification(activity.id, ActivityClassification.ERROR, null);
-      return { status: 'error', usedLLM: false, reason: 'prompt_fetch_failed' };
-    }
-
-    const prompt = promptResult.prompt;
-    logger.debug('[ActivityClassification] Prompt resolved', {
-      activityId,
-      promptType,
-      promptName,
-      promptLabel: LANGFUSE_PROMPT_LABEL,
+    // Jev, on the JSON the LLM prompt used to be filled with. SKIP is only ever valid for DMs.
+    const jev = await classifyActivityWithJev(inputPayload as unknown as Record<string, unknown>, {
+      allowSkip: inputPayload.actorAction === 'direct_message',
+      audience: false,
+      logId: activityId,
     });
-
-    try {
-      logger.info('[ActivityClassification] Sending request to LLM', {
+    if (!jev.ok) {
+      // Left PENDING: the worker retries it, and marks it ERROR once retries run out.
+      logger.warn('[ActivityClassification] Jev had no answer, leaving the activity PENDING', {
         activityId,
-        model: this.model,
+        reason: jev.reason,
       });
-      const llmResponse = await llmClient.generate({
-        messages: [createUserMessage(prompt)],
-        model: this.model,
-      });
-      const responseContent = llmResponse.content;
-
-      const parsed = this.parseLLMResponse(responseContent);
-      if (!parsed) {
-        logger.error('[ActivityClassification] Failed to parse LLM response', {
-          activityId,
-          response: responseContent,
-        });
-        await this.updateClassification(activity.id, ActivityClassification.ERROR, null);
-        return { status: 'error', usedLLM: true, reason: 'parse_failed' };
-      }
-
-      const mappedClassification = this.mapClassification(
-        parsed.classification,
-        activity.actorAction
-      );
-
-      const confidence = parsed.confidence ?? null;
-
-      logger.info('[ActivityClassification] Classification parsed', {
-        activityId,
-        classification: mappedClassification,
-        confidence,
-        rawClassification: parsed.classification,
-      });
-      await this.updateClassification(activity.id, mappedClassification, confidence);
-      return {
-        status: 'classified',
-        classification: mappedClassification,
-        confidence,
-        usedLLM: true,
-      };
-    } catch (error) {
-      const err = error instanceof Error ? error : new Error(String(error ?? 'unknown error'));
-      logger.error('[ActivityClassification] LLM classification failed', {
-        activityId,
-        errorMessage: err.message,
-        errorStack: err.stack,
-      });
-      // Leave as PENDING for retry
-      return { status: 'pending', usedLLM: true, reason: 'llm_failed' };
+      return { status: 'pending', usedJev: true, reason: `jev_${jev.reason}` };
     }
+
+    const mappedClassification = this.mapClassification(jev.classification, activity.actorAction);
+    logger.info('[ActivityClassification] Classified', {
+      activityId,
+      classification: mappedClassification,
+      confidence: jev.confidence,
+      jevChoice: jev.jevChoice,
+    });
+    await this.updateClassification(activity.id, mappedClassification, jev.confidence);
+    return {
+      status: 'classified',
+      classification: mappedClassification,
+      confidence: jev.confidence,
+      usedJev: true,
+    };
   }
 
   async classifySpecialMentionAudience(params: {
@@ -359,27 +235,12 @@ export class ActivityClassificationService {
     status: 'classified' | 'pending' | 'error' | 'skipped';
     classification?: ActivityClassification;
     confidence?: number | null;
-    usedLLM?: boolean;
+    usedJev?: boolean;
     reason?: string;
   }> {
     const { activityIds, messageId, channelId, recipientUserIds } = params;
     if (activityIds.length === 0 || recipientUserIds.length === 0) {
       return { status: 'skipped', reason: 'empty_audience' };
-    }
-
-    const credentialActivity = await db.activity.findFirst({
-      where: { id: { in: activityIds } },
-      select: { workspaceId: true },
-    });
-    const llmClient = await this.getLLMClient(credentialActivity?.workspaceId);
-    if (!llmClient) {
-      logger.warn('[ActivityClassification] Org LiteLLM credentials are not configured. Skipping audience classification.', {
-        messageId,
-        channelId,
-        workspaceId: credentialActivity?.workspaceId,
-        activityCount: activityIds.length,
-      });
-      return { status: 'pending', usedLLM: false, reason: 'llm_unavailable' };
     }
 
     logger.debug('[ActivityClassification] Building audience classification input', {
@@ -398,89 +259,37 @@ export class ActivityClassificationService {
         channelId,
       });
       await this.updateClassificationAudience(activityIds, ActivityClassification.ERROR, null);
-      return { status: 'error', usedLLM: false, reason: 'input_build_failed' };
+      return { status: 'error', usedJev: false, reason: 'input_build_failed' };
     }
 
-    const promptType = 'audience';
-    const promptName = LANGFUSE_PROMPT_NAMES[promptType];
-    const inputJson = JSON.stringify(inputPayload, null, 2);
-    let promptResult: ActivityClassificationPromptResult;
-    try {
-      promptResult = await getActivityClassificationPrompt({
-        name: promptName,
-        label: LANGFUSE_PROMPT_LABEL,
-        templateVariables: { INPUT_JSON: inputJson },
-      });
-    } catch (error) {
-      logger.error('[ActivityClassification] Failed to resolve audience Langfuse prompt', {
-        messageId,
-        promptType,
-        promptName,
-        promptLabel: LANGFUSE_PROMPT_LABEL,
-        errorMessage: error instanceof Error ? error.message : String(error ?? 'unknown error'),
-      });
-      await this.updateClassificationAudience(activityIds, ActivityClassification.ERROR, null);
-      return { status: 'error', usedLLM: false, reason: 'prompt_fetch_failed' };
-    }
-
-    const prompt = promptResult.prompt;
-    logger.debug('[ActivityClassification] Audience prompt resolved', {
-      messageId,
-      promptType,
-      promptName,
-      promptLabel: LANGFUSE_PROMPT_LABEL,
+    // One Jev call for the whole audience, as the LLM call was. Never SKIP: it is not a DM.
+    const jev = await classifyActivityWithJev(inputPayload as unknown as Record<string, unknown>, {
+      allowSkip: false,
+      audience: true,
+      logId: `${messageId} (${activityIds.length} recipients)`,
     });
-
-    try {
-      logger.info('[ActivityClassification] Sending audience request to LLM', {
+    if (!jev.ok) {
+      logger.warn('[ActivityClassification] Jev had no answer, leaving the audience PENDING', {
         messageId,
-        model: this.model,
+        reason: jev.reason,
       });
-      const llmResponse = await llmClient.generate({
-        messages: [createUserMessage(prompt)],
-        model: this.model,
-      });
-      const responseContent = llmResponse.content;
-
-      const parsed = this.parseLLMResponse(responseContent);
-      if (!parsed) {
-        logger.error('[ActivityClassification] Failed to parse audience LLM response', {
-          messageId,
-          response: responseContent,
-        });
-        await this.updateClassificationAudience(activityIds, ActivityClassification.ERROR, null);
-        return { status: 'error', usedLLM: true, reason: 'parse_failed' };
-      }
-
-      const mappedClassification = this.mapClassification(
-        parsed.classification,
-        inputPayload.actorAction
-      );
-
-      const confidence = parsed.confidence ?? null;
-
-      logger.info('[ActivityClassification] Audience classification parsed', {
-        messageId,
-        classification: mappedClassification,
-        confidence,
-      });
-      await this.updateClassificationAudience(activityIds, mappedClassification, confidence);
-      return {
-        status: 'classified',
-        classification: mappedClassification,
-        confidence,
-        usedLLM: true,
-      };
-    } catch (error) {
-      const err = error instanceof Error ? error : new Error(String(error ?? 'unknown error'));
-      logger.error('[ActivityClassification] Audience LLM classification failed', {
-        messageId,
-        errorMessage: err.message,
-        errorStack: err.stack,
-      });
-      // Leave as PENDING for retry
-      return { status: 'pending', usedLLM: true, reason: 'llm_failed' };
+      return { status: 'pending', usedJev: true, reason: `jev_${jev.reason}` };
     }
+
+    const mappedClassification = this.mapClassification(jev.classification, inputPayload.actorAction);
+    logger.info('[ActivityClassification] Audience classified', {
+      messageId,
+      classification: mappedClassification,
+      confidence: jev.confidence,
+      jevChoice: jev.jevChoice,
+    });
+    await this.updateClassificationAudience(activityIds, mappedClassification, jev.confidence);
+    return {
+      status: 'classified',
+      classification: mappedClassification,
+      confidence: jev.confidence,
+      usedJev: true,
+    };
   }
 
   private async buildClassificationInput(
@@ -1133,59 +942,8 @@ export class ActivityClassificationService {
     return links.size;
   }
 
-  private parseLLMResponse(content?: string | null): ActivityClassificationOutput | null {
-    logger.debug('[ActivityClassification] Parsing LLM response');
-    if (!content) return null;
-
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return null;
-
-    try {
-      const parsed = JSON.parse(jsonMatch[0]);
-      const normalized =
-        typeof parsed?.classification === 'string'
-          ? { ...parsed, classification: parsed.classification.toUpperCase() }
-          : parsed;
-
-      let normalizedConfidence = normalized?.confidence;
-      if (normalizedConfidence === null) {
-        normalizedConfidence = undefined;
-      }
-      if (typeof normalizedConfidence === 'string') {
-        const parsedValue = Number(normalizedConfidence);
-        if (!Number.isNaN(parsedValue)) {
-          normalizedConfidence = parsedValue;
-        }
-      }
-      if (typeof normalizedConfidence === 'number' && normalizedConfidence > 1) {
-        normalizedConfidence = normalizedConfidence / 100;
-      }
-
-      const result = ActivityClassificationOutputSchema.safeParse({
-        ...normalized,
-        confidence: normalizedConfidence,
-      });
-
-      if (!result.success) {
-        logger.warn('[ActivityClassification] LLM response validation failed', {
-          issues: result.error.issues,
-        });
-        return null;
-      }
-
-      return result.data;
-    } catch (error) {
-      const err = error instanceof Error ? error : new Error(String(error ?? 'unknown error'));
-      logger.error('[ActivityClassification] Failed to parse LLM response', {
-        errorMessage: err.message,
-        errorStack: err.stack,
-      });
-      return null;
-    }
-  }
-
   private mapClassification(
-    classification: ActivityClassificationOutput['classification'],
+    classification: 'ACTIONABLE' | 'FYI' | 'SKIP',
     actorAction: string
   ): ActivityClassification {
     if (classification === 'SKIP' && actorAction !== 'direct_message') {

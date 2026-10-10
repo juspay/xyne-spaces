@@ -102,7 +102,7 @@ export class CanvasSideEffectHandler extends BaseSideEffectHandler {
         channelId: canvas.channelId || undefined,
         canvasId: canvasId,
         blockId: undefined, // no specific blockId for AI-generated content
-        classification: ActivityClassification.PENDING,
+        classification: ActivityClassification.PENDING_CLASSIFY,
       }));
 
       logger.info(`[CanvasSideEffectHandler] Creating ${activities.length} activity entries for canvas mentions`, {

@@ -415,7 +415,12 @@ export enum ActivityClassification {
   ACTIONABLE = 'ACTIONABLE',
   FYI = 'FYI',
   SKIP = 'SKIP',
+  /** Legacy: written before PENDING_CLASSIFY existed. The classifier never picks these up. */
   PENDING = 'PENDING',
+  /** Waiting for the classifier. New activities are created with this. */
+  PENDING_CLASSIFY = 'PENDING_CLASSIFY',
+  /** Informational only: shown under Activity → All, in neither Actionable nor FYI. Never classified. */
+  NONE = 'NONE',
   PROCESSING = 'PROCESSING',
   ERROR = 'ERROR',
 }
