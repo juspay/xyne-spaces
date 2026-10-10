@@ -18,7 +18,7 @@
  */
 
 import { Router, type Request, type Response } from 'express';
-import { errorHandler, notFound, requestId } from './handler';
+import { callLog, errorHandler, notFound, requestId } from './handler';
 import { readsAvailable } from './query';
 import { createSdkV1Router } from './v1';
 
@@ -26,15 +26,17 @@ import { createSdkV1Router } from './v1';
  * Unauthenticated service endpoints, mounted before the authenticated router
  * so a probe can tell "the API is misconfigured" from "your session is bad".
  *
- * `requestId` lives here rather than in both routers: it is `router.use()`
- * with no path, so it runs for every request to `/api/sdk/*` regardless of
- * which of the two routers ultimately serves it — mounting order in `app.ts`
- * guarantees this one sees the request first.
+ * `requestId` and `callLog` live here rather than in both routers: each is
+ * `router.use()` with no path, so it runs for every request to `/api/sdk/*`
+ * regardless of which of the two routers ultimately serves it — mounting order
+ * in `app.ts` guarantees this one sees the request first. That is also why a
+ * request the auth middleware rejects still gets its call log line.
  */
 export function createSdkPublicRouter(): Router {
   const router = Router();
 
   router.use(requestId);
+  router.use(callLog);
 
   router.get('/version', (_req: Request, res: Response) => {
     res.json({ version: 'v1', service: 'xyne-spaces-api' });

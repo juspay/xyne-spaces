@@ -954,6 +954,8 @@ export function createDirectRouter(): Router {
       route.path,
       ...(route.middleware ?? []),
       handle(async (req: Request, res: Response) => {
+        // Reached by operation id, the v1 handler has already named the call.
+        req.sdkCall ??= { op: `${route.method.toUpperCase()} ${route.path}`, kind: 'direct' };
         for (const guard of route.guards ?? []) await guard(req);
 
         if (route.service) {
