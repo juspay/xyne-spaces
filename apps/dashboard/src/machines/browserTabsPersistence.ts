@@ -91,9 +91,11 @@ export function keepBrowserTabs(): () => void {
   let ready = false;
   let lastWritten = '';
   let timer: ReturnType<typeof setTimeout> | null = null;
-  const secure = keepsBrowserStateSecurely();
+  // Known once restoring starts: nothing is written before that.
+  let secure = false;
 
   const restore = async (): Promise<void> => {
+    secure = await keepsBrowserStateSecurely();
     const local = userPreferencesSnapshot().browserTabs;
     let kept: KeptTabs | null = local;
     if (secure) {

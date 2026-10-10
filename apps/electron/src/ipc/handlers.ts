@@ -1,4 +1,4 @@
-import { ipcMain, shell, app, session, BrowserView, BrowserWindow, desktopCapturer, dialog, clipboard, nativeTheme, powerMonitor } from 'electron';
+import { ipcMain, shell, app, session, BrowserView, BrowserWindow, desktopCapturer, dialog, clipboard, powerMonitor } from 'electron';
 import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron';
 import { promises as fs } from 'fs';
 import * as path from 'path';
@@ -7,7 +7,7 @@ import { clearBrowserHistory, suggestFromHistory, topSites } from '../services/b
 import { acceptBrowserCommands } from '../services/webview-shortcuts';
 import { zoomAppWindow } from '../services/zoom-menu';
 import { setEmbeddedPageFrozen } from '../services/webview-lifecycle';
-import { isBrowserStateKey, readBrowserState, writeBrowserState } from '../services/browser-state';
+import { keepsBrowserStateOnDisk, isBrowserStateKey, readBrowserState, writeBrowserState } from '../services/browser-state';
 import { acceptBrowserDownloads, actOnDownload } from '../services/browser-downloads';
 import {
   BrowserImportError,
@@ -59,6 +59,7 @@ import { meetingDetectorService } from '../services/meeting-detector';
 import { browserSettingsService, BrowserSettings } from '../services/browser-settings';
 import { errorReportRecorder } from '../services/error-report-recorder';
 import { localHarnessBridge, LOCAL_HARNESS_PROVIDERS, type LocalHarnessProvider } from '../services/local-harness';
+import { setAppScheme } from '../services/webview-theme';
 
 
 let previewBrowserView: BrowserView | null = null;
@@ -721,7 +722,7 @@ export function setupIpcHandlers(): void {
     setRecordingPillTheme(theme);
     // Pages in the in-app browsers follow Xyne's theme, not the OS's: sites read it
     // as prefers-color-scheme, as they would in a browser set to dark or light.
-    nativeTheme.themeSource = theme;
+    setAppScheme(theme);
   });
 
   ipcMain.on('call:state-changed', (event, inCall: unknown) => {
@@ -886,6 +887,11 @@ export function setupIpcHandlers(): void {
 
   // The in-app browser's open tabs and per-site zoom, kept encrypted here rather
   // than in the app's own storage. From the app's own windows only.
+  // Whether the browser's state is kept, encrypted, across restarts: the app keeps
+  // its own copy where it isn't — Linux without a keyring, say.
+  ipcMain.handle('browser-state:secure', event =>
+    isAppWindowSender(event) ? keepsBrowserStateOnDisk() : false,
+  );
   ipcMain.handle('browser-state:get', async (event, key: unknown) => {
     if (!isAppWindowSender(event) || !isBrowserStateKey(key)) return null;
     return readBrowserState(key);
@@ -904,6 +910,7 @@ export function setupIpcHandlers(): void {
     }
     return { success: await setEmbeddedPageFrozen(event.sender, pageId, frozen) };
   });
+
 
   // Whether the computer runs on battery: the in-app browsers freeze hidden pages
   // sooner then, as Chrome's Energy Saver does.

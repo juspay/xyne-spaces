@@ -178,6 +178,16 @@ function treeNodeOf(item: SdlcTrackItem): TreeNode {
 
 const tabKey = (tab: { kind: string; id: string }): string => `${tab.kind}:${tab.id}`;
 
+/**
+ * The key a tab's page is kept under in the window. The scratch tab has the same id
+ * in every folder, so its page is told apart by the folder — or a parked page from
+ * one folder would come back in another. Still `KIND:id`, as every window takes.
+ */
+const pageKeyOf = (folderId: string, tab: { kind: string; id: string }): string =>
+  tab.id === SCRATCH_TAB_ID
+    ? `${tab.kind}:${tab.id}-${folderId.replace(/[^\w-]/g, '')}`.slice(0, tab.kind.length + 129)
+    : tabKey(tab);
+
 export function compareTreeNodes(
   left: { kind: string; name: string },
   right: { kind: string; name: string },
@@ -791,9 +801,13 @@ function PageIcon(props: {
 }
 
 /** A tab's icon alone, as its label shows it: for the tab switcher's rows. */
-function TabIcon(props: { tab: FolderTab; item: SdlcTrackItem | undefined }): ReactElement {
+function TabIcon(props: {
+  folderId: string;
+  tab: FolderTab;
+  item: SdlcTrackItem | undefined;
+}): ReactElement {
   const { tab, item } = props;
-  const page = useEmbeddedPages().get(tabKey(tab));
+  const page = useEmbeddedPages().get(pageKeyOf(props.folderId, tab));
   if (tab.kind === 'BROWSER' || tab.kind === 'LINK') {
     return <PageIcon tab={tab} item={item} page={page} />;
   }
@@ -1553,7 +1567,7 @@ export function SdlcFolderPage(props: {
               .sort((a, b) => Number(a.kind === 'BROWSER') - Number(b.kind === 'BROWSER'))
               .map((tab): TabSwitcherEntry => {
                 const item = tabItems.get(tabKey(tab));
-                const page = embeddedPages.get(tabKey(tab));
+                const page = embeddedPages.get(pageKeyOf(props.folder.id, tab));
                 const saved = tab.kind !== 'BROWSER';
                 const url = page?.url || (item?.kind === 'LINK' ? item.url : tab.url) || '';
                 const detail =
@@ -1568,7 +1582,7 @@ export function SdlcFolderPage(props: {
                   key: tabKey(tab),
                   name: tabName(tab, item, page),
                   detail: saved ? detail : `Not saved${detail ? ` · ${detail}` : ''}`,
-                  icon: <TabIcon tab={tab} item={item} />,
+                  icon: <TabIcon folderId={props.folder.id} tab={tab} item={item} />,
                   group: saved ? 'Saved in this folder' : 'Browsing · not saved',
                   current: Boolean(active && active.kind === tab.kind && active.id === tab.id),
                   ...(!saved && /^https?:/.test(url) && { saveUrl: url }),
@@ -1620,7 +1634,7 @@ export function SdlcFolderPage(props: {
 
   const closeAllTabs = (): void => {
     setTabListOpen(false);
-    tabs.forEach(tab => discardEmbeddedPage(tabKey(tab)));
+    tabs.forEach(tab => discardEmbeddedPage(pageKeyOf(props.folder.id, tab)));
     setTabs([]);
     if (!active) return;
     // Not openTab: that forgets the closure, and until the url catches up it still
@@ -1637,7 +1651,7 @@ export function SdlcFolderPage(props: {
     // keeps the open tab in the strip would put it straight back — which read
     // as the first click doing nothing.
     closedRef.current = `${tab.kind}:${tab.id}`;
-    discardEmbeddedPage(tabKey(tab));
+    discardEmbeddedPage(pageKeyOf(props.folder.id, tab));
     setTabs(remaining);
     if (active && active.kind === tab.kind && active.id === tab.id) {
       // The one that takes its place, else the one before it — through onOpenTab, not
@@ -1680,7 +1694,7 @@ export function SdlcFolderPage(props: {
     const stored = storedTabs ?? [];
     const changed = stored.flatMap(tab => {
       if (tab.kind !== 'BROWSER') return [];
-      const page = embeddedPages.get(tabKey(tab));
+      const page = embeddedPages.get(pageKeyOf(props.folder.id, tab));
       if (!page || page.loading || !/^https?:/.test(page.url)) return [];
       return page.url !== tab.url ||
         (page.title && page.title !== tab.title) ||
@@ -1692,7 +1706,9 @@ export function SdlcFolderPage(props: {
     const timer = window.setTimeout(() => {
       setTabs(
         stored.map(tab => {
-          const page = changed.includes(tab.id) ? embeddedPages.get(tabKey(tab)) : undefined;
+          const page = changed.includes(tab.id)
+            ? embeddedPages.get(pageKeyOf(props.folder.id, tab))
+            : undefined;
           return page
             ? {
                 ...tab,
@@ -2032,12 +2048,12 @@ export function SdlcFolderPage(props: {
             <TabStrip
               tabs={tabs.map(tab => {
                 const item = tabItems.get(tabKey(tab));
-                const page = embeddedPages.get(tabKey(tab));
+                const page = embeddedPages.get(pageKeyOf(props.folder.id, tab));
                 return {
                   key: tabKey(tab),
                   name: tabName(tab, item, page),
                   tooltip: tabTooltip(tab, item, page),
-                  icon: <TabIcon tab={tab} item={item} />,
+                  icon: <TabIcon folderId={props.folder.id} tab={tab} item={item} />,
                 };
               })}
               activeKey={active ? tabKey(active) : null}
@@ -2255,7 +2271,7 @@ function TabContent(props: {
     );
   }
 
-  const pageKey = tabKey(props.tab);
+  const pageKey = pageKeyOf(props.folderId, props.tab);
   return (
     <ItemView
       item={item}

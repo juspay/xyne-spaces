@@ -13,6 +13,7 @@ import type { ElectronWebviewElement } from '../../types/electron';
 import {
   BrowserWebview,
   IDLE_PAGE,
+  useKeptAlive,
   actOnDownload,
   clearFinishedDownloads,
   currentDownloads,
@@ -67,8 +68,6 @@ interface Page {
   visible: boolean;
   /** Put aside: the lane's tab isn't open. Hidden, muted, and in time let go. */
   parked: boolean;
-  /** When it was last on screen or put aside, to let the longest-unused go first. */
-  touched: number;
 }
 
 /** A right-click in a page, and the page: the host's menu for it. */
@@ -81,23 +80,10 @@ interface OpenMenu {
 
 /** The key the single page of an older, unkeyed lane is held under. */
 const LEGACY_KEY = 'legacy';
-/** Pages kept alive at once, the one on screen included; past it the longest put aside go. */
-const MAX_LIVE_PAGES = 4;
-/** How long a page put aside stays alive before it is let go, to stop costing memory and power. */
-const PARKED_LIFETIME_MS = 10 * 60 * 1000;
 let tabCounter = 0;
 const nextTabId = (): string => `embed-tab-${(tabCounter += 1)}`;
 
 const activeTab = (page: Page): Tab | undefined => page.tabs.find(tab => tab.id === page.activeId);
-
-/** Lets go of pages past the limit, the longest put aside first; never one on screen. */
-function withinLimit(all: Page[]): Page[] {
-  const excess = all.length - MAX_LIVE_PAGES;
-  if (excess <= 0) return all;
-  const parked = all.filter(page => page.parked).sort((a, b) => a.touched - b.touched);
-  const going = new Set(parked.slice(0, excess).map(page => page.key));
-  return all.filter(page => !going.has(page.key));
-}
 
 /**
  * The live pages the SDLC lane asks the host to hold over it.
@@ -292,31 +278,24 @@ export function SdlcEmbeddedWebview(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // The pages use too much memory, says the desktop app: those put aside go now.
-  useEffect(
-    () =>
-      window.electronAPI?.onBrowserMemoryPressure?.(() => {
-        setPages(current => current.filter(page => !page.parked));
-      }),
-    [],
+  // Which pages put aside stay alive: the same rules as the app's browser — the few
+  // shown lately, a while each, all let go when memory runs short (useKeptAlive).
+  // Pages the lane is showing are its own to keep; only those put aside are let go.
+  const shownKey = pages.find(page => page.visible && !page.parked)?.key ?? null;
+  const isPlaying = useCallback((key: string): boolean => {
+    const page = pagesRef.current.find(candidate => candidate.key === key);
+    const view = page ? viewRefs.current.get(page.activeId) : undefined;
+    return ask(() => view?.isCurrentlyAudible() ?? false, false);
+  }, []);
+  const alive = useKeptAlive(
+    pages.map(page => page.key),
+    shownKey,
+    isPlaying,
   );
-
-  // A page put aside long enough is let go: one timer, for the next to expire.
   useEffect(() => {
-    const parked = pages.filter(page => page.parked);
-    if (parked.length === 0) return;
-    const next = Math.min(...parked.map(page => page.touched)) + PARKED_LIFETIME_MS;
-    const timer = window.setTimeout(
-      () => {
-        const now = Date.now();
-        setPages(current =>
-          current.filter(page => !page.parked || now - page.touched < PARKED_LIFETIME_MS),
-        );
-      },
-      Math.max(0, next - Date.now()),
-    );
-    return () => window.clearTimeout(timer);
-  }, [pages]);
+    if (!pages.some(page => page.parked && !alive.has(page.key))) return;
+    setPages(current => current.filter(page => !page.parked || alive.has(page.key)));
+  }, [pages, alive]);
 
   const openInLane = useCallback((url: string, from: string): void => {
     frameWindowRef
@@ -343,19 +322,14 @@ export function SdlcEmbeddedWebview(props: {
       if (message.type === SDLC_FRAME_MESSAGE.embedPage) {
         const key = message.key ?? LEGACY_KEY;
         const keyed = message.key !== undefined;
-        const now = Date.now();
         setPages(current => {
           const existing = current.find(page => page.key === key);
           if (message.url === null || !message.rect) {
             // A tab switched away keeps its page aside; anything else lets it go.
             if (!existing) return current;
             return keyed && message.keep
-              ? withinLimit(
-                  current.map(page =>
-                    page.key === key
-                      ? { ...page, visible: false, parked: true, touched: now }
-                      : page,
-                  ),
+              ? current.map(page =>
+                  page.key === key ? { ...page, visible: false, parked: true } : page,
                 )
               : current.filter(page => page.key !== key);
           }
@@ -365,9 +339,7 @@ export function SdlcEmbeddedWebview(props: {
           const restart =
             !existing || (!keyed && existing.tabs.find(tab => tab.pinned)?.src !== message.url);
           if (!restart) {
-            return current.map(page =>
-              page.key === key ? { ...page, ...placed, touched: now } : page,
-            );
+            return current.map(page => (page.key === key ? { ...page, ...placed } : page));
           }
           const tab: Tab = { id: nextTabId(), src: message.url, pinned: true };
           const fresh: Page = {
@@ -376,9 +348,8 @@ export function SdlcEmbeddedWebview(props: {
             tabs: [tab],
             activeId: tab.id,
             ...placed,
-            touched: now,
           };
-          return withinLimit([...current.filter(page => page.key !== key), fresh]);
+          return [...current.filter(page => page.key !== key), fresh];
         });
         return;
       }

@@ -27,6 +27,11 @@ const storePath = (): string => path.join(app.getPath('userData'), FILE_NAME);
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
+/** Whether the state is kept on disk, encrypted: not where no system key is available. */
+export function keepsBrowserStateOnDisk(): boolean {
+  return safeStorage.isEncryptionAvailable();
+}
+
 export const isBrowserStateKey = (value: unknown): value is BrowserStateKey =>
   typeof value === 'string' && (KEYS as readonly string[]).includes(value);
 

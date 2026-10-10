@@ -32,6 +32,9 @@ function ensureSubscriber(): void {
     .psubscribe(`${CALL_PREFIX}*`, `${ARTIFACTS_PREFIX}*`)
     .then(() => log.info(`[panel-signals] subscribed to ${CALL_PREFIX}* and ${ARTIFACTS_PREFIX}*`))
     .catch((err) => {
+      // This connection goes, rather than linger and resubscribe beside the next
+      // one — which would hear every signal twice.
+      sub.disconnect();
       subscriberReady = false;
       log.error(`[panel-signals] psubscribe failed: ${errMsg(err)}`);
     });

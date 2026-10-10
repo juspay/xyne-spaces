@@ -297,8 +297,17 @@ export async function servePagePanelStream(deps: PagePanelStreamDeps): Promise<(
   let draining = false;
   let again = false;
   const runIds = deps.runIds.slice(0, MAX_RUNS_PER_POLL);
+  const write = (chunk: string): void => {
+    if (!closed) deps.write(chunk);
+  };
+
+  // Only a panel with pages takes page calls and keeps the runs' presence: a screen
+  // following the runs without pages — another window, the web app — must neither
+  // take the calls a desktop panel should answer nor mark that panel closed.
+  const takesCalls = deps.panelOpen;
 
   const drain = async (): Promise<void> => {
+    if (!takesCalls) return;
     if (draining) {
       again = true;
       return;
@@ -309,9 +318,9 @@ export async function servePagePanelStream(deps: PagePanelStreamDeps): Promise<(
         again = false;
         for (;;) {
           if (closed) return;
-          const call = await nextPagePanelCall(deps.userId, runIds, deps.panelOpen).catch(() => null);
+          const call = await nextPagePanelCall(deps.userId, runIds, true).catch(() => null);
           if (!call) break;
-          deps.write(`event: call\ndata: ${JSON.stringify(call)}\n\n`);
+          write(`event: call\ndata: ${JSON.stringify(call)}\n\n`);
         }
       } while (again && !closed);
     } finally {
@@ -319,29 +328,40 @@ export async function servePagePanelStream(deps: PagePanelStreamDeps): Promise<(
     }
   };
 
-  const stops = runIds.map((runId) => onPageCall(runId, () => void drain()));
+  const stops: Array<() => void> = takesCalls ? runIds.map((runId) => onPageCall(runId, () => void drain())) : [];
 
-  // The runs' conversations, for their artifacts: only the user's own.
+  // The runs' conversations, for their artifacts: only the user's own. A run not
+  // found yet — its row not visible the moment the stream opens — is looked up
+  // again each beat; a conversation found late is said changed at once, for what
+  // happened in it before.
+  const found = new Set<string>();
   const conversations = new Set<string>();
-  for (const runId of runIds) {
-    const owner = await runOwner(runId).catch(() => null);
-    if (owner?.userId === deps.userId && owner.conversationId) conversations.add(owner.conversationId);
-  }
-  for (const conversationId of conversations) {
-    stops.push(
-      onArtifacts(conversationId, () => {
-        if (!closed) deps.write(`event: artifacts\ndata: ${JSON.stringify({ conversationId })}\n\n`);
-      }),
-    );
-  }
+  let ready = false;
+  const watchConversations = async (): Promise<void> => {
+    for (const runId of runIds) {
+      if (found.has(runId) || closed) continue;
+      const owner = await runOwner(runId).catch(() => null);
+      if (!owner || closed) continue;
+      found.add(runId);
+      const conversationId = owner.conversationId;
+      if (owner.userId !== deps.userId || !conversationId || conversations.has(conversationId)) continue;
+      conversations.add(conversationId);
+      const said = (): void => write(`event: artifacts\ndata: ${JSON.stringify({ conversationId })}\n\n`);
+      stops.push(onArtifacts(conversationId, said));
+      if (ready) said();
+    }
+  };
 
+  await watchConversations();
   // `artifacts` tells the client this stream says when artifacts change.
-  deps.write(`event: ready\ndata: ${JSON.stringify({ artifacts: true })}\n\n`);
+  write(`event: ready\ndata: ${JSON.stringify({ artifacts: true })}\n\n`);
+  ready = true;
   await drain();
   const heartbeat = setInterval(() => {
     if (closed) return;
-    deps.write(":ka\n\n");
+    write(":ka\n\n");
     void drain();
+    if (found.size < runIds.length) void watchConversations();
   }, deps.heartbeatMs);
 
   return () => {

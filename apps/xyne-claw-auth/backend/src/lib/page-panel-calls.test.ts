@@ -178,6 +178,57 @@ describe("browser panel calls for Xyne AI screen runs", () => {
     stop();
   });
 
+  it("leaves a call to the panel with pages, not a screen following the run without", async () => {
+    const id = newRun("u1", "chat");
+    const desktop: string[] = [];
+    const web: string[] = [];
+    const stopDesktop = await servePagePanelStream({
+      userId: "u1",
+      runIds: [id],
+      panelOpen: true,
+      write: (chunk) => desktop.push(chunk),
+      heartbeatMs: 60_000,
+    });
+    const stopWeb = await servePagePanelStream({
+      userId: "u1",
+      runIds: [id],
+      panelOpen: false,
+      write: (chunk) => web.push(chunk),
+      heartbeatMs: 60_000,
+    });
+    const answer = callPagePanelTool({ userId: "u1", sessionId: id, toolName: "page-read", args: {} });
+    await vi.waitFor(() => expect(desktop.some((chunk) => chunk.startsWith("event: call"))).toBe(true));
+    expect(web.some((chunk) => chunk.startsWith("event: call"))).toBe(false);
+    const sent = desktop.find((chunk) => chunk.startsWith("event: call")) ?? "";
+    const call = JSON.parse(sent.slice(sent.indexOf("data: ") + 6)) as { id: string };
+    await resolvePagePanelCall("u1", call.id, { ok: true, content: "read" });
+    expect((await answer).ok).toBe(true);
+    stopDesktop();
+    stopWeb();
+  });
+
+  it("says a conversation changed when its run is found only after the stream opened", async () => {
+    const id = `run-late-${++run}`;
+    const written: string[] = [];
+    const stop = await servePagePanelStream({
+      userId: "u1",
+      runIds: [id],
+      panelOpen: false,
+      write: (chunk) => written.push(chunk),
+      heartbeatMs: 20,
+    });
+    expect(written.some((chunk) => chunk.startsWith("event: artifacts"))).toBe(false);
+    // The run's row becomes visible after the stream opened.
+    state.runs.set(id, { userId: "u1", triggerSource: "chat", conversationId: `conv-${id}`, orgId: "org-1" });
+    await vi.waitFor(() =>
+      expect(written).toContain(`event: artifacts\ndata: {"conversationId":"conv-${id}"}\n\n`),
+    );
+    const before = written.length;
+    signalArtifacts(`conv-${id}`);
+    await vi.waitFor(() => expect(written.length).toBeGreaterThan(before));
+    stop();
+  });
+
   it("streams nothing for someone else's run", async () => {
     const id = newRun("u2", "chat");
     const written: string[] = [];

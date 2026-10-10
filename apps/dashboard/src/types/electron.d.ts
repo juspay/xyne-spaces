@@ -115,6 +115,8 @@ export interface ElectronAPI {
   preconnectBrowserPage?: (url: string) => Promise<void>;
   /** The in-app browser's open tabs or per-site zoom, kept encrypted by the desktop
    *  app; absent from one that can't. */
+  /** Whether the browser's state is kept encrypted across restarts. */
+  isBrowserStateSecure?: () => Promise<boolean>;
   getBrowserState?: (key: 'tabs' | 'zoom') => Promise<unknown>;
   setBrowserState?: (key: 'tabs' | 'zoom', value: unknown) => Promise<{ success: boolean }>;
   /** ⌘-scroll over a page of the in-app browsers, asking to zoom it, by the page's id. */

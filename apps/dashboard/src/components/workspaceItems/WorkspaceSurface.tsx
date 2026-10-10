@@ -55,6 +55,11 @@ export interface WorkspaceSurfaceProps {
   icon?: (item: WorkspaceItem) => ReactNode;
   /** A passage the reader picked, offered as the anchor for a new comment. */
   draftAnchor?: { quote: string; selector?: string; line?: number; offset?: number } | null;
+  /**
+   * On screen. A surface put out of sight keeps its kept-alive items — their pages
+   * stay loaded, out of sight — and draws nothing else.
+   */
+  visible?: boolean;
 }
 
 export function WorkspaceSurface({
@@ -75,6 +80,7 @@ export function WorkspaceSurface({
   browserOverlay,
   icon,
   draftAnchor,
+  visible = true,
 }: WorkspaceSurfaceProps): ReactElement {
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [focusCommentId, setFocusCommentId] = useState<string | null>(null);
@@ -103,7 +109,9 @@ export function WorkspaceSurface({
     open.filter(item => alive.has(item.id)),
     item => item.id,
   );
-  const own = active && !alive.has(active.id) ? renderItem?.(active, true) : null;
+  const own = visible && active && !alive.has(active.id) ? renderItem?.(active, true) : null;
+  // The kept item on screen: the open one, while the surface is.
+  const shownId = visible ? (active?.id ?? null) : null;
 
   return (
     <div className='flex h-full min-h-0 w-full min-w-0'>
@@ -170,12 +178,12 @@ export function WorkspaceSurface({
               <div
                 key={item.id}
                 className='absolute inset-0 min-h-0 min-w-0'
-                style={item.id === active?.id ? undefined : { visibility: 'hidden' }}
+                style={item.id === shownId ? undefined : { visibility: 'hidden' }}
               >
-                {renderItem?.(item, item.id === active?.id)}
+                {renderItem?.(item, item.id === shownId)}
               </div>
             ))}
-            {active && alive.has(active.id) ? null : active && own ? (
+            {!visible || (active && alive.has(active.id)) ? null : active && own ? (
               <div key={active.id} className='h-full min-h-0 w-full min-w-0'>
                 {own}
               </div>
@@ -191,7 +199,7 @@ export function WorkspaceSurface({
               (empty ?? <Centered>Nothing open yet.</Centered>)
             )}
           </div>
-          {active && commentsOpen ? (
+          {visible && active && commentsOpen ? (
             <CommentsPanel
               item={active}
               draftAnchor={draftAnchor ?? null}

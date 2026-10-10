@@ -42,7 +42,7 @@ function zoomsFrom(value: unknown): Record<string, number> {
  * before is moved over once and goes from there. Called once preferences are in.
  */
 export async function loadSiteZoom(): Promise<void> {
-  if (!keepsBrowserStateSecurely()) return;
+  if (!(await keepsBrowserStateSecurely())) return;
   const stored = zoomsFrom(await readSecureBrowserState('zoom'));
   const local = userPreferencesSnapshot().browserZoom;
   const moving = Object.keys(stored).length === 0 && Object.keys(local).length > 0;

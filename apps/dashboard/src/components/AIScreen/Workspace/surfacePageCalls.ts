@@ -4,6 +4,7 @@ import {
   subscribeToWorkspacePages,
   workspacePage,
   workspaceTabAt,
+  workspaceTabOpenedFor,
   type PageToolResult,
 } from './workspaceBrowserTools';
 import { getSdlcWebview, requestSdlcBrowser, subscribeToSdlcWebview } from './sdlcBrowserTarget';
@@ -111,28 +112,33 @@ async function openUrl(
     };
   }
 
-  // Already open in a tab: that one, as it is.
-  const open = workspaceTabAt(url);
-  if (open) {
+  const opened = (tab: string): PageToolResult => ({
+    ok: true,
+    content: `Opened ${url} in tab ${tab} of the browser panel beside the Xyne AI chat. Pass tab ${tab} to page-snapshot, page-read, page-click and page-type to work with it.`,
+  });
+  // Showing it already: that tab, as it is.
+  const showing = workspaceTabAt(url);
+  if (showing) {
     return {
       ok: true,
-      content: `${url} is already open in tab ${open} of the browser panel beside the Xyne AI chat. Pass tab ${open} to page-snapshot, page-read, page-click and page-type to work with it.`,
+      content: `${url} is already open in tab ${showing} of the browser panel beside the Xyne AI chat. Pass tab ${showing} to page-snapshot, page-read, page-click and page-type to work with it.`,
     };
   }
-  // The server added it as a new tab: its page, once it opens.
+  // Its tab is open but has gone elsewhere since: back to it, in that tab.
+  const moved = workspaceTabOpenedFor(url);
+  const movedPage = moved ? workspacePage(moved) : null;
+  if (moved && movedPage) {
+    await load(movedPage, url);
+    return opened(moved);
+  }
+  // The server added it as a new tab, which starts at the address: once it opens,
+  // that tab — not loaded a second time, which would cut its first load short.
   const tab = await whenReady(
-    () => workspaceTabAt(url),
+    () => workspaceTabOpenedFor(url),
     subscribeToWorkspacePages,
     WAIT_FOR_BROWSER_MS,
   );
-  if (tab) {
-    const wv = workspacePage(tab);
-    if (wv) await load(wv, url);
-    return {
-      ok: true,
-      content: `Opened ${url} in tab ${tab} of the browser panel beside the Xyne AI chat. Pass tab ${tab} to page-snapshot, page-read, page-click and page-type to work with it.`,
-    };
-  }
+  if (tab) return opened(tab);
   // A server from before tabs: the page on screen, as then.
   const wv = getWorkspaceWebview();
   if (!wv) {

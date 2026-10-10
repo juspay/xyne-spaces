@@ -274,6 +274,7 @@ const electronAPI = {
     ipcRenderer.invoke('browser-history:suggest', typed, limit),
   browserHistoryTop: (limit?: number) => ipcRenderer.invoke('browser-history:top', limit),
   clearBrowserHistory: () => ipcRenderer.invoke('browser-history:clear'),
+  isBrowserStateSecure: () => ipcRenderer.invoke('browser-state:secure'),
   getBrowserState: (key: string) => ipcRenderer.invoke('browser-state:get', key),
   setBrowserState: (key: string, value: unknown) =>
     ipcRenderer.invoke('browser-state:set', key, value),

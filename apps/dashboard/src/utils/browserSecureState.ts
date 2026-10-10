@@ -7,10 +7,26 @@
 
 export type SecureBrowserKey = 'tabs' | 'zoom';
 
-/** Whether the desktop app keeps the browser's state itself. */
-export function keepsBrowserStateSecurely(): boolean {
-  const api = window.electronAPI;
-  return typeof api?.getBrowserState === 'function' && typeof api.setBrowserState === 'function';
+let secure: Promise<boolean> | null = null;
+
+/**
+ * Whether the desktop app keeps the browser's state itself — only where it can
+ * encrypt it to disk. Where it can't (Linux without a keyring, say) it would hold it
+ * in memory only, so the app keeps its own copy, as before. Asked once.
+ */
+export function keepsBrowserStateSecurely(): Promise<boolean> {
+  secure ??= (async () => {
+    const api = window.electronAPI;
+    if (typeof api?.getBrowserState !== 'function' || typeof api.setBrowserState !== 'function') {
+      return false;
+    }
+    if (typeof api.isBrowserStateSecure !== 'function') return false;
+    return api.isBrowserStateSecure().then(
+      onDisk => onDisk === true,
+      () => false,
+    );
+  })();
+  return secure;
 }
 
 export async function readSecureBrowserState(key: SecureBrowserKey): Promise<unknown> {

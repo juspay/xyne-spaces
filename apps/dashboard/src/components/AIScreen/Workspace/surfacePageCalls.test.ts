@@ -16,7 +16,13 @@ const targets = vi.hoisted(() => ({
 
 vi.mock('./workspaceBrowserTools', () => ({
   getWorkspaceWebview: () => targets.workspace,
+  // As the registry: where a page is now, or where its tab opened it before it loads.
   workspaceTabAt: (url: string) =>
+    [...targets.tabs].find(([, tab]) => {
+      const now = (tab.view as { getURL: () => string }).getURL();
+      return (now && now !== 'about:blank' ? now : tab.url) === url;
+    })?.[0] ?? null,
+  workspaceTabOpenedFor: (url: string) =>
     [...targets.tabs].find(([, tab]) => tab.url === url)?.[0] ?? null,
   workspacePage: (tab: string) => targets.tabs.get(tab)?.view ?? null,
   subscribeToWorkspacePages: (listener: () => void) => {
@@ -111,9 +117,22 @@ describe('surface page calls', () => {
       url: 'https://docs.google.com/',
       xyneSurface: 'xyne-ai',
     });
-    expect(added.loadURL).toHaveBeenCalledWith('https://docs.google.com/');
+    // It starts at the address: loading it again would cut its first load short.
+    expect(added.loadURL).not.toHaveBeenCalled();
     expect(shown.loadURL).not.toHaveBeenCalled();
     expect(result.content).toContain('tab-new');
+  });
+
+  it('takes a tab that has navigated away back to the address it was opened for', async () => {
+    const moved = webview('https://docs.google.com/pricing');
+    targets.tabs.set('tab-moved', { url: 'https://docs.google.com/', view: moved });
+    const result = await runSurfacePageCall('open-url', {
+      url: 'https://docs.google.com/',
+      xyneSurface: 'xyne-ai',
+    });
+    expect(moved.loadURL).toHaveBeenCalledWith('https://docs.google.com/');
+    expect(result.content).toContain('tab-moved');
+    expect(result.content).not.toContain('already open');
   });
 
   it('points at the Xyne AI panel tab already at a URL instead of opening it again', async () => {

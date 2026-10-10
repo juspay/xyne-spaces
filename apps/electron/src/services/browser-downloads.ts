@@ -92,15 +92,23 @@ export function acceptBrowserDownloads(host: WebContents): void {
 }
 
 /** A name in Downloads that isn't taken: report.pdf, then report (1).pdf. */
+/** Paths given to downloads still coming in: not on disk yet, but taken. */
+const reserved = new Set<string>();
+
+/**
+ * A free path in Downloads for a file of this name, held until its download ends:
+ * two same-named downloads begun together get one each, not both the same.
+ */
 function freePath(name: string): string {
   const folder = app.getPath('downloads');
   const safe = path.basename(name) || 'download';
   const extension = path.extname(safe);
   const stem = safe.slice(0, safe.length - extension.length);
   let candidate = path.join(folder, safe);
-  for (let copy = 1; existsSync(candidate); copy += 1) {
+  for (let copy = 1; reserved.has(candidate) || existsSync(candidate); copy += 1) {
     candidate = path.join(folder, `${stem} (${copy})${extension}`);
   }
+  reserved.add(candidate);
   return candidate;
 }
 
@@ -141,6 +149,7 @@ export function setupBrowserDownloads(): void {
       report(id, download, state === 'interrupted' ? 'interrupted' : 'progressing');
     });
     item.once('done', (_done, state) => {
+      reserved.delete(savePath);
       if (state !== 'completed') {
         report(id, download, state);
         downloads.delete(id);

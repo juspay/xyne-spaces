@@ -282,14 +282,17 @@ app.on('web-contents-created', (_event, webContents) => {
     // sits over a site's own popups for a selection — nor for its bridge to the app,
     // which a third-party page has no business holding.
     // Xyne AI's workspace browser marks its pages `plain` for the same reason.
+    // Xyne's own pages, in their own partition, keep the script whatever the mark:
+    // it is how a Xyne page knows it is in a panel and shows only what fits one.
     const features = typeof params.webpreferences === 'string' ? params.webpreferences : '';
-    if (/(^|,)\s*xyneSurface=(sdlc|plain)\s*(,|$)/.test(features)) {
+    const ownPage = params.partition === 'persist:xyne-spaces';
+    if (!ownPage && /(^|,)\s*xyneSurface=(sdlc|plain)\s*(,|$)/.test(features)) {
       delete webPreferences.preload;
       log.info('[Main] Plain browsing page: no webview preload');
     } else {
       // Xyne's own pages, which load in their own partition, are told they are
       // in the browser panel; a third-party site never is.
-      if (params.partition === 'persist:xyne-spaces') {
+      if (ownPage) {
         webPreferences.additionalArguments = [
           ...(webPreferences.additionalArguments ?? []),
           '--xyne-own-page',
