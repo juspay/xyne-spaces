@@ -912,12 +912,15 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         // On-device intent classification. Fire-and-forget and never awaited — it must
         // not add a single millisecond to the send path. Gated inside the service on the
         // user preference and public-channel visibility, both fail closed. A detection
-        // raises a local toast; nothing leaves the device. See docs/ON_DEVICE_INTENT.md
+        // raises a local toast or an inline card under the message; nothing leaves the
+        // device. See docs/ON_DEVICE_INTENT.md
         const classifyIntent = (sentMessageId: string): void => {
           intentClassifier.submitForMessage({
             text: _plainText,
             messageId: sentMessageId,
             channel,
+            // A thread reply suggests a thread call; a channel message a channel call.
+            surface: conversationId ? 'thread' : 'channel',
           });
         };
 

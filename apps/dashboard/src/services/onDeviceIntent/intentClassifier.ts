@@ -43,6 +43,14 @@ export interface ClassifiableChannel {
   visibility?: string | undefined;
 }
 
+/**
+ * Which composer the message was sent from. Travels with the detection so the
+ * renderer can show the right thing in the right list: a thread reply suggests a
+ * thread call under the message in the thread panel, a channel message suggests a
+ * channel call under the message in the channel.
+ */
+export type IntentSurface = 'channel' | 'thread';
+
 /** What a subscriber is told when an intent fires. Carries no message text. */
 export interface IntentDetection {
   intentId: string;
@@ -56,6 +64,8 @@ export interface IntentDetection {
    * subscriber never has to decide what an unroutable how-to should look like.
    */
   topicId?: string;
+  /** See IntentSurface. */
+  surface: IntentSurface;
 }
 
 type DetectionListener = (detection: IntentDetection) => void;
@@ -78,6 +88,7 @@ interface PendingJob {
   requestId: string;
   text: string;
   messageId: string | null;
+  surface: IntentSurface;
   /** Playground requests resolve a promise and skip telemetry entirely. */
   resolve: ((result: ClassificationResult) => void) | null;
   reject: ((error: Error) => void) | null;
@@ -238,6 +249,7 @@ class IntentClassifier {
     text: string;
     messageId: string;
     channel: ClassifiableChannel | undefined | null;
+    surface: IntentSurface;
   }): void {
     this.ensureDebug();
     // Read every time, not once at construction: the switch must take effect
@@ -252,12 +264,16 @@ class IntentClassifier {
       });
       return;
     }
-    trace('main', '0. gate — public channel, classifying', { messageId: params.messageId });
+    trace('main', '0. gate — public channel, classifying', {
+      messageId: params.messageId,
+      surface: params.surface,
+    });
 
     this.enqueue({
       requestId: `m${++this.requestCounter}`,
       text: params.text,
       messageId: params.messageId,
+      surface: params.surface,
       resolve: null,
       reject: null,
     });
@@ -278,6 +294,7 @@ class IntentClassifier {
       }
       this.enqueue({
         requestId: `p${++this.requestCounter}`,
+        surface: 'channel',
         text,
         messageId: null,
         resolve,
@@ -383,10 +400,11 @@ class IntentClassifier {
       return;
     }
 
-    this.record(result, job?.messageId ?? null);
+    this.record(result, job ?? null);
   }
 
-  private record(result: ClassificationResult, messageId: string | null): void {
+  private record(result: ClassificationResult, job: PendingJob | null): void {
+    const messageId = job?.messageId ?? null;
     if (result.prefiltered) {
       trace('main', '6. prefiltered — nothing scored');
       return;
@@ -408,6 +426,7 @@ class IntentClassifier {
       actionable &&
       clearsThreshold &&
       messageId !== null &&
+      job !== null &&
       (!routesByTopic || topicResolved);
 
     if (triggered) {
@@ -416,6 +435,7 @@ class IntentClassifier {
         intentId: result.topIntent,
         messageId,
         score: result.topScore,
+        surface: job.surface,
         ...(topicResolved ? { topicId } : {}),
       });
     }

@@ -63,6 +63,8 @@ import {
 } from '../ChatList/ChatListUtils';
 import { useUserBookmarks } from '../../../hooks/useUserBookmarks';
 import { useChannel } from '../../../hooks/useChannels';
+import { useIntentCallSuggestion } from '../../../stores/intentCallSuggestionStore';
+import { IntentCallSuggestionCard } from '../IntentCallSuggestion';
 import { useIsDmReadOnly } from '../../../hooks/useIsDmReadOnly';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { logger, Event } from '../../../utils/logger';
@@ -1017,11 +1019,29 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     showThreadTags && context === 'thread' && !isSystemMessage && !isMessageDeleted ? (
       <MessageTags messageActs={message.messageActs} inspectedTag={inspectedTag} />
     ) : null;
+  // On-device "start a call" suggestion for the sender's own just-sent message.
+  // Local to this device (see intentCallSuggestionStore). Rendered in the list
+  // the message was sent from: a thread reply's card lives in the thread panel,
+  // a channel message's card in the channel — the surface check keeps a thread's
+  // first message from showing a thread-call card up in the channel list.
+  const intentCallSuggestion = useIntentCallSuggestion(message.messageId);
+  const intentCallCard =
+    intentCallSuggestion &&
+    message.senderId === user?.id &&
+    intentCallSuggestion.surface === context &&
+    !isMessageDeleted ? (
+      <IntentCallSuggestionCard
+        detection={intentCallSuggestion}
+        channelId={channelId}
+        conversationId={messageConversationId}
+      />
+    ) : null;
   const textTrailer =
-    afterTextContent !== undefined || messageTags ? (
+    afterTextContent !== undefined || messageTags || intentCallCard ? (
       <>
         {afterTextContent}
         {messageTags}
+        {intentCallCard}
       </>
     ) : undefined;
 
