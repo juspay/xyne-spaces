@@ -9,6 +9,7 @@ import { logger } from '@/utils/logger';
 import { DatabaseClient } from '@/database/client';
 import {
   BaseTicketType,
+  FLOW_STAGE_NAMES,
   isReleaseTicket,
   TicketStatusV2,
   TicketPriority,
@@ -539,6 +540,7 @@ export class TicketRepository {
     if (
       newStatusV2 === TicketStatusV2.COMPLETED &&
       oldStatusV2 !== TicketStatusV2.COMPLETED &&
+      newStageName !== FLOW_STAGE_NAMES.SKIPPED &&
       flowSnapshot?.gate?.type === 'confirmation'
     ) {
       await prisma.ticketActivity.create({
@@ -572,7 +574,8 @@ export class TicketRepository {
         boardId: true,
         stageName: true,
         updatedBy: true,
-        board: { select: { boardType: true } },
+        metadata: true,
+        board: { select: { boardType: true, flowPlan: true } },
       }
     });
   }

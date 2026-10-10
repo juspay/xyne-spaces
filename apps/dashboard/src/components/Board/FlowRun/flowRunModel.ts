@@ -10,6 +10,7 @@ import {
   flowRuntimeStatusOf,
   getFlowMeta,
   isFlowStepBacklogged,
+  isFlowStepSkipped,
   isRunRoot,
   mapPlanToRunTickets,
   type FlowRunTicket,
@@ -26,8 +27,11 @@ export interface FlowRunSummary {
   state: 'completed' | 'cancelled' | 'pending' | 'backlog' | 'not-started';
   pending: FlowRunSummaryStep[];
   backlogged: FlowRunSummaryStep[];
+  /** Manually skipped steps (stage SKIPPED) — settled but not completed. */
+  skipped: FlowRunSummaryStep[];
   cancelled: FlowRunSummaryStep[];
   completedCount: number;
+  /** Steps counted against progress — skipped steps are excluded (settled). */
   totalCount: number;
 }
 
@@ -203,10 +207,6 @@ export function summarizeFlowRuns(
       decisionOutcomes,
     );
     const nodes = model.nodes.filter(node => !skippedNodeIds.has(node.id));
-    const totalCount = nodes.length;
-    const completedCount = nodes.filter(
-      node => runTickets.get(node.id)?.statusV2 === TicketStatusV2.COMPLETED,
-    ).length;
     const toSummaryStep = (node: FlowPlanNode): FlowRunSummaryStep => {
       const runTicket = runTickets.get(node.id);
       return {
@@ -223,6 +223,18 @@ export function summarizeFlowRuns(
     const cancelled = nodes
       .filter(node => runTickets.get(node.id)?.statusV2 === TicketStatusV2.CANCELLED)
       .map(toSummaryStep);
+    const skipped = nodes
+      .filter(node => isFlowStepSkipped(runTickets.get(node.id)))
+      .map(toSummaryStep);
+    // Skipped steps are settled, not pending work: they count against neither
+    // the total nor the completed set, so a run finished with skips fills the
+    // bar while the skipped list still shows them separately.
+    const totalCount = nodes.length - skipped.length;
+    const completedCount = nodes.filter(
+      node =>
+        runTickets.get(node.id)?.statusV2 === TicketStatusV2.COMPLETED &&
+        !isFlowStepSkipped(runTickets.get(node.id)),
+    ).length;
     if (
       ticket.statusV2 === TicketStatusV2.COMPLETED ||
       ticket.statusV2 === TicketStatusV2.CANCELLED
@@ -231,6 +243,7 @@ export function summarizeFlowRuns(
         state: ticket.statusV2 === TicketStatusV2.COMPLETED ? 'completed' : 'cancelled',
         pending: [],
         backlogged: [],
+        skipped,
         cancelled,
         completedCount,
         totalCount,
@@ -255,6 +268,7 @@ export function summarizeFlowRuns(
       state: pending.length > 0 ? 'pending' : backlogged.length > 0 ? 'backlog' : 'not-started',
       pending,
       backlogged,
+      skipped,
       cancelled,
       completedCount,
       totalCount,

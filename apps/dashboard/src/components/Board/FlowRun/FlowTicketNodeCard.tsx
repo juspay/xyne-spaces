@@ -1,9 +1,9 @@
 import React from 'react';
 import { Handle, Position, type NodeProps } from 'reactflow';
-import { Archive, GitFork, Ticket as TicketIcon } from 'lucide-react';
+import { Archive, GitFork, SkipForward, Ticket as TicketIcon } from 'lucide-react';
 import type { FlowPlanNode } from '@xyne/shared';
 import { getStatusOption } from '../BoardStageConfigScreen/BoardStageConfigScreen.types';
-import { isFlowStepBacklogged, type FlowRunTicket } from './flowRun.utils';
+import { isFlowStepBacklogged, isFlowStepSkipped, type FlowRunTicket } from './flowRun.utils';
 import { FlowGroupNode } from './FlowGroupNode';
 import Tooltip from '../../ui/Tooltip';
 
@@ -24,7 +24,9 @@ export const FlowTicketNodeCard: React.FC<NodeProps<FlowTicketNodeData>> = ({ da
   const isRoot = planNode === null;
   const isGhost = !ticket;
   const backlogged = !isRoot && isFlowStepBacklogged(ticket);
-  const statusOption = ticket && !backlogged ? getStatusOption(ticket.statusV2) : null;
+  const manuallySkipped = !isRoot && isFlowStepSkipped(ticket);
+  const statusOption =
+    ticket && !backlogged && !manuallySkipped ? getStatusOption(ticket.statusV2) : null;
 
   return (
     <div
@@ -76,6 +78,11 @@ export const FlowTicketNodeCard: React.FC<NodeProps<FlowTicketNodeData>> = ({ da
               <Archive size={12} />
               Backlog
             </span>
+          ) : manuallySkipped ? (
+            <span className='flex items-center gap-1 text-[11px] font-medium text-teal-600'>
+              <SkipForward size={12} />
+              Skipped
+            </span>
           ) : ticket && statusOption ? (
             <span className='flex items-center gap-1 text-[11px] font-medium text-muted-foreground'>
               {statusOption.icon}
@@ -83,7 +90,7 @@ export const FlowTicketNodeCard: React.FC<NodeProps<FlowTicketNodeData>> = ({ da
             </span>
           ) : (
             <span className='text-[10px] font-medium text-muted-foreground uppercase tracking-[0.5px]'>
-              {isRoot ? 'No run' : skipped ? 'Skipped' : 'To Do'}
+              {isRoot ? 'No run' : skipped ? 'Not reached' : 'To Do'}
             </span>
           )}
         </span>

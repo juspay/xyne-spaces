@@ -4,14 +4,17 @@ import { toast } from 'sonner';
 import {
   CircleCheck,
   Archive,
+  ChevronDown,
   GitBranch,
   Hash,
   PanelRight,
   PauseCircle,
+  SkipForward,
   Ticket as TicketIcon,
   X,
   XCircle,
 } from 'lucide-react';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import {
   ActivityType,
   FLOW_STAGE_NAMES,
@@ -24,9 +27,15 @@ import Tooltip from '../../ui/Tooltip';
 import { getStatusOption } from '../BoardStageConfigScreen/BoardStageConfigScreen.types';
 import { gateOf } from '../FlowPlanEditor/FlowPlanEditor';
 import { StageFormInlinePanel } from '../../Tickets/StageFormInlinePanel/StageFormInlinePanel';
-import { isFlowStepBacklogged, normalizeUserId, type FlowRunTicket } from './flowRun.utils';
+import {
+  isFlowStepBacklogged,
+  isFlowStepSkipped,
+  normalizeUserId,
+  type FlowRunTicket,
+} from './flowRun.utils';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { useQuery } from '@xyne/shared/hooks';
 import { useUsersById } from '../../../hooks/useUsers';
 import { useConfirmDialog } from '../../../hooks/useConfirmDialog';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
@@ -45,15 +54,41 @@ interface FlowActivityValue {
 // edit past this window is a real post-completion edit.
 const FLOW_FORM_EDIT_GRACE_MS = 10_000;
 
+const FLOW_STEP_INFO_STYLE = {
+  skipped: {
+    verb: 'Skipped',
+    verbColor: 'text-teal-600',
+    surfaceColor: 'border-teal-500/15 bg-teal-500/[0.05]',
+  },
+  backlog: {
+    verb: 'Moved to backlog',
+    verbColor: 'text-amber-600',
+    surfaceColor: 'border-amber-500/15 bg-amber-500/[0.05]',
+  },
+  completed: {
+    verb: 'Confirmed',
+    verbColor: 'text-emerald-600',
+    surfaceColor: 'border-emerald-500/15 bg-emerald-500/[0.05]',
+  },
+  cancelled: {
+    verb: 'Cancelled',
+    verbColor: 'text-red-500',
+    surfaceColor: 'border-red-500/15 bg-red-500/[0.05]',
+  },
+} as const;
+
 const FlowStepCompletionInfo: React.FC<{
   ticketId: string;
   status?: TicketStatusV2;
-  backlogged?: boolean;
+  /** Stage-move byline: read the BACKLOG/SKIPPED stageName activity instead of a status one. */
+  stage?: 'BACKLOG' | 'SKIPPED';
   highlighted?: boolean;
   /** Scopes the "Updated by" byline to this form's own fields. */
   gateFormId?: string;
-}> = ({ ticketId, status, backlogged = false, highlighted = false, gateFormId = '' }) => {
-  const [activities] = useCachedQuery(queries.ticketActivities({ ticketId }));
+}> = ({ ticketId, status, stage, highlighted = false, gateFormId = '' }) => {
+  // Subscribed live (not via the shared query cache): the byline must appear
+  // as soon as the mutation commits, like the status chip does.
+  const [activities] = useQuery(queries.ticketActivities({ ticketId }));
   const [gateFormFields] = useCachedQuery(queries.getFormFieldsByFormId({ formId: gateFormId }), {
     enabled: !!gateFormId,
   });
@@ -68,16 +103,24 @@ const FlowStepCompletionInfo: React.FC<{
     },
     [usersById],
   );
-  // Stage changes share STATUS activity type, so exclude their stageName rows.
+  const kind = stage
+    ? stage === 'SKIPPED'
+      ? 'skipped'
+      : 'backlog'
+    : status === TicketStatusV2.COMPLETED
+      ? 'completed'
+      : 'cancelled';
+  // The Zero mutator logs a stage move as STATUS, the REST/group path as STAGE_NAME.
   const activity = useMemo(
     () =>
       (activities ?? []).find(row => {
-        if (backlogged) {
+        if (stage) {
           const value = row.value as { field?: string; newValue?: string } | null;
           return (
-            row.activityType === ActivityType.STATUS &&
+            (row.activityType === ActivityType.STATUS ||
+              row.activityType === ActivityType.STAGE_NAME) &&
             value?.field === 'stageName' &&
-            value.newValue === FLOW_STAGE_NAMES.BACKLOG
+            value.newValue === stage
           );
         }
         if (row.activityType !== ActivityType.STATUS) return false;
@@ -85,12 +128,12 @@ const FlowStepCompletionInfo: React.FC<{
         if (value?.field === 'stageName') return false;
         return value?.newValue === status;
       }) ?? null,
-    [activities, backlogged, status],
+    [activities, stage, status],
   );
   // A gate-form value edited by a person after the step completed. The flow
   // already moved on with the original answers; only the byline changes.
   const lastEditActivity = useMemo(() => {
-    if (backlogged || status !== TicketStatusV2.COMPLETED || !activity || !gateFormId) return null;
+    if (stage || status !== TicketStatusV2.COMPLETED || !activity || !gateFormId) return null;
     const gateFieldNames = new Set(
       ((gateFormFields ?? []) as Array<FormFields & { globalField?: { fieldName?: string } }>)
         .map(row => row.globalField?.fieldName ?? row.fieldName)
@@ -110,23 +153,9 @@ const FlowStepCompletionInfo: React.FC<{
         return !!value.fieldName && gateFieldNames.has(value.fieldName);
       }) ?? null
     );
-  }, [activities, activity, backlogged, status, gateFormId, gateFormFields]);
+  }, [activities, activity, stage, status, gateFormId, gateFormFields]);
   if (!activity) return null;
-  const verb = backlogged
-    ? 'Moved to backlog'
-    : status === TicketStatusV2.COMPLETED
-      ? 'Confirmed'
-      : 'Cancelled';
-  const verbColor = backlogged
-    ? 'text-amber-600'
-    : status === TicketStatusV2.COMPLETED
-      ? 'text-emerald-600'
-      : 'text-red-500';
-  const surfaceColor = backlogged
-    ? 'border-amber-500/15 bg-amber-500/[0.05]'
-    : status === TicketStatusV2.COMPLETED
-      ? 'border-emerald-500/15 bg-emerald-500/[0.05]'
-      : 'border-red-500/15 bg-red-500/[0.05]';
+  const { verb, verbColor, surfaceColor } = FLOW_STEP_INFO_STYLE[kind];
   const row = lastEditActivity
     ? {
         ...resolveActor(lastEditActivity.updatedBy),
@@ -178,11 +207,13 @@ interface FlowNodeSidePanelProps {
   backlogSteps?: FlowNodeSelection[];
   /** True when a pause above this step (main ticket or a pass-over) locks it */
   locked: boolean;
-  backlogBlockedReason?: string | undefined;
+  /** Why Backlog/Skip cannot fire right now (gates both settle actions). */
+  settleBlockedReason?: string | undefined;
   onClose: () => void;
   onShowDetails?: (ticket: FlowRunTicket) => void;
   onChangeStatus: (ticketId: string, statusV2: TicketStatusV2) => Promise<void>;
   onBacklog: (ticketId: string) => Promise<void>;
+  onSkip: (ticketId: string) => Promise<void>;
   onSelectBacklog?: (step: FlowNodeSelection) => void;
 }
 
@@ -214,11 +245,12 @@ export const FlowNodeSidePanel: React.FC<FlowNodeSidePanelProps> = ({
   node,
   backlogSteps = [],
   locked,
-  backlogBlockedReason,
+  settleBlockedReason,
   onClose,
   onShowDetails,
   onChangeStatus,
   onBacklog,
+  onSkip,
   onSelectBacklog,
 }) => {
   const navigate = useNavigate();
@@ -231,8 +263,8 @@ export const FlowNodeSidePanel: React.FC<FlowNodeSidePanelProps> = ({
         const confirmed = await confirm({
           title: isRoot ? 'Cancel flow run?' : 'Cancel this step?',
           description: isRoot
-            ? 'This will cancel the entire flow run and skip all remaining steps.'
-            : 'This will cancel the step and may skip steps that depend on it.',
+            ? 'This will cancel the entire flow run and all remaining steps.'
+            : 'This will cancel the step. Steps that depend on it will not be reached.',
           confirmLabel: isRoot ? 'Cancel run' : 'Cancel step',
           cancelLabel: isRoot ? 'Keep run' : 'Keep step',
           variant: 'destructive',
@@ -248,11 +280,12 @@ export const FlowNodeSidePanel: React.FC<FlowNodeSidePanelProps> = ({
     [confirm, isRoot, onChangeStatus],
   );
   const handleBacklogAction = useCallback(
-    async (ticketId: string): Promise<void> => {
+    async (ticketId: string, stepTitle: string): Promise<void> => {
       const confirmed = await confirm({
-        title: 'Move step to backlog?',
+        title: `Move "${stepTitle}" to backlog?`,
         description:
-          'This will defer the step and allow the flow to continue. You can complete it later from the backlog.',
+          'Dependent steps can continue, but the run will not complete until this step is ' +
+          'completed, cancelled or skipped.',
         confirmLabel: 'Move to backlog',
         cancelLabel: 'Keep step',
       });
@@ -265,8 +298,28 @@ export const FlowNodeSidePanel: React.FC<FlowNodeSidePanelProps> = ({
     },
     [confirm, onBacklog],
   );
+  const handleSkipAction = useCallback(
+    async (ticketId: string, stepTitle: string): Promise<void> => {
+      const confirmed = await confirm({
+        title: `Skip "${stepTitle}"?`,
+        description:
+          'Dependent steps will continue and the run can still complete. This cannot be undone.',
+        confirmLabel: 'Skip step',
+        cancelLabel: 'Keep step',
+      });
+      if (!confirmed) return;
+      try {
+        await onSkip(ticketId);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Failed to skip step');
+      }
+    },
+    [confirm, onSkip],
+  );
   const backlogged = !isRoot && isFlowStepBacklogged(ticket);
-  const statusOption = ticket && !backlogged ? getStatusOption(ticket.statusV2) : null;
+  const manuallySkipped = !isRoot && isFlowStepSkipped(ticket);
+  const statusOption =
+    ticket && !backlogged && !manuallySkipped ? getStatusOption(ticket.statusV2) : null;
   const gate = planNode ? gateOf(planNode) : null;
   const stepActive =
     !isRoot &&
@@ -279,6 +332,68 @@ export const FlowNodeSidePanel: React.FC<FlowNodeSidePanelProps> = ({
     enabled: gate?.type === 'form',
   });
   const formName = form?.formName ?? 'Form';
+
+  // Secondary step actions live in one menu; actions that cannot fire in the
+  // current state are hidden rather than disabled.
+  const canSkip = !!ticket && !settleBlockedReason;
+  const canBacklog = canSkip && !backlogged;
+  const stepTitle = ticket?.title ?? planNode?.title ?? '';
+  const stepTicketId = ticket?.id ?? '';
+  const stepMoreActions = (
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger asChild>
+        <button
+          type='button'
+          aria-label='More step actions'
+          data-track-category='flow_board'
+          data-track-name='open_step_actions'
+          className='inline-flex h-8 w-full cursor-pointer items-center justify-center gap-1.5 rounded-md bg-secondary px-3 text-sm font-medium text-secondary-foreground transition outline-none hover:bg-secondary/80 focus-visible:ring-[3px] focus-visible:ring-ring/50'
+        >
+          More actions
+          <ChevronDown size={13} />
+        </button>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content
+          sideOffset={6}
+          align='end'
+          className='z-50 w-[var(--radix-dropdown-menu-trigger-width)] rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md'
+        >
+          {canBacklog && (
+            <DropdownMenu.Item
+              onSelect={() => void handleBacklogAction(stepTicketId, stepTitle)}
+              data-track-category='flow_board'
+              data-track-name='backlog_step'
+              className='flex cursor-pointer select-none items-center justify-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none hover:bg-muted focus:bg-muted'
+            >
+              <Archive size={13} className='shrink-0 text-amber-600' />
+              Move to backlog
+            </DropdownMenu.Item>
+          )}
+          {canSkip && (
+            <DropdownMenu.Item
+              onSelect={() => void handleSkipAction(stepTicketId, stepTitle)}
+              data-track-category='flow_board'
+              data-track-name='skip_step'
+              className='flex cursor-pointer select-none items-center justify-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none hover:bg-muted focus:bg-muted'
+            >
+              <SkipForward size={13} className='shrink-0 text-teal-600' />
+              Skip
+            </DropdownMenu.Item>
+          )}
+          <DropdownMenu.Item
+            onSelect={() => void handleStatusAction(stepTicketId, TicketStatusV2.CANCELLED)}
+            data-track-category='flow_board'
+            data-track-name='cancel_step'
+            className='flex cursor-pointer select-none items-center justify-center gap-2 rounded-sm px-2 py-1.5 text-xs text-red-500 outline-none hover:bg-red-500/10 focus:bg-red-500/10'
+          >
+            <XCircle size={13} className='shrink-0' />
+            Cancel step
+          </DropdownMenu.Item>
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
+  );
 
   return (
     <div
@@ -302,6 +417,11 @@ export const FlowNodeSidePanel: React.FC<FlowNodeSidePanelProps> = ({
             <span className='flex items-center gap-1 text-[11px] font-medium text-amber-600'>
               <Archive size={12} />
               Backlog
+            </span>
+          ) : manuallySkipped ? (
+            <span className='flex items-center gap-1 text-[11px] font-medium text-teal-600'>
+              <SkipForward size={12} />
+              Skipped
             </span>
           ) : statusOption ? (
             <span className='flex items-center gap-1 text-[11px] font-medium text-muted-foreground'>
@@ -469,32 +589,7 @@ export const FlowNodeSidePanel: React.FC<FlowNodeSidePanelProps> = ({
                   >
                     {backlogged ? 'Confirm' : 'Confirm & move'}
                   </Button>
-                  <div
-                    className={`grid gap-2 ${
-                      backlogged || backlogBlockedReason ? 'grid-cols-1' : 'grid-cols-2'
-                    }`}
-                  >
-                    {!backlogged && !backlogBlockedReason && (
-                      <Button
-                        variant='secondary'
-                        size='sm'
-                        onClick={() => void handleBacklogAction(ticket.id)}
-                        data-track-category='flow_board'
-                        data-track-name='backlog_step'
-                      >
-                        Backlog
-                      </Button>
-                    )}
-                    <Button
-                      variant='secondary'
-                      size='sm'
-                      onClick={() => void handleStatusAction(ticket.id, TicketStatusV2.CANCELLED)}
-                      data-track-category='flow_board'
-                      data-track-name='cancel_step'
-                    >
-                      Cancel
-                    </Button>
-                  </div>
+                  {stepMoreActions}
                 </div>
               </div>
             )}
@@ -522,77 +617,75 @@ export const FlowNodeSidePanel: React.FC<FlowNodeSidePanelProps> = ({
                     No form attached to this step — edit the plan to attach one.
                   </p>
                 )}
-                <div
-                  className={`grid gap-2 ${
-                    backlogged || backlogBlockedReason ? 'grid-cols-1' : 'grid-cols-2'
-                  }`}
-                >
-                  {!backlogged && !backlogBlockedReason && (
-                    <Button
-                      variant='secondary'
-                      size='sm'
-                      onClick={() => void handleBacklogAction(ticket.id)}
-                      data-track-category='flow_board'
-                      data-track-name='backlog_step'
-                    >
-                      Backlog
-                    </Button>
-                  )}
-                  <Button
-                    variant='secondary'
-                    size='sm'
-                    onClick={() => void handleStatusAction(ticket.id, TicketStatusV2.CANCELLED)}
-                    data-track-category='flow_board'
-                    data-track-name='cancel_step'
-                  >
-                    Cancel step
-                  </Button>
-                </div>
+                {stepMoreActions}
               </div>
             )}
 
             {/* Submitted FLOW forms stay compact until explicitly opened for editing. */}
-            {!isRoot && ticket.statusV2 === TicketStatusV2.COMPLETED && gate?.type === 'form' && (
-              <div className='flex min-h-0 flex-col gap-2.5'>
-                {gate.formId && (
-                  <StageFormInlinePanel
-                    ticket={{ id: ticket.id }}
-                    targetStage={{ id: planNode.id, name: planNode.title }}
-                    sourceStageName=''
-                    formId={gate.formId}
-                    hasApprovers={false}
-                    isNonLinearBoard={false}
-                    headerTitle={formName}
-                    saveOnly
-                    saveSuccessMessage='Submitted form updated'
-                    editableOnDemand
-                    submittedHeader
-                    actionsPlacement='footer'
-                    embedded
-                  />
-                )}
-                <FlowStepCompletionInfo
-                  highlighted
-                  ticketId={ticket.id}
-                  status={TicketStatusV2.COMPLETED}
-                  gateFormId={formId}
-                />
+            {!isRoot && manuallySkipped && (
+              <div className='flex flex-col gap-2.5 rounded-lg border border-teal-500/25 bg-teal-500/[0.05] px-3 py-3'>
+                <p className='flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.5px] text-teal-600'>
+                  <SkipForward size={12} />
+                  Skipped
+                </p>
+                <p className='text-[12px] leading-[18px] text-muted-foreground'>
+                  This step was skipped manually. Dependent steps continue and the run can still
+                  complete.
+                </p>
+                <FlowStepCompletionInfo ticketId={ticket.id} stage='SKIPPED' />
               </div>
             )}
 
+            {/* Submitted FLOW forms stay compact until explicitly opened for editing. */}
+            {!isRoot &&
+              !manuallySkipped &&
+              ticket.statusV2 === TicketStatusV2.COMPLETED &&
+              gate?.type === 'form' && (
+                <div className='flex min-h-0 flex-col gap-2.5'>
+                  {gate.formId && (
+                    <StageFormInlinePanel
+                      ticket={{ id: ticket.id }}
+                      targetStage={{ id: planNode.id, name: planNode.title }}
+                      sourceStageName=''
+                      formId={gate.formId}
+                      hasApprovers={false}
+                      isNonLinearBoard={false}
+                      headerTitle={formName}
+                      saveOnly
+                      saveSuccessMessage='Submitted form updated'
+                      editableOnDemand
+                      submittedHeader
+                      actionsPlacement='footer'
+                      embedded
+                    />
+                  )}
+                  <FlowStepCompletionInfo
+                    highlighted
+                    ticketId={ticket.id}
+                    status={TicketStatusV2.COMPLETED}
+                    gateFormId={formId}
+                  />
+                </div>
+              )}
+
             {/* Completed confirmation: preserve the prompt as evidence. */}
-            {!isRoot && ticket.statusV2 === TicketStatusV2.COMPLETED && gate?.type !== 'form' && (
-              <div className='flex flex-col gap-2.5 rounded-lg border border-emerald-500/25 bg-emerald-500/[0.05] px-3 py-3'>
-                <p className='flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.5px] text-emerald-600'>
-                  <CircleCheck size={12} />
-                  Confirmed
-                </p>
-                {gate?.type === 'confirmation' && gate.prompt?.trim() && (
-                  <p className='text-[12px] text-foreground leading-[18px]'>{gate.prompt.trim()}</p>
-                )}
-                <FlowStepCompletionInfo ticketId={ticket.id} status={TicketStatusV2.COMPLETED} />
-              </div>
-            )}
+            {!isRoot &&
+              !manuallySkipped &&
+              ticket.statusV2 === TicketStatusV2.COMPLETED &&
+              gate?.type !== 'form' && (
+                <div className='flex flex-col gap-2.5 rounded-lg border border-emerald-500/25 bg-emerald-500/[0.05] px-3 py-3'>
+                  <p className='flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.5px] text-emerald-600'>
+                    <CircleCheck size={12} />
+                    Confirmed
+                  </p>
+                  {gate?.type === 'confirmation' && gate.prompt?.trim() && (
+                    <p className='text-[12px] text-foreground leading-[18px]'>
+                      {gate.prompt.trim()}
+                    </p>
+                  )}
+                  <FlowStepCompletionInfo ticketId={ticket.id} status={TicketStatusV2.COMPLETED} />
+                </div>
+              )}
 
             {/* Cancelled step: who cancelled it */}
             {!isRoot && ticket.statusV2 === TicketStatusV2.CANCELLED && (
@@ -612,9 +705,9 @@ export const FlowNodeSidePanel: React.FC<FlowNodeSidePanelProps> = ({
                   Moved to backlog
                 </p>
                 <p className='text-[12px] leading-[18px] text-muted-foreground'>
-                  This step was skipped. Dependent steps can continue.
+                  This step is deferred — dependent steps can continue, but the run waits for it.
                 </p>
-                <FlowStepCompletionInfo ticketId={ticket.id} backlogged />
+                <FlowStepCompletionInfo ticketId={ticket.id} stage='BACKLOG' />
               </div>
             )}
           </>
@@ -625,8 +718,8 @@ export const FlowNodeSidePanel: React.FC<FlowNodeSidePanelProps> = ({
                 ? 'No run yet. Create a ticket on this board to start a run.'
                 : skipped
                   ? skipReason === 'decision'
-                    ? 'This step was skipped because another decision path was chosen.'
-                    : 'This step was skipped because an earlier step was cancelled.'
+                    ? 'This step was not reached because another decision path was chosen.'
+                    : 'This step was not reached because an earlier step was cancelled.'
                   : planNode.parentIds.length > 1
                     ? 'This step is To Do. It is created automatically once ALL of its parent steps complete.'
                     : 'This step is To Do. It is created automatically when its parent completes.'}

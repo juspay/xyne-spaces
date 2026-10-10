@@ -16,7 +16,7 @@ import { useCanCreateTicket, usePermissions } from '../../hooks/usePermissions';
 import { useScrollFade } from '../../hooks/useScrollFade';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useRouteContext } from '../../hooks/useRouteContext';
-import { FileSpreadsheet, Archive } from 'lucide-react';
+import { FileSpreadsheet, Archive, SkipForward } from 'lucide-react';
 import {
   ChevronDown as ChevronDownIcon,
   ChevronRight,
@@ -156,7 +156,10 @@ import {
   type FlowTicketNodeData,
 } from '../../components/Board/FlowRun/FlowTicketNodeCard';
 import { flowGroupColor } from '../../components/Board/FlowRun/FlowGroupNode';
-import { useFlowRunGraph } from '../../components/Board/FlowRun/useFlowRunGraph';
+import {
+  useFlowRunGraph,
+  type FlowGroupAction,
+} from '../../components/Board/FlowRun/useFlowRunGraph';
 import { STATUS_OPTIONS } from '../../components/Board/BoardStageConfigScreen/BoardStageConfigScreen.types';
 import { VIRTUAL_ROOT_ID as FLOW_VIRTUAL_ROOT_ID } from '../../components/Board/FlowPlanEditor/FlowPlanEditor.utils';
 import {
@@ -238,6 +241,36 @@ type SavedConfigValue = {
   entityName: SavedConfigEntityName;
   fieldName: string;
   fieldValue: string;
+};
+
+// Confirm-dialog / toast copy per group action; the handler and endpoint differ
+// only by `action` itself.
+const FLOW_GROUP_ACTION_COPY: Record<
+  FlowGroupAction,
+  {
+    confirmTitle: (groupName: string) => string;
+    confirmDescription: (memberCount: number, hasNestedGroups: boolean) => string;
+    confirmLabel: string;
+    toastVerb: string;
+    errorTitle: string;
+  }
+> = {
+  backlog: {
+    confirmTitle: groupName => `Move "${groupName}" to backlog?`,
+    confirmDescription: (memberCount, hasNestedGroups) =>
+      `This will create any missing tickets and move all ${memberCount} non-terminal steps${hasNestedGroups ? ', including nested groups,' : ''} to backlog. Completed, cancelled, and skipped steps stay unchanged.`,
+    confirmLabel: 'Move to backlog',
+    toastVerb: 'moved to backlog',
+    errorTitle: 'Failed to move group to backlog',
+  },
+  skip: {
+    confirmTitle: groupName => `Skip group "${groupName}"?`,
+    confirmDescription: (memberCount, hasNestedGroups) =>
+      `This will create any missing tickets and skip all ${memberCount} non-terminal steps${hasNestedGroups ? ', including nested groups' : ''}. Completed, cancelled, and already-skipped steps stay unchanged. Dependent steps continue and the run can still complete.`,
+    confirmLabel: 'Skip group',
+    toastVerb: 'skipped',
+    errorTitle: 'Failed to skip group',
+  },
 };
 
 // Serialize filters (incl. boards) + groupBy into saved-config value rows.
@@ -579,7 +612,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const [flowRunExporting, setFlowRunExporting] = useState<'excel' | 'pdf' | null>(null);
   const [flowRunSearchQuery, setFlowRunSearchQuery] = useState('');
   const [flowThreadTicket, setFlowThreadTicket] = useState<FlowRunTicket | null>(null);
-  const [flowGroupBacklogPendingId, setFlowGroupBacklogPendingId] = useState<string | null>(null);
+  const [flowGroupPending, setFlowGroupPending] = useState<{
+    groupId: string;
+    action: FlowGroupAction;
+  } | null>(null);
   const collapseInitRunRef = useRef<string | null>(null);
   // When mounted from the project route (AppRoot.tsx → :projectId / :projectId/:boardId),
   // no channelId prop is passed. Fall back to the first non-archived channel of the
@@ -779,14 +815,16 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const [state, send] = useMachine(ticketFiltersMachine);
   const requestedLayoutView = searchParams.get('layout');
   const layoutStorageKey = `kanban-layout-${getStorageKey(filtersScopeId, viewMode, projectIdParam, boardId, viewId)}`;
-  const storedLayoutView = useMemo((): StorableLayoutView | null => {
+  // Read every render: handleLayoutChange writes this key without changing it,
+  // so a memo would hand the flow demote a preference from before the change.
+  const storedLayoutView = ((): StorableLayoutView | null => {
     try {
       const raw = localStorage.getItem(layoutStorageKey);
       return isStorableLayoutView(raw) ? raw : null;
     } catch {
       return null;
     }
-  }, [layoutStorageKey]);
+  })();
   const defaultLayoutView: StorableLayoutView = storedLayoutView ?? 'kanban';
   const requestedOrDefaultLayoutView: LayoutView = isLayoutView(requestedLayoutView)
     ? requestedLayoutView
@@ -1060,6 +1098,18 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       // the sidebar correctly shows only the project highlighted (not the old board).
       if (viewMode === 'board' && projectIdParam && !nextFilters.boards?.length) {
         void navigate(`/projects/${projectIdParam}`);
+      }
+      // Same for switching to one other board while on a board route: the route board
+      // must match the selected chip, otherwise the screen renders the new board under
+      // the old board's layout context — on a FLOW board that pins the flow layout with
+      // no layout toggle, leaving no path back to kanban/table/calendar.
+      if (
+        viewMode === 'board' &&
+        projectIdParam &&
+        nextFilters.boards?.length === 1 &&
+        nextFilters.boards[0] !== boardId
+      ) {
+        void navigate(`/projects/${projectIdParam}/${nextFilters.boards[0]}`);
       }
     },
     [
@@ -1442,8 +1492,13 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   // filteredSingleBoardId read false/null for one effect pass — demoting the
   // layout on that snapshot would tear down the flow view on every remount.
   const filtersInitialized = state.matches('initialized');
+  // The filters machine writes the URL before the router re-renders it; rewriting
+  // from the stale params here would drop the board the user just picked.
+  const filterUrlWritePending =
+    !!state.context.currentSearchParams &&
+    state.context.currentSearchParams.toString() !== searchParams.toString();
   useEffect(() => {
-    if (isTrackView) return;
+    if (isTrackView || filterUrlWritePending) return;
     if (isFlowBoard && layoutView !== 'flow') {
       setSearchParams(
         prev => {
@@ -1473,6 +1528,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     }
   }, [
     isTrackView,
+    filterUrlWritePending,
     filtersInitialized,
     isFlowBoard,
     selectedBoardDetail,
@@ -1481,40 +1537,55 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     defaultLayoutView,
     setSearchParams,
   ]);
-  const handleFlowStatusChange = useCallback(
-    async (ticketId: string, statusV2: TicketStatusV2): Promise<void> => {
+  const moveFlowStep = useCallback(
+    async (
+      ticketId: string,
+      stageName: string,
+      statusV2: TicketStatusV2,
+      failMessage: string,
+    ): Promise<void> => {
       const result = zero.mutate(
         mutators.ticket.update({
           id: ticketId,
           statusV2,
-          stageName: FLOW_STAGE_NAMES[statusV2],
+          stageName,
           updatedAt: Date.now(),
         }),
       );
       const response = await result.server;
       if (response?.type === 'error') {
-        throw new Error(response.error.message || 'Failed to update status');
+        throw new Error(response.error.message || failMessage);
       }
     },
     [zero],
   );
 
+  const handleFlowStatusChange = useCallback(
+    (ticketId: string, statusV2: TicketStatusV2): Promise<void> =>
+      moveFlowStep(ticketId, FLOW_STAGE_NAMES[statusV2], statusV2, 'Failed to update status'),
+    [moveFlowStep],
+  );
+
   const handleFlowStepBacklog = useCallback(
-    async (ticketId: string): Promise<void> => {
-      const result = zero.mutate(
-        mutators.ticket.update({
-          id: ticketId,
-          statusV2: TicketStatusV2.PAUSED,
-          stageName: FLOW_STAGE_NAMES.BACKLOG,
-          updatedAt: Date.now(),
-        }),
-      );
-      const response = await result.server;
-      if (response?.type === 'error') {
-        throw new Error(response.error.message || 'Failed to move step to backlog');
-      }
-    },
-    [zero],
+    (ticketId: string): Promise<void> =>
+      moveFlowStep(
+        ticketId,
+        FLOW_STAGE_NAMES.BACKLOG,
+        TicketStatusV2.PAUSED,
+        'Failed to move step to backlog',
+      ),
+    [moveFlowStep],
+  );
+
+  const handleFlowStepSkip = useCallback(
+    (ticketId: string): Promise<void> =>
+      moveFlowStep(
+        ticketId,
+        FLOW_STAGE_NAMES.SKIPPED,
+        TicketStatusV2.COMPLETED,
+        'Failed to skip step',
+      ),
+    [moveFlowStep],
   );
 
   // Transitions (with approvers) are fetched via the dedicated query, not embedded in boardDetailById.
@@ -2688,30 +2759,34 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       mapPlanToRunTickets(flowTickets, selectedGraphRootTicketId),
     );
   }, [flowModel, graphTickets, selectedFlowRunRootTicket, selectedGraphRootTicketId]);
-  const handleFlowGroupBacklog = useCallback(
-    async (groupId: string): Promise<void> => {
-      if (!selectedFlowRunModel || !selectedGraphRootTicketId || flowGroupBacklogPendingId) return;
+  const handleFlowGroupAction = useCallback(
+    async (groupId: string, action: FlowGroupAction): Promise<void> => {
+      if (!selectedFlowRunModel || !selectedGraphRootTicketId || flowGroupPending) return;
       const group = selectedFlowRunModel.getGroup(groupId);
       if (!group) return;
+      const copy = FLOW_GROUP_ACTION_COPY[action];
       const memberCount = selectedFlowRunModel.descendantMembersOf(groupId).length;
       const accepted = await confirm({
-        title: `Move "${group.name || 'Group'}" to backlog?`,
-        description: `This will create any missing tickets and move all ${memberCount} non-terminal steps${selectedFlowRunModel.childGroupsOf(groupId).length > 0 ? ', including nested groups,' : ''} to backlog. Completed, cancelled, and skipped steps stay unchanged.`,
-        confirmLabel: 'Move to backlog',
+        title: copy.confirmTitle(group.name || 'Group'),
+        description: copy.confirmDescription(
+          memberCount,
+          selectedFlowRunModel.childGroupsOf(groupId).length > 0,
+        ),
+        confirmLabel: copy.confirmLabel,
       });
       if (!accepted) return;
-      setFlowGroupBacklogPendingId(groupId);
+      setFlowGroupPending({ groupId, action });
       try {
         const response = await apiInstance.post<{
           createdCount: number;
-          backloggedCount: number;
+          movedCount: number;
           unchangedCount: number;
         }>(
-          `/tickets/${encodeURIComponent(selectedGraphRootTicketId)}/flow-groups/${encodeURIComponent(groupId)}/backlog`,
+          `/tickets/${encodeURIComponent(selectedGraphRootTicketId)}/flow-groups/${encodeURIComponent(groupId)}/${action}`,
         );
-        const { backloggedCount, createdCount } = response.data;
+        const { createdCount, movedCount } = response.data;
         toast.success(
-          `${backloggedCount} ${backloggedCount === 1 ? 'step' : 'steps'} moved to backlog`,
+          `${movedCount} ${movedCount === 1 ? 'step' : 'steps'} ${copy.toastVerb}`,
           createdCount > 0
             ? {
                 description: `${createdCount} missing ${createdCount === 1 ? 'ticket was' : 'tickets were'} created.`,
@@ -2719,14 +2794,14 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
             : undefined,
         );
       } catch (error) {
-        toast.error('Failed to move group to backlog', {
+        toast.error(copy.errorTitle, {
           description: getApiErrorMessage(error, 'Please retry.'),
         });
       } finally {
-        setFlowGroupBacklogPendingId(null);
+        setFlowGroupPending(null);
       }
     },
-    [confirm, flowGroupBacklogPendingId, selectedFlowRunModel, selectedGraphRootTicketId],
+    [confirm, flowGroupPending, selectedFlowRunModel, selectedGraphRootTicketId],
   );
   const selectedFlowRunBacklogs = useMemo((): FlowNodeSelection[] => {
     if (!selectedFlowRunModel || !selectedGraphRootTicketId) return [];
@@ -2756,8 +2831,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     setCollapsedFlowGroups,
     flowSelection,
     setFlowSelection,
-    flowGroupBacklogPendingId,
-    handleFlowGroupBacklog,
+    flowGroupPending,
+    handleFlowGroupAction,
   });
   // On entering a run, auto-open the panel for the first step waiting at its
   // gate (or the main ticket when nothing is waiting yet) — once per run.
@@ -4769,9 +4844,12 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                       const priorityIcon = root.priority ? getPriorityIcon(root.priority) : null;
                       const childCount = root.children.length;
                       const summary = flowRunSummaries.get(root.key);
-                      const progressPct = summary?.totalCount
-                        ? Math.round((summary.completedCount / summary.totalCount) * 100)
-                        : 0;
+                      const progressPct =
+                        summary?.state === 'completed'
+                          ? 100
+                          : summary?.totalCount
+                            ? Math.round((summary.completedCount / summary.totalCount) * 100)
+                            : 0;
                       const progressColor =
                         summary?.state === 'completed'
                           ? '#22c55e'
@@ -4972,6 +5050,40 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                               )}
                             </div>
                           )}
+                          {summary && summary.skipped.length > 0 && (
+                            <div className='flex flex-1 flex-col gap-1.5 pt-1.5'>
+                              <span className='text-[9px] font-semibold uppercase tracking-[0.6px] text-teal-600/80'>
+                                Skipped steps
+                              </span>
+                              {summary.skipped.slice(0, 2).map(step => (
+                                <div
+                                  key={step.id}
+                                  className='flex w-full items-center gap-2 rounded-md bg-teal-500/[0.06] px-2.5 py-1.5 text-[11px]'
+                                >
+                                  <SkipForward size={12} className='shrink-0 text-teal-600' />
+                                  <span className='min-w-0 flex-1 truncate text-foreground/80'>
+                                    {step.title}
+                                  </span>
+                                  {step.groupId && step.groupName && (
+                                    <span
+                                      className='max-w-[45%] shrink-0 truncate rounded px-1.5 py-px text-[10px] font-medium'
+                                      style={{
+                                        backgroundColor: `${flowGroupColor(step.groupId)}1a`,
+                                        color: flowGroupColor(step.groupId),
+                                      }}
+                                    >
+                                      {step.groupName}
+                                    </span>
+                                  )}
+                                </div>
+                              ))}
+                              {summary.skipped.length > 2 && (
+                                <div className='flex w-full items-center justify-center rounded-md bg-teal-500/[0.04] px-2.5 py-1.5 text-[11px] font-medium text-teal-700/80'>
+                                  +{summary.skipped.length - 2} more skipped
+                                </div>
+                              )}
+                            </div>
+                          )}
                           <div className='mt-auto flex items-center justify-between gap-2 pt-1'>
                             <span className='flex items-center gap-1.5'>
                               {priorityIcon}
@@ -4981,7 +5093,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                             </span>
                             <span className='text-[11px] text-muted-foreground'>
                               {summary
-                                ? `${summary.completedCount}/${summary.totalCount} steps done`
+                                ? `${summary.completedCount} done${summary.skipped.length > 0 ? ` · ${summary.skipped.length} skipped` : ''}`
                                 : `${childCount} nodes`}
                             </span>
                           </div>
@@ -5092,7 +5204,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                           </span>
                           <span className='flex items-center gap-2'>
                             <span className='inline-block w-6 border-t-2 border-[#d97706]' />
-                            Backlog — skipped manually; flow continues
+                            Backlog — deferred; flow continues, run waits for it
+                          </span>
+                          <span className='flex items-center gap-2'>
+                            <span className='inline-block w-6 border-t-2 border-[#0d9488]' />
+                            Skipped — skipped manually; flow continues, run can complete
                           </span>
                           <span className='flex items-center gap-2'>
                             <span className='inline-block w-6 border-t-2 border-[#ef4444]' />
@@ -5100,7 +5216,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                           </span>
                           <span className='flex items-center gap-2'>
                             <span className='inline-block w-6 border-t-2 border-[#d4d4d8] opacity-60' />
-                            Skipped — a parent step was cancelled
+                            Not reached — a parent step was cancelled
                           </span>
                           {/* Status symbols (as shown in collapsed group rows) */}
                           <div className='mt-1 flex flex-col gap-1.5 border-t border-border pt-1.5'>
@@ -5117,8 +5233,14 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                               Backlog
                             </span>
                             <span className='flex items-center gap-2'>
-                              <span className='flex w-6 justify-center text-[10px]'>—</span>
+                              <span className='flex w-6 justify-center text-teal-600'>
+                                <SkipForward size={12} />
+                              </span>
                               Skipped
+                            </span>
+                            <span className='flex items-center gap-2'>
+                              <span className='flex w-6 justify-center text-[10px]'>—</span>
+                              Not reached (path not taken)
                             </span>
                           </div>
                         </div>
@@ -5270,7 +5392,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                           ? flowRunGraph.locked.has(flowSelection.planNode.id)
                           : false
                       }
-                      backlogBlockedReason={
+                      settleBlockedReason={
                         flowSelection.planNode &&
                         selectedFlowRunModel?.decisionAfter(flowSelection.planNode.id)
                           ? 'Conditional form steps must be submitted before the flow can continue.'
@@ -5279,6 +5401,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                       onClose={() => setFlowSelection(null)}
                       onChangeStatus={handleFlowStatusChange}
                       onBacklog={handleFlowStepBacklog}
+                      onSkip={handleFlowStepSkip}
                       onSelectBacklog={handleSelectFlowBacklog}
                     />
                   </div>

@@ -80,7 +80,7 @@ import { BaseTicketType,
 } from '@xyne/shared';
 import { CommitAnalysisController } from './commitAnalysisController';
 import { isReleaseTicket } from '@xyne/shared';
-import { backlogFlowGroup } from '@/services/flowCascadeService';
+import { backlogFlowGroup, skipFlowGroup } from '@/services/flowCascadeService';
 import { AppError } from '@/middleware/errorHandler';
 
 import { z } from 'zod';
@@ -1224,6 +1224,42 @@ export class TicketController {
 
     try {
       const result = await backlogFlowGroup({
+        rootTicketId,
+        groupId,
+        actorUserId: userId,
+        workspaceId,
+      });
+      res.status(200).json(result);
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
+   * Skip every non-terminal descendant of a Flow run group.
+   * POST /api/tickets/:ticketId/flow-groups/:groupId/skip
+   */
+  skipFlowGroup = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    const userId = req.user?.id;
+    const workspaceId = req.user?.workspaceId;
+    if (!userId || !workspaceId) {
+      next(new AppError('User not authenticated', 401));
+      return;
+    }
+
+    const rootTicketId = req.params.ticketId;
+    const groupId = req.params.groupId;
+    if (!rootTicketId || !groupId) {
+      next(new AppError('ticketId and groupId are required', 400));
+      return;
+    }
+
+    try {
+      const result = await skipFlowGroup({
         rootTicketId,
         groupId,
         actorUserId: userId,
