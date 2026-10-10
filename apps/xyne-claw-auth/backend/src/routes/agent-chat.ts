@@ -9,6 +9,7 @@ import { Router, type Request, type RequestHandler, type Response } from "expres
 import { errMsg } from "../lib/errors.js";
 import { SDLC_AGENT_SLUG, isAgentInvocableBy, IMMEDIATE_TASK_COMMAND_RE, parseLocalSandboxCommand } from "xyne-claw-shared";
 import { recordDeliveredArtifacts } from "../lib/delivered-artifacts.js";
+import { attachmentResponseHeaders, THUMBNAIL_RESPONSE_HEADERS } from "../lib/attachment-response-headers.js";
 import { recordUploadedArtifacts } from "../lib/conversation-artifact-signals.js";
 import {
   mintChatSessionId,
@@ -887,22 +888,15 @@ router.get("/attachments/:id/download", async (req: Request<{ id: string }>, res
     const allowed = matchesAuthenticatedUserId(req, att.uploaderUserId) || await isClawAdmin(requesterId);
     if (!allowed) { res.status(403).json({ success: false, error: "Forbidden" }); return; }
 
-    res.setHeader("Content-Type", att.mimeType);
-    res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(att.originalFilename)}"`);
+    // Attachments are untrusted (agent- or user-authored) and `mimeType` is
+    // the uploader-declared type. Never echo it: only allowlisted types render
+    // inline; html/xml/unknown become an opaque `octet-stream` download with
+    // `nosniff`, so nothing can execute as active content on this origin.
+    for (const [name, value] of Object.entries(attachmentResponseHeaders(att))) {
+      res.setHeader(name, value);
+    }
     if (att.size) res.setHeader("Content-Length", String(att.size));
     res.setHeader("Cache-Control", "private, max-age=3600");
-    // Attachments are untrusted (agent- or user-authored). Served inline from
-    // OUR origin, an HTML file's scripts would otherwise run with the app's
-    // cookies/session — classic stored XSS. `CSP: sandbox` makes the browser
-    // treat the document as a unique origin with scripts disabled wherever
-    // it's viewed (new tab included), matching the in-page sandboxed iframe.
-    // Scoped to HTML/SVG/XML — the script-capable types; images/PDFs keep
-    // native rendering.
-    // `allow-same-origin` (WITHOUT allow-scripts) keeps the document readable
-    // for the in-page themed preview; script execution stays fully blocked.
-    if (/html|svg|xml/i.test(att.mimeType)) {
-      res.setHeader("Content-Security-Policy", "sandbox allow-same-origin");
-    }
 
     const stream = gcsService.createReadStream(att.url);
     stream.on("error", (err) => {
@@ -956,7 +950,9 @@ router.get("/attachments/:id/thumbnail", async (req: Request<{ id: string }>, re
 
     if (!att.thumbnailUrl) { res.status(404).json({ success: false, error: "No thumbnail" }); return; }
 
-    res.setHeader("Content-Type", "image/jpeg");
+    for (const [name, value] of Object.entries(THUMBNAIL_RESPONSE_HEADERS)) {
+      res.setHeader(name, value);
+    }
     res.setHeader("Cache-Control", "private, max-age=86400");
     const stream = gcsService.createReadStream(att.thumbnailUrl);
     stream.on("error", () => { if (!res.headersSent) res.status(500).end(); else res.end(); });
@@ -981,11 +977,13 @@ router.get("/attachments/:id/stream", async (req: Request<{ id: string }>, res: 
 
     const total = att.size;
     const range = req.headers["range"];
+    // Same allowlist as /download — never echo the uploader-declared type.
+    const safeHeaders = attachmentResponseHeaders(att);
 
     if (!range) {
       res.writeHead(200, {
+        ...safeHeaders,
         "Content-Length": String(total),
-        "Content-Type": att.mimeType,
         "Accept-Ranges": "bytes",
         "Cache-Control": "private, max-age=3600",
       });
@@ -1010,7 +1008,7 @@ router.get("/attachments/:id/stream", async (req: Request<{ id: string }>, res: 
       "Content-Range": `bytes ${start}-${end}/${total}`,
       "Accept-Ranges": "bytes",
       "Content-Length": String(end - start + 1),
-      "Content-Type": att.mimeType,
+      ...safeHeaders,
     });
     gcsService.createReadStream(att.url, { start, end }).pipe(res);
   } catch (err) {
