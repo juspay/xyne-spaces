@@ -117,8 +117,10 @@ export async function setupMTLS() {
     // Try to install Root CA if it exists
 
     try {
-        const caCertName = config.USER_DATA_SUFFIX === '-sandbox' ? 'ca.sbx.cert' : 'ca.cert';
-        const caPath = path.join(app.getAppPath(), 'certs', caCertName);
+        // Which root to trust is a config decision, not a guess from the userData
+        // suffix: a per-domain internal build sits behind its own private CA and
+        // sets CA_CERT_FILE in its tenant file.
+        const caPath = path.join(app.getAppPath(), 'certs', config.CA_CERT_FILE);
 
         if (fs.existsSync(caPath)) {
             const caContent = fs.readFileSync(caPath, 'utf8');

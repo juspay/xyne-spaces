@@ -32,6 +32,14 @@ ARG ELECTRON_PLATFORM=--linux
 ARG ELECTRON_BUILD_CONFIG=build.prod.json
 ARG PNPM_VERSION=10.15.0
 
+# Name of the internal deployment whose config gets baked in, or empty for a
+# build that keeps the channel defaults in src/app/config.ts. Resolved against
+# apps/electron/tenants/<name>.json, which in CI arrives from the private repo
+# through the public overlay. A build-arg rather than a secret: hostnames are
+# not secret and the selected name is worth keeping in image history, while the
+# tenant files themselves never enter this repo.
+ARG ELECTRON_TENANT=
+
 # Unsigned by design in phase 1: the macOS pkg installs via MDM, which sets no
 # quarantine attribute. Pinned off so electron-builder cannot pick up an
 # identity from the build host and silently change what it produces.
@@ -63,9 +71,14 @@ RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
 # ui-active is the app's offline fallback UI, listed in the electron-builder
 # config's `files`. It is staged into the context by `make electron-ui-copy`
 # rather than built here, so it keeps the deployment's VITE_* configuration.
+# select-tenant runs before build:prepare so tsc compiles the generated module
+# and type-checks the tenant's values against AppConfig. It is also what clears
+# a stale selection copied in from the build context, so an untenanted build
+# cannot inherit one from the host workspace.
 RUN --mount=type=cache,target=/root/.cache/electron \
     --mount=type=cache,target=/root/.cache/electron-builder \
     cd apps/electron \
+ && node scripts/select-tenant.mjs "${ELECTRON_TENANT}" \
  && pnpm run build:prepare \
  && pnpm exec electron-builder --config "${ELECTRON_BUILD_CONFIG}" ${ELECTRON_PLATFORM}
 

@@ -1,24 +1,25 @@
 # Electron Distribution & Update Architecture
 
-Status: proposal. Collapses the per-flavour build matrix into two channels, moves tenant identity from build time to runtime, and gives the internal channel a real signed release pipeline with automatic updates.
+Status: proposal. Collapses the per-flavour build matrix into two channels, moves per-domain configuration out of the source tree and into a build parameter, and gives the internal channel a real signed release pipeline with automatic updates.
 
 ## 1. Problems with the current distribution model
 
 Tenant identity is baked into the binary, so every new domain is a new build, a new signing run, and a new hosting location.
 
-| Concept | Where it is frozen today | Should be owned by |
-|---|---|---|
-| Backend/frontend hostnames | `src/app/config.ts:117` — `APP_ENV` selects one of three literal objects | Tenant, resolved at runtime |
-| mTLS trust root | `src/services/mtls.ts:120` — CA filename chosen by `USER_DATA_SUFFIX === '-sandbox'`, read from bundled `certs/` | Channel (never tenant) |
-| Bundle identity (appId, productName, scheme) | `build.prod.json` / `build.sbx.json` | Channel |
-| UI bundle | `UI_ZIP_URL` + `RELEASE_CONFIG_URL`, already OTA | Tenant |
+| Concept | Where it was frozen | Owned by | Status |
+|---|---|---|---|
+| Backend/frontend hostnames | `src/app/config.ts` — `APP_ENV` selected one of three literal objects, editing the tree being the only way to add a fourth | Tenant, selected at build time (§3) | **done** |
+| mTLS trust root | `src/services/mtls.ts` — CA filename derived from `USER_DATA_SUFFIX === '-sandbox'`, so a third CA had no way to be named | Tenant, via `CA_CERT_FILE` (`mtls.ts:123`) | **done** |
+| Bundle identity (appId, productName, scheme) | `build.prod.json` / `build.sbx.json` | Channel — never tenant | by design |
+| UI bundle | `UI_ZIP_URL` + `RELEASE_CONFIG_URL`, already OTA | Tenant | works |
+| Shell version | nothing — no update path exists | Release (§5) | **missing** |
 
 Consequences:
 
-- **Combinatorial builds.** A merchant domain with its own app config requires a fourth build config, then a fifth. Cost is `tenants × platforms × arch`.
+- **Combinatorial builds, and worse, combinatorial *source*.** A merchant domain with its own app config required a fourth literal object in `config.ts`, then a fifth, each one a commit to the shared tree. Cost was `tenants × platforms × arch` in build time and, more expensively, one code review per customer. §3 removes the source half of this: a domain is now a data file and a build parameter. The build half remains `tenants × platforms × arch` for the internal channel and is accepted deliberately — see §3.
 - **No single download origin.** Each per-domain build implies a per-domain host, so there is no one place to point a user at.
 - **Not publishable to stores.** Apple guideline 4.3(a) rejects multiple bundle IDs of one app differing only by brand or content, and names a single binary with in-app selection as the expected architecture. Play and Microsoft Store apply equivalent spam policies. Per-domain builds are not merely expensive; they cannot be listed.
-- **Private-CA mTLS is incompatible with store distribution.** `mtls.ts:120-136` calls `keychain.installRootCA()`, which shells out to `security add-trusted-cert`. A sandboxed Mac App Store build cannot modify the system trust store, and on iOS/Android an app cannot install a root CA at all without an MDM profile. A reviewer launching the app with no client certificate also sees a dead app — guideline 2.1.
+- **Private-CA mTLS is incompatible with store distribution.** `mtls.ts:119-140` calls `keychain.installRootCA()`, which shells out to `security add-trusted-cert`. A sandboxed Mac App Store build cannot modify the system trust store, and on iOS/Android an app cannot install a root CA at all without an MDM profile. A reviewer launching the app with no client certificate also sees a dead app — guideline 2.1.
 - **The native shell has no update path.** `grep -rn 'electron-updater\|autoUpdater' apps/electron/src` returns nothing. Only the UI self-updates (`ui-updater.ts`). Every Electron/Chromium security fix currently needs a manual reinstall in every org.
 - **Nothing is signed — deliberately, and correctly for today.** `build.prod.json` carries `"notarize": false`, `dmg.sign: false`, `win.signExecutable: false` because the only live distribution path is an MDM-pushed `pkg`, and notarizing a `pkg` is disproportionately expensive (§7.1). An MDM install sets no `com.apple.quarantine` attribute, so Gatekeeper's quarantine check never runs and an unsigned `pkg` installs cleanly. Signing blocks nothing on this path. It blocks exactly the two paths that need a trust anchor: a no-MDM download, and any self-update.
 - **No release pipeline.** `.github/workflows/` has no Electron job. Releases are a laptop ritual.
@@ -57,58 +58,95 @@ This works because every Slack tenant is `*.slack.com`: one origin, one public T
 
 So the community channel is Slack's model applied unchanged. The internal channel is the case Slack does not have, and it is handled by *not* putting it in a store.
 
-## 3. Tenant config at runtime
+## 3. Tenant config at build time
 
-Split `AppConfig` into what the channel owns and what the tenant owns.
+**Implemented.** A domain is a data file plus a build parameter. No source change, no new build config, no runtime discovery.
 
-**Baked per channel, immutable, inside the code signature:**
+### Split of ownership
+
+Baked per **channel**, immutable, inside the code signature. A tenant may not override these:
 
 ```
-APP_ID, PRODUCT_NAME, DEEP_LINK_PROTOCOL
-BOOTSTRAP_HOST          // today's UNPROTECTED_URL
-IS_STORE_BUILD          // gates installRootCA, electron-updater, mTLS entirely
-CHANNEL_CA              // internal channel only
-CONFIG_SIGNING_PUBKEY   // internal channel only
+APP_ID, APP_NAME, DEEP_LINK_PROTOCOL, USER_DATA_SUFFIX
+UNPROTECTED_URL            // bootstrap host, reachable before enrollment
 ```
 
-**Resolved per tenant at runtime, cached in `userData/tenants/<tenantId>/tenant.json`:**
+They sit inside the macOS code signature and the MDM package identity. Changing `APP_ID` or `USER_DATA_SUFFIX` per tenant means an upgrade over an existing install becomes a second app with an empty profile, so these stay channel-level even though nothing technically prevents moving them.
+
+Selected per **tenant** at build time:
 
 ```
 BACKEND_URL, MTLS_BACKEND_URL, MTLS_FRONTEND_URL, FRONTEND_URL, CLAW_AUTH_URL
+MTLS_IDENTITY_NAME, CA_CERT_FILE
 UI_ZIP_URL, RELEASE_CONFIG_URL
-updateFeedUrl, shellChannel, pinnedVersion, minShellVersion
-branding, featureFlags
+enableMtls, sendLogs, enableOtelMetrics, uiUpdateCheckIntervalMs
+window.title
 ```
 
-Discovery: `https://<workspace-host>/.well-known/xyne-desktop-config.json`, fetched from the bootstrap host before enrollment, since the mTLS host is unreachable without a client certificate. `UNPROTECTED_URL` already exists for exactly this pre-enrollment role (`config.ts:66`).
+`CA_CERT_FILE` is the one genuinely new field. `mtls.ts` previously derived the CA filename from `USER_DATA_SUFFIX === '-sandbox'`, which gave a third deployment no way to name its own root; `mtls.ts:123` now reads `config.CA_CERT_FILE`, so a per-domain private CA is a config value rather than a branch.
 
-**Signature requirements differ by channel, and the difference is the whole point.**
+### Mechanism
 
-- Community channel: public TLS is the signature. No extra signing layer, because the document carries no trust material — only hostnames. A compromised tenant server can mislead its own users and no one else.
-- Internal channel: the document carries a CA certificate, so TLS alone is not enough. A client that accepts a trust root off the network is a client an attacker can repoint, and whoever controls that root controls every subsequent mTLS session. The document must be signed with an offline Ed25519 key whose public half is compiled into the binary, verified before any field is read, with no fallback and no "warn and continue" path. Sign at tenant-onboarding time in the control plane, not per request.
+| Piece | Location | Repo |
+|---|---|---|
+| Tenant data | `apps/electron/tenants/<domain>.json` | **private** (public carries only `example.json`) |
+| Private CA root | `apps/electron/certs/ca.<domain>.cert` | **private** |
+| Selector | `apps/electron/scripts/select-tenant.mjs` | public |
+| Generated module | `apps/electron/src/app/tenant.active.ts` | git-ignored, never committed |
+| Build parameter | `ELECTRON_TENANT` (Make var, Jenkins string param) | both |
 
-Keep the per-host client-certificate allowlist in `mtls.ts:46` driven by the *verified* config, so the device identity still never reaches a foreign origin. In the store build that entire path compiles out.
+Flow:
 
-Merchant vanity domains become CNAMEs covered by a public certificate, or carry their own public certificate. Either way the client needs no trust configuration, and a merchant domain stops being a trust boundary and becomes a hostname.
+1. Jenkins runs with `ELECTRON_TENANT=acme`.
+2. `overlayPublicRepo()` copies the public tree in with `rsync --ignore-existing`, so the private `tenants/acme.json` and `certs/ca.acme.cert` are never shadowed by anything public.
+3. `select-tenant.mjs acme` reads `tenants/acme.json` and writes `src/app/tenant.active.ts`.
+4. `tsc` compiles it. `config.ts` overlays it on the channel defaults.
 
-## 4. Multi-tenant in one install
+Precedence, lowest to highest: **channel default → tenant file → environment variable.** The environment stays on top as the operator's escape hatch for repointing an already-built binary.
 
-`USER_DATA_SUFFIX` currently isolates flavours by swapping the whole `userData` directory. Replace with per-tenant subtrees inside one install:
+Empty `ELECTRON_TENANT` is a first-class case, not a degenerate one: it clears any previous selection and keeps the channel defaults, which is exactly what the community and sandbox channels want. An *unknown* tenant name is a hard error — a typo must never silently produce a default-configured binary wearing a customer's name.
 
+### Validation is the compiler's job
+
+`select-tenant.mjs` writes the tenant data as a typed object literal:
+
+```ts
+export const tenant: TenantConfig = { "BACKEND_URL": "https://app.spaces.acme.com", … };
 ```
-userData/tenants/<tenantId>/{ui-data, logs, window-state}
-```
 
-- Cookies and storage per tenant via `session.fromPartition('persist:tenant-<id>')`.
-- Keychain entries keyed by tenant (`src/keychain/*`).
-- `ui-updater.ts` paths (`getUIDataDir()` and below) become tenant-relative, so two tenants can sit on different UI versions.
-- Prod keeps the empty suffix path as the default tenant so existing installs need no migration.
+`TenantConfig` is derived from `AppConfig`, so `tsc` rejects a misspelled key (`BACKEND_UR` → TS2353, with a "did you mean" hint) and a wrong type (`"enableMtls": "yes"` → TS2322). This is deliberate: no JSON Schema to drift out of sync with the interface, no validation dependency, and `AppConfig` stays the single definition of the shape. The script checks only what a type cannot see — that the file exists, parses, and is a non-empty flat object.
 
-A workspace switcher falls out of this for free, which is the user-visible half of Slack's model.
+Two properties of the generated module matter:
+
+- **It holds one tenant at a time.** No artifact carries another deployment's hostnames, which a barrel of all tenants under `src/` would have caused — `tsc` compiles everything under `src/`, and electron-builder packs all of `dist`.
+- **It is git-ignored and cleared on every run, including its emitted `dist/app/tenant.active.js`.** `tsc` does not delete output for a source file that has gone away, so clearing only the `.ts` left the compiled module behind and an "untenanted" rebuild in a reused workspace resolved to the *previous* tenant's hostnames. Verified and fixed; the macOS host route is where it would have bitten, since `dist/` persists there between runs.
+
+### Cost, stated plainly
+
+This is `tenants × platforms × arch` builds for the internal channel. That cost is accepted because the internal channel is not store-distributed (§2), so the guideline 4.3(a) objection that makes per-domain builds *unpublishable* does not apply to it. What the design removes is the per-customer commit to shared source, which was the expensive half.
+
+The community channel is unaffected: one untenanted build, one listing per store, tenants distinguished by the workspace URL a user types — Slack's model, unchanged.
+
+## 4. Rejected: multi-tenant in one install
+
+An earlier draft moved tenant identity to runtime: `.well-known/xyne-desktop-config.json` discovery, Ed25519-signed config documents, per-tenant `userData` subtrees, `session.fromPartition('persist:tenant-<id>')`, and a workspace switcher.
+
+Dropped, for the internal channel. Recorded here because the option is reasonable and will be proposed again.
+
+| Against | |
+|---|---|
+| Trust bootstrapping | A runtime-fetched config for the internal channel carries a **CA certificate**. A client that accepts a trust root off the network is a client an attacker can repoint, so the document needs offline Ed25519 signing, a pubkey compiled into the binary, and no warn-and-continue path. That is a signing service and a key-custody process to replace a JSON file in a private repo. |
+| Two trust models | Community configs carry only hostnames, where public TLS is sufficient. Internal configs carry trust material, where it is not. One mechanism serving both means the weaker verification path exists in the binary that needs the stronger one. |
+| No demand for coexistence | Per-tenant partitions and a switcher only pay off when one user holds several internal workspaces at once. Each org installs the build for its own domain; this does not happen. |
+| Migration risk for zero user-visible gain | `USER_DATA_SUFFIX`, `ui-updater.ts` paths, keychain keys and cookie partitions all become tenant-relative. A path migration across an installed fleet with no MDM to repair it, in exchange for a switcher nobody asked for. |
+
+What survives from that draft: `UNPROTECTED_URL` keeps its pre-enrollment bootstrap role, and runtime config remains the right answer for the **community** channel, where a tenant is a hostname the user types and no trust material is involved.
+
+The version floor (`minShellVersion`, §5) stays runtime and server-side regardless. It is a security backstop, so it cannot live in a file that is fixed at build time.
 
 ## 5. Internal no-MDM path: download once, update everything
 
-This section applies to the no-MDM column only. On the MDM path, layer 1 is the MDM's job and `electron-updater` stays compiled out; layers 2 and 3 work identically on both paths, which is why an MDM org still gets same-day UI and config fixes today.
+This section applies to the no-MDM column only. On the MDM path, layer 1 is the MDM's job and `electron-updater` stays compiled out; layer 2 works identically on both paths, which is why an MDM org still gets same-day UI fixes today.
 
 Four layers update on three independent cadences. The rule that keeps this cheap: **anything that can live in a faster layer must live there.**
 
@@ -117,7 +155,9 @@ Four layers update on three independent cadences. The rule that keeps this cheap
 | 0 — installer | first download only | once | MDM push, or branded redirect to channel artifact | MDM push, built by hand |
 | 1 — shell | Electron, Chromium, main process, `native/mic-monitor` | weeks | `electron-updater`, background download, install on quit | **missing entirely** |
 | 2 — UI | dashboard web assets | 15 min | existing OTA, staged + apply on blur | works |
-| 3 — config | hostnames, flags, version floor | launch + periodic | signed `.well-known` fetch | hardcoded |
+| 3 — version floor | `minShellVersion` only | launch + periodic | server-side rejection, rendered as a blocking modal | **missing** |
+
+Hostnames and flags are deliberately **not** a layer here: §3 fixes them at build time for the internal channel. The only thing in this column that must change without a rebuild is the version floor, and it must, because it is a security backstop (§4).
 
 Layer 1 is reserved for what genuinely cannot ship as web assets: Chromium security fixes, native helpers, main-process logic. Everything else goes to layer 2, so the heavy signature-bound track stays rare.
 
@@ -136,13 +176,15 @@ https://spaces.xyne.juspay.net/download/internal/{platform}/{arch}
 
 This is safe only because the artifact's OS code signature is the trust anchor, not the transport: `electron-updater` checks the `sha512` in `latest.yml` and verifies the Authenticode or `codesign` signature before installing. That makes signing and notarization load-bearing on this path specifically. It is also the reason the MDM path can ship unsigned and the no-MDM path cannot: the MDM is the trust anchor in one case, the signature is the trust anchor in the other. There is no third option where an unsigned artifact self-updates safely.
 
-Air-gapped tenants override `updateFeedUrl` in their signed tenant config and point at their own mirror. Same bytes, same signature, so the mirror is a copy operation and never a build.
+Air-gapped tenants set `updateFeedUrl` in their tenant file (§3) and point at their own mirror. Same bytes, same signature, so the mirror is a copy operation and never a build.
 
 ### Rollout control
 
-- `shellChannel` in tenant config maps to an `electron-updater` channel (`stable` / `canary`).
+`shellChannel`, `pinnedVersion` and `updateFeedUrl` are new `AppConfig` fields that phase 7 adds; they come from the tenant file like everything else in §3. The dividing line: anything that must change **without** a rebuild belongs in `latest.yml` or the server, never in the tenant file.
+
+- `shellChannel` in the tenant file maps to an `electron-updater` channel (`stable` / `canary`).
 - `stagingPercentage` in `latest.yml` for staged rollout, so a bad shell build cannot reach every org at once.
-- `pinnedVersion` lets a regulated org hold back deliberately.
+- `pinnedVersion` lets a regulated org hold back deliberately. Changing it is a rebuild, which is acceptable: pinning is a deliberate, rare act.
 - `minShellVersion` is the security backstop. Without MDM there is no way to force an update, so the client blocks below the floor with a single mandatory "Restart to update" modal — the only case permitted to interrupt. Enforce the same floor server-side, since a client-side check is bypassable; the backend rejects below-floor clients with an error the app renders as the same modal.
 
 ### Windows: nsis updates, msi does not
@@ -161,10 +203,10 @@ Air-gapped tenants override `updateFeedUrl` in their signed tenant config and po
 
 1. Branded link `https://acme.spaces.xyne.net/download/mac` → 302 to the channel artifact. Per-domain URLs are redirects, never hosts.
 2. Install, launch.
-3. Deep link `xyne-spaces://enroll?host=…&code=…` pre-fills the workspace, or the user types the workspace URL. `custom-protocol.ts` and `deep-links.ts` already exist.
-4. Fetch and verify tenant config, then run the existing enrollment to obtain the client certificate.
+3. Run the existing enrollment to obtain the client certificate. The internal build already knows its hostnames and its CA (§3), so there is no workspace to choose and no config to fetch — the shortest possible first run.
+4. Community channel only: the user types a workspace URL, as in Slack.
 
-Scripted installs without MDM can skip steps 3–4 by dropping `enroll.json` into `/Library/Application Support/Xyne/` or `%ProgramData%\Xyne\`; the same signature verification applies, since the transport is irrelevant to it.
+Scripted installs without MDM can pre-seed the enrollment code by dropping `enroll.json` into `/Library/Application Support/Xyne/` or `%ProgramData%\Xyne\`, which carries no trust material and so needs no signature of its own.
 
 **Steady state, invisible:**
 
@@ -172,7 +214,7 @@ Scripted installs without MDM can skip steps 3–4 by dropping `enroll.json` int
 - Shell update: download in background, subtle tray indicator, install on quit. No modal.
 - UI update: existing staged + apply-on-blur.
 - Below `minShellVersion`: the one blocking modal.
-- About panel shows shell version, UI version, tenant, channel, last update check, plus a manual "Check for updates". Support calls need this.
+- About panel shows shell version, UI version, tenant (`TENANT_NAME` from §3, `null` for a default build), channel, last update check, plus a manual "Check for updates". Support calls need this, and the tenant name is how support confirms which build an org is actually running.
 
 ## 7. Release pipeline
 
@@ -208,6 +250,7 @@ workflow, so it matches how every other module in this repo is released.
 | Target | Does |
 |---|---|
 | `electron-deps` | host install of the electron workspace (macOS build only) |
+| `electron-tenant` | bake `ELECTRON_TENANT`'s config in, or clear any previous selection (§3) |
 | `electron-ui-copy` | stage an already-built `apps/dashboard/dist` into `ui-active` |
 | `electron-ui` | build the dashboard first, then stage it (local use) |
 | `electron-build-linux` | deb + rpm + AppImage, via buildx |
@@ -227,8 +270,9 @@ exposes its bundle the same way. Its ignore list is
 `.dockerignore` excludes both `apps/electron` and every `dist/`. It is deny-all
 then re-include, which keeps the context at ~7MB / 144 files.
 
-**Private repo** holds only what must stay private: the `BUILD_ELECTRON` and
-`BUILD_ELECTRON_MAC` parameters, the stage toggles, `ELECTRON_MAC_AGENT_LABEL`,
+**Private repo** holds only what must stay private: the `BUILD_ELECTRON`,
+`BUILD_ELECTRON_MAC` and `ELECTRON_TENANT` parameters, the stage toggles,
+`ELECTRON_MAC_AGENT_LABEL`, the tenant files and CA roots themselves (§3),
 and — from phase 2 — credentials. The stage runs after `Build All Modules` and
 reuses the dashboard bundle that stage produced, because that build carries
 deployment-specific `VITE_*` variables; rebuilding inside the electron targets
@@ -243,6 +287,14 @@ Two things the pipeline pins so CI output matches a laptop build:
   keychain and silently produce a differently-signed artifact than CI does.
 - **`--platform linux/amd64`** on the buildx call. The builder image is
   amd64-only; pinning stops an arm64 workstation from silently switching.
+- **`select-tenant.mjs` runs on every build**, including untenanted ones, and
+  clears both the generated source and its compiled output. Without that, a
+  reused workspace carries the previous tenant's hostnames into a default build
+  (§3).
+
+`ELECTRON_TENANT` travels as a `--build-arg`, not a `--secret`: hostnames are
+not secret, and the selected name belongs in image history as a record of what
+the artifact points at. The tenant *files* are what stay private.
 
 Zero secrets. Signing material has a passthrough already wired
 (`ELECTRON_BUILD_SECRETS` → buildx `--secret`, never `--build-arg`, which would
@@ -330,7 +382,7 @@ One build per channel per platform. Signing and target list differ by delivery p
 | internal — MDM | `pkg` universal, unsigned | `msi` x64 | deb · rpm |
 | internal — no-MDM | `dmg` + `zip` universal, notarized | `nsis` x64 + arm64, signed | deb · rpm · AppImage, GPG repo |
 
-Fixed cost. A new merchant is one signed JSON in the control plane and a DNS record. No build, no signing run, no new host.
+Per channel the cost is fixed. For the internal channel a new merchant is one JSON file in the private repo, one CA cert, a DNS record, and **one pipeline run with `ELECTRON_TENANT=<domain>`** — no source change, no new build config, no code review per customer. For the community channel a new tenant costs nothing at all: same artifact, different URL typed by the user.
 
 White-label with a distinct name and icon in Finder remains a genuine separate build, because bundle identity sits inside the code signature. Apple's route for that is publication from the client's own App Store Connect organisation. Sell it as a tier; never make it the default.
 
@@ -339,14 +391,23 @@ White-label with a distinct name and icon in Finder remains a genuine separate b
 Ordered so that each step ships alone and nothing early depends on a signing secret.
 
 1. **Unsigned MDM pipeline (§7.2) — done.** Reproduces today's hand-built artifacts in CI. No secrets, no signing. Linux and macOS verified end-to-end; Windows needs a native amd64 agent to confirm. Removes the laptop from the release path.
-2. **Extract the config resolver** behind the current three literal configs. Pure refactor, no behaviour change, unblocks steps 4–6.
-3. **Layer 2 + 3 hardening.** Tenant config fetch with caching, and the `minShellVersion` floor enforced server-side. Benefits MDM orgs immediately, since the server-side floor is how an un-updated MDM fleet gets caught regardless of path.
-4. **Community channel.** Compile out `installRootCA`, compile out self-update, public TLS only, platform attestation for device identity. The real work, independently reviewable.
-5. **`.well-known` tenant discovery** with signature verification on the internal channel, deep-link enrollment, first-launch workspace screen.
-6. **Per-tenant `userData` partitions** and the workspace switcher.
+2. **Build-time tenant selection (§3) — done.** `ELECTRON_TENANT` parameter, tenant files in the private overlay, `CA_CERT_FILE` replacing the CA-filename branch in `mtls.ts`. A new domain stops being a commit to shared source. Untenanted builds are unchanged, so this ships without touching the live MDM artifact.
+3. **Add the real tenant files.** Private repo only: one `tenants/<domain>.json` and one `certs/ca.<domain>.cert` per live deployment, then a pipeline run per domain. No public change.
+4. **Version floor (§5, layer 3).** `minShellVersion` enforced server-side, rendered client-side as the one permitted blocking modal. Benefits MDM orgs immediately, since a server-side floor is how an un-updated fleet gets caught regardless of delivery path.
+5. **Community channel.** Compile out `installRootCA`, compile out self-update, public TLS only, platform attestation for device identity (App Attest / Play Integrity / TPM-bound key). The real work, and independently reviewable.
+6. **Runtime tenant config — community channel only.** Workspace URL typed by the user, hostnames resolved over public TLS. No signing layer, because the document carries no trust material (§4).
 7. **Signed no-MDM pipeline (§7.3), then `electron-updater`.** Only now does the signing cost get paid, and only for the path that needs it. Scope is Developer ID Application signing plus notarization of `dmg` and `zip`; `pkg` stays unsigned and MDM-only, so no installer certificate is involved.
 8. **Submit one listing per store.** Sandbox becomes a tenant of the community channel, and `build.sbx.json` is deleted.
 
-Steps 1–3 are worth doing even if the store work never happens.
+Steps 1–4 are worth doing even if the store work never happens.
+
+**Blocked on decisions, not code:**
+
+| Blocker | Blocks | Nature |
+|---|---|---|
+| macOS build agent (`ELECTRON_MAC_AGENT_LABEL = 'xyne-macos'`, none exists) | `BUILD_ELECTRON_MAC`, and all of step 7 | procurement — own a Mac, rent one, or accept a GitHub Actions hybrid |
+| Developer ID Application cert + Azure Trusted Signing (HSM-backed since 2023; no local `.pfx`) | step 7 | procurement |
+| Apple / Play / Microsoft developer accounts, plus a public demo workspace for review | step 8 | procurement, and an org-level decision |
+| Device identity mechanism for the community channel | step 5 scope | design |
 
 Lens check: channel owns what changes at the rate of a compliance boundary (trust root, bundle identity, update ownership); tenant owns what changes at the rate of a sales contract (hostnames, branding, flags); release owns what changes weekly (shell version); UI owns what changes daily. Nothing that changes at one rate is stored in a layer that updates at another.

@@ -247,3 +247,6 @@ security-reports/
 
 # Build exports (make export-dashboard-bundle)
 out/
+# Per-domain tenant config baked in by apps/electron/scripts/select-tenant.mjs.
+# Generated per build and holds one deployment's hostnames — never committed.
+apps/electron/src/app/tenant.active.ts

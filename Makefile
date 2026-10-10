@@ -332,9 +332,24 @@ ELECTRON_SECRET_FLAGS := $(foreach spec,$(ELECTRON_BUILD_SECRETS),--secret $(spe
 ELECTRON_WIN_TARGETS ?=
 ELECTRON_LINUX_TARGETS ?=
 
+# Bake one internal deployment's config into the build:
+#   -e ELECTRON_TENANT=acme   ->  overlays $(ELECTRON_DIR)/tenants/acme.json
+#
+# Empty default: an untenanted build keeps the channel defaults in
+# src/app/config.ts, which is what the community and sandbox channels want.
+# Real tenant files live in the private repo and arrive through the public
+# overlay; this repo carries only tenants/example.json. An unknown name is a
+# hard error, never a silent fall back to the defaults.
+#
+# Passed as a --build-arg and not a --secret on purpose: hostnames are not
+# secret, and the chosen name belongs in the image history as a record of what
+# the artifact actually points at. The tenant FILES are what stay private.
+ELECTRON_TENANT ?=
+
 ELECTRON_BUILD_ARGS = \
 	--build-arg "BUILDER_IMAGE=$(ELECTRON_BUILDER_IMAGE)" \
 	--build-arg "ELECTRON_BUILD_CONFIG=$(ELECTRON_BUILD_CONFIG)" \
+	--build-arg "ELECTRON_TENANT=$(ELECTRON_TENANT)" \
 	--build-arg "PNPM_VERSION=$(PNPM_VERSION)"
 
 # $(1) = platform name (used for the output directory)
@@ -388,6 +403,14 @@ electron-ui:
 	cd $(ELECTRON_DIR) && pnpm run build:dashboard
 	$(MAKE) electron-ui-copy
 
+# Select the tenant for a HOST build (macOS). The container route runs the same
+# script inside the image instead, from the copied context. Safe to run with an
+# empty ELECTRON_TENANT: that clears any selection left by a previous build in
+# this workspace, so a default build can never inherit one.
+electron-tenant:
+	$(info Selecting electron tenant: $(if $(strip $(ELECTRON_TENANT)),$(ELECTRON_TENANT),<none - channel defaults>))
+	cd $(ELECTRON_DIR) && node scripts/select-tenant.mjs "$(ELECTRON_TENANT)"
+
 # Install the electron workspace's dependencies on the HOST. Only the macOS
 # build needs this: the Linux and Windows builds install inside the container.
 electron-deps:
@@ -409,6 +432,7 @@ electron-build-mac:
 		echo "       Current host: $$(uname -s). Use electron-build-win / electron-build-linux here." >&2; \
 		exit 1; }
 	$(info Building macOS artifacts with $(ELECTRON_BUILD_CONFIG) (unsigned: CSC_IDENTITY_AUTO_DISCOVERY=$(CSC_IDENTITY_AUTO_DISCOVERY)))
+	$(MAKE) electron-tenant
 	cd $(ELECTRON_DIR) && pnpm run build:prepare \
 		&& pnpm exec electron-builder --config $(ELECTRON_BUILD_CONFIG) --mac
 	@rm -rf "$(ELECTRON_ARTIFACT_DIR)/mac" && mkdir -p "$(ELECTRON_ARTIFACT_DIR)/mac"
@@ -424,6 +448,11 @@ electron-artifacts:
 		echo "ERROR: no artifacts under $(ELECTRON_ARTIFACT_DIR) - did a build target run?" >&2; \
 		exit 1; }
 	$(info Checksumming artifacts in $(ELECTRON_ARTIFACT_DIR))
+	@printf 'tenant: %s\nversion: %s\nconfig: %s\n' \
+		"$(if $(strip $(ELECTRON_TENANT)),$(ELECTRON_TENANT),none)" \
+		"$$(node -p 'require("./$(ELECTRON_DIR)/package.json").version')" \
+		"$(ELECTRON_BUILD_CONFIG)" > "$(ELECTRON_ARTIFACT_DIR)/BUILD-INFO"
+	@cat "$(ELECTRON_ARTIFACT_DIR)/BUILD-INFO"
 	@cd "$(ELECTRON_ARTIFACT_DIR)" && find . -type f ! -name SHA256SUMS -print0 \
 		| xargs -0 $$(command -v sha256sum || echo shasum -a 256) > SHA256SUMS
 	@cat "$(ELECTRON_ARTIFACT_DIR)/SHA256SUMS"
@@ -433,4 +462,4 @@ electron-clean:
 	cd $(ELECTRON_DIR) && pnpm run clean
 	rm -rf "$(ELECTRON_ARTIFACT_DIR)"
 
-.PHONY: build-backend push-backend clean-backend prisma-generate build-runner push-runner clean-runner build-dashboard push-dashboard clean-dashboard export-dashboard-bundle build-dashboard-edge push-dashboard-edge clean-dashboard-edge build-external-dashboard push-external-dashboard clean-external-dashboard build-lighton-ocr-wrapper push-lighton-ocr-wrapper clean-lighton-ocr-wrapper build-transcription-agent push-transcription-agent clean-transcription-agent build-claw push-claw clean-claw build-claw-auth-backend push-claw-auth-backend clean-claw-auth-backend build-claw-auth-frontend push-claw-auth-frontend clean-claw-auth-frontend build-claw-all push-claw-all clean-claw-all lint-dashboard typecheck run-pr-police build-all push-all clean-all test configure-docker revoke-sa electron-version electron-deps electron-ui electron-ui-copy electron-build-mac electron-build-win electron-build-linux electron-artifacts electron-clean
+.PHONY: build-backend push-backend clean-backend prisma-generate build-runner push-runner clean-runner build-dashboard push-dashboard clean-dashboard export-dashboard-bundle build-dashboard-edge push-dashboard-edge clean-dashboard-edge build-external-dashboard push-external-dashboard clean-external-dashboard build-lighton-ocr-wrapper push-lighton-ocr-wrapper clean-lighton-ocr-wrapper build-transcription-agent push-transcription-agent clean-transcription-agent build-claw push-claw clean-claw build-claw-auth-backend push-claw-auth-backend clean-claw-auth-backend build-claw-auth-frontend push-claw-auth-frontend clean-claw-auth-frontend build-claw-all push-claw-all clean-claw-all lint-dashboard typecheck run-pr-police build-all push-all clean-all test configure-docker revoke-sa electron-version electron-tenant electron-deps electron-ui electron-ui-copy electron-build-mac electron-build-win electron-build-linux electron-artifacts electron-clean
