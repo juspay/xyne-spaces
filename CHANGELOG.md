@@ -1,3 +1,10 @@
+## [1.488.0](https://github.com/juspay/xyne-spaces/compare/v1.487.0...v1.488.0) (2026-10-10)
+
+
+### Features
+
+* gate Tickets sidebar item on TICKETS READ access or above ([#2872](https://github.com/juspay/xyne-spaces/issues/2872)) ([06fb985](https://github.com/juspay/xyne-spaces/commit/06fb9852e871528c0fffe4009ab970b24c978829))
+
 ## [1.487.0](https://github.com/juspay/xyne-spaces/compare/v1.486.0...v1.487.0) (2026-10-09)
 
 
