@@ -1602,7 +1602,7 @@ export const router = createBrowserRouter(
                 {
                   path: 'projects',
                   element: (
-                    <ResourceProtectedRoute resourceName='PROJECTS'>
+                    <ResourceProtectedRoute resourceName='TICKETS' minAccess='READ'>
                       <ProjectsScreen />
                     </ResourceProtectedRoute>
                   ),
