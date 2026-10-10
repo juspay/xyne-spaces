@@ -10,7 +10,7 @@ export const PATH_TO_RESOURCE: Record<string, string> = {
   '/listProjects': 'LISTPROJECTS',
   '/migration/confluence': 'CONFLUENCE-MIGRATION',
   '/forms': 'FORMS',
-  '/projects': 'PROJECTS',
+  '/projects': 'TICKETS',
   '/tag-review': 'WORKSPACE',
   // Organisations bundles several resources; see organisationsAccess().
   '/organisations': 'ORGANIZATIONS',

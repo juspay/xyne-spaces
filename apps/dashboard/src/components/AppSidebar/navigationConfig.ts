@@ -309,7 +309,7 @@ export const filterNavItemsByPermission = (
       const access = organisationsAccess(permissions, canManageOwnUserGroups);
       hasAccess = Object.values(access).some(Boolean);
     } else if (requiresAccess) {
-      if (resourceName === 'SDLC') {
+      if (resourceName === 'SDLC' || resourceName === 'TICKETS') {
         // Any tier (READ/WRITE/ADMIN) unlocks the screen.
         hasAccess = permissions.some(p => p.resourceName === resourceName);
       } else {
