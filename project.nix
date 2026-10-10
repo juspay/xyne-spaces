@@ -2,6 +2,11 @@
 # This file contains all the development environment and service configurations
 { config, pkgs, lib, flakeInputs, ... }:
 let
+  # Developer data directories were created by 17; Compose runs 16.
+  # Moving majors needs a pg_upgrade story, not a flake bump.
+  postgres = pkgs.postgresql_17;
+  inherit (import ./nix/packages.nix { inherit pkgs lib; }) y-sweet;
+  transcriptionEnv = import ./nix/python-agent.nix { inherit pkgs lib flakeInputs; };
   prismaEngines = import ./nix/prisma-engines.nix { inherit pkgs; };
   prismaEnvironment = lib.optionalAttrs pkgs.stdenv.isLinux {
     PRISMA_QUERY_ENGINE_LIBRARY = "${prismaEngines}/lib/libquery_engine.node";
@@ -11,25 +16,44 @@ in
 {
   imports = [
     ./nix/modules/devshell.nix
+    ./nix/modules/playwright-version.nix
   ];
+
+  packages.transcription-agent-env = transcriptionEnv;
 
   # Development shell configuration
   devShell = {
     name = "xyne-spaces-dev";
 
     packages = with pkgs; [
-      nodejs
+      nodejs_22
       pnpm
       just
       openssl
+      ffmpeg
+      gitleaks
+      trivy
+      postgres
+      process-compose
+      kubernetes-helm
+      gauge
+      playwright-driver.browsers
     ];
 
-    environment = prismaEnvironment;
+    environment = prismaEnvironment // {
+      PLAYWRIGHT_BROWSERS_PATH = "${pkgs.playwright-driver.browsers}";
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1";
+      PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS = "true";
+    };
+
+    shellHook = lib.optionalString pkgs.stdenv.isLinux ''
+      export LD_LIBRARY_PATH="${lib.makeLibraryPath [ pkgs.stdenv.cc.cc.lib pkgs.zlib ]}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    '';
 
     banner = ''
       # Xyne Spaces Dev Environment
 
-      Node.js: ${pkgs.nodejs.version}
+      Node.js: ${pkgs.nodejs_22.version}
 
       ## Getting Started
 
@@ -76,19 +100,19 @@ in
       echo "🧹 Cleaning up development services..."
       
       # Kill all process-compose instances
-      pkill -f process-compose 2>/dev/null || true
+      ${pkgs.procps}/bin/pkill -f process-compose 2>/dev/null || true
       
       # Kill processes on specific ports
       PORTS=(5433 6379 7880 4848 4849 8080 4443 8001)
       for port in "''${PORTS[@]}"; do
-        lsof -ti:"$port" 2>/dev/null | xargs kill -9 2>/dev/null || true
+        ${pkgs.lsof}/bin/lsof -ti:"$port" 2>/dev/null | xargs kill -9 2>/dev/null || true
       done
       
       sleep 1
       echo "✓ All development ports are free"
       
       # Create necessary directories
-      mkdir -p data/zero-cache data/ysweet data/fake-gcs .logs .nix-cache
+      mkdir -p data/zero-cache data/ysweet data/fake-gcs .logs
     '';
 
     # Configure log files for all processes
@@ -107,7 +131,7 @@ in
         echo "Checking PostgreSQL health..."
         
         # Wait for PostgreSQL to be ready
-        if ! ${pkgs.postgresql}/bin/psql -h 127.0.0.1 -p 5433 -U xyne -d xyne_dev_db -c "SELECT 1;" > /dev/null 2>&1; then
+        if ! ${postgres}/bin/psql -h 127.0.0.1 -p 5433 -U xyne -d xyne_dev_db -c "SELECT 1;" > /dev/null 2>&1; then
           echo "ERROR: PostgreSQL is not ready"
           exit 1
         fi
@@ -125,13 +149,13 @@ in
           exit 1
         fi
 
-        export PATH="${lib.makeBinPath [ pkgs.nodejs pkgs.pnpm pkgs.openssl ]}:$PATH"
+        export PATH="${lib.makeBinPath [ pkgs.nodejs_22 pkgs.pnpm pkgs.openssl ]}:$PATH"
         cd "$BACKEND_DIR"
 
         # Also handle data directories created before the common DB was added.
-        if ! ${pkgs.postgresql}/bin/psql -h 127.0.0.1 -p 5433 -U xyne -d postgres -tAc \
+        if ! ${postgres}/bin/psql -h 127.0.0.1 -p 5433 -U xyne -d postgres -tAc \
           "SELECT 1 FROM pg_database WHERE datname = 'xyne_common'" | grep -q 1; then
-          ${pkgs.postgresql}/bin/createdb -h 127.0.0.1 -p 5433 -U xyne xyne_common
+          ${postgres}/bin/createdb -h 127.0.0.1 -p 5433 -U xyne xyne_common
         fi
 
         # Never reset existing data as part of ordinary startup.
@@ -155,6 +179,7 @@ in
 
     # PostgreSQL service
     services.postgres."xyne-db" = {
+      package = postgres;
       enable = true;
       listen_addresses = "127.0.0.1";
       port = 5433;
@@ -204,6 +229,7 @@ in
     # Zero Cache service (native, no container required)
     services.zero-cache."xyne-zero" = {
       enable = true;
+      nodeModulesPath = "./apps/backend/node_modules";
       port = 4848;
       upstreamDb = "postgresql://xyne:xyne123@127.0.0.1:5433/xyne_dev_db";
       cvrDb = "postgresql://xyne:xyne123@127.0.0.1:5433/xyne_dev_db";
@@ -211,7 +237,6 @@ in
       replicaFile = "./data/zero-cache/replica.db";
       logLevel = "info";
       adminPassword = "dev-admin-password";
-      authSecret = builtins.getEnv "ZERO_AUTH_SECRET";
       mutateUrl = "http://127.0.0.1:3001/api/zero/push";
       queryUrl = "http://127.0.0.1:3001/api/zero/query";
       numSyncWorkers = 5;
@@ -227,7 +252,13 @@ in
     # Read credentials at runtime; local secrets must never enter the Nix store.
     settings.processes."xyne-livekit".command = lib.mkForce (
       let livekit = config.process-compose."xyne-space-services".services.livekit."xyne-livekit";
-      in "${pkgs.pnpm}/bin/pnpm --dir apps/backend exec dotenv -e .env.local -- ${pkgs.nodejs}/bin/node ../../nix/scripts/livekit.mjs ${livekit.configFile} ${livekit.package}/bin/livekit-server"
+      in "${pkgs.pnpm}/bin/pnpm --dir apps/backend exec dotenv -e .env.local -- ${pkgs.nodejs_22}/bin/node ../../nix/scripts/livekit.mjs ${livekit.configFile} ${livekit.package}/bin/livekit-server"
+    );
+
+    # Load runtime secrets without changing the module's repo-relative working directory.
+    settings.processes."xyne-zero".command = lib.mkForce (
+      let zero = config.process-compose."xyne-space-services".services.zero-cache."xyne-zero";
+      in "${pkgs.nodejs_22}/bin/node apps/backend/node_modules/dotenv-cli/cli.js -e apps/backend/.env.local -- ${zero.outputs.settings.processes.xyne-zero.command}"
     );
 
     # Add dependency: zero-cache depends on postgres
@@ -271,41 +302,7 @@ in
       command = toString (pkgs.writeShellScript "ysweet" ''
         mkdir -p "$PWD/data/ysweet"
         
-        # Download y-sweet if not present
-        YSWEET_DIR="$PWD/.nix-cache/ysweet"
-        YSWEET_BIN="$YSWEET_DIR/y-sweet"
-        
-        if [ ! -f "$YSWEET_BIN" ]; then
-          echo "📦 Downloading y-sweet binary..."
-          mkdir -p "$YSWEET_DIR"
-          
-          # Detect platform
-          if [[ "$OSTYPE" == "darwin"* ]]; then
-            if [[ $(uname -m) == "arm64" ]]; then
-              PLATFORM="macos-arm64"
-            else
-              PLATFORM="macos-x64"
-            fi
-          else
-            if [[ $(uname -m) == "aarch64" ]]; then
-              PLATFORM="linux-arm64"
-            else
-              PLATFORM="linux-x64"
-            fi
-          fi
-          
-          # Download from GitHub releases (note: .gz not .tar.gz)
-          ${pkgs.curl}/bin/curl -L \
-            "https://github.com/jamsocket/y-sweet/releases/latest/download/y-sweet-$PLATFORM.gz" \
-            -o "$YSWEET_DIR/y-sweet.gz"
-          
-          ${pkgs.gzip}/bin/gunzip "$YSWEET_DIR/y-sweet.gz"
-          chmod +x "$YSWEET_BIN"
-          echo "✓ y-sweet downloaded"
-        fi
-        
-        # Run y-sweet
-        "$YSWEET_BIN" serve \
+        ${y-sweet}/bin/y-sweet serve \
           --host 0.0.0.0 \
           --port 8080 \
           --checkpoint-freq-seconds 10 \
@@ -328,14 +325,10 @@ in
     # Python Transcription Agent - Native via Nix Python
     settings.processes.transcription-agent = {
       command = toString (pkgs.writeShellScript "transcription-agent" ''
+        set -e
         cd apps/backend/python-agent
         mkdir -p transcriptions
 
-        # PyPI native wheels need runtime libraries on Nix Linux hosts.
-        ${lib.optionalString pkgs.stdenv.isLinux ''
-          export LD_LIBRARY_PATH="${lib.makeLibraryPath [ pkgs.stdenv.cc.cc.lib pkgs.zlib ]}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-        ''}
-        
         # Set environment variables
         export LIVEKIT_URL="ws://127.0.0.1:7880"
         export BACKEND_URL="http://127.0.0.1:3001"
@@ -345,19 +338,7 @@ in
         export STORAGE_EMULATOR_HOST="http://127.0.0.1:4443"
         export HEALTH_PORT="8001"
         
-        # Create virtual environment if it doesn't exist
-        if [ ! -d ".venv" ]; then
-          echo "📦 Creating Python virtual environment..."
-          ${pkgs.python3}/bin/python -m venv .venv
-          
-          echo "📦 Installing dependencies (this may take a minute)..."
-          .venv/bin/pip install --upgrade pip setuptools wheel
-          .venv/bin/pip install -r requirements.txt
-          echo "✓ Dependencies installed"
-        fi
-        
-        # Run the agent using the venv with 'start' command
-        .venv/bin/python -c 'from dotenv import load_dotenv; import runpy; load_dotenv("../.env.local", override=True); runpy.run_path("main.py", run_name="__main__")' start
+        exec ${transcriptionEnv}/bin/python -c 'from dotenv import load_dotenv; import runpy; load_dotenv("../.env.local", override=True); runpy.run_path("main.py", run_name="__main__")' start
       '');
       
       depends_on = {
@@ -376,9 +357,10 @@ in
         period_seconds = 10;
         timeout_seconds = 3;
         success_threshold = 1;
-        # First boot installs Python wheels before the health server can start.
-        # Do not kill that install after only one minute on a fresh machine.
-        failure_threshold = 90;
+        # The old 90-attempt allowance covered pip installs; Nix builds dependencies ahead of time.
+        # First start may still download the turn-detector model on a slow connection;
+        # raise failure_threshold if that download exceeds this readiness window.
+        failure_threshold = 6;
       };
       
       namespace = "ai.transcription-agent";
@@ -395,10 +377,31 @@ in
 
   packages.nix-smoke-test = pkgs.writeShellApplication {
     name = "nix-smoke-test";
-    runtimeInputs = [ pkgs.python3 pkgs.process-compose pkgs.nodejs pkgs.pnpm pkgs.openssl ];
+    runtimeInputs = [ pkgs.python3 pkgs.process-compose pkgs.nodejs_22 pkgs.pnpm pkgs.openssl ];
     text = ''
       python ${./nix/scripts/smoke-test.py} ${config.packages.nix-services-config} "$@"
     '';
+  };
+
+  checks = let
+    sourceCheck = name: nativeBuildInputs: command: pkgs.runCommand name {
+      inherit nativeBuildInputs;
+    } ''
+      # Checks only read sources; tests write their fixtures under TMPDIR.
+      cd ${flakeInputs.self}
+      ${command}
+      touch "$out"
+    '';
+  in {
+    referenced-paths = sourceCheck "referenced-paths" [ pkgs.bash pkgs.gnugrep ]
+      "bash nix/scripts/check-referenced-paths.sh";
+    script-tests = sourceCheck "script-tests" [ pkgs.nodejs_22 ] ''
+      # The proxy test transpiles config.ts; provide TypeScript without pnpm install.
+      export NODE_PATH=${pkgs.typescript_5}/lib/node_modules
+      node --test scripts/generate-local-secrets.test.mjs scripts/dashboard-dev-proxy.test.mjs
+    '';
+    compose-refs = sourceCheck "compose-refs" [ pkgs.bash pkgs.ripgrep pkgs.gnugrep ]
+      "bash nix/scripts/check-compose-refs.sh";
   };
 
   # Custom apps/commands
@@ -419,11 +422,11 @@ in
         
         # 1. Clean up ports and processes
         echo -e "''${YELLOW}1. Cleaning up ports and processes...''${NC}"
-        pkill -f process-compose 2>/dev/null || true
+        ${pkgs.procps}/bin/pkill -f process-compose 2>/dev/null || true
         
         PORTS=(5433 6379 7880 4848 4849 8080 4443 8001)
         for port in "''${PORTS[@]}"; do
-          lsof -ti:"$port" 2>/dev/null | xargs kill -9 2>/dev/null || true
+          ${pkgs.lsof}/bin/lsof -ti:"$port" 2>/dev/null | xargs kill -9 2>/dev/null || true
         done
         echo -e "''${GREEN}   ✓ Ports and processes cleaned''${NC}"
         echo ""
@@ -442,17 +445,6 @@ in
           echo -e "''${GREEN}   ✓ .logs/ removed''${NC}"
         fi
         
-        if [ -d ".nix-cache" ]; then
-          echo "   Removing .nix-cache/ directory (downloaded binaries)..."
-          rm -rf .nix-cache/
-          echo -e "''${GREEN}   ✓ .nix-cache/ removed''${NC}"
-        fi
-        
-        if [ -d "apps/backend/python-agent/.venv" ]; then
-          echo "   Removing Python virtual environment..."
-          rm -rf apps/backend/python-agent/.venv
-          echo -e "''${GREEN}   ✓ Python .venv/ removed''${NC}"
-        fi
         echo ""
         
         echo -e "''${YELLOW}⚠️  This is equivalent to 'docker-compose down -v' (volumes removed)''${NC}"

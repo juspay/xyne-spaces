@@ -62,24 +62,16 @@ jobs:
           purge-last-accessed: 604800
           purge-primary-key: never
 
-      # 1. Eval hygiene — cheap; catches removed attrs / eval errors across outputs.
+      # 1. Evaluate outputs and build source guards and script tests.
       - name: nix flake check
-        run: nix flake check --no-build -L
+        run: nix flake check -L
 
       # 2. Build what a developer actually consumes: the dev shell and the
       #    process-compose services bundle. Catches broken/removed derivations.
       - name: nix build (devShell + services bundle)
         run: nix build -L .#devShells.x86_64-linux.default .#xyne-space-services
 
-      # 3. Source-path drift guard — the check that would have caught the
-      #    backend/ -> apps/backend/ restructure that left db-setup pointing at a
-      #    dead path and silently skipping schema push + ACL seed + admin creation.
-      - name: Bootstrap path-drift guard
-        run: bash nix/scripts/check-referenced-paths.sh
-
       - name: Prepare workspace through the Nix development shell
-        env:
-          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
         run: nix develop --command just prepare
 
       - name: Check local secrets and development proxy configuration
