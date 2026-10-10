@@ -10,7 +10,8 @@ import { websocketService } from '@/services/websocketService';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { mailSchema, ticketSchema } from '@/vespa/src/types';
 import { normalizeVespaFieldValue } from '@/zero/vespa-injection/core/form-fields';
-import { createTicketCustomFieldActivity } from '@/services/ticketCustomFieldActivityService';
+import { createTicketCustomFieldActivity } from '@/services/ticketCustomFieldActivityService'
+import { pullRequestValidationService } from '@/services/pullRequestValidationService';
 import { emitTicketUpdated } from '@/automations/triggers/ticket-updated.trigger';
 import { FormFieldType, ActivityType } from '@xyne/shared';
 import { stringFromFormValue } from '@xyne/shared/zero';
@@ -286,6 +287,23 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
         },
         performedById: this.ctx.userID,
       });
+
+      // Re-run PR validation for the ticket's open PRs when a gated field
+      // (e.g. QA Assignee) changed: the merge-gate build status on the commit
+      // would otherwise stay stale until the next PR webhook event. The flag
+      // gate and name match live inside the service; this is fire-and-forget.
+      void pullRequestValidationService
+        .maybeRevalidateOpenPrsForTicketFieldChange({
+          ticketId,
+          workspaceId: ticket.workspaceId,
+          changedFieldNames: [fieldName],
+        })
+        .catch(error =>
+          logger.error('[FormEntityValuesSideEffectHandler] PR re-validation trigger failed:', {
+            ticketId,
+            error,
+          })
+        );
 
     } catch (error) {
       logger.error('[FormEntityValuesSideEffectHandler] Failed to emit form field event:', {

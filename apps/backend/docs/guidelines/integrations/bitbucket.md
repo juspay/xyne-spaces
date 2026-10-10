@@ -101,6 +101,26 @@ Response format:
 
 ---
 
+## PR Ticket Validation (merge gate)
+
+`src/services/pullRequestValidationService.ts` posts a
+`Xyne - Ticket Validation` build status (`xyne-ticket-check-pr-<prId>`) on the
+PR head commit from `pullrequests:created` / `pullrequests:updated` webhooks:
+the PR title must reference a valid Xyne ticket, not already resolved, not
+already used by another PR.
+
+**QA-assignee gate (workspace flag):** when the Superposition flag
+`pr_qa_assignee_check_enabled` is on for the workspace, the same status also
+fails while the linked ticket's gated board form field (default **QA
+Assignee**, overridable via `pr_qa_assignee_field_name`) is empty. Filling or
+changing that field on the ticket re-runs validation for every open PR linked
+to the ticket (Zero form-value side effect →
+`maybeRevalidateOpenPrsForTicketFieldChange`) and re-posts the status on the
+current head commit. Only a positively-determined missing value blocks; an
+unreadable value fails open and logs.
+
+---
+
 ## File Locations
 
 | File | Purpose |
@@ -109,6 +129,7 @@ Response format:
 | `src/services/bitbucketService.ts` | Main service class |
 | `src/services/bitbucketWebhookService.ts` | Webhook processing |
 | `src/services/multiBitbucketService.ts` | Multi-repo operations |
+| `src/services/pullRequestValidationService.ts` | PR → ticket validation + QA-assignee gate |
 | `src/middleware/bitbucketWebhookValidator.ts` | Webhook signature validation |
 | `src/types/bitbucket.ts` | Type definitions |
 

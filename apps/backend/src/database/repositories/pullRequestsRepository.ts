@@ -346,6 +346,40 @@ export class PRMetricsRepository {
   }
 
   /**
+   * Open PRs linked to a ticket. Used to re-post the merge-gate build status
+   * when a gated ticket form field (e.g. QA Assignee) changes after the PR was
+   * last validated. Covers the Bitbucket lane only — these rows are written by
+   * the Bitbucket watcher/webhook ingestion.
+   */
+  async findOpenPrsForTicket(ticketId: string): Promise<
+    Array<
+      Pick<
+        PullRequests,
+        | 'prId'
+        | 'repoName'
+        | 'repositoryUrl'
+        | 'prUrl'
+        | 'sourceBranchName'
+        | 'destinationBranchName'
+        | 'numberOfComments'
+      >
+    >
+  > {
+    return this.prisma.pullRequests.findMany({
+      where: { ticketId, status: PRStatus.OPEN },
+      select: {
+        prId: true,
+        repoName: true,
+        repositoryUrl: true,
+        prUrl: true,
+        sourceBranchName: true,
+        destinationBranchName: true,
+        numberOfComments: true,
+      },
+    });
+  }
+
+  /**
    * Count PRs for a ticket, excluding the specified PR.
    * Pass a `status` to restrict to that status (e.g. 'OPEN' for merge checks),
    * or omit it to count all PRs regardless of status (e.g. for delete checks).

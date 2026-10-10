@@ -6,6 +6,15 @@ import { config } from '@/config/env';
 
 const BASE_URL = config.bitbucket.baseUrl;
 
+/** Subset of the Bitbucket Server PR resource used by PR re-validation. */
+export interface BitbucketPullRequestDetail {
+  id: number;
+  title: string;
+  state: string; // 'OPEN' | 'MERGED' | 'DECLINED'
+  fromRef?: { displayId?: string; latestCommit?: string };
+  toRef?: { displayId?: string };
+}
+
 export class BitbucketManager {
   constructor(private prMetricsRepository = new PRMetricsRepository()) {}
 
@@ -243,6 +252,27 @@ export class BitbucketManager {
       logger.info('[Bitbucket-API] PR description updated successfully');
     } catch (error) {
       logger.error('[Bitbucket-API] Error updating PR description:', error);
+    }
+  }
+
+  /**
+   * Fetch a single pull request. Returns null on any API error so callers can
+   * log-and-skip without throwing (used on the PR re-validation path).
+   */
+  async getPullRequest(
+    projectKey: string,
+    repoSlug: string,
+    prId: number
+  ): Promise<BitbucketPullRequestDetail | null> {
+    try {
+      const url = this.buildPullRequestUrl(projectKey, repoSlug, prId);
+      const response = await this.makeRequest<BitbucketPullRequestDetail>(url, 'GET');
+      return response.data ?? null;
+    } catch (error) {
+      logger.error(`[Bitbucket API] Error fetching PR ${prId} from ${projectKey}/${repoSlug}:`, {
+        error: error instanceof Error ? error.message : error,
+      });
+      return null;
     }
   }
 

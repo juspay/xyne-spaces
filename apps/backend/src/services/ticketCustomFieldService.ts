@@ -4,6 +4,7 @@ import { resolveParentOption, isFieldActive, FormContextType, FormEntityType, Fo
 import { DatabaseClient } from '@/database/client';
 import { resolveFormFieldDefinitionsForForm } from '@/utils/fieldDefinition';
 import { createTicketCustomFieldActivity } from '@/services/ticketCustomFieldActivityService';
+import { pullRequestValidationService } from '@/services/pullRequestValidationService';
 import { normalizeCustomFieldValue } from '@/apps/controllers/ticketController.helpers';
 import { logger } from '@/utils/logger';
 import { vespaQueue } from '@/queues/vespaQueue';
@@ -620,6 +621,30 @@ const emitCustomFieldWriteSideEffects = async (
         formFieldChanges,
         performedById: updatedBy,
       });
+
+      // Re-run PR validation for the ticket's open PRs when a gated field
+      // (e.g. QA Assignee) changed: the merge-gate build status on the commit
+      // would otherwise stay stale until the next PR webhook event. Flag gate
+      // and name match live inside the service; this is fire-and-forget.
+      const valueChangedFieldNames = changedFields
+        .filter(
+          field => !field.hadPreviousValue || !customFieldValuesEqual(field.previousValue, field.newActualValue)
+        )
+        .map(field => field.fieldName);
+      if (valueChangedFieldNames.length > 0) {
+        void pullRequestValidationService
+          .maybeRevalidateOpenPrsForTicketFieldChange({
+            ticketId,
+            workspaceId: ticket.workspaceId,
+            changedFieldNames: valueChangedFieldNames,
+          })
+          .catch(error =>
+            logger.error('[TicketCustomFieldService] PR re-validation trigger failed:', {
+              ticketId,
+              error,
+            })
+          );
+      }
     }
   } catch (error) {
     logger.error('[TicketCustomFieldService] Failed to emit form-field events after custom-field write:', {

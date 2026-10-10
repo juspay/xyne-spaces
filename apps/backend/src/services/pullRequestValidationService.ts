@@ -13,7 +13,13 @@ import {
   REQUIRED_SPEC_SECTIONS,
   validateSpecSections,
 } from '@/utils/specValidation';
-import { sanitizeProjectCode, isValidProjectCode, VCSProviderType } from '@xyne/shared';
+import { sanitizeProjectCode, isValidProjectCode, VCSProviderType, FormEntityType } from '@xyne/shared';
+import { db } from '@/database/client';
+import {
+  resolveBoardTicketFormId,
+  resolveFormFieldDefinitionsForForm,
+} from '@/utils/fieldDefinition';
+import { parseBitbucketPrUrl, parseBitbucketRepoUrl } from '@/utils/repoUrlParser';
 
 // PR validation constants (shared by the Bitbucket and GitHub webhook paths)
 const PR_VALIDATION_CONFIG = {
@@ -52,6 +58,16 @@ const PR_VALIDATION_CONFIG = {
   SPEC_FLAGS: {
     ENABLED: 'pr_spec_check_enabled',
     REQUIRED_SECTIONS: 'pr_spec_required_sections',
+  },
+  // QA-assignee merge gate: a workspace-flagged extra ticket check. Unlike the
+  // spec check (own status) it joins the main Ticket Validation status so the
+  // existing Bitbucket required-builds rule enforces it with no repo change.
+  QA_ASSIGNEE: {
+    ENABLED_FLAG: 'pr_qa_assignee_check_enabled',
+    FIELD_NAME_FLAG: 'pr_qa_assignee_field_name',
+    DEFAULT_FIELD_NAME: 'QA Assignee',
+    MISSING_MESSAGE: (ticketId: string, fieldName: string) =>
+      `Ticket ${ticketId}: "${fieldName}" is not set on the linked ticket`,
   },
 } as const;
 
@@ -96,7 +112,7 @@ export interface ValidatePullRequestParams {
 // plumbed into refreshStrategy.timeout, which the provider never reads, and the
 // bundled HTTP handler defaults to unbounded. This sits on the webhook response
 // path, which GitHub gives 10s, so it needs its own bound.
-const SPEC_CONFIG_TIMEOUT_MS = 2500; 
+const FLAG_CONFIG_TIMEOUT_MS = 2500; 
 
 const withTimeout = async <T>(work: Promise<T>, fallback: T, label: string): Promise<T> => {
   let timer: NodeJS.Timeout | undefined;
@@ -105,9 +121,9 @@ const withTimeout = async <T>(work: Promise<T>, fallback: T, label: string): Pro
       work,
       new Promise<T>(resolve => {
         timer = setTimeout(() => {
-          logger.warn(`[PR-Validation] ${label} timed out after ${SPEC_CONFIG_TIMEOUT_MS}ms`);
+          logger.warn(`[PR-Validation] ${label} timed out after ${FLAG_CONFIG_TIMEOUT_MS}ms`);
           resolve(fallback);
-        }, SPEC_CONFIG_TIMEOUT_MS);
+        }, FLAG_CONFIG_TIMEOUT_MS);
       }),
     ]);
   } finally {
@@ -142,6 +158,102 @@ export class PullRequestValidationService {
     // runTicketValidation skips it.
     await this.postSpecBuildStatus(target, commitHash, prId, workspaceId, result);
     return result;
+  }
+
+  /**
+   * Re-run ticket validation for a ticket's open PRs after a form field on the
+   * ticket changed. The merge-gate build status lives on the PR head commit, so
+   * without this a "QA Assignee" fill/clear would not move the PR's status until
+   * the next PR webhook event. Fire-and-forget: never throws, and does nothing
+   * unless the QA-assignee gate is enabled for the workspace.
+   */
+  async maybeRevalidateOpenPrsForTicketFieldChange(args: {
+    ticketId: string;
+    workspaceId: string;
+    changedFieldNames: string[];
+  }): Promise<void> {
+    try {
+      // Stored PR rows are the devrepo Bitbucket lane, so the gate config is
+      // resolved with the default (Bitbucket) target context.
+      const config = await this.resolveQaAssigneeCheckConfig(
+        DEFAULT_BUILD_STATUS_TARGET,
+        args.workspaceId
+      );
+      if (!config.enabled) return;
+      const wanted = config.fieldName.trim().toLowerCase();
+      const gateFieldChanged = args.changedFieldNames.some(
+        name => name.trim().toLowerCase() === wanted
+      );
+      if (!gateFieldChanged) return;
+      await this.revalidateOpenPrsForTicket(args.ticketId, args.workspaceId);
+    } catch (error) {
+      logger.error('[PR-Validation] QA-assignee re-validation trigger failed:', error);
+    }
+  }
+
+  private async revalidateOpenPrsForTicket(
+    ticketId: string,
+    workspaceId: string
+  ): Promise<void> {
+    const openPrs = await this.prMetricsRepository.findOpenPrsForTicket(ticketId);
+    if (openPrs.length === 0) return;
+
+    logger.info(
+      `[PR-Validation] Re-validating ${openPrs.length} open PR(s) for ticket ${ticketId}`
+    );
+    for (const pr of openPrs) {
+      try {
+        const prUrlParts = parseBitbucketPrUrl(pr.prUrl);
+        const repoUrlParts = prUrlParts
+          ? null
+          : pr.repositoryUrl
+            ? parseBitbucketRepoUrl(pr.repositoryUrl)
+            : null;
+        const projectKey = prUrlParts?.projectKey ?? repoUrlParts?.projectKey;
+        const repositorySlug = prUrlParts?.repositorySlug ?? repoUrlParts?.repoSlug;
+        if (!projectKey || !repositorySlug) {
+          logger.warn(
+            `[PR-Validation] Cannot resolve repo for PR ${pr.prId}, skipping re-validation`
+          );
+          continue;
+        }
+
+        // Live PR detail is the source for title + head commit: the
+        // pull_requests table stores neither, and re-validation must judge the
+        // PR as it currently stands.
+        const detail = await this.bitbucketManager.getPullRequest(
+          projectKey,
+          repositorySlug,
+          pr.prId
+        );
+        if (!detail || detail.state !== 'OPEN') continue;
+        const sourceBranch = pr.sourceBranchName || detail.fromRef?.displayId || '';
+        const destinationBranch = pr.destinationBranchName || detail.toRef?.displayId || '';
+        const commitHash = detail.fromRef?.latestCommit;
+        if (!detail.title || !sourceBranch || !destinationBranch || !commitHash) {
+          logger.warn(
+            `[PR-Validation] PR ${pr.prId} re-validation skipped: incomplete Bitbucket detail`
+          );
+          continue;
+        }
+
+        await this.validatePullRequest({
+          prTitle: detail.title,
+          prId: pr.prId,
+          commitHash,
+          sourceBranch,
+          destinationBranch,
+          workspaceId,
+          repoName: pr.repoName,
+          repoUrl: pr.repositoryUrl,
+          prUrl: pr.prUrl,
+          numberOfComments: pr.numberOfComments,
+          target: DEFAULT_BUILD_STATUS_TARGET,
+        });
+      } catch (error) {
+        logger.error(`[PR-Validation] Re-validation failed for PR ${pr.prId}:`, error);
+      }
+    }
   }
 
   private async runTicketValidation(
@@ -200,6 +312,40 @@ export class PullRequestValidationService {
           xyneId: ticketId,
           ticketDescription: ticket.description,
         };
+      }
+
+      // QA-assignee merge gate (workspace flag, CAC). Only a positively
+      // determined missing value blocks the PR: when the value cannot be
+      // read/verified at all we fail open, so a forms or DB hiccup cannot
+      // freeze every merge in the workspace.
+      const qaConfig = await this.resolveQaAssigneeCheckConfig(target, workspaceId);
+      if (qaConfig.enabled && ticket.boardId) {
+        const qaAssigneeFilled = await this.isTicketFieldFilled(
+          ticket.id,
+          ticket.boardId,
+          qaConfig.fieldName
+        );
+        if (qaAssigneeFilled === false) {
+          const errorMessage = PR_VALIDATION_CONFIG.QA_ASSIGNEE.MISSING_MESSAGE(
+            ticketId,
+            qaConfig.fieldName
+          );
+          logger.info(`[PR-Validation] Blocking PR ${prId}: ${errorMessage}`);
+          await this.postFailedBuildStatus(target, prId, commitHash, errorMessage);
+          return {
+            isValid: false,
+            errorMessage,
+            ticketId,
+            xyneId: ticketId,
+            ticketDescription: ticket.description,
+          };
+        }
+        if (qaAssigneeFilled === null) {
+          logger.warn(
+            `[PR-Validation] "${qaConfig.fieldName}" not verifiable for ${ticketId}, ` +
+              `not blocking merge`
+          );
+        }
       }
 
       const duplicatePR = await this.prMetricsRepository.findDuplicatePR(
@@ -406,6 +552,134 @@ export class PullRequestValidationService {
     } catch (error) {
       logger.warn('[PR-Validation] Superposition lookup failed, spec check stays off:', error);
       return fallback;
+    }
+  }
+
+  /**
+   * Workspace flags for the QA-assignee merge gate. Mirrors
+   * resolveSpecCheckConfig: CAC is the only source, and any lookup problem
+   * leaves the gate OFF rather than guessing (and blocking merges on bad data).
+   */
+  private async resolveQaAssigneeCheckConfig(
+    target: BuildStatusTarget,
+    workspaceId: string
+  ): Promise<{ enabled: boolean; fieldName: string }> {
+    const fallback = {
+      enabled: false,
+      fieldName: PR_VALIDATION_CONFIG.QA_ASSIGNEE.DEFAULT_FIELD_NAME,
+    };
+
+    if (!superpositionClient.isReady()) {
+      logger.debug('[PR-Validation] Superposition not ready, QA-assignee check stays off');
+      return fallback;
+    }
+
+    try {
+      const context = {
+        workspaceId,
+        provider: target.provider,
+        ...(target.provider === VCSProviderType.GITHUB
+          ? { owner: target.owner, repo: target.repo }
+          : {}),
+      };
+
+      const details = await withTimeout(
+        superpositionClient.resolveAllConfigDetails(context),
+        {} as ResolvedConfigDetails,
+        'qa-assignee config'
+      );
+
+      // Flat map vs wrapped values: unwrap defensively like resolveSpecCheckConfig.
+      const unwrap = (key: string): unknown => {
+        const entry: unknown = details[key];
+        return entry && typeof entry === 'object' && 'value' in entry
+          ? (entry as { value: unknown }).value
+          : entry;
+      };
+
+      const enabledValue = unwrap(PR_VALIDATION_CONFIG.QA_ASSIGNEE.ENABLED_FLAG);
+      const enabled = typeof enabledValue === 'boolean' ? enabledValue : fallback.enabled;
+      if (!enabled) return { enabled, fieldName: fallback.fieldName };
+
+      const fieldNameValue = unwrap(PR_VALIDATION_CONFIG.QA_ASSIGNEE.FIELD_NAME_FLAG);
+      const fieldName =
+        typeof fieldNameValue === 'string' && fieldNameValue.trim()
+          ? fieldNameValue.trim()
+          : fallback.fieldName;
+
+      return { enabled, fieldName };
+    } catch (error) {
+      logger.warn(
+        '[PR-Validation] Superposition lookup failed, QA-assignee check stays off:',
+        error
+      );
+      return fallback;
+    }
+  }
+
+  /** A stored form value counts as filled when either shape carries content. */
+  private isFilledFormValue(value: unknown): boolean {
+    if (value === null || value === undefined) return false;
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      return trimmed !== '' && trimmed !== '[]' && trimmed !== '{}' && trimmed !== 'null';
+    }
+    if (Array.isArray(value)) return value.length > 0;
+    if (typeof value === 'object') return Object.keys(value as object).length > 0;
+    return true;
+  }
+
+  /**
+   * Whether the board-ticket form field `fieldName` is filled on a ticket.
+   * Returns null when the value cannot be determined (no form mapped to the
+   * board, no such field, or a read error) so the caller can fail open instead
+   * of blocking a merge on unverifiable data.
+   */
+  private async isTicketFieldFilled(
+    ticketId: string,
+    boardId: string,
+    fieldName: string
+  ): Promise<boolean | null> {
+    try {
+      const formId = await resolveBoardTicketFormId(db, boardId);
+      if (!formId) {
+        logger.warn(
+          `[PR-Validation] No ticket form mapped to board ${boardId}, cannot verify "${fieldName}"`
+        );
+        return null;
+      }
+      const definitions = await resolveFormFieldDefinitionsForForm(db, formId);
+      const wanted = fieldName.trim().toLowerCase();
+      const field = definitions.find(
+        definition => definition.fieldName.trim().toLowerCase() === wanted
+      );
+      if (!field) {
+        logger.warn(`[PR-Validation] No "${fieldName}" field on form ${formId}, cannot verify`);
+        return null;
+      }
+      // No contextId filter: a value written under any context on this ticket
+      // counts for the gate; the latest version row wins.
+      const latestValues = await db.formEntityValues.findMany({
+        where: {
+          entityType: FormEntityType.TICKET,
+          entityId: ticketId,
+          fieldId: field.id,
+        },
+        orderBy: { version: 'desc' },
+        take: 1,
+      });
+      const latest = latestValues[0];
+      if (!latest) return false;
+      return (
+        this.isFilledFormValue(latest.actualFieldValue) ||
+        this.isFilledFormValue(latest.fieldValue)
+      );
+    } catch (error) {
+      logger.error(
+        `[PR-Validation] Failed reading "${fieldName}" for ticket ${ticketId}:`,
+        error
+      );
+      return null;
     }
   }
 
