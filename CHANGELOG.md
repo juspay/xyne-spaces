@@ -1,3 +1,10 @@
+## [1.489.0](https://github.com/juspay/xyne-spaces/compare/v1.488.0...v1.489.0) (2026-10-10)
+
+
+### Features
+
+* in-app browsers: shared browser, workspace tabs, push instead of polling ([#2829](https://github.com/juspay/xyne-spaces/issues/2829)) ([6d59fe2](https://github.com/juspay/xyne-spaces/commit/6d59fe273caf40a568b929aa79db084f083b33dd))
+
 ## [1.488.0](https://github.com/juspay/xyne-spaces/compare/v1.487.0...v1.488.0) (2026-10-10)
 
 
