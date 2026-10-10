@@ -9,6 +9,7 @@ import { createLogger } from "../../logger.js";
 import { createReadStream } from "node:fs";
 import { resolve, join, sep } from "node:path";
 import { hasRange, sliceLines } from "./read-range.js";
+import { findSandboxKeys, resolveSandboxProfile } from "./repo-url.js";
 import {
   cleanupSdlcGitCredentialMaterial,
   installSdlcRepositoryAccess,
@@ -623,6 +624,8 @@ export interface RepoSetupConfig {
   /** Generic repositories are not baked into their template. Skip the golden
    * clone probe and clone them immediately. */
   skipBakedCloneWait?: boolean;
+  /** Set by claw-auth on a workspace's own profile; built-ins have none. */
+  workspaceId?: string;
 }
 
 export function buildRepoCloneCommand(
@@ -692,21 +695,84 @@ function makeClient(config: Record<string, string>, templateOverride?: string): 
 async function pinnedTemplateForContext(context: ToolExecutionContext): Promise<string | undefined> {
   const pinnedRepo = context.meta?.["sandboxRepo"]?.trim();
   if (!pinnedRepo) return undefined;
-  const { REPO_CONFIGS } = await import("./repo-configs.js");
-  return REPO_CONFIGS[pinnedRepo]?.template;
+  return (await runRepoConfigs(context))[pinnedRepo]?.template;
+}
+
+/** The profiles this run may use: built-ins plus its workspace's own. */
+async function runRepoConfigs(context: ToolExecutionContext | undefined) {
+  const workspaceId = context?.meta?.[SDLC_META_KEYS.workspaceId]?.trim() || context?.meta?.["workspaceId"]?.trim();
+  const { getRepoConfigsFor } = await import("./repo-config-source.js");
+  return getRepoConfigsFor(workspaceId || undefined);
 }
 
 /** An unknown template name from the LLM falls back to the agent's or default template instead of failing the claim. */
 async function knownTemplate(value: unknown): Promise<string | undefined> {
   if (typeof value !== "string" || !value.trim()) return undefined;
-  const { REPO_CONFIGS } = await import("./repo-configs.js");
+  const { getRepoConfigs } = await import("./repo-config-source.js");
+  const repoConfigs = await getRepoConfigs();
   const known = new Set([
     "kata-workspace-template",
-    ...Object.values(REPO_CONFIGS).map((config) => config.template),
+    ...Object.values(repoConfigs).map((config) => config.template),
     ...rotatedTemplateNames(),
   ]);
   return known.has(value.trim()) ? value.trim() : undefined;
 }
+
+const REPO_URL_INPUT = {
+  type: "string",
+  description: "Repository URL from spaces-sdlc-list-repositories. Picks that repository's sandbox profile; defaults to this run's SDLC repository.",
+};
+const PROFILE_INPUT = {
+  type: "string",
+  description:
+    "Sandbox profile key, needed only when repoUrl has several profiles. Take it from sandbox-list-profiles or the user; never guess it from the repository name.",
+};
+
+type RepoProfile = { key: string; config: RepoSetupConfig } | { error: string };
+
+/** A profile matched by repo URL wins over the agent pin. undefined → no match, keep the pin path. */
+async function repoProfileFor(params: Record<string, unknown>, context: ToolExecutionContext): Promise<RepoProfile | undefined> {
+  const param = typeof params["repoUrl"] === "string" ? params["repoUrl"].trim() : "";
+  const repoUrl = param || context.meta?.[SDLC_META_KEYS.repositoryUrl]?.trim();
+  // When a repository has several profiles and the model names none, the agent's pinned one is used.
+  const named = typeof params["profile"] === "string" ? params["profile"].trim() : "";
+  const profile = named || context.meta?.["sandboxRepo"]?.trim() || undefined;
+  const configs = await runRepoConfigs(context);
+  const choice = resolveSandboxProfile(configs, repoUrl, profile);
+  if (!choice || "error" in choice) return choice;
+  const config = configs[choice.key];
+  return config ? { key: choice.key, config } : undefined;
+}
+
+export const sandboxListProfiles: ToolDefinition = {
+  slug: "sandbox-list-profiles",
+  name: "Sandbox List Profiles",
+  description:
+    "List the sandbox profiles for a repository. Call before sandbox-create / sandbox-repo-setup. " +
+    "Get repoUrl from spaces-sdlc-list-repositories. Without repoUrl it uses this run's SDLC repository, " +
+    "and with neither it lists every profile. Pass the chosen key as profile when a repository has several.",
+  source: "custom:sandbox",
+  configSchema: SANDBOX_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: { repoUrl: REPO_URL_INPUT },
+    required: [],
+  },
+
+  async execute(params, context) {
+    const param = typeof params["repoUrl"] === "string" ? params["repoUrl"].trim() : "";
+    const repoUrl = param || context?.meta?.[SDLC_META_KEYS.repositoryUrl]?.trim();
+    const configs = await runRepoConfigs(context);
+    const keys = repoUrl ? findSandboxKeys(configs, repoUrl) : Object.keys(configs).sort();
+    const profiles = keys.flatMap((key) => {
+      const config = configs[key];
+      return config
+        ? [{ key, name: config.name, description: config.description, template: config.template, defaultBranch: config.defaultBranch }]
+        : [];
+    });
+    return JSON.stringify({ repoUrl: repoUrl || null, profiles });
+  },
+};
 
 /**
  * Create a persistent sandbox session. Returns a sessionId for follow-up tool calls.
@@ -718,7 +784,8 @@ export const sandboxCreate: ToolDefinition = {
     "Create a persistent isolated Kata/QEMU microVM sandbox session for multi-step workflows. " +
     "Provides clean, isolated environment for development tasks. Returns sessionId. " +
     "Use sandbox-run / sandbox-run-detached to execute commands, sandbox-write-file to upload files, " +
-    "and sandbox-destroy when done.",
+    "and sandbox-destroy when done. Pass repoUrl (and profile when it has several, see sandbox-list-profiles) " +
+    "to get that repository's sandbox.",
   source: "custom:sandbox",
   configSchema: SANDBOX_CONFIG_SCHEMA,
   inputSchema: {
@@ -736,6 +803,8 @@ export const sandboxCreate: ToolDefinition = {
         type: "string",
         description: "Sandbox template name to use (default: kata-workspace-template). For browser automation pin the agent to 'Browser (no repo)'; for repo work pin to a repo. Only override here for special cases.",
       },
+      repoUrl: REPO_URL_INPUT,
+      profile: PROFILE_INPUT,
     },
     required: [],
   },
@@ -750,9 +819,11 @@ export const sandboxCreate: ToolDefinition = {
       params["idleTimeoutMs"] as number | undefined,
       10 * 60 * 1000,
     );
-    // A UI-pinned sandbox repo wins over whatever template the LLM passed —
+    const byRepo = await repoProfileFor(params, context);
+    if (byRepo && "error" in byRepo) return byRepo.error;
+    // A repo-matched profile, then a UI-pinned sandbox repo, win over whatever template the LLM passed —
     // a pinned agent must always get its own sandbox, never the legacy kata one.
-    const pinnedTemplate = await pinnedTemplateForContext(context);
+    const pinnedTemplate = byRepo?.config.template ?? (await pinnedTemplateForContext(context));
     const requestedTemplate = pinnedTemplate ?? (await knownTemplate(params["template"]));
     // ROTATE, exactly as the repo-setup path does. Without this, every
     // sandbox-create on a pinned agent clones the BASE template's single
@@ -810,7 +881,8 @@ export const sandboxRun: ToolDefinition = {
     "suites routinely exceed the timeout (default 60000ms). This call is SYNCHRONOUS: when the timeout is " +
     "hit the call returns an error, the work is abandoned, and re-running the same command just burns the " +
     "timeout again. For anything that may take more than ~60s use sandbox-run-detached + sandbox-poll-job. " +
-    "Auto-detects existing sessions or creates fresh sandboxes as needed.",
+    "Auto-detects existing sessions or creates fresh sandboxes as needed. A fresh one-shot sandbox uses the " +
+    "repoUrl profile (pass profile when it has several, see sandbox-list-profiles).",
   source: "custom:sandbox",
   configSchema: SANDBOX_CONFIG_SCHEMA,
   inputSchema: {
@@ -834,6 +906,8 @@ export const sandboxRun: ToolDefinition = {
         type: "number",
         description: "Command timeout in milliseconds (default: 60000). On timeout the call returns an error and the work is abandoned — raise this only for commands you are confident finish sooner; otherwise use sandbox-run-detached.",
       },
+      repoUrl: REPO_URL_INPUT,
+      profile: PROFILE_INPUT,
     },
     required: ["cmd"],
   },
@@ -908,7 +982,9 @@ export const sandboxRun: ToolDefinition = {
     // so the ephemeral VM uses the pinned template (with /services + browser),
     // never the legacy kata default.
     try {
-      const pinnedTemplate = await pinnedTemplateForContext(context);
+      const byRepo = await repoProfileFor(params, context);
+      if (byRepo && "error" in byRepo) return byRepo.error;
+      const pinnedTemplate = byRepo?.config.template ?? (await pinnedTemplateForContext(context));
       // Rotate here too — a one-shot exec still provisions a VM from the
       // template's snapshot, so an un-rotated base name concentrates clones
       // the same way sandbox-create did.
@@ -2470,8 +2546,8 @@ export const sandboxRepoSetup: ToolDefinition = {
   name: "Sandbox Repository Setup",
   description:
     "Set up a workspace for one of the platform's configured repositories (REPO_CONFIGS). Read-first repositories " +
-    "default to the shared read-only workspace; write:true claims a writable one. SDLC hub repositories are not set " +
-    "up here: create a sandbox and call sdlc-repository-access instead.",
+    "default to the shared read-only workspace; write:true claims a writable one. repoUrl (and profile when it " +
+    "has several, see sandbox-list-profiles) picks the repository's profile instead of repoName.",
   source: "custom:sandbox",
   configSchema: SANDBOX_CONFIG_SCHEMA,
   inputSchema: {
@@ -2479,8 +2555,10 @@ export const sandboxRepoSetup: ToolDefinition = {
     properties: {
       repoName: {
         type: "string",
-        description: "Repository name (e.g. 'xyne-spaces', 'hyperswitch'). Must match a key in REPO_CONFIGS.",
+        description: "Repository name (e.g. 'xyne-spaces', 'hyperswitch'). Must match a key in REPO_CONFIGS. Ignored when repoUrl matches a profile.",
       },
+      repoUrl: REPO_URL_INPUT,
+      profile: PROFILE_INPUT,
       write: {
         type: "boolean",
         description:
@@ -2495,23 +2573,26 @@ export const sandboxRepoSetup: ToolDefinition = {
         description: "Write-sandbox lifetime in ms (default 1800000 = 30 min; write sandboxes are intentionally short-lived).",
       },
     },
-    required: ["repoName"],
+    required: [],
   },
 
   async execute(params, context) {
     if (!context) return "Error: No execution context available.";
+    const byRepo = await repoProfileFor(params, context);
+    if (byRepo && "error" in byRepo) return byRepo.error;
 
     // Deterministic pin: if the agent is bound to a repo in its config
     // (agent.config.sandboxRepo → context.meta.sandboxRepo), force THAT repo and
     // ignore whatever repoName the LLM passed. This is what makes the setup
     // deterministic — the operator picks the repo in the agent UI, not the model.
     const pinnedRepo = context.meta?.["sandboxRepo"]?.trim();
-    const repoName = pinnedRepo || (params["repoName"] as string);
+    const repoName = byRepo?.key ?? (pinnedRepo || (params["repoName"] as string));
     const wantWrite = params["write"] === true;
     const requestedBranchName = params["branchName"] as string;
     const sessionDurationMs = params["sessionDurationMs"] as number | undefined;
     // Import here to avoid circular dependency
-    const { REPO_CONFIGS, isReadOnlyJob } = await import("./repo-configs.js");
+    const { isReadOnlyJob } = await import("./repo-configs.js");
+    const repoConfigs = await runRepoConfigs(context);
 
     // ── Routing ──────────────────────────────────────────────────────────
     // 1. Always-read-only contexts → shared read-only sbx-git (no snapshot
@@ -2526,7 +2607,7 @@ export const sandboxRepoSetup: ToolDefinition = {
     // read-only). It ONLY relaxes the isReadOnlyJob force; `forceReadOnlySandbox`
     // (reviewer agents) still wins unconditionally. Default-off.
     const allowWriteInReadOnlyJob = context.meta?.["allowWriteInReadOnlyJob"] === "true";
-    const profile = pinnedRepo ? REPO_CONFIGS[pinnedRepo] : undefined;
+    const profile = pinnedRepo ? repoConfigs[pinnedRepo] : undefined;
     if (profile && !profile.repoUrl && context.meta?.["forceReadOnlySandbox"] !== "true") {
       try {
         return await makeRepoSetupTool(profile).execute(
@@ -2544,7 +2625,7 @@ export const sandboxRepoSetup: ToolDefinition = {
       return resolveSbxGit(repoName, context);
     }
 
-    const config = REPO_CONFIGS[repoName];
+    const config = repoConfigs[repoName];
 
     // 2. Per-repo READ-FIRST (config.readFirst, e.g. xyne-spaces): default every
     //    interactive run to read-only sbx-git; only claim a writable golden dev
@@ -2558,7 +2639,7 @@ export const sandboxRepoSetup: ToolDefinition = {
     // 3. Provision a writable dev sandbox (golden clone). Reached when a
     //    read-first repo asked write:true, OR a non-read-first (legacy) repo.
     if (!config) {
-      const availableRepos = Object.keys(REPO_CONFIGS).join(", ");
+      const availableRepos = Object.keys(repoConfigs).join(", ");
       return `Error: Repository '${repoName}' not found. Available repos: ${availableRepos}`;
     }
     // branchName is now optional in the schema (read-first calls don't pass it).

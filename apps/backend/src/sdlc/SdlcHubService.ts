@@ -581,9 +581,13 @@ export class SdlcHubService implements SdlcHub {
         channelId,
         sdlcArtifact: { isNot: null },
       },
-      select: { id: true, viewAccessId: true, title: true },
+      select: { id: true, viewAccessId: true, title: true, folder: { select: { name: true } } },
     });
     if (!existing) throw new AppError('SDLC artifact not found', 404);
+    if (existing.folder?.name === SDLC_HUB_KNOWLEDGE_FOLDER) {
+      // Same rule as creating one: every member's runs read Hub Knowledge.
+      await this.requireChannelRole(actor, channelId, true);
+    }
     const existingEntity = await this.prisma.sdlcArtifact.findUnique({
       where: { artifactId: existing.id },
       select: { repoId: true },
@@ -674,9 +678,13 @@ export class SdlcHubService implements SdlcHub {
     await this.requireChannelRole(actor, channelId, false);
     const canvas = await this.prisma.canvas.findFirst({
       where: { id: canvasId, channelId, sdlcArtifact: { isNot: null } },
-      select: { id: true, createdBy: true, content: true },
+      select: { id: true, createdBy: true, content: true, folder: { select: { name: true } } },
     });
     if (!canvas) throw new AppError('SDLC artifact not found', 404);
+    if (canvas.folder?.name === SDLC_HUB_KNOWLEDGE_FOLDER) {
+      // Same rule as creating one: every member's runs read Hub Knowledge.
+      await this.requireChannelRole(actor, channelId, true);
+    }
     return { ...canvas, channelId };
   }
 

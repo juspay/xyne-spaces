@@ -2111,7 +2111,11 @@ const XyneAISidebar = ({
         //
         // In a finally: a send that throws is exactly when the context must not
         // be left behind, since the turn it belonged to never happened.
-        setSelectedChannels([]);
+        //
+        // An SDLC hub chat keeps its hub: the hub is where the chat happens, and
+        // a follow-up sent without it runs with no hub context at all.
+        const hubId = window.location.pathname.match(/\/sdlc\/([^/]+)/)?.[1];
+        setSelectedChannels(previous => previous.filter(ch => ch.id === hubId));
         setSelectedTickets([]);
         setSelectedCanvases([]);
         setSelectedTranscripts([]);

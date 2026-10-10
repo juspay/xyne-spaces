@@ -7,8 +7,9 @@ import {
   buildSandboxStoreKey,
   sandboxConversationIdFromMeta,
   getSandboxSession,
-  REPO_CONFIGS,
+  getRepoConfigsFor,
 } from "../sandbox/index.js";
+import { SDLC_META_KEYS } from "../../sdlc/meta.js";
 import { generateSceneHtml } from "./scene-html.js";
 import {
   computeSegmentSeconds,
@@ -193,7 +194,9 @@ async function sceneCode(
     return `// Refused to read ${scene.file}\n// Code scenes are restricted to the sandbox workspace.`;
   }
   const pinnedRepo = context.meta?.["sandboxRepo"];
-  const repoRoot = pinnedRepo ? REPO_CONFIGS[pinnedRepo]?.workDir : undefined;
+  // Same scope as the sandbox tools: built-ins plus this run's workspace.
+  const runWorkspaceId = context.meta?.[SDLC_META_KEYS.workspaceId] || context.meta?.["workspaceId"];
+  const repoRoot = pinnedRepo ? (await getRepoConfigsFor(runWorkspaceId || undefined))[pinnedRepo]?.workDir : undefined;
   const candidates = normalized.startsWith("/")
     ? [normalized]
     : [
