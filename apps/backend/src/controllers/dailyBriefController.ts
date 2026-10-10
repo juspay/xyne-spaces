@@ -34,16 +34,17 @@ export async function getConfig(req: Request, res: Response) {
   }
 }
 
-/** PUT /api/daily-brief/config — { enabled?, instructions?, instructionsEnabled? }. */
+/** PUT /api/daily-brief/config — { enabled?, instructions?, instructionsEnabled?, whatsappEnabled? }. */
 export async function saveConfig(req: Request, res: Response) {
   const userId = req.user?.id;
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
   try {
-    const { enabled, instructions, instructionsEnabled } = req.body ?? {};
+    const { enabled, instructions, instructionsEnabled, whatsappEnabled } = req.body ?? {};
     const result = await saveDailyBriefConfig(req, userId, {
       enabled,
       instructions,
       instructionsEnabled,
+      whatsappEnabled,
     });
     return res.json(unwrap(result));
   } catch (error) {

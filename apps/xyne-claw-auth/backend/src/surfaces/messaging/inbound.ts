@@ -21,6 +21,7 @@ import {
 } from "./const.js";
 import { enqueueOutbound, typingCancelled, typingFinished, typingStarted } from "./delivery.js";
 import { pickAckReaction } from "./ack.js";
+import { handleBriefCommand, parseBriefCommand } from "./brief-command.js";
 import { agentActionGatesOf } from "./agent-tools.js";
 import { dispatchOrQueueChannelRun } from "./busy.js";
 import { channelConversationId } from "./ids.js";
@@ -383,6 +384,14 @@ async function handleOne(ctx: InboundContext, msg: InboundMessage): Promise<void
     await clearPendingQuestion(account.id, msg.chatId, msg.senderId);
     const bound = await findDefaultAgent(account, account.surfaceId);
     await handleControlCommand({ command, account, chatId: msg.chatId, userId, agentSlug: bound?.agent.slug ?? null, reply });
+    return;
+  }
+
+  // `/brief on|off|status`: the WhatsApp Daily Brief switch. Acts on the
+  // linked user resolved above, never on anything named in the message.
+  const briefCommand = answered ? null : parseBriefCommand(text);
+  if (briefCommand) {
+    await handleBriefCommand({ command: briefCommand, userId, reply });
     return;
   }
 
