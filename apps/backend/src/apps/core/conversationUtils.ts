@@ -70,6 +70,7 @@ export async function findOrCreateConversation(
       return {
         eventType: ChatEventType.MESSAGE_POSTED,
         conversationId: result.conversation.conversationId,
+        channelId: result.conversation.channelId,
         messageId: result.message.messageId,
         ticketId: result.conversation.ticketId || undefined,
       };
@@ -99,6 +100,7 @@ export async function findOrCreateConversation(
       return {
         eventType: ChatEventType.MESSAGE_POSTED,
         conversationId: result.conversation.conversationId,
+        channelId: result.conversation.channelId,
         messageId: result.message.messageId,
         ticketId: result.conversation.ticketId || undefined,
       };
@@ -131,6 +133,7 @@ export async function updateConversation(
     return {
       eventType: ChatEventType.MESSAGE_UPDATED,
       conversationId: result.conversation.conversationId,
+      channelId: result.conversation.channelId,
       messageId: result.message.messageId,
       ticketId: result.conversation.ticketId || undefined,
     };
