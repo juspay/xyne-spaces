@@ -43,6 +43,7 @@ const MUTATION_TOOLS = [
   "spaces-create-bulk-tickets",
   "spaces-update-ticket",
   "spaces-update-bulk-tickets",
+  "spaces-send-ticket-email",
   "spaces-schedule-call",
   "spaces-create-canvas",
   "spaces-edit-canvas",

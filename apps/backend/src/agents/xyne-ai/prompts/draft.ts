@@ -127,3 +127,41 @@ Your entire response is the email body that is sent to the customer as-is. The v
 
 PS: You can use conversationId="${conversationId}" with your tools to read the prior emails in this thread before drafting, so your reply fits the full context.`;
 }
+
+/**
+ * The draft for a ticket that has no email thread yet.
+ *
+ * A ticket can be raised before anyone has written to the customer — from
+ * WhatsApp, from a chat message, from the ticket form. The desk agent opening
+ * that ticket should still find an email waiting to be sent, but it cannot be
+ * a "reply": there is nothing to reply to, and the only material is the
+ * ticket's own title and description. The recipients are deliberately not part
+ * of this — whoever sends it fills those in.
+ */
+export function buildOpeningDraftEmailClawTask(params: {
+  userInfo?: UserInfo;
+  hasDeskSignature?: boolean;
+  ticketTitle: string;
+  ticketDescription: string;
+  conversationId: string;
+}): string {
+  const { userInfo, hasDeskSignature = false, ticketTitle, ticketDescription, conversationId } = params;
+  const rawName = userInfo?.userName?.trim() || 'the support specialist';
+  const name = titleCaseName(rawName);
+
+  return `Draft the FIRST customer email on a support ticket, on behalf of ${name}.
+
+Nobody has written to the customer yet — this email opens the correspondence, so do not write it as a reply and do not refer to "your email" or "your message".
+
+The ticket this is about:
+Title: ${ticketTitle}
+
+${ticketDescription}
+
+---
+Write the email the customer should receive about this ticket: acknowledge the issue in their terms, state what is being done or what is already known, and ask for exactly what is needed from them if anything is. Keep every concrete specific from the ticket — ids, amounts, dates, merchant ids — and never invent a fact the ticket does not contain.
+
+Your entire response is the email body that is sent as-is. The very first character must be the greeting (e.g. "Hi there,") — no summary, no "Here is the draft", no subject line, no commentary. If the customer's name is not in the ticket, use a generic greeting. ${hasDeskSignature ? `End after the final sentence — a signature is appended automatically, so add no sign-off or sender name.` : `End with a sign-off as "${name}".`}
+
+PS: You can use conversationId="${conversationId}" with your tools to read the ticket's thread for more context before drafting.`;
+}
