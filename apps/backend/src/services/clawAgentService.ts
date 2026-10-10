@@ -2341,7 +2341,12 @@ export async function getDailyBriefConfig(
 export async function saveDailyBriefConfig(
   req: { headers?: { cookie?: string } },
   userId: string,
-  body: { enabled?: boolean; instructions?: string | null; instructionsEnabled?: boolean }
+  body: {
+    enabled?: boolean;
+    instructions?: string | null;
+    instructionsEnabled?: boolean;
+    whatsappEnabled?: boolean;
+  }
 ): Promise<unknown> {
   const response = await fetch(`${DAILY_BRIEF_BASE()}/config`, {
     method: 'PUT',

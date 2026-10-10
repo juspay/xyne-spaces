@@ -175,6 +175,14 @@ export const CONFIG = {
   dailyBriefRateDurationMs: Number(process.env["DAILY_BRIEF_RATE_DURATION_MS"] ?? 1000),
   dailyBriefCronUtcHour: Number(process.env["DAILY_BRIEF_CRON_UTC_HOUR"] ?? 0),
   dailyBriefCronUtcMinute: Number(process.env["DAILY_BRIEF_CRON_UTC_MINUTE"] ?? 30),
+  // Daily Brief → WhatsApp. Kill switch first: "true" stops every send without a
+  // deploy. The allowlist (comma-separated org ids) limits the rollout; empty
+  // means every org.
+  dailyBriefWhatsappDisabled: process.env["DAILY_BRIEF_WHATSAPP_DISABLED"] === "true",
+  dailyBriefWhatsappOrgs: (process.env["DAILY_BRIEF_WHATSAPP_ORGS"] ?? "")
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean),
 
   // Weekly usage-pattern sync. Same two-stage shape as the Daily Brief: a
   // leader-locked cron enqueues one job per ACTIVE agent, a bounded worker

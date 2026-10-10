@@ -444,12 +444,15 @@ function PolicyEditor({
     selfChat?: boolean;
     agentActions?: { sendToOtherChats?: boolean; reactions?: boolean; listGroups?: boolean };
     notificationTemplate?: { name: string; language: string };
+    dailyBriefTemplate?: { name: string; language: string };
     questionFormId?: string;
   };
   const [selfChat, setSelfChat] = useState(residue.selfChat ?? true);
   const [agentSend, setAgentSend] = useState(residue.agentActions?.sendToOtherChats ?? false);
   const [templateName, setTemplateName] = useState(residue.notificationTemplate?.name ?? "");
   const [templateLanguage, setTemplateLanguage] = useState(residue.notificationTemplate?.language ?? "en");
+  const [briefTemplateName, setBriefTemplateName] = useState(residue.dailyBriefTemplate?.name ?? "");
+  const [briefTemplateLanguage, setBriefTemplateLanguage] = useState(residue.dailyBriefTemplate?.language ?? "en");
   const [wabaId, setWabaId] = useState("");
   const [publishing, setPublishing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -493,6 +496,9 @@ function PolicyEditor({
             ? {
                 notificationTemplate: templateName.trim()
                   ? { name: templateName.trim(), language: templateLanguage.trim() || "en" }
+                  : null,
+                dailyBriefTemplate: briefTemplateName.trim()
+                  ? { name: briefTemplateName.trim(), language: briefTemplateLanguage.trim() || "en" }
                   : null,
               }
             : {}),
@@ -604,6 +610,25 @@ function PolicyEditor({
               value={templateLanguage}
               placeholder="en"
               onChange={(event) => setTemplateLanguage(event.target.value)}
+            />
+            <div className="md:col-span-2">
+              <p className="text-[12px] font-semibold text-xyne-fg-primary">Daily Brief template (optional)</p>
+              <p className="mt-0.5 text-[11px] text-xyne-fg-muted">
+                Used for the morning brief when the 24-hour window is shut. Same single {"{{1}}"} body, which carries the
+                counts and a link. Leave empty to reuse the template above.
+              </p>
+            </div>
+            <TextField
+              label="Brief template name"
+              value={briefTemplateName}
+              placeholder="xyne_daily_brief"
+              onChange={(event) => setBriefTemplateName(event.target.value)}
+            />
+            <TextField
+              label="Brief template language"
+              value={briefTemplateLanguage}
+              placeholder="en"
+              onChange={(event) => setBriefTemplateLanguage(event.target.value)}
             />
           </div>
         )}

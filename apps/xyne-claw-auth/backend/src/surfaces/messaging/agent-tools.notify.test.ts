@@ -107,6 +107,44 @@ describe("notifyUser", () => {
 
   it("refuses when the user has no WhatsApp", async () => {
     const out = await notifyUser({ userId: "u1", orgId: "org1", text: "x" });
-    expect(out).toEqual({ ok: false, error: "This person has no WhatsApp linked to Claw, so they can't be messaged there." });
+    expect(out).toEqual({
+      ok: false,
+      reason: "no_target",
+      error: "This person has no WhatsApp linked to Claw, so they can't be messaged there.",
+    });
+  });
+
+  it("tags a closed window so callers can count it", async () => {
+    identities = [{ orgId: "org1", surfaceUserId: "919" }];
+    orgAccounts = [account({ channelConfig: {} })];
+    enqueueAndWait.mockResolvedValue({ ok: false, error: "More than 24 hours have passed" });
+    expect(await notifyUser({ userId: "u1", orgId: "org1", text: "x" })).toMatchObject({ ok: false, reason: "window_closed" });
+  });
+
+  it("prefers the daily brief template for a brief, with its own template text", async () => {
+    identities = [{ orgId: "org1", surfaceUserId: "919" }];
+    orgAccounts = [
+      account({
+        channelConfig: {
+          notificationTemplate: { name: "xyne_update", language: "en" },
+          dailyBriefTemplate: { name: "xyne_daily_brief", language: "en" },
+        },
+      }),
+    ];
+    enqueueAndWait.mockResolvedValue({ ok: true });
+    await notifyUser({ userId: "u1", orgId: "org1", text: "full brief", templateKind: "dailyBrief", templateText: "3 things need you" });
+    expect(enqueueAndWait.mock.calls[0]?.[1]).toMatchObject({
+      text: "full brief",
+      template: { name: "xyne_daily_brief" },
+      templateText: "3 things need you",
+    });
+  });
+
+  it("falls back to the notification template when no brief template is set", async () => {
+    identities = [{ orgId: "org1", surfaceUserId: "919" }];
+    orgAccounts = [account()];
+    enqueueAndWait.mockResolvedValue({ ok: true });
+    await notifyUser({ userId: "u1", orgId: "org1", text: "full brief", templateKind: "dailyBrief" });
+    expect(enqueueAndWait.mock.calls[0]?.[1]).toMatchObject({ template: { name: "xyne_update" } });
   });
 });

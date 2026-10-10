@@ -2,6 +2,7 @@ import type { ReactElement } from 'react';
 import { Switch } from '../ui/Switch';
 import { cn } from '../../utils/classNames';
 import { useDailyBriefEnabled } from '../../hooks/useDailyBriefEnabled';
+import { DailyBriefWhatsappToggle } from './DailyBriefWhatsappToggle';
 
 interface DailyBriefToggleProps {
   /** Morning Brief lives inside the Xyne AI sidebar, which "Open AI on launch" gates. */
@@ -34,6 +35,7 @@ export function DailyBriefToggle({ available }: DailyBriefToggleProps): ReactEle
           onCheckedChange={setEnabled}
         />
       </div>
+      {enabled === true && available && <DailyBriefWhatsappToggle />}
       {stranded && (
         <p className='mt-2 text-xs text-amber-600 dark:text-amber-500'>
           Your morning brief is still being generated each day. Turn “Open AI on launch” back on to
