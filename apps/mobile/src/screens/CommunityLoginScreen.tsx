@@ -35,6 +35,7 @@ import { GoogleLogo } from '@/src/assets/icons/GoogleLogo';
 import { MicrosoftLogo } from '@/src/assets/icons/MicrosoftLogo';
 import { XyneLogo } from '@/src/assets/icons/XyneLogo';
 import { useReportStartupReady } from '@/src/observability/logging/hooks/startup/useReportStartupReady';
+import { LoginHeroLayout, loginPalette } from '@/src/features/auth-login';
 
 type AuthMode = 'providers' | 'email' | 'sign-up' | 'forgot-password';
 type ForgotPasswordStep = 'request-code' | 'reset-password' | 'success';
@@ -589,6 +590,41 @@ export const CommunityLoginScreen = (): ReactElement => {
     Boolean(orgCreation) && !isNoWorkspaceAccess && !showOrgConflict && !showPublicDomainBlocked;
 
   const showProviderButtons = authMode === 'providers';
+
+  /**
+   * The redesigned entry point. It replaces only the plain provider list: every other state the
+   * screen can be in (email, sign-up, forgot-password, workspace selection, the no-workspace
+   * flows, and the in-flight spinner) still renders the original layout below.
+   */
+  if (showProviderButtons && !isLoading && !pendingAuth) {
+    return (
+      <LoginHeroLayout
+        onSelectProvider={provider => {
+          if (provider === 'google') {
+            void handleGoogleAuth();
+            return;
+          }
+          if (provider === 'microsoft') {
+            void handleMicrosoftAuth();
+            return;
+          }
+          setAuthMode('email');
+        }}
+        notice={
+          pendingCommunity.hasPending ? (
+            <View style={{ borderRadius: 12, backgroundColor: loginPalette.surface, padding: 12 }}>
+              <Text style={{ fontSize: 13, fontWeight: '600', color: loginPalette.textBody }}>
+                {pendingCommunity.name
+                  ? `You will be joining ${pendingCommunity.name} Community`
+                  : 'You will be joining the selected community'}
+              </Text>
+            </View>
+          ) : null
+        }
+      />
+    );
+  }
+
   const showEmailForm = authMode === 'email';
   const showSignUp = authMode === 'sign-up';
   const showForgotPassword = authMode === 'forgot-password';
