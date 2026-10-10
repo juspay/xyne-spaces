@@ -26,14 +26,22 @@ function shouldAssignTicketPerson(
   groupChanged: boolean,
   ticketIsUnassigned: boolean,
   effectiveGroupId: string | null,
+  assignmentOnly: boolean,
 ): boolean {
+  if (boardId === null) return false;
+
+  // An assignment-only run is a retry for a ticket nobody picked up — the desk sweep, or a
+  // member becoming available again. Supplying the desk's default group makes groupChanged
+  // true for any ticket that never got a group, so honouring rule 1 here would let a retry
+  // overwrite whoever assigned the ticket by hand in the meantime.
+  if (assignmentOnly) {
+    return ticketIsUnassigned && effectiveGroupId !== null;
+  }
+
   // ASSIGN RULE:
   // 1. Group changed → assign to someone in the new group
   // 2. Ticket is unassigned + classification yielded a group → assign
-  return boardId !== null && (
-    groupChanged ||
-    (ticketIsUnassigned && effectiveGroupId !== null)
-  );
+  return groupChanged || (ticketIsUnassigned && effectiveGroupId !== null);
 }
 
 export class EmailClassificationWorker {
@@ -85,10 +93,11 @@ export class EmailClassificationWorker {
     // If explicit flags provided (retrigger path), respect them; otherwise run both (normal ingestion path)
     const runClassification = job.data.runClassification ?? true;
     const runPriority = job.data.runPriority ?? true;
+    const runAssignment = job.data.runAssignment ?? false;
 
-    logger.info(`[EMAIL-CLASSIFICATION-WORKER] Processing job ${job.id} — ticket ${ticketId} runClassification=${runClassification} runPriority=${runPriority}`);
+    logger.info(`[EMAIL-CLASSIFICATION-WORKER] Processing job ${job.id} — ticket ${ticketId} runClassification=${runClassification} runPriority=${runPriority} runAssignment=${runAssignment}`);
 
-    if (!runClassification && !runPriority) {
+    if (!runClassification && !runPriority && !runAssignment) {
       logger.info(`[EMAIL-CLASSIFICATION-WORKER] Nothing to run for ticket ${ticketId}, skipping`);
       return;
     }
@@ -113,9 +122,11 @@ export class EmailClassificationWorker {
     } | null = null;
 
     try {
-      classificationData = await emailClassificationService.classify(channelId, emailRecord.subject, emailRecord.body, {
-        emailMetadata: buildEmailMetadata(emailRecord),
-      });
+      if (runClassification || runPriority) {
+        classificationData = await emailClassificationService.classify(channelId, emailRecord.subject, emailRecord.body, {
+          emailMetadata: buildEmailMetadata(emailRecord),
+        });
+      }
     } catch (error) {
       logger.error(
         `[EMAIL-CLASSIFICATION-WORKER] Classification failed for ticket ${ticketId}:`,
@@ -186,6 +197,7 @@ export class EmailClassificationWorker {
       groupChanged,
       ticketIsUnassigned,
       effectiveGroupId,
+      runAssignment && !runClassification,
     );
 
     const updatePayload: Record<string, unknown> = {
@@ -234,6 +246,13 @@ export class EmailClassificationWorker {
             assignmentSucceeded = true;
             logger.info(
               `[EMAIL-CLASSIFICATION-WORKER] Full-role assigned ticket ${ticketId}: primary=${primaryUserId}`,
+            );
+          } else {
+            // Without this the full-role path fails silently — the branch below logs a
+            // warn, so the desk flow that actually uses roles was the one saying nothing.
+            // The ticket stays unassigned and nothing retries it.
+            logger.warn(
+              `[EMAIL-CLASSIFICATION-WORKER] No primary assignee for ticket ${ticketId} (group ${effectiveGroupId}, board ${ticket.boardId}) — ticket left unassigned; see [Assignment] evaluateRoleSlots results for the reason`,
             );
           }
         } else {
@@ -315,7 +334,9 @@ export class EmailClassificationWorker {
     if (newAssignedTo && assignmentSucceeded) {
       const assignReason = resolvedGroupId
         ? 'AI classification'
-        : 'Default channel group';
+        : groupChanged
+          ? 'Default channel group'
+          : 'Existing ticket group';
 
       try {
         // 1. Ticket activity row (appears in the ticket's activity log)
