@@ -13,6 +13,9 @@
     "build:mac": "pnpm run build:mic-monitor && tsc && electron-builder --config build.prod.json",
     "build:win": "tsc && electron-builder --config build.prod.json --win nsis --x64",
     "build:win:arm64": "tsc && electron-builder --config build.prod.json --win nsis --arm64",
+    "build:linux": "tsc && electron-builder --config build.prod.json --linux",
+    "build:prepare": "pnpm run build:mic-monitor && tsc",
+    "select-tenant": "node scripts/select-tenant.mjs",
     "build:sandbox:mac": "pnpm run build:mic-monitor && tsc && electron-builder --config build.sbx.json",
     "build:sandbox:win": "tsc && electron-builder --config build.sbx.json --win nsis --x64",
     "copy-ui": "rimraf ui-active && cpy \"../dashboard/dist/**\" ui-active",
@@ -21,7 +24,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "clean": "rimraf dist release ui-active"
+    "clean": "rimraf dist release ui-active src/app/tenant.active.ts"
   },
   "keywords": [
     "electron",

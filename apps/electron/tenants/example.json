@@ -1,0 +1,13 @@
+{
+  "BACKEND_URL": "https://app.spaces.example.com",
+  "MTLS_BACKEND_URL": "https://auth.spaces.example.com",
+  "MTLS_FRONTEND_URL": "https://auth.spaces.example.com",
+  "MTLS_IDENTITY_NAME": "Web Simulation Client Example",
+  "CA_CERT_FILE": "ca.example.cert",
+  "FRONTEND_URL": "https://app.spaces.example.com",
+  "CLAW_AUTH_URL": "https://app.spaces.example.com",
+  "UI_ZIP_URL": "https://app.spaces.example.com/releases/dashboard.zip",
+  "window": {
+    "title": "Example Spaces"
+  }
+}
