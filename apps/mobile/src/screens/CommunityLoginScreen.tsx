@@ -36,6 +36,7 @@ import { MicrosoftLogo } from '@/src/assets/icons/MicrosoftLogo';
 import { XyneLogo } from '@/src/assets/icons/XyneLogo';
 import { useReportStartupReady } from '@/src/observability/logging/hooks/startup/useReportStartupReady';
 import { LoginHeroLayout, loginPalette } from '@/src/features/auth-login';
+import { toOnboardingContext, type SignInSnapshot } from '@/src/features/onboarding';
 
 type AuthMode = 'providers' | 'email' | 'sign-up' | 'forgot-password';
 type ForgotPasswordStep = 'request-code' | 'reset-password' | 'success';
@@ -162,6 +163,17 @@ export const CommunityLoginScreen = (): ReactElement => {
    */
   const isNoWorkspaceAccess = orgCreation?.userExistsButRemoved === true;
   const pendingCommunity = usePendingCommunity();
+
+  // A brand-new community user — authenticated, but belonging to no workspace at all. The
+  // onboarding deck takes over from this screen's org-creation forms and is what finally creates
+  // their session, so hand off as soon as the sign-in reports it.
+  const onboardingContext = toOnboardingContext(pendingAuth as SignInSnapshot | null);
+  useEffect(() => {
+    if (!onboardingContext) {
+      return;
+    }
+    router.replace('/onboarding');
+  }, [onboardingContext, router]);
   const infoBannerBg = useCSSVariable('--color-auth-info-icon-bg') as string;
   const infoBannerFg = useCSSVariable('--color-auth-info-icon') as string;
 

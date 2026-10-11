@@ -790,6 +790,9 @@ function RootLayoutNav(): ReactElement {
               `login` is pushed on top of it, so Back returns to the community list. */}
           <Stack.Protected guard={IS_COMMUNITY_APP && Boolean(isEnrolled) && !isSignedIn}>
             <Stack.Screen name='community' />
+            {/* The onboarding deck runs after sign-in but before a workspace session exists, so it
+                lives alongside `login` rather than inside the signed-in `(protected)` group. */}
+            <Stack.Screen name='onboarding' />
           </Stack.Protected>
           <Stack.Protected guard={Boolean(isEnrolled) && !isSignedIn}>
             <Stack.Screen name='login' />
