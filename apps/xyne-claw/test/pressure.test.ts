@@ -37,6 +37,7 @@ afterEach(() => {
   delete process.env["RUN_PRESSURE_MEM_HIGH_PCT"];
   delete process.env["RUN_PRESSURE_MEM_LOW_PCT"];
   delete process.env["RUN_PRESSURE_LOOP_DELAY_MS"];
+  delete process.env["RUN_PRESSURE_MEMORY_LIMIT_BYTES"];
 });
 
 describe("memoryPressurePct", () => {
@@ -62,12 +63,39 @@ describe("memoryPressurePct", () => {
     const { memoryPressurePct } = await loadPressure();
     const pct = memoryPressurePct();
     expect(pct).toBeGreaterThan(0);
-    expect(pct).toBe((process.memoryUsage().rss / 1000) * 100);
+    expect(pct / ((process.memoryUsage().rss / 1000) * 100)).toBeCloseTo(1, 1);
   });
 
   it("falls back to rss/totalmem when no cgroup files exist", async () => {
     const { memoryPressurePct } = await loadPressure();
     expect(memoryPressurePct()).toBeGreaterThan(0);
+  });
+
+  it("reads the container's own cgroup against the configured limit", async () => {
+    const own = "/sys/fs/cgroup/kubepods.slice/pod.slice/cri.scope";
+    files.set("/proc/self/cgroup", "0::/kubepods.slice/pod.slice/cri.scope\n");
+    files.set(`${own}/memory.max`, "max");
+    files.set(`${own}/memory.current`, "800");
+    files.set(`${own}/memory.stat`, "anon 500\ninactive_file 200\n");
+    const { memoryPressurePct } = await loadPressure({ RUN_PRESSURE_MEMORY_LIMIT_BYTES: "1000" });
+    expect(memoryPressurePct()).toBeCloseTo(60);
+  });
+
+  it("uses the cgroup's own limit when one is set", async () => {
+    const own = "/sys/fs/cgroup/kubepods.slice/pod.slice/cri.scope";
+    files.set("/proc/self/cgroup", "0::/kubepods.slice/pod.slice/cri.scope\n");
+    files.set(`${own}/memory.max`, "2000");
+    files.set(`${own}/memory.current`, "1500");
+    const { memoryPressurePct } = await loadPressure();
+    expect(memoryPressurePct()).toBeCloseTo(75);
+  });
+
+  it("never reports less than V8 heap usage", async () => {
+    files.set(V2_MAX, "1000000000000");
+    files.set(V2_CUR, "1");
+    const { memoryPressurePct, heapPressurePct } = await loadPressure();
+    expect(memoryPressurePct()).toBeCloseTo(heapPressurePct(), 0);
+    expect(heapPressurePct()).toBeGreaterThan(0);
   });
 
   it("caches for ~1s", async () => {
