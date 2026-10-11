@@ -32,6 +32,7 @@ interface ActivityConfig {
 const getActivityConfig = (actorAction: string): ActivityConfig => {
   switch (actorAction) {
     case 'ticket_status':
+    case 'ticket_status_v2':
       return {
         icon: <TicketToken className='size-3 text-green-600' />,
         badgeColor: 'bg-green-100',
@@ -199,6 +200,41 @@ const getActivityConfig = (actorAction: string): ActivityConfig => {
         description: 'paused the release carrying ticket in',
         label: 'Release Paused',
       };
+    case 'ticket_stage_eta':
+      return {
+        icon: <ClockDefault className='size-3 text-amber-600' />,
+        badgeColor: 'bg-amber-100',
+        description: 'updated stage due date of ticket in',
+        label: 'Stage Due Date',
+      };
+    case 'ticket_merged':
+      return {
+        icon: <Merge className='size-3 text-purple-600' />,
+        badgeColor: 'bg-purple-100',
+        description: 'merged ticket in',
+        label: 'Merged',
+      };
+    case 'ticket_merged_target':
+      return {
+        icon: <Merge className='size-3 text-purple-600' />,
+        badgeColor: 'bg-purple-100',
+        description: 'merged another ticket into ticket in',
+        label: 'Merged',
+      };
+    case 'ticket_unmerged':
+      return {
+        icon: <Merge className='size-3 text-slate-600' />,
+        badgeColor: 'bg-slate-100',
+        description: 'unmerged ticket in',
+        label: 'Unmerged',
+      };
+    case 'ticket_unmerged_target':
+      return {
+        icon: <Merge className='size-3 text-slate-600' />,
+        badgeColor: 'bg-slate-100',
+        description: 'unmerged another ticket from ticket in',
+        label: 'Unmerged',
+      };
     case 'ticket_release_planning':
       return {
         icon: <TicketToken className='size-3 text-slate-600' />,
@@ -233,6 +269,7 @@ export const TicketUpdateActivity = ({
   const ticketIdValue = activity.ticketId || activity.actionSourceId;
   const config = getActivityConfig(activity.actorAction);
   const isReleaseAction = activity.actorAction.startsWith('ticket_release_');
+  const isMergeAction = /^ticket_(un)?merged/.test(activity.actorAction);
 
   // On mobile: will navigate to minimized view with details tab
   // On desktop: will navigate to tab-based route in ConversationPannel
@@ -247,8 +284,10 @@ export const TicketUpdateActivity = ({
     <div className='flex flex-col gap-1 mt-2'>
       <div className='text-sm font-medium break-words whitespace-normal'>
         {' '}
-        {isPRAction || isReleaseAction ? config.label.toLowerCase() : `${config.label} updated`} for
-        ticket &ldquo;
+        {isPRAction || isReleaseAction || isMergeAction
+          ? config.label.toLowerCase()
+          : `${config.label} updated`}{' '}
+        for ticket &ldquo;
         {ticket.title}&rdquo;
       </div>
       <div className='text-xs text-muted-foreground break-words whitespace-normal'>
@@ -264,7 +303,7 @@ export const TicketUpdateActivity = ({
       </span>
       <span className='text-muted-foreground'>
         {' '}
-        {isPRAction || isReleaseAction
+        {isPRAction || isReleaseAction || isMergeAction
           ? config.label.toLowerCase()
           : `${config.label.toLowerCase()} updated`}
       </span>
