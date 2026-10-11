@@ -29,7 +29,7 @@ export class ChannelsACL extends BaseQueryACL<
       AND: [
         {
           OR: [
-            { visibility: 'PUBLIC' },
+            { visibility: 'PUBLIC', NOT: { scopeType: { in: ['DM', 'GROUP_DM'] } } },
             { participants: { some: { userId: this.ctx.userId } } },
           ],
         },

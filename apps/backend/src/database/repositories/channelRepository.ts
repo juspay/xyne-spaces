@@ -79,7 +79,7 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
         scopeType: data.scopeType,
         name: data.name,
         description: data.description,
-        visibility: data.visibility || 'PUBLIC',
+        visibility: isDMChannel ? 'PRIVATE' : (data.visibility || 'PUBLIC'),
         createdBy: data.createdBy,
         // '' sentinel for a projectless channel (column stays NOT NULL for prod/pre-prod sync).
         projectId: data.projectId ?? '',
