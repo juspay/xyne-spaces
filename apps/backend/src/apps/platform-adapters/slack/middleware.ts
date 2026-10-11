@@ -33,6 +33,10 @@ export function getResolvedChannelId(req: Request): string {
 }
 
 export async function resolveSlackChannel(channel: string): Promise<string> {
+	// `channel` comes from req.body / req.query, which can carry an array
+	// (e.g. ?channel=a&channel=b) despite the type — only accept a string.
+	if (typeof channel !== "string") throw new Error("Channel not found");
+
 	const existing = await repositories.channels.findById(channel);
 	if (existing) return existing.id;
 
