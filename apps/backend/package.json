@@ -104,7 +104,7 @@
     "axios": "1.18.1",
     "blocknote-layout-server-utils": "4.2.0",
     "bull": "^4.16.5",
-    "compression": "^1.7.4",
+    "compression": "^1.8.2",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
