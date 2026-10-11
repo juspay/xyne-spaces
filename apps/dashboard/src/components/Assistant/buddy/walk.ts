@@ -16,62 +16,46 @@ import { controlKey, normalise } from './history';
 import { groupControls, type ControlGroup } from './options';
 import { hiddenTargets, type HiddenTarget, type MenuItem, type Peeked } from './paths';
 
-// One request: read the screen and ask Jev; when nothing fits, look inside the menus on screen
-// and ask once more. Every pick is checked before it is used, so a control that only looks like
-// the request is never clicked. A pick that opens a page is followed: Buddy looks there for
-// something more specific, as a person would. A request of several steps ("open general and
-// leave it") is walked one step at a time. It sees the app only through a WalkEnv, so the eval
-// can replay it.
+// Sees the app only through a WalkEnv, so the eval can replay it.
 
 export interface WalkControl extends MenuItem {
   id: string;
 }
 
-/** What using an option said, and whether it was used: an item can be gone from its menu. */
+/** Whether it was used: an item can be gone from its menu. */
 export interface Used {
   reply: string;
   acted: boolean;
 }
 
-/** A control on screen, or an item inside one of its closed menus. */
 export type Option<C extends WalkControl> = C | HiddenTarget<C>;
 
-/** The app as the walk sees it: the live screen in Buddy, recorded screens in the eval. */
 export interface WalkEnv<C extends WalkControl> {
-  /** The controls on screen, and the menus among them worth a peek. */
   readScreen(): { controls: C[]; openers: C[] };
-  /** Opens a menu and reads it, leaving it open; `close` shuts it again. */
+  /** Leaves the menu open; `close` shuts it again. */
   peek(opener: C): Promise<Peeked<C>>;
   close(menu: Peeked<C>): Promise<void>;
   route(request: string, options: { id: string; description: string }[]): Promise<JevResult>;
   /** Whether the control is what was asked ('same'), a way to it ('leads') or not ('other'). */
   check(request: string, label: string): Promise<JevResult>;
-  /** Where the user is, so a step that led to a new page can go on there. */
   here(): string;
-  /** Clicks or points at the option. */
   use(option: Option<C>): Promise<Used>;
-  /** Highlights the options and asks if one of them is what the user meant; what to say. */
   ask(options: Option<C>[]): Promise<string>;
   log(step: string, detail?: string, data?: unknown): void;
   aborted(): boolean;
-  /** Waits for the page to hold still, as a page that loads in parts may still be filling in. */
   settle?(): Promise<void>;
-  /** The control the user said yes to for this request before (its controlKey), if any. */
   chosenBefore?(request: string): string | undefined;
-  /** Controls this request already used and that did not help: not offered again. */
   tried?: ReadonlySet<string>;
 }
 
 interface Round<C extends WalkControl> {
   optionOf: (id: string) => Option<C> | undefined;
   decision: Decision;
-  /** How sure Jev was of its top pick. */
   probability: number;
   /** Worth looking in menus: nothing fits and it is not plainly a question. */
   unsure: boolean;
   /** Jev's top pick, however weak: a menu it leans to is looked in first. */
   leaning?: string;
-  /** The pick the check turned down: it only looked like what was asked. */
   offTarget?: Option<C>;
   /** The menu left open for the pick inside it, closed again if the pick is not used. */
   open?: Peeked<C>;
@@ -81,9 +65,7 @@ interface Round<C extends WalkControl> {
 interface WalkResult {
   reply: string | null;
   why: string;
-  /** How it ended: on a click the next step can go on from, or on a "Did you mean…?". */
   ended?: 'clicked' | 'asked';
-  /** After a "Did you mean…?": the step it asked about, then the steps after it. */
   left?: string[];
 }
 
@@ -97,7 +79,6 @@ const traceOf = ({ id, use, label, track }: WalkControl): Partial<WalkControl> =
 const inMenu = <C extends WalkControl>(option: Option<C> | undefined): option is HiddenTarget<C> =>
   !!option && 'opener' in option;
 
-/** The menu item the round acts on, if any. */
 const menuItemOf = <C extends WalkControl>({
   optionOf,
   decision,
@@ -106,7 +87,6 @@ const menuItemOf = <C extends WalkControl>({
   return inMenu(chosen) ? chosen : undefined;
 };
 
-/** A "which one?" that offers something inside a menu. */
 const asksAboutMenu = <C extends WalkControl>({
   optionOf,
   decision,
@@ -132,15 +112,13 @@ async function choose<C extends WalkControl>(
   env.log('Jev answered', result.route, result);
   const byId = new Map(groups.map(group => [group.id, group.members[0]]));
   const optionOf = (id: string): Option<C> | undefined => byId.get(id);
-  // On a page the walk went into on purpose, a likely link onward is followed, not asked about;
-  // a control that does something still has to be sure.
+  // On a page walked into on purpose, a likely link onward is followed, not asked about.
   const pick = result.route === 'unavailable' ? undefined : optionOf(result.chosen ?? '');
   const sure = onTheWay && pick?.href ? MIN_PROBABILITY : SURE_CLICK;
   const decision = decide(result, id => optionOf(id)?.text ?? id, sure);
   const probability = result.route === 'unavailable' ? 0 : (result.probability ?? 0);
   const plainlyQuestion =
     result.route !== 'unavailable' && result.chosen === 'none' && probability >= SURE_NONE;
-  // Without Jev, what is in the menus could not be judged either.
   const unsure = decision.kind === 'ask_ai' && !plainlyQuestion && result.route !== 'unavailable';
   const leaning = result.route === 'unavailable' ? undefined : result.chosen;
   const round = { optionOf, decision, probability, unsure, ...(leaning && { leaning }) };
@@ -175,23 +153,16 @@ function chosenBefore<C extends WalkControl>(
   return { ...kept, decision: { kind: 'act', id: group.id, why }, unsure: false };
 }
 
-/** What the decision would use: its pick, or the two it asks between. */
 const pickedIds = (decision: Decision): string[] =>
   decision.kind === 'act' ? [decision.id] : decision.kind === 'ask' ? decision.ids : [];
 
-/**
- * Whether the check found the pick is something else. A link only goes somewhere, and back, so it
- * is turned down only when Jev is sure.
- */
+/** Whether the check found the pick is something else; a link only goes somewhere (and back), so only when Jev is sure. */
 const isOther = ({ href }: WalkControl, result: JevResult): boolean =>
   result.route !== 'unavailable' &&
   result.chosen === 'other' &&
   (!href || (result.probability ?? 0) >= MIN_PROBABILITY);
 
-/**
- * Turns down picks that are not what was asked, so the walk looks further instead of using them;
- * a "which one?" offers only the picks that pass.
- */
+/** Turns down picks that are not what was asked; a "which one?" offers only the picks that pass. */
 async function checked<C extends WalkControl>(
   request: string,
   env: WalkEnv<C>,
@@ -231,10 +202,7 @@ async function checked<C extends WalkControl>(
   return { ...round, decision: { ...round.decision, ids: passed.map(pick => pick.id) } };
 }
 
-/**
- * Of two picks that both pass, the one on this page rather than a link to another page, unless
- * the request names that other page.
- */
+/** Of two picks that both pass, the one on this page, unless the request names the other page. */
 function closest<C extends WalkControl>(
   request: string,
   passed: Option<C>[],
@@ -249,14 +217,12 @@ function closest<C extends WalkControl>(
   return names(elsewhere) && !names(local) ? undefined : local;
 }
 
-/** The check is sure the control is what was asked, not just a way to it. */
 const isSure = (result: JevResult | undefined): boolean =>
   result?.route !== undefined &&
   result.route !== 'unavailable' &&
   result.chosen === 'same' &&
   (result.probability ?? 0) >= SURE_CLICK;
 
-/** Going somewhere, switching a tab or opening a menu: nothing that cannot be undone. */
 const undoable = (option: WalkControl): boolean =>
   option.use === 'click' && (!!option.href || isTab(option) || !!option.opens);
 
@@ -267,9 +233,8 @@ const confirms = <C extends WalkControl>(round: Round<C>, first: Round<C>): bool
   round.decision.kind === 'act' && pickedIds(first.decision).includes(round.decision.id);
 
 /**
- * Looks in one menu at a time, as a person would, until Jev picks something inside one, or the
- * menu leaves Jev sure of its first pick. Visible controls Jev first turned to are not promoted;
- * when it first had no pick worth asking about, a later answer is checked and settles it.
+ * Looks in one menu at a time until Jev picks something inside one, or the menu leaves Jev sure of
+ * its first pick. Visible controls Jev first turned to are not promoted.
  */
 async function lookInMenus<C extends WalkControl>(
   request: string,
@@ -316,10 +281,7 @@ async function act<C extends WalkControl>(
 
 const isCurrent = ({ label }: WalkControl): boolean => label.includes(CURRENT);
 
-/**
- * One menu of each kind, in screen order, to look in without a lead: row menus share a kind, and
- * of those the current row's is the one asked about most.
- */
+/** One menu of each kind, in screen order, to look in without a lead; of row menus, the current row's first. */
 export function menusToSweep<C extends WalkControl>(openers: C[]): C[] {
   const byKind = new Map<string, C>();
   for (const opener of openers) {
@@ -331,8 +293,8 @@ export function menusToSweep<C extends WalkControl>(openers: C[]): C[] {
 }
 
 /**
- * Menus Jev picks, asks about or leans to are looked inside, like branches; when it is unsure and
- * leans nowhere useful, one of each kind, but not on a page the walk went into on purpose.
+ * Menus Jev picks, asks about or leans to; when unsure and leaning nowhere useful, one of each
+ * kind, but not on a page walked into on purpose.
  */
 function menusToLookIn<C extends WalkControl>(
   { decision, unsure, leaning }: Round<C>,
@@ -345,7 +307,6 @@ function menusToLookIn<C extends WalkControl>(
   return unsure && !onTheWay ? menusToSweep(openers).slice(0, LIMITS.peeks) : [];
 }
 
-/** One screen: read it, ask Jev, and look inside its menus when that is worth it. */
 async function lookHere<C extends WalkControl>(
   request: string,
   env: WalkEnv<C>,
@@ -359,7 +320,6 @@ async function lookHere<C extends WalkControl>(
   if (controls.length === 0) return undefined;
   let pool = controls;
   let round = await choose(request, env, pool, [], onTheWay);
-  // A pick the check turned down is left out and Jev asked again, before looking in menus.
   for (let retry = 0; round?.offTarget && retry < LIMITS.retries; retry++) {
     const turnedDown = round.offTarget;
     env.log('asking again', `without "${turnedDown.text}"`);
@@ -374,7 +334,6 @@ async function lookHere<C extends WalkControl>(
   return lookInMenus(request, env, pool, menus, round, onTheWay);
 }
 
-/** Closes the menu a round kept open for a pick that was not used after all. */
 async function closeUnused<C extends WalkControl>(
   env: WalkEnv<C>,
   round: Round<C> | null | undefined,
@@ -384,8 +343,8 @@ async function closeUnused<C extends WalkControl>(
 
 /**
  * When Jev only leans between pages ("general channel": Chat or Administration, General), the page
- * it leans to is looked in, not asked about: going to a page changes nothing, and what was asked
- * for is usually inside it. A control that does something is still asked about.
+ * it leans to is looked in, not asked about: going to a page changes nothing. A control that does
+ * something is still asked about.
  */
 function followsLink<C extends WalkControl>(round: Round<C>): Round<C> {
   if (round.decision.kind !== 'ask' || round.probability < MIN_PROBABILITY) return round;
@@ -396,7 +355,6 @@ function followsLink<C extends WalkControl>(round: Round<C>): Round<C> {
   return { ...round, decision: { kind: 'act', id: first.id, why } };
 }
 
-/** A round that uses an option the user said yes to. */
 const confirmedRound = <C extends WalkControl>(option: Option<C>): Round<C> => ({
   optionOf: () => option,
   decision: { kind: 'act', id: option.id, why: 'the user said yes' },
@@ -404,10 +362,7 @@ const confirmedRound = <C extends WalkControl>(option: Option<C>): Round<C> => (
   probability: 1,
 });
 
-/**
- * On a page the walk went into, a control the walk already used, or a link to the page: to it, or
- * marked as where the user is.
- */
+/** On a page walked into: a control already used, or a link to this page or marked current. */
 const leadsBack = <C extends WalkControl>(
   pick: Option<C>,
   used: ReadonlySet<string>,
@@ -427,11 +382,115 @@ function alreadyThere<C extends WalkControl>(
   return pick.href === here || current ? pick : undefined;
 }
 
-/** Not a control this request already tried, nor another way to the same place. */
 function untried<C extends WalkControl>(env: WalkEnv<C>, item: MenuItem): boolean {
   if (!env.tried?.size) return true;
   const places = new Set([...env.tried].map(key => key.split('|').at(-1)).filter(Boolean));
   return !env.tried.has(controlKey(item)) && !(item.href && places.has(item.href));
+}
+
+const wordsOf = (text: string): string[] =>
+  normalise(text).replace(/^\d+ /, '').split(' ').filter(Boolean);
+
+/** How many words all of these start with, leaving the first at least one of its own. */
+function sharedStart(lists: string[][]): number {
+  const [first = []] = lists;
+  let shared = 0;
+  while (shared < first.length - 1 && lists.every(words => words[shared] === first[shared])) {
+    shared++;
+  }
+  return shared;
+}
+
+/** A control's label without its name, destination and "(current)" mark: rows of one kind (channel links, DM rows) look alike. */
+const shapeOf = ({ label }: WalkControl): string =>
+  label
+    .replace(/"[^"]*"/, '""')
+    .replace(/\s*\(goes to [^)]*\)/, '')
+    .replace(CURRENT, '')
+    .trim();
+
+const kindOf = (control: WalkControl): string => `${control.track}|${shapeOf(control)}`;
+
+/**
+ * The rows a request can name: clickable controls of a repeating kind (channels, DMs, canvases),
+ * by their text and by the text past the words every row of the kind starts with.
+ */
+function itemNames<C extends WalkControl>(controls: C[]): Map<C, string[]> {
+  const kinds = new Map<string, C[]>();
+  for (const control of controls) {
+    if (control.track && control.use === 'click' && !control.opens) {
+      const kind = kindOf(control);
+      const rows = kinds.get(kind);
+      if (rows) rows.push(control);
+      else kinds.set(kind, [control]);
+    }
+  }
+  const names = new Map<C, string[]>();
+  for (const rows of kinds.values()) {
+    if (rows.length < 2) continue;
+    const words = rows.map(row => wordsOf(row.text));
+    const shared = sharedStart(words);
+    rows.forEach((row, i) => {
+      const own = words[i] ?? [];
+      names.set(
+        row,
+        [own.join(' '), own.slice(shared).join(' ')].filter(name => name.length >= 3),
+      );
+    });
+  }
+  return names;
+}
+
+/**
+ * The item the request names: the longest of its names said as whole words, when exactly one item
+ * has that name and that item is not the current one.
+ */
+function namedItem<C extends WalkControl>(
+  request: string,
+  controls: C[],
+): { item: C; name: string } | undefined {
+  const said = ` ${normalise(request)} `;
+  const named = [...itemNames(controls)].flatMap(([item, names]) =>
+    names.filter(name => said.includes(` ${name} `)).map(name => ({ item, name })),
+  );
+  const longest = Math.max(0, ...named.map(({ name }) => name.length));
+  const best = named.filter(({ name }) => name.length === longest);
+  const [first] = best;
+  if (!first || best.some(({ item }) => item !== first.item) || isCurrent(first.item)) {
+    return undefined;
+  }
+  return first;
+}
+
+/** Whether a text says the name: its words in a row, each equal to or starting with the name's ("unreads" says "unread"). */
+const saysName = (text: string, name: string): boolean => {
+  const words = wordsOf(text);
+  const nameWords = name.split(' ');
+  return words.some((_, i) => nameWords.every((word, j) => words[i + j]?.startsWith(word)));
+};
+
+/**
+ * On the first page, a request naming an item on screen goes to it when Jev picked something else,
+ * unless the pick has the same name (Administration's "General") and no row of that kind is current.
+ */
+function towardNamed<C extends WalkControl>(
+  round: Round<C>,
+  request: string,
+  controls: C[],
+): Round<C> {
+  if (round.decision.kind === 'ask_ai' || round.offTarget) return round;
+  const named = namedItem(request, controls);
+  if (!named || pickedIds(round.decision).includes(named.item.id)) return round;
+  const [first] = pickedIds(round.decision);
+  const pick = first === undefined ? undefined : round.optionOf(first);
+  // An item of a menu named for the item ("Duplicate" in "More actions for test") acts on it already.
+  if (inMenu(pick) && saysName(pick.opener.text, named.name)) return round;
+  const sameName = saysName(pick?.text ?? '', named.name);
+  const kind = kindOf(named.item);
+  const inKind = controls.some(c => c !== named.item && kindOf(c) === kind && isCurrent(c));
+  if (sameName && !inKind) return round;
+  const why = `the request names "${named.item.text}", so it is opened first`;
+  return { ...confirmedRound(named.item), decision: { kind: 'act', id: named.item.id, why } };
 }
 
 /**
@@ -445,21 +504,27 @@ export async function runWalk<C extends WalkControl>(
 ): Promise<WalkResult> {
   env.log('heard', `“${request}”`);
   const visited = [env.here()];
-  /** Pages already looked at a second time. */
   const lookedAgain = new Set<string>();
-  /** The controls this walk used: never used twice. */
   const used = new Set<string>();
-  /** The control that took Buddy into the page it is on, and what it said then. */
   let entered: { via: Option<C>; reply: string } | undefined;
   for (let step = 1; step <= MAX_PAGES; step++) {
     const looked =
       step === 1 && confirmed ? confirmedRound(confirmed) : await lookHere(request, env, !!entered);
-    const round = looked && followsLink(looked);
-    if (round === null || env.aborted()) {
-      await closeUnused(env, round);
+    const found = looked && followsLink(looked);
+    if (found === null || env.aborted()) {
+      await closeUnused(env, found);
       env.log('stopped', 'while looking');
       return { reply: STOPPED, why: 'stopped' };
     }
+    const round =
+      found && !entered && !confirmed
+        ? towardNamed(
+            found,
+            request,
+            env.readScreen().controls.filter(control => untried(env, control)),
+          )
+        : found;
+    if (round !== found) await closeUnused(env, found);
     // On a page the walk went into, nothing found (or only the way back) may be a page still
     // filling in: it is looked at once more, after it has held still, before it is the answer.
     const early =
@@ -494,7 +559,6 @@ export async function runWalk<C extends WalkControl>(
       await closeUnused(env, round);
       return { reply: MESSAGES.alreadyIn(there.text), why: 'already there', ended: 'clicked' };
     }
-    // Picking the way back to the page the walk went into means this page is the answer.
     if (entered && pick && leadsBack(pick, used, env.here())) {
       await closeUnused(env, round);
       return { reply: MESSAGES.opened(pick.text), why: 'arrived', ended: 'clicked' };
@@ -542,9 +606,8 @@ export function stepsOf(request: string): string[] {
 }
 
 /**
- * Walks a request step by step, each step on the screen the one before left, and goes on only
- * after a click: what changes data is pointed at for the user to finish, and a "Did you mean…?"
- * waits for the answer. `resume` goes on after a yes: the option chosen, then the steps left.
+ * Walks a request step by step, each on the screen the one before left, going on only after a click:
+ * what changes data is pointed at, and a "Did you mean…?" waits. `resume` goes on after a yes.
  */
 export async function runSteps<C extends WalkControl>(
   request: string,
