@@ -46,9 +46,9 @@ export const CanvasAttachmentModal: React.FC<CanvasAttachmentModalProps> = ({
     }
   }, [selectedCanvas, onSelectCanvas]);
 
-  const handleCreateNew = useCallback(() => {
+  const handleCreateNew = useCallback(async () => {
     setSelectedCanvas(null);
-    void onCreateNewCanvas();
+    await onCreateNewCanvas();
   }, [onCreateNewCanvas]);
 
   const handleClose = useCallback(() => {
@@ -130,7 +130,9 @@ export const CanvasAttachmentModal: React.FC<CanvasAttachmentModalProps> = ({
         <div className='flex items-center justify-between px-6 py-4 border-t border-border bg-muted/50 rounded-b-lg'>
           <Button
             variant='outline'
-            onClick={handleCreateNew}
+            // Disables the button and shows a spinner until the canvas is created,
+            // so repeated clicks can't create duplicates.
+            trackAction={handleCreateNew}
             data-testid='canvas-attachment-create-new'
             data-track-category='CANVAS'
             data-track-name='Create_New_Canvas_From_Attachment'
