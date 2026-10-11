@@ -65,6 +65,8 @@ export interface WalkEnv<C extends WalkControl> {
 interface Round<C extends WalkControl> {
   optionOf: (id: string) => Option<C> | undefined;
   decision: Decision;
+  /** How sure Jev was of its top pick. */
+  probability: number;
   /** Worth looking in menus: nothing fits and it is not plainly a question. */
   unsure: boolean;
   /** Jev's top pick, however weak: a menu it leans to is looked in first. */
@@ -141,7 +143,7 @@ async function choose<C extends WalkControl>(
   // Without Jev, what is in the menus could not be judged either.
   const unsure = decision.kind === 'ask_ai' && !plainlyQuestion && result.route !== 'unavailable';
   const leaning = result.route === 'unavailable' ? undefined : result.chosen;
-  const round = { optionOf, decision, unsure, ...(leaning && { leaning }) };
+  const round = { optionOf, decision, probability, unsure, ...(leaning && { leaning }) };
   // While looking in menus only a pick inside one counts, so the rest need no check.
   if (menus.length > 0 && !menuItemOf(round) && !asksAboutMenu(round)) return round;
   const verified = await checked(request, env, round);
@@ -386,7 +388,7 @@ async function closeUnused<C extends WalkControl>(
  * for is usually inside it. A control that does something is still asked about.
  */
 function followsLink<C extends WalkControl>(round: Round<C>): Round<C> {
-  if (round.decision.kind !== 'ask') return round;
+  if (round.decision.kind !== 'ask' || round.probability < MIN_PROBABILITY) return round;
   const leaned = round.decision.ids.map(round.optionOf).filter((o): o is Option<C> => !!o);
   const [first] = leaned;
   if (!first || !leaned.every(o => !!o.href && o.use === 'click' && !isCurrent(o))) return round;
@@ -399,6 +401,7 @@ const confirmedRound = <C extends WalkControl>(option: Option<C>): Round<C> => (
   optionOf: () => option,
   decision: { kind: 'act', id: option.id, why: 'the user said yes' },
   unsure: false,
+  probability: 1,
 });
 
 /**
