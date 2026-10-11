@@ -12,8 +12,6 @@ import {
 } from './constants';
 import type { MenuItem } from './paths';
 
-// Reading the screen: which controls are there, what each is called and what it does.
-
 export interface Control extends MenuItem {
   id: string;
   el: HTMLElement;
@@ -31,7 +29,6 @@ const clip = (text: string): string => text.replace(/\s+/g, ' ').trim().slice(0,
 
 const trackOf = (el: HTMLElement): string => el.getAttribute('data-track-name') ?? '';
 
-/** How it shows when its row is hovered, if a hover class is what hides it. */
 export const hoverDisplayOf = (el: Element): string | undefined =>
   SHOWN_ON_HOVER.exec(el.getAttribute('class') ?? '')?.[1];
 
@@ -42,26 +39,19 @@ const isTag = (el: Element, ...tags: string[]): boolean => tags.includes(el.tagN
 export const styleOf = (el: Element): CSSStyleDeclaration =>
   (el.ownerDocument.defaultView ?? window).getComputedStyle(el);
 
-/** The text of the elements an aria attribute points to by id. */
 const textAt = (el: HTMLElement, attribute: string): string =>
   (el.getAttribute(attribute)?.split(/\s+/) ?? [])
     .map(id => el.ownerDocument.getElementById(id)?.textContent ?? '')
     .join(' ');
 
-/** Its accessible description: aria-description, else the text aria-describedby points to. */
 const descriptionOf = (el: HTMLElement): string =>
   (el.getAttribute('aria-description') || textAt(el, 'aria-describedby'))
     .replace(/\s+/g, ' ')
     .trim();
 
-/** A field's own <label> text. */
 const labelTextOf = (el: HTMLElement): string =>
   [...((el as Partial<HTMLInputElement>).labels ?? [])].map(label => label.innerText).join(' ');
 
-/**
- * Its aria-label or aria-labelledby, title, <label> or first line of text; an icon button, its
- * description (tooltip).
- */
 const textOf = (el: HTMLElement): string => {
   const firstLine = (el.innerText || '').split('\n').find(line => line.trim()) ?? '';
   return clip(
@@ -74,7 +64,6 @@ const textOf = (el: HTMLElement): string => {
   );
 };
 
-/** What Buddy calls it to the user: its text, else its track name. */
 const shownTextOf = (el: HTMLElement): string => textOf(el) || humanize(trackOf(el));
 
 const isField = (el: HTMLElement): boolean =>
@@ -109,8 +98,8 @@ function isUsable(el: HTMLElement): boolean {
 }
 
 /**
- * Hidden only until its row is hovered, as row menus are: what hides it shows on hover, and the
- * row around it is on screen. Other hidden controls (another layout's, a closed panel's) stay out.
+ * Hidden only until its row is hovered, as row menus are; other hidden controls (another layout's,
+ * a closed panel's) stay out.
  */
 function showsOnHover(el: HTMLElement): boolean {
   if (!isAllowed(el)) return false;
@@ -124,7 +113,6 @@ function showsOnHover(el: HTMLElement): boolean {
   return hidden && node !== null && node !== el.ownerDocument.body && !inCollapsed(node);
 }
 
-/** A link's path without the workspace id. */
 const pathOf = (el: HTMLElement): string | null =>
   isTag(el, 'A') ? (el as HTMLAnchorElement).pathname.replace(WORKSPACE_PREFIX, '') : null;
 
@@ -148,16 +136,12 @@ function changesData(el: HTMLElement, text: string, name: string): boolean {
   );
 }
 
-/** The rest of the row it sits in, which tells row buttons apart. */
 function rowOf(el: HTMLElement): string {
   const row = el.closest<HTMLElement>(SELECTORS.row);
   return row ? clip(row.innerText.replace(el.innerText, '')) : '';
 }
 
-/**
- * What it says and what it holds, its row, where it goes, its area and whether it is where the
- * user is; the track name only when it shows no text.
- */
+/** Text, row, destination, area and whether it is current; the track name only when it shows no text. */
 function labelOf(el: HTMLElement, text: string, name: string): string {
   const about = descriptionOf(el);
   const row = rowOf(el);
@@ -195,16 +179,11 @@ function toControl(el: HTMLElement, id: string): Control {
   };
 }
 
-/**
- * What is read as a control in a document: in one where nothing is tracked (another package's UI
- * in a frame), also what assistive tech can act on.
- */
 const controlsOfDocument = (doc: Document): string =>
   [...doc.querySelectorAll<HTMLElement>('[data-track-name]')].some(isAllowed)
     ? SELECTORS.control
     : `${SELECTORS.control}, ${SELECTORS.named}`;
 
-/** The controls on screen with a name or track, then those their rows show on hover. */
 function controlsIn(root: ParentNode): HTMLElement[] {
   const selector = controlsOfDocument((root as Node).ownerDocument ?? (root as Document));
   const all = [...root.querySelectorAll<HTMLElement>(selector)].filter(
@@ -213,7 +192,6 @@ function controlsIn(root: ParentNode): HTMLElement[] {
   return [...all.filter(isUsable), ...all.filter(showsOnHover)];
 }
 
-/** The first item of each key, in order. */
 const uniqueBy = <T>(items: T[], keyOf: (item: T) => string): T[] => {
   const seen = new Set<string>();
   return items.filter(item => {
@@ -236,24 +214,30 @@ export function fewOfEach<T>(items: T[], kindOf: (item: T) => string, most: numb
 }
 
 /**
- * Up to LIMITS.controls, in screen order: navigation first in line, so a long page (a busy
- * channel's messages) cuts its own controls, not the site map after them. A list that repeats one
- * control for every row (chats, messages) is cut to a few rows first, so the page's own controls
- * after it are still read.
+ * The most rows of one kind that fit, cutting the largest kinds first so a long list of chats
+ * gives way before the channel list or the page's own controls do.
+ */
+export function fairShare(counts: number[], room: number): number {
+  for (let most = Math.max(0, ...counts); most > 1; most--) {
+    if (counts.reduce((sum, count) => sum + Math.min(count, most), 0) <= room) return most;
+  }
+  return 1;
+}
+
+/**
+ * Up to LIMITS.controls, in screen order, navigation first so a long page cannot cut the site map.
+ * Past that, the longest lists repeating one control per row (chats, messages) are cut first.
  */
 function capped(found: HTMLElement[]): HTMLElement[] {
   if (found.length <= LIMITS.controls) return found;
   const navigation = new Set(found.filter(el => el.closest(SELECTORS.navigation)));
-  const own = new Set(
-    fewOfEach(
-      found.filter(el => !navigation.has(el)),
-      el => trackOf(el) || textOf(el),
-      LIMITS.perKind,
-    ),
-  );
-  const kept = found.filter(el => navigation.has(el) || own.has(el));
-  let room = LIMITS.controls - navigation.size;
-  return kept.filter(el => navigation.has(el) || room-- > 0).slice(0, LIMITS.controls);
+  const own = found.filter(el => !navigation.has(el));
+  const kindOf = (el: HTMLElement): string => trackOf(el) || textOf(el);
+  const counts = new Map<string, number>();
+  own.forEach(el => counts.set(kindOf(el), (counts.get(kindOf(el)) ?? 0) + 1));
+  const room = LIMITS.controls - navigation.size;
+  const kept = new Set(fewOfEach(own, kindOf, fairShare([...counts.values()], room)));
+  return found.filter(el => navigation.has(el) || kept.has(el)).slice(0, LIMITS.controls);
 }
 
 function controlsOf(found: HTMLElement[]): Control[] {
@@ -261,7 +245,6 @@ function controlsOf(found: HTMLElement[]): Control[] {
   return uniqueBy(controls, control => control.label);
 }
 
-/** The documents of the same-origin frames on screen (another origin's read as null). */
 function framesIn(doc: Document): Document[] {
   return [...doc.querySelectorAll('iframe')].flatMap(frame => {
     const inner = isUsable(frame) ? frame.contentDocument : null;
@@ -281,7 +264,6 @@ export function topDocument(view: Pick<Window, 'top' | 'document'> = window): Do
   }
 }
 
-/** The page and the frames on it, the one Buddy runs in among them. */
 export const documents = (): [Document, ...Document[]] => {
   const page = topDocument();
   return [page, ...framesIn(page)];
@@ -300,7 +282,6 @@ function rootsIn(doc: Document): ParentNode[] {
   return [dialog, ...popups];
 }
 
-/** What the user can reach: a dialog on the page, else the page and its frames. */
 function roots(): ParentNode[] {
   const [page, ...frames] = documents();
   const reachable = rootsIn(page);
@@ -321,8 +302,8 @@ export const readPopup = (popup: HTMLElement): Control[] =>
   controlsOf(controlsIn(popup)).filter(control => !VOLATILE_TEXT.test(control.text));
 
 /**
- * A 'click' control that says it opens a menu, popover or dialog and does nothing else: a toggle or
- * a tab that also opens one (a filter's choices, say) would change something when peeked into.
+ * An opener that does nothing else: a toggle or tab that also opens a menu (a filter's choices)
+ * would change something when peeked into.
  */
 function isOpener(el: HTMLElement, use: Control['use']): boolean {
   const popup = el.getAttribute('aria-haspopup');
@@ -369,7 +350,6 @@ export const snapshot = (): Snapshot => {
   };
 };
 
-/** The popup or dialog that opened since `before`, if any. */
 export const newPopup = (before: Snapshot): HTMLElement | undefined =>
   overlays()
     .filter(el => !before.overlays.has(el))
