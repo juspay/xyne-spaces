@@ -33,4 +33,5 @@ export const PROACTIVE = {
   maxNudgesPerLoop: envNumber("PROACTIVE_MAX_NUDGES_PER_LOOP", 2),
   maxLaterPerLoop: envNumber("PROACTIVE_MAX_LATER_PER_LOOP", 3),
   cloudWindowMs: envNumber("PROACTIVE_CLOUD_WINDOW_MS", 23 * 60 * 60_000),
+  activeChatMs: envNumber("PROACTIVE_ACTIVE_CHAT_MS", 7 * 24 * 60 * 60_000),
 };

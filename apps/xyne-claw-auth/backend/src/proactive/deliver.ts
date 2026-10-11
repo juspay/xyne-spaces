@@ -4,12 +4,11 @@ import { dispatchOrQueueChannelRun } from "../surfaces/messaging/busy.js";
 import { channelConversationId } from "../surfaces/messaging/ids.js";
 import { isMessagingChannelKey, type MessagingChannelKey } from "../surfaces/messaging/plugin.js";
 import { PROACTIVE } from "./config.js";
+import { orderDeliveryTargets, type DeliveryCandidate } from "./delivery-order.js";
 
 export type DeliveryResult =
   | { ok: true; channel: MessagingChannelKey; sessionId: string | null }
   | { ok: false; reason: string };
-
-const CHANNEL_PREFERENCE: MessagingChannelKey[] = ["whatsapp", "whatsapp-cloud"];
 
 export async function deliverNudge(input: {
   userId: string;
@@ -37,30 +36,20 @@ export async function deliverNudge(input: {
     },
     include: { surface: { select: { key: true } } },
   });
-  const ordered = accounts
-    .filter((a) => isMessagingChannelKey(a.surface.key))
-    .sort((a, b) => CHANNEL_PREFERENCE.indexOf(a.surface.key as MessagingChannelKey) - CHANNEL_PREFERENCE.indexOf(b.surface.key as MessagingChannelKey));
-
-  let reason = "no_channel";
-  for (const account of ordered) {
-    const channel = account.surface.key as MessagingChannelKey;
+  const candidates: DeliveryCandidate<(typeof accounts)[number]>[] = [];
+  for (const account of accounts) {
+    if (!isMessagingChannelKey(account.surface.key)) continue;
     const identity = await prisma.userSurfaceIdentity.findFirst({
       where: { surfaceId: account.surfaceId, userId: input.userId, orgId: account.orgId, status: "ACTIVE" },
       orderBy: { lastSeenAt: "desc" },
       select: { surfaceUserId: true, lastSeenAt: true },
     });
-    if (!identity) {
-      reason = "user_not_linked";
-      continue;
-    }
-    if (
-      channel === "whatsapp-cloud" &&
-      (!identity.lastSeenAt || input.now.getTime() - identity.lastSeenAt.getTime() > PROACTIVE.cloudWindowMs)
-    ) {
-      reason = "outside_cloud_window";
-      continue;
-    }
-    const chatId = identity.surfaceUserId;
+    if (identity) candidates.push({ account, channel: account.surface.key, senderId: identity.surfaceUserId, lastSeenAt: identity.lastSeenAt });
+  }
+  const { usable, reason: skipReason } = orderDeliveryTargets(candidates, input.now, PROACTIVE);
+  let reason = skipReason;
+  for (const { account, channel, senderId } of usable) {
+    const chatId = senderId;
     try {
       const outcome = await dispatchOrQueueChannelRun({
         agent,
