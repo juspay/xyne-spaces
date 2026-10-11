@@ -1,5 +1,6 @@
 import type { ParsedMessage } from "./gmail-message.js";
-import type { TriageScores } from "./claw-client.js";
+import type { ExtractResponse, TriageScores } from "./claw-client.js";
+import type { PlannedLoopInput } from "./schedule.js";
 
 export interface ContactStats {
   inboundCount: number;
@@ -52,4 +53,21 @@ export function isHit(scores: TriageScores | null, message: ParsedMessage, t: Hi
   const needsReply = scores.needsReply ?? 0;
   const deadline = scores.hasDeadline ?? 0;
   return importance >= t.hitImportance && (needsReply >= t.hitNeedsReply || deadline >= t.hitDeadline);
+}
+
+export function fallbackLoop(message: ParsedMessage, confidence: number): PlannedLoopInput {
+  return {
+    kind: "awaiting_user",
+    title: (message.subject ?? "Unanswered email").slice(0, 120),
+    ask: message.snippet.slice(0, 300) || null,
+    counterpart: message.from?.name ?? message.from?.key ?? null,
+    deadlineAt: null,
+    confidence,
+  };
+}
+
+export function loopsForHit(extracted: ExtractResponse | null, message: ParsedMessage, urgent: boolean): PlannedLoopInput[] {
+  if (extracted && extracted.loops.length > 0) return extracted.loops;
+  if (extracted && !urgent) return [];
+  return [fallbackLoop(message, urgent ? 0.6 : 0.4)];
 }

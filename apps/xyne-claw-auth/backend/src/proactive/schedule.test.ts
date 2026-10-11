@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { adjustWeight, deadlineNudgeAt, inQuietHours, nextAllowedAt, planLoop, updateReplyAverage } from "./schedule.js";
+import { adjustWeight, deadlineNudgeAt, inQuietHours, nextAllowedAt, planLoop, quietHoldUntil, updateReplyAverage } from "./schedule.js";
 
 const now = new Date("2026-10-09T08:00:00.000Z");
 const ctx = { now, lastInboundAt: new Date("2026-10-09T07:00:00.000Z"), lastUserReplyAt: null, replySlaHours: 24 };
@@ -61,6 +61,13 @@ describe("quiet hours", () => {
   it("moves a quiet-time nudge to the end of the window", () => {
     expect(nextAllowedAt(new Date("2026-10-09T17:00:00Z"), prefs).toISOString()).toBe("2026-10-10T02:30:00.000Z");
     expect(nextAllowedAt(now, prefs)).toBe(now);
+  });
+
+  it("holds non-urgent loops until quiet hours end and lets urgent ones through", () => {
+    const night = new Date("2026-10-10T17:32:00Z");
+    expect(quietHoldUntil(night, prefs, false)?.toISOString()).toBe("2026-10-11T02:32:00.000Z");
+    expect(quietHoldUntil(night, prefs, true)).toBeNull();
+    expect(quietHoldUntil(now, prefs, false)).toBeNull();
   });
 
   it("treats equal start and end as no quiet hours", () => {

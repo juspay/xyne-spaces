@@ -12,7 +12,7 @@ import { messageBodyText, parseGmailMessage, type ParsedMessage } from "./gmail-
 import { mapPool } from "./pool.js";
 import { loadPrefs, type EffectivePrefs } from "./prefs.js";
 import { planLoop, updateReplyAverage } from "./schedule.js";
-import { buildTriageState, isHit, isUrgent } from "./triage.js";
+import { buildTriageState, isHit, isUrgent, loopsForHit } from "./triage.js";
 
 const log = createLogger("proactive-ingest");
 
@@ -210,6 +210,7 @@ async function writeLoops(
       dueAt: p.dueAt,
       expiresAt: p.expiresAt,
       confidence: p.confidence,
+      urgent: urgent && p.kind !== "awaiting_them",
       createdBy: "triage",
     })),
   });
@@ -277,25 +278,9 @@ async function triageAndExtract(
           where: { id: c.thread.id },
           data: { summary: extracted.summary || null, extractedAt: now },
         });
-        loops += await writeLoops(c, extracted.loops, prefs, now, urgent.has(c.thread.id));
-      } else {
-        loops += await writeLoops(
-          c,
-          [
-            {
-              kind: "awaiting_user",
-              title: (c.message.subject ?? "Unanswered email").slice(0, 120),
-              ask: c.message.snippet.slice(0, 300) || null,
-              counterpart: c.message.from?.name ?? c.message.from?.key ?? null,
-              deadlineAt: null,
-              confidence: 0.4,
-            },
-          ],
-          prefs,
-          now,
-          urgent.has(c.thread.id),
-        );
       }
+      const isUrgentHit = urgent.has(c.thread.id);
+      loops += await writeLoops(c, loopsForHit(extracted, c.message, isUrgentHit), prefs, now, isUrgentHit);
     } catch (err) {
       log.warn(`[proactive] extract failed thread=${c.thread.id}: ${errMsg(err)}`);
     }

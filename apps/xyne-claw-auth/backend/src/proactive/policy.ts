@@ -10,6 +10,7 @@ export interface LoopFacts {
   deadlineAt: Date | null;
   confidence: number | null;
   nudgeCount: number;
+  urgent?: boolean;
 }
 
 export interface ThreadFacts {
@@ -70,6 +71,7 @@ export function buildInterruptState(input: {
   if (thread?.lastInboundAt) lines.push(`Last message from them: ${relative(thread.lastInboundAt.getTime() - now.getTime())}`);
   if (loop.deadlineAt) lines.push(`Deadline: ${relative(loop.deadlineAt.getTime() - now.getTime())}`);
   if (thread?.importance !== null && thread?.importance !== undefined) lines.push(`Importance score: ${thread.importance.toFixed(2)}`);
+  if (loop.urgent) lines.push("Flagged urgent: very important and needs the user, so it is allowed through quiet hours");
   lines.push(`Already reminded about this: ${loop.nudgeCount} times`);
   lines.push(`Texts sent to the user in the last 24 hours: ${input.textsLast24h} of ${input.maxPerDay} allowed`);
   lines.push(`User's local hour: ${localHour(now, input.timezone)}:00`);

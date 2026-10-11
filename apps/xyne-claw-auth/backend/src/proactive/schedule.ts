@@ -92,6 +92,12 @@ export function inQuietHours(at: Date, prefs: QuietHours): boolean {
   return start < end ? hour >= start && hour < end : hour >= start || hour < end;
 }
 
+export function quietHoldUntil(now: Date, prefs: QuietHours, urgent: boolean): Date | null {
+  if (urgent) return null;
+  const allowedAt = nextAllowedAt(now, prefs);
+  return allowedAt.getTime() > now.getTime() ? allowedAt : null;
+}
+
 export function nextAllowedAt(now: Date, prefs: QuietHours): Date {
   let at = now;
   for (let i = 0; i < 24 * 4 && inQuietHours(at, prefs); i++) {

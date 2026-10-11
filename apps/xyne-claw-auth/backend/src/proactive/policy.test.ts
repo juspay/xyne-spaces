@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildInterruptState, fallbackDecision, finalDecision, nudgeTask, type LoopFacts } from "./policy.js";
-import { buildTriageState, isHit, isUrgent } from "./triage.js";
+import { buildTriageState, isHit, isUrgent, loopsForHit } from "./triage.js";
 import { parsePushEnvelope } from "./sources.js";
 import type { ParsedMessage } from "./gmail-message.js";
 
@@ -54,6 +54,24 @@ describe("triage", () => {
     expect(isUrgent(null, t)).toBe(false);
   });
 
+  it("never drops an urgent hit when extraction finds nothing pending", () => {
+    const extracted = { summary: "Claw is down", loops: [] };
+    expect(loopsForHit(extracted, parsed, true)).toEqual([
+      {
+        kind: "awaiting_user",
+        title: "Booking #4411",
+        ask: "Please confirm your booking by Wednesday.",
+        counterpart: "Taj reservations",
+        deadlineAt: null,
+        confidence: 0.6,
+      },
+    ]);
+    expect(loopsForHit(extracted, parsed, false)).toEqual([]);
+    expect(loopsForHit(null, parsed, false)[0]?.confidence).toBe(0.4);
+    const found = { summary: "", loops: [{ kind: "deadline" as const, title: "Sign", ask: null, counterpart: null, deadlineAt: null, confidence: 0.9 }] };
+    expect(loopsForHit(found, parsed, true)).toEqual(found.loops);
+  });
+
   it("falls back to Gmail's important label when Jev is unavailable", () => {
     expect(isHit(null, parsed, thresholds)).toBe(true);
     expect(isHit(null, { ...parsed, userRole: "cc" }, thresholds)).toBe(false);
@@ -87,6 +105,12 @@ describe("interrupt policy", () => {
     expect(state).toContain("Last message from them: 26 hours ago");
     expect(state).toContain("Texts sent to the user in the last 24 hours: 1 of 3 allowed");
     expect(state).toContain("User's local hour: 13:00");
+    expect(state).not.toContain("Flagged urgent");
+  });
+
+  it("tells the judge when an item is urgent", () => {
+    const state = buildInterruptState({ loop: { ...loop, urgent: true }, thread: null, contact: null, textsLast24h: 0, maxPerDay: 3, timezone: "Asia/Kolkata", now });
+    expect(state).toContain("Flagged urgent");
   });
 
   it("tells the agent the check-in is automated and not to act", () => {

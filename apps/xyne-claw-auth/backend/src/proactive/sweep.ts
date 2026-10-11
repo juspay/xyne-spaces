@@ -7,7 +7,7 @@ import { deliverNudge } from "./deliver.js";
 import { mapPool } from "./pool.js";
 import { buildInterruptState, fallbackDecision, finalDecision, nudgeTask, type Decision, type LoopFacts } from "./policy.js";
 import { loadPrefs } from "./prefs.js";
-import { adjustWeight, nextAllowedAt } from "./schedule.js";
+import { adjustWeight, quietHoldUntil } from "./schedule.js";
 import { enqueueStaleSources, renewExpiringWatches } from "./sources.js";
 
 const log = createLogger("proactive-sweep");
@@ -72,9 +72,9 @@ export async function evaluateLoop(id: string, mode: ProactiveMode, now: Date = 
     return null;
   }
 
-  const allowedAt = nextAllowedAt(now, prefs);
-  if (allowedAt.getTime() > now.getTime()) {
-    await prisma.openLoop.update({ where: { id: loop.id }, data: { dueAt: allowedAt } });
+  const holdUntil = quietHoldUntil(now, prefs, loop.urgent);
+  if (holdUntil) {
+    await prisma.openLoop.update({ where: { id: loop.id }, data: { dueAt: holdUntil } });
     return null;
   }
 
@@ -97,6 +97,7 @@ export async function evaluateLoop(id: string, mode: ProactiveMode, now: Date = 
     deadlineAt: loop.deadlineAt,
     confidence: loop.confidence,
     nudgeCount: loop.nudgeCount,
+    urgent: loop.urgent,
   };
   const threadFacts = thread
     ? { subject: thread.subject, summary: thread.summary, importance: thread.importance, lastInboundAt: thread.lastInboundAt }

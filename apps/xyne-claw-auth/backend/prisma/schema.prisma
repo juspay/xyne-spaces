@@ -3172,6 +3172,8 @@ model OpenLoop {
   /// "triage" | "agent" | "user"
   createdBy    String
   nudgeCount   Int            @default(0)
+  /// Set at ingest for very important mail; lets the loop through quiet hours.
+  urgent       Boolean        @default(false)
   lastNudgedAt DateTime?
   resolvedAt   DateTime?
   /// Why it closed: "user_replied" | "counterpart_replied" | "expired" | ...
