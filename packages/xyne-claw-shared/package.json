@@ -19,7 +19,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.28.0",
+    "@modelcontextprotocol/sdk": "^1.31.0",
     "@xyne/icons": "workspace:*",
     "@xyne/kata-sdk": "workspace:*",
     "marked": "^18.0.4",

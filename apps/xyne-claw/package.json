@@ -16,7 +16,7 @@
     "@earendil-works/pi-agent-core": "0.75.5",
     "@earendil-works/pi-ai": "0.75.5",
     "@earendil-works/pi-coding-agent": "0.75.5",
-    "@modelcontextprotocol/sdk": "^1.28.0",
+    "@modelcontextprotocol/sdk": "^1.31.0",
     "@sinclair/typebox": "^0.34.0",
     "@upstash/context7-mcp": "^2.1.7",
     "@xyne/litellm-client": "workspace:*",
