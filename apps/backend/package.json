@@ -125,7 +125,7 @@
     "http-proxy-middleware": "^3.0.5",
     "ioredis": "^5.8.2",
     "isomorphic-dompurify": "^2.34.0",
-    "joi": "^17.13.4",
+    "joi": "^17.13.8",
     "jose": "6.2.4",
     "js-yaml": "^4.3.0",
     "jsonwebtoken": "^9.0.2",
