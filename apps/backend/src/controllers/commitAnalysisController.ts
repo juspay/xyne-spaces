@@ -266,20 +266,23 @@ export class CommitAnalysisController {
 
     // Every service of a release config is released from the same repository.
     const repoIds = [...new Set(apps.map(app => app.repoId))];
-    if (repoIds.length !== 1) {
+    const repoId = repoIds[0];
+    if (repoIds.length !== 1 || !repoId) {
       logger.error(
-        `[ReleaseTrigger] skipped: services of main release board ${boardId} point at ${repoIds.length} repositories (${repoIds.join(', ')})`,
+        repoIds.includes(null)
+          ? `[ReleaseTrigger] skipped: services of main release board ${boardId} have no repository yet (run the release-config backfill)`
+          : `[ReleaseTrigger] skipped: services of main release board ${boardId} point at ${repoIds.length} repositories (${repoIds.join(', ')})`,
       );
       return null;
     }
     const repo = await db.repo.findUnique({
-      where: { id: repoIds[0] },
+      where: { id: repoId },
       select: { url: true, canonicalUrl: true },
     });
     const repoUrl = repo ? (repo.canonicalUrl || repo.url).trim().replace(/\/+$/, '') : '';
     if (!repoUrl) {
       logger.error(
-        `[ReleaseTrigger] skipped: repository ${repoIds[0]} of main release board ${boardId} not found`,
+        `[ReleaseTrigger] skipped: repository ${repoId} of main release board ${boardId} not found`,
       );
       return null;
     }

@@ -2010,7 +2010,7 @@ export const applicationTable = table('applications')
     mainReleaseBoardId: string().optional(),
     channelId: string().optional(),
     regex: string(),
-    repoId: string(),
+    repoId: string().optional(),
     deployedCommit: string().optional(),
     deployedVersion: string().optional(),
     lastDeployedAt: number().optional(),
