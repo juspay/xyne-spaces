@@ -6,6 +6,7 @@ import { db } from '@/database/client';
 import { CreateAppInput } from '@/database/repositories/appsRepository';
 import { logger } from '@/utils/logger';
 import { installApp, configureWebhook, regenerateJwt, getSigningSecret } from '../core/appUtils';
+import { ClawAgentLookupError } from '@/services/clawAgentService';
 import { isValidUrl } from '@/utils/urlUtils';
 import { UserManagementService } from '@/services/userManagementService';
 import { vespaQueue } from '@/queues/vespaQueue';
@@ -181,6 +182,12 @@ export class AppController {
       res.status(201).json(installedApp);
     } catch (error) {
       logger.error('Error installing external app:', error);
+
+      // Could not tell AGENT from APP (claw-auth down / misconfigured): nothing was written; retryable.
+      if (error instanceof ClawAgentLookupError) {
+        res.status(503).json({ error: error.message, code: 'CLAW_AGENT_LOOKUP_FAILED' });
+        return;
+      }
 
       // Handle app not found error
       if (error instanceof Error && error.message.includes('not found')) {

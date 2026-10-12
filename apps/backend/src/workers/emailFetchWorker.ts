@@ -17,6 +17,8 @@ import { catchUpEmailSource, refetchEmailSource, syncSocialMediaSources } from '
 import { getHttpStatus } from '@/services/googleService';
 import { seedSyncCursor } from '@/services/syncCursorRecovery';
 import { toGooglePlayErrorResponse } from '@/integrations/adapters/social-media/google-play/client';
+import { db } from '@/database/client';
+import { ExternalSourcePlatform } from '@/integrations/core/types';
 
 const externalSourceRepo = new ExternalSourceRepository();
 
@@ -337,20 +339,32 @@ class EmailFetchWorker {
     }
   }
 
+  private async isFacebookFetch(data: SocialMediaFetchJobData): Promise<boolean> {
+    const facebookSources = await db.externalSource.count({
+      where: { id: { in: data.sourceIds }, sourceType: ExternalSourcePlatform.FACEBOOK },
+    });
+    return facebookSources > 0;
+  }
+
   private async notifySocialMediaSuccess(
     data: SocialMediaFetchJobData,
     synced: number,
   ): Promise<void> {
     try {
+      // This job also serves Facebook desks, which hold messages, comments and mentions.
+      const isFacebook = await this.isFacebookFetch(data);
+      const item = isFacebook ? 'Facebook item' : 'review interaction';
       await notificationService.sendNotification(
         data.requesterUserId,
         NotificationType.EMAIL_FETCH_COMPLETED,
         synced > 0
-          ? `Fetched ${synced} new review interaction${synced === 1 ? '' : 's'}`
-          : 'Reviews are up to date',
+          ? `Fetched ${synced} new ${item}${synced === 1 ? '' : 's'}`
+          : isFacebook
+            ? 'Facebook desk is up to date'
+            : 'Reviews are up to date',
         synced > 0
-          ? `${synced} new review interaction${synced === 1 ? '' : 's'} added to the desk.`
-          : 'No new review interactions were found.',
+          ? `${synced} new ${item}${synced === 1 ? '' : 's'} added to the desk.`
+          : `No new ${item}s were found.`,
         {
           channelId: data.channelId,
           sourceCount: data.sourceIds.length,
@@ -373,7 +387,7 @@ class EmailFetchWorker {
       await notificationService.sendNotification(
         data.requesterUserId,
         NotificationType.EMAIL_FETCH_FAILED,
-        'Review fetch failed',
+        (await this.isFacebookFetch(data)) ? 'Facebook fetch failed' : 'Review fetch failed',
         (toGooglePlayErrorResponse(error)?.error ?? error.message).substring(0, 400),
         {
           channelId: data.channelId,

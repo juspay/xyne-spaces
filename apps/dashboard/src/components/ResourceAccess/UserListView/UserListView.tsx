@@ -42,7 +42,7 @@ const UserRow = ({
   return (
     <div className='flex items-center px-6 py-4 hover:bg-muted transition-colors border-b border-border last:border-b-0'>
       {/* User Column */}
-      <div className='flex items-center gap-3 flex-1 min-w-0'>
+      <div className='flex items-center gap-3 flex-[2] min-w-0'>
         <Avatar userId={user.id} size='sm' />
         <div className='min-w-0'>
           <div className='flex items-center gap-2'>
@@ -134,7 +134,7 @@ export const UserListView = ({
     <div className='bg-background rounded-lg border border-border overflow-hidden'>
       {/* Header */}
       <div className='flex items-center px-6 py-3 bg-muted border-b border-border'>
-        <div className='flex-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider'>
+        <div className='flex-[2] text-xs font-semibold text-muted-foreground uppercase tracking-wider'>
           User
         </div>
         <div className='flex-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4'>

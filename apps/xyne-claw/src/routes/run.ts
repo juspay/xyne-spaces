@@ -28,7 +28,7 @@ import {
   type ProgressEmitter,
   type Attachment,
 } from "../agent.js";
-import {
+import { parseReplyFormat,
   frameSseEvent,
   KEEPALIVE_FRAME,
   type ClawStreamEvent,
@@ -50,6 +50,7 @@ import { describeFetchError } from "../run-deadline.js";
 import { SandboxUnavailableError } from "../sandbox-unavailable.js";
 import { isSafeId } from "../safe-id.js";
 import { sanitizeCitations } from "../citation-sanitizer.js";
+import { TurnParts } from "../turn-parts.js";
 import { validateS2SKey } from "../middleware/auth.js";
 import { transientProviderCallback } from "../transient-provider-callback.js";
 import { loadMcpToolsForUser,
@@ -70,6 +71,7 @@ import { activeToolCap, demotedCatalogItem, planActiveToolCap, readToolUsageRank
 import { buildExperimentTools, buildExperimentReviewTools, type ExperimentContext } from "../experiment.js";
 import {
   executeRunFromPayload,
+  type AgentHandoffNote,
   type InternalRunPayload,
   type RunExecutionState,
 } from "../run-execution.js";
@@ -137,7 +139,7 @@ import {
   parseToolsConfig,
   resolveAgentToolsConfig,
   COPILOT_SYSTEM_INSTRUCTION,
-  REPO_CONFIGS,
+  getRepoConfigsFor,
   getSandboxSession,
   probeSession,
   buildSandboxStoreKey,
@@ -337,7 +339,7 @@ function dedupeToolsByName(tools: ToolDefinition[]): ToolDefinition[] {
 
 /** Snapshot for shutdown/drain forensics — one line per still-active run. */
 /**
- * `read-app-file` rides on `create-app` selection.
+ * `read-app-file` and `publish-app` ride on `create-app` selection.
  *
  * The two are one feature. `create-app` writes a project but hands back only a
  * manifest — file paths, never contents — so without the read half an
@@ -353,7 +355,10 @@ function dedupeToolsByName(tools: ToolDefinition[]): ToolDefinition[] {
  */
 function expandCustomSelection(custom: string[] | undefined): Set<string> {
   const selected = new Set(custom ?? []);
-  if (selected.has("create-app")) selected.add("read-app-file");
+  if (selected.has("create-app")) {
+    selected.add("read-app-file");
+    selected.add("publish-app");
+  }
   return selected;
 }
 
@@ -582,6 +587,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     planContinuation,
     awakening,
     generateFollowUpSuggestions: shouldGenerateFollowUpSuggestions,
+    agentHandoff,
   } = req.body as InternalRunPayload;
 
   const experiment = normalizeExperimentContext(rawExperiment);
@@ -840,6 +846,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       shouldGenerateFollowUpSuggestions,
       typeof callbackUrl === "string" ? callbackUrl : undefined,
       awakening,
+      agentHandoff,
     ).finally(() => {
       if (activeRun.handoffCapTimer) clearTimeout(activeRun.handoffCapTimer);
       if (activeRun.gracefulInterruptSummaryTimer) clearTimeout(activeRun.gracefulInterruptSummaryTimer);
@@ -966,6 +973,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
         shouldGenerateFollowUpSuggestions,
         typeof callbackUrl === "string" ? callbackUrl : undefined,
         awakening,
+        agentHandoff,
       );
     } catch (err) {
       processTaskError = err;
@@ -1145,11 +1153,12 @@ function makeSseProgressEmitter(initialRes: Response, sessionId: string): SsePro
     pr: (sid, pr: Record<string, unknown>) => write({ event: "pr", seq: next(), sessionId: sid, pr }),
     uiWidget: (sid, widget: UiWidget) => write({ event: "ui-widget", seq: next(), sessionId: sid, widget }),
     streamChunk: (sid, payload) => {
+      const partId = payload.partId ? { partId: payload.partId } : {};
       if (payload.reasoningDelta !== undefined) {
-        write({ event: "reasoning", seq: next(), sessionId: sid, reasoningDelta: payload.reasoningDelta });
+        write({ event: "reasoning", seq: next(), sessionId: sid, reasoningDelta: payload.reasoningDelta, ...partId });
       }
       if (payload.textDelta !== undefined) {
-        write({ event: "delta", seq: next(), sessionId: sid, textDelta: payload.textDelta });
+        write({ event: "delta", seq: next(), sessionId: sid, textDelta: payload.textDelta, ...partId });
       }
     },
     debugProgress: (sid, event) => write({ event: "debug", seq: next(), sessionId: sid, debugEvent: event }),
@@ -1515,6 +1524,7 @@ export async function processTask(
     windowEndMs?: number;
     entryPath?: string;
   },
+  agentHandoff?: AgentHandoffNote,
   execution?: RunExecutionState,
 ): Promise<void> {
   // Started here so the extractor overlaps session restore + MCP listing;
@@ -1773,7 +1783,10 @@ export async function processTask(
 
     // Task commands are parsed before custom-tool loading so command-owned
     // tools can be force-mounted for this run without mutating Agent.config.
-    const forcedTaskCommandTools = new Set(taskCommand?.autoTools ?? []);
+    const forcedTaskCommandTools = new Set([
+      ...(taskCommand?.autoTools ?? []),
+      ...(parseReplyFormat(agentConfig?.["replyFormat"]) ? ["create-pdf"] : []),
+    ]);
 
     const meta: Record<string, string> = { userId };
     if (userName) meta["userName"] = userName;
@@ -1800,6 +1813,8 @@ export async function processTask(
     // automation runs to the shared read-only sbx-git sandbox instead of cloning
     // a per-project golden snapshot (see sandboxRepoSetup → resolveSbxGit).
     if (eventType) meta["eventType"] = eventType;
+    // Set by claw-auth start-run: scopes the sandbox profiles this run can use.
+    if (typeof agentConfig?.["workspaceId"] === "string") meta["workspaceId"] = agentConfig["workspaceId"];
     // Surface the originating scheduled-job row id so the scheduledJobControl
     // tool can resolve jobId:"current" (worker forwards it in the run body).
     if (scheduledJobId) meta["scheduledJobId"] = scheduledJobId;
@@ -1953,7 +1968,7 @@ export async function processTask(
       undefined,
       runtimeProviderConfig,
       emitUiWidgetForCustom,
-      taskCommand?.autoTools ?? [],
+      [...forcedTaskCommandTools],
     );
     const {
       tools: customToolDefs,
@@ -2952,9 +2967,11 @@ export async function processTask(
     // without a human to approve its card, so a scheduled/automation run (no one
     // watching) must never get the tool. Never alongside the other terminal tools
     // (plan / daily brief own turn termination in their modes).
+    const hasSpacesCardSurface = !!channelId || (progressUrl && typeof progressUrl !== "string");
+    const isChatSurfaceRun = !channelId && !eventType;
     const agentAuthoringEnabled =
       agentConfig?.["agentAuthoring"] === true &&
-      (!!channelId || (progressUrl && typeof progressUrl !== "string")) &&
+      (hasSpacesCardSurface || isChatSurfaceRun) &&
       !isScheduledOrAutomationRun(eventType, conversationId) &&
       !isTwinMentionFlow &&
       !isPlanMode &&
@@ -2977,8 +2994,6 @@ export async function processTask(
       !isScheduledOrAutomationRun(eventType, conversationId) &&
       !isTwinMentionFlow &&
       !isDailyBrief;
-    const hasSpacesCardSurface = !!channelId || (progressUrl && typeof progressUrl !== "string");
-    const isChatSurfaceRun = !channelId && !eventType;
     const describeAgentAvailable = interactiveCardRun && (hasSpacesCardSurface || isChatSurfaceRun);
     if (describeAgentAvailable) {
       allTools.push(buildDescribeAgentTool(describeAgentRef));
@@ -3071,6 +3086,8 @@ export async function processTask(
     // casual chat (rhetorical questions, no verifiable deliverable), so the
     // GLOBAL default skips Twin agents; an explicit per-agent `true` still
     // honors them. Always yields to structured output (it owns delivery).
+    const replyFormat = parseReplyFormat(agentConfig?.["replyFormat"]);
+    if (replyFormat) log(`replyFormat enabled — ≤${replyFormat.maxSections} sections of ≤${replyFormat.maxWords} words`);
     const verifyAllDefault =
       (process.env["RESPONSE_VERIFY_ALL"] ?? "off").toLowerCase() === "on";
     const verifyCfg = agentConfig?.["verifyResponses"] as boolean | undefined;
@@ -3110,6 +3127,7 @@ export async function processTask(
           evidenceRef,
           agentSlug,
           ...(verifyResponseCriteria ? { criteria: verifyResponseCriteria } : {}),
+          ...(replyFormat ? { replyFormat } : {}),
         }),
       );
       log(
@@ -3191,16 +3209,19 @@ export async function processTask(
       eventType === "artifact_app" || (conversationId?.startsWith("app_") ?? false);
     if (isArtifactAppRun) {
       const before = allTools.length;
-      // read-app-file goes with create-app: it is keyed by conversation, and an
-      // app-invoked run carries the `app_` conversation of the app itself, so
-      // leaving it in would let an app read its own source back.
+      // The app tools go with create-app: an app-invoked run acts as the viewer,
+      // so leaving them in would let an app read, rewrite or publish apps —
+      // including itself — on whoever opens it.
       allTools = allTools.filter(
         (t) =>
-          t.name !== "create-app" && t.name !== "read-app-file" && t.name !== "schedule-task",
+          t.name !== "create-app" &&
+          t.name !== "read-app-file" &&
+          t.name !== "publish-app" &&
+          t.name !== "schedule-task",
       );
       if (allTools.length !== before) {
         log(
-          "Artifact-app run — create-app + read-app-file + schedule-task removed (self-replication ban)",
+          "Artifact-app run — create-app + read-app-file + publish-app + schedule-task removed (self-replication ban)",
         );
       }
     }
@@ -3227,7 +3248,9 @@ export async function processTask(
         "sandbox-run", "sandbox-run-detached", "sandbox-write-file",
         "sandbox-create", "sandbox-destroy", "write",
       ]);
-      const pinnedProfile = meta["sandboxRepo"] ? REPO_CONFIGS[meta["sandboxRepo"]] : undefined;
+      const pinnedProfile = meta["sandboxRepo"]
+        ? (await getRepoConfigsFor(meta[SDLC_META_KEYS.workspaceId] || meta["workspaceId"]))[meta["sandboxRepo"]]
+        : undefined;
       if (!forceReadOnlySandbox && pinnedProfile && !pinnedProfile.repoUrl) {
         RO_DISABLED.delete("sandbox-create");
         RO_DISABLED.delete("sandbox-destroy");
@@ -3699,7 +3722,8 @@ export async function processTask(
       const pinnedRepoName =
         (agentConfig?.["sandboxRepo"] as string | undefined) ?? undefined;
       const pinnedRepo = pinnedRepoName
-        ? REPO_CONFIGS[pinnedRepoName]
+        ? // Same scope as the sandbox tools: built-ins plus this run's workspace.
+          (await getRepoConfigsFor(meta[SDLC_META_KEYS.workspaceId] || meta["workspaceId"]))[pinnedRepoName]
         : undefined;
       if (pinnedRepoName && pinnedRepo) {
         const installPkgs = pinnedRepo.steps
@@ -4103,6 +4127,7 @@ export async function processTask(
         userId,
         task,
         context: fullContext,
+        ...(agentHandoff ? { agentHandoff } : {}),
         // Automation/scheduled runs draw from the low-priority LiteLLM key so
         // batch fleets can't queue interactive mentions (same predicate as the
         // read-only sandbox routing above).
@@ -4151,6 +4176,7 @@ export async function processTask(
           ? { verifyResponsesRef: evidenceRef }
           : {}),
         citationReflection,
+        replyFormat,
         autoToolCitations,
         // Thread invocations (Spaces/Slack replies — channelId present) keep a
         // clean posted reply = the last 2 assistant turns; ask-ai and every other
@@ -4756,6 +4782,15 @@ export async function processTask(
       tokenUsage: result.tokenUsage,
       ...(result.reasoning && result.reasoning.trim()
         ? { reasoning: result.reasoning }
+        : {}),
+      // The turn as ordered thinking / text / tool parts, ending in exactly the
+      // answer delivered as `result` (same citation sanitizing).
+      ...(result.parts?.length && structuredOutputPayload === undefined
+        ? {
+            parts: TurnParts.alignFinalAnswer(result.parts, callbackResultText, (text) =>
+              sanitizeCitations(text, result.toolInvocations, result.sessionClfTokens),
+            ),
+          }
         : {}),
       ...(result.latency ? { latency: result.latency } : {}),
       ...(result.toolInvocations.length > 0

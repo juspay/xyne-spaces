@@ -128,9 +128,17 @@ import {
   parseSlashCommandArtifactMessage,
   withSlashCommandArtifactClosed,
 } from '@xyne/shared';
+import { ConnectEntityType } from '@xyne/shared';
 import { SDLC_HUB_KNOWLEDGE_FOLDER, sdlcIconNameSchema, sdlcTrackStatusSchema } from '@xyne/shared';
 import { isSdlcTreeItemType, refileSdlcFolderEdges } from '@xyne/shared';
-import { MAX_DESK_APPS, MAX_DUPLICATE_SCOPE_FIELDS, serializeDeskAppIds } from '@xyne/shared';
+import {
+  ChannelPublishedEntityType,
+  MAX_DUPLICATE_SCOPE_FIELDS,
+  MAX_PUBLISHED_APP_ID_LENGTH,
+  MAX_PUBLISHED_APPS,
+  canPublishAppsTo,
+  type ChannelPublishedTab,
+} from '@xyne/shared';
 import {
   evaluateEta,
   buildEtaActivityIntents,
@@ -284,6 +292,43 @@ const storageService = getStorageService();
 
 const serializeCanvasCommentMentionedUserIds = (mentionedUserIds: string[]): string =>
   JSON.stringify([...new Set(mentionedUserIds)]);
+
+/** Checks the caller may change the channel's published apps; returns its current rows. */
+async function loadChannelForAppPublish(
+  tx: Transaction<Schema>,
+  channelId: string,
+  userId: string,
+): Promise<ChannelPublishedTab[]> {
+  const channel = await tx.run(zql.channels.where('id', channelId).one());
+  if (!channel) {
+    throw new Error("Channel doesn't exist");
+  }
+  if (channel.isArchived) {
+    throw new Error('Cannot publish apps to an archived channel');
+  }
+  const participant = await tx.run(
+    zql.channel_participants.where('channelId', channelId).where('userId', userId).one(),
+  );
+  const isDesk = isDeskChannelType(channel.type);
+  const deskPreference = isDesk
+    ? await tx.run(zql.email_channel_preferences.where('channelId', channelId).one())
+    : undefined;
+  const isDeskOwner = !!deskPreference?.ownerUserId && deskPreference.ownerUserId === userId;
+  if (!canPublishAppsTo(channel, participant?.role, isDeskOwner)) {
+    throw new Error(
+      isDesk
+        ? 'Only the desk owner or a channel admin can change desk apps'
+        : channel.scopeType === ChannelScopeType.DEFAULT
+          ? 'Only channel admins can publish apps to the channel'
+          : 'Apps can only be published to channels, DMs, group DMs and desks',
+    );
+  }
+  return tx.run(
+    zql.channel_published_tabs
+      .where('channelId', channelId)
+      .where('entityType', ChannelPublishedEntityType.APP),
+  );
+}
 
 async function getCanvasThreadCommentCount(
   tx: Transaction<Schema>,
@@ -1586,6 +1631,40 @@ export function createMutators(
           });
         },
       ),
+      publishApp: defineMutator(
+        z.object({
+          id: z.string().min(1).max(64),
+          channelId: z.string(),
+          appId: z.string().min(1).max(MAX_PUBLISHED_APP_ID_LENGTH),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, channelId, appId, timestamp } }) => {
+          const rows = await loadChannelForAppPublish(tx, channelId, authData.sub);
+          if (rows.some(row => row.entityId === appId)) return;
+          if (rows.length >= MAX_PUBLISHED_APPS) {
+            throw new Error(`Up to ${MAX_PUBLISHED_APPS} apps can be published here`);
+          }
+          await tx.mutate.channel_published_tabs.insert({
+            id,
+            workspaceId: authData.workspaceId,
+            channelId,
+            entityType: ChannelPublishedEntityType.APP,
+            entityId: appId,
+            position: rows.reduce((top, row) => Math.max(top, row.position), -1) + 1,
+            publishedBy: authData.sub,
+            createdAt: timestamp,
+          });
+        },
+      ),
+      unpublishApp: defineMutator(
+        z.object({ channelId: z.string(), appId: z.string().min(1).max(MAX_PUBLISHED_APP_ID_LENGTH) }),
+        async ({ tx, args: { channelId, appId } }) => {
+          const rows = await loadChannelForAppPublish(tx, channelId, authData.sub);
+          const row = rows.find(r => r.entityId === appId);
+          if (!row) return;
+          await tx.mutate.channel_published_tabs.delete({ id: row.id });
+        },
+      ),
       updateShowTicketsTabTicketsInChat: defineMutator(
         z.object({
           channelId: z.string(),
@@ -2505,9 +2584,10 @@ export function createMutators(
           name: z.string(),
           emoji: z.string().nullable().optional(),
           position: z.string(),
+          filterMode: z.nativeEnum(ChannelFilterMode).nullable().optional(),
           timestamp: z.number(),
         }),
-        async ({ tx, args: { id, name, emoji, position, timestamp } }) => {
+        async ({ tx, args: { id, name, emoji, position, filterMode, timestamp } }) => {
           // Reject a name this user already uses in this workspace (case-insensitive).
           const siblings = await tx.run(
             zql.channel_sections
@@ -2528,6 +2608,7 @@ export function createMutators(
             position,
             isCollapsed: false,
             isDeleted: false,
+            ...(filterMode !== undefined && { filterMode: filterMode ?? null }),
             createdAt: timestamp,
             updatedAt: timestamp,
           });
@@ -5274,8 +5355,9 @@ export function createMutators(
           // Cancelling from the Calls screen goes through this mutator, not a REST
           // route, so the channel pill has to be refreshed from here too.
           const cancelledCallId = call.id;
+          const cancelledCallExternalId = call.externalId;
           asyncTasks.push(async () => {
-            queueScheduledCallPillSync(cancelledCallId, 'mutators.calls.cancel');
+            queueScheduledCallPillSync(cancelledCallId, cancelledCallExternalId, 'mutators.calls.cancel');
           });
           if (cancelEntireSeries && call.recurringSeriesId) {
             await tx.mutate.recurring_call_series.update({
@@ -6486,8 +6568,9 @@ export function createMutators(
 
               activities.push({
                 activityType,
-                value: field === 'stageName'
-                  ? { field: 'stageName', oldValue: previousValue, newValue: params[field] }
+                // Both are STATUS activities; `field` tells them apart.
+                value: field === 'stageName' || field === 'statusV2'
+                  ? { field, oldValue: previousValue, newValue: params[field] }
                   : { oldValue: previousValue, newValue: params[field] },
               });
             }
@@ -9537,13 +9620,15 @@ export function createMutators(
           content: z.any().optional(),
           timestamp: z.number(),
           participantId: z.string(),
+          // Slack Connect: caller-generated connectId (id == connectId for the private row).
+          connectId: z.string().optional(),
           // Legacy fields (pre-XYNE-17290). Accepted so old clients don't get
           // Zod validation errors during a rolling deploy; intentionally
           // ignored — the canonical `id` is the only identity we write.
           viewAccessId: z.string().optional(),
           editAccessId: z.string().optional(),
         }),
-        async ({ tx, args: { id, title, channelId, folderId, projectId, visibility, content, timestamp, participantId } }) => {
+        async ({ tx, args: { id, title, channelId, folderId, projectId, visibility, content, timestamp, participantId, connectId } }) => {
           const now = timestamp;
           const {
             projectId: resolvedProjectId,
@@ -9577,7 +9662,22 @@ export function createMutators(
             createdAt: now,
             updatedAt: now,
             metadata: {},
+            connectId,
           });
+
+          // Slack Connect: create this canvas's private connect_group row (id == connectId).
+          if (connectId) {
+            await tx.mutate.connect_group.insert({
+              id: connectId,
+              entityType: ConnectEntityType.CANVAS,
+              entityId: id,
+              hostWorkspaceId: authData.workspaceId,
+              connectId,
+              status: 'ACTIVE',
+              createdAt: now,
+              updatedAt: now,
+            });
+          }
 
           // Add creator as participant with OWNER role
           await tx.mutate.canvas_participants.insert({
@@ -9588,6 +9688,7 @@ export function createMutators(
             role: CanvasRole.OWNER,
             joinedAt: now,
             updatedAt: now,
+            ...(connectId ? { canvasConnectId: connectId } : {}),
           });
           asyncTasks.push(async () => {
             try {
@@ -9673,6 +9774,7 @@ export function createMutators(
               role: role,
               joinedAt: now,
               updatedAt: now,
+              ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
             });
           }
         },
@@ -9733,6 +9835,7 @@ export function createMutators(
             role,
             joinedAt: timestamp,
             updatedAt: timestamp,
+            ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
           });
         },
       ),
@@ -9799,6 +9902,7 @@ export function createMutators(
             role,
             joinedAt: timestamp,
             updatedAt: timestamp,
+            ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
           });
         },
       ),
@@ -10432,6 +10536,7 @@ export function createMutators(
             isStarred: true,
             createdAt: timestamp,
             updatedAt: timestamp,
+            ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
           });
         },
       ),
@@ -10456,6 +10561,9 @@ export function createMutators(
             authData.workspaceId,
           );
 
+          // Slack Connect: inherit the parent canvas's connectId (null until backfilled).
+          const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+
           await tx.mutate.canvas_comment_threads.insert({
             id: threadId,
             workspaceId: authData.workspaceId,
@@ -10469,6 +10577,7 @@ export function createMutators(
             statusUpdatedAt: null,
             createdBy: authData.sub,
             createdAt: timestamp,
+            ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
           });
 
           await tx.mutate.canvas_comments.insert({
@@ -10483,6 +10592,7 @@ export function createMutators(
             editedAt: null,
             deletedAt: null,
             createdAt: timestamp,
+            ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
           });
         },
       ),
@@ -10513,6 +10623,9 @@ export function createMutators(
             authData.workspaceId,
           );
 
+          // Slack Connect: inherit the parent canvas's connectId (null until backfilled).
+          const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+
           await tx.mutate.canvas_comments.insert({
             id: commentId,
             workspaceId: authData.workspaceId,
@@ -10525,6 +10638,7 @@ export function createMutators(
             editedAt: null,
             deletedAt: null,
             createdAt: timestamp,
+            ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
           });
 
           const commentCount = await getCanvasThreadCommentCount(
@@ -10709,6 +10823,7 @@ export function createMutators(
             createdBy: authData.sub,
             createdAt: timestamp,
             updatedAt: timestamp,
+            ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
           });
         },
       ),
@@ -11417,6 +11532,10 @@ export function createMutators(
             boardId: z.string(),
             weight: z.number(),
             usePercentage: z.boolean(),
+            percentageWindowDays: z.number().int().min(1).max(90).optional(),
+            percentageShareBasis: z.enum(['ALL', 'OPEN']).optional(),
+            // Start of the first share window (ms); null clears it. Omit to keep the current start.
+            percentageWindowStartAt: z.number().nullable().optional(),
           }).optional(),
           expertiseMappings: z.object({
             boardId: z.string(),
@@ -11526,6 +11645,15 @@ export function createMutators(
                 id: existingScore.id,
                 weight: boardWeight.weight,
                 usePercentage: boardWeight.usePercentage,
+                ...(boardWeight.percentageWindowDays !== undefined && {
+                  percentageWindowDays: boardWeight.percentageWindowDays,
+                }),
+                ...(boardWeight.percentageShareBasis !== undefined && {
+                  percentageShareBasis: boardWeight.percentageShareBasis,
+                }),
+                ...(boardWeight.percentageWindowStartAt !== undefined && {
+                  percentageWindowStartAt: boardWeight.percentageWindowStartAt,
+                }),
                 updatedAt: now,
               });
             } else {
@@ -11539,6 +11667,9 @@ export function createMutators(
                 boardId: boardWeight.boardId,
                 weight: boardWeight.weight,
                 usePercentage: boardWeight.usePercentage,
+                percentageWindowDays: boardWeight.percentageWindowDays ?? null,
+                percentageShareBasis: boardWeight.percentageShareBasis ?? null,
+                percentageWindowStartAt: boardWeight.percentageWindowStartAt ?? null,
                 createdBy: authData.sub,
                 createdAt: now,
                 updatedAt: now,
@@ -16772,9 +16903,6 @@ export function createMutators(
           deskReportEnabled: z.boolean().optional(),
           deskReportAgentSlug: z.string().optional().nullable(),
           deskReportRangeDays: z.number().optional(),
-          // Artifact apps shown on this desk, in order (see EmailChannelPreference.deskAppIds).
-          // An empty list clears the column.
-          deskAppIds: z.array(z.string().min(1).max(64)).max(MAX_DESK_APPS).nullable().optional(),
           // Scoped duplicate detection config (see EmailChannelPreference.duplicateScopeConfig)
           duplicateScopeConfig: z
             .object({
@@ -16804,7 +16932,6 @@ export function createMutators(
             deskReportEnabled,
             deskReportAgentSlug,
             deskReportRangeDays,
-            deskAppIds,
             duplicateScopeConfig,
           },
         }) => {
@@ -16850,7 +16977,6 @@ export function createMutators(
               ...(deskReportEnabled !== undefined ? { deskReportEnabled } : {}),
               ...(deskReportAgentSlug !== undefined ? { deskReportAgentSlug } : {}),
               ...(deskReportRangeDays !== undefined ? { deskReportRangeDays } : {}),
-              ...(deskAppIds !== undefined ? { deskAppIds: serializeDeskAppIds(deskAppIds) } : {}),
               ...(duplicateScopeConfig !== undefined
                 ? { duplicateScopeConfig: duplicateScopeConfig == null ? null : JSON.stringify(duplicateScopeConfig) }
                 : {}),
@@ -16886,7 +17012,6 @@ export function createMutators(
               deskReportEnabled: deskReportEnabled ?? false,
               deskReportAgentSlug: deskReportAgentSlug ?? null,
               deskReportRangeDays: deskReportRangeDays ?? 1,
-              deskAppIds: serializeDeskAppIds(deskAppIds ?? null),
               duplicateScopeConfig: duplicateScopeConfig ? JSON.stringify(duplicateScopeConfig) : null,
             });
           }
@@ -17188,6 +17313,15 @@ export function createMutators(
             ...(isPrivate !== undefined && { isPrivate }),
             updatedAt: timestamp,
           });
+          // Folders carry their own copy of isPrivate and Zero's ACL reads each row's own copy,
+          // so a visibility change must reach every folder under this root or they keep syncing
+          // to the whole workspace after the root goes private.
+          if (isPrivate !== undefined && !collection.parentId) {
+            const folders = await tx.run(zql.collections.where('rootCollectionId', id));
+            for (const folder of folders) {
+              await tx.mutate.collections.update({ id: folder.id, isPrivate, updatedAt: timestamp });
+            }
+          }
         },
       ),
 

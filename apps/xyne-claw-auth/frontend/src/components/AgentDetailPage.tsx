@@ -7,7 +7,7 @@ import { PromptVersionHistory } from "./PromptVersionHistory";
 import { ChainWorkflowEditor } from "./ChainWorkflowEditor";
 import { CollapsibleSection } from "./CollapsibleSection";
 import { MemoryTab } from "../v2/components/MemoryTab";
-import { AgentMcpTab } from "./AgentMcpTab";
+import { AgentMcpTabV3 } from "../v3/components/agent-detail/tabs/AgentMcpTabV3";
 import { KnowledgeBasePicker } from "../v3/components/KnowledgeBasePicker";
 import type { Agent, AgentLight, AgentSkill, ScheduledJob, ScheduledJobRun } from "../lib/types";
 
@@ -395,9 +395,13 @@ export function AgentDetailPage({ userId, isAdmin }: Props) {
         <MemoryTab agentSlug={agent.slug} canDelete={canEdit} />
       )}
 
-      {/* MCPs tab — pin per-agent MCP credentials. Gated on canEdit. */}
+      {/* MCPs tab — pin per-agent MCP credentials. Gated on canEdit.
+          This legacy page is always dark (hardcoded zinc classes), so scope the
+          V3 tab's xyne-* tokens to dark regardless of the global theme. */}
       {activeTab === "mcp" && canEdit && agent && (
-        <AgentMcpTab agentSlug={agent.slug} userId={userId} canEdit={canEdit} />
+        <div className="dark">
+          <AgentMcpTabV3 agentSlug={agent.slug} userId={userId} canEdit={canEdit} />
+        </div>
       )}
 
       {/* Provider tab — agent-level default LLM + shared API credentials.

@@ -2,6 +2,7 @@ import type { DeleteID, InsertValue, Transaction, UpdateValue } from '@rocicorp/
 import { CanvasRole, CanvasVisibility, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
+import { assertConnectMutateAllowed } from '../core/connect-mutation-reach';
 import { zql } from '../../queries';
 
 
@@ -17,8 +18,17 @@ export class CanvasParticipantsACL extends BaseACL<'canvas_participants'> {
     return this.roleRank(a) >= this.roleRank(b) ? a : b;
   }
 
-  /** Effective canvas role for the requester: direct row, else strongest of group- and channel-based rows. */
-  private async getRequesterEffectiveRole(canvasId: string, tx: Transaction<Schema>): Promise<CanvasRole | null> {
+  /** Effective canvas role for the requester: creator, else direct row, else strongest of group- and channel-based rows. */
+  private async getRequesterEffectiveRole(
+    canvas: { id: string; createdBy: string | null },
+    tx: Transaction<Schema>,
+  ): Promise<CanvasRole | null> {
+    // Applies to every canvas. The creator may have no row (older SDLC) or only a VIEWER row
+    // (commit analysis, release reports). The VIEWER row was never a lock: the creator could
+    // already edit and add anyone at any role, so changing and removing roles is expected too.
+    if (canvas.createdBy === this.ctx.userID) return CanvasRole.OWNER;
+
+    const canvasId = canvas.id;
     const direct = await tx.run(
       zql.canvas_participants.where('canvasId', canvasId).where('userId', this.ctx.userID).one(),
     );
@@ -55,17 +65,24 @@ export class CanvasParticipantsACL extends BaseACL<'canvas_participants'> {
     return this.strongerRole(groupBest, channelBest);
   }
 
-  private async verifyWorkspace(canvasId: string, tx: Transaction<Schema>): Promise<void> {
+  /** Returns the canvas so callers do not load it again. */
+  private async verifyWorkspace(canvasId: string, tx: Transaction<Schema>) {
     const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
     if (!canvas) throw new MutationACLError('Canvas participant not found: canvas does not exist', 'canvas_participants');
-    
+
+    // Slack Connect: connectId present → connect_group reach is the workspace-truth; else legacy check below.
+    if (canvas.connectId) {
+      await assertConnectMutateAllowed(this.ctx, tx, canvas, 'canvas_participants');
+      return canvas;
+    }
+
     // If canvas has channel, verify through channel
     if (canvas.channelId) {
       const channel = await tx.run(zql.channels.where('id', canvas.channelId).one());
       if (!channel || channel.workspaceId !== this.ctx.workspaceId) {
         throw new MutationACLError('Canvas participant not found in this workspace', 'canvas_participants');
       }
-      return;
+      return canvas;
     }
     
     // If no channel, verify through canvas creator's workspace
@@ -74,19 +91,16 @@ export class CanvasParticipantsACL extends BaseACL<'canvas_participants'> {
     // Canvas without channel can only be accessed by creator initially
     const isCreator = canvas.createdBy === this.ctx.userID;
     if (!isCreator) {
-      const effective = await this.getRequesterEffectiveRole(canvasId, tx);
+      const effective = await this.getRequesterEffectiveRole(canvas, tx);
       if (!effective) {
         throw new MutationACLError('Canvas participant not found in this workspace', 'canvas_participants');
       }
     }
+    return canvas;
   }
 
   async canInsert(args: InsertValue<TableSchema<'canvas_participants'>>, tx: Transaction<Schema>): Promise<void> {
-    const canvas = await tx.run(zql.canvases.where('id', args.canvasId).one());
-    if (!canvas) {
-      throw new MutationACLError('Canvas participant insert failed: the specified canvas does not exist', 'canvas_participants');
-    }
-    await this.verifyWorkspace(args.canvasId, tx);
+    const canvas = await this.verifyWorkspace(args.canvasId, tx);
     if (canvas.visibility === CanvasVisibility.PUBLIC) {
       return; // Anyone can be added to a public canvas
     }
@@ -100,7 +114,7 @@ export class CanvasParticipantsACL extends BaseACL<'canvas_participants'> {
       return
     }
 
-    const effectiveRole = await this.getRequesterEffectiveRole(args.canvasId, tx);
+    const effectiveRole = await this.getRequesterEffectiveRole(canvas, tx);
 
     if (!effectiveRole) {
       throw new MutationACLError('Canvas participant insert failed: you must be a canvas participant to add others', 'canvas_participants');
@@ -112,9 +126,9 @@ export class CanvasParticipantsACL extends BaseACL<'canvas_participants'> {
     if (!canvasParticipant) {
       throw new MutationACLError('Canvas participant update failed: participant record does not exist', 'canvas_participants');
     }
-    await this.verifyWorkspace(canvasParticipant.canvasId, tx);
+    const canvas = await this.verifyWorkspace(canvasParticipant.canvasId, tx);
     if (args.role) {
-      const effectiveRole = await this.getRequesterEffectiveRole(canvasParticipant.canvasId, tx);
+      const effectiveRole = await this.getRequesterEffectiveRole(canvas, tx);
       const canUpdateRole =
         effectiveRole === CanvasRole.OWNER || effectiveRole === CanvasRole.EDITOR;
       if (!canUpdateRole) {
@@ -138,11 +152,11 @@ export class CanvasParticipantsACL extends BaseACL<'canvas_participants'> {
     if (!canvasParticipant) {
       throw new MutationACLError('Canvas participant delete failed: participant record does not exist', 'canvas_participants');
     }
-    await this.verifyWorkspace(canvasParticipant.canvasId, tx);
+    const canvas = await this.verifyWorkspace(canvasParticipant.canvasId, tx);
     if (canvasParticipant.userId === this.ctx.userID) {
       return; // Participants can remove themselves
     }
-    const effectiveRole = await this.getRequesterEffectiveRole(canvasParticipant.canvasId, tx);
+    const effectiveRole = await this.getRequesterEffectiveRole(canvas, tx);
     const canRemove =
       effectiveRole === CanvasRole.OWNER || effectiveRole === CanvasRole.EDITOR;
     if (!canRemove) {

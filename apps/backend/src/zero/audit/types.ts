@@ -39,6 +39,8 @@ export interface AuditLookup {
   userGroupsByIds(ids: string[]): Promise<{ id: string; name: string }[]>;
   /** board ids a form is bound to, resolved through forms_context_mapping (BOARD + STAGE contexts). */
   boardIdsForFormIds(formIds: string[]): Promise<{ formId: string; boardIds: string[] }[]>;
+  /** The given channel ids that are desks (have an email_channel_preferences row). */
+  deskChannelIds(channelIds: string[]): Promise<string[]>;
 }
 
 export interface AuditJob {

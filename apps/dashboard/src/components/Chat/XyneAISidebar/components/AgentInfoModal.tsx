@@ -1,6 +1,7 @@
 import { ReactElement, useEffect } from 'react';
 import { X, Wrench, Sparkles, Bot } from 'lucide-react';
 import type { AccessibleClawAgent } from '../../../../services/clawAgentListService';
+import { AgentGlyph } from '../../../AIScreen/AIAgentSelector';
 
 interface AgentInfoModalProps {
   isOpen: boolean;
@@ -75,18 +76,12 @@ export const AgentInfoModal = ({
         {/* Header */}
         <div className='flex items-center justify-between p-4 border-b border-border'>
           <div className='flex items-center gap-3'>
-            {/* Agent color indicator */}
-            <div
-              className='w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-semibold'
-              style={{ backgroundColor: agent.color || '#6366f1' }}
-            >
-              {agent.name
-                .split(' ')
-                .map(w => w[0])
-                .join('')
-                .slice(0, 2)
-                .toUpperCase()}
-            </div>
+            <AgentGlyph
+              name={agent.name}
+              color={agent.color || '#6366f1'}
+              userId={agent.botUserId}
+              size={32}
+            />
             <h2 className='text-lg font-semibold text-foreground'>{agent.name}</h2>
           </div>
           <button

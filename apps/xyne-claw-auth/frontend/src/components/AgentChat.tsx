@@ -91,6 +91,19 @@ function replaceMessageIdInSelections(
   return next;
 }
 
+
+/** This page lists one agent's whole history, so it walks every page. */
+async function listAgentConversations(userId: string, slug: string): Promise<ConversationSummary[]> {
+  const rows: ConversationSummary[] = [];
+  let cursor: string | null = null;
+  do {
+    const page = await listChatConversations(userId, { agentSlug: slug, cursor, limit: 100 });
+    rows.push(...page.conversations);
+    cursor = page.nextCursor;
+  } while (cursor);
+  return rows;
+}
+
 export function AgentChat({ userId }: Props) {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -217,7 +230,7 @@ export function AgentChat({ userId }: Props) {
     setLoadingHistory(true);
 
     Promise.all([
-      listChatConversations(slug, userId).catch(() => []),
+      listAgentConversations(userId, slug).catch(() => []),
       getUserAgentConfig(slug, userId).catch(() => null),
       listProviderCredentials(userId).catch(() => []),
     ])
@@ -464,7 +477,7 @@ export function AgentChat({ userId }: Props) {
 
   const refreshConversations = useCallback(() => {
     if (!slug) return;
-    listChatConversations(slug, userId).then(setConversations).catch((err) => console.error("[agent-chat] refresh error:", err));
+    listAgentConversations(userId, slug).then(setConversations).catch((err) => console.error("[agent-chat] refresh error:", err));
   }, [slug, userId]);
 
   const handleAgentChange = useCallback((nextSlug: string) => {

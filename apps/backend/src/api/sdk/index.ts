@@ -24,7 +24,7 @@ import { createSdkV1Router } from './v1';
 
 /**
  * Unauthenticated service endpoints, mounted before the authenticated router
- * so a probe can tell "the API is misconfigured" from "your key is bad".
+ * so a probe can tell "the API is misconfigured" from "your session is bad".
  *
  * `requestId` lives here rather than in both routers: it is `router.use()`
  * with no path, so it runs for every request to `/api/sdk/*` regardless of
@@ -60,7 +60,7 @@ export function createSdkPublicRouter(): Router {
 
 /**
  * The authenticated part of the API. `app.ts` mounts this behind
- * `apiKeyAuth`, passed explicitly rather than applied inside — see that file.
+ * `authMiddleware.authenticate`, passed explicitly rather than applied inside — see that file.
  */
 export function createSdkRouter(): Router {
   const router = Router();

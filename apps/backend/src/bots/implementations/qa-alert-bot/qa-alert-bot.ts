@@ -250,6 +250,7 @@ export class QaAlertBot extends UnifiedBaseBot<QaAlertBotInput, QaAlertBotOutput
         content: alertMessage,
         msgType: MessageType.BOT,
         isBot: true,
+        emitsMessageReceivedViaSideEffects: true,
       });
 
       logger.info(

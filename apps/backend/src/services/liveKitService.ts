@@ -240,7 +240,8 @@ export class LiveKitService {
    * actual flag being created in Superposition's dashboard (outside this repo) — confirm
    * the real key name before relying on this in anything but a test environment.
    */
-  async resolveAgentNameForUser(userId: string): Promise<string | null> {
+  async resolveAgentNameForUser(userId: string, context: { roomName?: string } = {}): Promise<string | null> {
+    const tag = context.roomName ? `[${context.roomName}] ` : '';
     let role: string;
     try {
       role = await superpositionClient.getStringValue(
@@ -253,12 +254,17 @@ export class LiveKitService {
       // falling back to DEFAULT_TRANSCRIPTION_AGENT_ROLE — a Superposition outage must
       // not suddenly hand every production user a second explicit-dispatch agent.
       // Automatic dispatch is still there regardless, so this fails safe either way.
-      logger.error(`transcription_agent_role_resolution_failed | userId=${userId}, error=${error}, falling_back_to=no_explicit_dispatch`);
+      logger.error(`${tag}transcription_agent_role_resolution_failed | userId=${userId}, error=${error}, falling_back_to=no_explicit_dispatch`);
       return null;
     }
 
-    if (role === NO_EXPLICIT_DISPATCH) return null;
-    return this.resolveAgentName(role);
+    logger.info(`${tag}transcription_agent_role_resolved | userId=${userId}, role=${role}`);
+
+    if (role === NO_EXPLICIT_DISPATCH) {
+      logger.info(`${tag}transcription_agent_dispatch_not_applicable | userId=${userId}, reason=role_is_none`);
+      return null;
+    }
+    return this.resolveAgentName(role, context);
   }
 
   /**
@@ -280,14 +286,23 @@ export class LiveKitService {
    * doubt, since the claim-check remains the real authority regardless of which way this
    * check turns out to be wrong.
    */
-  private async checkAgentHealthy(url: string): Promise<boolean> {
+  private async checkAgentHealthy(url: string, context: { roomName?: string } = {}): Promise<boolean> {
+    const tag = context.roomName ? `[${context.roomName}] ` : '';
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), AGENT_HEALTH_CHECK_TIMEOUT_MS);
+    const startedAt = Date.now();
     try {
       const response = await fetch(url, { signal: controller.signal });
+      const latencyMs = Date.now() - startedAt;
+      if (response.ok) {
+        logger.info(`${tag}transcription_agent_health_check_ok | url=${url}, status=${response.status}, latency_ms=${latencyMs}`);
+      } else {
+        logger.warn(`${tag}transcription_agent_health_check_unhealthy | url=${url}, status=${response.status}, latency_ms=${latencyMs}`);
+      }
       return response.ok;
     } catch (error) {
-      logger.warn(`transcription_agent_health_check_failed | url=${url}, error=${error}`);
+      const latencyMs = Date.now() - startedAt;
+      logger.warn(`${tag}transcription_agent_health_check_failed | url=${url}, latency_ms=${latencyMs}, timed_out=${controller.signal.aborted}, error=${error}`);
       return false;
     } finally {
       clearTimeout(timeout);
@@ -302,20 +317,38 @@ export class LiveKitService {
    * isn't claimable moments later is a different situation, handled by the retry loop
    * below, not by silently jumping to another role mid-attempt.
    */
-  async resolveAgentName(role: TranscriptionAgentRole): Promise<string | null> {
+  async resolveAgentName(role: TranscriptionAgentRole, context: { roomName?: string } = {}): Promise<string | null> {
+    const tag = context.roomName ? `[${context.roomName}] ` : '';
     const roles = await this.getConfiguredAgentRoles();
+    logger.info(`${tag}transcription_agent_roles_loaded | configured_roles=${Object.keys(roles).join(',') || 'none'}, requested_role=${role}`);
 
     const primary = roles[role];
-    if (primary && (await this.checkAgentHealthy(primary.url))) {
+    if (!primary) {
+      logger.warn(`${tag}transcription_agent_role_not_configured | role=${role}`);
+    } else if (await this.checkAgentHealthy(primary.url, context)) {
+      logger.info(`${tag}transcription_agent_resolved | role=${role}, agent=${primary.agentName}, source=primary`);
       return primary.agentName;
+    } else {
+      logger.warn(`${tag}transcription_agent_primary_unhealthy | role=${role}, agent=${primary.agentName}, url=${primary.url}`);
     }
 
-    if (role === DEFAULT_TRANSCRIPTION_AGENT_ROLE) return null;
+    if (role === DEFAULT_TRANSCRIPTION_AGENT_ROLE) {
+      logger.error(`${tag}transcription_agent_unavailable | role=${role}, reason=default_role_unconfigured_or_unhealthy`);
+      return null;
+    }
 
     const fallback = roles[DEFAULT_TRANSCRIPTION_AGENT_ROLE];
-    if (fallback && (await this.checkAgentHealthy(fallback.url))) {
+    if (!fallback) {
+      logger.error(`${tag}transcription_agent_unavailable | role=${role}, reason=no_default_fallback_configured`);
+      return null;
+    }
+
+    if (await this.checkAgentHealthy(fallback.url, context)) {
+      logger.info(`${tag}transcription_agent_resolved | role=${role}, agent=${fallback.agentName}, source=fallback_default`);
       return fallback.agentName;
     }
+
+    logger.error(`${tag}transcription_agent_unavailable | role=${role}, reason=default_fallback_unhealthy, agent=${fallback.agentName}, url=${fallback.url}`);
     return null;
   }
 

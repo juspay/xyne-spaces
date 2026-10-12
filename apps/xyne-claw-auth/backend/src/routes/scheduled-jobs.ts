@@ -44,6 +44,10 @@ import cronParser from "cron-parser";
 import { asyncHandler, ok, badRequest, unauthorized, forbidden, notFound, HttpError } from "../lib/http.js";
 
 import { createLogger } from "../logger.js";
+import { notifyUser } from "../surfaces/messaging/agent-tools.js";
+import { WHATSAPP_REPLY_MODE } from "../surfaces/messaging/const.js";
+import { channelOfConversationId } from "../surfaces/messaging/ids.js";
+
 const log = createLogger("scheduled-jobs");
 const { parseExpression } = cronParser;
 
@@ -202,6 +206,13 @@ async function postScheduledFailureNotice(row: {
   cronExpression: string | null;
   status: string;
 }, error: string | null | undefined): Promise<void> {
+  if (row.replyMode === WHATSAPP_REPLY_MODE) {
+    const next = nextFireText(row);
+    const text = [`Your scheduled task didn't go through: ${error?.trim() || "something went wrong"}.`, ...(next ? [`I'll try again ${next}.`] : [])].join(" ");
+    const sent = await notifyUser({ userId: row.userId, orgId: row.orgId, text });
+    if (!sent.ok) log.warn(`[scheduled-jobs/result] Job ${row.id}: WhatsApp failure notice not sent: ${sent.error}`);
+    return;
+  }
   const agent = await prisma.agent.findFirst({
     where: { slug: row.agentSlug, orgId: row.orgId },
   });
@@ -464,7 +475,13 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
   // shared channel. It must never be armed silently — gate it behind an explicit
   // approval card. When there is no channel to post into, there is nothing to
   // broadcast, so the normal (thread/DM) path applies.
-  const isChannelBroadcast = (replyMode === "channel") && !!channelId;
+  //
+  // A job set up from a WhatsApp chat reports back to that person on WhatsApp:
+  // the run's channelId is a phone chat, not a Spaces channel, so the Spaces
+  // delivery below could never reach it — and a broadcast makes no sense there.
+  const fromChat = channelOfConversationId(conversationId) !== null;
+  const effectiveReplyMode = fromChat ? WHATSAPP_REPLY_MODE : (replyMode ?? "thread");
+  const isChannelBroadcast = !fromChat && (replyMode === "channel") && !!channelId;
 
   // Create Prisma row
   const row = await prisma.scheduledJob.create({
@@ -482,7 +499,7 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
       nextRunAt,
       label: label ?? null,
       workspaceId: workspaceId ?? null,
-      replyMode: replyMode ?? "thread",
+      replyMode: effectiveReplyMode,
       // A channel broadcast is armed only AFTER the creator approves the card
       // posted below; until then it sits inert (the worker skips non-active rows).
       ...(isChannelBroadcast ? { status: "pending_approval" } : {}),
@@ -1284,6 +1301,21 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
   if (!payload.result && !payload.attachments?.length) {
     // Completed with nothing to deliver — not a failure; do not alarm the thread.
     log.info(`[scheduled-jobs/result] Job ${id}: completed with empty result — nothing to post`);
+    return;
+  }
+
+  if (row.replyMode === WHATSAPP_REPLY_MODE) {
+    const sent = await notifyUser({
+      userId: row.userId,
+      orgId: row.orgId,
+      text: payload.result?.trim() || "Here's what you asked for.",
+      ...(payload.attachments?.length ? { attachments: payload.attachments } : {}),
+    });
+    if (sent.ok) {
+      log.info(`[scheduled-jobs/result] Job ${id}: delivered on WhatsApp${sent.viaTemplate ? " (template)" : ""}`);
+    } else {
+      log.warn(`[scheduled-jobs/result] Job ${id}: WhatsApp delivery failed: ${sent.error}`);
+    }
     return;
   }
 

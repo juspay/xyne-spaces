@@ -181,6 +181,49 @@ export async function reconnectInstagramDesk(
   return response.data.authorizationUrl;
 }
 
+/** Initiates Facebook Login for a Page desk — returns authorization URL for redirect. */
+export async function startFacebookOAuth(input: {
+  channelName: string;
+  projectId: string;
+  boardId?: string;
+  assigneeUserGroupId?: string;
+  visibility: 'PUBLIC' | 'PRIVATE';
+  platform: 'web' | 'electron';
+}): Promise<string> {
+  const response = await apiInstance.post<{ authorizationUrl: string }>(
+    '/integrations/social-media/facebook/oauth/start',
+    { name: input.channelName, ...input },
+  );
+  return response.data.authorizationUrl;
+}
+
+export async function disconnectFacebookPage(channelId: string, sourceId: string): Promise<void> {
+  await apiInstance.post(`/integrations/social-media/${channelId}/facebook/${sourceId}/disconnect`);
+}
+
+export async function reconnectFacebookPage(
+  channelId: string,
+  sourceId: string,
+  platform: 'web' | 'electron',
+): Promise<string> {
+  const response = await apiInstance.post<{ authorizationUrl: string }>(
+    `/integrations/social-media/${channelId}/facebook/${sourceId}/reconnect`,
+    { platform },
+  );
+  return response.data.authorizationUrl;
+}
+
+export async function addFacebookPage(
+  channelId: string,
+  platform: 'web' | 'electron',
+): Promise<string> {
+  const response = await apiInstance.post<{ authorizationUrl: string }>(
+    `/integrations/social-media/${channelId}/facebook/add-page`,
+    { platform },
+  );
+  return response.data.authorizationUrl;
+}
+
 /** Apple keys are rotated by pasting a new .p8, not by re-running a consent redirect. */
 export async function rotateAppStoreCredentials(
   channelId: string,

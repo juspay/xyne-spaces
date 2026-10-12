@@ -47,6 +47,7 @@ import { decryptionCache } from '@xyne/shared';
 import { resetGlobalEncryptionBootstrap } from '@xyne/shared/hooks';
 import { dropAllZeroDatabases, dropZeroDatabases } from '../zero/dropZeroDatabases';
 import { getPendingSdkSso, takePendingSdkSso } from '../utils/pendingSdkSso';
+import { markOrgCreator } from '../utils/onboardingOrgCreator';
 
 export interface User {
   id: string;
@@ -700,6 +701,9 @@ export const authMachine = createMachine(
                     localStorage.setItem('user_email', output.user.email);
                     if (window.electronAPI?.setUserEmail) {
                       window.electronAPI.setUserEmail(output.user.email);
+                    }
+                    if (context.orgData?.orgName) {
+                      markOrgCreator(output.user.email, context.orgData.orgName);
                     }
                     if (output.user.workspaceId) {
                       setLastActiveWorkspaceId(output.user.email, output.user.workspaceId);

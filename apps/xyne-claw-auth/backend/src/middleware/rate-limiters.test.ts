@@ -1,4 +1,6 @@
+import { readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
+import { fileURLToPath } from "node:url";
 import type { AddressInfo } from "node:net";
 import express from "express";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -198,5 +200,113 @@ describe("forged session cookies cannot mint fresh buckets", () => {
     }
     expect(statuses.slice(0, 10).every((s) => s === 200)).toBe(true);
     expect(statuses[10]).toBe(429);
+  });
+});
+
+describe("isUnlimitedInternalS2S", () => {
+  const INTERNAL_KEY = "internal-secret";
+
+  // Mirrors http/routes.ts: the skip runs inside app.use(BASE), so req.path is base-relative.
+  async function startBaseApp(max: number): Promise<void> {
+    const { createRequesterLimiter, isUnlimitedInternalS2S } = await import("./rate-limiters.js");
+    const limiter = createRequesterLimiter({ windowMs: 60_000, max });
+    const app = express();
+    app.use("/claw/api/v1", (req, res, next) => {
+      if (isUnlimitedInternalS2S(req)) {
+        next();
+        return;
+      }
+      limiter(req, res, next);
+    });
+    app.get("/claw/api/v1/*", (_req, res) => {
+      res.json({ ok: true });
+    });
+    server = createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  }
+
+  async function statuses(path: string, key: string, n: number): Promise<number[]> {
+    const out: number[] = [];
+    for (let i = 0; i < n; i += 1) {
+      const res = await fetch(`${baseUrl}/claw/api/v1${path}`, { headers: { "x-s2s-key": key } });
+      out.push(res.status);
+    }
+    return out;
+  }
+
+  beforeEach(() => {
+    process.env["INTERNAL_S2S_KEY"] = INTERNAL_KEY;
+  });
+
+  afterEach(() => {
+    delete process.env["INTERNAL_S2S_KEY"];
+  });
+
+  it("never limits the agent check with a valid INTERNAL_S2S_KEY", async () => {
+    await startBaseApp(2);
+    const got = await statuses("/internal/agents/by-spaces-app/app-1", INTERNAL_KEY, 10);
+    expect(got.every((s) => s === 200)).toBe(true);
+  });
+
+  it("still limits the agent check with a wrong key", async () => {
+    await startBaseApp(2);
+    expect(await statuses("/internal/agents/by-spaces-app/app-1", "not-the-key", 3)).toEqual([200, 200, 429]);
+  });
+
+  it("still limits other internal routes with a valid INTERNAL_S2S_KEY", async () => {
+    await startBaseApp(2);
+    expect(await statuses("/internal/app-connectors/tools", INTERNAL_KEY, 3)).toEqual([200, 200, 429]);
+  });
+
+  it("does not match a prefix that only starts with the same letters", async () => {
+    await startBaseApp(2);
+    expect(await statuses("/internal/agentsx", INTERNAL_KEY, 3)).toEqual([200, 200, 429]);
+  });
+
+  it("never limits the bare /internal/agents path with a valid INTERNAL_S2S_KEY", async () => {
+    await startBaseApp(2);
+    const got = await statuses("/internal/agents", INTERNAL_KEY, 5);
+    expect(got.every((s) => s === 200)).toBe(true);
+  });
+
+  // Express routes case-insensitively, so this still reaches the agents router; it must stay limited.
+  it("still limits a differently-cased path", async () => {
+    await startBaseApp(2);
+    expect(await statuses("/INTERNAL/AGENTS/by-spaces-app/app-1", INTERNAL_KEY, 3)).toEqual([200, 200, 429]);
+  });
+
+  it("still limits a duplicated x-s2s-key header", async () => {
+    await startBaseApp(2);
+    const out: number[] = [];
+    for (let i = 0; i < 3; i += 1) {
+      const headers = new Headers();
+      headers.append("x-s2s-key", INTERNAL_KEY);
+      headers.append("x-s2s-key", INTERNAL_KEY);
+      out.push((await fetch(`${baseUrl}/claw/api/v1/internal/agents/by-spaces-app/app-1`, { headers })).status);
+    }
+    expect(out).toEqual([200, 200, 429]);
+  });
+
+  it("fails closed when INTERNAL_S2S_KEY is unset", async () => {
+    delete process.env["INTERNAL_S2S_KEY"];
+    await startBaseApp(2);
+    expect(await statuses("/internal/agents/by-spaces-app/app-1", "", 3)).toEqual([200, 200, 429]);
+  });
+
+  it("fails closed for the old key once INTERNAL_S2S_KEY is unset", async () => {
+    delete process.env["INTERNAL_S2S_KEY"];
+    await startBaseApp(2);
+    expect(await statuses("/internal/agents/by-spaces-app/app-1", INTERNAL_KEY, 3)).toEqual([200, 200, 429]);
+  });
+
+  // The cases above mirror the mount; this pins the real one in http/routes.ts.
+  it("is wired into routes.ts ahead of apiLimiter", () => {
+    const source = readFileSync(fileURLToPath(new URL("../http/routes.ts", import.meta.url)), "utf8");
+    const mount = source.slice(source.indexOf("app.use(BASE, (req: Request, res: Response, next: NextFunction)"));
+    const skip = mount.indexOf("if (isUnlimitedInternalS2S(req))");
+    const limiter = mount.indexOf("apiLimiter(req, res, next)");
+    expect(skip).toBeGreaterThan(0);
+    expect(limiter).toBeGreaterThan(skip);
   });
 });

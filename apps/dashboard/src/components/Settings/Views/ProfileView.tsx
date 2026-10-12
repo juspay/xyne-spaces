@@ -30,6 +30,7 @@ import { useSelf } from '../../../hooks/useUsers';
 import { mutators } from '../../../zero/mutators';
 import { v4 as uuidv4 } from 'uuid';
 import { useUserPresence } from '../../../hooks/usePresence';
+import { notificationsArePaused } from '../../../utils/notificationsPause';
 import { SelectedStatusData } from './SetStatusView';
 
 type ViewType = 'default' | 'status-suggestions' | 'status-edit';
@@ -106,9 +107,10 @@ const ProfileView = ({
   }, [isPresenceDropdownOpen]);
 
   const notificationsPausedUntil = user?.notificationsPausedUntil;
-  const isNotificationsPaused = useMemo(() => {
-    return notificationsPausedUntil ? notificationsPausedUntil > Date.now() : false;
-  }, [notificationsPausedUntil]);
+  const isNotificationsPaused = useMemo(
+    () => notificationsArePaused(notificationsPausedUntil),
+    [notificationsPausedUntil],
+  );
 
   const pauseOptions = useMemo(
     () => [

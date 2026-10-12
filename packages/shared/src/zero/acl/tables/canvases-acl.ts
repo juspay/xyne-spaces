@@ -16,9 +16,6 @@ export class CanvasesACL extends BaseQueryACL<'canvases'> {
         )
         .where(guestCanvasAccessWhere(this.ctx));
     }
-
-    return query.whereExists('createdByUser', (u) =>
-      u.where('workspaceId', '=', this.ctx.workspaceId),
-    );
+    return query;
   }
 }

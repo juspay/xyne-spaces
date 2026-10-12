@@ -5,6 +5,7 @@ export {
   formatReactArtifactResult,
 } from "./tools.js";
 export { readArtifactAppFileTool } from "./readTool.js";
+export { publishArtifactAppTool } from "./publishTool.js";
 export type {
   ReactArtifactFile,
   ReactArtifactDataRequirement,

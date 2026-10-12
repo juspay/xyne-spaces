@@ -61,6 +61,7 @@ import { emitAgentWorkingSignal } from "../surfaces/spaces/client.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
 import { dispatchXyneAiContinuationRun } from "../lib/xyne-ai-continuation.js";
 import { applyCreateSkill, isCreateSkillAction } from "../lib/skill-apply.js";
+import { applyArtifactAppAction, isArtifactAppAction } from "../lib/artifact-app-apply.js";
 import { isClawAdmin } from "../middleware/agent-acl.js";
 import { applyAgentToolAction, AGENT_TOOL_SLUGS } from "../lib/agent-tools-apply.js";
 import { applyConversationFork } from "../lib/conversation-fork.js";
@@ -743,6 +744,7 @@ async function finishWriteFailure(opts: {
   signature: string;
   agentSlug: string | undefined;
   spacesAppId: string | undefined;
+  subagentId: string | undefined;
   messageId: string;
   conversationId?: string | undefined;
   channelId?: string | undefined;
@@ -761,6 +763,8 @@ async function finishWriteFailure(opts: {
       userId: opts.writeUserId,
       signature: opts.signature,
       agentSlug: opts.agentSlug ?? "",
+      // The retry re-submits this signature, which covers the subagent id.
+      ...(opts.subagentId ? { subagentId: opts.subagentId } : {}),
       ...(opts.channelId !== undefined ? { channelId: opts.channelId } : {}),
       ...(opts.conversationId !== undefined ? { conversationId: opts.conversationId } : {}),
       ...(opts.spacesAppId !== undefined ? { spacesAppId: opts.spacesAppId } : {}),
@@ -815,6 +819,9 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       const signature = data["signature"] as string;
       const agentSlug = data["agentSlug"] as string | undefined;
       const spacesAppId = data["spacesAppId"] as string | undefined;
+      // Present when a subagent's own credential decided the call. Covered by
+      // the signature below, so a card cannot be pointed at another subagent.
+      const subagentId = typeof data["subagentId"] === "string" && data["subagentId"] ? data["subagentId"] : undefined;
 
       const continueChannelId = data["channelId"] as string | undefined;
 
@@ -865,20 +872,12 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
 
       // Verify the complete card identity before any approve/decline side
       // effect. Empty strings give absent routing fields one canonical form.
-      const { verifyActionSignatureAny } = await import("./mcp.js");
+      const { verifyActionSignatureAny, writeActionPayload } = await import("./mcp.js");
+      const legacyActionPayload = writeActionPayload({ serverType, tool, params, userId: writeUserId, subagentId });
       const actionPayload = {
-        serverType,
-        tool,
-        params,
-        userId: writeUserId,
+        ...legacyActionPayload,
         agentSlug: agentSlug ?? "",
         spacesAppId: spacesAppId ?? "",
-      };
-      const legacyActionPayload = {
-        serverType,
-        tool,
-        params,
-        userId: writeUserId,
       };
       const automationActionPayload = { ...actionPayload, automation: true };
       const isAutomationCard = verifyActionSignatureAny([automationActionPayload], signature);
@@ -1008,7 +1007,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             const errorText = approvalToolFailureMessage(errMsg(e));
             log.error(`[flow-action] xyne-ai spaces-send-message failed conversationId=${conversationId} userId=${writeUserId} err=${errMsg(e)}`);
             await finishWriteFailure({
-              tool, serverType, params, writeUserId, signature, agentSlug, spacesAppId,
+              tool, serverType, params, writeUserId, signature, agentSlug, spacesAppId, subagentId,
               messageId, conversationId, channelId: continueChannelId, errorText,
               xyneAi: xyneAiCard,
             });
@@ -1098,7 +1097,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           } satisfies AppActionResponse;
           if (!xyneAiCard) res.status(422).json(failureResponse);
           await finishWriteFailure({
-            tool, serverType, params, writeUserId, signature, agentSlug, spacesAppId,
+            tool, serverType, params, writeUserId, signature, agentSlug, spacesAppId, subagentId,
             messageId, conversationId, channelId: continueChannelId, errorText: userMessage,
             xyneAi: xyneAiCard,
           });
@@ -1228,6 +1227,16 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           void replaceFlowCardWithText(messageId, agentSlug, `${outcome.error}`, conversationId, undefined, spacesAppId);
           return;
         }
+        // An Ask AI card has no channel, so the hub comes from the signed params the sign route added.
+        const signedHubId = params["sdlcChannelId"];
+        const hubChannelId = typeof signedHubId === "string" ? signedHubId : continueChannelId;
+        if (hubChannelId) {
+          const { linkSdlcHubSkill } = await import("../lib/sdlc-repository-context.js");
+          // The card's raw Spaces id names the hub's workspace; converting the Claw id back could pick another one.
+          void linkSdlcHubSkill(hubChannelId, rawCallerUserId ?? writeUserId, outcome.id).catch((err) =>
+            log.warn(`[flow-action] create-skill hub link failed slug=${outcome.slug}: ${err instanceof Error ? err.message : String(err)}`),
+          );
+        }
         resp = { type: "close_screen", finalMessage: `${outcome.message}` };
         if (xyneAiCard) {
           await finishTextWriteOnRow({
@@ -1245,10 +1254,30 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         return;
       }
 
+      // ── publish-app: artifact apps live in claw-auth's own tables ───────────
+      // No MCP connector. Applied as the card-signed write owner; ownership is
+      // re-checked against the app row inside applyArtifactAppAction.
+      if (isArtifactAppAction(serverType, tool)) {
+        const outcome = await applyArtifactAppAction(tool, params, writeClawUserId);
+        if (!outcome.ok) {
+          res.json({ type: "error", message: outcome.error } satisfies AppActionResponse);
+          return;
+        }
+        resp = { type: "close_screen", finalMessage: outcome.message };
+        if (xyneAiCard) {
+          await finishTextWriteOnRow({ card: xyneAiCard, tool, ok: true, heading: outcome.message });
+          res.json(resp);
+          return;
+        }
+        res.json(resp);
+        void replaceFlowCardWithText(messageId, agentSlug, outcome.message, conversationId, undefined, spacesAppId);
+        return;
+      }
+
       // MCP-based tools
       const { callTool } = await import("../mcp/runner.js");
       const { hasConnectorDefinition } = await import("../mcp/connector-definitions.js");
-      const { loadEffectiveCredentials, isPrivateUserCredential } = await import("../lib/credentials-loader.js");
+      const { loadApprovedWriteCredentials, isPrivateUserCredential } = await import("../lib/credentials-loader.js");
       if (!(await hasConnectorDefinition(serverType))) {
         res.json({ type: "error", message: `No adapter for ${serverType}` } satisfies AppActionResponse);
         return;
@@ -1256,8 +1285,15 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       // `writeUserId` is the raw ID signed into the Flow card. Credential rows
       // and MCP execution are Claw-owned by the card-signed write owner, so
       // use writeClawUserId — never the approver (callerUserId), which differs
-      // for automation cards.
-      const effective = await loadEffectiveCredentials(writeClawUserId, serverType, agentSlug);
+      // for automation cards. The card's agent + subagent pick the identity
+      // the write was queued under.
+      const effective = await loadApprovedWriteCredentials({
+        userId: writeClawUserId,
+        serverType,
+        agentSlug,
+        spacesAppId,
+        subagentId,
+      });
       if (!effective) {
         res.json({ type: "error", message: `No connection for user ${writeClawUserId} / ${serverType}` } satisfies AppActionResponse);
         return;
@@ -1268,7 +1304,18 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
 
       let toolResult: Awaited<ReturnType<typeof callTool>>;
       try {
-        toolResult = await callTool(writeClawUserId, serverType, effective.credentials, tool, params);
+        // The instance keys the runner session to this credential, so the call
+        // can't reuse a client another identity (the tool listing) spawned.
+        toolResult = await callTool(
+          writeClawUserId,
+          serverType,
+          effective.credentials,
+          tool,
+          params,
+          agentSlug,
+          undefined,
+          effective.instance,
+        );
       } catch (err) {
         const errText = sanitizeApprovalToolError(err);
         const userMessage = approvalToolFailureMessage(errText);
@@ -1282,7 +1329,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         } satisfies AppActionResponse;
         if (!xyneAiCard) res.status(422).json(failureResponse);
         await finishWriteFailure({
-          tool, serverType, params, writeUserId, signature, agentSlug, spacesAppId,
+          tool, serverType, params, writeUserId, signature, agentSlug, spacesAppId, subagentId,
           messageId, conversationId, channelId: continueChannelId, errorText: userMessage,
           xyneAi: xyneAiCard,
         });
@@ -2041,6 +2088,10 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       const cardSpacesAppId = data["spacesAppId"] as string | undefined;
       const cardChannelId = data["channelId"] as string | undefined;
       const cardConversationId = (data["conversationId"] as string | undefined) ?? conversationId;
+      // A draft proposed on Xyne AI lives on a chat row, not a Spaces message.
+      const cardChatMessageId = data["chatMessageId"] as string | undefined;
+      const xyneAiChatMessageId =
+        data["surface"] === "xyne-ai" && cardChatMessageId ? cardChatMessageId : undefined;
 
       if (!requestId || !cardUserId) {
         res.status(400).json({ type: "error", message: "Missing agent-card fields in flowJSON.data" } satisfies AppActionResponse);
@@ -2085,7 +2136,10 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         }
         resp = { type: "close_screen", finalMessage: result.error };
         res.json(resp);
-        void replaceFlowCardWithText(messageId, cardAgentSlug, `${result.error}`, cardConversationId, cardChannelId, cardSpacesAppId);
+        // Xyne AI has no Spaces message to flatten; the toast carries the reason.
+        if (!xyneAiChatMessageId) {
+          void replaceFlowCardWithText(messageId, cardAgentSlug, `${result.error}`, cardConversationId, cardChannelId, cardSpacesAppId);
+        }
         return;
       }
 
@@ -2111,36 +2165,60 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             : "Agent draft declined.";
 
       resp = { type: "close_screen", finalMessage: finalText };
-      res.json(resp);
       // Update the SAME card in place — the identity stays visible, the chip and
-      // footer flip to the decided state. Falls back to text if the card can't
-      // be rebuilt, so the buttons never survive a decision either way.
-      void replaceFlowCardWithFlow(
-        messageId,
-        cardAgentSlug,
-        buildAgentCardFlow(
-          {
-            variant: "draft",
-            phase,
-            agent: result.identity,
-            toolSelection: result.toolSelection,
-            ...(result.note ? { note: result.note } : {}),
-            ...(deciderName ? { decidedBy: deciderName } : {}),
-            ...(decidedNow ? { decidedById: callerUserId } : {}),
-            ...(decidedNow ? { decidedAt: new Date().toISOString() } : {}),
-          },
-          {
-            requestId,
-            agentSlug: cardAgentSlug ?? "",
-            userId: cardUserId,
-            ...(cardConversationId ? { conversationId: cardConversationId } : {}),
-            ...(cardChannelId ? { channelId: cardChannelId } : {}),
-          },
-        ),
-        cardConversationId,
-        cardChannelId,
-        cardSpacesAppId,
+      // footer flip to the decided state.
+      const decidedFlow = buildAgentCardFlow(
+        {
+          variant: "draft",
+          phase,
+          agent: result.identity,
+          toolSelection: result.toolSelection,
+          ...(result.note ? { note: result.note } : {}),
+          ...(deciderName ? { decidedBy: deciderName } : {}),
+          ...(decidedNow ? { decidedById: callerUserId } : {}),
+          ...(decidedNow ? { decidedAt: new Date().toISOString() } : {}),
+        },
+        {
+          requestId,
+          agentSlug: cardAgentSlug ?? "",
+          userId: cardUserId,
+          ...(cardConversationId ? { conversationId: cardConversationId } : {}),
+          ...(cardChannelId ? { channelId: cardChannelId } : {}),
+        },
       );
+      if (xyneAiChatMessageId) {
+        // Xyne AI swaps the card on its chat row FIRST — the client re-reads it
+        // on the response (same ordering as write-approval cards).
+        const { replaceFlowCardOnRow } = await import("../lib/flow-card-delivery.js");
+        const replaced = await replaceFlowCardOnRow({
+          chatMessageId: xyneAiChatMessageId,
+          screenId: decidedFlow.screenId,
+          flow: {
+            ...decidedFlow,
+            data: {
+              ...(decidedFlow.data ?? {}),
+              surface: "xyne-ai",
+              chatMessageId: xyneAiChatMessageId,
+              ...(cardSpacesAppId ? { spacesAppId: cardSpacesAppId } : {}),
+            },
+          },
+          userId: callerUserId,
+        });
+        if (!replaced) log.warn(`[flow-action] agent-card xyne-ai card not replaced request=${requestId}`);
+        res.json(resp);
+      } else {
+        res.json(resp);
+        // Falls back to text if the card can't be rebuilt, so the buttons never
+        // survive a decision either way.
+        void replaceFlowCardWithFlow(
+          messageId,
+          cardAgentSlug,
+          decidedFlow,
+          cardConversationId,
+          cardChannelId,
+          cardSpacesAppId,
+        );
+      }
       log.info(`[flow-action] agent-card ${decision} request=${requestId} by=${callerUserId} phase=${phase}`);
       return;
     }

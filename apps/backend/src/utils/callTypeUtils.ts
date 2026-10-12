@@ -1,4 +1,10 @@
-import { CallType, ShareableEntityType, RecordingType } from '@xyne/shared';
+import { CallOrigin, CallType, ShareableEntityType, RecordingType } from '@xyne/shared';
+
+/** Calls that came FROM a calendar; that calendar owns them, so Xyne may not re-own them. */
+export const CALENDAR_CALL_ORIGINS = [
+  CallOrigin.GOOGLE_CALENDAR,
+  CallOrigin.MICROSOFT_CALENDAR,
+] as const;
 
 /**
  * Calls and recordings share the `Call` table and are told apart only by

@@ -81,6 +81,39 @@ export function buildCallParticipantPreviewUserIdsFromRows(
   return JSON.stringify(previewEntries);
 }
 
+/** {@link refreshCallParticipantPreview} for many calls, with one read for all of them. */
+export async function refreshCallParticipantPreviews(
+  tx: Prisma.TransactionClient,
+  callIds: readonly string[],
+): Promise<void> {
+  if (callIds.length === 0) return;
+  const participants = await tx.callParticipant.findMany({
+    where: { callId: { in: [...callIds] } },
+    select: {
+      id: true,
+      callId: true,
+      userId: true,
+      isExternal: true,
+      invitedAt: true,
+      respondedAt: true,
+      joinedAt: true,
+    },
+  });
+  const byCall = new Map<string, CallParticipantPreviewRow[]>(callIds.map(callId => [callId, []]));
+  for (const participant of participants) byCall.get(participant.callId)?.push(participant);
+
+  // Each call gets its own count and preview, so these stay one update per call.
+  for (const [callId, rows] of byCall) {
+    await tx.call.update({
+      where: { id: callId },
+      data: {
+        participantCount: rows.length,
+        participantPreviewUserIds: buildCallParticipantPreviewUserIdsFromRows(rows),
+      },
+    });
+  }
+}
+
 export async function refreshCallParticipantPreview(
   tx: Prisma.TransactionClient,
   callId: string,

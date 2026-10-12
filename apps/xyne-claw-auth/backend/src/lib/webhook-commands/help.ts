@@ -37,5 +37,16 @@ export async function handleHelp(ctx: WebhookCommandCtx): Promise<void> {
     "- `/debug chain` — why the agent workflow bound to this channel did or did not hand off to the next agent: bindings, published state, outgoing edges and plan mode",
     "- `/eval <question>` — run the question once on every configured provider; each answers in this thread, then an HTML comparison of their timings is attached. `providers=claude,codex` narrows it",
     "- `/help` — show this list",
+    // Chat-only commands: a messenger has no @mentions or thread controls.
+    ...(ctx.channelDelivery
+      ? [
+          "",
+          "*In this chat*",
+          "- `/new` (or `/reset`, `/clear`) — start a fresh conversation",
+          "- `/agents` — the agents you can talk to here · `/<agent> <message>` — send a message to one of them",
+          "- `/stop` also works as `/cancel` or `/abort`",
+          "- Files a chat can't carry (HTML traces, big downloads) arrive as a link that opens in your browser",
+        ]
+      : []),
   ].join("\n"), "Failed to post /help reply");
 }

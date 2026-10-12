@@ -9,4 +9,9 @@ export {
 } from './appSnapshotsStore';
 export { appItemId, isAppItemId, appIdOf, type AppItemId } from './appItemId';
 export { toolbarItemsStore, inboxItemsStore, MAX_APPS_PER_BAR } from './stores';
-export { getChannelTabsStore, DEFAULT_CHANNEL_TABS } from './channelTabsStores';
+export {
+  getChannelTabsStore,
+  useChannelTabsStore,
+  DEFAULT_CHANNEL_TABS,
+} from './channelTabsStores';
+export { useEnsureAppSnapshots } from './useEnsureAppSnapshots';

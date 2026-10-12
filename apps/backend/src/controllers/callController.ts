@@ -4,6 +4,8 @@ import {
   allowedSourcesForHostControls,
   hasTurnedOffHostControl,
   getHostControls,
+  isAgentParticipant,
+  isHumanParticipant,
 } from '@/services/liveKitService';
 import { repositories } from '@/database/repositories';
 import { DatabaseClient, db } from '@/database/client';
@@ -28,6 +30,7 @@ import { normalizeStoragePath } from '@xyne/storage';
 import { sdlcCallLinkSchema, type SdlcCallLink } from '@xyne/shared';
 import { callRecordingService } from '@/services/callRecordingService';
 import { isRecording, isRecordingType } from '@/utils/callTypeUtils';
+import { isTranscriptUnlinked } from '@/utils/transcriptUnlink';
 import { config } from '@/config/env';
 import { callDocumentService, numberTranscriptSegments, buildParticipantMap } from '@/services/callDocumentService';
 import {
@@ -52,6 +55,8 @@ import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQue
 import { callShareService } from '@/services/callShareService';
 import { callNotesCanvasService } from '@/services/callNotesCanvasService';
 import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
+import { acquireSummaryGenerationLock } from '@/utils/summaryGenerationLock';
+import { releaseLock } from '@/utils/distributedLock';
 import { summaryTemplateService } from '@/services/summaryTemplateService';
 import { canvasAuthService } from '@/services/canvasAuthService';
 import { validateOwnerInChannel } from '@/sdlc/entityLinkService';
@@ -502,7 +507,7 @@ export class CallController {
         }
 
         stage = 'transcription_agent_resolution';
-        const headlessAgentName = await livekitService.resolveAgentNameForUser(userId);
+        const headlessAgentName = await livekitService.resolveAgentNameForUser(userId, { roomName: callExternalId });
 
         const roomLink = buildCallInviteUrl(callExternalId);
         const roomMetadata = JSON.stringify({
@@ -766,7 +771,7 @@ export class CallController {
       }
 
       stage = 'transcription_agent_resolution';
-      const agentName = await livekitService.resolveAgentNameForUser(userId);
+      const agentName = await livekitService.resolveAgentNameForUser(userId, { roomName: callExternalId });
 
       // Create LiveKit room with metadata
       // The webhook will create all DB records when first participant joins
@@ -811,7 +816,14 @@ export class CallController {
             return;
           }
           const participants = await livekitService.listParticipants(callExternalId!);
-          const hasAgent = participants.some(p => p.identity.startsWith('agent-'));
+          // A room outlives its last participant (emptyTimeout), so a call that ended
+          // inside the 30s shows up here as an active room with nobody in it; that is
+          // not an agent failure, only a short call.
+          if (!participants.some(isHumanParticipant)) {
+            logger.info(`[${callExternalId}] agent_join_check_skipped | reason=no_human_participants`);
+            return;
+          }
+          const hasAgent = participants.some(isAgentParticipant);
           if (!hasAgent) {
             logger.error(`[${callExternalId}] agent_failed_to_join | reason=timeout_30s`);
             // Second safety net behind dispatchTranscriptionAgentForCall's own ~9s claim
@@ -995,7 +1007,7 @@ export class CallController {
           logger.info(`Deleted existing room ${callId}`);
         }
 
-        const joinAgentName = await livekitService.resolveAgentNameForUser(activeCall.createdByUserId);
+        const joinAgentName = await livekitService.resolveAgentNameForUser(activeCall.createdByUserId, { roomName: callId });
 
         // Prepare room metadata
         const roomMetadata = JSON.stringify({
@@ -1397,12 +1409,17 @@ export class CallController {
       let identifiedTranscriptContent: string | null = null;
       let hasTranscript: boolean;
       let hasIdentifiedTranscript: boolean;
+      // Admin unlink keeps the storage files, and every read below goes to storage by
+      // call id, so an unlinked transcript has to be treated as absent here.
+      const transcriptUnlinked = isTranscriptUnlinked(call);
 
       if (scope === 'metadata') {
-        [hasTranscript, hasIdentifiedTranscript] = await Promise.all([
-          transcriptService.transcriptExists(call.externalId),
-          transcriptService.identifiedTranscriptExists(call.externalId),
-        ]);
+        [hasTranscript, hasIdentifiedTranscript] = transcriptUnlinked
+          ? [false, false]
+          : await Promise.all([
+              transcriptService.transcriptExists(call.externalId),
+              transcriptService.identifiedTranscriptExists(call.externalId),
+            ]);
       } else {
         if (call.transcript) {
           try {
@@ -1414,10 +1431,12 @@ export class CallController {
         }
 
         // Fetch real-time identified transcript (written during call by the Python agent)
-        try {
-          identifiedTranscriptContent = await transcriptService.getIdentifiedTranscriptContent(call.externalId);
-        } catch (fetchError) {
-          logger.warn(`Failed to fetch identified transcript: ${fetchError}`);
+        if (!transcriptUnlinked) {
+          try {
+            identifiedTranscriptContent = await transcriptService.getIdentifiedTranscriptContent(call.externalId);
+          } catch (fetchError) {
+            logger.warn(`Failed to fetch identified transcript: ${fetchError}`);
+          }
         }
         hasTranscript = !!transcriptContent;
         hasIdentifiedTranscript = !!identifiedTranscriptContent;
@@ -1813,14 +1832,25 @@ export class CallController {
         return;
       }
 
+      // Shared with every other summary entry point (admin panel included): two
+      // overlapping runs would overwrite each other's detailedSummaryStatus.
+      const lockHandle = await acquireSummaryGenerationLock(call.externalId);
+      if (!lockHandle) {
+        res.status(409).json({ success: false, error: 'A summary is already being generated' });
+        return;
+      }
+
       // Fire-and-forget: the service owns every status transition ('pending'
       // at start, 'ready'/'failed' at the end) plus the completion
       // notification, so holding this HTTP request open for a minutes-long
-      // LLM run adds nothing except timeout risk.
+      // LLM run adds nothing except timeout risk. The lock is released when it settles.
       void noteTakerTranscriptService
         .regenerateSummary(call, input.summaryTemplateId, input.modelType)
         .catch(error => {
           logger.error(`[${callId}] Background summary regeneration threw`, error);
+        })
+        .finally(() => {
+          void releaseLock(lockHandle);
         });
 
       res.status(202).json({ success: true, status: 'pending' });
@@ -2008,7 +2038,8 @@ export class CallController {
         return;
       }
 
-      const transcript = await transcriptService.getTranscriptContent(callId);
+      // An admin-unlinked transcript still sits in storage (translations included); treat it as absent.
+      const transcript = isTranscriptUnlinked(call) ? null : await transcriptService.getTranscriptContent(callId);
       if (transcript === null) {
         res.status(404).json({ success: false, error: 'Transcript not available for this call' });
         return;
@@ -2195,7 +2226,9 @@ export class CallController {
       }
 
       // 3. Get transcript content
-      const transcriptContent = await transcriptService.getTranscriptContent(call.externalId);
+      const transcriptContent = isTranscriptUnlinked(call)
+        ? null
+        : await transcriptService.getTranscriptContent(call.externalId);
       if (!transcriptContent) {
         res.status(404).json({ success: false, error: 'Transcript not available for this call' });
         return;
@@ -2299,19 +2332,32 @@ export class CallController {
       }
 
       // 3. Get transcript content
-      const transcriptContent = await transcriptService.getTranscriptContent(call.externalId);
+      const transcriptContent = isTranscriptUnlinked(call)
+        ? null
+        : await transcriptService.getTranscriptContent(call.externalId);
       if (!transcriptContent) {
         res.status(404).json({ success: false, error: 'Transcript not available for this call' });
         return;
       }
 
-      // 4. Generate detailed summary and post to conversation
-      const result = await callDocumentService.generateAndPostDetailedSummary(
-        callId,
-        transcriptContent,
-        callMessage.conversationId,
-        customPrompt
-      );
+      // 4. Generate detailed summary and post to conversation, under the lock every
+      // summary entry point shares so runs can't overlap.
+      const lockHandle = await acquireSummaryGenerationLock(call.externalId);
+      if (!lockHandle) {
+        res.status(409).json({ success: false, error: 'A summary is already being generated' });
+        return;
+      }
+      let result: Awaited<ReturnType<typeof callDocumentService.generateAndPostDetailedSummary>>;
+      try {
+        result = await callDocumentService.generateAndPostDetailedSummary(
+          callId,
+          transcriptContent,
+          callMessage.conversationId,
+          customPrompt
+        );
+      } finally {
+        await releaseLock(lockHandle);
+      }
 
       if (!result.success) {
         res.status(500).json({ success: false, error: result.error || 'Failed to generate detailed summary' });
@@ -3068,7 +3114,7 @@ export class CallController {
 
       // stopRecording clears the room-metadata indicator (every stop path) and the
       // egress_ended webhook finalizes the file + posts it to the thread.
-      await callRecordingService.stopRecording(recording);
+      await callRecordingService.stopRecording(recording, call.externalId);
 
       logger.info(`[CallController] stopCallRecording | callId=${callId}, recordingId=${recording.id}, userId=${userId}`);
       res.json({ success: true, recordingId: recording.id });

@@ -11,6 +11,7 @@ const CsvPreview = lazy(() => import('./previewers/CsvPreview'));
 const SpreadsheetPreview = lazy(() => import('./previewers/SpreadsheetPreview'));
 const ImagePreview = lazy(() => import('./previewers/ImagePreview'));
 const VideoPreview = lazy(() => import('./previewers/VideoPreview'));
+const PdfPreview = lazy(() => import('./previewers/PdfPreview'));
 const LegacyPreview = lazy(() => import('./previewers/LegacyPreview'));
 
 /**
@@ -152,17 +153,18 @@ export const PREVIEWERS: readonly Previewer[] = [
     skeleton: 'text',
     component: TextPreview,
   },
-  // Until these have previewers of their own (documents and slides as PDFs the
-  // server makes), the app's existing viewers draw them.
   {
     id: 'pdf',
     label: 'PDF',
     extensions: ['pdf'],
     mimeTypes: ['application/pdf'],
+    // Fetched a piece at a time by the viewer, so no size is too large to open.
     reads: { kind: 'stream' },
     skeleton: 'document',
-    component: LegacyPreview,
+    component: PdfPreview,
   },
+  // Until these have previewers of their own (documents and slides as PDFs the
+  // server makes, in the PDF previewer), the app's existing viewers draw them.
   {
     id: 'word',
     label: 'Word document',

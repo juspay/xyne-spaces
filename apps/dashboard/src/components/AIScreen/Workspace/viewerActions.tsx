@@ -35,16 +35,21 @@ export function useViewerActions(): ReactNode {
   return render ? render() : null;
 }
 
-export function usePublishViewerAction(render: ViewerActionRender, deps: unknown[]): void {
+export function usePublishViewerAction(
+  render: ViewerActionRender,
+  deps: unknown[],
+  /** Off for an item kept out of sight, whose control isn't the toolbar's to show. */
+  enabled = true,
+): void {
   const context = useContext(ViewerActionsContext);
   const publish = context?.publish;
   const latest = useRef(render);
   latest.current = render;
 
   useEffect(() => {
-    if (!publish) return;
+    if (!publish || !enabled) return;
     publish(() => latest.current());
     return () => publish(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [publish, ...deps]);
+  }, [publish, enabled, ...deps]);
 }

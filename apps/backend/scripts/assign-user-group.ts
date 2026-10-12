@@ -66,13 +66,19 @@ async function assignUserToGroup() {
 
       // Create orgMember with password for email/password login
       const passwordHash = await hashPassword(DEV_USER_PASSWORD);
-      const orgMember = await prisma.orgMember.create({
-        data: {
-          email,
-          orgId: defaultWorkspace.orgId,
-          role: OrgRole.MEMBER,
-          passwordHash,
-        }
+      const orgMember = await prisma.$transaction(async (tx) => {
+        const created = await tx.orgMember.create({
+          data: {
+            email,
+            orgId: defaultWorkspace.orgId,
+            role: OrgRole.MEMBER,
+            passwordHash,
+          }
+        });
+        await tx.orgMemberCredential.create({
+          data: { memberId: created.memberId, orgId: created.orgId, passwordHash },
+        });
+        return created;
       });
       console.log(`✅ Created orgMember with password for ${email}`);
 

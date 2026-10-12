@@ -430,6 +430,7 @@ export const useCanvasVersionCopy = <TVersion extends CopyableCanvasVersion>({
             ...(resolvedProjectId ? { projectId: resolvedProjectId } : {}),
             timestamp,
             participantId: uuidv4(),
+            connectId: uuidv4(),
           }),
         );
         const serverResult = await result.server;

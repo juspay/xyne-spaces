@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { db } from '@/database/client';
+import { newConnectId, ConnectEntityType } from '@/database/connectGroup';
 import {
   resolveCanvasHierarchy,
   GuestEntity,
@@ -467,6 +468,8 @@ class CanvasAuthService {
       }
       const workspaceId = creator.workspaceId;
 
+      const connectId = newConnectId();
+      const connectNow = new Date();
       await db.$transaction([
         db.canvas.create({
           data: {
@@ -477,10 +480,24 @@ class CanvasAuthService {
             title: options?.title || 'Untitled Canvas',
             content: [],
             isCollaborative: true,
+            connectId,
             ...(resolvedChannelId ? { channelId: resolvedChannelId } : {}),
             ...(resolvedProjectId ? { projectId: resolvedProjectId } : {}),
             ...(folderId ? { folderId } : {}),
             ...(options?.metadata ? { metadata: options.metadata as Prisma.InputJsonValue } : {}),
+          },
+        }),
+        db.connectGroup.create({
+          data: {
+            entityType: ConnectEntityType.CANVAS,
+            entityId: canvasId,
+            hostWorkspaceId: workspaceId,
+            invitedEntityId: null,
+            invitedWorkspaceId: null,
+            connectId,
+            status: 'ACTIVE',
+            createdAt: connectNow,
+            updatedAt: connectNow,
           },
         }),
         db.canvasParticipant.upsert({
@@ -490,6 +507,7 @@ class CanvasAuthService {
             userId,
             workspaceId,
             role: CanvasRole.OWNER,
+            canvasConnectId: connectId,
           },
           update: {
             workspaceId,

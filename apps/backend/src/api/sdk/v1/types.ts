@@ -30,6 +30,15 @@ export type V1Target =
       readonly method: HttpMethod;
       /** Built per-call, since most direct routes carry an id in the path. */
       readonly path: (args: Record<string, unknown>) => string;
+    }
+  | {
+      /**
+       * A shipped id whose catalog operation is gone with no faithful successor.
+       * It stays in the map so the caller is told why, rather than getting the
+       * same "unknown operation" a typo would.
+       */
+      readonly kind: 'retired';
+      readonly reason: string;
     };
 
 /**
@@ -44,6 +53,15 @@ export type V1Target =
 export interface V1Parsed {
   readonly args: unknown;
   readonly generated?: Readonly<Record<string, string>>;
+  /**
+   * Reshape a query's rows before they are returned.
+   *
+   * For a target that answers a broader question than the operation asks —
+   * every user group, where the caller asked for three; a one-row probe, where
+   * the caller asked yes or no. It lives in the parser so the narrowing has the
+   * caller's arguments to hand.
+   */
+  readonly mapResult?: (data: unknown) => unknown;
 }
 
 /**

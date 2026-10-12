@@ -376,18 +376,22 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
             <span className='inline-flex items-center gap-2'>Copy member names</span>
           </button>
 
-          <div className='h-px bg-border' />
+          {context.role !== 'COMMUNITY_MEMBER' && (
+            <>
+              <div className='h-px bg-border' />
 
-          <button
-            type='button'
-            onClick={() => void handleCopyEmails()}
-            className='w-full px-[12px] py-[10px] text-left text-sm font-medium text-foreground transition-colors hover:bg-accent'
-            data-track-category='CHANNEL_SETTINGS'
-            data-track-name='CopyMemberEmails'
-            data-track-metadata={JSON.stringify({ channelId: channel.id, isAdmin })}
-          >
-            <span className='inline-flex items-center gap-2'>Copy member email addresses</span>
-          </button>
+              <button
+                type='button'
+                onClick={() => void handleCopyEmails()}
+                className='w-full px-[12px] py-[10px] text-left text-sm font-medium text-foreground transition-colors hover:bg-accent'
+                data-track-category='CHANNEL_SETTINGS'
+                data-track-name='CopyMemberEmails'
+                data-track-metadata={JSON.stringify({ channelId: channel.id, isAdmin })}
+              >
+                <span className='inline-flex items-center gap-2'>Copy member email addresses</span>
+              </button>
+            </>
+          )}
         </div>
 
         {/* Private -> public card */}

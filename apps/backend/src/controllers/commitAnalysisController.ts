@@ -413,7 +413,7 @@ export class CommitAnalysisController {
 
     // Build a provider-specific VCS client + downstream services per repo
     // so board.vcsProvider picks between BitbucketService and GitHubService.
-    const vcsClient = buildVcsClient(vcsProvider as VCSProviderType);
+    const vcsClient = await buildVcsClient(vcsProvider as VCSProviderType);
     const commitAnalysisService = new CommitAnalysisService(vcsClient);
     const releaseService = new ReleaseService(commitAnalysisService);
 

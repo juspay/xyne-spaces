@@ -1016,7 +1016,12 @@ export function CallControls({
   );
 
   return (
-    <div className='flex h-16 w-full items-center justify-center gap-4 px-3 sm:h-20 sm:px-4 lg:grid lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]'>
+    <div
+      className={cn(
+        'flex w-full justify-center gap-4 px-3 sm:px-4 lg:grid lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]',
+        isFullView ? 'h-[72px] items-center pb-4' : 'h-16 items-center sm:h-20',
+      )}
+    >
       <div className='hidden min-w-0 items-center lg:flex'>{infoSlot}</div>
 
       <div className='flex flex-nowrap items-center justify-center gap-2 sm:gap-3'>

@@ -1,7 +1,7 @@
 import rateLimit, { ipKeyGenerator, type RateLimitRequestHandler } from "express-rate-limit";
 import type { Request, Response } from "express";
 import { createHash } from "node:crypto";
-import { s2sKeyMatches } from "./require-auth.js";
+import { internalS2sKeyMatches, s2sKeyMatches } from "./require-auth.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("rate-limiters");
@@ -59,6 +59,22 @@ function requesterKey(req: Request): string {
 
 function isInternalCaller(req: Request, _res: Response): boolean {
   return s2sKeyMatches(req.headers?.["x-s2s-key"]);
+}
+
+/**
+ * Spaces-backend routes (INTERNAL_S2S_KEY) that skip apiLimiter. Those calls
+ * carry no user or cookie, so the requester key falls back to the address and
+ * every Spaces call shares one bucket. The agent check runs inside installApp,
+ * which stamps AGENT/APP once, so a 429 there fails the install.
+ */
+const INTERNAL_S2S_UNLIMITED_PREFIXES = ["/internal/agents"] as const;
+
+/** `req.path` must be relative to the API base, as it is where apiLimiter is mounted. */
+export function isUnlimitedInternalS2S(req: Request): boolean {
+  return (
+    INTERNAL_S2S_UNLIMITED_PREFIXES.some((prefix) => req.path === prefix || req.path.startsWith(`${prefix}/`)) &&
+    internalS2sKeyMatches(req.headers?.["x-s2s-key"])
+  );
 }
 
 export function createRequesterLimiter(options: {

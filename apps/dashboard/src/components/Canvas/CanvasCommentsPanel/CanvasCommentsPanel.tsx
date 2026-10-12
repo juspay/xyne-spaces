@@ -17,6 +17,7 @@ import { toast } from 'sonner';
 
 import { useAuth } from '../../../hooks/useAuth';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { useCanvasConnectId } from '../../../hooks/useCanvasConnectId';
 import { useMentionSearch } from '../../../hooks/useMentionSearch';
 import { useUsers } from '../../../hooks/useUsers';
 import { useZero } from '../../../hooks/useZero';
@@ -580,9 +581,13 @@ export function CanvasCommentsPanel({
   const allUsers = useUsers();
   const [threadStatusFilter, setThreadStatusFilter] = useState<CanvasCommentThreadFilter>('ALL');
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
-  const [threads = []] = useCachedQuery(queries.canvasCommentThreads({ canvasId }), {
-    enabled: Boolean(canvasId),
-  }) as unknown as [CanvasCommentThread[]];
+  const commentsConnectId = useCanvasConnectId(canvasId);
+  const [threads = []] = useCachedQuery(
+    queries.canvasCommentThreads({ canvasId, connectId: commentsConnectId }),
+    {
+      enabled: Boolean(canvasId),
+    },
+  ) as unknown as [CanvasCommentThread[]];
 
   const orderedThreads = useMemo(() => {
     return [...threads].sort((a, b) => {

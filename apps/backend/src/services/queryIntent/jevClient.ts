@@ -49,6 +49,9 @@ export type JevFailure =
 
 export const isJevConfigured = (): boolean => Boolean(envConfig.jev.apiKey);
 
+export const isPrivateJevConfigured = (): boolean =>
+  isJevConfigured() && Boolean(process.env.JEV_URL?.trim());
+
 const isProbability = (p: unknown): p is number => typeof p === 'number' && p >= 0 && p <= 1;
 
 /** The answer to `question`, or null when Jev's reply for it is unusable. */

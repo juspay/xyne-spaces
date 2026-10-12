@@ -7,7 +7,7 @@ import { logger } from '@/utils/logger';
  * the call operation that triggered it. Safe to call for any call — it no-ops unless
  * that call actually has a live pill.
  */
-export function queueScheduledCallPillSync(callId: string, context: string): void {
+export function queueScheduledCallPillSync(callId: string, callExternalId: string, context: string): void {
   setImmediate(() => {
     void (async () => {
       try {
@@ -17,7 +17,7 @@ export function queueScheduledCallPillSync(callId: string, context: string): voi
         await repositories.calls.syncScheduledCallPillMessage(callId);
       } catch (error) {
         logger.error(
-          `[${context}] Failed to sync scheduled-call pill | callId=${callId} error=${
+          `[${context}] Failed to sync scheduled-call pill | callId=${callExternalId} error=${
             error instanceof Error ? error.message : String(error)
           }`,
         );

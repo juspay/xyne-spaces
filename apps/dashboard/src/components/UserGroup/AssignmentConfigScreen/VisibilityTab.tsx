@@ -80,6 +80,19 @@ export function VisibilityTab({
   const selectedBoardName = boards.find(b => b.id === selectedBoardId)?.name;
   const hasAnyStartOffset = scoreRows.some(row => row.startOffset > 0);
   const usePercentage = computeUsePercentageForBoard(boardComplexityScores, selectedBoardId);
+  // On % share boards the engine ranks by share of recent assignments, which this client-side
+  // score cannot reproduce, so the score column is hidden rather than shown as misleading.
+  const selectedBoardScore = (boardComplexityScores ?? []).find(s => s.boardId === selectedBoardId);
+  const shareWindowDays = selectedBoardScore?.percentageWindowDays ?? null;
+  const shareBasis = selectedBoardScore?.percentageShareBasis ?? null;
+  // Without all three share settings the engine falls back to standard workload scoring
+  const isShareConfigured =
+    usePercentage &&
+    shareWindowDays !== null &&
+    (shareBasis === 'ALL' || shareBasis === 'OPEN') &&
+    (selectedBoardScore?.percentageWindowStartAt ?? null) !== null;
+  const showScore = selectedBoardId !== null && !isShareConfigured;
+  const shareTicketsLabel = shareBasis === 'OPEN' ? 'still-open tickets' : 'tickets';
 
   if (!isCurrentUserGroupMember) {
     return (
@@ -115,9 +128,11 @@ export function VisibilityTab({
           </Select>
           <p className='text-xs leading-[1.4] text-muted-foreground'>
             {selectedBoardId
-              ? usePercentage
-                ? 'Score = (weightedActiveTasks + coldStartOffset) − expertiseBonus − percentDiff. Lowest score is assigned next.'
-                : 'Score = (weightedActiveTasks + coldStartOffset) − expertiseBonus. Lowest score is assigned next. percentDiff is excluded because “Use percentage assignment” is off for this board.'
+              ? isShareConfigured
+                ? `“Use percentage assignment” is on for this board: each ticket goes to whoever is furthest below their % share of ${shareTicketsLabel} assigned here in the current window, which resets every ${shareWindowDays} day${shareWindowDays === 1 ? '' : 's'}. Open tickets only break ties, so no score is shown.`
+                : usePercentage
+                  ? '“Use percentage assignment” is on, but the share window or tickets counted is not set, so the standard score is used. Lowest score is assigned next.'
+                  : 'Score = (weightedActiveTasks + coldStartOffset) − expertiseBonus. Lowest score is assigned next.'
               : 'Pick a board to see the exact score. With “All boards”, only total open tickets and weighted load are shown.'}
           </p>
         </div>
@@ -149,7 +164,7 @@ export function VisibilityTab({
                   <th className={cn(TABLE_HEAD_CELL, 'text-center')}>Cold-Start Offset</th>
                 )}
                 {hasMaxWorkload && <th className={cn(TABLE_HEAD_CELL, 'text-center')}>Capacity</th>}
-                {selectedBoardId && <th className={cn(TABLE_HEAD_CELL, 'text-center')}>Score</th>}
+                {showScore && <th className={cn(TABLE_HEAD_CELL, 'text-center')}>Score</th>}
               </tr>
             </thead>
             <tbody className='divide-y divide-border'>
@@ -192,7 +207,7 @@ export function VisibilityTab({
                       )}
                     </td>
                   )}
-                  {selectedBoardId && (
+                  {showScore && (
                     <td className='px-6 py-4 whitespace-nowrap text-center text-sm font-medium text-foreground'>
                       {row.displayScore !== null ? row.displayScore.toFixed(2) : '—'}
                     </td>
@@ -206,7 +221,7 @@ export function VisibilityTab({
                       3 +
                       (hasAnyStartOffset ? 1 : 0) +
                       (hasMaxWorkload ? 1 : 0) +
-                      (selectedBoardId ? 1 : 0)
+                      (showScore ? 1 : 0)
                     }
                     className='px-6 py-8 text-center text-[13px] text-muted-foreground'
                   >

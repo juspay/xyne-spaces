@@ -1,5 +1,5 @@
 import React from 'react';
-import { DragableSixDots, EyeOff, PlusDefault as Plus, ThreeDotsMenuHorizontal } from '@xyne/icons';
+import { EyeOff, PlusDefault as Plus, ThreeDotsMenuHorizontal } from '@xyne/icons';
 import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -47,6 +47,7 @@ import {
 import { cn } from '../../../utils/classNames';
 import { KanbanIcon } from './KanbanIcon';
 import { HiddenColumnsPanel } from '../HiddenColumnsPanel/HiddenColumnsPanel';
+import { useColumnReorder } from './useColumnReorder';
 
 // Re-exported for the many call sites that already import it from here.
 export { KanbanIcon };
@@ -89,25 +90,6 @@ const writeColumnLayout = (key: string, patch: Partial<ColumnLayout>): void => {
     // Storage blocked or full — the layout lives for this session only.
   }
 };
-
-/** Visible grip — the only part of a column that starts a reorder drag. */
-const ColumnDragHandle: React.FC<{
-  stageId: string;
-  onDraggedStageChange: (stageId: string | null) => void;
-}> = ({ stageId, onDraggedStageChange }) => (
-  <div
-    draggable
-    onDragStart={event => {
-      event.dataTransfer.setData('text/plain', stageId); // Firefox needs data to start a drag.
-      onDraggedStageChange(stageId);
-    }}
-    onDragEnd={() => onDraggedStageChange(null)}
-    title='Drag to reorder column'
-    className='cursor-grab text-muted-foreground active:cursor-grabbing'
-  >
-    <DragableSixDots className='size-4' />
-  </div>
-);
 
 const SortableTicketCard: React.FC<SortableTicketCardProps> = ({
   ticket,
@@ -701,7 +683,6 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
     return counts;
   }, [stages, stageCounts, ticketsByStage]);
   const [columnOrder, setColumnOrder] = React.useState<string[]>([]);
-  const [draggedStageId, setDraggedStageId] = React.useState<string | null>(null);
 
   const layoutKey = [layoutScope, ...stages.map(stage => stage.id).sort()].join('|');
   const seededLayoutKeyRef = React.useRef('');
@@ -729,28 +710,28 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
     : [];
   const orderedStages = columnOrder.length ? [...visibleStages].sort(bySavedOrder) : visibleStages;
 
-  const moveColumnTo = (targetStageId: string): void => {
-    setDraggedStageId(null);
-    if (!draggedStageId || draggedStageId === targetStageId) return;
-
+  const commitColumnOrder = (visibleIds: string[]): void => {
     // Ordered over every stage, hidden ones included, so unhiding a column
     // restores it where it was rather than at the head of the strip.
-    const stageIds = [...stages].sort(bySavedOrder).map(stage => stage.id);
-    // Target index taken before the removal, so the column lands after the target
-    // when dragged rightwards and before it when dragged leftwards.
-    const fromIndex = stageIds.indexOf(draggedStageId);
-    const toIndex = stageIds.indexOf(targetStageId);
-    if (fromIndex === -1 || toIndex === -1) return; // A -1 would splice off the last column.
-    stageIds.splice(fromIndex, 1);
-    stageIds.splice(toIndex, 0, draggedStageId);
+    const queue = [...visibleIds];
+    const visible = new Set(visibleIds);
+    const stageIds = [...stages]
+      .sort(bySavedOrder)
+      .map(stage => (visible.has(stage.id) ? (queue.shift() ?? stage.id) : stage.id));
     setColumnOrder(stageIds);
     writeColumnLayout(layoutKey, { order: stageIds });
   };
+  const canReorderColumns = orderedStages.length > 1;
+  const reorder = useColumnReorder({
+    stageIds: orderedStages.map(stage => stage.id),
+    onReorder: commitColumnOrder,
+  });
 
   return (
     <div
+      ref={reorder.stripRef}
       className={cn(
-        'flex gap-1 sm:gap-4 p-2 sm:p-3 h-full bg-background overflow-x-auto min-w-screen no-scrollbar',
+        'flex gap-1 sm:gap-4 p-2 sm:p-3 h-full bg-background overflow-x-auto min-w-screen',
         containerClassName,
       )}
     >
@@ -773,14 +754,28 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
         return (
           <DroppableStage key={`${keyPrefix}${stage.id}`} id={stage.id}>
             <div
-              onDragOver={event => event.preventDefault()}
-              onDrop={() => moveColumnTo(stage.id)}
-              className={cn(
-                'group/kanbancol flex flex-col rounded-lg bg-muted h-full w-72 sm:w-96',
-                draggedStageId === stage.id && 'opacity-40',
-              )}
+              ref={reorder.columnRef(stage.id)}
+              className='group/kanbancol relative flex flex-col rounded-lg bg-muted h-full w-72 sm:w-96'
             >
-              <div className='flex items-center justify-between px-4 pt-3 pb-1 w-full'>
+              <div
+                data-column-socket
+                aria-hidden
+                className='pointer-events-none absolute inset-0 rounded-lg border-[1.5px] border-dashed border-foreground/15 bg-foreground/[0.02] opacity-0'
+              />
+              <div
+                onPointerDown={event => reorder.startPress(stage.id, event)}
+                className={cn(
+                  'group/colhead relative flex items-center justify-between px-4 pt-3 pb-1 w-full select-none',
+                  canReorderColumns && 'cursor-grab active:cursor-grabbing',
+                )}
+              >
+                {canReorderColumns && (
+                  <span
+                    data-column-grabber
+                    aria-hidden
+                    className='pointer-events-none absolute left-1/2 top-1 h-[3px] w-7 -translate-x-1/2 rounded-full bg-foreground/20 opacity-0 transition-opacity duration-150 ease-out [@media(hover:hover)_and_(pointer:fine)]:group-hover/colhead:opacity-100'
+                  />
+                )}
                 <div className='flex items-center gap-2 min-w-0'>
                   <KanbanIcon status={stage.defaultTicketStatusV2} />
                   <h3 className='text-xs font-medium truncate uppercase text-foreground'>
@@ -792,7 +787,6 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                 </div>
 
                 <div className='flex items-center gap-1'>
-                  <ColumnDragHandle stageId={stage.id} onDraggedStageChange={setDraggedStageId} />
                   {onHideColumn && (
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
@@ -907,6 +901,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
           onUnhide={onUnhideColumn}
         />
       )}
+      {reorder.layer}
     </div>
   );
 };

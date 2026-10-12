@@ -37,7 +37,6 @@ export interface CreateTicketRequest {
   stageName?: string; // Optional stage name for the ticket
   skipStageEta?: boolean; // Skip creating active stage ETA tracking entry
   tags?: string[]; // Optional tags for categorization
-  merchantId?: string; // Merchant ID to which the ticket is linked
   ticketType?: string; // Lookup value from lookup_values table (type=TICKET_TYPE)
 
 }
@@ -75,6 +74,7 @@ export interface TicketDuplicateCheckRequest {
 
 export interface TicketDuplicateCandidate {
   id: string;
+  xyneId?: string;
   title: string;
   description: string;
   boardId?: string;
@@ -92,6 +92,12 @@ export interface TicketDuplicateCheckAnalysis {
   confidence?: number;
   reason?: string;
   error?: string;
+  matches?: Array<{
+    id: string;
+    tier: 'likely' | 'similar';
+    score: number;
+    relation?: 'duplicate' | 'regression' | 'related' | 'unrelated';
+  }>;
 }
 
 export interface TicketDuplicateCheckResponse {

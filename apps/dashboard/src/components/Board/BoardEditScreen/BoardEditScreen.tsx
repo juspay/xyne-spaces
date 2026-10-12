@@ -1855,13 +1855,9 @@ const BoardEditScreen = ({
                                 )}
 
                                 {/* Show in Create toggle - for fields that can be hidden in create modal */}
-                                {[
-                                  'dueDate',
-                                  'assignedTo',
-                                  'merchantId',
-                                  'tags',
-                                  'ticketType',
-                                ].includes(field.name) && (
+                                {['dueDate', 'assignedTo', 'tags', 'ticketType'].includes(
+                                  field.name,
+                                ) && (
                                   <div className='flex items-center gap-2'>
                                     <span className='text-[13px] text-[#505b62] leading-[18px] tracking-[-0.2px]'>
                                       Show in Create

@@ -12,6 +12,7 @@ import { ExternalSourceRepository } from '../../database/repositories/externalSo
 import { ChannelRepository } from '../../database/repositories/channelRepository';
 import crypto from 'crypto';
 import { SlackMessage, SlackFile, UserInfoCache } from '../slack/utils/extractConversation';
+import { getAppCreatorEmail } from '../slack/migrationWorkspaceConfig';
 import {
   ExternalAttachmentService,
   ExternalAttachment,
@@ -250,13 +251,13 @@ export const findOrCreateApp = async (
   // ── 2. Not found in target workspace — create fresh app + user ───────────
   // Each workspace gets its own apps row so workspace-scoped features
   // (permissions, webhooks, commands) are cleanly isolated.
-  // App createdBy = the MIGRATION_APP_CREATOR_EMAIL user IN the target workspace (the same email can exist in several).
-  const creatorEmail = config.slackMigration.appCreatorEmail;
+  // App createdBy = the workspace's app creator (Superposition, else MIGRATION_APP_CREATOR_EMAIL) IN that workspace.
+  const creatorEmail = await getAppCreatorEmail(workspaceId ?? '');
   const creatorUser = creatorEmail
     ? await db.user.findFirst({ where: { email: creatorEmail, workspaceId } })
     : null;
   if (!creatorUser) {
-    throw new Error(`[findOrCreateApp] App creator not found for '${creatorEmail}' in workspace ${workspaceId} — set MIGRATION_APP_CREATOR_EMAIL to a user in this workspace.`);
+    throw new Error(`[findOrCreateApp] App creator not found for '${creatorEmail}' in workspace ${workspaceId} — set SlackMigrationWorkspaces["${workspaceId}"].app_creator_email in Superposition to a user in this workspace.`);
   }
 
   // Build a unique app name so bots with identical display names (e.g. two

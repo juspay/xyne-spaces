@@ -37,10 +37,9 @@ import {
 } from '../../components/ui/dropdown-menu';
 import { useActiveUsers, useActiveUserSearch, useUsers } from '../../hooks/useUsers';
 import { useAllChannels } from '../../hooks/useChannels';
-import { useZero } from '../../hooks/useZero';
+import { useMarkMissedCallsReadOnVisit } from '../../hooks/useMissedCallCount';
 import { cn } from '../../utils/classNames';
 import { isSameDay } from '../../utils/dateUtils';
-import { mutators } from '../../zero/mutators';
 import { CallCard } from './CallCard';
 import {
   hasExternalChatAccess,
@@ -419,7 +418,6 @@ const CallHistoryScreen = (): ReactElement => {
     [otherUsersCalls],
   );
 
-  const zero = useZero();
   const callHistoryLoadStartTimeRef = useRef<number | null>(null);
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(null);
 
@@ -437,8 +435,6 @@ const CallHistoryScreen = (): ReactElement => {
   }, [isLoading]);
 
   const showRecentCallsLoader = isLoading || (showMinLoader && (calls?.length ?? 0) === 0);
-
-  const endedCallsCount = calls?.filter(c => c.status === CallStatus.ENDED).length ?? 0;
 
   const searchParams = new URLSearchParams(location.search);
   const callIdParam = searchParams.get('callId');
@@ -479,11 +475,7 @@ const CallHistoryScreen = (): ReactElement => {
     });
   }, [callIdParam, calls, scheduledCalls]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => {
-    if (endedCallsCount === 0) return;
-
-    void zero.mutate(mutators.activities.markMissedCallsAsRead({}));
-  }, [endedCallsCount]);
+  useMarkMissedCallsReadOnVisit();
 
   useEffect(() => {
     if (queryDetails.type === 'unknown') {
@@ -839,7 +831,7 @@ const CallHistoryScreen = (): ReactElement => {
         )}
       >
         {/* Sticky header */}
-        <div className='max-w-[860px] w-full sticky top-0 bg-background z-50 flex flex-col gap-3 pt-4 pb-6 sm:pb-3'>
+        <div className='max-w-[852px] w-full sticky top-0 bg-background z-50 flex flex-col gap-3 pt-4 pb-6 sm:pb-3'>
           {/* Row 1: Title + calendar sync */}
           <CallHistorySearchPanel
             calendarProvider={calendarProvider}
@@ -873,7 +865,7 @@ const CallHistoryScreen = (): ReactElement => {
         {/* Page body */}
         <div
           className={cn(
-            'max-w-[860px] w-full flex flex-col gap-6',
+            'max-w-[852px] w-full flex flex-col gap-6',
             viewMode === 'calendar' ? 'flex-1 min-h-0' : 'pb-6',
           )}
         >

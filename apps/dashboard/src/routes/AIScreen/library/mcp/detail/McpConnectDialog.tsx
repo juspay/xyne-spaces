@@ -1,9 +1,15 @@
 import { type ReactElement, useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/Button/Button';
+import { useSelectedAgent } from '@/hooks/useSelectedAgent';
+import { xyneAIActor } from '@/machines/xyneAIMachine';
+import type { AccessibleClawAgent } from '@/services/clawAgentListService';
 import { createMcpConnection } from '@/services/claw/clawMcpService';
 import type { McpServer } from '@/services/claw/clawMcpTypes';
 import { V2Dialog } from '../../shared/primitives/V2Dialog';
 import { McpLogo } from '../../shared/pickers/mcp/McpLogo';
+import { buildMcpSetupPrompt } from '../../shared/pickers/mcp/mcpSetupPrompt';
 import { useMcpCredentialFields } from '../../shared/pickers/mcp/useMcpCredentialFields';
 
 /**
@@ -19,6 +25,9 @@ import { useMcpCredentialFields } from '../../shared/pickers/mcp/useMcpCredentia
  *
  * Values are posted straight to claw-auth and never stored client-side.
  */
+// The agent that answers "how do I find these?"; users without it get Ask AI.
+const MCP_SETUP_AGENT_SLUG = 'xyne';
+
 interface McpConnectDialogProps {
   server: McpServer;
   iconType: string;
@@ -41,6 +50,8 @@ export const McpConnectDialog = ({
   onConnected,
 }: McpConnectDialogProps): ReactElement => {
   const { fieldsFor, loading: fieldsLoading } = useMcpCredentialFields();
+  const queryClient = useQueryClient();
+  const { setSelectedAgentSlug } = useSelectedAgent();
   const fields = fieldsFor(server);
   const [values, setValues] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
@@ -72,6 +83,26 @@ export const McpConnectDialog = ({
     } finally {
       setSubmitting(false);
     }
+  };
+
+  // The dialog is modal and would cover the panel, so it steps aside; the
+  // answer stays in Ask AI for when the user comes back to Connect.
+  const handleAskHowToConfigure = (): void => {
+    onOpenChange(false);
+    // Read the agent list the sidebar already loaded rather than waiting on a fetch;
+    // until it has, XYNE can't be confirmed, so Ask AI answers.
+    const agents =
+      queryClient.getQueryData<AccessibleClawAgent[]>(['accessible-claw-agents']) ?? [];
+    // A slug the sidebar can't resolve leaves it with no agent, so fall back to Ask AI.
+    const hasSetupAgent = agents.some(agent => agent.slug === MCP_SETUP_AGENT_SLUG);
+    setSelectedAgentSlug(hasSetupAgent ? MCP_SETUP_AGENT_SLUG : null);
+    xyneAIActor.send({
+      type: 'OPEN',
+      trackSource: 'mcp_connect_help',
+      startFreshChat: true,
+      initialQuery: buildMcpSetupPrompt(server, label, fields),
+      webSearch: true,
+    });
   };
 
   return (
@@ -113,6 +144,21 @@ export const McpConnectDialog = ({
           )}
         </div>
       </div>
+
+      {fields.length > 0 && (
+        <Button
+          variant='link'
+          size='sm'
+          className='h-auto self-start px-0 py-0'
+          onClick={handleAskHowToConfigure}
+          data-testid='mcp-connect-ask-ai'
+          data-track-category='Claw MCP'
+          data-track-name='AskAiHowToConfigureMcp'
+        >
+          <Sparkles />
+          How do I find these? Ask AI
+        </Button>
+      )}
 
       {submitting && (
         <p className='text-xs leading-4 text-muted-foreground'>

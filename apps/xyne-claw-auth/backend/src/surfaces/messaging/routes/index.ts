@@ -4,12 +4,15 @@
  * `:channel` param is resolved against the plugin registry per request.
  *
  * Auth split: the webhook ingress authenticates itself per plugin (no user
- * session — messengers POST there); the account routes are an admin API behind
+ * session — messengers POST there), as do the connect links (their token);
+ * the account routes are an admin API behind
  * a verified Spaces user session; /my-numbers is the same session with no admin
  * gate, because it only ever touches the caller's own identity rows.
  */
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { requireUserAuth } from "../../../middleware/require-auth.js";
+import { connectRouter } from "../connect.js";
+import { hostedFilesRouter } from "../hosted-files.js";
 import { accountsRouter } from "./accounts.js";
 import { channelOf } from "./context.js";
 import { numbersRouter } from "./numbers.js";
@@ -25,6 +28,12 @@ messagingRouter.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 messagingRouter.use(webhookRouter);
+// Connector sign-in links sent into a chat: opened from a phone browser with
+// no session, so the link's own token is the credential (connect.ts).
+messagingRouter.use(connectRouter);
+// Files the messenger would not carry (HTML, oversized), behind the link's
+// own token (hosted-files.ts).
+messagingRouter.use(hostedFilesRouter);
 messagingRouter.use(requireUserAuth, accountsRouter);
 // Self-service, so no admin gate — every route is scoped to the caller.
 messagingRouter.use(requireUserAuth, numbersRouter);

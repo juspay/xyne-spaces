@@ -137,12 +137,25 @@ export interface UpdateCallInput {
   metadata?: any;
   aiSummary?: string;
   title?: string;
-  transcript?: string;
+  transcript?: string | null;
   startedAt?: Date;
   recordingUrl?: string | null;
   labels?: string[];
   markedItems?: Prisma.InputJsonValue[];
   summaryTemplateId?: string | null;
+}
+
+export interface CallAdminListFilters {
+  workspaceId: string;
+  /** SELF tier: only calls this user created or participates in. */
+  participantUserId?: string;
+  statuses?: CallStatus[];
+  callType?: CallType;
+  /** Case-insensitive title match, or an exact externalId. */
+  search?: string;
+  /** Matches Call.metadata.detailedSummaryStatus; "ready" also takes a canvas with no status. */
+  summaryStatuses?: Array<'pending' | 'ready' | 'failed'>;
+  hasTranscript?: boolean;
 }
 
 export interface CreateCallWithParticipantsInput {
@@ -344,7 +357,7 @@ export class CallRepository {
       );
     }
     queueCallVespaFeed(result.id, { source: CallVespaFeedSource.CallRepositoryUpdate });
-    queueScheduledCallPillSync(result.id, 'callRepository.update');
+    queueScheduledCallPillSync(result.id, result.externalId, 'callRepository.update');
     return result;
   }
 
@@ -525,6 +538,147 @@ export class CallRepository {
     }
 
     return { calls, nextCursor };
+  }
+
+  /**
+   * Calls admin panel list: every call in the workspace, newest first, cursor-paged
+   * the same way as findByUserAndType. `participantUserId` narrows it to calls that
+   * user created or is a participant of (the panel's SELF tier).
+   */
+  async findForAdminList(
+    filters: CallAdminListFilters,
+    options: { limit: number; cursor?: { startedAt: Date; id: string } },
+  ): Promise<{ calls: Call[]; nextCursor: { startedAt: Date; id: string } | null }> {
+    const conditions: Prisma.CallWhereInput[] = [{ workspaceId: filters.workspaceId }];
+
+    if (filters.participantUserId) {
+      conditions.push({
+        OR: [
+          { createdByUserId: filters.participantUserId },
+          { participants: { some: { userId: filters.participantUserId } } },
+        ],
+      });
+    }
+    if (filters.statuses?.length) conditions.push({ status: { in: filters.statuses } });
+    if (filters.callType) conditions.push({ callType: filters.callType });
+    if (filters.search) {
+      // Support pastes a call id as often as a title, so match either.
+      conditions.push({
+        OR: [
+          { title: { contains: filters.search, mode: 'insensitive' } },
+          { externalId: filters.search },
+        ],
+      });
+    }
+    if (filters.summaryStatuses?.length) {
+      conditions.push({
+        OR: filters.summaryStatuses.flatMap((status): Prisma.CallWhereInput[] => {
+          const byStatus: Prisma.CallWhereInput = {
+            metadata: { path: ['detailedSummaryStatus'], equals: status },
+          };
+          if (status !== 'ready') return [byStatus];
+          // A channel call's own post-call summary records only the canvas, no status;
+          // count those as ready, as readSummaryStatus in callAdminService does.
+          return [
+            byStatus,
+            {
+              AND: [
+                { metadata: { path: ['detailedSummaryStatus'], equals: Prisma.AnyNull } },
+                { NOT: { metadata: { path: ['detailedSummaryCanvasId'], equals: Prisma.AnyNull } } },
+              ],
+            },
+          ];
+        }),
+      });
+    }
+    if (filters.hasTranscript !== undefined) {
+      conditions.push({ transcript: filters.hasTranscript ? { not: null } : null });
+    }
+    if (options.cursor) {
+      conditions.push({
+        OR: [
+          { startedAt: { lt: options.cursor.startedAt } },
+          { startedAt: options.cursor.startedAt, id: { lt: options.cursor.id } },
+        ],
+      });
+    }
+
+    // Fetch one extra to determine if there is a next page
+    const calls = await DatabaseClient.getInstance().call.findMany({
+      where: { AND: conditions },
+      orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
+      take: options.limit + 1,
+    });
+
+    let nextCursor: { startedAt: Date; id: string } | null = null;
+    if (calls.length > options.limit) {
+      calls.pop(); // discard the sentinel item (not part of the current page)
+      const lastInPage = calls[calls.length - 1];
+      nextCursor = { startedAt: lastInPage.startedAt, id: lastInPage.id };
+    }
+
+    return { calls, nextCursor };
+  }
+
+  /**
+   * Hand calls to a new owner: `newOwnerId` becomes createdByUserId (and organizerId
+   * where one is set) and is upserted as a participant with an ACCEPTED RSVP, the way
+   * createCallWithParticipants seeds an organizer. The previous owner keeps their
+   * participant row. Ownership deliberately stays out of UpdateCallInput — this is
+   * the only write path for it.
+   *
+   * Returns the writes unsent, for the caller to commit in one batch transaction with
+   * its own (a series moving with its calls). Participant previews are not among them:
+   * refresh those once the batch commits.
+   */
+  async transferOwnershipOps(callIds: string[], newOwnerId: string): Promise<Prisma.PrismaPromise<unknown>[]> {
+    if (callIds.length === 0) return [];
+
+    const db = DatabaseClient.getInstance();
+    const [calls, existingParticipants] = await Promise.all([
+      db.call.findMany({
+        where: { id: { in: callIds } },
+        select: { id: true, workspaceId: true, createdByUserId: true },
+      }),
+      db.callParticipant.findMany({
+        where: { callId: { in: callIds }, userId: newOwnerId },
+        select: { callId: true },
+      }),
+    ]);
+    const alreadyParticipant = new Set(existingParticipants.map(participant => participant.callId));
+    const now = new Date();
+
+    return [
+      db.call.updateMany({
+        where: { id: { in: callIds } },
+        data: { createdByUserId: newOwnerId },
+      }),
+      db.call.updateMany({
+        where: { id: { in: callIds }, organizerId: { not: null } },
+        data: { organizerId: newOwnerId },
+      }),
+      db.callParticipant.createMany({
+        data: calls
+          .filter(call => !alreadyParticipant.has(call.id))
+          .map(call => ({
+            id: uuidv4(),
+            callId: call.id,
+            workspaceId: call.workspaceId,
+            userId: newOwnerId,
+            invitedBy: call.createdByUserId,
+            invitedAt: now,
+            response: InvitationResponse.INVITED,
+            meetingStatus: MeetingStatus.ACCEPTED,
+            respondedAt: now,
+          })),
+        skipDuplicates: true,
+      }),
+      // After the create, so a row added since the read (which skipDuplicates passed over) is accepted too.
+      db.callParticipant.updateMany({
+        where: { callId: { in: callIds }, userId: newOwnerId },
+        data: { meetingStatus: MeetingStatus.ACCEPTED, respondedAt: now },
+      }),
+    ];
   }
 
   async delete(id: string): Promise<void> {
@@ -962,7 +1116,7 @@ export class CallRepository {
    */
   async findCallsWithStrandedParticipants(
     take: number,
-  ): Promise<Array<{ id: string; endedAt: Date | null }>> {
+  ): Promise<Array<{ id: string; externalId: string; endedAt: Date | null }>> {
     const stranded = await DatabaseClient.getInstance().callParticipant.findMany({
       where: {
         response: InvitationResponse.ACCEPTED,
@@ -977,7 +1131,7 @@ export class CallRepository {
 
     return await DatabaseClient.getInstance().call.findMany({
       where: { id: { in: stranded.map((p) => p.callId) } },
-      select: { id: true, endedAt: true },
+      select: { id: true, externalId: true, endedAt: true },
       orderBy: { endedAt: 'asc' },
     });
   }
@@ -1042,7 +1196,7 @@ export class CallRepository {
     const result = await handleParticipantLeaveTx(callExternalId, userId, this, leftAt);
     queueCallVespaFeed(result.call?.id, { source: CallVespaFeedSource.CallRepositoryHandleParticipantLeaving });
     if (result.call) {
-      queueScheduledCallPillSync(result.call.id, 'callRepository.handleParticipantLeave');
+      queueScheduledCallPillSync(result.call.id, result.call.externalId, 'callRepository.handleParticipantLeave');
     }
     return result;
   }
@@ -1062,7 +1216,7 @@ export class CallRepository {
     const result = await handleRoomFinishedTx(callExternalId, endedAt, this);
     queueCallVespaFeed(result.call?.id, { source: CallVespaFeedSource.CallRepositoryHandleRoomFinished });
     if (result.call) {
-      queueScheduledCallPillSync(result.call.id, 'callRepository.handleRoomFinished');
+      queueScheduledCallPillSync(result.call.id, result.call.externalId, 'callRepository.handleRoomFinished');
     }
     return result;
   }
@@ -1118,7 +1272,7 @@ export class CallRepository {
       await messageMetadataService.syncInitialMessageMd(activatedCallMeta.conversationId);
     }
     queueCallVespaFeed(callParam.id, { source: CallVespaFeedSource.CallRepositoryActivateScheduledCall });
-    queueScheduledCallPillSync(callParam.id, 'callRepository.activateScheduledCall');
+    queueScheduledCallPillSync(callParam.id, callParam.externalId, 'callRepository.activateScheduledCall');
   }
 
   /**
@@ -1312,7 +1466,7 @@ export class CallRepository {
       return [];
     }
 
-    logger.info(`[getParticipantsInfo] Resolved call: externalId=${callExternalId}, internalId=${call.id}`);
+    logger.info(`[getParticipantsInfo] Resolved call: externalId=${callExternalId}`);
 
     // Fetch participants with response status
     const callParticipants = await DatabaseClient.getInstance().callParticipant.findMany({
@@ -1329,7 +1483,7 @@ export class CallRepository {
       },
     });
 
-    logger.info(`[getParticipantsInfo] Found ${callParticipants.length} call_participant records for callId=${call.id}, userIds: ${callParticipants.map(p => p.userId).join(', ')}`);
+    logger.info(`[getParticipantsInfo] Found ${callParticipants.length} call_participant records for callId=${callExternalId}, userIds: ${callParticipants.map(p => p.userId).join(', ')}`);
 
     const userIds = callParticipants.map(p => p.userId);
     if (userIds.length === 0) {
@@ -1369,6 +1523,21 @@ export class CallRepository {
         joinedAt: p.joinedAt,
         leftAt: p.leftAt,
       };
+    });
+  }
+
+  /**
+   * The detailed-summary canvas of a call, scoped to the call's workspace when
+   * it has one. Only the persisted BlockNote snapshot; live Y-Sweet content is
+   * read by the caller.
+   */
+  async findSummaryCanvas(
+    canvasId: string,
+    workspaceId: string | null
+  ): Promise<{ id: string; content: Prisma.JsonValue } | null> {
+    return DatabaseClient.getInstance().canvas.findFirst({
+      where: { id: canvasId, ...(workspaceId ? { workspaceId } : {}) },
+      select: { id: true, content: true },
     });
   }
 
@@ -1460,7 +1629,7 @@ export class CallRepository {
     const updatedCall = await updateScheduledCallTx(db, title, startsAt, endsAt, channelId, metadata, callUpdatesChannel, callId, removeUserIds, addUserIds, invitedByUserId, externalInvitees, summaryTemplateId);
 
     queueCallVespaFeed(callId, { source: CallVespaFeedSource.CallRepositoryUpdateScheduledCall });
-    queueScheduledCallPillSync(callId, 'callRepository.updateScheduledCall');
+    queueScheduledCallPillSync(callId, updatedCall.externalId, 'callRepository.updateScheduledCall');
     return updatedCall;
   }
 

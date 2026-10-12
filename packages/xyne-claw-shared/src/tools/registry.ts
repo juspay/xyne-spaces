@@ -152,6 +152,7 @@ register(researchAgent.reviewPullRequest);
 // historical messages; only the registration is gone.
 register(reactArtifact.createReactArtifactTool);
 register(reactArtifact.readArtifactAppFileTool);
+register(reactArtifact.publishArtifactAppTool);
 
 // Register create-html-report tool — renders a markdown report into a
 // standalone HTML file and attaches it, leaving a short summary inline in
@@ -240,6 +241,7 @@ register(sandbox.sandboxReadFile);
 register(sandbox.sandboxDeliverFiles);
 register(sandbox.sandboxDestroy);
 register(sandbox.sandboxRepoSetup);
+register(sandbox.sandboxListProfiles);
 register(sandbox.sdlcRepositoryAccess);
 register(sandbox.gitRead);
 register(videoExplainer.createVideoExplainer);

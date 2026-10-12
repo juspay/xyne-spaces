@@ -1,107 +1,10 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
-export interface OptimizationSpec {
-  summary: string;
-  defaultOn: boolean;
-}
+import { OPTIMIZATIONS, OPTIMIZATION_KEYS, OPTIMIZATION_TIER_DEFAULTS, type OptimizationKey } from "xyne-claw-shared";
 
-export const OPTIMIZATIONS = {
-  jev_tool_sift: {
-    summary: "search-tools adds tools Jev scores as relevant on top of keyword hits",
-    defaultOn: true,
-  },
-  jev_compaction: {
-    summary: "compaction tries Jev call/result selection before LLM summarisation",
-    defaultOn: true,
-  },
-  jev_auto_continue: {
-    summary: "an answer Jev judges incomplete gets one automatic continuation turn",
-    defaultOn: true,
-  },
-  auto_continue_strict: {
-    summary: "auto-continue only when the reply is intent-only or reads as unfinished, not merely 'did not answer'",
-    defaultOn: false,
-  },
-  jev_result_sift: {
-    summary: "large list-shaped results from retrieval tools are relevance-filtered against the user's request before reaching the model; the full result is always saved to a file first",
-    defaultOn: false,
-  },
-  jev_verify_prefilter: {
-    summary: "Verify Responses asks Jev first: drafts Jev is confident are fine are delivered without the LLM verifier, the rest go to the LLM as before, and when the LLM verifier is unavailable a high-risk draft is sent back instead of passing unchecked",
-    defaultOn: false,
-  },
-  jev_twin_gate: {
-    summary: "the Digital Twin's respond/skip gate asks Jev first: a score ≥ 0.7 lets the twin run, ≤ 0.3 skips it as noise, anything in between (or Jev down) goes to the LLM gate as before",
-    defaultOn: true,
-  },
-  jev_twin_delivery_check: {
-    summary: "every accepted twin_deliver is scored by Jev (answers the ask, grounded, right destination); the scores ride along with the delivery for the approver and the pipeline log — advisory, never blocks",
-    defaultOn: true,
-  },
-  jev_memory_candidate_check: {
-    summary: "memory-curator candidates are checked by Jev against the user's most similar existing memories: clear duplicates and noise are dropped, the rest are ranked and carry a Jev score that auto-approval also requires",
-    defaultOn: true,
-  },
-  jev_memory_file_pick: {
-    summary: "a twin run loads the persona files Jev scores as needed for this message (max 3, soul.md always) instead of the fixed toggled set; Jev down → the toggled set",
-    defaultOn: true,
-  },
-  jev_memory_update_check: {
-    summary: "each nightly persona-file rewrite is scored by Jev against the old file and the approved facts; a rewrite Jev rejects keeps the old file",
-    defaultOn: true,
-  },
-  jev_context_gate: {
-    summary: "before the agent's answer is accepted, Jev scores whether the evidence gathered supports a complete answer; when it clearly does not, the agent is nudged once to fetch more context",
-    defaultOn: false,
-  },
-  jev_mode_router: {
-    summary: "plain-text messages are routed to /review, /learn or no mode by Jev when it is confident; otherwise the LLM router decides as before",
-    defaultOn: true,
-  },
-  jev_goal_prefilter: {
-    summary: "a /goal loop's done-check asks Jev first; only when Jev is unsure (or down) does the LLM boss judge run",
-    defaultOn: true,
-  },
-  jev_prefetch_gate: {
-    summary: "query prefetch asks Jev whether the first message names anything worth looking up; a clear no skips the LLM entity extractor",
-    defaultOn: true,
-  },
-  jev_checkpoint_precheck: {
-    summary: "the 'final answer looks like a compaction checkpoint' nudge asks Jev first; when Jev is confident the text is a real answer, the extra LLM turn is skipped",
-    defaultOn: true,
-  },
-  jev_tool_progress: {
-    summary: "on long tool loops, Jev scores whether the recent calls are still making progress; clear stalls get the converge nudge early instead of waiting for the fixed call count",
-    defaultOn: false,
-  },
-  catalog_full_index: {
-    summary: "the system-prompt tool index names every loadable tool, fitted to a size budget, instead of collapsing catalogs over 15 tools to a single line — so the model loads by exact name rather than guessing search terms",
-    defaultOn: false,
-  },
-  subagent_read_tools: {
-    summary: "the tools inside an agent's own subagents, writes included, are also loadable directly through search-tools/load-tools, so it can skip the subagent round trip; each tool keeps its permission and approval, and nothing outside the agent's grant is added",
-    defaultOn: false,
-  },
-  subagent_direct_only: {
-    summary: "built-in server subagents (spaces, bitbucket, …) are not offered at all: their tools, writes included, are catalogued and the agent loads and calls them itself, so no run waits on a nested subagent; custom subagents are kept",
-    defaultOn: false,
-  },
-  interim_messages: {
-    summary: "text the model writes alongside a tool call is sent to the person as soon as that turn ends, and only the last turn is kept as the final answer — for messaging channels, where nothing else shows progress",
-    defaultOn: false,
-  },
-  lean_palette: {
-    summary: "with the open palette on, tools it admitted (not ones the agent was granted) stay hidden in the catalog — including write tools — and under a reads+writes palette the forced `spaces` wrapper is dropped since its tools are loadable directly",
-    defaultOn: false,
-  },
-  active_tool_cap: {
-    summary: "when an agent starts with more active tools than its cap (25 by default), only its most-used tools of the last 7 days stay active; the rest move to the catalog, are named in the tool index and load with one load-tools call — nothing is removed from the grant",
-    defaultOn: false,
-  },
-} as const satisfies Record<string, OptimizationSpec>;
-
-export type OptimizationKey = keyof typeof OPTIMIZATIONS;
-export const OPTIMIZATION_KEYS = Object.keys(OPTIMIZATIONS) as OptimizationKey[];
+// The catalog (labels, copy, defaults) lives in xyne-claw-shared so the
+// agent-config UI renders the same list this module decides at run time.
+export { OPTIMIZATIONS, OPTIMIZATION_KEYS, type OptimizationKey, type OptimizationSpec } from "xyne-claw-shared";
 
 export type OptimizationOverrides = Partial<Record<OptimizationKey, boolean>>;
 
@@ -118,7 +21,7 @@ const store = new AsyncLocalStorage<{ overrides: OptimizationOverrides; tierDefa
  * and the rest wait behind search-tools / load-tools.
  */
 export function tierOptimizationDefaults(delegationMode: string | undefined): OptimizationOverrides {
-  return delegationMode === "orchestrator" ? { active_tool_cap: true } : {};
+  return { ...(delegationMode ? OPTIMIZATION_TIER_DEFAULTS[delegationMode] : undefined) };
 }
 
 function isKey(value: string): value is OptimizationKey {

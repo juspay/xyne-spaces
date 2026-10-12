@@ -481,6 +481,7 @@ export const mapMessage = async (
     channelScopeType: (channelScopeType as ChannelScopeType) || undefined,
     replyCount: conversation.replyCount || 0,
     isReply: (conversation.replyCount || 0) > 0,
+    createdAt: toTimestamp(args.createdAt),
   }).catch(err => {
     logger.error('Failed to capture message signals', err);
   });

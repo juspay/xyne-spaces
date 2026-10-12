@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, type RefObject } from 'react';
 import { CanvasCommentThreadStatus } from '@xyne/shared';
 
 import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { useCanvasConnectId } from '../../hooks/useCanvasConnectId';
 import { queries } from '../../zero/queries';
 
 export type CanvasCommentHighlightThread = {
@@ -176,8 +177,9 @@ export const useCanvasCommentHighlights = ({
   onOpenCountChange,
   onThreadsChange,
 }: UseCanvasCommentHighlightsOptions): void => {
+  const connectId = useCanvasConnectId(canvasId);
   const [threads = []] = useCachedQuery(
-    queries.canvasCommentThreads({ canvasId: canvasId || '' }),
+    queries.canvasCommentThreads({ canvasId: canvasId || '', connectId }),
     {
       enabled: enabled && Boolean(canvasId),
     },

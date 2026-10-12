@@ -44,6 +44,7 @@ export enum CallVespaFeedSource {
   ScheduledCallRepositoryCancelCall = 'ScheduledCallRepository.cancelCall',
   RecurringCallServiceCancelSeries = 'RecurringCallService.cancelSeries',
   RecurringCallServiceDeleteSeries = 'RecurringCallService.deleteSeries',
+  CallAdminPanel = 'CallAdminPanel',
 }
 
 export const queueCallVespaFeed = (

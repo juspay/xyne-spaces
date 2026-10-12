@@ -96,7 +96,7 @@ import { WorkflowType } from '@/workflows/types/workflow-enums';
 import { ticketService } from '@/services/ticketService';
 import { dualWriteTicketTags } from '@/services/ticketTagDualWriteService';
 import { createTicketWithConversationTx } from '@/bypassAcl/transactions/controllersTicketController';
-import { createTicketTx } from '@/bypassAcl/transactions/controllersTicketController';
+import { createTicketTx, TicketCreateAccessError } from '@/bypassAcl/transactions/controllersTicketController';
 import { mergeTicketTx } from '@/bypassAcl/transactions/controllersTicketController';
 import { unmergeTicketTx } from '@/bypassAcl/transactions/controllersTicketController';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
@@ -110,6 +110,27 @@ type MyTicketBoardOption = {
   id: string;
   name: string;
   projectId?: string;
+};
+
+const MAX_DUPLICATE_DECISIONS = 20;
+
+const duplicateDecisionsOf = (raw: unknown): { sameAs: string | null; notSame: string[] } => {
+  let value = raw;
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return { sameAs: null, notSame: [] };
+    }
+  }
+  if (!value || typeof value !== 'object') return { sameAs: null, notSame: [] };
+  const { sameAs, notSame } = value as { sameAs?: unknown; notSame?: unknown };
+  return {
+    sameAs: typeof sameAs === 'string' && sameAs.length > 0 ? sameAs : null,
+    notSame: (Array.isArray(notSame) ? notSame : [])
+      .filter((id): id is string => typeof id === 'string' && id.length > 0)
+      .slice(0, MAX_DUPLICATE_DECISIONS),
+  };
 };
 
 export class TicketController {
@@ -367,6 +388,8 @@ export class TicketController {
 
   createTicket = async (req: Request, res: Response): Promise<void> => {
     try {
+      // Set only from server config below; the x-support-ticket header alone never trusts a channel.
+      let supportChannelId: string | undefined;
       // If this is a support/error-report ticket, resolve channel+board from CAC
       if (req.headers['x-support-ticket'] === 'true') {
         const cacConfig = await superpositionClient.getObjectValue(
@@ -389,6 +412,7 @@ export class TicketController {
         const SUPPORT_TAG = 'Support Ticket';
         const existingTags: string[] = Array.isArray(req.body.tags) ? req.body.tags : [];
         req.body.channelId = cacConfig.channelId;
+        supportChannelId = cacConfig.channelId;
         if (cacConfig.boardId) {
           req.body.boardId = cacConfig.boardId;
           const board = await this.boardRepository.findBoardById(cacConfig.boardId);
@@ -434,7 +458,6 @@ export class TicketController {
         excludedChatAttachmentIds,
         draftAttachmentIds,
         tags,
-        merchantId,
         parentTicketId,
         ticketType,
         stageName
@@ -594,9 +617,16 @@ export class TicketController {
 
       // Determine the actual channel to check its type
       let actualChannelId = channelId;
-      if (!actualChannelId && sourceConversationId) {
+      if (sourceConversationId) {
         const sourceConv = await this.conversationRepository.findById(sourceConversationId);
         if (sourceConv) {
+          if (channelId && channelId !== sourceConv.channelId) {
+            res.status(400).json({
+              error: 'channelId does not match the channel of sourceConversationId',
+              code: 'CHANNEL_CONVERSATION_MISMATCH',
+            });
+            return;
+          }
           actualChannelId = sourceConv.channelId;
         }
       }
@@ -791,8 +821,27 @@ export class TicketController {
         }
       }
 
+      // The one channel this ticket is created in. Everything below (the access check and the
+      // attachment rows written inside the transaction) uses this, never the raw request channelId.
+      const effectiveChannelId = sourceConversationId ? validatedConversation?.channelId : channelId;
+
       // Wrap all database operations in a transaction for data integrity
-      const { ticket } = await createTicketTx(projectId, sourceConversationId, validatedConversation, this, requestedTicketId, title, description, userId, finalAssignedTo, userGroupId, boardId, effectiveStatusV2, priority, eta, metadata, closedAt, closedBy, merchantId, sourceMessageId, effectiveTicketType, effectiveStageName, dynamicFields, formFieldChangesForEmit, channelId, excludedChatAttachmentIds, entityLinkOwner, fromTicketsTab, initialMessageId, board, uploadedFiles, draftAttachmentIds);
+      let ticket: Awaited<ReturnType<typeof createTicketTx>>['ticket'];
+      try {
+        ({ ticket } = await createTicketTx(projectId, sourceConversationId, validatedConversation, this, requestedTicketId, title, description, userId, finalAssignedTo, userGroupId, boardId, effectiveStatusV2, priority, eta, metadata, closedAt, closedBy, sourceMessageId, effectiveTicketType, effectiveStageName, dynamicFields, formFieldChangesForEmit, effectiveChannelId, excludedChatAttachmentIds, entityLinkOwner, fromTicketsTab, initialMessageId, board, uploadedFiles, draftAttachmentIds, (req.user.isApiKeyUser && req.user.role === 'admin') ? undefined : {
+          workspaceId: req.user.workspaceId,
+          channelId: effectiveChannelId,
+          boardId,
+          isGuest: req.user.role === 'GUEST',
+          trustedChannelId: supportChannelId,
+        }));
+      } catch (error) {
+        if (error instanceof TicketCreateAccessError) {
+          res.status(403).json({ error: error.message, code: error.code });
+          return;
+        }
+        throw error;
+      }
 
       // Ticket committed on its initial stage — auto-create the on-entry approval
       // request if that stage's single outgoing transition is configured for it.
@@ -981,22 +1030,26 @@ export class TicketController {
         userName: req.user?.name ?? null,
       });
 
-      ticketDuplicateService.persistDuplicateReferences({
-        ticketId: ticket.id,
-        ticketCreatedBy: ticket.createdBy,
-        title,
-        description,
-        projectId,
-        userId,
-        parentTicketId,
-        channelId: ticket.channelId,
-        scopeFieldValues: duplicateScopeValues,
-      }).catch(error => {
-        logger.error('Failed to persist duplicate references for ticket', {
+      const duplicateDecisions = duplicateDecisionsOf(req.body.duplicateDecisions);
+      if (!duplicateDecisions.sameAs) {
+        ticketDuplicateService.persistDuplicateReferences({
           ticketId: ticket.id,
-          error,
+          ticketCreatedBy: ticket.createdBy,
+          title,
+          description,
+          projectId,
+          userId,
+          parentTicketId,
+          channelId: ticket.channelId,
+          scopeFieldValues: duplicateScopeValues,
+          excludeTicketIds: duplicateDecisions.notSame,
+        }).catch(error => {
+          logger.error('Failed to persist duplicate references for ticket', {
+            ticketId: ticket.id,
+            error,
+          });
         });
-      });
+      }
 
       const response: GetTicketDetailsResponse = {
         id: ticket.id,
@@ -1360,6 +1413,7 @@ export class TicketController {
         projectId,
         userId,
         limit,
+        jevOnly: true,
       });
 
       const response: TicketDuplicateCheckResponse = {

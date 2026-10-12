@@ -1,6 +1,8 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { sanitizeProjectCode, ProjectType, ChannelRole, ChannelScopeType, ChannelVisibility } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
+import { newConnectId } from '@/database/connectGroup';
+import { createChannelWithConnectGroupMaybeTx } from '@/bypassAcl/transactions/connectGroupEntities';
 
 type PrismaClientLike = PrismaClient | Prisma.TransactionClient;
 
@@ -63,17 +65,23 @@ export async function ensureGeneralChannelForWorkspace(
       });
     }
 
-    channel = await db.channel.create({
-      data: {
+    const connectId = newConnectId();
+    // Atomic channel + connect_group (bypassAcl op). `db` may be a full client OR an already-open tx
+    // (PrismaClientLike); the bypassAcl op wraps only when it owns the client, else runs on the tx.
+    channel = await createChannelWithConnectGroupMaybeTx(
+      db,
+      {
         name: 'general',
         scopeType: ChannelScopeType.DEFAULT,
         visibility: ChannelVisibility.PUBLIC,
         createdBy,
         projectId: project.id,
         workspaceId,
+        connectId,
       },
-      select: { id: true },
-    });
+      workspaceId,
+      connectId,
+    );
 
     // Dual-write: mirror the channel→project board set into ChannelBoardMapping.
     const boards = await db.board.findMany({

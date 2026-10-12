@@ -23,7 +23,7 @@ import { compactionExtension, setCompactionSubmitTool } from "./compaction-exten
 import { takeCitations, takeDebug } from "./citations.js";
 import { applyAutoCitations } from "./auto-citations.js";
 import { extractSessionClfTokens } from "./citation-sanitizer.js";
-import { getSandboxSession } from "xyne-claw-shared";
+import { checkReplyFormat, replyFormatNudge, type ResultSectionLimits, getSandboxSession } from "xyne-claw-shared";
 import type {
   ClawAttachmentPayload,
   ClawSandboxPreviewPayload,
@@ -92,6 +92,7 @@ import { installLlmCallMetrics } from "./llm-call-metrics.js";
 import { installFastMode, isAdaptiveThinkingClaudeModel, type ModelSpeed } from "./model-speed.js";
 import { installToolBudget } from "./tool-budget.js";
 import { installAwakeningInbox } from "./awakening-inbox.js";
+import { TurnParts, type TurnPart } from "./turn-parts.js";
 import type { FastToolRuntimeController } from "./tool-catalog.js";
 
 const log = createLogger("agent");
@@ -118,7 +119,9 @@ export interface ToolInvocation {
   /** Set when this invocation originated inside a subagent's own session.
    *  Points at the tool_call_id on the parent agent that invoked the subagent. */
   parentToolCallId?: string;
-  /** Name of the subagent wrapping this invocation (e.g. "spaces", "bitbucket"). */
+  /** Name of the subagent wrapping this invocation (e.g. "spaces", "bitbucket").
+   *  On a top-level call (no parentToolCallId) it names the subagent the call
+   *  itself runs, so the UI can show it as one from the moment it starts. */
   subagentName?: string;
   /** The underlying pi-coding-agent tool_call_id for this specific call. */
   toolCallId?: string;
@@ -281,6 +284,8 @@ export interface RunResult {
   readonly latency?: LatencyMetrics;
   readonly attachments?: Attachment[];
   readonly reasoning?: string;
+  /** The run's thinking, text and tool calls in the order they happened. */
+  readonly parts?: TurnPart[];
   /** Distinct real `[clf-<id>#n]` citation tokens seen ANYWHERE in the session
    *  transcript (all prior + current turns' tool outputs). Lets run.ts sanitize
    *  citations SESSION-wide so a follow-up turn can re-cite an earlier turn's
@@ -1097,7 +1102,7 @@ export interface ProgressEmitter {
    *  progress POST → renderPrCard). */
   pr(sessionId: string, pr: Record<string, unknown>): void;
   uiWidget(sessionId: string, widget: UiWidget): void;
-  streamChunk(sessionId: string, payload: { reasoningDelta?: string; textDelta?: string }): void;
+  streamChunk(sessionId: string, payload: { reasoningDelta?: string; textDelta?: string; partId?: string }): void;
   debugProgress(sessionId: string, event: DebugEventRecord): void;
   progressLabel(sessionId: string, toolLabel: string, meta?: ClawStreamMeta): void;
   /** Final result frame. Returns once flushed so the route handler can close
@@ -1416,6 +1421,7 @@ function maybeEmitPrCard(progressUrl: ProgressDest, sessionId: string, invocatio
 // Send a single tool invocation to the progress endpoint — NOT throttled,
 // fires on every tool_execution_end so the Control Center sees live tool streams.
 export function pushInvocation(progressUrl: ProgressDest, sessionId: string, invocation: unknown): void {
+  flushStreamChunks(progressUrl, sessionId);
   if (!progressUrl) return;
   // Emit a PR card when this invocation is a completed create/merge PR (guards
   // internally; no-op for every other tool). Runs for parent + nested tools.
@@ -1446,6 +1452,17 @@ export function pushInvocation(progressUrl: ProgressDest, sessionId: string, inv
 }
 
 const INTERIM_MESSAGE_MAX_CHARS = 1_500;
+
+/**
+ * Whether an assistant turn ended by calling tools — i.e. the run continues.
+ * pi reports this as "toolUse" (pi-ai StopReason); "tool_use" is the Anthropic
+ * wire spelling this code was written against, which pi never emits, so a
+ * check for that alone is silently never true. The interim-message check was
+ * exactly that: no interim line ever left a run until this.
+ */
+export function endedInToolCalls(stopReason: string | undefined): boolean {
+  return stopReason === "toolUse" || stopReason === "tool_use";
+}
 
 export function pushInterimMessage(progressUrl: ProgressDest, sessionId: string, text: string): void {
   if (!progressUrl || typeof progressUrl !== "string") return;
@@ -1528,10 +1545,60 @@ export function pushSandboxPreview(
 
 // Stream raw text fragments (reasoning deltas, assistant text deltas) to the progress endpoint.
 // These are fired on every pi-ai text_delta / thinking_delta event — high-frequency, keep it lean.
+const STREAM_CHUNK_FLUSH_MS = 200;
+
+type StreamChunkKind = "reasoningDelta" | "textDelta";
+
+interface PendingStreamChunk {
+  url: string;
+  sessionId: string;
+  kind: StreamChunkKind;
+  partId: string | undefined;
+  text: string;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+const pendingStreamChunks = new Map<string, PendingStreamChunk>();
+
+function postStreamChunk(chunk: PendingStreamChunk): void {
+  fetch(chunk.url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(SERVER.s2sKey ? { "x-s2s-key": SERVER.s2sKey } : {}),
+    },
+    body: JSON.stringify({
+      sessionId: chunk.sessionId,
+      [chunk.kind]: chunk.text,
+      ...(chunk.partId !== undefined ? { partId: chunk.partId } : {}),
+    }),
+    signal: AbortSignal.timeout(5_000),
+  }).catch(() => {
+    // Best-effort — don't spam logs on every chunk
+  });
+}
+
+function streamChunkKey(url: string, sessionId: string): string {
+  return `${url}\u0000${sessionId}`;
+}
+
+function flushStreamChunkKey(key: string): void {
+  const chunk = pendingStreamChunks.get(key);
+  if (!chunk) return;
+  clearTimeout(chunk.timer);
+  pendingStreamChunks.delete(key);
+  postStreamChunk(chunk);
+}
+
+export function flushStreamChunks(progressUrl: ProgressDest, sessionId: string): void {
+  if (!progressUrl || isEmitter(progressUrl)) return;
+  flushStreamChunkKey(streamChunkKey(progressUrl, sessionId));
+}
+
 function pushStreamChunk(
   progressUrl: ProgressDest,
   sessionId: string,
-  payload: { reasoningDelta?: string; textDelta?: string },
+  payload: { reasoningDelta?: string; textDelta?: string; partId?: string },
 ): void {
   if (!progressUrl) return;
   if (isEmitter(progressUrl)) {
@@ -1540,16 +1607,23 @@ function pushStreamChunk(
     }
     return;
   }
-  fetch(progressUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(SERVER.s2sKey ? { "x-s2s-key": SERVER.s2sKey } : {}),
-    },
-    body: JSON.stringify({ sessionId, ...payload }),
-    signal: AbortSignal.timeout(5_000),
-  }).catch(() => {
-    // Best-effort — don't spam logs on every chunk
+  const kind: StreamChunkKind = payload.reasoningDelta !== undefined ? "reasoningDelta" : "textDelta";
+  const text = payload[kind];
+  if (text === undefined) return;
+  const key = streamChunkKey(progressUrl, sessionId);
+  const pending = pendingStreamChunks.get(key);
+  if (pending && pending.kind === kind && pending.partId === payload.partId) {
+    pending.text += text;
+    return;
+  }
+  if (pending) flushStreamChunkKey(key);
+  pendingStreamChunks.set(key, {
+    url: progressUrl,
+    sessionId,
+    kind,
+    partId: payload.partId,
+    text,
+    timer: setTimeout(() => flushStreamChunkKey(key), STREAM_CHUNK_FLUSH_MS),
   });
 }
 
@@ -1782,11 +1856,16 @@ export interface RunTaskOptions {
    *  was approved (or a trivial plan auto-continued). Debug-telemetry only —
    *  emits a mode_switch (plan→auto) event at session start. */
   planContinuation?: boolean | undefined;
+  /** Multi-agent direct chat hand-off note (claw-auth lib/agent-handoff.ts):
+   *  `resume` when this run resumes the agent's own session, `fresh` when it
+   *  starts one. Picked here because only runTask knows which it is. */
+  agentHandoff?: { resume?: string | null; fresh?: string | null } | undefined;
   /** Opt-in citation reflection (agentConfig.citationReflection). When true and
    *  the run pulled citeable sources (a tool result carried [clf-…#n] tokens)
    *  yet the final prose cites none, runTask nudges the model once to rewrite
    *  the answer with inline citations. See the post-loop block. */
   citationReflection?: boolean | undefined;
+  replyFormat?: ResultSectionLimits | undefined;
   /** Opt-in generic auto-citations (agentConfig.autoToolCitations). When true,
    *  EVERY tool result that doesn't already self-cite is chunked and prefixed
    *  with inline [clf-<toolCallId>#n] tokens (plus one generic citation per
@@ -1954,7 +2033,9 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     twinDeliverRef,
     mode,
     planContinuation,
+    agentHandoff,
     citationReflection,
+    replyFormat,
     autoToolCitations,
     isRegenerate,
     backgroundRegistry,
@@ -2549,6 +2630,9 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   const tokenUsage: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
   let streamedText = "";
   let streamedReasoning = "";
+  // The same output in order — thinking, text and tool calls across every LLM
+  // call — for the chat's step timeline (done.parts).
+  const turnParts = new TurnParts();
   // Detail of the most recent assistant turn that ended in a provider error
   // (stopReason "error") with the SDK's own auto-retries already exhausted.
   // Reset to null whenever a later turn ends cleanly, so a mid-run blip the
@@ -3015,12 +3099,17 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // Each invocation picks one at random so long-running tools cycle labels
   // instead of staying on a single string.
   const progressLabels = new Map<string, string[]>();
+  // Tools that run a whole subagent — their calls carry `subagentName`.
+  const subagentToolNames = new Set<string>();
   if (customTools) {
     for (const t of customTools) {
       const labels = (t as unknown as { progressLabels?: string[] }).progressLabels;
       if (labels?.length) progressLabels.set(t.name, labels);
+      if ((t as unknown as { subagent?: boolean }).subagent) subagentToolNames.add(t.name);
     }
   }
+  const subagentMark = (toolName: string): { subagentName?: string } =>
+    subagentToolNames.has(toolName) ? { subagentName: toolName } : {};
   const pickLabel = (toolName: string, fallback: string): string => {
     const arr = progressLabels.get(toolName);
     if (!arr?.length) return fallback;
@@ -3053,6 +3142,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       modelActive = false;
       log.info(`[agent] Tool call: ${event.toolName} argCount=${Object.keys(event.args ?? {}).length} argKeys=[${Object.keys(event.args ?? {}).join(",")}]`);
       inflightCalls.set(event.toolCallId, { toolName: event.toolName, args: event.args, startedAt: Date.now() });
+      turnParts.tool(event.toolCallId);
       pushDebugEvent("tool_execution_start", {
         toolName: event.toolName,
         args: cloneForDebug(event.args),
@@ -3077,6 +3167,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         durationMs: 0,
         status: "running",
         toolCallId: event.toolCallId,
+        ...subagentMark(event.toolName),
       };
       pushInvocation(progressUrl, sessionId ?? conversationId ?? "unknown", pendingInvocation);
       mirrorToCaller?.(pendingInvocation);
@@ -3131,6 +3222,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
           durationMs: Date.now() - started.startedAt,
           status: "completed",
           toolCallId: event.toolCallId,
+          ...subagentMark(event.toolName),
           ...(citations ? { citations } : {}),
           ...(debug ? { debug } : {}),
           ...(bgTask ? { background: true, backgroundState: "running" as const, backgroundTaskId: bgTask.taskId } : {}),
@@ -3198,7 +3290,9 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     // We no longer persist the raw deltas in debug artifacts. Instead we only
     // accumulate stream-rate summaries for the current turn.
     if (event.type === "message_update") {
-      const ame = (event as { assistantMessageEvent?: { type?: string; delta?: string } }).assistantMessageEvent;
+      const ame = (event as { assistantMessageEvent?: { type?: string; delta?: string; contentIndex?: number } }).assistantMessageEvent;
+      const partId = TurnParts.partId(llmCallSeq, ame?.contentIndex);
+      if (ame?.type === "thinking_end") turnParts.endReasoning(partId);
       if (ame && typeof ame.delta === "string" && ame.delta.length > 0) {
         if (firstDeltaAt == null && turnStartedAt != null) {
           firstDeltaAt = Date.now();
@@ -3216,7 +3310,8 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
           startStreamRateTimer();
           turnStreamThinkingChars += ame.delta.length;
           turnStreamChars += ame.delta.length;
-          pushStreamChunk(progressUrl, sessionId ?? conversationId ?? "unknown", { reasoningDelta: ame.delta });
+          turnParts.delta("reasoning", partId, ame.delta);
+          pushStreamChunk(progressUrl, sessionId ?? conversationId ?? "unknown", { reasoningDelta: ame.delta, partId });
         } else if (ame.type === "text_delta") {
           turnStreamCount += 1;
           streamWindowCount += 1;
@@ -3224,11 +3319,13 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
           streamedText += ame.delta;
           turnStreamTextChars += ame.delta.length;
           turnStreamChars += ame.delta.length;
-          pushStreamChunk(progressUrl, sessionId ?? conversationId ?? "unknown", { textDelta: ame.delta });
+          turnParts.delta("text", partId, ame.delta);
+          pushStreamChunk(progressUrl, sessionId ?? conversationId ?? "unknown", { textDelta: ame.delta, partId });
         }
       }
     }
     if (event.type === "message_end") {
+      flushStreamChunks(progressUrl, sessionId ?? conversationId ?? "unknown");
       modelActive = false; // turn finished — next turn_start re-arms the watchdog
       const msg = (event as { message?: { role?: string; usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number } } }).message;
       if (msg?.role === "assistant" && msg.usage) {
@@ -3284,7 +3381,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         if (stopReason !== "tool_use" && stopReason !== "aborted" && stopReason !== "error") {
           recordHandoffBoundary(latency.llmTurns);
         }
-        if (stopReason === "tool_use" && optEnabled("interim_messages")) {
+        if (endedInToolCalls(stopReason) && optEnabled("interim_messages")) {
           const interim = piAssistantText(msg as PiMsg);
           if (interim && sessionId) pushInterimMessage(progressUrl, sessionId, interim);
         }
@@ -3543,7 +3640,14 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         "Read these files from disk before answering.",
       ].join("\n")
     : "";
-  const mergedContext = [context, attachmentContext].filter(Boolean).join("\n\n");
+  // Multi-agent direct chat: the other agents' turns this session has not
+  // seen. A resumed session already holds this agent's own earlier turns, so it
+  // only needs what came after its last reply; a fresh one needs the whole path.
+  const handoffNote = (isResume ? agentHandoff?.resume : agentHandoff?.fresh) ?? "";
+  if (handoffNote) {
+    log.info(`[agent] multi-agent hand-off note (${isResume ? "resume" : "fresh"}, ${handoffNote.length} chars)`);
+  }
+  const mergedContext = [context, handoffNote, attachmentContext].filter(Boolean).join("\n\n");
   const contextBlock = mergedContext ? `\n\n## Additional Context\n${mergedContext}` : "";
 
   if (isResume) {
@@ -3790,6 +3894,23 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     }
   }
 
+  if (replyFormat && !structuredOutputRef && !verifyResponsesRef && !abortSignal?.aborted) {
+    const before = checkReplyFormat(extractFinalAnswerText(session, opts.finalAnswerMaxTurns) ?? "", replyFormat);
+    if (!before.ok) {
+      log.info(`[agent] replyFormat: answer does not fit (${before.problems.join("; ")}) — nudging rewrite`);
+      pushDebugEvent("reply_format", { phase: "nudge", problems: before.problems });
+      turnParts.supersedeTrailingText();
+      await promptWithAbort(() => session.prompt(`<system>${replyFormatNudge(before.problems, replyFormat)}</system>`));
+      const nq = session as unknown as { _agentEventQueue?: Promise<void> };
+      if (nq._agentEventQueue) {
+        await withAbort(nq._agentEventQueue);
+      }
+      const after = checkReplyFormat(extractFinalAnswerText(session, opts.finalAnswerMaxTurns) ?? "", replyFormat);
+      log.info(`[agent] replyFormat: rewrite ${after.ok ? "fits" : `still over (${after.problems.join("; ")}) — delivery will split it`}`);
+      pushDebugEvent("reply_format", { phase: "result", ok: after.ok, problems: after.problems });
+    }
+  }
+
   // Citation reflection (opt-in via agentConfig.citationReflection). If this run
   // pulled citeable sources — a tool/subagent result carried [clf-…#n] tokens —
   // but the final prose cites NONE of them, the agent answered from retrieved
@@ -3841,6 +3962,8 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         rounds = nudge + 1;
         log.info(`[agent] citationReflection: uncited answer with citeable sources — nudging ${rounds}/${maxRounds}`);
         pushDebugEvent("citation_reflection", { phase: "nudge", round: rounds, maxRounds });
+        // The rewrite replaces the answer just written; show only the rewrite.
+        turnParts.supersedeTrailingText();
         await promptWithAbort(() => session.prompt(`<system>${CITATION_REFLECTION_NUDGE}</system>`));
         const nq = session as unknown as { _agentEventQueue?: Promise<void> };
         if (nq._agentEventQueue) {
@@ -4170,7 +4293,8 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     });
     throw new ProviderTerminalError(provider ?? "spaces", lastTurnErrorDetail);
   }
-  return { text, toolsUsed, toolInvocations, tokenUsage, latency: latencyMetrics, sessionClfTokens, ...(streamedReasoning ? { reasoning: streamedReasoning } : {}), ...(twinDeliverRef?.value !== undefined ? { twinDelivery: twinDeliverRef.value } : {}) };
+  const parts = turnParts.finish();
+  return { text, toolsUsed, toolInvocations, tokenUsage, latency: latencyMetrics, sessionClfTokens, ...(streamedReasoning ? { reasoning: streamedReasoning } : {}), ...(parts.length > 0 ? { parts } : {}), ...(twinDeliverRef?.value !== undefined ? { twinDelivery: twinDeliverRef.value } : {}) };
   } finally {
     // Always stop the progress reporter's keep-alive timer so it doesn't keep
     // pinging after the agent finishes — including on thrown errors.

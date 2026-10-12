@@ -37,6 +37,7 @@ import {
 import {
   STATUS_OPTIONS,
   getStatusOption,
+  type StageCondition,
   type StageNode,
 } from '../BoardStageConfigScreen/BoardStageConfigScreen.types';
 import { StatusIndicator } from '../StatusIndicator';
@@ -100,7 +101,7 @@ export interface NonLinearTransitionEditorProps {
     allPairs?: Array<{ fromTempId: number; toTempId: number }>,
   ) => void;
   stageForms: Array<{ id: string; formName: string }>;
-  onAddConditionForEdge: (from: number, to: number) => void;
+  onAddConditionForEdge: (from: number, to: number, condition?: StageCondition) => void;
   isTransitionsLoading: boolean;
   editingEtaId: number | null;
   etaValue: string;
@@ -718,7 +719,7 @@ type EdgeSettingsPanelProps = {
       isAllEdge: false;
       fromStage: StageNode;
       onRemoveEdge: () => void;
-      onAddCondition: () => void;
+      onAddCondition: (condition?: StageCondition) => void;
     }
   | {
       isAllEdge: true;
@@ -976,9 +977,33 @@ const EdgeSettingsPanel: React.FC<EdgeSettingsPanelProps> = props => {
               </div>
 
               {/* Add Condition */}
+              {props.toStage.prStatuses.map(ps => (
+                <button
+                  key={ps}
+                  type='button'
+                  data-track-category='board_stage_config'
+                  data-track-name='edit_condition_for_edge'
+                  onClick={() =>
+                    props.onAddCondition({
+                      id: `pr-${props.toStage.tempId}-${ps}`,
+                      name: `PR Status - ${ps}`,
+                      whenField: 'pr_status',
+                      whenCondition: 'is',
+                      whenValue: ps,
+                      thenField: 'status',
+                      thenCondition: 'set_to',
+                      thenValue: props.toStage.name,
+                    })
+                  }
+                  className='w-full bg-background border border-border rounded-[12px] min-h-[40px] px-2 py-2 flex items-center gap-[6px] hover:bg-muted transition-colors text-left'
+                >
+                  <GitBranch size={14} className='text-muted-foreground flex-shrink-0' />
+                  <span className='text-[14px] font-medium text-foreground'>PR Status - {ps}</span>
+                </button>
+              ))}
               <button
                 type='button'
-                onClick={props.onAddCondition}
+                onClick={() => props.onAddCondition()}
                 data-track-category='board_stage_config'
                 data-track-name='add_condition_for_edge'
                 className='flex items-center gap-[6px] text-[13px] font-medium text-[#6276be] hover:text-[#5060a0] p-[4px] rounded-[6px] w-full'
@@ -1888,8 +1913,8 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
                   onAttachExistingEdgeForm(selectedEdge.fromTempId, selectedEdge.toTempId, formId)
                 }
                 stageForms={stageForms}
-                onAddCondition={() =>
-                  onAddConditionForEdge(selectedEdge.fromTempId, selectedEdge.toTempId)
+                onAddCondition={condition =>
+                  onAddConditionForEdge(selectedEdge.fromTempId, selectedEdge.toTempId, condition)
                 }
               />
             </Panel>

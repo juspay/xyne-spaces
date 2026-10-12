@@ -42,7 +42,6 @@ const CreateTicketParamsSchema = z.object({
   stageName: z.string().trim().optional(),
   eta: z.date().optional(),
   ticketType: z.string().trim().optional(),
-  merchantId: z.string().trim().min(1).optional(),
   customFieldValues: z.object({
     formId: z.string().min(1, 'Form ID is required').trim(),
     contextId: z.string().min(1, 'Context ID is required').trim(),
@@ -131,7 +130,6 @@ export async function createTicketWithConversation(
       stageName,
       eta,
       ticketType,
-      merchantId,
       customFieldValues,
     } = paramsResult.data;
 
@@ -187,7 +185,7 @@ export async function createTicketWithConversation(
         : undefined;
 
     // Generate xyneId and create ticket in a transaction
-    const ticket = await createTicketWithConversationTx(prisma, projectId, ticketRepository, title, description, userId, assignedTo, userGroupId, finalConversationId, channelId, workspaceId, boardId, priority, stageName, eta, ticketType, merchantId, formFieldChanges, customFieldValues);
+    const ticket = await createTicketWithConversationTx(prisma, projectId, ticketRepository, title, description, userId, assignedTo, userGroupId, finalConversationId, channelId, workspaceId, boardId, priority, stageName, eta, ticketType, formFieldChanges, customFieldValues);
 
     // Automations re-read the ticket on their own connection, so the event must
     // not be published before the transaction above commits.

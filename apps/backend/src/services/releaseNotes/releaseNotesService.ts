@@ -190,7 +190,7 @@ export class ReleaseNotesService {
         return prs;
       }
 
-      const commitAnalysisService = new CommitAnalysisService(buildVcsClient(provider));
+      const commitAnalysisService = new CommitAnalysisService(await buildVcsClient(provider));
 
       const results = await commitAnalysisService.analyzeCommits({
         deployedCommitId,

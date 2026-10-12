@@ -5,6 +5,7 @@ import { CONFIG } from "../config.js";
 import { createLogger } from "../logger.js";
 import { setSession } from "./session-context.js";
 import { resolveProvidersForDispatch } from "./provider-resolution.js";
+import type { ChannelDeliveryTarget } from "../surfaces/messaging/plugin.js";
 
 const log = createLogger("eval-run");
 
@@ -112,6 +113,9 @@ export interface EvalState {
   spacesAppUserId: string;
   appToken: string;
   dispatches: EvalDispatch[];
+  /** Set when /eval was typed in a messaging chat: the arms answer there and
+   *  the comparison goes there too (as a link — it is HTML). */
+  channelDelivery?: ChannelDeliveryTarget;
 }
 
 const EVAL_STATE_PREFIX = "eval:pending:";
@@ -258,6 +262,8 @@ export async function dispatchEvalRun(args: {
   spacesAppUserId: string;
   senderName?: string;
   traceId: string;
+  /** The chat to answer in, when /eval came from one instead of a thread. */
+  channelDelivery?: ChannelDeliveryTarget;
 }): Promise<EvalDispatch> {
   const sessionKey = evalSessionKey(args.conversationId, args.traceId);
   const res = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
@@ -319,6 +325,8 @@ export async function dispatchEvalRun(args: {
       appToken: args.spacesAppToken,
       spacesAppId: args.spacesAppId,
       spacesAppUserId: args.spacesAppUserId,
+      // Each arm answers in the chat rather than through Spaces.
+      ...(args.channelDelivery ? { channelDelivery: args.channelDelivery, triggerSource: args.channelDelivery.channel } : {}),
     },
     { skipConversationIndex: true },
   );

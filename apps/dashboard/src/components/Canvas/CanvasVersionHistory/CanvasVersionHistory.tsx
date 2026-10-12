@@ -12,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { useCanvasConnectId } from '../../../hooks/useCanvasConnectId';
 import { queries } from '../../../zero/queries';
 import { cn } from '../../../utils/classNames';
 import { useUsers } from '../../../hooks/useUsers';
@@ -55,9 +56,13 @@ export const CanvasVersionHistory = ({
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const [renameVersion, setRenameVersion] = useState<CanvasVersionRecord | null>(null);
   const [renameValue, setRenameValue] = useState('');
-  const [versions = []] = useCachedQuery(queries.canvasVersions({ canvasId: canvasId || '' }), {
-    enabled: open && Boolean(canvasId),
-  });
+  const connectId = useCanvasConnectId(canvasId);
+  const [versions = []] = useCachedQuery(
+    queries.canvasVersions({ canvasId: canvasId || '', connectId }),
+    {
+      enabled: open && Boolean(canvasId),
+    },
+  );
 
   if (!open) return null;
 

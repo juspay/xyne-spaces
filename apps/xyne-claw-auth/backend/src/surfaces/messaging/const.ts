@@ -50,6 +50,10 @@ export const TYPING_COUNT_TTL_S = 20 * 60;
 export const MAX_INBOUND_BYTES = 12 * 1024 * 1024;
 
 export const REDIS_PREFIX = "claw:channel";
+
+/** `ScheduledJob.replyMode` of a job set up from a WhatsApp chat: its results
+ *  are texted back to that person instead of posted into Spaces. */
+export const WHATSAPP_REPLY_MODE = "whatsapp";
 export const CONTROL_CHANNEL = `${REDIS_PREFIX}:control`;
 
 /** `/slug task` at the start of a message picks an agent. Not `@slug`: a

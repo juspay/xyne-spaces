@@ -5,6 +5,7 @@ import { logger } from '@/utils/logger';
 import { repositories } from '@/database/repositories';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
+import { runCallAiTask } from '@/services/callAi/callAiGateway';
 
 const MAX_ATTEMPTS = 5;
 const BASE_DELAY_MS = 120_000; // 2 minutes
@@ -132,7 +133,66 @@ async function waitBeforeRetry(
   });
 }
 
+/** Map a Claw-engine result into the framework agent's extracted-content shape. */
+const clawExtractedAdapter = {
+  ok: (content: string): ExtractedContent => ({ ok: true, content }),
+  fail: (reason: string): ExtractedContent => failedResult(`claw_${reason}`),
+};
+
+/**
+ * Run a non-streaming call LLM task with the legacy retry loop, or on a Claw
+ * agent when CALL_AI_USE_CLAW_AGENT is on (see services/callAi).
+ */
 export async function executeCallLlmWithRetry(
+  createAgent: () => Agent | null | Promise<Agent | null>,
+  buildPrompt: () => string,
+  operation: string,
+  callId: string,
+  buildSystemPrompt?: () => string | undefined,
+): Promise<ExtractedContent> {
+  const systemPrompt = buildSystemPrompt?.()?.trim();
+  return runCallAiTask(
+    {
+      operation,
+      userPrompt: buildPrompt(),
+      ...(systemPrompt ? { systemPrompt } : {}),
+      ...(callId && callId !== 'unknown' ? { callId } : {}),
+    },
+    clawExtractedAdapter,
+    () => executeCallLlmWithRetryLegacy(createAgent, buildPrompt, operation, callId, buildSystemPrompt),
+  );
+}
+
+/**
+ * Run a call LLM task once (no retry loop), or on a Claw agent when
+ * CALL_AI_USE_CLAW_AGENT is on. For best-effort extras such as labels and tickets.
+ */
+export async function executeCallLlmOnce(
+  createAgent: () => Agent | null | Promise<Agent | null>,
+  prompt: string,
+  operation: string,
+  callId: string | undefined,
+): Promise<ExtractedContent> {
+  return runCallAiTask(
+    {
+      operation,
+      userPrompt: prompt,
+      ...(callId && callId !== 'unknown' ? { callId } : {}),
+    },
+    clawExtractedAdapter,
+    async () => {
+      const agent = await createAgent();
+      if (!agent) {
+        return failedResult('agent_creation_failed');
+      }
+      const result = await agent.execute({ messages: [createUserMessage(prompt)] });
+      const extracted = extractAgentContent(result);
+      return extracted.ok ? extracted : ({ ...extracted, status: extracted.status ?? result.status } as ExtractedContent);
+    },
+  );
+}
+
+async function executeCallLlmWithRetryLegacy(
   createAgent: () => Agent | null | Promise<Agent | null>,
   buildPrompt: () => string,
   operation: string,
@@ -293,12 +353,54 @@ function getStreamingLlmClient(creds: StreamingLlmCreds): LLMClient {
 }
 
 /**
+ * Run a streaming call LLM task through LiteLLM, or on a Claw agent when
+ * CALL_AI_USE_CLAW_AGENT is on (see services/callAi). Claw runs do not stream text
+ * back, so `onDelta` then fires once with the complete content.
+ */
+export async function executeStreamingLlmRequest(
+  options: ExecuteStreamingLlmOptions,
+): Promise<StreamingLlmResult> {
+  return runCallAiTask<StreamingLlmResult>(
+    {
+      operation: options.operation,
+      userPrompt: options.userPrompt,
+      ...(options.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),
+      ...(options.callId ? { callId: options.callId } : {}),
+      ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
+    },
+    {
+      ok: async (content) => {
+        await emitFinalDelta(options, content);
+        return { ok: true, content };
+      },
+      fail: (reason, error) => ({
+        ok: false,
+        reason: reason === 'cancelled' || reason === 'empty_content' ? reason : 'exception',
+        error: `claw_${reason}${error ? `: ${error}` : ''}`,
+      }),
+    },
+    () => executeStreamingLlmRequestLegacy(options),
+  );
+}
+
+async function emitFinalDelta(options: ExecuteStreamingLlmOptions, content: string): Promise<void> {
+  if (!options.onDelta) return;
+  try {
+    await options.onDelta(content);
+  } catch (error) {
+    logger.warn(`[${options.callId || 'unknown'}] ${options.operation}_on_delta_failed`, {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
  * Requests a streaming completion through the shared framework client,
  * fully drains the stream, and returns the accumulated final message.
  * The full drain is required: the framework only resolves `finalMessage`
  * once the consumer has iterated the stream to completion.
  */
-export async function executeStreamingLlmRequest(
+async function executeStreamingLlmRequestLegacy(
   options: ExecuteStreamingLlmOptions,
 ): Promise<StreamingLlmResult> {
   const callId = options.callId || 'unknown';
@@ -380,9 +482,12 @@ export async function executeStreamingLlmRequest(
 
       if (!content) {
         // Deterministic empty response — retrying only burns the backoff budget.
-        logger.warn(`[${callId}] ${options.operation}_failed`, {
-          reason: 'empty_content',
+        // Logged as an attempt failure; the caller that gives up on the summary
+        // emits the single `<operation>_failed` line for the final failure.
+        logger.warn(`[${callId}] ${options.operation}_attempt_failed`, {
           attempt,
+          max_attempts: MAX_ATTEMPTS,
+          reason: 'empty_content',
           duration_ms: Date.now() - attemptStart,
         });
 

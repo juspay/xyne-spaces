@@ -48,6 +48,8 @@ export function buildRouter(service: SlackMigrationService): Router {
     })));
   }));
   router.get('/mine', wrap(async (req, res) => { res.json(ok(await service.getMineList(actorOf(req)))); }));
+  // Dashboard announcement banner — per-workspace free text from Superposition; any member may read it.
+  router.get('/announcement', wrap(async (req, res) => { res.json(ok(await service.getAnnouncement(actorOf(req)))); }));
   // Owner self-service: the submitter can resume/delete their OWN jobs (service asserts ownership) — no admin needed.
   router.post('/mine/:id/resume', wrap(async (req, res) => { res.json(ok(await service.resume(req.params.id, actorOf(req), true))); }));
   router.delete('/mine/:id', wrap(async (req, res) => { await service.remove(req.params.id, actorOf(req), true); res.json(ok({ deleted: true })); }));
@@ -76,12 +78,14 @@ export function buildRouter(service: SlackMigrationService): Router {
   router.post('/migration-jobs/:id/resume', admin, wrap(async (req, res) => { res.json(ok(await service.resume(req.params.id, actorOf(req)))); }));
   // Recover a wiped/finished channel: reset it to AWAITING_APPROVAL so Approve re-ingests from the existing GCS dump (no re-collect).
   router.post('/migration-jobs/:id/reingest', admin, wrap(async (req, res) => { res.json(ok(await service.reingest(req.params.id, actorOf(req)))); }));
+  // Jump a queued job to the front of its queue (collection or ingestion).
+  router.post('/migration-jobs/:id/prioritize', admin, wrap(async (req, res) => { res.json(ok(await service.prioritize(req.params.id, actorOf(req)))); }));
   router.delete('/migration-jobs/:id', admin, wrap(async (req, res) => { await service.remove(req.params.id, actorOf(req)); res.json(ok({ deleted: true })); }));
   router.post('/queues/:queue/pause', admin, wrap(async (req, res) => {
-    await service.pauseQueue(req.params.queue as QueueName); res.json(ok({ paused: req.params.queue }));
+    await service.pauseQueue(actorOf(req), req.params.queue as QueueName); res.json(ok({ paused: req.params.queue }));
   }));
   router.post('/queues/:queue/resume', admin, wrap(async (req, res) => {
-    await service.resumeQueue(req.params.queue as QueueName); res.json(ok({ resumed: req.params.queue }));
+    await service.resumeQueue(actorOf(req), req.params.queue as QueueName); res.json(ok({ resumed: req.params.queue }));
   }));
 
   // Scoped error handler → consistent envelope

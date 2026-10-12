@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { PrismaClient } from '@prisma/client';
-import { ChannelRole, UserType } from '@xyne/shared';
+import { AuthProvider, ChannelRole, OrgRole, UserType } from '@xyne/shared';
 import { db } from '../src/database/client';
 import { repositories } from '../src/database/repositories/index';
 import { runWithContext } from '../src/database/tenant/context';
@@ -182,7 +182,44 @@ async function registerAgent(
     await repositories.appPermissions.setAppPermissions(app.id, scopes);
   }
 
-  // Creates org member + APP user + installed_apps + APPROVED permissions, and
+  // Pre-create the app user as AGENT so installApp reuses it. AGENT is hardcoded on
+  // purpose: every row this seed registers comes from claw-auth's `agents` table, so
+  // it is always a Claw agent. installApp would otherwise ask claw-auth, which isn't
+  // running yet when start-services.sh runs this seed. An existing user is left as-is.
+  // Skipped when already installed: installApp then keeps the install's own user, and
+  // the email (derived from the app's current name) may no longer match it after a rename.
+  const alreadyInstalled = await repositories.installedApps.findFirst({
+    where: { appId: app.id, user: { workspaceId: ctx.workspaceId } },
+  });
+  // Same email installApp derives for the app user, so installApp finds and reuses this user.
+  const botName = app.name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+  const email = `${botName}-${ctx.workspaceId}@app.xyne.ai`;
+  if (!alreadyInstalled && !(await repositories.users.findByEmail(email, ctx.workspaceId))) {
+    const orgMember =
+      (await repositories.orgMembers.findByEmail(email)) ??
+      (await repositories.orgMembers.create({
+        email,
+        role: OrgRole.MEMBER,
+        organization: { connect: { orgId: ctx.orgId } },
+      }));
+    await repositories.users.create({
+      name: app.name,
+      email,
+      providerUserId: `xyne-app-${app.id}`,
+      authProvider: AuthProvider.API_KEY,
+      userType: UserType.AGENT,
+      status: 'ACTIVE',
+      workspace: { connect: { id: ctx.workspaceId } },
+      orgMember: { connect: { memberId: orgMember.memberId } },
+    });
+  }
+
+  // Creates installed_apps + APPROVED permissions (reusing the AGENT user above), and
   // returns the bot's JWT. On re-run this takes the update branch: re-approves
   // permissions and re-mints the token.
   const { jwtToken } = await installApp(app.id, ctx.workspaceId);

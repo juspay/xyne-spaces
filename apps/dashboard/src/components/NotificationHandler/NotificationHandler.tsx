@@ -894,6 +894,7 @@ function getToastFn(notificationType: string) {
     case 'email_fetch_completed':
       return toast.success;
     case 'email_fetch_failed':
+    case 'desk_account_disconnected':
       return toast.error;
     case 'collection_shared':
       return toast.success;

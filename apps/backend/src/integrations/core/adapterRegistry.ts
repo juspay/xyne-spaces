@@ -107,6 +107,7 @@ class AdapterRegistry {
     'app-desk': ExternalSourcePlatform.APP_DESK,
     ozonetel: ExternalSourcePlatform.OZONETEL,
     instagram: ExternalSourcePlatform.INSTAGRAM,
+    facebook: ExternalSourcePlatform.FACEBOOK,
   };
 
   private tryMapStringToPlatform(platformStr: string): ExternalSourcePlatform | undefined {

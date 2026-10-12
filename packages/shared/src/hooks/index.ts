@@ -41,12 +41,14 @@ export {
   useUsers,
   useUsersById,
   useUser,
+  useUserLookup,
   useSelf,
   useUserSearch,
   useActiveUsers,
   useActiveUserSearch,
   invalidateUsersMapCache,
 } from "./useUsers.js";
+export type { UserLookup } from "./useUsers.js";
 
 export {
   searchChannels,
@@ -56,6 +58,7 @@ export {
   useAllVisibleChannels,
   useVisibleProjects,
   useChannel,
+  useChannelLookup,
   useVisibleChannel,
   useChannelByName,
   useChannelSearch,
@@ -72,7 +75,7 @@ export {
   getChannelConversationsSnapshot,
   useGetLatestConversation,
 } from "./useChannels.js";
-export type { VisibleChannel, VisibleProject } from "./useChannels.js";
+export type { VisibleChannel, VisibleProject, ChannelLookup } from "./useChannels.js";
 
 export {
   usePermissions,

@@ -54,6 +54,8 @@ export interface MessageReceivedEventPayload {
   msgType: MessageType;
   /** True when an edit produced this event rather than a new message. */
   isEdit?: boolean;
+  /** True when the message is a reply, not the first message of its conversation. */
+  isReply?: boolean;
   /**
    * Fields that must never be persisted or logged. The router drops `_transient`
    * before serialising the execution context — whether or not the trigger

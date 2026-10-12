@@ -24,6 +24,7 @@ export enum ExternalSourcePlatform {
   GOOGLE_PLAY = 'google-play-reviews',
   APP_STORE = 'app-store-reviews',
   INSTAGRAM = 'instagram',
+  FACEBOOK = 'facebook',
 }
 
 export interface IngestionOptions {

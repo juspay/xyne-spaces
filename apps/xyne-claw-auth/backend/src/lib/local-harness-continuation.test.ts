@@ -154,3 +154,63 @@ describe("local harness continuation planning", () => {
     expect(context).toContain("harness answer");
   });
 });
+
+describe("multi-agent harness continuation", () => {
+  const HARNESS = "local-harness:claude";
+  let t = 0;
+  const row = (id: string, role: "user" | "assistant", agentSlug: string, parentId: string | null, runProvider: string | null = null) => {
+    t += 1;
+    return { id, role, agentSlug, parentId, runProvider, content: `${id} text`, status: "completed", createdAt: new Date(t * 1000) };
+  };
+
+  beforeEach(() => {
+    state.session = { cliSessionId: "cli-1" };
+    state.messages = [];
+  });
+
+  it("does not resume a CLI session another agent owns, and sends the whole path", async () => {
+    const messages = [row("u1", "user", "alpha", null), row("a1", "assistant", "alpha", "u1", HARNESS)];
+    const { planHarnessContinuation } = await import("./local-harness-continuation.js");
+    const plan = await planHarnessContinuation({
+      conversationId: "chat-1",
+      agentSlug: "beta",
+      provider: HARNESS,
+      multiAgent: { messages, leafId: "a1" },
+    });
+    expect(plan.resumeSessionId).toBeNull();
+    expect(plan.context).toContain("[@alpha (another agent)]: a1 text");
+  });
+
+  it("resumes the agent's own CLI session with only what it missed", async () => {
+    const messages = [
+      row("u1", "user", "alpha", null),
+      row("a1", "assistant", "alpha", "u1", HARNESS),
+      row("u2", "user", "beta", "a1"),
+      row("b2", "assistant", "beta", "u2", "spaces"),
+    ];
+    const { planHarnessContinuation } = await import("./local-harness-continuation.js");
+    const plan = await planHarnessContinuation({
+      conversationId: "chat-1",
+      agentSlug: "alpha",
+      provider: HARNESS,
+      multiAgent: { messages, leafId: "b2" },
+    });
+    expect(plan.resumeSessionId).toBe("cli-1");
+    expect(plan.context).toContain("b2 text");
+    expect(plan.context).not.toContain("a1 text");
+  });
+
+  it("falls back to the single-agent plan when the path holds one agent", async () => {
+    const messages = [row("u1", "user", "alpha", null), row("a1", "assistant", "alpha", "u1", HARNESS)];
+    state.messages = messages;
+    const { planHarnessContinuation } = await import("./local-harness-continuation.js");
+    const plan = await planHarnessContinuation({
+      conversationId: "chat-1",
+      agentSlug: "alpha",
+      provider: HARNESS,
+      multiAgent: { messages, leafId: "a1" },
+    });
+    expect(plan.resumeSessionId).toBe("cli-1");
+    expect(plan.context).toBeNull();
+  });
+});

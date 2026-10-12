@@ -82,7 +82,6 @@ import { KanbanColumns } from '../../components/Tickets/KanbanColumns/KanbanColu
 import { useHiddenKanbanColumns } from './useHiddenKanbanColumns';
 import { useViewStar } from '../../hooks/useViewStar';
 import { useDragAndDrop, type StageTransitionInfo } from '../../hooks/useDragAndDrop';
-import { useVespaTagSearch } from '../../hooks/useVespaTagSearch';
 import {
   useAllChannels,
   useAllVisibleChannels,
@@ -373,7 +372,6 @@ type CreateTicketSeed = {
   assignee?: { type: 'assigneeTo' | 'userGroup'; value: string } | null;
   priority?: TicketPriority | null;
   tags?: string[];
-  merchantId?: string;
   dynamicFields?: Record<string, string | string[]>;
   boardId?: string;
   channelId?: string;
@@ -2165,7 +2163,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     isMyTicketsView || isWorkspaceView || tagsProjectIds.length > 1;
   const shouldUseSingleProjectQuery = !shouldUseMultiProjectQuery && tagsProjectIds.length === 1;
 
-  // State for tag search query (debounced value passed to Vespa)
+  // State for tag search query
   const [tagsSearchQuery, setTagsSearchQuery] = useState('');
 
   // Pagination state for Zero query tags
@@ -2182,26 +2180,28 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     setHasMoreZeroTags(true);
   }, [tagsProjectIdsKey, tagsSearchQuery]);
 
-  // Fetch tags via Zero query for single project (for initial load without search)
+  // Fetch tags via Zero query for single project
   // Only used for regular board views (not my-tickets or workspace views)
   const [singleProjectTags, singleProjectTagsDetails] = useCachedQuery(
     queries.projectTagsByProjectId({
       projectId: tagsProjectIds[0] || '',
       limit: TAGS_PAGE_SIZE,
       start: tagsCursor,
+      search: tagsSearchQuery.trim(),
     }),
-    { enabled: shouldUseSingleProjectQuery && !tagsSearchQuery.trim() },
+    { enabled: shouldUseSingleProjectQuery },
   );
 
-  // Fetch tags via Zero query for multiple projects (for initial load without search)
+  // Fetch tags via Zero query for multiple projects
   // Used for my-tickets, workspace views, and any multi-project scenarios
   const [multiProjectTags, multiProjectTagsDetails] = useCachedQuery(
     queries.projectTagsByProjectIds({
       projectIds: tagsProjectIds,
       limit: TAGS_PAGE_SIZE,
       start: tagsCursor,
+      search: tagsSearchQuery.trim(),
     }),
-    { enabled: shouldUseMultiProjectQuery && tagsProjectIds.length > 0 && !tagsSearchQuery.trim() },
+    { enabled: shouldUseMultiProjectQuery && tagsProjectIds.length > 0 },
   );
 
   // Combine Zero query results
@@ -2244,18 +2244,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       setTagsCursor({ name: lastTag.name, id: lastTag.id });
     }
   }, [hasMoreZeroTags, tagsSearchQuery, accumulatedTags]);
-
-  // Fetch tags via Vespa search (only when there's a search query).
-  // projectId is singular, so a channel whose linked boards cross projects scopes by
-  // those boards instead — otherwise tag search silently covers one project out of N.
-  const { tags: vespaTags } = useVespaTagSearch({
-    ...(channelId && tagsProjectIds.length > 1
-      ? { boardIds: channelBoards.boardIds }
-      : { projectId: tagsProjectIds[0] }),
-    searchQuery: tagsSearchQuery,
-    enabled: tagsProjectIds.length > 0 && !!tagsSearchQuery.trim(),
-    limit: 20,
-  });
 
   // Handle tag search callback
   const handleSearchTags = useCallback((query: string) => {
@@ -3549,29 +3537,13 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   const lastSentFilteredTicketIdsRef = useRef<string | null>(null);
 
-  // Compute availableTags: use Vespa when searching, Zero query otherwise
-  // Fallback to client-side filtering if Vespa returns no results
   const availableTags = useMemo(() => {
     const zeroTags =
       projectTags && projectTags.length > 0
         ? Array.from(new Set(projectTags.map(tag => tag.name))).sort()
         : [];
-
-    // If there's a search query, prefer Vespa results
-    if (tagsSearchQuery.trim()) {
-      // If Vespa has results, use them
-      if (vespaTags && vespaTags.length > 0) {
-        return vespaTags;
-      }
-      // Fallback to client-side filtering on Zero tags
-      const lower = tagsSearchQuery.toLowerCase();
-      const filtered = zeroTags.filter(tag => tag.toLowerCase().includes(lower));
-      return filtered.length > 0 ? filtered : undefined;
-    }
-
-    // No search - return Zero query results
     return zeroTags.length > 0 ? zeroTags : undefined;
-  }, [tagsSearchQuery, vespaTags, projectTags]);
+  }, [projectTags]);
 
   const availableStages = useMemo(() => {
     if (!stages || stages.length === 0) return undefined;
@@ -3816,7 +3788,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     const { inverted, includeUnassigned, ids } = parseAssigneeFilter(filters.assignee ?? []);
     const assigneeId = !inverted && !includeUnassigned && ids.length === 1 ? ids[0] : undefined;
     const userGroupId = filters.userGroups?.length === 1 ? filters.userGroups[0] : undefined;
-    const merchantId = filters.merchantIds?.length === 1 ? filters.merchantIds[0] : undefined;
     return {
       assignee: assigneeId
         ? { type: 'assigneeTo', value: assigneeId }
@@ -3825,7 +3796,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           : null,
       priority: filters.priority?.length === 1 ? (filters.priority[0] ?? null) : null,
       ...(filters.tags?.length === 1 ? { tags: filters.tags } : {}),
-      ...(merchantId ? { merchantId } : {}),
       ...(channelId ? { channelId } : {}),
       ...(channelId && board ? { boardId: board.id } : {}),
     };
@@ -3865,7 +3835,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         stageName: column.stageName,
         assignee: groupAssignee ?? viewCreateTicketSeed?.assignee ?? null,
         priority: group.priority ?? viewCreateTicketSeed?.priority ?? null,
-        ...(groupBy === 'merchantId' && hasGroupValue ? { merchantId: group.key } : {}),
         ...(isFormFieldGroup(groupBy) && hasGroupValue
           ? {
               dynamicFields: {
@@ -4418,6 +4387,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     onRequestDelete: item =>
       setDeleteViewConfirm({ configId: item.id, name: item.name, isPublic: !item.isPrivate }),
   });
+  const recentLabelsBoardIds = useMemo(() => {
+    if (filteredSingleBoardId) return [filteredSingleBoardId];
+    if (filters.boards?.length) return filters.boards;
+    return availableBoards ?? scopeBoards?.map(board => board.id) ?? [];
+  }, [filteredSingleBoardId, filters.boards, availableBoards, scopeBoards]);
   const headerPickerContext = useMemo(
     () => ({
       projectId: isMyTicketsView ? '' : projectIdParam || '',
@@ -4432,6 +4406,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       onLoadMoreTags: handleLoadMoreTags,
       hasMoreTags: !tagsSearchQuery.trim() && hasMoreZeroTags,
       onSearchTags: handleSearchTags,
+      recentLabelsBoardIds,
       availableStages,
       formMappings:
         filters.boards?.length === 1 && selectedBoardDetail
@@ -4458,6 +4433,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       tagsSearchQuery,
       hasMoreZeroTags,
       handleSearchTags,
+      recentLabelsBoardIds,
       availableStages,
       filters.boards,
       selectedBoardDetail,
@@ -5636,7 +5612,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           initialStageName={createTicketSeed?.stageName ?? null}
           initialAssignee={createTicketSeed?.assignee ?? null}
           initialPriority={createTicketSeed?.priority ?? null}
-          initialMerchantId={createTicketSeed?.merchantId}
           initialDynamicFields={createTicketSeed?.dynamicFields}
           onTicketCreated={handleTicketCreated}
         />
@@ -5661,7 +5636,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           initialAssignee={createTicketSeed?.assignee ?? null}
           initialPriority={createTicketSeed?.priority ?? null}
           {...(createTicketSeed?.tags ? { initialTags: createTicketSeed.tags } : {})}
-          initialMerchantId={createTicketSeed?.merchantId}
           initialDynamicFields={createTicketSeed?.dynamicFields}
           onTicketCreated={handleTicketCreated}
         />

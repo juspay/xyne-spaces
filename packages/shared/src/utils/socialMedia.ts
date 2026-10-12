@@ -11,4 +11,5 @@ export const SOCIAL_MEDIA_SOURCE_TYPE = {
   GOOGLE_PLAY: 'google-play-reviews',
   APP_STORE: 'app-store-reviews',
   INSTAGRAM: 'instagram',
+  FACEBOOK: 'facebook',
 } as const;

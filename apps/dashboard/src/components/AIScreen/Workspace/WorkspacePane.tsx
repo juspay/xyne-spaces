@@ -24,7 +24,7 @@ import type { ConversationArtifact } from '../../../services/XyneAI/XyneAIArtifa
 import { useConversationArtifacts } from './useConversationArtifacts';
 import { ArtifactList } from './ArtifactList';
 import { ArtifactInlineView, artifactInlineActions } from './ArtifactInlineView';
-import { AiBrowserItemView } from './AiBrowserItemView';
+import { AiBrowserItemView, isWorkspacePagePlaying } from './AiBrowserItemView';
 import { AiDocItemView } from './AiDocItemView';
 import { useReviewGuide } from './useReviewGuide';
 import { registerArtifactCommentStore } from './artifactCommentStore';
@@ -37,6 +37,7 @@ import {
   itemFromArtifact,
   openTab,
   closeTab,
+  moveTab,
   pruneTabs,
   EMPTY_TABS,
   type TabState,
@@ -231,17 +232,19 @@ function WorkspacePaneInner({
       setSelectedId(null);
       return;
     }
-    const page = artifacts.find(a => a.kind === 'PAGE' && isNew(a));
-    if (page && designDraftActive) {
-      setTab('artifacts');
-      setTransientAppId(null);
-      setSelectedId(page.id);
-      return;
-    }
+    const pages = artifacts.filter(a => a.kind === 'PAGE' && isNew(a));
+    const page = pages[0];
     if (!page) return;
-    setTab('sources');
+    // Every page the agent opened gets a tab of its own, kept alive for it to work
+    // in — two opened together are two tabs. The first shows, as one alone did.
+    setTabs(current =>
+      openTab(
+        pages.reduce((state, opened) => openTab(state, opened.id), current),
+        page.id,
+      ),
+    );
+    setTab(designDraftActive ? 'artifacts' : 'sources');
     setTransientAppId(null);
-    setSelectedId(page.id);
   }, [artifacts, isLoading]);
 
   useEffect(() => {
@@ -368,6 +371,10 @@ function WorkspacePaneInner({
   }, [conversationId, selectedId]);
 
   const showDetail = (tab === 'artifacts' || tab === 'sources') && selected !== null;
+  // A web page open in a tab, kept loaded for the agent while the conversation is.
+  const hasOpenPages = surfaceItems.some(
+    item => tabs.openIds.includes(item.id) && (item.kind === 'link' || item.kind === 'page'),
+  );
 
   const quickSwitchSections = useMemo(
     () =>
@@ -534,37 +541,54 @@ function WorkspacePaneInner({
       </div>
 
       <div className='relative min-h-0 w-full min-w-0 flex-1 overflow-hidden'>
-        {showDetail ? (
-          <WorkspaceSurface
-            items={surfaceItems}
-            tabs={tabs}
-            onActivate={id => setSelectedId(id)}
-            onOpen={id => setSelectedId(id)}
-            sections={quickSwitchSections}
-            onClose={closeWorkspaceTab}
-            icon={item => artifactKindIcon((item.row as ConversationArtifact).kind, 'h-3 w-3')}
-            actionsFor={item => (
-              <>
-                <ViewerActionSlot />
-                {artifactInlineActions(item.row as ConversationArtifact)}
-              </>
-            )}
-            renderItem={item => {
-              if (item.kind === 'html-doc') return <AiDocItemView item={item} />;
-              if (SHARED_ITEM_KINDS.has(item.kind)) return null;
-              if (item.kind === 'link' || item.kind === 'page') {
-                return <AiBrowserItemView item={item} />;
-              }
-              return (
-                <ArtifactInlineView
-                  artifact={item.row as ConversationArtifact}
-                  appPane={appPane}
-                  reviewGuide={reviewGuide}
-                />
-              );
-            }}
-          />
-        ) : tab === 'artifacts' ? (
+        {/* Open page tabs stay loaded while the conversation is: the agent works in
+            them whatever the pane shows. Out of the detail view the surface is put
+            out of sight — its pages freeze a while later — rather than unmounted. */}
+        {showDetail || hasOpenPages ? (
+          <div
+            className={showDetail ? 'h-full min-h-0 w-full' : 'invisible absolute inset-0'}
+            aria-hidden={showDetail ? undefined : true}
+          >
+            <WorkspaceSurface
+              visible={showDetail}
+              items={surfaceItems}
+              tabs={tabs}
+              onActivate={id => setSelectedId(id)}
+              onOpen={id => setSelectedId(id)}
+              sections={quickSwitchSections}
+              onClose={closeWorkspaceTab}
+              onReorder={(id, toIndex) => setTabs(current => moveTab(current, id, toIndex))}
+              icon={item => artifactKindIcon((item.row as ConversationArtifact).kind, 'h-3 w-3')}
+              actionsFor={item => (
+                <>
+                  <ViewerActionSlot />
+                  {artifactInlineActions(item.row as ConversationArtifact)}
+                </>
+              )}
+              keepAlive={{
+                keeps: item => item.kind === 'link' || item.kind === 'page',
+                // Xyne AI works in these tabs too, and must find each as it left it.
+                policy: 'every',
+                isPlaying: isWorkspacePagePlaying,
+              }}
+              renderItem={(item, shown) => {
+                if (item.kind === 'html-doc') return <AiDocItemView item={item} />;
+                if (SHARED_ITEM_KINDS.has(item.kind)) return null;
+                if (item.kind === 'link' || item.kind === 'page') {
+                  return <AiBrowserItemView item={item} shown={shown} />;
+                }
+                return (
+                  <ArtifactInlineView
+                    artifact={item.row as ConversationArtifact}
+                    appPane={appPane}
+                    reviewGuide={reviewGuide}
+                  />
+                );
+              }}
+            />
+          </div>
+        ) : null}
+        {showDetail ? null : tab === 'artifacts' ? (
           <ArtifactList
             artifacts={listedArtifacts}
             isLoading={isLoading}

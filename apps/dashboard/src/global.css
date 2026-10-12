@@ -79,6 +79,7 @@
     --mention-color: #3b82f6;
     --mention-hover-color: #2563eb;
     --mention-bg: rgba(59, 130, 246, 0.1);
+    --mention-bg-hover: rgba(59, 130, 246, 0.18);
     --mention-current-user-bg: rgba(244, 155, 53, 0.1);
     --mention-current-user-color: #f49b35;
     --mention-channel-bg: rgba(59, 130, 246, 0.1);
@@ -233,6 +234,7 @@
     --mention-color: #3b82f6;
     --mention-hover-color: #2563eb;
     --mention-bg: rgba(59, 130, 246, 0.1);
+    --mention-bg-hover: rgba(59, 130, 246, 0.18);
     --mention-current-user-bg: rgba(244, 155, 53, 0.1);
     --mention-current-user-color: #f49b35;
     --mention-channel-bg: rgba(59, 130, 246, 0.1);
@@ -382,6 +384,7 @@
     --mention-color: #88c2ff;
     --mention-hover-color: #a9d4ff;
     --mention-bg: rgba(82, 156, 232, 0.11);
+    --mention-bg-hover: rgba(82, 156, 232, 0.2);
     --mention-current-user-bg: rgba(244, 155, 53, 0.1);
     --mention-current-user-color: #f49b35;
     --mention-channel-bg: rgba(82, 156, 232, 0.11);
@@ -4915,6 +4918,13 @@ img.inline-emoji,
   }
 }
 
+/* The composer's listening glow drifts its colours sideways (Composer/ComposerGlow). */
+@keyframes composer-glow-drift {
+  to {
+    background-position: -200% 0;
+  }
+}
+
 .xyne-voice-border-wrap {
   background: conic-gradient(
     from var(--xyne-angle),
@@ -5013,6 +5023,76 @@ img.inline-emoji,
 
 @media (prefers-reduced-motion: reduce) {
   .xyne-related-scan::after {
+    animation: none;
+  }
+}
+
+@keyframes xyne-duplicate-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+
+.xyne-duplicate-scan {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 320ms cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s linear 320ms;
+}
+
+.xyne-duplicate-scan-track {
+  position: relative;
+  flex: 1;
+  height: 1.5px;
+  overflow: hidden;
+  background: hsl(var(--border));
+}
+
+.xyne-duplicate-scan-track::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 40%;
+  background: linear-gradient(
+    90deg,
+    rgba(139, 92, 246, 0) 0%,
+    rgba(139, 92, 246, 0.85) 30%,
+    rgba(59, 130, 246, 0.85) 55%,
+    rgba(20, 184, 166, 0.8) 80%,
+    rgba(20, 184, 166, 0) 100%
+  );
+  animation: xyne-duplicate-sweep 1.6s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+  animation-play-state: paused;
+}
+
+.xyne-duplicate-scan[data-active="true"] {
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity 320ms cubic-bezier(0.22, 1, 0.36, 1) 200ms,
+    visibility 0s linear 200ms;
+}
+
+.xyne-duplicate-scan[data-active="true"] .xyne-duplicate-scan-track::after {
+  animation-play-state: running;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .xyne-duplicate-scan-track::after {
+    width: 100%;
     animation: none;
   }
 }
@@ -5405,6 +5485,16 @@ img.inline-emoji,
 
 /* Full-DOM viewers (DOCX) paint matches via the CSS Custom Highlight API rather
    than <mark> injection, so the third-party markup is never mutated. */
+/* A loading bar's shine: a highlight sweeping left to right along what has filled. */
+@keyframes xyne-bar-shine {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+
 ::highlight(xyne-find) {
   background-color: var(--search-result-highlight-bg, #fde68a);
   color: inherit;

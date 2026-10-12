@@ -8,12 +8,9 @@ export const ticketDuplicateCheckSchema = Joi.object({
     'string.max': 'Title must be 200 characters or less',
     'any.required': 'Title is required',
   }),
-  description: Joi.string().trim().min(5).max(5000).required().messages({
+  description: Joi.string().trim().allow('').max(5000).default('').messages({
     'string.base': 'Description must be a string',
-    'string.empty': 'Description is required',
-    'string.min': 'Description must be at least 5 characters',
     'string.max': 'Description must be 5000 characters or less',
-    'any.required': 'Description is required',
   }),
   projectId: Joi.string().trim().required().messages({
     'string.base': 'Project ID must be a string',

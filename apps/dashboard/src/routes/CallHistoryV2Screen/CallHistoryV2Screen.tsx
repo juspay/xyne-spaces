@@ -31,10 +31,9 @@ import { InstantCallModal } from '../../components/Call/InstantCallModal/Instant
 import { ScheduleCallModal } from '../../components/Call/ScheduleCallModal/ScheduleCallModal';
 import { useActiveUserSearch, useUsers } from '../../hooks/useUsers';
 import { useAllChannels } from '../../hooks/useChannels';
-import { useZero } from '../../hooks/useZero';
+import { useMarkMissedCallsReadOnVisit } from '../../hooks/useMissedCallCount';
 import { cn } from '../../utils/classNames';
 import { isSameDay } from '../../utils/dateUtils';
-import { mutators } from '../../zero/mutators';
 import { CallCard } from './components/CallCard';
 import {
   Call,
@@ -325,7 +324,6 @@ const CallHistoryV2Screen = (): ReactElement => {
     return vespaCallSearchResults.map(r => mapVespaCallResultToCall(r, wsId));
   }, [vespaCallSearchResults, user?.workspaceId]);
 
-  const zero = useZero();
   const callHistoryLoadStartTimeRef = useRef<number | null>(null);
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(null);
 
@@ -344,13 +342,7 @@ const CallHistoryV2Screen = (): ReactElement => {
 
   const showRecentCallsLoader = isLoading || (showMinLoader && (calls?.length ?? 0) === 0);
 
-  const endedCallsCount = calls?.filter(c => c.status === CallStatus.ENDED).length ?? 0;
-
-  useEffect(() => {
-    if (endedCallsCount === 0) return;
-
-    void zero.mutate(mutators.activities.markMissedCallsAsRead({}));
-  }, [endedCallsCount]);
+  useMarkMissedCallsReadOnVisit();
 
   useEffect(() => {
     if (queryDetails.type === 'unknown') {
@@ -467,11 +459,15 @@ const CallHistoryV2Screen = (): ReactElement => {
   // call.labels stores Tag ids (no FK), not display text — resolve them once so
   // the dropdown shows real names. Every id is passed in, including generated
   // ones, since resolving is also what reveals the method.
-  const { resolveLabel: resolveCallLabel, resolveMethod: resolveCallLabelMethod } =
-    useResolvedRecordingLabels(availableCallLabels);
+  const {
+    resolveLabel: resolveCallLabel,
+    resolveMethod: resolveCallLabelMethod,
+    isResolved: isCallLabelResolved,
+  } = useResolvedRecordingLabels(availableCallLabels);
   const isManualCallLabel = useCallback(
-    (label: string): boolean => resolveCallLabelMethod(label) !== TagMethod.LLM,
-    [resolveCallLabelMethod],
+    (label: string): boolean =>
+      isCallLabelResolved(label) && resolveCallLabelMethod(label) !== TagMethod.LLM,
+    [isCallLabelResolved, resolveCallLabelMethod],
   );
   const manualCallLabels = useMemo(
     () =>
@@ -620,7 +616,7 @@ const CallHistoryV2Screen = (): ReactElement => {
       )}
       <div className='w-full flex flex-col items-center'>
         {/* Sticky header */}
-        <div className='max-w-[820px] w-full sticky top-0 bg-background z-50 flex flex-col px-6 pt-8 sm:px-8'>
+        <div className='max-w-[884px] w-full sticky top-0 bg-background z-50 flex flex-col px-4 pt-8'>
           <CallHistorySearchPanel
             variant='v2'
             callMentionSearchType={callMentionSearchType}
@@ -644,7 +640,7 @@ const CallHistoryV2Screen = (): ReactElement => {
           />
         </div>
         {/* Page body */}
-        <div className='max-w-[820px] w-full flex flex-col gap-6 px-6 pb-20 sm:px-8'>
+        <div className='max-w-[884px] w-full flex flex-col gap-6 px-4 pb-20'>
           {/* UPCOMING section */}
           {(!hasCallSearch || isVespaCallSearching || hasUpcomingCallsToday) && (
             <div className='flex flex-col gap-3'>
@@ -775,6 +771,9 @@ const CallHistoryV2Screen = (): ReactElement => {
                               : undefined
                           }
                           labels={row.item.labels.filter(isManualCallLabel)}
+                          pendingLabelCount={
+                            row.item.labels.filter(label => !isCallLabelResolved(label)).length
+                          }
                           resolveLabel={resolveCallLabel}
                           onDetailClick={() => {
                             // The labels on screen right now double as the detail picker's

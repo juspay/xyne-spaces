@@ -71,7 +71,7 @@ const useOpenTicketCard = (
     const resolvedConversationId = ticket.conversationId || fallbackConversationId;
     if (!resolvedChannelId || !resolvedConversationId) return;
 
-    if (isDeskView) {
+    if (isDeskView && resolvedConversationId === fallbackConversationId) {
       const params = new URLSearchParams(location.search);
       params.set('selectedTab', 'details');
       void navigate(`${location.pathname}?${params.toString()}`, { replace: true });

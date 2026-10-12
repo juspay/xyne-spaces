@@ -605,12 +605,12 @@ export class AiContextService {
           const metadata = call.metadata as Record<string, unknown>;
           if (typeof metadata.conversationId === 'string') {
             conversationId = metadata.conversationId;
-            logger.debug(`[AiContextService] Call ${call.id} enriched with conversationId: ${conversationId}`);
+            logger.debug(`[AiContextService] Call ${call.externalId} enriched with conversationId: ${conversationId}`);
           } else {
-            logger.debug(`[AiContextService] Call ${call.id} missing conversationId in metadata. Available keys: ${Object.keys(metadata).join(', ')}`);
+            logger.debug(`[AiContextService] Call ${call.externalId} missing conversationId in metadata. Available keys: ${Object.keys(metadata).join(', ')}`);
           }
         } else {
-          logger.debug(`[AiContextService] Call ${call.id} has no metadata or metadata is not an object`);
+          logger.debug(`[AiContextService] Call ${call.externalId} has no metadata or metadata is not an object`);
         }
 
         return {
@@ -1139,10 +1139,10 @@ export class AiContextService {
               conversationId = metadata.conversationId;
             } else {
               // Log when conversationId is missing to help debug citation issues
-              logger.debug(`[AiContextService] Call ${call.id} missing conversationId in metadata. Available keys: ${Object.keys(metadata).join(', ')}`);
+              logger.debug(`[AiContextService] Call ${call.externalId} missing conversationId in metadata. Available keys: ${Object.keys(metadata).join(', ')}`);
             }
           } else {
-            logger.debug(`[AiContextService] Call ${call.id} has no metadata or metadata is not an object`);
+            logger.debug(`[AiContextService] Call ${call.externalId} has no metadata or metadata is not an object`);
           }
 
           return {

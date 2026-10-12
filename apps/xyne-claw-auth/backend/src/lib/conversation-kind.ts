@@ -20,3 +20,15 @@ export function isChatConversation(conversationId: string | null | undefined): b
   if (!conversationId) return false;
   return !NON_CHAT_CONVERSATION_PREFIXES.some((prefix) => conversationId.startsWith(prefix));
 }
+
+/**
+ * A conversation minted by a direct chat surface (claw v3 chat, Ask AI, the
+ * sidebar) — `chat-<uuid>`. Only these can hold turns from several agents the
+ * user switched between, so only these get the conversation-wide reads,
+ * deletes and the one-title-per-conversation rule. Spaces thread ids are left
+ * alone: a thread shares its id with a mentioned user's digital twin, whose
+ * rows must stay out of the host agent's window.
+ */
+export function isDirectChatConversation(conversationId: string | null | undefined): boolean {
+  return typeof conversationId === "string" && conversationId.startsWith("chat-");
+}

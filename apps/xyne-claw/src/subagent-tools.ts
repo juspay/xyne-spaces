@@ -23,7 +23,7 @@ import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import { AGENT, LITELLM, SERVER } from "./config.js";
 import { runWithSubagentMcpId } from "./subagent-mcp-context.js";
 import { ensureSessionDebugDir, sessionDir } from "./session-store.js";
-import { SUBAGENT_DEFINITIONS, findSubagentDefinitionForServer, isPresentationToolSource, getSandboxSession, probeSession, REPO_CONFIGS, buildSandboxStoreKey, type SubagentDefinition, type SetupStep } from "xyne-claw-shared";
+import { SUBAGENT_DEFINITIONS, findSubagentDefinitionForServer, isPresentationToolSource, getSandboxSession, probeSession, buildSandboxStoreKey, type SubagentDefinition, type SetupStep } from "xyne-claw-shared";
 import { acquireFollowUpLock, isValidFollowUpHandle } from "./subagent-followup.js";
 import { matchesDirectPick } from "./tool-resolution.js";
 import { optEnabled } from "./optimizations.js";
@@ -469,10 +469,18 @@ async function loadMcpTools(
   // Without `timeout`, that internal 60s default wins the race even if we
   // attach a generous AbortSignal. See @modelcontextprotocol/sdk
   // shared/protocol.js:712.
-  const { tools } = await client.listTools(undefined, {
-    timeout: MCP_REQUEST_TIMEOUT_MS,
-    signal: AbortSignal.timeout(MCP_REQUEST_TIMEOUT_MS),
-  });
+  let listed: Awaited<ReturnType<Client["listTools"]>>;
+  try {
+    listed = await client.listTools(undefined, {
+      timeout: MCP_REQUEST_TIMEOUT_MS,
+      signal: AbortSignal.timeout(MCP_REQUEST_TIMEOUT_MS),
+    });
+  } catch (err) {
+    await client.close().catch(() => {});
+    throw err;
+  }
+  const { tools } = listed;
+
   const toolDefs: ToolDefinition[] = tools.map((t) => ({
     name: `${prefix}__${t.name}`,
     label: `${prefix} / ${t.name}`,
@@ -578,11 +586,13 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
     `[Subagent — nested LLM run, expensive] ${directFirst}${def.description} ` +
     `(If you have multiple independent questions for this subagent, batch them into ONE call with a single combined question; ` +
     `if you must fire it more than once, fire ALL the calls in the SAME assistant turn so they run in parallel.)`;
-  const tool: ToolDefinition & { progressLabels?: string[] } = {
+  const tool: ToolDefinition & { progressLabels?: string[]; subagent?: true } = {
     name: def.name,
     label: def.name,
     description: taggedDescription,
     progressLabels: def.progressLabels,
+    // Lets the run mark this tool's calls as subagent calls (ToolInvocation.subagentName).
+    subagent: true,
     parameters: Type.Object({
       [def.paramName]: Type.String({ description: def.paramDescription }),
       // Only exposed on the top-level run (where a background registry exists).
@@ -1961,33 +1971,35 @@ export function buildSubagentTools(
 
 // ── DeepWiki & Context7 MCP loaders (stdio transport, cached) ─────────────
 
-let cachedDeepwikiTools: McpToolGroup | null = null;
+const MCP_LOAD_RETRY_MS = 60_000;
 
-export async function loadDeepwikiTools(): Promise<McpToolGroup | null> {
-  if (cachedDeepwikiTools) return cachedDeepwikiTools;
-  try {
-    const { tools } = await loadMcpTools("npx", ["-y", "deepwiki-mcp"], "deepwiki");
-    cachedDeepwikiTools = { serverType: "deepwiki", serverName: "deepwiki", tools, writeTools: [] };
-    log.info(`[deepwiki] Loaded ${tools.length} tools: ${tools.map((t) => t.name).join(", ")}`);
-    return cachedDeepwikiTools;
-  } catch (err) {
-    log.warn(`[deepwiki] Failed to load tools: ${err instanceof Error ? err.message : err}`);
-    return null;
-  }
+function cachedStdioMcpLoader(name: string, command: string, args: string[]): () => Promise<McpToolGroup | null> {
+  let loaded: McpToolGroup | null = null;
+  let inflight: Promise<McpToolGroup | null> | null = null;
+  let failedAt = 0;
+  return async () => {
+    if (loaded) return loaded;
+    if (inflight) return inflight;
+    if (Date.now() - failedAt < MCP_LOAD_RETRY_MS) return null;
+    inflight = (async () => {
+      try {
+        const { tools } = await loadMcpTools(command, args, name);
+        loaded = { serverType: name, serverName: name, tools, writeTools: [] };
+        log.info(`[${name}] Loaded ${tools.length} tools: ${tools.map((t) => t.name).join(", ")}`);
+        return loaded;
+      } catch (err) {
+        failedAt = Date.now();
+        log.warn(`[${name}] Failed to load tools: ${err instanceof Error ? err.message : err}`);
+        return null;
+      } finally {
+        inflight = null;
+      }
+    })();
+    return inflight;
+  };
 }
 
-let cachedContext7Tools: McpToolGroup | null = null;
+export const loadDeepwikiTools = cachedStdioMcpLoader("deepwiki", "npx", ["-y", "deepwiki-mcp"]);
 
-export async function loadContext7Tools(): Promise<McpToolGroup | null> {
-  if (cachedContext7Tools) return cachedContext7Tools;
-  try {
-    const { tools } = await loadMcpTools("npx", ["-y", "@upstash/context7-mcp@latest"], "context7");
-    cachedContext7Tools = { serverType: "context7", serverName: "context7", tools, writeTools: [] };
-    log.info(`[context7] Loaded ${tools.length} tools: ${tools.map((t) => t.name).join(", ")}`);
-    return cachedContext7Tools;
-  } catch (err) {
-    log.warn(`[context7] Failed to load tools: ${err instanceof Error ? err.message : err}`);
-    return null;
-  }
-}
+export const loadContext7Tools = cachedStdioMcpLoader("context7", "npx", ["-y", "@upstash/context7-mcp@latest"]);
 
