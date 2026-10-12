@@ -38,7 +38,7 @@ import {
  * (sdlcContainerRef); Vespa imports the rest of their place from it. A conversation started on a
  * document sits in the document's container and references it (sdlcDocumentRef). A ticket can sit in
  * several places, so its scope ids and documents are fed as lists (sdlcScopeIds,
- * sdlcDocumentIds).
+ * sdlcDocumentIds, sdlcRepoIds).
  */
 export interface SdlcHubIndex {
   hubId: string;
@@ -292,10 +292,13 @@ async function buildSdlcHubIndex(hubId: string, prisma: PrismaClient): Promise<S
     if (!containerId) continue;
     let entry = tickets.get(ticketId);
     if (!entry) {
-      entry = { sdlcScopeIds: [], sdlcDocumentIds: [] };
+      entry = { sdlcScopeIds: [], sdlcDocumentIds: [], sdlcRepoIds: [] };
       tickets.set(ticketId, entry);
     }
-    for (const scopeId of containers.get(containerId)!.scopeIds) addOnce(entry.sdlcScopeIds, scopeId);
+    const container = containers.get(containerId)!;
+    for (const scopeId of container.scopeIds) addOnce(entry.sdlcScopeIds, scopeId);
+    // repoRef is id:<namespace>:sdlc_repository::<repoId> on a repository wiki's containers.
+    if (container.repoRef) addOnce(entry.sdlcRepoIds, container.repoRef.split('::')[1]!);
     if (l.relationType !== SDLC_CONTAINMENT_RELATION && documentOf(itemType, itemId)) addOnce(entry.sdlcDocumentIds, itemId);
   }
 
@@ -355,7 +358,7 @@ export async function sdlcFieldsForAttachment(attachment: { id: string; entityTy
 
 export const EMPTY_SDLC_DISCUSSION_FIELDS: SdlcDiscussionFields = { sdlcContainerRef: '', sdlcDocumentRef: '' };
 
-export const EMPTY_SDLC_TICKET_FIELDS: SdlcTicketFields = { sdlcScopeIds: [], sdlcDocumentIds: [] };
+export const EMPTY_SDLC_TICKET_FIELDS: SdlcTicketFields = { sdlcScopeIds: [], sdlcDocumentIds: [], sdlcRepoIds: [] };
 
 /**
  * Where a ticket sits, across every hub it is linked in; empty outside SDLC. Its scope ids and
@@ -372,12 +375,13 @@ export async function sdlcFieldsForTicket(ticketId: string): Promise<SdlcTicketF
     orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     select: { channelId: true },
   });
-  const fields: SdlcTicketFields = { sdlcScopeIds: [], sdlcDocumentIds: [] };
+  const fields: SdlcTicketFields = { sdlcScopeIds: [], sdlcDocumentIds: [], sdlcRepoIds: [] };
   for (const hubId of new Set(links.map(l => l.channelId))) {
     const entry = (await loadSdlcHubIndex(hubId))?.tickets.get(ticketId);
     if (!entry) continue;
     fields.sdlcScopeIds.push(...entry.sdlcScopeIds.filter(id => !fields.sdlcScopeIds.includes(id)));
     fields.sdlcDocumentIds.push(...entry.sdlcDocumentIds.filter(id => !fields.sdlcDocumentIds.includes(id)));
+    fields.sdlcRepoIds.push(...entry.sdlcRepoIds.filter(id => !fields.sdlcRepoIds.includes(id)));
   }
   return fields;
 }

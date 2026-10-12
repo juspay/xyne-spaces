@@ -675,10 +675,12 @@ export interface SdlcTicketFields {
   sdlcScopeIds: string[];
   /** Every document (canvas or upload) linked to it by a TICKET or CONTEXT edge. */
   sdlcDocumentIds: string[];
+  /** Every repository whose wiki holds an item it is linked from (sdlc_repository docIds). */
+  sdlcRepoIds: string[];
 }
 
 export const SDLC_DISCUSSION_FIELDS: readonly (keyof SdlcDiscussionFields)[] = ['sdlcContainerRef', 'sdlcDocumentRef'];
-export const SDLC_TICKET_FIELDS: readonly (keyof SdlcTicketFields)[] = ['sdlcScopeIds', 'sdlcDocumentIds'];
+export const SDLC_TICKET_FIELDS: readonly (keyof SdlcTicketFields)[] = ['sdlcScopeIds', 'sdlcDocumentIds', 'sdlcRepoIds'];
 export const SDLC_FILE_FIELDS: readonly (keyof SdlcFileFields)[] = [
   'sdlcContainerRef', 'sdlcTypeName', 'sdlcStatus', 'sdlcRelatedDocumentIds',
 ];
