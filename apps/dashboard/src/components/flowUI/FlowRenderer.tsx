@@ -276,8 +276,6 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
           toast.error(response.message);
           return false;
         }
-        // The server resolved the card without performing the write; the params
-        // it skipped are still on the card, so hand it back for the draft.
         if (draftClaimsFlow && action.type === 'submit') {
           draftScope?.onApplied(action.actionId, validatedFlow);
         }

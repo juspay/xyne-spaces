@@ -27,7 +27,6 @@ function parseFlowParams(raw: unknown): Record<string, unknown> | null {
 
 interface AgentDraftBuilderPanelProps {
   draft: WizardState;
-  /** The user's opening brief. Seeds the conversation; never the draft. */
   intent: string;
   onApplyPatch: (patch: Partial<WizardState>) => void;
   onBusyChange?: (busy: boolean) => void;
@@ -39,24 +38,26 @@ export function AgentDraftBuilderPanel({
   onApplyPatch,
   onBusyChange,
 }: AgentDraftBuilderPanelProps): ReactElement {
-  const { data: catalog } = useClawAvailableTools();
+  const { data: catalog, isPending: catalogPending } = useClawAvailableTools();
 
   const draftRef = useRef(draft);
   draftRef.current = draft;
   const catalogRef = useRef(catalog);
   catalogRef.current = catalog;
 
-  const seed = useMemo(
-    () => ({ query: buildSeedQuery(draft, intent), nonce: Date.now() }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
-  );
-
   const intentRef = useRef(intent);
   intentRef.current = intent;
 
+  const seed = useMemo(
+    () =>
+      catalogPending
+        ? null
+        : { query: buildSeedQuery(draftRef.current, intentRef.current), nonce: Date.now() },
+    [catalogPending],
+  );
+
   const hiddenContext = useCallback(
-    () => buildHiddenContext(draftRef.current, intentRef.current),
+    () => buildHiddenContext(draftRef.current, intentRef.current, catalogRef.current),
     [],
   );
 
@@ -86,9 +87,6 @@ export function AgentDraftBuilderPanel({
     [applyProposal],
   );
 
-  // The card's own approve/decline goes to the server as usual; applyToDraft
-  // makes it resolve the card without creating the agent, and this fills the
-  // form from the params it skipped.
   const draftScope = useMemo<FlowDraftScope>(
     () => ({
       claims: (flow: FlowDefinition): boolean => {
@@ -114,8 +112,8 @@ export function AgentDraftBuilderPanel({
             variant='sidebar'
             forcedAgentSlug={BUILDER_DRIVER_SLUG}
             startFreshChat
-            initialQuery={seed.query}
-            autoSendNonce={seed.nonce}
+            initialQuery={seed?.query ?? ''}
+            {...(seed ? { autoSendNonce: seed.nonce } : {})}
             hiddenContext={hiddenContext}
             onInterceptPendingAction={onInterceptPendingAction}
             {...(onBusyChange ? { onStreamingChange: onBusyChange } : {})}

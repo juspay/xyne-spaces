@@ -146,7 +146,6 @@ export const useCreateClawAgent = (): UseMutationResult<Agent, Error, WizardSubm
       );
       void queryClient.invalidateQueries({ queryKey: ['claw-auth-agents', userId] });
       void queryClient.invalidateQueries({ queryKey: ['sdlc-hub-agents'] });
-      // The detail view reads this key; without it the fresh agent renders stale.
       void queryClient.invalidateQueries({ queryKey: clawAgentDetailKey(agent.slug) });
       toast.success('Agent created');
       if (sdlcChannelId && returnTo?.startsWith('/') && !returnTo.startsWith('//')) {

@@ -38,9 +38,6 @@ const PROMPT_MIN_HEIGHT = 72;
 const PROMPT_MAX_HEIGHT = 420;
 const PROMPT_FLASH_MS = 1400;
 
-/** Everything the form can change, in a shape that compares by value. Used to
- *  decide whether an existing agent has been edited — the page reads as a view
- *  until it has, so Save only appears once there is something to save. */
 function comparable(state: WizardState): string {
   return JSON.stringify([
     state.name.trim(),

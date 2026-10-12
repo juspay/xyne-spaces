@@ -1200,8 +1200,6 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       }
 
       if (serverType === "agent-tools" && AGENT_TOOL_SLUGS.has(tool)) {
-        // The builder proposes into a client-side draft; nothing is written
-        // until the user saves it themselves.
         const draftOnly = applyToDraft === true && tool === "create-agent";
         const outcome = draftOnly
           ? { ok: true as const, message: "Agent setup updated" }
@@ -1228,9 +1226,6 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             ...(outcome.note ? { details: [{ label: "Note", value: outcome.note }] } : {}),
           });
           res.json(resp);
-          // This branch never dispatched a continuation, so Approve & Continue
-          // behaved exactly like Approve for every agent tool. Same call the
-          // other write paths make, via finishWriteSuccess.
           if (actionId === "approve-continue" || actionId === "retry-continue") {
             await dispatchXyneAiWriteContinuation({
               writeUserId,

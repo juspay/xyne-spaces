@@ -2219,8 +2219,6 @@ const XyneAISidebar = ({
   // Shared props for the composer (XyneAIInputBox), at both mount points.
   const sharedInputSectionProps = {
     ...(composerPlaceholder === undefined ? {} : { placeholder: composerPlaceholder }),
-    // Model picker. Empty list (agent has no litellm credential) ⇒ the picker
-    // hides itself, so no extra gating is needed here beyond the v2 check.
     models: isV2 ? (agentModelsData?.models ?? []) : [],
     modelsLoading: agentModelsLoading,
     defaultModel: agentModelsData?.defaultModel ?? null,

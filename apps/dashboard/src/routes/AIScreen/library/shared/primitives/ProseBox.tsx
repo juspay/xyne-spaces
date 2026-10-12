@@ -22,8 +22,6 @@ interface ScrollFadeBoxProps {
 }
 
 /**
- * Scroll area with a bottom fade that only appears while there is more to
- * scroll — so a short body doesn't sit under a pointless gradient.
  */
 export function ScrollFadeBox({
   children,

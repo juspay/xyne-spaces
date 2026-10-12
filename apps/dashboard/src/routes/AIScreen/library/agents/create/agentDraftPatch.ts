@@ -14,7 +14,14 @@ import {
 type ToolSelection = WizardState['tools'];
 
 export type ResolvedTools =
-  | { status: 'resolved'; tools: ToolSelection; unknown: string[]; removed: string[] }
+  | {
+      status: 'resolved';
+      tools: ToolSelection;
+      unknown: string[];
+      removed: string[];
+      deduped: string[];
+      trimmedSubagents: string[];
+    }
   | { status: 'catalog-unavailable' }
   | { status: 'nothing-proposed' };
 
@@ -65,6 +72,43 @@ function addSubagent(tools: ToolSelection, name: string): ToolSelection {
   return { ...tools, subagents: [...tools.subagents, name] };
 }
 
+const MAX_SUBAGENTS = 2;
+
+interface JudgedSelection {
+  tools: ToolSelection;
+  deduped: string[];
+  trimmedSubagents: string[];
+}
+
+function judgeSelection(
+  tools: ToolSelection,
+  catalog: AvailableTools,
+  catalogs: Catalogs,
+): JudgedSelection {
+  const serverTypeOf = new Map(catalog.subagents.map(s => [s.name, s.serverType]));
+  const coveredServers = new Set(
+    tools.subagents.map(name => serverTypeOf.get(name)).filter((t): t is string => Boolean(t)),
+  );
+
+  const deduped: string[] = [];
+  const direct = tools.direct.filter(slug => {
+    const entry = catalogs.mcpEntries.find(e =>
+      e.tools.some(t => t.slug === slug || t.name === slug),
+    );
+    const server = entry?.server?.type ?? entry?.slug;
+    if (server && coveredServers.has(server)) {
+      deduped.push(slug);
+      return false;
+    }
+    return true;
+  });
+
+  const trimmedSubagents = tools.subagents.slice(MAX_SUBAGENTS);
+  const subagents = tools.subagents.slice(0, MAX_SUBAGENTS);
+
+  return { tools: { ...tools, subagents, direct }, deduped, trimmedSubagents };
+}
+
 export function resolveProposedTools(
   names: readonly string[],
   catalog: AvailableTools | undefined,
@@ -110,10 +154,19 @@ export function resolveProposedTools(
     }
   }
 
-  const granted = new Set(grantedNames(tools));
+  const judged = judgeSelection(tools, catalog, catalogs);
+
+  const granted = new Set(grantedNames(judged.tools));
   const removed = grantedNames(current).filter(name => !granted.has(name));
 
-  return { status: 'resolved', tools, unknown, removed };
+  return {
+    status: 'resolved',
+    tools: judged.tools,
+    unknown,
+    removed,
+    deduped: judged.deduped,
+    trimmedSubagents: judged.trimmedSubagents,
+  };
 }
 
 const FIELDS_THIS_DRAFT_CANNOT_SET = [
@@ -178,6 +231,16 @@ export function paramsToDraftPatch(
       patch.tools = resolved.tools;
       if (resolved.unknown.length > 0) {
         problems.push(`Skipped unrecognised tool(s): ${resolved.unknown.join(', ')}`);
+      }
+      if (resolved.deduped.length > 0) {
+        problems.push(
+          `Skipped tool(s) already covered by a granted subagent: ${resolved.deduped.join(', ')}`,
+        );
+      }
+      if (resolved.trimmedSubagents.length > 0) {
+        problems.push(
+          `Kept the first ${2} subagent(s); skipped: ${resolved.trimmedSubagents.join(', ')}`,
+        );
       }
       if (resolved.removed.length > 0) {
         problems.push(`Removed tool(s) you had selected: ${resolved.removed.join(', ')}`);

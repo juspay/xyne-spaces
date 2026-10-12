@@ -746,9 +746,6 @@ interface MessageItemProps {
    *  is the off switch, so a surface that cannot service a flow action never
    *  shows a card it would leave stuck. */
   flowCards?: { conversationId: string; onActionComplete: () => void } | undefined;
-  /** Let the host claim a pending action instead of sending it to the server.
-   *  Returning true means "handled here" — used by the agent draft builder,
-   *  where the agent does not exist yet so there is nothing to call. */
   onInterceptPendingAction?: ((action: PendingAction, approved: boolean) => boolean) | undefined;
 }
 
@@ -1716,20 +1713,16 @@ export const MessageItem = React.memo(
               {Boolean(message.content || message.streamingContent) && (
                 <button
                   onClick={handleCopy}
-                  className='inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground'
+                  className='p-1.5 rounded transition-colors hover:bg-accent'
                   title={copied ? 'Copied!' : 'Copy'}
                   data-track-category='XyneAI'
                   data-track-name='COPY_USER_MESSAGE'
                   data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
                 >
                   {copied ? (
-                    <Check
-                      className='size-3.5 text-status-success'
-                      strokeWidth={1.75}
-                      aria-label='Copied'
-                    />
+                    <Check size={16} className='text-muted-foreground' />
                   ) : (
-                    <Copy className='size-3.5' strokeWidth={1.75} aria-label='Copy' />
+                    <Copy size={16} className='text-muted-foreground' />
                   )}
                 </button>
               )}
@@ -1742,12 +1735,12 @@ export const MessageItem = React.memo(
                       startEditing();
                     }
                   }}
-                  className='inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground'
+                  className='p-1.5 rounded transition-colors hover:bg-accent'
                   title='Edit message'
                   data-track-category='XyneAI'
                   data-track-name='EDIT_MESSAGE'
                 >
-                  <Pencil className='size-3.5' strokeWidth={1.75} aria-label='Edit message' />
+                  <Pencil size={16} className='text-muted-foreground' />
                 </button>
               )}
             </div>
@@ -2798,18 +2791,33 @@ const MessageActions = ({
       {/* Copy Button */}
       <button
         onClick={onCopy}
-        className='inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground'
+        className='p-1.5 rounded transition-colors hover:bg-accent'
         title={copied ? 'Copied!' : 'Copy'}
         data-track-category='XyneAI'
         data-track-name='COPY_MESSAGE'
         data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
       >
         {copied ? (
-          <Check className='size-3.5 text-status-success' strokeWidth={1.75} aria-label='Copied' />
+          <img src='/svgs/icons/check-success.svg' alt='Copied' width='16' height='16' />
         ) : (
-          <Copy className='size-3.5' strokeWidth={1.75} aria-label='Copy' />
+          <img src='/svgs/icons/copy.svg' alt='Copy' width='16' height='16' />
         )}
       </button>
+
+      {/* Regenerate Button - only on the latest bot message */}
+      {onRegenerate && (
+        <button
+          onClick={onRegenerate}
+          data-ph-capture-attribute-track-id='regenerate_message'
+          className='p-1.5 rounded transition-colors hover:bg-accent'
+          title='Regenerate response'
+          data-track-category='XyneAI'
+          data-track-name='REGENERATE_MESSAGE'
+          data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
+        >
+          <RefreshCw size={16} className='text-current' />
+        </button>
+      )}
 
       {isV2 ? (
         // v2 (claw): persist to agent_runs.rating (metrics + reload) with an
@@ -2827,7 +2835,7 @@ const MessageActions = ({
           <button
             onClick={() => onFeedback(message.id, 'LIKE')}
             data-ph-capture-attribute-track-id='like_message'
-            className='inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground'
+            className='p-1.5 rounded transition-colors hover:bg-accent'
             title='Like'
             data-track-category='XyneAI'
             data-track-name='LIKE_MESSAGE'
@@ -2870,7 +2878,7 @@ const MessageActions = ({
           <button
             onClick={() => onFeedback(message.id, 'DISLIKE')}
             data-ph-capture-attribute-track-id='dislike_message'
-            className='inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground'
+            className='p-1.5 rounded transition-colors hover:bg-accent'
             title='Dislike'
             data-track-category='XyneAI'
             data-track-name='DISLIKE_MESSAGE'
@@ -2921,7 +2929,7 @@ const MessageActions = ({
         <button
           onClick={onRegenerate}
           data-ph-capture-attribute-track-id='regenerate_message'
-          className='inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground'
+          className='p-1.5 rounded transition-colors hover:bg-accent'
           title='Regenerate response'
           data-track-category='XyneAI'
           data-track-name='REGENERATE_MESSAGE'

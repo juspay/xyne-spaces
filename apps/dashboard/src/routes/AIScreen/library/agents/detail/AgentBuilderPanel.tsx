@@ -22,11 +22,7 @@ export function AgentBuilderPanel({
 
   const [previewStarted, setPreviewStarted] = useState(false);
 
-  const seed = useMemo(
-    () => ({ query: `Help me improve “${agent.name}”`, nonce: Date.now() }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
-  );
+  const seed = useMemo(() => ({ query: `Help me improve “${agent.name}”`, nonce: Date.now() }), []);
 
   const queryClient = useQueryClient();
   const wasStreaming = useRef(false);

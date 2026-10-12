@@ -13,10 +13,6 @@ import { useAIChatHandoff } from '../useAIChatHandoff';
 
 export interface AgentDraftSeed {
   name?: string;
-  /** What the user said the agent is for. Seeds the CONVERSATION, never the
-   *  draft: a one-line brief is not a system prompt, and writing it into
-   *  Instructions makes the form look configured when nothing has been decided
-   *  — which is also what made the builder call its own setup a placeholder. */
   intent?: string;
   color?: string;
 }

@@ -91,11 +91,6 @@ export const createAgentTool: ToolDefinition = {
       },
       modelId: { type: "string", description: "Optional model id to pin, e.g. 'claude-sonnet-5'. Omit to inherit the workspace default." },
       color: { type: "string", description: "Optional hex accent colour for the agent's avatar, e.g. '#6366f1'." },
-      // Required, and an empty array is a real answer. Leaving the field off
-      // produced agents that looked configured and held nothing, with no error
-      // anywhere — so the choice has to be stated rather than defaulted. Saying
-      // empty is valid is load-bearing: a required field with no stated empty
-      // case invites padding the list to satisfy it, which is worse than none.
       tools: {
         ...toolsProperty,
         description:
