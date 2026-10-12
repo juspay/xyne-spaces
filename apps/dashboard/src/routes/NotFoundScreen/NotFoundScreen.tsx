@@ -2,6 +2,7 @@ import { useEffect, type ReactElement } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft } from '@xyne/icons';
 import { Button } from '../../components/ui/Button/Button';
+import XyneHomeLogo from '../../components/XyneHomeLogo/XyneHomeLogo';
 
 interface NotFoundScreenProps {
   /** Where to return to. Skips history so a dead URL in it is never replayed. */
@@ -40,7 +41,7 @@ const NotFoundScreen = ({ fallbackPath }: NotFoundScreenProps = {}): ReactElemen
   return (
     <div className='flex h-screen w-full flex-col overflow-hidden bg-background'>
       <header className='flex w-full shrink-0 items-center py-4 pl-4 pr-3'>
-        <img src='/svgs/xyne.svg' alt='Xyne' className='h-3.5 w-auto' draggable='false' />
+        <XyneHomeLogo source='not_found' imgClassName='h-3.5 w-auto' />
       </header>
 
       <main className='flex flex-1 flex-col items-center justify-center gap-[58px] overflow-y-auto px-6 py-10'>
