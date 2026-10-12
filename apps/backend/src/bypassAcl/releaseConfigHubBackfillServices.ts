@@ -34,8 +34,8 @@ import { asSystem, type TableName } from './base';
  * says why. Idempotent: a moved project with nothing left to change writes nothing, and
  * a removed one has no config left to remove.
  *
- * Ships while applications.repoId is still nullable, and is removed once every config
- * is on a hub and repoId is required.
+ * applications.repoId stays nullable (the code sets it on every save), so services an
+ * older app instance writes without one are picked up by running this again.
  *
  * Runs as the system actor: `db` is ACL-wrapped, and the configs span every workspace,
  * which a request context would narrow to the caller's.
@@ -192,16 +192,10 @@ async function loadConfigs(projectIds: string[] | null): Promise<ReleaseConfig[]
       channelId: true,
       regex: true,
       repoUrl: true,
+      repoId: true,
     },
     orderBy: { name: 'asc' },
   });
-  // repoId is read only where it is set: until the backfill fills it, the column holds
-  // NULLs that a client generated with repoId required refuses to load.
-  const filledRepoIds = await db.application.findMany({
-    where: { id: { in: applications.map((app) => app.id) }, repoId: { not: '' } },
-    select: { id: true, repoId: true },
-  });
-  const repoIdByApplicationId = new Map(filledRepoIds.map((app) => [app.id, app.repoId]));
   // Looked up apart from the service: one missing board must not fail every project.
   const serviceBoards = await db.board.findMany({
     where: { id: { in: applications.map((app) => app.boardId) } },
@@ -223,7 +217,7 @@ async function loadConfigs(projectIds: string[] | null): Promise<ReleaseConfig[]
         regex: app.regex,
         channelId: app.channelId,
         repoUrl: app.repoUrl,
-        repoId: repoIdByApplicationId.get(app.id) ?? null,
+        repoId: app.repoId,
       })),
   }));
 }
@@ -232,8 +226,8 @@ async function loadConfigs(projectIds: string[] | null): Promise<ReleaseConfig[]
  * Every project with a release config: its configs, the repositories their services
  * match, the project's SDLC hubs and which of them have that repository, and whether
  * the config is already on a hub. `servicesWithoutRepoId` counts every service row
- * still missing a repoId, configured or not; it must be 0 before repoId is made NOT
- * NULL. Writes nothing.
+ * still missing a repoId, configured or not; a service without one releases nothing,
+ * so it should be 0 after a run. Writes nothing.
  */
 export function getReleaseConfigHubBackfillStatus() {
   return asSystem(READ_TABLES, REASON, async () => {
@@ -322,18 +316,9 @@ export function getReleaseConfigHubBackfillStatus() {
         }),
     }));
     // Every service, not only the configs above: one with no or a deleted main board
-    // still has to have a repoId before it is made required. Counted, not loaded, for
-    // the same reason as in loadConfigs.
-    const [services, servicesWithRepoId] = await Promise.all([
-      db.application.count(),
-      db.application.count({ where: { repoId: { not: '' } } }),
-    ]);
-    return {
-      success: true as const,
-      pending,
-      servicesWithoutRepoId: services - servicesWithRepoId,
-      projects: result,
-    };
+    // releases nothing until it has a repoId either.
+    const servicesWithoutRepoId = await db.application.count({ where: { repoId: null } });
+    return { success: true as const, pending, servicesWithoutRepoId, projects: result };
   });
 }
 
