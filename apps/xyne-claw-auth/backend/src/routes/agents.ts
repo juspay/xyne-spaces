@@ -19,6 +19,7 @@ import { spacesAppFetch } from "../lib/spaces-api.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { LOCAL_HARNESS_PROVIDERS } from "../lib/local-harness.js";
 import { prisma } from "../db.js";
+import { DEFAULT_NEW_AGENT_TOOL_SOURCES, mergeNewAgentToolDefaults } from "../lib/new-agent-tool-defaults.js";
 import { CONFIG } from "../config.js";
 import { encrypt, decrypt } from "../crypto.js";
 import { checkHealth } from "../health.js";
@@ -150,6 +151,14 @@ function readConfigToolSelection(config: unknown): string[] {
     for (const item of configArray(tools[key])) out.push(`${key}:${item}`);
   }
   return out;
+}
+
+async function applyNewAgentToolDefaults(config: Record<string, unknown> | undefined): Promise<Record<string, unknown>> {
+  const rows = await prisma.tool.findMany({
+    where: { source: { in: [...DEFAULT_NEW_AGENT_TOOL_SOURCES] } },
+    select: { slug: true },
+  });
+  return mergeNewAgentToolDefaults(config, rows.map((r) => r.slug));
 }
 
 function readTopLevelGatewaySelection(config: unknown): string[] {
@@ -567,7 +576,7 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
     kbScope?: string;
   };
 
-  const normalizedConfig = await normalizeGatewayServicesInConfig(config);
+  const normalizedConfig = await applyNewAgentToolDefaults(await normalizeGatewayServicesInConfig(config));
 
   if (!slug || typeof slug !== "string" || slug.trim().length === 0) {
     throw badRequest("slug is required");
