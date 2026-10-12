@@ -43,7 +43,24 @@ export interface CacheEntry<T> {
   lastAccessedAt?: number;
   accessCount?: number;
   estimatedSize?: number;
+  /** Stamped on persist; see {@link CACHE_ENTRY_VERSION}. */
+  version?: number;
 }
+
+/**
+ * Format version for persisted generic (hash-keyed) cache entries.
+ *
+ * These entries are lazy-loaded from storage long after they were written, by a
+ * bundle that may be many releases newer. The hash key pins the query's AST but
+ * says nothing about whether the rows under it are trustworthy, so before this
+ * existed a malformed row written by any past build was replayed on every mount
+ * and survived until the user cleared site data (XYNE-65862).
+ *
+ * Bump this whenever previously-written entries must not be trusted — a row
+ * shape change, or a fixed bug that wrote bad rows. Entries stamped with a
+ * different version are dropped and tombstoned on load.
+ */
+export const CACHE_ENTRY_VERSION = 2;
 
 export interface QueryCacheContext {
   //eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -435,7 +452,15 @@ export async function loadCacheEntryFromStorage(hash: string): Promise<CacheEntr
   try {
     const value = await _storageAdapter.loadContextProperty(hash);
     if (!value || value === null) return null;
-    return value as CacheEntry<unknown>;
+    const entry = value as CacheEntry<unknown>;
+    // Entries written by an older format are not trustworthy — drop rather than
+    // replay. Tombstone so the stale payload stops occupying storage even if
+    // this query is never mounted again.
+    if (entry.version !== CACHE_ENTRY_VERSION) {
+      void _storageAdapter.saveContextProperty(hash, null).catch(() => {});
+      return null;
+    }
+    return entry;
   } catch {
     return null;
   }
@@ -683,7 +708,12 @@ export const setupQueryCachePersistence = (
     cache.forEach((value, key) => {
       if (lastPersistedRefs.get(key) === value) return;
       lastPersistedRefs.set(key, value);
-      storage.saveContextProperty(key, value).catch(() => {});
+      // Stamp the format version so a future bundle can tell whether these rows
+      // are safe to replay. Tracked against `value` (not the stamped copy) so
+      // the dirty check still compares against the live context reference.
+      storage
+        .saveContextProperty(key, { ...value, version: CACHE_ENTRY_VERSION })
+        .catch(() => {});
     });
 
     // Prune refs for keys no longer in the cache. Without this, a
