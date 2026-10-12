@@ -192,10 +192,16 @@ async function loadConfigs(projectIds: string[] | null): Promise<ReleaseConfig[]
       channelId: true,
       regex: true,
       repoUrl: true,
-      repoId: true,
     },
     orderBy: { name: 'asc' },
   });
+  // repoId is read only where it is set: until the backfill fills it, the column holds
+  // NULLs that a client generated with repoId required refuses to load.
+  const filledRepoIds = await db.application.findMany({
+    where: { id: { in: applications.map((app) => app.id) }, repoId: { not: '' } },
+    select: { id: true, repoId: true },
+  });
+  const repoIdByApplicationId = new Map(filledRepoIds.map((app) => [app.id, app.repoId]));
   // Looked up apart from the service: one missing board must not fail every project.
   const serviceBoards = await db.board.findMany({
     where: { id: { in: applications.map((app) => app.boardId) } },
@@ -217,7 +223,7 @@ async function loadConfigs(projectIds: string[] | null): Promise<ReleaseConfig[]
         regex: app.regex,
         channelId: app.channelId,
         repoUrl: app.repoUrl,
-        repoId: app.repoId ?? null,
+        repoId: repoIdByApplicationId.get(app.id) ?? null,
       })),
   }));
 }
@@ -316,12 +322,16 @@ export function getReleaseConfigHubBackfillStatus() {
         }),
     }));
     // Every service, not only the configs above: one with no or a deleted main board
-    // still has to have a repoId before it is made required.
-    const services = await db.application.findMany({ select: { repoId: true } });
+    // still has to have a repoId before it is made required. Counted, not loaded, for
+    // the same reason as in loadConfigs.
+    const [services, servicesWithRepoId] = await Promise.all([
+      db.application.count(),
+      db.application.count({ where: { repoId: { not: '' } } }),
+    ]);
     return {
       success: true as const,
       pending,
-      servicesWithoutRepoId: services.filter((service) => !service.repoId).length,
+      servicesWithoutRepoId: services - servicesWithRepoId,
       projects: result,
     };
   });
