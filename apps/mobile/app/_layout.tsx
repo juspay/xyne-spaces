@@ -102,8 +102,13 @@ SplashScreen.setOptions({
 });
 const POST_FIRST_FRAME_SERVICES_DELAY_MS = 250;
 export const unstable_settings = {
-  // Signed-out landing: the community list in the community app, login in the main app.
-  anchor: IS_COMMUNITY_APP ? 'community' : 'login',
+  // Signed-out landing: login, in every build. In the community app the person signs in first and
+  // is then asked where to start by the onboarding deck, which needs the sign-in to exist.
+  //
+  // This is an explicit initial route, so it is what decides the landing screen — not the order the
+  // screens are declared in below. It used to read `'community'` for the community app, which is
+  // why putting `login` first in the stack alone did not change what that app opened on.
+  anchor: 'login',
 };
 const LazyImageViewerModal = React.lazy(
   () => import('@/src/components/chat/message/viewer/image-viewer-modal'),
@@ -786,16 +791,22 @@ function RootLayoutNav(): ReactElement {
           <Stack.Protected guard={!isEnrolled}>
             <Stack.Screen name='enrollment' />
           </Stack.Protected>
-          {/* Community app: community is listed first so it is the signed-out landing screen;
-              `login` is pushed on top of it, so Back returns to the community list. */}
-          <Stack.Protected guard={IS_COMMUNITY_APP && Boolean(isEnrolled) && !isSignedIn}>
-            <Stack.Screen name='community' />
-            {/* The onboarding deck runs after sign-in but before a workspace session exists, so it
-                lives alongside `login` rather than inside the signed-in `(protected)` group. */}
-            <Stack.Screen name='onboarding' />
-          </Stack.Protected>
+          {/* `login` is declared first, so it is the signed-out landing screen in every build.
+              Order is what decides the landing screen: the navigator opens on the first screen
+              whose guard passes. In the community app the person signs in first and is then asked
+              where to start — by the onboarding deck, which needs the sign-in to exist. */}
           <Stack.Protected guard={Boolean(isEnrolled) && !isSignedIn}>
             <Stack.Screen name='login' />
+          </Stack.Protected>
+          {/* Declared after `login` on purpose, so neither becomes the landing screen.
+              `community` is no longer a step in the flow: it stays registered because an invite
+              link (`/community/join?workspaceId=…`, see `+native-intent`) resolves to it and it
+              renders the outcome of a join request. The deck runs after sign-in but before a
+              workspace session exists, so it lives alongside `login` rather than inside the
+              signed-in `(protected)` group. */}
+          <Stack.Protected guard={IS_COMMUNITY_APP && Boolean(isEnrolled) && !isSignedIn}>
+            <Stack.Screen name='community' />
+            <Stack.Screen name='onboarding' />
           </Stack.Protected>
           <Stack.Protected guard={isSignedIn && Boolean(isEnrolled)}>
             <Stack.Screen

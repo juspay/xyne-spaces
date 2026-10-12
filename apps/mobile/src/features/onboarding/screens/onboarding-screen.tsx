@@ -19,8 +19,10 @@ import {
 import { CardDeck } from '../components/card-deck';
 import { DeckDots } from '../components/deck-dots';
 import { DeckFooter } from '../components/deck-footer';
+import { RequestSentScreen } from '../components/request-sent-screen';
 import { WelcomeScreen } from '../components/welcome-screen';
 import { CompanyOnXyneCard } from '../components/cards/company-on-xyne-card';
+import { CompanySizeCard } from '../components/cards/company-size-card';
 import { ConnectToolsCard } from '../components/cards/connect-tools-card';
 import { NameCard } from '../components/cards/name-card';
 import { RoleCard } from '../components/cards/role-card';
@@ -44,18 +46,34 @@ function emailDomainOf(email: string): string {
  * Presentational apart from one thing: finishing the last card commits the answers through
  * `AuthContext`, which creates the session. The root navigator watches that session, so the screen
  * does not navigate anywhere itself — it simply stops existing once the user is signed in.
+ *
+ * The exception is asking an existing company workspace for access. That ends without a session,
+ * so the root never swaps and this screen is the only thing that can say what happened — it
+ * renders the waiting state itself and leaves for sign-in on request.
+ *
+ * The other exception is the caller that is already signed in and only has questions left
+ * (`ApprovedOnboardingGate`): it passes `onComplete`, since there is no session to appear.
  */
-export function OnboardingScreen({ context }: { context: OnboardingContext }): ReactElement {
+export function OnboardingScreen({
+  context,
+  onComplete,
+}: {
+  context: OnboardingContext;
+  onComplete?: () => void;
+}): ReactElement {
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
 
   const deck = useOnboardingDeck(context);
-  const { commit, isCommitting, error, clearError } = useOnboardingCommit();
+  const { commit, isCommitting, error, clearError, submittedRequest, leaveRequest } =
+    useOnboardingCommit(context, onComplete);
 
   // Also what the start card names, so the row shows the real community rather than a placeholder.
+  // An invited person never sees that card, so there is nothing to look up for them.
   const { data: organizations } = useQuery({
     queryKey: COMMUNITY_WORKSPACES_QUERY_KEY,
     queryFn: listCommunityWorkspaces,
+    enabled: !context.isInvited,
   });
 
   const community = useMemo(() => {
@@ -75,8 +93,14 @@ export function OnboardingScreen({ context }: { context: OnboardingContext }): R
       deck.next();
       return;
     }
-    void commit(deck.outcome, community?.id ?? null);
+    void commit(deck.outcome, deck.answers, community?.id ?? null);
   }, [commit, community?.id, deck]);
+
+  // Before the welcome check: a submitted request replaces the deck outright. There is no session
+  // to land in, so nothing else would tell the person what just happened.
+  if (submittedRequest !== null) {
+    return <RequestSentScreen request={submittedRequest} onDone={leaveRequest} />;
+  }
 
   if (deck.showWelcome) {
     return <WelcomeScreen name={context.profileName} onDone={deck.dismissWelcome} />;
@@ -136,6 +160,7 @@ function renderCard(
           community={
             community ? { name: community.name, description: community.description ?? null } : null
           }
+          publicEmailDomainError={context.publicEmailDomainError}
         />
       );
 
@@ -144,6 +169,14 @@ function renderCard(
 
     case CardId.ROLE:
       return <RoleCard value={answers.role} onChange={role => answer({ role })} />;
+
+    case CardId.COMPANY_SIZE:
+      return (
+        <CompanySizeCard
+          value={answers.companySize}
+          onChange={companySize => answer({ companySize })}
+        />
+      );
 
     case CardId.COMPANY_ON_XYNE:
       return (

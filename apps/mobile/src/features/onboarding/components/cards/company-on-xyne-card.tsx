@@ -46,7 +46,7 @@ export function CompanyOnXyneCard({
       <View style={styles.footnote}>
         <Info size={16} color={deckPalette.textMuted} strokeWidth={1.8} />
         <Text style={styles.footnoteLabel}>
-          Until an admin accepts, you&apos;ll be in the Xyne Community.
+          An admin reviews join requests. You can use Xyne once yours is approved.
         </Text>
       </View>
     </View>

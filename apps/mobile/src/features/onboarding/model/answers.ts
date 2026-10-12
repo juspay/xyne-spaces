@@ -16,19 +16,21 @@ export const CompanyChoice = {
 } as const;
 export type CompanyChoice = (typeof CompanyChoice)[keyof typeof CompanyChoice];
 
-export const ROLE_OPTIONS = [
-  { id: 'building', label: 'Building and shipping' },
-  { id: 'operating', label: 'Keeping things running' },
-  { id: 'leading', label: 'Leading a team' },
-  { id: 'everything', label: 'A bit of everything' },
-] as const;
-export type RoleId = (typeof ROLE_OPTIONS)[number]['id'];
+/**
+ * The dashboard's "Company size" choices, verbatim — it asks them of whoever creates an org, and
+ * the backend stores the label as the answer, so these strings are the contract.
+ */
+export const COMPANY_SIZE_OPTIONS = ['0-10', '11-100', '100-1000', '1000+'] as const;
+export type CompanySize = (typeof COMPANY_SIZE_OPTIONS)[number];
 
 export interface OnboardingAnswers {
   start?: StartChoice;
   /** Collected only on the email sign-up path, where the provider gave us no name. */
   name?: string;
-  role?: RoleId;
+  /** Free text, as on the dashboard ("Ex: Product Manager"). Optional there, so optional here. */
+  role?: string;
+  /** Asked only of someone creating a new org — see `buildFlow`. */
+  companySize?: CompanySize;
   company?: CompanyChoice;
   workspaceName?: string;
   companyName?: string;

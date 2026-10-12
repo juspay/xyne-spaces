@@ -42,6 +42,11 @@ import {
 import { requestMicrosoftAuthorizationCode } from '../services/microsoftOAuth';
 import { deleteKeys, getJson, getString, setJson, setString } from '../services/localStorage';
 import {
+  PENDING_AUTH_SNAPSHOT_KEY,
+  decodePendingAuth,
+  encodePendingAuth,
+} from '../services/pendingAuthSnapshot';
+import {
   decodeAuthJwtClaims,
   deleteStoredAuthToken,
   getStoredAuthToken,
@@ -70,7 +75,8 @@ import { clearStartupMetricsQueue } from '../services/metrics/metricsQueue';
 import { queryClient } from '../services/queryClient';
 import { clearPersistentDownloads } from '../modules/downloads/NativeAttachmentDownload';
 import { logger, Event } from '../utils/logger';
-import { API_BASE_URL } from '../config';
+import { API_BASE_URL, API_ORIGIN } from '../config';
+import { GOOGLE_ACCESS_TOKEN_COOKIE, getCookieValueFromJar } from '../utils/apiCookieHeader';
 import type { Context } from '@xyne/shared';
 import { setActiveWorkspaceId, getActiveWorkspaceId } from '../utils/activeWorkspace';
 import { clearMemberWorkspacesCache } from '../services/memberWorkspaces';
@@ -242,7 +248,7 @@ try {
 type GoogleUser = SignInSuccessResponse | null;
 type SignInProvider = 'google' | 'email' | 'microsoft';
 
-type PendingAuthState =
+export type PendingAuthState =
   | {
       kind: 'workspace_selection_required';
       provider: SignInProvider;
@@ -375,6 +381,24 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
     makeWorkspaceSessionKey(cachedAuthSnapshot.user),
   );
   const [pendingAuth, setPendingAuth] = useState<PendingAuthState | null>(null);
+
+  /**
+   * The only way `pendingAuth` changes.
+   *
+   * State and its on-disk snapshot have to move together, and there are half a dozen places that
+   * clear it — sign-out, a session landing, the user backing out. Routing them all through one
+   * function is what stops a path from clearing the state and leaving the snapshot behind, which
+   * would bring a finished onboarding back from the dead on the next launch.
+   */
+  const updatePendingAuth = (next: PendingAuthState | null): void => {
+    setPendingAuth(next);
+    const stored = encodePendingAuth(next, Date.now());
+    if (stored) {
+      setJson(PENDING_AUTH_SNAPSHOT_KEY, stored);
+    } else {
+      deleteKeys([PENDING_AUTH_SNAPSHOT_KEY]);
+    }
+  };
   const [communityJoinRequest, setCommunityJoinRequest] =
     useState<CommunityJoinRequestState | null>(null);
   const [communityJoinError, setCommunityJoinError] = useState<string | null>(null);
@@ -537,7 +561,7 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
             setGoogleUser(null);
             setToken(null);
             setActiveWorkspaceId(null);
-            setPendingAuth(null);
+            updatePendingAuth(null);
             setCommunityJoinRequest(null);
             setCommunityJoinError(null);
           },
@@ -556,6 +580,41 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
     );
 
     return stages;
+  };
+
+  /**
+   * Brings back a sign-in that was interrupted before it became a workspace session.
+   *
+   * Two gates, because they answer different questions. The stored snapshot is the *what*: who
+   * this is and which cards apply. The cookie jar is the *may they*: the pending-auth cookie is
+   * what the final onboarding call authenticates with, and it is short-lived. A snapshot without
+   * its cookie would put someone on a card whose last step can only fail, so it is dropped and
+   * they sign in again — their answers are kept by the deck itself, keyed by email, so signing
+   * back in resumes where they were.
+   */
+  const restorePendingAuth = async (): Promise<void> => {
+    try {
+      const snapshot = decodePendingAuth(getJson<unknown>(PENDING_AUTH_SNAPSHOT_KEY), Date.now());
+      if (!snapshot) {
+        deleteKeys([PENDING_AUTH_SNAPSHOT_KEY]);
+        return;
+      }
+
+      const pendingCookie = await getCookieValueFromJar(API_ORIGIN, GOOGLE_ACCESS_TOKEN_COOKIE);
+      if (!pendingCookie) {
+        logger.debug(Event.LOTUS_AUTH_CHECK, { stage: 'pending_auth_cookie_gone' });
+        deleteKeys([PENDING_AUTH_SNAPSHOT_KEY]);
+        return;
+      }
+
+      logger.debug(Event.LOTUS_AUTH_CHECK, { stage: 'pending_auth_restored' });
+      // Not `updatePendingAuth`: that would re-stamp `savedAt`, so every relaunch would extend
+      // the snapshot's life past the cookie's. The original timestamp has to stand.
+      setPendingAuth(snapshot);
+    } catch (error) {
+      // Never let a bad snapshot cost someone the login screen.
+      logger.debug(Event.LOTUS_AUTH_CHECK, { stage: 'pending_auth_restore_failed', error });
+    }
   };
 
   const tryRestoreGoogleSession = async (
@@ -801,6 +860,10 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
           });
         }
         logger.debug(Event.LOTUS_AUTH_CHECK, { stage: 'no_stored_credentials' });
+        // No workspace session — but this person may have signed in and been killed mid-way
+        // through onboarding. Awaited, so it lands before `isLoading` ends: the login screen
+        // never paints for someone who is about to be sent to the deck.
+        await restorePendingAuth();
         return;
       }
 
@@ -982,7 +1045,7 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
     setUser(nextUser);
     setToken(nextToken);
     setActiveWorkspaceId(nextUser.workspaceId);
-    setPendingAuth(null);
+    updatePendingAuth(null);
     return true;
   };
 
@@ -1006,7 +1069,7 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
       // The pending selection is deliberately kept so a later sign-in re-checks the request's
       // status; "Continue with work email" is the escape hatch that purges it.
       setCommunityJoinRequest(request);
-      setPendingAuth(null);
+      updatePendingAuth(null);
       setUser(null);
       setToken(null);
       return { kind: 'request', request };
@@ -1105,7 +1168,7 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
     }
     setActiveWorkspaceId(null);
     if (authResponse.kind === 'workspace_selection_required') {
-      setPendingAuth({
+      updatePendingAuth({
         kind: 'workspace_selection_required',
         provider,
         profile: authResponse.profile,
@@ -1113,7 +1176,7 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
         ...(authResponse.userExistsButRemoved ? { userExistsButRemoved: true } : {}),
       });
     } else {
-      setPendingAuth({
+      updatePendingAuth({
         kind: 'org_creation_required',
         provider,
         profile: authResponse.profile,
@@ -1165,7 +1228,7 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
     setUser(nextUser);
     setToken(nextToken);
     setActiveWorkspaceId(nextUser.workspaceId);
-    setPendingAuth(null);
+    updatePendingAuth(null);
     setWorkspaceSessionKey(nextKey);
     if (Platform.OS === 'android') {
       void clearPersistentDownloads();
@@ -1804,7 +1867,7 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
         createOrganization,
         requestEnterpriseJoin: requestEnterpriseWorkspaceJoin,
         createEnterpriseWorkspace,
-        clearPendingAuth: () => setPendingAuth(null),
+        clearPendingAuth: () => updatePendingAuth(null),
         signOut,
         token,
         applyRefreshedToken,

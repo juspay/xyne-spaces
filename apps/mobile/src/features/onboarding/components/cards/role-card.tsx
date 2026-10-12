@@ -1,31 +1,37 @@
 import type { ReactElement } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet, TextInput, View } from 'react-native';
 
 import { CardHeading } from '../card-heading';
-import { OptionRow } from '../option-row';
-import { ROLE_OPTIONS, type RoleId } from '../../model/answers';
+import { deckMetrics, deckPalette } from '../../theme';
 
-/** "What's your day mostly made of?" — the one card every path shows. */
+/**
+ * "What's your role in your team?" — the dashboard's question, free text and optional, asked on
+ * every path that ends in a session.
+ */
 export function RoleCard({
   value,
   onChange,
 }: {
-  value: RoleId | undefined;
-  onChange: (role: RoleId) => void;
+  value: string | undefined;
+  onChange: (role: string) => void;
 }): ReactElement {
   return (
     <View style={styles.card}>
-      <CardHeading title="What's your day mostly made of?" />
-      <View style={styles.options} accessibilityRole='radiogroup'>
-        {ROLE_OPTIONS.map(option => (
-          <OptionRow
-            key={option.id}
-            label={option.label}
-            selected={value === option.id}
-            onPress={() => onChange(option.id)}
-          />
-        ))}
-      </View>
+      <CardHeading
+        title="What's your role in your team?"
+        subtitle='Helps your teammates recognise and connect with you.'
+      />
+      <TextInput
+        value={value ?? ''}
+        onChangeText={onChange}
+        placeholder='Ex: Product Manager'
+        placeholderTextColor={deckPalette.textMuted}
+        autoCapitalize='words'
+        autoCorrect={false}
+        returnKeyType='done'
+        accessibilityLabel='Your role'
+        style={styles.input}
+      />
     </View>
   );
 }
@@ -35,7 +41,13 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 24,
   },
-  options: {
-    gap: 10,
+  input: {
+    minHeight: deckMetrics.rowHeight,
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: deckPalette.textPrimary,
+    backgroundColor: deckPalette.row,
   },
 });

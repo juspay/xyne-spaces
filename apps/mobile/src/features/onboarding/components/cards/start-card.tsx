@@ -1,6 +1,6 @@
 import { ChevronRight, Info } from 'lucide-react-native';
 import type { ReactElement } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { CardHeading } from '../card-heading';
 import { StartChoice } from '../../model/answers';
@@ -11,6 +11,12 @@ export interface StartCardProps {
   onChange: (choice: StartChoice) => void;
   /** The public community space, once the listing lands. */
   community: { name: string; description: string | null } | null;
+  /**
+   * Set when the address is a personal one (gmail.com and friends). The backend will not build or
+   * join an enterprise workspace from it, so the workspace row says so rather than letting the
+   * person walk three cards to the same refusal.
+   */
+  publicEmailDomainError: string | null;
 }
 
 /**
@@ -19,9 +25,23 @@ export interface StartCardProps {
  * The community row names the real workspace from `/community/workspaces`; it falls back to the
  * product name while the listing is in flight, so the card never renders empty.
  */
-export function StartCard({ value, onChange, community }: StartCardProps): ReactElement {
+export function StartCard({
+  value,
+  onChange,
+  community,
+  publicEmailDomainError,
+}: StartCardProps): ReactElement {
   const isCommunity = value === StartChoice.COMMUNITY;
   const isWorkspace = value === StartChoice.WORKSPACE;
+
+  const chooseWorkspace = (): void => {
+    if (publicEmailDomainError !== null) {
+      // Not selected: the row stays unpicked, so the forward button cannot carry them on.
+      Alert.alert('Use your work email', publicEmailDomainError);
+      return;
+    }
+    onChange(StartChoice.WORKSPACE);
+  };
 
   return (
     <View style={styles.card}>
@@ -60,7 +80,7 @@ export function StartCard({ value, onChange, community }: StartCardProps): React
       </Pressable>
 
       <Pressable
-        onPress={() => onChange(StartChoice.WORKSPACE)}
+        onPress={chooseWorkspace}
         accessibilityRole='radio'
         accessibilityState={{ selected: isWorkspace }}
         accessibilityLabel='Join or create workspace'

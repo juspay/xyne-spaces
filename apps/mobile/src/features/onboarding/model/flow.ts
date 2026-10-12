@@ -15,15 +15,33 @@ export const CardId = {
   ROLE: 'role',
   WORKSPACE_SETUP: 'workspace-setup',
   COMPANY_ON_XYNE: 'company-on-xyne',
+  COMPANY_SIZE: 'company-size',
   CONNECT_TOOLS: 'connect-tools',
 } as const;
 export type CardId = (typeof CardId)[keyof typeof CardId];
+
+/**
+ * Whether the "Connect your tools" card is part of the deck.
+ *
+ * Off until connecting a tool actually does something. The card, its screen branch and its
+ * answers are all still here, so turning this on is the whole change — nothing else needs to be
+ * put back. While it is off the card is absent from every path, which is why this is decided in
+ * `buildFlow` rather than at the screen: the dot count, the resume position and the last-card
+ * button all derive from the flow and follow it automatically.
+ */
+export const CONNECT_TOOLS_ENABLED = false;
 
 /**
  * The ordered deck for this person and the answers they have given so far.
  *
  * Recomputed on every answer, so picking "Join or create workspace" grows the deck by one card
  * and the dots grow with it.
+ *
+ * Two halves, in this order. First the *placement* cards — where the person is going: the start
+ * fork, then (for the workspace branch) the company card or the workspace setup. Then the
+ * *questions*, which the dashboard asks of everyone who ends up with a session. The one exception
+ * is asking an existing company for access: that ends in a waiting screen, not in the app, so
+ * nothing is asked of them until an admin has said yes.
  */
 export function buildFlow(
   context: OnboardingContext,
@@ -35,13 +53,6 @@ export function buildFlow(
   if (!context.isInvited) {
     cards.push(CardId.START);
   }
-
-  // The provider gave us no name, so ask before anything addressed to them.
-  if (context.profileName === null) {
-    cards.push(CardId.NAME);
-  }
-
-  cards.push(CardId.ROLE);
 
   if (!context.isInvited && answers.start === StartChoice.WORKSPACE) {
     if (context.existingCompany) {
@@ -55,7 +66,26 @@ export function buildFlow(
     }
   }
 
-  cards.push(CardId.CONNECT_TOOLS);
+  const outcome = resolveOutcome(context, answers);
+
+  if (outcome.kind !== 'request-enterprise-join') {
+    // The provider gave us no name, so ask before anything addressed to them.
+    if (context.profileName === null) {
+      cards.push(CardId.NAME);
+    }
+
+    cards.push(CardId.ROLE);
+
+    // Mirrors the dashboard, which asks company size of the person who *created* the org and of
+    // nobody else — joining one, or opening a second workspace in it, does not.
+    if (outcome.kind === 'create-org') {
+      cards.push(CardId.COMPANY_SIZE);
+    }
+  }
+
+  if (CONNECT_TOOLS_ENABLED) {
+    cards.push(CardId.CONNECT_TOOLS);
+  }
 
   return cards;
 }
@@ -72,9 +102,12 @@ export function canAdvance(
     case CardId.NAME:
       return (answers.name ?? '').trim().length > 0;
     case CardId.ROLE:
-      return answers.role !== undefined;
+      // Optional on the dashboard too: leaving it blank just means no role is stored.
+      return true;
     case CardId.COMPANY_ON_XYNE:
       return answers.company !== undefined;
+    case CardId.COMPANY_SIZE:
+      return answers.companySize !== undefined;
     case CardId.WORKSPACE_SETUP:
       // Leaving it blank is the documented way to skip the workspace and land in the community.
       return context.publicEmailDomainError === null || isWorkspaceSkipped(answers);
@@ -108,8 +141,9 @@ export function resolveOutcome(
     return { kind: 'join-community' };
   }
 
-  // Their domain already belongs to an org and they asked that org for access. Until an admin
-  // accepts, the community is where they wait, which the card says out loud.
+  // Their domain already belongs to an org and they asked that org for access. Asking is not
+  // joining: the request waits for an admin and no session comes of it, so the deck ends on a
+  // waiting screen and not in the app (see `use-onboarding-commit`).
   if (context.existingCompany && answers.company === CompanyChoice.REQUEST_JOIN) {
     const target = context.existingCompany.workspaces[0];
     return target
@@ -152,9 +186,11 @@ export function isAnswered(card: CardId, answers: OnboardingAnswers): boolean {
     case CardId.NAME:
       return (answers.name ?? '').trim().length > 0;
     case CardId.ROLE:
-      return answers.role !== undefined;
+      return (answers.role ?? '').trim().length > 0;
     case CardId.COMPANY_ON_XYNE:
       return answers.company !== undefined;
+    case CardId.COMPANY_SIZE:
+      return answers.companySize !== undefined;
     case CardId.WORKSPACE_SETUP:
       return answers.workspaceName !== undefined;
     case CardId.CONNECT_TOOLS:

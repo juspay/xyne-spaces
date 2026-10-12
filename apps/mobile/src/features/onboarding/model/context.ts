@@ -52,6 +52,33 @@ export interface SignInSnapshot {
 }
 
 /**
+ * The personal providers the backend refuses to build an enterprise workspace from — a copy of
+ * `PERSONAL_EMAIL_DOMAINS` in `organizationDomainService.ts`.
+ *
+ * It has to live here because the backend only *reports* this refusal when the sign-in carries the
+ * "enterprise login" intent, and a native mobile sign-in carries no OAuth state to hold one. So a
+ * Gmail user comes back with no `publicEmailDomainError` at all, and the deck would only find out
+ * at the final call. If the backend list grows, this one needs the same entry.
+ */
+const PERSONAL_EMAIL_DOMAINS: ReadonlySet<string> = new Set([
+  'gmail.com',
+  'yahoo.com',
+  'outlook.com',
+  'hotmail.com',
+  'icloud.com',
+  'proton.me',
+]);
+
+/** The backend's own wording, so the person reads the same sentence whichever side raised it. */
+export function personalEmailDomainError(email: string): string | null {
+  const domain = email.trim().toLowerCase().split('@')[1];
+  if (domain === undefined || !PERSONAL_EMAIL_DOMAINS.has(domain)) {
+    return null;
+  }
+  return `Public email domains (${domain}) cannot create enterprise workspaces. Please use your work email.`;
+}
+
+/**
  * The onboarding context for this sign-in, or `null` when the deck does not apply.
  *
  * The deck is for people the backend could not place: `org_creation_required` means they
@@ -77,7 +104,9 @@ export function toOnboardingContext(pendingAuth: SignInSnapshot | null): Onboard
     // Blank whenever no provider gave us one, which is what puts the name card in the deck.
     profileName: pendingAuth.profile.name.trim() || null,
     existingCompany: target ? { orgName: target.orgName, workspaces: target.workspaces } : null,
-    publicEmailDomainError: pendingAuth.publicEmailDomainError ?? null,
+    // The backend's message when it sent one; otherwise worked out here (see above).
+    publicEmailDomainError:
+      pendingAuth.publicEmailDomainError ?? personalEmailDomainError(pendingAuth.profile.email),
     isInvited: false,
   };
 }

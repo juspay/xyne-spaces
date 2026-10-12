@@ -33,6 +33,8 @@ import { setRouteSnapshot } from '@/src/features/chat/navigation/routeSnapshot';
 import { ensureQueryCacheStorageReady } from '@/src/machines/queryCacheMachine';
 import { GuideReturnBar } from '@/src/features/user-guide/components/guide-return-bar';
 import { isFlagOn, useFlagGeneration } from '@/src/flags';
+import { ApprovedOnboardingGate } from '@/src/features/onboarding/components/approved-onboarding-gate';
+import { useFlushPendingOnboarding } from '@/src/features/onboarding/hooks/use-flush-pending-onboarding';
 
 const DASHBOARD_WEBVIEW_ROUTE_SEGMENTS = new Set(['canvas', 'rca', 'call', 'channel-canvas']);
 
@@ -55,6 +57,11 @@ export const unstable_settings = {
 
 function ClearExpiredOwnStatusEffect({ enabled }: { enabled: boolean }): null {
   useClearExpiredOwnStatus({ enabled });
+  return null;
+}
+
+function FlushPendingOnboardingEffect({ enabled }: { enabled: boolean }): null {
+  useFlushPendingOnboarding({ enabled });
   return null;
 }
 
@@ -107,6 +114,7 @@ function NativeShell(): ReactElement {
     <>
       <ZeroProvider>
         <ClearExpiredOwnStatusEffect enabled={canRunPostStartupServices} />
+        <FlushPendingOnboardingEffect enabled={canRunPostStartupServices} />
         <InitialStateLoader>
           <CallBarVisibilityContext.Provider value={callBarVisibility}>
             <SafeAreaInsetsProvider raw={insets} content={contentInsets}>
@@ -184,7 +192,7 @@ function ProtectedShell(): ReactElement {
   }
 
   return (
-    <>
+    <ApprovedOnboardingGate>
       <NativeShell key={`${workspaceSessionKey}:${flagGeneration}`} />
 
       {shouldLoadDashboardWebView && (
@@ -192,7 +200,7 @@ function ProtectedShell(): ReactElement {
           <LazyDashboardWebViewShell />
         </Suspense>
       )}
-    </>
+    </ApprovedOnboardingGate>
   );
 }
 

@@ -2,18 +2,27 @@
 import { describe, expect, it, jest } from '@jest/globals';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import type { ReactElement } from 'react';
+import { Alert } from 'react-native';
 import {
   SafeAreaProvider,
   initialWindowMetrics,
   type Metrics,
 } from 'react-native-safe-area-context';
 
+// `mock`-prefixed so the hoisted factory below may close over them; shared across renders so a
+// test can assert on what the deck did.
+const mockJoinCommunity = jest.fn<(workspaceId: string) => Promise<void>>();
+const mockRequestEnterpriseJoin =
+  jest.fn<(workspaceId: string) => Promise<{ status: string | null; isExisting: boolean }>>();
+const mockClearPendingAuth = jest.fn();
+
 jest.mock('@/src/contexts/AuthContext', () => ({
   useAuth: () => ({
-    joinCommunityAndSwitch: jest.fn(),
+    joinCommunityAndSwitch: mockJoinCommunity,
     createOrganization: jest.fn(),
     createEnterpriseWorkspace: jest.fn(),
-    requestEnterpriseJoin: jest.fn(),
+    requestEnterpriseJoin: mockRequestEnterpriseJoin,
+    clearPendingAuth: mockClearPendingAuth,
   }),
 }));
 
@@ -103,12 +112,122 @@ describe('OnboardingScreen', () => {
       jest.advanceTimersByTime(2500);
     });
 
-    // Three cards on the community path: start, role, connect-tools.
-    expect(screen.getByLabelText('Step 1 of 3')).toBeTruthy();
+    // Two cards on the community path: start, role. Connect-tools is off, so it is not counted.
+    expect(screen.getByLabelText('Step 1 of 2')).toBeTruthy();
     fireEvent.press(screen.getByLabelText('Join or create workspace'));
 
     // The workspace branch adds the setup card, so the dots gain one.
-    expect(screen.getByLabelText('Step 1 of 4')).toBeTruthy();
+    expect(screen.getByLabelText('Step 1 of 3')).toBeTruthy();
     jest.useRealTimers();
+  });
+
+  it("asks the dashboard's role question as free text on the community path", async () => {
+    jest.useFakeTimers();
+    renderDeck();
+    act(() => {
+      jest.advanceTimersByTime(2500);
+    });
+
+    fireEvent.press(screen.getByLabelText(/community space/));
+    fireEvent.press(screen.getByLabelText('Next'));
+
+    expect(screen.getByText("What's your role in your team?")).toBeTruthy();
+    fireEvent.changeText(screen.getByLabelText('Your role'), 'Product Manager');
+
+    mockJoinCommunity.mockResolvedValue(undefined);
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText('Finish'));
+    });
+
+    expect(mockJoinCommunity).toHaveBeenCalledTimes(1);
+    jest.useRealTimers();
+  });
+
+  describe('with a personal email address', () => {
+    const PERSONAL_CONTEXT: OnboardingContext = {
+      ...CONTEXT,
+      email: 'devesh@gmail.com',
+      publicEmailDomainError:
+        'Public email domains (gmail.com) cannot create enterprise workspaces. Please use your work email.',
+    };
+
+    it('refuses the workspace option on the start card itself, with the backend message', () => {
+      jest.useFakeTimers();
+      const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+      renderDeck(PERSONAL_CONTEXT);
+      act(() => {
+        jest.advanceTimersByTime(2500);
+      });
+
+      fireEvent.press(screen.getByLabelText('Join or create workspace'));
+
+      expect(alert).toHaveBeenCalledWith(
+        'Use your work email',
+        PERSONAL_CONTEXT.publicEmailDomainError,
+      );
+      // Not selected: the deck did not grow and the person cannot be carried on to the setup card.
+      expect(screen.getByLabelText('Step 1 of 2')).toBeTruthy();
+      alert.mockRestore();
+      jest.useRealTimers();
+    });
+  });
+
+  describe('requesting to join an existing company workspace', () => {
+    const COMPANY_CONTEXT: OnboardingContext = {
+      ...CONTEXT,
+      existingCompany: { orgName: 'Juspay', workspaces: [{ id: 'ws-juspay', name: 'Juspay' }] },
+    };
+
+    async function requestToJoin(): Promise<void> {
+      jest.useFakeTimers();
+      renderDeck(COMPANY_CONTEXT);
+      act(() => {
+        jest.advanceTimersByTime(2500);
+      });
+
+      fireEvent.press(screen.getByLabelText('Join or create workspace'));
+      fireEvent.press(screen.getByLabelText('Next'));
+      // No role question in between: asking for access ends the deck on the company card.
+      fireEvent.press(screen.getByLabelText('Request to join Juspay'));
+
+      await act(async () => {
+        fireEvent.press(screen.getByLabelText('Finish'));
+      });
+    }
+
+    it('asks for access without joining anything', async () => {
+      mockRequestEnterpriseJoin.mockResolvedValue({ status: 'PENDING', isExisting: false });
+
+      await requestToJoin();
+
+      expect(mockRequestEnterpriseJoin).toHaveBeenCalledWith('ws-juspay');
+      // The bug: this used to be called as well, which created a session and let the person into
+      // the app before an admin had approved them.
+      expect(mockJoinCommunity).not.toHaveBeenCalled();
+      jest.useRealTimers();
+    });
+
+    it('ends on a waiting screen that only leads back to sign-in', async () => {
+      mockRequestEnterpriseJoin.mockResolvedValue({ status: 'PENDING', isExisting: false });
+
+      await requestToJoin();
+
+      expect(screen.getByText('Request sent')).toBeTruthy();
+      // The deck is gone — there is no forward button left to press.
+      expect(screen.queryByLabelText('Finish')).toBeNull();
+
+      fireEvent.press(screen.getByLabelText('Back to sign in'));
+      expect(mockClearPendingAuth).toHaveBeenCalledTimes(1);
+      jest.useRealTimers();
+    });
+
+    it('reports a request that was already waiting', async () => {
+      mockRequestEnterpriseJoin.mockResolvedValue({ status: 'PENDING', isExisting: true });
+
+      await requestToJoin();
+
+      expect(screen.getByText('Request already sent')).toBeTruthy();
+      jest.useRealTimers();
+    });
   });
 });

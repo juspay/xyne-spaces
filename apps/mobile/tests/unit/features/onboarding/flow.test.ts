@@ -16,7 +16,18 @@ import {
   toOnboardingContext,
   type OnboardingContext,
 } from '@/src/features/onboarding/model/context';
-import { buildFlow, canAdvance, resolveOutcome } from '@/src/features/onboarding/model/flow';
+import {
+  CONNECT_TOOLS_ENABLED,
+  buildFlow,
+  canAdvance,
+  resolveOutcome,
+} from '@/src/features/onboarding/model/flow';
+
+/**
+ * The connect-tools card closes every deck while it is enabled and is absent while it is not.
+ * Written as a tail rather than hardcoded so these scenarios stay about the *other* cards.
+ */
+const TOOLS: readonly string[] = CONNECT_TOOLS_ENABLED ? ['connect-tools'] : [];
 
 const BASE: OnboardingContext = {
   email: 'devesh@acme.com',
@@ -37,19 +48,26 @@ function flow(context: OnboardingContext, answers: OnboardingAnswers): string[] 
 
 describe('onboarding flow', () => {
   it('picks the Xyne community', () => {
-    const answers: OnboardingAnswers = { start: StartChoice.COMMUNITY, role: 'building' };
-    assert.deepEqual(flow(BASE, answers), ['start', 'role', 'connect-tools']);
+    const answers: OnboardingAnswers = { start: StartChoice.COMMUNITY, role: 'Product Manager' };
+    assert.deepEqual(flow(BASE, answers), ['start', 'role', ...TOOLS]);
     assert.deepEqual(resolveOutcome(BASE, answers), { kind: 'join-community' });
   });
 
   it('picks a workspace at a company new to Xyne', () => {
     const answers: OnboardingAnswers = {
       start: StartChoice.WORKSPACE,
-      role: 'leading',
+      role: 'Product Manager',
       workspaceName: 'Acme',
       companyName: 'Acme Inc',
     };
-    assert.deepEqual(flow(BASE, answers), ['start', 'role', 'workspace-setup', 'connect-tools']);
+    // Placement first, questions after — and company size only because an org is being created.
+    assert.deepEqual(flow(BASE, answers), [
+      'start',
+      'workspace-setup',
+      'role',
+      'company-size',
+      ...TOOLS,
+    ]);
     assert.deepEqual(resolveOutcome(BASE, answers), {
       kind: 'create-org',
       orgName: 'Acme Inc',
@@ -57,18 +75,14 @@ describe('onboarding flow', () => {
     });
   });
 
-  it('picks a workspace at a company already on Xyne', () => {
+  it('asks for access to a company already on Xyne, and asks nothing else', () => {
     const answers: OnboardingAnswers = {
       start: StartChoice.WORKSPACE,
-      role: 'building',
       company: CompanyChoice.REQUEST_JOIN,
     };
-    assert.deepEqual(flow(WITH_COMPANY, answers), [
-      'start',
-      'role',
-      'company-on-xyne',
-      'connect-tools',
-    ]);
+    // The deck ends on the company card: the request waits for an admin and no session comes of
+    // it, so the questions are held until the person is actually let in.
+    assert.deepEqual(flow(WITH_COMPANY, answers), ['start', 'company-on-xyne', ...TOOLS]);
     assert.deepEqual(resolveOutcome(WITH_COMPANY, answers), {
       kind: 'request-enterprise-join',
       workspaceId: 'ws-1',
@@ -76,19 +90,29 @@ describe('onboarding flow', () => {
     });
   });
 
+  it('does not ask a name of someone who is only asking for access', () => {
+    const noName: OnboardingContext = { ...WITH_COMPANY, profileName: null };
+    const answers: OnboardingAnswers = {
+      start: StartChoice.WORKSPACE,
+      company: CompanyChoice.REQUEST_JOIN,
+    };
+    assert.ok(!flow(noName, answers).includes('name'));
+  });
+
   it('creates a separate workspace inside a company already on Xyne', () => {
     const answers: OnboardingAnswers = {
       start: StartChoice.WORKSPACE,
-      role: 'building',
       company: CompanyChoice.CREATE_NEW,
       workspaceName: 'Acme Labs',
     };
+    // Company size is the org creator's question; opening a second workspace in an existing org
+    // is not that, so the deck stops at the role.
     assert.deepEqual(flow(WITH_COMPANY, answers), [
       'start',
-      'role',
       'company-on-xyne',
       'workspace-setup',
-      'connect-tools',
+      'role',
+      ...TOOLS,
     ]);
     assert.deepEqual(resolveOutcome(WITH_COMPANY, answers), {
       kind: 'create-enterprise-workspace',
@@ -99,10 +123,11 @@ describe('onboarding flow', () => {
   it('picks a workspace, then skips it', () => {
     const answers: OnboardingAnswers = {
       start: StartChoice.WORKSPACE,
-      role: 'everything',
       workspaceName: '   ',
     };
     assert.deepEqual(resolveOutcome(BASE, answers), { kind: 'join-community' });
+    // Skipped, so no org is created and the size question has no place.
+    assert.ok(!flow(BASE, answers).includes('company-size'));
     // Blank is the skip, so the card never blocks the forward button.
     assert.equal(canAdvance('workspace-setup', BASE, answers), true);
   });
@@ -110,22 +135,25 @@ describe('onboarding flow', () => {
   it('asks for a name when no provider gave one', () => {
     const emailSignUp: OnboardingContext = { ...BASE, profileName: null };
     const answers: OnboardingAnswers = { start: StartChoice.COMMUNITY };
-    assert.deepEqual(flow(emailSignUp, answers), ['start', 'name', 'role', 'connect-tools']);
+    assert.deepEqual(flow(emailSignUp, answers), ['start', 'name', 'role', ...TOOLS]);
     assert.equal(canAdvance('name', emailSignUp, answers), false);
     assert.equal(canAdvance('name', emailSignUp, { ...answers, name: 'Devesh' }), true);
   });
 
-  it('drops the start card for an invited user', () => {
+  it('drops the start card for someone already placed in a workspace', () => {
     const invited: OnboardingContext = { ...BASE, isInvited: true };
-    assert.deepEqual(flow(invited, {}), ['role', 'connect-tools']);
+    // Also the shape an approved join request takes on its way in: questions only.
+    assert.deepEqual(flow(invited, {}), ['role', ...TOOLS]);
     assert.deepEqual(resolveOutcome(invited, {}), { kind: 'nothing' });
   });
 
   it('shrinks the deck when the answer changes back to the community', () => {
     const workspace = flow(BASE, { start: StartChoice.WORKSPACE });
     const community = flow(BASE, { start: StartChoice.COMMUNITY });
-    assert.equal(workspace.length, 4);
-    assert.equal(community.length, 3);
+    // One card fewer — the setup card — whatever the deck's other cards add up to.
+    assert.equal(workspace.length, community.length + 1);
+    assert.ok(workspace.includes('workspace-setup'));
+    assert.ok(!community.includes('workspace-setup'));
   });
 
   it('falls back to the community when the company has no workspace to ask', () => {
@@ -138,6 +166,51 @@ describe('onboarding flow', () => {
       company: CompanyChoice.REQUEST_JOIN,
     };
     assert.deepEqual(resolveOutcome(noWorkspaces, answers), { kind: 'join-community' });
+    // Nothing was asked of an admin, so the person is about to be let in and is asked as usual.
+    assert.ok(flow(noWorkspaces, answers).includes('role'));
+  });
+
+  it('treats the role as optional, as the dashboard does', () => {
+    assert.equal(canAdvance('role', BASE, {}), true);
+    assert.equal(canAdvance('role', BASE, { role: '  Designer ' }), true);
+  });
+
+  it('needs a company size picked before moving on', () => {
+    assert.equal(canAdvance('company-size', BASE, {}), false);
+    assert.equal(canAdvance('company-size', BASE, { companySize: '11-100' }), true);
+  });
+});
+
+describe('personal email domains', () => {
+  const signIn = (
+    email: string,
+    extra: Record<string, unknown> = {},
+  ): ReturnType<typeof toOnboardingContext> =>
+    toOnboardingContext({
+      kind: 'org_creation_required',
+      profile: { email, name: 'A' },
+      ...extra,
+    });
+
+  it('blocks the workspace option for a personal address even when the backend sent nothing', () => {
+    // Native mobile carries no enterprise-login intent, so this is the case that actually occurs.
+    assert.equal(
+      signIn('someone@gmail.com')?.publicEmailDomainError,
+      'Public email domains (gmail.com) cannot create enterprise workspaces. Please use your work email.',
+    );
+    assert.ok(signIn('Someone@Outlook.com')?.publicEmailDomainError?.includes('outlook.com'));
+  });
+
+  it('leaves a work address alone', () => {
+    assert.equal(signIn('devesh@juspay.in')?.publicEmailDomainError, null);
+  });
+
+  it('prefers the backend message when it sends one', () => {
+    assert.equal(
+      signIn('someone@gmail.com', { publicEmailDomainError: 'From the server' })
+        ?.publicEmailDomainError,
+      'From the server',
+    );
   });
 });
 

@@ -177,12 +177,14 @@ export const CommunityLoginScreen = (): ReactElement => {
   const infoBannerBg = useCSSVariable('--color-auth-info-icon-bg') as string;
   const infoBannerFg = useCSSVariable('--color-auth-info-icon') as string;
 
+  // Sign-in is the landing screen, so there is usually nothing beneath it. Falling back to
+  // `replace('/community')` here used to be the way home; it is now a way *back* to the options
+  // screen that sign-in is supposed to come before. Only offer Back when a screen is beneath —
+  // an invite link lands on `community` and pushes this on top of it.
+  const canGoBackToCommunities = router.canGoBack();
+
   const goBackToCommunities = (): void => {
-    if (router.canGoBack()) {
-      router.back();
-      return;
-    }
-    router.replace('/community');
+    router.back();
   };
 
   const inputStyle = {
@@ -603,6 +605,13 @@ export const CommunityLoginScreen = (): ReactElement => {
 
   const showProviderButtons = authMode === 'providers';
 
+  // The deck takes over from here (see the effect above). `pendingAuth` is set at this point, so
+  // falling through would paint the old org-creation forms for the frame before it does — and a
+  // restored mid-onboarding sign-in lands here on every relaunch.
+  if (onboardingContext) {
+    return <View style={{ flex: 1 }} />;
+  }
+
   /**
    * The redesigned entry point. It replaces only the plain provider list: every other state the
    * screen can be in (email, sign-up, forgot-password, workspace selection, the no-workspace
@@ -656,15 +665,19 @@ export const CommunityLoginScreen = (): ReactElement => {
           paddingVertical: 32,
         }}
       >
-        <Pressable
-          onPress={goBackToCommunities}
-          accessibilityRole='button'
-          accessibilityLabel='Back to communities'
-          style={{ alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 4 }}
-        >
-          <ChevronLeft size={18} color={secondaryText} />
-          <Text style={{ fontSize: 13, color: secondaryText, fontWeight: '600' }}>Communities</Text>
-        </Pressable>
+        {canGoBackToCommunities ? (
+          <Pressable
+            onPress={goBackToCommunities}
+            accessibilityRole='button'
+            accessibilityLabel='Back to communities'
+            style={{ alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 4 }}
+          >
+            <ChevronLeft size={18} color={secondaryText} />
+            <Text style={{ fontSize: 13, color: secondaryText, fontWeight: '600' }}>
+              Communities
+            </Text>
+          </Pressable>
+        ) : null}
 
         <View
           style={{ flexGrow: 1, justifyContent: 'center', alignItems: 'center', width: '100%' }}
