@@ -715,8 +715,8 @@ const ChatDirectory = ({
         s => s.channelId === c.id && s.userId === context.userID,
       );
       const isDM = c.scopeType === ChannelScopeType.DM || c.scopeType === ChannelScopeType.GROUP_DM;
-      if (status?.desktopNotificationLevel === NotificationLevel.NONE) continue;
       const hasUnreadCount = (unreadCounts[c.id] ?? 0) > 0;
+      if (status?.desktopNotificationLevel === NotificationLevel.NONE && !hasUnreadCount) continue;
       let isUnread = hasUnreadCount;
       if (!isDM) {
         const hasNewActivity =
