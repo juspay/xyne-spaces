@@ -19,7 +19,7 @@ import {
   type MessageHoverToolbarActions,
 } from '../HoverActionsToolbar/messageHoverActionsRegistry';
 import { useAuthContext } from '../../../providers/AuthProvider';
-import { ChatInput } from '../ChatInput';
+import { EditMessageComposer } from '../ChatInput';
 import { usePin } from '../../../hooks/usePin';
 import { useMessageEdit } from '../../../providers/EditProvider';
 import { toast } from 'sonner';
@@ -1335,7 +1335,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       }}
     >
       {isCurrentEditing ? (
-        <ChatInput
+        <EditMessageComposer
           autoFocus='end' // eslint-disable-line jsx-a11y/no-autofocus
           channelId={channelId}
           conversation={conversation}
@@ -1347,7 +1347,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           }
           placeholder='Edit message…'
           className='ml-12'
-          showTypingIndicator={false}
           onEditComplete={finishEditing}
           onCancel={finishEditing}
           isForwardedContent={message.msgType === MessageType.FORWARDED}

@@ -1,1 +1,1 @@
-export { ChatInput } from './ChatInput';
+export { ChannelComposer, ThreadComposer, EditMessageComposer } from './ChatInput';

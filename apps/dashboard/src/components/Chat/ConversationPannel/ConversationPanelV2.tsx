@@ -21,7 +21,7 @@ import ConversationHeader from '../ConversationHeader/ConversationHeader';
 import DragAndDropOverlay from '../DragAndDropOverlay';
 import LoadingAnimation from '../Loader/Loader';
 import JoinChannel from '../JoinChannel/JoinChannel';
-import { ChatInput } from '../ChatInput';
+import { ChannelComposer } from '../ChatInput';
 import FileListV2 from '../FileListV2';
 import PinListV2 from '../PinListV2';
 import KanbanBoardScreen from '../../../routes/KanbanBoardScreen';
@@ -360,7 +360,7 @@ const ConversationPanelV2 = ({
                 <div
                   className={`${discussionList ? 'pb-5' : 'pb-3'} bg-background px-[var(--composer-px)] [--composer-px:0.75rem]`}
                 >
-                  <ChatInput
+                  <ChannelComposer
                     // eslint-disable-next-line jsx-a11y/no-autofocus
                     autoFocus={skipInputAutoFocus ? null : 'end'}
                     ref={inputRef}

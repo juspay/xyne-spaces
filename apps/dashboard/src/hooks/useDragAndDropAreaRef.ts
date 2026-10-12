@@ -26,7 +26,7 @@ interface UseDragAndDropAreaRefReturn {
  *
  * <div ref={dragAndDropAreaRef}>
  *   {isDragging && <DragAndDropOverlay />}
- *   <ChatInput ref={inputRef} />
+ *   <ChannelComposer ref={inputRef} />
  * </div>
  */
 export const useDragAndDropAreaRef = (resetKey?: string): UseDragAndDropAreaRefReturn => {

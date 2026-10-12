@@ -52,7 +52,7 @@ import {
   DropdownMenuSubTrigger,
 } from '../ui/dropdown-menu';
 import { AddToStreamMenuItem } from '../Streams/components/AddToStreamMenu/AddToStreamMenu';
-import { ChatInput } from './ChatInput';
+import { ThreadComposer } from './ChatInput';
 import ThreadList from './ThreadList/ThreadList';
 import { useDragAndDropAreaRef } from '../../hooks/useDragAndDropAreaRef';
 import { DragAndDropOverlay } from './DragAndDropOverlay';
@@ -1230,14 +1230,14 @@ export const ThreadMessages = ({
                 thread is read-only there. */}
             {isDmReadOnly ? null : isUserMember || channel?.isArchived ? (
               <div className='pb-3 bg-background shrink-0 px-[var(--composer-px)] [--composer-px:0.75rem]'>
-                <ChatInput
+                <ThreadComposer
                   ref={inputRef}
                   channelId={derivedChannelId}
                   conversation={conversation ?? undefined}
                   placeholder='Reply to this thread...'
                   hasTicket={hasTicketInMessages}
                   threadParticipantIds={threadParticipantIds}
-                  dockSlot={twinDock}
+                  dock={twinDock}
                   twinEdit={twinEditSession}
                 />
               </div>
@@ -1861,14 +1861,14 @@ export const ThreadMessages = ({
                       Suppressed entirely in a deactivated 1:1 DM archive. */}
                   {isDmReadOnly ? null : isUserMember || channel?.isArchived ? (
                     <div className='pb-3 bg-background shrink-0 px-[var(--composer-px)] [--composer-px:0.75rem]'>
-                      <ChatInput
+                      <ThreadComposer
                         ref={inputRef}
                         channelId={derivedChannelId}
                         conversation={conversation ?? undefined}
                         placeholder='Reply to this thread...'
                         hasTicket={hasTicketInMessages}
                         threadParticipantIds={threadParticipantIds}
-                        dockSlot={twinDock}
+                        dock={twinDock}
                         twinEdit={twinEditSession}
                       />
                     </div>
@@ -2042,7 +2042,7 @@ export const ThreadMessages = ({
                     Suppressed entirely in a deactivated 1:1 DM archive. */}
                 {isDmReadOnly ? null : isUserMember || channel?.isArchived ? (
                   <div className='pb-3 bg-background shrink-0 px-[var(--composer-px)] [--composer-px:0.75rem]'>
-                    <ChatInput
+                    <ThreadComposer
                       // eslint-disable-next-line jsx-a11y/no-autofocus
                       autoFocus={previewCardMode || skipInputAutoFocus ? null : 'end'}
                       ref={inputRef}
@@ -2051,7 +2051,7 @@ export const ThreadMessages = ({
                       placeholder='Reply to this thread...'
                       hasTicket={hasTicketInMessages}
                       threadParticipantIds={threadParticipantIds}
-                      dockSlot={twinDock}
+                      dock={twinDock}
                       twinEdit={twinEditSession}
                     />
                   </div>
