@@ -64,8 +64,10 @@ interface IntentCallSuggestionCardProps {
   conversationId: string;
 }
 
-/** How many names to spell out before "+N". Matches the avatar stack. */
-const NAMED_PARTICIPANTS = 3;
+/** Names spelled out before "and N more people". */
+const NAMED_PARTICIPANTS = 2;
+/** Avatars shown before the +N badge takes the fourth slot. */
+const VISIBLE_AVATARS = 3;
 
 const TRACK_CATEGORY = 'INTENT_SUGGESTION';
 
@@ -113,18 +115,33 @@ export const IntentCallSuggestionCard: React.FC<IntentCallSuggestionCardProps> =
       .filter(id => id !== currentUserId);
   }, [isThread, conversation?.participants, currentUserId]);
 
-  const participantsLabel = useMemo((): string => {
-    const names = threadUserIds
-      .map(id => {
+  // Display list: only participants we can actually name. Avatars and text are
+  // derived from the SAME list so the +N badge and "N more people" agree — an id
+  // with no user record (deactivated, or a bot missing from the directory) would
+  // otherwise show as an avatar the sentence never counts.
+  const shownParticipants = useMemo(
+    (): Array<{ id: string; name: string }> =>
+      threadUserIds.flatMap(id => {
         const u = usersById.get(id);
-        return u ? getUserDisplayName(u) : null;
-      })
-      .filter((n): n is string => !!n);
+        const name = u ? getUserDisplayName(u) : '';
+        return name ? [{ id, name }] : [];
+      }),
+    [threadUserIds, usersById],
+  );
+  const shownParticipantIds = useMemo(
+    (): string[] => shownParticipants.map(p => p.id),
+    [shownParticipants],
+  );
+
+  const participantsLabel = useMemo((): string => {
+    const names = shownParticipants.map(p => p.name);
     if (names.length === 0) return 'Just you so far';
-    const named = names.slice(0, NAMED_PARTICIPANTS).join(', ');
+    if (names.length === 1) return names[0] ?? '';
+    const [first, second] = names;
     const rest = names.length - NAMED_PARTICIPANTS;
-    return `${named}${rest > 0 ? ` +${rest}` : ''} from this thread`;
-  }, [threadUserIds, usersById]);
+    if (rest <= 0) return `${first} and ${second}`;
+    return `${first}, ${second} and ${rest} more ${rest === 1 ? 'person' : 'people'}`;
+  }, [shownParticipants]);
 
   // --- starting the call -------------------------------------------------------
 
@@ -301,8 +318,13 @@ export const IntentCallSuggestionCard: React.FC<IntentCallSuggestionCardProps> =
 
           {isThread && (
             <div className='mt-1.5 flex items-center gap-2 text-sm text-muted-foreground'>
-              {threadUserIds.length > 0 && (
-                <AvatarGroup userIds={threadUserIds} size='sm' count={4} className='shrink-0' />
+              {shownParticipantIds.length > 0 && (
+                <AvatarGroup
+                  userIds={shownParticipantIds}
+                  size='sm'
+                  count={VISIBLE_AVATARS}
+                  className='shrink-0'
+                />
               )}
               <span className='truncate'>{participantsLabel}</span>
             </div>
