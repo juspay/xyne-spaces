@@ -10,6 +10,11 @@ const state = vi.hoisted(() => ({
   // decrypt() returns a JSON string in production; the branch JSON.parses it.
   decryptImpl: (() => JSON.stringify({ apiKey: "x" })) as (...args: any[]) => unknown,
   findFirstCalls: [] as any[],
+  // The subagent's mcpInstanceMap and the parent agent's connection by slug —
+  // only the instance-routing tests set these.
+  instanceMap: null as null | Record<string, string>,
+  agentConnBySlug: {} as Record<string, Record<string, any>>,
+  userLookups: 0,
 }));
 
 vi.mock("../config.js", () => ({ CONFIG: { encryptionKey: Buffer.alloc(32, 7) } }));
@@ -41,11 +46,21 @@ vi.mock("../db.js", () => ({
     user: {
       findUnique: vi.fn(async () => ({ orgId: state.userOrgId })),
     },
+    subagentDefinition: {
+      findFirst: vi.fn(async () => (state.instanceMap ? { mcpInstanceMap: state.instanceMap } : null)),
+    },
     // Cascade reads that run only on a soft-pin fallthrough — stubbed to null
     // so the resolver returns null instead of throwing.
-    userMcpConnection: { findFirst: vi.fn(async () => null) },
+    userMcpConnection: {
+      findFirst: vi.fn(async () => {
+        state.userLookups += 1;
+        return null;
+      }),
+    },
     mcpServer: { findUnique: vi.fn(async () => null) },
-    agentMcpConnection: { findFirst: vi.fn(async () => null) },
+    agentMcpConnection: {
+      findFirst: vi.fn(async (args: any) => state.agentConnBySlug[args.where.slug ?? "default"] ?? null),
+    },
   },
 }));
 
@@ -59,6 +74,9 @@ beforeEach(() => {
   state.userOrgId = "org-1";
   state.decryptImpl = () => JSON.stringify({ apiKey: "x" });
   state.findFirstCalls = [];
+  state.instanceMap = null;
+  state.agentConnBySlug = {};
+  state.userLookups = 0;
 });
 
 describe("loadEffectiveCredentials — subagent pin", () => {
@@ -122,5 +140,44 @@ describe("loadEffectiveCredentials — subagent pin", () => {
 
     await loadEffectiveCredentials("user-1", SERVER, undefined, undefined, "org-1");
     expect(state.findFirstCalls.length).toBe(0);
+  });
+});
+
+describe("loadEffectiveCredentials — viaSubagent (what a queued write binds)", () => {
+  const conn = (id: string, slug: string) => ({ id, slug, encryptedCreds: "e", iv: "i", authTag: "t" });
+
+  it("marks a subagent pin hit, so its write carries the subagent into approval", async () => {
+    state.subRow = { ...conn("conn-7", "default"), nonOverridable: true };
+
+    const res = await loadEffectiveCredentials("user-1", SERVER, "ny-payments", undefined, "org-1", SUB_ID);
+
+    expect(res).toMatchObject({ source: "subagent", viaSubagent: SUB_ID, instance: "subagent:conn-7" });
+  });
+
+  it("marks an agent instance the subagent's mcpInstanceMap routed to", async () => {
+    state.instanceMap = { [SERVER]: "prod" };
+    state.agentConnBySlug = { prod: conn("agent-prod", "prod"), default: conn("agent-default", "default") };
+
+    const res = await loadEffectiveCredentials("user-1", SERVER, "ny-payments", undefined, "org-1", SUB_ID);
+
+    expect(res).toMatchObject({ source: "agent", connectionId: "agent-prod", instance: "prod", viaSubagent: SUB_ID });
+  });
+
+  it("leaves it unset when the subagent has no say, so the action keeps its four-field signature", async () => {
+    state.agentConnBySlug = { default: conn("agent-default", "default") };
+
+    const res = await loadEffectiveCredentials("user-1", SERVER, "ny-payments", undefined, "org-1", SUB_ID);
+
+    expect(res).toMatchObject({ source: "agent", connectionId: "agent-default" });
+    expect(res!.viaSubagent).toBeUndefined();
+  });
+
+  it("fails closed when the routed instance has no agent in scope, instead of using the user's credential", async () => {
+    state.instanceMap = { [SERVER]: "prod" };
+
+    const res = await loadEffectiveCredentials("user-1", SERVER, undefined, undefined, "org-1", SUB_ID);
+
+    expect(res).toBeNull();
+    expect(state.userLookups).toBe(0);
   });
 });
