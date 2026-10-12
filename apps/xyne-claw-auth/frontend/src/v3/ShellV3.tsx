@@ -39,7 +39,6 @@ import {
   CaretLeftIcon,
   CaretRightIcon,
   DotsThreeVerticalIcon,
-  ArrowUUpLeftIcon,
   ClockCounterClockwiseIcon,
 } from "@phosphor-icons/react";
 import { useAuth } from "../hooks/useAuth";
@@ -96,11 +95,6 @@ const RAIL_DESTINATIONS: RailDestination[] = [
   { label: "Design",          path: "/v3/design",   icon: PaintBrushIcon },
   { label: "Dashboard",    path: "/v3/dashboard",    icon: ChartBarIcon },
   { label: "Digital Twin", path: "/v3/digital-twin", icon: BrainIcon },
-  // Escape hatch to the legacy V1 surface. Lives in the top rail
-  // alongside the primary destinations so users can flip back at any
-  // moment. Path is `/v1` — kept reachable in App.tsx purely for this
-  // affordance (root `/` redirects to /v3/home now that V3 is main).
-  { label: "Switch to v1", path: "/v1",              icon: ArrowUUpLeftIcon },
 ];
 
 const SIDEBAR_GROUPS: SidebarGroupConfig[] = [
