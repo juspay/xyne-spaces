@@ -39,7 +39,7 @@ interface UseResizeEndTimeReturn {
   activeResizeCallId: string | null;
   onResizePointerDown: (e: React.PointerEvent, call: Call) => void;
   dialogOpen: boolean;
-  confirm: () => void;
+  confirm: (notifyParticipantsByEmail: boolean) => void;
   cancel: () => void;
   /** Reactive mirror of the pending resize — feeds the confirmation dialog's content. */
   pendingChange: PendingCallChange | null;
@@ -187,12 +187,13 @@ export function useResizeEndTime(
     [gridRef, cleanup, hourHeight, referenceDay, openDialogFor],
   );
 
-  const confirm = useCallback((): void => {
+  const confirm = useCallback((notifyParticipantsByEmail: boolean): void => {
     const pending = pendingResizeRef.current;
     if (!pending) return;
     void callService.updateScheduledCall(pending.externalId, {
       startsAt: pending.newStartsAt,
       endsAt: pending.newEndsAt,
+      ...(notifyParticipantsByEmail && { notifyParticipantsByEmail }),
     });
     pendingResizeRef.current = null;
     setDialogOpen(false);

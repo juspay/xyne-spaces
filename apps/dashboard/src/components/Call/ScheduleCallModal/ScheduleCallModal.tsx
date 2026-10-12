@@ -70,6 +70,7 @@ import { useExternalInviteSuggestions } from './hooks/useExternalInviteSuggestio
 import { usePostCallUpdates } from './hooks/usePostCallUpdates';
 import { useScheduleCallInitialization } from './hooks/useScheduleCallInitialization';
 import { useChannelMemberExclusions } from './hooks/useChannelMemberExclusions';
+import { MAX_EMAIL_PARTICIPANTS } from '../callEmailNotify';
 import {
   validateCallDateTimes,
   validateRecurringCallTimes,
@@ -150,6 +151,8 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
 
   // For recurring calls in edit mode — checkbox to edit the whole series
   const [editEntireSeries, setEditEntireSeries] = useState(false);
+  // Opt-in: email all participants (internal and external) about the change.
+  const [notifyByEmail, setNotifyByEmail] = useState(false);
 
   // Selective participants: tracks which participant IDs were in the original call (edit mode)
   // and whether the exclusion set has been initialized from the channel member list.
@@ -457,6 +460,13 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
     !!user?.id &&
     initialCall.organizerUserId !== user.id;
 
+  // The email option is hidden for big audiences (the backend enforces the same cap).
+  const emailRecipientCount =
+    participants.filter(v => v.startsWith('user:')).length +
+    (channelMembersOptions ? channelMembersOptions.length - excludedChannelMembers.size : 0);
+  const showEmailOption = !participantsOnly && emailRecipientCount <= MAX_EMAIL_PARTICIPANTS;
+  const notifyParticipantsByEmail = showEmailOption && notifyByEmail;
+
   // Restricted editors may drop the people they invited themselves, so only the organizer
   // and everyone invited by someone else is pinned. Mirrors the backend's pinned set in
   // scheduleCallController.authorizeScheduledCallEdit.
@@ -699,6 +709,7 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
                   endTime: recurringEndTime,
                   startsOn: data.startsAt.getTime(),
                   externalInvitees: effExternals,
+                  ...(notifyParticipantsByEmail && { notifyParticipantsByEmail }),
                   ...(seriesEndsType === 'on' &&
                     seriesEndsOn !== null && { endsOn: seriesEndsOn.getTime() }),
                 },
@@ -726,6 +737,7 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
                   // still be sent — omitting it would leave removed teammates on the call.
                   ...((userIds.length > 0 || !channelId) && { targetUserIds: userIds }),
                   externalInvitees: effExternals,
+                  ...(notifyParticipantsByEmail && { notifyParticipantsByEmail }),
                 },
           );
           toast.success('Call Updated', {
@@ -763,6 +775,7 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
         if (seriesEndsType === 'on' && seriesEndsOn !== null) {
           recurringRequest.endsOn = seriesEndsOn.getTime();
         }
+        if (notifyParticipantsByEmail) recurringRequest.notifyParticipantsByEmail = true;
         if (effExternals.length > 0) {
           recurringRequest.externalInvitees = effExternals;
           recurringRequest.invitation = buildExternalInvitation();
@@ -790,6 +803,7 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
           if (postCallUpdates && updateChannelId) requestData.callUpdatesChannel = updateChannelId;
           if (userIds.length > 0) requestData.targetUserIds = userIds;
         }
+        if (notifyParticipantsByEmail) requestData.notifyParticipantsByEmail = true;
         if (effExternals.length > 0) {
           requestData.externalInvitees = effExternals;
           requestData.externalInviteDelivery = externalInviteDelivery;
@@ -910,6 +924,7 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
     expandedGroupMembersRef.current.clear();
     resetRecurringState(defaultStart);
     setEditEntireSeries(false);
+    setNotifyByEmail(false);
     resetPostCallUpdates();
     onClose();
   }, [reset, onClose]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -2147,6 +2162,31 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
                     </div>
                   )}
                 </section>
+              )}
+
+              {showEmailOption && (
+                <div className='flex items-center gap-1.5 w-full'>
+                  <Checkbox
+                    checked={notifyByEmail}
+                    onChange={setNotifyByEmail}
+                    data-track-category='CALLS'
+                    data-track-name='EMAIL_PARTICIPANTS_TOGGLE'
+                    label='Email details to all participants'
+                  />
+                  <Tooltip
+                    content='Emails everyone on the call, including external invitees.'
+                    side='top'
+                    sideOffset={6}
+                    className='max-w-60'
+                  >
+                    <button
+                      type='button'
+                      className='text-muted-foreground hover:text-foreground transition-colors'
+                    >
+                      <Info className='size-3.5' strokeWidth={2} />
+                    </button>
+                  </Tooltip>
+                </div>
               )}
 
               <SubmitFooter
