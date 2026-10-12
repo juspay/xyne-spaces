@@ -5664,7 +5664,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           mode={BulkTicketMode.ALL_PARENTS}
           fromTicketsTab={true}
           channelId={channel.id}
-          projectId={scopedProjectId}
           boardId={currentBoardId ?? ''}
           boardName={selectedBoardDetail?.name}
         />

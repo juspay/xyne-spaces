@@ -23,6 +23,7 @@ const channelParticipantRepository = new ChannelParticipantRepository();
  * A channel is reachable when:
  *  - it exists, and
  *  - it belongs to the caller's workspace, and
+ *  - it is not archived, and
  *  - if it is PRIVATE, the caller is a participant.
  */
 export async function validateChannelAccess(
@@ -38,6 +39,11 @@ export async function validateChannelAccess(
 
   if (channel.workspaceId !== workspaceId) {
     return { hasAccess: false, reason: `Channel ${channelId} is not in your workspace` };
+  }
+
+  // Bulk creation bypasses TicketsACL.canCreate, which refuses archived channels.
+  if (channel.isArchived) {
+    return { hasAccess: false, reason: `Channel ${channelId} is archived` };
   }
 
   if (channel.visibility === 'PRIVATE') {

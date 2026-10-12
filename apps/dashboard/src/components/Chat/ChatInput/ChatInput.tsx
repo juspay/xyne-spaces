@@ -1557,7 +1557,6 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               setBulkDescriptions([]);
             }}
             channelId={channelId}
-            projectId={(channel.projectId as string | null) || ''}
             mode={BulkTicketMode.PARENT_SUB}
             parentTitle={bulkParentTitle}
             subTitleTitles={bulkSubTitles}

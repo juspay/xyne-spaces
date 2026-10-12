@@ -399,7 +399,7 @@ export class TicketController {
           title: string;
           description?: string;
           channelId: string;
-          projectId: string;
+          projectId?: string;
           boardId: string;
           assignedTo?: string;
           priority?: string;

@@ -41,7 +41,6 @@ const bulkTicketSchema = Joi.object({
 });
 
 const parentSchema = bulkTicketSchema.keys({
-  projectId: Joi.string().required(),
   boardId: Joi.string().required(),
   channelId: Joi.string().required(),
   description: Joi.string().trim().allow('').max(4000).required(),

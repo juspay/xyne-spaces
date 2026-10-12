@@ -1,7 +1,6 @@
 import type { ReactElement } from 'react';
 import { BulkTicketMode } from '@xyne/shared';
 
-import { useChannel } from '../../../hooks/useChannels';
 import { BulkCreateTicketsModal } from '../../Tickets/BulkCreateTicketsModal/BulkCreateTicketsModal';
 import type { CanvasTableTicketDraft } from '../useCanvasTableFilters';
 
@@ -21,7 +20,6 @@ export function CanvasBulkTicketCreationFlow({
   onClose,
 }: CanvasBulkTicketCreationFlowProps): ReactElement | null {
   const effectiveChannelId = channelId ?? '';
-  const effectiveChannel = useChannel(effectiveChannelId);
 
   if (!draft) return null;
 
@@ -30,7 +28,6 @@ export function CanvasBulkTicketCreationFlow({
       isOpen={true}
       onClose={onClose}
       channelId={effectiveChannelId}
-      {...(effectiveChannel?.projectId ? { projectId: effectiveChannel.projectId } : {})}
       mode={BulkTicketMode.PARENT_SUB}
       parentTitle={draft.titles[0] ?? ''}
       subTitleTitles={draft.titles.slice(1)}

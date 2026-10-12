@@ -18,6 +18,7 @@ import { useActiveUserSearch } from '../../../hooks/useUsers';
 import { useUserGroups } from '../../../hooks/useUserGroup';
 import { useAuth } from '../../../hooks/useAuth';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { useChannelBoards } from '../../../hooks/useChannelBoards';
 import { queries } from '../../../zero/queries';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
@@ -33,7 +34,6 @@ export interface BulkCreateTicketsModalProps {
   isOpen: boolean;
   onClose: () => void;
   channelId?: string | undefined;
-  projectId?: string | undefined;
   boardId?: string | undefined;
   boardName?: string | undefined;
   /** Set by the tickets tab so channels can keep those tickets out of chat. */
@@ -98,11 +98,65 @@ const newSubRow = (title: string, channelId: string, boardId: string): BulkRow =
   eta: null,
 });
 
+interface RowBoardSelectorProps {
+  rowId: string;
+  channelId: string;
+  boardId: string;
+  onChange: (rowId: string, patch: Partial<BulkRow>) => void;
+}
+
+/**
+ * Board picker for one row. Options are the boards linked to that row's channel
+ * (channel_board_mappings), never channel.projectId — rows can target different
+ * channels, so each row reads its own. Once the mapping has synced, a board that
+ * isn't linked to the channel is replaced by the channel's first linked board.
+ */
+const RowBoardSelector: React.FC<RowBoardSelectorProps> = ({
+  rowId,
+  channelId,
+  boardId,
+  onChange,
+}) => {
+  const { boards, isSynced } = useChannelBoards(channelId || undefined);
+
+  React.useEffect(() => {
+    if (!channelId || !isSynced || boards.some(b => b.id === boardId)) return;
+    const fallback = boards[0]?.id ?? '';
+    if (fallback !== boardId) onChange(rowId, { boardId: fallback });
+  }, [channelId, isSynced, boards, boardId, rowId, onChange]);
+
+  const options: SelectorOption[] = useMemo(
+    () =>
+      boards.map(b => ({
+        label: b.name,
+        value: b.id,
+        icon: (
+          <span className='bg-primary text-primary-foreground text-xs aspect-square size-4 rounded text-center'>
+            {b.name.charAt(0)}
+          </span>
+        ),
+      })),
+    [boards],
+  );
+
+  return (
+    <EntitySelector
+      options={options}
+      selectedValue={boardId}
+      onSelect={v => onChange(rowId, { boardId: v ?? '' })}
+      placeholder={channelId && isSynced && boards.length === 0 ? 'No boards' : 'Board'}
+      searchPlaceholder='Search'
+      noBorder
+      width='100%'
+      inputClassName='h-[34px] px-2 gap-1 text-[12.5px] bg-transparent dark:bg-transparent hover:bg-accent/40 justify-between [&>span:first-child]:truncate [&>span:first-child]:flex-1'
+    />
+  );
+};
+
 export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
   isOpen,
   onClose,
   channelId: propChannelId,
-  projectId: propProjectId,
   boardId: propBoardId,
   fromTicketsTab = false,
   mode = BulkTicketMode.PARENT_SUB,
@@ -128,28 +182,9 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const parentChannelId = rows[0]?.channelId ?? propChannelId ?? '';
-  const selectedChannel = channels.find(c => c.id === parentChannelId);
-  const projectId = propProjectId || selectedChannel?.projectId || '';
 
-  const [boards] = useCachedQuery(queries.boardsListByProject({ projectId }), {
-    enabled: !!projectId,
-  });
   const [ticketTypeLookup] = useCachedQuery(
     queries.lookupValuesByType({ type: LookupType.TICKET_TYPE }),
-  );
-
-  const boardOptions: SelectorOption[] = useMemo(
-    () =>
-      (boards ?? []).map(b => ({
-        label: b.name,
-        value: b.id,
-        icon: (
-          <span className='bg-primary text-primary-foreground text-xs aspect-square size-4 rounded text-center'>
-            {b.name.charAt(0)}
-          </span>
-        ),
-      })),
-    [boards],
   );
 
   const ticketTypeOptions: SelectorOption[] = useMemo(() => {
@@ -185,7 +220,8 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
     return [...userOpts, ...groupOpts];
   }, [assigneeResults, userGroups]);
 
-  const defaultBoardId = useMemo(() => propBoardId || boards?.[0]?.id || '', [propBoardId, boards]);
+  // Rows without a board get their channel's first linked board from RowBoardSelector.
+  const defaultBoardId = propBoardId ?? '';
   const initDoneRef = useRef(false);
 
   React.useEffect(() => {
@@ -259,15 +295,6 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
     hasExistingParent,
   ]);
 
-  React.useEffect(() => {
-    if (!isOpen || !defaultBoardId) return;
-    setRows(prev => {
-      const needsUpdate = prev.some(r => !r.boardId);
-      if (!needsUpdate) return prev;
-      return prev.map(r => ({ ...r, boardId: r.boardId || defaultBoardId }));
-    });
-  }, [isOpen, defaultBoardId]);
-
   const ensureEmptyRows = (rows: BulkRow[], count: number): BulkRow[] => {
     const emptyCount = rows.filter(r => !r.title.trim()).length;
     if (emptyCount >= count) return rows;
@@ -297,11 +324,12 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
           boardId: r.boardId || selectedBoardId,
         }));
       }
-      // When board is selected in ANY row, auto-fill for rows that don't have one
+      // When board is selected in ANY row, auto-fill for rows on the same channel that don't have one
       if (patch.boardId !== undefined && patch.boardId) {
+        const selectedChannelId = updated.find(r => r.id === id)?.channelId;
         updated = updated.map(r => ({
           ...r,
-          boardId: r.boardId || patch.boardId!,
+          boardId: r.boardId || (r.channelId === selectedChannelId ? patch.boardId! : ''),
         }));
       }
       if (patch.title !== undefined && patch.title.trim()) {
@@ -323,6 +351,22 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
     const firstRow = rows[0];
     if (!firstRow) return;
     const value = firstRow[field];
+    // Boards are linked per channel, so a board only carries over to rows on the
+    // same channel, and a channel carries its board with it.
+    if (field === 'boardId') {
+      setRows(prev =>
+        prev.map(r =>
+          r.channelId === firstRow.channelId ? { ...r, boardId: firstRow.boardId } : r,
+        ),
+      );
+      return;
+    }
+    if (field === 'channelId') {
+      setRows(prev =>
+        prev.map(r => ({ ...r, channelId: firstRow.channelId, boardId: firstRow.boardId })),
+      );
+      return;
+    }
     setRows(prev => prev.map(r => ({ ...r, [field]: value })));
   };
 
@@ -331,7 +375,6 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
   const minimumRows = isAllParentsMode || hasExistingParent ? 1 : 2;
   const isNewParentMode = !isAllParentsMode && !hasExistingParent;
   const blockingReason = ((): string | null => {
-    if (!projectId) return 'Pick a channel to set the project';
     if (isNewParentMode && !rows[0]?.title.trim()) return 'The main ticket needs a title';
     if (filledRows.length < minimumRows) {
       return minimumRows === 1
@@ -380,7 +423,6 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
         const body = {
           mode: BulkTicketMode.ALL_PARENTS,
           tickets,
-          projectId,
           channelId: propChannelId,
           ...(fromTicketsTab ? { fromTicketsTab: true } : {}),
         };
@@ -410,7 +452,6 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
           mode: BulkTicketMode.PARENT_SUB,
           existingParentTicketId: existingParentTicket.id,
           channelId: propChannelId,
-          projectId,
           subTickets,
           ...(sourceMessageId ? { sourceMessageId } : {}),
           ...(fromTicketsTab ? { fromTicketsTab: true } : {}),
@@ -448,7 +489,6 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
         mode: BulkTicketMode;
         parent: Record<string, unknown>;
         channelId?: string;
-        projectId?: string;
         boardId?: string;
         subTickets: unknown[];
         sourceConversationId?: string;
@@ -456,12 +496,10 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
       } = {
         mode: BulkTicketMode.PARENT_SUB,
         channelId: parent.channelId,
-        projectId,
         boardId: parent.boardId,
         parent: {
           title: parent.title.trim(),
           description: parent.description,
-          projectId,
           boardId: parent.boardId,
           channelId: parent.channelId,
           priority: parent.priority,
@@ -518,7 +556,7 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
         {/* Toolbar */}
         <div className='flex items-center gap-3 px-4 py-2.5 shrink-0 flex-wrap border-b border-border'>
           <span className='text-[12px] text-muted-foreground'>
-            {projectId
+            {parentChannelId
               ? 'New rows appear automatically as you fill in titles'
               : 'Select a channel in any row to auto-fill details'}
           </span>
@@ -668,15 +706,11 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
 
                     {/* Board */}
                     <div className='px-1 overflow-hidden'>
-                      <EntitySelector
-                        options={boardOptions}
-                        selectedValue={row.boardId}
-                        onSelect={v => updateRow(row.id, { boardId: v ?? '' })}
-                        placeholder='Board'
-                        searchPlaceholder='Search'
-                        noBorder
-                        width='100%'
-                        inputClassName='h-[34px] px-2 gap-1 text-[12.5px] bg-transparent dark:bg-transparent hover:bg-accent/40 justify-between [&>span:first-child]:truncate [&>span:first-child]:flex-1'
+                      <RowBoardSelector
+                        rowId={row.id}
+                        channelId={row.channelId}
+                        boardId={row.boardId}
+                        onChange={updateRow}
                       />
                     </div>
 

@@ -225,7 +225,6 @@ export const TicketSuggestions: React.FC<TicketSuggestionsProps> = ({
           isOpen={true}
           onClose={() => setIsBulkModalOpen(false)}
           channelId={channelId}
-          projectId={currentChannel.projectId ?? ''}
           mode={BulkTicketMode.PARENT_SUB}
           parentTitle={existingParentTicket ? undefined : bulkParentTitle}
           subTitleTitles={bulkSubTitleTitles}

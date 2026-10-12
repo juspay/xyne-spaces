@@ -609,6 +609,23 @@ export const commitRows = async (
     })),
   });
 
+  await tx.ticketActivity.createMany({
+    data: prepared.map((r) => ({
+      ticketId: r.ticketId,
+      updatedBy: ctx.createdBy,
+      timestamp: r.stageEnteredAt,
+      activityType: ActivityType.TICKET_CREATED,
+      channelId: r.input.channelId,
+      workspaceId: r.workspaceId,
+      value: {
+        field: 'ticketCreated',
+        priority: r.priority,
+        stageName: r.stageName,
+        statusV2: r.statusV2,
+      } as Prisma.InputJsonValue,
+    })),
+  });
+
   await tx.ticketDescription.createMany({
     data: prepared.map((r) => ({
       ticketId: r.ticketId,
