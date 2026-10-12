@@ -20,7 +20,6 @@ import {
   BuildingApartmentTwo,
   LightningThunderElectricOn,
   Atom,
-  RocketShip,
   GitBranch,
   LayoutGridTwoVertical,
   type PikaIconProps,
@@ -205,7 +204,6 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
   { path: '/knowledge-base', label: 'Knowledge Base', icon: Notebook, popout: true },
   { path: '/dashboards', label: 'Dashboards', icon: GridDashboard01, popout: true },
   { path: '/listProjects', label: 'List Projects', icon: FolderDefault, popout: true },
-  { path: '/releaseManager', label: 'Release Manager', icon: RocketShip, popout: true },
   {
     path: '/migrations',
     label: 'Migrations',
@@ -284,7 +282,6 @@ export const TOOLBAR_ITEM_DESCRIPTIONS: Record<string, string> = {
   '/apps': 'Installed app integrations',
   '/guide': 'Product documentation and onboarding guide',
   '/knowledge-base': 'File and folder knowledge base for Ask AI',
-  '/releaseManager': 'Release and deployment tracking',
   '/migrations/slack': 'Slack Migration tab under Migrations',
   '/scheduled-messages': 'Messages scheduled for later delivery (Inbox)',
 };
