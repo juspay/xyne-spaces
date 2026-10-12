@@ -136,7 +136,7 @@ function getParallel(env: Environment): number {
     case 'local-test':
       return 3;
     case 'test':
-      return 1; // Jenkins runs serially — single Gauge worker
+      return 3; // Jenkins / Docker CI run 3 Gauge workers in parallel
     default:
       return 1;
   }

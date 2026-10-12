@@ -35,6 +35,7 @@
     "reset": "chmod +x scripts/reset-local.sh && ./scripts/reset-local.sh",
     "yama": "node node_modules/@juspay/yama/dist/cli/v2.cli.js",
     "test": "./tools/xyne-automation/scripts/run-test.sh",
+    "test:headed": "./tools/xyne-automation/scripts/run-headed.sh",
     "test:integrity": "pnpm --filter xyne-automation run test:integrity",
     "test:push": "./tools/xyne-automation/scripts/push-report-branch.sh",
     "test:enum": "bash scripts/validate-no-new-enums.sh",

@@ -119,7 +119,7 @@ jobs:
 
   test:
     name: Automation tests
-    if: github.event_name == 'merge_group' && vars.RUN_TEST_CASE == 'true'
+    # if: github.event_name == 'merge_group' && vars.RUN_TEST_CASE == 'true'
     runs-on: ci-cluster-github-runners
     env:
       TEST_ENV: test
@@ -175,7 +175,8 @@ jobs:
           # One-click view: a self-contained summary page (failures + screenshots, passes collapsed)
           # built from Gauge's json-report. Uploaded first so it's the first thing in the message.
           if [ -n "$RUN_DIR" ] && [ -f "$RUN_DIR/json-report/result.json" ]; then
-            node tools/xyne-automation/scripts/build-summary-report.mjs "$RUN_DIR" "$RUNNER_TEMP/automation-report.html"
+            ABS_RUN_DIR=$(realpath "$RUN_DIR")
+            (cd tools/xyne-automation && pnpm exec ts-node --project tsconfig.json scripts/build-summary-report.ts "$ABS_RUN_DIR" "$RUNNER_TEMP/automation-report.html")
             UPLOAD_ARGS+=(-F "files=@$RUNNER_TEMP/automation-report.html;type=text/html")
           fi
           # Full detail: the endpoint accepts at most 10 files, and Gauge's html-report needs its
