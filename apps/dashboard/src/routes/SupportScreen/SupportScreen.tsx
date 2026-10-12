@@ -36,7 +36,7 @@ import {
   SUPPORT_SIDEBAR_MAX_WIDTH,
   SUPPORT_SIDEBAR_MIN_WIDTH,
 } from './supportSidebarWidth';
-import { useHasResourceAccess } from '../../hooks/usePermissions';
+import { useCanReadTicket } from '../../hooks/usePermissions';
 import { cn } from '../../utils/classNames';
 import { getApiErrorMessage } from '../../utils/apiError';
 import { surfaceMutationError } from '../../utils/zeroMutationToast';
@@ -669,7 +669,7 @@ const SupportScreen = (): ReactElement => {
   const supportBase = workspaceId ? `/${workspaceId}/support` : '/support';
   const navigate = useNavigate();
   // Gate the Tickets shortcut the same way the main rail gates '/projects'.
-  const canAccessProjects = useHasResourceAccess('PROJECTS');
+  const canAccessProjects = useCanReadTicket();
   const [searchParams, setSearchParams] = useSearchParams();
   const { userID } = useAuthContextValues();
   const isGuest = useAuth().user?.role === WorkspaceRole.GUEST;
@@ -3326,7 +3326,7 @@ const SupportScreen = (): ReactElement => {
                     </div>
                   </div>
                   {/* Tickets shortcut — jumps to the Projects/Tickets board.
-                    Replaces the old rail icon; gated on PROJECTS access. */}
+                    Replaces the old rail icon; gated on TICKETS READ access or above. */}
                   {canAccessProjects && (
                     <div className='shrink-0'>
                       <button

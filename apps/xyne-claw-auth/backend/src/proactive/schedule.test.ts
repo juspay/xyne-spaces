@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { adjustWeight, deadlineNudgeAt, inQuietHours, nextAllowedAt, planLoop, updateReplyAverage } from "./schedule.js";
+import { adjustWeight, deadlineNudgeAt, inQuietHours, nextAllowedAt, planLoop, quietHoldUntil, updateReplyAverage } from "./schedule.js";
 
 const now = new Date("2026-10-09T08:00:00.000Z");
 const ctx = { now, lastInboundAt: new Date("2026-10-09T07:00:00.000Z"), lastUserReplyAt: null, replySlaHours: 24 };
@@ -37,6 +37,13 @@ describe("planLoop", () => {
     expect(loop.dueAt.toISOString()).toBe("2026-10-12T08:00:00.000Z");
   });
 
+  it("makes an urgent loop due now but keeps waiting on the other side", () => {
+    const urgent = { ...ctx, urgent: true };
+    expect(planLoop({ ...base, kind: "awaiting_user", deadlineAt: null }, urgent).dueAt).toEqual(now);
+    expect(planLoop({ ...base, kind: "deadline", deadlineAt: "2026-10-10T08:00:00Z" }, urgent).dueAt).toEqual(now);
+    expect(planLoop({ ...base, kind: "awaiting_them", deadlineAt: null }, urgent).dueAt.toISOString()).toBe("2026-10-12T08:00:00.000Z");
+  });
+
   it("never schedules in the past", () => {
     const stale = { ...ctx, lastInboundAt: new Date("2026-10-01T00:00:00Z") };
     expect(planLoop({ ...base, kind: "awaiting_user", deadlineAt: null }, stale).dueAt).toEqual(now);
@@ -54,6 +61,13 @@ describe("quiet hours", () => {
   it("moves a quiet-time nudge to the end of the window", () => {
     expect(nextAllowedAt(new Date("2026-10-09T17:00:00Z"), prefs).toISOString()).toBe("2026-10-10T02:30:00.000Z");
     expect(nextAllowedAt(now, prefs)).toBe(now);
+  });
+
+  it("holds non-urgent loops until quiet hours end and lets urgent ones through", () => {
+    const night = new Date("2026-10-10T17:32:00Z");
+    expect(quietHoldUntil(night, prefs, false)?.toISOString()).toBe("2026-10-11T02:32:00.000Z");
+    expect(quietHoldUntil(night, prefs, true)).toBeNull();
+    expect(quietHoldUntil(now, prefs, false)).toBeNull();
   });
 
   it("treats equal start and end as no quiet hours", () => {

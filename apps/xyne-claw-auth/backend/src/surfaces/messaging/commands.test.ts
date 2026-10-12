@@ -28,8 +28,15 @@ vi.mock("../../routes/webhook.js", () => ({ reconcileStoppedRuns }));
 const sendGeneratedFile = vi.fn(async (..._args: unknown[]) => undefined);
 vi.mock("./hosted-files.js", () => ({ sendGeneratedFile }));
 
-const { parseControlCommand, describeElapsed, isSlashCommand, rememberChatTarget, chatTargetFor, runChatSlashCommand } =
-  await import("./commands.js");
+const {
+  parseControlCommand,
+  describeElapsed,
+  isSlashCommand,
+  rememberChatTarget,
+  chatTargetFor,
+  runChatSlashCommand,
+  handleControlCommand,
+} = await import("./commands.js");
 
 describe("parseControlCommand", () => {
   it("recognises the three commands and their aliases", () => {
@@ -167,3 +174,31 @@ describe("runChatSlashCommand", () => {
   });
 });
 
+
+describe("handleControlCommand /new", () => {
+  it("also forgets the threaded path's open tasks and facts, for that chat only", async () => {
+    store.set("claw:channel:threads:tasks:acc-1:chat-1", "{}");
+    store.set("claw:channel:threads:state:acc-1:chat-1", "{}");
+    store.set("claw:channel:threads:tasks:acc-1:chat-2", "{}");
+    const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const reply = vi.fn(async (_text: string) => undefined);
+    try {
+      await handleControlCommand({
+        command: "new",
+        account: { id: "acc-1", channel: "whatsapp-cloud", accountKey: "15550001111" } as never,
+        chatId: "chat-1",
+        userId: "u1",
+        agentSlug: "concierge",
+        reply,
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(store.has("claw:channel:threads:tasks:acc-1:chat-1")).toBe(false);
+    expect(store.has("claw:channel:threads:state:acc-1:chat-1")).toBe(false);
+    expect(store.has("claw:channel:threads:tasks:acc-1:chat-2")).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(reply).toHaveBeenCalledWith(expect.stringContaining("Fresh start"));
+  });
+});

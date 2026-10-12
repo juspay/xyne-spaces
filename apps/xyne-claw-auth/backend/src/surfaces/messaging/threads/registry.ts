@@ -67,6 +67,15 @@ export async function closeTask(accountId: string, chatId: string, conversationI
   }
 }
 
+/** /new: every open task in the chat is from before the fresh start. */
+export async function forgetChatTasks(accountId: string, chatId: string): Promise<void> {
+  try {
+    await redisService.getConnection().del(tasksKey(accountId, chatId));
+  } catch (err) {
+    log.warn(`[threads-registry] forget failed account=${accountId} chat=${chatId}: ${errMsg(err)}`);
+  }
+}
+
 export async function atOpenTaskCap(accountId: string, chatId: string): Promise<boolean> {
   const tasks = await openTasks(accountId, chatId);
   return tasks.length >= MAX_OPEN_TASKS;

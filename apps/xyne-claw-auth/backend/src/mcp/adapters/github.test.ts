@@ -1,4 +1,9 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
+
+// config.ts needs the key at import time, and static imports run before the test body.
+vi.hoisted(() => {
+  process.env['ENCRYPTION_KEY'] ||= '00'.repeat(32);
+});
 import { GITHUB_CUSTOM_TOOLS, embedMarkdown, handleUploadPrAttachment } from './github.js';
 
 const creds = { token: 'ghp_test' };

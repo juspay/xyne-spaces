@@ -1,4 +1,4 @@
-import { useCallback, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { Copy, ExternalLink } from 'lucide-react';
 import { openLink } from '../../../utils/openLink';
 import type { ElectronWebviewElement } from '../../../types/electron';
@@ -13,11 +13,12 @@ import {
 } from '../../workspaceItems';
 import { artifactKindIcon, linkHost, providerLabel } from './artifactKinds';
 import { safeHttpUrl } from './safeHttpUrl';
-import { registerWorkspaceWebview } from './workspaceBrowserTools';
+import { registerWorkspacePage, showWorkspaceTab } from './workspaceBrowserTools';
 import { SignInImportBar, looksLikeSignIn } from './SignInImportBar';
 
 import { usePublishViewerAction } from './viewerActions';
 import { InlineCommentThread, type InlineCommentTarget } from './InlineCommentThread';
+import { DownloadsButton } from '../../InAppBrowser';
 
 /**
  * Providers the agent can actually write back to. Everywhere else the passage
@@ -26,12 +27,26 @@ import { InlineCommentThread, type InlineCommentTarget } from './InlineCommentTh
  */
 const EDITABLE_PROVIDERS = new Set(['google_docs', 'google_sheets', 'google_slides', 'notion']);
 
+/** The items whose page is playing a video or a sound now. */
+const playingItems = new Set<string>();
+
+/** Whether an item's page is playing: kept alive out of sight while it plays. */
+export const isWorkspacePagePlaying = (itemId: string): boolean => playingItems.has(itemId);
+
 /**
  * The AI screen's browser: the shared embedded browser plus the chrome only this
  * surface has — the header row, the sign-in offer, the selection capture, and
  * the registration that lets the agent's page tools drive it.
  */
-export function AiBrowserItemView({ item }: { item: WorkspaceItem }): ReactElement {
+export function AiBrowserItemView({
+  item,
+  shown = true,
+}: {
+  item: WorkspaceItem;
+  /** On screen. Kept out of sight, the page stays as it was, and the agent can still
+   *  work in it; the toolbar's action is the shown one's. */
+  shown?: boolean;
+}): ReactElement {
   const url = safeHttpUrl(item.url ?? null);
   const [atSignIn, setAtSignIn] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -40,10 +55,24 @@ export function AiBrowserItemView({ item }: { item: WorkspaceItem }): ReactEleme
   const [picked, setPicked] = useState<PickedBlock | null>(null);
   const [openThread, setOpenThread] = useState<InlineCommentTarget | null>(null);
 
-  const onView = useCallback((next: ElectronWebviewElement | null) => {
-    registerWorkspaceWebview(next);
-    setView(next);
-  }, []);
+  const onView = useCallback((next: ElectronWebviewElement | null) => setView(next), []);
+
+  // Every open tab's page is within the agent's reach, kept alive out of sight; the
+  // one shown is where a page tool without a tab acts.
+  useEffect(() => {
+    if (!view) return undefined;
+    return registerWorkspacePage(item.id, { view, url: item.url ?? '' });
+  }, [view, item.id, item.url]);
+  useEffect(() => (shown ? showWorkspaceTab(item.id) : undefined), [shown, item.id]);
+
+  const onPlaying = useCallback(
+    (playing: boolean) => {
+      if (playing) playingItems.add(item.id);
+      else playingItems.delete(item.id);
+    },
+    [item.id],
+  );
+  useEffect(() => () => void playingItems.delete(item.id), [item.id]);
 
   const onNavigate = useCallback((next: string) => {
     setAtSignIn(looksLikeSignIn(next));
@@ -75,7 +104,11 @@ export function AiBrowserItemView({ item }: { item: WorkspaceItem }): ReactEleme
     onPicked: setPicked,
   });
 
-  usePublishViewerAction(() => annotate.toggle, [annotate.picking, annotate.toggle === null]);
+  usePublishViewerAction(
+    () => annotate.toggle,
+    [annotate.picking, annotate.toggle === null],
+    shown,
+  );
 
   if (!url) return <Centered>Link unavailable</Centered>;
 
@@ -100,7 +133,7 @@ export function AiBrowserItemView({ item }: { item: WorkspaceItem }): ReactEleme
             {artifactKindIcon('LINK', 'h-3.5 w-3.5')}
           </span>
         ) : null}
-        <span className='truncate' title={url}>
+        <span className='min-w-0 flex-1 truncate' title={url}>
           {isLink ? `${providerLabel(item.provider)}${host ? ` · ${host}` : ''}` : url}
         </span>
         {isLink ? (
@@ -116,6 +149,8 @@ export function AiBrowserItemView({ item }: { item: WorkspaceItem }): ReactEleme
             {copied ? 'Copied' : null}
           </button>
         ) : null}
+        {/* The browser's downloads, as its other browsers show them. */}
+        <DownloadsButton compact />
         <button
           type='button'
           onClick={event => openLink(url, event, { force: 'external' })}
@@ -138,6 +173,8 @@ export function AiBrowserItemView({ item }: { item: WorkspaceItem }): ReactEleme
           title={item.title}
           onView={onView}
           onNavigate={onNavigate}
+          shown={shown}
+          onPlaying={onPlaying}
           banner={view =>
             atSignIn ? (
               <SignInImportBar

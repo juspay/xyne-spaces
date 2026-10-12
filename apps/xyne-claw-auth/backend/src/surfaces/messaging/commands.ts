@@ -18,6 +18,8 @@ import { enqueueOutbound, typingCancelled } from "./delivery.js";
 import { channelConversationId } from "./ids.js";
 import type { ChannelAccount, ChannelDeliveryTarget } from "./plugin.js";
 import type { BoundAgent } from "./store.js";
+import { forgetChatTasks } from "./threads/registry.js";
+import { clearChatState } from "./threads/state.js";
 
 const log = createLogger("channel-commands");
 
@@ -175,6 +177,9 @@ export async function handleControlCommand(input: {
     await reply("This number has no agent assigned yet — ask your admin to bind one.");
     return;
   }
+  // The threaded path's open tasks and remembered facts are this chat's too:
+  // left behind, the next message gets filed under a task from before /new.
+  await Promise.all([forgetChatTasks(account.id, chatId), clearChatState(account.id, chatId)]);
   const cleared = await clearConversation({
     userId,
     conversationId: channelConversationId(account.channel, account.accountKey, agentSlug, chatId),

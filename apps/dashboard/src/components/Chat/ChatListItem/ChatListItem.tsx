@@ -64,6 +64,8 @@ type ChatListItemProps = {
   dataIndex?: number;
   onEmojiPickerOpenChange?: (isOpen: boolean) => void;
   linkedConversationId?: string | null;
+  /** Always show the sender header, whatever the previous row (deep-link target). */
+  forceShowAvatar?: boolean;
 };
 
 const ChatListItemComponent = ({
@@ -78,6 +80,7 @@ const ChatListItemComponent = ({
   dataIndex,
   onEmojiPickerOpenChange,
   linkedConversationId,
+  forceShowAvatar = false,
 }: ChatListItemProps): ReactElement | null => {
   // All non-date-separator items are conversations - get conversation data first
   const conversation =
@@ -127,7 +130,7 @@ const ChatListItemComponent = ({
   const prevItem = index > 0 ? (chatListItems[index - 1] ?? null) : null;
   let showAvatar = true;
 
-  if (prevItem && prevItem.type !== 'date-separator') {
+  if (!forceShowAvatar && prevItem && prevItem.type !== 'date-separator') {
     showAvatar = shouldShowAvatar(item, prevItem, showThreadTags);
   }
 

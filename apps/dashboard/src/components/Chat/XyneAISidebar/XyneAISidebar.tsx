@@ -2094,7 +2094,10 @@ const XyneAISidebar = ({
           (kind: string) =>
           (item: { id: string }): boolean =>
             openedWith.has(`${kind}:${item.id}`);
-        setSelectedChannels(prev => prev.filter(keep('channel')));
+        // An SDLC hub chat keeps its hub: the hub is where the chat happens, and
+        // a follow-up sent without it runs with no hub context at all.
+        const hubId = window.location.pathname.match(/\/sdlc\/([^/]+)/)?.[1];
+        setSelectedChannels(prev => prev.filter(ch => ch.id === hubId || keep('channel')(ch)));
         setSelectedTickets(prev => prev.filter(keep('ticket')));
         setSelectedCanvases(prev => prev.filter(keep('canvas')));
         setSelectedTranscripts(prev => prev.filter(keep('call')));

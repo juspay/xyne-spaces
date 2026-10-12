@@ -6,6 +6,7 @@ import {
   PauseCircle,
   Mic,
   MessageSquare,
+  Globe,
   Zap,
   Code2,
   Copy,
@@ -103,6 +104,7 @@ import {
   useChannelAppPublishing,
 } from '../../BarCustomize';
 import { BarCustomizer } from './BarCustomizer';
+import { BrowserSection } from './BrowserSection';
 import type { PreferenceSection, PreferencesProps, NavItem } from '.';
 import { disconnectCalendar } from '../../../services/clients/calendarApi';
 import { toast } from 'sonner';
@@ -121,6 +123,7 @@ const NAV_ITEMS: NavItem[] = [
     icon: <MessageSquare className='size-4' />,
     desktopOnly: true,
   },
+  { id: 'browser', label: 'Browser', icon: <Globe className='size-4' />, desktopOnly: true },
   { id: 'launch', label: 'Launch', icon: <Zap className='size-4' />, desktopOnly: true },
   {
     id: 'toolbar',
@@ -1417,6 +1420,7 @@ const SECTIONS: Record<PreferenceSection, FC<{ state: PreferencesState }>> = {
   calls: CallsSection,
   recordings: RecordingsSection,
   messaging: MessagingSection,
+  browser: BrowserSection,
   launch: LaunchSection,
   toolbar: ToolbarSection,
   inbox: InboxSection,
@@ -1433,7 +1437,8 @@ const Preferences = ({ open, onClose, initialSection }: PreferencesProps): React
   const { isMobile } = usePlatform();
   const state = usePreferencesState(open);
   const navItems = useMemo(() => {
-    const electronOnly = new Set<PreferenceSection>();
+    // Imports sign-ins through the desktop app, which a browser tab has none of.
+    const electronOnly = new Set<PreferenceSection>(['browser']);
     return NAV_ITEMS.filter(item => {
       if (isMobile && item.desktopOnly) return false;
       if (!isElectronApp() && electronOnly.has(item.id)) return false;
