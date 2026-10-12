@@ -168,14 +168,12 @@ router.post('/test-connection', authorizePrivilegedOrResource('RELEASE-MANAGER',
   }
 });
 
-// AI-suggest services + env/migration paths from the repo's file tree, to
-// prefill the release-config wizard. Supports GitHub and Bitbucket Server.
-// Scope note: repoUrl is caller-supplied and listing uses the org-wide token, so
-// any RELEASE-MANAGER WRITE holder can list any repo that token can read. This is
-// intentional — the wizard prefills repos not yet configured, so it can't be
-// restricted to existing applications; the VCS host is pinned to config (no SSRF).
+// AI-suggest services + env/migration paths from a registered repository's file
+// tree, to prefill a release config. Supports GitHub and Bitbucket Server.
+// Scope note: the repository is one registered in the caller's workspace (repoId),
+// and listing uses the org-wide token; the VCS host is pinned to config (no SSRF).
 router.post('/suggest-services', authorizePrivilegedOrResource('RELEASE-MANAGER', AccessType.WRITE), async (req: Request, res: Response): Promise<void> => {
-  const { repoUrl, projectId: rawProjectId } = req.body as { repoUrl?: string; projectId?: unknown };
+  const { repoId, projectId: rawProjectId } = req.body as { repoId?: string; projectId?: unknown };
   const projectId = typeof rawProjectId === 'string' && rawProjectId ? rawProjectId : null;
   const userId = req.user?.id;
   const workspaceId = req.user?.workspaceId;
@@ -183,10 +181,19 @@ router.post('/suggest-services', authorizePrivilegedOrResource('RELEASE-MANAGER'
     res.status(401).json({ error: 'Authentication required' });
     return;
   }
-  if (!repoUrl) {
-    res.status(400).json({ error: 'repoUrl is required' });
+  if (!repoId) {
+    res.status(400).json({ error: 'repoId is required' });
     return;
   }
+  const repo = await db.repo.findFirst({
+    where: { id: repoId, workspaceId },
+    select: { url: true, canonicalUrl: true },
+  });
+  if (!repo) {
+    res.status(404).json({ error: 'Repository not found' });
+    return;
+  }
+  const repoUrl = repo.canonicalUrl || repo.url;
   const provider = detectVcsProvider(repoUrl);
   // detectVcsProvider treats any non-GitHub URL as Bitbucket, so also require the
   // configured Bitbucket host — otherwise a GitLab URL surfaces as a Bitbucket auth error.
@@ -220,7 +227,7 @@ router.post('/suggest-services', authorizePrivilegedOrResource('RELEASE-MANAGER'
     res.json(result);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    logger.error('[CommitAnalysis] suggest-services failed', { repoUrl, error: msg });
+    logger.error('[CommitAnalysis] suggest-services failed', { repoId, error: msg });
     res.status(500).json({ error: 'Failed to suggest services for this repository' });
   }
 });
