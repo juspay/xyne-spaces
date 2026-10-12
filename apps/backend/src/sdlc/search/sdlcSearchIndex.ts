@@ -13,6 +13,7 @@ import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import {
   channelSchema,
+  fileSchema,
   sdlcContainerSchema,
   sdlcRepositorySchema,
   VespaDocType,
@@ -35,7 +36,7 @@ import {
  *
  * Documents, uploads and conversations are indexed by the one container they sit in
  * (sdlcContainerRef); Vespa imports the rest of their place from it. A conversation started on a
- * document sits in the document's container and names it (sdlcDocumentId). A ticket can sit in
+ * document sits in the document's container and references it (sdlcDocumentRef). A ticket can sit in
  * several places, so its scope ids and documents are fed as lists (sdlcScopeIds,
  * sdlcDocumentIds).
  */
@@ -66,6 +67,8 @@ export const sdlcContainerRef = (containerId: string): string =>
   `id:${NAMESPACE}:${sdlcContainerSchema}::${containerId}`;
 const repositoryRef = (repoId: string): string =>
   `id:${NAMESPACE}:${sdlcRepositorySchema}::${repoId}`;
+const documentRef = (docId: string): string =>
+  `id:${NAMESPACE}:${fileSchema}::${docId}`;
 
 // A hub sync fans out into one Vespa job per item, and each job maps its own document; caching
 // the hub briefly keeps that from rebuilding the whole hub once per item. The jobs run in other
@@ -265,7 +268,7 @@ async function buildSdlcHubIndex(hubId: string, prisma: PrismaClient): Promise<S
     const containerId = containerOf(type, id);
     if (!containerId) return null;
     const isDocument = (type === 'CANVAS' && canvasFields.has(id)) || (type === 'ATTACHMENT' && attachments.has(id));
-    return { sdlcContainerRef: sdlcContainerRef(containerId), sdlcDocumentId: isDocument ? id : '' };
+    return { sdlcContainerRef: sdlcContainerRef(containerId), sdlcDocumentRef: isDocument ? documentRef(id) : '' };
   };
 
   // Tickets. Every item a ticket is linked to is one of its places: X -> TICKET [TICKET] (raised
@@ -348,7 +351,7 @@ export async function sdlcFieldsForAttachment(attachment: { id: string; entityTy
   return index?.attachments.get(attachment.id) ?? EMPTY_SDLC_FILE_FIELDS;
 }
 
-export const EMPTY_SDLC_DISCUSSION_FIELDS: SdlcDiscussionFields = { sdlcContainerRef: '', sdlcDocumentId: '' };
+export const EMPTY_SDLC_DISCUSSION_FIELDS: SdlcDiscussionFields = { sdlcContainerRef: '', sdlcDocumentRef: '' };
 
 export const EMPTY_SDLC_TICKET_FIELDS: SdlcTicketFields = { sdlcScopeIds: [], sdlcDocumentIds: [] };
 
