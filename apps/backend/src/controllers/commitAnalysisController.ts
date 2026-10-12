@@ -264,12 +264,22 @@ export class CommitAnalysisController {
       return null;
     }
 
-    const repoUrls = [
-      ...new Set(apps.map(app => app.repoUrl.trim().replace(/\/+$/, ''))),
-    ];
-    if (repoUrls.length !== 1 || !repoUrls[0]) {
+    // Every service of a release config is released from the same repository.
+    const repoIds = [...new Set(apps.map(app => app.repoId))];
+    if (repoIds.length !== 1) {
       logger.error(
-        `[ReleaseTrigger] skipped: main release board ${boardId} has invalid repository URLs (${repoUrls.join(', ')})`,
+        `[ReleaseTrigger] skipped: services of main release board ${boardId} point at ${repoIds.length} repositories (${repoIds.join(', ')})`,
+      );
+      return null;
+    }
+    const repo = await db.repo.findUnique({
+      where: { id: repoIds[0] },
+      select: { url: true, canonicalUrl: true },
+    });
+    const repoUrl = repo ? (repo.canonicalUrl || repo.url).trim().replace(/\/+$/, '') : '';
+    if (!repoUrl) {
+      logger.error(
+        `[ReleaseTrigger] skipped: repository ${repoIds[0]} of main release board ${boardId} not found`,
       );
       return null;
     }
@@ -277,9 +287,9 @@ export class CommitAnalysisController {
     let projectKey: string;
     let repoSlug: string;
     if (provider === VCSProviderType.GITHUB) {
-      const parsed = parseGitHubRepoUrl(repoUrls[0]);
+      const parsed = parseGitHubRepoUrl(repoUrl);
       if (!parsed) {
-        logger.warn(`[ReleaseTrigger] skipped: cannot parse GitHub repoUrl ${repoUrls[0]}`);
+        logger.warn(`[ReleaseTrigger] skipped: cannot parse GitHub repoUrl ${repoUrl}`);
         return null;
       }
       // For GitHub, owner→projectKey and repo→repoSlug. The strings flow through
@@ -287,9 +297,9 @@ export class CommitAnalysisController {
       projectKey = parsed.owner;
       repoSlug = parsed.repo;
     } else {
-      const parsed = parseBitbucketRepoUrl(repoUrls[0]);
+      const parsed = parseBitbucketRepoUrl(repoUrl);
       if (!parsed) {
-        logger.warn(`[ReleaseTrigger] skipped: cannot parse Bitbucket repoUrl ${repoUrls[0]}`);
+        logger.warn(`[ReleaseTrigger] skipped: cannot parse Bitbucket repoUrl ${repoUrl}`);
         return null;
       }
       projectKey = parsed.projectKey;
@@ -470,7 +480,7 @@ export class CommitAnalysisController {
       }
 
       const repoLabels = contexts.map((c) => `${c.projectKey}/${c.repoSlug}`);
-      logger.info(`Commit analysis request: ${repoLabels.join(', ')} by user ${userId} (derived from Application.repoUrl)`);
+      logger.info(`Commit analysis request: ${repoLabels.join(', ')} by user ${userId} (derived from the release config's repository)`);
 
       // Post loading indicator (once — the release owns a single analysis card).
       loadingMessageId = await postLoadingMessage(conversationId, userId);

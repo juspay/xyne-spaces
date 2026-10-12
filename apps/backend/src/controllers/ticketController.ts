@@ -598,6 +598,7 @@ export class TicketController {
       // is sent) — an incomplete repo would otherwise be silently dropped when
       // persisting releaseRepos, quietly covering fewer repos than configured.
       const rawReleaseRepos = dynamicFields?.['releaseRepos'];
+      let releaseRepoBoardIds: string[] = [];
       if (rawReleaseRepos !== undefined) {
         if (!req.user) {
           res.status(401).json({ error: 'Authentication required' });
@@ -671,6 +672,7 @@ export class TicketController {
             });
             return;
           }
+          releaseRepoBoardIds = boardIds;
         }
       }
 
@@ -705,6 +707,27 @@ export class TicketController {
         } else {
           // Non-support channels must provide boardId
           res.status(400).json({ error: 'boardId is required' });
+          return;
+        }
+      }
+
+      // A release config's main board takes tickets only from its release channel. Keyed
+      // on the board, not the requested ticket type, which the client could leave out.
+      {
+        const releaseBoardIds = [
+          ...new Set([boardId, ...releaseRepoBoardIds].filter((id): id is string => !!id)),
+        ];
+        const otherChannelConfig = await db.application.findFirst({
+          where: {
+            mainReleaseBoardId: { in: releaseBoardIds },
+            NOT: { channelId: actualChannelId ?? '' },
+          },
+          select: { id: true },
+        });
+        if (otherChannelConfig) {
+          res.status(403).json({
+            error: "This release board belongs to another release config; create the release from that config's release channel.",
+          });
           return;
         }
       }
@@ -1241,7 +1264,7 @@ export class TicketController {
 
         if (this.commitAnalysisController && releaseTicket && (hasRepoRows || hasScalarRange)) {
           // workspace + repoSlug are now derived inside commitAnalysisController
-          // from Application.repoUrl on the resolved project. We pass empty
+          // from the release config's repository (Application.repoId). We pass empty
           // placeholders to satisfy the existing param shape; the controller
           // ignores them when DB-derived values are available.
           const xyneReleaseBot = await unifiedBotUserService.getBotByBotId('xyne-release-bot', ticket.workspaceId);
