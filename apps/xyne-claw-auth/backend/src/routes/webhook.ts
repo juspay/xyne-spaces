@@ -853,9 +853,10 @@ async function postWriteApprovalAction(args: {
   // The rich `ticket` FlowUI component is only rendered by newer Spaces
   // backends; older deployments reject it. Track when we used it so a flow-
   // schema rejection can fall back to the generic approval card below.
-  const { flow: cardFlow, usedTicketCard: usedRichTicketCard } = buildWriteApprovalCardFlow(
+  const { flow: cardFlow, usedRichCard } = await buildWriteApprovalCardFlow(
     cardAction,
     actionDesc,
+    ctx.agentOrgId,
   );
   const writeFlow = withSpacesAppId(cardFlow, spacesAppId);
 
@@ -915,9 +916,9 @@ async function postWriteApprovalAction(args: {
     // (auth, channel validation, network) re-throws so the caller's skip/target
     // logic is unaffected. Once Spaces ships `ticket`, the rich card works again
     // with no code change.
-    if (!usedRichTicketCard || !isFlowSchemaRejection(err)) throw err;
+    if (!usedRichCard || !isFlowSchemaRejection(err)) throw err;
     clog.warn(
-      `[webhook/result] ticket approval card rejected by Spaces flow schema; falling back to generic approval card tool=${cardAction.tool} channelId=${ctx.channelId} conversationId=${ctx.conversationId ?? ""}`,
+      `[webhook/result] rich approval card rejected by Spaces flow schema; falling back to generic approval card tool=${cardAction.tool} channelId=${ctx.channelId} conversationId=${ctx.conversationId ?? ""}`,
     );
     await postCard(withSpacesAppId(buildWriteApprovalFlow(actionDesc, cardAction), spacesAppId));
   }
