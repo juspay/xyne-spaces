@@ -186,11 +186,14 @@ const JEV_CONFIG_KEY = 'ticket_duplicate_jev_config';
 interface TicketDuplicateJevConfig {
   similarThreshold: number;
   shadow: boolean;
+  /** false => with Jev enabled, the LLM is not called even if Jev gives no answer. */
+  llmFallback: boolean;
 }
 
 const DEFAULT_JEV_CONFIG: TicketDuplicateJevConfig = {
   similarThreshold: 0.5,
   shadow: false,
+  llmFallback: true,
 };
 
 const LLM_MIN_CONFIDENCE = 0.7;
@@ -380,10 +383,12 @@ export async function analyzeTicketDuplicates(
       });
       return jevResult;
     }
-    logger.warn(`[${AGENT_NAME}] Jev gave no answer, falling back to the LLM`, { source: 'jev' });
+    logger.warn(`[${AGENT_NAME}] Jev gave no answer${jevConfig.llmFallback ? ', falling back to the LLM' : ''}`, { source: 'jev' });
   }
 
-  if (options.jevOnly) {
+  const llmDisabled = cacConfig.ticketDuplicateJevEnabled && !jevConfig.llmFallback;
+  if (options.jevOnly || llmDisabled) {
+    if (llmDisabled) logger.warn(`[${AGENT_NAME}] Jev unavailable and llmFallback is off, skipping the LLM`, { source: 'jev' });
     return {
       isDuplicate: false,
       duplicateTicketId: null,
