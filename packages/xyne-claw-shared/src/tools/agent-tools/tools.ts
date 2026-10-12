@@ -36,7 +36,7 @@ const toolsProperty = {
   description:
     "Tool identifiers to grant, e.g. 'web-search', 'sandbox-run-command', or a subagent name like 'github'. " +
     "Names that do not exist in this workspace are dropped and reported on the card rather than failing the whole request — " +
-    "call list-available-tools first if you are unsure what exists.",
+    "call search_tools first if you are unsure what exists.",
   items: { type: "string" as const },
 };
 
@@ -196,10 +196,10 @@ export const updateAgentTool: ToolDefinition = {
     "applied until they approve, and approval is refused unless the approver may edit that agent (its owner, an EDITOR, or an admin). " +
     "Send ONLY the fields you want to change — omitted fields are left exactly as they are. " +
     "To change the system prompt, PREFER `promptEdits` — anchored {oldText, newText} replacements against the current prompt " +
-    "(read it first via get-agent-config so your oldText anchors are exact; each must appear exactly once). " +
+    "(read it first via get_agent_config so your oldText anchors are exact; each must appear exactly once). " +
     "`systemPrompt` (full replacement) is only accepted while the current prompt is under ~8K chars — larger bodies get " +
     "truncated as tool arguments and would destroy the prompt, so the server rejects them. " +
-    "`tools` REPLACES the agent's tool list rather than adding to it, so read the agent's current tools first (get-agent-config) " +
+    "`tools` REPLACES the agent's tool list rather than adding to it, so read the agent's current tools first (get_agent_config) " +
     "and send the full intended list. " +
     "This mutates an agent that may be running right now, so prefer a narrow change over a rewrite.",
   source: AGENT_TOOLS_SOURCE,
