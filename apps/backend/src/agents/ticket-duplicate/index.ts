@@ -386,16 +386,11 @@ export async function analyzeTicketDuplicates(
     logger.warn(`[${AGENT_NAME}] Jev gave no answer${jevConfig.llmFallback ? ', falling back to the LLM' : ''}`, { source: 'jev' });
   }
 
-  const llmDisabled = cacConfig.ticketDuplicateJevEnabled && !jevConfig.llmFallback;
+  // Only when Jev is actually reachable on this pod: unconfigured, the LLM is the fallback.
+  const llmDisabled = cacConfig.ticketDuplicateJevEnabled && isJevAvailable() && !jevConfig.llmFallback;
   if (options.jevOnly || llmDisabled) {
-    if (llmDisabled) logger.warn(`[${AGENT_NAME}] Jev unavailable and llmFallback is off, skipping the LLM`, { source: 'jev' });
-    return {
-      isDuplicate: false,
-      duplicateTicketId: null,
-      confidence: 0,
-      reason: 'Duplicate scoring is not available.',
-      matches: [],
-    };
+    // Thrown, not returned as "not a duplicate": callers turn it into an error instead of a verdict.
+    throw new Error('Jev gave no answer and the LLM fallback is off');
   }
 
   const modelName = cacConfig.ticketDuplicateModelName;

@@ -5,7 +5,7 @@ import { logger } from '@/utils/logger';
 import { redisService } from '@/services/redisService';
 import { tagRepository } from '@/database/repositories/tagRepository';
 import { generateLlmTags } from './generators/llm';
-import { generateJevTags, runShadowTagGeneration } from './generators/xorShadow';
+import { buildQuestions, generateJevTags, runShadowTagGeneration } from './generators/xorShadow';
 import { AgentsConfig } from '@/agents/config';
 import { isPrivateJevConfigured } from '@/services/queryIntent/jevClient';
 import { TagsConfigShapeSchema } from './schema';
@@ -408,7 +408,11 @@ export class TagGenerationPipeline extends EventEmitter {
       if (!jevTags) throw new Error(`[TAG][PIPELINE] Jev gave no answer for ${sourceId}`);
       generated.push(...jevTags);
     }
-    const byMethod = this.groupCategoriesByMethod(consumeJev ? {} : categories);
+    // Categories Jev can't be asked (non-llm, fewer than 2 options) still use their generator.
+    const askable = consumeJev ? buildQuestions(categories) : {};
+    const byMethod = this.groupCategoriesByMethod(
+      Object.fromEntries(Object.entries(categories).filter(([name]) => !(name in askable))),
+    );
 
     for (const [method, group] of Object.entries(byMethod)) {
       if (method === 'manual') continue;

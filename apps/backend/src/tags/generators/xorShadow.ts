@@ -26,13 +26,13 @@ const SHADOW_TIMEOUT_MS = 30_000;
  * Jev's `criteria` wants a description per option, but CategoryConfig only carries the
  * names, so each option describes itself — Jev works from less guidance than the LLM.
  */
-function buildQuestions(
+export function buildQuestions(
   categories: Record<string, CategoryConfig>,
 ): Record<string, JevChoiceQuestion> {
   const questions: Record<string, JevChoiceQuestion> = {};
 
   for (const [name, category] of Object.entries(categories)) {
-    const options = category.tags ?? [];
+    const options = (category.tags ?? []).filter((tag) => !category.blacklist?.includes(tag));
     if (category.method !== 'llm' || options.length < 2) continue;
 
     questions[name] = {
