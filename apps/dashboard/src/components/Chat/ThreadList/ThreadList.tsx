@@ -53,8 +53,6 @@ type ThreadListProps = {
   /** Overrides the bubbles' default profile navigation (pass a noop to disable it, e.g. SDLC panels). */
   onUserClick?: ((userId: string) => void) | undefined;
   spawnedTicketMessageIds?: ReadonlySet<string> | undefined;
-  /** Drop the "N replies" divider after the first message (desk conversations read as one list). */
-  hideReplyDivider?: boolean;
 };
 
 /** Space reserved below the last message for the typing / agent-activity bar, which
@@ -95,7 +93,6 @@ const ThreadList = ({
   inspectedTag = null,
   onUserClick,
   spawnedTicketMessageIds,
-  hideReplyDivider = false,
 }: ThreadListProps): ReactElement => {
   const { user } = useAuthContext();
   const { isEditingMessage, isEditingHere, requestEdit } = useMessageEdit();
@@ -715,7 +712,7 @@ const ThreadList = ({
                       inspectedTag={inspectedTag}
                     />
                   </div>
-                  {!hideReplyDivider && messageIndex === 0 && threadMessages.length > 1 && (
+                  {messageIndex === 0 && threadMessages.length > 1 && (
                     <div className='flex items-center my-3 pl-2 gap-2'>
                       <span className='flex text-xs text-muted-foreground'>
                         {threadMessages.length - 1}{' '}

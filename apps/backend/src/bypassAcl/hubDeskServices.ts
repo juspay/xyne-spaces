@@ -4,9 +4,10 @@
  */
 import { randomUUID } from 'node:crypto';
 import type { Ticket } from '@prisma/client';
-import { BaseTicketType, MessageType } from '@xyne/shared';
+import { BaseTicketType, ChannelType, EmailType, MessageType } from '@xyne/shared';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { db } from '@/database/client';
+import { EmailRepository } from '@/database/repositories/emailRepository';
 import { createHubTicket } from '@/hubDesk/hub';
 import { generateTicketId } from './transactions/ticketIdService';
 import { asService, transaction } from './base';
@@ -24,6 +25,7 @@ const HUB_TABLES = [
   'Ticket',
   'ChannelUserStatus',
   'Channel',
+  'User',
 ] as const;
 
 /** Called after a new top-level thread is created; a no-op unless its channel feeds a HUB desk. */
@@ -42,14 +44,14 @@ export function hubTicketForConversation(
 
 /**
  * The ticket needs a conversation in its own channel, so each one gets a stub thread on the desk
- * holding one system line. Desk activity lands there. The merchant's thread is only referenced from
- * the stub's metadata and never written to: a ticket id on it would reach the merchant through the
- * conversation's ticket relation. Null if this thread already has a ticket on the desk.
+ * holding one system line. Desk activity lands there. Like other desks' external threads, the
+ * merchant's thread is named by an email row on the stub (externalThreadId) and never written to.
+ * Null if this thread already has a ticket on the desk.
  */
 export async function insertHubTicket(args: {
   workspaceId: string;
   conversationId: string;
-  sourceChannelId: string;
+  messageId: string;
   sourceChannelName: string;
   deskId: string;
   projectId: string;
@@ -58,21 +60,19 @@ export async function insertHubTicket(args: {
   title: string;
   description: string;
   createdBy: string;
+  senderEmail: string;
   createdAt: Date;
   priority: string;
   userGroupId: string | null;
 }): Promise<Ticket | null> {
   return transaction(
-    ['Conversation', 'Message', 'Ticket', 'ChannelUserStatus', 'Project'],
+    ['Conversation', 'Message', 'Ticket', 'ChannelUserStatus', 'Project', 'Email', 'Channel'],
     'HUB desk ticket: stub thread and ticket must commit together',
     db,
     async (tx) => {
-      const existing = await tx.conversation.findFirst({
-        where: {
-          channelId: args.deskId,
-          metadata: { path: ['hubSourceConversationId'], equals: args.conversationId },
-        },
-        select: { conversationId: true },
+      const existing = await tx.email.findFirst({
+        where: { channelId: args.deskId, externalThreadId: args.conversationId },
+        select: { id: true },
       });
       if (existing) return null;
       const stubMessageId = randomUUID();
@@ -83,10 +83,6 @@ export async function insertHubTicket(args: {
           initialMessageId: stubMessageId,
           workspaceId: args.workspaceId,
           lastActivityAt: args.createdAt,
-          metadata: {
-            hubSourceConversationId: args.conversationId,
-            hubSourceChannelId: args.sourceChannelId,
-          },
         },
       });
       await tx.message.create({
@@ -122,12 +118,93 @@ export async function insertHubTicket(args: {
         where: { conversationId: stub.conversationId },
         data: { ticketId: ticket.id },
       });
+      await new EmailRepository().create(
+        {
+          type: EmailType.DEFAULT,
+          subject: args.title,
+          body: args.description,
+          to: [],
+          from: args.senderEmail,
+          conversationId: stub.conversationId,
+          channelId: args.deskId,
+          externalThreadId: args.conversationId,
+          externalMessageId: args.messageId,
+          createdAt: args.createdAt,
+        },
+        tx
+      );
       await syncConversationTicketMdFromPrismaTicket(tx, ticket);
       await tx.channelUserStatus.updateMany({
         where: { channelId: args.deskId, isDeleted: false },
         data: { unreadCount: { increment: 1 }, updatedAt: new Date() },
       });
       return ticket;
+    }
+  );
+}
+
+export interface HubThreadTicket {
+  conversationId: string;
+  ticketId: string;
+  xyneId: string;
+  title: string;
+  statusV2: string;
+  stageName: string;
+  priority: string;
+  assignee: { id: string; name: string } | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/**
+ * The tickets HUB desks opened for these threads, for someone already allowed to open the threads
+ * (`hubTicketsForThreads` checks that). The desk is outside their access, so only these fields leave
+ * it: never the desk's own thread or its notes.
+ */
+export function readHubTicketsForThreads(workspaceId: string, conversationIds: string[]): Promise<HubThreadTicket[]> {
+  return asService(
+    ['Email', 'Channel', 'Ticket', 'User'],
+    "HUB desk ticket status for its thread's own members",
+    'hub-desk',
+    workspaceId,
+    async () => {
+      const links = await db.email.findMany({
+        where: { externalThreadId: { in: conversationIds }, channel: { type: ChannelType.HUB } },
+        select: { externalThreadId: true, conversationId: true },
+      });
+      const threadOf = new Map(links.map((link) => [link.conversationId, link.externalThreadId]));
+      const tickets = await db.ticket.findMany({
+        where: { conversationId: { in: [...threadOf.keys()] }, isArchived: false },
+        select: {
+          id: true,
+          xyneId: true,
+          title: true,
+          statusV2: true,
+          stageName: true,
+          priority: true,
+          assignedTo: true,
+          createdAt: true,
+          updatedAt: true,
+          conversationId: true,
+        },
+      });
+      const assignees = await db.user.findMany({
+        where: { id: { in: tickets.flatMap((ticket) => ticket.assignedTo ?? []) } },
+        select: { id: true, name: true, displayName: true },
+      });
+      const nameOf = new Map(assignees.map((user) => [user.id, user.displayName || user.name]));
+      return tickets.map((ticket) => ({
+        conversationId: threadOf.get(ticket.conversationId)!,
+        ticketId: ticket.id,
+        xyneId: ticket.xyneId,
+        title: ticket.title,
+        statusV2: ticket.statusV2,
+        stageName: ticket.stageName,
+        priority: ticket.priority,
+        assignee: ticket.assignedTo ? { id: ticket.assignedTo, name: nameOf.get(ticket.assignedTo) ?? '' } : null,
+        createdAt: ticket.createdAt,
+        updatedAt: ticket.updatedAt,
+      }));
     }
   );
 }

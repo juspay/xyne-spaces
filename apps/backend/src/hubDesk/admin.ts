@@ -1,7 +1,7 @@
 // Linking a HUB desk to an installed app (one active desk per install, set up by an app admin or the
 // app's creator), and choosing which of the app's channels feed it.
 import { Prisma } from '@prisma/client';
-import { AccessType } from '@xyne/shared';
+import { AccessType, ChannelScopeType, ChannelType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
@@ -54,30 +54,46 @@ export interface HubChannel {
 }
 
 /**
- * The desk's app's channels the caller can see: the ones on this desk, and the ones on no desk yet.
+ * The desk's channels, and the channels its app is in that are on no desk yet (regular channels only,
+ * never a desk or a DM). A channel stays on the desk until it is removed, even if the app leaves it.
  * Read under the caller's own access, so private channels they aren't in are never listed.
  */
 export async function listHubChannels(deskId: string): Promise<{ added: HubChannel[]; available: HubChannel[] }> {
   const app = await hubAppOf(deskId);
   const install = app && (await db.installedApps.findUnique({ where: { id: app.id }, select: { userId: true } }));
   if (!install) return { added: [], available: [] };
-  const channels = await db.channel.findMany({
-    where: { createdBy: install.userId, isArchived: false },
-    select: { id: true, name: true },
-    orderBy: { name: 'asc' },
-  });
-  const links = await db.externalSource.findMany({
-    where: { name: { in: channels.map((channel) => hubChannelSourceName(channel.id)) }, isActive: true },
-    select: { channelId: true, externalIdentifier: true },
-  });
-  const deskOf = new Map(links.map((link) => [link.externalIdentifier, link.channelId]));
-  return {
-    added: channels.filter((channel) => deskOf.get(channel.id) === deskId),
-    available: channels.filter((channel) => !deskOf.has(channel.id)),
-  };
+  const [deskLinks, appChannels] = await Promise.all([
+    db.externalSource.findMany({
+      where: { channelId: deskId, sourceType: ExternalSourcePlatform.APP_HUB_CHANNEL, isActive: true },
+      select: { externalIdentifier: true },
+    }),
+    db.channel.findMany({
+      where: {
+        participants: { some: { userId: install.userId } },
+        type: ChannelType.DEFAULT,
+        scopeType: ChannelScopeType.DEFAULT,
+        isArchived: false,
+      },
+      select: { id: true, name: true },
+      orderBy: { name: 'asc' },
+    }),
+  ]);
+  const [added, taken] = await Promise.all([
+    db.channel.findMany({
+      where: { id: { in: deskLinks.flatMap((link) => link.externalIdentifier ?? []) } },
+      select: { id: true, name: true },
+      orderBy: { name: 'asc' },
+    }),
+    db.externalSource.findMany({
+      where: { name: { in: appChannels.map((channel) => hubChannelSourceName(channel.id)) }, isActive: true },
+      select: { externalIdentifier: true },
+    }),
+  ]);
+  const onADesk = new Set(taken.map((link) => link.externalIdentifier));
+  return { added, available: appChannels.filter((channel) => !onADesk.has(channel.id)) };
 }
 
-/** Adds one of the app's channels to the desk. False if it isn't available (not the app's, or on another desk). */
+/** Adds one of the app's channels to the desk. False if it isn't available (app not in it, or on another desk). */
 export async function addHubChannel(desk: { id: string; workspaceId: string }, channelId: string): Promise<boolean> {
   const { added, available } = await listHubChannels(desk.id);
   if (added.some((channel) => channel.id === channelId)) return true;

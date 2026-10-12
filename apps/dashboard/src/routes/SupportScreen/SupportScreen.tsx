@@ -97,7 +97,7 @@ import { queries } from '../../zero/queries';
 import { useTicketKeysetWindow } from '../../hooks/useTicketKeysetWindow';
 import { QueryResultType } from '@rocicorp/zero';
 import ThreadMessages from '../../components/Chat/ThreadPannel';
-import { HubComposer, HubSourceThread } from './HubSourceThread';
+import { HubSourceThread } from './HubSourceThread';
 import { useChannel, useEmailChannels, useUserChannelStatuses } from '../../hooks/useChannels';
 import { useRefetchExternalSource } from '../../hooks/useRefetchExternalSource';
 import { useChannelFetchSources } from '../../hooks/useChannelFetchSources';
@@ -5786,14 +5786,6 @@ export const SupportTicketDetail = ({
       threadScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
     });
   };
-  // HUB threads are oldest-first, so a new reply is at the bottom.
-  const scrollThreadToBottom = (): void => {
-    requestAnimationFrame(() => {
-      const container = threadScrollRef.current;
-      container?.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
-    });
-  };
-
   const composerOverlayRef = useRef<HTMLDivElement>(null);
   const [composerOverlayHeight, setComposerOverlayHeight] = useState<number>(96);
   useEffect(() => {
@@ -6454,9 +6446,18 @@ export const SupportTicketDetail = ({
                 )}
               </div>
             </div>
+            {/* A HUB ticket opens the merchant's thread in the regular thread view, composer included. */}
+            {channel?.type === ChannelType.HUB && emails[0]?.externalThreadId && (
+              <div className='flex-1 min-h-0 flex flex-col'>
+                <HubSourceThread sourceConversationId={emails[0].externalThreadId} />
+              </div>
+            )}
             <div
               ref={threadScrollRef}
-              className='flex-1 overflow-y-auto no-scrollbar px-6 py-4'
+              className={cn(
+                'flex-1 overflow-y-auto no-scrollbar px-6 py-4',
+                channel?.type === ChannelType.HUB && 'hidden',
+              )}
               style={{
                 paddingBottom: composerOverlayHeight + 12,
                 transition: 'padding-bottom 280ms cubic-bezier(0.22, 1, 0.36, 1)',
@@ -6650,16 +6651,7 @@ export const SupportTicketDetail = ({
                     </div>
                   </div>
                 )}
-              {channel?.type === ChannelType.HUB && ticket?.id && channel.id && (
-                <div className='mb-6'>
-                  <HubSourceThread
-                    ticketId={ticket.id}
-                    deskChannelId={channel.id}
-                    onOwnMessage={scrollThreadToBottom}
-                  />
-                </div>
-              )}
-              {emails && emails.length > 0 && (
+              {channel?.type !== ChannelType.HUB && emails && emails.length > 0 && (
                 <div className='mb-6'>
                   {isAppSourcedTicket ||
                   isSlackSourcedTicket ||
@@ -6706,12 +6698,8 @@ export const SupportTicketDetail = ({
               ref={composerOverlayRef}
             >
               <DuplicateTicketsBanner ticketId={mailboxTicketId} />
-              {/* HUB tickets reply into the conversation in its own channel. */}
-              {channel?.type === ChannelType.HUB ? (
-                ticket?.id ? (
-                  <HubComposer ticketId={ticket.id} deskChannelId={channel.id} />
-                ) : null
-              ) : isAppSourcedTicket ? (
+              {/* HUB tickets reply in the thread view above. */}
+              {channel?.type === ChannelType.HUB ? null : isAppSourcedTicket ? (
                 conversationId ? (
                   <SlackComposer
                     conversationId={conversationId}

@@ -1,11 +1,12 @@
 // HUB desks: a desk linked to one installed Xyne App gets a ticket for every new thread in the
 // channels added to it (from those the app created). The ticket and a stub thread live on the desk;
-// the thread stays in its channel (only referenced), so reading it still needs access to that channel.
+// the thread stays in its channel, named by an email row on the stub, so reading it still needs
+// access to that channel. A ticket the merchant opens on their own thread is separate.
 import type { Ticket } from '@prisma/client';
 import { MessageType, TicketPriority } from '@xyne/shared';
 import { stripHtml } from '@/agents/xyne-ai/tools/helpers';
 import type { TicketLike } from '@/automations/triggers/ticket-context';
-import { insertHubTicket } from '@/bypassAcl/hubDeskServices';
+import { insertHubTicket, readHubTicketsForThreads, type HubThreadTicket } from '@/bypassAcl/hubDeskServices';
 import { db } from '@/database/client';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
 import { vespaQueue } from '@/queues/vespaQueue';
@@ -67,11 +68,11 @@ export async function createHubTicket(conversationId: string): Promise<Ticket | 
   const [preference, message, sourceChannel] = await Promise.all([
     db.emailChannelPreference.findUnique({
       where: { channelId: deskId },
-      select: { boardId: true, assigneeUserGroupId: true },
+      select: { boardId: true, assigneeUserGroupId: true, ownerUserId: true },
     }),
     db.message.findUnique({
       where: { messageId: conversation.initialMessageId },
-      select: { content: true, senderId: true, createdAt: true, msgType: true },
+      select: { content: true, senderId: true, createdAt: true, msgType: true, sender: { select: { email: true } } },
     }),
     db.channel.findUnique({ where: { id: sourceChannelId }, select: { name: true } }),
   ]);
@@ -89,12 +90,13 @@ export async function createHubTicket(conversationId: string): Promise<Ticket | 
     return null;
   }
 
-  const text = stripHtml(message.content);
+  // Blocks end in a space, so paragraphs don't run together in the title.
+  const text = stripHtml(message.content.replace(/<\/(p|div|li|h[1-6])>|<br\s*\/?>/gi, ' '));
   const priority = TicketPriority.LOW;
   const ticket = await insertHubTicket({
     workspaceId: conversation.workspaceId,
     conversationId,
-    sourceChannelId,
+    messageId: conversation.initialMessageId,
     sourceChannelName: sourceChannel.name,
     deskId,
     projectId: board.projectId,
@@ -102,7 +104,9 @@ export async function createHubTicket(conversationId: string): Promise<Ticket | 
     stageName: firstStage.name,
     title: (text.length > TITLE_MAX_LENGTH ? `${text.slice(0, TITLE_MAX_LENGTH - 1)}…` : text) || 'New conversation',
     description: text,
-    createdBy: message.senderId,
+    // Created as the desk's owner, like other desks' inbound tickets; the merchant is the requester (email row).
+    createdBy: preference?.ownerUserId ?? message.senderId,
+    senderEmail: message.sender.email,
     createdAt: message.createdAt,
     priority,
     userGroupId: preference?.assigneeUserGroupId ?? null,
@@ -162,4 +166,18 @@ async function afterCreate(ticket: Ticket, sourceChannelId: string): Promise<voi
   } catch (err) {
     logger.error('[hub-desk] Auto-assignment failed', { ticketId: ticket.id, err });
   }
+}
+
+/**
+ * The desk tickets for the caller's own threads (SDK `tickets.forThreads`). The threads are read under
+ * the caller's access first; null if any of them isn't one they can open.
+ */
+export async function hubTicketsForThreads(
+  workspaceId: string,
+  conversationIds: string[],
+): Promise<HubThreadTicket[] | null> {
+  const ids = [...new Set(conversationIds)];
+  const visible = await db.conversation.count({ where: { conversationId: { in: ids } } });
+  if (visible !== ids.length) return null;
+  return readHubTicketsForThreads(workspaceId, ids);
 }
