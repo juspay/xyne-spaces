@@ -26,11 +26,9 @@ interface CommunityWorkspace {
   name: string;
   description: string | null;
   joinPolicy: string | null;
-  landingChannelId: string | null;
 }
 
 interface CommunityWorkspaceOrganization {
-  orgId: string;
   orgName: string;
   workspaces: CommunityWorkspace[];
 }
@@ -201,7 +199,6 @@ const LeftPanel = ({
               }
               data-track-metadata={JSON.stringify({
                 workspaceId: featuredWorkspace.id,
-                orgId: featuredOrg.orgId,
               })}
             >
               {isRejected ? (

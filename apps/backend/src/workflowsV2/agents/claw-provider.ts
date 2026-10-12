@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import { BaseAgentProvider } from '@xyne/workflow-sdk/agents/host';
 import type {
@@ -236,7 +236,45 @@ export function buildCallbackUrl(executionId: string, nodePath: string, attempt:
   const base = config.xyneClaw.callbackUrl.replace(/\/$/, '');
   return `${base}/api/internal/workflows-v2/claw-callback/${encodeURIComponent(executionId)}`
     + `?nodePath=${encodeURIComponent(nodePath)}&attempt=${String(attempt)}`
-    + (turn !== undefined ? `&turn=${String(turn)}` : '');
+    + (turn !== undefined ? `&turn=${String(turn)}` : '')
+    + `&sig=${signClawCallback(executionId, nodePath, attempt, turn)}`;
+}
+
+/**
+ * Security (bug bounty #45): the S2S key proves the POST came from an internal
+ * service, not that this service was asked to report on THIS gate. Claw and other
+ * S2S holders relay URLs that tenants can influence, so the key alone let one
+ * workspace resume another workspace's parked step with forged output. Each
+ * callback URL we hand out is therefore bound to its (execution, node, attempt,
+ * turn) by an HMAC only this backend can mint.
+ */
+function callbackSigningKey(): string {
+  const key = process.env['JWT_SECRET'];
+  if (!key) throw new Error('workflows: JWT_SECRET is required to sign claw callbacks');
+  return key;
+}
+
+export function signClawCallback(
+  executionId: string,
+  nodePath: string,
+  attempt: number,
+  turn?: number,
+): string {
+  return createHmac('sha256', callbackSigningKey())
+    .update(['workflows-v2/claw-callback', executionId, nodePath, String(attempt), turn === undefined ? '' : String(turn)].join('\n'))
+    .digest('hex');
+}
+
+export function verifyClawCallbackSignature(
+  sig: unknown,
+  executionId: string,
+  nodePath: string,
+  attempt: number,
+  turn?: number,
+): boolean {
+  if (typeof sig !== 'string' || !/^[0-9a-f]{64}$/.test(sig)) return false;
+  const expected = Buffer.from(signClawCallback(executionId, nodePath, attempt, turn), 'hex');
+  return timingSafeEqual(expected, Buffer.from(sig, 'hex'));
 }
 
 function safeClawId(raw: string): string {

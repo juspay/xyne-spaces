@@ -639,19 +639,23 @@ export class MicrosoftAuthController {
           memberId: user.orgMemberId ?? undefined,
         });
 
-        // Handle mobile platform: relay to app deep link with the token (no server session needed).
+        // Security (bug bounty #40): never put a session token into a custom-scheme deep
+        // link. `xyne-spaces://` can be registered by any installed app, so whichever app
+        // claimed the scheme would receive a fully valid Spaces JWT. The mobile app signs in
+        // with PKCE (src/services/microsoftOAuth.ts) and exchanges the code over HTTPS via
+        // POST /api/v2/auth/microsoft/exchange-mobile, so this legacy relay only ever
+        // carries an error back to the app.
         if (resolvedPlatform === 'mobile') {
-          const mobileParams = new URLSearchParams({
-            success: 'true',
-            token: customToken,
-            user_id: user.id,
-            email: user.email,
-            name: user.name,
-          });
-
-          const mobileRedirectUrl = `xyne-spaces://auth/microsoft/callback?${mobileParams.toString()}`;
-          logger.info(`${tag()} Microsoft OAuth login succeeded (platform=mobile, outcome=${workspaceOutcome(workspaces.length)}, count=${workspaces.length}) — redirecting to mobile app`);
-          res.redirect(mobileRedirectUrl);
+          logger.warn(
+            `${tag()} Refusing legacy Microsoft mobile token relay over custom-scheme deep link (user=${user.id})`,
+          );
+          res.redirect(
+            this.getRedirectUrl(req, 'mobile', {
+              success: 'false',
+              error: 'unsupported_flow',
+              message: 'Please update the Xyne Spaces app to sign in with Microsoft.',
+            }),
+          );
           return;
         }
 

@@ -2190,40 +2190,35 @@ export class AuthV2Controller {
           picture: oauthUserData.picture,
         };
 
-        // Ensure OrgMember exists — find the org by email domain, or fall back to
-        // the user's existing OrgMember record (e.g. when domain mapping is missing).
-        let existingOrgId: string | null = null;
-        const existingOrgByDomain = await organizationDomainService.findExistingOrgByEmailDomain(userData.email);
+        // Security (bug bounty #31): the pending-auth cookie only proves the caller
+        // owns this email address — it is NOT an invitation. Previously this path
+        // matched the org by email domain and silently upserted an OrgMember, so any
+        // address on a mapped domain could self-join the org and become OWNER of a
+        // fresh workspace without an admin invite. Workspace creation from the
+        // pending-auth flow now requires an existing, active org membership with an
+        // OWNER or ADMIN role — the same bar the authenticated /create-workspace
+        // route enforces via canCreateWorkspace.
+        const existingOrgMember = await this.prisma.orgMember.findFirst({
+          where: { email: userData.email.toLowerCase(), leftAt: null },
+          select: { orgId: true, role: true },
+        });
 
-        if (existingOrgByDomain) {
-          existingOrgId = existingOrgByDomain.orgId;
-        } else {
-          const existingOrgMember = await this.prisma.orgMember.findFirst({
-            where: { email: userData.email.toLowerCase(), leftAt: null },
-            select: { orgId: true },
-          });
-          existingOrgId = existingOrgMember?.orgId ?? null;
-        }
-
-        if (!existingOrgId) {
-          res.status(409).json({
-            error: 'No organization found',
-            message: 'No organization found for your email domain. Please create an organization first.',
+        if (!existingOrgMember) {
+          res.status(403).json({
+            error: 'Forbidden',
+            message: 'You are not a member of an organization. Ask an organization admin to invite you.',
           });
           return;
         }
 
-        await this.prisma.orgMember.upsert({
-          where: { email: userData.email.toLowerCase() },
-          create: {
-            orgId: existingOrgId,
-            email: userData.email.toLowerCase(),
-            role: OrgRole.MEMBER,
-          },
-          update: {
-            leftAt: null,
-          },
-        });
+        if (existingOrgMember.role !== OrgRole.OWNER && existingOrgMember.role !== OrgRole.ADMIN) {
+          logger.warn(`[CREATE-WORKSPACE-PENDING] Denied workspace creation for non-admin org member ${userData.email}`);
+          res.status(403).json({
+            error: 'Forbidden',
+            message: 'Only organization owners and admins can create workspaces. Ask an admin to invite you to a workspace.',
+          });
+          return;
+        }
 
         const { organization, workspace, workspaceUser } = await this.userService.createWorkspaceInOrg(
           { userId: '', providerUserId: userData.providerUserId, email: userData.email, name: userData.name, picture: userData.picture, authProvider: signUpProvider },

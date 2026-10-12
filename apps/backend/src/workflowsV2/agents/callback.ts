@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import { findWorkflowExecutionForCallback } from '@/bypassAcl/workflowServices';
 import { resumeWorkflowClawCallback } from '@/bypassAcl/workflowOperations';
 import { logger } from '@/utils/logger';
+import { verifyClawCallbackSignature } from './claw-provider';
 
 /**
  * A stale callback answers 200, not an error. Claw did nothing wrong, and a
@@ -22,9 +23,9 @@ import { logger } from '@/utils/logger';
  * path, so the path alone cannot distinguish a live callback from a superseded
  * one. Both checks are cheap: one indexed read, one integer comparison.
  *
- * Guarded by `validateS2SKey` at the mount, like the automations and SDLC
- * callbacks: the S2S key is the authorization, and the execution id is not
- * treated as a secret.
+ * Guarded by `validateS2SKey` at the mount AND by a per-gate HMAC (`sig`) minted
+ * in `buildCallbackUrl`: the S2S key says an internal service is calling, the
+ * signature says this backend asked for a report on exactly this gate (#45).
  */
 export async function handleWorkflowClawCallback(
   req: Request<{ executionId: string }>,
@@ -39,6 +40,18 @@ export async function handleWorkflowClawCallback(
 
   if (!nodePath || !Number.isInteger(attempt)) {
     res.status(400).json({ success: false, error: 'missing nodePath or attempt' });
+    return;
+  }
+
+  // Bug bounty #45: the S2S key alone does not bind a caller to this gate.
+  if (
+    (turn !== undefined && !Number.isInteger(turn))
+    || !verifyClawCallbackSignature(req.query['sig'], executionId, nodePath, attempt, turn)
+  ) {
+    logger.warn(
+      `[workflows] claw-callback: rejected unsigned or mis-signed callback execution=${executionId} node=${nodePath}`,
+    );
+    res.status(403).json({ success: false, error: 'invalid callback signature' });
     return;
   }
 

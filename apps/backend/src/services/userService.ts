@@ -1022,7 +1022,9 @@ export class UserService {
   ): Promise<{ organization: any; workspace: any; workspaceUser: User }> {
     // Find the user's org membership
     const orgMember = await this.prisma.orgMember.findFirst({
-      where: { email: userData.email },
+      // Ignore memberships the user has left — a departed member must not be able
+      // to create workspaces in their former org.
+      where: { email: userData.email, leftAt: null },
       include: { organization: true },
       orderBy: { joinedAt: 'asc' },
     });

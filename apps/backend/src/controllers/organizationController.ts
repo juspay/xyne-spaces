@@ -1,6 +1,5 @@
 import { Request, Response } from 'express';
 import { OrganizationRepository } from '../database/repositories/organizationRepository';
-import { UserRepository } from '../database/repositories/users';
 import { DatabaseClient } from '../database/client';
 import { logger } from '@/utils/logger';
 import { invitationService } from '@/services/invitationService';
@@ -12,24 +11,18 @@ import { getEncryptionProvider } from '@/services/encryption';
 import { createId } from '@paralleldrive/cuid2';
 import { createOrganizationWithWorkspace, createOwnerInvitation } from '@/bypassAcl/orgServices';
 
-// Create OrgMemberRepository interface since we don't have the full file yet
+// OrgMember identity is `memberId` (one row per email). The legacy `userId` column is
+// deprecated and always holds the literal "deprecated", so every lookup below is keyed
+// on (orgId, memberId) and ignores members who have left (`leftAt` set).
 interface OrgMember {
   memberId: string;
   orgId: string;
-  userId: string;
+  email: string;
   role: OrgRole;
   joinedAt: Date;
-  invitedBy?: string;
+  invitedBy?: string | null;
 }
 
-interface CreateOrgMemberInput {
-  orgId: string;
-  userId: string;
-  role: OrgRole;
-  invitedBy?: string;
-}
-
-// Simple OrgMemberRepository class (this should be moved to a separate file)
 class OrgMemberRepository {
   private db: any;
 
@@ -37,81 +30,53 @@ class OrgMemberRepository {
     this.db = DatabaseClient.getInstance();
   }
 
-  async create(data: CreateOrgMemberInput): Promise<OrgMember> {
-    return await this.db.orgMember.create({ data });
-  }
-
-  async findMember(orgId: string, userId: string): Promise<OrgMember | null> {
-    return await this.db.orgMember.findUnique({
-      where: {
-        orgId_userId: { orgId, userId }
-      }
+  async findMember(orgId: string, memberId: string): Promise<OrgMember | null> {
+    if (!memberId) return null;
+    return await this.db.orgMember.findFirst({
+      where: { orgId, memberId, leftAt: null },
     });
   }
 
   async getOrgMembers(orgId: string): Promise<OrgMember[]> {
     return await this.db.orgMember.findMany({
-      where: { orgId },
-      orderBy: { joinedAt: 'asc' }
+      where: { orgId, leftAt: null },
+      orderBy: { joinedAt: 'asc' },
     });
   }
 
-  async getUserOrgs(userId: string): Promise<OrgMember[]> {
+  async getMemberOrgs(memberId: string): Promise<OrgMember[]> {
+    if (!memberId) return [];
     return await this.db.orgMember.findMany({
-      where: { userId },
-      orderBy: { joinedAt: 'desc' }
+      where: { memberId, leftAt: null },
+      orderBy: { joinedAt: 'desc' },
     });
   }
 
-  async removeMember(orgId: string, userId: string): Promise<void> {
-    await this.db.orgMember.delete({
-      where: {
-        orgId_userId: { orgId, userId }
-      }
+  async removeMember(orgId: string, memberId: string): Promise<void> {
+    await this.db.orgMember.updateMany({
+      where: { orgId, memberId, leftAt: null },
+      data: { leftAt: new Date() },
     });
   }
 
-  async updateMemberRole(orgId: string, userId: string, role: OrgRole): Promise<OrgMember> {
-    return await this.db.orgMember.update({
-      where: {
-        orgId_userId: { orgId, userId }
-      },
-      data: { role }
+  async updateMemberRole(orgId: string, memberId: string, role: OrgRole): Promise<void> {
+    await this.db.orgMember.updateMany({
+      where: { orgId, memberId, leftAt: null },
+      data: { role },
     });
   }
 }
 
+const isOrgAdminRole = (role: string | undefined | null): boolean =>
+  role === OrgRole.OWNER || role === OrgRole.ADMIN;
+
 export class OrganizationController {
   private organizationRepository: OrganizationRepository;
   private orgMemberRepository: OrgMemberRepository;
-  private userRepository: UserRepository;
 
   constructor() {
     this.organizationRepository = new OrganizationRepository();
     this.orgMemberRepository = new OrgMemberRepository();
-    this.userRepository = new UserRepository();
-  }
-
-  // Helper method to get user info
-  private async getUserInfo(userId: string) {
-    try {
-      const user = await this.userRepository.findById(userId);
-      if (user) {
-        return {
-          id: user.id,
-          name: user.name,
-          email: user.email
-        };
-      }
-    } catch (error) {
-      logger.warn(`Failed to lookup user ${userId}:`, error);
-    }
-
-    return {
-      id: userId,
-      name: 'User',
-      email: 'user@example.com'
-    };
   }
 
   // POST /api/organizations - Create new organization with workspace, owner, and invitation
@@ -157,7 +122,33 @@ export class OrganizationController {
         return;
       }
 
-      await organizationDomainService.assertCanCreateOrgForEmail(ownerEmail.trim());
+      // Security (bug bounty #36): creating an organization provisions a new tenant and
+      // emails an OWNER invitation to `ownerEmail`. Previously any authenticated
+      // non-guest user could do this for an arbitrary address, i.e. send official
+      // Xyne invitation mail to anyone and pre-claim another company's email domain
+      // (createDomainMappingForOrg). Restrict this to org/workspace OWNER or ADMIN —
+      // the same bar as POST /api/invitations/provision-org.
+      if (!isOrgAdminRole(req.user?.orgRole) && !isOrgAdminRole(req.user?.role)) {
+        res.status(403).json({
+          error: 'Forbidden',
+          message: 'Only organization or workspace admins can create organizations',
+        });
+        return;
+      }
+
+      const normalizedOwnerEmail = ownerEmail.trim().toLowerCase();
+      await organizationDomainService.assertCanCreateOrgForEmail(normalizedOwnerEmail);
+
+      // OrgMember.email is globally unique — reject owners who already belong to an
+      // organization instead of failing later inside the transaction.
+      const existingOwnerMembership = await db.orgMember.findFirst({
+        where: { email: normalizedOwnerEmail, leftAt: null },
+        select: { orgId: true },
+      });
+      if (existingOwnerMembership) {
+        res.status(409).json({ error: `${ownerEmail.trim()} is already a member of an organization` });
+        return;
+      }
 
       // Check if organization name already exists
       const existingOrg = await this.organizationRepository.findByName(name.trim());
@@ -245,11 +236,8 @@ export class OrganizationController {
   // GET /api/organizations - List user's organizations
   getUserOrganizations = async (req: Request, res: Response): Promise<void> => {
     try {
-      const userId = req.user!.id;
-      
-
-      // Get user's organization memberships
-      const memberships = await this.orgMemberRepository.getUserOrgs(userId);
+      // Get the caller's organization memberships (keyed on OrgMember.memberId)
+      const memberships = await this.orgMemberRepository.getMemberOrgs(req.user!.memberId);
 
       // Get organization details for each membership
       const organizationsWithRole = await Promise.all(
@@ -292,8 +280,6 @@ export class OrganizationController {
   getOrganizationDetails = async (req: Request, res: Response): Promise<void> => {
     try {
       const { orgId } = req.params;
-      const userId = req.user!.id;
-      
 
       const organization = await this.organizationRepository.findById(orgId);
       if (!organization) {
@@ -302,7 +288,7 @@ export class OrganizationController {
       }
 
       // Check if user is organization member
-      const membership = await this.orgMemberRepository.findMember(orgId, userId);
+      const membership = await this.orgMemberRepository.findMember(orgId, req.user!.memberId);
       if (!membership) {
         res.status(403).json({ error: 'Access denied - not an organization member' });
         return;
@@ -314,11 +300,11 @@ export class OrganizationController {
       // Get user info for each member
       const membersWithUserInfo = await Promise.all(
         members.map(async (member) => ({
-          userId: member.userId,
+          memberId: member.memberId,
+          email: member.email,
           role: member.role,
           joinedAt: member.joinedAt,
           invitedBy: member.invitedBy,
-          user: await this.getUserInfo(member.userId),
         }))
       );
 
@@ -339,82 +325,22 @@ export class OrganizationController {
   };
 
   // POST /api/organizations/{orgId}/members - Add member to organization
-  addMember = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const { orgId } = req.params;
-      const { userId: targetUserId, role }: { userId: string; role: OrgRole } = req.body;
-      const userId = req.user!.id;
-      
-
-      // Validate required fields
-      if (!targetUserId || !role) {
-        res.status(400).json({ error: 'userId and role are required' });
-        return;
-      }
-
-      // Validate role
-      const validRoles: OrgRole[] = [OrgRole.OWNER, OrgRole.ADMIN, OrgRole.MEMBER, OrgRole.GUEST];
-      if (!validRoles.includes(role)) {
-        res.status(400).json({
-          error: 'Invalid role',
-          validValues: validRoles
-        });
-        return;
-      }
-
-      const organization = await this.organizationRepository.findById(orgId);
-      if (!organization) {
-        res.status(404).json({ error: 'Organization not found' });
-        return;
-      }
-
-      // Check if current user has permission to add members (admin or owner)
-      const currentUserMembership = await this.orgMemberRepository.findMember(orgId, userId);
-      if (!currentUserMembership || !['OWNER', 'ADMIN'].includes(currentUserMembership.role)) {
-        res.status(403).json({ error: 'Access denied - insufficient permissions' });
-        return;
-      }
-
-      // Only an existing OWNER may add a member with the OWNER role.
-      if (role === 'OWNER' && currentUserMembership.role !== 'OWNER') {
-        res.status(403).json({ error: 'Only an owner can assign the OWNER role' });
-        return;
-      }
-
-      // Check if target user is already a member
-      const existingMembership = await this.orgMemberRepository.findMember(orgId, targetUserId);
-      if (existingMembership) {
-        res.status(409).json({ error: 'User is already a member of this organization' });
-        return;
-      }
-
-      // Add member
-      await this.orgMemberRepository.create({
-        orgId,
-        userId: targetUserId,
-        role,
-        invitedBy: userId,
-      });
-
-      res.status(200).json({
-        message: 'Member added successfully',
-        orgId,
-        userId: targetUserId,
-        role,
-      });
-    } catch (error) {
-      logger.error('Error adding organization member:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
+  // OrgMember rows are keyed on email and created through the invitation flow
+  // (invitationService), which verifies the invitee owns the address. Direct inserts
+  // by id would bypass that, so this endpoint is intentionally disabled.
+  addMember = async (_req: Request, res: Response): Promise<void> => {
+    res.status(410).json({
+      error: 'Gone',
+      message: 'Add organization members by sending an invitation instead',
+    });
   };
 
   // PUT /api/organizations/{orgId}/members/{userId} - Update member role
   updateMemberRole = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { orgId, userId: targetUserId } = req.params;
+      const { orgId, userId: targetMemberId } = req.params;
       const { role }: { role: OrgRole } = req.body;
-      const userId = req.user!.id;
-      
+      const callerMemberId = req.user!.memberId;
 
       // Validate role
       const validRoles: OrgRole[] = [OrgRole.OWNER, OrgRole.ADMIN, OrgRole.MEMBER, OrgRole.GUEST];
@@ -433,7 +359,7 @@ export class OrganizationController {
       }
 
       // Check if current user has permission (admin or owner)
-      const currentUserMembership = await this.orgMemberRepository.findMember(orgId, userId);
+      const currentUserMembership = await this.orgMemberRepository.findMember(orgId, callerMemberId);
       if (!currentUserMembership || !['OWNER', 'ADMIN'].includes(currentUserMembership.role)) {
         res.status(403).json({ error: 'Access denied - insufficient permissions' });
         return;
@@ -446,15 +372,21 @@ export class OrganizationController {
         return;
       }
       // A member may not change their own role.
-      if (targetUserId === userId && role !== currentUserMembership.role) {
+      if (targetMemberId === callerMemberId && role !== currentUserMembership.role) {
         res.status(403).json({ error: 'You cannot change your own role' });
         return;
       }
 
       // Check if target user is a member
-      const targetMembership = await this.orgMemberRepository.findMember(orgId, targetUserId);
+      const targetMembership = await this.orgMemberRepository.findMember(orgId, targetMemberId);
       if (!targetMembership) {
         res.status(404).json({ error: 'User is not a member of this organization' });
+        return;
+      }
+
+      // An ADMIN may not demote or otherwise modify an OWNER.
+      if (targetMembership.role === OrgRole.OWNER && currentUserMembership.role !== OrgRole.OWNER) {
+        res.status(403).json({ error: 'Only an owner can change the role of another owner' });
         return;
       }
 
@@ -469,12 +401,12 @@ export class OrganizationController {
       }
 
       // Update member role
-      await this.orgMemberRepository.updateMemberRole(orgId, targetUserId, role);
+      await this.orgMemberRepository.updateMemberRole(orgId, targetMemberId, role);
 
       res.status(200).json({
         message: 'Member role updated successfully',
         orgId,
-        userId: targetUserId,
+        memberId: targetMemberId,
         role,
       });
     } catch (error) {
@@ -486,9 +418,8 @@ export class OrganizationController {
   // DELETE /api/organizations/{orgId}/members/{userId} - Remove member from organization
   removeMember = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { orgId, userId: targetUserId } = req.params;
-      const userId = req.user!.id;
-      
+      const { orgId, userId: targetMemberId } = req.params;
+      const callerMemberId = req.user!.memberId;
 
       const organization = await this.organizationRepository.findById(orgId);
       if (!organization) {
@@ -497,22 +428,32 @@ export class OrganizationController {
       }
 
       // Check if current user has permission (admin, owner, or removing themselves)
-      const currentUserMembership = await this.orgMemberRepository.findMember(orgId, userId);
+      const currentUserMembership = await this.orgMemberRepository.findMember(orgId, callerMemberId);
       if (!currentUserMembership) {
         res.status(403).json({ error: 'Access denied - not an organization member' });
         return;
       }
 
-      const canRemove = ['OWNER', 'ADMIN'].includes(currentUserMembership.role) || userId === targetUserId;
+      const canRemove = isOrgAdminRole(currentUserMembership.role) || callerMemberId === targetMemberId;
       if (!canRemove) {
         res.status(403).json({ error: 'Access denied - insufficient permissions' });
         return;
       }
 
       // Check if target user is a member
-      const targetMembership = await this.orgMemberRepository.findMember(orgId, targetUserId);
+      const targetMembership = await this.orgMemberRepository.findMember(orgId, targetMemberId);
       if (!targetMembership) {
         res.status(404).json({ error: 'User is not a member of this organization' });
+        return;
+      }
+
+      // An ADMIN may not remove an OWNER (owners may still leave themselves).
+      if (
+        targetMembership.role === OrgRole.OWNER &&
+        currentUserMembership.role !== OrgRole.OWNER &&
+        callerMemberId !== targetMemberId
+      ) {
+        res.status(403).json({ error: 'Only an owner can remove another owner' });
         return;
       }
 
@@ -527,12 +468,12 @@ export class OrganizationController {
       }
 
       // Remove member
-      await this.orgMemberRepository.removeMember(orgId, targetUserId);
+      await this.orgMemberRepository.removeMember(orgId, targetMemberId);
 
       res.status(200).json({
         message: 'Member removed successfully',
         orgId,
-        userId: targetUserId,
+        memberId: targetMemberId,
       });
     } catch (error) {
       logger.error('Error removing organization member:', error);

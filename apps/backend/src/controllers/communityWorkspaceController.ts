@@ -42,10 +42,8 @@ export class CommunityWorkspaceController {
       res.status(200).json({ organizations });
     } catch (error) {
       logger.error('[CommunityWorkspaceController] Failed to list community workspaces:', error);
-      res.status(500).json({
-        error: 'Failed to list community workspaces',
-        message: error instanceof Error ? error.message : 'Unknown error',
-      });
+      // Unauthenticated endpoint — never echo internal error details.
+      res.status(500).json({ error: 'Failed to list community workspaces' });
     }
   };
 

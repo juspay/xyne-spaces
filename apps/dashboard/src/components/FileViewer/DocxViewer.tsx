@@ -15,6 +15,36 @@ import { useDomSearch } from './search';
  */
 const PAGE_WIDTH = 816;
 
+
+const SAFE_LINK_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', 'tel:']);
+const ACTIVE_ELEMENTS = 'script, iframe, frame, object, embed, base, meta, link, form';
+
+/** Strip script-capable content that docx-preview may emit from a crafted .docx. */
+function neutraliseActiveContent(root: HTMLElement): void {
+  root.querySelectorAll(ACTIVE_ELEMENTS).forEach((el) => el.remove());
+  root.querySelectorAll<HTMLElement>('*').forEach((el) => {
+    for (const attr of Array.from(el.attributes)) {
+      if (attr.name.toLowerCase().startsWith('on')) el.removeAttribute(attr.name);
+    }
+  });
+  root.querySelectorAll<HTMLAnchorElement>('a[href]').forEach((a) => {
+    const href = a.getAttribute('href') ?? '';
+    if (href.startsWith('#')) return;
+    let protocol: string;
+    try {
+      protocol = new URL(href, window.location.href).protocol;
+    } catch {
+      protocol = '';
+    }
+    if (!SAFE_LINK_PROTOCOLS.has(protocol)) {
+      a.removeAttribute('href');
+      return;
+    }
+    a.setAttribute('target', '_blank');
+    a.setAttribute('rel', 'noopener noreferrer');
+  });
+}
+
 export const DocxViewer: React.FC<BaseViewerProps> = ({ source, searchable }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -105,7 +135,18 @@ export const DocxViewer: React.FC<BaseViewerProps> = ({ source, searchable }) =>
         className: 'docx',
         inWrapper: false,
         breakPages: true,
+        // Security: altChunk parts embed raw HTML from the .docx, which docx-preview
+        // injects into this same-origin container — a stored-XSS vector for any
+        // uploaded Word document. Never render them.
+        renderAltChunks: false,
       });
+
+      // Security: the document is rendered straight into the app's DOM, so neutralise
+      // anything an uploaded .docx could use to run script here (e.g. a hyperlink whose
+      // target is `javascript:`), before the user can click it.
+      if (containerRef.current) {
+        neutraliseActiveContent(containerRef.current);
+      }
 
       // After rendering, remove any inline width constraints and make it responsive
       if (containerRef.current) {

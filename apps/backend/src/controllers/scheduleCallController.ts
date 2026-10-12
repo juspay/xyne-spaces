@@ -182,6 +182,86 @@ export class ScheduleCallController {
   }
 
   /**
+   * Security (bug bounty #33): scheduling/updating a call writes call pills into
+   * `channelId` / `callUpdatesChannel`, adds `targetUserIds` as participants and sends
+   * them notifications + calendar invites. These IDs come straight from the request
+   * body, so without this check a user could post call pills into channels they are not
+   * in, or invite (and notify) users from another workspace.
+   *
+   * Rules:
+   *  - every referenced channel must be in the caller's workspace and the caller must
+   *    be a participant of it (channels already on the call are passed in
+   *    `alreadyAttachedChannelIds` and skipped, so an organizer who left a channel can
+   *    still edit their existing call);
+   *  - every target user must be an active user of the caller's workspace;
+   *  - a conversationId must be a thread of the (resolved) call channel.
+   */
+  private async validateCallTargets(
+    req: Request,
+    params: {
+      channelId?: string | null;
+      callUpdatesChannel?: string | null;
+      targetUserIds?: string[] | null;
+      conversationId?: string | null;
+      alreadyAttachedChannelIds?: Array<string | null | undefined>;
+    },
+  ): Promise<{ status: number; error: string } | null> {
+    const userId = req.user?.id;
+    const workspaceId = req.user?.workspaceId;
+    if (!userId || !workspaceId) {
+      return { status: 401, error: 'Unauthorized' };
+    }
+
+    const db = DatabaseClient.getInstance();
+    const skip = new Set((params.alreadyAttachedChannelIds ?? []).filter((id): id is string => !!id));
+    const channelIds = [params.channelId, params.callUpdatesChannel].filter(
+      (id): id is string => !!id && !skip.has(id),
+    );
+
+    for (const channelId of new Set(channelIds)) {
+      const channel = await db.channel.findFirst({
+        where: { id: channelId, workspaceId },
+        select: { id: true },
+      });
+      if (!channel || !(await repositories.channelParticipants.isParticipant(channelId, userId))) {
+        logger.warn(`[validateCallTargets] user ${userId} denied access to channel ${channelId}`);
+        return { status: 403, error: 'You do not have access to this channel' };
+      }
+    }
+
+    const targetIds = Array.from(new Set((params.targetUserIds ?? []).filter(Boolean)));
+    if (targetIds.length > 0) {
+      const inWorkspace = await db.user.count({
+        where: { id: { in: targetIds }, workspaceId },
+      });
+      if (inWorkspace !== targetIds.length) {
+        logger.warn(`[validateCallTargets] user ${userId} tried to invite users outside workspace ${workspaceId}`);
+        return { status: 403, error: 'All invitees must be members of this workspace' };
+      }
+    }
+
+    if (params.conversationId) {
+      const conversation = await db.conversation.findFirst({
+        where: {
+          conversationId: params.conversationId,
+          workspaceId,
+          ...(params.channelId ? { channelId: params.channelId } : {}),
+        },
+        select: { channelId: true },
+      });
+      if (
+        !conversation ||
+        (!skip.has(conversation.channelId) &&
+          !(await repositories.channelParticipants.isParticipant(conversation.channelId, userId)))
+      ) {
+        return { status: 403, error: 'You do not have access to this thread' };
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * A pinned summary template must be one the organizer can access: the detailed summary
    * later resolves it as the organizer, and falls back to LLM selection if it can't.
    */
@@ -224,6 +304,16 @@ export class ScheduleCallController {
         summaryTemplateId,
       } = RecurringScheduleCallSchema.parse(req.body);
       const normalizedExternalInvitees = normalizeEmailList(externalInvitees);
+
+      const targetError = await this.validateCallTargets(req, {
+        channelId,
+        callUpdatesChannel: reqCallUpdatesChannel,
+        targetUserIds,
+      });
+      if (targetError) {
+        res.status(targetError.status).json({ success: false, error: targetError.error });
+        return;
+      }
 
       if (summaryTemplateId && !(await this.canPinSummaryTemplate(summaryTemplateId, req, userId))) {
         res.status(400).json({ success: false, error: 'Invalid summary template' });
@@ -337,6 +427,17 @@ export class ScheduleCallController {
         invitation,
         summaryTemplateId,
       } = ScheduleCallSchema.parse(req.body);
+
+      const targetError = await this.validateCallTargets(req, {
+        channelId,
+        callUpdatesChannel: reqCallUpdatesChannel,
+        targetUserIds,
+        conversationId,
+      });
+      if (targetError) {
+        res.status(targetError.status).json({ success: false, error: targetError.error });
+        return;
+      }
 
       if (summaryTemplateId && !(await this.canPinSummaryTemplate(summaryTemplateId, req, userId))) {
         res.status(400).json({ success: false, error: 'Invalid summary template' });
@@ -553,6 +654,17 @@ export class ScheduleCallController {
 
       if (call.status !== CallStatus.SCHEDULED) {
         res.status(400).json({ success: false, error: 'Only SCHEDULED calls can be edited' });
+        return;
+      }
+
+      const updateTargetError = await this.validateCallTargets(req, {
+        channelId: reqChannelId,
+        callUpdatesChannel: reqCallUpdatesChannel,
+        targetUserIds,
+        alreadyAttachedChannelIds: [call.channelId, call.callUpdatesChannel],
+      });
+      if (updateTargetError) {
+        res.status(updateTargetError.status).json({ success: false, error: updateTargetError.error });
         return;
       }
 
@@ -831,6 +943,17 @@ export class ScheduleCallController {
       });
       if (!auth.allowed) {
         res.status(auth.status).json({ success: false, error: auth.error });
+        return;
+      }
+
+      const seriesTargetError = await this.validateCallTargets(req, {
+        channelId: reqChannelId,
+        callUpdatesChannel: reqCallUpdatesChannel,
+        targetUserIds,
+        alreadyAttachedChannelIds: [series.channelId, series.callUpdatesChannel],
+      });
+      if (seriesTargetError) {
+        res.status(seriesTargetError.status).json({ success: false, error: seriesTargetError.error });
         return;
       }
 

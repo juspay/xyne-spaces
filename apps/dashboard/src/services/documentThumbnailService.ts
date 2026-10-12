@@ -198,6 +198,8 @@ async function generateDocxThumbnail(file: File): Promise<Blob> {
       ignoreWidth: false,
       ignoreHeight: false,
       className: 'docx-preview',
+      // Security: never inject altChunk raw HTML from an uploaded .docx into the app DOM.
+      renderAltChunks: false,
     });
 
     // Strip the page-wrapper styling so the thumbnail shows clean white content

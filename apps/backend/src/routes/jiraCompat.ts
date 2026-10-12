@@ -8,12 +8,18 @@
  * Application Link base URL, so that base URL must be
  * `<host>/api/webhooks/bitbucket/<workspaceId>`.
  *
- * Read-only and unauthenticated (Bitbucket is external, no client cert — same as
- * the webhook, which uses HMAC not mTLS). Lookups are workspace-scoped and expose
- * only project codes + ticket title/status. Restrict to Bitbucket egress IPs at
- * the ingress if that exposure matters.
+ * Read-only and reachable without a Spaces session (Bitbucket is external, no
+ * client cert — same as the webhook, which uses HMAC not mTLS). Lookups are
+ * workspace-scoped.
+ *
+ * Security (bug bounty #39): anonymous callers only get what linkification needs —
+ * project keys and ticket keys/status. Ticket titles and project names are returned
+ * only when the caller presents the shared credential configured in
+ * JIRA_COMPAT_BASIC_AUTH ("user:password", set as Basic auth on the Bitbucket
+ * Application Link). Without that env var nobody gets titles or names.
  */
 import { Router, Request, Response } from 'express';
+import crypto from 'crypto';
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
@@ -49,6 +55,26 @@ const XML_ESCAPE: Record<string, string> = {
 };
 function escapeXml(s: string): string {
   return s.replace(/[<>&'"]/g, (c) => XML_ESCAPE[c]);
+}
+
+/**
+ * True only when JIRA_COMPAT_BASIC_AUTH is configured and the request carries the
+ * matching `Authorization: Basic …` header. Constant-time comparison.
+ */
+function hasTrustedCredential(req: Request): boolean {
+  const expected = (process.env.JIRA_COMPAT_BASIC_AUTH || '').trim();
+  if (!expected) return false;
+  const header = req.headers.authorization || '';
+  if (!header.startsWith('Basic ')) return false;
+  let presented: string;
+  try {
+    presented = Buffer.from(header.slice('Basic '.length).trim(), 'base64').toString('utf8');
+  } catch {
+    return false;
+  }
+  const a = crypto.createHash('sha256').update(presented).digest();
+  const b = crypto.createHash('sha256').update(expected).digest();
+  return crypto.timingSafeEqual(a, b);
 }
 
 /** Validated workspace id from the mount path; '' if malformed. */
@@ -130,11 +156,13 @@ router.get('/rest/api/2/project', async (req: Request, res: Response) => {
       distinct: ['code'],
       orderBy: { code: 'asc' },
     });
+    const trusted = hasTrustedCredential(req);
     res.json(
       projects.map((p) => ({
         id: p.id,
         key: p.code,
-        name: p.name,
+        // Project names are internal (customer names etc.) — key only for anonymous callers.
+        name: trusted ? p.name : p.code,
         projectTypeKey: 'software',
       }))
     );
@@ -170,7 +198,8 @@ router.get('/rest/api/2/issue/:key', async (req: Request, res: Response) => {
       key: ticket.xyneId,
       self: `${selfBase(req)}/rest/api/2/issue/${ticket.xyneId}`,
       fields: {
-        summary: ticket.title,
+        // Ticket titles are internal — never disclose them to anonymous callers.
+        summary: hasTrustedCredential(req) ? ticket.title : ticket.xyneId,
         status: { name: ticket.statusV2 },
         issuetype: { name: 'Task', subtask: false },
       },

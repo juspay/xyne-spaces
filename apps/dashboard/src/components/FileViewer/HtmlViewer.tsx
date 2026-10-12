@@ -2,13 +2,38 @@ import React, { useEffect, useState, useCallback, memo } from 'react';
 import { BaseViewerProps } from './utils';
 import { inlineAuthenticatedImages } from '../../utils/inlineAuthenticatedImages';
 
-const declaresEncoding = async (file: Blob): Promise<boolean> => {
-  const head = new Uint8Array(await file.slice(0, 1024).arrayBuffer());
-  return /<meta[^>]+charset/i.test(new TextDecoder('latin1').decode(head));
+/**
+ * Decode the uploaded bytes using the charset the document declares in a
+ * <meta> tag (first 1 KB), falling back to UTF-8. srcdoc needs a string, so the
+ * decoding the browser used to do for the blob: URL now happens here.
+ */
+const decodeHtml = async (file: Blob): Promise<string> => {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const head = new TextDecoder('latin1').decode(bytes.slice(0, 1024));
+  const declared = /<meta[^>]+charset\s*=\s*["']?\s*([\w-]+)/i.exec(head)?.[1];
+  if (declared) {
+    try {
+      return new TextDecoder(declared).decode(bytes);
+    } catch {
+      // Unknown label — fall through to UTF-8.
+    }
+  }
+  return new TextDecoder('utf-8').decode(bytes);
 };
 
+/**
+ * Security (bug bounty #35): the document used to be loaded from a blob: URL.
+ * A blob: URL carries the app's own origin, so although the frame itself was
+ * sandboxed, the same URL opened top-level (new tab, "open frame in new tab")
+ * ran the uploaded page's scripts with full access to the app origin. The page
+ * is now given as srcdoc, which has no address of its own and always stays in
+ * the opaque sandbox origin. Mirrors FilePreview/previewers/HtmlPreview.tsx.
+ * Never add allow-same-origin or allow-popups-to-escape-sandbox here.
+ */
+const SANDBOX = 'allow-scripts';
+
 const HtmlViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [page, setPage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -25,23 +50,18 @@ const HtmlViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
     try {
       if (source.size === 0) throw new Error('File is empty');
 
-      const type = (await declaresEncoding(source)) ? 'text/html' : 'text/html;charset=utf-8';
+      let html = await decodeHtml(source);
 
-      // The sandbox='allow-scripts' iframe below runs from an opaque origin —
-      // its <img> loads send no cookies, so authenticated-origin images would
-      // 401 (broken render, and in Electron a session-killing 401). Inline
-      // them first; when the document has none, keep the original bytes so
-      // non-UTF-8 files are untouched.
-      let fileBlob = source.slice(0, source.size, type);
+      // The sandboxed frame runs from an opaque origin — its <img> loads send
+      // no cookies, so authenticated-origin images would 401 (broken render,
+      // and in Electron a session-killing 401). Inline them first.
       try {
-        const { html, changed } = await inlineAuthenticatedImages(await fileBlob.text());
-        if (changed) fileBlob = new Blob([html], { type: 'text/html;charset=utf-8' });
+        html = (await inlineAuthenticatedImages(html)).html;
       } catch {
         // Fall back to the original document.
       }
 
-      const url = URL.createObjectURL(fileBlob);
-      setBlobUrl(url);
+      setPage(html);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load HTML file');
     } finally {
@@ -51,10 +71,6 @@ const HtmlViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
 
   useEffect(() => {
     void loadFile();
-    return () => {
-      if (blobUrl) URL.revokeObjectURL(blobUrl);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadFile]);
 
   if (loading) {
@@ -90,12 +106,13 @@ const HtmlViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
     );
   }
 
-  if (!blobUrl) return null;
+  if (page === null) return null;
 
   return (
     <iframe
-      src={blobUrl}
-      sandbox='allow-scripts'
+      srcDoc={page}
+      sandbox={SANDBOX}
+      referrerPolicy='no-referrer'
       title='HTML Document'
       className='w-full h-full border-0 bg-white'
       style={{ minHeight: '100%' }}

@@ -49,16 +49,18 @@ export interface CommunityJoinResult {
   };
 }
 
+// Returned by the unauthenticated GET /api/community/workspaces (login screen).
+// Security (bug bounty #38): keep this to what the picker renders. Internal
+// identifiers (orgId, landingChannelId) are not exposed; the landing channel is
+// resolved server-side on join.
 export interface CommunityWorkspaceListItem {
   id: string;
   name: string;
   description: string | null;
   joinPolicy: string | null;
-  landingChannelId: string | null;
 }
 
 export interface CommunityWorkspaceOrganization {
-  orgId: string;
   orgName: string;
   workspaces: CommunityWorkspaceListItem[];
 }
@@ -104,7 +106,6 @@ export class CommunityWorkspaceService {
       },
       orderBy: { name: 'asc' },
       select: {
-        orgId: true,
         name: true,
         workspaces: {
           where: {
@@ -117,7 +118,6 @@ export class CommunityWorkspaceService {
             name: true,
             description: true,
             joinPolicy: true,
-            landingChannelId: true,
           },
         },
       },
@@ -125,7 +125,6 @@ export class CommunityWorkspaceService {
 
     return organizations
       .map((org) => ({
-        orgId: org.orgId,
         orgName: org.name,
         workspaces: org.workspaces,
       }))
