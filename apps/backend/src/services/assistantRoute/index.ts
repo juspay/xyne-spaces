@@ -137,6 +137,7 @@ export const routeAssistantMessage = async (
   const finish = (result: AssistantRouteResult, chosen?: string, confidence?: number) => {
     log('info', {
       route: result.route,
+      ...(result.route === 'ask_ai' ? { reason: result.reason } : {}),
       ...(chosen ? { chosen } : {}),
       ...(confidence !== undefined ? { confidence } : {}),
     });
