@@ -221,8 +221,8 @@ describe("spaces-create-ticket custom fields (queue-time)", () => {
       await expect(
         create({
           MID: "merchant_1234",
-          Amount: "499.50",
-          Refunded: "true",
+          Amount: 499.5,
+          Refunded: true,
           Due: "2026-01-31",
           Severity: "P1",
           Products: ["UPI", "Cards"],
@@ -230,14 +230,18 @@ describe("spaces-create-ticket custom fields (queue-time)", () => {
           Parent: "ticket_1",
         }),
       ).resolves.toBeNull();
-      await expect(create({ Amount: 499.5, Refunded: false })).resolves.toBeNull();
+      await expect(create({ Amount: 0, Refunded: false })).resolves.toBeNull();
     });
 
     it.each([
       [{ MID: 1234 }, /MID must be a non-empty string/],
       [{ MID: "  " }, /MID must be a non-empty string/],
       [{ Amount: "lots" }, /Amount must be a number/],
+      // A create stores the value as sent, so the string form of a number or a
+      // boolean would be saved as a string.
+      [{ Amount: "499.50" }, /Amount must be a number, not a string/],
       [{ Refunded: "yes" }, /Refunded must be true or false/],
+      [{ Refunded: "true" }, /Refunded must be true or false, not a string/],
       [{ Due: "next week" }, /Due must be a date/],
       [{ Severity: "P9" }, /Severity does not accept "P9".*P1 \| P2/],
       [{ Severity: ["P1"] }, /Severity must be a single value/],
@@ -261,6 +265,18 @@ describe("spaces-create-ticket custom fields (queue-time)", () => {
         "xyne-spaces",
         "spaces-create-ticket",
         { ...ticketParams, dynamicFields: { Geo: { lat: 1 } } },
+        CREDS,
+      );
+      expect(err).toBeNull();
+    });
+
+    it("takes the string form of a number or boolean on an update, where Spaces converts it", async () => {
+      interact.mockResolvedValue([{ boardId: "board_1" }]);
+      spacesFetch.mockResolvedValue(typed);
+      const err = await validateWriteAction(
+        "xyne-spaces",
+        "spaces-update-ticket",
+        { ticketId: "ticket_9", customFields: { Amount: "499.50", Refunded: "true" } },
         CREDS,
       );
       expect(err).toBeNull();

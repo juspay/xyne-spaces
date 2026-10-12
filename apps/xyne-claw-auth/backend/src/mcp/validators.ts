@@ -295,12 +295,14 @@ function fieldValueError(field: BoardField, value: unknown, op: "create" | "upda
       return filled(value) ? null : `${name} must be a non-empty string.`;
 
     case FormFieldType.NUMBER: {
-      const numeric = typeof value === "number" ? value : filled(value) ? Number(value) : Number.NaN;
-      return Number.isFinite(numeric) ? null : `${name} must be a number.`;
+      if (typeof value === "number") return Number.isFinite(value) ? null : `${name} must be a number.`;
+      if (op === "create") return `${name} must be a number, not a string — pass 499.5, not "499.5".`;
+      return filled(value) && Number.isFinite(Number(value)) ? null : `${name} must be a number.`;
     }
 
     case FormFieldType.BOOLEAN: {
       if (typeof value === "boolean") return null;
+      if (op === "create") return `${name} must be true or false, not a string.`;
       const text = typeof value === "string" ? value.trim().toLowerCase() : "";
       return text === "true" || text === "false" ? null : `${name} must be true or false.`;
     }
