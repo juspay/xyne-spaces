@@ -8,7 +8,7 @@ import { automationQueue, type AutomationJobData } from './automation.queue';
 import { automationScheduleQueue } from './automation-schedule.queue';
 import { stepRegistry } from '../steps/step-registry';
 import { AutomationExecutor } from '../engine/automation-executor';
-import { AutomationStatus, AutomationRunStatus } from '../types/status';
+import { AutomationStatus, AutomationRunStatus, isPlaygroundRun } from '../types/status';
 import {
   isExecutableAutomationWorkflowType,
   mayDrainInFlight,
@@ -122,7 +122,13 @@ export class AutomationWorker {
       logger.warn(`[AUTOMATION-WORKER] workflow ${execution.workflowId} missing — dropping`);
       return;
     }
-    if (workflow.status !== AutomationStatus.ACTIVE && !mayDrainInFlight(workflow)) {
+    // Played playground runs are keyed off the run's own tag, so a run already played
+    // finishes even if its version leaves PLAYGROUND mid-flight (DELAY / RUN_AGENT).
+    if (
+      workflow.status !== AutomationStatus.ACTIVE &&
+      !mayDrainInFlight(workflow) &&
+      !isPlaygroundRun(execution)
+    ) {
       await db.workflowExecution.update({
         where: { id: executionId },
         data: { status: AutomationRunStatus.CANCELLED },

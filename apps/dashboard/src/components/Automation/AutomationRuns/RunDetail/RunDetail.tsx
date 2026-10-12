@@ -2,10 +2,12 @@ import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, CheckCircle2, Hourglass, Loader2, XCircle } from 'lucide-react';
 import { cn } from '../../../../utils/classNames';
 import { fetchAutomationRun } from '../../../../api/automationsApi';
+import { PlayRunButton } from '../PlayRunButton/PlayRunButton';
 import type { AutomationRunStatus } from '../../Automation.types';
 import type { RunDetailProps } from './RunDetail.types';
 
 const STATUS_CLASSES: Record<AutomationRunStatus, string> = {
+  HELD: 'bg-sky-500/10 text-sky-700 border-sky-500/30 dark:text-sky-400 dark:border-sky-500/40',
   PENDING: 'bg-muted text-muted-foreground border-border',
   SCHEDULED:
     'bg-amber-500/10 text-amber-700 border-amber-500/30 dark:text-amber-400 dark:border-amber-500/40',
@@ -21,6 +23,7 @@ const STATUS_CLASSES: Record<AutomationRunStatus, string> = {
 };
 
 const STATUS_LABELS: Record<AutomationRunStatus, string> = {
+  HELD: 'Held',
   PENDING: 'Pending',
   SCHEDULED: 'Scheduled',
   RUNNING: 'Running',
@@ -72,6 +75,11 @@ export function RunDetail({ runId, onBack }: RunDetailProps): React.ReactElement
             {run.status === 'EXTERNAL_WAIT' && <Hourglass className='size-3' />}
             {STATUS_LABELS[run.status] ?? run.status}
           </span>
+        )}
+        {run?.status === 'HELD' && (
+          <div className='ml-auto'>
+            <PlayRunButton runId={run.id} automation={data?.automation ?? null} />
+          </div>
         )}
       </div>
 
