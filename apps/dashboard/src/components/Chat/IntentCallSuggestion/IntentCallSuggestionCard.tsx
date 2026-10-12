@@ -13,17 +13,20 @@
  * Public channels only — the classifier never sees a private channel or DM
  * message (see intentClassifier.isEligible), so there is no DM branch here.
  *
- * Start call starts it right here; Schedule opens the usual Schedule Call modal
- * with the same people prefilled. Everything goes through the hooks the header
- * and thread buttons already use, so an active call, the "switch calls?" prompt
- * and the SDLC frame bridge all behave as they do there.
+ * Start call follows the same flow as the header buttons it stands in for:
+ *   thread  → opens CallParticipantsSelectionModal, pre-filled with the thread's
+ *             participants, exactly like the thread header's "Start call".
+ *   channel → the "Start a call in this channel?" confirmation, then the same
+ *             join-or-start the header phone button does.
+ * Schedule opens the usual Schedule Call modal with the same people prefilled.
  *
- * The card stays mounted until the call is actually connected: both call hooks
- * keep their "disconnect, then start" step in a ref, so unmounting on click
- * would drop a pending switch on the floor. If the attempt fails — the room
- * machine's `failed` state falls straight back to `idle` with no UI of its own —
- * or nothing happens within START_TIMEOUT_MS, the button resets and a toast
- * says so, leaving the card as the retry point.
+ * For a channel call the card stays mounted until the call is actually
+ * connected: the call hook keeps its "disconnect, then start" step in a ref, so
+ * unmounting on click would drop a pending switch on the floor. If the attempt
+ * fails — the room machine's `failed` state falls straight back to `idle` with
+ * no UI of its own — or nothing happens within START_TIMEOUT_MS, the button
+ * resets and a toast says so, leaving the card as the retry point. The thread
+ * picker owns its own call start, so the card simply goes once it has fired.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
@@ -34,12 +37,12 @@ import { Button } from '../../ui/Button';
 import AvatarGroup from '../../ui/Avatar/AvatarGroup';
 import Tooltip from '../../ui/Tooltip';
 import { CallConfirmationModal } from '../../Call/CallConfirmationModal';
+import { CallParticipantsSelectionModal } from '../../Call/CallParticipantsSelectionModal';
 import { ScheduleCallModal } from '../../Call/ScheduleCallModal/ScheduleCallModal';
 import { useAuth } from '../../../hooks/useAuth';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useCallActions } from '../../../hooks/useCallActions';
 import { useCallConfirmation } from '../../../hooks/useCallConfirmation';
-import { useCallJoinOrInitiate } from '../../../hooks/useCallJoinOrInitiate';
 import { useChannel } from '../../../hooks/useChannels';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import { roomActor } from '../../../machines/roomMachine';
@@ -84,6 +87,7 @@ export const IntentCallSuggestionCard: React.FC<IntentCallSuggestionCardProps> =
 
   const [expanded, setExpanded] = useState(true);
   const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
   // Impression and dismissal share a clock so msShown means the same thing it
   // does for the toast variant.
   const [shownAt] = useState(() => Date.now());
@@ -129,22 +133,15 @@ export const IntentCallSuggestionCard: React.FC<IntentCallSuggestionCardProps> =
 
   // --- starting the call -------------------------------------------------------
 
-  // A channel call rings the room, so it carries no explicit targets.
-  const targetUserIds = useMemo(
-    (): string[] | undefined => (isThread ? [...threadUserIds, currentUserId] : undefined),
-    [isThread, threadUserIds, currentUserId],
-  );
-
-  const { initiateCall } = useCallJoinOrInitiate();
+  // Channel path only — the thread path hands off to the participant picker,
+  // which places its own call. A channel call rings the room: no explicit targets.
   const { handleCallClick, hasActiveCallInChannel, isUserInCurrentChannelCall, isInCall } =
     useCallActions({
       channelId,
-      targetUserIds,
       callDisplayName: channelDisplayName,
-      ...(isThread && { conversationId }),
     });
-  // The card is already the confirmation, so skip "Start a call in this
-  // channel?" and keep only the "switch calls?" prompt when already in one.
+  // Same prompts as the header: "Start a call in this channel?" for a fresh
+  // call, "Switch to a new call?" when already in one.
   const { showConfirmModal, modalContent, handleCallAction, handleConfirmCall, closeModal } =
     useCallConfirmation({
       scopeType: channel?.scopeType,
@@ -153,7 +150,6 @@ export const IntentCallSuggestionCard: React.FC<IntentCallSuggestionCardProps> =
       hasActiveCallInChannel,
       isUserInCurrentChannelCall,
       isInCall,
-      onlyShowSwitchModal: true,
     });
 
   const threadCallActive = isThread && !!conversation?.callId;
@@ -228,30 +224,16 @@ export const IntentCallSuggestionCard: React.FC<IntentCallSuggestionCardProps> =
     } else {
       setStarting(true);
     }
-    if (isThread) {
-      initiateCall({
-        channelId,
-        conversationId,
-        ...(targetUserIds && targetUserIds.length > 0 && { targetUserIds }),
-        callDisplayName: channelDisplayName,
-      });
-      return;
-    }
     handleCallClick();
-  }, [
-    isThread,
-    initiateCall,
-    channelId,
-    conversationId,
-    targetUserIds,
-    channelDisplayName,
-    handleCallClick,
-    detection.messageId,
-  ]);
+  }, [handleCallClick, detection.messageId]);
 
   const onStartCall = (): void => {
     track(joinsExisting ? 'Join call' : 'Start call');
-    // Runs placeCall now, or after the "switch calls?" prompt is confirmed.
+    if (isThread) {
+      setPickerOpen(true);
+      return;
+    }
+    // Runs placeCall now, or once a confirmation prompt is accepted.
     handleCallAction(placeCall);
   };
 
@@ -351,6 +333,16 @@ export const IntentCallSuggestionCard: React.FC<IntentCallSuggestionCardProps> =
             </Tooltip>
           </div>
         </div>
+      )}
+
+      {pickerOpen && (
+        <CallParticipantsSelectionModal
+          isOpen
+          onClose={() => setPickerOpen(false)}
+          channelId={channelId}
+          conversationId={conversationId}
+          onCallInitiated={() => dismissIntentCallSuggestion(detection.messageId)}
+        />
       )}
 
       <CallConfirmationModal
