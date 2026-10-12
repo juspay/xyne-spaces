@@ -57,18 +57,83 @@ async function getSidebarDestinationPath(page: Page, item: Locator): Promise<str
   return new URL(href, page.url()).pathname;
 }
 
-function isAtPath(page: Page, expectedPath: string): boolean {
-  return new URL(page.url()).pathname === expectedPath;
+// Pins a "More" overflow item to the sidebar toolbar through
+// More -> Customize toolbar -> Preferences > Toolbar -> "+ Add".
+// Toolbar items are stored in localStorage, so this only affects the current
+// browser context and is safe for parallel scenarios.
+async function addSidebarItemToToolbar(
+  page: Page,
+  moreTrigger: Locator,
+  itemId: string
+): Promise<void> {
+  await moreTrigger.click();
+  const moreItem = page.locator(`[data-testid='more-${itemId}']`).first();
+  try {
+    await moreItem.waitFor({ state: 'visible', timeout: 5000 });
+  } catch {
+    throw new Error(
+      `Sidebar item "${itemId}" is neither on the toolbar (nav-${itemId}) nor under ` +
+        `"More" (more-${itemId}). It may have moved into another screen.`
+    );
+  }
+  const togglePath = await getMoreItemPath(moreItem, itemId);
+
+  await page.locator("[data-testid='more-customize-toolbar']").click();
+  const preferences = page.getByRole('dialog', { name: 'Preferences' });
+  await preferences.waitFor({ state: 'visible' });
+
+  // "Available" rows tag their "+ Add" button with the item's toolbar path.
+  const addButton = preferences.locator(
+    `button[data-track-name='AddBarItem'][data-track-metadata*='"id":"${togglePath}"']`
+  );
+  await addButton.click();
+  await expect(addButton).toBeHidden();
+
+  await page.keyboard.press('Escape');
+  await preferences.waitFor({ state: 'hidden' });
 }
 
+// "More" items carry their toolbar path in data-track-metadata ({"path": ...}).
+async function getMoreItemPath(moreItem: Locator, itemId: string): Promise<string> {
+  const metadata = await moreItem.getAttribute('data-track-metadata');
+  assert.ok(metadata, `Expected "More" item "${itemId}" to have data-track-metadata.`);
+  const parsed: unknown = JSON.parse(metadata);
+  const togglePath =
+    typeof parsed === 'object' && parsed !== null && 'path' in parsed ? parsed.path : undefined;
+  assert.ok(
+    typeof togglePath === 'string' && togglePath.length > 0,
+    `Expected "More" item "${itemId}" metadata to contain a path, got ${metadata}.`
+  );
+  return togglePath;
+}
+
+// Some destinations redirect to a child route (e.g. /chat/dir -> /chat/dir/<id>).
 async function waitForPath(page: Page, expectedPath: string): Promise<void> {
-  await page.waitForURL((url) => url.pathname === expectedPath, {
-    timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS,
-  });
+  await page.waitForURL(
+    (url) => url.pathname === expectedPath || url.pathname.startsWith(`${expectedPath}/`),
+    {
+      timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS,
+    }
+  );
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+// Navigates through a sidebar toolbar link, first pinning it to the toolbar
+// when it currently lives in the "More" overflow.
+async function navigateViaSidebar(page: Page, itemId: string): Promise<void> {
+  // Wait for the sidebar to be mounted before deciding toolbar vs overflow.
+  const moreTrigger = page.locator("[data-testid='nav-more']").first();
+  await moreTrigger.waitFor({ state: 'visible' });
+
+  // Scope to links: the bottom Support popover button also uses nav-support.
+  const toolbarItem = page.locator(`a[data-testid='nav-${itemId}']`).first();
+  if (!(await toolbarItem.isVisible())) {
+    await addSidebarItemToToolbar(page, moreTrigger, itemId);
+    await toolbarItem.waitFor({ state: 'visible' });
+  }
+
+  const expectedPath = await getSidebarDestinationPath(page, toolbarItem);
+  await toolbarItem.click();
+  await waitForPath(page, expectedPath);
 }
 
 export default class BrowserSteps {
@@ -184,7 +249,7 @@ export default class BrowserSteps {
 
     await containers.first().waitFor({ state: 'visible' });
     // Search every matching container, not just the first: with prefix
-    // selectors (e.g. [data-testid^='project-item-']) the target text may
+    // selectors (e.g. [data-testid^='project-card-']) the target text may
     // live in any of the matched elements.
     await containers.getByText(resolvedText, { exact: false }).first().click();
   }
@@ -228,55 +293,7 @@ export default class BrowserSteps {
 
   @Step('navigating via sidebar to <itemId>')
   public async navigateViaSidebar(itemId: string): Promise<void> {
-    const page = testContext.activePage;
-    // Wait for the sidebar to be mounted before deciding toolbar vs overflow.
-    const moreTrigger = page.locator("[data-testid='nav-more']").first();
-    await moreTrigger.waitFor({ state: 'visible' });
-
-    const toolbarItem = page.locator(`[data-testid='nav-${itemId}']`).first();
-    if (await toolbarItem.isVisible()) {
-      const expectedPath = await getSidebarDestinationPath(page, toolbarItem);
-      await toolbarItem.click();
-      await waitForPath(page, expectedPath);
-      return;
-    }
-
-    // Item is not in the toolbar — open the "More" overflow menu and click it there.
-    await moreTrigger.click();
-    let moreItem = page.locator(`[data-testid='more-${itemId}']`).first();
-    await moreItem.waitFor({ state: 'visible' });
-    const expectedPath = await getSidebarDestinationPath(page, moreItem);
-
-    try {
-      await moreItem.click({ timeout: 2000 });
-      await waitForPath(page, expectedPath);
-      return;
-    } catch (initialError) {
-      // A click can close the Radix popover before Playwright dispatches the final
-      // click event. Treat it as successful only if the URL actually changed.
-      if (isAtPath(page, expectedPath)) {
-        return;
-      }
-
-      // The popover item may have been unmounted by the failed click. Reopen the
-      // menu if necessary and resolve a fresh locator before the forced retry.
-      if (!(await moreItem.isVisible())) {
-        await moreTrigger.click();
-      }
-
-      moreItem = page.locator(`[data-testid='more-${itemId}']`).first();
-      await moreItem.waitFor({ state: 'visible' });
-
-      try {
-        await moreItem.click({ force: true, timeout: 5000 });
-        await waitForPath(page, expectedPath);
-      } catch (retryError) {
-        throw new Error(
-          `Sidebar navigation to "${itemId}" did not reach "${expectedPath}". ` +
-            `Initial attempt: ${errorMessage(initialError)} Retry: ${errorMessage(retryError)}`
-        );
-      }
-    }
+    await navigateViaSidebar(testContext.activePage, itemId);
   }
 
   @Step('typing <text> in <selector>')
@@ -986,6 +1003,8 @@ export default class BrowserSteps {
       message = page.locator('[data-testid^="chat-message-"]').last();
     }
     await message.waitFor({ state: 'visible' });
+    // Start off the list so the hover always fires a fresh pointerover.
+    await page.mouse.move(0, 0);
     await message.scrollIntoViewIfNeeded();
     await message.hover();
     // Wait for hover actions toolbar to appear instead of hardcoded timeout
@@ -1129,14 +1148,9 @@ export default class BrowserSteps {
   // NAVIGATION
   // ===========================================
 
-  @Step('clicking on "[data-testid=\'nav-chat\']"')
-  public async clickNavChat(): Promise<void> {
-    await testContext.activePage.locator("[data-testid='nav-chat']").first().click();
-  }
-
   @Step('Navigating to chat')
   public async navigateToChat(): Promise<void> {
-    await testContext.activePage.locator("[data-testid='nav-chat']").first().click();
+    await navigateViaSidebar(testContext.activePage, 'chat');
     await testContext.activePage
       .locator("[data-testid='chat-list-loading']")
       .first()

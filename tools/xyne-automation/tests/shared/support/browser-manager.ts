@@ -1,3 +1,4 @@
+import * as path from 'node:path';
 import {
   type APIRequestContext,
   type Browser,
@@ -7,6 +8,7 @@ import {
   firefox,
   type Page,
   request,
+  type Video,
   webkit,
 } from '@playwright/test';
 import { config } from '@/config';
@@ -155,7 +157,53 @@ async function acquireBrowserEntry(
   return entry;
 }
 
+export interface RecordedVideo {
+  sessionName: string;
+  video: Video;
+}
+
+// Every page opened while recording, in open order — including tabs/popups that
+// close and sessions released mid-scenario — so the whole flow is kept.
+let recordedVideos: RecordedVideo[] = [];
+
+function getVideoDirectory(): string {
+  return path.join(process.env.XYNE_RUN_ARTIFACT_DIR ?? 'reports', 'videos');
+}
+
+// Saves the videos recorded since the last call and returns their paths. Videos
+// are finalized only after their context closes, so call this after the sessions
+// are reset. Renames Playwright's random file names to
+// <status>-<label>-<HHMMSS>-<nn>-<session>.webm: the time keeps retries of the
+// same scenario apart, nn is the order pages opened.
+export async function saveRecordedVideos(label: string, isFailing: boolean): Promise<string[]> {
+  const videos = recordedVideos;
+  recordedVideos = [];
+  const slug = label
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+  const status = isFailing ? 'FAILED' : 'passed';
+  const time = new Date().toISOString().slice(11, 19).replace(/:/g, '');
+  const savedPaths: string[] = [];
+  for (const [index, { sessionName, video }] of videos.entries()) {
+    const order = String(index + 1).padStart(2, '0');
+    const target = path.join(
+      getVideoDirectory(),
+      `${status}-${slug}-${time}-${order}-${sessionName}.webm`
+    );
+    try {
+      await video.saveAs(target);
+      await video.delete();
+      savedPaths.push(target);
+    } catch (error) {
+      gaugeLogger.warn('Failed to save recorded video', { target, error: String(error) });
+    }
+  }
+  return savedPaths;
+}
+
 async function buildSession(
+  sessionName: string,
   width: number,
   height: number,
   browserTypeName: SupportedBrowserChannel
@@ -173,12 +221,22 @@ async function buildSession(
     // prefers-reduced-motion; the DISABLE_ANIMATIONS_SCRIPT below covers the
     // rest (raw CSS animations/transitions).
     reducedMotion: 'reduce',
+    ...(config.recordVideo
+      ? { recordVideo: { dir: getVideoDirectory(), size: { width, height } } }
+      : {}),
     ...(isChromium
       ? { permissions: ['microphone', 'camera', 'clipboard-read', 'clipboard-write'] }
       : {}),
   });
 
   context.setDefaultTimeout(config.timeout);
+
+  if (config.recordVideo) {
+    context.on('page', (newPage) => {
+      const video = newPage.video();
+      if (video) recordedVideos.push({ sessionName, video });
+    });
+  }
 
   // Polyfill crypto.randomUUID for insecure-origin targets (http://<bare-host> like
   // the Docker dashboard:5173 isn't a secure context), where it's undefined and app
@@ -235,7 +293,7 @@ export async function ensureNamedBrowserSession(
   if (existingSession) {
     if (existingSession.viewportWidth !== width || existingSession.viewportHeight !== height) {
       await releaseSession(name);
-      const session = await buildSession(width, height, browserTypeName);
+      const session = await buildSession(name, width, height, browserTypeName);
       testContext.sessions.set(name, session);
       testContext.activeSessionName = name;
       return;
@@ -245,7 +303,7 @@ export async function ensureNamedBrowserSession(
     return;
   }
 
-  const session = await buildSession(width, height, browserTypeName);
+  const session = await buildSession(name, width, height, browserTypeName);
   testContext.sessions.set(name, session);
   testContext.activeSessionName = name;
 }
@@ -293,7 +351,7 @@ export async function ensureBrowserSession(
 
     if (existingSession.viewportWidth !== width || existingSession.viewportHeight !== height) {
       await releaseSession(defaultName);
-      const session = await buildSession(width, height, browserTypeName);
+      const session = await buildSession(defaultName, width, height, browserTypeName);
       testContext.sessions.set(defaultName, session);
       testContext.activeSessionName = defaultName;
       return;
@@ -303,7 +361,7 @@ export async function ensureBrowserSession(
     return;
   }
 
-  const session = await buildSession(width, height, browserTypeName);
+  const session = await buildSession(defaultName, width, height, browserTypeName);
   testContext.sessions.set(defaultName, session);
   testContext.activeSessionName = defaultName;
 }
