@@ -132,6 +132,19 @@ export interface SessionContext {
   resultForwardUrl?: string;
   /** External API caller result target. The optional secret is AES-GCM encrypted. */
   externalResultCallback?: ExternalResultCallbackConfig;
+  /**
+   * External-API runs can act on behalf of a real end-user who is NOT the
+   * service-token owner: the email of that user, validated against a live
+   * User row in the same org at dispatch time. The run (AgentRun, ACL,
+   * conversations, Spaces tools) still belongs to the token owner — this is
+   * consumed ONLY at the MCP gateway tool-call boundary in routes/mcp.ts to
+   * pick the per-user backend credential (e.g. Mettle applies its own ACL on
+   * {tenant, service, email}). Placed in the session context so it is also
+   * automatically available under header auth (automation/handoff hops
+   * re-store it via destructuring as long as their SessionContext type
+   * includes it).
+   */
+  onBehalfOfEmail?: string;
   /** Terminal result target for a run dispatched from a per-agent Slack app. */
   slackDelivery?: SlackDeliveryTarget;
   /** Terminal result target for a run dispatched from a messaging channel

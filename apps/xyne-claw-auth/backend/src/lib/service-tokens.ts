@@ -96,6 +96,11 @@ export const EXTERNAL_RUN_BODY_FIELDS = [
   "detached",
   "triggerSource",
   "userId",
+  // On-behalf-of user identity for MCP gateway tool credentials (email of the
+  // real end-user this run acts for). Never changes the run's owner — see
+  // SessionContext.onBehalfOfEmail (lib/session-context.ts) and the gateway
+  // branch in routes/mcp.ts.
+  "onBehalfOfEmail",
 ] as const;
 
 export function sanitizeExternalRunBody(

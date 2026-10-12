@@ -559,7 +559,7 @@ export async function prepareRun(
   const serviceToken = caller.serviceToken;
   const isServiceTokenCaller = serviceToken?.client === "service";
   {
-    const { task, context, conversationId, piSessionConversationId, agentSlug, callbackUrl, callbackSecret, channelId, deliverTo, projectId, projectName, cwd, eventType, triggerSource, slackDelivery, channelDelivery, traceId, provider, providerOrder, providerOverride, subagentProviders, subagentProviderMode, providerConfigs, progressUrl, attachments, recordingRefs, contextFiles, skills: bodySkills, attachedContext, ticketIds, canvasIds, callIds, idempotencyKey: requestedIdempotencyKey, isRegenerate, detached, fastMode, resumedFromHandoff, judgeBackend, optimizations, generateFollowUpSuggestions } = body as {
+    const { task, context, conversationId, piSessionConversationId, agentSlug, callbackUrl, callbackSecret, channelId, deliverTo, projectId, projectName, cwd, eventType, triggerSource, slackDelivery, channelDelivery, traceId, provider, providerOrder, providerOverride, subagentProviders, subagentProviderMode, providerConfigs, progressUrl, attachments, recordingRefs, contextFiles, skills: bodySkills, attachedContext, ticketIds, canvasIds, callIds, idempotencyKey: requestedIdempotencyKey, isRegenerate, detached, fastMode, resumedFromHandoff, judgeBackend, optimizations, generateFollowUpSuggestions, onBehalfOfEmail } = body as {
       task?: string;
       context?: string;
       conversationId?: string;
@@ -571,6 +571,10 @@ export async function prepareRun(
       agentSlug?: string;
       callbackUrl?: string;
       callbackSecret?: string;
+      /** External-API runs: gateway tools use this end-user's email for the
+       *  per-user backend credential instead of the token owner's. Run
+       *  ownership/ACL stay with the token owner. */
+      onBehalfOfEmail?: string;
       channelId?: string;
       deliverTo?: "dm";
       projectId?: string;
@@ -694,6 +698,16 @@ export async function prepareRun(
     if (callbackSecret !== undefined && (typeof callbackSecret !== "string" || callbackSecret.length > 256)) {
       return { ok: false, status: 400, error: "callbackSecret must be a string of at most 256 characters" };
     }
+    // on-behalf-of end-user identity for gateway-tool credentials. Stored in
+    // the session context and consumed only by the /mcp/call gateway branch;
+    // the run itself still belongs to the authenticated caller.
+    const onBehalfOfEmailTrimmed =
+      typeof onBehalfOfEmail === "string" && onBehalfOfEmail.trim()
+        ? onBehalfOfEmail.trim()
+        : undefined;
+    if (onBehalfOfEmail !== undefined && !onBehalfOfEmailTrimmed) {
+      return { ok: false, status: 400, error: "onBehalfOfEmail must be a non-empty string" };
+    }
 
     // Resolve identity. Browser and access-token auth pin x-user-id server-side;
     // body userId is accepted only when it agrees with that authenticated id.
@@ -772,6 +786,29 @@ export async function prepareRun(
     const agent = await resolveAgent(agentSlug, runtimeOrgId);
     if ("error" in agent) {
       return { ok: false, status: 400, error: agent.error };
+    }
+
+    // On-behalf-of end-user (gateway credentials). The email must belong to a
+    // live User row in the SAME org as the resolved agent — a service token
+    // validated in org A cannot act on behalf of a user in org B. Runs also
+    // require an agent (which carries the org), so an on-behalf email with the
+    // implicit default agent is impossible.
+    let resolvedOnBehalfOfEmail: string | undefined;
+    if (onBehalfOfEmailTrimmed) {
+      if (!agentSlug) {
+        return { ok: false, status: 400, error: "onBehalfOfEmail requires an explicit agentSlug" };
+      }
+      const onBehalfUser = await prisma.user.findFirst({
+        where: { email: onBehalfOfEmailTrimmed, orgId: agent.orgId },
+        select: { id: true, email: true },
+      });
+      if (!onBehalfUser) {
+        log.warn(
+          `[run] on-behalf-of user not found email=${onBehalfOfEmailTrimmed} orgId=${agent.orgId} userId=${resolved.userId} agentSlug=${agentSlug}`,
+        );
+        return { ok: false, status: 404, error: "onBehalfOfEmail user not found" };
+      }
+      resolvedOnBehalfOfEmail = onBehalfUser.email;
     }
 
     // Invocation whitelist — the universal chokepoint for CLI / service-token /
@@ -1334,6 +1371,7 @@ export async function prepareRun(
           // Read by routes/mcp.ts: app-mode Spaces tools + the send tool.
           triggerSource: kind === "reflex" ? "reflex" : "heartbeat",
           isAutomation: true,
+          ...(resolvedOnBehalfOfEmail ? { onBehalfOfEmail: resolvedOnBehalfOfEmail } : {}),
           // The agent posts through tools, choosing thread and wording itself;
           // its final answer is an operator log line, not a channel message.
           suppressThreadReply: true,
@@ -1416,6 +1454,7 @@ export async function prepareRun(
           rootAgentSlug: agentSlug || "assistant",
           ...(traceId ? { traceId } : {}),
           ...(externalResultCallback ? { externalResultCallback } : {}),
+          ...(resolvedOnBehalfOfEmail ? { onBehalfOfEmail: resolvedOnBehalfOfEmail } : {}),
           ...(defaultTriggerSource === "slack" && slackDelivery ? { slackDelivery } : {}),
           ...(isMessagingChannelKey(defaultTriggerSource) && channelDelivery ? { channelDelivery } : {}),
         };
