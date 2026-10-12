@@ -27,6 +27,7 @@ import { mutators } from '../../zero/mutators';
 import { resolveDisplayFormFields } from '../../utils/board/resolveDisplayFormFields';
 import { ChangeSections, type ChangeSectionsGroup } from '../../components/Release/ChangeCards';
 import { ReleaseStagePicker } from '../../components/Release/ReleaseStagePicker';
+import { repoWebUrl } from '../../components/Release/repoVisual';
 import { ReleaseDevTicketsTable } from '../../components/Release/ReleaseDevTicketsTable';
 import {
   buildValuesByChangeId,
@@ -260,8 +261,9 @@ const ReleaseDetailScreen = (): ReactElement => {
     const map = new Map<string, VCSProviderType | null>();
     const apps = applications instanceof Error ? [] : (applications ?? []);
     for (const app of apps) {
-      if (app.repoUrl && app.mainReleaseBoardId && !map.has(app.repoUrl)) {
-        map.set(app.repoUrl, byBoard.get(app.mainReleaseBoardId) ?? null);
+      const repoUrl = repoWebUrl(app.repo);
+      if (repoUrl && app.mainReleaseBoardId && !map.has(repoUrl)) {
+        map.set(repoUrl, byBoard.get(app.mainReleaseBoardId) ?? null);
       }
     }
     return map;

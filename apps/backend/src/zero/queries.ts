@@ -42,6 +42,7 @@ import {
   SDLC_WORKFLOW_RELATION,
   SDLC_WIKI_WORKFLOW_RELATION,
   SDLC_HUB_ITEM_RELATION,
+  SDLC_RELEASE_CONFIG_RELATION,
   EmailType,
   ActivityClassification, LinkVisibility,
   NudgeState,
@@ -5584,6 +5585,23 @@ dmChannelsLatestMessagesPaginated: defineQuery(
         .related('workflow')
         .one(),
   ),
+  /** The hub's release configs: one REPOSITORY -> main release BOARD edge per repository. */
+  getSdlcHubReleaseConfigs: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ args: { channelId } }) =>
+      zql.sdlc_entity_links
+        .where('channelId', channelId)
+        .where('relationType', SDLC_RELEASE_CONFIG_RELATION),
+  ),
+  /** The release config edge of a main release board; it names the hub that owns it. */
+  releaseConfigByMainBoardId: defineQuery(
+    z.object({ boardId: z.string() }),
+    ({ args: { boardId } }) =>
+      zql.sdlc_entity_links
+        .where('relationType', SDLC_RELEASE_CONFIG_RELATION)
+        .where('targetId', boardId)
+        .one(),
+  ),
   /** Every Wiki and Hub Knowledge placement edge in a hub; the tree is built from these. */
   getSdlcHubItems: defineQuery(z.object({ channelId: z.string() }), ({ args: { channelId } }) =>
     zql.sdlc_entity_links
@@ -6076,7 +6094,7 @@ dmChannelsLatestMessagesPaginated: defineQuery(
     ({ args: { releaseId } }) => {
       return zql.release_change_types
         .where('releaseId', releaseId)
-        .related('application')
+        .related('application', application => application.related('repo'))
         .orderBy('createdAt', 'desc');
     },
   ),
@@ -6201,7 +6219,7 @@ dmChannelsLatestMessagesPaginated: defineQuery(
   applicationsByProjectId: defineQuery(
     z.object({ projectId: z.string() }),
     ({ args: { projectId } }) => {
-      return zql.applications.where('projectId', projectId);
+      return zql.applications.where('projectId', projectId).related('repo');
     },
   ),
   // Multi-project variant, for callers whose boards can span projects (a channel's
@@ -6212,7 +6230,9 @@ dmChannelsLatestMessagesPaginated: defineQuery(
   applicationsByProjectIds: defineQuery(
     z.object({ projectIds: z.array(z.string()) }),
     ({ args: { projectIds } }) => {
-      return zql.applications.where(helpers => helpers.cmp('projectId', 'IN', projectIds));
+      return zql.applications
+        .where(helpers => helpers.cmp('projectId', 'IN', projectIds))
+        .related('repo');
     },
   ),
 

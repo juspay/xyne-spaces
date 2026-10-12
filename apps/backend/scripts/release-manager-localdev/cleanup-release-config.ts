@@ -22,7 +22,8 @@
  * tickets, and unrelated project data are left untouched. Runs in a single
  * transaction — if an unexpected FK blocks a delete, nothing is committed.
  */
-import { PrismaClient, BoardType, FormContextType } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
+import { BoardType, FormContextType } from '@xyne/shared';
 
 const prisma = new PrismaClient();
 
@@ -63,7 +64,13 @@ async function main(): Promise<void> {
         { mainReleaseBoardId: { in: boardIds } },
       ],
     },
-    select: { id: true, name: true, repoUrl: true, boardId: true, mainReleaseBoardId: true },
+    select: {
+      id: true,
+      name: true,
+      boardId: true,
+      mainReleaseBoardId: true,
+      repo: { select: { url: true } },
+    },
   });
   const appIds = applications.map(a => a.id);
   // include any app-owned boards not already in the RELEASE set
@@ -114,7 +121,7 @@ async function main(): Promise<void> {
   console.log(`\n  RELEASE boards        : ${allBoardIds.length}`);
   for (const b of releaseBoards) console.log(`     · "${b.name}"  (project ${b.projectId})`);
   console.log(`  Applications          : ${applications.length}`);
-  for (const a of applications) console.log(`     · ${a.name}  ${a.repoUrl}`);
+  for (const a of applications) console.log(`     · ${a.name}  ${a.repo.url}`);
   console.log(`  Tickets on boards     : ${ticketIds.length}${ticketIds.length ? '  (' + tickets.map(t => t.xyneId).join(', ') + ')' : ''}`);
   console.log(`  Stages                : ${stageIds.length}`);
   console.log(`  Sub-tickets           : ${subTicketIds.length}`);
@@ -202,6 +209,12 @@ async function main(): Promise<void> {
     await tx.userWorkloadMapping.deleteMany({ where: { boardId: { in: allBoardIds } } });
     await tx.userExpertiseMapping.deleteMany({ where: { boardId: { in: allBoardIds } } });
     await tx.appIncomingWebhook.deleteMany({ where: { boardId: { in: allBoardIds } } });
+    await tx.channelBoardMapping.deleteMany({ where: { boardId: { in: allBoardIds } } });
+    // The hub's RELEASE_CONFIG edges point at the main boards; left behind they would
+    // block a new config for the same hub and repository.
+    await tx.sdlcEntityLink.deleteMany({
+      where: { relationType: 'RELEASE_CONFIG', targetId: { in: allBoardIds } },
+    });
 
     // finally the boards
     await tx.board.deleteMany({ where: { id: { in: allBoardIds } } });
