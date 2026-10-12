@@ -32,7 +32,8 @@ months. Two mechanisms enforce this:
 **Nix has:** dev shell (node, pnpm, just, openssl, pinned Prisma engines);
 services bundle (Postgres, Redis, LiveKit, Zero, fake GCS, Y-Sweet, transcription
 agent, db-setup); `nix-ci.yml` with a runtime smoke test; `vira.hs`. Flake
-`checks` cover referenced paths, script tests, Compose references, and Playwright versions. The Kata
+`checks` cover referenced paths, script tests, Compose references, Playwright versions, and the
+python-agent lock. The Kata
 Claw sandboxes already run the bundle.
 
 **Docker still owns:**
@@ -83,7 +84,8 @@ cheap jobs first.
       all app Dockerfiles, and moving settings to `pnpm-workspace.yaml`.
 - [x] Add to shell: ffmpeg, gitleaks, trivy, postgresql, process-compose, helm, gauge,
       Nix Playwright browsers aligned with npm pins, download-skip variables; prepend Linux C++/zlib library paths.
-- [x] Flake `checks`: referenced-paths, the secrets/proxy script tests, compose-refs, and playwright-version.
+- [x] Flake `checks`: referenced-paths, the secrets/proxy script tests, compose-refs, playwright-version,
+      and python-agent-lock (`uv.lock` matches `pyproject.toml`; Docker's `requirements.txt` matches the lock).
       Git-history-dependent schema/SQL/enum/tenant guards remain outside these checks.
 - [x] **Gate:** check Compose references against the allowlist through `nix flake check` in CI.
 - [x] **Delete:** `docker-compose.local.yml`, `docker/Dockerfile.dev-infra`, `docker/dev-infra/`,

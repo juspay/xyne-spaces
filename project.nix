@@ -402,6 +402,22 @@ in
     '';
     compose-refs = sourceCheck "compose-refs" [ pkgs.bash pkgs.ripgrep pkgs.gnugrep ]
       "bash nix/scripts/check-compose-refs.sh";
+    # Docker installs requirements.txt; Nix builds from uv.lock. Keep them one source.
+    python-agent-lock = sourceCheck "python-agent-lock" [ pkgs.uv ] ''
+      export HOME=$TMPDIR UV_NO_CACHE=1 UV_OFFLINE=1 UV_PYTHON_DOWNLOADS=never
+      export UV_PYTHON=${pkgs.python311}/bin/python3
+      agent=apps/backend/python-agent
+      # --locked fails when pyproject.toml has changed without `uv lock`.
+      uv export --project "$agent" --format requirements-txt --no-dev --no-emit-project \
+        --locked --no-header --quiet > "$TMPDIR/requirements.txt" || {
+        echo "uv export failed; if pyproject.toml changed, run: uv lock --project $agent" >&2
+        exit 1
+      }
+      grep -v '^#' "$agent/requirements.txt" | diff -u - "$TMPDIR/requirements.txt" || {
+        echo "$agent/requirements.txt drifted from uv.lock; regenerate it with the command in its header" >&2
+        exit 1
+      }
+    '';
   };
 
   # Custom apps/commands
