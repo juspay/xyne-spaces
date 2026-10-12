@@ -378,6 +378,10 @@ variable "overlay_sources" {
     chart_version   = optional(string, "")
     namespace       = optional(string, "")
     helm_values     = optional(string, "")
+    # Helm value files, as paths inside repo_url. Relative to path, so an entry
+    # outside the chart directory needs "../" - Argo CD allows that as long as it
+    # stays inside the repository. Applied before helm_values, which outranks them.
+    value_files     = optional(list(string), [])
   }))
   default = []
 

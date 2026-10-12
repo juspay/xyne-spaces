@@ -49,8 +49,9 @@ missing_status() {
 }
 
 tool_version() {
+  local _v
   case "$1" in
-    terraform) terraform version 2>/dev/null | head -n1 | sed -E 's/^Terraform v//; s/[[:space:]].*$//' ;;
+    terraform) _v="$(terraform version 2>/dev/null || true)"; _v="${_v%%$'\n'*}"; _v="${_v#Terraform v}"; printf '%s' "${_v%%[[:space:]]*}" ;;
     helm) helm version --short 2>/dev/null | sed -E 's/^v//; s/[+-].*$//' ;;
     kubectl) kubectl version --client 2>/dev/null | grep -E '^Client Version' | sed -E 's/.*v([0-9]+\.[0-9]+\.[0-9]+).*/\1/' ;;
     jq) jq --version 2>/dev/null | sed -E 's/^jq-//' ;;
@@ -58,7 +59,7 @@ tool_version() {
     gcloud) gcloud version 2>/dev/null | grep -E '^Google Cloud SDK' | sed -E 's/^Google Cloud SDK //' ;;
     aws) aws --version 2>/dev/null | sed -E 's|^aws-cli/||; s/[[:space:]].*$//' ;;
     az) az version --output tsv --query '"azure-cli"' 2>/dev/null ;;
-    kubelogin) kubelogin --version 2>/dev/null | grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+' | head -n1 ;;
+    kubelogin) _v="$(kubelogin --version 2>/dev/null || true)"; printf '%s' "$(printf '%s' "$_v" | grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+' | sed -n 1p)" ;;
     *) printf 'present' ;;
   esac
 }
@@ -385,6 +386,8 @@ check_vespa() {
     record PASS "vespa embedder" "disabled; point values.app.embedder at your own OpenAI-compatible endpoint"
   elif [ "$(tfvar_value "$INFRA_TFVARS" gpu_enabled)" = "true" ]; then
     record PASS "vespa embedder" "runs on the gpu pool"
+  elif grep -Eq 'nvidia\.com/gpu:[[:space:]]*"0"' "$PLATFORM_TFVARS"; then
+    record PASS "vespa embedder" "GPU request overridden to 0: runs on the general pool, needs a cpu-* image tag"
   else
     record FAIL "vespa embedder" "the embedder needs a GPU node: set gpu_enabled = true in 01-infra.tfvars"
   fi

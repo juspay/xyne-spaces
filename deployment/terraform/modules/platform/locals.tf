@@ -340,6 +340,7 @@ locals {
           chartVersion   = s.chart_version
           namespace      = s.namespace
           helmValues     = s.helm_values
+          valueFiles     = s.value_files
         }
       ]
     }
