@@ -51,6 +51,7 @@ import { kickOffPrReviewRoom, registerLivePrRunContext, unregisterLivePrRunConte
 import { judgeRunSummary, recordJudgeOutcome, setJudgeDebugSink } from "./judge-backend.js";
 import { effectiveOptimizations, optEnabled } from "./optimizations.js";
 import { jevThreshold } from "./jev.js";
+import { checkProactiveDraft, proactiveFallbackNudge, proactiveRewriteNudge, type ProactiveCheckSpec } from "./proactive-check.js";
 import { attachRunMessages, pinRunTask } from "./run-context.js";
 import { CONTEXT_GATE_NUDGE, checkpointPrecheck, contextGate } from "./answer-gates.js";
 import { runWithToolCall, takeSiftParam, withSiftParam, type ToolCallContext } from "./tool-call-context.js";
@@ -1808,6 +1809,7 @@ export interface RunTaskOptions {
    *  the answer with inline citations. See the post-loop block. */
   citationReflection?: boolean | undefined;
   replyFormat?: ResultSectionLimits | undefined;
+  proactiveCheck?: ProactiveCheckSpec | undefined;
   /** Opt-in generic auto-citations (agentConfig.autoToolCitations). When true,
    *  EVERY tool result that doesn't already self-cite is chunked and prefixed
    *  with inline [clf-<toolCallId>#n] tokens (plus one generic citation per
@@ -1978,6 +1980,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     agentHandoff,
     citationReflection,
     replyFormat,
+    proactiveCheck,
     autoToolCitations,
     isRegenerate,
     backgroundRegistry,
@@ -3849,6 +3852,36 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       const after = checkReplyFormat(extractFinalAnswerText(session, opts.finalAnswerMaxTurns) ?? "", replyFormat);
       log.info(`[agent] replyFormat: rewrite ${after.ok ? "fits" : `still over (${after.problems.join("; ")}) — delivery will split it`}`);
       pushDebugEvent("reply_format", { phase: "result", ok: after.ok, problems: after.problems });
+    }
+  }
+
+  if (proactiveCheck && !structuredOutputRef && !abortSignal?.aborted) {
+    const settle = async (): Promise<void> => {
+      const nq = session as unknown as { _agentEventQueue?: Promise<void> };
+      if (nq._agentEventQueue) await withAbort(nq._agentEventQueue);
+    };
+    const draftText = (): string => extractFinalAnswerText(session, opts.finalAnswerMaxTurns) ?? "";
+    const first = await checkProactiveDraft(proactiveCheck, draftText());
+    if (!first) {
+      pushDebugEvent("proactive_check", { phase: "skipped", reason: "jev_unavailable" });
+    } else if (first.ok) {
+      pushDebugEvent("proactive_check", { phase: "result", ok: true });
+    } else {
+      log.info(`[agent] proactiveCheck: draft breaks rules (${first.problems.join("; ")}) — nudging rewrite`);
+      pushDebugEvent("proactive_check", { phase: "rewrite", problems: first.problems });
+      turnParts.supersedeTrailingText();
+      await promptWithAbort(() => session.prompt(`<system>${proactiveRewriteNudge(first.problems)}</system>`));
+      await settle();
+      const second = await checkProactiveDraft(proactiveCheck, draftText());
+      if (second && !second.ok && !abortSignal?.aborted) {
+        log.info(`[agent] proactiveCheck: rewrite still breaks rules (${second.problems.join("; ")}) — using fallback`);
+        pushDebugEvent("proactive_check", { phase: "fallback", problems: second.problems });
+        turnParts.supersedeTrailingText();
+        await promptWithAbort(() => session.prompt(`<system>${proactiveFallbackNudge(proactiveCheck.fallback)}</system>`));
+        await settle();
+      } else {
+        pushDebugEvent("proactive_check", { phase: "result", ok: second?.ok ?? true, ...(second ? {} : { reason: "jev_unavailable" }) });
+      }
     }
   }
 

@@ -6,7 +6,7 @@ import { PROACTIVE, proactiveMode, type ProactiveMode } from "./config.js";
 import { groupByUser } from "./batching.js";
 import { deliverNudge } from "./deliver.js";
 import { mapPool } from "./pool.js";
-import { buildInterruptState, fallbackDecision, finalDecision, nudgeTask, type Decision, type LoopFacts, type NudgeItem } from "./policy.js";
+import { buildInterruptState, fallbackDecision, finalDecision, nudgeFacts, nudgeFallback, nudgeTask, type Decision, type LoopFacts, type NudgeItem } from "./policy.js";
 import { loadPrefs } from "./prefs.js";
 import { adjustWeight, quietHoldUntil, textGapUntil } from "./schedule.js";
 import { enqueueStaleSources, renewExpiringWatches } from "./sources.js";
@@ -175,6 +175,10 @@ export async function sendBatch(batch: TextCandidate[], mode: ProactiveMode, now
           userId: first.userId,
           agentId: first.agentId,
           task: nudgeTask({ items: batch.map((c) => c.item), timezone: first.timezone, now }),
+          proactive: {
+            facts: nudgeFacts(batch.map((c) => c.item), first.timezone, now),
+            fallback: nudgeFallback(batch.map((c) => c.item), first.timezone),
+          },
           idempotencyKey: `proactive-${batch.map((c) => `${c.loopId}-${c.nudgeCount + 1}`).join("+")}`,
           now,
         })

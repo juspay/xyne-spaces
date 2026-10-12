@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildInterruptState, fallbackDecision, finalDecision, formatLocal, nudgeTask, type LoopFacts } from "./policy.js";
+import { buildInterruptState, fallbackDecision, finalDecision, formatLocal, nudgeFacts, nudgeFallback, nudgeTask, type LoopFacts } from "./policy.js";
 import { buildTriageState, isHit, isUrgent, loopsForHit } from "./triage.js";
 import { parsePushEnvelope } from "./sources.js";
 import type { ParsedMessage } from "./gmail-message.js";
@@ -141,6 +141,17 @@ describe("interrupt policy", () => {
     expect(task).toContain("From: Xyne Space <xyne.spaces@juspay.in>");
     expect(task).toContain("already in the user's timezone (Asia/Kolkata)");
     expect(formatLocal(new Date("2026-10-09T07:48:00Z"), "Not/AZone")).toMatch(/07:48/);
+  });
+
+  it("builds a correct deterministic fallback for one or many items", () => {
+    const thread = { subject: "Claw down", summary: null, importance: 0.9, lastInboundAt: new Date("2026-10-09T07:48:00Z") };
+    const one = { loop, thread, threadExternalId: null, sender: "Xyne Space <xyne.spaces@juspay.in>" };
+    expect(nudgeFallback([one], "Asia/Kolkata")).toMatch(/^📬 Xyne Space <xyne\.spaces@juspay\.in> \(.*13:18.*\): Confirm hotel booking #4411\. Want me to draft a reply\?$/);
+    const two = nudgeFallback([one, { ...one, sender: null, loop: { ...loop, title: "Approve deploy" } }], "Asia/Kolkata");
+    expect(two.split("\n")).toHaveLength(4);
+    expect(two).toContain("📬 2 things need you:");
+    expect(two).toContain("• Taj reservations (");
+    expect(nudgeFacts([one], "Asia/Kolkata", now)).toContain("From: Xyne Space <xyne.spaces@juspay.in>");
   });
 
   it("batches several items into one message", () => {

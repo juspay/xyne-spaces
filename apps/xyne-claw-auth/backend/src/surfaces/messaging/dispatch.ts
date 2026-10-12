@@ -11,6 +11,7 @@ import { resolveAgentProviderConfigs, resolveSubagentProviderMode } from "../../
 import { runAttachmentRefsEnabled, uploadRunAttachment } from "../../lib/run-attachment-store.js";
 import { setSession, type SessionContext } from "../../lib/session-context.js";
 import { channelAgentTools } from "./agent-tools.js";
+import { withProactiveCheck } from "../../proactive/run-config.js";
 import { getChannel, type ChannelDeliveryTarget, type MessagingChannelKey } from "./plugin.js";
 import { channelConversationId } from "./ids.js";
 import type { BoundAgent } from "./store.js";
@@ -164,6 +165,15 @@ export function channelAgentConfig(
 }
 
 export const CHANNEL_RUN_OPTIMIZATIONS = "+subagent_direct_only,+interim_messages";
+export const PROACTIVE_RUN_OPTIMIZATIONS = "+subagent_direct_only,-interim_messages";
+
+export function proactiveRunConfig(
+  base: Record<string, unknown>,
+  channel: MessagingChannelKey,
+  proactive: { facts: string; fallback: string },
+): Record<string, unknown> {
+  return withProactiveCheck(base, channelAgentTools(channel).map((tool) => `${channel}__${tool.name}`), proactive);
+}
 
 /** A photo or PDF is the same weight here as in Spaces, so it takes the same
  *  route: bytes to object storage and a ref in the body, falling back to
@@ -206,6 +216,8 @@ export interface ChannelRunInput {
   providerOverride?: { provider: string; model?: string };
   /** /queue <message>: wait behind the active run instead of interrupting it. */
   explicitQueueOnly?: boolean;
+  /** A proactive check-in: one final message only, checked against these facts before delivery. */
+  proactive?: { facts: string; fallback: string };
 }
 
 export interface ChannelRun {
@@ -243,8 +255,14 @@ export async function buildChannelRun(input: ChannelRunInput): Promise<ChannelRu
       ...(input.providerOverride ? { providerOverride: input.providerOverride } : {}),
       additionalInstructions: channelSurfaceInstructions(input.target.channel),
       subagentProviderMode: resolveSubagentProviderMode(input.agent.config),
-      optimizations: CHANNEL_RUN_OPTIMIZATIONS,
-      agentConfig: channelAgentConfig(input.agent.config, input.target.channel, input.agent.delegationTier),
+      optimizations: input.proactive ? PROACTIVE_RUN_OPTIMIZATIONS : CHANNEL_RUN_OPTIMIZATIONS,
+      agentConfig: input.proactive
+        ? proactiveRunConfig(
+            channelAgentConfig(input.agent.config, input.target.channel, input.agent.delegationTier),
+            input.target.channel,
+            input.proactive,
+          )
+        : channelAgentConfig(input.agent.config, input.target.channel, input.agent.delegationTier),
     },
     sessionContext: {
       mentionedUserId: input.userId,

@@ -16,6 +16,7 @@ export async function deliverNudge(input: {
   task: string;
   idempotencyKey: string;
   now: Date;
+  proactive?: { facts: string; fallback: string };
 }): Promise<DeliveryResult> {
   if (!input.agentId) return { ok: false, reason: "no_agent" };
   const agent = await prisma.agent.findUnique({
@@ -58,6 +59,7 @@ export async function deliverNudge(input: {
         conversationId: channelConversationId(channel, account.surfaceTenantId, agent.slug, chatId),
         eventType: "DIRECT_MESSAGE",
         idempotencyKey: input.idempotencyKey,
+        ...(input.proactive ? { proactive: input.proactive } : {}),
         target: {
           channel,
           connectedSurfaceId: account.id,

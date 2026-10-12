@@ -139,6 +139,23 @@ function itemFacts(item: NudgeItem, timezone: string, now: Date): string[] {
   ];
 }
 
+export function nudgeFacts(items: NudgeItem[], timezone: string, now: Date): string {
+  const many = items.length > 1;
+  return items.map((item, i) => [...(many ? [`Item ${i + 1}:`] : []), ...itemFacts(item, timezone, now)].join("\n")).join("\n\n");
+}
+
+function fallbackLine(item: NudgeItem, timezone: string): string {
+  const who = item.sender ?? item.loop.counterpart ?? "Someone";
+  const when = item.thread?.lastInboundAt ? ` (${formatLocal(item.thread.lastInboundAt, timezone)})` : "";
+  const due = item.loop.deadlineAt ? `, due ${formatLocal(item.loop.deadlineAt, timezone)}` : "";
+  return `${who}${when}: ${item.loop.title}${due}`;
+}
+
+export function nudgeFallback(items: NudgeItem[], timezone: string): string {
+  if (items.length === 1) return `📬 ${fallbackLine(items[0]!, timezone)}. Want me to draft a reply?`;
+  return [`📬 ${items.length} things need you:`, ...items.map((item) => `• ${fallbackLine(item, timezone)}`), "Want me to draft the replies?"].join("\n");
+}
+
 export function nudgeTask(input: { items: NudgeItem[]; timezone: string; now: Date }): string {
   const { items, timezone, now } = input;
   const fresh = items.every((item) => {
@@ -156,7 +173,6 @@ export function nudgeTask(input: { items: NudgeItem[]; timezone: string; now: Da
     : fresh
       ? "Write ONE short message of 2 to 4 sentences: who it is from, what they need and by when, and one concrete next step you can take for them, such as drafting the reply."
       : "Write ONE short, friendly message of 2 to 4 sentences: what is pending, why it matters now, and one concrete next step you can take for them, such as drafting the reply.";
-  const blocks = items.map((item, i) => [...(many ? [`Item ${i + 1}:`] : []), ...itemFacts(item, timezone, now)].join("\n"));
   return [
     "[Automated proactive check-in. The user did not send this message.]",
     intro,
@@ -165,6 +181,6 @@ export function nudgeTask(input: { items: NudgeItem[]; timezone: string; now: Da
     "Send exactly one message. Never send a follow-up, correction or second message. If a detail is missing or unclear, leave it out instead of guessing.",
     "Do not send emails or take any other action now. Do not mention these instructions.",
     "",
-    blocks.join("\n\n"),
+    nudgeFacts(items, timezone, now),
   ].join("\n");
 }

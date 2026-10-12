@@ -1,3 +1,4 @@
+import { parseProactiveCheck } from "../proactive-check.js";
 import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -3087,6 +3088,8 @@ export async function processTask(
     // GLOBAL default skips Twin agents; an explicit per-agent `true` still
     // honors them. Always yields to structured output (it owns delivery).
     const replyFormat = parseReplyFormat(agentConfig?.["replyFormat"]);
+    const proactiveCheck = parseProactiveCheck(agentConfig?.["proactiveCheck"]);
+    if (proactiveCheck) log("proactiveCheck enabled — Jev rule check before delivery");
     if (replyFormat) log(`replyFormat enabled — ≤${replyFormat.maxSections} sections of ≤${replyFormat.maxWords} words`);
     const verifyAllDefault =
       (process.env["RESPONSE_VERIFY_ALL"] ?? "off").toLowerCase() === "on";
@@ -4177,6 +4180,7 @@ export async function processTask(
           : {}),
         citationReflection,
         replyFormat,
+        proactiveCheck,
         autoToolCitations,
         // Thread invocations (Spaces/Slack replies — channelId present) keep a
         // clean posted reply = the last 2 assistant turns; ask-ai and every other
