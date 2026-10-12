@@ -87,9 +87,10 @@ export class ReleaseNotesService {
       });
       const provider = (board?.vcsProvider ?? null) as VCSProviderType | null;
       const apps = await this.applicationRepository.findByMainReleaseBoardId(boardId);
-      const repo = apps[0]
+      const repoId = apps[0]?.repoId;
+      const repo = repoId
         ? await db.repo.findUnique({
-            where: { id: apps[0].repoId },
+            where: { id: repoId },
             select: { url: true, canonicalUrl: true },
           })
         : null;
