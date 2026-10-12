@@ -122,6 +122,7 @@ export async function createChannelsDeskTicket(conversationId: string): Promise<
     workspaceId: conversation.workspaceId,
     conversationId,
     messageId: conversation.initialMessageId,
+    sourceChannelId,
     sourceChannelName: sourceChannel.name,
     deskId,
     projectId: board.projectId,

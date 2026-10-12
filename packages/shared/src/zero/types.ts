@@ -884,6 +884,7 @@ export enum FormContextType {
   BOARD = 'BOARD',
   RELEASE_CHANGE = 'RELEASE_CHANGE',
   STAGE = 'STAGE',
+  WORKSPACE = 'WORKSPACE',
 }
 
 // @ts-ignore TS1294
@@ -898,6 +899,7 @@ export enum BoardType {
 export enum FormEntityType {
   TICKET = 'TICKET',
   SUB_TICKET = 'SUB_TICKET',
+  CHANNEL = 'CHANNEL',
   RELEASE_MIGRATION_FORM = "RELEASE_MIGRATION_FORM",
   RELEASE_ENV_FORM = "RELEASE_ENV_FORM",
 }

@@ -7,6 +7,7 @@ import {
   ChannelRole,
   ChannelAddUserPolicy,
   Channel,
+  WorkspaceRole,
 } from '@xyne/shared';
 import { useZero } from '../../../hooks/useZero';
 import { QueryResultType } from '@rocicorp/zero';
@@ -65,6 +66,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { VisibleChannel } from '../../../machines/stateMachine';
 import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
 import { channelTrackingMetadata } from '../../../services/Analytics/channelTracking';
+import { ChannelFields } from './ChannelFields';
 
 export type ChannelTab =
   | 'about'
@@ -73,7 +75,8 @@ export type ChannelTab =
   | 'settings'
   | 'ai-features'
   | 'scheduled-messages'
-  | 'agents-apps';
+  | 'agents-apps'
+  | 'fields';
 interface InfoProps {
   channel: VisibleChannel;
   previousChannelId?: string | null;
@@ -125,6 +128,11 @@ const Info = ({
     currentUserParticipant?.role === ChannelRole.ADMIN || channel.createdBy === context.userID;
   const canManageScheduledMessages =
     isDefaultChannel && currentUserParticipant?.role === ChannelRole.ADMIN;
+  // Channel fields: channel admins and workspace admins edit, others read.
+  const canEditChannelFields =
+    currentUserParticipant?.role === ChannelRole.ADMIN ||
+    (context.role as WorkspaceRole) === WorkspaceRole.ADMIN ||
+    (context.role as WorkspaceRole) === WorkspaceRole.OWNER;
 
   const addUserPolicy = channel.channelStats?.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE;
   const showAddPeopleButton =
@@ -455,6 +463,11 @@ const Info = ({
             </Tabs.Trigger>
           )}
           {isDefaultChannel && (
+            <Tabs.Trigger value='fields' className={tabTriggerClass('fields')}>
+              Fields
+            </Tabs.Trigger>
+          )}
+          {isDefaultChannel && (
             <Tabs.Trigger value='ai-features' className={tabTriggerClass('ai-features')}>
               AI Preference
             </Tabs.Trigger>
@@ -510,6 +523,11 @@ const Info = ({
               allParticipants={participants}
               appParticipants={appParticipantsForCount}
             />
+          </Tabs.Content>
+        )}
+        {isDefaultChannel && (
+          <Tabs.Content value='fields' className='outline-none flex-1 min-h-0 overflow-y-auto'>
+            <ChannelFields channelId={channel.id} canEdit={canEditChannelFields} />
           </Tabs.Content>
         )}
         {isDefaultChannel && (

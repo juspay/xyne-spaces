@@ -4,6 +4,7 @@ import { useForm, Controller } from 'react-hook-form';
 import { useMutation } from '@tanstack/react-query';
 import { arrayMove } from '@dnd-kit/sortable';
 import { useZero } from '../../../hooks/useZero';
+import { useAuth } from '../../../hooks/useAuth';
 import {
   PlusDefault,
   DeleteDustbin02,
@@ -84,6 +85,7 @@ export const CreateFormModal = ({
   onSuccess,
 }: CreateFormModalProps): ReactElement => {
   const zero = useZero();
+  const { user } = useAuth();
   const [fields, setFields] = useState<FormField[]>([]);
   const [isReadOnly, setIsReadOnly] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Set<number>>(new Set());
@@ -109,6 +111,7 @@ export const CreateFormModal = ({
     handleSubmit: handleFormSubmit,
     watch,
     reset,
+    setValue,
   } = useForm<CreateFormFormData>({
     defaultValues: {
       formName: '',
@@ -221,7 +224,25 @@ export const CreateFormModal = ({
     mutationFn: async (data: CreateFormRequest) => {
       return formService.createForm(data);
     },
-    onSuccess: data => {
+    onSuccess: async (data, request) => {
+      // A workspace form applies to the whole workspace, so it is bound as soon as it exists
+      // (boards bind theirs from the board screen).
+      if (request.contextType === FormContextType.WORKSPACE && data.id && user?.workspaceId) {
+        const mapping = await zero.mutate(
+          mutators.formContextMapping.upsert({
+            contextId: user.workspaceId,
+            contextType: FormContextType.WORKSPACE,
+            entityType: request.entityType,
+            formId: data.id,
+            mappingId: uuidv4(),
+          }),
+        ).server;
+        if (mapping.type === 'error') {
+          toast.error('Form created, but it could not be applied to this workspace', {
+            description: mapping.error.message,
+          });
+        }
+      }
       reset();
       setFields([]);
       onOpenChange(false);
@@ -792,7 +813,14 @@ export const CreateFormModal = ({
                 render={({ field: { onChange, value } }) => (
                   <Select
                     value={value}
-                    onValueChange={next => onChange(next as FormContextType)}
+                    onValueChange={next => {
+                      onChange(next as FormContextType);
+                      // Keep the entity type one this context supports (WORKSPACE only has CHANNEL).
+                      const entityTypes = getEntityTypesForContext(next as FormContextType);
+                      if (!entityTypes.includes(watch('entityType')) && entityTypes[0]) {
+                        setValue('entityType', entityTypes[0]);
+                      }
+                    }}
                     disabled={isEditMode || createFormMutation.isPending}
                   >
                     <SelectTrigger
@@ -835,6 +863,8 @@ export const CreateFormModal = ({
                 rules={{ required: 'Entity type is required' }}
                 render={({ field: { onChange, value } }) => (
                   <Select
+                    // Remounted per context so it shows the entity type picked for the new context.
+                    key={selectedContextType}
                     value={value}
                     onValueChange={onChange}
                     disabled={isEditMode || createFormMutation.isPending}

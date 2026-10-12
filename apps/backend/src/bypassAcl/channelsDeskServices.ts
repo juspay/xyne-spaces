@@ -9,6 +9,7 @@ import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { db } from '@/database/client';
 import { EmailRepository } from '@/database/repositories/emailRepository';
 import { createChannelsDeskTicket } from '@/channelsDesk/desk';
+import { copyChannelFieldsToTicket } from '@/services/channelFieldService';
 import { generateTicketId } from './transactions/ticketIdService';
 import { asService, transaction } from './base';
 
@@ -52,6 +53,7 @@ export async function insertChannelsDeskTicket(args: {
   workspaceId: string;
   conversationId: string;
   messageId: string;
+  sourceChannelId: string;
   sourceChannelName: string;
   deskId: string;
   projectId: string;
@@ -66,7 +68,7 @@ export async function insertChannelsDeskTicket(args: {
   userGroupId: string | null;
 }): Promise<Ticket | null> {
   return transaction(
-    ['Conversation', 'Message', 'Ticket', 'ChannelUserStatus', 'Project', 'Email', 'Channel'],
+    ['Conversation', 'Message', 'Ticket', 'ChannelUserStatus', 'Project', 'Email', 'Channel', 'FormContextMapping', 'FormFields', 'FormEntityValues'],
     'Channels desk ticket: stub thread and ticket must commit together',
     db,
     async (tx) => {
@@ -133,6 +135,13 @@ export async function insertChannelsDeskTicket(args: {
         },
         tx
       );
+      // The source channel's fields (e.g. its merchant) go onto the ticket in the same write.
+      await copyChannelFieldsToTicket(tx, {
+        workspaceId: args.workspaceId,
+        channelId: args.sourceChannelId,
+        ticketId: ticket.id,
+        boardId: args.boardId,
+      });
       await syncConversationTicketMdFromPrismaTicket(tx, ticket);
       await tx.channelUserStatus.updateMany({
         where: { channelId: args.deskId, isDeleted: false },
