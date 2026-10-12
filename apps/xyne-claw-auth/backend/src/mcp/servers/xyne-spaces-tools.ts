@@ -6092,23 +6092,18 @@ async function resolveTicketForEmail(
   auth?: SpacesAuthContext,
 ): Promise<TicketEmailTarget | null> {
   const lookup = async (where: Record<string, unknown>): Promise<TicketEmailTarget | null> => {
-    try {
-      const rows = (await interact(
-        { model: "ticket", operation: "findMany", where, take: 1 },
-        auth,
-      )) as TicketEmailTarget[];
-      return rows?.[0] ?? null;
-    } catch {
-      return null;
-    }
+    const rows = (await interact(
+      { model: "ticket", operation: "findMany", where, take: 1 },
+      auth,
+    )) as TicketEmailTarget[];
+    return rows?.[0] ?? null;
   };
   if (args.conversationId) return lookup({ conversationId: { equals: args.conversationId } });
   const ticketId = args.ticketId;
   if (!ticketId) return null;
-  const looksLikeXyneId = /^[A-Za-z][A-Za-z0-9]*-\d+$/.test(ticketId);
-  const byId = (): Promise<TicketEmailTarget | null> => lookup({ id: { equals: ticketId } });
-  const byXyneId = (): Promise<TicketEmailTarget | null> => lookup({ xyneId: { equals: ticketId } });
-  return looksLikeXyneId ? ((await byXyneId()) ?? (await byId())) : ((await byId()) ?? (await byXyneId()));
+  // Internal id first, then the Xyne id — the same order the queue-time
+  // validator resolves in, so both always land on the same ticket.
+  return (await lookup({ id: { equals: ticketId } })) ?? (await lookup({ xyneId: { equals: ticketId } }));
 }
 
 const spacesSendTicketEmail: ToolDef = {

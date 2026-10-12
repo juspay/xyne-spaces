@@ -28,7 +28,11 @@ import { adapterRegistry } from '@/integrations/core/adapterRegistry';
 import { ChannelExternalSourceResolver } from '@/services/channelExternalSourceResolver';
 import { websocketService } from './websocketService';
 import { redisService } from './redisService';
-import { clearConversationAgentProgress, requestClawAgentCancel } from './agentProgressService';
+import {
+  clearConversationAgentProgress,
+  listConversationAgentProgress,
+  requestClawAgentCancel,
+} from './agentProgressService';
 import { resolveDefaultReplyRecipients } from '@/utils/email';
 import { isRegisteredBot, getBotInfo } from '@/bots/core/bot-utils';
 import { PrismaClient } from '@prisma/client';
@@ -868,13 +872,32 @@ export class EmailService {
       const preference = await this.emailChannelPreferenceRepository.findByChannelId(channelId);
       // The same agent and persona triggerAutoDraft dispatched the run as.
       const agentSlug = preference?.autoDraftAgentSlug?.trim() || 'draft-agent';
-      if (preference?.ownerUserId) {
-        const res = await requestClawAgentCancel({ conversationId, agentSlug, userId: preference.ownerUserId });
+      // Only the drafting agent's run: another agent may be working on this
+      // thread for a person, and its run and pill are not ours to touch.
+      const drafting = (await listConversationAgentProgress(conversationId)).filter(
+        run => run.agentSlug === agentSlug,
+      );
+      for (const run of drafting) {
+        if (!run.sessionId || !preference?.ownerUserId) continue;
+        const res = await requestClawAgentCancel({
+          conversationId,
+          agentSlug,
+          userId: preference.ownerUserId,
+          sessionId: run.sessionId,
+        });
         if (!res.ok) {
-          logger.warn('[AutoDraft] could not cancel the opening draft run', { conversationId, status: res.status });
+          logger.warn('[AutoDraft] could not cancel the opening draft run', {
+            conversationId,
+            sessionId: run.sessionId,
+            status: res.status,
+          });
         }
       }
-      await clearConversationAgentProgress(conversationId, channelId);
+      await clearConversationAgentProgress(
+        conversationId,
+        channelId,
+        drafting.map(run => run.agentUserId),
+      );
     } catch (error) {
       logger.warn('[AutoDraft] failed to stop the opening draft run after send', {
         conversationId,
@@ -904,6 +927,11 @@ export class EmailService {
     // a channel that is not an email desk at all, and this runs on each one.
     const preference = await this.emailChannelPreferenceRepository.findByChannelId(params.channelId);
     if (preference?.autoDraftMode !== AutoDraftMode.DRAFT) return;
+
+    // Only an email desk has a mailbox to send the draft from; an app or Slack
+    // desk with auto-draft on must not get a "first customer email".
+    const channel = await this.channelRepository.findById(params.channelId);
+    if (channel?.type !== ChannelType.EMAIL) return;
 
     const existing = await this.prisma.email.findFirst({
       where: { conversationId: params.conversationId },

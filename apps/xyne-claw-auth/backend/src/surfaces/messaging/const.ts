@@ -25,6 +25,10 @@ export const LOGIN_ARTIFACT_TTL_S = 60;
  *  and a window shorter than that backlog re-runs every request and command
  *  (/new included) the person sent before it. */
 export const DEDUP_TTL_S = 24 * 60 * 60;
+/** A message older than this on arrival is a re-delivery or a backlog from an
+ *  outage, not something the person is waiting on. Acting on it now — running
+ *  an old request, honouring an old /new — is worse than staying quiet. */
+export const MAX_INBOUND_AGE_S = 15 * 60;
 /** Outbox items survive this long waiting for a pod to own the account. */
 export const OUTBOX_TTL_S = 6 * 60 * 60;
 /** Blocking pop timeout of the outbox drain loop (seconds). */

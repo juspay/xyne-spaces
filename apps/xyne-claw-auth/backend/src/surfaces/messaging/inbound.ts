@@ -13,6 +13,7 @@ import { redeemApproval } from "./approvals.js";
 import { consumeOption, parseMenuChoice, peekOption, tokenForMenuChoice } from "./cards.js";
 import {
   DEDUP_TTL_S,
+  MAX_INBOUND_AGE_S,
   NOT_LINKED_TEXT,
   RATE_LIMITED_TEXT,
   RATE_LIMIT_NOTICE_TTL_S,
@@ -163,6 +164,14 @@ export async function handleInbound(ctx: InboundContext, msg: InboundMessage): P
   // answered with a prompt below rather than dropped as empty.
   if (!msg.text.trim() && !msg.cardReplyId && !msg.formReply && !hasMedia && !msg.mentionedSelf) {
     log.info(`[inbound] nothing in it account=${account.id} chat=${msg.chatId}`);
+    return;
+  }
+  // The messenger's own send time, in seconds. Checked before the dedup write
+  // so an old message is refused even when Redis has forgotten it.
+  if (msg.timestamp !== undefined && Date.now() / 1000 - msg.timestamp > MAX_INBOUND_AGE_S) {
+    log.info(
+      `[inbound] too old to act on id=${msg.messageId} account=${account.id} ageS=${Math.round(Date.now() / 1000 - msg.timestamp)}`,
+    );
     return;
   }
   if (await isDuplicate(account.id, msg.messageId)) {

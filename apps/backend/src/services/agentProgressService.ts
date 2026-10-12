@@ -10,10 +10,15 @@ import { redisService } from './redisService';
  * Keyed by agentUserId (the Redis hash field), reusing each stored payload so the
  * client computes the same key and drops the matching entry.
  */
-export async function clearConversationAgentProgress(conversationId: string, channelId: string): Promise<void> {
+export async function clearConversationAgentProgress(
+  conversationId: string,
+  channelId: string,
+  /** Limit the clear to these agents (hash fields); every agent when omitted. */
+  onlyAgentUserIds?: readonly string[],
+): Promise<void> {
   const key = `agent_progress:conversation:${conversationId}`;
   const raw = await redisService.getAllHashFields(key);
-  const fields = Object.keys(raw);
+  const fields = Object.keys(raw).filter(field => !onlyAgentUserIds || onlyAgentUserIds.includes(field));
   if (fields.length === 0) return;
 
   for (const agentUserId of fields) {
@@ -44,11 +49,33 @@ export async function clearConversationAgentProgress(conversationId: string, cha
   await redisService.deleteHashField(key, fields);
 }
 
-/** Ask xyne-claw-auth to cancel the agent's in-flight run on a conversation, as `userId`. */
+/** The runs currently showing a "working" pill on a conversation, one per agent. */
+export async function listConversationAgentProgress(
+  conversationId: string,
+): Promise<Array<{ agentUserId: string; agentSlug: string | null; sessionId: string | null }>> {
+  const raw = await redisService.getAllHashFields(`agent_progress:conversation:${conversationId}`);
+  return Object.entries(raw).map(([agentUserId, value]) => {
+    let stored: Record<string, unknown> = {};
+    try {
+      stored = JSON.parse(value) as Record<string, unknown>;
+    } catch {
+      /* malformed field — reported with no slug or session */
+    }
+    return {
+      agentUserId,
+      agentSlug: typeof stored.agentSlug === 'string' ? stored.agentSlug : null,
+      sessionId: typeof stored.sessionId === 'string' ? stored.sessionId : null,
+    };
+  });
+}
+
+/** Ask xyne-claw-auth to cancel an agent's in-flight run, as `userId`. */
 export function requestClawAgentCancel(params: {
   conversationId: string;
   agentSlug: string;
   userId: string;
+  /** The run to cancel, when the caller knows it. */
+  sessionId?: string;
 }): Promise<globalThis.Response> {
   return fetch(
     `${config.xyneClaw.authUrl}/claw/api/v1/agent-chat/${encodeURIComponent(params.agentSlug)}/chat/cancel`,
@@ -59,7 +86,10 @@ export function requestClawAgentCancel(params: {
         'x-user-id': params.userId,
         ...(config.xyneClaw.s2sKey ? { 'x-s2s-key': config.xyneClaw.s2sKey } : {}),
       },
-      body: JSON.stringify({ conversationId: params.conversationId }),
+      body: JSON.stringify({
+        conversationId: params.conversationId,
+        ...(params.sessionId ? { sessionId: params.sessionId } : {}),
+      }),
     },
   );
 }

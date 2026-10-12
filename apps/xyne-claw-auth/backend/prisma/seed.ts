@@ -993,6 +993,7 @@ You:
         toolPermissions: {
           "xyne-spaces__spaces-create-ticket": "ask",
           "xyne-spaces__spaces-update-ticket": "ask",
+          "xyne-spaces__spaces-send-ticket-email": "ask",
           "xyne-spaces__spaces-schedule-call": "ask",
           "xyne-spaces__user-send-message": "ask",
           "xyne-spaces__spaces-create-canvas": "ask",
@@ -1081,6 +1082,7 @@ You:
         toolPermissions: {
           "xyne-spaces__spaces-create-ticket": "ask",
           "xyne-spaces__spaces-update-ticket": "ask",
+          "xyne-spaces__spaces-send-ticket-email": "ask",
           "xyne-spaces__spaces-schedule-call": "ask",
           "xyne-spaces__user-send-message": "ask",
           "xyne-spaces__spaces-create-canvas": "ask",
