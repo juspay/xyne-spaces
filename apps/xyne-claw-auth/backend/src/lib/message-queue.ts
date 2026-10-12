@@ -32,6 +32,7 @@ import { redisService } from "../redis.js";
 import { errMsg } from "./errors.js";
 import { createLogger } from "../logger.js";
 import { twinScopedKey } from "./twin-scope.js";
+import { coalesceQueuedMessages, leadingBatchSize } from "./message-buffer.js";
 
 const log = createLogger("message-queue");
 
@@ -137,6 +138,10 @@ export interface QueuedMessage {
   /** Suppress the normal "queued" notice when another control path already
    *  posts a better acknowledgement. */
   suppressQueuedNotice?: boolean;
+  /** Chat buffering: how many times this entry was drained but failed to
+   *  re-dispatch and was put back at the head. Bounded so a poison message
+   *  cannot wedge the queue. */
+  drainAttempts?: number;
   /** epoch ms when enqueued */
   ts: number;
 }
@@ -378,6 +383,103 @@ export async function dequeueMessage(conversationId: string, agentSlug: string, 
   } catch (err) {
     log.warn("dequeueMessage failed", { conversationId, agentSlug, error: errMsg(err) });
     return null;
+  }
+}
+
+// Compare-and-pop: remove the first N list entries ONLY if they are still the
+// exact blobs the caller inspected. Guards the LRANGE→decide→pop window against
+// a concurrent drain (late finalizer) popping the same head. Returns 1 on pop.
+//   KEYS[1] = queue list   ARGV = the N raw JSON blobs, in order
+const POP_IF_HEAD_LUA = `
+local n = #ARGV
+local head = redis.call('LRANGE', KEYS[1], 0, n - 1)
+if #head ~= n then return 0 end
+for i = 1, n do
+  if head[i] ~= ARGV[i] then return 0 end
+end
+redis.call('LTRIM', KEYS[1], n, -1)
+return 1
+`;
+
+export interface DequeuedBatch {
+  /** The message to dispatch (merged when size > 1). */
+  message: QueuedMessage;
+  /** How many queued entries it represents. */
+  size: number;
+  /** Original eventIds, oldest first — for logs. */
+  eventIds: string[];
+}
+
+/**
+ * Chat buffering drain: pop the leading run of mergeable messages (same sender,
+ * conversation-mode, see message-buffer.ts) as ONE merged message. A head that
+ * cannot be merged drains alone, so ordering is identical to dequeueMessage.
+ * Falls back to a single LPOP if the compare-and-pop loses a race repeatedly.
+ */
+export async function dequeueBatch(conversationId: string, agentSlug: string, twinUserScopeId?: string): Promise<DequeuedBatch | null> {
+  if (!conversationId || !agentSlug) return null;
+  const key = queueKey(conversationId, agentSlug, twinUserScopeId);
+  try {
+    const redis = redisService.getConnection();
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const raws = await redis.lrange(key, 0, QUEUE_CAP - 1);
+      if (raws.length === 0) return null;
+      const parsed: QueuedMessage[] = [];
+      for (const r of raws) {
+        try {
+          parsed.push(JSON.parse(r) as QueuedMessage);
+        } catch {
+          break; // stop the batch at a corrupt entry; it drains alone later
+        }
+      }
+      const n = Math.max(1, leadingBatchSize(parsed));
+      if (parsed.length === 0) {
+        // Head itself is corrupt: drop it via plain LPOP (legacy behaviour).
+        await redis.lpop(key);
+        return null;
+      }
+      const popped = (await redis.eval(POP_IF_HEAD_LUA, 1, key, ...raws.slice(0, n))) as number;
+      if (popped !== 1) continue;
+      const batch = parsed.slice(0, n);
+      return { message: coalesceQueuedMessages(batch), size: n, eventIds: batch.map((m) => m.eventId) };
+    }
+    const single = await dequeueMessage(conversationId, agentSlug, twinUserScopeId);
+    return single ? { message: single, size: 1, eventIds: [single.eventId] } : null;
+  } catch (err) {
+    log.warn("dequeueBatch failed", { conversationId, agentSlug, error: errMsg(err) });
+    return null;
+  }
+}
+
+/**
+ * Put a drained-but-undispatched message back at the HEAD of the queue so a
+ * failed redispatch does not silently lose the user's message(s). Bypasses the
+ * cap and dedupe set on purpose: it was already accepted once.
+ */
+export async function requeueAtHead(msg: QueuedMessage): Promise<boolean> {
+  try {
+    const redis = redisService.getConnection();
+    await redis.lpush(queueKey(msg.conversationId, msg.agentSlug, msg.twinUserScopeId), JSON.stringify(msg));
+    return true;
+  } catch (err) {
+    log.warn("requeueAtHead failed", { conversationId: msg.conversationId, agentSlug: msg.agentSlug, error: errMsg(err) });
+    return false;
+  }
+}
+
+/**
+ * Claim the right to send ONE interrupt-with-reply to an active session.
+ * With buffering, the first follow-up asks the run to wrap up; later follow-ups
+ * in the same busy window just join the queue instead of re-interrupting.
+ * Fail-open (returns true) so a Redis blip keeps legacy behaviour.
+ */
+export async function claimInterruptOnce(sessionId: string): Promise<boolean> {
+  try {
+    const redis = redisService.getConnection();
+    const res = await redis.set(`claw:mq:interrupted:${sessionId}`, "1", "PX", BUSY_TTL_MS, "NX");
+    return res === "OK";
+  } catch {
+    return true;
   }
 }
 

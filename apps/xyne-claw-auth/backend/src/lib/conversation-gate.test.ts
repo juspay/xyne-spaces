@@ -3,11 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const tryAcquireSlot = vi.fn(async (..._args: unknown[]) => "tok-1" as string | null);
 const getSlotOwner = vi.fn(async (..._args: unknown[]) => ({ userId: "u1", sessionId: "sess-old" }) as { userId?: string; sessionId?: string } | null);
 const enqueueMessage = vi.fn(async (_msg: Record<string, unknown>) => ({ enqueued: true, position: 1, deduped: false, full: false }));
+const claimInterruptOnce = vi.fn(async (_sessionId: string) => true);
 const fetchMock = vi.fn(async (..._args: unknown[]) => ({ ok: true, status: 200, text: async () => "" }));
 
 vi.mock("../config.js", () => ({ CONFIG: { internalUrl: "http://claw", xyneClawS2sKey: "" } }));
 vi.mock("../logger.js", () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) }));
-vi.mock("./message-queue.js", () => ({ QUEUE_CAP: 10, enqueueMessage, getSlotOwner, tryAcquireSlot }));
+vi.mock("./message-queue.js", () => ({ QUEUE_CAP: 10, enqueueMessage, getSlotOwner, tryAcquireSlot, claimInterruptOnce }));
 
 const { claimOrQueue, queuedNotice } = await import("./conversation-gate.js");
 
@@ -22,10 +23,13 @@ const message = {
 };
 
 beforeEach(() => {
-  for (const m of [tryAcquireSlot, getSlotOwner, enqueueMessage, fetchMock]) m.mockClear();
+  for (const m of [tryAcquireSlot, getSlotOwner, enqueueMessage, fetchMock, claimInterruptOnce]) m.mockClear();
   vi.stubGlobal("fetch", fetchMock);
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+});
 
 describe("claimOrQueue", () => {
   it("claims a free conversation without queueing", async () => {
@@ -68,5 +72,34 @@ describe("claimOrQueue", () => {
 describe("queuedNotice", () => {
   it("says a duplicate is already queued", () => {
     expect(queuedNotice({ enqueued: false, position: 0, deduped: true, full: false }, false, false, "thread")).toContain("Already queued");
+  });
+});
+
+describe("claimOrQueue with chat buffering", () => {
+  it("interrupts the active run only once per busy window", async () => {
+    vi.stubEnv("CLAW_MSG_BUFFER_ENABLED", "1");
+    tryAcquireSlot.mockResolvedValue(null);
+    claimInterruptOnce.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    enqueueMessage
+      .mockResolvedValueOnce({ enqueued: true, position: 1, deduped: false, full: false })
+      .mockResolvedValueOnce({ enqueued: true, position: 2, deduped: false, full: false });
+    const first = await claimOrQueue({ message });
+    const second = await claimOrQueue({ message: { ...message, eventId: "evt-2" } });
+    tryAcquireSlot.mockResolvedValue("tok-1");
+    expect(claimInterruptOnce).toHaveBeenCalledWith("sess-old");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(first).toMatchObject({ interrupted: true });
+    expect(second).toMatchObject({ interrupted: false, accepted: true });
+    expect((second as { notice: string }).notice).toContain("answer your follow-ups together");
+  });
+
+  it("keeps legacy behaviour (interrupt every time) when the flag is off", async () => {
+    vi.stubEnv("CLAW_MSG_BUFFER_ENABLED", "");
+    tryAcquireSlot.mockResolvedValue(null);
+    await claimOrQueue({ message });
+    await claimOrQueue({ message: { ...message, eventId: "evt-2" } });
+    tryAcquireSlot.mockResolvedValue("tok-1");
+    expect(claimInterruptOnce).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

@@ -2,8 +2,10 @@ import { CONFIG } from "../config.js";
 import { createLogger } from "../logger.js";
 import { errMsg } from "./errors.js";
 import { systemNote } from "./notice-format.js";
+import { isChatBufferingEnabled } from "./message-buffer.js";
 import {
   QUEUE_CAP,
+  claimInterruptOnce,
   enqueueMessage,
   getSlotOwner,
   tryAcquireSlot,
@@ -34,7 +36,12 @@ export async function claimOrQueue(input: {
     interruptMode: interruptSessionId ? "interrupt_with_reply" : "queue_only",
     ts: Date.now(),
   });
-  const interrupted = enq.enqueued && interruptSessionId ? await requestInterruptWithReply(interruptSessionId, userId) : false;
+  // Chat buffering: only the FIRST follow-up in a busy window interrupts the
+  // active run; later ones just join the buffer and are answered together.
+  const shouldInterrupt = enq.enqueued && Boolean(interruptSessionId) &&
+    (!isChatBufferingEnabled() || (await claimInterruptOnce(interruptSessionId!)));
+  const interrupted = shouldInterrupt ? await requestInterruptWithReply(interruptSessionId!, userId) : false;
+  const buffered = isChatBufferingEnabled() && enq.enqueued && !interrupted && enq.position > 1;
   log.info(
     `[msg-queue] conv ${conversationId} busy — queued eventId=${input.message.eventId} interrupted=${interrupted} (enqueued=${enq.enqueued} pos=${enq.position} deduped=${enq.deduped} full=${enq.full})`,
   );
@@ -42,7 +49,9 @@ export async function claimOrQueue(input: {
     kind: "queued",
     accepted: enq.enqueued || enq.deduped,
     interrupted,
-    notice: queuedNotice(enq, interrupted, input.explicitQueueOnly ?? false, input.place ?? "thread"),
+    notice: buffered && !input.explicitQueueOnly
+      ? systemNote(`Queued at position ${enq.position} — I'll answer your follow-ups together once I finish the current reply.`)
+      : queuedNotice(enq, interrupted, input.explicitQueueOnly ?? false, input.place ?? "thread"),
     enq,
   };
 }
