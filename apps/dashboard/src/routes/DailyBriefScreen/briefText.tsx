@@ -25,6 +25,8 @@ import {
   ChannelMentionRenderer,
 } from '../../components/Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { useChannel } from '../../hooks/useChannels';
+import { useChannelDisplayName } from '../../hooks/useChannelDisplayName';
+import { useAuthContextValues } from '../../hooks/useAuth';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { queries } from '../../zero/queries';
 import type { ToolInvocation } from '../../components/Chat/XyneAISidebar/utils/XyneAITypes';
@@ -99,10 +101,14 @@ function linkifyMentions(line: string, ticketPrefixes: ReadonlySet<string>): str
 function BriefChannelMention({ channelId }: { channelId: string }): ReactElement {
   const navigate = useNavigate();
   const channel = useChannel(channelId);
+  const { userID } = useAuthContextValues();
+  // DM / group-DM channels store comma-joined participant ids in `name`;
+  // resolve them to people's names instead of rendering the raw id list.
+  const { displayName } = useChannelDisplayName(channel, userID);
   return (
     <ChannelMentionRenderer
       channelId={channelId}
-      channelName={channel?.name ?? channelId}
+      channelName={channel ? displayName : channelId}
       isPrivate={String(channel?.visibility) === 'PRIVATE'}
       navigate={navigate}
     />
