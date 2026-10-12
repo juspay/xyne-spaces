@@ -9,6 +9,8 @@ interface ZeroFolder {
   parentId: string | null;
   rootCollectionId: string | null;
   updatedAt: number;
+  /** Folder remark (collections.description). */
+  description?: string | null;
 }
 
 type CollectionItemWithAttachment = CollectionItem & {
@@ -52,6 +54,7 @@ export function useCollectionNodes({
           ? new Date(folder.updatedAt).toISOString()
           : new Date().toISOString(),
         mimeType: '',
+        description: folder.description ?? null,
         childrenIds: childrenMap[folder.id] ?? [],
         isLoaded: true,
         isLoading: false,

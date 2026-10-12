@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
+import { REMARK_MAX_LENGTH } from '../../knowledgeBaseV2/components/RemarkDialogV2';
 import { toast } from 'sonner';
 import { Hash, Plus } from 'lucide-react';
 import Dialog from '../../ui/Dialog';
@@ -41,6 +42,7 @@ const CreateCollectionModal = ({
   const nameInputRef = useRef<HTMLInputElement | null>(null);
 
   const [title, setTitle] = useState('');
+  const [remark, setRemark] = useState('');
   const [isPrivate, setIsPrivate] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [selectedChannelId, setSelectedChannelId] = useState<string | null>(initialScopeId ?? null);
@@ -49,6 +51,7 @@ const CreateCollectionModal = ({
 
   const resetForm = useCallback(() => {
     setTitle('');
+    setRemark('');
     setIsPrivate(false);
     setIsCreating(false);
     setSelectedChannelId(initialScopeId ?? null);
@@ -93,7 +96,7 @@ const CreateCollectionModal = ({
           scopeType: effectiveScopeId ? scopeType : 'WORKSPACE',
           scopeId: effectiveScopeId ?? user.workspaceId,
           name: finalTitle,
-          description: null,
+          description: remark.trim() || null,
           isPrivate,
           permissionId: crypto.randomUUID(),
           timestamp,
@@ -114,7 +117,7 @@ const CreateCollectionModal = ({
       const collection: CollectionSummary = {
         id,
         name: finalTitle,
-        description: null,
+        description: remark.trim() || null,
         ownerId: user.id,
         canShare: true,
         role: CollectionRole.OWNER,
@@ -132,7 +135,7 @@ const CreateCollectionModal = ({
         toast.error(msg || 'Failed to create collection. Please try again.');
       }
     }
-  }, [zero, title, scopeType, effectiveScopeId, isPrivate, user, onSuccess, onClose, resetForm]);
+  }, [zero, title, remark, scopeType, effectiveScopeId, isPrivate, user, onSuccess, onClose, resetForm]);
 
   const canSubmit = title.trim().length > 0 && !isCreating;
 
@@ -178,6 +181,24 @@ const CreateCollectionModal = ({
               disabled={isCreating}
               data-track-category='knowledge-base'
               data-track-name='collection-name-input'
+            />
+          </div>
+
+          <div>
+            <label className='block text-sm font-medium text-foreground mb-1' htmlFor='kb-remark'>
+              Remark <span className='text-muted-foreground font-normal'>(optional)</span>
+            </label>
+            <textarea
+              id='kb-remark'
+              value={remark}
+              maxLength={REMARK_MAX_LENGTH}
+              rows={3}
+              onChange={event => setRemark(event.target.value)}
+              placeholder='Add a note about what this collection is for'
+              disabled={isCreating}
+              className='block w-full resize-y rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring'
+              data-track-category='knowledge-base'
+              data-track-name='collection-remark-input'
             />
           </div>
 

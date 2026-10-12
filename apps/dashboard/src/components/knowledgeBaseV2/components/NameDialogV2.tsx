@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { REMARK_MAX_LENGTH } from './RemarkDialogV2';
 
 interface NameDialogV2Props {
   open: boolean;
@@ -14,7 +15,10 @@ interface NameDialogV2Props {
   /** Submit button copy while the request is in flight. Defaults to
    *  "Creating...". The rename flow overrides to "Renaming...". */
   submittingLabel?: string;
-  onSubmit: (name: string) => Promise<void>;
+  /** When true, renders an optional "Remark" textarea under the name. The
+   *  trimmed remark ('' when left empty) is passed as onSubmit's 2nd arg. */
+  withRemark?: boolean;
+  onSubmit: (name: string, remark: string) => Promise<void>;
   onClose: () => void;
 }
 
@@ -28,16 +32,19 @@ export const NameDialogV2: React.FC<NameDialogV2Props> = ({
   submitLabel,
   initialValue,
   submittingLabel,
+  withRemark,
   onSubmit,
   onClose,
 }) => {
   const [name, setName] = useState(initialValue ?? '');
+  const [remark, setRemark] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (open) {
       setName(initialValue ?? '');
+      setRemark('');
       setSubmitting(false);
       // Focus on next tick after modal renders. Select-all so a rename
       // user can immediately overwrite the existing name.
@@ -54,8 +61,9 @@ export const NameDialogV2: React.FC<NameDialogV2Props> = ({
     if (!trimmed || submitting) return;
     setSubmitting(true);
     try {
-      await onSubmit(trimmed);
+      await onSubmit(trimmed, remark.trim());
       setName('');
+      setRemark('');
     } catch {
       // Error handled by caller (toast)
     } finally {
@@ -90,6 +98,26 @@ export const NameDialogV2: React.FC<NameDialogV2Props> = ({
             data-track-name='name-dialog-input'
           />
           {helper ? <p className='mt-1 text-xs text-muted-foreground'>{helper}</p> : null}
+
+          {withRemark ? (
+            <div className='mt-4'>
+              <label className='block text-sm font-medium text-foreground' htmlFor='kb-name-dialog-remark'>
+                Remark <span className='font-normal text-muted-foreground'>(optional)</span>
+              </label>
+              <textarea
+                id='kb-name-dialog-remark'
+                value={remark}
+                maxLength={REMARK_MAX_LENGTH}
+                rows={3}
+                onChange={e => setRemark(e.target.value)}
+                placeholder='Add a note about what belongs here'
+                className='mt-1 block w-full resize-y rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring'
+                disabled={submitting}
+                data-track-category='knowledge-base'
+                data-track-name='name-dialog-remark-input'
+              />
+            </div>
+          ) : null}
 
           <div className='mt-5 flex justify-end gap-2'>
             <button

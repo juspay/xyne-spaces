@@ -35,6 +35,9 @@ export interface CollectionChild {
   fileTotal?: number;
   fileIngested?: number;
   fileFailed?: number;
+  /** Free-text remark on a collection or folder (stored in
+   *  `collections.description`). Undefined for files. */
+  description?: string | null;
 }
 
 export interface CollectionItemVersion {
