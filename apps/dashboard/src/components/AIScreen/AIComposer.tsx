@@ -40,6 +40,8 @@ import {
 } from '../../hooks/useSelectedAgent';
 import { useAskAIAuto } from '../../hooks/useAskAIAuto';
 import { useRoutedSubmit, type AssistantRouting } from '../Assistant/useRoutedSubmit';
+import { buddy } from '../Assistant/buddy';
+import { tryBuddy } from '../Assistant/buddy/tryBuddy';
 import { Composer } from '../Composer/Composer';
 import type {
   ComposerHandle,
@@ -166,6 +168,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   const seed = initialExtras ?? EMPTY_COMPOSER_CONTEXT;
   const [value, setValue] = useState('');
   const [attachments, setAttachments] = useState<AIComposerAttachment[]>([]);
+  const [buddyWorking, setBuddyWorking] = useState(false);
   const [selections, setSelections] = useState<ContextSelections>(() => ({
     channels: seed.channels,
     tickets: seed.tickets,
@@ -497,8 +500,19 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     submit: send,
   });
 
+  async function askBuddy(text: string, trigger: 'button' | 'enter'): Promise<void> {
+    setBuddyWorking(true);
+    try {
+      const outcome = await tryBuddy(text);
+      if (outcome === 'done') setValue('');
+      else if (outcome === 'missed' && !routedSubmit.route(trigger)) send(trigger);
+    } finally {
+      setBuddyWorking(false);
+    }
+  }
+
   function submit(trigger: 'button' | 'enter'): void {
-    if (pending) return;
+    if (pending || buddyWorking) return;
     const trimmed = value.trim();
     if (!trimmed) return;
     // An explicit command is never re-routed by Auto.
@@ -507,17 +521,22 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       attachments.length === 0 &&
       !trimmed.startsWith('/') &&
       applyStudioMode(trimmed) === trimmed;
-    if (isRoutable && routedSubmit.route(trigger)) return;
-    send(trigger);
+    if (isRoutable) void askBuddy(trimmed, trigger);
+    else send(trigger);
   }
 
   const handleStop = (): void => {
+    if (buddyWorking) {
+      buddy.cancel();
+      return;
+    }
     if (routedSubmit.stop()) return;
     onStop?.();
   };
 
   // Voice bypasses routedSubmit, so its routing is cancelled directly.
   const handleVoiceStop = (): void => {
+    buddy.cancel();
     assistant?.cancel();
     handleStop();
   };
@@ -588,7 +607,8 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     () =>
       isAutoOn && assistant
         ? async (text: string): Promise<string | null> =>
-            detectStudioIntent(text) ? null : assistant.answer(text)
+            // '' means Buddy was stopped, so the action cards are not asked.
+            detectStudioIntent(text) ? null : ((await buddy.answer(text)) ?? assistant.answer(text))
         : undefined,
     [isAutoOn, assistant],
   );
@@ -725,7 +745,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
         onValueChange={setValue}
         {...(placeholder ? { placeholder } : {})}
         {...(autoFocus ? { autoFocus } : {})}
-        isStreaming={pending}
+        isStreaming={pending || buddyWorking}
         anchor={anchor}
         onSubmit={submit}
         onStop={handleStop}

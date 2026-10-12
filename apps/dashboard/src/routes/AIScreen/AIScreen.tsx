@@ -43,6 +43,7 @@ import { globalClickTracker } from '../../services/Analytics/globalClickTracker'
 import { readTrackSource } from '../../services/Analytics/trackSource';
 import { useV2SessionInvalidator } from '../../hooks/useAskAISessionsV2';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
+import { ASSISTANT_PANEL_ATTR } from '../../components/Assistant/buddy/constants';
 import { useAssistantActions } from '../../components/Assistant/useAssistantActions';
 import type { AssistantRouting } from '../../components/Assistant/useRoutedSubmit';
 import { useUserPreference } from '../../machines/userPreferencesMachine';
@@ -740,7 +741,10 @@ const AIScreen = (): ReactElement => {
                       <SidebarLeftOpen size={16} aria-hidden='true' />
                     </button>
                   )}
-                  <div className='flex w-full max-w-3xl flex-col'>
+                  <div
+                    {...{ [ASSISTANT_PANEL_ATTR]: '' }}
+                    className='flex w-full max-w-3xl flex-col'
+                  >
                     <AIEmptyState />
                     <LandingComposerSlot className='mt-16'>
                       <AIComposer

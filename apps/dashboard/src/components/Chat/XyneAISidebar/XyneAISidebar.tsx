@@ -111,6 +111,7 @@ import { useVoiceHost } from '../../Voice/voiceSession';
 import { VoiceStage } from '../../Voice/VoiceStage';
 import { buddy } from '../../Assistant/buddy';
 import { ASSISTANT_PANEL_ATTR } from '../../Assistant/buddy/constants';
+import { tryBuddy } from '../../Assistant/buddy/tryBuddy';
 import { useFlowActionComplete } from '../../../hooks/useFlowActionComplete';
 import {
   buildXyneAIStreamThreadId,
@@ -2206,16 +2207,10 @@ const XyneAISidebar = ({
     selectedActivities.length === 0 &&
     activeSelectionInfos.length === 0;
 
-  const tryBuddy = async (text: string, trigger?: 'button' | 'enter'): Promise<void> => {
-    const reply = await buddy.answer(text);
-    if (reply === '') return;
-    const description = `You typed “${text}” · ${buddy.explain()}`;
-    toast(reply ?? 'Sent to Ask AI', { description });
-    if (reply === null) {
-      sendOnward(trigger);
-      return;
-    }
-    setInputValue('');
+  const runBuddy = async (text: string, trigger?: 'button' | 'enter'): Promise<void> => {
+    const outcome = await tryBuddy(text);
+    if (outcome === 'missed') sendOnward(trigger);
+    else if (outcome === 'done') setInputValue('');
   };
 
   // Not in handleSubmit, so auto-send, suggestion and follow-up sends are never routed.
@@ -2223,7 +2218,7 @@ const XyneAISidebar = ({
   const handleComposerSubmit = (trigger?: 'button' | 'enter'): void => {
     const text = inputValue.trim();
     if (buddyTyped && text !== '' && !text.startsWith('/')) {
-      void tryBuddy(text, trigger);
+      void runBuddy(text, trigger);
       return;
     }
     sendOnward(trigger);
