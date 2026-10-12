@@ -1336,55 +1336,26 @@ export class CallDocumentService {
     // A bot-created call (e.g. a regeneration requested by its app) follows its template
     // alone, as its first summary did in generateAndPostDetailedSummary: no Xyne-generated
     // system prompt and none of the recording summary's Markdown instructions.
-    if (!isRecording(call) && (await this.isBotCreatedCall(call))) {
-      const botTemplate = templateId
-        ? await summaryTemplateService.findAccessibleById(
-            templateId,
-            call.workspaceId,
-            call.createdByUserId,
-          )
-        : await this.resolveBotCallSummaryTemplate(
-            unnumberedTranscript ?? transcript,
-            call,
-            call.workspaceId,
-            callId,
-          );
-      if (!botTemplate) {
-        logger.error(`[${callId}] recording_summary_generation_failed`, {
-          reason: 'invalid_template',
-          template_id: templateId,
-        });
-        return null;
-      }
-
-      const rawSummary = await this.generateBotCallSummary(
-        unnumberedTranscript ?? transcript,
-        callId,
-        botTemplate,
-        onDelta,
-        modelType,
-      );
-      if (!rawSummary) return null;
-      return {
-        summary: stripRecordingSummaryMarkedItemAnnotations(rawSummary),
-        template: botTemplate,
-        markedItems: [],
-        rawSummary,
-      };
-    }
-
+    const botCreated = !isRecording(call) && (await this.isBotCreatedCall(call));
     const selectedTemplate = templateId
       ? await summaryTemplateService.findAccessibleById(
           templateId,
           call.workspaceId,
           call.createdByUserId,
         )
-      : await this.selectRecordingSummaryTemplateForTranscript(
-          transcript,
-          call.workspaceId,
-          call.createdByUserId,
-          callId,
-        );
+      : botCreated
+        ? await this.resolveBotCallSummaryTemplate(
+            unnumberedTranscript ?? transcript,
+            call,
+            call.workspaceId,
+            callId,
+          )
+        : await this.selectRecordingSummaryTemplateForTranscript(
+            transcript,
+            call.workspaceId,
+            call.createdByUserId,
+            callId,
+          );
 
     if (!selectedTemplate) {
       logger.error(`[${callId}] recording_summary_generation_failed`, {
@@ -1392,6 +1363,23 @@ export class CallDocumentService {
         template_id: templateId,
       });
       return null;
+    }
+
+    if (botCreated) {
+      const rawSummary = await this.generateBotCallSummary(
+        unnumberedTranscript ?? transcript,
+        callId,
+        selectedTemplate,
+        onDelta,
+        modelType,
+      );
+      if (!rawSummary) return null;
+      return {
+        summary: stripRecordingSummaryMarkedItemAnnotations(rawSummary),
+        template: selectedTemplate,
+        markedItems: [],
+        rawSummary,
+      };
     }
 
     const template = await summaryTemplateService.ensureGeneratedSystemPrompt(selectedTemplate);
