@@ -78,7 +78,7 @@ export class ResolveConversationStep extends BaseActionStep<
     }
 
     const ticket = await db.ticket.findFirst({
-      where: conversation.ticketId ? { id: conversation.ticketId } : { conversationId },
+      where: { conversationId },
       select: { id: true, boardId: true, projectId: true, channelId: true, createdBy: true },
     });
 
@@ -102,6 +102,7 @@ export class ResolveConversationStep extends BaseActionStep<
       customFieldValues: customForm
         ? Object.fromEntries(customForm.fields.map(f => [f.fieldName, f.value]))
         : null,
+      ...Object.fromEntries(RESOLVE_AS_OPTIONS.map(type => [type, null])),
       ...Object.fromEntries(resolved),
     };
   }
@@ -135,7 +136,14 @@ async function buildEventPayload(
     case TICKET_COMMENTED_EVENT: {
       if (!ticket) return null;
       const message = await db.message.findFirst({
-        where: { conversationId, msgType: MessageType.USER, isDeleted: false },
+        where: {
+          conversationId,
+          msgType: MessageType.USER,
+          isDeleted: false,
+          visibleTo: null,
+          isSent: true,
+          messageId: { not: conversation.initialMessageId },
+        },
         orderBy: [{ createdAt: 'desc' }, { messageId: 'desc' }],
       });
       return message && { ticketId: ticket.id, messageId: message.messageId, conversationId, authorId: message.senderId };
@@ -179,7 +187,17 @@ async function buildEventPayload(
     }
 
     case TAG_GENERATED_EVENT: {
-      const email = await findLatestEmail(conversationId);
+      const emails = await db.email.findMany({
+        where: { conversationId },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        select: { id: true, channelId: true },
+      });
+      const tagged = await db.tag.findFirst({
+        where: { sourceType: DESK_EMAIL_SOURCE_TYPE, sourceId: { in: emails.map(e => e.id) }, isDeleted: false },
+        orderBy: { createdAt: 'desc' },
+        select: { sourceId: true },
+      });
+      const email = emails.find(e => e.id === tagged?.sourceId);
       if (!email) return null;
       const tags = await tagService.listTags(email.id, DESK_EMAIL_SOURCE_TYPE);
       return {
@@ -192,9 +210,9 @@ async function buildEventPayload(
   }
 }
 
-function findLatestEmail(conversationId: string, types?: EmailType[]) {
+function findLatestEmail(conversationId: string, types: EmailType[]) {
   return db.email.findFirst({
-    where: { conversationId, ...(types && { type: { in: types } }) },
+    where: { conversationId, type: { in: types } },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     select: { id: true, channelId: true },
   });
