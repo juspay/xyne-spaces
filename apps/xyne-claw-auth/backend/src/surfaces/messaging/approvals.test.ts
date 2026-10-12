@@ -311,4 +311,23 @@ describe("send-email card", () => {
   it("says plainly when there is no recipient rather than looking empty", () => {
     expect(describeWriteAction("spaces-send-ticket-email", { body: "x" })).toContain("(nobody)");
   });
+
+  // WhatsApp clips a card body at 1024 without a word, which used to drop the
+  // end of the message AND the note saying it was shortened.
+  it("stays under WhatsApp's body cap and still says what it left out", () => {
+    const many = (prefix: string): string[] =>
+      Array.from({ length: 30 }, (_, i) => `${prefix}${i}@a-rather-long-merchant-domain.com`);
+    const body = describeWriteAction("spaces-send-ticket-email", {
+      to: many("to"),
+      cc: many("cc"),
+      bcc: many("bcc"),
+      subject: "S".repeat(400),
+      body: "word ".repeat(600),
+    });
+    expect(body.length).toBeLessThanOrEqual(1024);
+    expect(body).toMatch(/to0@.* \+\d+ more/);
+    expect(body).toMatch(/cc cc0@.* \+\d+ more/);
+    expect(body).toMatch(/bcc bcc0@.* \+\d+ more/);
+    expect(body).toContain("the full message is sent");
+  });
 });

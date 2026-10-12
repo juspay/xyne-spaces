@@ -49,6 +49,27 @@ function paramText(value: unknown): string {
 
 const THREAD_PREVIEW_CHARS = 160;
 
+/** WhatsApp's hard cap on a card body. `fitCard` clips anything past it
+ *  without a word, so a card that must say what it left out stays under it. */
+const CARD_BODY_CHARS = 1024;
+
+/** As many addresses as fit in `max` characters, then how many were left off:
+ *  a clipped list must never read as the whole list of people being mailed. */
+function recipientList(value: unknown, max: number): string {
+  const all = (Array.isArray(value) ? value : str(value).split(/[,;\s]+/))
+    .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+    .filter(Boolean);
+  const shown: string[] = [];
+  let used = 0;
+  for (const address of all) {
+    if (shown.length > 0 && used + address.length + 2 > max) break;
+    shown.push(clamp(address, max));
+    used += address.length + 2;
+  }
+  const rest = all.length - shown.length;
+  return `${shown.join(", ")}${rest > 0 ? ` +${rest} more` : ""}`;
+}
+
 /** "MID: merchant_1234" per line, for a card that would otherwise hide the
  *  custom-field values being written. Capped so a wide form cannot push the
  *  rest of the card past WhatsApp's 1024-character body. */
@@ -155,16 +176,21 @@ export function describeWriteAction(tool: string, params: Record<string, unknown
     case "spaces-send-ticket-email": {
       // An email leaves the building. Recipients and the actual words are the
       // whole decision, so both go on the card even when that crowds it.
-      const to = paramText(params["to"]) || "(nobody)";
-      const cc = paramText(params["cc"]);
-      const bcc = paramText(params["bcc"]);
-      const subject = str(params["subject"]);
+      const to = recipientList(params["to"], 200) || "(nobody)";
+      const cc = recipientList(params["cc"], 120);
+      const bcc = recipientList(params["bcc"], 120);
+      const subject = clamp(str(params["subject"]).replace(/\s+/g, " ").trim(), 150);
       const fullBody = cardText(str(params["body"]));
-      const content = clamp(fullBody, MAX_DETAIL_CHARS);
       const lines = [`Email *${to}*${cc ? `, cc ${cc}` : ""}${bcc ? `, bcc ${bcc}` : ""} from this ticket`];
       if (subject) lines.push(`Subject: ${subject}`);
-      const cut = fullBody.length > MAX_DETAIL_CHARS ? "\n(shortened for this card — the full message is sent)" : "";
-      return `${lines.join("\n")}\n\n"${content}"${cut}`;
+      const head = lines.join("\n");
+      const cutNote = "\n(shortened for this card — the full message is sent)";
+      // The message takes whatever the recipients and subject left, so the
+      // card never passes the cap and loses its own "shortened" note.
+      const room = CARD_BODY_CHARS - head.length - cutNote.length - '\n\n""…'.length;
+      const limit = Math.min(MAX_DETAIL_CHARS, room);
+      const content = clamp(fullBody, limit);
+      return `${head}\n\n"${content}"${fullBody.length > limit ? cutNote : ""}`;
     }
     case "spaces-update-ticket": {
       const fields = describeFieldMap(params["customFields"]);

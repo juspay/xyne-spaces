@@ -92,7 +92,7 @@ vi.mock("../../services/goalRelooper.js", () => ({ persistGoalStart: vi.fn(async
 const sendConnectorLink = vi.fn(async (..._args: unknown[]) => undefined);
 vi.mock("./widgets.js", () => ({ sendConnectorLink }));
 
-const { handleInbound } = await import("./inbound.js");
+const { handleInbound, menuChoiceOf } = await import("./inbound.js");
 
 const account = {
   id: "acc-1",
@@ -129,6 +129,22 @@ async function settle(): Promise<void> {
   await vi.advanceTimersByTimeAsync(1000);
   await vi.advanceTimersByTimeAsync(0);
 }
+
+// Regression: "/ask-ai 1" was read as a new request for the agent, so the
+// approval was never redeemed and the model reported it as done.
+describe("menuChoiceOf", () => {
+  it("reads a choice sent bare or behind the agent's name", () => {
+    expect(menuChoiceOf("1")).toBe(1);
+    expect(menuChoiceOf("/ask-ai 1")).toBe(1);
+    expect(menuChoiceOf(" /ask-ai  2. ")).toBe(2);
+  });
+
+  it("leaves anything wordier as a message", () => {
+    expect(menuChoiceOf("/ask-ai check")).toBeNull();
+    expect(menuChoiceOf("/ask-ai 1 more thing")).toBeNull();
+    expect(menuChoiceOf("/ask-ai")).toBeNull();
+  });
+});
 
 describe("handleInbound", () => {
   beforeEach(() => {
@@ -191,6 +207,22 @@ describe("handleInbound", () => {
     await handleInbound(ctx, msg({ text: "what is the deploy status" }));
     // Deliberately no timer advance: the message must be on its way already.
     await vi.advanceTimersByTimeAsync(0);
+    expect(dispatchChannelRun).toHaveBeenCalledTimes(1);
+  });
+
+  // Regression: a linked device is handed its backlog again on reconnect, and
+  // every old request and command was run a second time.
+  it("ignores a message that is already old when it arrives", async () => {
+    const sentAt = Math.floor(Date.now() / 1000) - 20 * 60;
+    await handleInbound(ctx, msg({ text: "what is the deploy status", timestamp: sentAt }));
+    await settle();
+    expect(dispatchChannelRun).not.toHaveBeenCalled();
+  });
+
+  it("still handles a message that arrives a little late", async () => {
+    const sentAt = Math.floor(Date.now() / 1000) - 2 * 60;
+    await handleInbound(ctx, msg({ text: "what is the deploy status", timestamp: sentAt }));
+    await settle();
     expect(dispatchChannelRun).toHaveBeenCalledTimes(1);
   });
 

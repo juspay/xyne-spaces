@@ -74,10 +74,22 @@ async function isDuplicate(accountId: string, messageId: string): Promise<boolea
   }
 }
 
+/**
+ * The number a person meant, whether they sent "1" or "/ask-ai 1".
+ *
+ * In a chat where every message has to open with the agent's name, that is
+ * simply how someone replies — and without this the "1" reaches the agent as a
+ * new request, the approval is never redeemed, and the model is left to guess
+ * (wrongly) that it went through.
+ */
+export function menuChoiceOf(text: string): number | null {
+  return parseMenuChoice(text) ?? parseMenuChoice(parseAgentRoute(text).task);
+}
+
 /** A bare number against the newest numbered menu in this chat, and only when
  *  this is the person the menu was shown to. */
 async function menuToken(accountId: string, chatId: string, text: string, senderId: string): Promise<string | null> {
-  const choice = parseMenuChoice(text);
+  const choice = menuChoiceOf(text);
   return choice === null ? null : tokenForMenuChoice(accountId, chatId, choice, senderId);
 }
 

@@ -28,6 +28,8 @@ import { adapterRegistry } from '@/integrations/core/adapterRegistry';
 import { ChannelExternalSourceResolver } from '@/services/channelExternalSourceResolver';
 import { websocketService } from './websocketService';
 import { redisService } from './redisService';
+import { clearConversationAgentProgress, requestClawAgentCancel } from './agentProgressService';
+import { resolveDefaultReplyRecipients } from '@/utils/email';
 import { isRegisteredBot, getBotInfo } from '@/bots/core/bot-utils';
 import { PrismaClient } from '@prisma/client';
 import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
@@ -832,13 +834,49 @@ export class EmailService {
    * human wrote is their own row and is left alone.
    */
   async discardOpeningAutoDraft(conversationId: string): Promise<void> {
+    let draftingChannelId: string | null = null;
     try {
       // The seed row has no owner, so it is resolved above the caller's scope.
       await withWorkspaceScope(async () => {
+        const seed = await this.prisma.emailDraft.findFirst({
+          where: { conversationId, userId: null },
+          select: { channelId: true, autoDraftStatus: true },
+        });
+        if (seed?.autoDraftStatus === AutoDraftStatus.GENERATING) draftingChannelId = seed.channelId;
         await this.prisma.emailDraft.deleteMany({ where: { conversationId, userId: null } });
       });
     } catch (error) {
       logger.warn('[AutoDraft] failed to discard the opening draft after send', {
+        conversationId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    if (draftingChannelId) await this.stopOpeningDraftRun(conversationId, draftingChannelId);
+  }
+
+  /**
+   * The opening draft was still being written when its email went out. Deleting
+   * the seed row alone leaves the agent drafting a mail nobody will read, with
+   * its "working" pill sitting on the thread until the run ends by itself — so
+   * stop the run and clear the pill. Best-effort: the mail is already sent.
+   *
+   * Only reached while the seed says GENERATING, so the run being stopped is the
+   * drafting one and not something a person asked the same agent to do here.
+   */
+  private async stopOpeningDraftRun(conversationId: string, channelId: string): Promise<void> {
+    try {
+      const preference = await this.emailChannelPreferenceRepository.findByChannelId(channelId);
+      // The same agent and persona triggerAutoDraft dispatched the run as.
+      const agentSlug = preference?.autoDraftAgentSlug?.trim() || 'draft-agent';
+      if (preference?.ownerUserId) {
+        const res = await requestClawAgentCancel({ conversationId, agentSlug, userId: preference.ownerUserId });
+        if (!res.ok) {
+          logger.warn('[AutoDraft] could not cancel the opening draft run', { conversationId, status: res.status });
+        }
+      }
+      await clearConversationAgentProgress(conversationId, channelId);
+    } catch (error) {
+      logger.warn('[AutoDraft] failed to stop the opening draft run after send', {
         conversationId,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -1970,9 +2008,11 @@ export class EmailService {
 
     const to = params.to?.length
       ? params.to
-      : params.type === 'REPLY'
-        ? [initialEmail.replyTo?.[0] ?? initialEmail.from]
-        : [...new Set([initialEmail.replyTo?.[0] ?? initialEmail.from, ...initialEmail.to])];
+      : resolveDefaultReplyRecipients({
+          type: params.type,
+          initialEmail,
+          ownAddresses: [fromEmailAddress, preference.sendAsEmail, owner.email, externalSource.displayName],
+        });
     const cc = params.cc ?? (params.type === 'REPLY_ALL' && !params.to ? (initialEmail.cc || []) : []);
     const bcc = params.bcc ?? [];
 
