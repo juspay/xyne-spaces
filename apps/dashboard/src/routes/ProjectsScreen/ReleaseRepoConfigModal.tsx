@@ -14,6 +14,7 @@ import {
   ProviderBadge,
   repoColor,
   repoHostPath,
+  repoWebUrl,
 } from '../../components/Release/repoVisual';
 
 interface ReleaseRepoConfigModalProps {
@@ -52,7 +53,8 @@ const ReleaseRepoConfigModal = ({
       const id = app.mainReleaseBoardId;
       if (!id) continue;
       counts.set(id, (counts.get(id) ?? 0) + 1);
-      if (app.repoUrl && !repoUrlByBoard.has(id)) repoUrlByBoard.set(id, app.repoUrl);
+      const repoUrl = repoWebUrl(app.repo);
+      if (repoUrl && !repoUrlByBoard.has(id)) repoUrlByBoard.set(id, repoUrl);
     }
     return [...counts.entries()].map(([mainBoardId, appCount]) => ({
       mainBoardId,

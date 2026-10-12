@@ -3533,6 +3533,7 @@ model Repo {
   sdlcArtifacts   SdlcArtifact[]
   /// @deprecated -> back-relation of the legacy sdlc_tracks.repoId
   sdlcTracks      SdlcTrack[]
+  applications    Application[]
 
   @@unique([url, createdBy]) // Same repo can be added by different users
   @@unique([workspaceId, canonicalUrl])
@@ -3568,6 +3569,8 @@ model SdlcEntityLink {
 
   // The repository an edge is about is an endpoint, not a column: sourceId/targetId are
   // polymorphic, so no relation covers them and readers filter on relationType.
+  // RELEASE_CONFIG edges also have two partial unique indexes (one per hub and
+  // repository, one per board) that live in a raw migration — Prisma can't express them.
   @@unique([channelId, sourceType, sourceId, targetType, targetId, relationType], map: "sdlc_entity_links_channel_edge_key")
   @@unique([repoId, sourceType, sourceId, targetType, targetId, relationType]) // deprecated
   @@index([workspaceId])
@@ -4072,9 +4075,11 @@ model Application {
   projectId          String    // Project ID (no FK constraint)
   boardId            String    @unique // Application release board ID
   mainReleaseBoardId String?   // Owning main release board ID
-  channelId          String?   // Channel ID (no FK constraint)
+  channelId          String?   // Release channel: where release tickets are created (no FK constraint)
   regex              String    // Used to identify service
-  repoUrl            String
+  /// @deprecated -> use repoId (repos.url)
+  repoUrl            String?
+  repoId             String    // Repository this service is released from
   deployedCommit     String?   // Commit-range deployment state
   deployedVersion    String?   // Version-mode deployment state
   lastDeployedAt     DateTime?
@@ -4085,12 +4090,14 @@ model Application {
   updatedAt          DateTime? @updatedAt 
   applicationBoard Board @relation("ApplicationBoard", fields: [boardId], references: [id], onDelete: Restrict)
   mainReleaseBoard Board? @relation("MainReleaseBoardApplications", fields: [mainReleaseBoardId], references: [id], onDelete: Restrict)
+  repo             Repo   @relation(fields: [repoId], references: [id], onDelete: Restrict)
 
   @@unique([mainReleaseBoardId, name])
   @@index([projectId])
   @@index([channelId])
   @@index([boardId])
   @@index([mainReleaseBoardId])
+  @@index([repoId])
   @@map("applications")
   @@schema("public")
 }

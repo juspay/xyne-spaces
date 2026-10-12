@@ -1,5 +1,6 @@
 import { ReactElement, useEffect, useMemo, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
+import { BoardType } from '@xyne/shared';
 import { toast } from 'sonner';
 import { ChevronRight, CheckTickSingle as Check, SearchDefault as Search } from '@xyne/icons';
 import { useZero } from '../../../hooks/useZero';
@@ -51,7 +52,10 @@ function ProjectRow({
     queries.boardsListByProject({ projectId: project.id }),
     { enabled: expanded },
   );
-  const boardList = (boards ?? []) as readonly BoardLite[];
+  // Release boards are linked by their SDLC hub's release config, not by hand.
+  const boardList = (boards ?? []).filter(
+    board => board.boardType !== BoardType.RELEASE,
+  ) as readonly BoardLite[];
 
   const linkedCount = boardList.filter(board => locked.has(board.id)).length;
   const selectedCount = boardList.filter(board => selected.has(board.id)).length;
