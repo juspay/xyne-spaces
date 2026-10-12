@@ -50,13 +50,15 @@ import { isSdlcSurface } from '../../../config';
 import { useUsersById } from '../../../hooks/useUsers';
 import { queries } from '../../../zero/queries';
 import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
-import type { IntentDetection } from '../../../services/onDeviceIntent';
-import { dismissIntentCallSuggestion } from '../../../stores/intentCallSuggestionStore';
+import {
+  dismissIntentCallSuggestion,
+  type IntentCallSuggestion,
+} from '../../../stores/intentCallSuggestionStore';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { cn } from '../../../utils/classNames';
 
 interface IntentCallSuggestionCardProps {
-  detection: IntentDetection;
+  suggestion: IntentCallSuggestion;
   channelId: string;
   /** The message's own conversation — the thread, when `detection.surface` is 'thread'. */
   conversationId: string;
@@ -74,10 +76,11 @@ const TRACK_CATEGORY = 'INTENT_SUGGESTION';
 const START_TIMEOUT_MS = 20_000;
 
 export const IntentCallSuggestionCard: React.FC<IntentCallSuggestionCardProps> = ({
-  detection,
+  suggestion,
   channelId,
   conversationId,
 }) => {
+  const { detection, shownAt } = suggestion;
   const isThread = detection.surface === 'thread';
   const { user: currentUser } = useAuth();
   const currentUserId = currentUser?.id ?? '';
@@ -88,18 +91,10 @@ export const IntentCallSuggestionCard: React.FC<IntentCallSuggestionCardProps> =
   const [expanded, setExpanded] = useState(true);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
-  // Impression and dismissal share a clock so msShown means the same thing it
-  // does for the toast variant.
-  const [shownAt] = useState(() => Date.now());
+  // SUGGESTION_SHOWN and shownAt are recorded once per detection by the store;
+  // this card remounts with the virtualized list and must not count again.
   const intentKey = detection.intentId;
-
-  React.useEffect(() => {
-    globalClickTracker.trackManualEvent(TRACK_CATEGORY, 'SUGGESTION_SHOWN', undefined, {
-      intentKey,
-      hasAction: true,
-      surface: detection.surface,
-    });
-  }, [intentKey, detection.surface]);
+  const toggleExpanded = useCallback((): void => setExpanded(v => !v), []);
 
   // --- who gets called -------------------------------------------------------
 
@@ -155,7 +150,9 @@ export const IntentCallSuggestionCard: React.FC<IntentCallSuggestionCardProps> =
   const threadCallActive = isThread && !!conversation?.callId;
   // handleCallClick toggles: in this channel's call it would LEAVE. Not from here.
   const alreadyInThisCall = !isThread && isUserInCurrentChannelCall;
-  const callInProgress = threadCallActive || alreadyInThisCall;
+  // Same rule as the header's CallTrigger: a call nobody else can join is not offered.
+  const isAlone = !isThread && (channel?.participantCount ?? 0) === 1;
+  const startBlocked = threadCallActive || alreadyInThisCall || isAlone;
   // Channel-side: a live channel call makes this a join, which handleCallClick
   // already does; the label says so.
   const joinsExisting = !isThread && hasActiveCallInChannel && !isUserInCurrentChannelCall;
@@ -222,10 +219,22 @@ export const IntentCallSuggestionCard: React.FC<IntentCallSuggestionCardProps> =
       // there is nothing to watch — hand it over and clear the card.
       dismissIntentCallSuggestion(detection.messageId);
     } else {
+      // roomActor.send is synchronous: from idle the machine is already in
+      // `initiating`/`joining` by the time the effect first runs with
+      // `starting`, so record the idle-ness NOW rather than hoping to observe
+      // it. In the switch path we are in a call here and the effect sees the
+      // idle gap after DISCONNECT instead.
+      sawIdleSinceStart.current = !isInCall;
+      sawAttempt.current = false;
       setStarting(true);
     }
     handleCallClick();
-  }, [handleCallClick, detection.messageId]);
+  }, [handleCallClick, isInCall, detection.messageId]);
+
+  const confirmStart = useCallback(
+    (): void => handleConfirmCall(placeCall),
+    [handleConfirmCall, placeCall],
+  );
 
   const onStartCall = (): void => {
     track(joinsExisting ? 'Join call' : 'Start call');
@@ -254,13 +263,13 @@ export const IntentCallSuggestionCard: React.FC<IntentCallSuggestionCardProps> =
 
   const title = isThread ? 'Start a thread call' : 'Start a call in this channel';
   const startLabel = starting ? 'Starting…' : joinsExisting ? 'Join call' : 'Start call';
-  const startDisabled = callInProgress || starting;
+  const startDisabled = startBlocked || starting;
 
   return (
     <div className='mt-3 flex flex-col items-start gap-3' data-testid='intent-call-suggestion'>
       <button
         type='button'
-        onClick={() => setExpanded(v => !v)}
+        onClick={toggleExpanded}
         aria-expanded={expanded}
         data-track-category='INTENT_SUGGESTION'
         data-track-name='TOGGLE_INTENT_SUGGESTION'
@@ -314,7 +323,9 @@ export const IntentCallSuggestionCard: React.FC<IntentCallSuggestionCardProps> =
                   ? 'You are already in this call'
                   : threadCallActive
                     ? 'Call already in progress'
-                    : startLabel
+                    : isAlone
+                      ? 'You are the only one here'
+                      : startLabel
               }
             >
               <span>
@@ -348,7 +359,7 @@ export const IntentCallSuggestionCard: React.FC<IntentCallSuggestionCardProps> =
       <CallConfirmationModal
         isOpen={showConfirmModal}
         onClose={closeModal}
-        onConfirm={() => handleConfirmCall(placeCall)}
+        onConfirm={confirmStart}
         title={modalContent.title}
         subtitle={modalContent.subtitle}
         description={modalContent.description}

@@ -137,6 +137,7 @@ const ChatListItemComponent = ({
       channelId={channelId}
       projectId={projectId}
       channelScopeType={channelScopeType}
+      showIntentSuggestion
       // Every discussion is its own card, so each says who started it.
       showAvatar={discussionList ? true : showAvatar}
       conversation={conversation}

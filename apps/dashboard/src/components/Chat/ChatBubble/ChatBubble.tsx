@@ -144,6 +144,13 @@ interface ChatBubbleProps {
   /** Tag being inspected from the thread header; messages carrying it show a chip. */
   inspectedTag?: string | null;
   afterTextContent?: React.ReactNode;
+  /**
+   * Render the on-device start-call suggestion card under the sender's own
+   * message. Opt-in from the live channel list and thread list only: the same
+   * bubble is reused by pins, search results and the file viewer, which must
+   * not grow a second card with its own call state.
+   */
+  showIntentSuggestion?: boolean;
 }
 
 export const ChatBubble: React.FC<ChatBubbleProps> = ({
@@ -173,6 +180,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   highlightMessageId,
   inspectedTag = null,
   afterTextContent,
+  showIntentSuggestion = false,
 }) => {
   const { user } = useAuthContext();
   // Off inside hosts that embed chat for one purpose (the related-context popup).
@@ -1026,12 +1034,13 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   // first message from showing a thread-call card up in the channel list.
   const intentCallSuggestion = useIntentCallSuggestion(message.messageId);
   const intentCallCard =
+    showIntentSuggestion &&
     intentCallSuggestion &&
     message.senderId === user?.id &&
-    intentCallSuggestion.surface === context &&
+    intentCallSuggestion.detection.surface === context &&
     !isMessageDeleted ? (
       <IntentCallSuggestionCard
-        detection={intentCallSuggestion}
+        suggestion={intentCallSuggestion}
         channelId={channelId}
         conversationId={messageConversationId}
       />
