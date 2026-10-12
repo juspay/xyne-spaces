@@ -144,12 +144,6 @@ interface ChatBubbleProps {
   /** Tag being inspected from the thread header; messages carrying it show a chip. */
   inspectedTag?: string | null;
   afterTextContent?: React.ReactNode;
-  /**
-   * Render the on-device start-call suggestion card under the sender's own
-   * message. Opt-in from the live channel list and thread list only: the same
-   * bubble is reused by pins, search results and the file viewer, which must
-   * not grow a second card with its own call state.
-   */
   showIntentSuggestion?: boolean;
 }
 
@@ -1027,11 +1021,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     showThreadTags && context === 'thread' && !isSystemMessage && !isMessageDeleted ? (
       <MessageTags messageActs={message.messageActs} inspectedTag={inspectedTag} />
     ) : null;
-  // On-device "start a call" suggestion for the sender's own just-sent message.
-  // Local to this device (see intentCallSuggestionStore). Rendered in the list
-  // the message was sent from: a thread reply's card lives in the thread panel,
-  // a channel message's card in the channel — the surface check keeps a thread's
-  // first message from showing a thread-call card up in the channel list.
   const intentCallSuggestion = useIntentCallSuggestion(message.messageId);
   const intentCallCard =
     showIntentSuggestion &&

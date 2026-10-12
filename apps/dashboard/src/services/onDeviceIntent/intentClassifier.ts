@@ -43,12 +43,6 @@ export interface ClassifiableChannel {
   visibility?: string | undefined;
 }
 
-/**
- * Which composer the message was sent from. Travels with the detection so the
- * renderer can show the right thing in the right list: a thread reply suggests a
- * thread call under the message in the thread panel, a channel message suggests a
- * channel call under the message in the channel.
- */
 export type IntentSurface = 'channel' | 'thread';
 
 /** What a subscriber is told when an intent fires. Carries no message text. */
@@ -64,7 +58,6 @@ export interface IntentDetection {
    * subscriber never has to decide what an unroutable how-to should look like.
    */
   topicId?: string;
-  /** See IntentSurface. */
   surface: IntentSurface;
 }
 

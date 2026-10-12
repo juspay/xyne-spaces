@@ -1,33 +1,3 @@
-/**
- * Inline "Suggested by Xyne" card under a message the on-device classifier read as
- * a wish to talk ("can we hop on a call?"). Local to the sender's device — the
- * detection never leaves it and nobody else sees the card.
- *
- * Two shapes, picked by the composer the message came from (IntentDetection.surface):
- *   thread  → "Start a thread call" listing the thread's participants, the same
- *             set CallParticipantsSelectionModal pre-selects.
- *   channel → "Start a call in this channel", no participant row: a channel call
- *             rings the room, so naming its members adds noise, not information.
- *             Same call the header's phone button starts.
- *
- * Public channels only — the classifier never sees a private channel or DM
- * message (see intentClassifier.isEligible), so there is no DM branch here.
- *
- * Start call follows the same flow as the header buttons it stands in for:
- *   thread  → opens CallParticipantsSelectionModal, pre-filled with the thread's
- *             participants, exactly like the thread header's "Start call".
- *   channel → the "Start a call in this channel?" confirmation, then the same
- *             join-or-start the header phone button does.
- * Schedule opens the usual Schedule Call modal with the same people prefilled.
- *
- * For a channel call the card stays mounted until the call is actually
- * connected: the call hook keeps its "disconnect, then start" step in a ref, so
- * unmounting on click would drop a pending switch on the floor. If the attempt
- * fails — the room machine's `failed` state falls straight back to `idle` with
- * no UI of its own — or nothing happens within START_TIMEOUT_MS, the button
- * resets and a toast says so, leaving the card as the retry point. The thread
- * picker owns its own call start, so the card simply goes once it has fired.
- */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import { toast } from 'sonner';
@@ -60,21 +30,14 @@ import { cn } from '../../../utils/classNames';
 interface IntentCallSuggestionCardProps {
   suggestion: IntentCallSuggestion;
   channelId: string;
-  /** The message's own conversation — the thread, when `detection.surface` is 'thread'. */
   conversationId: string;
 }
 
-/** Names spelled out before "and N more people". */
 const NAMED_PARTICIPANTS = 2;
-/** Avatars shown before the +N badge takes the fourth slot. */
 const VISIBLE_AVATARS = 3;
 
 const TRACK_CATEGORY = 'INTENT_SUGGESTION';
 
-/**
- * How long "Starting…" may sit before giving up. Generous: a switch has to
- * disconnect the old call first. Covers a pending action that never fires.
- */
 const START_TIMEOUT_MS = 20_000;
 
 export const IntentCallSuggestionCard: React.FC<IntentCallSuggestionCardProps> = ({
@@ -93,20 +56,12 @@ export const IntentCallSuggestionCard: React.FC<IntentCallSuggestionCardProps> =
   const [expanded, setExpanded] = useState(true);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
-  // SUGGESTION_SHOWN and shownAt are recorded once per detection by the store;
-  // this card remounts with the virtualized list and must not count again.
   const intentKey = detection.intentId;
   const toggleExpanded = useCallback((): void => setExpanded(v => !v), []);
-
-  // --- who gets called -------------------------------------------------------
 
   const [conversation] = useCachedQuery(queries.getConversationById({ conversationId }), {
     enabled: isThread,
   });
-  // Thread participants, others only — self is added back when the call is
-  // placed, and "you" in the avatar row says nothing. Same rule as
-  // CallParticipantsSelectionModal: only people who authored or were mentioned,
-  // not those auto-added by read tracking.
   const threadUserIds = useMemo((): string[] => {
     if (!isThread) return [];
     return (conversation?.participants ?? [])
@@ -115,10 +70,6 @@ export const IntentCallSuggestionCard: React.FC<IntentCallSuggestionCardProps> =
       .filter(id => id !== currentUserId);
   }, [isThread, conversation?.participants, currentUserId]);
 
-  // Display list: only participants we can actually name. Avatars and text are
-  // derived from the SAME list so the +N badge and "N more people" agree — an id
-  // with no user record (deactivated, or a bot missing from the directory) would
-  // otherwise show as an avatar the sentence never counts.
   const shownParticipants = useMemo(
     (): Array<{ id: string; name: string }> =>
       threadUserIds.flatMap(id => {
@@ -143,17 +94,11 @@ export const IntentCallSuggestionCard: React.FC<IntentCallSuggestionCardProps> =
     return `${first}, ${second} and ${rest} more ${rest === 1 ? 'person' : 'people'}`;
   }, [shownParticipants]);
 
-  // --- starting the call -------------------------------------------------------
-
-  // Channel path only — the thread path hands off to the participant picker,
-  // which places its own call. A channel call rings the room: no explicit targets.
   const { handleCallClick, hasActiveCallInChannel, isUserInCurrentChannelCall, isInCall } =
     useCallActions({
       channelId,
       callDisplayName: channelDisplayName,
     });
-  // Same prompts as the header: "Start a call in this channel?" for a fresh
-  // call, "Switch to a new call?" when already in one.
   const { showConfirmModal, modalContent, handleCallAction, handleConfirmCall, closeModal } =
     useCallConfirmation({
       scopeType: channel?.scopeType,
@@ -165,13 +110,9 @@ export const IntentCallSuggestionCard: React.FC<IntentCallSuggestionCardProps> =
     });
 
   const threadCallActive = isThread && !!conversation?.callId;
-  // handleCallClick toggles: in this channel's call it would LEAVE. Not from here.
   const alreadyInThisCall = !isThread && isUserInCurrentChannelCall;
-  // Same rule as the header's CallTrigger: a call nobody else can join is not offered.
   const isAlone = !isThread && (channel?.participantCount ?? 0) === 1;
   const startBlocked = threadCallActive || alreadyInThisCall || isAlone;
-  // Channel-side: a live channel call makes this a join, which handleCallClick
-  // already does; the label says so.
   const joinsExisting = !isThread && hasActiveCallInChannel && !isUserInCurrentChannelCall;
 
   const track = useCallback(
@@ -186,9 +127,6 @@ export const IntentCallSuggestionCard: React.FC<IntentCallSuggestionCardProps> =
     [intentKey, detection.surface, shownAt],
   );
 
-  // Set when the call has been asked for. From then on the room machine is
-  // watched: idle → (initiating/joining/connecting) → connected dismisses the
-  // card; an attempt that drops back to idle before connecting is a failure.
   const [starting, setStarting] = useState(false);
   const isConnected = useSelector(roomActor, state => state.matches('connected'));
   const sawIdleSinceStart = useRef(false);
@@ -208,13 +146,10 @@ export const IntentCallSuggestionCard: React.FC<IntentCallSuggestionCardProps> =
       return;
     }
     if (isInCall) {
-      // Either we were idle to begin with, or the old call has been dropped
-      // ahead of the switch. Either way this attempt is ours.
       if (sawIdleSinceStart.current) sawAttempt.current = true;
       return;
     }
     if (sawAttempt.current) {
-      // `failed` → `idle` without ever reaching `connected`.
       resetStart("Couldn't start the call. Please try again.");
       return;
     }
@@ -232,15 +167,8 @@ export const IntentCallSuggestionCard: React.FC<IntentCallSuggestionCardProps> =
 
   const placeCall = useCallback((): void => {
     if (isSdlcSurface) {
-      // The host frame owns the call from here and this machine never moves, so
-      // there is nothing to watch — hand it over and clear the card.
       dismissIntentCallSuggestion(detection.messageId);
     } else {
-      // roomActor.send is synchronous: from idle the machine is already in
-      // `initiating`/`joining` by the time the effect first runs with
-      // `starting`, so record the idle-ness NOW rather than hoping to observe
-      // it. In the switch path we are in a call here and the effect sees the
-      // idle gap after DISCONNECT instead.
       sawIdleSinceStart.current = !isInCall;
       sawAttempt.current = false;
       setStarting(true);
@@ -259,7 +187,6 @@ export const IntentCallSuggestionCard: React.FC<IntentCallSuggestionCardProps> =
       setPickerOpen(true);
       return;
     }
-    // Runs placeCall now, or once a confirmation prompt is accepted.
     handleCallAction(placeCall);
   };
 

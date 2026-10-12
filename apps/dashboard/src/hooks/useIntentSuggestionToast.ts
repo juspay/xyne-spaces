@@ -31,16 +31,10 @@ export interface IntentSuggestionActions {
 type Suggestion =
   | {
       message: string;
-      /** Button label, or undefined when the message itself is the whole answer. */
       action?: string;
       run?: (actions: IntentSuggestionActions) => void;
     }
   | {
-      /**
-       * Rendered as a card under the sent message instead of a toast — see
-       * components/Chat/IntentCallSuggestion. The card owns its own copy,
-       * actions and tracking, so this row carries nothing else.
-       */
       inline: true;
     };
 
@@ -63,8 +57,6 @@ type Suggestion =
  * intent wired ahead of its UI, not a blank toast.
  */
 const SUGGESTIONS: Record<string, Suggestion> = {
-  // Inline card under the message: "Start a call" / "Start a thread call" with
-  // Schedule and Start call buttons. It was a toast offering only Schedule.
   'start-call': { inline: true },
   // How-to questions. These converge with the intents above where the product has
   // the same destination: "can we hop on a call" and "how do I start a call" are
@@ -123,7 +115,6 @@ export function useIntentSuggestionToast(actions: IntentSuggestionActions): void
     const copy = SUGGESTIONS[key];
     if (!copy) return;
     if ('inline' in copy) {
-      // No cooldown: the card is anchored to one message and dedupes by id.
       addIntentCallSuggestion(detection);
       return;
     }
