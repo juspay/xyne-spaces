@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { useMountedStylesheet } from '../../../hooks/useMountedStylesheet';
 import { getAttachmentStreamUrl } from '../../../services/clients/apiClient';
+import { streamSourceOf } from '../streamSource';
 import { cn } from '../../../utils/classNames';
 import {
   DropdownMenu,
@@ -162,7 +163,7 @@ export default function PdfPreview(props: PreviewerProps): ReactElement {
   useMountedStylesheet(pdfViewerCss);
   useMountedStylesheet(VIEWER_STYLES);
   const download = usePreviewDownload();
-  const fileId = props.file.id;
+  const fileUrl = streamSourceOf(props.file, getAttachmentStreamUrl);
 
   const paneRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -231,7 +232,7 @@ export default function PdfPreview(props: PreviewerProps): ReactElement {
     );
 
     let cancelled = false;
-    const task = openPdf(getAttachmentStreamUrl(fileId));
+    const task = openPdf(fileUrl);
     task.onPassword = (update: (password: string) => void, reason: number) => {
       if (cancelled) return;
       passwordRef.current = update;
@@ -275,7 +276,7 @@ export default function PdfPreview(props: PreviewerProps): ReactElement {
       viewer.cleanup();
       void task.destroy();
     };
-  }, [fileId, attempt]);
+  }, [fileUrl, attempt]);
 
   const finder = useMemo(
     () =>

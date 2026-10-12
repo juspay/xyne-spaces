@@ -17,7 +17,6 @@ import {
 } from 'lucide-react';
 import { type TabItem } from '../../ui/Tabs';
 import { cn } from '../../../utils/classNames';
-import { downloadFile } from '../../../services/clients/fileFetchService';
 import { useCitationDocs } from '../citationDocs';
 import CitationDocsPanel from '../CitationDocsPanel';
 import type { ConversationArtifact } from '../../../services/XyneAI/XyneAIArtifactsService';
@@ -370,7 +369,8 @@ function WorkspacePaneInner({
     writeLastOpen(conversationId, selectedId);
   }, [conversationId, selectedId]);
 
-  const showDetail = (tab === 'artifacts' || tab === 'sources') && selected !== null;
+  const showDetail =
+    (tab === 'artifacts' || tab === 'sources' || tab === 'files') && selected !== null;
   // A web page open in a tab, kept loaded for the agent while the conversation is.
   const hasOpenPages = surfaceItems.some(
     item => tabs.openIds.includes(item.id) && (item.kind === 'link' || item.kind === 'page'),
@@ -656,12 +656,7 @@ function WorkspacePaneInner({
                 isError={isError}
                 emptyTitle='No files yet'
                 emptyBody='Files the agent delivers in this conversation will appear here.'
-                onOpen={(artifact): void => {
-                  void downloadFile(
-                    `/xyne-ai/v2/attachments/${encodeURIComponent(artifact.openRef.refId)}/download`,
-                    artifact.title,
-                  );
-                }}
+                onOpen={openArtifact}
                 onPatch={patch}
               />
             </div>

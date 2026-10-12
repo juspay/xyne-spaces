@@ -25,7 +25,7 @@ function attachmentDownloadUrl(refId: string): string {
 export function artifactInlineActions(artifact: ConversationArtifact): ReactElement | null {
   const url = safeHttpUrl(artifact.openRef.url ?? artifact.url);
 
-  if (artifact.kind === 'FILE' || artifact.kind === 'SPEC') {
+  if (artifact.kind === 'SPEC') {
     return (
       <button
         type='button'
@@ -101,7 +101,12 @@ export function ArtifactInlineView({
     case 'FILE':
     case 'UPLOAD':
       return (
-        <FileView url={attachmentDownloadUrl(artifact.openRef.refId)} title={artifact.title} />
+        <FileView
+          url={attachmentDownloadUrl(artifact.openRef.refId)}
+          title={artifact.title}
+          {...(artifact.mimeType ? { mimeType: artifact.mimeType } : {})}
+          {...(artifact.size ? { size: artifact.size } : {})}
+        />
       );
     case 'SPEC':
       return (

@@ -1,8 +1,13 @@
 import type { ReactElement, ReactNode } from 'react';
 import { EmbeddedBrowser } from './EmbeddedBrowser';
 import { Centered, FileView, HtmlDocView, MarkdownView, SandboxedFrame } from './primitives';
-import { detectFileType } from '../FileViewer/utils';
-import { isBrowsableItem, type WorkspaceItem, type WorkspaceItemKind } from './itemDescriptor';
+import { previewerFor } from '../FilePreview/registry';
+import {
+  fileSourceOf,
+  isBrowsableItem,
+  type WorkspaceItem,
+  type WorkspaceItemKind,
+} from './itemDescriptor';
 
 /**
  * What a surface must supply, because only it knows how to render these:
@@ -69,14 +74,14 @@ export function ItemView({
     );
   }
 
-  const contentUrl = item.contentUrl ?? item.url;
+  const contentUrl = fileSourceOf(item);
   if (!contentUrl) return <Centered>This item has nothing to show.</Centered>;
 
   if (item.kind === 'html-doc') return <HtmlDocView url={contentUrl} title={item.title} />;
   if (item.kind === 'spec') return <MarkdownView url={contentUrl} title={item.title} />;
   if (item.kind === 'preview') return <SandboxedFrame url={contentUrl} title={item.title} />;
 
-  if (!detectFileType(item.mimeType ?? '', item.title)) {
+  if (!previewerFor({ name: item.title, mimetype: item.mimeType ?? '' })) {
     const fallback = slots?.fileFallback?.(item);
     if (fallback) return <>{fallback}</>;
   }
@@ -86,6 +91,7 @@ export function ItemView({
       url={contentUrl}
       title={item.title}
       {...(item.mimeType ? { mimeType: item.mimeType } : {})}
+      {...(item.size ? { size: item.size } : {})}
     />
   );
 }

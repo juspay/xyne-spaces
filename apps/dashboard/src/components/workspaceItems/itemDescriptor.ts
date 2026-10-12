@@ -1,4 +1,6 @@
 import type { ConversationArtifact } from '../../services/XyneAI/XyneAIArtifactsService';
+import { browserAddressOf } from '../FilePreview/streamSource';
+import type { PreviewFile } from '../FilePreview/types';
 
 export type WorkspaceItemKind =
   | 'canvas'
@@ -36,6 +38,7 @@ export interface WorkspaceItem {
   contentUrl?: string;
   provider?: string;
   mimeType?: string;
+  size?: number;
   versionRef?: string;
   stale?: boolean;
   /** The row this was mapped from, for views that still need their own fields. */
@@ -96,6 +99,8 @@ export function itemFromArtifact(artifact: ConversationArtifact): WorkspaceItem 
     refId: artifact.openRef.refId,
     ...(url ? { url } : {}),
     ...(contentUrl ? { contentUrl } : {}),
+    ...(artifact.mimeType ? { mimeType: artifact.mimeType } : {}),
+    ...(artifact.size ? { size: artifact.size } : {}),
     ...(artifact.provider ? { provider: artifact.provider } : {}),
     ...(artifact.latestVersionRef ? { versionRef: artifact.latestVersionRef } : {}),
     ...(artifact.status === 'STALE' ? { stale: true } : {}),
@@ -131,6 +136,31 @@ export function itemFromSdlc(row: SdlcItemInput): WorkspaceItem {
     ...(row.url && kind === 'file' ? { contentUrl: row.url } : {}),
     ...(row.mimeType ? { mimeType: row.mimeType } : {}),
     row,
+  };
+}
+
+/** Where an item's bytes are fetched from, which is not every item's own address. */
+export function fileSourceOf(item: WorkspaceItem): string | undefined {
+  return item.contentUrl ?? item.url;
+}
+
+/** A file as the app's file previewer takes it, built from an item's address. */
+export function previewFileFor(
+  file: {
+    source: string;
+    name: string;
+    mimeType?: string | undefined;
+    size?: number | undefined;
+  },
+  apiBase: string,
+): PreviewFile {
+  const streamUrl = browserAddressOf(file.source, apiBase);
+  return {
+    id: file.source,
+    name: file.name,
+    mimetype: file.mimeType ?? '',
+    size: file.size ?? 0,
+    ...(streamUrl ? { streamUrl } : {}),
   };
 }
 

@@ -1,8 +1,9 @@
-import { useEffect, useState, type ReactElement, type ReactNode } from 'react';
-import { cn } from '../../utils/classNames';
+import { useEffect, useMemo, useState, type ReactElement, type ReactNode } from 'react';
+import { API_BASE_URL } from '../../config';
 import { fetchFile } from '../../services/clients/fileFetchService';
-import { detectFileType } from '../FileViewer/utils';
+import { FilePreview } from '../FilePreview';
 import ReadmeViewer from '../FileViewer/ReadmeViewer';
+import { previewFileFor } from './itemDescriptor';
 
 export const IFRAME_SANDBOX = 'allow-scripts allow-forms allow-modals allow-popups';
 
@@ -66,32 +67,23 @@ export function SandboxedFrame({ url, title }: { url: string; title: string }): 
   );
 }
 
+/** A file, drawn by the app's file previewer. */
 export function FileView({
   url,
   title,
   mimeType,
+  size,
 }: {
   url: string;
   title: string;
   mimeType?: string | undefined;
+  size?: number | undefined;
 }): ReactElement {
-  const fileType = detectFileType(mimeType ?? '', title);
-  const { file, loading, error } = useRemoteFile(
-    url,
-    title,
-    fileType?.type === 'pdf' ? 'application/pdf' : (mimeType ?? 'application/octet-stream'),
+  const file = useMemo(
+    () => previewFileFor({ source: url, name: title, mimeType, size }, API_BASE_URL),
+    [url, title, mimeType, size],
   );
-  const ViewerComponent = fileType?.component;
-
-  if (loading) return <Spinner />;
-  if (error) return <Centered>Could not load this file.</Centered>;
-  if (!file || !ViewerComponent) return <Centered>Preview not available for this file.</Centered>;
-
-  return (
-    <div className={cn(fileType.wrapperClass, 'h-full max-h-full max-w-full bg-background')}>
-      <ViewerComponent source={file} fileName={title} />
-    </div>
-  );
+  return <FilePreview key={url} file={file} />;
 }
 
 export function MarkdownView({ url, title }: { url: string; title: string }): ReactElement {
