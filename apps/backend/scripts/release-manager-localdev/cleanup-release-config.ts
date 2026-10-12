@@ -121,7 +121,7 @@ async function main(): Promise<void> {
   console.log(`\n  RELEASE boards        : ${allBoardIds.length}`);
   for (const b of releaseBoards) console.log(`     · "${b.name}"  (project ${b.projectId})`);
   console.log(`  Applications          : ${applications.length}`);
-  for (const a of applications) console.log(`     · ${a.name}  ${a.repo.url}`);
+  for (const a of applications) console.log(`     · ${a.name}  ${a.repo?.url ?? '(no repository)'}`);
   console.log(`  Tickets on boards     : ${ticketIds.length}${ticketIds.length ? '  (' + tickets.map(t => t.xyneId).join(', ') + ')' : ''}`);
   console.log(`  Stages                : ${stageIds.length}`);
   console.log(`  Sub-tickets           : ${subTicketIds.length}`);
