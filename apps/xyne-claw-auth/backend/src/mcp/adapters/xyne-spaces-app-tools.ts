@@ -47,6 +47,9 @@ export const xyneSpacesAppToolsAdapter: StdioMcpAdapter = {
         XYNE_SPACES_TOKEN: appToken,
         XYNE_SPACES_AUTH_MODE: "app",
         XYNE_USER_ID: userId,
+        // KNOWN EXCEPTION (XYNE-65520): this first-party child keeps the root
+        // INTERNAL_S2S_KEY — and ONLY that key — until the signed delegation
+        // token ships. TODO(XYNE-65483): replace with the delegation token.
         INTERNAL_S2S_KEY: process.env["INTERNAL_S2S_KEY"] ?? "",
       },
     };
