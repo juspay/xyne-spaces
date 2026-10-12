@@ -12,6 +12,8 @@ export type BranchableMutatorField = {
 
 // Same three rules formsRepository.ts enforces on the REST path: the referenced option must
 // exist, its owning field must be Single Select, and that field must not itself be branch-scoped.
+// Without this, a client using this mutator directly (bypassing REST) could write a
+// parentOptionId that formsRepository.ts would have rejected.
 export const validateFieldBranch = (
   field: BranchableMutatorField,
   allFields: readonly BranchableMutatorField[],

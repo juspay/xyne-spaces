@@ -109,6 +109,13 @@ import {
   validateUniqueFieldNames,
   assertFieldIsCurrentlyActive,
 } from './formsMutatorHelpers.js';
+// Re-exported so the backend's server mutators run the exact same form-field checks as the
+// client mutators, instead of keeping their own copy that can drift.
+export {
+  validateFieldBranches,
+  validateUniqueFieldNames,
+  assertFieldIsCurrentlyActive,
+} from './formsMutatorHelpers.js';
 import type { MessageType as MessageTypeEnum } from './schema.js';
 import { extractAllMentions } from '../utils/mentionParser.js';
 import {
