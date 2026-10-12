@@ -16,7 +16,7 @@ import {
   MessageType,
   ConversationParticipation,
 } from '@xyne/shared';
-import type { TicketCardSummary, BoardMetadata } from '@xyne/shared';
+import type { TicketCardSummary, BoardMetadata, ParentMessageSummary } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { EntitySequenceService } from '@/services/entitySequenceService';
 import { calculateETADeadline } from '@/utils/etaCalculation';
@@ -52,9 +52,8 @@ import { vespaQueue } from '@/queues/vespaQueue';
 import { ticketSchema } from '@/vespa/src/types';
 import {
   syncConversationTicketMdFromPrismaTicket,
-  linkSubTicketConversationToParent,
+  applyAnchorToConversations,
 } from '@/utils/ticketMd';
-import { recordTicketTimelineEvent } from '@/services/ticketTimelineEventService';
 import { commitBulkTicketBatchTx } from '@/bypassAcl/transactions/bulkTicketBatchService';
 import { advisoryXactLock } from '@/bypassAcl/lockServices';
 import { logger } from '@/utils/logger';
@@ -982,41 +981,79 @@ export const commitSubTicketLinks = async (
     })),
   });
 
-  // The rest of what subTicketService.createSubTicket does per child: the child's
-  // thread needs the parent's anchor card, and the parent's timeline needs a
-  // SUBTICKET_CREATED entry. Looped because both are inherently per-child.
-  for (const { child, subTicketId } of rows) {
-    await linkSubTicketConversationToParent(tx, child.ticketId, parent.id);
-
-    await recordTicketTimelineEvent(
-      {
-        activity: {
-          ticketId: parent.id,
-          updatedBy: ctx.createdBy,
-          activityType: ActivityType.SUBTICKET_CREATED,
-          workspaceId: parent.workspaceId,
-          value: {
-            subTicketId,
-            subTicketTitle: child.input.title,
-            subTicketXyneId: child.xyneId,
-          },
-          timestamp: child.stageEnteredAt,
-        },
-        ...(parent.conversationId
-          ? {
-              message: {
-                conversationId: parent.conversationId,
-                senderId: ctx.createdBy,
-                content: `Subticket ${child.xyneId} created: ${child.input.title}`,
-                activityType: ActivityType.SUBTICKET_CREATED,
-                workspaceId: parent.workspaceId,
-                createdAt: child.stageEnteredAt,
-              },
-            }
-          : {}),
+  // The rest of what subTicketService.createSubTicket does per child, batched:
+  // every child's thread gets the same parent anchor card, and the parent's
+  // timeline gets one SUBTICKET_CREATED entry per child.
+  const [parentTicket, parentConversation] = await Promise.all([
+    tx.ticket.findUnique({
+      where: { id: parent.id },
+      select: {
+        conversationId: true,
+        channelId: true,
+        xyneId: true,
+        title: true,
+        createdBy: true,
+        createdAt: true,
       },
-      tx as Prisma.TransactionClient
+    }),
+    tx.conversation.findUnique({
+      where: { conversationId: parent.conversationId },
+      select: { initialMessageId: true },
+    }),
+  ]);
+  if (parentTicket?.conversationId && parentConversation) {
+    await applyAnchorToConversations(
+      tx,
+      children.map((child) => child.conversationId),
+      {
+        messageId: parentConversation.initialMessageId,
+        conversationId: parentTicket.conversationId,
+        channelId: parentTicket.channelId,
+        senderId: parentTicket.createdBy,
+        content: `${parentTicket.xyneId} · ${parentTicket.title}`,
+        msgType: MessageType.SYSTEM as ParentMessageSummary['msgType'],
+        createdAt: parentTicket.createdAt.getTime(),
+        anchorType: 'SUBTICKET',
+      }
     );
+  }
+
+  // Same rows recordTicketTimelineEvent writes, one insert per table.
+  await tx.ticketActivity.createMany({
+    data: rows.map(({ child, subTicketId }) => ({
+      ticketId: parent.id,
+      updatedBy: ctx.createdBy,
+      activityType: ActivityType.SUBTICKET_CREATED,
+      workspaceId: parent.workspaceId,
+      value: {
+        subTicketId,
+        subTicketTitle: child.input.title,
+        subTicketXyneId: child.xyneId,
+      },
+      timestamp: child.stageEnteredAt,
+    })),
+  });
+
+  if (parent.conversationId) {
+    await tx.message.createMany({
+      data: rows.map(({ child }) => ({
+        conversationId: parent.conversationId,
+        senderId: ctx.createdBy,
+        content: `Subticket ${child.xyneId} created: ${child.input.title}`,
+        msgType: MessageType.SYSTEM,
+        hasAttachment: false,
+        edited: false,
+        isDeleted: false,
+        isSent: true,
+        showInChannel: false,
+        workspaceId: parent.workspaceId,
+        createdAt: child.stageEnteredAt,
+        metadata: {
+          activityType: ActivityType.SUBTICKET_CREATED,
+          isTicketActivity: true,
+        } as Prisma.InputJsonValue,
+      })),
+    });
   }
 };
 

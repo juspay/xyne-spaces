@@ -1,7 +1,7 @@
 import { transaction } from '../base';
 import { db } from '@/database/client';
 import { BulkTicketMode } from '@xyne/shared';
-import { resolveInheritedOwner, linkCreatedEntities } from '@/sdlc/entityLinkService';
+import { resolveInheritedOwner, linkCreatedEntitiesBatch } from '@/sdlc/entityLinkService';
 import { syncConversationSubTicketsMd } from '@/utils/ticketMd';
 import {
   commitRows,
@@ -53,18 +53,16 @@ export function commitBulkTicketBatchTx(params: {
       if (ctx.sourceConversationId) {
         const owner = await resolveInheritedOwner(tx, ctx.sourceConversationId);
         if (owner) {
-          for (const row of prepared) {
-            await linkCreatedEntities(
-              tx,
-              {
-                owner,
-                channelId: row.input.channelId,
-                conversationId: row.conversationId,
-                ticketId: row.ticketId,
-              },
-              { workspaceId: row.workspaceId, userId: ctx.createdBy }
-            );
-          }
+          await linkCreatedEntitiesBatch(
+            tx,
+            owner,
+            prepared.map((row) => ({
+              channelId: row.input.channelId,
+              conversationId: row.conversationId,
+              ticketId: row.ticketId,
+            })),
+            { workspaceId: ctx.workspaceId, userId: ctx.createdBy }
+          );
         }
       }
 
