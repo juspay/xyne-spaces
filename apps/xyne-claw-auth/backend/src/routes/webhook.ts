@@ -24,7 +24,7 @@ import {
   experimentRepository,
 } from "../repositories/index.js";
 import type { DraftAgentSpec } from "../lib/agent-card.js";
-import { postAgentDraftCard, draftSpecFromCreateAgentParams } from "../lib/agent-draft-card.js";
+import { createAgentQueueError, postAgentDraftCard, draftSpecFromCreateAgentParams } from "../lib/agent-draft-card.js";
 import { toResolvedAgent, type ResolvedAgent } from "../lib/resolved-agent.js";
 import { stripLeadingAgentMention } from "../lib/strip-agent-mention.js";
 import { resolveUserSpacesAuth } from "../surfaces/spaces/user-auth.js";
@@ -678,6 +678,12 @@ async function pendingActionTargetValidation(
 ): Promise<{ error: string | null; channelName?: string }> {
   const conversationId = pendingActionTargetConversationId(action);
   const channelId = pendingActionTargetChannelId(action);
+
+  if (action["tool"] === "create-agent" && ctx.agentOrgId) {
+    const params = action["params"] && typeof action["params"] === "object" ? (action["params"] as Record<string, unknown>) : {};
+    const error = await createAgentQueueError(params, ctx.agentOrgId);
+    if (error) return { error };
+  }
 
   if (action["tool"] === "user-send-message" && !!conversationId === !!channelId) {
     return { error: "provide exactly one target: use conversationId for an existing thread or channelId to post into a channel" };

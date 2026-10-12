@@ -1,9 +1,9 @@
-import { chatMessageRepository } from "../repositories/index.js";
+import { agentRepository, chatMessageRepository } from "../repositories/index.js";
 import { postAgentMessage } from "../surfaces/spaces/post-message.js";
 import { errMsg } from "./errors.js";
 import { postFlowCard } from "./flow-card-delivery.js";
 import { agentDraftTranscript, prepareAgentDraftCard } from "./agent-card-render.js";
-import type { DraftAgentSpec } from "./agent-card.js";
+import { isValidAgentSlug, type DraftAgentSpec } from "./agent-card.js";
 
 /**
  * Where the draft card is posted and who it belongs to. Every caller already
@@ -181,4 +181,19 @@ export function draftSpecFromCreateAgentParams(params: Record<string, unknown>):
     ...(scope === "personal" || scope === "global" ? { scope } : {}),
     ...(str("summary") ? { summary: str("summary") as string } : {}),
   };
+}
+
+export async function createAgentQueueError(
+  params: Record<string, unknown>,
+  orgId: string,
+): Promise<string | null> {
+  const spec = draftSpecFromCreateAgentParams(params);
+  if (!spec) return null;
+  if (!isValidAgentSlug(spec.slug)) {
+    return `\`${spec.slug}\` isn't a usable agent identifier — ask again with a simple name like "ticket triage".`;
+  }
+  const existing = await agentRepository.findBySlug(spec.slug, orgId);
+  return existing
+    ? `An agent called **${existing.name}** (\`${spec.slug}\`) already exists here — ask again with a different name, or update the existing agent.`
+    : null;
 }

@@ -2,13 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../db.js", () => ({ prisma: {} }));
 vi.mock("../logger.js", () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) }));
-vi.mock("../repositories/index.js", () => ({ agentRepository: {}, chatMessageRepository: {} }));
+const findBySlug = vi.fn();
+vi.mock("../repositories/index.js", () => ({ agentRepository: { findBySlug }, chatMessageRepository: {} }));
 vi.mock("../repositories/agentRequestRepository.js", () => ({ agentRequestRepository: {} }));
 vi.mock("../routes/tools.js", () => ({ buildAvailableToolsCatalog: vi.fn() }));
 vi.mock("../surfaces/spaces/post-message.js", () => ({ postAgentMessage: vi.fn() }));
 vi.mock("./flow-card-delivery.js", () => ({ postFlowCard: vi.fn() }));
 
-const { draftSpecFromCreateAgentParams } = await import("./agent-draft-card.js");
+const { createAgentQueueError, draftSpecFromCreateAgentParams } = await import("./agent-draft-card.js");
 
 const base = {
   name: "PR Review Agent",
@@ -101,5 +102,30 @@ describe("draftSpecFromCreateAgentParams", () => {
 
     expect(spec?.knowledge).toBeUndefined();
     expect(spec?.memory).toBeUndefined();
+  });
+});
+
+describe("createAgentQueueError", () => {
+  it("refuses a slug that already names an agent in the org", async () => {
+    findBySlug.mockResolvedValueOnce({ name: "PR Review Agent" });
+
+    const error = await createAgentQueueError({ ...base }, "org-1");
+
+    expect(findBySlug).toHaveBeenLastCalledWith("pr-review-agent", "org-1");
+    expect(error).toContain("already exists");
+    expect(error).toContain("`pr-review-agent`");
+  });
+
+  it("lets a new slug through", async () => {
+    findBySlug.mockResolvedValueOnce(null);
+
+    expect(await createAgentQueueError({ ...base }, "org-1")).toBeNull();
+  });
+
+  it("leaves params that are not a usable draft to the write card", async () => {
+    findBySlug.mockClear();
+
+    expect(await createAgentQueueError({ description: "x" }, "org-1")).toBeNull();
+    expect(findBySlug).not.toHaveBeenCalled();
   });
 });
