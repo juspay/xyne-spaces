@@ -244,7 +244,14 @@ const CallsScreen = (): ReactElement => {
   const [selectedCall, setSelectedCall] = useState<CallDisplayData | null>(null);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const [isInstantCallOpen, setIsInstantCallOpen] = useState(false);
-  const [shouldMountCallSheets, setShouldMountCallSheets] = useState(false);
+  const router = useRouter();
+  // The Instant Call sheet exists only while it is open or closing. Left mounted it keeps a full
+  // fullscreen sheet (native glass buttons, a 20-row user list) alive under the call list,
+  // re-rendering it on every user/channel update and republishing it to the portal host on every
+  // render of this screen, which is what made this list laggy.
+  const [isInstantCallMounted, setIsInstantCallMounted] = useState(false);
+  const isInstantCallOpenRef = useRef(false);
+  isInstantCallOpenRef.current = isInstantCallOpen;
   const [shouldLoadRemoteAvatars, setShouldLoadRemoteAvatars] = useState(false);
 
   const handleLayout = useCallback(() => {
@@ -265,21 +272,16 @@ const CallsScreen = (): ReactElement => {
   }, [isFocused, liveDataEnabled, zero]);
 
   useEffect(() => {
-    if (!isFocused || (shouldMountCallSheets && shouldLoadRemoteAvatars)) {
+    if (!isFocused || shouldLoadRemoteAvatars) {
       return;
     }
 
     const task = InteractionManager.runAfterInteractions(() => {
-      if (!shouldMountCallSheets) {
-        setShouldMountCallSheets(true);
-      }
-      if (!shouldLoadRemoteAvatars) {
-        setShouldLoadRemoteAvatars(true);
-      }
+      setShouldLoadRemoteAvatars(true);
     });
 
     return (): void => task.cancel();
-  }, [isFocused, shouldLoadRemoteAvatars, shouldMountCallSheets]);
+  }, [isFocused, shouldLoadRemoteAvatars]);
 
   // Row press: a finished call opens the full call detail screen (summary,
   // timeline, transcript); live and scheduled calls keep the quick-actions sheet.
@@ -295,6 +297,17 @@ const CallsScreen = (): ReactElement => {
     },
     [router],
   );
+  // Stable refs so the memoised CallsFab (and its Portal push) skips live-data re-renders.
+  const openInstantCall = useCallback(() => {
+    setIsInstantCallMounted(true);
+    setIsInstantCallOpen(true);
+  }, []);
+  const closeInstantCall = useCallback(() => setIsInstantCallOpen(false), []);
+  // Unmount once its close animation has finished, unless it was reopened in the meantime.
+  const unmountInstantCall = useCallback(() => {
+    if (!isInstantCallOpenRef.current) setIsInstantCallMounted(false);
+  }, []);
+  const openScheduleCall = useCallback(() => router.push('/(protected)/schedule-call'), [router]);
 
   // Handler for avatar press - same destination as the row
   const handleAvatarPress = handleCallPress;
@@ -432,14 +445,18 @@ const CallsScreen = (): ReactElement => {
 
       {isFocused && (
         <CallsFab
-          onStartCall={() => setIsInstantCallOpen(true)}
-          onScheduleCall={() => {}}
+          onStartCall={openInstantCall}
+          onScheduleCall={openScheduleCall}
           isHidden={isInstantCallOpen || isDetailsOpen}
         />
       )}
 
-      {(shouldMountCallSheets || isInstantCallOpen) && (
-        <InstantCallSheet isOpen={isInstantCallOpen} onClose={() => setIsInstantCallOpen(false)} />
+      {isInstantCallMounted && (
+        <InstantCallSheet
+          isOpen={isInstantCallOpen}
+          onClose={closeInstantCall}
+          onDismissed={unmountInstantCall}
+        />
       )}
 
       {selectedCall ? (

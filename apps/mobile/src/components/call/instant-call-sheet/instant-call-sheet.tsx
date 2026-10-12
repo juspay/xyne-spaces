@@ -329,9 +329,15 @@ const ActionBar = ({
 interface InstantCallSheetProps {
   isOpen: boolean;
   onClose: () => void;
+  /** Fired once the sheet has fully closed, so the parent can unmount it. */
+  onDismissed?: () => void;
 }
 
-export const InstantCallSheet: React.FC<InstantCallSheetProps> = ({ isOpen, onClose }) => {
+export const InstantCallSheet: React.FC<InstantCallSheetProps> = ({
+  isOpen,
+  onClose,
+  onDismissed,
+}) => {
   const searchInputRef = useRef<TextInput>(null);
   const afterDismissRef = useRef<(() => void) | null>(null);
   const insets = useSafeAreaInsets();
@@ -375,7 +381,8 @@ export const InstantCallSheet: React.FC<InstantCallSheetProps> = ({ isOpen, onCl
     reset();
     onClose();
     afterDismiss?.();
-  }, [reset, onClose]);
+    onDismissed?.();
+  }, [reset, onClose, onDismissed]);
 
   const handleSheetOpenChange = useCallback(
     (open: boolean) => {

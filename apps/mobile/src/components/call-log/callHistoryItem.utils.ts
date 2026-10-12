@@ -5,7 +5,7 @@
  */
 import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../zero/queries';
-import { CallOrigin, CallStatus, InvitationResponse } from '@xyne/shared';
+import { CallOrigin, CallStatus, ChannelScopeType, InvitationResponse } from '@xyne/shared';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -123,9 +123,9 @@ export function hasPreviewParticipantJoined(
 
 /** Total participants: live rows for an active call, the denormalized count otherwise. */
 export function getCallParticipantCount(call: {
-  status?: string | null;
-  participantCount?: number | null;
-  participants?: readonly unknown[] | null;
+  status?: string | null | undefined;
+  participantCount?: number | null | undefined;
+  participants?: readonly unknown[] | null | undefined;
 }): number {
   if (call.status === CallStatus.ACTIVE) {
     return call.participants?.length ?? call.participantCount ?? 0;
@@ -216,4 +216,46 @@ export function isScheduledCallJoinable(call: {
   if (call.status === CallStatus.ACTIVE) return true;
 
   return Date.now() >= call.startsAt;
+}
+
+export function isScheduledCallManageable(
+  call: { status: string; organizerId?: string | null; createdByUserId: string },
+  currentUserId: string | undefined,
+): boolean {
+  if (!currentUserId || call.status !== CallStatus.SCHEDULED) return false;
+
+  const organizerUserId = call.organizerId ?? call.createdByUserId;
+  return organizerUserId === currentUserId;
+}
+
+export function canEditScheduledCallParticipants(
+  call: {
+    status: string;
+    organizerId?: string | null;
+    createdByUserId: string;
+    channelId?: string | null;
+  },
+  currentUserId: string | undefined,
+  visibleChannels: readonly { id: string; scopeType: ChannelScopeType }[],
+): boolean {
+  if (!currentUserId || call.status !== CallStatus.SCHEDULED || !call.channelId) return false;
+  if (isScheduledCallManageable(call, currentUserId)) return false;
+  if (visibleChannels.length === 0) return false;
+
+  const channel = visibleChannels.find(c => c.id === call.channelId);
+  return (
+    !channel ||
+    channel.scopeType === ChannelScopeType.DM ||
+    channel.scopeType === ChannelScopeType.GROUP_DM
+  );
+}
+
+export function hasOnlyParticipantPreview(call: {
+  status: string;
+  participantCount?: number | null | undefined;
+  participants?: readonly unknown[] | null | undefined;
+}): boolean {
+  if (call.status === CallStatus.ACTIVE) return false;
+  if (call.participantCount === null || call.participantCount === undefined) return true;
+  return getCallParticipantCount(call) > (call.participants?.length ?? 0);
 }

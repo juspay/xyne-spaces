@@ -13,6 +13,7 @@ import { isScheduledCallJoinable } from '@/src/components/call-log/callHistoryIt
 import { useBubbleAccent } from '@/src/theme/useBubbleAccent';
 import { buildSearchHighlightSegments, type HighlightSegment } from '@/src/utils/searchHighlight';
 import {
+  EllipsisVertical,
   Phone,
   PhoneIncoming,
   PhoneOutgoing,
@@ -318,6 +319,8 @@ const CallLogItem = memo(
     const foregroundColor = useCSSVariable('--color-secondary-foreground') as string;
     const backgroundColor = useCSSVariable('--color-accent-foreground') as string;
     const errorIconColor = useCSSVariable('--color-status-danger') as string;
+    // Text and icon on the Join pill: contrast colour on the accent fill, normal otherwise.
+    const controlColor = isJoinable ? backgroundColor : foregroundColor;
 
     // Inline handlers with isInCall guard
     const handleJoin = useCallback((): void => {
@@ -335,6 +338,10 @@ const CallLogItem = memo(
       handleCallback(call);
     }, [call, isInCall]);
     const handleTranscript = useCallback((): void => handleViewTranscript(call), [call]);
+
+    // The ⋮ opens the call details sheet, which holds Copy Link and Delete. It shows when the
+    // sheet has one of them to offer: anyone can copy the link, only the organiser deletes.
+    const hasMenu = isScheduled && (Boolean(call.roomLink) || call.isOutgoing);
     const handleRowPress = useCallback((): void => onPress?.(call), [call, onPress]);
     const handleAvatarPress = useCallback((): void => onAvatarPress?.(call), [call, onAvatarPress]);
 
@@ -429,9 +436,37 @@ const CallLogItem = memo(
             <ScrollTextIcon size={16} color={foregroundColor} />
           </Pressable>
         )}
+        {hasMenu && !isUserInThisDevice ? (
+          <Pressable
+            onPress={handleJoin}
+            className={cn(
+              'ml-2 h-9 flex-row items-center gap-1.5 rounded-full px-3 active:opacity-90',
+              !isJoinable && 'bg-secondary/80',
+            )}
+            style={isJoinable ? { backgroundColor: accentBg } : undefined}
+          >
+            <Phone size={18} color={controlColor} />
+            <Text className='ml-1 text-sm font-semibold' style={{ color: controlColor }}>
+              {call.hasJoined ? 'Switch' : 'Join'}
+            </Text>
+          </Pressable>
+        ) : null}
+        {hasMenu ? (
+          <Pressable
+            onPress={handleRowPress}
+            onPressIn={(): void => {
+              void haptics.buttonTap();
+            }}
+            accessibilityRole='button'
+            accessibilityLabel='More options'
+            className='-mr-1 h-9 w-9 items-center justify-center rounded-full active:bg-secondary'
+          >
+            <EllipsisVertical size={18} color={foregroundColor} />
+          </Pressable>
+        ) : null}
 
         {/* Join / Restart button — hidden if user is already in this call on this device */}
-        {!isUserInThisDevice && (
+        {!isUserInThisDevice && !hasMenu && (
           <Pressable
             onPress={isActive || isScheduled ? handleJoin : handleCb}
             className={cn(
