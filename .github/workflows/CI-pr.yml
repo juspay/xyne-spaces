@@ -23,7 +23,7 @@ concurrency:
 
 jobs:
   ci:
-    uses: juspay/xyne-spaces/.github/workflows/ci.yml@main
+    uses: juspay/xyne-spaces/.github/workflows/ci.yml@fix/XYNE-66272-automation-new-ui
     secrets: inherit
     permissions:
       contents: read
