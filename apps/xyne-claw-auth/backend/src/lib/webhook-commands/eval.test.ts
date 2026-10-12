@@ -220,18 +220,18 @@ describe("eval judge arms", () => {
       kind: "eval",
       question: "summarize the channel",
       providers: [],
-      judges: ["llm", "jev", "ournormaljev", "ourtrainedjev"],
+      judges: ["llm", "ournormaljev", "ourtrainedjev"],
       opts: [],
     });
   });
 
   it("expands aliases and all, and ignores unknown judges", async () => {
     const { normalizeJudges, armKey, armLabel } = await import("../eval-run.js");
-    expect(normalizeJudges(["all"])).toEqual(["llm", "jev", "ournormaljev", "ourtrainedjev"]);
-    expect(normalizeJudges(["trained", "jev", "bogus", "jev", "normal"])).toEqual(["ourtrainedjev", "jev", "ournormaljev"]);
+    expect(normalizeJudges(["all"])).toEqual(["llm", "ournormaljev", "ourtrainedjev"]);
+    expect(normalizeJudges(["trained", "jev", "bogus", "jev", "normal"])).toEqual(["ourtrainedjev", "ournormaljev"]);
     expect(normalizeJudges(["ourjev"])).toEqual([]);
     expect(normalizeJudges([])).toEqual([]);
-    expect(armKey({ provider: "claude", useOverride: true, judge: "jev" })).toBe("claude-jev");
+    expect(armKey({ provider: "claude", useOverride: true, judge: "ournormaljev" })).toBe("claude-ournormaljev");
     expect(armLabel({ provider: "claude", judge: "ourtrainedjev" })).toBe("claude + ourtrainedjev");
   });
 
@@ -253,7 +253,7 @@ describe("eval judge arms", () => {
       },
     } as unknown as DebugTraceRun;
     const traces = new Map<string, EvalTrace>([["s-claude", { run, timing: null }]]);
-    const html = renderEvalHtml("q", [result("claude", { judge: "jev" })], started, traces, "xyne");
+    const html = renderEvalHtml("q", [result("claude", { judge: "ournormaljev" })], started, traces, "xyne");
     expect(html).toContain("claude + jev");
     expect(html).toContain("6 calls · 140 q");
     expect(html).toContain("1 failed");

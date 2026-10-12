@@ -33,10 +33,12 @@ describe("GET /eval-models", () => {
   });
 
   it("lists configured judge backends separately from models", async () => {
-    process.env["JEV_API_KEY"] = "k-jev";
+    process.env["JEV_API_KEY"] = "k-hosted";
+    process.env["OUR_NORMAL_JEV_URL"] = "https://grid.example/v1/systemone";
+    process.env["OUR_JEV_API_KEY"] = "k-ours";
     let body: { models?: string[]; judgeBackends?: string[] } = {};
     await modelsHandler()({}, { json: (b: typeof body) => { body = b; } });
-    expect(body.judgeBackends).toEqual(["jev"]);
+    expect(body.judgeBackends).toEqual(["ournormaljev"]);
     expect(body.models).not.toContain("jev");
     expect(body.models).not.toContain("ournormaljev");
     expect(body.models).not.toContain("ourtrainedjev");
@@ -50,9 +52,8 @@ describe("GET /eval-models", () => {
     process.env["OUR_TRAINED_JEV_MODEL"] = "our-jev-ft-v3";
     let body: { models?: string[]; judgeBackends?: string[]; judgeBackendLabels?: Record<string, string> } = {};
     await modelsHandler()({}, { json: (b: typeof body) => { body = b; } });
-    expect(body.judgeBackends).toEqual(["jev", "ournormaljev", "ourtrainedjev"]);
+    expect(body.judgeBackends).toEqual(["ournormaljev", "ourtrainedjev"]);
     expect(body.judgeBackendLabels).toEqual({
-      jev: "Jev (typed evaluator)",
       ournormaljev: "Our Jev — normal",
       ourtrainedjev: "Our Jev — trained",
     });
