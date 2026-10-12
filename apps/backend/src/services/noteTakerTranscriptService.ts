@@ -22,7 +22,7 @@ import {
   ActivityClassification,
 } from '@xyne/shared';
 import { recordingSharingService } from '@/services/recordingSharingService';
-import { isRecording } from '@/utils/callTypeUtils';
+import { callSubject, isRecording } from '@/utils/callTypeUtils';
 import { isTranscriptUnlinked } from '@/utils/transcriptUnlink';
 import { notificationService } from '@/services/notificationService';
 import { activityService } from '@/services/activity/activityService';
@@ -346,6 +346,8 @@ class NoteTakerTranscriptService {
   private async recordSummaryReadyActivity(call: Call): Promise<void> {
     try {
       if (!call.workspaceId) return;
+      // 'recording' vs 'call' — drives the dashboard's Recordings sidebar dot.
+      const actionSource = callSubject(call);
 
       const existing = await db.activity.findFirst({
         where: {
@@ -360,7 +362,7 @@ class NoteTakerTranscriptService {
         // re-sorts the row to the top rather than stacking a second entry.
         await db.activity.update({
           where: { id: existing.id },
-          data: { isRead: false, updatedAt: new Date() },
+          data: { isRead: false, updatedAt: new Date(), actionSource },
         });
         return;
       }
@@ -371,7 +373,7 @@ class NoteTakerTranscriptService {
         // notional actor and the only recipient.
         actorId: call.createdByUserId,
         actorAction: RECORDING_SUMMARY_READY_ACTION,
-        actionSource: 'call',
+        actionSource,
         actionSourceId: call.id,
         callId: call.id,
         workspaceId: call.workspaceId,

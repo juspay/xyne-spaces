@@ -112,6 +112,7 @@ import {
 } from './components/SummaryTemplatesModal';
 import { useSummaryTemplates } from '../../hooks/useSummaryTemplates';
 import { useSummaryModelPreference } from '../../hooks/useSummaryModelPreference';
+import { useMarkRecordingSummaryReadOnOpen } from '../../hooks/useHasUnreadRecordingSummaries';
 
 const EMPTY_LABEL_SUGGESTIONS: string[] = [];
 
@@ -545,6 +546,7 @@ export default function RecordingDetailV2Screen({
     queries.oatsRecordingByExternalId({ callId: recordingId ?? '' }),
     { enabled: !!recordingId },
   );
+  useMarkRecordingSummaryReadOnOpen(recordingRow?.id);
   // Editors get every editing surface the owner has. Delete stays owner-only
   // (PRD §5.2). The Google Docs list is not gated on this at all: it is shown to
   // everyone who has the recording, attributing the exports they cannot open
