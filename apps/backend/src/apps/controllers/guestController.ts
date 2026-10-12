@@ -50,7 +50,7 @@ function guestApp(req: Request): GuestApp {
 
 export class GuestController {
   /**
-   * Create a guest in channels the app created
+   * Create a guest in channels the app is in
    * POST /api/apps/guests/create
    */
   create = async (req: Request, res: Response): Promise<void> => {

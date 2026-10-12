@@ -11,8 +11,8 @@ import { mintGuestToken } from './guestToken';
 
 /**
  * An app's guest users: people outside the workspace, owned by the installed app that created them
- * (providerUserId `app:<installedAppId>:<uuid>`). An app may only give its guests channels it created
- * (its bot is the creator), not ones it was only added to.
+ * (providerUserId `app:<installedAppId>:<uuid>`). An app may only give its guests channels its bot
+ * is a member of (ones it created, or was added to), never DMs or archived channels.
  */
 
 /** The installed app acting, from its verified token: its install and its bot user. */
@@ -68,22 +68,22 @@ async function findOwnedGuest(app: GuestApp, email: string): Promise<User> {
   return user;
 }
 
-/** The channels the app created, optionally narrowed to `ids`. */
+/** The channels the app's bot is in, optionally narrowed to `ids`. */
 async function appChannelIds(app: GuestApp, ids?: string[]): Promise<Set<string>> {
-  const rows = await db.channel.findMany({
-    where: { createdBy: app.botUserId, workspaceId: app.workspaceId, ...(ids && { id: { in: ids } }) },
-    select: { id: true },
+  const rows = await db.channelParticipant.findMany({
+    where: { userId: app.botUserId, workspaceId: app.workspaceId, ...(ids && { channelId: { in: ids } }) },
+    select: { channelId: true },
   });
-  return new Set(rows.map((row) => row.id));
+  return new Set(rows.map((row) => row.channelId));
 }
 
-/** Refuses any channel the app didn't create. */
+/** Refuses any channel the app's bot isn't in. */
 async function assertAppChannels(app: GuestApp, ids: string[]): Promise<void> {
   if (ids.length === 0) return;
   const allowed = await appChannelIds(app, ids);
   const notAllowed = ids.filter((id) => !allowed.has(id));
   if (notAllowed.length > 0) {
-    throw new GuestError(403, 'CHANNEL_NOT_ALLOWED', `${notAllowed.join(', ')} is not a channel this app created.`);
+    throw new GuestError(403, 'CHANNEL_NOT_ALLOWED', `${notAllowed.join(', ')} is not a channel this app is in.`);
   }
 }
 
