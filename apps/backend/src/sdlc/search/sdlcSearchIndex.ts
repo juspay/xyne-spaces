@@ -170,6 +170,7 @@ async function buildSdlcHubIndex(hubId: string, prisma: PrismaClient): Promise<S
   for (const t of tracks) names.set(t.id, t.name);
   for (const f of folders) names.set(f.id, f.name);
   const trackSet = new Set(trackIds);
+  const trackStatus = new Map(tracks.map(t => [t.id, String(t.status)]));
 
   const containers = new Map<string, VespaSdlcContainerDocument>();
   const base = {
@@ -193,6 +194,7 @@ async function buildSdlcHubIndex(hubId: string, prisma: PrismaClient): Promise<S
       depth: chain.length - 1,
       path: scopeIds.slice(1).map(c => names.get(c) ?? '').join('/'),
       trackId: scopeIds.find(c => trackSet.has(c)) ?? '',
+      trackStatus: trackStatus.get(scopeIds.find(c => trackSet.has(c)) ?? '') ?? '',
       repoRef: repoContainer ? repositoryRef(repoOfWiki(repoContainer)!) : '',
     };
   };
@@ -204,7 +206,7 @@ async function buildSdlcHubIndex(hubId: string, prisma: PrismaClient): Promise<S
     if (!p || p.branch !== 'TRACKS') continue;
     containers.set(t.id, {
       ...base, ...p, docId: t.id, containerType: 'TRACK', parentType: 'HUB',
-      name: t.name, description: t.description ?? '', status: t.status,
+      name: t.name, description: t.description ?? '',
       createdBy: t.createdBy, createdAt: ms(t.createdAt), updatedAt: ms(t.updatedAt),
     });
   }
@@ -214,7 +216,7 @@ async function buildSdlcHubIndex(hubId: string, prisma: PrismaClient): Promise<S
     containers.set(f.id, {
       ...base, ...p, docId: f.id, containerType: typeOf(f.id),
       parentType: p.parentId === hubId ? 'HUB' : typeOf(p.parentId),
-      name: f.name, description: '', status: '',
+      name: f.name, description: '',
       createdBy: f.createdBy, createdAt: ms(f.createdAt), updatedAt: ms(f.updatedAt),
     });
   }

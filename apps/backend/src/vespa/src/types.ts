@@ -698,10 +698,10 @@ export interface VespaSdlcContainerDocument {
   name: string;
   /** Tracks only. */
   description: string;
-  /** Tracks only: ACTIVE | COMPLETED | ARCHIVED. */
-  status: string;
   /** TRACKS branch: the track; a track's own id for a track. */
   trackId: string;
+  /** TRACKS branch: that track's status, on the track and every folder in it; '' elsewhere. */
+  trackStatus: string;
   parentId: string;
   parentType: 'HUB' | SdlcContainerType;
   /** WIKI branch: id:sdlc_repository:sdlc_repository::<repoId> on a repository's wiki and every folder below it. */
