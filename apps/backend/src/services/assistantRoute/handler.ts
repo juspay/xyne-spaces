@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { routeAssistantMessage, type AssistantRouteAction } from './index';
 
-// Always 200 once validated: a Jev failure is `{ route: 'unavailable' }`, never a 5xx.
+// Always 200 once validated: a Jev failure is `{ route: 'unavailable', reason }`, never a 5xx.
 export const assistantRouteHandler = async (req: Request, res: Response): Promise<void> => {
   const userId = req.user?.id;
   const workspaceId = req.user?.workspaceId;
