@@ -17,6 +17,7 @@ import {
   assertValidUrlPath,
   assertValidUserAlias,
 } from '@/tests/shared/support/literal-validation';
+import { dispatchHoverEvents } from '@/tests/shared/support/message-hover';
 
 function resolvePathValue(source: unknown, path: string): unknown {
   return path.split('.').reduce<unknown>((currentValue, segment) => {
@@ -206,6 +207,11 @@ export default class BrowserSteps {
   @Step('clicking on <selector>')
   public async clickOnSelector(selector: string): Promise<void> {
     const element = testContext.activePage.locator(selector).first();
+    // Wait for the element to exist in the DOM first; if it's attached but
+    // scrolled past the fold (nested panel scrollers) `waitFor(visible)` can
+    // time out even though a scroll would bring it into view.
+    await element.waitFor({ state: 'attached' });
+    await element.scrollIntoViewIfNeeded().catch(() => {});
     await element.waitFor({ state: 'visible' });
     try {
       await element.click({ timeout: 5000 });
@@ -224,6 +230,25 @@ export default class BrowserSteps {
       }
       await element.click({ force: true });
     }
+  }
+
+  @Step('clicking on <selector> if visible')
+  public async clickOnSelectorIfVisible(selector: string): Promise<void> {
+    // No-wait sibling of `clicking on <selector>` for conditional UI
+    // (collapsed sections, dismissible banners) that may or may not be present
+    // for the current scenario. Fail-silent on absence. Scrolls below-the-fold
+    // elements into view first so a match that exists in DOM but is scrolled
+    // past still gets the click (Playwright's `isVisible` honours viewport).
+    const element = testContext.activePage.locator(selector).first();
+    // Short grace period so the DOM has a chance to mount the optional element
+    // when it is about to appear (e.g. after a modal transition).
+    try {
+      await element.waitFor({ state: 'attached', timeout: 2000 });
+    } catch {
+      return;
+    }
+    await element.scrollIntoViewIfNeeded().catch(() => {});
+    await element.click({ force: true }).catch(() => {});
   }
 
   @Step('navigating via sidebar to <itemId>')
@@ -1004,18 +1029,17 @@ export default class BrowserSteps {
   /**
    * Atomic hover-and-click for hover action toolbars.
    *
-   * Why this exists:
-   * The HoverActionsToolbar in the dashboard is rendered ONLY while the parent
-   * message has hover state (`if (!isVisible && !isDropdownOpen) return null`).
-   * The toolbar is positioned at `-top-7 right-4` - outside the message's
-   * bounding box. When Playwright tries to do separate hover + click steps,
-   * the mouse path from message to button can leave the message's bbox,
-   * triggering `onMouseLeave`, which UNMOUNTS the toolbar mid-click.
+   * The dashboard uses a single shared `MessageHoverToolbar` per message list
+   * (not one per bubble): a delegated `pointerover`/`pointermove` listener on
+   * the list container finds the hovered row via `closest('[data-message-id]')`
+   * and positions the overlay via `translateY`. The overlay is `pointer-events`
+   * active and renders `HoverActionsToolbar`'s buttons (hover-action-*).
    *
-   * The fix: dispatch synthetic `mouseover`/`mouseenter` events directly on
-   * the message DOM node (this triggers React's onMouseEnter handler, sets
-   * state, mounts the toolbar) and then click the action via JavaScript.
-   * No physical mouse involved = no mouseleave race = bulletproof.
+   * Real pointer events are required — the handler's modality guard
+   * (`messageInteractionModality.current !== 'pointer'`) is only flipped by a
+   * genuine `pointermove`, which `page.mouse.move` fires. Synthetic
+   * `dispatchEvent('mouseover')` on the row does not flip modality and the
+   * overlay never mounts.
    */
   @Step('clicking hover action <hoverActionSelector> on message with text <messageText>')
   public async clickHoverActionOnMessage(
@@ -1024,38 +1048,24 @@ export default class BrowserSteps {
   ): Promise<void> {
     const page = testContext.activePage;
 
-    // Locate the message bubble; fall back to last message if text match fails
     let message = page.locator(`[data-testid^="chat-message-"]:has-text("${messageText}")`).last();
     if (!(await message.isVisible().catch(() => false))) {
       message = page.locator('[data-testid^="chat-message-"]').last();
     }
     await message.waitFor({ state: 'visible' });
-    await message.scrollIntoViewIfNeeded();
 
-    // Trigger hover programmatically. We dispatch BOTH `mouseover` and
-    // `mouseenter` because React's synthetic event system listens to
-    // mouseover (delegated) but some components also listen to mouseenter.
-    // Using bubbles:true on mouseover ensures it propagates up to the
-    // ChatBubble parent that holds the onMouseEnter handler.
-    // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context
-    // @ts-ignore - Element and MouseEvent exist in browser context
-    await message.evaluate((el) => {
-      // biome-ignore lint/suspicious/noTsIgnore: browser context
-      // @ts-ignore - MouseEvent exists in browser context
-      el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
-      // biome-ignore lint/suspicious/noTsIgnore: browser context
-      // @ts-ignore - MouseEvent exists in browser context
-      el.dispatchEvent(new MouseEvent('mouseenter', { bubbles: false, cancelable: true }));
-    });
-
-    // Wait for the specific action button to mount (React re-render must complete)
     const actionButton = page.locator(hoverActionSelector).first();
-    await actionButton.waitFor({ state: 'visible', timeout: 10000 });
-
-    // Click the button. Use force:true so Playwright doesn't try to scroll
-    // or move the physical mouse (which would risk triggering mouseleave on
-    // the message and unmounting the toolbar between scroll and click).
-    await actionButton.click({ force: true });
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      await message.scrollIntoViewIfNeeded();
+      await message.evaluate(dispatchHoverEvents);
+      try {
+        await actionButton.waitFor({ state: 'visible', timeout: 5000 });
+        await actionButton.click({ force: true, timeout: 5000 });
+        return;
+      } catch (error) {
+        if (attempt === 3) throw error;
+      }
+    }
   }
 
   @Step('attaching file to <selector>')

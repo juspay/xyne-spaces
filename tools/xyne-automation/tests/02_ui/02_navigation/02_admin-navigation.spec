@@ -30,9 +30,10 @@ Quarantined (XYNE-63195): admin sidebar navigation is flaky in CI — e.g. `[ari
 * Using browser
 * Ensuring user "admin-1" is logged in
 * ensuring project "project-1" exists in fixture for user "admin-1"
-* navigating via sidebar to "tickets"
-* clicking on "[aria-controls='projects-section']"
-* clicking on text "user:admin-1.projects.project-1.name" in "[data-testid^='project-item-']"
+* navigating via sidebar to "list-projects"
+* waiting for "[data-testid='list-projects-page']" to appear
+* clicking on text "user:admin-1.projects.project-1.name" in "[data-testid^='project-card-']"
+* clicking on "[data-track-name='Open_Board_Row']"
 * waiting for "[data-testid='projects-board-page']" to appear
 
 ## Admin navigates to List Projects view

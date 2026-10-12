@@ -116,6 +116,11 @@ async function acquireBrowserEntry(
 
   const browserLauncher = browserTypeName === 'chrome' ? chromium : browserTypes[browserTypeName];
 
+  // In headed-on-host mode the dashboard surfaces container hostnames
+  // (ysweet, backend, zero-cache, …) directly to the browser. Chromium's
+  // --host-resolver-rules transparently redirects those to the exposed
+  // host:port pairs, so no backend URL rewriting is needed.
+  const hostResolverRules = process.env.BROWSER_HOST_RESOLVER_RULES;
   const browser: Browser = await browserLauncher.launch({
     headless: config.headless,
     args: [
@@ -140,6 +145,7 @@ async function acquireBrowserEntry(
       '--disable-accelerated-2d-canvas',
       '--disable-web-security', // For test environment
       '--js-flags=--max-old-space-size=4096', // Increase V8 heap size
+      ...(hostResolverRules ? [`--host-resolver-rules=${hostResolverRules}`] : []),
     ],
     ...(browserTypeName === 'chrome' ? { channel: 'chrome' } : {}),
   });

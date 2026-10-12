@@ -32,7 +32,6 @@
 * verifying inline code formatting is applied in editor
 
 ## List creation and navigation work
-tags: quarantine
 * Using browser
 * Ensuring user "user-1" is logged in
 * Opening baseline DM for user "user-1"
@@ -51,7 +50,7 @@ tags: quarantine
 * pressing Shift+Enter in inputbox
 * appending text "Second line" in "[data-testid='message-input']"
 * verifying inputbox contains multiple lines
-* pressing Cmd+Enter in inputbox
+* clicking on "[data-testid='send-message-button']"
 * waiting for "2" seconds
 * verifying message was sent to conversation
 

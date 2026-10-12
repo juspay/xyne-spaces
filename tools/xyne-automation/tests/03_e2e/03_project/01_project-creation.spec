@@ -15,5 +15,5 @@
 * navigating via sidebar to "list-projects"
 * clicking on text "user:admin-1.projects.project-e2e.name" in "[data-testid^='project-card-']"
 * waiting for "2" seconds
-* clicking on "[data-testid='edit-board-button']"
+* clicking on "[data-testid='board-actions-button']"
 * verifying stored user "admin-1" project "project-e2e" field "name" is visible in "body"
