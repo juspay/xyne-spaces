@@ -1,18 +1,18 @@
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useReleaseForDevTicket } from '../../../hooks/useReleaseForDevTicket';
 import { Rocket, SquareArrowOutUpRight, ArrowRight } from 'lucide-react';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { useChannelParticipation } from '../../../hooks/useChannels';
 
 interface ReleasePanelViewProps {
   ticketId: string;
 }
 
 // Per-ticket "Release" tab: the release a dev ticket belongs to plus a jump to
-// the full Release Detail screen. Mounted only when the ticket has ART rows.
+// its SDLC hub's release view. Mounted only when the ticket has ART rows.
 export const ReleasePanelView = ({ ticketId }: ReleasePanelViewProps): React.ReactElement => {
   const navigate = useNavigate();
-  const location = useLocation();
 
   const { releaseIds, primaryReleaseId, isHotfix } = useReleaseForDevTicket(ticketId);
 
@@ -23,6 +23,14 @@ export const ReleasePanelView = ({ ticketId }: ReleasePanelViewProps): React.Rea
     queries.releaseEventsByReleaseId({ releaseId: primaryReleaseId, limit: 20 }),
     { enabled: !!primaryReleaseId },
   );
+  // The release view lives in the SDLC hub that owns the release board's config. Only
+  // hub members can read that config edge, so others get a disabled button.
+  const [releaseConfig] = useCachedQuery(
+    queries.releaseConfigByMainBoardId({ boardId: releaseTicket?.boardId ?? '' }),
+    { enabled: !!releaseTicket?.boardId },
+  );
+  const releaseHubId = releaseConfig?.channelId ?? '';
+  const releaseHubParticipation = useChannelParticipation(releaseHubId);
 
   if (!primaryReleaseId) {
     return (
@@ -34,11 +42,12 @@ export const ReleasePanelView = ({ ticketId }: ReleasePanelViewProps): React.Rea
     );
   }
 
+  const canOpenReleaseView = !!releaseHubId && !!releaseHubParticipation;
   const openReleaseView = (): void => {
-    if (!releaseTicket?.projectId) return;
-    void navigate(`/listProjects/${releaseTicket.projectId}/releases/${primaryReleaseId}`, {
-      state: { returnToUrl: location.pathname + location.search },
-    });
+    if (!canOpenReleaseView) return;
+    void navigate(
+      `/sdlc/${releaseHubId}/releases?${new URLSearchParams({ release: primaryReleaseId, discussion: '1', chat: 'conversations' }).toString()}`,
+    );
   };
 
   return (
@@ -75,10 +84,16 @@ export const ReleasePanelView = ({ ticketId }: ReleasePanelViewProps): React.Rea
       <button
         type='button'
         onClick={openReleaseView}
+        disabled={!canOpenReleaseView}
+        title={
+          canOpenReleaseView
+            ? undefined
+            : "Only members of this release's SDLC hub can open the release view"
+        }
         data-track-category='Tickets'
         data-track-name='OpenReleaseViewFromReleaseTab'
         data-testid='open-release-view-from-tab'
-        className='group flex items-center justify-between gap-3 w-full px-4 py-3 rounded-xl border border-border bg-background text-foreground shadow-sm hover:shadow-md hover:border-input transition-all'
+        className='group flex items-center justify-between gap-3 w-full px-4 py-3 rounded-xl border border-border bg-background text-foreground shadow-sm hover:shadow-md hover:border-input transition-all disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:shadow-sm disabled:hover:border-border'
       >
         <span className='inline-flex items-center gap-3'>
           <span className='flex h-9 w-9 items-center justify-center rounded-full bg-muted text-foreground'>

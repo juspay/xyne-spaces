@@ -1,7 +1,7 @@
 import { SDLC_MEMBERSHIP_RELATION, VespaInsertionStatus, VespaOperationType } from '@xyne/shared';
 import { BaseRepository } from './base';
 import { Channel } from '@prisma/client';
-import { ChannelScopeType, ChannelVisibility, ChannelType, ProjectType } from '@xyne/shared';
+import { BoardType, ChannelScopeType, ChannelVisibility, ChannelType, ProjectType } from '@xyne/shared';
 import { QueryOptions } from '@/types/database';
 import { logger } from '@/utils/logger';
 import { withWorkspaceScope } from '@/database/tenant/context';
@@ -97,7 +97,7 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     // channel has no project (nothing to map).
     if (data.projectId) {
       const boards = await this.db.board.findMany({
-        where: { projectId: data.projectId },
+        where: { projectId: data.projectId, boardType: { not: BoardType.RELEASE } },
         orderBy: { createdAt: 'asc' },
         select: { id: true },
       });

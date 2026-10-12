@@ -18,7 +18,7 @@ import { EntitySequenceService } from '@/services/entitySequenceService';
 interface ApplicationData {
   name: string;
   regex: string;
-  repoUrl: string;
+  repoId: string;
   deployedCommit: string;
   ownerTeam: string;
 }
@@ -376,7 +376,7 @@ export class ApplicationBackfillService {
             mainReleaseBoardId,
             channelId: validChannel.id,
             regex: app.regex,
-            repoUrl: app.repoUrl,
+            repoId: app.repoId,
             deployedCommit: app.deployedCommit,
             ownerTeam: app.ownerTeam,
             createdAt: new Date(),

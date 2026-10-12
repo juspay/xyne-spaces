@@ -1,5 +1,6 @@
 import { serializeCsv, type ReleaseReportDevTicket } from '@xyne/shared';
 import type { ChangeCounts } from '../../components/Release/releaseChanges.utils';
+import { repoWebUrl } from '../../components/Release/repoVisual';
 
 interface ArtRowInput {
   readonly id: string;
@@ -218,7 +219,10 @@ export interface RepoRangeInput {
 export interface RepoApplicationInput {
   readonly boardId: string;
   readonly mainReleaseBoardId?: string | null | undefined;
-  readonly repoUrl?: string | null | undefined;
+  readonly repo?:
+    | { readonly url: string; readonly canonicalUrl?: string | null }
+    | null
+    | undefined;
   readonly name?: string | null | undefined;
 }
 
@@ -247,7 +251,7 @@ export function groupDevTicketRowsByRepo(
       if (app.boardId) boardToRepo.set(app.boardId, app.mainReleaseBoardId);
       if (!repoMeta.has(app.mainReleaseBoardId)) {
         repoMeta.set(app.mainReleaseBoardId, {
-          repoUrl: app.repoUrl ?? null,
+          repoUrl: repoWebUrl(app.repo),
           name: app.name ?? null,
         });
       }

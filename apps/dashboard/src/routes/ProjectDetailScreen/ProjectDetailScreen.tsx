@@ -50,6 +50,7 @@ import {
   ProviderBadge,
   repoColor,
   repoHostPath,
+  repoWebUrl,
 } from '../../components/Release/repoVisual';
 
 // Type for board data passed from BoardEditScreen to BoardStageConfigScreen
@@ -245,7 +246,8 @@ const ProjectDetailScreen = (): ReactElement => {
         migrationPaths: app.migrationPaths ?? [],
       });
       servicesByBoard.set(id, services);
-      if (app.repoUrl && !repoUrlByBoard.has(id)) repoUrlByBoard.set(id, app.repoUrl);
+      const repoUrl = repoWebUrl(app.repo);
+      if (repoUrl && !repoUrlByBoard.has(id)) repoUrlByBoard.set(id, repoUrl);
     }
     return [...servicesByBoard.entries()].map(([mainBoardId, services]) => ({
       mainBoardId,

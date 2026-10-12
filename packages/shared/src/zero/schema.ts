@@ -2022,7 +2022,7 @@ export const applicationTable = table('applications')
     mainReleaseBoardId: string().optional(),
     channelId: string().optional(),
     regex: string(),
-    repoUrl: string(),
+    repoId: string(),
     deployedCommit: string().optional(),
     deployedVersion: string().optional(),
     lastDeployedAt: number().optional(),
@@ -4834,6 +4834,11 @@ export const applicationTableRelationships = relationships(applicationTable, ({ 
     sourceField: ['mainReleaseBoardId'],
     destField: ['id'],
     destSchema: boardTable,
+  }),
+  repo: one({
+    sourceField: ['repoId'],
+    destField: ['id'],
+    destSchema: repoTable,
   }),
 }));
 
