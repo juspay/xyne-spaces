@@ -53,8 +53,11 @@ async function clickHoverActionOnMessage(
   await message.waitFor({ state: 'visible' });
 
   const actionButton = page.locator(hoverActionSelector).first();
-  // Hover actions vanish if the message re-renders under load — re-hover per attempt.
+  // The toolbar hides whenever the list scrolls (e.g. a new message arrives), and
+  // re-hovering the same point fires no new pointerover, so move the pointer off
+  // the list first to make every attempt a fresh hover.
   for (let attempt = 1; attempt <= 3; attempt++) {
+    await page.mouse.move(0, 0);
     await message.scrollIntoViewIfNeeded();
     await message.hover({ force: true });
     try {
