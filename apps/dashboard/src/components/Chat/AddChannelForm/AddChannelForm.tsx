@@ -840,25 +840,44 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
           ) : (
             <>
               <Select value={selectedInstalledAppId} onValueChange={setSelectedInstalledAppId}>
-                <SelectTrigger id='app-desk-select' className='w-full'>
-                  <SelectValue placeholder='Select a Xyne App' />
+                {/* Radix SelectValue drops className, so let its span shrink from here. */}
+                <SelectTrigger id='app-desk-select' className='w-full min-w-0 [&>span]:min-w-0'>
+                  <SelectValue placeholder='Select a Xyne App'>
+                    <span className='block truncate'>
+                      {
+                        eligibleAppsData.find(app => app.installedAppId === selectedInstalledAppId)
+                          ?.name
+                      }
+                    </span>
+                  </SelectValue>
                 </SelectTrigger>
-                <SelectContent>
-                  {eligibleAppsData.map(app => (
-                    <SelectItem key={app.installedAppId} value={app.installedAppId}>
-                      {app.name}
-                      {app.description && (
-                        <span className='ml-2 text-xs text-muted-foreground'>
-                          {app.description}
+                {/* Keep the dropdown as wide as the field. */}
+                <SelectContent className='w-[var(--radix-select-trigger-width)] max-w-[var(--radix-select-trigger-width)]'>
+                  {eligibleAppsData.map(app => {
+                    const meta = [
+                      app.description,
+                      app.deskCount
+                        ? `backs ${app.deskCount} desk${app.deskCount === 1 ? '' : 's'}`
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ');
+                    return (
+                      <SelectItem
+                        key={app.installedAppId}
+                        value={app.installedAppId}
+                        title={meta ? `${app.name} — ${meta}` : app.name}
+                        className='[&>span:last-child]:min-w-0 [&>span:last-child]:flex-1'
+                      >
+                        <span className='flex min-w-0 flex-col'>
+                          <span className='truncate'>{app.name}</span>
+                          {meta && (
+                            <span className='truncate text-xs text-muted-foreground'>{meta}</span>
+                          )}
                         </span>
-                      )}
-                      {!!app.deskCount && (
-                        <span className='ml-2 text-xs text-muted-foreground'>
-                          backs {app.deskCount} desk{app.deskCount === 1 ? '' : 's'}
-                        </span>
-                      )}
-                    </SelectItem>
-                  ))}
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
               <p className='text-xs text-muted-foreground'>
