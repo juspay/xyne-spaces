@@ -6,7 +6,7 @@ import { useAuth } from '../../../hooks/useAuth';
 import { callActor } from '../../../machines/callMachine';
 import { roomActor, type JoinMediaOverrides } from '../../../machines/roomMachine';
 import { useCallJoinSettings } from '../../../hooks/useCallJoinSettings';
-import { useCameraPreview } from '../IncomingCall/useCameraPreview';
+import { useCameraPreview } from '../hooks/useCameraPreview';
 import { CallParticipant, Channel, RingStatus } from '@xyne/shared';
 import { mutators } from '../../../zero/mutators';
 import { queries } from '../../../zero/queries';
