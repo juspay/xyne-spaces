@@ -28,8 +28,9 @@ import { BLOCKED_EXTENSIONS } from '../../ui/utils/files';
 import { getAllChannels, useChannel, useChannelMentionSearch } from '../../../hooks/useChannels';
 import { ConversationTabContext } from '../ConversationTabContext';
 import { intentClassifier } from '../../../services/onDeviceIntent';
+import { rememberCallParticipants } from '../../../stores/intentCallSuggestionStore';
+import { extractUserMentions } from '../../../utils/mentionParser';
 import { useIntentSuggestionToast } from '../../../hooks/useIntentSuggestionToast';
-import { ScheduleCallModal } from '../../Call/ScheduleCallModal/ScheduleCallModal';
 import { AddPeopleForm } from '../AddPeopleForm/AddPeopleForm';
 import Dialog from '../../ui/Dialog';
 import { v4 as uuidv4 } from 'uuid';
@@ -443,13 +444,8 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     const [isCreateTicketModalOpen, setIsCreateTicketModalOpen] = useState(false);
     // Which surface opened the create form (composer button vs intent toast).
     const [createTicketSource, setCreateTicketSource] = useState('chat_composer');
-    const [scheduleCallOpen, setScheduleCallOpen] = useState(false);
     const [addPeopleOpen, setAddPeopleOpen] = useState(false);
-    // On-device intent detections surface as a toast; its action opens the modal below.
-    // The toast hook owns no modal state — ChatInput does, for all three — so a
-    // suggestion opens exactly the same modal the toolbar does.
     useIntentSuggestionToast({
-      openScheduleCall: () => setScheduleCallOpen(true),
       openCreateTicket: () => {
         setCreateTicketSource('intent_toast');
         setIsCreateTicketModalOpen(true);
@@ -911,14 +907,24 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
 
         // On-device intent classification. Fire-and-forget and never awaited — it must
         // not add a single millisecond to the send path. Gated inside the service on the
-        // user preference and public-channel visibility, both fail closed. A detection
-        // raises a local toast; nothing leaves the device. See docs/ON_DEVICE_INTENT.md
+        // user preference and channel type, both fail closed. A detection raises a local
+        // toast or an inline card; nothing leaves the device. See docs/ON_DEVICE_INTENT.md
         const classifyIntent = (sentMessageId: string): void => {
-          intentClassifier.submitForMessage({
+          const queued = intentClassifier.submitForMessage({
             text: _plainText,
             messageId: sentMessageId,
             channel,
           });
+          if (!queued) return;
+          const participantIds = new Set(threadParticipantIds);
+          for (const id of extractUserMentions(processedHtml)) participantIds.add(id);
+          if (user?.id) participantIds.delete(user.id);
+          rememberCallParticipants(
+            sentMessageId,
+            [...participantIds],
+            conversationId ? 'thread' : 'channel',
+            conversationId ? `thread:${conversationId}` : `channel:${channelId}`,
+          );
         };
 
         if (messageId) {
@@ -1507,13 +1513,6 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
             }}
           />
         )}
-        {/* Opened by the intent-suggestion toast. */}
-        <ScheduleCallModal
-          isOpen={scheduleCallOpen}
-          onClose={() => setScheduleCallOpen(false)}
-          channelId={channelId}
-          {...(conversation?.conversationId ? { conversationId: conversation.conversationId } : {})}
-        />
         {channel && addPeopleOpen ? (
           <Dialog open={addPeopleOpen} onOpenChange={setAddPeopleOpen} title='Add Members'>
             <AddPeopleForm

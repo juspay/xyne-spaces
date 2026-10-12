@@ -25,12 +25,14 @@ interface InstantCallModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSubmit: (selectedParticipants: string[]) => void;
+  initialParticipants?: string[];
 }
 
 export const InstantCallModal: React.FC<InstantCallModalProps> = ({
   isOpen,
   onClose,
   onSubmit,
+  initialParticipants,
 }) => {
   const user = useSelf();
   const zero = useZero();
@@ -44,6 +46,17 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
   const activeUsers = useActiveUsers();
   const usersById = useUsersById();
   const allVisibleChannels = useAllVisibleChannels();
+
+  // Via a ref: callers pass a fresh array each render, and depending on it would reset edits.
+  const initialParticipantsRef = useRef(initialParticipants);
+  initialParticipantsRef.current = initialParticipants;
+  useEffect(() => {
+    if (isOpen && initialParticipantsRef.current?.length) {
+      setSelectedParticipants(
+        initialParticipantsRef.current.map(v => (v.includes(':') ? v : `user:${v}`)),
+      );
+    }
+  }, [isOpen]);
 
   // Focus on Search Participant Input when modal opens
   useEffect(() => {

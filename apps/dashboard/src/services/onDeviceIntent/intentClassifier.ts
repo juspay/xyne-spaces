@@ -1,7 +1,7 @@
 /**
  * Main-thread owner of the on-device intent classifier.
  *
- * Responsibilities: worker lifecycle, the user-preference and public-channel
+ * Responsibilities: worker lifecycle, the user-preference and channel-type
  * gates, the drop-oldest scheduler, and the self-disabling perf budget.
  *
  * NOTHING LEAVES THE DEVICE. There is no telemetry here — no OTel metrics, no log
@@ -13,12 +13,12 @@
  *
  * This module is the ONLY thing allowed to talk to intent.worker.ts — the
  * eligibility gate is a single chokepoint by design. Adding a second entry point
- * is how "public channels only" silently erodes.
+ * is how the set of eligible channel types silently erodes.
  *
  * Nothing here touches React state. See docs/ON_DEVICE_INTENT.md §3
  */
 
-import { ChannelVisibility } from '@xyne/shared';
+import { ChannelScopeType, ChannelVisibility } from '@xyne/shared';
 import { wasInterrupted } from '@xyne/shared/hooks';
 
 import { isIntentSuggestionsEnabled } from '../../hooks/useIntentSuggestionsEnabled';
@@ -40,6 +40,7 @@ import type {
 
 /** Minimal shape we need — avoids coupling to the full Zero channel row. */
 export interface ClassifiableChannel {
+  scopeType?: string | undefined;
   visibility?: string | undefined;
 }
 
@@ -56,6 +57,7 @@ export interface IntentDetection {
    * subscriber never has to decide what an unroutable how-to should look like.
    */
   topicId?: string;
+  publicChannel: boolean;
 }
 
 type DetectionListener = (detection: IntentDetection) => void;
@@ -78,17 +80,21 @@ interface PendingJob {
   requestId: string;
   text: string;
   messageId: string | null;
+  publicChannel: boolean;
   /** Playground requests resolve a promise and skip telemetry entirely. */
   resolve: ((result: ClassificationResult) => void) | null;
   reject: ((error: Error) => void) | null;
 }
 
 /**
- * Public channels only, fail closed. `undefined` covers the channel still loading
- * and any unknown visibility value — both must not classify.
+ * Channels (public, private, desk) and group DMs, fail closed. 1:1 DMs, ticket and
+ * document channels are out; a channel still loading or of unknown scope must not classify.
  */
 export function isEligible(channel: ClassifiableChannel | undefined | null): boolean {
-  return channel?.visibility === ChannelVisibility.PUBLIC;
+  return (
+    channel?.scopeType === ChannelScopeType.DEFAULT ||
+    channel?.scopeType === ChannelScopeType.GROUP_DM
+  );
 }
 
 class IntentClassifier {
@@ -238,29 +244,31 @@ class IntentClassifier {
     text: string;
     messageId: string;
     channel: ClassifiableChannel | undefined | null;
-  }): void {
+  }): boolean {
     this.ensureDebug();
     // Read every time, not once at construction: the switch must take effect
     // without a reload (the worker does not hot-reload).
     if (!isIntentSuggestionsEnabled()) {
       trace('main', '0. gate — SKIPPED, disabled in Settings → Developer');
-      return;
+      return false;
     }
     if (!isEligible(params.channel)) {
-      trace('main', '0. gate — SKIPPED, channel is not public', {
-        visibility: params.channel?.visibility ?? '(unknown)',
+      trace('main', '0. gate — SKIPPED, channel type not eligible', {
+        scopeType: params.channel?.scopeType ?? '(unknown)',
       });
-      return;
+      return false;
     }
-    trace('main', '0. gate — public channel, classifying', { messageId: params.messageId });
+    trace('main', '0. gate — eligible channel, classifying', { messageId: params.messageId });
 
     this.enqueue({
       requestId: `m${++this.requestCounter}`,
       text: params.text,
       messageId: params.messageId,
+      publicChannel: params.channel?.visibility === ChannelVisibility.PUBLIC,
       resolve: null,
       reject: null,
     });
+    return true;
   }
 
   /**
@@ -280,6 +288,7 @@ class IntentClassifier {
         requestId: `p${++this.requestCounter}`,
         text,
         messageId: null,
+        publicChannel: false,
         resolve,
         reject,
       });
@@ -383,10 +392,14 @@ class IntentClassifier {
       return;
     }
 
-    this.record(result, job?.messageId ?? null);
+    this.record(result, job?.messageId ?? null, job?.publicChannel ?? false);
   }
 
-  private record(result: ClassificationResult, messageId: string | null): void {
+  private record(
+    result: ClassificationResult,
+    messageId: string | null,
+    publicChannel: boolean,
+  ): void {
     if (result.prefiltered) {
       trace('main', '6. prefiltered — nothing scored');
       return;
@@ -416,6 +429,7 @@ class IntentClassifier {
         intentId: result.topIntent,
         messageId,
         score: result.topScore,
+        publicChannel,
         ...(topicResolved ? { topicId } : {}),
       });
     }

@@ -181,7 +181,9 @@ export function useScheduleCallInitialization({
     const displayName = getUserDisplayName(user);
     const start = initialStartsAt ?? defaultStart;
     const end = initialEndsAt ?? new Date(start.getTime() + 60 * 60 * 1000);
-    const prefilledParticipants = initialParticipants?.map(id => `user:${id}`) ?? [];
+
+    const prefilledParticipants =
+      initialParticipants?.map(v => (v.includes(':') ? v : `user:${v}`)) ?? [];
 
     if (displayName !== 'Unknown') {
       reset({

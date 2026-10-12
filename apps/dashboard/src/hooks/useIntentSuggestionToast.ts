@@ -2,8 +2,9 @@
  * Renders on-device intent detections as a suggestion toast.
  *
  * Classification happens in a Web Worker, clears its threshold, and surfaces here
- * as a toast with one action — no server call, no agent run, no cost, no latency.
- * This is now the ONLY thing a detection does. The alternative — an agent picking
+ * as a toast with one action — or, for call intents, as an inline card under the
+ * message (`card: true` rows → IntentCallSuggestionCard via the suggestion store).
+ * No server call, no agent run, no cost, no latency. The alternative — an agent picking
  * attendees and posting a `call_start` card into the thread — was built, measured
  * at ~77s round-trip, and removed for the first cut. See the note at the top of
  * services/onDeviceIntent/config.ts for how to bring it back.
@@ -19,10 +20,10 @@ import { toast } from 'sonner';
 
 import { intentClassifier, type IntentDetection } from '../services/onDeviceIntent';
 import { globalClickTracker } from '../services/Analytics/globalClickTracker';
+import { promoteIntentCallSuggestion } from '../stores/intentCallSuggestionStore';
 
 /** What a suggestion is allowed to do. One entry per wired destination. */
 export interface IntentSuggestionActions {
-  openScheduleCall: () => void;
   openCreateTicket: () => void;
   openAddPeople: () => void;
 }
@@ -31,7 +32,9 @@ interface Suggestion {
   message: string;
   /** Button label, or undefined when the message itself is the whole answer. */
   action?: string;
-  run?: (actions: IntentSuggestionActions) => void;
+  run?: (actions: IntentSuggestionActions, detection: IntentDetection) => void;
+  card?: true;
+  publicOnly?: true;
 }
 
 /**
@@ -54,27 +57,29 @@ interface Suggestion {
  */
 const SUGGESTIONS: Record<string, Suggestion> = {
   'start-call': {
-    message: 'Looks like you are trying to schedule a call',
-    action: 'Schedule Call',
-    run: actions => actions.openScheduleCall(),
+    message: 'Start a call',
+    card: true,
+    run: (_, d) => promoteIntentCallSuggestion(d.messageId, suggestionKey(d)),
   },
   // How-to questions. These converge with the intents above where the product has
   // the same destination: "can we hop on a call" and "how do I start a call" are
   // different asks that want the same modal.
   'platform-help:start-call': {
-    message: 'Looks like you are trying to start a call',
-    action: 'Start Call',
-    run: actions => actions.openScheduleCall(),
+    message: 'Start a call',
+    card: true,
+    run: (_, d) => promoteIntentCallSuggestion(d.messageId, suggestionKey(d)),
   },
   'platform-help:create-ticket': {
     message: 'Looks like you are trying to create a ticket',
     action: 'Create Ticket',
     run: actions => actions.openCreateTicket(),
+    publicOnly: true,
   },
   'platform-help:add-people': {
     message: 'Looks like you are trying to add people to this channel',
     action: 'Add People',
     run: actions => actions.openAddPeople(),
+    publicOnly: true,
   },
 };
 
@@ -114,6 +119,12 @@ export function useIntentSuggestionToast(actions: IntentSuggestionActions): void
     const key = suggestionKey(detection);
     const copy = SUGGESTIONS[key];
     if (!copy) return;
+    if (copy.publicOnly && !detection.publicChannel) return;
+
+    if (copy.card) {
+      copy.run?.(latestActions.current, detection);
+      return;
+    }
 
     const now = Date.now();
     const shownAt = lastShownAt.current.get(key);
@@ -161,7 +172,7 @@ export function useIntentSuggestionToast(actions: IntentSuggestionActions): void
                   copy.action,
                   { intentKey: key, action: copy.action, msShown: Date.now() - now },
                 );
-                copy.run?.(latestActions.current);
+                copy.run?.(latestActions.current, detection);
               },
             },
           }

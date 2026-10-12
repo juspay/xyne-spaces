@@ -37,6 +37,8 @@ import {
 } from '@xyne/shared';
 import { mutators } from '../../../zero/mutators';
 import { MessageTags } from '../../tags/MessageTags';
+import { IntentCallSuggestionCard } from '../IntentCallSuggestionCard/IntentCallSuggestionCard';
+import { useIntentCallSuggestion } from '../../../stores/intentCallSuggestionStore';
 // import { useIntersectionObserver } from '../../../hooks/useIntersectionObserver';
 import { convertHtmlToBlocks } from './ChatBubble.utils';
 import { sanitizeHtmlString } from '../../../utils/sanitizer';
@@ -1017,11 +1019,23 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     showThreadTags && context === 'thread' && !isSystemMessage && !isMessageDeleted ? (
       <MessageTags messageActs={message.messageActs} inspectedTag={inspectedTag} />
     ) : null;
+
+  const callSuggestion = useIntentCallSuggestion(message.messageId);
+  const callSuggestionCard =
+    callSuggestion && !searchItemView && callSuggestion.surface === context ? (
+      <IntentCallSuggestionCard
+        messageId={message.messageId}
+        channelId={channelId}
+        conversationId={context === 'thread' ? conversation?.conversationId : undefined}
+        suggestion={callSuggestion}
+      />
+    ) : null;
   const textTrailer =
-    afterTextContent !== undefined || messageTags ? (
+    afterTextContent !== undefined || messageTags || callSuggestionCard ? (
       <>
         {afterTextContent}
         {messageTags}
+        {callSuggestionCard}
       </>
     ) : undefined;
 

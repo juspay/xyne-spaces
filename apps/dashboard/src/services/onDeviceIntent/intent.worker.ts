@@ -143,7 +143,7 @@ let extractor: FeatureExtractionPipeline | null = null;
 let loading: Promise<FeatureExtractionPipeline> | null = null;
 
 /**
- * Lazy — a user who never posts in a public channel should never pay the ~23MB
+ * Lazy — a user who never posts in an eligible channel should never pay the ~23MB
  * download. Concurrent callers share one in-flight load.
  */
 function getExtractor(): Promise<FeatureExtractionPipeline> {
