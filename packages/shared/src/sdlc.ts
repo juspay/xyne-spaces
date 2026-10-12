@@ -807,7 +807,52 @@ export const SDLC_UPLOAD_EXTENSIONS = [
   "m4v",
   "avi",
   "mkv",
+  // code and data — text, previewed with its language's colours. Only what the
+  // upload filter (ALLOWED_UPLOAD_EXTENSIONS) also takes, or it would be dropped.
+  "json",
+  "jsonl",
+  "xml",
+  "yaml",
+  "yml",
+  "toml",
+  "ini",
+  "conf",
+  "sql",
+  "log",
+  "py",
+  "js",
+  "mjs",
+  "cjs",
+  "ts",
+  "tsx",
+  "jsx",
+  "sh",
+  "bash",
+  "java",
+  "go",
+  "rs",
+  "rb",
+  "c",
+  "h",
+  "cpp",
+  "hpp",
+  "diff",
+  "patch",
+  "gradle",
 ] as const;
+
+/**
+ * A file's new name, keeping its extension: report.pdf renamed "Q4 report" is
+ * "Q4 report.pdf", so it still opens and previews as what it is. A name already
+ * ending in the extension is taken as it is.
+ */
+export function withKeptExtension(current: string, next: string): string {
+  const name = next.trim();
+  const dot = current.lastIndexOf(".");
+  if (dot <= 0 || dot === current.length - 1) return name;
+  const extension = current.slice(dot);
+  return name.toLowerCase().endsWith(extension.toLowerCase()) ? name : `${name}${extension}`;
+}
 
 /** `accept` for a file input, so the picker offers only what will be taken. */
 export const SDLC_UPLOAD_ACCEPT = SDLC_UPLOAD_EXTENSIONS.map(
