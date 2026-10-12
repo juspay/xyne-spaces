@@ -16903,12 +16903,12 @@ export function createMutators(
           deskReportEnabled: z.boolean().optional(),
           deskReportAgentSlug: z.string().optional().nullable(),
           deskReportRangeDays: z.number().optional(),
-          duplicateLookbackDays: z.number().int().min(0).max(3650).optional(),
           // Scoped duplicate detection config (see EmailChannelPreference.duplicateScopeConfig)
           duplicateScopeConfig: z
             .object({
               enabled: z.boolean(),
               scopeFieldGlobalIds: z.array(z.string()).max(MAX_DUPLICATE_SCOPE_FIELDS),
+              lookbackDays: z.number().int().min(0).max(3650).nullable().optional(),
             })
             .nullable()
             .optional(),
@@ -16934,7 +16934,6 @@ export function createMutators(
             deskReportAgentSlug,
             deskReportRangeDays,
             duplicateScopeConfig,
-            duplicateLookbackDays,
           },
         }) => {
           // One address routes to one desk; channelController enforces the same
@@ -16979,7 +16978,6 @@ export function createMutators(
               ...(deskReportEnabled !== undefined ? { deskReportEnabled } : {}),
               ...(deskReportAgentSlug !== undefined ? { deskReportAgentSlug } : {}),
               ...(deskReportRangeDays !== undefined ? { deskReportRangeDays } : {}),
-              ...(duplicateLookbackDays !== undefined ? { duplicateLookbackDays } : {}),
               ...(duplicateScopeConfig !== undefined
                 ? { duplicateScopeConfig: duplicateScopeConfig == null ? null : JSON.stringify(duplicateScopeConfig) }
                 : {}),
@@ -17015,7 +17013,6 @@ export function createMutators(
               deskReportEnabled: deskReportEnabled ?? false,
               deskReportAgentSlug: deskReportAgentSlug ?? null,
               deskReportRangeDays: deskReportRangeDays ?? 1,
-              duplicateLookbackDays: duplicateLookbackDays ?? null,
               duplicateScopeConfig: duplicateScopeConfig ? JSON.stringify(duplicateScopeConfig) : null,
             });
           }

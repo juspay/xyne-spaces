@@ -241,8 +241,7 @@ export function useDeskSettingsForm(
     deskReportRangeDays: emailChannelPreference?.deskReportRangeDays ?? 1,
     duplicateDetectionEnabled: duplicateScopeServer?.enabled ?? false,
     duplicateScopeFieldIds: JSON.stringify(duplicateScopeServer?.scopeFieldGlobalIds ?? []),
-    duplicateLookbackDays:
-      emailChannelPreference?.duplicateLookbackDays ?? DEFAULT_DUPLICATE_LOOKBACK_DAYS,
+    duplicateLookbackDays: duplicateScopeServer?.lookbackDays ?? DEFAULT_DUPLICATE_LOOKBACK_DAYS,
   });
   const cls = useDraft({
     enabled: classificationConfig?.enabled ?? false,
@@ -489,16 +488,15 @@ export function useDeskSettingsForm(
       if (d.deskReportRangeDays !== s.deskReportRangeDays) {
         patch.deskReportRangeDays = d.deskReportRangeDays;
       }
-      if (d.duplicateLookbackDays !== s.duplicateLookbackDays) {
-        patch.duplicateLookbackDays = d.duplicateLookbackDays;
-      }
       if (
         d.duplicateDetectionEnabled !== s.duplicateDetectionEnabled ||
-        d.duplicateScopeFieldIds !== s.duplicateScopeFieldIds
+        d.duplicateScopeFieldIds !== s.duplicateScopeFieldIds ||
+        d.duplicateLookbackDays !== s.duplicateLookbackDays
       ) {
         patch.duplicateScopeConfig = {
           enabled: d.duplicateDetectionEnabled,
           scopeFieldGlobalIds: parseDuplicateScopeFieldIds(d.duplicateScopeFieldIds),
+          lookbackDays: d.duplicateLookbackDays,
         };
       }
 

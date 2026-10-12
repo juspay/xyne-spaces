@@ -11,6 +11,8 @@ import { mutators } from '../zero/mutators';
 export type DuplicateScopeConfig = {
   enabled: boolean;
   scopeFieldGlobalIds: string[];
+  /** last N days; 0/null/undefined = all time */
+  lookbackDays?: number | null;
 };
 
 /**
@@ -34,9 +36,15 @@ export const parseDuplicateScopeConfig = (raw: unknown): DuplicateScopeConfig | 
   const ids = config['scopeFieldGlobalIds'];
   if (typeof config['enabled'] !== 'boolean') return null;
   if (!Array.isArray(ids) || !ids.every(id => typeof id === 'string')) return null;
+  const rawLookback = config['lookbackDays'];
+  const lookbackDays =
+    typeof rawLookback === 'number' && Number.isFinite(rawLookback) && rawLookback >= 0
+      ? rawLookback
+      : null;
   return {
     enabled: config['enabled'],
     scopeFieldGlobalIds: ids,
+    lookbackDays,
   };
 };
 
@@ -78,7 +86,6 @@ export function useUpdateEmailChannelPreference() {
       deskReportAgentSlug,
       deskReportRangeDays,
       duplicateScopeConfig,
-      duplicateLookbackDays,
     }: {
       channelId: string;
       ownerUserId?: string;
@@ -98,7 +105,6 @@ export function useUpdateEmailChannelPreference() {
       deskReportAgentSlug?: string | null;
       deskReportRangeDays?: number;
       duplicateScopeConfig?: DuplicateScopeConfig | null;
-      duplicateLookbackDays?: number;
     }): Promise<void> => {
       const mutation = zero.mutate(
         mutators.emailChannelPreference.upsert({
@@ -124,7 +130,6 @@ export function useUpdateEmailChannelPreference() {
             : {}),
           ...(deskReportRangeDays !== undefined ? { deskReportRangeDays } : {}),
           ...(duplicateScopeConfig !== undefined ? { duplicateScopeConfig } : {}),
-          ...(duplicateLookbackDays !== undefined ? { duplicateLookbackDays } : {}),
         }),
       );
       // Zero resolves .server with the rejection instead of rejecting the promise.

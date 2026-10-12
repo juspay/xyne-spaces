@@ -71,15 +71,17 @@ const recheckCacheKey = (ticketId: string): string => `ticket:duplicate-recheck-
 const RECHECK_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 /**
- * Earliest createdAt a duplicate candidate may have: the desk's duplicateLookbackDays
- * counted back from `asOf` (the ticket's creation). Undefined means no time bound:
- * a non-desk ticket (no preference row applies), or the desk set 0/null = all time.
+ * Earliest createdAt a duplicate candidate may have: the desk's
+ * duplicateScopeConfig.lookbackDays counted back from `asOf` (the ticket's
+ * creation). Undefined/null/0 means no time bound: non-desk tickets pass
+ * undefined (project-wide detection is never time-bounded), and a desk value
+ * of 0/null = all time.
  */
 const lookbackCutoff = (
-  preference: Pick<EmailChannelPreference, 'duplicateLookbackDays'> | null,
+  lookbackDays: number | null | undefined,
   asOf: number,
 ): number | undefined => {
-  const days = preference?.duplicateLookbackDays;
+  const days = lookbackDays;
   return days && days > 0 ? asOf - days * DAY_MS : undefined;
 };
 
@@ -117,6 +119,7 @@ type ResolvedDuplicateScopeField = {
 const duplicateScopeConfigSchema = z.object({
   enabled: z.boolean().optional().default(false),
   scopeFieldGlobalIds: z.array(z.string()).max(MAX_DUPLICATE_SCOPE_FIELDS).optional().default([]),
+  lookbackDays: z.number().int().min(0).max(3650).nullable().optional(),
 });
 type DuplicateScopeConfig = z.infer<typeof duplicateScopeConfigSchema>;
 
@@ -464,7 +467,10 @@ class TicketDuplicateService {
     // Unconfigured desk: skip the whole check — no form-value/exclusion reads, no
     // Vespa search, no LLM call. Non-desk tickets (no channel) fall through to the
     // legacy project-wide run below.
-    if (ticket.channelId && !this.resolveDuplicateScopeConfig(ticket.channelId, preference)) {
+    const scope = ticket.channelId
+      ? this.resolveDuplicateScopeConfig(ticket.channelId, preference)
+      : null;
+    if (ticket.channelId && !scope) {
       return {
         analysis: skippedAnalysis(SKIP_REASON_NOT_CONFIGURED),
         candidateCount: 0,
@@ -521,7 +527,7 @@ class TicketDuplicateService {
         description: ticket.description,
         projectId: ticket.projectId,
         channelId: ticket.channelId,
-        lookbackDays: preference?.duplicateLookbackDays ?? null,
+        lookbackDays: scope?.config?.lookbackDays ?? null,
         scopeConfig: preference?.duplicateScopeConfig ?? null,
         scopeFieldValues: [...scopeFieldValues].sort((a, b) => a.fieldId.localeCompare(b.fieldId)),
         excludeTicketIds: [...excludeTicketIds].sort(),
@@ -624,11 +630,13 @@ class TicketDuplicateService {
     // short of that SKIPS the check — the old project-wide fallback is gone. A ticket
     // with no channel at all (non-desk) keeps the legacy project-wide check.
     let scopeDynamicFieldValues: string[] | undefined;
+    let deskLookbackDays: number | null | undefined;
     if (channelId) {
       const scope = this.resolveDuplicateScopeConfig(channelId, preference);
       if (!scope) {
         return { candidates: [], analysis: skippedAnalysis(SKIP_REASON_NOT_CONFIGURED) };
       }
+      deskLookbackDays = scope?.config?.lookbackDays ?? undefined;
       const scopeTokens = await this.buildScopeDynamicFieldValues({
         scope,
         channelId,
@@ -652,7 +660,7 @@ class TicketDuplicateService {
       parentTicketId,
       excludeTicketIds,
       dynamicFieldValues: scopeDynamicFieldValues,
-      createdAfterTimestamp: lookbackCutoff(preference, asOfTimestamp ?? Date.now()),
+      createdAfterTimestamp: lookbackCutoff(deskLookbackDays, asOfTimestamp ?? Date.now()),
       createdBeforeTimestamp: asOfTimestamp,
     });
 

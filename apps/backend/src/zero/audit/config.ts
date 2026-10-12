@@ -171,6 +171,7 @@ const FRT_EMAIL_REPLY = '__emailReply';
 interface DuplicateScopeConfig {
   enabled?: boolean;
   scopeFieldGlobalIds?: string[];
+  lookbackDays?: number | null;
 }
 
 const duplicateScopeFieldIds = (value: unknown): string[] => {
@@ -183,7 +184,10 @@ const formatDuplicateScope = (value: unknown, res: AuditResolution): string | nu
   if (!scope || typeof scope !== 'object') return null;
   if (!scope.enabled) return 'off';
   const fields = formatSet(scope.scopeFieldGlobalIds, id => res.globalFieldName(id));
-  return fields ? `on: ${fields}` : 'on';
+  const window = typeof scope.lookbackDays === 'number' && scope.lookbackDays > 0
+    ? `; window: Last ${scope.lookbackDays} days`
+    : '; window: All time';
+  return (fields ? `on: ${fields}` : 'on') + window;
 };
 
 /** Guest visibility is a { key: visible } map where a missing key means visible. */
@@ -511,8 +515,6 @@ export const AUDIT_TABLE_CONFIG: Record<string, AuditTableConfig> = {
         typeof value === 'number' ? `${Math.round(value * 100)}%` : null,
       deskReportRangeDays: value =>
         typeof value === 'number' ? `${value} day${value === 1 ? '' : 's'}` : null,
-      duplicateLookbackDays: value =>
-        typeof value === 'number' && value > 0 ? `Last ${value} days` : 'All time',
     },
     ignoreFields: ['deskType'],
     // Column defaults. metricsEnabled is left out: Prisma creates it as null, Zero as false.
@@ -526,7 +528,6 @@ export const AUDIT_TABLE_CONFIG: Record<string, AuditTableConfig> = {
       appWebhookDeliveryEnabled: true,
       deskReportEnabled: false,
       deskReportRangeDays: 1,
-      duplicateLookbackDays: null,
       frtStageNames: null,
     },
   },
