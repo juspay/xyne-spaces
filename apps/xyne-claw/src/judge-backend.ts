@@ -15,8 +15,8 @@ export interface SystemOneBackendSpec {
 }
 
 export const SYSTEM_ONE_BACKENDS = {
-  ournormaljev: {
-    label: "Our Jev — normal",
+  xor: {
+    label: "Xor — our Jev",
     envPrefix: "OUR_NORMAL_JEV",
     sharedEnvPrefix: "OUR_JEV",
     defaultModel: "jev-latest",
@@ -81,9 +81,9 @@ const store = new AsyncLocalStorage<JudgeRunContext>();
 const collectors = new AsyncLocalStorage<JudgeExchange[]>();
 const MAX_PENDING = 100;
 
-export const DEFAULT_JUDGE_BACKEND: JudgeBackendName = "ournormaljev";
+export const DEFAULT_JUDGE_BACKEND: JudgeBackendName = "xor";
 
-const LEGACY_BACKEND_ALIASES: Record<string, JudgeBackendName> = { jev: "ournormaljev" };
+const LEGACY_BACKEND_ALIASES: Record<string, JudgeBackendName> = { jev: "xor", ournormaljev: "xor" };
 
 export function isJudgeBackend(value: unknown): value is JudgeBackendName {
   return typeof value === "string" && (value === "llm" || (SYSTEM_ONE_BACKEND_NAMES as readonly string[]).includes(value));

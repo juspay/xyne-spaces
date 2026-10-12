@@ -18,13 +18,14 @@ afterEach(() => {
 
 describe("judge backends", () => {
   it("no longer registers the hosted Jev service", () => {
-    expect(SYSTEM_ONE_BACKEND_NAMES).toEqual(["ournormaljev", "ourtrainedjev"]);
-    expect(DEFAULT_JUDGE_BACKEND).toBe("ournormaljev");
+    expect(SYSTEM_ONE_BACKEND_NAMES).toEqual(["xor", "ourtrainedjev"]);
+    expect(DEFAULT_JUDGE_BACKEND).toBe("xor");
   });
 
   it("maps the legacy jev name to our normal Jev and rejects unknown names", () => {
-    expect(resolveJudgeBackend("jev")).toBe("ournormaljev");
-    expect(resolveJudgeBackend(" JEV ")).toBe("ournormaljev");
+    expect(resolveJudgeBackend("jev")).toBe("xor");
+    expect(resolveJudgeBackend("ournormaljev")).toBe("xor");
+    expect(resolveJudgeBackend(" JEV ")).toBe("xor");
     expect(resolveJudgeBackend("ourtrainedjev")).toBe("ourtrainedjev");
     expect(resolveJudgeBackend("llm")).toBe("llm");
     expect(resolveJudgeBackend("typesafe")).toBeNull();
@@ -33,15 +34,15 @@ describe("judge backends", () => {
 
   it("defaults to our normal Jev, and treats JUDGE_BACKEND=jev the same", () => {
     delete process.env["JUDGE_BACKEND"];
-    expect(activeJudgeBackend()).toBe("ournormaljev");
+    expect(activeJudgeBackend()).toBe("xor");
     process.env["JUDGE_BACKEND"] = "jev";
-    expect(activeJudgeBackend()).toBe("ournormaljev");
+    expect(activeJudgeBackend()).toBe("xor");
     process.env["JUDGE_BACKEND"] = "ourtrainedjev";
     expect(activeJudgeBackend()).toBe("ourtrainedjev");
   });
 
   it("drops a shadow that resolves to the primary and de-duplicates the rest", () => {
-    process.env["JUDGE_SHADOW"] = "jev, llm, ournormaljev, llm, bogus";
-    expect(shadowJudgeBackends("ournormaljev")).toEqual(["llm"]);
+    process.env["JUDGE_SHADOW"] = "jev, llm, xor, llm, bogus";
+    expect(shadowJudgeBackends("xor")).toEqual(["llm"]);
   });
 });

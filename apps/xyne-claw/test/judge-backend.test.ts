@@ -53,7 +53,7 @@ describe("judge backends", () => {
 
     const seen: Record<string, string> = {};
     await Promise.all(
-      (["jev", "ournormaljev", "ourtrainedjev", "llm"] as const).map(
+      (["jev", "xor", "ourtrainedjev", "llm"] as const).map(
         (backend) =>
           new Promise<void>((resolve) => {
             setImmediate(async () => {
@@ -66,7 +66,7 @@ describe("judge backends", () => {
       ),
     );
 
-    expect(seen).toEqual({ jev: "ournormaljev", ournormaljev: "ournormaljev", ourtrainedjev: "ourtrainedjev", llm: "llm" });
+    expect(seen).toEqual({ jev: "xor", xor: "xor", ourtrainedjev: "ourtrainedjev", llm: "llm" });
     const urls = fetchMock.mock.calls.map((c) => String(c[0])).sort();
     expect(urls).toEqual([
       "https://llm.internal/v1/chat/completions",
@@ -94,15 +94,15 @@ describe("judge backends", () => {
   it("hides a variant that would be indistinguishable from its sibling", () => {
     process.env["OUR_JEV_URL"] = "https://ourjev.internal/v1/systemone";
     process.env["OUR_JEV_API_KEY"] = "k-ours";
-    expect(judgeBackendConfigured("ournormaljev")).toBe(false);
+    expect(judgeBackendConfigured("xor")).toBe(false);
     expect(judgeBackendConfigured("ourtrainedjev")).toBe(false);
 
     process.env["OUR_TRAINED_JEV_MODEL"] = "our-jev-ft-v3";
     expect(judgeBackendConfigured("ourtrainedjev")).toBe(true);
-    expect(judgeBackendConfigured("ournormaljev")).toBe(false);
+    expect(judgeBackendConfigured("xor")).toBe(false);
 
     process.env["OUR_NORMAL_JEV_URL"] = "https://ourjev-base.internal/v1/systemone";
-    expect(judgeBackendConfigured("ournormaljev")).toBe(true);
+    expect(judgeBackendConfigured("xor")).toBe(true);
   });
 
   it("lets a variant override the shared endpoint and key", async () => {
@@ -127,7 +127,7 @@ describe("judge backends", () => {
     await jevAsk("state", QUESTIONS, { purpose: "sift" });
     await jevAsk("state", QUESTIONS, { purpose: "sift" });
     const summary = judgeRunSummary();
-    expect(summary).toMatchObject({ backend: "ournormaljev", calls: 2, failed: 1, questions: 4 });
+    expect(summary).toMatchObject({ backend: "xor", calls: 2, failed: 1, questions: 4 });
     expect(summary?.byPurpose["sift"]).toMatchObject({ calls: 2, failed: 1 });
   });
 
@@ -148,7 +148,7 @@ describe("judge backends", () => {
     await vi.waitFor(() => expect(judgeRunSummary()?.shadows.length).toBe(1));
 
     const shadow = judgeRunSummary()?.shadows[0];
-    expect(shadow).toMatchObject({ primary: "ournormaljev", shadow: "llm", questions: 2, agreed: 1 });
+    expect(shadow).toMatchObject({ primary: "xor", shadow: "llm", questions: 2, agreed: 1 });
     expect(shadow?.meanAbsDiff).toBeCloseTo(0.5, 5);
   });
 });
@@ -171,9 +171,9 @@ describe("judge debug events", () => {
     recordJudgeOutcome("tool-search", "added 1", { added: [{ name: "spaces-desk-metrics", score: 0.9 }] });
 
     expect(events.map((e) => e.kind)).toEqual(["judge_call", "judge_call", "judge_outcome"]);
-    expect(events[0]?.data).toMatchObject({ backend: "ournormaljev", purpose: "tool-search", questions: 2, ok: true });
+    expect(events[0]?.data).toMatchObject({ backend: "xor", purpose: "tool-search", questions: 2, ok: true });
     expect(events[1]?.data).toMatchObject({ ok: false });
-    expect(events[2]?.data).toMatchObject({ backend: "ournormaljev", purpose: "tool-search", summary: "added 1" });
+    expect(events[2]?.data).toMatchObject({ backend: "xor", purpose: "tool-search", summary: "added 1" });
     expect(JSON.parse(String(events[2]?.data["detail"]))).toEqual({ added: [{ name: "spaces-desk-metrics", score: 0.9 }] });
   });
 

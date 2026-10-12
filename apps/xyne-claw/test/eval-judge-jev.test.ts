@@ -121,7 +121,7 @@ describe("judgeSemanticMatch via a jev backend", () => {
     expect(String(fetchMock.mock.calls[0]![0])).toBe("https://grid.example/v1/systemone");
     expect((fetchMock.mock.calls[0]![1] as RequestInit).headers).toMatchObject({ Authorization: "Bearer k-ours" });
     expect(result.score).toBeGreaterThanOrEqual(90);
-    expect(result.reasoning).toContain("ournormaljev:");
+    expect(result.reasoning).toContain("xor:");
     expect(result.reasoning.length).toBeLessThanOrEqual(200);
   });
 
@@ -137,7 +137,7 @@ describe("judgeSemanticMatch via a jev backend", () => {
   });
 
   it("fails open when the backend is not configured", async () => {
-    const result = await judgeSemanticMatch({ expected: "a", generated: "b", model: "ournormaljev" });
+    const result = await judgeSemanticMatch({ expected: "a", generated: "b", model: "xor" });
     expect(result).toEqual({ score: null, reasoning: "judge_unavailable" });
     expect(fetchMock).not.toHaveBeenCalled();
   });

@@ -38,9 +38,9 @@ describe("GET /eval-models", () => {
     process.env["OUR_JEV_API_KEY"] = "k-ours";
     let body: { models?: string[]; judgeBackends?: string[] } = {};
     await modelsHandler()({}, { json: (b: typeof body) => { body = b; } });
-    expect(body.judgeBackends).toEqual(["ournormaljev"]);
+    expect(body.judgeBackends).toEqual(["xor"]);
     expect(body.models).not.toContain("jev");
-    expect(body.models).not.toContain("ournormaljev");
+    expect(body.models).not.toContain("xor");
     expect(body.models).not.toContain("ourtrainedjev");
   });
 
@@ -52,9 +52,9 @@ describe("GET /eval-models", () => {
     process.env["OUR_TRAINED_JEV_MODEL"] = "our-jev-ft-v3";
     let body: { models?: string[]; judgeBackends?: string[]; judgeBackendLabels?: Record<string, string> } = {};
     await modelsHandler()({}, { json: (b: typeof body) => { body = b; } });
-    expect(body.judgeBackends).toEqual(["ournormaljev", "ourtrainedjev"]);
+    expect(body.judgeBackends).toEqual(["xor", "ourtrainedjev"]);
     expect(body.judgeBackendLabels).toEqual({
-      ournormaljev: "Our Jev — normal",
+      xor: "Xor — our Jev",
       ourtrainedjev: "Our Jev — trained",
     });
   });
