@@ -4005,6 +4005,8 @@ export default function SdlcScreen(): ReactElement {
               ) : section === 'releases' ? (
                 <SdlcReleases
                   projectId={channel.projectId ?? null}
+                  channelId={channel.id}
+                  channelName={channel.name}
                   repositories={channelRepos}
                   openReleaseId={openReleaseId}
                   onOpenRelease={openRelease}

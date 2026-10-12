@@ -4715,6 +4715,8 @@ export const mutators = defineMutators({
         mainBoardName: z.string(),
         releaseTrackingMode: z.nativeEnum(ReleaseTrackingMode),
         channelId: z.string(),
+        hubChannelId: z.string(),
+        repoId: z.string(),
         applications: z.array(
           z.object({
             id: z.string(),
@@ -4722,7 +4724,6 @@ export const mutators = defineMutators({
             boardName: z.string(),
             name: z.string(),
             regex: z.string(),
-            repoUrl: z.string(),
             ownerTeam: z.string(),
             envPaths: z.array(z.string()),
             migrationPaths: z.array(z.string()),

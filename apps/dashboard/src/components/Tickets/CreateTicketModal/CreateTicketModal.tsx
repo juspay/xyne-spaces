@@ -73,7 +73,7 @@ import { Button } from '../../ui/Button';
 import { Dialog } from '../../ui/Dialog';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
 import { EntityMultiSelector } from '../../ui/EntitySelector/EntityMultiSelector';
-import { repoShortName } from '../../Release/repoVisual';
+import { repoShortName, repoWebUrl } from '../../Release/repoVisual';
 import {
   ReleaseRepositoriesSection,
   type ReleaseRangeKey,
@@ -557,7 +557,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const isReleaseLine = ticketKind === 'release';
   // Only main release boards are selectable (repos); services show as chips below.
   // Keep the currently-primary board even if it lacks a provider.
-  const releaseBoards = useMemo(
+  const linkedReleaseBoards = useMemo(
     () =>
       (boards ?? [])
         .filter(b => isMainReleaseBoard(b) || b.id === formValues.boardId)
@@ -571,20 +571,21 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   // (deprecated) projectId, but it stays as narrow as the repos on screen.
   const releaseProjectIds = useMemo(() => {
     const ids = new Set<string>();
-    for (const board of releaseBoards) {
+    for (const board of linkedReleaseBoards) {
       if (board.projectId) ids.add(board.projectId);
     }
     return Array.from(ids).sort();
-  }, [releaseBoards]);
+  }, [linkedReleaseBoards]);
 
   // Services grouped by main release board → read-only chips under each repo.
   const [releaseApplications] = useCachedQuery(
     queries.applicationsByProjectIds({ projectIds: releaseProjectIds }),
     { enabled: isReleaseLine && releaseProjectIds.length > 0 },
   );
-  const { servicesByMainBoard, repoUrlByMainBoard } = useMemo(() => {
+  const { servicesByMainBoard, repoUrlByMainBoard, otherHubBoardIds } = useMemo(() => {
     const services = new Map<string, string[]>();
     const repoUrls = new Map<string, string>();
+    const ownedElsewhere = new Set<string>();
     const list =
       !releaseApplications || releaseApplications instanceof Error ? [] : releaseApplications;
     for (const app of list) {
@@ -592,10 +593,43 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       const names = services.get(app.mainReleaseBoardId) ?? [];
       names.push(app.name);
       services.set(app.mainReleaseBoardId, names);
-      if (app.repoUrl) repoUrls.set(app.mainReleaseBoardId, app.repoUrl);
+      const repoUrl = repoWebUrl(app.repo);
+      if (repoUrl) repoUrls.set(app.mainReleaseBoardId, repoUrl);
+      // A release config takes releases only from its own release channel.
+      if (app.channelId && app.channelId !== effectiveChannelId) {
+        ownedElsewhere.add(app.mainReleaseBoardId);
+      }
     }
-    return { servicesByMainBoard: services, repoUrlByMainBoard: repoUrls };
-  }, [releaseApplications]);
+    return {
+      servicesByMainBoard: services,
+      repoUrlByMainBoard: repoUrls,
+      otherHubBoardIds: ownedElsewhere,
+    };
+  }, [releaseApplications, effectiveChannelId]);
+  const releaseBoards = useMemo(
+    () => linkedReleaseBoards.filter(b => !otherHubBoardIds.has(b.id)),
+    [linkedReleaseBoards, otherHubBoardIds],
+  );
+  // A selected board whose release config creates releases in another channel is hidden
+  // above; drop it, primary or extra repo, so submit doesn't target it. Re-runs when the
+  // primary changes, since a prefill can set it after the configs have loaded.
+  useEffect(() => {
+    if (!isReleaseLine) return;
+    if (formValues.boardId && otherHubBoardIds.has(formValues.boardId)) {
+      form.setFieldValue('boardId', '');
+      markAutoApplied({ boardId: '' });
+    }
+    if (selectedRepoBoardIds.some(id => otherHubBoardIds.has(id))) {
+      setSelectedRepoBoardIds(prev => prev.filter(id => !otherHubBoardIds.has(id)));
+    }
+  }, [
+    isReleaseLine,
+    otherHubBoardIds,
+    formValues.boardId,
+    selectedRepoBoardIds,
+    form,
+    markAutoApplied,
+  ]);
 
   const isVersionBoard = (board: { releaseTrackingMode?: string | null } | undefined): boolean =>
     board?.releaseTrackingMode === ReleaseTrackingMode.VERSION;

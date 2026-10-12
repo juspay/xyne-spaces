@@ -321,7 +321,7 @@ function RepoForm({
         </div>
         <SdlcReleaseServices
           repoName={repo.name}
-          repoUrl={repo.repoUrl}
+          repoId={repo.id}
           projectId={repo.projectId}
           services={draft.services}
           onChange={services => onChange({ services })}

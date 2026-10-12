@@ -87,7 +87,13 @@ export class ReleaseNotesService {
       });
       const provider = (board?.vcsProvider ?? null) as VCSProviderType | null;
       const apps = await this.applicationRepository.findByMainReleaseBoardId(boardId);
-      const repoUrl = apps.map(a => a.repoUrl?.trim()).find(Boolean);
+      const repo = apps[0]
+        ? await db.repo.findUnique({
+            where: { id: apps[0].repoId },
+            select: { url: true, canonicalUrl: true },
+          })
+        : null;
+      const repoUrl = repo ? (repo.canonicalUrl || repo.url).trim() : '';
       if (!repoUrl) return { ...fallback, provider };
       const parsed = provider === VCSProviderType.GITHUB
         ? parseGitHubRepoUrl(repoUrl)
