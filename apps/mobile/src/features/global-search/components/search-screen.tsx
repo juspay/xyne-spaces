@@ -357,11 +357,19 @@ const SearchToolbar = memo(function SearchToolbar({
             scope={scope}
             dispatch={dispatch}
             onRequestClose={onRequestClose}
+            filterBadgeCount={filterBadgeCount}
+            {...(scope ? {} : { onFilterPress: openFilters })}
           />
         )}
         {scope ? null : (
           <>
-            <SearchCategoryTags tab={tab} onTabChange={onTabChange} />
+            <SearchCategoryTags
+              tab={tab}
+              onTabChange={onTabChange}
+              {...(fieldHostedElsewhere
+                ? { onFilterPress: openFilters, filterBadgeCount }
+                : {})}
+            />
             <Animated.View style={filterRowStyle}>
               <GlobalSearchFilterBar
                 tab={tab}

@@ -15,19 +15,18 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
   TextInput,
   View,
   type NativeSyntheticEvent,
   type TextInputKeyPressEventData,
 } from 'react-native';
-import { ListFilter, Search, X } from 'lucide-react-native';
+import { Search, X } from 'lucide-react-native';
 import { useCSSVariable, useUniwind } from 'uniwind';
 
-import { useBubbleAccent } from '@/src/theme/useBubbleAccent';
 import { haptics } from '@/src/utils/haptics';
 import { withAlpha } from '@/src/utils/color';
 import { SearchFilterChipView } from './search-filter-chip';
+import { SearchFiltersButton } from './search-filters-button';
 import {
   createDebouncedCommitter,
   SEARCH_COMMIT_MAX_WAIT_MS,
@@ -77,31 +76,6 @@ const styles = StyleSheet.create({
     gap: FILTER_BUTTON_GAP,
   },
   pill: { flex: 1 },
-  filterButton: {
-    width: SEARCH_BAR_HEIGHT,
-    height: SEARCH_BAR_HEIGHT,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: SEARCH_BAR_HEIGHT / 2,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  filterBadge: {
-    position: 'absolute',
-    top: 4,
-    right: 4,
-    minWidth: 16,
-    height: 16,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 4,
-  },
-  filterBadgeText: {
-    color: '#ffffff',
-    fontSize: 10,
-    fontWeight: '700',
-    lineHeight: 12,
-  },
   scroll: { flex: 1 },
   scrollContent: { alignItems: 'center', flexGrow: 1 },
 });
@@ -161,7 +135,6 @@ export const SearchInput = memo(function SearchInput({
   const foregroundColor = useCSSVariable('--color-foreground') as string;
   const mutedColor = useCSSVariable('--color-secondary-text') as string;
   const { theme } = useUniwind();
-  const { accentText } = useBubbleAccent();
 
   // Driven from the change handler, never from an effect, and `maxWaitMs` commits even
   // while the user keeps typing. Together they stop continuous typing from never
@@ -296,19 +269,6 @@ export const SearchInput = memo(function SearchInput({
     [borderColor, inputColor],
   );
 
-  const filterButtonStyle = useMemo(
-    () => ({
-      backgroundColor: inputColor,
-      borderColor,
-    }),
-    [borderColor, inputColor],
-  );
-
-  const onFilterButtonPress = useCallback(() => {
-    void haptics.buttonTap();
-    onFilterPress?.();
-  }, [onFilterPress]);
-
   const textStyle = useMemo(
     () => [
       {
@@ -389,27 +349,7 @@ export const SearchInput = memo(function SearchInput({
       </View>
 
       {scope || !onFilterPress ? null : (
-        <Pressable
-          accessibilityRole='button'
-          accessibilityLabel={
-            filterBadgeCount > 0 ? `Filters, ${filterBadgeCount} active` : 'Filters'
-          }
-          hitSlop={8}
-          onPress={onFilterButtonPress}
-          style={[styles.filterButton, filterButtonStyle]}
-        >
-          <ListFilter
-            size={SEARCH_BAR_ICON_SIZE}
-            color={filterBadgeCount > 0 ? accentText : mutedColor}
-          />
-          {filterBadgeCount > 0 ? (
-            <View style={[styles.filterBadge, { backgroundColor: accentText }]}>
-              <Text style={styles.filterBadgeText}>
-                {filterBadgeCount > 9 ? '9+' : String(filterBadgeCount)}
-              </Text>
-            </View>
-          ) : null}
-        </Pressable>
+        <SearchFiltersButton onPress={onFilterPress} badgeCount={filterBadgeCount} />
       )}
     </View>
   );
