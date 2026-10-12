@@ -117,6 +117,21 @@ if (config.xyneClaw.s2sKey && config.xyneClaw.authUrl) {
   logger.warn('[workflows] xyne-claw not configured — RUN_AGENT will not be available');
 }
 
+/**
+ * The SDK only mounts POST /ai-builder/chat (workflow builder + "Ask about this run"
+ * chat in @xyne/workflow-ui) when `config.aiBuilder` is set. Without it the UI's
+ * Ask AI buttons 404. Omit it when LiteLLM isn't configured rather than mounting a
+ * route that fails every call.
+ */
+const AI_BUILDER_CONFIG = (() => {
+  const { litellmBaseUrl, litellmApiKey, model } = config.workflows.aiBuilder;
+  if (!litellmBaseUrl || !litellmApiKey) {
+    logger.warn('[workflows] AI builder disabled: LITELLM_BASE_URL / API key not configured');
+    return undefined;
+  }
+  return { baseUrl: litellmBaseUrl, apiKey: litellmApiKey, ...(model ? { model } : {}) };
+})();
+
 const APPROVAL_POLICY = {
   default: ApprovalRequirement.NOT_REQUIRED,
   steps: {},
@@ -145,6 +160,7 @@ export const workflowRuntime = new WorkflowRuntime<Record<string, unknown>, Xyne
     baseUrl: BASE_URL,
     defaultCronTimezone: DEFAULT_CRON_TIMEZONE,
     approval: APPROVAL_POLICY,
+    ...(AI_BUILDER_CONFIG ? { aiBuilder: AI_BUILDER_CONFIG } : {}),
   },
 });
 
