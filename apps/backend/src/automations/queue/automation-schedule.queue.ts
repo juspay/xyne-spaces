@@ -4,8 +4,12 @@ import { redisService } from '@/services/redisService';
 import { markAutomationFailed } from '@/database/repositories/workflowExecutionStateUtils';
 
 export interface AutomationScheduleJobData {
-  executionId: string;
+  executionId?: string; // DELAY wake-up
+  workflowId?: string; // Schedule (CRON) tick
 }
+
+// Per-workflow job NAME (no custom jobId) keeps same-cron automations on separate repeat keys.
+export const CRON_TICK_PREFIX = 'cron-tick:';
 
 class AutomationScheduleQueue {
   private queue: Bull.Queue<AutomationScheduleJobData> | null = null;
@@ -36,6 +40,7 @@ class AutomationScheduleQueue {
         logger.error(
           `[AUTOMATION-SCHEDULE-QUEUE] job ${job.id} failed — execution ${executionId}: ${message}`,
         );
+        if (!executionId) return;
         void markAutomationFailed(executionId, message)
           .then(result => {
             if (result === 'marked') {
@@ -86,6 +91,23 @@ class AutomationScheduleQueue {
     });
   }
 
+  async unscheduleCron(workflowId: string): Promise<void> {
+    const queue = this.getQueue();
+    const name = `${CRON_TICK_PREFIX}${workflowId}`;
+    const repeatables = await queue.getRepeatableJobs();
+    for (const job of repeatables.filter(j => j.name === name)) {
+      await queue.removeRepeatableByKey(job.key);
+    }
+  }
+
+  async scheduleCron(workflowId: string, cron: string, tz: string): Promise<void> {
+    await this.unscheduleCron(workflowId);
+    await this.getQueue().add(
+      `${CRON_TICK_PREFIX}${workflowId}`,
+      { workflowId },
+      { repeat: { cron, tz }, removeOnFail: true },
+    );
+  }
 }
 
 export const automationScheduleQueue = new AutomationScheduleQueue();

@@ -7,6 +7,9 @@ import { ConfigValidator } from '../engine/config-validator';
 import { triggerRegistry } from '../triggers/trigger-registry';
 import { stepRegistry } from '../steps/step-registry';
 import { encryptWebhookStepHeaders } from '../engine/webhook-step-encryption';
+import { automationScheduleQueue } from '../queue/automation-schedule.queue';
+import { cronFromTrigger, SCHEDULE_EVENT } from '../triggers/schedule.trigger';
+import { DEFAULT_CRON_TIMEZONE } from '@/workflowsV2/constants';
 import {
   AUTOMATION_WORKFLOW_TYPE,
   buildAutomationMetadata,
@@ -64,6 +67,7 @@ class AutomationService {
       for (const issue of validation.issues) {
         logger.warn(`  • [${issue.code}] ${issue.path}: ${issue.message}`);
       }
+      if (existing.eventType === SCHEDULE_EVENT) await automationScheduleQueue.unscheduleCron(id);
       const demoted =
         existing.status === AutomationStatus.ACTIVE
           ? await repositories.workflows.update(id, {
@@ -79,6 +83,23 @@ class AutomationService {
     logger.info(
       `[AUTOMATION-SERVICE] activate id=${id} trigger=${config.trigger.type} steps=${config.steps.length}`,
     );
+
+    if (config.trigger.type === SCHEDULE_EVENT) {
+      try {
+        await automationScheduleQueue.scheduleCron(
+          id,
+          cronFromTrigger(config.trigger.config),
+          DEFAULT_CRON_TIMEZONE,
+        );
+      } catch (err) {
+        // The row may already be ACTIVE (set by the caller); never leave it live without a schedule.
+        await repositories.workflows.update(id, {
+          status: AutomationStatus.DISABLED,
+          updatedAt: new Date(),
+        });
+        throw err;
+      }
+    }
 
     const headersEncrypted = encryptWebhookStepHeaders(config.steps);
     const { drainInFlight: _drained, ...metadata } = parseAutomationMetadata(existing.metadata);
@@ -105,6 +126,7 @@ class AutomationService {
       throw new Error(`Automation "${id}" not found`);
     }
 
+    if (existing.eventType === SCHEDULE_EVENT) await automationScheduleQueue.unscheduleCron(id);
     const updated = await repositories.workflows.update(id, {
       status: AutomationStatus.DISABLED,
       metadata: buildAutomationMetadata({

@@ -9,6 +9,7 @@ import {
   automationScheduleQueue,
   type AutomationScheduleJobData,
 } from './automation-schedule.queue';
+import { processCronTick, recoverCronSchedules } from './automation-cron-tick';
 
 class AutomationScheduleWorker {
   private isInitialized = false;
@@ -34,6 +35,10 @@ class AutomationScheduleWorker {
         },
       );
 
+    // Named jobs (cron ticks) skip the unnamed processor above and land here.
+    automationScheduleQueue.getQueue().process('*', processCronTick);
+    await recoverCronSchedules();
+
     this.isInitialized = true;
     logger.info('[AUTOMATION-SCHEDULE-WORKER] Started');
   }
@@ -43,6 +48,7 @@ class AutomationScheduleWorker {
       throw new Error('[AUTOMATION-SCHEDULE-WORKER] Executor not initialized');
     }
     const { executionId } = job.data;
+    if (!executionId) return;
     logger.info(
       `[AUTOMATION-SCHEDULE-WORKER] picking up scheduled run executionId=${executionId}`,
     );

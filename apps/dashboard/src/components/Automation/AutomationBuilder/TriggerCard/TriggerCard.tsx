@@ -15,6 +15,7 @@ import { Popover } from '../../../ui/Popover/Popover';
 import { SchemaForm } from '../SchemaForm/SchemaForm';
 import { EmailReceivedFilterForm } from './EmailReceivedFilterForm';
 import { WebhookTriggerForm } from './WebhookTriggerForm';
+import { ScheduleTriggerForm } from './ScheduleTriggerForm';
 import {
   TicketUpdatedFormFieldsSection,
   conditionsFromTriggerConfig,
@@ -149,6 +150,13 @@ export function TriggerCard({
           />
         ) : trigger.type === 'WEBHOOK' ? (
           <WebhookTriggerForm
+            value={trigger.config}
+            onChange={onConfigChange}
+            issues={issues ?? null}
+            pathPrefix='trigger.config.'
+          />
+        ) : trigger.type === 'CRON' ? (
+          <ScheduleTriggerForm
             value={trigger.config}
             onChange={onConfigChange}
             issues={issues ?? null}
