@@ -1,6 +1,6 @@
 import { getAuthToken } from '../../contexts/AuthContext';
 import { CallType, MeetingStatus } from '@xyne/shared';
-import { apiGetText, apiPost, apiRequest } from '../apiClient';
+import { apiGetText, apiPost, apiRequest, isMtlsRequestError } from '../apiClient';
 import { PUBLIC_DEEP_LINK_ORIGIN } from '../../config';
 import { canonicalizePublicDeepLink } from '../../utils/publicDeepLink';
 
@@ -44,13 +44,28 @@ export interface ValidateRoomsRequest {
   callIds: string[];
 }
 
-export interface ScheduleCallRequest {
+export type ScheduleCallRequest = {
   title: string;
   startsAt: number;
   endsAt: number;
   channelId?: string;
   targetUserIds?: string[];
-}
+  callUpdatesChannel?: string;
+  conversationId?: string;
+  externalInvitees?: string[];
+  externalInviteDelivery?: 'standalone' | 'conversation_reply';
+  invitation?: CallInvitation;
+};
+
+export type CallInvitation = {
+  bodyHtml: string;
+  title?: string;
+  organizerName?: string;
+  organizerEmail?: string;
+  orgName?: string;
+  /** IANA timezone used to format start/end times in the email. */
+  timezone?: string;
+};
 
 export interface ScheduleCallResponse {
   success: boolean;
@@ -59,18 +74,26 @@ export interface ScheduleCallResponse {
   channelId: string;
 }
 
-export interface CreateRecurringSeriesRequest {
+export type CreateRecurringSeriesRequest = {
   title: string;
   description?: string;
   channelId?: string;
   targetUserIds?: string[];
+  callUpdatesChannel?: string;
+  /** IANA timezone, e.g. "Asia/Kolkata". */
   timezone: string;
+  /** e.g. "FREQ=WEEKLY;BYDAY=MO,WE,FR". */
   recurrenceRule: string;
+  /** HH:mm, 24-hour, local to the first occurrence. */
   startTime: string;
   endTime: string;
+  /** Epoch ms of the first occurrence (the RRULE dtstart). */
   startsOn: number;
+  /** Epoch ms; omit for an indefinite series. */
   endsOn?: number;
-}
+  externalInvitees?: string[];
+  invitation?: CallInvitation;
+};
 
 export interface CreateRecurringSeriesResponse {
   success: boolean;
@@ -78,15 +101,17 @@ export interface CreateRecurringSeriesResponse {
   channelId: string;
 }
 
-export interface UpdateScheduleCallRequest {
+export type UpdateScheduleCallRequest = {
   title?: string;
   startsAt?: number;
   endsAt?: number;
   targetUserIds?: string[];
   channelId?: string;
-}
+  callUpdatesChannel?: string;
+  externalInvitees?: string[];
+};
 
-export interface UpdateRecurringSeriesRequest {
+export type UpdateRecurringSeriesRequest = {
   title?: string;
   recurrenceRule?: string;
   startTime?: string;
@@ -96,7 +121,9 @@ export interface UpdateRecurringSeriesRequest {
   timezone?: string;
   targetUserIds?: string[];
   channelId?: string;
-}
+  callUpdatesChannel?: string;
+  externalInvitees?: string[];
+};
 
 export interface ApiErrorResponse {
   error: string;
@@ -171,6 +198,38 @@ function extractCredentials(
     ...(response.channelId !== undefined ? { channelId: response.channelId } : {}),
     ...(response.scopeType !== undefined ? { scopeType: response.scopeType } : {}),
   };
+}
+
+/** The server's `error` text, unless it is a stringified Zod issue array (starts with `[`). */
+function readServerMessage(responseBody: string): string | null {
+  try {
+    const { error } = JSON.parse(responseBody) as { error?: unknown };
+    return typeof error === 'string' && !error.trimStart().startsWith('[') ? error : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Run a schedule or cancel request and surface the server's reason as an ApiError. The backend
+ * answers some validation failures with an unreadable Zod array or a bare 500, so those fall back
+ * to `fallback`.
+ */
+async function withApiError<T>(fallback: string, run: (token: string) => Promise<T>): Promise<T> {
+  const authToken = await getAuthToken();
+  if (!authToken) {
+    throw new ApiError('Not authenticated', 401, 'UNAUTHORIZED');
+  }
+  try {
+    return await run(authToken);
+  } catch (error) {
+    if (!isMtlsRequestError(error)) throw error;
+    throw new ApiError(
+      readServerMessage(error.responseBody) ?? fallback,
+      error.statusCode,
+      'UNKNOWN_ERROR',
+    );
+  }
 }
 
 // ============================================================================
@@ -370,21 +429,23 @@ class CallServiceWrapper {
   }
 
   /**
-   * Schedule a call for a future time
-   * Not implemented in base service - placeholder
+   * Schedule a call for a future time (POST /calls/schedule)
    */
-  async scheduleCall(_data: ScheduleCallRequest): Promise<ScheduleCallResponse> {
-    throw new ApiError('Scheduled calls not yet supported', 501, 'NOT_IMPLEMENTED');
+  async scheduleCall(data: ScheduleCallRequest): Promise<ScheduleCallResponse> {
+    return withApiError('Failed to schedule call', token =>
+      apiPost<ScheduleCallResponse>('/calls/schedule', data, { token }),
+    );
   }
 
   /**
-   * Create a recurring call series
-   * Not implemented in base service - placeholder
+   * Create a recurring call series (POST /calls/series)
    */
   async createRecurringSeries(
-    _data: CreateRecurringSeriesRequest,
+    data: CreateRecurringSeriesRequest,
   ): Promise<CreateRecurringSeriesResponse> {
-    throw new ApiError('Recurring calls not yet supported', 501, 'NOT_IMPLEMENTED');
+    return withApiError('Failed to create recurring series', token =>
+      apiPost<CreateRecurringSeriesResponse>('/calls/series', data, { token }),
+    );
   }
 
   /**
@@ -406,14 +467,12 @@ class CallServiceWrapper {
    * Marks the instance as CANCELLED (DELETE /calls/:callId)
    */
   async cancelScheduledCall(callId: string): Promise<void> {
-    const authToken = await getAuthToken();
-    if (!authToken) {
-      throw new ApiError('Not authenticated', 401, 'UNAUTHORIZED');
-    }
-    await apiRequest<{ success: boolean; error?: string }>(`/calls/${encodeURIComponent(callId)}`, {
-      method: 'DELETE',
-      token: authToken,
-    });
+    await withApiError('Failed to cancel call', token =>
+      apiRequest<{ success: boolean; error?: string }>(`/calls/${encodeURIComponent(callId)}`, {
+        method: 'DELETE',
+        token,
+      }),
+    );
   }
 
   /**
@@ -421,33 +480,37 @@ class CallServiceWrapper {
    * Marks all future instances as CANCELLED (DELETE /calls/series/:seriesId)
    */
   async cancelRecurringSeries(seriesId: string): Promise<void> {
-    const authToken = await getAuthToken();
-    if (!authToken) {
-      throw new ApiError('Not authenticated', 401, 'UNAUTHORIZED');
-    }
-    await apiRequest<{ success: boolean; error?: string }>(
-      `/calls/series/${encodeURIComponent(seriesId)}`,
-      { method: 'DELETE', token: authToken },
+    await withApiError('Failed to cancel series', token =>
+      apiRequest<{ success: boolean; error?: string }>(
+        `/calls/series/${encodeURIComponent(seriesId)}`,
+        { method: 'DELETE', token },
+      ),
     );
   }
 
   /**
-   * Update a single scheduled call instance
-   * Not implemented in base service - placeholder
+   * Update a single scheduled call instance (PATCH /calls/:callId)
    */
-  async updateScheduledCall(_callId: string, _data: UpdateScheduleCallRequest): Promise<void> {
-    throw new ApiError('Update scheduled call not yet supported', 501, 'NOT_IMPLEMENTED');
+  async updateScheduledCall(callId: string, data: UpdateScheduleCallRequest): Promise<void> {
+    await withApiError('Failed to update call', token =>
+      apiRequest<{ success: boolean; error?: string }>(`/calls/${encodeURIComponent(callId)}`, {
+        method: 'PATCH',
+        body: data,
+        token,
+      }),
+    );
   }
 
   /**
-   * Update a recurring call series
-   * Not implemented in base service - placeholder
+   * Update a recurring call series (PATCH /calls/series/:seriesId)
    */
-  async updateRecurringSeries(
-    _seriesId: string,
-    _data: UpdateRecurringSeriesRequest,
-  ): Promise<void> {
-    throw new ApiError('Update recurring series not yet supported', 501, 'NOT_IMPLEMENTED');
+  async updateRecurringSeries(seriesId: string, data: UpdateRecurringSeriesRequest): Promise<void> {
+    await withApiError('Failed to update series', token =>
+      apiRequest<{ success: boolean; error?: string }>(
+        `/calls/series/${encodeURIComponent(seriesId)}`,
+        { method: 'PATCH', body: data, token },
+      ),
+    );
   }
 
   /**

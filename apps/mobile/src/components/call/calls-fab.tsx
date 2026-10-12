@@ -1,10 +1,8 @@
-import { useEffect, useState, type ReactElement } from 'react';
+import { memo, useEffect, useState, type ReactElement } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import Animated, {
   Extrapolation,
   interpolate,
-  interpolateColor,
-  useAnimatedProps,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
@@ -13,6 +11,7 @@ import Animated, {
 import { CalendarDays, Phone, Plus } from 'lucide-react-native';
 import { useCSSVariable } from 'uniwind';
 import { useTabPageIsFocused } from '@/src/hooks/useTabPageFocus';
+import { useOverlayPresence } from '@/src/hooks/useOverlayPresence';
 
 import {
   FAB_RADIUS,
@@ -25,10 +24,10 @@ import { useBubbleAccent } from '@/src/theme/useBubbleAccent';
 import { GlassSurface } from '@/src/components/ui/glass-surface';
 import { haptics } from '@/src/utils/haptics';
 
-const AnimatedPlus = Animated.createAnimatedComponent(Plus);
-
 const ACTION_GAP = 16;
 const ACTION_SPRING = { damping: 16, stiffness: 220, mass: 0.7 };
+/** Long enough for ACTION_SPRING to settle before the menu layers unmount. */
+const MENU_CLOSE_DURATION = 400;
 
 interface CallsFabProps {
   onStartCall: () => void;
@@ -103,19 +102,21 @@ const FabAction = ({
   );
 };
 
-export const CallsFab = ({
+// Memoised: the Portal re-pushes its children on every render, which re-renders the
+// whole tab overlay host. The calls screen re-renders on every live-data tick.
+export const CallsFab = memo(function CallsFab({
   onStartCall,
   onScheduleCall,
   isHidden = false,
-}: CallsFabProps): ReactElement | null => {
-  const { mode } = useDisplayMode();
+}: CallsFabProps): ReactElement | null {
   const { accentBg, accentFg } = useBubbleAccent();
-  const closeIconColor = useCSSVariable('--color-background') as string;
   const isFocused = useTabPageIsFocused();
   const fabBottomOffset = useFabScreenBottomOffset();
-  const closeFill = useCSSVariable('--color-foreground') as string;
 
   const [expanded, setExpanded] = useState(false);
+  // Scrim and glass actions only exist while open or closing; parked at opacity 0 over a
+  // scrolling list they still cost compositor time.
+  const isMenuMounted = useOverlayPresence(expanded, MENU_CLOSE_DURATION);
   const progress = useSharedValue(0);
   useEffect(() => {
     progress.set(withSpring(expanded ? 1 : 0, ACTION_SPRING));
@@ -126,17 +127,14 @@ export const CallsFab = ({
   }, [isHidden, isFocused]);
 
   const scrimStyle = useAnimatedStyle(() => ({ opacity: progress.get() * 0.85 }));
-  // Morph: accent square -> neutral circle.
+  // Morph: square -> circle. Colour stays accent; no colour interpolation and no animated
+  // SVG props — those kept the Calls tab's JS/compositor busy while the FAB sat idle.
   const fabShellStyle = useAnimatedStyle(() => ({
-    backgroundColor: interpolateColor(progress.get(), [0, 1], [accentBg, closeFill]),
     borderRadius: interpolate(progress.get(), [0, 1], [FAB_RADIUS, FAB_SIZE / 2]),
   }));
-  // A "+" turned 45° is an "x": one icon, rotated, recoloured to stay visible on the circle.
+  // A "+" turned 45° is an "x".
   const plusStyle = useAnimatedStyle(() => ({
     transform: [{ rotate: `${progress.get() * 45}deg` }],
-  }));
-  const plusProps = useAnimatedProps(() => ({
-    color: interpolateColor(progress.get(), [0, 1], [accentFg, closeIconColor]),
   }));
 
   const fabVisibility = useSharedValue(isHidden ? 0 : 1);
@@ -171,40 +169,47 @@ export const CallsFab = ({
   return (
     <Portal name='calls-fab' hostName={TAB_OVERLAY_PORTAL_HOST}>
       <View pointerEvents='box-none' className='absolute inset-0 z-[1100]'>
-        <Animated.View
-          pointerEvents={expanded ? 'auto' : 'none'}
-          className='absolute inset-0'
-          style={scrimStyle}
-        >
-          <Pressable onPress={() => setExpanded(false)} className='absolute inset-0 bg-black' />
-        </Animated.View>
-        <View
-          pointerEvents='box-none'
-          className='absolute right-6 h-44 w-70'
-          style={{ bottom: fabBottomOffset }}
-        >
-          <FabAction
-            slot={2}
-            label='Schedule a call'
-            icon={<CalendarDays size={22} color={accentBg} />}
-            progress={progress}
-            expanded={expanded}
-            onPress={choose(onScheduleCall)}
-          />
-          <FabAction
-            slot={1}
-            label='Start a call'
-            icon={<Phone size={22} color={accentBg} />}
-            progress={progress}
-            expanded={expanded}
-            onPress={choose(onStartCall)}
-          />
-        </View>
+        {isMenuMounted && (
+          <>
+            <Animated.View
+              pointerEvents={expanded ? 'auto' : 'none'}
+              className='absolute inset-0'
+              style={scrimStyle}
+            >
+              <Pressable
+                onPress={() => setExpanded(false)}
+                className='absolute inset-0 bg-black'
+              />
+            </Animated.View>
+            <View
+              pointerEvents='box-none'
+              className='absolute right-6 h-44 w-70'
+              style={{ bottom: fabBottomOffset }}
+            >
+              <FabAction
+                slot={2}
+                label='Schedule a call'
+                icon={<CalendarDays size={22} color={accentBg} />}
+                progress={progress}
+                expanded={expanded}
+                onPress={choose(onScheduleCall)}
+              />
+              <FabAction
+                slot={1}
+                label='Start a call'
+                icon={<Phone size={22} color={accentBg} />}
+                progress={progress}
+                expanded={expanded}
+                onPress={choose(onStartCall)}
+              />
+            </View>
+          </>
+        )}
         <Animated.View
           pointerEvents={isHidden ? 'none' : 'auto'}
-          className='absolute right-6 size-12 border-[0.5px] shadow-[0px_6px_14px_0px_rgba(0,0,0,0.22)]'
+          className='absolute right-6 size-12'
           style={[
-            { bottom: fabBottomOffset, borderColor: accentBg },
+            { bottom: fabBottomOffset, backgroundColor: accentBg },
             fabShellStyle,
             fabVisibilityStyle,
           ]}
@@ -214,7 +219,7 @@ export const CallsFab = ({
             className='absolute inset-0 items-center justify-center'
             style={plusStyle}
           >
-            <AnimatedPlus size={24} strokeWidth={2.2} animatedProps={plusProps} />
+            <Plus size={24} strokeWidth={2.2} color={accentFg} />
           </Animated.View>
           <Pressable
             accessibilityRole='button'
@@ -226,4 +231,4 @@ export const CallsFab = ({
       </View>
     </Portal>
   );
-};
+});

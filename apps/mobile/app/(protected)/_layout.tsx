@@ -124,6 +124,7 @@ function NativeShell(): ReactElement {
                   name='call-prejoin'
                   options={{ presentation: 'fullScreenModal', animation: 'slide_from_bottom' }}
                 />
+                <Stack.Screen name='schedule-call' />
                 <Stack.Screen name='native-call' />
                 <Stack.Screen name='chat-deeplink' options={{ animation: 'none' }} />
                 <Stack.Screen name='canvas' />
