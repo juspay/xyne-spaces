@@ -10,13 +10,15 @@ import McpV2 from './mcp/McpV2';
 import AppsV2 from './apps/AppsV2';
 import DevelopersV2 from './developers/DevelopersV2';
 import { LibraryToolbarSlotProvider } from './shared/components/LibraryToolbarSlot';
+import { CreateAppDialog } from '@/routes/AppsMarketplaceScreen/CreateAppDialog';
 
 interface LibraryTab {
   id: string;
   label: string;
   content: ComponentType<{ query: string }>;
   searchPlaceholder: string;
-  create: { label: string; path: string } | null;
+  /** A page to go to, or `dialog` for a create flow that opens in place. */
+  create: { label: string; path: string } | { label: string; dialog: 'app' } | null;
 }
 
 const LIBRARY_TABS = [
@@ -53,8 +55,7 @@ const LIBRARY_TABS = [
     label: 'Apps',
     content: AppsV2,
     searchPlaceholder: 'Search apps',
-    // Apps are created by saving one out of a chat, never from a blank form.
-    create: null,
+    create: { label: 'Create app', dialog: 'app' },
   },
   {
     id: 'developers',
@@ -80,6 +81,7 @@ const LibraryV2 = ({ channelId }: { channelId?: string | undefined } = {}): Reac
   const prefixWs = (path: string): string => (workspaceId ? `/${workspaceId}${path}` : path);
   const [searchParams, setSearchParams] = useSearchParams();
   const [toolbarSlot, setToolbarSlot] = useState<HTMLDivElement | null>(null);
+  const [createAppOpen, setCreateAppOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement | null>(null);
 
   const rawTab = searchParams.get('tab');
@@ -135,7 +137,12 @@ const LibraryV2 = ({ channelId }: { channelId?: string | undefined } = {}): Reac
             <Button
               type='button'
               className='shrink-0'
-              onClick={() => void navigate(prefixWs(createPath(activeTab.create.path)))}
+              onClick={() => {
+                const { create } = activeTab;
+                if (!create) return;
+                if ('dialog' in create) setCreateAppOpen(true);
+                else void navigate(prefixWs(createPath(create.path)));
+              }}
               data-track-category='Claw Agents'
               data-track-name={activeTab.create.label}
             >
@@ -220,6 +227,8 @@ const LibraryV2 = ({ channelId }: { channelId?: string | undefined } = {}): Reac
           )}
         </div>
       </LibraryToolbarSlotProvider>
+
+      <CreateAppDialog open={createAppOpen} onOpenChange={setCreateAppOpen} />
     </div>
   );
 };

@@ -49,6 +49,7 @@ const EXACT_MODULES = new Set([
   '/scheduled-messages',
   '/automations',
   '/apps',
+  '/apps-marketplace',
   '/resource-access',
   '/roles',
   // Administration (/organisations) settles on one of these tabs; the bare

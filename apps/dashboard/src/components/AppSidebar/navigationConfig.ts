@@ -32,7 +32,7 @@ import {
   ListAiGenerated,
   KeySlant,
 } from '@xyne/icons';
-import { AudioLines, Radar } from 'lucide-react';
+import { AudioLines, Radar, Store } from 'lucide-react';
 
 import { PATH_TO_RESOURCE } from './utils/resourceMapping';
 import { isElectronApp } from '../../utils/electronApp';
@@ -51,6 +51,9 @@ const AudioWaveIcon = ({ variant: _variant, ...props }: PikaIconProps): ReactEle
 
 const RadarNavIcon = ({ variant: _variant, ...props }: PikaIconProps): ReactElement =>
   createElement(Radar, props);
+
+const StoreNavIcon = ({ variant: _variant, ...props }: PikaIconProps): ReactElement =>
+  createElement(Store, props);
 
 export type ChatNavKey =
   | 'new-message'
@@ -184,6 +187,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
   { path: '/chat/dir', label: 'Chat', icon: Hashtag, popout: true },
   { path: '/chat/dm', label: 'DMs', icon: ChatDefault, popout: true },
   { path: '/chat/activity', label: 'Activity', icon: NotificationBellOn, popout: true },
+  { path: '/apps-marketplace', label: 'Apps Marketplace', icon: StoreNavIcon, popout: true },
   { path: '/streams', label: 'Streams', icon: LayoutGridTwoVertical, popout: true },
   { path: '/calls', label: 'Calls', icon: PhoneDefault, popout: true },
   { path: '/recordings', label: 'Recordings', icon: AudioWaveIcon, popout: true },
@@ -265,6 +269,7 @@ export const DEFAULT_TOOLBAR_PATHS: string[] = [
   '/sdlc',
   '/support',
   '/chat/activity',
+  '/apps-marketplace',
 ];
 
 // One-line description per toolbar-manageable path, shown under the label in
@@ -282,6 +287,7 @@ export const TOOLBAR_ITEM_DESCRIPTIONS: Record<string, string> = {
   '/automations': 'Workflow automation triggers and actions',
   '/browser': 'In-app browser tabs (desktop app only)',
   '/apps': 'Installed app integrations',
+  '/apps-marketplace': 'Apps built on Xyne data, and creating your own',
   '/guide': 'Product documentation and onboarding guide',
   '/knowledge-base': 'File and folder knowledge base for Ask AI',
   '/migrations/slack': 'Slack Migration tab under Migrations',
