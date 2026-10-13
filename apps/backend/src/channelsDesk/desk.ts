@@ -3,7 +3,7 @@
 // the thread stays in its channel, named by an email row on the stub, so reading it still needs
 // access to that channel. A ticket the merchant opens on their own thread is separate.
 import type { Ticket } from '@prisma/client';
-import { MessageType, TicketPriority, UserType } from '@xyne/shared';
+import { AppPermissionStatus, AppPermissionType, MessageType, TicketPriority, UserType } from '@xyne/shared';
 import { stripHtml } from '@/agents/xyne-ai/tools/helpers';
 import type { TicketLike } from '@/automations/triggers/ticket-context';
 import { insertChannelsDeskTicket, readChannelsDeskTicketsForThreads, type ChannelsDeskThreadTicket } from '@/bypassAcl/channelsDeskServices';
@@ -26,20 +26,33 @@ export const channelsDeskChannelSourceName = (channelId: string): string =>
 
 const TITLE_MAX_LENGTH = 120;
 
-/** The desk itself, or null once it is archived: no one works an archived desk, so nothing is sent to it. */
-async function unlessArchived(deskId: string | null | undefined): Promise<string | null> {
-  if (!deskId) return null;
-  const desk = await db.channel.findUnique({ where: { id: deskId }, select: { isArchived: true } });
-  return desk && !desk.isArchived ? deskId : null;
+/**
+ * The desk itself, or null when nothing should be sent to it: it is archived (no one works it), or its app
+ * no longer holds desk:write (removed, or the partner relationship ended).
+ */
+async function liveDesk(deskId: string | null | undefined, installedAppId: string | null | undefined): Promise<string | null> {
+  if (!deskId || !installedAppId) return null;
+  const [desk, deskWrite] = await Promise.all([
+    db.channel.findUnique({ where: { id: deskId }, select: { isArchived: true } }),
+    db.installedAppPermission.findFirst({
+      where: {
+        installedAppId,
+        status: { in: [AppPermissionStatus.APPROVED, AppPermissionStatus.PENDINGDELETE] },
+        permission: { name: 'desk', type: AppPermissionType.WRITE },
+      },
+      select: { id: true },
+    }),
+  ]);
+  return desk && !desk.isArchived && deskWrite ? deskId : null;
 }
 
-/** The app's Channels desk. `evenIfArchived` finds the link itself, which stays while the desk is archived. */
+/** The app's Channels desk. `evenIfArchived` finds the link itself, which stays while the desk is archived or the app has lost desk:write. */
 export async function channelsDeskOf(installedAppId: string, { evenIfArchived = false } = {}): Promise<string | null> {
   const source = await db.externalSource.findFirst({
     where: { sourceType: ExternalSourcePlatform.APP_CHANNELS_DESK, externalIdentifier: installedAppId, isActive: true },
     select: { channelId: true },
   });
-  return evenIfArchived ? (source?.channelId ?? null) : unlessArchived(source?.channelId);
+  return evenIfArchived ? (source?.channelId ?? null) : liveDesk(source?.channelId, installedAppId);
 }
 
 /** The installed app feeding a Channels desk. */
@@ -57,7 +70,8 @@ async function channelsDeskForChannel(channelId: string): Promise<string | null>
     where: { name: channelsDeskChannelSourceName(channelId) },
     select: { channelId: true, isActive: true },
   });
-  return source?.isActive ? unlessArchived(source.channelId) : null;
+  if (!source?.isActive || !source.channelId) return null;
+  return liveDesk(source.channelId, (await channelsDeskAppOf(source.channelId))?.id);
 }
 
 /** Creates the desk ticket for a new top-level thread; null when the channel has no Channels desk or it already has one. */
