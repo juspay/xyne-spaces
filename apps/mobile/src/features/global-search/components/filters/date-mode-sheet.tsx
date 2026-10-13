@@ -73,7 +73,9 @@ function DateModeSheetBody({
 }): ReactElement {
   const isRange = mode === '__range__';
   const [start, setStart] = useState(
-    mode === '__before__' ? initial.before || toIso(new Date()) : initial.after || toIso(new Date()),
+    mode === '__before__'
+      ? initial.before || toIso(new Date())
+      : initial.after || toIso(new Date()),
   );
   const [end, setEnd] = useState(initial.before || toIso(new Date()));
   const [editing, setEditing] = useState<'start' | 'end'>('start');

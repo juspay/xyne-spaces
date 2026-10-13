@@ -92,9 +92,7 @@ export function GlobalSearchFilterBar({
           variant={onlyMyChannels ? 'active' : 'default'}
           {...(onlyMyChannels
             ? {
-                trailing: (
-                  <Check size={GLYPH_SIZE} color={accentText} strokeWidth={GLYPH_STROKE} />
-                ),
+                trailing: <Check size={GLYPH_SIZE} color={accentText} strokeWidth={GLYPH_STROKE} />,
               }
             : {})}
           accessibilityRole='button'
@@ -110,9 +108,7 @@ export function GlobalSearchFilterBar({
           variant={includeBotMessages ? 'active' : 'default'}
           {...(includeBotMessages
             ? {
-                trailing: (
-                  <Check size={GLYPH_SIZE} color={accentText} strokeWidth={GLYPH_STROKE} />
-                ),
+                trailing: <Check size={GLYPH_SIZE} color={accentText} strokeWidth={GLYPH_STROKE} />,
               }
             : {})}
           accessibilityRole='button'

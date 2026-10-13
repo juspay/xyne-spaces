@@ -138,9 +138,7 @@ export function buildSearchRequest({
   // Structured fields only count when this category actually sends them.
   const hasUserInput = scope
     ? freeText.length > 0
-    : freeText.length > 0 ||
-      chips.length > 0 ||
-      hasApplicableStructuredInput(category, structured);
+    : freeText.length > 0 || chips.length > 0 || hasApplicableStructuredInput(category, structured);
   if (!hasUserInput) return null;
 
   return {
@@ -150,10 +148,7 @@ export function buildSearchRequest({
     sortBy,
     rankProfile,
     tab: scope ? 'messages' : tab,
-    ...effectiveInputsForScope(
-      { chips, onlyMyChannels, includeBotMessages, exactMatch },
-      scope,
-    ),
+    ...effectiveInputsForScope({ chips, onlyMyChannels, includeBotMessages, exactMatch }, scope),
   };
 }
 

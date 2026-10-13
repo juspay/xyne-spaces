@@ -43,12 +43,7 @@ import {
   modalFieldEntries,
   type ModalFilterEntry,
 } from '../../utils/filter-registry';
-import {
-  getRankProfileOptions,
-  rankLabel,
-  SORT_OPTIONS,
-  type SortBy,
-} from '../../utils/rank-sort';
+import { getRankProfileOptions, rankLabel, SORT_OPTIONS, type SortBy } from '../../utils/rank-sort';
 import type { GlobalSearchTab } from '../../utils/search-tabs';
 import { DateModeSheet } from './date-mode-sheet';
 import { FilterMultiSelectSheet, selectionFirst } from './filter-multi-select-sheet';
@@ -377,10 +372,7 @@ function FiltersSheetBody({
                       backgroundColor: selected ? `${accentText}22` : inputBg,
                     }}
                   >
-                    <Text
-                      className='text-[13px]'
-                      style={{ color: selected ? accentText : muted }}
-                    >
+                    <Text className='text-[13px]' style={{ color: selected ? accentText : muted }}>
                       {option.label}
                     </Text>
                   </Pressable>
@@ -420,10 +412,7 @@ function FiltersSheetBody({
               className='flex-row items-center justify-between rounded-xl border px-3 py-3'
               style={{ borderColor: border, backgroundColor: inputBg }}
             >
-              <Text
-                className='text-[15px]'
-                style={{ color: draft.priority ? fieldText : muted }}
-              >
+              <Text className='text-[15px]' style={{ color: draft.priority ? fieldText : muted }}>
                 {PRIORITY_OPTIONS.find(opt => opt.value === draft.priority)?.label ??
                   control.anyLabel}
               </Text>
@@ -463,7 +452,11 @@ function FiltersSheetBody({
                 const selected =
                   option.value === dateMode ||
                   (!dateMode && option.value === draft.dateRange) ||
-                  (option.value === '' && !dateMode && !draft.dateRange && !draft.after && !draft.before);
+                  (option.value === '' &&
+                    !dateMode &&
+                    !draft.dateRange &&
+                    !draft.after &&
+                    !draft.before);
                 return (
                   <Pressable
                     key={option.value || 'any'}
@@ -483,10 +476,7 @@ function FiltersSheetBody({
                       backgroundColor: selected ? `${accentText}22` : inputBg,
                     }}
                   >
-                    <Text
-                      className='text-[13px]'
-                      style={{ color: selected ? accentText : muted }}
-                    >
+                    <Text className='text-[13px]' style={{ color: selected ? accentText : muted }}>
                       {option.label}
                     </Text>
                   </Pressable>
@@ -607,7 +597,12 @@ function FiltersSheetBody({
       </AppBottomSheet>
 
       <FromFilterSheet
-        isOpen={picker?.kind === 'from' || picker?.kind === 'with' || picker?.kind === 'assignee' || picker?.kind === 'mentionUsers'}
+        isOpen={
+          picker?.kind === 'from' ||
+          picker?.kind === 'with' ||
+          picker?.kind === 'assignee' ||
+          picker?.kind === 'mentionUsers'
+        }
         onClose={() => setPicker(null)}
         selected={entitiesToChips(
           picker?.kind === 'with'
@@ -726,11 +721,7 @@ function PrioritySheet({
   const options = [{ value: '', label: 'Any priority' }, ...PRIORITY_OPTIONS];
 
   return (
-    <AppBottomSheet
-      {...sheetProps}
-      mode='dynamic'
-      backdropOpacity={0.4}
-    >
+    <AppBottomSheet {...sheetProps} mode='dynamic' backdropOpacity={0.4}>
       <FilterSheetHeader title='Priority' onCancel={onClose} />
       <View className='px-2 pb-4'>
         {options.map(option => (
@@ -764,9 +755,7 @@ function MentionGroupsSheet({
   const { shouldRender, sheetProps } = useMountWhileOpen(isOpen, onClose);
   if (!shouldRender) return null;
 
-  return (
-    <MentionGroupsSheetBody {...sheetProps} selected={selected} onApply={onApply} />
-  );
+  return <MentionGroupsSheetBody {...sheetProps} selected={selected} onApply={onApply} />;
 }
 
 function BoardsFilterSheet({

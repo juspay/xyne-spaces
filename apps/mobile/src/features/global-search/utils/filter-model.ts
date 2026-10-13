@@ -4,13 +4,7 @@
  */
 
 export type SearchDocType =
-  | 'all'
-  | 'messages'
-  | 'files'
-  | 'tickets'
-  | 'channels'
-  | 'desk'
-  | 'people';
+  'all' | 'messages' | 'files' | 'tickets' | 'channels' | 'desk' | 'people';
 
 /** Labeled id for pickers that need a display name after apply. */
 export type FilterEntity = {
@@ -197,7 +191,9 @@ export function describeDateBounds(after: string, before: string): string {
   return '';
 }
 
-export function dateModeFor(filters: Pick<StructuredSearchFilters, 'after' | 'before'>): DateMode | '' {
+export function dateModeFor(
+  filters: Pick<StructuredSearchFilters, 'after' | 'before'>,
+): DateMode | '' {
   const { after, before } = filters;
   if (after && before) return after === before ? '__on__' : '__range__';
   if (after) return '__after__';

@@ -1,5 +1,14 @@
 import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
-import {useEffect, memo, useCallback, useMemo, useRef, useState, type ReactElement, type RefObject } from 'react';
+import {
+  useEffect,
+  memo,
+  useCallback,
+  useMemo,
+  useRef,
+  useState,
+  type ReactElement,
+  type RefObject,
+} from 'react';
 import { Keyboard, StyleSheet, View } from 'react-native';
 import Animated, {
   Extrapolation,
@@ -358,43 +367,43 @@ const SearchToolbar = memo(function SearchToolbar({
 
   return (
     <>
-    <Animated.View pointerEvents='box-none' style={[containerStyle, toolbarStyle]}>
-      <View pointerEvents='box-none' style={innerStyle}>
-        {fieldHostedElsewhere ? null : (
-          <SearchInput
-            ref={inputRef}
-            tab={tab}
-            chips={chips}
-            scope={scope}
-            dispatch={dispatch}
-            onRequestClose={onRequestClose}
-            filterBadgeCount={filterBadgeCount}
-            {...(scope || !filtersAvailable ? {} : { onFilterPress: openFilters })}
-          />
-        )}
-        {scope ? null : (
-          <>
-            <SearchCategoryTags
+      <Animated.View pointerEvents='box-none' style={[containerStyle, toolbarStyle]}>
+        <View pointerEvents='box-none' style={innerStyle}>
+          {fieldHostedElsewhere ? null : (
+            <SearchInput
+              ref={inputRef}
               tab={tab}
-              onTabChange={onTabChange}
-              {...(fieldHostedElsewhere && filtersAvailable
-                ? { onFilterPress: openFilters, filterBadgeCount }
-                : {})}
+              chips={chips}
+              scope={scope}
+              dispatch={dispatch}
+              onRequestClose={onRequestClose}
+              filterBadgeCount={filterBadgeCount}
+              {...(scope || !filtersAvailable ? {} : { onFilterPress: openFilters })}
             />
-            <Animated.View style={filterRowStyle}>
-              <GlobalSearchFilterBar
+          )}
+          {scope ? null : (
+            <>
+              <SearchCategoryTags
                 tab={tab}
-                onlyMyChannels={onlyMyChannels}
-                includeBotMessages={includeBotMessages}
-                exactMatch={exactMatch}
-                dispatch={dispatch}
+                onTabChange={onTabChange}
+                {...(fieldHostedElsewhere && filtersAvailable
+                  ? { onFilterPress: openFilters, filterBadgeCount }
+                  : {})}
               />
-            </Animated.View>
-          </>
-        )}
-      </View>
-    </Animated.View>
-    {scope || !filtersAvailable ? null : (
+              <Animated.View style={filterRowStyle}>
+                <GlobalSearchFilterBar
+                  tab={tab}
+                  onlyMyChannels={onlyMyChannels}
+                  includeBotMessages={includeBotMessages}
+                  exactMatch={exactMatch}
+                  dispatch={dispatch}
+                />
+              </Animated.View>
+            </>
+          )}
+        </View>
+      </Animated.View>
+      {scope || !filtersAvailable ? null : (
         <FiltersSheet
           isOpen={filtersOpen}
           onClose={() => setFiltersOpen(false)}

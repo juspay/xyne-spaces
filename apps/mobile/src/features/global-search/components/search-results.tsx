@@ -88,8 +88,7 @@ export function SearchResults({
 
   const category = scope ? 'messages' : categoryForTab(tab);
   // A locked scope narrows the request but is not something the user asked for.
-  const hasQuery =
-    query.length > 0 || chips.length > 0 || hasStructuredFilterInput(structured);
+  const hasQuery = query.length > 0 || chips.length > 0 || hasStructuredFilterInput(structured);
 
   if (category === 'calls') {
     return <CallResults request={request} query={query} hasQuery={hasQuery} {...chrome} />;

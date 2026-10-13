@@ -373,9 +373,7 @@ describe('global search request', () => {
     });
 
     it('changes cache identity when sort or rank changes', () => {
-      const base = toSearchParams(
-        buildSearchRequest(input({ query: 'deploy' })) as SearchRequest,
-      );
+      const base = toSearchParams(buildSearchRequest(input({ query: 'deploy' })) as SearchRequest);
       const sorted = toSearchParams(
         buildSearchRequest(input({ query: 'deploy', sortBy: 'newest' })) as SearchRequest,
       );

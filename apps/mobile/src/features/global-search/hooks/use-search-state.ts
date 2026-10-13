@@ -8,11 +8,7 @@ import {
   type StructuredSearchFilters,
 } from '../utils/filter-model';
 import { clearInapplicableStructured } from '../utils/filter-registry';
-import {
-  DEFAULT_RANK_PROFILE,
-  DEFAULT_SORT_BY,
-  type SortBy,
-} from '../utils/rank-sort';
+import { DEFAULT_RANK_PROFILE, DEFAULT_SORT_BY, type SortBy } from '../utils/rank-sort';
 import { triggersEqual, type FilterTrigger } from '../utils/filter-trigger';
 import type { GlobalSearchTab } from '../utils/search-tabs';
 

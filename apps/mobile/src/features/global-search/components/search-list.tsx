@@ -229,9 +229,7 @@ function VirtualListImpl<T>({
       sharedValues={sharedValues}
       contentContainerStyle={contentContainerStyle}
       style={styles.list}
-      {...(onEndReached
-        ? { onEndReached, onEndReachedThreshold: 0.4 as const }
-        : {})}
+      {...(onEndReached ? { onEndReached, onEndReachedThreshold: 0.4 as const } : {})}
     />
   );
 }
