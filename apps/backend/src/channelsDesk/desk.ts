@@ -26,12 +26,20 @@ export const channelsDeskChannelSourceName = (channelId: string): string =>
 
 const TITLE_MAX_LENGTH = 120;
 
-export async function channelsDeskOf(installedAppId: string): Promise<string | null> {
+/** The desk itself, or null once it is archived: no one works an archived desk, so nothing is sent to it. */
+async function unlessArchived(deskId: string | null | undefined): Promise<string | null> {
+  if (!deskId) return null;
+  const desk = await db.channel.findUnique({ where: { id: deskId }, select: { isArchived: true } });
+  return desk && !desk.isArchived ? deskId : null;
+}
+
+/** The app's Channels desk. `evenIfArchived` finds the link itself, which stays while the desk is archived. */
+export async function channelsDeskOf(installedAppId: string, { evenIfArchived = false } = {}): Promise<string | null> {
   const source = await db.externalSource.findFirst({
     where: { sourceType: ExternalSourcePlatform.APP_CHANNELS_DESK, externalIdentifier: installedAppId, isActive: true },
     select: { channelId: true },
   });
-  return source?.channelId ?? null;
+  return evenIfArchived ? (source?.channelId ?? null) : unlessArchived(source?.channelId);
 }
 
 /** The installed app feeding a Channels desk. */
@@ -49,7 +57,7 @@ async function channelsDeskForChannel(channelId: string): Promise<string | null>
     where: { name: channelsDeskChannelSourceName(channelId) },
     select: { channelId: true, isActive: true },
   });
-  return source?.isActive ? source.channelId : null;
+  return source?.isActive ? unlessArchived(source.channelId) : null;
 }
 
 /** Creates the desk ticket for a new top-level thread; null when the channel has no Channels desk or it already has one. */

@@ -859,8 +859,9 @@ export class ChannelController {
           res.status(403).json({ error: "Only the app's creator or an app admin can link it to a desk." });
           return;
         }
-        if (await channelsDeskOf(installedAppId)) {
-          res.status(409).json({ error: 'This app already has a desk.' });
+        // An archived desk still holds the app; unarchiving it is how the app gets its desk back.
+        if (await channelsDeskOf(installedAppId, { evenIfArchived: true })) {
+          res.status(409).json({ error: 'This app already has a desk. If it is archived, unarchive it.' });
           return;
         }
         channelsDeskAppName = channelsDeskApp.name;
