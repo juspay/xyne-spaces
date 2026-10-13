@@ -1,9 +1,6 @@
 import { FormFieldType } from '@xyne/shared';
 
-import type {
-  LeftoverFieldValue,
-  ResolvedBoardAdditionalField,
-} from './board-form-entity-values';
+import type { LeftoverFieldValue, ResolvedBoardAdditionalField } from './board-form-entity-values';
 import { parseFieldOptionValues } from './form-field-shared';
 
 type FieldValueLike = ResolvedBoardAdditionalField | LeftoverFieldValue;
@@ -48,9 +45,7 @@ export const isFormFieldEmpty = (fieldValue: FieldValueLike): boolean => {
   if (raw === null || raw === undefined) return true;
   if (typeof raw === 'string') return raw.trim() === '';
   if (Array.isArray(raw)) {
-    return raw.every(
-      entry => entry === null || entry === undefined || String(entry).trim() === '',
-    );
+    return raw.every(entry => entry === null || entry === undefined || String(entry).trim() === '');
   }
   return false;
 };

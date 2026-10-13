@@ -1,7 +1,7 @@
 import { FormFieldType } from '@xyne/shared';
 import { format, parseISO, isValid } from 'date-fns';
 import { Lock } from 'lucide-react-native';
-import { memo, useCallback, useMemo, useRef, useState, type ReactElement } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { Keyboard, Pressable, Text, TextInput, View } from 'react-native';
 import { useCSSVariable } from 'uniwind';
 
@@ -65,6 +65,13 @@ export const EditableFormField = memo(function EditableFormField({
   const [editor, setEditor] = useState<EditorKind>('none');
   const [draftText, setDraftText] = useState('');
   const textInputRef = useRef<TextInput>(null);
+
+  // Prefer imperative focus over `autoFocus` (jsx-a11y/no-autofocus).
+  useEffect(() => {
+    if (editor !== 'text') return;
+    const handle = requestAnimationFrame(() => textInputRef.current?.focus());
+    return (): void => cancelAnimationFrame(handle);
+  }, [editor]);
 
   const displayValue = useMemo(() => {
     if (fieldType === FormFieldType.BOOLEAN) {
@@ -169,7 +176,6 @@ export const EditableFormField = memo(function EditableFormField({
             <View className='gap-2'>
               <TextInput
                 ref={textInputRef}
-                autoFocus
                 value={draftText}
                 onChangeText={setDraftText}
                 keyboardType={fieldType === FormFieldType.NUMBER ? 'numeric' : 'default'}
@@ -210,7 +216,10 @@ export const EditableFormField = memo(function EditableFormField({
               {fieldType === FormFieldType.USER && selectedUserIds.length > 0 ? (
                 <View className='flex-row items-center gap-2'>
                   <Avatar userIds={selectedUserIds} size={20} />
-                  <Text className='flex-1 text-[14px] font-medium text-foreground' numberOfLines={2}>
+                  <Text
+                    className='flex-1 text-[14px] font-medium text-foreground'
+                    numberOfLines={2}
+                  >
                     {displayValue}
                   </Text>
                 </View>

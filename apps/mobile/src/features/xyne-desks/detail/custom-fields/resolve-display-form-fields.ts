@@ -45,9 +45,7 @@ const toFieldOptions = (value: unknown): FieldEnumOption[] | undefined => {
 
 const asFormFieldType = (raw: unknown): FormFieldType | null => {
   if (typeof raw !== 'string') return null;
-  return (Object.values(FormFieldType) as string[]).includes(raw)
-    ? (raw as FormFieldType)
-    : null;
+  return (Object.values(FormFieldType) as string[]).includes(raw) ? (raw as FormFieldType) : null;
 };
 
 /**

@@ -131,9 +131,7 @@ export const TicketCustomFieldsSection = memo(function TicketCustomFieldsSection
 
   const orderedFormFields = useMemo(
     () =>
-      [...allFormFields].sort(
-        (a, b) => Number(isFormFieldEmpty(a)) - Number(isFormFieldEmpty(b)),
-      ),
+      [...allFormFields].sort((a, b) => Number(isFormFieldEmpty(a)) - Number(isFormFieldEmpty(b))),
     [allFormFields],
   );
 
@@ -224,10 +222,7 @@ export const TicketCustomFieldsSection = memo(function TicketCustomFieldsSection
       ))}
 
       {leftoverFieldValues.map(field => (
-        <View
-          key={field.resolvedFieldId}
-          className='border-b border-ticket-overview-divider py-3'
-        >
+        <View key={field.resolvedFieldId} className='border-b border-ticket-overview-divider py-3'>
           <View className='flex-row items-start'>
             <View className='w-[186px] pr-3'>
               <Text className='text-[13px] font-medium text-ticket-meta-left-text'>

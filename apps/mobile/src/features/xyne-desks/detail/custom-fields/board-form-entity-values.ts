@@ -200,8 +200,7 @@ export const resolveLeftoverFieldValues = ({
     const fieldName = value.globalField?.fieldName ?? value.formField?.fieldName;
     const rawType = value.globalField?.fieldType ?? value.formField?.fieldType;
     const fieldType =
-      typeof rawType === 'string' &&
-      (Object.values(FormFieldType) as string[]).includes(rawType)
+      typeof rawType === 'string' && (Object.values(FormFieldType) as string[]).includes(rawType)
         ? (rawType as FormFieldType)
         : null;
     if (!fieldName || !fieldType) continue;
