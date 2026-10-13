@@ -165,6 +165,10 @@ export async function sendCallInvitationEmail(params: CallInvitationParams): Pro
 /** Internal participants are only emailed when the call has at most this many of them. */
 export const MAX_INTERNAL_EMAIL_RECIPIENTS = 100;
 
+/** Single calls are stored as UTC, so their emails are shown in IST. */
+export const resolveEmailTimezone = (stored?: string | null): string =>
+  !stored || stored === 'UTC' ? 'Asia/Kolkata' : stored;
+
 /** Strips line breaks from user-derived values before they go into a log line. */
 export const sanitizeForLog = (value: unknown): string => String(value ?? '').replace(/[\r\n]+/g, ' ');
 
@@ -250,7 +254,7 @@ export async function sendCallChangeEmails(params: CallChangeEmailParams): Promi
   if (recipients.length === 0) return;
 
   const copy = CHANGE_EMAIL_COPY[params.kind];
-  const timezone = params.timezone || call?.timezone || 'UTC';
+  const timezone = resolveEmailTimezone(params.timezone || call?.timezone);
   const joinUrl = call?.roomLink ?? '';
   const lines = params.changeLines ?? [];
   const userBodyHtml =

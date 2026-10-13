@@ -110,8 +110,6 @@ export const ScheduleCallSchema = z.object({
   externalInviteDelivery: z.enum(['standalone', 'conversation_reply']).optional(),
   invitation: CallInvitationSchema.optional(),
   notifyParticipantsByEmail: z.boolean().optional(),
-  /** Organizer's IANA zone for the change email; a single call is stored as UTC. */
-  emailTimezone: z.string().min(1).max(64).optional(),
   // Pins the detailed-summary template so no LLM template selection runs for this call.
   summaryTemplateId: z.string().trim().min(1).optional(),
 }).refine(
@@ -215,8 +213,6 @@ export const UpdateScheduleCallSchema = z
     callUpdatesChannel: z.string().optional(),
     externalInvitees: z.array(z.string().email()).optional(),
     notifyParticipantsByEmail: z.boolean().optional(),
-    /** Organizer's IANA zone for the change email; a single call is stored as UTC. */
-    emailTimezone: z.string().min(1).max(64).optional(),
     // null clears the pinned template (back to LLM selection).
     summaryTemplateId: z.string().trim().min(1).nullable().optional(),
   })

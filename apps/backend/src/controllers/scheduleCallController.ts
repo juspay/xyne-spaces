@@ -17,6 +17,7 @@ import {
   type CallChangeEmailParams,
   type CallInvitationParams,
   formatCallWindow,
+  resolveEmailTimezone,
   sanitizeForLog,
   sendCallChangeEmails,
   sendCallInvitationEmail,
@@ -416,7 +417,6 @@ export class ScheduleCallController {
         externalInviteDelivery,
         invitation,
         notifyParticipantsByEmail,
-        emailTimezone,
         summaryTemplateId,
       } = ScheduleCallSchema.parse(req.body);
 
@@ -504,7 +504,6 @@ export class ScheduleCallController {
           callTitle: title,
           startsAt: new Date(startsAt),
           endsAt: new Date(endsAt),
-          timezone: emailTimezone ?? invitation?.timezone,
           organizerUserId: userId,
           externalEmails: [],
           internalUserIds: participantUserIds,
@@ -610,7 +609,7 @@ export class ScheduleCallController {
 
     try {
       const parsedBody = UpdateScheduleCallSchema.parse(req.body);
-      const { title, startsAt, endsAt, targetUserIds, channelId: reqChannelId, callUpdatesChannel: reqCallUpdatesChannel, externalInvitees, summaryTemplateId, notifyParticipantsByEmail, emailTimezone: requestedEmailTimezone } = parsedBody;
+      const { title, startsAt, endsAt, targetUserIds, channelId: reqChannelId, callUpdatesChannel: reqCallUpdatesChannel, externalInvitees, summaryTemplateId, notifyParticipantsByEmail } = parsedBody;
       const normalizedExternalInvitees = externalInvitees !== undefined
         ? normalizeEmailList(externalInvitees)
         : undefined;
@@ -814,7 +813,7 @@ export class ScheduleCallController {
       const emailStartsAt = updatedCall.startsAt ?? call.startsAt;
       const emailEndsAt = updatedCall.endsAt ?? call.endsAt;
       if (emailOnEdit && emailStartsAt && emailEndsAt) {
-        const emailTimezone = requestedEmailTimezone ?? updatedCall.timezone ?? call.timezone;
+        const emailTimezone = resolveEmailTimezone(updatedCall.timezone ?? call.timezone);
         const changeLines: string[] = [];
         if (title !== undefined && title !== call.title) {
           changeLines.push(`Title: ${call.title ?? ''} → ${title}`);
@@ -1409,7 +1408,7 @@ export class ScheduleCallController {
           callTitle: call.title ?? 'Scheduled Call',
           startsAt: call.startsAt,
           endsAt: call.endsAt,
-          timezone: typeof req.query.timezone === 'string' ? req.query.timezone : call.timezone,
+          timezone: call.timezone,
           organizerUserId: call.createdByUserId,
           externalEmails: await repositories.calls.findExternalInviteeEmails(call.id),
           internalUserIds: (await repositories.calls.findParticipants(call.id)).map((p) => p.userId),

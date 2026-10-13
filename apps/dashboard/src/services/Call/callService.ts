@@ -150,8 +150,6 @@ export interface HideCallRequest {
 // CUSTOM ERROR CLASS
 // ============================================================================
 
-const browserTimeZone = (): string => Intl.DateTimeFormat().resolvedOptions().timeZone;
-
 export class ApiError extends Error {
   public readonly status: number;
   public readonly code: string;
@@ -588,10 +586,7 @@ export class CallService {
             externalInviteDelivery: data.externalInviteDelivery,
             invitation: data.invitation,
           }),
-        ...(data.notifyParticipantsByEmail && {
-          notifyParticipantsByEmail: true,
-          emailTimezone: browserTimeZone(),
-        }),
+        ...(data.notifyParticipantsByEmail && { notifyParticipantsByEmail: true }),
       });
 
       return response.data;
@@ -699,9 +694,7 @@ export class CallService {
   async cancelScheduledCall(callId: string, notifyParticipantsByEmail = false): Promise<void> {
     try {
       await apiInstance.delete(`/calls/${callId}`, {
-        ...(notifyParticipantsByEmail && {
-          params: { notifyParticipantsByEmail: true, timezone: browserTimeZone() },
-        }),
+        ...(notifyParticipantsByEmail && { params: { notifyParticipantsByEmail: true } }),
       });
     } catch (error) {
       if (error instanceof AxiosError && error.response?.data) {
@@ -747,10 +740,7 @@ export class CallService {
    */
   async updateScheduledCall(callId: string, data: UpdateScheduleCallRequest): Promise<void> {
     try {
-      await apiInstance.patch(`/calls/${callId}`, {
-        ...data,
-        ...(data.notifyParticipantsByEmail && { emailTimezone: browserTimeZone() }),
-      });
+      await apiInstance.patch(`/calls/${callId}`, data);
     } catch (error) {
       if (error instanceof AxiosError && error.response?.data) {
         const errorData = error.response.data as unknown;
