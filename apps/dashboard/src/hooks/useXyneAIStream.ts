@@ -12,7 +12,6 @@ import type { UserActivity } from '../hooks/useUserActivity';
 import type { WorkflowContext } from '../machines/xyneAIMachine';
 import { xyneAIStreamManager, type StreamState } from '../services/XyneAI';
 import { buildXyneAIStreamThreadId } from '../utils/xyneAIStreamThreadId';
-import { shouldRouteStreamState } from '../utils/xyneAIStreamRouting';
 import { globalClickTracker } from '../services/Analytics/globalClickTracker';
 import {
   aiRunTrackingMetadata,
@@ -223,20 +222,28 @@ export const useXyneAIStream = ({
   useEffect(() => {
     const expectedAgentSlug = agentSlug ?? 'ask-ai';
     const unsubscribe = xyneAIStreamManager.subscribe((state: StreamState) => {
-      // Slot key, tracked streamId or sessionId must match; the agent must be
-      // the hook's (or the one it last dispatched) — except for a live viewer
-      // of this conversation, which shows whichever agent's run is in flight.
+      const stateAgentSlug = state.agentSlug ?? 'ask-ai';
+      // Live viewers (`live-*`) follow the conversation's in-flight run, whichever agent owns it.
       if (
-        !shouldRouteStreamState({
-          state,
-          expectedAgentSlug,
-          dispatchedAgentSlug: dispatchedAgentSlugRef.current,
-          streamSessionKey: streamSessionKeyRef.current,
-          currentStreamId: currentStreamIdRef.current,
-          conversationId: conversationIdRef.current,
-        })
+        stateAgentSlug !== expectedAgentSlug &&
+        stateAgentSlug !== dispatchedAgentSlugRef.current &&
+        !state.streamId.startsWith('live-')
       )
         return;
+      const slotRef = streamSessionKeyRef.current;
+      const matchesSlot = state.streamSlotKey === slotRef;
+      const matchesTrackedStream =
+        currentStreamIdRef.current !== null && state.streamId === currentStreamIdRef.current;
+      // Also match by sessionId: a stream created with a draft slot key gets
+      // its server sessionId mid-flight (see meta-event handler in the
+      // manager). If the user switched conversations before the slot key
+      // promotion landed everywhere, we can still recognise "this stream
+      // belongs to the conversation this hook represents" by sessionId.
+      const matchesBySessionId =
+        !!state.sessionId &&
+        !!conversationIdRef.current &&
+        state.sessionId === conversationIdRef.current;
+      if (!matchesSlot && !matchesTrackedStream && !matchesBySessionId) return;
 
       // Once we've matched by anything, lock onto the streamId so future
       // notifications stay routed even if slot key / sessionId change again.
