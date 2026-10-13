@@ -91,6 +91,11 @@ const RETRIEVAL_TOOL_NAMES: ReadonlySet<string> = new Set([
   // File/email content reads — grounding evidence the model reasons over, same
   // as a retrieval result. They no longer hard-truncate internally; the full
   // body flows here and spills to a file behind a preview past this larger cap.
+  "spaces-read-canvas",
+  "spaces-messages",
+  "spaces-message-detail",
+  "spaces-tickets",
+  "spaces-sdlc-read-artifact",
   "google-gmail-read",
   "google-gmail-attachment",
   "google-drive-read",
@@ -104,8 +109,27 @@ const RETRIEVAL_TOOL_NAMES: ReadonlySet<string> = new Set([
  * so future retrieval tools are covered without editing this list. Bulk/file
  * tools (bash/read/grep/list_resources/fetch-attachment/…) do NOT match.
  */
+const DOCUMENT_READ_TOOL_NAMES: ReadonlySet<string> = new Set([
+  "spaces-read-canvas",
+  "spaces-message-detail",
+  "spaces-sdlc-read-artifact",
+  "google-gmail-read",
+  "google-drive-read",
+  "microsoft-onedrive-read",
+  "microsoft-outlook-read",
+]);
+
+export function isDocumentReadTool(toolName: string): boolean {
+  return DOCUMENT_READ_TOOL_NAMES.has(bareToolName(toolName).toLowerCase());
+}
+
+export function bareToolName(toolName: string): string {
+  const cut = toolName.lastIndexOf("__");
+  return cut >= 0 ? toolName.slice(cut + 2) : toolName;
+}
+
 export function isRetrievalTool(toolName: string): boolean {
-  const n = toolName.toLowerCase();
+  const n = bareToolName(toolName).toLowerCase();
   if (RETRIEVAL_TOOL_NAMES.has(n)) return true;
   return (
     n.startsWith("kb-") ||
@@ -277,7 +301,7 @@ export async function promoteIfOversized(
   // covers retrieval tools. Only one pass sifts: an MCP result goes through
   // this function twice (mcp.ts, then the custom-tool wrapper).
   const call = currentToolCall();
-  const siftWanted = call?.sift ?? (optEnabled("jev_result_sift") && isRetrievalTool(toolName));
+  const siftWanted = call?.sift ?? (optEnabled("jev_result_sift") && isRetrievalTool(toolName) && !isDocumentReadTool(toolName));
   if (siftWanted && !call?.sifted) {
     const sifted = await siftIntoContext(outputBaseDir, category, toolName, clean, cap);
     if (sifted) {
@@ -377,7 +401,8 @@ export async function promoteIfOversized(
   log.info(`[tool-output] ${safeCategory}/${safeTool} result ${clean.length}b → ${absPath} (cap ${cap}b)`);
   return [
     `[Tool returned ${clean.length} chars — full result saved to ${absPath}.`,
-    `Use the read tool on that absolute path (with offset/limit) or grep on it to inspect.`,
+    `Only the first ${previewBytes} of ${clean.length} chars are shown below. Do not answer from this preview alone:`,
+    `read that absolute path (with offset/limit) or grep it for what you need before you answer.`,
     ...(rawRelPath
       ? [`To use the whole result inside a sandbox, forward the byte-identical raw copy with sandbox-copy-in contextPath: "${rawRelPath}" instead of retyping it.`]
       : []),
