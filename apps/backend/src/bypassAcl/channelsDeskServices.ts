@@ -27,6 +27,10 @@ const CHANNELS_DESK_TABLES = [
   'ChannelUserStatus',
   'Channel',
   'User',
+  'FormContextMapping',
+  'FormFields',
+  'FormEntityValues',
+  'GlobalField',
 ] as const;
 
 /** Called after a new top-level thread is created; a no-op unless its channel feeds a Channels desk. */
@@ -68,7 +72,7 @@ export async function insertChannelsDeskTicket(args: {
   userGroupId: string | null;
 }): Promise<Ticket | null> {
   return transaction(
-    ['Conversation', 'Message', 'Ticket', 'ChannelUserStatus', 'Project', 'Email', 'Channel', 'FormContextMapping', 'FormFields', 'FormEntityValues'],
+    ['Conversation', 'Message', 'Ticket', 'ChannelUserStatus', 'Project', 'Email', 'Channel', 'FormContextMapping', 'FormFields', 'FormEntityValues', 'GlobalField'],
     'Channels desk ticket: stub thread and ticket must commit together',
     db,
     async (tx) => {

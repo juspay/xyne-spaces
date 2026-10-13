@@ -3,7 +3,7 @@
  * workspace's channel form (WORKSPACE context, CHANNEL entity) and stored like ticket fields, one
  * form_entity_values row per channel per field. A Channels desk copies them onto the tickets it opens.
  */
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { FormContextType, FormEntityType, FormFieldType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
@@ -24,7 +24,7 @@ export class ChannelFieldError extends Error {
 interface ChannelFieldValue {
   fieldId: string;
   fieldValue: string;
-  actualFieldValue: Prisma.InputJsonValue;
+  actualFieldValue: Prisma.InputJsonValue | typeof Prisma.DbNull;
 }
 
 /** The workspace's channel form and its fields, or null if none is set up. */
@@ -66,9 +66,14 @@ export async function prepareChannelFields(
   }
   const values: ChannelFieldValue[] = names.map((name) => {
     const field = byName.get(name)!;
+    const raw = input[name];
+    // null, "" or [] clears the field, as clearing it in the UI does.
+    if (raw === null || raw === '' || (Array.isArray(raw) && raw.length === 0)) {
+      return { fieldId: field.id, fieldValue: '', actualFieldValue: Prisma.DbNull };
+    }
     try {
       // The value lives in actualFieldValue only, as the UI writes it, so clearing it there leaves no old value behind.
-      return { fieldId: field.id, fieldValue: '', actualFieldValue: normalizeCustomFieldValue(field, input[name]).actualFieldValue };
+      return { fieldId: field.id, fieldValue: '', actualFieldValue: normalizeCustomFieldValue(field, raw).actualFieldValue };
     } catch (err) {
       throw new ChannelFieldError('INVALID_VALUE', err instanceof Error ? err.message : `Invalid value for "${name}"`);
     }
@@ -94,7 +99,7 @@ export async function writeChannelFields(
   }
 }
 
-// Option ids belong to their field's definition, so these only copy onto the same definition.
+// An option value must be one of its field's own options, which another field may not have; so these only copy onto the same definition.
 const OPTION_TYPES = new Set<string>([FormFieldType.SINGLE_SELECT, FormFieldType.MULTI_SELECT]);
 
 function isEmptyValue(value: Prisma.JsonValue): boolean {
