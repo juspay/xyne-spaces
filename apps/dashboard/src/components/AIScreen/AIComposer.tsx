@@ -617,6 +617,10 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     ownsStream: startedOnAIPage,
     answer: answerTranscript,
     onStop: handleVoiceStop,
+    cancelAnswer: () => {
+      buddy.cancel();
+      assistant?.cancel();
+    },
     onExit: () => setVoiceMode(false),
   });
 

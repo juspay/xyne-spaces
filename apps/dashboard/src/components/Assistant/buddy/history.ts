@@ -9,7 +9,6 @@ export interface Turn {
 }
 
 const KEPT = 3;
-const REMEMBERED = 50;
 
 /** The same control, wherever it is read: its track, text and where it goes. */
 export const controlKey = ({
@@ -70,50 +69,4 @@ export function tried(turns: readonly Turn[], request: string): Set<string> {
 export function looping(turns: readonly Turn[], request: string): Turn | undefined {
   const [last, before] = repeats(turns, request);
   return last?.used && before?.used?.key === last.used.key ? last : undefined;
-}
-
-interface Store {
-  getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
-}
-
-/** Which control the user said yes to for a request, kept in `store` (which may throw). */
-export function choices(
-  storageKey: string,
-  store: () => Store,
-): {
-  recall(request: string): string | undefined;
-  keep(request: string, key: string): void;
-  forget(request: string): void;
-} {
-  let saved: Map<string, string> | undefined;
-  const load = (): Map<string, string> => {
-    if (saved) return saved;
-    try {
-      saved = new Map(JSON.parse(store().getItem(storageKey) ?? '[]') as [string, string][]);
-    } catch {
-      saved = new Map();
-    }
-    return saved;
-  };
-  const save = (): void => {
-    try {
-      store().setItem(storageKey, JSON.stringify([...load()]));
-    } catch {
-      // Not kept past this session (private mode, full storage): it still works for now.
-    }
-  };
-  return {
-    recall: request => load().get(normalise(request)),
-    keep: (request, key): void => {
-      const map = load();
-      map.delete(normalise(request));
-      map.set(normalise(request), key);
-      [...map.keys()].slice(0, -REMEMBERED).forEach(old => map.delete(old));
-      save();
-    },
-    forget: (request): void => {
-      if (load().delete(normalise(request))) save();
-    },
-  };
 }

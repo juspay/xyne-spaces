@@ -2248,6 +2248,7 @@ const XyneAISidebar = ({
       buddy.cancel();
       handleAbort();
     },
+    cancelAnswer: buddy.cancel,
     onExit: () => setVoiceMode(false),
   });
 

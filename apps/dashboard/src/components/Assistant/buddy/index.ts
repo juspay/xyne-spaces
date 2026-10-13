@@ -8,7 +8,7 @@ import {
   TIMING,
   WORKSPACE_PREFIX,
 } from './constants';
-import { choices, controlKey, looping, remember, tried, turnOf, type Turn } from './history';
+import { looping, remember, tried, turnOf, type Turn } from './history';
 import type { JevResult } from './decide';
 import { readScreen, topDocument, type Control } from './screen';
 import { runSteps, type Option, type Used, type WalkEnv } from './walk';
@@ -59,18 +59,8 @@ const liveScreen = (
   log,
   aborted: () => signal.aborted,
   settle: () => settle(TIMING.lateQuietMs, signal),
-  chosenBefore: request => choicesHere().recall(request),
   tried: triedHere,
 });
-
-const workspaceChoices = new Map<string, ReturnType<typeof choices>>();
-function choicesHere(): ReturnType<typeof choices> {
-  const workspace = WORKSPACE_PREFIX.exec(topDocument().location.pathname)?.[0] ?? '';
-  const kept =
-    workspaceChoices.get(workspace) ?? choices(`buddy.choices${workspace}`, () => localStorage);
-  workspaceChoices.set(workspace, kept);
-  return kept;
-}
 
 let running: AbortController | null = null;
 /** The walk under way, so the next one starts only once it has stopped and tidied up. */
@@ -79,8 +69,6 @@ let hearing: string | undefined;
 let lastDecision = '';
 let asked: { options: Option<Control>[]; steps: string[] } | undefined;
 let turns: Turn[] = [];
-
-const NOT_THAT = /^\s*(?:no|nope|not that|wrong|the other(?: one)?)\b/i;
 
 /** A reply to "Did you mean…?": yes or that one takes the first, the second or other the second. */
 const ANSWER_TO_ASK =
@@ -110,10 +98,7 @@ async function walkFrom(request: string, signal: AbortSignal): Promise<string | 
   if (signal.aborted) return STOPPED;
   const question = asked;
   asked = undefined;
-  const [previous] = turns.slice(-1);
-  if (previous && NOT_THAT.test(request)) choicesHere().forget(previous.request);
   const picked = question && (await pickedFromAsk(request, question.options, signal));
-  if (question && picked) choicesHere().keep(question.steps[0] ?? request, controlKey(picked));
   const loop = !picked && looping(turns, request);
   if (loop) {
     lastDecision = `"${loop.used?.text}" was tried twice for this`;

@@ -1,4 +1,5 @@
 import {
+  ASKS_A_QUESTION,
   ASKS_FOR_A_WAY,
   CURRENT,
   LIMITS,
@@ -13,7 +14,7 @@ import {
 } from './constants';
 import { decide, type Decision, type JevResult } from './decide';
 import { controlKey, normalise } from './history';
-import { groupControls, type ControlGroup } from './options';
+import { groupControls } from './options';
 import { hiddenTargets, type HiddenTarget, type MenuItem, type Peeked } from './paths';
 
 // Sees the app only through a WalkEnv, so the eval can replay it.
@@ -44,7 +45,6 @@ export interface WalkEnv<C extends WalkControl> {
   log(step: string, detail?: string, data?: unknown): void;
   aborted(): boolean;
   settle?(): Promise<void>;
-  chosenBefore?(request: string): string | undefined;
   tried?: ReadonlySet<string>;
 }
 
@@ -118,39 +118,15 @@ async function choose<C extends WalkControl>(
   const decision = decide(result, id => optionOf(id)?.text ?? id, sure);
   const probability = result.route === 'unavailable' ? 0 : (result.probability ?? 0);
   const plainlyQuestion =
-    result.route !== 'unavailable' && result.chosen === 'none' && probability >= SURE_NONE;
+    result.route !== 'unavailable' &&
+    result.chosen === 'none' &&
+    (probability >= SURE_NONE || ASKS_A_QUESTION.test(request));
   const unsure = decision.kind === 'ask_ai' && !plainlyQuestion && result.route !== 'unavailable';
   const leaning = result.route === 'unavailable' ? undefined : result.chosen;
   const round = { optionOf, decision, probability, unsure, ...(leaning && { leaning }) };
   // While looking in menus only a pick inside one counts, so the rest need no check.
   if (menus.length > 0 && !menuItemOf(round) && !asksAboutMenu(round)) return round;
-  const verified = await checked(request, env, round);
-  return verified && chosenBefore(request, env, groups, result, verified);
-}
-
-/**
- * The control the user said yes to for this request before, when it is here and Jev leans to it,
- * or Jev is unsure and nothing else passed the check.
- */
-function chosenBefore<C extends WalkControl>(
-  request: string,
-  env: WalkEnv<C>,
-  groups: ControlGroup<Option<C>>[],
-  result: JevResult,
-  round: Round<C>,
-): Round<C> {
-  const key = env.chosenBefore?.(request);
-  if (!key || round.decision.kind === 'act') return round;
-  const group = groups.find(({ members }) => members.some(member => controlKey(member) === key));
-  if (!group) return round;
-  const leanedTo =
-    result.route !== 'unavailable' &&
-    [result.chosen, ...(result.route === 'actions' ? result.actionIds : [])].includes(group.id);
-  const others = pickedIds(round.decision).filter(id => id !== group.id);
-  if (!leanedTo && others.length > 0) return round;
-  const why = `"${group.members[0].text}" is what the user chose for this before`;
-  const { offTarget: _turnedDown, ...kept } = round;
-  return { ...kept, decision: { kind: 'act', id: group.id, why }, unsure: false };
+  return checked(request, env, round);
 }
 
 const pickedIds = (decision: Decision): string[] =>

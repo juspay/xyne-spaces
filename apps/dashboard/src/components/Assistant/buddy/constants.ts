@@ -39,6 +39,10 @@ export const LIMITS = {
 export const ASKS_FOR_A_WAY =
   /^\s*(?:(?:how|where) (?:do|can|could|would|should) i|how to|is there a way to|can i)\s+/i;
 
+/** Asks about something rather than for a place: when Jev finds nothing for it, no menu is opened to look. */
+export const ASKS_A_QUESTION =
+  /^\s*(?:what|whats|who|whom|whose|when|why|did|summari[sz]e|explain|tell me)\b/i;
+
 export const STEP_BREAK = /(\s*,?\s+(?:and\s+)?(?:then|after that)\s+|\s+and\s+)/i;
 
 /** Times, dates, counts and initials are content, not something to open. */
@@ -88,7 +92,7 @@ export const SHOWN_ON_HOVER =
 
 /** These change data or reach other people, so Buddy points at them instead of clicking. */
 export const CHANGES_DATA =
-  /\b(send|delete|remove|archive|leave|end|log ?out|sign ?out|deactivate|revoke|disconnect|reject|decline|approve|merge|reset|ban|kick|block|unsubscribe|publish|post|invite|resolve|pay|admin|role|access|grant|permission|promote|demote|transfer|clear|discard|disable|wipe|yes|dial|(?:start|stop)(?: \w+)? (?:record|recording|call|huddle|meeting)|join (?:\w+ )?(?:call|huddle|meeting))\b/;
+  /\b(send|delete|remove|archive|leave|end|log ?out|sign ?out|deactivate|revoke|disconnect|reject|decline|approve|merge|reset|ban|kick|block|unsubscribe|publish|post|invite|resolve|pay|admin|role|access|grant|permission|promote|demote|transfer|clear|discard|disable|wipe|yes|dial|mark|pin|unpin|star|unstar|mute|unmute|follow|unfollow|subscribe|rename|edit|save|snooze|assign|unassign|move|share|forward|duplicate|(?:start|stop)(?: \w+)? (?:record|recording|call|huddle|meeting)|join (?:\w+ )?(?:call|huddle|meeting))\b/;
 /** Opening a menu or panel changes nothing, whatever it is about. */
 export const OPENS_UI = /\b(open|trigger|menu|dropdown|tab|expand|collapse)$/;
 export const MAKES_SOMETHING = /^(create|new|add|start)\b/i;

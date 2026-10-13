@@ -41,6 +41,8 @@ export interface VoiceHost {
   answer?: ((text: string) => Promise<string | null>) | undefined;
   // Cancels what lives outside the session: Auto routing and the LLM request.
   onStop?: (() => void) | undefined;
+  // Cancels only a pending `answer`, leaving any Ask AI reply already streaming.
+  cancelAnswer?: (() => void) | undefined;
   onExit: () => void;
   onEnd?: (() => void) | undefined;
 }
@@ -79,6 +81,8 @@ const setPhase = (phase: VoicePhase): void => {
 
 // Bumped when the session ends, so replies still in flight are dropped.
 let session = 0;
+/** Bumped on every hold, so a reply to an earlier utterance is dropped. */
+let turn = 0;
 let host: VoiceHost | null = null;
 let unsubscribe: (() => void) | null = null;
 let utterance: Utterance | null = null;
@@ -266,6 +270,7 @@ async function understand(text: string): Promise<string | null> {
  */
 async function handleTranscript(rawText: string): Promise<void> {
   const current = session;
+  const mine = turn;
   try {
     const text = rawText.trim();
     if (!text) {
@@ -279,7 +284,7 @@ async function handleTranscript(rawText: string): Promise<void> {
     setPhase('understanding');
     const routeStarted = performance.now();
     const reply = await understand(text);
-    if (session !== current || !host) return;
+    if (session !== current || turn !== mine || !host) return;
     const took = `${Math.round(performance.now() - routeStarted)}ms`;
     if (reply === '') {
       log('route', 'Handled, nothing to say', took);
@@ -302,7 +307,7 @@ async function handleTranscript(rawText: string): Promise<void> {
     watch(START_TIMEOUT_MS);
     host.submit(text);
   } catch (err) {
-    if (session !== current) return;
+    if (session !== current || turn !== mine) return;
     const description = err instanceof Error ? err.message : 'Unknown error';
     logError('route', 'Failed', description);
     toast.error('Voice transcription failed', { description });
@@ -330,6 +335,12 @@ function startRecording(): void {
     voiceDebug.log('input', 'Hold ignored', 'a recording is already running', { level: 'warn' });
     return;
   }
+  // The walk deciding the previous utterance must not click once the user speaks again.
+  if (state.phase === 'understanding') {
+    host?.cancelAnswer?.();
+    setPhase('idle');
+  }
+  turn++;
   voiceDebug.startTurn();
   holdStartedAt = performance.now();
   log('input', 'Hold start', `phase ${state.phase}`);
@@ -517,6 +528,7 @@ export function useVoiceHost(enabled: boolean, surface: VoiceHost): void {
       ownsStream: stream => surfaceRef.current.ownsStream(stream),
       answer: async text => (await surfaceRef.current.answer?.(text)) ?? null,
       onStop: () => surfaceRef.current.onStop?.(),
+      cancelAnswer: () => surfaceRef.current.cancelAnswer?.(),
       onExit: () => surfaceRef.current.onExit(),
       onEnd: () => surfaceRef.current.onEnd?.(),
     });
