@@ -1,4 +1,4 @@
--- Slack Connect — `channelConnectId` on every table in a channel's subtree (72 tables). It holds the
+-- Slack Connect — `channelConnectId` on every table in a channel's subtree (78 tables). It holds the
 -- owning channel's connect_group handle (channels.connectId) so the row can later be queried by that
 -- handle and its workspace ACL resolved via connect_group. Column only: nullable, no default, so each
 -- ADD COLUMN is a metadata-only change (no table rewrite). Rows with no channel stay NULL and keep
@@ -72,6 +72,12 @@ ALTER TABLE "public"."ticket_reference_mappings" ADD COLUMN "channelConnectId" T
 ALTER TABLE "public"."ticket_stage_eta" ADD COLUMN "channelConnectId" TEXT;
 ALTER TABLE "public"."ticket_sub_ticket_mappings" ADD COLUMN "channelConnectId" TEXT;
 ALTER TABLE "public"."ticket_tags" ADD COLUMN "channelConnectId" TEXT;
+ALTER TABLE "public"."ticket_tag_mappings" ADD COLUMN "channelConnectId" TEXT;
+ALTER TABLE "public"."rcas" ADD COLUMN "channelConnectId" TEXT;
+ALTER TABLE "public"."impacts" ADD COLUMN "channelConnectId" TEXT;
+ALTER TABLE "public"."ticket_stage_requests" ADD COLUMN "channelConnectId" TEXT;
+ALTER TABLE "public"."release_attributions" ADD COLUMN "channelConnectId" TEXT;
+ALTER TABLE "public"."application_release_tickets" ADD COLUMN "channelConnectId" TEXT;
 ALTER TABLE "public"."pull_requests" ADD COLUMN "channelConnectId" TEXT;
 ALTER TABLE "public"."workflows" ADD COLUMN "channelConnectId" TEXT;
 ALTER TABLE "workflow"."workflow_executions" ADD COLUMN "channelConnectId" TEXT;
@@ -191,6 +197,12 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "ticket_reference_mappings_channelConnec
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "ticket_stage_eta_channelConnectId_idx" ON "public"."ticket_stage_eta"("channelConnectId");
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "ticket_sub_ticket_mappings_channelConnectId_idx" ON "public"."ticket_sub_ticket_mappings"("channelConnectId");
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "ticket_tags_channelConnectId_idx" ON "public"."ticket_tags"("channelConnectId");
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "ticket_tag_mappings_channelConnectId_idx" ON "public"."ticket_tag_mappings"("channelConnectId");
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "rcas_channelConnectId_idx" ON "public"."rcas"("channelConnectId");
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "impacts_channelConnectId_idx" ON "public"."impacts"("channelConnectId");
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "ticket_stage_requests_channelConnectId_idx" ON "public"."ticket_stage_requests"("channelConnectId");
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "release_attributions_channelConnectId_idx" ON "public"."release_attributions"("channelConnectId");
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "application_release_tickets_channelConnectId_idx" ON "public"."application_release_tickets"("channelConnectId");
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "pull_requests_channelConnectId_idx" ON "public"."pull_requests"("channelConnectId");
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "workflows_channelConnectId_idx" ON "public"."workflows"("channelConnectId");
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "workflow_executions_channelConnectId_idx" ON "workflow"."workflow_executions"("channelConnectId");

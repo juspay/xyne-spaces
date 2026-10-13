@@ -386,6 +386,7 @@ model TicketTagMapping {
   workspaceId String // denormalized tenant key (stamped on insert)
   id        String   @id @default(cuid())
   ticketId  String
+  channelConnectId String? // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
   tagId     String
   tagName   String   // Denormalized from ProjectTag.name for fast reads
   createdAt DateTime @default(now())
@@ -393,6 +394,7 @@ model TicketTagMapping {
   @@unique([ticketId, tagId])
   @@index([ticketId])
   @@index([tagId])
+  @@index([channelConnectId])
   @@map("ticket_tag_mappings")
   @@schema("public")
 }
@@ -4273,6 +4275,7 @@ model ApplicationReleaseTicket {
   id                    String                          @id @default(cuid())
   applicationReleaseId  String                          // SubTicket ID from ApplicationRelease
   ticketId              String                          // Dev ticket UUID (FK to tickets.id via Zero relation)
+  channelConnectId String? // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
   releaseId             String                          // Release ticket ID
   testedBy              String?                         // User ID (no FK constraint)
   testedAt              DateTime?
@@ -4288,6 +4291,7 @@ model ApplicationReleaseTicket {
   @@index([applicationReleaseId])
   @@index([ticketId])
   @@index([releaseId, createdAt(sort: Desc), id(sort: Desc)], map: "application_release_tickets_releaseId_createdAt_id_idx")
+  @@index([channelConnectId])
   @@map("application_release_tickets")
   @@schema("public")
 }
@@ -4395,6 +4399,7 @@ model TicketStageRequest {
   workspaceId String // denormalized tenant key (stamped on insert)
   id                        String                    @id @default(cuid())
   ticketId                  String
+  channelConnectId String? // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
   stageId                   String
   formId                    String?
   status                    String                   @default("DRAFT")
@@ -4409,6 +4414,7 @@ model TicketStageRequest {
   @@index([stageId])
   @@index([formId])
   @@unique([ticketId, stageId])
+  @@index([channelConnectId])
   @@map("ticket_stage_requests")
   @@schema("public")
 }
@@ -4418,6 +4424,7 @@ model RCA {
   id                    String     @id @default(cuid())
   title                 String
   ticketId              String     // Ticket ID
+  channelConnectId String? // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
   ownerId               String     // User ID (no FK constraint)
   summary               String?
   rootCause             String?
@@ -4433,6 +4440,7 @@ model RCA {
   @@index([ticketId])
   @@index([ownerId])
   @@index([status])
+  @@index([channelConnectId])
   @@map("rcas")
   @@schema("public")
 }
@@ -4442,6 +4450,7 @@ model Impact {
   workspaceId String // denormalized tenant key (stamped on insert)
   id                    String      @id @default(cuid())
   ticketId              String      // Ticket ID
+  channelConnectId String? // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
   rcaId                 String?     // RCA ID
   impactTypeId          String
   impact                String      // Description of impact
@@ -4450,6 +4459,7 @@ model Impact {
   @@index([ticketId])
   @@index([rcaId])
   @@index([impactTypeId])
+  @@index([channelConnectId])
   @@map("impacts")
   @@schema("public")
 }
@@ -4479,6 +4489,7 @@ model ReleaseAttribution {
   workspaceId String // denormalized tenant key (stamped on insert)
   id                      String                 @id @default(cuid())
   ticketId                String                 // Ticket ID of the newly reported issue
+  channelConnectId String? // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
   releaseId               String                 // Release ticket ID
   releaseApplicationId    String?                // Application release ID (SubTicket ID)
   rootCauseTicketId       String?                // Root cause ticket
@@ -4489,6 +4500,7 @@ model ReleaseAttribution {
   @@index([releaseId])
   @@index([releaseApplicationId])
   @@index([rootCauseTicketId])
+  @@index([channelConnectId])
   @@map("release_attributions")
   @@schema("public")
 }
