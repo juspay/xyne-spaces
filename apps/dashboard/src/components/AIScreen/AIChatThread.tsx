@@ -1702,6 +1702,12 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
   }, [v2Sessions, conversationId]);
   useEffect(() => {
     if (!isV2 || !conversationId) return;
+    // Only a chat created in this thread can still be waiting for its
+    // generated title. A chat opened from history already has its final
+    // title (or never will get one), and the invalidation below refetches
+    // every loaded page of every cached history list, so polling for it
+    // would just reload the whole history six times.
+    if (mountedWithSessionIdRef.current) return;
     if (generatedTitle) return;
     const timers = [4_000, 10_000, 20_000, 35_000, 60_000, 90_000].map(delay =>
       window.setTimeout(() => invalidateSessions(), delay),
