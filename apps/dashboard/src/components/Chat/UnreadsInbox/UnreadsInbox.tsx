@@ -336,6 +336,7 @@ const UnreadsInbox = (): ReactElement => {
               <ThreadMessages
                 channelId={activeThread.channelId}
                 conversationId={activeThread.conversationId}
+                showChannelLink
                 onClose={() => setActiveThread(null)}
               />
             </div>
