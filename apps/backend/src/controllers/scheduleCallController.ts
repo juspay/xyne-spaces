@@ -82,7 +82,7 @@ export class ScheduleCallController {
 
   /**
    * Email the people affected by an edit: those still invited hear what changed, newly added
-   * internals get an invitation, removed people are told so. Newly added externals are left
+   * internals get an invitation, and people taken off the call are not told. Newly added externals are left
    * out; they already receive the invite email.
    */
   private emailCallEdit(args: {
@@ -93,17 +93,14 @@ export class ScheduleCallController {
     >;
     actorUserId: string;
     changeLines: string[];
-    previous: { externalEmails: string[]; internalUserIds: string[] };
+    previousInternalUserIds: string[];
     next: { externalEmails: string[]; internalUserIds: string[] };
     newlyAddedExternalEmails: string[];
   }): void {
-    const { context, call, actorUserId, changeLines, previous, next } = args;
+    const { context, call, actorUserId, changeLines, previousInternalUserIds, next } = args;
     const common = { ...call, excludeUserIds: [actorUserId] };
-    const previousInternal = new Set(previous.internalUserIds);
-    const nextInternal = new Set(next.internalUserIds);
+    const previousInternal = new Set(previousInternalUserIds);
     const addedInternal = next.internalUserIds.filter((id) => !previousInternal.has(id));
-    const removedInternal = previous.internalUserIds.filter((id) => !nextInternal.has(id));
-    const removedExternals = findNewEmails(previous.externalEmails, next.externalEmails);
     const stayingExternals = findNewEmails(next.externalEmails, args.newlyAddedExternalEmails);
 
     if (changeLines.length > 0) {
@@ -122,15 +119,6 @@ export class ScheduleCallController {
         bodyHtml: defaultCallInvitation(call.timezone).bodyHtml,
         externalEmails: [],
         internalUserIds: addedInternal,
-      });
-    }
-    if (removedExternals.length > 0 || removedInternal.length > 0) {
-      this.sendCallChangeEmailsInBackground(context, {
-        ...common,
-        kind: 'removed',
-        changeLines: ['You have been removed from this call.'],
-        externalEmails: removedExternals,
-        internalUserIds: removedInternal,
       });
     }
   }
@@ -854,10 +842,7 @@ export class ScheduleCallController {
           },
           actorUserId: userId,
           changeLines,
-          previous: {
-            externalEmails: previousExternalInvitees,
-            internalUserIds: [...participantIds.filter((id) => !addedIds.has(id)), ...(removeUserIds ?? [])],
-          },
+          previousInternalUserIds: participantIds.filter((id) => !addedIds.has(id)),
           next: {
             externalEmails: normalizedExternalInvitees ?? previousExternalInvitees,
             internalUserIds: participantIds,
@@ -1325,7 +1310,7 @@ export class ScheduleCallController {
           },
           actorUserId: userId,
           changeLines,
-          previous: { externalEmails: previousExternalInvitees, internalUserIds: previousInternalUserIds },
+          previousInternalUserIds,
           next: {
             externalEmails: normalizedExternalInvitees ?? previousExternalInvitees,
             internalUserIds: await repositories.recurringCallParticipants.findInternalParticipantUserIds(seriesId),

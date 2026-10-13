@@ -168,13 +168,12 @@ export const MAX_INTERNAL_EMAIL_RECIPIENTS = 100;
 /** Strips line breaks from user-derived values before they go into a log line. */
 export const sanitizeForLog = (value: unknown): string => String(value ?? '').replace(/[\r\n]+/g, ' ');
 
-export type CallChangeEmailKind = 'created' | 'updated' | 'cancelled' | 'removed';
+export type CallChangeEmailKind = 'created' | 'updated' | 'cancelled';
 
 const CHANGE_EMAIL_COPY: Record<CallChangeEmailKind, { heading: string; subject: string }> = {
   created: { heading: 'Meeting invitation', subject: 'Invitation' },
   updated: { heading: 'Meeting updated', subject: 'Updated' },
   cancelled: { heading: 'Meeting cancelled', subject: 'Cancelled' },
-  removed: { heading: 'Removed from meeting', subject: 'Removed' },
 };
 
 export interface CallChangeEmailParams {
@@ -269,7 +268,7 @@ export async function sendCallChangeEmails(params: CallChangeEmailParams): Promi
     joinUrl,
     userBodyHtml,
     heading: copy.heading,
-    hideJoin: params.kind === 'cancelled' || params.kind === 'removed' || !joinUrl,
+    hideJoin: params.kind === 'cancelled' || !joinUrl,
   });
 
   const { emailService: genericEmailService } = await import('@/services/email/factory');
