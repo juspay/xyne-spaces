@@ -24,7 +24,7 @@ import {
   experimentRepository,
 } from "../repositories/index.js";
 import type { DraftAgentSpec } from "../lib/agent-card.js";
-import { createAgentQueueError, postAgentDraftCard, draftSpecFromCreateAgentParams } from "../lib/agent-draft-card.js";
+import { createAgentQueueError, draftCardCarriesReply, postAgentDraftCard, draftSpecFromCreateAgentParams } from "../lib/agent-draft-card.js";
 import { toResolvedAgent, type ResolvedAgent } from "../lib/resolved-agent.js";
 import { stripLeadingAgentMention } from "../lib/strip-agent-mention.js";
 import { resolveUserSpacesAuth } from "../surfaces/spaces/user-auth.js";
@@ -801,6 +801,12 @@ export async function fetchConversationHistory(
 }
 
 // buildAppActionFrontmatter removed — replaced by buildTwinApprovalFlow from xyne-claw-shared
+
+function rendersAgentDraftCard(action: Record<string, unknown>, ctx: SessionContext): boolean {
+  if (action["tool"] !== "create-agent" || !ctx.agentSlug || !ctx.agentOrgId) return false;
+  const params = action["params"] && typeof action["params"] === "object" ? (action["params"] as Record<string, unknown>) : {};
+  return draftSpecFromCreateAgentParams(params) !== null;
+}
 
 async function postWriteApprovalAction(args: {
   action: Record<string, unknown>;
@@ -3372,7 +3378,9 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     }
     const toolOf = (a: Record<string, unknown>): string =>
       typeof a["tool"] === "string" && a["tool"].trim() ? a["tool"].trim() : "write action";
-    const queued = pendingActionList.filter((a) => !pendingActionValidation.get(a)?.error);
+    const queued = pendingActionList.filter(
+      (a) => !pendingActionValidation.get(a)?.error && !rendersAgentDraftCard(a, ctx),
+    );
     const rejected = pendingActionList.filter((a) => pendingActionValidation.get(a)?.error);
 
     const lines: string[] = [];
@@ -4602,6 +4610,18 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     return;
   }
 
+  const draftCardIsTheReply = draftCardCarriesReply({
+    completed: payload.status === "completed",
+    conversation: ctx.responseMode === "conversation",
+    actions: pendingActionList.map((a) => ({
+      rendersDraftCard: rendersAgentDraftCard(a, ctx),
+      rejected: Boolean(pendingActionValidation.get(a)?.error),
+    })),
+    hasAttachments: Boolean(payload.attachments?.length),
+    hasPendingResponses: Boolean(payload.pendingResponses?.length),
+    replyText: typeof payload.result === "string" ? payload.result : "",
+  });
+
   // Notify user if result is empty (but not if copilot has pendingResponses, and
   // not when a capability card was just posted — there the card IS the answer
   // and an apology under it would be nonsense).
@@ -4615,7 +4635,8 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     !resultWithCitations.trim() &&
     !payload.attachments?.length &&
     !payload.pendingResponses?.length &&
-    !postedAgentProfileCard
+    !postedAgentProfileCard &&
+    !draftCardIsTheReply
   ) {
     if (deferCompletedRecoveryForEmptyResult) {
       const recoveryEmptyResult = await handleRunCompletion(sessionId, "failed", "empty_result").catch((err) => {
@@ -5212,7 +5233,9 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         },
       );
 
-      if (prepared.attachments.length > 0) {
+      if (draftCardIsTheReply) {
+        log.info(`Agent ${ctx.agentSlug}: reply dropped — the create-agent draft card carries it, thread ${ctx.conversationId}`);
+      } else if (prepared.attachments.length > 0) {
         const form = new FormData();
         for (const att of prepared.attachments) {
           const buffer = Buffer.from(att.data, "base64");

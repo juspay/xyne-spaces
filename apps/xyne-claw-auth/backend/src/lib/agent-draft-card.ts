@@ -2,7 +2,7 @@ import { agentRepository, chatMessageRepository } from "../repositories/index.js
 import { postAgentMessage } from "../surfaces/spaces/post-message.js";
 import { errMsg } from "./errors.js";
 import { postFlowCard } from "./flow-card-delivery.js";
-import { agentDraftTranscript, prepareAgentDraftCard } from "./agent-card-render.js";
+import { agentDraftTranscript, prepareAgentDraftCard, resolveDraftCapabilities } from "./agent-card-render.js";
 import { isValidAgentSlug, type DraftAgentSpec } from "./agent-card.js";
 
 /**
@@ -196,4 +196,36 @@ export async function createAgentQueueError(
   return existing
     ? `An agent called **${existing.name}** (\`${spec.slug}\`) already exists here — ask again with a different name, or update the existing agent.`
     : null;
+}
+
+export async function createAgentNotGranted(
+  params: Record<string, unknown>,
+  orgId: string,
+  userId: string,
+): Promise<string[]> {
+  const spec = draftSpecFromCreateAgentParams(params);
+  if (!spec) return [];
+  const { resolved, expandedMcps } = await resolveDraftCapabilities(spec, orgId, userId);
+  return [...resolved.unknown, ...expandedMcps.unknown];
+}
+
+const DRAFT_CARD_REPLY_MAX_CHARS = 500;
+
+export function draftCardCarriesReply(args: {
+  completed: boolean;
+  conversation: boolean;
+  actions: ReadonlyArray<{ rendersDraftCard: boolean; rejected: boolean }>;
+  hasAttachments: boolean;
+  hasPendingResponses: boolean;
+  replyText: string;
+}): boolean {
+  return (
+    args.completed &&
+    args.conversation &&
+    args.actions.length > 0 &&
+    args.actions.every((a) => a.rendersDraftCard && !a.rejected) &&
+    !args.hasAttachments &&
+    !args.hasPendingResponses &&
+    args.replyText.trim().length <= DRAFT_CARD_REPLY_MAX_CHARS
+  );
 }

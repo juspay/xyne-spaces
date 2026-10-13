@@ -34,7 +34,7 @@ const queued = (what: string) => async (): Promise<string> =>
 const toolsProperty = {
   type: "array" as const,
   description:
-    "Tool identifiers to grant, e.g. 'web-search', 'sandbox-run-command', or a subagent name like 'github'. " +
+    "Tool identifiers to grant, e.g. 'web-search', 'sandbox-run', or a subagent name like 'github'. " +
     "Names that do not exist in this workspace are dropped and reported on the card rather than failing the whole request — " +
     "call search_tools first if you are unsure what exists.",
   items: { type: "string" as const },
@@ -69,7 +69,9 @@ export const createAgentTool: ToolDefinition = {
     "On approval the agent is created as a PERSONAL agent owned by the approving user. " +
     "Write a real system prompt — role, procedure, which tools to use when, output format and limits — not a one-line summary; " +
     "a vague prompt produces an agent that does not work. " +
-    "Use this when the user asks you to 'create an agent', 'make me a bot for X', or 'set up an agent that does Y'.",
+    "Use this when the user asks you to 'create an agent', 'make me a bot for X', or 'set up an agent that does Y'. " +
+    "Your `summary` is the ONLY text the user should see about the draft: do not write any message announcing, " +
+    "describing or asking them to approve it — not before this call, not after it.",
   source: AGENT_TOOLS_SOURCE,
   isWriteTool: true,
   inputSchema: {
@@ -143,13 +145,16 @@ export const createAgentTool: ToolDefinition = {
       summary: {
         type: "string",
         description:
-          "One or two sentences posted next to the card, in your own voice: what you built and WHY you made the " +
-          "key calls — which tools you granted and anything you deliberately left out. The card already lists the " +
-          "name, description and tools, so do NOT restate them.",
+          "Required. ONE short sentence (max ~25 words) posted above the card, in your own voice, saying only WHY you " +
+          "granted these tools or left something out. The card already shows the name, description and tools, so do NOT " +
+          "say what the agent does, how it formats answers, or that it needs approval.",
       },
     },
-    required: ["name", "description", "systemPrompt", "tools"],
+    required: ["name", "description", "systemPrompt", "tools", "summary"],
   },
+  queuedForApprovalText:
+    "Queued: the user now gets the agent draft card, with your `summary` posted above it. Together they already say " +
+    "everything, so your reply after this must be EMPTY — no recap, no tool list, no 'approve the card' line.",
   execute: queued("create-agent"),
 };
 

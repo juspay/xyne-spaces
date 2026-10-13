@@ -232,11 +232,11 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
             </div>
           )}
 
-          {/* `props.note` (the server's "not granted — no such tool" footnote) is
-              intentionally NOT rendered here for now, alongside the hidden
-              capability chips. The server still sends it and the expanded
-              preview still shows it — this is a display choice, not a change to
-              the wire contract. */}
+          {props.note && (
+            <span className='block break-words px-1 text-xs leading-4 text-muted-foreground'>
+              {props.note}
+            </span>
+          )}
         </div>
       </div>
 

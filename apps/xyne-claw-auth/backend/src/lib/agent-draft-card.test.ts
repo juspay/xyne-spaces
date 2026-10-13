@@ -9,7 +9,7 @@ vi.mock("../routes/tools.js", () => ({ buildAvailableToolsCatalog: vi.fn() }));
 vi.mock("../surfaces/spaces/post-message.js", () => ({ postAgentMessage: vi.fn() }));
 vi.mock("./flow-card-delivery.js", () => ({ postFlowCard: vi.fn() }));
 
-const { createAgentQueueError, draftSpecFromCreateAgentParams } = await import("./agent-draft-card.js");
+const { createAgentQueueError, draftCardCarriesReply, draftSpecFromCreateAgentParams } = await import("./agent-draft-card.js");
 
 const base = {
   name: "PR Review Agent",
@@ -127,5 +127,43 @@ describe("createAgentQueueError", () => {
 
     expect(await createAgentQueueError({ description: "x" }, "org-1")).toBeNull();
     expect(findBySlug).not.toHaveBeenCalled();
+  });
+});
+
+describe("draftCardCarriesReply", () => {
+  const draftOnly = {
+    completed: true,
+    conversation: true,
+    actions: [{ rendersDraftCard: true, rejected: false }],
+    hasAttachments: false,
+    hasPendingResponses: false,
+    replyText: "Done — approve the card above to create it.",
+  };
+
+  it("lets the draft card stand in for a short reply about it", () => {
+    expect(draftCardCarriesReply(draftOnly)).toBe(true);
+    expect(draftCardCarriesReply({ ...draftOnly, replyText: "" })).toBe(true);
+  });
+
+  it("keeps the reply when it carries more than the draft", () => {
+    expect(draftCardCarriesReply({ ...draftOnly, replyText: "x".repeat(501) })).toBe(false);
+    expect(draftCardCarriesReply({ ...draftOnly, hasAttachments: true })).toBe(false);
+    expect(draftCardCarriesReply({ ...draftOnly, hasPendingResponses: true })).toBe(false);
+  });
+
+  it("keeps the reply when any action is not a posted draft card", () => {
+    expect(draftCardCarriesReply({ ...draftOnly, actions: [] })).toBe(false);
+    expect(draftCardCarriesReply({ ...draftOnly, actions: [{ rendersDraftCard: true, rejected: true }] })).toBe(false);
+    expect(
+      draftCardCarriesReply({
+        ...draftOnly,
+        actions: [{ rendersDraftCard: true, rejected: false }, { rendersDraftCard: false, rejected: false }],
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps the reply outside a completed conversation run", () => {
+    expect(draftCardCarriesReply({ ...draftOnly, completed: false })).toBe(false);
+    expect(draftCardCarriesReply({ ...draftOnly, conversation: false })).toBe(false);
   });
 });
