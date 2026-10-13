@@ -4,12 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   bareToolName,
-  inlineCapForTool,
-  isDocumentReadTool,
-  isRetrievalTool,
+  isSearchTool,
   promoteIfOversized,
   stripControlChars,
-  TOOL_RESULT_RETRIEVAL_CAP_BYTES,
   lineifyForSpill,
   TOOL_RESULT_INLINE_CAP_BYTES,
   SPILL_MAX_LINE_CHARS,
@@ -136,32 +133,26 @@ test("lineify: malformed JSON (bracket but unparseable) falls back to hard-wrap,
   expect(lined.replace(/\n/g, "")).toBe(broken);
 });
 
-test("retrieval tools keep their large cap when called with a server prefix", () => {
-  expect(bareToolName("Xyne_Spaces__spaces-vespa-search")).toBe("spaces-vespa-search");
-  expect(bareToolName("spaces-vespa-search")).toBe("spaces-vespa-search");
-  expect(isRetrievalTool("Xyne_Spaces__spaces-vespa-search")).toBe(true);
-  expect(isRetrievalTool("Xyne_Spaces__spaces-read-canvas")).toBe(true);
-  expect(isRetrievalTool("Genius__genius-investigation")).toBe(true);
-  expect(isRetrievalTool("Bitbucket__get_file_content")).toBe(false);
-  expect(inlineCapForTool("Xyne_Spaces__spaces-vespa-search")).toBe(TOOL_RESULT_RETRIEVAL_CAP_BYTES);
-  expect(inlineCapForTool("Bitbucket__get_file_content")).toBe(TOOL_RESULT_INLINE_CAP_BYTES);
-});
-
-test("a prefixed search result under the retrieval cap stays fully inline", async () => {
+test("every tool gets the same large inline cap, prefixed or not", async () => {
+  expect(TOOL_RESULT_INLINE_CAP_BYTES).toBe(128 * 1024);
   const content = "hit ".repeat(15_000);
-  const out = await promoteIfOversized(dir, "custom", "Xyne_Spaces__spaces-vespa-search", content);
-  expect(out).toBe(content);
+  for (const name of ["Xyne_Spaces__spaces-vespa-search", "Xyne_Spaces__spaces-read-canvas", "Bitbucket__get_file_content", "sandbox-run"]) {
+    expect(await promoteIfOversized(dir, "custom", name, content)).toBe(content);
+  }
 });
 
-test("an oversized result says the inline text is only a preview and must be read first", async () => {
-  const content = "row\n".repeat(20_000);
+test("a result over the cap is saved to a file with a marked preview", async () => {
+  const content = "row\n".repeat(40_000);
   const out = await promoteIfOversized(dir, "custom", "Bitbucket__get_file_content", content);
   expect(out).toContain("full result saved to");
-  expect(out).toContain(`of ${content.length} chars are shown below. Do not answer from this preview alone`);
+  expect(out).toContain(`Only the first 16384 of ${content.length} chars are shown below. Do not answer from this preview alone`);
+  expect(out).toContain("## Preview (first 16384 chars)");
 });
 
-test("whole-document reads are never auto-sifted, search results can be", () => {
-  expect(isDocumentReadTool("Xyne_Spaces__spaces-read-canvas")).toBe(true);
-  expect(isDocumentReadTool("spaces-sdlc-read-artifact")).toBe(true);
-  expect(isDocumentReadTool("Xyne_Spaces__spaces-vespa-search")).toBe(false);
+test("bare names drop the server prefix and only search tools are auto-sift candidates", () => {
+  expect(bareToolName("Xyne_Spaces__spaces-vespa-search")).toBe("spaces-vespa-search");
+  expect(bareToolName("spaces-vespa-search")).toBe("spaces-vespa-search");
+  expect(isSearchTool("Xyne_Spaces__spaces-vespa-search")).toBe(true);
+  expect(isSearchTool("Xyne_Spaces__spaces-read-canvas")).toBe(false);
+  expect(isSearchTool("sandbox-run")).toBe(false);
 });
