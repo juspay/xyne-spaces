@@ -52,6 +52,7 @@ export interface UserPreferences {
   relatedContextEnabled: boolean;
   /** How long after the last keystroke to look them up, in ms. Never below 1000. */
   relatedContextDebounceMs: number;
+  aiWorkspaceAutoOpen: boolean;
 }
 
 export const DEFAULT_USER_PREFERENCES: UserPreferences = {
@@ -69,6 +70,7 @@ export const DEFAULT_USER_PREFERENCES: UserPreferences = {
   sdlcShowClosedTracks: false,
   relatedContextEnabled: false,
   relatedContextDebounceMs: 1000,
+  aiWorkspaceAutoOpen: true,
 };
 
 export interface UserPreferencesContext {

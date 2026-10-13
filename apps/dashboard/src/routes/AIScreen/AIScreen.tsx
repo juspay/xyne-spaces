@@ -45,6 +45,7 @@ import { useV2SessionInvalidator } from '../../hooks/useAskAISessionsV2';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { useAssistantActions } from '../../components/Assistant/useAssistantActions';
 import type { AssistantRouting } from '../../components/Assistant/useRoutedSubmit';
+import { useUserPreference } from '../../machines/userPreferencesMachine';
 import { AI_ACTIVE_SESSION_KEY, AI_SHOW_CHAT_VIEW_KEY } from './aiSessionStorage';
 
 function CitationWorkspaceOpener({ onOpenSources }: { onOpenSources: () => void }): null {
@@ -543,6 +544,7 @@ const AIScreen = (): ReactElement => {
     setWorkspaceOverride(null);
   }, [activeSessionId]);
   const { artifacts: conversationArtifacts } = useConversationArtifacts(activeSessionId || null);
+  const workspaceAutoOpen = useUserPreference('aiWorkspaceAutoOpen');
   const hasArtifacts = conversationArtifacts.length > 0;
   const [workspaceRequest, setWorkspaceRequest] = useState<WorkspaceOpenRequest>({
     seq: 0,
@@ -604,10 +606,12 @@ const AIScreen = (): ReactElement => {
   // Likewise a fresh element remounts the pane's subtree each render.
   const appPane = useMemo(() => <ArtifactAppPane mode={appMode} />, [appMode]);
 
-  const openWorkspaceTab = useCallback(
-    (tab: WorkspaceOpenRequest['tab'], artifactId?: string) =>
-      requestWorkspace({ tab, ...(artifactId ? { openArtifactId: artifactId } : {}) }),
-    [requestWorkspace],
+  const autoOpenWorkspaceTab = useCallback(
+    (tab: WorkspaceOpenRequest['tab'], artifactId?: string) => {
+      if (!workspaceAutoOpen) return;
+      requestWorkspace({ tab, ...(artifactId ? { openArtifactId: artifactId } : {}) });
+    },
+    [requestWorkspace, workspaceAutoOpen],
   );
   const collapseWorkspace = useCallback(() => {
     setWorkspaceOverride(false);
@@ -628,7 +632,7 @@ const AIScreen = (): ReactElement => {
     [appMode.active, appMode.hasApp, appMode.appId, appMode.open, appMode.exit],
   );
 
-  const workspaceOpen = showChatView && (workspaceOverride ?? hasArtifacts);
+  const workspaceOpen = showChatView && (workspaceOverride ?? (workspaceAutoOpen && hasArtifacts));
   const workspaceWasOpen = useRef(workspaceOpen);
   useEffect(() => {
     if (workspaceOpen && !workspaceWasOpen.current) {
@@ -655,7 +659,7 @@ const AIScreen = (): ReactElement => {
       <DesignStudioProvider>
         <PageSelectionProvider submitPrompt={submitPrompt}>
           <CitationWorkspaceOpener onOpenSources={openSourcesInWorkspace} />
-          <WorkspaceAutoOpener artifacts={conversationArtifacts} onOpen={openWorkspaceTab} />
+          <WorkspaceAutoOpener artifacts={conversationArtifacts} onOpen={autoOpenWorkspaceTab} />
           <AppCreationModeProvider value={appModeSignal}>
             <AIShell
               activeSessionId={activeSessionId}
