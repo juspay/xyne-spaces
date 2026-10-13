@@ -686,7 +686,12 @@ export const SDLC_FILE_FIELDS: readonly (keyof SdlcFileFields)[] = [
 ];
 
 export type SdlcBranch = 'TRACKS' | 'WIKI' | 'KNOWLEDGE';
-export type SdlcContainerType = 'TRACK' | 'FOLDER' | 'REPOSITORY';
+/**
+ * What a container is: a track; the Wiki root (WIKI); the hub's own wiki under it (HUB_WIKI);
+ * a repository's wiki under it (REPOSITORY); Hub Knowledge (KNOWLEDGE); or a folder created
+ * inside any of those (FOLDER).
+ */
+export type SdlcContainerType = 'TRACK' | 'WIKI' | 'HUB_WIKI' | 'REPOSITORY' | 'KNOWLEDGE' | 'FOLDER';
 
 /** A track or folder of an SDLC Hub (vespa-core: sdlc_container.sd). */
 export interface VespaSdlcContainerDocument {

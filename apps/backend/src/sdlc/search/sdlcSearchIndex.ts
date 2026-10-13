@@ -196,7 +196,12 @@ async function buildSdlcHubIndex(hubId: string, prisma: PrismaClient): Promise<S
     };
   };
   const typeOf = (id: string): SdlcContainerType =>
-    trackSet.has(id) ? 'TRACK' : repoOfWiki(id) ? 'REPOSITORY' : 'FOLDER';
+    trackSet.has(id) ? 'TRACK'
+      : id === wikiRoot ? 'WIKI'
+      : id === hubWiki ? 'HUB_WIKI'
+      : id === knowledgeRoot ? 'KNOWLEDGE'
+      : repoOfWiki(id) ? 'REPOSITORY'
+      : 'FOLDER';
 
   for (const t of tracks) {
     const p = place(t.id);
