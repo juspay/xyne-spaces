@@ -1,5 +1,6 @@
-// A channel's fields (e.g. which merchant it is for), from the workspace's channel form. Channel admins
-// edit them; a Channels desk copies them onto the tickets it opens for the channel.
+// A channel's fields (e.g. which merchant it is for), from the workspace's channel form. Shown only on
+// channels that have values; channel admins correct them there. A Channels desk copies them onto the tickets
+// it opens for the channel.
 import { useState, type ReactElement } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from 'sonner';
@@ -97,6 +98,8 @@ export function ChannelFields({
       .filter(value => (value.entityType as FormEntityType) === FormEntityType.CHANNEL)
       .map(value => [value.fieldId, value]),
   );
+  // Only channels given fields (e.g. by the app that made them) show them; others stay as they are.
+  if (!fields.some(field => valueOf.has(field.id))) return null;
 
   const save = async (fieldId: string, newValue: string[]): Promise<void> => {
     const existing = valueOf.get(fieldId);
