@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { adjustWeight, deadlineNudgeAt, inQuietHours, nextAllowedAt, planLoop, quietHoldUntil, updateReplyAverage } from "./schedule.js";
+import { adjustWeight, deadlineNudgeAt, inQuietHours, nextAllowedAt, planLoop, quietHoldUntil, textGapUntil, updateReplyAverage } from "./schedule.js";
 
 const now = new Date("2026-10-09T08:00:00.000Z");
 const ctx = { now, lastInboundAt: new Date("2026-10-09T07:00:00.000Z"), lastUserReplyAt: null, replySlaHours: 24 };
@@ -72,6 +72,18 @@ describe("quiet hours", () => {
 
   it("treats equal start and end as no quiet hours", () => {
     expect(inQuietHours(now, { ...prefs, quietStartHour: 9, quietEndHour: 9 })).toBe(false);
+  });
+});
+
+describe("textGapUntil", () => {
+  const gap = 60 * 60_000;
+  it("holds a non-urgent text until the gap since the last one ends", () => {
+    expect(textGapUntil(new Date("2026-10-09T07:50:00Z"), now, gap, false)?.toISOString()).toBe("2026-10-09T08:50:00.000Z");
+  });
+  it("lets urgent texts, first texts and texts after the gap through", () => {
+    expect(textGapUntil(new Date("2026-10-09T07:50:00Z"), now, gap, true)).toBeNull();
+    expect(textGapUntil(null, now, gap, false)).toBeNull();
+    expect(textGapUntil(new Date("2026-10-09T06:00:00Z"), now, gap, false)).toBeNull();
   });
 });
 

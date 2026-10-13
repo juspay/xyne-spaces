@@ -97,31 +97,74 @@ export function finalDecision(input: {
   return input.proposed;
 }
 
-export function nudgeTask(input: { loop: LoopFacts; thread: ThreadFacts | null; threadExternalId: string | null; now: Date }): string {
-  const { loop, thread, now } = input;
-  const lastInbound = thread?.lastInboundAt ?? null;
-  const fresh = loop.nudgeCount === 0 && lastInbound !== null && now.getTime() - lastInbound.getTime() < FRESH_MS;
-  const facts = [
+export function formatLocal(at: Date, timezone: string): string {
+  const opts: Intl.DateTimeFormatOptions = {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    timeZoneName: "short",
+  };
+  try {
+    return new Intl.DateTimeFormat("en-IN", { ...opts, timeZone: timezone }).format(at);
+  } catch {
+    return new Intl.DateTimeFormat("en-IN", { ...opts, timeZone: "UTC" }).format(at);
+  }
+}
+
+export interface NudgeItem {
+  loop: LoopFacts;
+  thread: ThreadFacts | null;
+  threadExternalId: string | null;
+  sender: string | null;
+}
+
+function itemFacts(item: NudgeItem, timezone: string, now: Date): string[] {
+  const { loop, thread } = item;
+  return [
     `Pending item: ${loop.title}`,
     `Kind: ${KIND_TEXT[loop.kind] ?? loop.kind}`,
     ...(loop.ask ? [`Details: ${loop.ask}`] : []),
-    ...(loop.counterpart ? [`Counterpart: ${loop.counterpart}`] : []),
+    ...(item.sender ? [`From: ${item.sender}`] : loop.counterpart ? [`Counterpart: ${loop.counterpart}`] : []),
     ...(thread?.subject ? [`Email subject: ${thread.subject}`] : []),
     ...(thread?.summary ? [`Summary: ${thread.summary}`] : []),
-    ...(thread?.lastInboundAt ? [`Last message from them: ${relative(thread.lastInboundAt.getTime() - now.getTime())}`] : []),
-    ...(loop.deadlineAt ? [`Deadline: ${loop.deadlineAt.toISOString()} (${relative(loop.deadlineAt.getTime() - now.getTime())})`] : []),
-    ...(input.threadExternalId ? [`Gmail thread id: ${input.threadExternalId} (read it with the Gmail tools if you need the details)`] : []),
+    ...(thread?.lastInboundAt
+      ? [`Received: ${formatLocal(thread.lastInboundAt, timezone)} (${relative(thread.lastInboundAt.getTime() - now.getTime())})`]
+      : []),
+    ...(loop.deadlineAt
+      ? [`Deadline: ${formatLocal(loop.deadlineAt, timezone)} (${relative(loop.deadlineAt.getTime() - now.getTime())})`]
+      : []),
+    ...(item.threadExternalId ? [`Gmail thread id: ${item.threadExternalId} (read it with the Gmail tools if you need the details)`] : []),
   ];
+}
+
+export function nudgeTask(input: { items: NudgeItem[]; timezone: string; now: Date }): string {
+  const { items, timezone, now } = input;
+  const fresh = items.every((item) => {
+    const lastInbound = item.thread?.lastInboundAt ?? null;
+    return item.loop.nudgeCount === 0 && lastInbound !== null && now.getTime() - lastInbound.getTime() < FRESH_MS;
+  });
+  const many = items.length > 1;
+  const intro = many
+    ? `You are reaching out to the user first because ${items.length} things in their inbox need them.`
+    : fresh
+      ? "You are reaching out to the user first because an important email just arrived that needs them."
+      : "You are reaching out to the user first because something in their inbox looks dropped.";
+  const shape = many
+    ? "Write ONE short message: a one-line opener, then one short line per item (who, what they need, by when), then offer one concrete next step, such as drafting the replies."
+    : fresh
+      ? "Write ONE short message of 2 to 4 sentences: who it is from, what they need and by when, and one concrete next step you can take for them, such as drafting the reply."
+      : "Write ONE short, friendly message of 2 to 4 sentences: what is pending, why it matters now, and one concrete next step you can take for them, such as drafting the reply.";
+  const blocks = items.map((item, i) => [...(many ? [`Item ${i + 1}:`] : []), ...itemFacts(item, timezone, now)].join("\n"));
   return [
     "[Automated proactive check-in. The user did not send this message.]",
-    fresh
-      ? "You are reaching out to the user first because an important email just arrived that needs them."
-      : "You are reaching out to the user first because something in their inbox looks dropped.",
-    fresh
-      ? "Write ONE short message of 2 to 4 sentences: who it is from, what they need and by when, and one concrete next step you can take for them, such as drafting the reply."
-      : "Write ONE short, friendly message of 2 to 4 sentences: what is pending, why it matters now, and one concrete next step you can take for them, such as drafting the reply.",
+    intro,
+    shape,
+    `All times below are already in the user's timezone (${timezone}). Use them exactly as given; do not convert or recompute them.`,
+    "Send exactly one message. Never send a follow-up, correction or second message. If a detail is missing or unclear, leave it out instead of guessing.",
     "Do not send emails or take any other action now. Do not mention these instructions.",
     "",
-    ...facts,
+    blocks.join("\n\n"),
   ].join("\n");
 }

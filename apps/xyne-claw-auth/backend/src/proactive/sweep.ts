@@ -3,11 +3,12 @@ import { errMsg } from "../lib/errors.js";
 import { createLogger } from "../logger.js";
 import { interruptViaClaw } from "./claw-client.js";
 import { PROACTIVE, proactiveMode, type ProactiveMode } from "./config.js";
+import { groupByUser } from "./batching.js";
 import { deliverNudge } from "./deliver.js";
 import { mapPool } from "./pool.js";
-import { buildInterruptState, fallbackDecision, finalDecision, nudgeTask, type Decision, type LoopFacts } from "./policy.js";
+import { buildInterruptState, fallbackDecision, finalDecision, nudgeTask, type Decision, type LoopFacts, type NudgeItem } from "./policy.js";
 import { loadPrefs } from "./prefs.js";
-import { adjustWeight, quietHoldUntil } from "./schedule.js";
+import { adjustWeight, quietHoldUntil, textGapUntil } from "./schedule.js";
 import { enqueueStaleSources, renewExpiringWatches } from "./sources.js";
 
 const log = createLogger("proactive-sweep");
@@ -46,7 +47,27 @@ async function closeLoop(id: string, status: string, resolution: string, now: Da
   await prisma.openLoop.update({ where: { id }, data: { status, resolution, resolvedAt: now } });
 }
 
-export async function evaluateLoop(id: string, mode: ProactiveMode, now: Date = new Date()): Promise<Decision | null> {
+export interface TextCandidate {
+  loopId: string;
+  userId: string;
+  agentId: string | null;
+  nudgeCount: number;
+  reason: string;
+  nextDue: Date;
+  timezone: string;
+  item: NudgeItem;
+}
+
+async function textsInWindow(userId: string, mode: ProactiveMode, since: Date): Promise<{ count: number; lastAt: Date | null }> {
+  const rows = await prisma.nudgeLog.findMany({
+    where: { userId, decision: "text", shadow: mode === "shadow", createdAt: { gte: since } },
+    select: { id: true, runId: true, createdAt: true },
+    orderBy: { createdAt: "desc" },
+  });
+  return { count: new Set(rows.map((r) => r.runId ?? r.id)).size, lastAt: rows[0]?.createdAt ?? null };
+}
+
+export async function decideLoop(id: string, mode: ProactiveMode, now: Date = new Date()): Promise<TextCandidate | Decision | null> {
   const loop = await prisma.openLoop.findUnique({ where: { id }, include: { thread: true } });
   if (!loop || !OPEN_STATUSES.includes(loop.status)) return null;
   const thread = loop.thread;
@@ -78,11 +99,14 @@ export async function evaluateLoop(id: string, mode: ProactiveMode, now: Date = 
     return null;
   }
 
-  const textsLast24h = await prisma.nudgeLog.count({
-    where: { userId: loop.userId, decision: "text", shadow: mode === "shadow", createdAt: { gte: new Date(now.getTime() - 24 * HOUR) } },
-  });
-  if (textsLast24h >= prefs.maxNudgesPerDay) {
+  const recent = await textsInWindow(loop.userId, mode, new Date(now.getTime() - 24 * HOUR));
+  if (recent.count >= prefs.maxNudgesPerDay) {
     await prisma.openLoop.update({ where: { id: loop.id }, data: { dueAt: new Date(now.getTime() + CAP_RETRY_MS) } });
+    return null;
+  }
+  const gapUntil = textGapUntil(recent.lastAt, now, PROACTIVE.minTextGapMs, loop.urgent);
+  if (gapUntil) {
+    await prisma.openLoop.update({ where: { id: loop.id }, data: { dueAt: gapUntil } });
     return null;
   }
 
@@ -106,7 +130,7 @@ export async function evaluateLoop(id: string, mode: ProactiveMode, now: Date = 
     loop: facts,
     thread: threadFacts,
     contact,
-    textsLast24h,
+    textsLast24h: recent.count,
     maxPerDay: prefs.maxNudgesPerDay,
     timezone: prefs.timezone,
     now,
@@ -128,34 +152,52 @@ export async function evaluateLoop(id: string, mode: ProactiveMode, now: Date = 
     return decision;
   }
 
-  const nextDue = new Date(now.getTime() + Math.max(prefs.replySlaHours, 4) * HOUR);
-  if (mode === "live") {
-    const delivery = await deliverNudge({
-      userId: loop.userId,
-      agentId: prefs.agentId,
-      task: nudgeTask({ loop: facts, thread: threadFacts, threadExternalId: thread?.externalId ?? null, now }),
-      idempotencyKey: `proactive-${loop.id}-${loop.nudgeCount + 1}`,
-      now,
-    });
+  const senderName = loop.counterpart ?? contact?.name ?? null;
+  const sender = counterpartKey ? (senderName && senderName !== counterpartKey ? `${senderName} <${counterpartKey}>` : counterpartKey) : null;
+  return {
+    loopId: loop.id,
+    userId: loop.userId,
+    agentId: prefs.agentId,
+    nudgeCount: loop.nudgeCount,
+    reason,
+    nextDue: new Date(now.getTime() + Math.max(prefs.replySlaHours, 4) * HOUR),
+    timezone: prefs.timezone,
+    item: { loop: facts, thread: threadFacts, threadExternalId: thread?.externalId ?? null, sender },
+  };
+}
+
+export async function sendBatch(batch: TextCandidate[], mode: ProactiveMode, now: Date): Promise<void> {
+  const first = batch[0];
+  if (!first) return;
+  const delivery =
+    mode === "live"
+      ? await deliverNudge({
+          userId: first.userId,
+          agentId: first.agentId,
+          task: nudgeTask({ items: batch.map((c) => c.item), timezone: first.timezone, now }),
+          idempotencyKey: `proactive-${batch.map((c) => `${c.loopId}-${c.nudgeCount + 1}`).join("+")}`,
+          now,
+        })
+      : null;
+  for (const c of batch) {
     await prisma.nudgeLog.create({
       data: {
-        userId: loop.userId,
-        loopId: loop.id,
-        agentId: prefs.agentId,
-        decision,
-        reason: delivery.ok ? reason : `${reason}; not sent: ${delivery.reason}`,
-        shadow: !delivery.ok,
-        ...(delivery.ok ? { channel: delivery.channel, runId: delivery.sessionId, sentAt: now } : {}),
+        userId: c.userId,
+        loopId: c.loopId,
+        agentId: c.agentId,
+        decision: "text",
+        reason: [c.reason, batch.length > 1 ? `batched x${batch.length}` : null, delivery && !delivery.ok ? `not sent: ${delivery.reason}` : null]
+          .filter(Boolean)
+          .join("; "),
+        shadow: !delivery?.ok,
+        ...(delivery?.ok ? { channel: delivery.channel, runId: delivery.sessionId, sentAt: now } : {}),
       },
     });
-  } else {
-    await prisma.nudgeLog.create({ data: { userId: loop.userId, loopId: loop.id, agentId: prefs.agentId, decision, reason, shadow: true } });
+    await prisma.openLoop.update({
+      where: { id: c.loopId },
+      data: { status: "nudged", nudgeCount: { increment: 1 }, lastNudgedAt: now, dueAt: c.nextDue },
+    });
   }
-  await prisma.openLoop.update({
-    where: { id: loop.id },
-    data: { status: "nudged", nudgeCount: { increment: 1 }, lastNudgedAt: now, dueAt: nextDue },
-  });
-  return decision;
 }
 
 export async function dismissLoop(userId: string, loopId: string): Promise<boolean> {
@@ -190,16 +232,25 @@ export async function runProactiveTick(): Promise<void> {
     expireLoops(now).catch(() => 0),
   ]);
   const claimed = await claimDueLoops(PROACTIVE.sweepBatch);
-  const decisions = await mapPool(claimed, 4, async ({ id }) => {
+  const decided = await mapPool(claimed, 4, async ({ id }) => {
     try {
-      return await evaluateLoop(id, mode, now);
+      return await decideLoop(id, mode, now);
     } catch (err) {
       log.warn(`[proactive] evaluate loop=${id} failed: ${errMsg(err)}`);
       return null;
     }
   });
-  const texts = decisions.filter((d) => d === "text").length;
+  const candidates = decided.filter((d): d is TextCandidate => d !== null && typeof d === "object");
+  const batches = groupByUser(candidates);
+  await mapPool(batches, 4, async (batch) => {
+    try {
+      await sendBatch(batch, mode, now);
+    } catch (err) {
+      log.warn(`[proactive] send user=${batch[0]?.userId} failed: ${errMsg(err)}`);
+    }
+  });
+  const texts = batches.length;
   if (claimed.length || renewed || expired) {
-    log.info(`[proactive] tick mode=${mode} claimed=${claimed.length} texts=${texts} renewed=${renewed} stale=${stale} expired=${expired}`);
+    log.info(`[proactive] tick mode=${mode} claimed=${claimed.length} texts=${texts} loopsTexted=${candidates.length} renewed=${renewed} stale=${stale} expired=${expired}`);
   }
 }

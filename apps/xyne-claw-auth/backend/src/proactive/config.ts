@@ -34,4 +34,5 @@ export const PROACTIVE = {
   maxLaterPerLoop: envNumber("PROACTIVE_MAX_LATER_PER_LOOP", 3),
   cloudWindowMs: envNumber("PROACTIVE_CLOUD_WINDOW_MS", 23 * 60 * 60_000),
   activeChatMs: envNumber("PROACTIVE_ACTIVE_CHAT_MS", 7 * 24 * 60 * 60_000),
+  minTextGapMs: envNumber("PROACTIVE_MIN_TEXT_GAP_MS", 60 * 60_000),
 };

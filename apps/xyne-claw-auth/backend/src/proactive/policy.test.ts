@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildInterruptState, fallbackDecision, finalDecision, nudgeTask, type LoopFacts } from "./policy.js";
+import { buildInterruptState, fallbackDecision, finalDecision, formatLocal, nudgeTask, type LoopFacts } from "./policy.js";
 import { buildTriageState, isHit, isUrgent, loopsForHit } from "./triage.js";
 import { parsePushEnvelope } from "./sources.js";
 import type { ParsedMessage } from "./gmail-message.js";
@@ -114,17 +114,48 @@ describe("interrupt policy", () => {
   });
 
   it("tells the agent the check-in is automated and not to act", () => {
-    const task = nudgeTask({ loop, thread: null, threadExternalId: "18c0", now });
+    const task = nudgeTask({ items: [{ loop, thread: null, threadExternalId: "18c0", sender: null }], timezone: "Asia/Kolkata", now });
     expect(task.startsWith("[Automated proactive check-in.")).toBe(true);
     expect(task).toContain("Do not send emails");
     expect(task).toContain("Gmail thread id: 18c0");
     expect(task).toContain("looks dropped");
+    expect(task).toContain("Never send a follow-up, correction or second message");
   });
 
   it("frames a first nudge on a just-arrived email as a heads-up", () => {
     const thread = { subject: "Sign-off", summary: null, importance: 0.9, lastInboundAt: new Date("2026-10-09T07:50:00Z") };
-    expect(nudgeTask({ loop, thread, threadExternalId: null, now })).toContain("an important email just arrived");
-    expect(nudgeTask({ loop: { ...loop, nudgeCount: 1 }, thread, threadExternalId: null, now })).toContain("looks dropped");
+    const item = { loop, thread, threadExternalId: null, sender: null };
+    expect(nudgeTask({ items: [item], timezone: "Asia/Kolkata", now })).toContain("an important email just arrived");
+    expect(nudgeTask({ items: [{ ...item, loop: { ...loop, nudgeCount: 1 } }], timezone: "Asia/Kolkata", now })).toContain("looks dropped");
+  });
+
+  it("gives times in the user's timezone and names the sender", () => {
+    const thread = { subject: "Claw down", summary: null, importance: 0.9, lastInboundAt: new Date("2026-10-09T07:48:00Z") };
+    const task = nudgeTask({
+      items: [{ loop: { ...loop, deadlineAt: new Date("2026-10-09T12:30:00Z") }, thread, threadExternalId: null, sender: "Xyne Space <xyne.spaces@juspay.in>" }],
+      timezone: "Asia/Kolkata",
+      now,
+    });
+    expect(task).toMatch(/Received: .*13:18/);
+    expect(task).toMatch(/Deadline: .*18:00/);
+    expect(task).toContain("From: Xyne Space <xyne.spaces@juspay.in>");
+    expect(task).toContain("already in the user's timezone (Asia/Kolkata)");
+    expect(formatLocal(new Date("2026-10-09T07:48:00Z"), "Not/AZone")).toMatch(/07:48/);
+  });
+
+  it("batches several items into one message", () => {
+    const task = nudgeTask({
+      items: [
+        { loop, thread: null, threadExternalId: null, sender: null },
+        { loop: { ...loop, title: "Approve deploy plan" }, thread: null, threadExternalId: null, sender: null },
+      ],
+      timezone: "Asia/Kolkata",
+      now,
+    });
+    expect(task).toContain("2 things in their inbox need them");
+    expect(task).toContain("Item 1:");
+    expect(task).toContain("Item 2:");
+    expect(task).toContain("Approve deploy plan");
   });
 });
 

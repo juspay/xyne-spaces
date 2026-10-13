@@ -98,6 +98,12 @@ export function quietHoldUntil(now: Date, prefs: QuietHours, urgent: boolean): D
   return allowedAt.getTime() > now.getTime() ? allowedAt : null;
 }
 
+export function textGapUntil(lastTextAt: Date | null, now: Date, gapMs: number, urgent: boolean): Date | null {
+  if (urgent || !lastTextAt) return null;
+  const until = lastTextAt.getTime() + gapMs;
+  return until > now.getTime() ? new Date(until) : null;
+}
+
 export function nextAllowedAt(now: Date, prefs: QuietHours): Date {
   let at = now;
   for (let i = 0; i < 24 * 4 && inQuietHours(at, prefs); i++) {
