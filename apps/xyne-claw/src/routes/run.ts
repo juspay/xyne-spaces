@@ -1604,6 +1604,7 @@ export async function processTask(
   const suggestProvidersRef: SuggestProvidersRef = {};
   const blockedConnectors = new Set<string>();
   const emitBriefRef: EmitBriefRef = {};
+  let experimentEnded = false;
   let callbackProvider = provider ?? "spaces";
   // Seed from THIS run's provider — a hardcoded default made every early
   // failure report the wrong model (740 codex / 461 claude rows, 2026-08-29).
@@ -2944,7 +2945,10 @@ export async function processTask(
       allTools.push(
         ...(experiment.mode === "review"
           ? buildExperimentReviewTools(experiment)
-          : buildExperimentTools(experiment, abortRun)),
+          : buildExperimentTools(experiment, () => {
+              experimentEnded = true;
+              abortRun?.();
+            })),
       );
       log(
         experiment.mode === "review"
@@ -5116,6 +5120,27 @@ export async function processTask(
         status: "completed",
         result: "",
         dailyBrief: emitBriefRef.value,
+        ...(err instanceof RunCancelledError && err.toolsUsed.length > 0 ? { toolsUsed: err.toolsUsed } : {}),
+        ...(err instanceof RunCancelledError && err.toolInvocations.length > 0 ? { toolInvocations: err.toolInvocations } : {}),
+        ...(err instanceof RunCancelledError ? { tokenUsage: err.tokenUsage } : {}),
+        provider: callbackProvider,
+        model: callbackModel,
+      });
+    } else if (
+      experimentEnded &&
+      !isUserCancel &&
+      (err instanceof RunCancelledError || abortSignal?.aborted)
+    ) {
+      log(`Session terminated by end-experiment: ${sessionId}`);
+      const partialResult = err instanceof RunCancelledError ? err.partialText?.trim() : "";
+      await sendCallback(callbackUrl, sessionToken, {
+        sessionId,
+        userId,
+        conversationId: conversationId ?? null,
+        agentSlug: agentSlug ?? null,
+        fastMode: fastModeForCallback,
+        status: "completed",
+        result: partialResult || "Experiment complete — report recorded.",
         ...(err instanceof RunCancelledError && err.toolsUsed.length > 0 ? { toolsUsed: err.toolsUsed } : {}),
         ...(err instanceof RunCancelledError && err.toolInvocations.length > 0 ? { toolInvocations: err.toolInvocations } : {}),
         ...(err instanceof RunCancelledError ? { tokenUsage: err.tokenUsage } : {}),
