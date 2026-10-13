@@ -34,6 +34,7 @@ import {
   useCallWhiteboardStore,
 } from '../../../stores/callWhiteboardStore';
 import { DeviceSelector } from '../DeviceSelector/DeviceSelector';
+import { BackgroundPicker } from '../BackgroundPicker/BackgroundPicker';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useShortcutById, useShortcut } from '../../../shortcuts';
 import { InvitationResponse, type Call, type RecordingType } from '@xyne/shared';
@@ -186,6 +187,7 @@ export function CallControls({
 }: CallControlsProps): React.ReactElement {
   const [showCopied, setShowCopied] = useState(false);
   const [showCameraMenu, setShowCameraMenu] = useState(false);
+  const [showBackgroundPicker, setShowBackgroundPicker] = useState(false);
   const [showMicMenu, setShowMicMenu] = useState(false);
   const [showReactionPicker, setShowReactionPicker] = useState(false);
   const reactionPickerRef = useRef<HTMLDivElement>(null);
@@ -194,10 +196,12 @@ export function CallControls({
   const micMenuRef = useRef<HTMLDivElement>(null);
   const cameraMenuRef = useRef<HTMLDivElement>(null);
   const room = useSelector(roomActor, state => state.context.room);
-  const isBackgroundBlurEnabled = useSelector(
+  const hasBackgroundEffect = useSelector(
     roomActor,
-    state => state.context.isBackgroundBlurEnabled,
+    state => state.context.backgroundEffect.mode !== 'none',
   );
+  // Background effects process the web camera track; native mode bridges the camera.
+  const isNativeMode = useSelector(roomActor, state => state.context.isNativeMode);
   const isDrawingEnabled = useDrawStore(s => s.isDrawingEnabled);
   const isWhiteboardOpen = useCallWhiteboardStore(s => s.isOpen);
 
@@ -321,6 +325,7 @@ export function CallControls({
       }
       if (cameraMenuRef.current && !cameraMenuRef.current.contains(event.target as Node)) {
         setShowCameraMenu(false);
+        setShowBackgroundPicker(false);
       }
       if (reactionPickerRef.current && !reactionPickerRef.current.contains(event.target as Node)) {
         setShowReactionPicker(false);
@@ -488,7 +493,10 @@ export function CallControls({
         {isFullView && (
           <button
             type='button'
-            onClick={() => setShowCameraMenu(!showCameraMenu)}
+            onClick={() => {
+              setShowCameraMenu(!showCameraMenu);
+              setShowBackgroundPicker(false);
+            }}
             className={deviceChevronClass}
             aria-label='Video settings'
             aria-expanded={showCameraMenu}
@@ -546,28 +554,42 @@ export function CallControls({
               buttonPadding={buttonPadding}
             />
             {isMobile && <div className='h-px w-full bg-white/10' />}
-            <button
-              type='button'
-              onClick={() => roomActor.send({ type: 'TOGGLE_BACKGROUND_BLUR' })}
-              title={isBackgroundBlurEnabled ? 'Turn off background blur' : 'Blur background'}
-              data-track-category='CALLS'
-              data-track-name='TOGGLE_BACKGROUND_BLUR'
-              data-track-metadata={JSON.stringify({
-                enabled: !isBackgroundBlurEnabled,
-                callId,
-              })}
-              className={cn(
-                'flex items-center gap-2 whitespace-nowrap px-4 py-3 text-sm transition-colors',
-                isMobile ? 'w-full rounded-lg' : 'rounded-full',
-                isBackgroundBlurEnabled
-                  ? 'bg-[#a8c7fa] text-[#062e6f] hover:bg-[#bcd4fb]'
-                  : 'bg-[#333537] text-[#e3e3e3] hover:bg-[#404245]',
-              )}
-            >
-              <ImagePlus size={16} />
-              <span>Blur background</span>
-            </button>
+            {!isNativeMode && (
+              <button
+                type='button'
+                onClick={() => {
+                  setShowCameraMenu(false);
+                  setShowBackgroundPicker(true);
+                }}
+                title='Apply visual effects'
+                data-track-category='CALLS'
+                data-track-name='OPEN_BACKGROUND_PICKER'
+                data-track-metadata={JSON.stringify({ callId })}
+                className={cn(
+                  'flex items-center gap-2 whitespace-nowrap px-4 py-3 text-sm transition-colors',
+                  isMobile ? 'w-full rounded-lg' : 'rounded-full',
+                  hasBackgroundEffect
+                    ? 'bg-[#a8c7fa] text-[#062e6f] hover:bg-[#bcd4fb]'
+                    : 'bg-[#333537] text-[#e3e3e3] hover:bg-[#404245]',
+                )}
+              >
+                <ImagePlus size={16} />
+                <span>Backgrounds</span>
+              </button>
+            )}
           </div>
+        </div>
+      )}
+
+      {showBackgroundPicker && !isNativeMode && (
+        <div
+          className={cn(
+            popoverClass,
+            'absolute bottom-full z-50 mb-3 rounded-xl',
+            isMobile ? '-left-20' : 'left-0',
+          )}
+        >
+          <BackgroundPicker callId={callId} />
         </div>
       )}
     </div>

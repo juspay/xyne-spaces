@@ -19,7 +19,7 @@ import {
   LocalVideoTrack,
   VideoPresets,
 } from 'livekit-client';
-import { BackgroundBlur } from '@livekit/track-processors';
+import { BackgroundEffectProcessor, supportsBackgroundEffects } from '../utils/backgroundEffects';
 import type { Zero } from '@rocicorp/zero';
 import { DEFAULT_HOST_CONTROLS, type Call, type HostControls } from '@xyne/shared';
 import {
@@ -36,6 +36,13 @@ import { CallType } from '@xyne/shared';
 import { playAudio, AUDIO_PATHS } from '../utils/audioPlayer';
 import { isCallUrlApiAllowed, type CallUrlOverrides } from '../utils/callUrlOverrides';
 import { toast } from 'sonner';
+import {
+  type BackgroundEffect,
+  NO_BACKGROUND_EFFECT,
+  loadBackgroundEffect,
+  saveBackgroundEffect,
+  toEffectOptions,
+} from '../utils/callBackground';
 import { MACOS_PRIVACY_URLS } from '../constants/permissions';
 import {
   CALL_MEDIA_QUALITY_CONFIG,
@@ -139,49 +146,60 @@ export interface ChatMessage {
 // Permission error type
 export type PermissionErrorType = 'microphone' | 'camera' | 'screen' | null;
 
-// Context for Room state management
-// Background blur strength (px). Fixed — no user config (YAGNI).
-const BACKGROUND_BLUR_RADIUS = 10;
-
-// Reconcile the camera processor to the latest desired state, one op at a time.
+// Reconcile the camera processor to the latest desired effect, one op at a time.
 // `setProcessor` is async (awaits WASM/model init) and not registered until it
-// resolves; serializing through this chain — and re-reading `desiredBlur` when
-// each op actually runs — prevents a rapid toggle from desyncing the flag from
+// resolves; serializing through this chain — and re-reading `desiredEffect` when
+// each op actually runs — prevents rapid changes from desyncing the context from
 // the real processor state.
-let blurReconcileChain: Promise<void> = Promise.resolve();
-let desiredBlur = false;
+let effectReconcileChain: Promise<void> = Promise.resolve();
+let desiredEffect: BackgroundEffect = NO_BACKGROUND_EFFECT;
 
 /**
- * Drive the background-blur processor on the local camera track toward `enabled`.
+ * Drive the background processor on the local camera track toward `effect`.
  * Idempotent and serialized, so it can be called on every LOCAL_TRACK_PUBLISHED
- * (join, camera re-enable, device switch) and on rapid toggles without races.
+ * (join, camera re-enable, device switch) and on rapid changes without races.
+ * One processor is attached while any effect is on and switched in place between
+ * blur/image, which avoids the flicker of tearing it down; it is removed entirely
+ * for "none" so an unused effect costs nothing.
  * Web only: native mode bridges the camera and has no web track to process.
- * `onEnableError` fires if turning blur ON fails, so the caller can revert state.
+ * `onError` fires if applying a non-"none" effect fails, so the caller can revert.
  */
-function syncBackgroundBlur(
+function syncBackgroundEffect(
   room: Room | null,
-  enabled: boolean,
-  onEnableError?: () => void,
+  effect: BackgroundEffect,
+  onError?: () => void,
 ): Promise<void> {
-  desiredBlur = enabled;
-  blurReconcileChain = blurReconcileChain.then(async () => {
+  desiredEffect = effect;
+  effectReconcileChain = effectReconcileChain.then(async () => {
     const track = room?.localParticipant.getTrackPublication(Track.Source.Camera)?.track as
       | LocalVideoTrack
       | undefined;
     if (!track) return;
-    const hasProcessor = !!track.getProcessor();
+    const target = desiredEffect;
+    const current = track.getProcessor();
     try {
-      if (desiredBlur && !hasProcessor) {
-        await track.setProcessor(BackgroundBlur(BACKGROUND_BLUR_RADIUS));
-      } else if (!desiredBlur && hasProcessor) {
-        await track.stopProcessor();
+      if (target.mode === 'none') {
+        if (current) await track.stopProcessor();
+        return;
       }
-    } catch {
-      // Only an enable failure leaves a lying "on" state to correct.
-      if (desiredBlur) onEnableError?.();
+      if (!supportsBackgroundEffects()) throw new Error('Background effects unsupported');
+      if (current instanceof BackgroundEffectProcessor) {
+        await current.setEffect(toEffectOptions(target));
+      } else {
+        if (current) await track.stopProcessor();
+        await track.setProcessor(new BackgroundEffectProcessor(toEffectOptions(target)));
+      }
+    } catch (error) {
+      logger.error(Event.LIVEKIT_ROOM_EVENT, {
+        eventName: 'background_effect_failed',
+        effect: target.mode,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      // Only a failed "on" leaves a lying state to correct.
+      if (desiredEffect.mode !== 'none') onError?.();
     }
   });
-  return blurReconcileChain;
+  return effectReconcileChain;
 }
 
 export interface RoomContext {
@@ -244,8 +262,9 @@ export interface RoomContext {
   isCallChatOpen: boolean;
   unreadCallChatCount: number;
   hostControls: HostControls;
-  // Background blur on the local camera feed (web only). Off by default.
-  isBackgroundBlurEnabled: boolean;
+  // Background effect (blur / virtual image) on the local camera feed (web only).
+  // Persisted per browser, so it is restored on the next call.
+  backgroundEffect: BackgroundEffect;
   // What a call URL asked for, when the join was driven by one rather than by a
   // person clicking Join (see utils/callUrlOverrides). `null` is the normal case
   // and means "no request": enableLocalTracks falls back to the user's saved join
@@ -325,8 +344,7 @@ export type RoomMachineEvent =
   | { type: 'PUSH_TO_TALK_START' }
   | { type: 'PUSH_TO_TALK_END' }
   | { type: 'TOGGLE_CAMERA' }
-  | { type: 'TOGGLE_BACKGROUND_BLUR' }
-  | { type: 'SET_BACKGROUND_BLUR'; enabled: boolean }
+  | { type: 'SET_BACKGROUND_EFFECT'; effect: BackgroundEffect }
   | { type: 'TOGGLE_SCREEN_SHARE' }
   | { type: 'SCREEN_SHARE_FAILED' }
   | { type: 'TOGGLE_VIEW' }
@@ -1557,7 +1575,7 @@ export const roomMachine = setup({
       permissionError: () => ({ type: null as PermissionErrorType, dismissed: false }),
       isCallChatOpen: () => false,
       unreadCallChatCount: () => 0,
-      isBackgroundBlurEnabled: () => false,
+      backgroundEffect: () => loadBackgroundEffect(),
       hostControls: () => DEFAULT_HOST_CONTROLS,
       callUrlOverrides: () => null,
       joinMediaOverrides: () => null,
@@ -1667,15 +1685,18 @@ export const roomMachine = setup({
         duration: 4000,
       });
     },
-    // Sync the background-blur processor with context flag (web only).
-    // If enabling fails (e.g. WASM/model load), revert the flag so the toggle
-    // doesn't lie, and tell the user.
-    applyBackgroundBlur: ({ context, self }) => {
+    // Sync the background processor with the context effect (web only).
+    // If applying fails (e.g. WASM/model load, unsupported browser), revert to
+    // no effect so the picker doesn't lie, and tell the user.
+    applyBackgroundEffect: ({ context, self }) => {
       if (context.isNativeMode) return;
-      void syncBackgroundBlur(context.room, context.isBackgroundBlurEnabled, () => {
-        self.send({ type: 'SET_BACKGROUND_BLUR', enabled: false });
-        toast.error('Could not enable background blur');
+      void syncBackgroundEffect(context.room, context.backgroundEffect, () => {
+        self.send({ type: 'SET_BACKGROUND_EFFECT', effect: NO_BACKGROUND_EFFECT });
+        toast.error('Could not apply background effect');
       });
+    },
+    persistBackgroundEffect: ({ context }) => {
+      saveBackgroundEffect(context.backgroundEffect);
     },
     enforceHostControls: ({ context }) => {
       const audioTurnedOffByHost = isHostControlTurnedOffForLocal(context, 'turnOffAudio');
@@ -1785,7 +1806,7 @@ export const roomMachine = setup({
     pushToTalkState: 'idle',
     isCallChatOpen: false,
     unreadCallChatCount: 0,
-    isBackgroundBlurEnabled: false,
+    backgroundEffect: loadBackgroundEffect(),
     hostControls: DEFAULT_HOST_CONTROLS,
     callUrlOverrides: null,
     joinMediaOverrides: null,
@@ -2346,21 +2367,15 @@ export const roomMachine = setup({
             }
           },
         },
-        TOGGLE_BACKGROUND_BLUR: {
-          // Flip flag first, then apply — assign runs before the action sees context.
-          actions: [
-            assign({ isBackgroundBlurEnabled: ({ context }) => !context.isBackgroundBlurEnabled }),
-            'applyBackgroundBlur',
-          ],
-        },
-        SET_BACKGROUND_BLUR: {
-          // Explicit set (used to revert the flag when enabling fails).
+        SET_BACKGROUND_EFFECT: {
+          // Update context first, then persist/apply — assign runs before the actions see context.
           actions: [
             assign({
-              isBackgroundBlurEnabled: ({ event }) =>
-                event.type === 'SET_BACKGROUND_BLUR' ? event.enabled : false,
+              backgroundEffect: ({ event }) =>
+                event.type === 'SET_BACKGROUND_EFFECT' ? event.effect : NO_BACKGROUND_EFFECT,
             }),
-            'applyBackgroundBlur',
+            'persistBackgroundEffect',
+            'applyBackgroundEffect',
           ],
         },
         TOGGLE_SCREEN_SHARE: {
@@ -2751,9 +2766,9 @@ export const roomMachine = setup({
           actions: 'updateParticipants',
         },
         LOCAL_TRACK_PUBLISHED: {
-          // Re-apply blur when the camera track (re)publishes: join, re-enable,
-          // or device switch (which republishes a fresh track, dropping the processor).
-          actions: ['updateParticipants', 'enforceHostControls', 'applyBackgroundBlur'],
+          // Re-apply the background effect when the camera track (re)publishes: join,
+          // re-enable, or device switch (which republishes a fresh track, dropping the processor).
+          actions: ['updateParticipants', 'enforceHostControls', 'applyBackgroundEffect'],
         },
         LOCAL_TRACK_UNPUBLISHED: {
           actions: 'updateParticipants',
