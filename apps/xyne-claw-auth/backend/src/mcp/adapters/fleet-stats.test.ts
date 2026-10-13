@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const queryRaw = vi.fn();
+const findMany = vi.fn();
 const isClawAdmin = vi.fn();
 
 vi.mock("../../logger.js", () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) }));
-vi.mock("../../db.js", () => ({ prisma: { $queryRaw: queryRaw } }));
+vi.mock("../../db.js", () => ({ prisma: { agentRun: { findMany } } }));
 vi.mock("../../middleware/agent-acl.js", () => ({ isClawAdmin }));
 
-const { buildFleetStats, handleGetFleetStats, normalizeError } = await import("./fleet-stats.js");
+const { buildFleetStats, handleGetFleetStats, normalizeError, summarizeBaseline, ToolAccumulator } = await import("./fleet-stats.js");
 type Row = import("./fleet-stats.js").FleetRunRow;
 
 const from = new Date("2026-10-13T00:00:00.000Z");
@@ -130,9 +130,42 @@ describe("buildFleetStats", () => {
   });
 });
 
+describe("summarizeBaseline", () => {
+  it("counts runs and failures and takes percentiles of completed runs, skipping orphans", () => {
+    const t = (s: number) => new Date(Date.UTC(2026, 9, 10, 0, 0, s));
+    const rows = summarizeBaseline([
+      { agentSlug: "a", status: "completed", error: null, startedAt: t(0), completedAt: t(10) },
+      { agentSlug: "a", status: "completed", error: null, startedAt: t(0), completedAt: t(30) },
+      { agentSlug: "a", status: "failed", error: "x", startedAt: t(0), completedAt: t(5) },
+      { agentSlug: "a", status: "cancelled", error: "interrupted (orphaned run)", startedAt: t(0), completedAt: null },
+    ]);
+    expect(rows).toEqual([{ agentSlug: "a", runs: 3, failed: 1, p50Ms: 20_000, p95Ms: 29_000 }]);
+  });
+});
+
+describe("ToolAccumulator", () => {
+  it("reads toolName (or legacy name), errors and durations, ignoring junk", () => {
+    const acc = new ToolAccumulator();
+    acc.add("a", [
+      { toolName: "webfetch", durationMs: 100, isError: false },
+      { toolName: "webfetch", durationMs: 300, isError: true },
+      { name: "legacy", durationMs: "50" },
+      { durationMs: 10 },
+      null,
+    ]);
+    acc.add("b", { not: "an array" });
+    acc.add("b", [{ toolName: "webfetch" }]);
+    const rows = acc.rows().sort((x, y) => x.tool.localeCompare(y.tool));
+    expect(rows).toEqual([
+      { tool: "legacy", calls: 1, errors: 0, p50Ms: 50, p95Ms: 50, agents: ["a"] },
+      { tool: "webfetch", calls: 3, errors: 1, p50Ms: 200, p95Ms: 290, agents: ["a", "b"] },
+    ]);
+  });
+});
+
 describe("handleGetFleetStats", () => {
   beforeEach(() => {
-    queryRaw.mockReset();
+    findMany.mockReset();
     isClawAdmin.mockReset();
   });
 
@@ -140,7 +173,7 @@ describe("handleGetFleetStats", () => {
     isClawAdmin.mockResolvedValue(false);
     const out = JSON.parse(await handleGetFleetStats({}, "org", "user"));
     expect(out.error).toMatch(/claw admins/);
-    expect(queryRaw).not.toHaveBeenCalled();
+    expect(findMany).not.toHaveBeenCalled();
   });
 
   it("requires an org and a requester", async () => {
@@ -148,24 +181,31 @@ describe("handleGetFleetStats", () => {
     expect(JSON.parse(await handleGetFleetStats({}, "org", undefined)).error).toMatch(/claw admins/);
   });
 
-  it("maps database rows, including bigint and string numerics", async () => {
+  it("scopes every query to the org, clamps params and pages tool invocations", async () => {
     isClawAdmin.mockResolvedValue(true);
-    queryRaw
+    const started = new Date(Date.now() - 3_600_000);
+    findMany
       .mockResolvedValueOnce([
         {
           sessionId: "s1", agentSlug: "a", status: "completed", provider: "claude", model: "opus", triggerSource: "spaces",
-          durationMs: "12000", llmTotalMs: 6000, llmWaitMs: null, llmDecodeMs: null, toolMs: 4000, ttftMs: null,
-          tokensPerSec: null, llmTurns: 3, llmRetries: 0, lastRetryReason: null, error: null, tokensIn: 10, tokensOut: 5,
-          rating: "up", startedAt: new Date(),
+          startedAt: started, completedAt: new Date(started.getTime() + 12_000), totalMs: null, llmTotalMs: 6000,
+          llmWaitMs: null, llmDecodeMs: null, toolMs: 4000, ttftMs: null, tokensPerSec: null, llmTurns: 3, llmRetries: 0,
+          lastRetryReason: null, error: null, tokensIn: 10, tokensOut: 5, rating: "up",
         },
       ])
-      .mockResolvedValueOnce([{ agentSlug: "a", runs: BigInt(14), failed: BigInt(0), p50Ms: 10000, p95Ms: 12000 }])
-      .mockResolvedValueOnce([{ tool: "webfetch", calls: BigInt(4), errors: BigInt(1), p50Ms: 300, p95Ms: 900, agents: ["a"] }]);
-    const out = JSON.parse(await handleGetFleetStats({ hours: 999, baselineDays: 0 }, "org", "admin"));
+      .mockResolvedValueOnce([
+        { agentSlug: "a", status: "completed", error: null, startedAt: started, completedAt: new Date(started.getTime() + 12_000) },
+      ])
+      .mockResolvedValueOnce([{ id: "r1", agentSlug: "a", toolInvocations: [{ toolName: "webfetch", durationMs: 300, isError: true }] }]);
+    const out = JSON.parse(await handleGetFleetStats({ hours: 999, baselineDays: 0, agentSlugs: ["a", " ", 3] }, "org", "admin"));
     expect(out.window.hours).toBe(168);
     expect(out.baselineDays).toBe(1);
     expect(out.agents[0]).toMatchObject({ agentSlug: "a", runs: 1, p50S: 12, ratingsUp: 1, p95ChangePct: 0 });
-    expect(out.tools[0]).toMatchObject({ tool: "webfetch", calls: 4, errors: 1, errorPct: 25 });
-    expect(queryRaw).toHaveBeenCalledTimes(3);
+    expect(out.tools[0]).toMatchObject({ tool: "webfetch", calls: 1, errors: 1, errorPct: 100 });
+    expect(out).toMatchObject({ toolRunsScanned: 1, toolScanTruncated: false });
+    expect(findMany).toHaveBeenCalledTimes(3);
+    for (const [arg] of findMany.mock.calls) {
+      expect(arg.where).toMatchObject({ orgId: "org", agentSlug: { in: ["a"] } });
+    }
   });
 });

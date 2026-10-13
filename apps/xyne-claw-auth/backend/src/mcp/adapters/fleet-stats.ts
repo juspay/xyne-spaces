@@ -292,7 +292,72 @@ function clampInt(raw: unknown, fallback: number, min: number, max: number): num
   return Number.isFinite(n) && raw !== undefined && raw !== null && raw !== "" ? Math.min(Math.max(n, min), max) : fallback;
 }
 
-const toNum = (v: unknown): number | null => (v === null || v === undefined ? null : Number.isFinite(Number(v)) ? Number(v) : null);
+const TOOL_PAGE = 250;
+const MAX_TOOL_RUNS = 20_000;
+
+interface RunTiming {
+  agentSlug: string;
+  status: string;
+  error: string | null;
+  startedAt: Date;
+  completedAt: Date | null;
+}
+
+function durationMs(r: { startedAt: Date; completedAt: Date | null; totalMs?: number | null }): number | null {
+  if (r.completedAt) return r.completedAt.getTime() - r.startedAt.getTime();
+  return r.totalMs ?? null;
+}
+
+export function summarizeBaseline(rows: RunTiming[]): FleetBaselineRow[] {
+  const bySlug = new Map<string, { runs: number; failed: number; durations: number[] }>();
+  for (const r of rows) {
+    if (r.error === ORPHANED) continue;
+    const b = bySlug.get(r.agentSlug) ?? { runs: 0, failed: 0, durations: [] };
+    b.runs += 1;
+    if (r.status === "failed") b.failed += 1;
+    if (r.status === "completed" && r.completedAt) b.durations.push(r.completedAt.getTime() - r.startedAt.getTime());
+    bySlug.set(r.agentSlug, b);
+  }
+  return [...bySlug].map(([agentSlug, b]) => ({
+    agentSlug,
+    runs: b.runs,
+    failed: b.failed,
+    p50Ms: percentile(b.durations, 0.5),
+    p95Ms: percentile(b.durations, 0.95),
+  }));
+}
+
+export class ToolAccumulator {
+  private readonly byTool = new Map<string, { calls: number; errors: number; durations: number[]; agents: Set<string> }>();
+
+  add(agentSlug: string, invocations: unknown): void {
+    if (!Array.isArray(invocations)) return;
+    for (const inv of invocations) {
+      if (!inv || typeof inv !== "object") continue;
+      const o = inv as Record<string, unknown>;
+      const name = typeof o["toolName"] === "string" ? o["toolName"] : typeof o["name"] === "string" ? o["name"] : null;
+      if (!name) continue;
+      const t = this.byTool.get(name) ?? { calls: 0, errors: 0, durations: [], agents: new Set<string>() };
+      t.calls += 1;
+      if (o["isError"] === true) t.errors += 1;
+      const d = Number(o["durationMs"]);
+      if (o["durationMs"] !== undefined && o["durationMs"] !== null && Number.isFinite(d) && d >= 0) t.durations.push(d);
+      t.agents.add(agentSlug);
+      this.byTool.set(name, t);
+    }
+  }
+
+  rows(): FleetToolRow[] {
+    return [...this.byTool].map(([tool, t]) => ({
+      tool,
+      calls: t.calls,
+      errors: t.errors,
+      p50Ms: percentile(t.durations, 0.5),
+      p95Ms: percentile(t.durations, 0.95),
+      agents: [...t.agents].slice(0, 20),
+    }));
+  }
+}
 
 export async function handleGetFleetStats(
   params: Record<string, unknown>,
@@ -317,62 +382,58 @@ export async function handleGetFleetStats(
   const to = new Date();
   const from = new Date(to.getTime() - hours * 3_600_000);
   const baselineFrom = new Date(from.getTime() - baselineDays * 86_400_000);
-  const slugFilter = agentSlugs.length > 0 ? agentSlugs : null;
+  const scope = { orgId: contextOrgId, ...(agentSlugs.length > 0 ? { agentSlug: { in: agentSlugs } } : {}) };
 
-  const [runRows, baselineRows, toolRows] = await Promise.all([
-    prisma.$queryRaw<Array<Record<string, unknown>>>`
-      SELECT
-        "sessionId", "agentSlug", status, provider, model, "triggerSource",
-        CASE
-          WHEN "completedAt" IS NOT NULL THEN EXTRACT(EPOCH FROM ("completedAt" - "startedAt")) * 1000
-          ELSE "totalMs"
-        END AS "durationMs",
-        "llmTotalMs", "llmWaitMs", "llmDecodeMs", "toolMs", "ttftMs", "tokensPerSec",
-        "llmTurns", "llmRetries", LEFT("lastRetryReason", 300) AS "lastRetryReason",
-        LEFT(error, 500) AS error, "tokensIn", "tokensOut", rating, "startedAt"
-      FROM "agent_runs"
-      WHERE "orgId" = ${contextOrgId}
-        AND "startedAt" >= ${from}
-        AND (${slugFilter}::text[] IS NULL OR "agentSlug" = ANY(${slugFilter}::text[]))
-    `,
-    prisma.$queryRaw<Array<Record<string, unknown>>>`
-      SELECT
-        "agentSlug",
-        COUNT(*) AS runs,
-        COUNT(*) FILTER (WHERE status = 'failed') AS failed,
-        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM ("completedAt" - "startedAt")) * 1000)
-          FILTER (WHERE status = 'completed' AND "completedAt" IS NOT NULL) AS "p50Ms",
-        PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM ("completedAt" - "startedAt")) * 1000)
-          FILTER (WHERE status = 'completed' AND "completedAt" IS NOT NULL) AS "p95Ms"
-      FROM "agent_runs"
-      WHERE "orgId" = ${contextOrgId}
-        AND "startedAt" >= ${baselineFrom}
-        AND "startedAt" < ${from}
-        AND (error IS NULL OR error <> ${ORPHANED})
-        AND (${slugFilter}::text[] IS NULL OR "agentSlug" = ANY(${slugFilter}::text[]))
-      GROUP BY "agentSlug"
-    `,
-    prisma.$queryRaw<Array<Record<string, unknown>>>`
-      SELECT
-        COALESCE(inv->>'toolName', inv->>'name') AS tool,
-        COUNT(*) AS calls,
-        COUNT(*) FILTER (WHERE (inv->>'isError')::boolean IS TRUE) AS errors,
-        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY (inv->>'durationMs')::float)
-          FILTER (WHERE inv->>'durationMs' ~ '^[0-9.]+$') AS "p50Ms",
-        PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY (inv->>'durationMs')::float)
-          FILTER (WHERE inv->>'durationMs' ~ '^[0-9.]+$') AS "p95Ms",
-        (ARRAY_AGG(DISTINCT r."agentSlug"))[1:20] AS agents
-      FROM "agent_runs" r
-      CROSS JOIN LATERAL jsonb_array_elements(
-        CASE WHEN jsonb_typeof(r."toolInvocations") = 'array' THEN r."toolInvocations" ELSE '[]'::jsonb END
-      ) AS inv
-      WHERE r."orgId" = ${contextOrgId}
-        AND r."startedAt" >= ${from}
-        AND COALESCE(inv->>'toolName', inv->>'name') IS NOT NULL
-        AND (${slugFilter}::text[] IS NULL OR r."agentSlug" = ANY(${slugFilter}::text[]))
-      GROUP BY COALESCE(inv->>'toolName', inv->>'name')
-    `,
+  const [runRows, baselineRows] = await Promise.all([
+    prisma.agentRun.findMany({
+      where: { ...scope, startedAt: { gte: from } },
+      select: {
+        sessionId: true,
+        agentSlug: true,
+        status: true,
+        provider: true,
+        model: true,
+        triggerSource: true,
+        startedAt: true,
+        completedAt: true,
+        totalMs: true,
+        llmTotalMs: true,
+        llmWaitMs: true,
+        llmDecodeMs: true,
+        toolMs: true,
+        ttftMs: true,
+        tokensPerSec: true,
+        llmTurns: true,
+        llmRetries: true,
+        lastRetryReason: true,
+        error: true,
+        tokensIn: true,
+        tokensOut: true,
+        rating: true,
+      },
+    }),
+    prisma.agentRun.findMany({
+      where: { ...scope, startedAt: { gte: baselineFrom, lt: from } },
+      select: { agentSlug: true, status: true, error: true, startedAt: true, completedAt: true },
+    }),
   ]);
+
+  const tools = new ToolAccumulator();
+  let cursor: string | undefined;
+  let scanned = 0;
+  while (scanned < MAX_TOOL_RUNS) {
+    const page = await prisma.agentRun.findMany({
+      where: { ...scope, startedAt: { gte: from } },
+      select: { id: true, agentSlug: true, toolInvocations: true },
+      orderBy: { id: "asc" },
+      take: TOOL_PAGE,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    });
+    for (const r of page) tools.add(r.agentSlug, r.toolInvocations);
+    scanned += page.length;
+    if (page.length < TOOL_PAGE) break;
+    cursor = page[page.length - 1]!.id;
+  }
 
   const stats = buildFleetStats({
     from,
@@ -382,43 +443,13 @@ export async function handleGetFleetStats(
     topTools,
     maxAgents,
     runs: runRows.map((r) => ({
-      sessionId: String(r["sessionId"]),
-      agentSlug: String(r["agentSlug"]),
-      status: String(r["status"]),
-      provider: (r["provider"] as string | null) ?? null,
-      model: (r["model"] as string | null) ?? null,
-      triggerSource: String(r["triggerSource"] ?? "unknown"),
-      durationMs: toNum(r["durationMs"]),
-      llmTotalMs: toNum(r["llmTotalMs"]),
-      llmWaitMs: toNum(r["llmWaitMs"]),
-      llmDecodeMs: toNum(r["llmDecodeMs"]),
-      toolMs: toNum(r["toolMs"]),
-      ttftMs: toNum(r["ttftMs"]),
-      tokensPerSec: toNum(r["tokensPerSec"]),
-      llmTurns: toNum(r["llmTurns"]),
-      llmRetries: toNum(r["llmRetries"]),
-      lastRetryReason: (r["lastRetryReason"] as string | null) ?? null,
-      error: (r["error"] as string | null) ?? null,
-      tokensIn: toNum(r["tokensIn"]),
-      tokensOut: toNum(r["tokensOut"]),
-      rating: (r["rating"] as string | null) ?? null,
-      startedAt: new Date(r["startedAt"] as string | Date),
+      ...r,
+      durationMs: durationMs(r),
+      lastRetryReason: r.lastRetryReason?.slice(0, 300) ?? null,
+      error: r.error?.slice(0, 500) ?? null,
     })),
-    baseline: baselineRows.map((b) => ({
-      agentSlug: String(b["agentSlug"]),
-      runs: toNum(b["runs"]) ?? 0,
-      failed: toNum(b["failed"]) ?? 0,
-      p50Ms: toNum(b["p50Ms"]),
-      p95Ms: toNum(b["p95Ms"]),
-    })),
-    tools: toolRows.map((t) => ({
-      tool: String(t["tool"]),
-      calls: toNum(t["calls"]) ?? 0,
-      errors: toNum(t["errors"]) ?? 0,
-      p50Ms: toNum(t["p50Ms"]),
-      p95Ms: toNum(t["p95Ms"]),
-      agents: Array.isArray(t["agents"]) ? (t["agents"] as unknown[]).map(String) : [],
-    })),
+    baseline: summarizeBaseline(baselineRows),
+    tools: tools.rows(),
   });
-  return JSON.stringify(stats);
+  return JSON.stringify({ ...stats, toolRunsScanned: scanned, toolScanTruncated: scanned >= MAX_TOOL_RUNS });
 }
