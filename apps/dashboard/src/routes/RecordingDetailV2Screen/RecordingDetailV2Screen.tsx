@@ -111,6 +111,11 @@ import {
   getTemplateIcon,
 } from './components/SummaryTemplatesModal';
 import { useSummaryTemplates } from '../../hooks/useSummaryTemplates';
+import {
+  hasShownDefaultSummaryTemplateNudge,
+  markDefaultSummaryTemplateNudgeShown,
+  useRecordingDefaultSummaryTemplate,
+} from '../../hooks/useRecordingDefaultSummaryTemplate';
 import { useSummaryModelPreference } from '../../hooks/useSummaryModelPreference';
 import { useMarkRecordingSummaryReadOnOpen } from '../../hooks/useHasUnreadRecordingSummaries';
 
@@ -206,7 +211,7 @@ export default function RecordingDetailV2Screen({
   recordingId: recordingIdOverride,
   onBack,
 }: RecordingDetailV2ScreenProps): ReactElement {
-  const { isMobile } = usePlatform();
+  const { isMobile, isElectron } = usePlatform();
   const askAIAvailable = useAskAIAvailable();
   const params = useParams<{ recordingId: string }>();
   const recordingId = recordingIdOverride ?? params.recordingId;
@@ -269,6 +274,13 @@ export default function RecordingDetailV2Screen({
   const { templates: summaryTemplates, isLoading: summaryTemplatesLoading } = useSummaryTemplates(
     shouldLoadSummaryTemplates || templatesModalMode !== null,
   );
+  const { defaultSummaryTemplateId, setDefaultSummaryTemplateId } =
+    useRecordingDefaultSummaryTemplate();
+  // Shown once, next to the template selector, after the first template switch.
+  const [defaultTemplateOffer, setDefaultTemplateOffer] = useState<{
+    templateId: string;
+    name: string;
+  } | null>(null);
   const storedSummaryTemplateId = recording?.summaryTemplateId ?? '';
   const shouldQueryStoredSummaryTemplate =
     storedSummaryTemplateId.length > 0 && storedSummaryTemplateId !== 'default';
@@ -811,6 +823,14 @@ export default function RecordingDetailV2Screen({
   ): Promise<void> => {
     if (!recording || isRegeneratingSummary) return;
 
+    // A switch is an explicit pick that differs from the template the summary was
+    // written with; first generations and "Retry with …" model changes are not.
+    const isTemplateSwitch =
+      !modelType &&
+      Boolean(summaryTemplateId) &&
+      Boolean(recording.summaryTemplateId) &&
+      summaryTemplateId !== recording.summaryTemplateId;
+
     // Re-running a template we cannot read is not possible: asking for it by id
     // fails the server's own template check, and omitting it resolves to the
     // default, quietly rewriting the summary in a different style. Both the
@@ -871,6 +891,17 @@ export default function RecordingDetailV2Screen({
       toast.success(`Generating ${selectedName} summary`, {
         description: "We'll notify you when it's ready.",
       });
+      // On the first switch in the desktop app, offer to make the pick the default
+      // for future recordings. The option always lives in Preferences › Recordings.
+      const offerAsDefault =
+        isElectron &&
+        isTemplateSwitch &&
+        !hasShownDefaultSummaryTemplateNudge() &&
+        defaultSummaryTemplateId !== resolvedTemplateId;
+      if (offerAsDefault) {
+        markDefaultSummaryTemplateNudgeShown();
+        setDefaultTemplateOffer({ templateId: resolvedTemplateId, name: selectedName });
+      }
     } catch (err) {
       logRecordingError('RecordingDetailV2Screen.regenerateSummary', err);
       // Drop the placeholder too: a failed request leaves nothing on its way, and
@@ -1339,6 +1370,17 @@ export default function RecordingDetailV2Screen({
                       onRegenerate: () => void handleRegenerateSummary(selectedSummaryTemplate.id),
                       onOpenTemplates: handleOpenSummaryTemplates,
                       onNewTemplate: handleNewSummaryTemplate,
+                      defaultTemplateOffer,
+                      onAcceptDefaultTemplateOffer: (): void => {
+                        if (!defaultTemplateOffer) return;
+                        setDefaultSummaryTemplateId(defaultTemplateOffer.templateId);
+                        toast.success(`${defaultTemplateOffer.name} is now your default template`, {
+                          description:
+                            'New recordings will use it. Change it in Preferences › Recordings.',
+                        });
+                        setDefaultTemplateOffer(null);
+                      },
+                      onDismissDefaultTemplateOffer: (): void => setDefaultTemplateOffer(null),
                     })}
               />
 

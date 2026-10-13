@@ -11,6 +11,8 @@ import { useDefaultFormattingToolbarOpen } from './useDefaultFormattingToolbarOp
 import { useShowThreadTags } from './useShowThreadTags';
 import { useStreamsVisibility } from './useStreamsVisibility';
 import { useSummaryModelPreference } from './useSummaryModelPreference';
+import { useRecordingDefaultSummaryTemplate } from './useRecordingDefaultSummaryTemplate';
+import { useSummaryTemplates } from './useSummaryTemplates';
 import { useSearchMode } from './useSearchMode';
 import { useThreadBroadcastMentions } from './useThreadBroadcastMentions';
 import { useCallJoinSettings } from './useCallJoinSettings';
@@ -53,6 +55,9 @@ export function usePreferencesState(enabled: boolean) {
   const { showThreadTags, setShowThreadTags } = useShowThreadTags();
   const { showStreams, setShowStreams } = useStreamsVisibility();
   const { summaryModelPreference, setSummaryModelPreference } = useSummaryModelPreference();
+  const { defaultSummaryTemplateId, setDefaultSummaryTemplateId } =
+    useRecordingDefaultSummaryTemplate();
+  const { templates: summaryTemplates } = useSummaryTemplates(enabled);
   const { searchMode } = useSearchMode();
   const { allowThreadBroadcastMentions, setAllowThreadBroadcastMentions } =
     useThreadBroadcastMentions();
@@ -155,6 +160,9 @@ export function usePreferencesState(enabled: boolean) {
     setShowThreadTags,
     summaryModelPreference,
     setSummaryModelPreference,
+    defaultSummaryTemplateId,
+    setDefaultSummaryTemplateId,
+    summaryTemplates,
     setEnterSendsMessage,
     searchMode,
     allowThreadBroadcastMentions,

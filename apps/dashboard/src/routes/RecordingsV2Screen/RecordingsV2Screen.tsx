@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { Virtuoso } from 'react-virtuoso';
 import { GridDashboardBento, Spinner } from '@xyne/icons';
@@ -9,6 +9,11 @@ import AppNavigator from '../../components/AppNavigator/AppNavigator';
 import { XyneAIStar } from '../../components/icons/xyne-ai';
 import { Button } from '../../components/ui/Button/Button';
 import { Dialog } from '../../components/ui/Dialog';
+import {
+  SummaryTemplateTourStep,
+  summaryTemplateTour,
+  useSummaryTemplateTour,
+} from '../../components/SummaryTemplateTour';
 import {
   refreshOatsRecordings,
   usePaginatedOatsRecordings,
@@ -65,7 +70,7 @@ import { getRecordingParticipantIds, normalizeRecordingTags } from '../../utils/
 import { DEFAULT_RECORDING_TITLE, readRecordingCanvasIds } from '@/utils/recordingUtils';
 
 const RecordingsV2Screen = (): ReactElement => {
-  const { isMobile } = usePlatform();
+  const { isMobile, isElectron } = usePlatform();
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -247,6 +252,27 @@ const RecordingsV2Screen = (): ReactElement => {
     },
     [setSearchParams],
   );
+
+  // Template creation tour: auto-start once on arrival in the desktop app, keep it
+  // in step with the dialog, and drop it when leaving the page.
+  const { activeStep: tourStep } = useSummaryTemplateTour();
+  const tourAutoStartAttempted = useRef(false);
+  useEffect(() => {
+    if (tourAutoStartAttempted.current || isTemplatesOpen || !isElectron) return;
+    const timer = setTimeout(() => {
+      tourAutoStartAttempted.current = true;
+      summaryTemplateTour.startOnce();
+    }, 800);
+    return (): void => clearTimeout(timer);
+    // Only the first render decides; a deep link into the dialog skips the tour.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (!tourStep) return;
+    if (isTemplatesOpen && tourStep === 'open-templates') summaryTemplateTour.next();
+    if (!isTemplatesOpen && tourStep !== 'open-templates') summaryTemplateTour.dismiss();
+  }, [isTemplatesOpen, tourStep]);
+  useEffect(() => (): void => summaryTemplateTour.dismiss(), []);
 
   // The linked template is gone or no longer shared: say so and show the list.
   useEffect(() => {
@@ -513,6 +539,7 @@ const RecordingsV2Screen = (): ReactElement => {
                   onClick={() => setTemplatesOpen(true)}
                   className='h-9 gap-1.5 whitespace-nowrap rounded-xl border-border px-3 font-semibold hover:bg-muted/70 sm:px-4'
                   aria-label='Summary templates'
+                  data-tour='summary-templates-button'
                   data-track-category='RecordingsV2'
                   data-track-name='open_summary_templates'
                 >
@@ -754,6 +781,14 @@ const RecordingsV2Screen = (): ReactElement => {
         onConfirm={() => void handleConfirmDeleteRecording()}
       />
       <ConfirmDialog />
+
+      <SummaryTemplateTourStep
+        step='open-templates'
+        target='summary-templates-button'
+        side='bottom'
+        align='end'
+        onNext={() => setTemplatesOpen(true)}
+      />
     </div>
   );
 };

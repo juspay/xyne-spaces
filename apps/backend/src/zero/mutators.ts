@@ -16881,6 +16881,56 @@ export function createMutators(
           }
         },
       ),
+      setRecordingDefaultSummaryTemplate: defineMutator(
+        z.object({
+          id: z.string(),
+          // `null` clears the default so recordings go back to the automatic pick.
+          recordingDefaultSummaryTemplateId: z.string().min(1).nullable(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, ctx, args: { id, recordingDefaultSummaryTemplateId, timestamp } }) => {
+            // The default must be a template in this workspace (or the code-backed
+            // 'default'). Whether the user may still read it is re-checked when a
+            // summary is generated, falling back to the automatic pick.
+              if (recordingDefaultSummaryTemplateId && recordingDefaultSummaryTemplateId !== 'default') {
+              const template = await tx.run(
+                zql.summary_templates.where('id', recordingDefaultSummaryTemplateId).one(),
+              );
+              if (!template || template.workspaceId !== ctx.workspaceId) {
+                throw new Error('Summary template not found');
+              }
+            }
+
+          const existing = await tx.run(
+            zql.user_preferences.where('userId', ctx.userID).one(),
+          );
+          if (existing) {
+            await tx.mutate.user_preferences.update({
+              id: existing.id,
+              recordingDefaultSummaryTemplateId,
+              updatedAt: timestamp,
+            });
+          } else {
+            await tx.mutate.user_preferences.insert({
+              workspaceId: ctx.workspaceId,
+              id,
+              userId: ctx.userID,
+              channelSortOrder: ChannelSortOrder.RECENCY,
+              enterSendsMessage: true,
+              allowThreadBroadcastMentions: false,
+              globalDesktopNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+              globalMobileNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+              threadReplyNotificationsEnabled: true,
+              channelWideMentionsEnabled: true,
+              notificationKeywords: '[]',
+              showThreadTags: false,
+              recordingDefaultSummaryTemplateId,
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            });
+          }
+        },
+      ),
     },
 
     emailChannelPreference: {
