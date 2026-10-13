@@ -4,8 +4,9 @@ import { fetchFile } from '../../services/clients/fileFetchService';
 import { FilePreview } from '../FilePreview';
 import ReadmeViewer from '../FileViewer/ReadmeViewer';
 import { previewFileFor } from './itemDescriptor';
+import { iframeSandboxFor } from './iframeSandbox';
 
-export const IFRAME_SANDBOX = 'allow-scripts allow-forms allow-modals allow-popups';
+export { IFRAME_SANDBOX } from './iframeSandbox';
 
 export function Centered({ children }: { children: ReactNode }): ReactElement {
   return (
@@ -60,7 +61,7 @@ export function SandboxedFrame({ url, title }: { url: string; title: string }): 
     <iframe
       src={url}
       title={title}
-      sandbox={IFRAME_SANDBOX}
+      sandbox={iframeSandboxFor(url)}
       className='h-full w-full border-0 bg-background'
       referrerPolicy='no-referrer'
     />
