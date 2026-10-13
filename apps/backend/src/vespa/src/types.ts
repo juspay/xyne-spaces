@@ -637,7 +637,7 @@ export type InsertDocument =
 /**
  * Where an item sits in an SDLC Hub: a reference to the track or folder it is in. Vespa
  * imports the container's branch, track, scope and path from it (sdlcContainerId,
- * sdlcContainerType, sdlcBranch, sdlcTrackId, sdlcScopeIds, sdlcPath), so nothing else is fed.
+ * sdlcContainerType, sdlcBranch, sdlcTrackId, sdlcContainerIds, sdlcPath), so nothing else is fed.
  * Empty when the item is in no hub. Shared by documents (`file`) and messages.
  */
 export interface SdlcPlacementFields {
@@ -672,7 +672,7 @@ export interface SdlcDiscussionFields extends SdlcPlacementFields {
  */
 export interface SdlcTicketFields {
   /** Every hub, track and folder above every item it is linked from, and every track holding it. */
-  sdlcScopeIds: string[];
+  sdlcContainerIds: string[];
   /** Every document (canvas or upload) linked to it by a TICKET or CONTEXT edge. */
   sdlcDocumentIds: string[];
   /** Every repository whose wiki holds an item it is linked from (sdlc_repository docIds). */
@@ -680,7 +680,7 @@ export interface SdlcTicketFields {
 }
 
 export const SDLC_DISCUSSION_FIELDS: readonly (keyof SdlcDiscussionFields)[] = ['sdlcContainerRef', 'sdlcDocumentId'];
-export const SDLC_TICKET_FIELDS: readonly (keyof SdlcTicketFields)[] = ['sdlcScopeIds', 'sdlcDocumentIds', 'sdlcRepoIds'];
+export const SDLC_TICKET_FIELDS: readonly (keyof SdlcTicketFields)[] = ['sdlcContainerIds', 'sdlcDocumentIds', 'sdlcRepoIds'];
 export const SDLC_FILE_FIELDS: readonly (keyof SdlcFileFields)[] = [
   'sdlcContainerRef', 'sdlcTypeName', 'sdlcStatus', 'sdlcRelatedDocumentIds',
 ];

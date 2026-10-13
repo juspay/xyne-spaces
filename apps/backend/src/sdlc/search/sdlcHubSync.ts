@@ -131,7 +131,7 @@ export async function syncSdlcHub(hubId: string): Promise<SdlcHubSyncResult | nu
   // Stale entries: what Vespa still places in this hub that Postgres no longer does. Items are
   // found through the containers they reference, so this runs before stale containers go.
   // Vespa is asked only for entries outside the live set, so a large hub is not paged through.
-  const inHub = `sdlcScopeIds contains "${hubId}"`;
+  const inHub = `sdlcContainerIds contains "${hubId}"`;
   let cleared = 0;
   const staleFiles = await indexedHits(
     fileSchema, notIn(inHub, [...index.canvases.keys(), ...index.attachments.keys()]), ['subApp'],
