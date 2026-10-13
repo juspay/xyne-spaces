@@ -58,7 +58,7 @@
   "dependencies": {
     "@types/pixelmatch": "^5.2.6",
     "@types/pngjs": "^6.0.5",
-    "axios": "^1.18.1",
+    "axios": "^1.20.0",
     "ora": "^9.3.0",
     "pixelmatch": "^7.1.0",
     "pngjs": "^7.0.0"
