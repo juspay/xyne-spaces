@@ -1995,6 +1995,7 @@ model ChannelPublishedTab {
   id          String   @id
   workspaceId String
   channelId   String
+  channelConnectId String? // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
   entityType  String   // APP
   entityId    String   // for APP: artifact app id (claw-auth); no FK — different database
   position    Int
@@ -2002,6 +2003,7 @@ model ChannelPublishedTab {
   createdAt   DateTime @default(now())
 
   @@unique([channelId, entityType, entityId])
+  @@index([channelConnectId, entityType, entityId]) // Slack Connect: mirrors the channelId unique index
   @@map("channel_published_tabs")
   @@schema("public")
 }
