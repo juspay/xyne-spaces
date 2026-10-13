@@ -42,24 +42,37 @@ export function useParticipantNetworkQuality(
 }
 
 /**
- * Returns true briefly (for `duration` ms) whenever network quality degrades
- * to Poor or Lost, then resets to false. Re-triggers on each degradation.
+ * Returns true briefly (for `duration` ms) once network quality has stayed
+ * Poor or Lost for at least `debounceMs`, then resets to false. Short blips
+ * that recover within the debounce window never surface the toast.
+ * Re-triggers on each degradation.
  */
 export function useNetworkQualityToast(
   networkQuality: ConnectionQuality | null,
   duration = 5000,
+  debounceMs = 2000,
 ): boolean {
   const [showToast, setShowToast] = useState(false);
+  const isDegraded =
+    networkQuality === ConnectionQuality.Poor || networkQuality === ConnectionQuality.Lost;
 
   useEffect(() => {
-    if (networkQuality === ConnectionQuality.Poor || networkQuality === ConnectionQuality.Lost) {
-      setShowToast(true);
-      const timer = setTimeout(() => setShowToast(false), duration);
-      return (): void => clearTimeout(timer);
+    if (!isDegraded) {
+      setShowToast(false);
+      return undefined;
     }
-    setShowToast(false);
-    return undefined;
-  }, [networkQuality, duration]);
+
+    let hideTimer: ReturnType<typeof setTimeout> | undefined;
+    const showTimer = setTimeout(() => {
+      setShowToast(true);
+      hideTimer = setTimeout(() => setShowToast(false), duration);
+    }, debounceMs);
+
+    return (): void => {
+      clearTimeout(showTimer);
+      if (hideTimer) clearTimeout(hideTimer);
+    };
+  }, [networkQuality, isDegraded, duration, debounceMs]);
 
   return showToast;
 }
