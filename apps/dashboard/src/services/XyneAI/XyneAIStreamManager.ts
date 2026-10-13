@@ -2208,7 +2208,6 @@ class XyneAIStreamManager {
     const ensureViewerStream = (
       partial?: { content?: string; reasoning?: string; parts?: unknown; createdAt?: string },
       inProgress?: ToolInvocation[],
-      runSessionId?: string,
     ): void => {
       if (started) return;
       started = true;
@@ -2258,10 +2257,6 @@ class XyneAIStreamManager {
         showInSidebar: true,
         version: 'v2',
         agentSlug,
-        // Claw run id from the /live snapshot — what abortStream cancels by.
-        // A viewer never sees the driving request's `run` event, so without
-        // this Stop only detaches and the run keeps going (XYNE-66347).
-        ...(runSessionId ? { traceId: runSessionId } : {}),
       };
       this.activeStreams.set(threadId, streamState);
       this.streamDataMap.set(streamId, {
@@ -2286,24 +2281,22 @@ class XyneAIStreamManager {
               }
             | undefined;
           const inProgress = (data['inProgress'] as ToolInvocation[] | undefined) ?? [];
-          const runSessionId =
-            typeof data['runSessionId'] === 'string' && data['runSessionId'].trim()
-              ? data['runSessionId'].trim()
-              : undefined;
+          const wasStarted = started;
           if (!started) {
             if (!partial && inProgress.length === 0) {
               close(); // run already finished — the fetched transcript stands
               return;
             }
-            ensureViewerStream(partial, inProgress, runSessionId);
-            break;
+            ensureViewerStream(partial, inProgress);
           }
-          // Started from an early delta, or the first snapshot predated the
-          // run link: adopt the run id now so Stop can cancel upstream.
-          if (runSessionId) {
-            const st = this.activeStreams.get(threadId);
-            if (st && st.streamId === streamId && !st.traceId) st.traceId = runSessionId;
+          // A reattached viewer never sees the `run` event, so take the run id
+          // from the snapshot — without it Stop only detaches (XYNE-66347).
+          const runSessionId = data['runSessionId'];
+          const st = this.activeStreams.get(threadId);
+          if (typeof runSessionId === 'string' && st?.streamId === streamId && !st.traceId) {
+            st.traceId = runSessionId;
           }
+          if (!wasStarted) break;
           // RECONNECT re-snapshot. If the run finished while we were
           // disconnected, finalize via the done path; else heal the missed
           // window from the persisted partial (authoritative accumulated text —
