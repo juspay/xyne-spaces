@@ -36,7 +36,6 @@ interface XyneAIHeaderProps {
   hideHistory?: boolean;
   selectedAgent?: AccessibleClawAgent | null;
   onShowDebugger?: (() => void) | undefined;
-  isCompact?: boolean;
   isTight?: boolean;
   hideClose?: boolean;
   dense?: boolean;
@@ -54,7 +53,6 @@ export const XyneAIHeader = ({
   hideHistory = false,
   selectedAgent,
   onShowDebugger,
-  isCompact = false,
   isTight = false,
   hideClose = false,
   dense = false,
@@ -77,7 +75,7 @@ export const XyneAIHeader = ({
   // desktop and mobile render paths so they stay in sync.
   // `includeHistory` is false on desktop, where chat history has its own header
   // button; mobile has no such button, so it keeps the menu item.
-  const showMemoriesAndActivity = !hideMemoriesAndActivity && !isCompact;
+  const showMemoriesAndActivity = !hideMemoriesAndActivity;
   const buildOverflowMenuItems = (includeHistory: boolean): ReactNode => (
     <>
       {selectedAgent && (
