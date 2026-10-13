@@ -72,7 +72,6 @@ export interface ScheduleCallRequest {
     /** IANA timezone used to format start/end times in the email body. */
     timezone?: string;
   };
-  /** Email all participants (internal and external) about this change. */
   notifyParticipantsByEmail?: boolean;
 }
 
@@ -97,7 +96,6 @@ export interface CreateRecurringSeriesRequest {
   endsOn?: number; // epoch ms — omit for indefinite series
   externalInvitees?: string[];
   invitation?: ScheduleCallRequest['invitation'];
-  /** Email all participants (internal and external) about this change. */
   notifyParticipantsByEmail?: boolean;
 }
 
@@ -115,7 +113,6 @@ export interface UpdateScheduleCallRequest {
   channelId?: string;
   callUpdatesChannel?: string;
   externalInvitees?: string[];
-  /** Email all participants (internal and external) about this change. */
   notifyParticipantsByEmail?: boolean;
 }
 
@@ -131,7 +128,6 @@ export interface UpdateRecurringSeriesRequest {
   channelId?: string;
   callUpdatesChannel?: string;
   externalInvitees?: string[];
-  /** Email all participants (internal and external) about this change. */
   notifyParticipantsByEmail?: boolean;
 }
 
@@ -592,7 +588,10 @@ export class CallService {
             externalInviteDelivery: data.externalInviteDelivery,
             invitation: data.invitation,
           }),
-        ...(data.notifyParticipantsByEmail && { notifyParticipantsByEmail: true }),
+        ...(data.notifyParticipantsByEmail && {
+          notifyParticipantsByEmail: true,
+          emailTimezone: browserTimeZone(),
+        }),
       });
 
       return response.data;

@@ -11,9 +11,7 @@ export interface CallInvitationInput {
   orgName?: string;
   joinUrl: string;
   userBodyHtml: string;
-  /** Overrides the "Meeting invitation" eyebrow, e.g. for update/cancel emails. */
   heading?: string;
-  /** Omit the join button (cancelled / removed emails). */
   hideJoin?: boolean;
 }
 

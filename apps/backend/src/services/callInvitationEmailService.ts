@@ -165,6 +165,9 @@ export async function sendCallInvitationEmail(params: CallInvitationParams): Pro
 /** Internal participants are only emailed when the call has at most this many of them. */
 export const MAX_INTERNAL_EMAIL_RECIPIENTS = 100;
 
+/** Strips line breaks from user-derived values before they go into a log line. */
+export const sanitizeForLog = (value: unknown): string => String(value ?? '').replace(/[\r\n]+/g, ' ');
+
 export type CallChangeEmailKind = 'created' | 'updated' | 'cancelled' | 'removed';
 
 const CHANGE_EMAIL_COPY: Record<CallChangeEmailKind, { heading: string; subject: string }> = {
@@ -186,11 +189,9 @@ export interface CallChangeEmailParams {
   externalEmails: string[];
   /** Skipped entirely when there are more than MAX_INTERNAL_EMAIL_RECIPIENTS. */
   internalUserIds: string[];
-  /** Never emailed (organizer, acting user). */
   excludeUserIds?: string[];
   /** Plain-text lines shown in the body (what changed). Escaped here. */
   changeLines?: string[];
-  /** Organizer-authored body, used for `created`. Sanitized here. */
   bodyHtml?: string;
 }
 
@@ -229,7 +230,7 @@ export async function sendCallChangeEmails(params: CallChangeEmailParams): Promi
   let internalUserIds = [...new Set(params.internalUserIds)].filter((id) => !exclude.has(id));
   if (internalUserIds.length > MAX_INTERNAL_EMAIL_RECIPIENTS) {
     logger.warn(
-      `[sendCallChangeEmails] Skipping internal participants, over cap | externalId=${params.externalId} kind=${params.kind} count=${internalUserIds.length}`,
+      `[sendCallChangeEmails] Skipping internal participants, over cap | externalId=${sanitizeForLog(params.externalId)} kind=${params.kind} count=${internalUserIds.length}`,
     );
     internalUserIds = [];
   }
@@ -280,11 +281,11 @@ export async function sendCallChangeEmails(params: CallChangeEmailParams): Promi
     });
     if (!result.success) {
       logger.error(
-        `[sendCallChangeEmails] Failed | externalId=${params.externalId} kind=${params.kind} to=${to} error=${result.error}`,
+        `[sendCallChangeEmails] Failed | externalId=${sanitizeForLog(params.externalId)} kind=${params.kind} to=${sanitizeForLog(to)} error=${sanitizeForLog(result.error)}`,
       );
     }
   }
   logger.info(
-    `[sendCallChangeEmails] Done | externalId=${params.externalId} kind=${params.kind} recipients=${recipients.length}`,
+    `[sendCallChangeEmails] Done | externalId=${sanitizeForLog(params.externalId)} kind=${params.kind} recipients=${recipients.length}`,
   );
 }
