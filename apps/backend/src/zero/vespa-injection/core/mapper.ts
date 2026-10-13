@@ -1581,7 +1581,7 @@ export const mapEmail = async (email: Email, workspaceId?: string, orgId?: strin
  */
 const sdlcPlacement = (fields: SdlcDiscussionFields): Partial<SdlcDiscussionFields> => {
   if (!fields.sdlcContainerRef) return {};
-  return fields.sdlcDocumentRef ? { ...fields } : { sdlcContainerRef: fields.sdlcContainerRef };
+  return fields.sdlcDocumentId ? { ...fields } : { sdlcContainerRef: fields.sdlcContainerRef };
 };
 
 /** A ticket's places and linked documents; left out for a ticket in no hub. */

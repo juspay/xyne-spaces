@@ -657,12 +657,12 @@ export interface SdlcFileFields extends SdlcPlacementFields {
 
 /**
  * Where a conversation sits in an SDLC Hub. Started on a document, it is placed in the
- * document's container and references the document; started on a track or folder, the
- * document reference is ''. Vespa imports the document's id through it as sdlcDocumentId.
+ * document's container and names the document; started on a track or folder, the document
+ * is ''.
  */
 export interface SdlcDiscussionFields extends SdlcPlacementFields {
-  /** id:<namespace>:file::<docId> of the document (canvas or upload) it was started on, or ''. */
-  sdlcDocumentRef: string;
+  /** The file docId (canvas or upload) it was started on, or ''. */
+  sdlcDocumentId: string;
 }
 
 /**
@@ -679,7 +679,7 @@ export interface SdlcTicketFields {
   sdlcRepoIds: string[];
 }
 
-export const SDLC_DISCUSSION_FIELDS: readonly (keyof SdlcDiscussionFields)[] = ['sdlcContainerRef', 'sdlcDocumentRef'];
+export const SDLC_DISCUSSION_FIELDS: readonly (keyof SdlcDiscussionFields)[] = ['sdlcContainerRef', 'sdlcDocumentId'];
 export const SDLC_TICKET_FIELDS: readonly (keyof SdlcTicketFields)[] = ['sdlcScopeIds', 'sdlcDocumentIds', 'sdlcRepoIds'];
 export const SDLC_FILE_FIELDS: readonly (keyof SdlcFileFields)[] = [
   'sdlcContainerRef', 'sdlcTypeName', 'sdlcStatus', 'sdlcRelatedDocumentIds',
