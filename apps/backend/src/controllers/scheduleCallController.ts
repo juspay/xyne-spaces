@@ -237,11 +237,12 @@ export class ScheduleCallController {
       // selective channel call can also post its updates to a different channel.
       let finalChannelId = channelId;
       const callUpdatesChannel: string | null = reqCallUpdatesChannel ?? null;
-      if (!channelId && targetUserIds?.length) {
-        // No channel supplied → direct group call, create a GROUP_DM for the participants.
+      if (!channelId) {
+        // No channel supplied → direct group call, create a GROUP_DM for the participants
+        // (the organizer's self-DM for a guest-only series).
         finalChannelId = await repositories.channels.findOrCreateDMChannel(
           userId,
-          targetUserIds,
+          targetUserIds ?? [],
           repositories.channelParticipants,
           req.user!.workspaceId!,
         );
@@ -351,11 +352,14 @@ export class ScheduleCallController {
       let finalChannelId = channelId;
       const callUpdatesChannel: string | null = reqCallUpdatesChannel ?? null;
 
-      if (!channelId && targetUserIds?.length) {
-        // No channel supplied → direct group call, create a GROUP_DM for the participants.
+      if (!channelId) {
+        if (conversationId && !targetUserIds?.length) {
+          res.status(400).json({ success: false, error: 'channelId is required for a thread-linked call' });
+          return;
+        }
         finalChannelId = await repositories.channels.findOrCreateDMChannel(
           userId,
-          targetUserIds,
+          targetUserIds ?? [],
           repositories.channelParticipants,
           req.user!.workspaceId!,
         );
@@ -592,8 +596,7 @@ export class ScheduleCallController {
           // Channel-scoped call: keep channelId. A selective subset (targetUserIds) is applied
           // via the participant delta below, not by switching channels.
           resolvedChannelId = reqChannelId;
-        } else if (targetUserIds !== undefined && targetUserIds.length > 0) {
-          // Direct group call — create a GROUP_DM for the participants.
+        } else if (targetUserIds !== undefined) {
           logger.info(`[updateScheduledCall] group call: creating GROUP_DM for targetUserIds=${JSON.stringify(targetUserIds)}`);
           // Anchored on the organizer, not the actor: a participant editing the list must
           // not drag the call onto their own DM/self-DM.
@@ -880,8 +883,7 @@ export class ScheduleCallController {
           // Channel-scoped call: keep channelId. A selective subset (targetUserIds) is applied
           // via the per-instance participant delta below, not by switching channels.
           resolvedChannelId = reqChannelId;
-        } else if (targetUserIds !== undefined && targetUserIds.length > 0) {
-          // Direct group call — create a GROUP_DM for the participants.
+        } else if (targetUserIds !== undefined) {
           logger.info(`[updateRecurringSeries] group call: creating GROUP_DM for targetUserIds=${JSON.stringify(targetUserIds)}`);
           // Anchored on the organizer, not the actor: a participant editing the list must
           // not drag the series onto their own DM/self-DM.

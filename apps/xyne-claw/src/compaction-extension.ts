@@ -24,8 +24,8 @@
 
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { compact, estimateTokens } from "@earendil-works/pi-coding-agent";
-import { buildJevCompaction } from "./jev-compaction.js";
-import { recordJudgeOutcome } from "./judge-backend.js";
+import { buildJevCompaction } from "./xor-compaction.js";
+import { recordJudgeOutcome } from "./judge-trace.js";
 import { optEnabled } from "./optimizations.js";
 import { metric } from "./metrics.js";
 

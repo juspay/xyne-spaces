@@ -132,6 +132,7 @@ import { NoteTakerOverlayHost } from './RecordingsV2Screen/components/NoteTakerO
 import FormScreen from './FormScreen/FormScreen';
 import ScheduledMessageScreen from './ScheduledMessageScreen/ScheduledMessageScreen';
 import AppsScreen from './AppsScreen/AppsScreen';
+import AppsMarketplaceScreen from './AppsMarketplaceScreen/AppsMarketplaceScreen';
 import InitialStateLoader from '../providers/InitialStateLoader';
 import { ZeroFallbackProvider } from '../contexts/ZeroFallbackContext';
 import { InstrumentationProvider, type Instrumentation } from '@xyne/shared/hooks';
@@ -2003,6 +2004,14 @@ export const router = createBrowserRouter(
                   element: (
                     <ToolbarProtectedRoute path='/apps'>
                       <AppsScreen />
+                    </ToolbarProtectedRoute>
+                  ),
+                },
+                {
+                  path: 'apps-marketplace',
+                  element: (
+                    <ToolbarProtectedRoute path='/apps-marketplace'>
+                      <AppsMarketplaceScreen />
                     </ToolbarProtectedRoute>
                   ),
                 },

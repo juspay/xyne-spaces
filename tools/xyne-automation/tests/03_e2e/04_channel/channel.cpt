@@ -1,12 +1,12 @@
 # Navigating to channel <channelAlias> for user <userAlias>
 * ensuring channel <channelAlias> exists in fixture for user <userAlias>
-* clicking on "[data-testid='nav-chat']"
+* navigating via sidebar to "chat"
 * clicking on stored channel <channelAlias> name for user <userAlias>
 * waiting for network to be idle
 
 # Creating channel <channelAlias> for user <userAlias> in project <projectAlias>
 * ensuring project <projectAlias> exists in fixture for user <userAlias>
-* clicking on "[data-testid='nav-chat']"
+* navigating via sidebar to "chat"
 * waiting for "[data-testid='create-new-channel']" to appear
 * clicking on "[data-testid='create-new-channel']"
 * waiting for "[data-testid='add-channel-form']" to appear

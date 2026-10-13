@@ -52,6 +52,49 @@ export const isJevConfigured = (): boolean => Boolean(envConfig.jev.apiKey);
 export const isPrivateJevConfigured = (): boolean =>
   isJevConfigured() && Boolean(process.env.JEV_URL?.trim());
 
+const ERROR_BODY_LIMIT = 2048;
+const ERROR_TYPE = /^[a-z0-9_.-]{1,64}$/i;
+
+/** Hostname of the Jev endpoint for logs, or undefined when the URL doesn't parse. */
+const jevHost = (url: string): string | undefined => {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * A safe label for a non-2xx reply: LiteLLM's `error.type` when it looks like an
+ * identifier, `html` for a gateway page, else `unknown`. The body is read (capped) and
+ * released, but never logged or returned: it can echo the request, and the grid's
+ * `error.message` includes part of the API key.
+ */
+const readErrorType = async (response: Response): Promise<string> => {
+  let text = '';
+  try {
+    const reader = response.body?.getReader();
+    const decoder = new TextDecoder();
+    while (reader && text.length < ERROR_BODY_LIMIT) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value, { stream: true });
+    }
+    await reader?.cancel();
+  } catch {
+    // A body that can't be read is just an unknown error type.
+  }
+  if (response.headers.get('content-type')?.includes('html') || text.trimStart().startsWith('<')) {
+    return 'html';
+  }
+  try {
+    const type = (JSON.parse(text) as { error?: { type?: unknown } } | null)?.error?.type;
+    return typeof type === 'string' && ERROR_TYPE.test(type) ? type : 'unknown';
+  } catch {
+    return 'unknown';
+  }
+};
+
 const isProbability = (p: unknown): p is number => typeof p === 'number' && p >= 0 && p <= 1;
 
 /** The answer to `question`, or null when Jev's reply for it is unusable. */
@@ -147,6 +190,7 @@ export const askJev = async (
 ): Promise<Record<string, JevAnswer> | null> => {
   const { apiKey, url, model } = envConfig.jev;
   if (!apiKey) return null;
+  const target = { model, host: jevHost(url) };
 
   try {
     const response = await fetch(url, {
@@ -158,10 +202,10 @@ export const askJev = async (
         : AbortSignal.timeout(timeoutMs),
     });
     if (!response.ok) {
-      // Status only: an error body can echo the request, which carries user text. The
-      // body is still released, so the connection goes back to the pool.
-      logger.warn('Jev request failed', { status: response.status });
-      await response.body?.cancel();
+      const errorType = await readErrorType(response);
+      // Cancelled by the caller while the body was read: not a failure, as in the catch below.
+      if (signal?.aborted) return null;
+      logger.warn('Jev request failed', { status: response.status, errorType, ...target });
       onFailure?.({ kind: 'status', status: response.status });
       return null;
     }
@@ -182,6 +226,7 @@ export const askJev = async (
         questions: unusable.slice(0, 5),
         unusable: unusable.length,
         of: Object.keys(questions).length,
+        ...target,
       });
       if (!partial || unusable.length === Object.keys(questions).length) {
         onFailure?.({ kind: 'unusable' });
@@ -197,6 +242,7 @@ export const askJev = async (
     // and it can echo the request.
     logger.warn(`Jev request ${timedOut ? `timed out after ${timeoutMs}ms` : 'errored'}`, {
       error: error instanceof Error ? error.name : 'unknown',
+      ...target,
     });
     onFailure?.({ kind: timedOut ? 'timeout' : 'network' });
     return null;

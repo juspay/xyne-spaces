@@ -12,8 +12,8 @@ type RouteResponse =
 
 const UNAVAILABLE: RouteResponse = { route: 'unavailable' };
 
-// Above the backend's 2.5 s Jev timeout, so that one decides and this only covers the network.
-const ROUTE_DEADLINE_MS = 3000;
+// Above the backend's 5 s Jev timeout, so that one decides and this only covers the network.
+const ROUTE_DEADLINE_MS = 6000;
 
 const isRouteResponse = (body: unknown): body is RouteResponse => {
   if (typeof body !== 'object' || body === null) return false;
