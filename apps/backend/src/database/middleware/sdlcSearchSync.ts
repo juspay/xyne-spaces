@@ -17,6 +17,8 @@ import { requestSdlcSearchSync, type SdlcSearchSyncTarget } from '@/queues/sdlcS
  */
 const MODELS = new Set(['SdlcEntityLink', 'SdlcTrack', 'SdlcFolder', 'CanvasFolder', 'SdlcArtifact', 'Repo']);
 const WRITES = new Set(['create', 'createMany', 'update', 'updateMany', 'upsert', 'delete', 'deleteMany']);
+/** Models whose rows carry their hub as channelId. */
+const HUB_MODELS = new Set(['SdlcEntityLink', 'CanvasFolder']);
 
 type Row = Record<string, unknown>;
 const str = (value: unknown): string | null => (typeof value === 'string' && value ? value : null);
@@ -29,22 +31,25 @@ export function setupSdlcSearchSync(prisma: PrismaClient): void {
       return next(params);
     }
 
-    // A bulk delete of links may not name its hub; read the rows it is about to remove first.
-    let deletedLinkHubs: string[] = [];
-    if (params.model === 'SdlcEntityLink' && params.action === 'deleteMany' && !str(params.args?.where?.channelId)) {
+    // Links and canvas folders carry their hub (channelId), but a write may name neither it nor
+    // return it: an update by id that selects only some fields, or a delete of rows that will be
+    // gone afterwards. Read the hubs of the rows it is about to touch first.
+    let touchedHubs: string[] = [];
+    if (HUB_MODELS.has(params.model) && !params.action.startsWith('create') && !str(params.args?.where?.channelId)) {
       try {
-        const rows = await (prisma as unknown as { sdlcEntityLink: { findMany: (a: unknown) => Promise<Row[]> } })
-          .sdlcEntityLink.findMany({ where: params.args?.where, select: { channelId: true }, distinct: ['channelId'] });
-        deletedLinkHubs = rows.map(r => str(r.channelId)).filter((id): id is string => Boolean(id));
+        const delegate = params.model === 'SdlcEntityLink' ? 'sdlcEntityLink' : 'canvasFolder';
+        const rows = await (prisma as unknown as Record<string, { findMany: (a: unknown) => Promise<Row[]> }>)[delegate]
+          .findMany({ where: params.args?.where, select: { channelId: true }, distinct: ['channelId'] });
+        touchedHubs = rows.map(r => str(r.channelId)).filter((id): id is string => Boolean(id));
       } catch (error) {
-        logger.warn('[SDLC_SEARCH_SYNC] could not read links before delete', { error });
+        logger.warn('[SDLC_SEARCH_SYNC] could not read the hubs of the rows being written', { model: params.model, error });
       }
     }
 
     const result = await next(params);
 
     try {
-      for (const target of targetsOf(params.model, params.args ?? {}, result, deletedLinkHubs)) {
+      for (const target of targetsOf(params.model, params.args ?? {}, result, touchedHubs)) {
         requestSdlcSearchSync(target, `prisma:${params.model}.${params.action}`);
       }
     } catch (error) {
@@ -54,7 +59,7 @@ export function setupSdlcSearchSync(prisma: PrismaClient): void {
   });
 }
 
-function targetsOf(model: string, args: Row, result: unknown, deletedLinkHubs: string[]): SdlcSearchSyncTarget[] {
+function targetsOf(model: string, args: Row, result: unknown, touchedHubs: string[]): SdlcSearchSyncTarget[] {
   // The rows the write touched, as far as the call says: the returned row, the data written,
   // and the where clause.
   const where = (args.where ?? {}) as Row;
@@ -64,7 +69,7 @@ function targetsOf(model: string, args: Row, result: unknown, deletedLinkHubs: s
   switch (model) {
     case 'SdlcEntityLink':
     case 'CanvasFolder':
-      return [...new Set([...values('channelId'), ...deletedLinkHubs])].map(hubId => ({ hubId }));
+      return [...new Set([...values('channelId'), ...touchedHubs])].map(hubId => ({ hubId }));
     case 'SdlcTrack':
     case 'SdlcFolder':
       return values('id').map(containerId => ({ containerId }));
