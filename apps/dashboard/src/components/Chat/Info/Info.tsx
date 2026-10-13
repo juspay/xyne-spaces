@@ -66,7 +66,6 @@ import { v4 as uuidv4 } from 'uuid';
 import { VisibleChannel } from '../../../machines/stateMachine';
 import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
 import { channelTrackingMetadata } from '../../../services/Analytics/channelTracking';
-import { ChannelFields } from './ChannelFields';
 
 export type ChannelTab =
   | 'about'
@@ -75,8 +74,7 @@ export type ChannelTab =
   | 'settings'
   | 'ai-features'
   | 'scheduled-messages'
-  | 'agents-apps'
-  | 'fields';
+  | 'agents-apps';
 interface InfoProps {
   channel: VisibleChannel;
   previousChannelId?: string | null;
@@ -463,11 +461,6 @@ const Info = ({
             </Tabs.Trigger>
           )}
           {isDefaultChannel && (
-            <Tabs.Trigger value='fields' className={tabTriggerClass('fields')}>
-              Fields
-            </Tabs.Trigger>
-          )}
-          {isDefaultChannel && (
             <Tabs.Trigger value='ai-features' className={tabTriggerClass('ai-features')}>
               AI Preference
             </Tabs.Trigger>
@@ -526,15 +519,11 @@ const Info = ({
           </Tabs.Content>
         )}
         {isDefaultChannel && (
-          <Tabs.Content value='fields' className='outline-none flex-1 min-h-0 overflow-y-auto'>
-            <ChannelFields channelId={channel.id} canEdit={canEditChannelFields} />
-          </Tabs.Content>
-        )}
-        {isDefaultChannel && (
           <Tabs.Content value='settings' className='outline-none flex-1 min-h-0 overflow-y-auto'>
             <ChannelSettings
               channel={channel}
               isAdmin={currentUserParticipant?.role === ChannelRole.ADMIN}
+              canEditFields={canEditChannelFields}
               previousChannelId={previousChannelId}
               {...(onClose && { onClose })}
             />

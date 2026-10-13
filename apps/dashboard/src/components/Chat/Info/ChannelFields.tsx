@@ -1,6 +1,6 @@
 // A channel's fields (e.g. which merchant it is for), from the workspace's channel form. Channel admins
 // edit them; a Channels desk copies them onto the tickets it opens for the channel.
-import type { ReactElement } from 'react';
+import { useState, type ReactElement } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from 'sonner';
 import {
@@ -14,7 +14,44 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { queries } from '../../../zero/queries';
+import Input from '../../ui/Input';
 import { EditableFormField } from '../../Tickets/TicketDetails/EditableFormField';
+
+const TEXT_TYPES = new Set([FormFieldType.STRING, FormFieldType.NUMBER]);
+
+// Saves on blur or Enter, only when the value changed.
+function TextFieldInput({
+  value,
+  type,
+  disabled,
+  onSave,
+}: {
+  value: string;
+  type: FormFieldType;
+  disabled: boolean;
+  onSave: (newValue: string[]) => void;
+}): ReactElement {
+  const [draft, setDraft] = useState(value);
+  const commit = (): void => {
+    const next = draft.trim();
+    if (next !== value) onSave(next ? [next] : []);
+  };
+  return (
+    <Input
+      variant='flat'
+      type={type === FormFieldType.NUMBER ? 'number' : 'text'}
+      value={draft}
+      disabled={disabled}
+      placeholder={disabled ? '-' : 'Not set'}
+      onChange={e => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={e => {
+        if (e.key === 'Enter') e.currentTarget.blur();
+        if (e.key === 'Escape') setDraft(value);
+      }}
+    />
+  );
+}
 
 export function ChannelFields({
   channelId,
@@ -22,10 +59,10 @@ export function ChannelFields({
 }: {
   channelId: string;
   canEdit: boolean;
-}): ReactElement {
+}): ReactElement | null {
   const zero = useZero();
   const { workspaceId } = useAuthContextValues();
-  const [mapping, mappingDetails] = useCachedQuery(
+  const [mapping] = useCachedQuery(
     queries.getFormMappingByContextId({
       contextId: workspaceId ?? '',
       contextType: FormContextType.WORKSPACE,
@@ -33,17 +70,13 @@ export function ChannelFields({
     }),
     { enabled: !!workspaceId },
   );
-  const [values] = useCachedQuery(queries.getFormEntityValuesByEntityId({ entityId: channelId }));
+  const [values, valuesDetails] = useCachedQuery(
+    queries.getFormEntityValuesByEntityId({ entityId: channelId }),
+  );
 
-  if (!mapping) {
-    if (mappingDetails.type !== 'complete') return <></>;
-    return (
-      <div className='px-6 py-10 text-center text-sm text-muted-foreground'>
-        No channel fields yet. A workspace admin can add them in Forms (context WORKSPACE, entity
-        CHANNEL).
-      </div>
-    );
-  }
+  if (!mapping || mapping.formFields.length === 0) return null;
+  // Wait for the saved values: an edit made before they load would be lost, or saved as a second value.
+  if (valuesDetails.type !== 'complete') return null;
 
   // Values are keyed like ticket fields: the global field's id, or the form field's for legacy rows.
   const fields = [...mapping.formFields]
@@ -91,21 +124,51 @@ export function ChannelFields({
   };
 
   return (
-    <div className='flex flex-col gap-1 px-6 py-4'>
-      {fields.map(field => {
-        const value = valueOf.get(field.id);
-        return (
-          <EditableFormField
-            key={field.id}
-            readOnly={!canEdit}
-            fieldName={field.name}
-            fieldValue={value?.actualFieldValue ?? value?.fieldValue ?? null}
-            fieldType={field.type}
-            fieldEnum={field.options.length > 0 ? field.options : undefined}
-            onSave={newValue => void save(field.id, newValue)}
-          />
-        );
-      })}
+    <div className='bg-card p-[12px] rounded-[12px] border border-border'>
+      <div className='flex flex-col gap-y-3'>
+        <div className='flex flex-col gap-y-1'>
+          <p className='text-sm font-medium text-foreground'>Channel fields</p>
+          <p className='text-sm text-muted-foreground'>
+            Copied onto tickets a Channels desk opens for this channel.
+          </p>
+        </div>
+        {fields.map(field => {
+          const value = valueOf.get(field.id);
+          const current = value?.actualFieldValue ?? value?.fieldValue ?? null;
+          if (!TEXT_TYPES.has(field.type)) {
+            return (
+              <EditableFormField
+                key={field.id}
+                readOnly={!canEdit}
+                fieldName={field.name}
+                fieldValue={current}
+                fieldType={field.type}
+                fieldEnum={field.options.length > 0 ? field.options : undefined}
+                onSave={newValue => void save(field.id, newValue)}
+              />
+            );
+          }
+          const text = current === null ? '' : String(current);
+          return (
+            <label key={field.id} className='flex flex-col gap-y-1.5'>
+              <span className='text-sm text-foreground'>{field.name}</span>
+              <TextFieldInput
+                // Remount when the saved value changes elsewhere.
+                key={text}
+                value={text}
+                type={field.type}
+                disabled={!canEdit}
+                onSave={newValue => void save(field.id, newValue)}
+              />
+            </label>
+          );
+        })}
+        {!canEdit && (
+          <p className='text-sm text-muted-foreground'>
+            You don&apos;t have permission to change these fields.
+          </p>
+        )}
+      </div>
     </div>
   );
 }
