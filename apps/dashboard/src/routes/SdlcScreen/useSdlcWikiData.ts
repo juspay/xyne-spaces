@@ -4,6 +4,7 @@ import { queries } from '../../zero/queries';
 import {
   type WikiCanvas,
   type WikiScope,
+  type SdlcWikiHubPage,
   type SdlcWikiPage,
   wikiScopePages,
   wikiScopes,
@@ -14,6 +15,10 @@ export interface SdlcWikiData<Repo> {
   scopes: WikiScope[];
   /** Live pages per scope folder. */
   pageCounts: ReadonlyMap<string, number>;
+  /** Live pages of every scope. */
+  allPages: SdlcWikiHubPage[];
+  /** False until the hub's Wiki has arrived, so "no pages" is not shown for "not yet". */
+  loaded: boolean;
   /** The scope on screen: the url's, else the one holding the open page. */
   scope: WikiScope | null;
   scopeRepo: Repo | null;
@@ -42,9 +47,10 @@ export function useSdlcWikiData<Repo extends { id: string }>(input: {
 }): SdlcWikiData<Repo> {
   const { channelId, enabled, repos, scopeParam, selectedCanvasId } = input;
   const active = Boolean(channelId) && enabled;
-  const [itemRows] = useCachedQuery(queries.getSdlcHubItems({ channelId: channelId ?? '' }), {
-    enabled: active,
-  });
+  const [itemRows, itemDetails] = useCachedQuery(
+    queries.getSdlcHubItems({ channelId: channelId ?? '' }),
+    { enabled: active },
+  );
   const [folderRows] = useCachedQuery(queries.getSdlcHubFolders({ channelId: channelId ?? '' }), {
     enabled: active,
   });
@@ -123,6 +129,15 @@ export function useSdlcWikiData<Repo extends { id: string }>(input: {
       ),
     [pagesByScope],
   );
+  const allPages = useMemo(
+    () =>
+      scopes.flatMap(item =>
+        (pagesByScope.get(item.folderId) ?? [])
+          .filter(page => !page.archived)
+          .map(page => ({ ...page, scopeFolderId: item.folderId, scopeName: item.name })),
+      ),
+    [scopes, pagesByScope],
+  );
   // A page link without ?wiki= falls back to the page's own folder.
   const scope =
     scopes.find(item => item.folderId === scopeParam) ??
@@ -148,6 +163,8 @@ export function useSdlcWikiData<Repo extends { id: string }>(input: {
   return {
     scopes,
     pageCounts,
+    allPages,
+    loaded: active && itemDetails.type === 'complete',
     scope,
     scopeRepo,
     pages,

@@ -14,10 +14,17 @@ export function SdlcArchiveMenu(props: {
   archived: boolean;
   trackingScope: 'Wiki' | 'HubKnowledge';
   className?: string;
+  /** Set both to open it from outside, a right-click on the row for one. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   onToggle: (archived: boolean) => void;
 }): ReactElement {
   return (
-    <DropdownMenu>
+    <DropdownMenu
+      // Passed only when set: the menu's props do not take an explicit undefined.
+      {...(props.open !== undefined && { open: props.open })}
+      {...(props.onOpenChange && { onOpenChange: props.onOpenChange })}
+    >
       <DropdownMenuTrigger asChild>
         <button
           type='button'
