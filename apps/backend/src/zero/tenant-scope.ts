@@ -45,6 +45,32 @@ const CUSTOM_SCOPES: Record<string, OrgScopeRule> = {
     ),
 };
 
+/**
+ * Tables that DO carry a workspaceId column, but whose read visibility is deliberately wider
+ * than one workspace. The workspaceId on these rows is a denormalised "created in" stamp, not
+ * the tenant boundary, so the generic workspace rule would hide rows the caller is entitled to.
+ * Each rule must still be a strict tenant boundary derived only from server-side context.
+ */
+const CROSS_WORKSPACE_SCOPES: Record<string, OrgScopeRule> = {
+  // App templates are org-level catalog rows (scope ORG) or marketplace rows (scope GLOBAL).
+  // `apps.workspaceId` is the creating workspace, so a workspace filter hid org apps built in a
+  // sibling workspace of the same org (Org Apps tab) and every other workspace's GLOBAL apps
+  // (Marketplace tab). Mirrors the AppsACL read rule (packages/shared/src/zero/acl/tables/
+  // apps-acl.ts), which define-query already opts out of its own workspace backstop for:
+  //   - GLOBAL apps are visible to everyone (marketplace, cross-org by design);
+  //   - ORG apps are visible only when the app's org contains the caller's workspace. This is
+  //     resolved from ctx.workspaceId via the orgWorkspaces relation, never from a client
+  //     argument, so a client passing another org's id in getOrgApps still sees nothing.
+  // signingSecret is not a synced column (XYNE-56394), so no secret leaves the server.
+  apps: (query, ctx) =>
+    query.where(({ or, cmp, exists }: any) =>
+      or(
+        cmp('scope', '=', 'GLOBAL'),
+        exists('orgWorkspaces', (w: ScopableQuery) => w.where('id', ctx.workspaceId)),
+      ),
+    ),
+};
+
 /** Reference data that is the same for every tenant. */
 const GLOBAL_REFERENCE_TABLES = new Set(['lookup_values', 'merchants', 'resources']);
 
@@ -61,6 +87,13 @@ export function scopeQueryToTenant<T>(query: T, ctx: Context, queryName: string)
   // fall through to the "unscoped table" error once workspaceId is dropped from them.
   if (CONNECT_SCOPED_TABLES.has(table)) {
     return query;
+  }
+  const crossWorkspaceRule = CROSS_WORKSPACE_SCOPES[table];
+  if (crossWorkspaceRule) {
+    if (!ctx.workspaceId) {
+      logger.warn('zero_query_missing_workspace', { query: queryName, table });
+    }
+    return crossWorkspaceRule(scopable, ctx) as unknown as T;
   }
   if (zeroTables[table] && 'workspaceId' in zeroTables[table].columns) {
     // Not expected on the read path — real callers carry a workspaceId. An absent
