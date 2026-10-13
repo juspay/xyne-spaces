@@ -73,7 +73,7 @@ jobs:
           --filter xyne-spaces-backend...
 
       - name: Build workspace libraries
-        run: pnpm --filter @xyne/shared --filter agentic-framework run build
+        run: pnpm --filter agentic-framework run build
 
       - name: Prisma generate (app + common schemas)
         run: |
