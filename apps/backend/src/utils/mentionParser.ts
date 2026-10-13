@@ -41,8 +41,10 @@ export function extractChannelMentions(htmlContent: string): string[] {
 
 // The opening tag @xyne/shared's extractUserMentions / extractGroupMentions match: no closing tag
 // needed, either quote at each end. Mentions are found (and notified) from this tag alone.
-// [^<>] stops each try at the next tag, so many unclosed '<span's can't make it quadratic.
-const MENTION_TAG = /<span[^<>]*data-mention-type=["'](user|group)["'][^<>]*>/g;
+// Each <span ...> tag is cut out first with a single [^<>]* (one pass, stops at the next tag), then
+// read on its own, so guest text can't make the scan quadratic.
+const SPAN_TAG = /<span[^<>]*>/g;
+const MENTION_TYPE = /data-mention-type=["'](user|group)["']/;
 const MENTION_USER_ID = /data-user-id=(["'])([^"']+)\1/;
 
 /**
@@ -52,7 +54,9 @@ const MENTION_USER_ID = /data-user-id=(["'])([^"']+)\1/;
  */
 export function keepMentionsWithin(htmlContent: string, allowedUserIds: ReadonlySet<string>): string {
   if (!htmlContent.includes('data-mention-type')) return htmlContent;
-  const kept = htmlContent.replace(MENTION_TAG, (tag: string, type: string) => {
+  const kept = htmlContent.replace(SPAN_TAG, (tag: string) => {
+    const type = MENTION_TYPE.exec(tag)?.[1];
+    if (!type) return tag;
     const userId = type === 'user' ? MENTION_USER_ID.exec(tag)?.[2] : undefined;
     return userId && allowedUserIds.has(userId) ? tag : '<span>';
   });
