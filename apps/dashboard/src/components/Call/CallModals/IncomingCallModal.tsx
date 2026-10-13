@@ -4,7 +4,9 @@ import { useZero } from '../../../hooks/useZero';
 import { QueryResultType } from '@rocicorp/zero';
 import { useAuth } from '../../../hooks/useAuth';
 import { callActor } from '../../../machines/callMachine';
-import { roomActor } from '../../../machines/roomMachine';
+import { roomActor, type JoinMediaOverrides } from '../../../machines/roomMachine';
+import { useCallJoinSettings } from '../../../hooks/useCallJoinSettings';
+import { useCameraPreview } from '../hooks/useCameraPreview';
 import { CallParticipant, Channel, RingStatus } from '@xyne/shared';
 import { mutators } from '../../../zero/mutators';
 import { queries } from '../../../zero/queries';
@@ -289,6 +291,17 @@ export function IncomingCallModal(): React.ReactElement | null {
     }
   }, [isRinging, incomingCallData, silenceReason]);
 
+  // Mic/camera picked on the card for this call; untouched toggles use saved preferences.
+  const { joinMuted, joinWithoutVideo } = useCallJoinSettings();
+  const [mediaChoice, setMediaChoice] = useState<({ callId: string } & JoinMediaOverrides) | null>(
+    null,
+  );
+  const ringingMediaChoice =
+    mediaChoice && mediaChoice.callId === incomingCallData?.callId ? mediaChoice : null;
+  const micOn = ringingMediaChoice?.mic ?? !joinMuted;
+  const cameraOn = ringingMediaChoice?.camera ?? !joinWithoutVideo;
+  const previewStream = useCameraPreview(isRinging && !!incomingCallData && cameraOn);
+
   const handleAcceptCall = useCallback(
     (callIdToAccept?: string): void => {
       if (audioRef.current) {
@@ -305,15 +318,27 @@ export function IncomingCallModal(): React.ReactElement | null {
         window.electronAPI.closeCallNotification(callIdToAccept);
       }
 
+      const { callId: choiceCallId, ...choice } = mediaChoice ?? {};
+      const overrides: JoinMediaOverrides | undefined =
+        choiceCallId && choiceCallId === incomingCallData?.callId ? choice : undefined;
+
       if (isInActiveCall) {
         // Send SWITCH_CALL event to disconnect current call and join new one
-        callActor.send({ type: 'SWITCH_CALL', zero });
+        callActor.send({
+          type: 'SWITCH_CALL',
+          zero,
+          ...(overrides && { joinMediaOverrides: overrides }),
+        });
       } else {
         // Normal accept flow
-        callActor.send({ type: 'ACCEPT', zero });
+        callActor.send({
+          type: 'ACCEPT',
+          zero,
+          ...(overrides && { joinMediaOverrides: overrides }),
+        });
       }
     },
-    [isInActiveCall, zero],
+    [isInActiveCall, zero, mediaChoice, incomingCallData?.callId],
   );
 
   const handleRejectCall = useCallback(
@@ -490,10 +515,30 @@ export function IncomingCallModal(): React.ReactElement | null {
     }
     lastViewModelRef.current = vm;
 
+    const callId = incomingCallData.callId;
+    const media = {
+      micOn,
+      cameraOn,
+      previewStream,
+      onToggleMic: (): void =>
+        setMediaChoice(prev => ({
+          ...(prev?.callId === callId ? prev : {}),
+          callId,
+          mic: !micOn,
+        })),
+      onToggleCamera: (): void =>
+        setMediaChoice(prev => ({
+          ...(prev?.callId === callId ? prev : {}),
+          callId,
+          camera: !cameraOn,
+        })),
+    };
+
     return (
       <>
         <IncomingCallCard
           vm={vm}
+          media={media}
           onAccept={() => handleAcceptCall(incomingCallData.callId)}
           onReject={() => handleRejectCall(incomingCallData.callId)}
         />
@@ -506,6 +551,7 @@ export function IncomingCallModal(): React.ReactElement | null {
               <IncomingCallCard
                 container={container}
                 vm={vm}
+                media={media}
                 // Tracked by hand: the global click tracker only sees clicks in
                 // this page, and the floating card lives in its own window.
                 onAccept={() => {

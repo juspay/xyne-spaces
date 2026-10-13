@@ -14,6 +14,7 @@ import { AssignmentPauseActivity } from './AssignmentPauseActivity';
 import { TicketAssignmentActivity } from './TicketAssignmentActivity';
 import { TicketUpdateActivity } from './TicketUpdateActivity';
 import { ScheduledCallActivity } from './ScheduledCallActivity';
+import { MissedCallActivity } from './MissedCallActivity';
 import { EmailFetchActivity } from './EmailFetchActivity';
 import { DeskAccountDisconnectedActivity } from './DeskAccountDisconnectedActivity';
 import { CanvasSharedActivity } from './CanvasSharedActivity';
@@ -122,6 +123,9 @@ export const ActivityItem = memo(function ActivityItem({
     case 'meeting_accepted':
     case 'meeting_declined':
       return <ScheduledCallActivity activity={activity} isExpanded={isExpanded} />;
+
+    case 'missed_call':
+      return <MissedCallActivity activity={activity} isExpanded={isExpanded} />;
 
     case 'email_fetch_completed':
     case 'email_fetch_failed':

@@ -696,6 +696,7 @@ const ThreadList = ({
                       channelId={channelId}
                       showAvatar={showAvatar}
                       context='thread'
+                      showIntentSuggestion
                       {...(onUserClick && { onUserClick })}
                       {...(spawnedTicketMessageIds && { spawnedTicketMessageIds })}
                       isFirstInThread={messageIndex === 0}
@@ -804,6 +805,7 @@ const ThreadList = ({
                     channelId={channelId}
                     showAvatar={showAvatar}
                     context='thread'
+                    showIntentSuggestion
                     {...(onUserClick && { onUserClick })}
                     {...(spawnedTicketMessageIds && { spawnedTicketMessageIds })}
                     isFirstInThread={index === 0}

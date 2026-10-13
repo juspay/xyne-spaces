@@ -26,6 +26,7 @@ export const SDLC_ENTITY_TYPES = [
   "TRACK",
   "FOLDER",
   "LINK",
+  "AGENT",
 ] as const;
 
 export const sdlcEntityTypeSchema = z.enum(SDLC_ENTITY_TYPES);
@@ -60,6 +61,36 @@ export const sdlcIconNameSchema = z
   .string()
   .max(64)
   .regex(/^[a-z0-9]+(-[a-z0-9]+)*$/);
+
+/** A CHANNEL -> AGENT (claw agent id) edge for an agent created from the hub and not yet registered; replaced by channel membership once it is. */
+export const SDLC_AGENT_PENDING_RELATION = "AGENT_PENDING";
+
+/** A CHANNEL -> SKILL (claw skill id) edge: the skill is linked to that hub. Its scope decides which members' runs get it. */
+export const SDLC_HUB_SKILL_RELATION = "HUB_SKILL";
+
+/**
+ * A pinned Knowledge File (CANVAS) or Linked Skill (SKILL): runs get its full text.
+ * There are two pins, told apart by the edge's source:
+ * - hub pin (from CHANNEL): set by a hub admin, on a Knowledge File or a global skill, for every member's runs.
+ * - personal pin (from USER, a member's id): set by any member on a skill they can use, for their own runs only.
+ * A personal skill takes only its owner's personal pin. When it becomes global that pin stays personal;
+ * the full text reaches everyone only once a hub admin sets a hub pin.
+ */
+export const SDLC_HUB_PIN_RELATION = "HUB_PIN";
+
+export const sdlcHubPinSchema = z.object({
+  targetType: z.enum(["CANVAS", "SKILL"]),
+  targetId: z.string().min(1).max(64),
+  /** `hub` pins for every member, `me` for the caller's own runs. */
+  scope: z.enum(["hub", "me"]),
+  pinned: z.boolean(),
+});
+export type SdlcHubPin = z.infer<typeof sdlcHubPinSchema>;
+
+export interface SdlcHubKnowledgeLinks {
+  pinnedCanvasIds: string[];
+  skills: { skillId: string; linkedBy: string; pinnedForHub: boolean; pinnedForMe: boolean }[];
+}
 
 export const SDLC_WORKFLOW_RELATION = "WORKFLOW";
 export const SDLC_WIKI_WORKFLOW_RELATION = "WIKI_WORKFLOW";
@@ -148,6 +179,9 @@ export const SDLC_STRUCTURAL_RELATIONS = [
   SDLC_WIKI_WORKFLOW_RELATION,
   SDLC_HUB_ITEM_RELATION,
   SDLC_HUB_ITEM_FLAT_RELATION,
+  SDLC_AGENT_PENDING_RELATION,
+  SDLC_HUB_SKILL_RELATION,
+  SDLC_HUB_PIN_RELATION,
 ] as const;
 
 /**
@@ -165,6 +199,9 @@ export const SDLC_HUB_GRAPH_EXCLUDED_RELATIONS = [
   SDLC_WIKI_WORKFLOW_RELATION,
   SDLC_HUB_ITEM_RELATION,
   SDLC_HUB_ITEM_FLAT_RELATION,
+  SDLC_AGENT_PENDING_RELATION,
+  SDLC_HUB_SKILL_RELATION,
+  SDLC_HUB_PIN_RELATION,
 ] as const;
 
 /** Relation types a user may create or delete through the generic link API. */
@@ -496,6 +533,69 @@ export const bootstrapSdlcRuntimeCredentialSchema = z
 export type BootstrapSdlcRuntimeCredentialInput = z.infer<
   typeof bootstrapSdlcRuntimeCredentialSchema
 >;
+
+export interface SdlcEnvironmentRow {
+  repoId: string;
+  name: string;
+  url: string;
+  hubChannelIds: string[];
+}
+
+export type SandboxSetupStep =
+  | { type: 'install'; packages: string[]; cmd?: string }
+  | {
+      type: 'services';
+      cmd: string;
+      markerPath?: string;
+      healthCheck?: {
+        cmd: string;
+        successCondition: 'all-healthy' | 'all-up';
+        intervalMs: number;
+        timeoutMs: number;
+      };
+    }
+  | { type: 'devserver'; name: string; cmd: string; cwd: string; markerPath?: string }
+  | { type: 'run'; label: string; cmd: string; cwd?: string; timeoutMs?: number };
+
+/** A sandbox profile's config, as claw-auth validates it (RepoSetupConfig in xyne-claw-shared). */
+export interface SandboxProfileConfig {
+  slug: string;
+  name: string;
+  description: string;
+  repoUrl?: string;
+  defaultBranch: string;
+  cloneDepth?: number;
+  cloneTimeoutMs?: number;
+  workDir: string;
+  template: string;
+  sessionTimeoutMs?: number;
+  idleTimeoutMs?: number;
+  readyTimeoutMs?: number;
+  writeSessionTimeoutMs?: number;
+  writeIdleTimeoutMs?: number;
+  readFirst?: boolean;
+  skipBakedCloneWait?: boolean;
+  steps: SandboxSetupStep[];
+  ports?: Record<string, number>;
+  auxRepos?: { name: string; url: string; defaultBranch: string; workDir: string }[];
+}
+
+/** GET /sdlc/sandbox-profiles row. `config` is trimmed to its overview fields unless canEdit. */
+export interface SdlcSandboxProfile {
+  key: string;
+  config: SandboxProfileConfig;
+  enabled: boolean;
+  builtIn: boolean;
+  /** A built-in whose stored copy differs from the code version; editors can reset it. */
+  overridden: boolean;
+  canEdit: boolean;
+}
+
+export interface SdlcSandboxProfileList {
+  profiles: SdlcSandboxProfile[];
+  /** Repos the viewer may add a profile to. */
+  canCreateRepoIds: string[];
+}
 
 export interface SdlcSandboxGitCredential {
   provider: SdlcVcsProvider;

@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { createLogger } from "../logger.js";
 
@@ -12,7 +13,7 @@ export function isCreateSkillAction(serverType: string, tool: string): boolean {
 /** `invalid` leaves the card in place — malformed params, so no approval of
  *  them can succeed. `duplicate` is terminal. */
 export type SkillApplyOutcome =
-  | { status: "created"; name: string; slug: string; message: string }
+  | { status: "created"; id: string; name: string; slug: string; message: string }
   | { status: "invalid"; error: string }
   | { status: "duplicate"; error: string };
 
@@ -69,16 +70,25 @@ export async function applyCreateSkill(
     return { status: "duplicate", error: `A skill with slug "${slug}" already exists.` };
   }
 
-  await skillRepository.create({
-    slug,
-    name,
-    description,
-    content: content.trim(),
-    source: "agent-authored",
-    scope: "personal",
-    owner: { connect: { id: userId } },
-    org: { connect: { id: skillOrgId } },
-  });
+  let created;
+  try {
+    created = await skillRepository.create({
+      slug,
+      name,
+      description,
+      content: content.trim(),
+      source: "agent-authored",
+      scope: "personal",
+      owner: { connect: { id: userId } },
+      org: { connect: { id: skillOrgId } },
+    });
+  } catch (err) {
+    // Two approvals at once both pass the lookup above; the unique slug stops the second.
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      return { status: "duplicate", error: `A skill with slug "${slug}" already exists.` };
+    }
+    throw err;
+  }
   log.info(`[skill-apply] create-skill approved slug=${slug} owner=${userId} org=${skillOrgId}`);
-  return { status: "created", name, slug, message: `Skill "${name}" created.` };
+  return { status: "created", id: created.id, name, slug, message: `Skill "${name}" created.` };
 }

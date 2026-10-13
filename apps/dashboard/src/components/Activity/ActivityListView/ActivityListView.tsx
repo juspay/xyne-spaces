@@ -98,6 +98,7 @@ const CALL_ACTIVITY_TYPES = [
   'call_updated',
   'meeting_accepted',
   'meeting_declined',
+  'missed_call',
 ] as const;
 
 const isCallActivity = (activity: ActivityWithRelated): boolean =>

@@ -6,6 +6,11 @@ export interface SandboxRepoOption {
   readonly key: string;
   readonly name: string;
   readonly description?: string;
+  readonly repoUrl?: string;
+  readonly defaultBranch?: string;
+  readonly template?: string;
+  readonly sessionTimeoutMs?: number;
+  readonly idleTimeoutMs?: number;
 }
 
 export function listSandboxRepos(): Promise<SandboxRepoOption[]> {

@@ -113,7 +113,7 @@ export default function ImagePreview(props: PreviewerProps): ReactElement {
           type='button'
           title={zoom === 'fit' ? 'Actual size' : 'Fit to the pane'}
           onClick={() => setZoom(zoom === 'fit' ? 1 : 'fit')}
-          className='h-7 min-w-[52px] rounded-md px-1.5 text-xs tabular-nums text-muted-foreground transition-colors hover:bg-foreground/[0.08] hover:text-foreground'
+          className='outline-none h-7 min-w-[52px] rounded-md px-1.5 text-xs tabular-nums text-muted-foreground transition-colors hover:bg-foreground/[0.08] focus-visible:bg-foreground/[0.08] hover:text-foreground focus-visible:text-foreground'
           data-track-category='FilePreview'
           data-track-name='PreviewZoomReset'
         >

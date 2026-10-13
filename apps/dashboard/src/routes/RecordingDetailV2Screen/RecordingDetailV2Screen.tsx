@@ -112,6 +112,7 @@ import {
 } from './components/SummaryTemplatesModal';
 import { useSummaryTemplates } from '../../hooks/useSummaryTemplates';
 import { useSummaryModelPreference } from '../../hooks/useSummaryModelPreference';
+import { useMarkRecordingSummaryReadOnOpen } from '../../hooks/useHasUnreadRecordingSummaries';
 
 const EMPTY_LABEL_SUGGESTIONS: string[] = [];
 
@@ -545,6 +546,7 @@ export default function RecordingDetailV2Screen({
     queries.oatsRecordingByExternalId({ callId: recordingId ?? '' }),
     { enabled: !!recordingId },
   );
+  useMarkRecordingSummaryReadOnOpen(recordingRow?.id);
   // Editors get every editing surface the owner has. Delete stays owner-only
   // (PRD §5.2). The Google Docs list is not gated on this at all: it is shown to
   // everyone who has the recording, attributing the exports they cannot open
@@ -1196,7 +1198,7 @@ export default function RecordingDetailV2Screen({
           .filter(Boolean)
           .join(' ')}
       >
-        <div className='mx-auto flex min-h-full w-full max-w-[860px] flex-col px-4 py-6'>
+        <div className='mx-auto flex min-h-full w-full max-w-[884px] flex-col px-4 py-6'>
           {/* The only pinned row — the rest of the page scrolls under it. */}
           <div className='sticky top-0 z-20 -mx-4 -mt-6 flex items-center justify-between gap-3 bg-background px-4 pb-3 pt-6'>
             {/* Mobile has no activity list beside this panel and no app navigator,

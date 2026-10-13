@@ -8,6 +8,7 @@ import { enqueueMessage, type QueuedMessage } from "../lib/message-queue.js";
 
 import { systemNote } from "../lib/notice-format.js";
 import { createLogger } from "../logger.js";
+import { isRunWaitingInQueue } from "./run-execution-queue.js";
 const log = createLogger("run-recovery-worker");
 
 const RECOVERY_PREFIX = "run-recovery:";
@@ -669,6 +670,8 @@ async function dispatchRetry(rootSessionId: string, reason: string): Promise<voi
   }
 }
 
+const QUEUED_RECHECK_MS = 60_000;
+
 async function processRecoveryJob(job: Job<RunRecoveryJobData>): Promise<void> {
   const data = job.data;
 
@@ -685,6 +688,12 @@ async function processRecoveryJob(job: Job<RunRecoveryJobData>): Promise<void> {
   const age = Date.now() - state.lastHeartbeatAt;
   if (age < state.timeoutMs) {
     await scheduleWatchdog(state.rootSessionId, state.activeSessionId, state.timeoutMs - age);
+    return;
+  }
+
+  if (await isRunWaitingInQueue(state.activeSessionId).catch(() => false)) {
+    log.info(`[run-recovery] root=${state.rootSessionId} session=${state.activeSessionId} is still waiting in the run queue — not retrying`);
+    await scheduleWatchdog(state.rootSessionId, state.activeSessionId, QUEUED_RECHECK_MS);
     return;
   }
 

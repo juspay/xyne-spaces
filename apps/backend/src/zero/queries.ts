@@ -3171,6 +3171,12 @@ export const queries: AnyQueryRegistry = defineQueries({
       .orderBy('name', 'asc');
   }),
 
+  // Point lookup used by `useChannel` when an id is missing from the hydrated
+  // channel sets (e.g. channel created or made visible after the initial load).
+  // Scoped by ChannelsACL like every other `channels` read, so it never widens visibility.
+  getChannelById: defineQuery(z.object({ channelId: z.string() }), ({ args: { channelId } }) => {
+    return zql.channels.where('id', channelId).one();
+  }),
   channelStats: defineQuery(
     z.object({ channelId: z.string() }),
     ({ args: { channelId } }) => {

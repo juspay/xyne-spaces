@@ -19,22 +19,22 @@ const assistant = (text: string, calls: Array<{ name: string; arguments: unknown
 });
 
 describe("judge backends", () => {
-  it("ournormaljev is served through LiteLLM when no own URL/key is set", () => {
+  it("xor is served through LiteLLM when no own URL/key is set", () => {
     process.env["LITELLM_URL"] = "https://grid.example/";
     process.env["LITELLM_API_KEY"] = "k";
-    expect(judgeBackendConfigured("ournormaljev")).toBe(true);
+    expect(judgeBackendConfigured("xor")).toBe(true);
   });
 
-  it("ournormaljev is not configured without LiteLLM or its own settings", () => {
+  it("xor is not configured without LiteLLM or its own settings", () => {
     delete process.env["LITELLM_URL"];
     delete process.env["LITELLM_API_KEY"];
-    expect(judgeBackendConfigured("ournormaljev")).toBe(false);
+    expect(judgeBackendConfigured("xor")).toBe(false);
   });
 
-  it("sends ournormaljev calls to <LITELLM_URL>/v1/systemone with jev-latest", async () => {
+  it("sends xor calls to <LITELLM_URL>/v1/systemone with jev-latest", async () => {
     process.env["LITELLM_URL"] = "https://grid.example";
     process.env["LITELLM_API_KEY"] = "k";
-    process.env["JUDGE_BACKEND"] = "ournormaljev";
+    process.env["JUDGE_BACKEND"] = "xor";
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ answers: { a: { type: "noul", noul: 0.9 } } }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     const answers = await jevAsk("state", { a: { type: "noul", instructions: "x" } });

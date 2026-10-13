@@ -159,6 +159,7 @@ function parseSignedAction(raw: unknown): SignedWriteAction | null {
     signature,
     ...(str(r["agentSlug"]) ? { agentSlug: str(r["agentSlug"]) } : {}),
     ...(str(r["spacesAppId"]) ? { spacesAppId: str(r["spacesAppId"]) } : {}),
+    ...(str(r["subagentId"]) ? { subagentId: str(r["subagentId"]) } : {}),
   };
 }
 
