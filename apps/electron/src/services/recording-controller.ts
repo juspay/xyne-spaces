@@ -7,7 +7,6 @@ import {
   isPillWindow,
   isRecordingPillEnabled,
   persistRecordingPillEnabled,
-  prewarmRecordingPill,
 } from './recording-pill-window';
 
 export type RecordingTrigger = 'tray' | 'shortcut' | 'pill';
@@ -209,7 +208,6 @@ function scheduleSyncPillVisibility(): void {
 
 export function setRecordingPillEnabled(enabled: boolean): void {
   persistRecordingPillEnabled(enabled);
-  if (enabled) prewarmRecordingPill();
   syncPillVisibility();
   log.info(`[RecordingController] Recording pill ${enabled ? 'enabled' : 'disabled'}`);
 }
@@ -225,8 +223,6 @@ export function setOverlayMinimized(next: boolean): void {
 }
 
 export function initRecordingPillVisibility(): void {
-  if (isRecordingPillEnabled()) prewarmRecordingPill();
-
   const handleWindowFocus = (_event: Electron.Event, window: BrowserWindow): void => {
     if (isPillWindow(window)) return;
     if (window === getMainWindow()) clearFocusRequested();

@@ -209,15 +209,6 @@ export function showRecordingPill(state: RecordingPillState): void {
   }
 }
 
-/**
- * Builds the pill window ahead of the first recording so a start never pays
- * window construction + loadFile on the critical path.
- */
-export function prewarmRecordingPill(): void {
-  if (pillWindow && !pillWindow.isDestroyed()) return;
-  createPillWindow();
-}
-
 function createPillWindow(): void {
   const pos = getInitialPosition();
 
@@ -241,7 +232,6 @@ function createPillWindow(): void {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, '..', 'preload.js'),
-      backgroundThrottling: false,
     },
   });
 
@@ -286,6 +276,24 @@ function createPillWindow(): void {
     stopDrag();
   };
   ipcMain.on('recording-pill:drag-end', dragEndHandler);
+
+  // The pill renders one local file and is loaded only here, at construction, so a navigation
+  // away from it is permanent for the rest of the session.
+  const isOwnRoute = (navUrl: string): boolean => {
+    try {
+      return new URL(navUrl).protocol === 'file:';
+    } catch {
+      return false;
+    }
+  };
+
+  pillWindow.webContents.on('will-navigate', (event, navUrl) => {
+    if (isOwnRoute(navUrl)) return;
+    event.preventDefault();
+    log.warn('[RecordingPill] Blocked navigation away from the pill:', navUrl);
+  });
+
+  pillWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
   pillWindow.webContents.on('did-finish-load', () => {
     if (!pillWindow || pillWindow.isDestroyed()) return;
