@@ -1,6 +1,6 @@
 import { closeSync, openSync, readdirSync, readSync, statSync } from "node:fs";
 import path from "node:path";
-import { jevAsk, jevEnabled, jevThreshold, type JevAnswer, type JevQuestion } from "./jev.js";
+import { xor, xorEnabled, xorThreshold, type XorAnswer, type XorAsk, type XorQuestion } from "./xor.js";
 import { createLogger } from "./logger.js";
 import { metric } from "./metrics.js";
 
@@ -21,11 +21,11 @@ export interface PlanGateDecision {
 }
 
 export interface PlanGateDeps {
-  ask?: (state: string, questions: Record<string, JevQuestion>, opts: { purpose: string }) => Promise<Record<string, JevAnswer> | null>;
+  ask?: XorAsk;
   enabled?: () => boolean;
 }
 
-const QUESTION: JevQuestion = {
+const QUESTION: XorQuestion = {
   type: "noul",
   instructions:
     "Handling the user's latest message takes real work over several steps — searching, reading, " +
@@ -38,7 +38,7 @@ export function planGateForced(agentConfig: Record<string, unknown> | undefined)
 }
 
 export function isShortFollowUp(task: string): boolean {
-  return task.trim().length <= jevThreshold("JEV_PLAN_GATE_CONTEXT_MAX_TASK_CHARS", 200);
+  return task.trim().length <= xorThreshold("JEV_PLAN_GATE_CONTEXT_MAX_TASK_CHARS", 200);
 }
 
 function textOf(content: unknown): string {
@@ -100,22 +100,18 @@ export async function decidePlanTracking(
 ): Promise<PlanGateDecision> {
   if (planGateForced(agentConfig)) return { plan: true, reason: "forced" };
   if (process.env["XYNE_PLAN_GATE"]?.trim().toLowerCase() === "off") return { plan: true, reason: "gate-off" };
-  const enabled = deps.enabled ?? jevEnabled;
+  const enabled = deps.enabled ?? xorEnabled;
   if (!task.trim() || !enabled()) return record({ plan: true, reason: "jev-unavailable" });
 
-  const ask = deps.ask ?? jevAsk;
+  const ask = deps.ask ?? xor;
   const withPreviousReply = !!previousReply;
   const started = Date.now();
-  const answers = await ask(
-    buildGateState(task, previousReply),
-    { multiStep: QUESTION },
-    { purpose: "plan-gate" },
-  ).catch(() => null);
+  const answers = await ask({ state: buildGateState(task, previousReply), questions: { multiStep: QUESTION }, purpose: "plan-gate" }).catch(() => null);
   const ms = Date.now() - started;
   const probability = answers?.["multiStep"]?.noul;
   if (typeof probability !== "number") return record({ plan: true, reason: "jev-unavailable", ms, withPreviousReply });
 
-  const threshold = jevThreshold("JEV_PLAN_GATE_THRESHOLD", 0.5);
+  const threshold = xorThreshold("JEV_PLAN_GATE_THRESHOLD", 0.5);
   return record({ plan: probability >= threshold, reason: "jev", probability, ms, withPreviousReply });
 }
 

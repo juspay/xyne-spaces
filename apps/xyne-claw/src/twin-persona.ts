@@ -11,7 +11,7 @@
  */
 
 import { SERVER } from "./config.js";
-import type { JevAnswer, JevQuestion } from "./jev.js";
+import type { XorAnswer, XorQuestion } from "./xor.js";
 import { runJudgeSite, type JudgeSiteDeps } from "./judge-site.js";
 import { createLogger } from "./logger.js";
 import { optEnabled } from "./optimizations.js";
@@ -79,8 +79,8 @@ export function toggledFiles(files: readonly PromptMemoryFile[]): PromptMemoryFi
   return (files.some((f) => f.loadInPrompt !== undefined) ? files.filter((f) => f.loadInPrompt) : files).slice(0, MAX_PICKED_FILES);
 }
 
-function pickQuestions(files: readonly PromptMemoryFile[]): Record<string, JevQuestion> {
-  const q: Record<string, JevQuestion> = {};
+function pickQuestions(files: readonly PromptMemoryFile[]): Record<string, XorQuestion> {
+  const q: Record<string, XorQuestion> = {};
   files.forEach((f, i) => {
     if (f.name === ALWAYS) return;
     const about = f.description ?? f.content.replace(/\s+/g, " ").slice(0, PREVIEW_CHARS);
@@ -95,7 +95,7 @@ function pickQuestions(files: readonly PromptMemoryFile[]): Record<string, JevQu
 /** Pure: answers → files to load (soul.md + best others ≥ threshold), or null to fall back. */
 export function pickFromAnswers(
   files: readonly PromptMemoryFile[],
-  answers: Record<string, JevAnswer>,
+  answers: Record<string, XorAnswer>,
   threshold = 0.5,
 ): PromptMemoryFile[] | null {
   const scored = files

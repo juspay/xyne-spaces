@@ -25,7 +25,7 @@
  *      the model re-checks rather than anchoring on it.
  */
 
-import type { JevAnswer, JevQuestion } from "./jev.js";
+import type { XorAnswer, XorQuestion } from "./xor.js";
 import { runJudgeSite } from "./judge-site.js";
 import { optEnabled } from "./optimizations.js";
 import { LITELLM, litellmEndpoint } from "./config.js";
@@ -218,7 +218,7 @@ export function startPrefetchExtraction(task: string): Promise<PrefetchSpec | nu
   })();
 }
 
-export const PREFETCH_GATE_QUESTIONS: Record<string, JevQuestion> = {
+export const PREFETCH_GATE_QUESTIONS: Record<string, XorQuestion> = {
   names_entity: {
     type: "noul",
     instructions:
@@ -227,7 +227,7 @@ export const PREFETCH_GATE_QUESTIONS: Record<string, JevQuestion> = {
 };
 
 /** Pure: a clear "names nothing to look up" skips the LLM extractor; anything else extracts. */
-export function prefetchGateFromJev(answers: Record<string, JevAnswer>): "skip" | "extract" | null {
+export function prefetchGateFromJev(answers: Record<string, XorAnswer>): "skip" | "extract" | null {
   const p = answers["names_entity"]?.noul;
   if (typeof p !== "number") return null;
   return p <= 0.2 ? "skip" : "extract";

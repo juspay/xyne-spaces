@@ -10,14 +10,14 @@
  * Both default to today's behaviour when Jev is off, down, or unsure.
  */
 
-import type { JevAnswer, JevQuestion } from "./jev.js";
+import type { XorAnswer, XorQuestion } from "./xor.js";
 import { answerProb, runJudgeSite } from "./judge-site.js";
 import { buildJudgeState } from "./judge-state.js";
 import { optEnabled } from "./optimizations.js";
 
-type Ask = typeof import("./jev.js").jevAsk;
+type Ask = import("./xor.js").XorAsk;
 
-export const CHECKPOINT_QUESTIONS: Record<string, JevQuestion> = {
+export const CHECKPOINT_QUESTIONS: Record<string, XorQuestion> = {
   is_answer: {
     type: "noul",
     instructions:
@@ -26,7 +26,7 @@ export const CHECKPOINT_QUESTIONS: Record<string, JevQuestion> = {
 };
 
 /** Pure: true = confidently a real answer (skip the nudge), false = nudge, null = unsure (nudge, as today). */
-export function checkpointFromJev(answers: Record<string, JevAnswer>): boolean | null {
+export function checkpointFromJev(answers: Record<string, XorAnswer>): boolean | null {
   const p = answerProb(answers, "is_answer");
   if (p === undefined) return null;
   if (p >= 0.85) return true;
@@ -53,7 +53,7 @@ export async function checkpointPrecheck(
   return result.decision === true;
 }
 
-export const CONTEXT_GATE_QUESTIONS: Record<string, JevQuestion> = {
+export const CONTEXT_GATE_QUESTIONS: Record<string, XorQuestion> = {
   supported: {
     type: "score",
     instructions: "How well does the evidence the agent gathered support its answer to the request?",
@@ -73,7 +73,7 @@ export const CONTEXT_GATE_QUESTIONS: Record<string, JevQuestion> = {
 export type ContextGateDecision = "accept" | "fetch-more";
 
 /** Pure: a clear evidence gap (and a request that needs lookups) → fetch-more. */
-export function contextGateFromJev(answers: Record<string, JevAnswer>): ContextGateDecision | null {
+export function contextGateFromJev(answers: Record<string, XorAnswer>): ContextGateDecision | null {
   const noLookup = answerProb(answers, "no_lookup_needed");
   const supported = answerProb(answers, "supported");
   if (noLookup !== undefined && noLookup >= 0.7) return "accept";

@@ -1,5 +1,5 @@
 import { LITELLM, litellmEndpoint } from "./config.js";
-import type { JevAnswer, JevQuestion } from "./jev.js";
+import type { XorAnswer, XorQuestion } from "./xor.js";
 import { runJudgeSite } from "./judge-site.js";
 import { createLogger } from "./logger.js";
 import { optEnabled } from "./optimizations.js";
@@ -22,7 +22,7 @@ export interface ModeRouteResult {
 const JEV_MODE_AT = Number(process.env["MODE_ROUTER_JEV_MODE_AT"] ?? 0.85);
 const JEV_NONE_AT = Number(process.env["MODE_ROUTER_JEV_NONE_AT"] ?? 0.7);
 
-export function modeQuestion(commands: TaskCommand[]): Record<string, JevQuestion> {
+export function modeQuestion(commands: TaskCommand[]): Record<string, XorQuestion> {
   const criteria: Record<string, string> = {
     none: "Ordinary conversation, a question, or anything that does not plainly ask for one of the other modes",
   };
@@ -33,7 +33,7 @@ export function modeQuestion(commands: TaskCommand[]): Record<string, JevQuestio
 /** Pure: answers → route, or null (unsure → LLM router). Exported for tests. */
 export function routeFromJev(
   commands: TaskCommand[],
-  answers: Record<string, JevAnswer>,
+  answers: Record<string, XorAnswer>,
 ): ModeRouteResult | null {
   const a = answers["mode"];
   const pick = a?.choice;

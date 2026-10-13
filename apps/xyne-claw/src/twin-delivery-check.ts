@@ -5,14 +5,14 @@
  */
 
 import type { TwinDelivery, TwinDeliveryCheck } from "xyne-claw-shared";
-import type { JevAnswer, JevQuestion } from "./jev.js";
+import type { XorAnswer, XorQuestion } from "./xor.js";
 import { round3, runJudgeSite, type JudgeSiteDeps } from "./judge-site.js";
 import { buildJudgeState } from "./judge-state.js";
 import { optEnabled } from "./optimizations.js";
 import { extractEvidenceDigest } from "./verify-response.js";
 
 /** Pure: Jev answers → delivery check. Exported for tests. */
-export function twinCheckFromAnswers(answers: Record<string, JevAnswer>, ms: number): TwinDeliveryCheck | null {
+export function twinCheckFromAnswers(answers: Record<string, XorAnswer>, ms: number): TwinDeliveryCheck | null {
   const num = (id: string): number | undefined => {
     const v = answers[id]?.score ?? answers[id]?.noul;
     return typeof v === "number" && Number.isFinite(v) ? round3(v) : undefined;
@@ -35,8 +35,8 @@ export function twinCheckFromAnswers(answers: Record<string, JevAnswer>, ms: num
 }
 
 /** Jev questions for a delivery; which ones depend on the action. Exported for tests. */
-export function twinCheckQuestions(delivery: TwinDelivery): Record<string, JevQuestion> {
-  const q: Record<string, JevQuestion> = {};
+export function twinCheckQuestions(delivery: TwinDelivery): Record<string, XorQuestion> {
+  const q: Record<string, XorQuestion> = {};
   if (delivery.message) {
     q["answers_ask"] = {
       type: "score",

@@ -2,9 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { jevScoreFromProbabilities, judgeSemanticMatch } from "../src/eval-judge.js";
 
 const ENV_KEYS = [
-  "JEV_API_KEY", "JEV_URL", "JEV_MODEL", "OUR_JEV_URL", "OUR_JEV_API_KEY",
-  "OUR_NORMAL_JEV_URL", "OUR_NORMAL_JEV_API_KEY", "OUR_NORMAL_JEV_MODEL", "OUR_TRAINED_JEV_URL", "OUR_TRAINED_JEV_API_KEY", "OUR_TRAINED_JEV_MODEL",
-  "JUDGE_BACKEND", "JUDGE_SHADOW",
+  "XOR_URL", "XOR_API_KEY", "XOR_MODEL", "XOR_BACKEND", "OUR_JEV_URL", "OUR_JEV_API_KEY",
+  "OUR_NORMAL_JEV_URL", "OUR_NORMAL_JEV_API_KEY", "OUR_NORMAL_JEV_MODEL", "LITELLM_URL", "LITELLM_API_KEY", "JUDGE_BACKEND",
 ];
 
 function systemOneReply(values: Record<string, number>): Response {
@@ -90,7 +89,7 @@ describe("jevScoreFromProbabilities", () => {
   });
 });
 
-describe("judgeSemanticMatch via a jev backend", () => {
+describe("judgeSemanticMatch via xor", () => {
   const saved: Record<string, string | undefined> = {};
   let fetchMock: ReturnType<typeof vi.fn>;
 
@@ -111,8 +110,7 @@ describe("judgeSemanticMatch via a jev backend", () => {
     vi.unstubAllGlobals();
   });
 
-  it("routes the legacy jev name to our normal Jev, never the hosted service", async () => {
-    process.env["JEV_API_KEY"] = "k-hosted";
+  it("grades the legacy jev name via xor", async () => {
     process.env["OUR_NORMAL_JEV_URL"] = "https://grid.example/v1/systemone";
     process.env["OUR_JEV_API_KEY"] = "k-ours";
     fetchMock.mockResolvedValue(systemOneReply({ same: 0.95, minor: 0.1, misses: 0, contradicts: 0, empty: 0 }));
@@ -125,15 +123,29 @@ describe("judgeSemanticMatch via a jev backend", () => {
     expect(result.reasoning.length).toBeLessThanOrEqual(200);
   });
 
-  it("grades with our self-hosted backend at its own url and key", async () => {
-    process.env["OUR_JEV_URL"] = "https://ourjev.internal/v1/systemone";
-    process.env["OUR_JEV_API_KEY"] = "k-ours";
-    process.env["OUR_TRAINED_JEV_MODEL"] = "our-jev-ft-v3";
-    fetchMock.mockResolvedValue(systemOneReply({ same: 0, minor: 0, misses: 0, contradicts: 0, empty: 1 }));
-    const result = await judgeSemanticMatch({ expected: "a", generated: "", model: "ourtrainedjev" });
-    expect(String(fetchMock.mock.calls[0]![0])).toBe("https://ourjev.internal/v1/systemone");
-    expect((fetchMock.mock.calls[0]![1] as RequestInit).headers).toMatchObject({ Authorization: "Bearer k-ours" });
-    expect(result.score).toBe(0);
+  it("grades via xor at its own url, key and model for every xor alias", async () => {
+    process.env["XOR_URL"] = "https://xor.internal/v1/systemone";
+    process.env["XOR_API_KEY"] = "k-xor";
+    process.env["XOR_MODEL"] = "xor-ft-v3";
+    fetchMock.mockImplementation(async () => systemOneReply({ same: 0, minor: 0, misses: 0, contradicts: 0, empty: 1 }));
+    for (const model of ["xor", " Xor ", "ournormaljev"]) {
+      const result = await judgeSemanticMatch({ expected: "a", generated: "", model });
+      expect(result.score).toBe(0);
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    for (const [url, init] of fetchMock.mock.calls as Array<[string, RequestInit]>) {
+      expect(url).toBe("https://xor.internal/v1/systemone");
+      expect(init.headers).toMatchObject({ Authorization: "Bearer k-xor" });
+      expect(JSON.parse(String(init.body)).model).toBe("xor-ft-v3");
+    }
+  });
+
+  it("does not treat ourtrainedjev as an xor alias", async () => {
+    process.env["XOR_URL"] = "https://xor.internal/v1/systemone";
+    process.env["XOR_API_KEY"] = "k-xor";
+    fetchMock.mockResolvedValue(new Response("nope", { status: 500 }));
+    await judgeSemanticMatch({ expected: "a", generated: "b", model: "ourtrainedjev" });
+    expect(fetchMock.mock.calls.some((c) => String(c[0]) === "https://xor.internal/v1/systemone")).toBe(false);
   });
 
   it("fails open when the backend is not configured", async () => {

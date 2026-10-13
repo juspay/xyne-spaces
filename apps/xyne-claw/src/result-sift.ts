@@ -1,5 +1,5 @@
-import { jevEnabled, jevScoreItems, jevThreshold } from "./jev.js";
-import { recordJudgeOutcome } from "./judge-backend.js";
+import { xorEnabled, xorScoreItems, xorThreshold } from "./xor.js";
+import { recordJudgeOutcome } from "./judge-trace.js";
 import { buildJudgeState } from "./judge-state.js";
 import { metric } from "./metrics.js";
 
@@ -138,30 +138,28 @@ export async function siftToolResult(params: {
   charBudget: number;
 }): Promise<SiftOutcome | null> {
   const { toolName, content, task } = params;
-  if (!jevEnabled() || !task.trim() || content.length < MIN_CHARS) return null;
+  if (!xorEnabled() || !task.trim() || content.length < MIN_CHARS) return null;
   const split = splitResultItems(content);
   if (!split || split.items.length < MIN_ITEMS || split.items.length > MAX_ITEMS) return null;
 
   const started = Date.now();
   const indexed = split.items.map((text, index) => ({ text, index }));
-  const scores = await jevScoreItems(
-    siftState({
+  const scores = await xorScoreItems({
+    state: siftState({
       toolName,
       task,
       ...(params.messages ? { messages: params.messages } : {}),
       ...(params.args !== undefined ? { args: params.args } : {}),
     }),
-    indexed,
-    {
-      purpose: "result-sift",
-      key: (item) => String(item.index),
-      instructions: (item) =>
-        `This item contains information that helps answer the user's request: ${item.text.slice(0, ITEM_PREVIEW_CHARS)}`,
-    },
-  );
+    items: indexed,
+    purpose: "result-sift",
+    key: (item) => String(item.index),
+    instructions: (item) =>
+      `This item contains information that helps answer the user's request: ${item.text.slice(0, ITEM_PREVIEW_CHARS)}`,
+  });
   if (!scores) return null;
 
-  const threshold = jevThreshold("JEV_RESULT_THRESHOLD", 0.3);
+  const threshold = xorThreshold("JEV_RESULT_THRESHOLD", 0.3);
   const keep = selectItems(split.items, scores, threshold, params.charBudget);
   const keptItems = split.items.filter((_, index) => keep.has(index));
   const body = keptItems.join(split.joiner);

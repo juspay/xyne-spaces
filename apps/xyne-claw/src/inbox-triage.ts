@@ -1,4 +1,4 @@
-import { jevAsk, jevEnabled, type JevAnswer, type JevQuestion } from "./jev.js";
+import { xor, xorEnabled, type XorAnswer, type XorQuestion } from "./xor.js";
 import { LITELLM, litellmEndpoint } from "./config.js";
 import { createLogger } from "./logger.js";
 import { metric } from "./metrics.js";
@@ -12,7 +12,7 @@ const EXTRACT_MODEL = process.env["INBOX_EXTRACT_MODEL"]?.trim() || "private-lar
 export const TRIAGE_KINDS = ["ask", "deadline", "reply", "fyi", "noise"] as const;
 export type TriageKind = (typeof TRIAGE_KINDS)[number];
 
-export const TRIAGE_QUESTIONS: Record<string, JevQuestion> = {
+export const TRIAGE_QUESTIONS: Record<string, XorQuestion> = {
   needsReply: {
     type: "noul",
     instructions: "Does this message ask the recipient personally to reply, decide, approve, or do something?",
@@ -60,7 +60,7 @@ function num(value: number | undefined): number | null {
   return typeof value === "number" && Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : null;
 }
 
-export function triageFromAnswers(answers: Record<string, JevAnswer>): InboxTriage {
+export function triageFromAnswers(answers: Record<string, XorAnswer>): InboxTriage {
   const kind = answers["kind"]?.choice;
   return {
     needsReply: num(answers["needsReply"]?.noul),
@@ -71,7 +71,7 @@ export function triageFromAnswers(answers: Record<string, JevAnswer>): InboxTria
 }
 
 export function inboxJevAvailable(): boolean {
-  return jevEnabled();
+  return xorEnabled();
 }
 
 async function mapPool<T, R>(items: readonly T[], size: number, fn: (item: T) => Promise<R>): Promise<R[]> {
@@ -89,9 +89,7 @@ async function mapPool<T, R>(items: readonly T[], size: number, fn: (item: T) =>
 
 export async function triageItems(items: readonly InboxTriageItem[]): Promise<Record<string, InboxTriage | null>> {
   const results = await mapPool(items, TRIAGE_CONCURRENCY, async (item) => {
-    const answers = await jevAsk(item.state.slice(0, 6_000), TRIAGE_QUESTIONS, {
-      purpose: "inbox_triage",
-    });
+    const answers = await xor({ state: item.state.slice(0, 6_000), questions: TRIAGE_QUESTIONS, purpose: "inbox_triage" });
     return [item.key, answers ? triageFromAnswers(answers) : null] as const;
   });
   const out: Record<string, InboxTriage | null> = {};
@@ -108,7 +106,7 @@ export async function triageItems(items: readonly InboxTriageItem[]): Promise<Re
 export const INTERRUPT_DECISIONS = ["ignore", "later", "text"] as const;
 export type InterruptDecision = (typeof INTERRUPT_DECISIONS)[number];
 
-export const INTERRUPT_QUESTIONS: Record<string, JevQuestion> = {
+export const INTERRUPT_QUESTIONS: Record<string, XorQuestion> = {
   decision: {
     type: "choice",
     instructions:
@@ -126,7 +124,7 @@ export interface InterruptResult {
   confidence: number;
 }
 
-export function interruptFromAnswers(answers: Record<string, JevAnswer>): InterruptResult | null {
+export function interruptFromAnswers(answers: Record<string, XorAnswer>): InterruptResult | null {
   const a = answers["decision"];
   const pick = a?.choice;
   if (!pick || !(INTERRUPT_DECISIONS as readonly string[]).includes(pick)) return null;
@@ -134,9 +132,7 @@ export function interruptFromAnswers(answers: Record<string, JevAnswer>): Interr
 }
 
 export async function decideInterrupt(state: string): Promise<InterruptResult | null> {
-  const answers = await jevAsk(state.slice(0, 6_000), INTERRUPT_QUESTIONS, {
-    purpose: "inbox_interrupt",
-  });
+  const answers = await xor({ state: state.slice(0, 6_000), questions: INTERRUPT_QUESTIONS, purpose: "inbox_interrupt" });
   return answers ? interruptFromAnswers(answers) : null;
 }
 

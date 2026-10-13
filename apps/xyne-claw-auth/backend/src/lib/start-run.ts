@@ -67,8 +67,6 @@ import { toolUsageRankFor, wantsToolUsageRank } from "./tool-usage-rank.js";
 import { createLogger } from "../logger.js";
 import type { SessionContext } from "../routes/webhook.js";
 
-const JUDGE_BACKENDS = new Set(["jev", "ournormaljev", "xor", "ourtrainedjev", "llm"]);
-
 const log = createLogger("run");
 
 export const RECORDING_MAX_BYTES = 1024 * 1024 * 1024;
@@ -559,7 +557,7 @@ export async function prepareRun(
   const serviceToken = caller.serviceToken;
   const isServiceTokenCaller = serviceToken?.client === "service";
   {
-    const { task, context, conversationId, piSessionConversationId, agentSlug, callbackUrl, callbackSecret, channelId, deliverTo, projectId, projectName, cwd, eventType, triggerSource, slackDelivery, channelDelivery, traceId, provider, providerOrder, providerOverride, subagentProviders, subagentProviderMode, providerConfigs, progressUrl, attachments, recordingRefs, contextFiles, skills: bodySkills, attachedContext, ticketIds, canvasIds, callIds, idempotencyKey: requestedIdempotencyKey, isRegenerate, detached, fastMode, resumedFromHandoff, judgeBackend, optimizations, generateFollowUpSuggestions } = body as {
+    const { task, context, conversationId, piSessionConversationId, agentSlug, callbackUrl, callbackSecret, channelId, deliverTo, projectId, projectName, cwd, eventType, triggerSource, slackDelivery, channelDelivery, traceId, provider, providerOrder, providerOverride, subagentProviders, subagentProviderMode, providerConfigs, progressUrl, attachments, recordingRefs, contextFiles, skills: bodySkills, attachedContext, ticketIds, canvasIds, callIds, idempotencyKey: requestedIdempotencyKey, isRegenerate, detached, fastMode, resumedFromHandoff, optimizations, generateFollowUpSuggestions } = body as {
       task?: string;
       context?: string;
       conversationId?: string;
@@ -614,7 +612,6 @@ export async function prepareRun(
       detached?: boolean;
       fastMode?: boolean;
       resumedFromHandoff?: boolean;
-      judgeBackend?: string;
       optimizations?: unknown;
       generateFollowUpSuggestions?: boolean;
       /** Branching: when true, claw branches the PI session at the last user
@@ -1592,7 +1589,6 @@ export async function prepareRun(
       // session was never actually compacted, only summarised.
       ...((body as { compactBeforeRun?: unknown }).compactBeforeRun === true ? { compactBeforeRun: true } : {}),
       ...(resumedFromHandoff === true ? { resumedFromHandoff: true } : {}),
-      ...(typeof judgeBackend === "string" && JUDGE_BACKENDS.has(judgeBackend) ? { judgeBackend } : {}),
       ...(typeof optimizations === "string" && /^[a-z0-9_,+\-]{1,400}$/i.test(optimizations) ? { optimizations } : {}),
       // Plan/auto mode gate. This forwardBody is an explicit allowlist, so these
       // MUST be threaded here or claw never sees them and plan mode is inert.

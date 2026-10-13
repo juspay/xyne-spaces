@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { JEV_TIMEOUT_MS, backendTimeoutMs, jevAsk, judgeBackendConfigured, normaliseScores, type JevAnswer } from "../src/jev.js";
+import { XOR_TIMEOUT_MS, normaliseScores, xor, xorConfig, xorEnabled, type XorAnswer } from "../src/xor.js";
 import { answerProb, band, runJudgeSite } from "../src/judge-site.js";
 import { buildJudgeState, summariseTranscript } from "../src/judge-state.js";
 import { attachRunMessages, currentRunMessages, pinRunTask } from "../src/run-context.js";
@@ -8,9 +8,9 @@ import { isolateEnv } from "./helpers/env.js";
 
 const ENV = [
   "LITELLM_URL", "LITELLM_API_KEY", "OUR_JEV_URL", "OUR_JEV_API_KEY", "OUR_NORMAL_JEV_URL", "OUR_NORMAL_JEV_MODEL",
-  "JUDGE_BACKEND", "JUDGE_LLM_TIMEOUT_MS", "JEV_URL", "JEV_API_KEY",
+  "OUR_NORMAL_JEV_API_KEY", "XOR_URL", "XOR_API_KEY", "XOR_MODEL", "XOR_BACKEND", "JUDGE_BACKEND", "JUDGE_LLM_TIMEOUT_MS",
 ];
-isolateEnv(ENV);
+isolateEnv(ENV, { clear: true });
 
 const user = (text: string) => ({ role: "user", content: [{ type: "text", text }] });
 const assistant = (text: string, calls: Array<{ name: string; arguments: unknown }> = []) => ({
@@ -18,26 +18,25 @@ const assistant = (text: string, calls: Array<{ name: string; arguments: unknown
   content: [{ type: "text", text }, ...calls.map((c, i) => ({ type: "toolCall", id: `c${i}`, ...c }))],
 });
 
-describe("judge backends", () => {
+describe("xor config", () => {
   it("xor is served through LiteLLM when no own URL/key is set", () => {
     process.env["LITELLM_URL"] = "https://grid.example/";
     process.env["LITELLM_API_KEY"] = "k";
-    expect(judgeBackendConfigured("xor")).toBe(true);
+    expect(xorEnabled()).toBe(true);
   });
 
   it("xor is not configured without LiteLLM or its own settings", () => {
     delete process.env["LITELLM_URL"];
     delete process.env["LITELLM_API_KEY"];
-    expect(judgeBackendConfigured("xor")).toBe(false);
+    expect(xorEnabled()).toBe(false);
   });
 
   it("sends xor calls to <LITELLM_URL>/v1/systemone with jev-latest", async () => {
     process.env["LITELLM_URL"] = "https://grid.example";
     process.env["LITELLM_API_KEY"] = "k";
-    process.env["JUDGE_BACKEND"] = "xor";
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ answers: { a: { type: "noul", noul: 0.9 } } }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
-    const answers = await jevAsk("state", { a: { type: "noul", instructions: "x" } });
+    const answers = await xor({ state: "state", questions: { a: { type: "noul", instructions: "x" } }, purpose: "t" });
     expect(answers?.["a"]?.noul).toBe(0.9);
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe("https://grid.example/v1/systemone");
@@ -45,19 +44,19 @@ describe("judge backends", () => {
   });
 
   it("every Jev call uses one timeout, and the llm backend never exceeds it (bug C)", () => {
-    expect(JEV_TIMEOUT_MS).toBe(10_000);
-    expect(backendTimeoutMs("xor")).toBe(JEV_TIMEOUT_MS);
-    expect(backendTimeoutMs("ourtrainedjev")).toBe(JEV_TIMEOUT_MS);
+    expect(XOR_TIMEOUT_MS).toBe(10_000);
+    expect(xorConfig().timeoutMs).toBe(XOR_TIMEOUT_MS);
+    process.env["XOR_BACKEND"] = "llm";
     process.env["JUDGE_LLM_TIMEOUT_MS"] = "30000";
-    expect(backendTimeoutMs("llm")).toBe(JEV_TIMEOUT_MS);
+    expect(xorConfig().timeoutMs).toBe(XOR_TIMEOUT_MS);
     process.env["JUDGE_LLM_TIMEOUT_MS"] = "2000";
-    expect(backendTimeoutMs("llm")).toBe(2_000);
+    expect(xorConfig().timeoutMs).toBe(2_000);
   });
 });
 
 describe("runJudgeSite", () => {
   const questions = { q: { type: "noul" as const, instructions: "x" } };
-  const answersOf = (p: number): Record<string, JevAnswer> => ({ q: { type: "noul", noul: p } });
+  const answersOf = (p: number): Record<string, XorAnswer> => ({ q: { type: "noul", noul: p } });
 
   it("disabled → fallback, no classifier call", async () => {
     const ask = vi.fn();
@@ -101,10 +100,10 @@ describe("runJudgeSite", () => {
   });
 
   it("passes the site as purpose and no per-site timeout to the classifier", async () => {
-    const ask = vi.fn(async () => answersOf(0.9));
+    const ask = vi.fn(async (_req: { state: string; questions: unknown; purpose: string }) => answersOf(0.9));
     await runJudgeSite({ site: "t", enabled: true, state: "s", questions, decide: () => 1, ask });
-    expect(ask.mock.calls[0]![2]).toMatchObject({ purpose: "t" });
-    expect(ask.mock.calls[0]![2]).not.toHaveProperty("timeoutMs");
+    expect(ask.mock.calls[0]![0]).toMatchObject({ state: "s", questions, purpose: "t" });
+    expect(ask.mock.calls[0]![0]).not.toHaveProperty("timeoutMs");
   });
 
   it("band: ≥ high yes, ≤ low no, between null", () => {

@@ -1,15 +1,11 @@
-import { jevAsk, jevEnabled, jevThreshold, type JevAnswer, type JevQuestion } from "./jev.js";
+import { xor, xorEnabled, xorThreshold, type XorAnswer, type XorAsk, type XorQuestion } from "./xor.js";
 import type { ResponseClaimError, VerifyResponseInput } from "./verify-response.js";
 
 const MAX_TASK_CHARS = 4_000;
 const MAX_DRAFT_CHARS = 8_000;
 const MAX_REQUIREMENTS = 8;
 
-export type PrecheckAsk = (
-  state: string,
-  questions: Record<string, JevQuestion>,
-  opts: { purpose: string },
-) => Promise<Record<string, JevAnswer> | null>;
+export type PrecheckAsk = XorAsk;
 
 export interface Precheck {
   risk: number;
@@ -18,11 +14,11 @@ export interface Precheck {
 }
 
 export function passThreshold(): number {
-  return jevThreshold("JEV_VERIFY_PASS_THRESHOLD", 0.2);
+  return xorThreshold("JEV_VERIFY_PASS_THRESHOLD", 0.2);
 }
 
 export function holdThreshold(): number {
-  return jevThreshold("JEV_VERIFY_HOLD_THRESHOLD", 0.7);
+  return xorThreshold("JEV_VERIFY_HOLD_THRESHOLD", 0.7);
 }
 
 export function requirementLines(criteria: string | undefined): string[] {
@@ -46,8 +42,8 @@ export function buildPrecheckState(input: VerifyResponseInput): string {
   ].join("\n");
 }
 
-export function buildPrecheckQuestions(criteria: string | undefined): Record<string, JevQuestion> {
-  const questions: Record<string, JevQuestion> = {
+export function buildPrecheckQuestions(criteria: string | undefined): Record<string, XorQuestion> {
+  const questions: Record<string, XorQuestion> = {
     contradicted: {
       type: "noul",
       instructions:
@@ -68,7 +64,7 @@ export function buildPrecheckQuestions(criteria: string | undefined): Record<str
   return questions;
 }
 
-export function scorePrecheck(answers: Record<string, JevAnswer>, criteria: string | undefined): Precheck | null {
+export function scorePrecheck(answers: Record<string, XorAnswer>, criteria: string | undefined): Precheck | null {
   const contradicted = answers["contradicted"]?.noul;
   const fabricated = answers["fabricated_list"]?.noul;
   if (typeof contradicted !== "number" || typeof fabricated !== "number") return null;
@@ -85,13 +81,11 @@ export function scorePrecheck(answers: Record<string, JevAnswer>, criteria: stri
 }
 
 export function precheckEnabled(): boolean {
-  return jevEnabled();
+  return xorEnabled();
 }
 
-export async function runPrecheck(input: VerifyResponseInput, ask: PrecheckAsk = jevAsk): Promise<Precheck | null> {
-  const answers = await ask(buildPrecheckState(input), buildPrecheckQuestions(input.criteria), {
-    purpose: "verify-prefilter",
-  }).catch(() => null);
+export async function runPrecheck(input: VerifyResponseInput, ask: PrecheckAsk = xor): Promise<Precheck | null> {
+  const answers = await ask({ state: buildPrecheckState(input), questions: buildPrecheckQuestions(input.criteria), purpose: "verify-prefilter" }).catch(() => null);
   return answers ? scorePrecheck(answers, input.criteria) : null;
 }
 

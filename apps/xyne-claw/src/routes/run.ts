@@ -65,7 +65,7 @@ import {
 } from "xyne-claw-shared";
 import { loadCustomTools } from "../custom-tools.js";
 import { buildCopilotTool } from "../copilot.js";
-import { pinRunJudgeBackend } from "../judge-backend.js";
+import { beginJudgeRun } from "../judge-trace.js";
 import { optEnabled, pinRunOptimizations, tierOptimizationDefaults } from "../optimizations.js";
 import { activeToolCap, demotedCatalogItem, planActiveToolCap, readToolUsageRank } from "../active-tool-cap.js";
 import { buildExperimentTools, buildExperimentReviewTools, type ExperimentContext } from "../experiment.js";
@@ -577,7 +577,6 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     detached,
     fastMode,
     resumedFromHandoff,
-    judgeBackend,
     optimizations,
     memoryBankId,
     senderName,
@@ -591,7 +590,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
   } = req.body as InternalRunPayload;
 
   const experiment = normalizeExperimentContext(rawExperiment);
-  pinRunJudgeBackend(judgeBackend);
+  beginJudgeRun();
   pinRunOptimizations(optimizations, agentConfig?.["optimizations"], tierOptimizationDefaults(delegationMode));
 
   // [AUTODBG] claw-side receipt of every /run forward (esp. automations). Confirms

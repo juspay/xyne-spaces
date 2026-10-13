@@ -98,7 +98,6 @@ interface JudgeStats {
   failed: number;
   questions: number;
   totalMs: number;
-  shadows: Array<{ shadow: string; questions: number; agreed: number; meanAbsDiff: number; shadowMs: number; primaryMs: number }>;
 }
 
 function judgeStats(trace: EvalTrace | undefined): JudgeStats | null {
@@ -112,44 +111,13 @@ function judgeStats(trace: EvalTrace | undefined): JudgeStats | null {
     failed: n(j["failed"]),
     questions: n(j["questions"]),
     totalMs: n(j["totalMs"]),
-    shadows: Array.isArray(j["shadows"])
-      ? (j["shadows"] as Array<Record<string, unknown>>).map((x) => ({
-          shadow: typeof x["shadow"] === "string" ? x["shadow"] : "?",
-          questions: n(x["questions"]),
-          agreed: n(x["agreed"]),
-          meanAbsDiff: n(x["meanAbsDiff"]),
-          shadowMs: n(x["shadowMs"]),
-          primaryMs: n(x["primaryMs"]),
-        }))
-      : [],
   };
 }
 
 function judgeCell(r: EvalResult, trace: EvalTrace | undefined): string {
   const stats = judgeStats(trace);
-  if (!stats) return r.judge ? `${esc(r.judge)}<div class="m">no judge calls recorded</div>` : "—";
-  const drift = r.judge && stats.backend !== r.judge ? ` · asked ${esc(r.judge)}` : "";
-  return `${esc(stats.backend)}${drift}<div class="m">${stats.calls} calls · ${stats.questions} q · ${ms(stats.totalMs)}${stats.failed ? ` · ${stats.failed} failed` : ""}</div>`;
-}
-
-function shadowBlock(trace: EvalTrace | undefined): string {
-  const stats = judgeStats(trace);
-  if (!stats || stats.shadows.length === 0) return "";
-  const by = new Map<string, { q: number; agreed: number; diff: number; ms: number; primaryMs: number; n: number }>();
-  for (const sh of stats.shadows) {
-    const slot = by.get(sh.shadow) ?? { q: 0, agreed: 0, diff: 0, ms: 0, primaryMs: 0, n: 0 };
-    slot.q += sh.questions;
-    slot.agreed += sh.agreed;
-    slot.diff += sh.meanAbsDiff * sh.questions;
-    slot.ms += sh.shadowMs;
-    slot.primaryMs += sh.primaryMs;
-    slot.n += 1;
-    by.set(sh.shadow, slot);
-  }
-  const rows = [...by.entries()]
-    .map(([name, v]) => `<tr><td>${esc(name)}</td><td class="n">${v.q}</td><td class="n">${v.q ? Math.round((v.agreed / v.q) * 100) : 0}%</td><td class="n">${v.q ? (v.diff / v.q).toFixed(3) : "—"}</td><td class="n">${ms(Math.round(v.ms / v.n))}</td><td class="n">${ms(Math.round(v.primaryMs / v.n))}</td></tr>`)
-    .join("");
-  return `<h2>Judge agreement (shadow, same questions)</h2><table class="cmp"><thead><tr><th>Shadow judge</th><th class="n">Questions</th><th class="n">Agrees with ${esc(stats.backend)}</th><th class="n">Mean |Δ|</th><th class="n">Avg ms</th><th class="n">${esc(stats.backend)} avg ms</th></tr></thead><tbody>${rows}</tbody></table>`;
+  if (!stats) return "—";
+  return `${esc(stats.backend)}<div class="m">${stats.calls} calls · ${stats.questions} q · ${ms(stats.totalMs)}${stats.failed ? ` · ${stats.failed} failed` : ""}</div>`;
 }
 
 export function renderEvalHtml(
@@ -216,7 +184,6 @@ export function renderEvalHtml(
         answer
           ? `<h2>Answer</h2><pre class="ans">${esc(answer)}</pre>`
           : `<p class="notice">No answer recorded for this arm${r.error ? " — see the error above" : ""}.</p>`,
-        shadowBlock(trace),
         parts
           ? parts.inner
           : `<p class="notice">No execution trace was checkpointed for this arm, so its timeline is unavailable.</p>`,
@@ -282,12 +249,11 @@ export async function handleEval(
   ctx: WebhookCommandCtx,
   question: string,
   requested: string[],
-  judges: string[] = [],
   opts: string[] = [],
 ): Promise<void> {
   const trimmed = question.trim();
   if (!trimmed) {
-    await ctx.reply("`/eval <question>` — runs the question on every configured provider and posts a comparison. Add `opts=none|all` to A/B the optimization switches, or `judges=llm,xor,ourtrainedjev` to compare judge backends, on one provider.", REPLY_LABEL);
+    await ctx.reply("`/eval <question>` — runs the question on every configured provider and posts a comparison. Add `opts=none|all` to A/B the optimization switches on one provider.", REPLY_LABEL);
     return;
   }
 
@@ -305,7 +271,6 @@ export async function handleEval(
     agentRow,
     conversationId,
     ...(requested.length ? { requested } : {}),
-    ...(judges.length ? { judges } : {}),
     ...(opts.length ? { opts } : {}),
   });
 
