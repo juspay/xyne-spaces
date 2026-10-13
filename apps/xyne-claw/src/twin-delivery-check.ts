@@ -104,7 +104,6 @@ export async function checkTwinDelivery(
   const result = await runJudgeSite<TwinDeliveryCheck>({
     site: "twin-delivery-check",
     enabled: deps.enabled ?? optEnabled("jev_twin_delivery_check"),
-    budgetMs: Number(process.env["TWIN_DELIVERY_CHECK_TIMEOUT_MS"] ?? 3_000),
     state,
     questions: twinCheckQuestions(delivery),
     decide: (answers) => twinCheckFromAnswers(answers, Date.now() - started),

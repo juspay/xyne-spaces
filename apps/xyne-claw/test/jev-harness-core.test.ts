@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { backendTimeoutMs, jevAsk, judgeBackendConfigured, normaliseScores, type JevAnswer } from "../src/jev.js";
+import { JEV_TIMEOUT_MS, backendTimeoutMs, jevAsk, judgeBackendConfigured, normaliseScores, type JevAnswer } from "../src/jev.js";
 import { answerProb, band, runJudgeSite } from "../src/judge-site.js";
 import { buildJudgeState, summariseTranscript } from "../src/judge-state.js";
 import { attachRunMessages, currentRunMessages, pinRunTask } from "../src/run-context.js";
@@ -44,12 +44,14 @@ describe("judge backends", () => {
     expect(JSON.parse(String(init.body)).model).toBe("jev-latest");
   });
 
-  it("the llm backend can only shorten a site's budget, never stretch it (bug C)", () => {
+  it("every Jev call uses one timeout, and the llm backend never exceeds it (bug C)", () => {
+    expect(JEV_TIMEOUT_MS).toBe(10_000);
+    expect(backendTimeoutMs("xor")).toBe(JEV_TIMEOUT_MS);
+    expect(backendTimeoutMs("ourtrainedjev")).toBe(JEV_TIMEOUT_MS);
     process.env["JUDGE_LLM_TIMEOUT_MS"] = "30000";
-    expect(backendTimeoutMs("llm", 1_500)).toBe(1_500);
-    expect(backendTimeoutMs("llm", undefined)).toBe(30_000);
+    expect(backendTimeoutMs("llm")).toBe(JEV_TIMEOUT_MS);
     process.env["JUDGE_LLM_TIMEOUT_MS"] = "2000";
-    expect(backendTimeoutMs("llm", 5_000)).toBe(2_000);
+    expect(backendTimeoutMs("llm")).toBe(2_000);
   });
 });
 
@@ -59,19 +61,19 @@ describe("runJudgeSite", () => {
 
   it("disabled → fallback, no classifier call", async () => {
     const ask = vi.fn();
-    const r = await runJudgeSite({ site: "t", enabled: false, budgetMs: 10, state: "s", questions, decide: () => "jev", fallback: async () => "old", ask });
+    const r = await runJudgeSite({ site: "t", enabled: false, state: "s", questions, decide: () => "jev", fallback: async () => "old", ask });
     expect(r).toMatchObject({ decision: "old", outcome: "disabled" });
     expect(ask).not.toHaveBeenCalled();
   });
 
   it("unavailable → fallback", async () => {
-    const r = await runJudgeSite({ site: "t", enabled: true, budgetMs: 10, state: "s", questions, decide: () => "jev", fallback: async () => "old", ask: async () => null });
+    const r = await runJudgeSite({ site: "t", enabled: true, state: "s", questions, decide: () => "jev", fallback: async () => "old", ask: async () => null });
     expect(r).toMatchObject({ decision: "old", outcome: "unavailable" });
   });
 
   it("unsure → fallback, answers kept for the caller", async () => {
     const r = await runJudgeSite({
-      site: "t", enabled: true, budgetMs: 10, state: "s", questions,
+      site: "t", enabled: true, state: "s", questions,
       decide: (a) => (band(answerProb(a, "q"), 0.7, 0.3) === "yes" ? "jev" : null),
       fallback: async () => "old", ask: async () => answersOf(0.5),
     });
@@ -82,7 +84,7 @@ describe("runJudgeSite", () => {
   it("decided → classifier decision, fallback not run", async () => {
     const fallback = vi.fn(async () => "old");
     const r = await runJudgeSite({
-      site: "t", enabled: true, budgetMs: 10, state: "s", questions,
+      site: "t", enabled: true, state: "s", questions,
       decide: (a) => (band(answerProb(a, "q"), 0.7, 0.3) === "yes" ? "jev" : null),
       fallback, ask: async () => answersOf(0.9),
     });
@@ -92,16 +94,17 @@ describe("runJudgeSite", () => {
 
   it("a throwing decide falls back instead of failing the caller", async () => {
     const r = await runJudgeSite({
-      site: "t", enabled: true, budgetMs: 10, state: "s", questions,
+      site: "t", enabled: true, state: "s", questions,
       decide: () => { throw new Error("boom"); }, fallback: async () => "old", ask: async () => answersOf(0.9),
     });
     expect(r).toMatchObject({ decision: "old", outcome: "unsure" });
   });
 
-  it("passes the site budget to the classifier", async () => {
+  it("passes the site as purpose and no per-site timeout to the classifier", async () => {
     const ask = vi.fn(async () => answersOf(0.9));
-    await runJudgeSite({ site: "t", enabled: true, budgetMs: 1234, state: "s", questions, decide: () => 1, ask });
-    expect(ask.mock.calls[0]![2]).toMatchObject({ timeoutMs: 1234, purpose: "t" });
+    await runJudgeSite({ site: "t", enabled: true, state: "s", questions, decide: () => 1, ask });
+    expect(ask.mock.calls[0]![2]).toMatchObject({ purpose: "t" });
+    expect(ask.mock.calls[0]![2]).not.toHaveProperty("timeoutMs");
   });
 
   it("band: ≥ high yes, ≤ low no, between null", () => {

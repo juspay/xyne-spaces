@@ -28,7 +28,7 @@ import { llmJudgeConfig, llmJudgePost } from "./judge-llm.js";
 
 const log = createLogger("jev");
 
-const DEFAULT_TIMEOUT_MS = Math.max(200, Number(process.env["JEV_TIMEOUT_MS"] ?? 2500));
+export const JEV_TIMEOUT_MS = Math.max(200, Number(process.env["JEV_TIMEOUT_MS"] ?? 10_000));
 const DEFAULT_BATCH = Math.min(Math.max(Number(process.env["JEV_BATCH"] ?? 50), 1), 100);
 
 export type JevQuestion =
@@ -50,7 +50,6 @@ export interface JevAnswer {
 }
 
 export interface JevOptions {
-  timeoutMs?: number;
   signal?: AbortSignal;
   /** Label for metrics, so call sites are distinguishable. */
   purpose?: string;
@@ -160,17 +159,8 @@ export function normaliseScores(
   return out;
 }
 
-/**
- * The caller's budget wins. A slower backend may only shorten it, never
- * stretch it: a 1.5s hot-path gate must not become a 30s stall just because
- * the run is pinned to the LLM judge.
- */
-export function backendTimeoutMs(backend: JudgeBackendName, requested: number | undefined): number {
-  if (backend === "llm") {
-    const llm = llmJudgeConfig().timeoutMs;
-    return requested === undefined ? llm : Math.min(requested, llm);
-  }
-  return requested ?? DEFAULT_TIMEOUT_MS;
+export function backendTimeoutMs(backend: JudgeBackendName): number {
+  return backend === "llm" ? Math.min(JEV_TIMEOUT_MS, llmJudgeConfig().timeoutMs) : JEV_TIMEOUT_MS;
 }
 
 function answerValue(answer: JevAnswer | undefined): number | string | undefined {
@@ -188,7 +178,7 @@ async function runShadow(
   purpose: string,
 ): Promise<void> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), backendTimeoutMs(shadow, undefined));
+  const timer = setTimeout(() => controller.abort(), backendTimeoutMs(shadow));
   const started = Date.now();
   try {
     const answers = await post(shadow, state, questions, controller.signal);
@@ -243,7 +233,7 @@ export async function jevAskOn(
   const controller = new AbortController();
   const onAbort = (): void => controller.abort();
   opts.signal?.addEventListener("abort", onAbort, { once: true });
-  const timer = setTimeout(() => controller.abort(), backendTimeoutMs(backend, opts.timeoutMs));
+  const timer = setTimeout(() => controller.abort(), backendTimeoutMs(backend));
   const record = (ms: number, answers: Record<string, JevAnswer> | null, error?: string): void =>
     recordJudgeExchange({
       backend, purpose, ms, questions: count, ok: answers !== null,

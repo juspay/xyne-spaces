@@ -5,7 +5,6 @@ import { metric } from "./metrics.js";
 
 const log = createLogger("inbox-triage");
 
-const TRIAGE_TIMEOUT_MS = Number(process.env["INBOX_TRIAGE_TIMEOUT_MS"] ?? 5_000);
 const TRIAGE_CONCURRENCY = Math.max(1, Number(process.env["INBOX_TRIAGE_CONCURRENCY"] ?? 6));
 const EXTRACT_TIMEOUT_MS = Number(process.env["INBOX_EXTRACT_TIMEOUT_MS"] ?? 90_000);
 const EXTRACT_MODEL = process.env["INBOX_EXTRACT_MODEL"]?.trim() || "private-large-spaces";
@@ -92,7 +91,6 @@ export async function triageItems(items: readonly InboxTriageItem[]): Promise<Re
   const results = await mapPool(items, TRIAGE_CONCURRENCY, async (item) => {
     const answers = await jevAsk(item.state.slice(0, 6_000), TRIAGE_QUESTIONS, {
       purpose: "inbox_triage",
-      timeoutMs: TRIAGE_TIMEOUT_MS,
     });
     return [item.key, answers ? triageFromAnswers(answers) : null] as const;
   });
@@ -138,7 +136,6 @@ export function interruptFromAnswers(answers: Record<string, JevAnswer>): Interr
 export async function decideInterrupt(state: string): Promise<InterruptResult | null> {
   const answers = await jevAsk(state.slice(0, 6_000), INTERRUPT_QUESTIONS, {
     purpose: "inbox_interrupt",
-    timeoutMs: TRIAGE_TIMEOUT_MS,
   });
   return answers ? interruptFromAnswers(answers) : null;
 }

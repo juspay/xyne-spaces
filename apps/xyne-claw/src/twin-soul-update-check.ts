@@ -97,7 +97,6 @@ export async function checkMemoryUpdate(
   const { result, exchanges } = await collectJudgeExchanges(() => runJudgeSite<MemoryUpdateCheck>({
     site: "memory-update-check",
     enabled: deps.enabled ?? optEnabled("jev_memory_update_check"),
-    budgetMs: Number(process.env["MEMORY_UPDATE_CHECK_TIMEOUT_MS"] ?? 8_000),
     state,
     questions: updateCheckQuestions(hasOld),
     decide: (answers) => checkFromAnswers(answers, Date.now() - started),

@@ -30,8 +30,6 @@ const log = createLogger("memory-candidate-check");
 const SIMILAR_K = 5;
 const CONCURRENCY = 8;
 const DROP_AT = 0.7;
-// Background (nightly) work: no user is waiting, so allow a slow classifier reply.
-const BUDGET_MS = Number(process.env["MEMORY_CANDIDATE_CHECK_TIMEOUT_MS"] ?? 8_000);
 const BATCH_DEADLINE_MS = Number(process.env["MEMORY_CANDIDATE_CHECK_DEADLINE_MS"] ?? 30_000);
 const MAX_CONSECUTIVE_MISSES = 3;
 
@@ -135,7 +133,6 @@ export async function checkMemoryCandidates(
     if (giveUp()) return { c, d: null, exchange: undefined };
     const { result: answers, exchanges } = await collectJudgeExchanges(() =>
       ask(candidateState(c, mostSimilar(c.text, existing)), CANDIDATE_QUESTIONS, {
-        timeoutMs: BUDGET_MS,
         purpose: "memory-candidate-check",
       }),
     );

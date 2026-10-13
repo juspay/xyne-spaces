@@ -26,8 +26,6 @@ export interface JudgeSiteSpec<D> {
   site: string;
   /** Resolved on/off switch for this site. */
   enabled: boolean;
-  /** Time budget for the Jev call; the backend may shorten it, never stretch it. */
-  budgetMs: number;
   state: string;
   questions: Record<string, JevQuestion>;
   /** Pure: answers → decision, or null when not confident enough to act. */
@@ -93,7 +91,6 @@ export async function runJudgeSite<D>(spec: JudgeSiteSpec<D>): Promise<JudgeSite
   if (!spec.enabled) return finish("disabled", null, null);
   const ask = spec.ask ?? jevAsk;
   const answers = await ask(spec.state, spec.questions, {
-    timeoutMs: spec.budgetMs,
     purpose: spec.site,
     ...(spec.signal ? { signal: spec.signal } : {}),
   });

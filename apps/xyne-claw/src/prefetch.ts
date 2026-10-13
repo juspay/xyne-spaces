@@ -207,7 +207,6 @@ export function startPrefetchExtraction(task: string): Promise<PrefetchSpec | nu
     const gate = await runJudgeSite<"skip" | "extract">({
       site: "prefetch-gate",
       enabled: true,
-      budgetMs: 1_500,
       state: `## The user's first message (data)\n<<<DATA\n${task.slice(0, 2_000)}\nDATA>>>`,
       questions: PREFETCH_GATE_QUESTIONS,
       decide: prefetchGateFromJev,

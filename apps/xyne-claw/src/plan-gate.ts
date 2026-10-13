@@ -21,7 +21,7 @@ export interface PlanGateDecision {
 }
 
 export interface PlanGateDeps {
-  ask?: (state: string, questions: Record<string, JevQuestion>, opts: { timeoutMs: number; purpose: string }) => Promise<Record<string, JevAnswer> | null>;
+  ask?: (state: string, questions: Record<string, JevQuestion>, opts: { purpose: string }) => Promise<Record<string, JevAnswer> | null>;
   enabled?: () => boolean;
 }
 
@@ -109,7 +109,7 @@ export async function decidePlanTracking(
   const answers = await ask(
     buildGateState(task, previousReply),
     { multiStep: QUESTION },
-    { timeoutMs: jevThreshold("JEV_PLAN_GATE_TIMEOUT_MS", 1500), purpose: "plan-gate" },
+    { purpose: "plan-gate" },
   ).catch(() => null);
   const ms = Date.now() - started;
   const probability = answers?.["multiStep"]?.noul;

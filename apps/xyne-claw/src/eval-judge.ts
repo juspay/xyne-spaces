@@ -93,7 +93,6 @@ export interface JevJudgeProbabilities {
   empty: number;
 }
 
-const JEV_JUDGE_TIMEOUT_MS = Math.max(1000, Number(process.env["EVAL_JEV_TIMEOUT_MS"] ?? 15_000));
 
 const JEV_CONFIDENT = 0.5;
 const JEV_CONTRADICTS_CONFIDENT = 0.6;
@@ -164,7 +163,6 @@ async function judgeViaJev(backend: JudgeBackendName, input: EvalJudgeInput): Pr
 
   const answers = await jevAskOn(backend, state, questions, {
     purpose: "eval-judge",
-    timeoutMs: JEV_JUDGE_TIMEOUT_MS,
   });
   if (!answers) return { score: null, reasoning: "judge_unavailable" };
 

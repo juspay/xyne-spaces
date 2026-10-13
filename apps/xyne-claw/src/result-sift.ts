@@ -9,7 +9,6 @@ const MIN_KEEP = Math.max(1, Number(process.env["JEV_RESULT_SIFT_MIN_KEEP"]) || 
 const MAX_ITEMS = Math.max(MIN_ITEMS, Number(process.env["JEV_RESULT_SIFT_MAX_ITEMS"]) || 600);
 const ITEM_PREVIEW_CHARS = 500;
 const MIN_REDUCTION = 0.25;
-const SIFT_TIMEOUT_MS = Math.max(500, Number(process.env["JEV_RESULT_SIFT_TIMEOUT_MS"]) || 4_000);
 
 export interface SplitResult {
   head: string;
@@ -158,7 +157,6 @@ export async function siftToolResult(params: {
       key: (item) => String(item.index),
       instructions: (item) =>
         `This item contains information that helps answer the user's request: ${item.text.slice(0, ITEM_PREVIEW_CHARS)}`,
-      timeoutMs: SIFT_TIMEOUT_MS,
     },
   );
   if (!scores) return null;

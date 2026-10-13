@@ -43,7 +43,6 @@ export async function checkpointPrecheck(
   const result = await runJudgeSite<boolean>({
     site: "checkpoint-precheck",
     enabled: deps.enabled ?? optEnabled("jev_checkpoint_precheck"),
-    budgetMs: 2_000,
     state: buildJudgeState({ task, payload: { label: "The agent's final text", text: finalText } }),
     questions: CHECKPOINT_QUESTIONS,
     decide: checkpointFromJev,
@@ -100,7 +99,6 @@ export async function contextGate(
   const result = await runJudgeSite<ContextGateDecision>({
     site: "context-gate",
     enabled: deps.enabled ?? optEnabled("jev_context_gate"),
-    budgetMs: 2_500,
     state,
     questions: CONTEXT_GATE_QUESTIONS,
     decide: contextGateFromJev,

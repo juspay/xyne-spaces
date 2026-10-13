@@ -83,7 +83,6 @@ export async function routeTaskMode(
   const routed = await runJudgeSite<ModeRouteResult>({
     site: "mode-router",
     enabled: optEnabled("jev_mode_router"),
-    budgetMs: 1_500,
     state: `## The user's message (data)\n<<<DATA\n${trimmed.slice(0, MAX_TASK_CHARS)}\nDATA>>>`,
     questions: modeQuestion(commands),
     decide: (answers) => routeFromJev(commands, answers),

@@ -127,7 +127,6 @@ export function installToolBudget(
       void runJudgeSite<boolean>({
         site: "tool-progress",
         enabled: true,
-        budgetMs: 2_500,
         state: buildJudgeState({
           task: currentRunTask(),
           messages: currentRunMessages(),

@@ -151,7 +151,6 @@ export async function judgeGoalProgress(input: GoalJudgeInput): Promise<GoalJudg
   const result = await runJudgeSite<GoalJudgeDecision>({
     site: "goal-judge",
     enabled: optEnabled("jev_goal_prefilter"),
-    budgetMs: 2_500,
     state,
     questions: GOAL_QUESTIONS,
     decide: goalFromJev,

@@ -8,7 +8,7 @@ const MAX_REQUIREMENTS = 8;
 export type PrecheckAsk = (
   state: string,
   questions: Record<string, JevQuestion>,
-  opts: { purpose: string; timeoutMs: number },
+  opts: { purpose: string },
 ) => Promise<Record<string, JevAnswer> | null>;
 
 export interface Precheck {
@@ -91,7 +91,6 @@ export function precheckEnabled(): boolean {
 export async function runPrecheck(input: VerifyResponseInput, ask: PrecheckAsk = jevAsk): Promise<Precheck | null> {
   const answers = await ask(buildPrecheckState(input), buildPrecheckQuestions(input.criteria), {
     purpose: "verify-prefilter",
-    timeoutMs: jevThreshold("JEV_VERIFY_TIMEOUT_MS", 3_000),
   }).catch(() => null);
   return answers ? scorePrecheck(answers, input.criteria) : null;
 }
