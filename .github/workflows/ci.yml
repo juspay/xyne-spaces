@@ -160,6 +160,8 @@ jobs:
     env:
       TEST_ENV: test
       BROWSER: chromium
+      # Gauge workers; forwarded into the automation container by the runner.
+      PARALLEL: 5
     steps:
       - uses: actions/checkout@v5
 
