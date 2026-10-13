@@ -2,7 +2,12 @@ import type { JsonValue } from '@openfeature/server-sdk';
 import { logger } from '@/utils/logger';
 import { superpositionClient } from '@/services/superpositionClient';
 import { ASSISTANT_ROUTE_NONE_ID as NONE_ID } from '@/validators/assistantRouteValidator';
-import { askJev, isJevConfigured, type JevChoiceQuestion } from '@/services/queryIntent/jevClient';
+import {
+  askJev,
+  isJevConfigured,
+  type JevChoiceQuestion,
+  type JevFailure,
+} from '@/services/queryIntent/jevClient';
 
 export interface AssistantRouteAction {
   id: string;
@@ -13,6 +18,24 @@ type AssistantRouteResult =
   | { route: 'actions'; actionIds: string[]; confidence: number }
   | { route: 'ask_ai'; reason: 'none' | 'low_confidence' }
   | { route: 'unavailable' };
+
+// Why a route was unavailable. Logged, not returned: the client treats every cause the same way.
+type UnavailableReason =
+  | 'classifier_not_configured'
+  | 'config_unavailable'
+  | 'disabled'
+  | 'classifier_timeout'
+  | 'classifier_network'
+  | 'classifier_http_error'
+  | 'classifier_bad_answer'
+  | 'cancelled';
+
+// Expected states, not breakage: logged at info so they don't warn on every message.
+const QUIET_REASONS: ReadonlySet<UnavailableReason> = new Set([
+  'classifier_not_configured',
+  'disabled',
+  'cancelled',
+]);
 
 interface AssistantRouteContext {
   userId: string;
@@ -27,7 +50,7 @@ const CONFIG_KEY = 'assistant_route_config';
 const ACTION_THRESHOLD = 0.85;
 const ALSO_THRESHOLD = 0.1;
 
-const TIMEOUT_MS = 2500;
+const TIMEOUT_MS = 5000;
 
 const NONE_DESCRIPTION =
   'None of these: a general question, or a request about something else, for the AI assistant to answer.';
@@ -72,6 +95,22 @@ const getConfig = async (ctx: AssistantRouteContext): Promise<AssistantRouteConf
   };
 };
 
+const failureReason = (
+  failure: JevFailure | undefined,
+  signal?: AbortSignal
+): UnavailableReason => {
+  switch (failure?.kind) {
+    case 'timeout':
+      return 'classifier_timeout';
+    case 'network':
+      return 'classifier_network';
+    case 'status':
+      return 'classifier_http_error';
+    default:
+      return signal?.aborted ? 'cancelled' : 'classifier_bad_answer';
+  }
+};
+
 const shuffle = <T>(items: T[]): T[] => {
   const out = [...items];
   for (let i = out.length - 1; i > 0; i--) {
@@ -88,21 +127,31 @@ export const routeAssistantMessage = async (
   signal?: AbortSignal
 ): Promise<AssistantRouteResult> => {
   const started = Date.now();
-  const finish = (result: AssistantRouteResult, chosen?: string, confidence?: number) => {
-    // Never the text or the action descriptions: they are user content.
-    logger.info('assistant route', {
-      route: result.route,
-      ...(chosen ? { chosen } : {}),
-      ...(confidence !== undefined ? { confidence } : {}),
+  // Never the text or the action descriptions: they are user content.
+  const log = (level: 'info' | 'warn', fields: Record<string, unknown>) =>
+    logger[level]('assistant route', {
+      ...fields,
       actions: actions.length,
       latencyMs: Date.now() - started,
     });
+  const finish = (result: AssistantRouteResult, chosen?: string, confidence?: number) => {
+    log('info', {
+      route: result.route,
+      ...(result.route === 'ask_ai' ? { reason: result.reason } : {}),
+      ...(chosen ? { chosen } : {}),
+      ...(confidence !== undefined ? { confidence } : {}),
+    });
     return result;
   };
+  const unavailable = (reason: UnavailableReason): AssistantRouteResult => {
+    log(QUIET_REASONS.has(reason) ? 'info' : 'warn', { route: 'unavailable', reason });
+    return { route: 'unavailable' };
+  };
 
-  if (!isJevConfigured()) return finish({ route: 'unavailable' });
+  if (!isJevConfigured()) return unavailable('classifier_not_configured');
   const config = await getConfig(ctx);
-  if (!config?.enabled) return finish({ route: 'unavailable' });
+  if (!config) return unavailable('config_unavailable');
+  if (!config.enabled) return unavailable('disabled');
 
   // Shuffled against position bias. Built with fromEntries, not `criteria[id] =`: ids come from
   // the request, and fromEntries defines own keys without going through prototype setters.
@@ -112,9 +161,14 @@ export const routeAssistantMessage = async (
   ]);
   const question: JevChoiceQuestion = { type: 'choice', instructions: INSTRUCTIONS, criteria };
 
-  const answers = await askJev({ text: text.trim() }, { action: question }, TIMEOUT_MS, signal);
+  let failure: JevFailure | undefined;
+  const answers = await askJev({ text: text.trim() }, { action: question }, TIMEOUT_MS, signal, {
+    onFailure: (f) => {
+      failure = f;
+    },
+  });
   const answer = answers?.action;
-  if (!answer || answer.type !== 'choice') return finish({ route: 'unavailable' });
+  if (!answer || answer.type !== 'choice') return unavailable(failureReason(failure, signal));
 
   if (answer.choice === NONE_ID) return finish({ route: 'ask_ai', reason: 'none' }, NONE_ID);
 
