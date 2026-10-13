@@ -193,9 +193,9 @@ export const getFleetStatsTool: ToolDefinition = {
     "failure %, p50/p95 run duration and where run time goes (LLM wait, LLM generation, tools, other); " +
     "a per-agent table (runs, failed, cancelled, failure %, p50/p95, LLM wait, time to first token, tool " +
     "time, turns, retries, tokens, ratings, change vs baseline); the slowest agents with the dominant " +
-    "cause of their run time, top retry reasons and their slowest tools; the top normalised error " +
-    "messages with counts, affected agents, first/last seen and example session ids; per-tool call " +
-    "counts, error % and p50/p95 latency; and per provider/model failure %, retries, time to first token " +
+    "cause of their run time and top retry reasons; the top normalised error messages with counts, " +
+    "affected agents, first/last seen and example session ids; the most-used tools (runs using each, and " +
+    "which agents); and per provider/model failure %, retries, time to first token " +
     "and tokens/sec. Use it for daily fleet reports and \"which agents are failing or slow and why\". " +
     "Restricted to claw admins. Read-only.",
   source: "custom:agent-introspect",

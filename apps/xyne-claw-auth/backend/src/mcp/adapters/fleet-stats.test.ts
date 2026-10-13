@@ -7,7 +7,7 @@ vi.mock("../../logger.js", () => ({ createLogger: () => ({ info: vi.fn(), warn: 
 vi.mock("../../db.js", () => ({ prisma: { agentRun: { findMany } } }));
 vi.mock("../../middleware/agent-acl.js", () => ({ isClawAdmin }));
 
-const { buildFleetStats, handleGetFleetStats, normalizeError, summarizeBaseline, ToolAccumulator } = await import("./fleet-stats.js");
+const { buildFleetStats, handleGetFleetStats, normalizeError, summarizeBaseline, summarizeToolUsage } = await import("./fleet-stats.js");
 type Row = import("./fleet-stats.js").FleetRunRow;
 
 const from = new Date("2026-10-13T00:00:00.000Z");
@@ -101,12 +101,10 @@ describe("buildFleetStats", () => {
     const stats = buildFleetStats({
       ...base,
       runs: [...slow, run({ agentSlug: "rare", durationMs: 900_000 })],
-      tools: [{ tool: "sandbox-run", calls: 10, errors: 1, p50Ms: 5_000, p95Ms: 60_000, agents: ["slow"] }],
     }) as Record<string, any>;
     expect(stats.slowestAgents).toHaveLength(1);
     expect(stats.slowestAgents[0].agentSlug).toBe("slow");
     expect(stats.slowestAgents[0].likelyCause).toMatch(/^tool calls — 75% of run time/);
-    expect(stats.slowestAgents[0].slowestTools).toEqual([{ tool: "sandbox-run", p95Ms: 60_000 }]);
   });
 
   it("reports provider health per provider and model", () => {
@@ -143,22 +141,16 @@ describe("summarizeBaseline", () => {
   });
 });
 
-describe("ToolAccumulator", () => {
-  it("reads toolName (or legacy name), errors and durations, ignoring junk", () => {
-    const acc = new ToolAccumulator();
-    acc.add("a", [
-      { toolName: "webfetch", durationMs: 100, isError: false },
-      { toolName: "webfetch", durationMs: 300, isError: true },
-      { name: "legacy", durationMs: "50" },
-      { durationMs: 10 },
-      null,
-    ]);
-    acc.add("b", { not: "an array" });
-    acc.add("b", [{ toolName: "webfetch" }]);
-    const rows = acc.rows().sort((x, y) => x.tool.localeCompare(y.tool));
+describe("summarizeToolUsage", () => {
+  it("counts runs using each tool once per run, with the agents that used it", () => {
+    const rows = summarizeToolUsage([
+      { agentSlug: "a", toolsUsed: ["webfetch", "webfetch", "sandbox-run"] },
+      { agentSlug: "b", toolsUsed: ["webfetch", ""] },
+      { agentSlug: "c", toolsUsed: null },
+    ]).sort((x, y) => x.tool.localeCompare(y.tool));
     expect(rows).toEqual([
-      { tool: "legacy", calls: 1, errors: 0, p50Ms: 50, p95Ms: 50, agents: ["a"] },
-      { tool: "webfetch", calls: 3, errors: 1, p50Ms: 200, p95Ms: 290, agents: ["a", "b"] },
+      { tool: "sandbox-run", calls: 1, errors: 0, p50Ms: null, p95Ms: null, agents: ["a"] },
+      { tool: "webfetch", calls: 2, errors: 0, p50Ms: null, p95Ms: null, agents: ["a", "b"] },
     ]);
   });
 });
@@ -181,7 +173,7 @@ describe("handleGetFleetStats", () => {
     expect(JSON.parse(await handleGetFleetStats({}, "org", undefined)).error).toMatch(/claw admins/);
   });
 
-  it("scopes every query to the org, clamps params and pages tool invocations", async () => {
+  it("scopes every query to the org and clamps params", async () => {
     isClawAdmin.mockResolvedValue(true);
     const started = new Date(Date.now() - 3_600_000);
     findMany
@@ -190,20 +182,19 @@ describe("handleGetFleetStats", () => {
           sessionId: "s1", agentSlug: "a", status: "completed", provider: "claude", model: "opus", triggerSource: "spaces",
           startedAt: started, completedAt: new Date(started.getTime() + 12_000), totalMs: null, llmTotalMs: 6000,
           llmWaitMs: null, llmDecodeMs: null, toolMs: 4000, ttftMs: null, tokensPerSec: null, llmTurns: 3, llmRetries: 0,
-          lastRetryReason: null, error: null, tokensIn: 10, tokensOut: 5, rating: "up",
+          lastRetryReason: null, error: null, tokensIn: 10, tokensOut: 5, rating: "up", toolsUsed: ["webfetch"],
         },
       ])
       .mockResolvedValueOnce([
         { agentSlug: "a", status: "completed", error: null, startedAt: started, completedAt: new Date(started.getTime() + 12_000) },
-      ])
-      .mockResolvedValueOnce([{ id: "r1", agentSlug: "a", toolInvocations: [{ toolName: "webfetch", durationMs: 300, isError: true }] }]);
+      ]);
     const out = JSON.parse(await handleGetFleetStats({ hours: 999, baselineDays: 0, agentSlugs: ["a", " ", 3] }, "org", "admin"));
     expect(out.window.hours).toBe(168);
     expect(out.baselineDays).toBe(1);
     expect(out.agents[0]).toMatchObject({ agentSlug: "a", runs: 1, p50S: 12, ratingsUp: 1, p95ChangePct: 0 });
-    expect(out.tools[0]).toMatchObject({ tool: "webfetch", calls: 1, errors: 1, errorPct: 100 });
-    expect(out).toMatchObject({ toolRunsScanned: 1, toolScanTruncated: false });
-    expect(findMany).toHaveBeenCalledTimes(3);
+    expect(out.tools[0]).toEqual({ tool: "webfetch", runsUsing: 1, agents: ["a"] });
+    expect(out.agents[0]).not.toHaveProperty("toolsUsed");
+    expect(findMany).toHaveBeenCalledTimes(2);
     for (const [arg] of findMany.mock.calls) {
       expect(arg.where).toMatchObject({ orgId: "org", agentSlug: { in: ["a"] } });
     }

@@ -195,11 +195,6 @@ export function buildFleetStats(input: FleetStatsInput): Record<string, unknown>
       timeBreakdown: a.timeBreakdown,
       likelyCause: dominantCause(a.timeBreakdown, a.llmRetries, a.runs),
       topRetryReasons: a.topRetryReasons,
-      slowestTools: input.tools
-        .filter((t) => t.agents.includes(a.agentSlug))
-        .sort((x, y) => (y.p95Ms ?? 0) - (x.p95Ms ?? 0))
-        .slice(0, 3)
-        .map((t) => ({ tool: t.tool, p95Ms: round(t.p95Ms) })),
     }));
 
   const errorGroups = new Map<string, { count: number; agents: Set<string>; firstSeen: Date; lastSeen: Date; sessions: string[] }>();
@@ -275,14 +270,15 @@ export function buildFleetStats(input: FleetStatsInput): Record<string, unknown>
     distinctErrors: errorGroups.size,
     tools: input.tools
       .slice()
-      .sort((a, b) => b.errors - a.errors || (b.p95Ms ?? 0) - (a.p95Ms ?? 0))
+      .sort((a, b) => b.calls - a.calls)
       .slice(0, input.topTools)
-      .map((t) => ({ ...t, errorPct: pct(t.errors, t.calls), p50Ms: round(t.p50Ms), p95Ms: round(t.p95Ms), agents: t.agents.slice(0, 5) })),
+      .map((t) => ({ tool: t.tool, runsUsing: t.calls, agents: t.agents.slice(0, 5) })),
     providers,
     notes: [
       "Durations are completedAt - startedAt of completed runs (falls back to totalMs).",
       "Runs ended as 'interrupted (orphaned run)' are excluded and counted in overall.orphanedExcluded.",
       "timeBreakdown is each phase's share of total run time; llmOther = LLM time not attributed to wait/decode.",
+      "tools[].runsUsing counts runs that used the tool (from toolsUsed); per-tool error rates and latency are not included.",
     ],
   };
 }
@@ -291,9 +287,6 @@ function clampInt(raw: unknown, fallback: number, min: number, max: number): num
   const n = Math.trunc(Number(raw));
   return Number.isFinite(n) && raw !== undefined && raw !== null && raw !== "" ? Math.min(Math.max(n, min), max) : fallback;
 }
-
-const TOOL_PAGE = 250;
-const MAX_TOOL_RUNS = 20_000;
 
 interface RunTiming {
   agentSlug: string;
@@ -327,36 +320,18 @@ export function summarizeBaseline(rows: RunTiming[]): FleetBaselineRow[] {
   }));
 }
 
-export class ToolAccumulator {
-  private readonly byTool = new Map<string, { calls: number; errors: number; durations: number[]; agents: Set<string> }>();
-
-  add(agentSlug: string, invocations: unknown): void {
-    if (!Array.isArray(invocations)) return;
-    for (const inv of invocations) {
-      if (!inv || typeof inv !== "object") continue;
-      const o = inv as Record<string, unknown>;
-      const name = typeof o["toolName"] === "string" ? o["toolName"] : typeof o["name"] === "string" ? o["name"] : null;
-      if (!name) continue;
-      const t = this.byTool.get(name) ?? { calls: 0, errors: 0, durations: [], agents: new Set<string>() };
-      t.calls += 1;
-      if (o["isError"] === true) t.errors += 1;
-      const d = Number(o["durationMs"]);
-      if (o["durationMs"] !== undefined && o["durationMs"] !== null && Number.isFinite(d) && d >= 0) t.durations.push(d);
-      t.agents.add(agentSlug);
-      this.byTool.set(name, t);
+export function summarizeToolUsage(rows: Array<{ agentSlug: string; toolsUsed: string[] | null }>): FleetToolRow[] {
+  const byTool = new Map<string, { runs: number; agents: Set<string> }>();
+  for (const r of rows) {
+    for (const tool of new Set(r.toolsUsed ?? [])) {
+      if (!tool) continue;
+      const t = byTool.get(tool) ?? { runs: 0, agents: new Set<string>() };
+      t.runs += 1;
+      t.agents.add(r.agentSlug);
+      byTool.set(tool, t);
     }
   }
-
-  rows(): FleetToolRow[] {
-    return [...this.byTool].map(([tool, t]) => ({
-      tool,
-      calls: t.calls,
-      errors: t.errors,
-      p50Ms: percentile(t.durations, 0.5),
-      p95Ms: percentile(t.durations, 0.95),
-      agents: [...t.agents].slice(0, 20),
-    }));
-  }
+  return [...byTool].map(([tool, t]) => ({ tool, calls: t.runs, errors: 0, p50Ms: null, p95Ms: null, agents: [...t.agents].slice(0, 20) }));
 }
 
 export async function handleGetFleetStats(
@@ -410,6 +385,7 @@ export async function handleGetFleetStats(
         tokensIn: true,
         tokensOut: true,
         rating: true,
+        toolsUsed: true,
       },
     }),
     prisma.agentRun.findMany({
@@ -418,23 +394,6 @@ export async function handleGetFleetStats(
     }),
   ]);
 
-  const tools = new ToolAccumulator();
-  let cursor: string | undefined;
-  let scanned = 0;
-  while (scanned < MAX_TOOL_RUNS) {
-    const page = await prisma.agentRun.findMany({
-      where: { ...scope, startedAt: { gte: from } },
-      select: { id: true, agentSlug: true, toolInvocations: true },
-      orderBy: { id: "asc" },
-      take: TOOL_PAGE,
-      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-    });
-    for (const r of page) tools.add(r.agentSlug, r.toolInvocations);
-    scanned += page.length;
-    if (page.length < TOOL_PAGE) break;
-    cursor = page[page.length - 1]!.id;
-  }
-
   const stats = buildFleetStats({
     from,
     to,
@@ -442,14 +401,14 @@ export async function handleGetFleetStats(
     topErrors,
     topTools,
     maxAgents,
-    runs: runRows.map((r) => ({
+    runs: runRows.map(({ toolsUsed: _toolsUsed, ...r }) => ({
       ...r,
       durationMs: durationMs(r),
       lastRetryReason: r.lastRetryReason?.slice(0, 300) ?? null,
       error: r.error?.slice(0, 500) ?? null,
     })),
     baseline: summarizeBaseline(baselineRows),
-    tools: tools.rows(),
+    tools: summarizeToolUsage(runRows),
   });
-  return JSON.stringify({ ...stats, toolRunsScanned: scanned, toolScanTruncated: scanned >= MAX_TOOL_RUNS });
+  return JSON.stringify(stats);
 }
