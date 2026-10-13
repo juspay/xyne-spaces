@@ -37,11 +37,7 @@ import { XyneAIStar } from '../../../components/icons/xyne-ai';
 import Avatar from '../../../components/ui/Avatar/Avatar';
 import { Button } from '../../../components/ui/Button/Button';
 import { Popover } from '../../../components/ui/Popover';
-import {
-  SummaryTemplateTourStep,
-  summaryTemplateTour,
-  useSummaryTemplateTour,
-} from '../../../components/SummaryTemplateTour';
+import { SummaryTemplateTourStep } from '../../../components/SummaryTemplateTour';
 import { Switch } from '../../../components/ui/Switch';
 import { useHasResourceAccess } from '../../../hooks/usePermissions';
 import { useUser } from '../../../hooks/useUsers';
@@ -364,7 +360,6 @@ export function SummaryTemplatesModal({
   const isDraftOwner = draft?.createdBy === currentUserId;
 
   const nameInputRef = useRef<HTMLInputElement>(null);
-  const { activeStep: tourStep } = useSummaryTemplateTour();
   const limitMessageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sectionSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -391,13 +386,6 @@ export function SummaryTemplatesModal({
     setOriginalDraft(null);
     setIsCreatingTemplate(true);
   };
-
-  // The tour's "new template" step is done once a blank draft is open, whether the
-  // user clicked the button themselves or let the tour do it.
-  const isEditingNewDraft = isCreatingTemplate && draft !== null && draft.id === null;
-  useEffect((): void => {
-    if (tourStep === 'new-template' && isEditingNewDraft) summaryTemplateTour.next();
-  }, [isEditingNewDraft, tourStep]);
 
   useEffect(() => {
     if (draft) return;
@@ -893,7 +881,6 @@ export function SummaryTemplatesModal({
               variant='outline'
               onClick={startNewTemplate}
               className='h-9 w-full gap-2.5 rounded-lg border-border px-3 shadow-none hover:bg-muted'
-              data-tour='summary-template-new'
               data-track-category='SummaryTemplates'
               data-track-name='NewTemplate'
             >
@@ -1048,7 +1035,6 @@ export function SummaryTemplatesModal({
                     onChange={event => updateTemplateName(event.target.value)}
                     readOnly={!isEditable}
                     aria-label='Template name'
-                    data-tour='summary-template-name'
                     className='w-full bg-transparent py-0.5 text-2xl font-bold tracking-tight outline-none read-only:cursor-default placeholder:text-muted-foreground/40 placeholder:text-medium'
                     data-track-category='SummaryTemplates'
                     data-track-name='EditName'
@@ -1164,10 +1150,7 @@ export function SummaryTemplatesModal({
               </div>
 
               <section className='py-3'>
-                <div
-                  className='mb-2.5 flex items-center gap-2.5'
-                  data-tour='summary-template-context'
-                >
+                <div className='mb-2.5 flex items-center gap-2.5'>
                   <div className='min-w-0 flex-1'>
                     <h3 className='font-semibold'>Meeting Context</h3>
                     <p className='text-sm text-muted-foreground'>
@@ -1218,10 +1201,7 @@ export function SummaryTemplatesModal({
               </section>
 
               <section className='pb-3 flex flex-col gap-2.5 justify-start items-start w-full'>
-                <div
-                  className='mb-2.5 flex items-center gap-2.5 w-full'
-                  data-tour='summary-template-sections'
-                >
+                <div className='mb-2.5 flex items-center gap-2.5 w-full'>
                   <div className='min-w-0 flex-1'>
                     <h3 className='font-semibold'>Sections</h3>
                     <p className='text-sm text-muted-foreground'>
@@ -1563,23 +1543,7 @@ export function SummaryTemplatesModal({
 
       {/* Tour coachmarks live inside the dialog tree so Radix keeps the dialog open
           while the user clicks through them. */}
-      <SummaryTemplateTourStep
-        step='new-template'
-        target='summary-template-new'
-        side='right'
-        align='start'
-        onNext={startNewTemplate}
-      />
-      <SummaryTemplateTourStep step='name' target='summary-template-name' showBack />
-      <SummaryTemplateTourStep step='context' target='summary-template-context' showBack />
-      <SummaryTemplateTourStep step='sections' target='summary-template-sections' showBack />
-      <SummaryTemplateTourStep
-        step='save'
-        target='summary-template-save'
-        side='top'
-        align='end'
-        showBack
-      />
+      <SummaryTemplateTourStep step='save' target='summary-template-save' side='top' align='end' />
     </div>
   );
 }

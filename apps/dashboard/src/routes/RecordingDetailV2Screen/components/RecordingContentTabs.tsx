@@ -19,6 +19,12 @@ import { cn } from '../../../utils/classNames';
 import { Button } from '../../../components/ui/Button/Button';
 import { Popover } from '../../../components/ui/Popover';
 import {
+  SummaryTemplateTourStep,
+  isSummaryTemplateMenuStep,
+  summaryTemplateTour,
+  useSummaryTemplateTour,
+} from '../../../components/SummaryTemplateTour';
+import {
   SummaryTemplateGlyph,
   SummaryTemplateMenu,
 } from '../../../components/SummaryTemplateMenu/SummaryTemplateMenu';
@@ -81,6 +87,12 @@ export const RecordingContentTabs = ({
 }: RecordingContentTabsProps): ReactElement => {
   const shouldReduceMotion = useReducedMotion();
   const [isTemplateMenuOpen, setIsTemplateMenuOpen] = useState(false);
+  // The template tour's first steps point into the dropdown, so it opens for them.
+  const { activeStep: tourStep } = useSummaryTemplateTour();
+  const isTourInMenu = isSummaryTemplateMenuStep(tourStep);
+  useEffect(() => {
+    if (isTourInMenu) setIsTemplateMenuOpen(true);
+  }, [isTourInMenu]);
   // The offer popover anchors to the summary segment without being its trigger,
   // since the template menu already owns that role.
   const [summaryTrigger, setSummaryTrigger] = useState<HTMLButtonElement | null>(null);
@@ -317,6 +329,8 @@ export const RecordingContentTabs = ({
           onOpenChange={open => {
             if (isActive) {
               if (open) onTemplateMenuOpen?.();
+              // Closing the dropdown by hand ends a tour that was pointing into it.
+              if (!open && isTourInMenu) summaryTemplateTour.dismiss();
               setIsTemplateMenuOpen(open);
             }
           }}
@@ -338,6 +352,25 @@ export const RecordingContentTabs = ({
             onNewTemplate={() => onNewTemplate?.()}
             onRequestClose={() => setIsTemplateMenuOpen(false)}
             trackCategory='RecordingDetailV2'
+          />
+          {/* Inside the dropdown's tree so clicking a coachmark does not close it. */}
+          <SummaryTemplateTourStep
+            step='pick-template'
+            target='summary-template-menu-list'
+            side='right'
+            align='start'
+          />
+          <SummaryTemplateTourStep
+            step='new-template'
+            target='summary-template-menu-new'
+            side='right'
+            align='end'
+            showBack
+            onNext={() => {
+              setIsTemplateMenuOpen(false);
+              onNewTemplate?.();
+              summaryTemplateTour.next();
+            }}
           />
         </Popover>
         {offer}

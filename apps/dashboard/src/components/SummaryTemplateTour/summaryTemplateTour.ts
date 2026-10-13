@@ -1,36 +1,46 @@
 import { useSyncExternalStore } from 'react';
 
 /**
- * Guided walkthrough of creating a recording summary template.
+ * Guided walkthrough of changing and creating a recording summary template.
  *
- * It auto-starts once per browser; the shown flag uses the same localStorage
- * key style as `useWalkthrough`. This store itself only tracks the current step.
+ * The user starts it from the "New" pill beside the template selector on a
+ * recording. The first steps run in the template dropdown, the rest inside the
+ * Summary Templates dialog. Finishing or skipping the tour marks it taken in
+ * localStorage (same key style as `useWalkthrough`), which hides the pill.
  */
-export const SUMMARY_TEMPLATE_TOUR_SHOWN_KEY = 'walkthrough_summary_templates';
+export const SUMMARY_TEMPLATE_TOUR_TAKEN_KEY = 'walkthrough_summary_templates';
 
-export const hasShownSummaryTemplateTour = (): boolean => {
+const takenListeners = new Set<() => void>();
+
+const readTaken = (): boolean => {
   try {
-    return localStorage.getItem(SUMMARY_TEMPLATE_TOUR_SHOWN_KEY) === 'true';
+    return localStorage.getItem(SUMMARY_TEMPLATE_TOUR_TAKEN_KEY) === 'true';
   } catch {
-    return true;
+    return false;
   }
 };
 
-const markSummaryTemplateTourShown = (): void => {
+const markTaken = (): void => {
   try {
-    localStorage.setItem(SUMMARY_TEMPLATE_TOUR_SHOWN_KEY, 'true');
+    localStorage.setItem(SUMMARY_TEMPLATE_TOUR_TAKEN_KEY, 'true');
   } catch {
-    // Storage unavailable: the tour may auto-start again next visit, which is harmless.
+    // Storage unavailable: the pill stays, which is harmless.
   }
+  takenListeners.forEach(listener => listener());
 };
 
-export type SummaryTemplateTourStepId =
-  | 'open-templates'
-  | 'new-template'
-  | 'name'
-  | 'context'
-  | 'sections'
-  | 'save';
+/** Whether the user has finished or skipped the tour on this device. */
+export const useSummaryTemplateTourTaken = (): boolean =>
+  useSyncExternalStore(
+    listener => {
+      takenListeners.add(listener);
+      return () => takenListeners.delete(listener);
+    },
+    readTaken,
+    () => false,
+  );
+
+export type SummaryTemplateTourStepId = 'pick-template' | 'new-template' | 'save';
 
 export interface SummaryTemplateTourStep {
   id: SummaryTemplateTourStepId;
@@ -40,34 +50,19 @@ export interface SummaryTemplateTourStep {
 
 export const SUMMARY_TEMPLATE_TOUR_STEPS: readonly SummaryTemplateTourStep[] = [
   {
-    id: 'open-templates',
-    title: 'Summary templates',
-    body: 'Templates decide what every recording summary covers and how it is laid out. This is where you manage them.',
+    id: 'pick-template',
+    title: 'Pick a template',
+    body: 'Each template shapes the summary differently. Choose one here and the summary is rewritten in that shape.',
   },
   {
     id: 'new-template',
-    title: 'Start a new template',
-    body: 'Create one for each kind of meeting you run, like a customer call or a sprint review. Next starts one for you.',
-  },
-  {
-    id: 'name',
-    title: 'Name it',
-    body: 'Use a name that says what the meeting is, like “Customer discovery call”. It is how you will spot the template later.',
-  },
-  {
-    id: 'context',
-    title: 'Describe the meeting',
-    body: 'Tell AI what this kind of meeting is about. Xyne uses it to auto-pick the template for matching recordings. Let AI draft it if you prefer.',
-  },
-  {
-    id: 'sections',
-    title: 'Choose the sections',
-    body: 'Each section becomes a part of the summary, like Decisions or Action items. Add your own or let AI suggest them.',
+    title: 'Or create your own',
+    body: 'Make a template for each kind of meeting you run, like a customer call or a sprint review. Next opens the editor.',
   },
   {
     id: 'save',
-    title: 'Save and use it',
-    body: 'Save the template, then pick it from the Summary tab of any recording to regenerate that summary in this shape.',
+    title: 'Fill it in and save',
+    body: 'Give it a name, describe the meeting and add the sections you want, then hit Save. The template is ready to use right away.',
   },
 ];
 
@@ -91,25 +86,27 @@ const setStepIndex = (next: number | null): void => {
   emit();
 };
 
+/** Steps that live in the template dropdown rather than the templates dialog. */
+export const isSummaryTemplateMenuStep = (step: SummaryTemplateTourStepId | null): boolean =>
+  step === 'pick-template' || step === 'new-template';
+
 export const summaryTemplateTour = {
   isActive: (): boolean => stepIndex !== null,
-  /** Starts the tour on request (a replay never consults the shown flag). */
   start: (): void => setStepIndex(0),
-  /** Auto-start: runs once per browser and records that it was shown. */
-  startOnce: (): boolean => {
-    if (stepIndex !== null || hasShownSummaryTemplateTour()) return false;
-    markSummaryTemplateTourShown();
-    setStepIndex(0);
-    return true;
-  },
-  /** Moves on; past the last step this just closes the tour. */
+  /** Moves on; past the last step the tour counts as taken and closes. */
   next: (): void => {
     if (stepIndex === null) return;
     if (stepIndex >= SUMMARY_TEMPLATE_TOUR_STEPS.length - 1) {
+      markTaken();
       setStepIndex(null);
       return;
     }
     setStepIndex(stepIndex + 1);
+  },
+  /** "Skip tour": counts as taken, unlike an incidental close. */
+  skip: (): void => {
+    markTaken();
+    setStepIndex(null);
   },
   back: (): void => {
     if (stepIndex === null || stepIndex === 0) return;

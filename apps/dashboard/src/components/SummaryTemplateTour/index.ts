@@ -1,8 +1,9 @@
 export { SummaryTemplateTourStep } from './SummaryTemplateTourStep';
 export {
-  SUMMARY_TEMPLATE_TOUR_SHOWN_KEY,
   SUMMARY_TEMPLATE_TOUR_STEPS,
-  hasShownSummaryTemplateTour,
+  SUMMARY_TEMPLATE_TOUR_TAKEN_KEY,
+  useSummaryTemplateTourTaken,
+  isSummaryTemplateMenuStep,
   summaryTemplateTour,
   useSummaryTemplateTour,
   type SummaryTemplateTourStepId,
