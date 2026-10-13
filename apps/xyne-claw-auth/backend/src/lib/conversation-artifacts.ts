@@ -4,6 +4,8 @@ import { prisma } from "../db.js";
 import { orgIdForSpacesUser } from "./users-jit.js";
 import { createLogger } from "../logger.js";
 import { signalArtifacts } from "./panel-signals.js";
+import { baseConversationId, checkConversationAccess } from "./conversation-access.js";
+import { isDirectChatConversation } from "./conversation-kind.js";
 
 const log = createLogger("conversation-artifacts");
 
@@ -229,23 +231,62 @@ export async function setArtifactVersionRef(args: {
   return result.count;
 }
 
+export interface ConversationReadContext {
+  /** The caller's workspace-scoped Spaces user id (x-spaces-user-id). Spaces'
+   *  conversation-access ACL matches channel_participants by this id, not by
+   *  the canonical Claw id. Omit when the caller has no Spaces identity. */
+  spacesUserId?: string | null | undefined;
+}
+
 export async function listConversationArtifacts(
   conversationId: string,
   userIds: string | string[],
+  context: ConversationReadContext = {},
 ): Promise<ConversationArtifact[]> {
   const ids = Array.isArray(userIds) ? userIds : [userIds];
   if (!conversationId || ids.length === 0 || ids.every((id) => !id)) return [];
-  const owns = await userOwnsConversation(conversationId, ids);
+  const canSeeAll = await canReadConversation(conversationId, ids, context);
   return prisma.conversationArtifact.findMany({
     where: {
       conversationId,
       status: { not: "DELETED" },
       // Artifact/ownership rows may be keyed by EITHER id form of the user
       // (canonical Claw id or the raw Spaces alias) — match all.
-      ...(owns ? {} : { createdByUserId: { in: ids } }),
+      ...(canSeeAll ? {} : { createdByUserId: { in: ids } }),
     },
     orderBy: [{ pinned: "desc" }, { createdAt: "desc" }],
   });
+}
+
+/**
+ * Whether the caller may see EVERY artifact in a conversation, not only the
+ * ones they created. True when either:
+ *  - they have posted in it (legacy rule, kept so nothing that is visible
+ *    today disappears), or
+ *  - it is a Spaces thread and Spaces — the ACL owner — says they can access
+ *    it (channel member, or a PUBLIC channel in their workspace).
+ *
+ * Previously only the first rule applied, so a collaborator who opened a
+ * shared thread without posting saw none of the owner's artifacts
+ * (XYNE-66344). Direct chats (`chat-…`) have no Spaces conversation row and no
+ * share model yet, so they stay on the posted-or-created rule. An "unknown"
+ * verdict (Spaces unreachable / no row) does not widen access.
+ */
+export async function canReadConversation(
+  conversationId: string,
+  userIds: string | string[],
+  context: ConversationReadContext = {},
+): Promise<boolean> {
+  const ids = Array.isArray(userIds) ? userIds : [userIds];
+  if (await userOwnsConversation(conversationId, ids)) return true;
+  const base = baseConversationId(conversationId);
+  const spacesUserId = context.spacesUserId?.trim();
+  if (!base || !spacesUserId || isDirectChatConversation(base)) return false;
+  const verdict = await checkConversationAccess(base, spacesUserId);
+  if (verdict !== "ok") {
+    log.info(`conversation-wide artifact read not granted verdict=${verdict} conversationId=${base}`);
+  }
+  return verdict === "ok";
 }
 
 export async function userOwnsConversation(conversationId: string, userIds: string | string[]): Promise<boolean> {
