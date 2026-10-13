@@ -79,54 +79,63 @@ export function useAgentProgress(sessionId: string | undefined): UseAgentProgres
   // and is dropped forever; a brand-new run has a fresh sessionId and is shown
   // immediately. Deterministic: no timers, and never blocks an immediate re-run.
   const doneSessionsRef = useRef<Set<string>>(new Set());
+  // Incremented for every live progress event. Snapshot responses use this to avoid
+  // overwriting a newer WebSocket update that arrived while the GET was in flight.
+  const liveEventVersionRef = useRef(0);
 
   useEffect(() => {
     if (!sessionId) return;
 
     doneSessionsRef.current = new Set();
 
-    // Rehydrate from the server-side Redis hash on mount so reopening the thread
-    // mid-run still shows the spinner (pub/sub doesn't replay past events).
+    // Rehydrate from the server-side Redis hash on mount and after a socket
+    // reconnect. Pub/sub does not replay events, so this snapshot repairs state
+    // without continuously polling while the socket is healthy.
     let aborted = false;
-    void apiInstance
-      .get<{
-        data?: Array<{
-          agentSlug?: string | null;
-          agentName?: string | null;
-          agentUserId?: string | null;
-          sessionId?: string | null;
-          toolLabel?: string | null;
-          conversationId?: string;
-          triggeredByUserId?: string | null;
-        }>;
-      }>(`/conversations/${encodeURIComponent(sessionId)}/agent-progress`)
-      .then(res => {
-        if (aborted) return;
-        const entries = res.data.data ?? [];
-        if (entries.length === 0) return;
-        setActive(prev => {
-          const next = new Map(prev);
-          for (const d of entries) {
-            if (d.conversationId && d.conversationId !== sessionId) continue;
-            const key = d.agentUserId ?? d.agentSlug ?? 'unknown';
-            if (next.has(key)) continue; // live socket event already placed it
-            if (d.sessionId && doneSessionsRef.current.has(d.sessionId)) continue; // its run already ended live — don't resurrect
-            next.set(key, {
-              agentSlug: d.agentSlug ?? null,
-              agentName: d.agentName ?? d.agentSlug ?? null,
-              agentUserId: d.agentUserId ?? null,
-              toolLabel: d.toolLabel ?? null,
-              triggeredByUserId: d.triggeredByUserId ?? null,
-              variant: pickRandomAgentSpinnerVariant(),
-              at: Date.now(),
-            });
-          }
-          return next;
+    const reconcileProgress = (): void => {
+      const liveEventVersionAtRequest = liveEventVersionRef.current;
+      void apiInstance
+        .get<{
+          data?: Array<{
+            agentSlug?: string | null;
+            agentName?: string | null;
+            agentUserId?: string | null;
+            sessionId?: string | null;
+            toolLabel?: string | null;
+            conversationId?: string;
+            triggeredByUserId?: string | null;
+          }>;
+        }>(`/conversations/${encodeURIComponent(sessionId)}/agent-progress`)
+        .then(res => {
+          if (aborted || liveEventVersionRef.current !== liveEventVersionAtRequest) return;
+          const entries = res.data.data ?? [];
+          setActive(prev => {
+            if (entries.length === 0) return prev.size === 0 ? prev : new Map();
+            const next = new Map(prev);
+            for (const d of entries) {
+              if (d.conversationId && d.conversationId !== sessionId) continue;
+              const key = d.agentUserId ?? d.agentSlug ?? 'unknown';
+              if (next.has(key)) continue; // live socket event already placed it
+              if (d.sessionId && doneSessionsRef.current.has(d.sessionId)) continue; // its run already ended live — don't resurrect
+              next.set(key, {
+                agentSlug: d.agentSlug ?? null,
+                agentName: d.agentName ?? d.agentSlug ?? null,
+                agentUserId: d.agentUserId ?? null,
+                toolLabel: d.toolLabel ?? null,
+                triggeredByUserId: d.triggeredByUserId ?? null,
+                variant: pickRandomAgentSpinnerVariant(),
+                at: Date.now(),
+              });
+            }
+            return next;
+          });
+        })
+        .catch(() => {
+          /* non-fatal — socket events remain the primary transport */
         });
-      })
-      .catch(() => {
-        /* non-fatal — socket events will populate live state */
-      });
+    };
+
+    reconcileProgress();
 
     const handler = (evt: SessionActivityEvent): void => {
       logger.info(LogEvent.INFO, {
@@ -146,6 +155,7 @@ export function useAgentProgress(sessionId: string | undefined): UseAgentProgres
 
       // Scope the spinner to the thread (conversationId) only — not the channel input.
       if (!d.conversationId || d.conversationId !== sessionId) return;
+      liveEventVersionRef.current += 1;
 
       const key = d.agentUserId ?? d.agentSlug ?? 'unknown';
 
@@ -182,38 +192,19 @@ export function useAgentProgress(sessionId: string | undefined): UseAgentProgres
     };
 
     websocketService.on('session_activity', handler);
+    websocketService.on('connect', reconcileProgress);
     return (): void => {
       aborted = true;
       websocketService.removeListener('session_activity', handler);
+      websocketService.removeListener('connect', reconcileProgress);
       setActive(new Map());
     };
   }, [sessionId]);
 
-  // Auto-expire stale entries + server-verify backstop.
-  //
-  // Two roles:
-  //   1. Local stale-entry sweep: drop entries we haven't heard a heartbeat from
-  //      in STALE_MS (crash-safety for runs that never emit done).
-  //   2. Server-verify (every ~5s while active): re-check the GET endpoint and
-  //      clear the local map if the server says no agents are running. This catches
-  //      the race where the WebSocket done event was emitted during the hook's
-  //      sessionId-transition window (cleanup → new mount) and was therefore missed.
-  //      The GET now filters tombstoned entries server-side, so an empty response is
-  //      authoritative proof that the run is over.
+  // Local crash-safety backstop for runs that never emit `done`. Live state is
+  // socket-driven; server reconciliation happens only on mount/reconnect above.
   useEffect(() => {
-    if (active.size === 0 || !sessionId) return;
-    // Server-verify: poll every 5 s while the spinner is active.
-    const verifyId = setInterval(() => {
-      void apiInstance
-        .get<{ data?: unknown[] }>(`/conversations/${encodeURIComponent(sessionId)}/agent-progress`)
-        .then(res => {
-          if ((res.data.data ?? []).length === 0) setActive(new Map());
-        })
-        .catch(() => {
-          /* non-fatal */
-        });
-    }, 5_000);
-    // Local stale-entry sweep: run every 30 s.
+    if (active.size === 0) return;
     const staleId = setInterval(() => {
       setActive(prev => {
         const now = Date.now();
@@ -228,11 +219,8 @@ export function useAgentProgress(sessionId: string | undefined): UseAgentProgres
         return changed ? next : prev;
       });
     }, 30_000);
-    return (): void => {
-      clearInterval(verifyId);
-      clearInterval(staleId);
-    };
-  }, [active.size, sessionId]);
+    return (): void => clearInterval(staleId);
+  }, [active.size]);
 
   // When another AgentProgressIndicator instance (e.g. channel input vs thread input)
   // successfully aborts the same conversationId, it dispatches this custom event so
