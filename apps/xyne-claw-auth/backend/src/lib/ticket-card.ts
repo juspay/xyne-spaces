@@ -9,6 +9,40 @@ export function parseXyneIdFromToolResult(resultText: string): string | null {
   return match?.[1] ?? null;
 }
 
+/**
+ * The fields the email-sent card shows, read back from what the tool actually
+ * sent rather than from the action's params — on a reply the subject comes
+ * from the thread, so params would show a blank where the recipient saw a
+ * real subject line.
+ */
+export function parseSentEmailFromToolResult(resultText: string): {
+  to: string[];
+  cc: string[];
+  bcc: string[];
+  subject?: string;
+  ticketXyneId?: string;
+} | null {
+  const sent =
+    /^\s*Sent to\s+(.+?)\s*(?:\(cc\s+(.+?)\s*\))?\s*(?:\(bcc\s+(.+?)\s*\))?\.\s*$/im.exec(resultText);
+  if (!sent) return null;
+  const list = (raw: string | undefined): string[] =>
+    (raw ?? "")
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+  const to = list(sent[1]);
+  if (to.length === 0) return null;
+  const subject = /^\s*Subject:\s*(.+?)\s*$/im.exec(resultText)?.[1];
+  const ticketXyneId = /^\s*Ticket:\s*(\S+)\s*$/im.exec(resultText)?.[1];
+  return {
+    to,
+    cc: list(sent[2]),
+    bcc: list(sent[3]),
+    ...(subject ? { subject } : {}),
+    ...(ticketXyneId ? { ticketXyneId } : {}),
+  };
+}
+
 export async function fetchTicketForCard(
   xyneId: string,
   appToken: string,

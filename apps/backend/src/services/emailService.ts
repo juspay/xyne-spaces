@@ -28,6 +28,12 @@ import { adapterRegistry } from '@/integrations/core/adapterRegistry';
 import { ChannelExternalSourceResolver } from '@/services/channelExternalSourceResolver';
 import { websocketService } from './websocketService';
 import { redisService } from './redisService';
+import {
+  clearConversationAgentProgress,
+  listConversationAgentProgress,
+  requestClawAgentCancel,
+} from './agentProgressService';
+import { resolveDefaultReplyRecipients } from '@/utils/email';
 import { isRegisteredBot, getBotInfo } from '@/bots/core/bot-utils';
 import { PrismaClient } from '@prisma/client';
 import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
@@ -74,7 +80,7 @@ import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
 import { ticketDuplicateService, type DuplicateScopeFieldValue } from '@/services/ticketDuplicateService';
 import { tagGenerationPipeline } from '@/tags/pipeline';
 import { DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey } from '@/tags';
-import { buildDraftEmailClawTask } from '@/agents/xyne-ai/prompts/draft';
+import { buildDraftEmailClawTask, buildOpeningDraftEmailClawTask } from '@/agents/xyne-ai/prompts/draft';
 import { runClawAgent } from '@/services/clawAgentService';
 import { convert as htmlToText } from 'html-to-text';
 import type { UserInfo as AgentUserInfo } from '@/agents/xyne-ai/tools/types';
@@ -683,6 +689,13 @@ export class EmailService {
     channelId: string;
     emailSubject: string;
     emailBody: string;
+    /**
+     * The thread has no email on it yet, so the draft OPENS the
+     * correspondence instead of replying to it.
+     */
+    openingEmail?: boolean;
+    /** Already-loaded channel preference, so the caller's gate is not re-read. */
+    preference?: Awaited<ReturnType<EmailChannelPreferenceRepository['findByChannelId']>>;
   }): Promise<void> {
     const { ticketId, conversationId, channelId, emailSubject, emailBody } = params;
     const startTime = Date.now();
@@ -696,7 +709,8 @@ export class EmailService {
       bodyLen: emailBody?.length ?? 0,
     });
 
-    const preference = await this.emailChannelPreferenceRepository.findByChannelId(channelId);
+    const preference =
+      params.preference ?? (await this.emailChannelPreferenceRepository.findByChannelId(channelId));
     if (preference?.autoDraftMode !== AutoDraftMode.DRAFT) {
       logger.info('[AutoDraft] skip: auto-draft not enabled for channel', {
         mode: 'autodraft',
@@ -760,13 +774,21 @@ export class EmailService {
     try {
       const effectiveAgentSlug = autoDraftAgentSlug ?? 'draft-agent';
       const latestBodyText = htmlToText(emailBody || '', { wordwrap: false }).trim() || emailBody;
-      const clawTask = buildDraftEmailClawTask({
-        userInfo,
-        hasDeskSignature,
-        emailSubject,
-        emailBody: latestBodyText,
-        conversationId,
-      });
+      const clawTask = params.openingEmail
+        ? buildOpeningDraftEmailClawTask({
+            userInfo,
+            hasDeskSignature,
+            ticketTitle: emailSubject,
+            ticketDescription: latestBodyText,
+            conversationId,
+          })
+        : buildDraftEmailClawTask({
+            userInfo,
+            hasDeskSignature,
+            emailSubject,
+            emailBody: latestBodyText,
+            conversationId,
+          });
       const callbackUrl = `${config.backendUrl.replace(/\/$/, '')}/api/internal/email/autodraft-callback/${encodeURIComponent(conversationId)}/${encodeURIComponent(channelId)}`;
       const { dispatched } = await runClawAgent({
         agentSlug: effectiveAgentSlug,
@@ -807,6 +829,125 @@ export class EmailService {
       await this.clearAutoDraftGenerating(conversationId);
       return;
     }
+  }
+
+  /**
+   * Drop the machine-written opening draft once that email has actually been
+   * sent, so the desk agent does not open the ticket to a draft of a mail
+   * that already went out. Only the ownerless seed row is touched — a draft a
+   * human wrote is their own row and is left alone.
+   */
+  async discardOpeningAutoDraft(conversationId: string): Promise<void> {
+    let draftingChannelId: string | null = null;
+    try {
+      // The seed row has no owner, so it is resolved above the caller's scope.
+      await withWorkspaceScope(async () => {
+        const seed = await this.prisma.emailDraft.findFirst({
+          where: { conversationId, userId: null },
+          select: { channelId: true, autoDraftStatus: true },
+        });
+        if (seed?.autoDraftStatus === AutoDraftStatus.GENERATING) draftingChannelId = seed.channelId;
+        await this.prisma.emailDraft.deleteMany({ where: { conversationId, userId: null } });
+      });
+    } catch (error) {
+      logger.warn('[AutoDraft] failed to discard the opening draft after send', {
+        conversationId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    if (draftingChannelId) await this.stopOpeningDraftRun(conversationId, draftingChannelId);
+  }
+
+  /**
+   * The opening draft was still being written when its email went out. Deleting
+   * the seed row alone leaves the agent drafting a mail nobody will read, with
+   * its "working" pill sitting on the thread until the run ends by itself — so
+   * stop the run and clear the pill. Best-effort: the mail is already sent.
+   *
+   * Only reached while the seed says GENERATING, so the run being stopped is the
+   * drafting one and not something a person asked the same agent to do here.
+   */
+  private async stopOpeningDraftRun(conversationId: string, channelId: string): Promise<void> {
+    try {
+      const preference = await this.emailChannelPreferenceRepository.findByChannelId(channelId);
+      // The same agent and persona triggerAutoDraft dispatched the run as.
+      const agentSlug = preference?.autoDraftAgentSlug?.trim() || 'draft-agent';
+      // Only the drafting agent's run: another agent may be working on this
+      // thread for a person, and its run and pill are not ours to touch.
+      const drafting = (await listConversationAgentProgress(conversationId)).filter(
+        run => run.agentSlug === agentSlug,
+      );
+      for (const run of drafting) {
+        if (!run.sessionId || !preference?.ownerUserId) continue;
+        const res = await requestClawAgentCancel({
+          conversationId,
+          agentSlug,
+          userId: preference.ownerUserId,
+          sessionId: run.sessionId,
+        });
+        if (!res.ok) {
+          logger.warn('[AutoDraft] could not cancel the opening draft run', {
+            conversationId,
+            sessionId: run.sessionId,
+            status: res.status,
+          });
+        }
+      }
+      await clearConversationAgentProgress(
+        conversationId,
+        channelId,
+        drafting.map(run => run.agentUserId),
+      );
+    } catch (error) {
+      logger.warn('[AutoDraft] failed to stop the opening draft run after send', {
+        conversationId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /**
+   * Auto-draft the FIRST email for a ticket that arrived without one.
+   *
+   * The existing auto-draft only ever fires on an inbound email, so a ticket
+   * raised from WhatsApp or the ticket form reached the desk with an empty
+   * composer — the one case where the agent has to write from scratch. Same
+   * machinery, same per-channel switch (`autoDraftMode = DRAFT`) and same
+   * persona; only the task differs. No-ops on a channel without auto-draft,
+   * and on a ticket whose thread already has email.
+   */
+  async triggerOpeningAutoDraft(params: {
+    ticketId: string;
+    conversationId: string;
+    channelId: string;
+    title: string;
+    description: string;
+  }): Promise<void> {
+    // Cheapest gate first: almost every ticket in the workspace is created on
+    // a channel that is not an email desk at all, and this runs on each one.
+    const preference = await this.emailChannelPreferenceRepository.findByChannelId(params.channelId);
+    if (preference?.autoDraftMode !== AutoDraftMode.DRAFT) return;
+
+    // Only an email desk has a mailbox to send the draft from; an app or Slack
+    // desk with auto-draft on must not get a "first customer email".
+    const channel = await this.channelRepository.findById(params.channelId);
+    if (channel?.type !== ChannelType.EMAIL) return;
+
+    const existing = await this.prisma.email.findFirst({
+      where: { conversationId: params.conversationId },
+      select: { id: true },
+    });
+    if (existing) return;
+
+    await this.triggerAutoDraft({
+      ticketId: params.ticketId,
+      conversationId: params.conversationId,
+      channelId: params.channelId,
+      emailSubject: params.title,
+      emailBody: params.description,
+      openingEmail: true,
+      preference,
+    });
   }
 
   /**
@@ -938,6 +1079,25 @@ export class EmailService {
         where: { conversationId, userId: null },
         select: { id: true },
       });
+      if (!existingSeed) {
+        const latest = await this.prisma.email.findFirst({
+          where: { conversationId },
+          orderBy: { createdAt: 'desc' },
+          select: { id: true, type: true },
+        });
+        const alreadySent =
+          !!latest &&
+          [EmailType.COMPOSE, EmailType.REPLY, EmailType.REPLY_ALL].includes(latest.type as EmailType);
+        if (alreadySent) {
+          logger.info('[AutoDraft] skip persist: the email was already sent while drafting', {
+            mode: 'autodraft',
+            ticketId,
+            conversationId,
+            sessionId,
+          });
+          return;
+        }
+      }
       if (existingSeed) {
         await this.prisma.emailDraft.update({
           where: { id: existingSeed.id },
@@ -1876,9 +2036,11 @@ export class EmailService {
 
     const to = params.to?.length
       ? params.to
-      : params.type === 'REPLY'
-        ? [initialEmail.replyTo?.[0] ?? initialEmail.from]
-        : [...new Set([initialEmail.replyTo?.[0] ?? initialEmail.from, ...initialEmail.to])];
+      : resolveDefaultReplyRecipients({
+          type: params.type,
+          initialEmail,
+          ownAddresses: [fromEmailAddress, preference.sendAsEmail, owner.email, externalSource.displayName],
+        });
     const cc = params.cc ?? (params.type === 'REPLY_ALL' && !params.to ? (initialEmail.cc || []) : []);
     const bcc = params.bcc ?? [];
 

@@ -249,16 +249,24 @@ async function scheduleCapacityRetryIfNeeded(
  * logged so an opted-out agent that starts posting again can be explained.
  */
 async function isLivePreviewMessageHidden(
-  agentId: string | undefined,
+  ctx: { agentId?: string | undefined; agentOrgId?: string | null | undefined; agentSlug?: string | undefined },
   log: { warn: (msg: string, meta?: Record<string, unknown>) => void },
 ): Promise<boolean> {
-  if (!agentId) return false;
+  const { agentId, agentOrgId, agentSlug } = ctx;
+  // A context resolved from an older run-recovery record can lack agentId;
+  // fall back to the org-scoped slug (unique per org) before assuming opt-in.
+  if (!agentId && !(agentOrgId && agentSlug)) return false;
   try {
-    const agent = await prisma.agent.findUnique({ where: { id: agentId }, select: { config: true } });
+    const agent = agentId
+      ? await prisma.agent.findUnique({ where: { id: agentId }, select: { config: true } })
+      : await prisma.agent.findUnique({
+          where: { orgId_slug: { orgId: agentOrgId!, slug: agentSlug! } },
+          select: { config: true },
+        });
     const config = agent?.config as { hideLivePreview?: unknown } | null | undefined;
     return config?.hideLivePreview === true;
   } catch (err) {
-    log.warn("hideLivePreview lookup failed; posting live preview message", { agentId, error: errMsg(err) });
+    log.warn("hideLivePreview lookup failed; posting live preview message", { agentId, agentOrgId, agentSlug, error: errMsg(err) });
     return false;
   }
 }
@@ -2706,6 +2714,8 @@ export async function handleAutomationWebhook(
       channelName: payload.channelName ?? payload.channelId ?? "",
       conversationId: payload.conversationId ?? "",
       task: task!,
+      agentId: agent.id,
+      agentOrgId: agent.orgId ?? null,
       agentSlug: agent.slug,
       agentName: agent.name,
       responseMode: "conversation",
@@ -6624,8 +6634,8 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
     // Per-agent opt-out (agent.config.hideLivePreview). Only the thread message is
     // suppressed — the ownership row above is still written, because the sandbox
     // router's access check (and the Workspace pane) depend on it.
-    if (await isLivePreviewMessageHidden(ctx.agentId, log)) {
-      log.info(`Sandbox preview message suppressed by agent config (sandboxId=${sandboxId})`);
+    if (await isLivePreviewMessageHidden(ctx, log)) {
+      log.info(`Sandbox preview message suppressed by agent config (sandboxId=${sandboxId} agentId=${ctx.agentId ?? "-"} agentSlug=${ctx.agentSlug ?? "-"})`);
       return;
     }
     try {
@@ -6646,7 +6656,7 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
           metadata: { contentFormat: "markdown" },
         }
       );
-      log.info(`Sandbox preview announced: ${sandboxPreviewUrl} (sandboxId=${sandboxId})`);
+      log.info(`Sandbox preview announced: ${sandboxPreviewUrl} (sandboxId=${sandboxId} agentId=${ctx.agentId ?? "-"} agentSlug=${ctx.agentSlug ?? "-"})`);
     } catch (err) {
       log.warn("Failed to announce sandbox preview", { error: errMsg(err) });
     }
