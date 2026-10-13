@@ -44,8 +44,6 @@ import {
   type ModalFilterEntry,
 } from '../../utils/filter-registry';
 import {
-  DEFAULT_RANK_PROFILE,
-  DEFAULT_SORT_BY,
   getRankProfileOptions,
   rankLabel,
   SORT_OPTIONS,
@@ -251,23 +249,22 @@ function FiltersSheetBody({
         ...entitiesToFromChips(committed.fromUsers),
         ...entitiesToInChips(committed.inChannels),
       ],
-      onlyMyChannels: committed.onlyMyChannels,
+      // @Ch lives on the bar — do not overwrite a live toggle from a stale draft.
+      onlyMyChannels: applied.onlyMyChannels,
       sortBy: committed.sortBy,
       rankProfile: committed.rankProfile,
     });
     onOpenChange(false);
-  }, [commitTextFields, draft, onApply, onOpenChange, structuredFromDraft]);
+  }, [applied.onlyMyChannels, commitTextFields, draft, onApply, onOpenChange, structuredFromDraft]);
 
   const clearFilters = useCallback(() => {
     void haptics.buttonTap();
+    // Clear modal filter fields only — keep type / sort / rank / bar mode pills.
     setDraft(prev => ({
       ...prev,
       ...clearStructuredDraft(),
       fromUsers: [],
       inChannels: [],
-      onlyMyChannels: false,
-      sortBy: DEFAULT_SORT_BY,
-      rankProfile: DEFAULT_RANK_PROFILE,
     }));
     setTextDrafts({});
     setDateMode('');

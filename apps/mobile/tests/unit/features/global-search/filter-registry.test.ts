@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import { DEFAULT_STRUCTURED_FILTERS } from '@/src/features/global-search/utils/filter-model';
 import {
+  canOpenFiltersSheet,
   clearInapplicableStructured,
   countActiveFilters,
   docTypeForTab,
@@ -15,6 +16,12 @@ import {
   DEFAULT_SORT_BY,
 } from '@/src/features/global-search/utils/rank-sort';
 
+function fieldIds(docType: Parameters<typeof modalFieldEntries>[0]): string[] {
+  return modalFieldEntries(docType)
+    .map(entry => entry.id)
+    .filter(id => id !== 'sort' && id !== 'rank');
+}
+
 describe('global search filter registry', () => {
   it('maps mobile tabs onto dashboard doc types', () => {
     assert.equal(docTypeForTab('messages'), 'messages');
@@ -22,29 +29,57 @@ describe('global search filter registry', () => {
     assert.equal(docTypeForTab('channels'), 'channels');
     assert.equal(docTypeForTab('chats'), 'people');
     assert.equal(docTypeForTab('calls'), 'messages');
+    assert.equal(docTypeForTab('files'), 'files');
   });
 
-  it('opens the Filters drawer with fields for the active tab only', () => {
-    assert.equal(modalDocTypeForTab('messages'), 'messages');
-    assert.equal(modalDocTypeForTab('tickets'), 'tickets');
-    // Local tabs fall back to messages so the drawer is not empty from DMs.
-    assert.equal(modalDocTypeForTab('chats'), 'messages');
-    assert.equal(modalDocTypeForTab('channels'), 'messages');
+  it('hides the Filters sheet on local Zero tabs', () => {
+    assert.equal(canOpenFiltersSheet('messages'), true);
+    assert.equal(canOpenFiltersSheet('files'), true);
+    assert.equal(canOpenFiltersSheet('tickets'), true);
+    assert.equal(canOpenFiltersSheet('calls'), true);
+    assert.equal(canOpenFiltersSheet('chats'), false);
+    assert.equal(canOpenFiltersSheet('channels'), false);
+    assert.equal(modalDocTypeForTab('chats'), 'people');
+    assert.equal(modalDocTypeForTab('channels'), 'channels');
+  });
 
-    const messageIds = modalFieldEntries('messages').map(entry => entry.id);
-    assert.ok(messageIds.includes('from'));
-    assert.ok(messageIds.includes('with'));
-    assert.ok(messageIds.includes('mentions'));
-    assert.ok(!messageIds.includes('assignee'));
-    assert.ok(!messageIds.includes('board'));
-    assert.ok(!messageIds.includes('priority'));
-
-    const ticketIds = modalFieldEntries('tickets').map(entry => entry.id);
-    assert.ok(ticketIds.includes('assignee'));
-    assert.ok(ticketIds.includes('board'));
-    assert.ok(ticketIds.includes('priority'));
-    assert.ok(!ticketIds.includes('with'));
-    assert.ok(!ticketIds.includes('mentions'));
+  it('matches the by-type modal field matrix (excluding Sort/Rank chrome)', () => {
+    assert.deepEqual(fieldIds('messages'), [
+      'from',
+      'in',
+      'with',
+      'mentions',
+      'date',
+      'tags',
+      'entity',
+    ]);
+    assert.deepEqual(fieldIds('files'), ['from', 'in', 'date']);
+    assert.deepEqual(fieldIds('tickets'), [
+      'from',
+      'in',
+      'date',
+      'assignee',
+      'priority',
+      'board',
+      'tags',
+      'entity',
+      'showArchived',
+    ]);
+    assert.deepEqual(fieldIds('all'), [
+      'from',
+      'in',
+      'with',
+      'mentions',
+      'date',
+      'assignee',
+      'priority',
+      'board',
+      'tags',
+      'entity',
+    ]);
+    assert.deepEqual(fieldIds('desk'), ['from', 'in', 'date', 'showArchived']);
+    assert.deepEqual(fieldIds('channels'), []);
+    assert.deepEqual(fieldIds('people'), []);
   });
 
   it('defaults sort/rank when building the Filters snapshot', () => {
@@ -94,7 +129,7 @@ describe('global search filter registry', () => {
     assert.ok(filters.sortBy === 'oldest');
   });
 
-  it('counts From, In, Only my channels, and Sort in the Filters badge', () => {
+  it('excludes From / In from the badge (hidden: false)', () => {
     const filters = toSearchResultsFilters({
       tab: 'messages',
       chips: [
@@ -109,7 +144,8 @@ describe('global search filter registry', () => {
       rankProfile: '',
     });
 
-    assert.equal(countActiveFilters(filters), 4);
+    // Sort only — From/In and @Ch are not badge-counted.
+    assert.equal(countActiveFilters(filters), 1);
   });
 
   it('counts ticket modal filters without message-only With', () => {
@@ -149,5 +185,24 @@ describe('global search filter registry', () => {
     assert.deepEqual(cleared.structured.boards, []);
     assert.deepEqual(cleared.structured.withUsers, [{ id: 'u2', label: 'Bob' }]);
     assert.equal(cleared.chips.length, 1);
+  });
+
+  it('clearInapplicableStructured drops from/in chips on local tabs', () => {
+    const cleared = clearInapplicableStructured(
+      'channels',
+      {
+        ...DEFAULT_STRUCTURED_FILTERS,
+        withUsers: [{ id: 'u2', label: 'Bob' }],
+        dateRange: 'last 7 days',
+      },
+      [
+        { id: 'u9', label: 'From', prefix: 'from:', entityType: 'user' },
+        { id: 'c1', label: 'eng', prefix: 'in:', entityType: 'channel' },
+      ],
+    );
+
+    assert.equal(cleared.chips.length, 0);
+    assert.deepEqual(cleared.structured.withUsers, []);
+    assert.equal(cleared.structured.dateRange, '');
   });
 });

@@ -15,7 +15,11 @@ import { FiltersSheet } from '../components/filters/filters-sheet';
 import { GlobalSearchFilterBar } from '../components/filters/global-search-filter-bar';
 import { SearchCategoryTags } from './search-category-tags';
 import { useSearchState, type SearchDispatch } from '../hooks/use-search-state';
-import { countActiveFilters, toSearchResultsFilters } from '../utils/filter-registry';
+import {
+  canOpenFiltersSheet,
+  countActiveFilters,
+  toSearchResultsFilters,
+} from '../utils/filter-registry';
 import type { StructuredSearchFilters } from '../utils/filter-model';
 import type { SortBy } from '../utils/rank-sort';
 import {
@@ -267,12 +271,19 @@ const SearchToolbar = memo(function SearchToolbar({
     [chips, exactMatch, includeBotMessages, onlyMyChannels, rankProfile, sortBy, structured, tab],
   );
 
-  const filterBadgeCount = countActiveFilters(appliedFilters);
+  const filtersAvailable = canOpenFiltersSheet(tab);
+  const filterBadgeCount = filtersAvailable ? countActiveFilters(appliedFilters) : 0;
+
+  // Local tabs have no Filters sheet — drop any leftover open state when switching away.
+  useEffect(() => {
+    if (!filtersAvailable) setFiltersOpen(false);
+  }, [filtersAvailable]);
 
   const openFilters = useCallback(() => {
+    if (!canOpenFiltersSheet(tab)) return;
     Keyboard.dismiss();
     setFiltersOpen(true);
-  }, []);
+  }, [tab]);
 
   const applyFilters = useCallback(
     (next: {
@@ -358,7 +369,7 @@ const SearchToolbar = memo(function SearchToolbar({
             dispatch={dispatch}
             onRequestClose={onRequestClose}
             filterBadgeCount={filterBadgeCount}
-            {...(scope ? {} : { onFilterPress: openFilters })}
+            {...(scope || !filtersAvailable ? {} : { onFilterPress: openFilters })}
           />
         )}
         {scope ? null : (
@@ -366,13 +377,14 @@ const SearchToolbar = memo(function SearchToolbar({
             <SearchCategoryTags
               tab={tab}
               onTabChange={onTabChange}
-              {...(fieldHostedElsewhere
+              {...(fieldHostedElsewhere && filtersAvailable
                 ? { onFilterPress: openFilters, filterBadgeCount }
                 : {})}
             />
             <Animated.View style={filterRowStyle}>
               <GlobalSearchFilterBar
                 tab={tab}
+                onlyMyChannels={onlyMyChannels}
                 includeBotMessages={includeBotMessages}
                 exactMatch={exactMatch}
                 dispatch={dispatch}
@@ -382,7 +394,7 @@ const SearchToolbar = memo(function SearchToolbar({
         )}
       </View>
     </Animated.View>
-    {scope ? null : (
+    {scope || !filtersAvailable ? null : (
         <FiltersSheet
           isOpen={filtersOpen}
           onClose={() => setFiltersOpen(false)}

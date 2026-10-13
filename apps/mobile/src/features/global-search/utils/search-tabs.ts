@@ -78,7 +78,9 @@ export function placeholderForTab(tab: GlobalSearchTab): string {
 }
 
 export const IN_CHIP_EMPTY_LABEL = 'In';
-export const ONLY_MY_CHANNELS_CHIP_LABEL = 'Only my channels';
+/** Bar pill — dashboard `@Ch` (only my channels). */
+export const ONLY_MY_CHANNELS_CHIP_LABEL = '@Ch';
+export const ONLY_MY_CHANNELS_CHIP_A11Y_LABEL = 'Only my channels';
 /** Short pill label — include bot / automation messages (Messages tab). */
 export const BOT_CHIP_LABEL = 'Bot';
 export const BOT_CHIP_A11Y_LABEL = 'Include bot messages';

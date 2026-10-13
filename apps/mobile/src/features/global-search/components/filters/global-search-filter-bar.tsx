@@ -12,16 +12,20 @@ import {
   SEARCH_FILTER_ROW_TOP_GAP,
   SEARCH_SIDE_MARGIN,
 } from '../../constants';
+import { canOpenFiltersSheet } from '../../utils/filter-registry';
 import {
   BOT_CHIP_A11Y_LABEL,
   BOT_CHIP_LABEL,
   EXACT_CHIP_A11Y_LABEL,
   EXACT_CHIP_LABEL,
+  ONLY_MY_CHANNELS_CHIP_A11Y_LABEL,
+  ONLY_MY_CHANNELS_CHIP_LABEL,
   type GlobalSearchTab,
 } from '../../utils/search-tabs';
 
 type GlobalSearchFilterBarProps = {
   tab: GlobalSearchTab;
+  onlyMyChannels: boolean;
   includeBotMessages: boolean;
   exactMatch: boolean;
   dispatch: SearchDispatch;
@@ -31,23 +35,26 @@ const GLYPH_SIZE = 14;
 const GLYPH_STROKE = 2.5;
 
 /**
- * Mode-toggle row. Sort / Rank / From / In / Only my channels live in the
- * Filters drawer; what remains here are Bot and Exact.
- *
- * Built from the same Badge as the category tag strip, so the two rows are one
- * visual family. Badge owns the colours; nothing here paints its own.
+ * Mode-toggle row (dashboard SearchFilterBar pills).
+ * `@Ch` / Exact on remote tabs; Bot on messages only. Sort / Rank stay in Filters.
  */
 export function GlobalSearchFilterBar({
   tab,
+  onlyMyChannels,
   includeBotMessages,
   exactMatch,
   dispatch,
 }: GlobalSearchFilterBarProps): ReactElement {
   const { accentText } = useBubbleAccent();
 
-  // Dashboard shows Bot for messages | all. Mobile lands on Chats by default, so
-  // keep the pill visible there too; the flag only affects Vespa message search.
-  const showBotToggle = tab === 'messages' || tab === 'chats' || tab === 'channels';
+  const showChannelModes = canOpenFiltersSheet(tab);
+  // Dashboard: Bot for messages | all only.
+  const showBotToggle = tab === 'messages';
+
+  const toggleOnlyMyChannels = useCallback(() => {
+    void (onlyMyChannels ? haptics.toggleOff() : haptics.toggleOn());
+    dispatch({ type: 'onlyMyChannelsToggled' });
+  }, [dispatch, onlyMyChannels]);
 
   const toggleIncludeBotMessages = useCallback(() => {
     void (includeBotMessages ? haptics.toggleOff() : haptics.toggleOn());
@@ -78,6 +85,24 @@ export function GlobalSearchFilterBar({
         paddingHorizontal: SEARCH_SIDE_MARGIN,
       }}
     >
+      {showChannelModes ? (
+        <Badge
+          className='max-w-55'
+          label={ONLY_MY_CHANNELS_CHIP_LABEL}
+          variant={onlyMyChannels ? 'active' : 'default'}
+          {...(onlyMyChannels
+            ? {
+                trailing: (
+                  <Check size={GLYPH_SIZE} color={accentText} strokeWidth={GLYPH_STROKE} />
+                ),
+              }
+            : {})}
+          accessibilityRole='button'
+          accessibilityState={{ selected: onlyMyChannels }}
+          accessibilityLabel={ONLY_MY_CHANNELS_CHIP_A11Y_LABEL}
+          onPress={toggleOnlyMyChannels}
+        />
+      ) : null}
       {showBotToggle ? (
         <Badge
           className='max-w-55'
@@ -96,20 +121,22 @@ export function GlobalSearchFilterBar({
           onPress={toggleIncludeBotMessages}
         />
       ) : null}
-      <Badge
-        className='max-w-55'
-        label={EXACT_CHIP_LABEL}
-        variant={exactMatch ? 'active' : 'default'}
-        {...(exactMatch
-          ? {
-              trailing: <Check size={GLYPH_SIZE} color={accentText} strokeWidth={GLYPH_STROKE} />,
-            }
-          : {})}
-        accessibilityRole='button'
-        accessibilityState={{ selected: exactMatch }}
-        accessibilityLabel={EXACT_CHIP_A11Y_LABEL}
-        onPress={toggleExactMatch}
-      />
+      {showChannelModes ? (
+        <Badge
+          className='max-w-55'
+          label={EXACT_CHIP_LABEL}
+          variant={exactMatch ? 'active' : 'default'}
+          {...(exactMatch
+            ? {
+                trailing: <Check size={GLYPH_SIZE} color={accentText} strokeWidth={GLYPH_STROKE} />,
+              }
+            : {})}
+          accessibilityRole='button'
+          accessibilityState={{ selected: exactMatch }}
+          accessibilityLabel={EXACT_CHIP_A11Y_LABEL}
+          onPress={toggleExactMatch}
+        />
+      ) : null}
     </ScrollView>
   );
 }

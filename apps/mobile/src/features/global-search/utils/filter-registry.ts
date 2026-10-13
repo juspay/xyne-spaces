@@ -1,6 +1,7 @@
 /**
  * Mobile port of dashboard `filterRegistry` — modal fields, visibility, badge count.
- * Bot / Exact stay on the filter bar; From / In / Only my channels / Sort / Rank live here.
+ * Mode pills (`@Ch`, Bot, Exact) stay on the filter bar; Sort / Rank live in the sheet
+ * until bar chips exist (page-level, not in the by-type field matrix).
  */
 
 import type { SearchFilterChip } from '../types';
@@ -37,14 +38,14 @@ export type FilterControl =
     }
   | { kind: 'text'; placeholder: string; field: 'tags' | 'entities' }
   | { kind: 'date' }
-  | { kind: 'checkbox'; field: 'showArchived' | 'onlyMyChannels' }
+  | { kind: 'checkbox'; field: 'showArchived' }
   | { kind: 'sort' }
   | { kind: 'rank' };
 
 export type ModalFilterEntry = {
   id: string;
   label: string;
-  /** When false, excluded from the Filters badge. */
+  /** When false, excluded from the Filters badge (From / In already have bar chips). */
   hidden?: boolean;
   appliesTo: (docType: SearchDocType) => boolean;
   isActive: (f: SearchResultsFilters) => boolean;
@@ -61,7 +62,6 @@ const notLocal = (d: SearchDocType): boolean => !isLocalType(d);
 
 /**
  * Map mobile tabs onto dashboard docType for appliesTo / request shaping.
- * Local-only tabs behave like channels/people for *search* category gating.
  */
 export function docTypeForTab(tab: GlobalSearchTab): SearchDocType {
   switch (tab) {
@@ -82,22 +82,24 @@ export function docTypeForTab(tab: GlobalSearchTab): SearchDocType {
 }
 
 /**
- * Filters drawer visibility follows the active tab so ticket-only fields are not
- * shown on Messages (and vice versa). Chats / Channels are local Zero lists with
- * no remote filter fields — fall back to messages so opening Filters from DMs
- * (default Chats tab) is not an empty Sort-only sheet.
+ * DocType used to pick Filters-sheet rows. Same as `docTypeForTab` — local tabs
+ * (Chats / Channels) have no Vespa modal fields; hide the Filters entry instead
+ * of falling back to messages (GLOBAL_SEARCH_FILTERS_BY_TYPE).
  */
 export function modalDocTypeForTab(tab: GlobalSearchTab): SearchDocType {
-  const docType = docTypeForTab(tab);
-  if (docType === 'people' || docType === 'channels') return 'messages';
-  return docType;
+  return docTypeForTab(tab);
+}
+
+/** Filters sheet is for remote Vespa categories only — not local Zero browse. */
+export function canOpenFiltersSheet(tab: GlobalSearchTab): boolean {
+  return notLocal(modalDocTypeForTab(tab));
 }
 
 export const FILTER_MODAL_ENTRIES: readonly ModalFilterEntry[] = [
   {
     id: 'sort',
     label: 'Sort',
-    appliesTo: () => true,
+    appliesTo: notLocal,
     isActive: f => isSortActive(f.sortBy),
     control: { kind: 'sort' },
   },
@@ -105,13 +107,15 @@ export const FILTER_MODAL_ENTRIES: readonly ModalFilterEntry[] = [
     id: 'rank',
     label: 'Rank',
     // Experiment profiles — keep off production builds until CAC / internal gating exists.
-    appliesTo: () => typeof __DEV__ !== 'undefined' && __DEV__,
+    appliesTo: d => notLocal(d) && typeof __DEV__ !== 'undefined' && __DEV__,
     isActive: f => isRankActive(f.rankProfile),
     control: { kind: 'rank' },
   },
   {
     id: 'from',
     label: 'From',
+    // Bar / chip surface already shows From — do not inflate the Filters badge.
+    hidden: false,
     appliesTo: notLocal,
     isActive: f => f.fromUsers.length > 0,
     control: {
@@ -137,6 +141,7 @@ export const FILTER_MODAL_ENTRIES: readonly ModalFilterEntry[] = [
   {
     id: 'in',
     label: 'In',
+    hidden: false,
     appliesTo: notLocal,
     isActive: f => f.inChannels.length > 0,
     control: {
@@ -144,13 +149,6 @@ export const FILTER_MODAL_ENTRIES: readonly ModalFilterEntry[] = [
       placeholder: 'e.g. #project-unicorn',
       field: 'inChannels',
     },
-  },
-  {
-    id: 'onlyMyChannels',
-    label: 'Only my channels',
-    appliesTo: isMessageType,
-    isActive: f => f.onlyMyChannels,
-    control: { kind: 'checkbox', field: 'onlyMyChannels' },
   },
   {
     id: 'with',
@@ -265,7 +263,8 @@ export function modalFieldEntries(docType: SearchDocType): ModalFilterEntry[] {
 }
 
 /**
- * Badge = active modal filters. Bot / Exact stay on the bar and are not counted.
+ * Badge = active modal filters. From / In (`hidden: false`) and bar toggles are
+ * not counted — same as dashboard `countActiveFilters`.
  */
 export function countActiveFilters(filters: SearchResultsFilters): number {
   return entriesFor(filters.docType).filter(
