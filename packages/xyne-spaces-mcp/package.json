@@ -22,7 +22,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@xyne/spaces-sdk": "^0.1.1",
+    "@xyne/spaces-sdk": "^0.1.3",
     "emoji-datasource": "^16.0.0"
   },
   "devDependencies": {
