@@ -1,4 +1,4 @@
-import { type ReactElement } from 'react';
+import { useState, type ReactElement } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ChevronBigLeft } from '@xyne/icons';
 import { Loader2 } from 'lucide-react';
@@ -20,18 +20,26 @@ function formatCreated(value: string | undefined): string | null {
   return Number.isNaN(parsed.getTime()) ? null : DATE.format(parsed);
 }
 
-const ClawSkillDetailV2 = (): ReactElement => {
+const ClawSkillDetailV2 = (props: {
+  /** Shown inside a hub page: this skill, and back hands the page back. */
+  hub?: { slug: string; onClose: () => void };
+}): ReactElement => {
+  const { hub } = props;
   const navigate = useNavigate();
-  const { slug } = useParams<{ slug?: string }>();
+  const params = useParams<{ slug?: string }>();
+  const slug = hub?.slug ?? params.slug;
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const tab = resolveSkillTab(searchParams.get('tab'));
+  // Inside a hub the tab stays out of the hub's URL.
+  const [hubTab, setHubTab] = useState<SkillDetailTabId>(resolveSkillTab(null));
+  const tab = hub ? hubTab : resolveSkillTab(searchParams.get('tab'));
   const { entries, loading, isError } = useSkillCatalog();
   const entry = entries.find(candidate => candidate.slug === slug);
   const skill = entry?.skill;
-  const actions = useSkillDetailActions(skill);
+  const actions = useSkillDetailActions(skill, hub?.onClose);
 
   const setTab = (next: SkillDetailTabId): void => {
+    if (hub) return setHubTab(next);
     const params = new URLSearchParams(searchParams);
     params.set('tab', next);
     setSearchParams(params, { replace: true });
@@ -41,13 +49,18 @@ const ClawSkillDetailV2 = (): ReactElement => {
   const author = skill?.owner?.name ?? skill?.owner?.email ?? null;
 
   return (
-    <div className='h-full overflow-y-auto no-scrollbar' data-component='ClawSkillDetailV2'>
+    <div
+      className={hub ? undefined : 'h-full overflow-y-auto no-scrollbar'}
+      data-component='ClawSkillDetailV2'
+    >
       <div className='mx-auto flex w-full max-w-[800px] flex-col gap-6 px-6 pb-6'>
         <div className='bg-background sticky top-0 z-10 flex flex-col gap-6 pb-3 pt-6'>
           <div className='flex w-full items-center justify-between gap-4'>
             <button
               type='button'
-              onClick={() => void navigate(`${actions.libraryPath}?tab=skills`)}
+              onClick={() =>
+                hub ? hub.onClose() : void navigate(`${actions.libraryPath}?tab=skills`)
+              }
               data-track-category='Claw Agents'
               data-track-name='Skill detail v2: back'
               className='flex h-7 shrink-0 items-center rounded-[10px] pr-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
@@ -56,7 +69,7 @@ const ClawSkillDetailV2 = (): ReactElement => {
                 <ChevronBigLeft className='size-4' aria-hidden />
               </span>
               <span className='text-base font-semibold leading-6 tracking-[-0.32px] text-foreground'>
-                Skills
+                {hub ? 'Hub Knowledge' : 'Skills'}
               </span>
             </button>
 
