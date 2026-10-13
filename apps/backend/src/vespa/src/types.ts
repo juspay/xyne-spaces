@@ -673,7 +673,7 @@ export interface SdlcDiscussionFields extends SdlcPlacementFields {
 export interface SdlcTicketFields {
   /** The deepest containers it sits in (sdlc_container docIds): the track or folder of every item it is
    * linked from and every track holding it, minus any that is above another in the list. */
-  sdlcContainerId: string[];
+  sdlcContainerIds: string[];
   /** Every document (canvas or upload) linked to it by a TICKET or CONTEXT edge. */
   sdlcDocumentIds: string[];
   /** Every repository whose wiki holds an item it is linked from (sdlc_repository docIds). */
@@ -681,7 +681,7 @@ export interface SdlcTicketFields {
 }
 
 export const SDLC_DISCUSSION_FIELDS: readonly (keyof SdlcDiscussionFields)[] = ['sdlcContainerRef', 'sdlcDocumentId'];
-export const SDLC_TICKET_FIELDS: readonly (keyof SdlcTicketFields)[] = ['sdlcContainerId', 'sdlcDocumentIds', 'sdlcRepoIds'];
+export const SDLC_TICKET_FIELDS: readonly (keyof SdlcTicketFields)[] = ['sdlcContainerIds', 'sdlcDocumentIds', 'sdlcRepoIds'];
 export const SDLC_FILE_FIELDS: readonly (keyof SdlcFileFields)[] = [
   'sdlcContainerRef', 'sdlcTypeName', 'sdlcStatus', 'sdlcRelatedDocumentIds',
 ];

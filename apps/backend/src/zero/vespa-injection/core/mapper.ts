@@ -1586,7 +1586,7 @@ const sdlcPlacement = (fields: SdlcDiscussionFields): Partial<SdlcDiscussionFiel
 
 /** A ticket's places and linked documents; left out for a ticket in no hub. */
 const sdlcTicketPlacement = (fields: SdlcTicketFields): Partial<SdlcTicketFields> =>
-  fields.sdlcContainerId.length || fields.sdlcDocumentIds.length ? { ...fields } : {};
+  fields.sdlcContainerIds.length || fields.sdlcDocumentIds.length ? { ...fields } : {};
 
 const sdlcFileFields = (fields: SdlcFileFields): Partial<SdlcFileFields> => {
   if (!fields.sdlcContainerRef) return {};

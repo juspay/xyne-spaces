@@ -146,7 +146,7 @@ export async function syncSdlcHub(hubId: string): Promise<SdlcHubSyncResult | nu
     cleared++;
   }
   const ticketsInHub = hubContainers.length
-    ? await indexedHits(ticketSchema, notIn(`sdlcContainerId in (${hubContainers.map(id => JSON.stringify(id)).join(', ')})`, [...index.tickets.keys()]))
+    ? await indexedHits(ticketSchema, notIn(`sdlcContainerIds in (${hubContainers.map(id => JSON.stringify(id)).join(', ')})`, [...index.tickets.keys()]))
     : [];
   for (const hit of ticketsInHub) {
     jobs.push({ schema: ticketSchema, jobType: 'update', docId: hit.id, fields: ticketFields, ...base });

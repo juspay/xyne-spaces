@@ -36,7 +36,7 @@ import {
  * Documents, uploads and conversations are indexed by the one container they sit in
  * (sdlcContainerRef); Vespa imports the rest of their place from it. A conversation started on a
  * document sits in the document's container and names it (sdlcDocumentId). A ticket can sit in
- * several places, so its containers and documents are fed as lists (sdlcContainerId,
+ * several places, so its containers and documents are fed as lists (sdlcContainerIds,
  * sdlcDocumentIds, sdlcRepoIds).
  */
 export interface SdlcHubIndex {
@@ -295,17 +295,17 @@ async function buildSdlcHubIndex(hubId: string, prisma: PrismaClient): Promise<S
     if (!containerId) continue;
     let entry = tickets.get(ticketId);
     if (!entry) {
-      entry = { sdlcContainerId: [], sdlcDocumentIds: [], sdlcRepoIds: [] };
+      entry = { sdlcContainerIds: [], sdlcDocumentIds: [], sdlcRepoIds: [] };
       tickets.set(ticketId, entry);
     }
     const container = containers.get(containerId)!;
-    addOnce(entry.sdlcContainerId, containerId);
+    addOnce(entry.sdlcContainerIds, containerId);
     // repoRef is id:<namespace>:sdlc_repository::<repoId> on a repository wiki's containers.
     if (container.repoRef) addOnce(entry.sdlcRepoIds, container.repoRef.split('::')[1]!);
     if (l.relationType !== SDLC_CONTAINMENT_RELATION && documentOf(itemType, itemId)) addOnce(entry.sdlcDocumentIds, itemId);
   }
   for (const entry of tickets.values()) {
-    entry.sdlcContainerId = entry.sdlcContainerId.filter(id => !entry.sdlcContainerId.some(
+    entry.sdlcContainerIds = entry.sdlcContainerIds.filter(id => !entry.sdlcContainerIds.some(
       other => other !== id && containers.get(other)!.scopeIds.includes(id),
     ));
   }
@@ -366,7 +366,7 @@ export async function sdlcFieldsForAttachment(attachment: { id: string; entityTy
 
 export const EMPTY_SDLC_DISCUSSION_FIELDS: SdlcDiscussionFields = { sdlcContainerRef: '', sdlcDocumentId: '' };
 
-export const EMPTY_SDLC_TICKET_FIELDS: SdlcTicketFields = { sdlcContainerId: [], sdlcDocumentIds: [], sdlcRepoIds: [] };
+export const EMPTY_SDLC_TICKET_FIELDS: SdlcTicketFields = { sdlcContainerIds: [], sdlcDocumentIds: [], sdlcRepoIds: [] };
 
 /**
  * Where a ticket sits, across every hub it is linked in; empty outside SDLC. Its containers and
@@ -383,11 +383,11 @@ export async function sdlcFieldsForTicket(ticketId: string): Promise<SdlcTicketF
     orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     select: { channelId: true },
   });
-  const fields: SdlcTicketFields = { sdlcContainerId: [], sdlcDocumentIds: [], sdlcRepoIds: [] };
+  const fields: SdlcTicketFields = { sdlcContainerIds: [], sdlcDocumentIds: [], sdlcRepoIds: [] };
   for (const hubId of new Set(links.map(l => l.channelId))) {
     const entry = (await loadSdlcHubIndex(hubId))?.tickets.get(ticketId);
     if (!entry) continue;
-    fields.sdlcContainerId.push(...entry.sdlcContainerId.filter(id => !fields.sdlcContainerId.includes(id)));
+    fields.sdlcContainerIds.push(...entry.sdlcContainerIds.filter(id => !fields.sdlcContainerIds.includes(id)));
     fields.sdlcDocumentIds.push(...entry.sdlcDocumentIds.filter(id => !fields.sdlcDocumentIds.includes(id)));
     fields.sdlcRepoIds.push(...entry.sdlcRepoIds.filter(id => !fields.sdlcRepoIds.includes(id)));
   }
