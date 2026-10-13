@@ -3130,7 +3130,7 @@ const SupportScreen = (): ReactElement => {
                 }
               : c.type === ChannelType.HUB
                 ? {
-                    label: 'Hub',
+                    label: 'Channels',
                     className: 'bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-200',
                   }
                 : {

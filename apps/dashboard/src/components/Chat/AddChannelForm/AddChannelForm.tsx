@@ -109,7 +109,7 @@ const DESK_SOURCES: ReadonlyArray<{
   },
   {
     value: DeskType.HUB,
-    label: 'Hub',
+    label: 'Channels',
     description: 'Create a ticket for every new thread in the channels an installed app is in',
     icon: Waypoints,
   },
