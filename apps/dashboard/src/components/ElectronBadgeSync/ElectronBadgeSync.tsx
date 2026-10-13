@@ -3,7 +3,7 @@ import { useElectronBadge } from '../../hooks/useElectronBadge';
 
 /**
  * Side-effect-only component (renders nothing) that keeps the native desktop
- * app-icon badge in sync with the total unread message count via
+ * app-icon badge in sync with the Activity bell unread count via
  * {@link useElectronBadge}.
  *
  * Mounted once at the app root (next to the other global IPC/side-effect
