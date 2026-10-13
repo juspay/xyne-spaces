@@ -209,7 +209,8 @@ model Ticket {
   @@index([workspaceId, createdBy, statusV2, isArchived, createdAt(sort: Desc), id])
   @@index([xyneId])
   @@unique([workspaceId, xyneId])
-  @@index([channelConnectId])
+  @@index([channelConnectId, merchantId]) // Slack Connect: mirrors the channelId index
+  @@index([channelConnectId]) // Slack Connect: mirrors the channelId index
   @@map("tickets")
   @@schema("public")
 }
@@ -227,7 +228,7 @@ model TicketDescription {
   ticket      Ticket  @relation(fields: [ticketId], references: [id])
   channel     Channel @relation(fields: [channelId], references: [id])
 
-  @@index([channelConnectId])
+  @@index([channelConnectId]) // Slack Connect: no channelId/workspaceId index to mirror; channelConnectId is its scope filter
   @@map("ticket_descriptions")
   @@schema("public")
 }
@@ -330,7 +331,7 @@ model TicketActivity {
   @@index([ticketId])
   @@index([updatedBy])
   @@index([channelId, timestamp])
-  @@index([channelConnectId])
+  @@index([channelConnectId, timestamp]) // Slack Connect: mirrors the channelId index
   @@map("ticket_activities")
   @@schema("public")
 }
@@ -1065,7 +1066,7 @@ model ScheduledMessage {
 
   @@index([channelId])
   @@index([createdBy])
-  @@index([channelConnectId])
+  @@index([channelConnectId]) // Slack Connect: mirrors the channelId index
   @@map("scheduled_messages")
   @@schema("non_zero")
 }
@@ -1423,7 +1424,7 @@ model PrThreadLink {
   @@unique([prUrl, conversationId]) // Idempotency guard against duplicate side-effect delivery
   @@index([prId])
   @@index([conversationId])
-  @@index([channelConnectId])
+  @@index([channelConnectId]) // Slack Connect: no channelId/workspaceId index to mirror; channelConnectId is its scope filter
   @@map("pr_thread_links")
   @@schema("non_zero")
 }
@@ -1777,7 +1778,7 @@ model Invitation {
   @@index([entityId])
   @@index([createdAt(sort: Desc), id])
   @@index([orgId, isOrgApproved])
-  @@index([channelConnectId])
+  @@index([channelConnectId]) // Slack Connect: mirrors the workspaceId index
   @@map("invitations")
   @@schema("public")
 }
@@ -2023,7 +2024,8 @@ model ChannelBoardMapping {
 
   @@unique([channelId, boardId])
   @@index([channelId])
-  @@index([channelConnectId])
+  @@index([channelConnectId, boardId]) // Slack Connect: mirrors the channelId unique index
+  @@index([channelConnectId]) // Slack Connect: mirrors the channelId index
   @@map("channel_board_mappings")
   @@schema("public")
 }
@@ -2086,7 +2088,8 @@ model ChannelStats {
   // lets ORDER BY lastActivityAt DESC walk the index so take(N) bounds the scan
   // instead of a full-table temp-sort on every hydration.
   @@index([workspaceId, lastActivityAt(sort: Desc), channelId(sort: Desc)])
-  @@index([channelConnectId])
+  @@index([channelConnectId]) // Slack Connect: mirrors the channelId id index
+  @@index([workspaceId, lastActivityAt(sort: Desc), channelConnectId(sort: Desc)]) // Slack Connect: mirrors the channelId index
   @@map("channel_stats")
   @@schema("public")
 }
@@ -2119,7 +2122,10 @@ model ChannelParticipant {
   @@index([userId, role, id])
 
   @@index([channelId, id])
-  @@index([channelConnectId])
+  @@index([channelConnectId, userId]) // Slack Connect: mirrors the channelId unique index
+  @@index([channelConnectId]) // Slack Connect: mirrors the channelId index
+  @@index([channelConnectId, userId, id]) // Slack Connect: mirrors the channelId index
+  @@index([channelConnectId, id]) // Slack Connect: mirrors the channelId index
   @@map("channel_participants")
   @@schema("public")
 }
@@ -2165,7 +2171,8 @@ model ChannelUserStatus {
 
   @@index([userId, isDeleted, id])
   @@index([userId, sectionId]) // Fast lookup of channels within a section + cleanup on section delete
-  @@index([channelConnectId])
+  @@index([channelConnectId, userId]) // Slack Connect: mirrors the channelId unique index
+  @@index([channelConnectId]) // Slack Connect: mirrors the channelId index
   @@map("channel_user_status")
   @@schema("public")
 }
@@ -2256,7 +2263,10 @@ model Conversation {
   @@index([createdBy])
   @@index([initialMessageId])
   @@index([parentMessageId])
-  @@index([channelConnectId])
+  @@index([channelConnectId, lastActivityAt]) // Slack Connect: mirrors the channelId index
+  @@index([channelConnectId]) // Slack Connect: mirrors the channelId index
+  @@index([channelConnectId, createdAt(sort: Desc), conversationId(sort: Asc)]) // Slack Connect: mirrors the channelId index
+  @@index([channelConnectId, doNotPostToChannel, createdAt(sort: Desc), conversationId(sort: Asc)]) // Slack Connect: mirrors the channelId index
   @@map("conversations")
   @@schema("public")
 }
@@ -2288,7 +2298,7 @@ model ConversationParticipant {
   @@index([userId, isSubscribed, lastReplyAt(sort: Desc), id(sort: Desc)], map: "conversation_participants_thread_list_idx")
 
   @@index([userId, id])
-  @@index([channelConnectId])
+  @@index([channelConnectId]) // Slack Connect: no channelId/workspaceId index to mirror; channelConnectId is its scope filter
   @@map("conversation_participants")
   @@schema("public")
 }
@@ -2326,7 +2336,10 @@ model Email {
   @@index([conversationId, id])
   @@index([sentByUserId, createdAt(sort: Desc)]) // "Sent by me" list, ordered newest-first
   @@index([channelId, type, id, createdAt]) // desk auto-label backfill: keyset walk of one channel's inbound mail, within the lookback window
-  @@index([channelConnectId])
+  @@index([externalMessageId, channelConnectId]) // Slack Connect: mirrors the channelId unique index
+  @@index([channelConnectId]) // Slack Connect: mirrors the channelId index
+  @@index([channelConnectId, rfcMessageId]) // Slack Connect: mirrors the channelId index
+  @@index([channelConnectId, type, id, createdAt]) // Slack Connect: mirrors the channelId index
   @@map("emails")
   @@schema("public")
 }
@@ -2357,7 +2370,7 @@ model EmailDraft {
   @@index([userId, conversationId, id])
   @@index([conversationId])
   @@index([channelId])
-  @@index([channelConnectId])
+  @@index([channelConnectId]) // Slack Connect: mirrors the channelId index
   @@map("email_drafts")
   @@schema("public")
 }
@@ -2408,7 +2421,7 @@ model ConversationLabel {
   // Also serves per-user catalog reads + ACL via its (channelId, createdBy) prefix,
   // with the trailing "name" matching the catalog query's orderBy('name').
   @@unique([channelId, createdBy, name]) // No duplicate label names per user within a desk
-  @@index([channelConnectId])
+  @@index([channelConnectId, createdBy, name]) // Slack Connect: mirrors the channelId unique index
   @@map("conversation_labels")
   @@schema("public")
 }
@@ -2431,7 +2444,7 @@ model ConversationLabelMapping {
   // The unique's conversationId prefix also serves the per-thread chips read.
   @@unique([conversationId, labelId]) // A label can only be applied once per conversation
   @@index([labelId]) // label-panel read, label→mappings correlation, deleteLabel cascade
-  @@index([channelConnectId])
+  @@index([channelConnectId]) // Slack Connect: no channelId/workspaceId index to mirror; channelConnectId is its scope filter
   @@map("conversation_label_mappings")
   @@schema("public")
 }
@@ -2457,7 +2470,9 @@ model DeskAutoLabelRuleReference {
   @@index([workspaceId, ownerId, channelId, createdAt(sort: Desc), id(sort: Desc)], map: "desk_auto_label_rule_refs_owner_channel_idx")
   @@index([workspaceId, channelId], map: "desk_auto_label_rule_refs_channel_idx")
   @@index([workspaceId, labelId], map: "desk_auto_label_rule_refs_label_idx")
-  @@index([channelConnectId])
+  @@index([workspaceId, ownerId, channelConnectId, labelId, filterFingerprint], map: "desk_auto_label_rule_refs_filter_connect_idx") // Slack Connect: mirrors the channelId unique index
+  @@index([workspaceId, ownerId, channelConnectId, createdAt(sort: Desc), id(sort: Desc)], map: "desk_auto_label_rule_refs_owner_channel_connect_idx") // Slack Connect: mirrors the channelId index
+  @@index([workspaceId, channelConnectId], map: "desk_auto_label_rule_refs_channel_connect_idx") // Slack Connect: mirrors the channelId index
   @@map("desk_auto_label_rule_references")
   @@schema("non_zero")
 }
@@ -2481,7 +2496,7 @@ model TicketUserMailbox {
   // Also serves the setState/setStarred upsert lookup and the tickets.userMailbox
   // correlation (spam/starred exists() + related() overlay) via its ticketId prefix.
   @@unique([ticketId, userId]) // one overlay row per agent per ticket
-  @@index([channelConnectId])
+  @@index([channelConnectId]) // Slack Connect: no channelId/workspaceId index to mirror; channelConnectId is its scope filter
   @@map("ticket_user_mailbox")
   @@schema("public")
 }
@@ -2538,7 +2553,7 @@ model EmailChannelPreference {
   @@index([assigneeUserGroupId])
   @@index([boardId])
   @@unique([workspaceId, dlEmail])
-  @@index([channelConnectId])
+  @@index([channelConnectId]) // Slack Connect: mirrors the channelId id index
   @@map("email_channel_preferences")
   @@schema("public")
 }
@@ -2555,7 +2570,8 @@ model ClassificationMapping {
 
   @@index([channelId])
   @@index([channelId, category])
-  @@index([channelConnectId])
+  @@index([channelConnectId]) // Slack Connect: mirrors the channelId index
+  @@index([channelConnectId, category]) // Slack Connect: mirrors the channelId index
   @@map("classification_mappings")
   @@schema("public")
 }
@@ -2657,7 +2673,7 @@ model MessageArtifact {
 
   @@index([workspaceId, status, messageCreatedAt])
   @@index([channelId])
-  @@index([channelConnectId])
+  @@index([channelConnectId]) // Slack Connect: mirrors the channelId index
   @@map("message_artifacts")
   @@schema("public")
 }
@@ -2696,7 +2712,7 @@ model MessageAttachment {
   @@index([entityId, id])
   @@index([entityId, position])
   @@index([workspaceId, channelId, createdAt(sort: Desc), id])
-  @@index([channelConnectId])
+  @@index([workspaceId, channelConnectId, createdAt(sort: Desc), id]) // Slack Connect: mirrors the channelId index
   @@map("message_attachments")
   @@schema("public")
 }
@@ -2821,7 +2837,8 @@ model Activity {
 
   @@index([userId, updatedAt(sort: Desc), id])
   @@index([userId, actorAction, isRead, id])
-  @@index([channelConnectId])
+  @@index([classificationJobType, actionSourceId, channelConnectId, classification]) // Slack Connect: mirrors the channelId index
+  @@index([channelConnectId]) // Slack Connect: mirrors the channelId index
   @@map("activities")
   @@schema("public")
 }
@@ -2873,7 +2890,7 @@ model ExternalSource {
   @@index([displayName])
   @@index([channelId])
   @@index([externalIdentifier])
-  @@index([channelConnectId])
+  @@index([channelConnectId]) // Slack Connect: mirrors the channelId index
   @@map("external_sources")
   @@schema("workflow")
 }
@@ -2986,7 +3003,11 @@ model SurfaceNudgeCount {
   @@index([conversationId, userId])
   @@index([conversationId, channelId])
   @@index([conversationId, gid, gidType])
-  @@index([channelConnectId])
+  @@index([messageId, channelConnectId]) // Slack Connect: mirrors the channelId index
+  @@index([ticketId, channelConnectId]) // Slack Connect: mirrors the channelId index
+  @@index([canvasId, channelConnectId]) // Slack Connect: mirrors the channelId index
+  @@index([callId, channelConnectId]) // Slack Connect: mirrors the channelId index
+  @@index([conversationId, channelConnectId]) // Slack Connect: mirrors the channelId index
   @@map("surface_nudge_counts")
   @@schema("public")
 }
@@ -3120,7 +3141,9 @@ model Call {
   // scheduled ones by when they start.
   @@index([channelId, status, endedAt(sort: Desc)])
   @@index([channelId, status, startsAt])
-  @@index([channelConnectId])
+  @@index([channelConnectId]) // Slack Connect: mirrors the channelId index
+  @@index([channelConnectId, status, endedAt(sort: Desc)]) // Slack Connect: mirrors the channelId index
+  @@index([channelConnectId, status, startsAt]) // Slack Connect: mirrors the channelId index
   @@map("calls")
   @@schema("public")
 }
@@ -3153,7 +3176,7 @@ model EntityAccess {
   @@index([workspaceId, userId])
   @@index([workspaceId, userGroupId])
   @@index([workspaceId, channelId])
-  @@index([channelConnectId])
+  @@index([workspaceId, channelConnectId]) // Slack Connect: mirrors the channelId index
   @@map("entity_access")
   @@schema("public")
 }
@@ -3272,7 +3295,7 @@ model RecurringCallSeries {
   @@index([organizerId])  // Fast lookup of series created by a user
   @@index([channelId])    // Fast lookup of series in a channel
   @@index([status])       // Fast lookup of active series
-  @@index([channelConnectId])
+  @@index([channelConnectId]) // Slack Connect: mirrors the channelId index
   @@index([workspaceId, createdAt(sort: Desc), id]) // Calls admin panel series list, keyset-paged
   @@map("recurring_call_series")
   @@schema("public")
@@ -3334,7 +3357,9 @@ model CanvasFolder {
   @@index([channelId])
   @@index([projectId, channelId])
   @@index([createdBy])
-  @@index([channelConnectId])
+  @@index([projectId, channelConnectId, name]) // Slack Connect: mirrors the channelId unique index
+  @@index([channelConnectId]) // Slack Connect: mirrors the channelId index
+  @@index([projectId, channelConnectId]) // Slack Connect: mirrors the channelId index
   @@map("canvas_folders")
   @@schema("public")
 }
@@ -3402,7 +3427,7 @@ model Canvas {
   @@index([createdBy, updatedAt(sort: Desc), id])
   @@index([docType, updatedAt(sort: Desc), id])
   @@index([connectId])
-  @@index([channelConnectId])
+  @@index([channelConnectId]) // Slack Connect: mirrors the channelId index
   @@map("canvases")
   @@schema("public")
 }
@@ -3505,7 +3530,8 @@ model CanvasParticipant {
   @@index([userGroupId])
   @@index([channelId])
   @@index([canvasConnectId])
-  @@index([channelConnectId])
+  @@index([canvasId, channelConnectId]) // Slack Connect: mirrors the channelId unique index
+  @@index([channelConnectId]) // Slack Connect: mirrors the channelId index
   @@map("canvas_participants")
   @@schema("public")
 }
@@ -3576,7 +3602,9 @@ model Link {
   @@index([createdBy, url, channelId])
   @@index([channelId, visibility]) // Fast lookup of channel links by visibility
   @@index([channelId, createdBy]) // Fast lookup of user's links in channel
-  @@index([channelConnectId])
+  @@index([createdBy, url, channelConnectId]) // Slack Connect: mirrors the channelId index
+  @@index([channelConnectId, visibility]) // Slack Connect: mirrors the channelId index
+  @@index([channelConnectId, createdBy]) // Slack Connect: mirrors the channelId index
   @@map("links")
   @@schema("public")
 }
@@ -3662,7 +3690,8 @@ model Repo {
   @@index([projectId])
   @@index([workspaceId, projectId])
   @@index([vcsCredentialId])
-  @@index([channelConnectId])
+  @@index([channelConnectId, canonicalUrl]) // Slack Connect: mirrors the workspaceId unique index
+  @@index([channelConnectId, projectId]) // Slack Connect: mirrors the workspaceId index
   @@map("repos")
   @@schema("public")
 }
@@ -3701,7 +3730,8 @@ model SdlcEntityLink {
   @@index([workspaceId, repoId]) // deprecated
   @@index([repoId, sourceType, sourceId]) // deprecated
   @@index([repoId, targetType, targetId]) // deprecated
-  @@index([channelConnectId])
+  @@index([channelConnectId, sourceType, sourceId, targetType, targetId, relationType]) // Slack Connect: mirrors the channelId unique index
+  @@index([channelConnectId, relationType]) // Slack Connect: mirrors the channelId index
   @@map("sdlc_entity_links")
   @@schema("public")
 }
@@ -4021,7 +4051,7 @@ model DraftMessage {
   @@index([channelId, conversationId, messageId, userId]) // Fast lookup of user's draft for a conversation
   @@index([userId, id]) // for userDrafts
   @@index([userId, origin])
-  @@index([channelConnectId])
+  @@index([channelConnectId, conversationId, messageId, userId]) // Slack Connect: mirrors the channelId index
   @@map("draft_messages")
   @@schema("public")
 }
@@ -4165,7 +4195,8 @@ model CollectionPermission {
   @@index([userGroupId])
   @@index([channelId])
   @@index([collectionId, userId, id], map: "idx_collection_permissions_collection_user_id")
-  @@index([channelConnectId])
+  @@index([collectionId, channelConnectId]) // Slack Connect: mirrors the channelId unique index
+  @@index([channelConnectId]) // Slack Connect: mirrors the channelId index
   @@map("collection_permissions")
   @@schema("public")
 }
@@ -4227,7 +4258,7 @@ model Application {
   @@index([channelId])
   @@index([boardId])
   @@index([mainReleaseBoardId])
-  @@index([channelConnectId])
+  @@index([channelConnectId]) // Slack Connect: mirrors the channelId index
   @@map("applications")
   @@schema("public")
 }
@@ -4302,7 +4333,7 @@ model ReleaseEvent {
   // Serves releaseEventsByReleaseId (filter releaseId, order createdAt desc, id desc);
   // avoids a zero-cache TEMP B-TREE sort. Built CONCURRENTLY in a raw migration.
   @@index([releaseId, createdAt(sort: Desc), id(sort: Desc)], map: "release_events_releaseId_createdAt_id_idx")
-  @@index([channelConnectId])
+  @@index([channelConnectId, conversationId]) // Slack Connect: mirrors the channelId index
   @@map("release_events")
   @@schema("public")
 }
@@ -4497,7 +4528,7 @@ model ChannelDailyRecap {
 
   @@index([recapDate])
   @@index([userId])
-  @@index([channelConnectId])
+  @@index([channelConnectId]) // Slack Connect: no channelId/workspaceId index to mirror; channelConnectId is its scope filter
   @@map("channel_daily_recaps")
   @@schema("public")
 }
@@ -4514,7 +4545,7 @@ model ChannelRecap {
 
   @@index([recapDate])
   @@index([userId])
-  @@index([channelConnectId])
+  @@index([channelConnectId]) // Slack Connect: no channelId/workspaceId index to mirror; channelConnectId is its scope filter
   @@map("channel_recaps")
   @@schema("public")
 }
@@ -4662,7 +4693,7 @@ model AppIncomingWebhook {
   @@index([installedAppId, channelId])
   @@index([installedAppId])
   @@index([secret])
-  @@index([channelConnectId])
+  @@index([installedAppId, channelConnectId]) // Slack Connect: mirrors the channelId index
   @@map("app_incoming_webhooks")
   @@schema("workflow")
 }
@@ -4769,7 +4800,7 @@ model DelayedMessage {
   @@index([senderId, scheduledFor])
   @@index([scheduledFor, status])
   @@index([channelId, status])
-  @@index([channelConnectId])
+  @@index([channelConnectId, status]) // Slack Connect: mirrors the channelId index
   @@map("delayed_messages")
   @@schema("public")
 }
@@ -5258,7 +5289,7 @@ model ExecutionItem {
   @@index([pendingOn], type: Gin) // feed: Pending Me membership
   @@index([requestedBy], type: Gin) // feed: Waiting On membership
   @@index([workspaceId, status, updatedAt(sort: Desc)]) // feed: Pending Others ordering
-  @@index([channelConnectId])
+  @@index([channelConnectId, status]) // Slack Connect: mirrors the channelId index
   @@map("execution_items")
   @@schema("non_zero")
 }
@@ -5361,7 +5392,7 @@ model RadarPrLink {
   @@unique([messageId, prUrl])
   // The only read: every link to one PR in a workspace.
   @@index([workspaceId, prUrl])
-  @@index([channelConnectId])
+  @@index([channelConnectId, prUrl]) // Slack Connect: mirrors the workspaceId index
   @@map("radar_pr_links")
   @@schema("non_zero")
 }
