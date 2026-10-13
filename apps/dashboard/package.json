@@ -156,7 +156,7 @@
     "date-fns": "^4.1.0",
     "diff": "^8.0.2",
     "docx-preview": "^0.3.7",
-    "dompurify": "^3.4.11",
+    "dompurify": "^3.4.16",
     "driver.js": "^1.4.0",
     "echarts": "^6.1.0",
     "echarts-for-react": "^3.0.6",
