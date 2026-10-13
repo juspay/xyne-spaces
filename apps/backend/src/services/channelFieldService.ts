@@ -83,27 +83,14 @@ export async function writeChannelFields(
   { formId, values }: PreparedChannelFields,
 ): Promise<void> {
   for (const value of values) {
-    const existing = await db.formEntityValues.findFirst({
-      where: { entityType: FormEntityType.CHANNEL, entityId: channelId, fieldId: value.fieldId },
-      select: { id: true },
+    // version 1, as the UI writes it: a null version never clashes in the unique key, so two writes at once
+    // would each add a row. With it, the database keeps one row per field and the later write wins.
+    const key = { entityId: channelId, entityType: FormEntityType.CHANNEL, fieldId: value.fieldId, contextId: workspaceId, version: 1 };
+    await db.formEntityValues.upsert({
+      where: { entityId_entityType_fieldId_contextId_version: key },
+      create: { workspaceId, formId, ...key, ...value },
+      update: { fieldValue: value.fieldValue, actualFieldValue: value.actualFieldValue },
     });
-    if (existing) {
-      await db.formEntityValues.update({
-        where: { id: existing.id },
-        data: { fieldValue: value.fieldValue, actualFieldValue: value.actualFieldValue },
-      });
-    } else {
-      await db.formEntityValues.create({
-        data: {
-          workspaceId,
-          entityType: FormEntityType.CHANNEL,
-          entityId: channelId,
-          formId,
-          contextId: workspaceId,
-          ...value,
-        },
-      });
-    }
   }
 }
 
@@ -158,7 +145,7 @@ export async function copyChannelFieldsToTicket(
       skipped.push(source.fieldName);
       return [];
     }
-    // One value per ticket field: a second would break the unique index and roll back the ticket.
+    // One value per ticket field: two channel fields can map to the same one.
     if (copied.has(target.id)) return [];
     copied.add(target.id);
     return [
@@ -169,6 +156,7 @@ export async function copyChannelFieldsToTicket(
         formId: boardMapping.formId,
         fieldId: target.id,
         contextId: args.boardId,
+        version: 1,
         fieldValue: '',
         actualFieldValue: current,
       },
