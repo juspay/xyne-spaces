@@ -6,7 +6,7 @@ import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
-import { channelsDeskAppOf, channelsDeskChannelSourceName, channelsDeskSourceName } from './desk';
+import { channelsDeskAppOf, channelsDeskChannelSourceName, channelsDeskOf, channelsDeskSourceName } from './desk';
 
 /** Whether the user may manage Xyne Apps (ADMIN on XYNE-APPS). */
 export async function canManageApps(userId: string): Promise<boolean> {
@@ -134,4 +134,23 @@ export async function removeChannelsDeskChannel(deskId: string, channelId: strin
     data: { isActive: false },
   });
   return removed.count > 0;
+}
+
+/**
+ * For the app API: puts one of the app's channels on its app's Channels desk, or takes it off. The admin
+ * who linked the desk to the app already chose that its channels may feed it.
+ */
+export async function setAppChannelOnDesk(
+  app: { installedAppId: string; workspaceId: string },
+  channelId: string,
+  onDesk: boolean,
+): Promise<'done' | 'no-desk' | 'other-desk'> {
+  const deskId = await channelsDeskOf(app.installedAppId);
+  if (!deskId) return 'no-desk';
+  if (!onDesk) {
+    await removeChannelsDeskChannel(deskId, channelId);
+    return 'done';
+  }
+  // The caller checked it's the app's channel, so a refusal means another desk has it.
+  return (await addChannelsDeskChannel({ id: deskId, workspaceId: app.workspaceId }, channelId)) ? 'done' : 'other-desk';
 }
