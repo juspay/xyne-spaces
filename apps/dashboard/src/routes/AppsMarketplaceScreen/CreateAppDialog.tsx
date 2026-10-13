@@ -7,25 +7,11 @@ import { Button } from '@/components/ui/Button/index';
 import { IconPopoverPicker } from '@/components/AppIcon/IconPopoverPicker';
 import { createBlankArtifactApp } from '@/services/claw/artifactAppsService';
 import { copyTextToClipboard } from '@/utils/clipboardUtils';
-import { cliDownloadUrl } from '@/routes/AIScreen/library/developers/developerTools';
+import { appInitCommand } from '@/components/ArtifactApp/appInitCommand';
 
 const MAX_TITLE = 120;
 const MIN_DESCRIPTION = 5;
 const MAX_DESCRIPTION = 500;
-
-/** The project folder `spaces app init` creates: the name, kebab-cased. */
-function folderName(title: string): string {
-  const slug = title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-  return slug || 'xyne-app';
-}
-
-/** Installs the CLI from this Spaces, then scaffolds a project pinned to the new app. */
-function initCommand(title: string, appId: string): string {
-  return `npm i -g ${cliDownloadUrl()} && spaces app init ${folderName(title)} --app-id ${appId}`;
-}
 
 /**
  * Create app: name it, then build it locally.
@@ -80,7 +66,7 @@ export const CreateAppDialog = ({
     reset();
   };
 
-  const command = created ? initCommand(created.title, created.id) : '';
+  const command = created ? appInitCommand(created.title, created.id) : '';
   const copy = (): void => {
     copyTextToClipboard(command)
       .then(() => setCopied(true))
