@@ -196,7 +196,7 @@ scope apply as they do for the dashboard.
 | `POST /api/sdk/v1/canvases/:canvasId/labels` | `{ names }` → `{ labels }` |
 | `POST /api/sdk/v1/canvases/:canvasId/labels/remove` | `{ labelIds }` → `{}` (POST: the product route is a DELETE with a body) |
 | `PATCH /api/sdk/v1/tickets/:ticketId` | `{ assigneeId?, stage?, groupId?, title?, description?, priority?, status?, eta?, tags?, formFields? }` → `{ updated }`. Requires the `TICKETS` write grant and a ticket the caller can read in their workspace (404 otherwise) |
-| `POST /api/sdk/v1/sub-tickets/link` | `{ ticketId, mappedTicketId, subTicketTitle? }` → `{ subTicketId, mappingId }`. Attaches the existing ticket `mappedTicketId` under `ticketId`, as the app's "Add existing sub-ticket" does: write access to the parent, read access to the child, manual boards only, no cycles, one parent per ticket (409 otherwise) |
+| `POST /api/sdk/v1/sub-tickets/link` | `{ ticketId, mappedTicketId, subTicketTitle? }` → `{ subTicketId, mappingId }`. Attaches the existing ticket `mappedTicketId` under `ticketId`, as the app's "Add existing sub-ticket" does: write access to the parent, read access to the child, manual boards only, no cycles, one parent per ticket (otherwise 409) |
 | `POST /api/sdk/v1/sub-tickets/unlink` | `{ mappingId }` → empty `204`. Removes the link and its sub-ticket row; the child ticket itself is kept |
 
 #### Desk metrics and desk report
