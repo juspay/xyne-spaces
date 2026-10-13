@@ -101,6 +101,9 @@ export const CreateFormModal = ({
       : queries.getFormFieldsByFormId({ formId: '' }),
     { enabled: isEditMode && !!form },
   );
+  // Forms don't store a project; a saved form's is its fields' (they can't move to another one).
+  const savedProjectId = formFields?.find(field => field.globalField?.projectId)?.globalField
+    ?.projectId;
 
   const [projects] = useCachedQuery(queries.getAllProjectsList(), {
     enabled: open && shouldSelectProject,
@@ -141,8 +144,8 @@ export const CreateFormModal = ({
   }, [projects, selectedProjectId]);
 
   useEffect(() => {
-    if (projectId) {
-      setSelectedProjectId(projectId);
+    if (projectId ?? savedProjectId) {
+      setSelectedProjectId(projectId ?? savedProjectId ?? '');
       return;
     }
 
@@ -159,7 +162,7 @@ export const CreateFormModal = ({
     if (selectedProjectId) {
       setSelectedProjectId('');
     }
-  }, [open, projectId, projects, selectedProjectId]);
+  }, [open, projectId, savedProjectId, projects, selectedProjectId]);
 
   // Initialize form data when opening in edit mode
   useEffect(() => {
@@ -688,9 +691,9 @@ export const CreateFormModal = ({
             <div>
               {/* Not a <label htmlFor>: Combobox owns its input id internally */}
               <span className='block text-sm font-medium text-foreground mb-1.5'>
-                Project {!isReadOnly && <span className='text-red-500'>*</span>}
+                Project {!isReadOnly && !savedProjectId && <span className='text-red-500'>*</span>}
               </span>
-              {isReadOnly ? (
+              {isReadOnly || savedProjectId ? (
                 <div className='px-3 py-2 text-sm bg-muted border border-border rounded-lg'>
                   {projects?.find(project => project.id === selectedProjectId)?.name || '-'}
                 </div>
