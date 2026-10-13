@@ -3,8 +3,6 @@ import { mkdtemp, rm, readFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  bareToolName,
-  isSearchTool,
   promoteIfOversized,
   stripControlChars,
   lineifyForSpill,
@@ -147,12 +145,4 @@ test("a result over the cap is saved to a file with a marked preview", async () 
   expect(out).toContain("full result saved to");
   expect(out).toContain(`Only the first 16384 of ${content.length} chars are shown below. Do not answer from this preview alone`);
   expect(out).toContain("## Preview (first 16384 chars)");
-});
-
-test("bare names drop the server prefix and only search tools are auto-sift candidates", () => {
-  expect(bareToolName("Xyne_Spaces__spaces-vespa-search")).toBe("spaces-vespa-search");
-  expect(bareToolName("spaces-vespa-search")).toBe("spaces-vespa-search");
-  expect(isSearchTool("Xyne_Spaces__spaces-vespa-search")).toBe(true);
-  expect(isSearchTool("Xyne_Spaces__spaces-read-canvas")).toBe(false);
-  expect(isSearchTool("sandbox-run")).toBe(false);
 });

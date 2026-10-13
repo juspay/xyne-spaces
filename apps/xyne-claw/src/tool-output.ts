@@ -35,7 +35,6 @@ import { randomUUID } from "node:crypto";
 import { metric } from "./metrics.js";
 
 import { createLogger } from "./logger.js";
-import { optEnabled } from "./optimizations.js";
 import { siftToolResult } from "./result-sift.js";
 import { currentRunMessages, currentRunTask } from "./run-context.js";
 import { currentToolCall } from "./tool-call-context.js";
@@ -51,16 +50,6 @@ const TOOL_RESULT_PREVIEW_BYTES = 16 * 1024;
 // the spilled file is always paginable/greppable. Well under pi's 50KB line cap
 // and large enough that one JSON record almost always fits on one line.
 export const SPILL_MAX_LINE_CHARS = Number(process.env["XYNE_CLAW_SPILL_MAX_LINE_CHARS"] ?? 4 * 1024);
-
-export function bareToolName(toolName: string): string {
-  const cut = toolName.lastIndexOf("__");
-  return cut >= 0 ? toolName.slice(cut + 2) : toolName;
-}
-
-export function isSearchTool(toolName: string): boolean {
-  const n = bareToolName(toolName).toLowerCase();
-  return n.includes("search") || n.includes("research");
-}
 
 /** Strip NUL + other C0 control chars (keep tab, newline, carriage-return). */
 export function stripControlChars(text: string): string {
@@ -211,11 +200,11 @@ export async function promoteIfOversized(
 ): Promise<string> {
   const cap = inlineCapBytes ?? TOOL_RESULT_INLINE_CAP_BYTES;
   const clean = stripControlChars(rawContent);
-  // Per-call choice (the `sift` tool param) wins over the agent default, which
-  // covers retrieval tools. Only one pass sifts: an MCP result goes through
+  // Sifting happens only when the call asks for it (the `sift` tool param).
+  // Only one pass sifts: an MCP result goes through
   // this function twice (mcp.ts, then the custom-tool wrapper).
   const call = currentToolCall();
-  const siftWanted = call?.sift ?? (optEnabled("jev_result_sift") && isSearchTool(toolName));
+  const siftWanted = call?.sift === true;
   if (siftWanted && !call?.sifted) {
     const sifted = await siftIntoContext(outputBaseDir, category, toolName, clean, cap);
     if (sifted) {
