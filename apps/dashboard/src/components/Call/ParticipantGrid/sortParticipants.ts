@@ -43,6 +43,7 @@ export function compareParticipants(a: ParticipantInfo, b: ParticipantInfo): num
  */
 /**
  * Returns the first non-local, non-agent participant for presentation mode.
+ * Falls back to the local participant when no remote caller is present (self mode).
  * Relies on the caller passing a pre-sorted array (sortParticipants output) so
  * that .find() lands on the most-active caller (mic→camera→joinedAt order).
  * MVP limitation: does not switch to active speaker dynamically.
