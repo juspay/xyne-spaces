@@ -587,6 +587,26 @@ class XyneAIStreamManager {
     );
   }
 
+  /**
+   * Drop every per-stream buffer for `streamId`. This is the single teardown
+   * for done / error / abort / live-viewer close, so the paths can't drift
+   * apart again (XYNE-66353: abort and viewer close left `pendingTextPartsMap`
+   * entries behind). Does not touch `activeStreams` or `abortControllers` —
+   * callers own those, since their rules differ per path.
+   */
+  private releaseStreamBuffers(streamId: string): void {
+    this.streamDataMap.delete(streamId);
+    this.pendingDeltaMap.delete(streamId);
+    this.pendingTextPartsMap.delete(streamId);
+    this.workerActiveStreams.delete(streamId);
+    this.liveViewerStreams.delete(streamId);
+    const rafId = this.rafIdMap.get(streamId);
+    if (rafId !== undefined) {
+      cancelAnimationFrame(rafId);
+      this.rafIdMap.delete(streamId);
+    }
+  }
+
   private scheduleDeltaFlush(streamId: string): void {
     if (!this.rafIdMap.has(streamId)) {
       const rafId = requestAnimationFrame(() => this.flushDeltaContent(streamId));
@@ -785,14 +805,7 @@ class XyneAIStreamManager {
     }
 
     // Cleanup stream data
-    this.streamDataMap.delete(streamId);
-    this.pendingDeltaMap.delete(streamId);
-    this.pendingTextPartsMap.delete(streamId);
-    const completionRafId = this.rafIdMap.get(streamId);
-    if (completionRafId !== undefined) {
-      cancelAnimationFrame(completionRafId);
-      this.rafIdMap.delete(streamId);
-    }
+    this.releaseStreamBuffers(streamId);
   }
 
   /**
@@ -832,14 +845,7 @@ class XyneAIStreamManager {
     this.errorStream(streamId, threadId, botMessageId, error);
 
     // Cleanup stream data
-    this.streamDataMap.delete(streamId);
-    this.pendingDeltaMap.delete(streamId);
-    this.pendingTextPartsMap.delete(streamId);
-    const errorRafId = this.rafIdMap.get(streamId);
-    if (errorRafId !== undefined) {
-      cancelAnimationFrame(errorRafId);
-      this.rafIdMap.delete(streamId);
-    }
+    this.releaseStreamBuffers(streamId);
   }
 
   /**
@@ -2185,14 +2191,7 @@ class XyneAIStreamManager {
       closed = true;
       abort.abort();
       this.abortControllers.delete(streamId);
-      this.liveViewerStreams.delete(streamId);
-      this.streamDataMap.delete(streamId);
-      this.pendingDeltaMap.delete(streamId);
-      const rid = this.rafIdMap.get(streamId);
-      if (rid !== undefined) {
-        cancelAnimationFrame(rid);
-        this.rafIdMap.delete(streamId);
-      }
+      this.releaseStreamBuffers(streamId);
       // Detached BEFORE `done` (navigate-away/unmount): drop our still-
       // 'streaming' state. Left in place it becomes a zombie — the adopt paths
       // (which PREFER streaming matches) adopt it and early-return, and the
@@ -2913,17 +2912,13 @@ class XyneAIStreamManager {
 
         // Cleanup
         this.activeStreams.delete(threadId);
-        this.streamDataMap.delete(streamId);
-        this.workerActiveStreams.delete(streamId);
-        this.pendingDeltaMap.delete(streamId);
-        const rafId = this.rafIdMap.get(streamId);
-        if (rafId !== undefined) {
-          cancelAnimationFrame(rafId);
-          this.rafIdMap.delete(streamId);
-        }
         break;
       }
     }
+
+    // Release buffers even when no activeStreams entry matched (state already
+    // dropped, e.g. a late abort): they are keyed by streamId, not thread.
+    this.releaseStreamBuffers(streamId);
   }
 
   /**
