@@ -367,27 +367,27 @@ describe("canReadConversation (XYNE-66344)", () => {
 
   it("grants a poster without asking Spaces", async () => {
     state.postedBy = ["claw_d"];
-    expect(await canReadConversation("thread_1", ["claw_d", "spaces_d"], { spacesUserId: "spaces_d" })).toBe(true);
+    expect(await canReadConversation("thread_1", ["claw_d", "spaces_d"], "spaces_d")).toBe(true);
     expect(state.accessChecks).toEqual([]);
   });
 
   it("grants a non-poster Spaces says can access the thread, checked by base id and Spaces id", async () => {
     state.accessVerdict = "ok";
     expect(
-      await canReadConversation("thread_1__branch__msg_9", ["claw_d", "spaces_d"], { spacesUserId: "spaces_d" }),
+      await canReadConversation("thread_1__branch__msg_9", ["claw_d", "spaces_d"], "spaces_d"),
     ).toBe(true);
     expect(state.accessChecks).toEqual([{ conversationId: "thread_1", userId: "spaces_d" }]);
   });
 
   it("does not widen access on a denied or unknown verdict", async () => {
-    expect(await canReadConversation("thread_1", ["claw_d"], { spacesUserId: "spaces_d" })).toBe(false);
+    expect(await canReadConversation("thread_1", ["claw_d"], "spaces_d")).toBe(false);
     state.accessVerdict = "unknown";
-    expect(await canReadConversation("thread_1", ["claw_d"], { spacesUserId: "spaces_d" })).toBe(false);
+    expect(await canReadConversation("thread_1", ["claw_d"], "spaces_d")).toBe(false);
   });
 
   it("never consults Spaces for direct chats or callers without a Spaces id", async () => {
     state.accessVerdict = "ok";
-    expect(await canReadConversation("chat-abc", ["claw_d"], { spacesUserId: "spaces_d" })).toBe(false);
+    expect(await canReadConversation("chat-abc", ["claw_d"], "spaces_d")).toBe(false);
     expect(await canReadConversation("thread_1", ["claw_d"])).toBe(false);
     expect(state.accessChecks).toEqual([]);
   });

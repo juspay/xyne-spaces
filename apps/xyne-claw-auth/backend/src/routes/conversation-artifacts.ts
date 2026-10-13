@@ -24,14 +24,11 @@ function serialize(artifact: NonNullable<ArtifactRow>): Record<string, unknown> 
   return { ...artifact, openRef: toOpenRef(artifact) };
 }
 
-// The workspace-scoped Spaces id stamped by requireAuth. Spaces' conversation
-// ACL resolves channel membership by this id, not the canonical Claw id.
-// requireAuth omits it when the two ids are identical (legacy users), so fall
-// back to the canonical id — the same fallback run-stream's access guard uses.
+// Spaces' ACL keys membership by the Spaces id; requireAuth only stamps it when
+// it differs from the Claw id, so fall back to that (as run-stream does).
 function spacesUserIdOf(req: Request): string | undefined {
   const value = req.headers["x-spaces-user-id"];
-  if (typeof value === "string" && value.trim()) return value.trim();
-  return getRequesterId(req) || undefined;
+  return (typeof value === "string" && value.trim()) || getRequesterId(req) || undefined;
 }
 
 // Artifact rows and conversation chat rows may be keyed by EITHER verified id
@@ -39,20 +36,10 @@ function spacesUserIdOf(req: Request): string | undefined {
 // every ACL compare must match the caller's full alias set, not one form.
 // Reading is conversation-scoped: anyone who can access the conversation can
 // read its artifacts. Writing stays creator-only (canWrite).
-async function canRead(
-  artifact: NonNullable<ArtifactRow>,
-  req: Request,
-  cache?: Map<string, boolean>,
-): Promise<boolean> {
+async function canRead(artifact: NonNullable<ArtifactRow>, req: Request): Promise<boolean> {
   const requesterAliases = getRequesterAliases(req);
   if (requesterAliases.includes(artifact.createdByUserId)) return true;
-  const cached = cache?.get(artifact.conversationId);
-  if (cached !== undefined) return cached;
-  const allowed = await canReadConversation(artifact.conversationId, requesterAliases, {
-    spacesUserId: spacesUserIdOf(req),
-  });
-  cache?.set(artifact.conversationId, allowed);
-  return allowed;
+  return canReadConversation(artifact.conversationId, [...requesterAliases], spacesUserIdOf(req));
 }
 
 function canWrite(artifact: NonNullable<ArtifactRow>, requesterAliases: readonly string[]): boolean {
@@ -71,9 +58,7 @@ conversationArtifactsRouter.get("/", async (req: Request, res: Response): Promis
       res.status(400).json({ success: false, error: "conversationId is required" });
       return;
     }
-    const rows = await listConversationArtifacts(conversationId, getRequesterAliases(req), {
-      spacesUserId: spacesUserIdOf(req),
-    });
+    const rows = await listConversationArtifacts(conversationId, getRequesterAliases(req), spacesUserIdOf(req));
     res.json({ success: true, artifacts: rows.map(serialize) });
   } catch (err) {
     log.error("list failed", err);
@@ -96,9 +81,8 @@ conversationArtifactsRouter.get("/by-ref", async (req: Request, res: Response): 
     }
     const rows = await findArtifactsByRef(service, refId);
     const visible: Record<string, unknown>[] = [];
-    const accessByConversation = new Map<string, boolean>();
     for (const row of rows) {
-      if (await canRead(row, req, accessByConversation)) visible.push(serialize(row));
+      if (await canRead(row, req)) visible.push(serialize(row));
     }
     res.json({ success: true, artifacts: visible });
   } catch (err) {

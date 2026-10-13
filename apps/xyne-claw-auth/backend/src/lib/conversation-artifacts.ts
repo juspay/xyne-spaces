@@ -231,21 +231,14 @@ export async function setArtifactVersionRef(args: {
   return result.count;
 }
 
-export interface ConversationReadContext {
-  /** The caller's workspace-scoped Spaces user id (x-spaces-user-id). Spaces'
-   *  conversation-access ACL matches channel_participants by this id, not by
-   *  the canonical Claw id. Omit when the caller has no Spaces identity. */
-  spacesUserId?: string | null | undefined;
-}
-
 export async function listConversationArtifacts(
   conversationId: string,
   userIds: string | string[],
-  context: ConversationReadContext = {},
+  spacesUserId?: string,
 ): Promise<ConversationArtifact[]> {
   const ids = Array.isArray(userIds) ? userIds : [userIds];
   if (!conversationId || ids.length === 0 || ids.every((id) => !id)) return [];
-  const canSeeAll = await canReadConversation(conversationId, ids, context);
+  const canSeeAll = await canReadConversation(conversationId, ids, spacesUserId);
   return prisma.conversationArtifact.findMany({
     where: {
       conversationId,
@@ -258,35 +251,18 @@ export async function listConversationArtifacts(
   });
 }
 
-/**
- * Whether the caller may see EVERY artifact in a conversation, not only the
- * ones they created. True when either:
- *  - they have posted in it (legacy rule, kept so nothing that is visible
- *    today disappears), or
- *  - it is a Spaces thread and Spaces — the ACL owner — says they can access
- *    it (channel member, or a PUBLIC channel in their workspace).
- *
- * Previously only the first rule applied, so a collaborator who opened a
- * shared thread without posting saw none of the owner's artifacts
- * (XYNE-66344). Direct chats (`chat-…`) have no Spaces conversation row and no
- * share model yet, so they stay on the posted-or-created rule. An "unknown"
- * verdict (Spaces unreachable / no row) does not widen access.
- */
+// XYNE-66344: anyone Spaces lets into the thread (channel member, or a public
+// channel in their workspace) sees every artifact, not just their own. Direct
+// chats have no Spaces row, and "denied"/"unknown" verdicts never widen access.
 export async function canReadConversation(
   conversationId: string,
-  userIds: string | string[],
-  context: ConversationReadContext = {},
+  userIds: string[],
+  spacesUserId?: string,
 ): Promise<boolean> {
-  const ids = Array.isArray(userIds) ? userIds : [userIds];
-  if (await userOwnsConversation(conversationId, ids)) return true;
+  if (await userOwnsConversation(conversationId, userIds)) return true;
   const base = baseConversationId(conversationId);
-  const spacesUserId = context.spacesUserId?.trim();
   if (!base || !spacesUserId || isDirectChatConversation(base)) return false;
-  const verdict = await checkConversationAccess(base, spacesUserId);
-  if (verdict !== "ok") {
-    log.info(`conversation-wide artifact read not granted verdict=${verdict} conversationId=${base}`);
-  }
-  return verdict === "ok";
+  return (await checkConversationAccess(base, spacesUserId)) === "ok";
 }
 
 export async function userOwnsConversation(conversationId: string, userIds: string | string[]): Promise<boolean> {
