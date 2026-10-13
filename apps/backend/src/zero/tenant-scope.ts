@@ -45,23 +45,8 @@ const CUSTOM_SCOPES: Record<string, OrgScopeRule> = {
     ),
 };
 
-/**
- * Tables that DO carry a workspaceId column, but whose read visibility is deliberately wider
- * than one workspace. The workspaceId on these rows is a denormalised "created in" stamp, not
- * the tenant boundary, so the generic workspace rule would hide rows the caller is entitled to.
- * Each rule must still be a strict tenant boundary derived only from server-side context.
- */
+// apps.workspaceId is only the creating workspace; visibility is org/GLOBAL (mirrors AppsACL).
 const CROSS_WORKSPACE_SCOPES: Record<string, OrgScopeRule> = {
-  // App templates are org-level catalog rows (scope ORG) or marketplace rows (scope GLOBAL).
-  // `apps.workspaceId` is the creating workspace, so a workspace filter hid org apps built in a
-  // sibling workspace of the same org (Org Apps tab) and every other workspace's GLOBAL apps
-  // (Marketplace tab). Mirrors the AppsACL read rule (packages/shared/src/zero/acl/tables/
-  // apps-acl.ts), which define-query already opts out of its own workspace backstop for:
-  //   - GLOBAL apps are visible to everyone (marketplace, cross-org by design);
-  //   - ORG apps are visible only when the app's org contains the caller's workspace. This is
-  //     resolved from ctx.workspaceId via the orgWorkspaces relation, never from a client
-  //     argument, so a client passing another org's id in getOrgApps still sees nothing.
-  // signingSecret is not a synced column (XYNE-56394), so no secret leaves the server.
   apps: (query, ctx) =>
     query.where(({ or, cmp, exists }: any) =>
       or(
