@@ -6,7 +6,7 @@ import { searchMemory } from './memoryService';
 import { MemoryScope, VespaDocType, type VespaMemoryDocument } from '@/vespa/src/types';
 import type { ConversationSourceAdapter, MemoryIngestionContext } from './conversationIngestion/types';
 
-import './conversationIngestion/tools/searchMemoryTool';
+import { runWithMemoryWorkspace } from './conversationIngestion/tools/searchMemoryTool';
 
 const CONVERSATION_ANALYST_AGENT = 'conversation-analyst';
 const CHUNK_SIZE = 40;
@@ -82,6 +82,7 @@ FIELD RULES:
  */
 async function fetchExistingKnowledge(
   sessionId: string,
+  workspaceId: string,
   repoUrl?: string,
 ): Promise<{ sops: VespaMemoryDocument[]; facts: VespaMemoryDocument[] }> {
   const searchParams = {
@@ -94,8 +95,8 @@ async function fetchExistingKnowledge(
   };
 
   const [sopsResult, factsResult] = await Promise.all([
-    searchMemory({ ...searchParams, docType: VespaDocType.SOP }, ''),
-    searchMemory({ ...searchParams, docType: VespaDocType.FACT }, ''),
+    searchMemory({ ...searchParams, docType: VespaDocType.SOP }, { workspaceId }),
+    searchMemory({ ...searchParams, docType: VespaDocType.FACT }, { workspaceId }),
   ]);
 
   return {
@@ -253,14 +254,16 @@ export class ConversationAnalysisService {
     // First iteration: fetch existing knowledge and analyze first chunk
     logger.info(`[ConversationAnalysisService] Starting analysis with ${chunks.length} chunks`);
     
-    const existingKnowledge = await fetchExistingKnowledge(ctx.sessionId, ctx.repoUrl);
+    const existingKnowledge = await fetchExistingKnowledge(ctx.sessionId, ctx.workspaceId, ctx.repoUrl);
     logger.info(`[ConversationAnalysisService] Found ${existingKnowledge.sops.length} existing SOPs, ${existingKnowledge.facts.length} existing Facts`);
 
     const firstPrompt = buildFirstIterationPrompt(chunks[0], ctx, existingKnowledge);
-    const firstResult = await agent.execute({
-      messages: [createUserMessage(firstPrompt)],
-      systemPrompt,
-    });
+    const firstResult = await runWithMemoryWorkspace(ctx.workspaceId, () =>
+      agent.execute({
+        messages: [createUserMessage(firstPrompt)],
+        systemPrompt,
+      }),
+    );
 
     if (firstResult.status === 'error') {
       throw new Error(`[ConversationAnalysisService] Agent failed on chunk 1: ${firstResult.error}`);
@@ -287,10 +290,12 @@ export class ConversationAnalysisService {
         i + 1,
       );
 
-      const result = await agent.execute({
-        messages: [createUserMessage(prompt)],
-        systemPrompt,
-      });
+      const result = await runWithMemoryWorkspace(ctx.workspaceId, () =>
+        agent.execute({
+          messages: [createUserMessage(prompt)],
+          systemPrompt,
+        }),
+      );
 
       if (result.status === 'error') {
         throw new Error(`[ConversationAnalysisService] Agent failed on chunk ${i + 1}: ${result.error}`);

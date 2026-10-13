@@ -13,6 +13,7 @@ export class WorkflowExecutionAdapter extends BaseGcsAdapter {
     let repoUrl = '';
     let commitId = '';
     let userId = '';
+    let workspaceId = '';
     try {
       const step = await db.workflowStep.findUnique({
         where: { id: this.sourceId },
@@ -26,11 +27,12 @@ export class WorkflowExecutionAdapter extends BaseGcsAdapter {
 
       const execution = await db.workflowExecution.findUnique({
         where: { id: workflowExecutionId },
-        select: { workflowId: true, createdBy: true },
+        select: { workflowId: true, createdBy: true, workspaceId: true },
       });
 
       if (execution) {
         userId = execution.createdBy ?? '';
+        workspaceId = execution.workspaceId;
         const workflow = await db.workflow.findUnique({
           where: { id: execution.workflowId },
           select: { ticketId: true },
@@ -53,6 +55,7 @@ export class WorkflowExecutionAdapter extends BaseGcsAdapter {
       // sourceId is the unique session identifier (executionId or stepId)
       sessionId: this.sourceId,
       userId,
+      workspaceId,
       repoUrl,
       commitId,
       ticketId,

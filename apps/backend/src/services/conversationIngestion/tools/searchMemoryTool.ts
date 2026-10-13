@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'async_hooks';
 import { z } from 'zod';
 import { BaseTool, Tool } from '@framework';
 import type { ToolExecutionContext, ToolExecutionResult } from '@framework';
@@ -5,13 +6,19 @@ import { searchMemory } from '@/services/memoryService';
 import { MemoryScope, VespaDocType } from '@/vespa/src/types';
 import { logger } from '@/utils/logger';
 
+// Workspace the tool searches in. Bound by whoever runs the agent, never by the LLM.
+const memoryWorkspace = new AsyncLocalStorage<string>();
+
+export function runWithMemoryWorkspace<T>(workspaceId: string, fn: () => Promise<T>): Promise<T> {
+  return memoryWorkspace.run(workspaceId, fn);
+}
+
 const InputSchema = z.object({
   query: z.string().describe('Search query to find relevant SOPs or Facts'),
   excludeSessionId: z.string().optional().describe('Session ID to exclude from results (pass current session ID to avoid self-referencing)'),
   docType: z.enum(['SOP', 'FACT']).optional().describe('Filter by document type'),
   tags: z.array(z.string()).optional().describe('Filter by tags (OR-matched)'),
   repoUrl: z.string().optional().describe('Filter by repository URL'),
-  userId: z.string().optional().describe('Owner userId to scope results'),
 });
 
 const OutputSchema = z.object({
@@ -33,7 +40,6 @@ PARAMETERS:
 - docType: (optional) 'SOP' or 'FACT' — omit to search both
 - tags: (optional) Filter by tags (OR-matched)
 - repoUrl: (optional) Filter by repository URL
-- userId: (optional) Owner to scope results
 
 RETURNS: Matching APPROVED documents from other sessions with their userQuery, chatSummary, tags, and filePointers.
 
@@ -68,7 +74,10 @@ export class SearchMemoryTool extends BaseTool<Input, Output, Output> {
   protected async executeInternal(input: Input, _context: ToolExecutionContext): Promise<Output> {
     logger.info(`[search-memory] query="${input.query}" excludeSessionId=${input.excludeSessionId ?? 'none'} docType=${input.docType ?? 'any'}`);
 
-    const userId = input.userId ?? '';
+    const workspaceId = memoryWorkspace.getStore();
+    if (!workspaceId) {
+      throw new Error('search-memory called without a workspace context');
+    }
 
     const result = await searchMemory(
       {
@@ -81,7 +90,7 @@ export class SearchMemoryTool extends BaseTool<Input, Output, Output> {
         ...(input.tags && { tags: input.tags }),
         ...(input.repoUrl && { repoUrl: input.repoUrl }),
       },
-      userId,
+      { workspaceId },
     );
 
     const filteredDocs = input.excludeSessionId

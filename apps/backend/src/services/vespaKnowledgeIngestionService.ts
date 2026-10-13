@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import removeMarkdown from 'remove-markdown';
 import { logger } from '@/utils/logger';
-import { searchMemory, insertMemory, deleteMemory } from './memoryService';
+import { searchMemory, insertMemory, deleteMemory, resolveMemoryWorkspaceId } from './memoryService';
 import { MemoryScope, VespaDocType, type VespaMemoryDocument } from '@/vespa/src/types';
 import type { ConversationSourceAdapter } from './conversationIngestion/types';
 import type { ExtractedSOP, ExtractedFACT } from './conversationAnalysisService';
@@ -41,7 +41,10 @@ function chunkContent(content: string): string[] {
 /**
  * Get all existing memory documents for a session
  */
-async function getAllDocumentsForSession(sessionId: string): Promise<VespaMemoryDocument[]> {
+async function getAllDocumentsForSession(
+  sessionId: string,
+  workspaceId: string,
+): Promise<VespaMemoryDocument[]> {
   const result = await searchMemory(
     {
       query: '',
@@ -50,16 +53,16 @@ async function getAllDocumentsForSession(sessionId: string): Promise<VespaMemory
       offset: 0,
       sessionId,
     },
-    '',
+    { workspaceId },
   );
   return result.documents;
 }
 
 /**
- * Delete all memory documents for a session
+ * Delete all memory documents for a session, within one workspace
  */
-async function deleteAllForSession(sessionId: string): Promise<void> {
-  const existingDocs = await getAllDocumentsForSession(sessionId);
+async function deleteAllForSession(sessionId: string, workspaceId: string): Promise<void> {
+  const existingDocs = await getAllDocumentsForSession(sessionId, workspaceId);
   
   if (existingDocs.length === 0) {
     logger.info(`[VESPA-KNOWLEDGE] No existing documents to delete for session=${sessionId}`);
@@ -93,10 +96,11 @@ export interface ReplaceSessionDoc {
 
 export class VespaKnowledgeIngestionService {
   /**
-   * Publicly exposed helper — deletes all Vespa memory documents for a session.
+   * Publicly exposed helper — deletes all Vespa memory documents for a session in the
+   * given workspace.
    */
-  async deleteSession(sessionId: string): Promise<void> {
-    await deleteAllForSession(sessionId);
+  async deleteSession(sessionId: string, workspaceId: string): Promise<void> {
+    await deleteAllForSession(sessionId, workspaceId);
   }
 
   /**
@@ -108,10 +112,12 @@ export class VespaKnowledgeIngestionService {
     sessionId: string,
     userId: string,
     docs: ReplaceSessionDoc[],
+    workspaceId?: string,
   ): Promise<void> {
     logger.info(`[VESPA-KNOWLEDGE] replaceSession start session=${sessionId} docs=${docs.length}`);
 
-    await deleteAllForSession(sessionId);
+    const tenantId = workspaceId || (await resolveMemoryWorkspaceId(userId));
+    await deleteAllForSession(sessionId, tenantId);
 
     const now = Date.now();
     for (const doc of docs) {
@@ -138,7 +144,7 @@ export class VespaKnowledgeIngestionService {
         parentRef:    '',
         reviewStatus: doc.reviewStatus ?? 'pending',
       };
-      await insertMemory(vespaDoc);
+      await insertMemory(vespaDoc, tenantId);
       logger.info(`[VESPA-KNOWLEDGE] replaceSession inserted docId=${vespaDoc.docId} docType=${doc.docType}`);
     }
 
@@ -154,21 +160,21 @@ export class VespaKnowledgeIngestionService {
     facts: ExtractedFACT[],
   ): Promise<void> {
     const ctx = await adapter.buildMemoryContext();
-    const { sessionId, userId } = ctx;
+    const { sessionId, userId, workspaceId } = ctx;
 
     logger.info(`[VESPA-KNOWLEDGE] Starting ingestion for session=${sessionId}: ${sops.length} SOPs, ${facts.length} Facts`);
 
     // Step 1: Delete all existing knowledge for this session
-    await deleteAllForSession(sessionId);
+    await deleteAllForSession(sessionId, workspaceId);
 
     // Step 2: Insert all new SOPs
     for (const sop of sops) {
-      await this.insertNewSOP(sop, sessionId, userId);
+      await this.insertNewSOP(sop, sessionId, userId, workspaceId);
     }
 
     // Step 3: Insert all new Facts
     for (const fact of facts) {
-      await this.insertNewFACT(fact, sessionId, userId);
+      await this.insertNewFACT(fact, sessionId, userId, workspaceId);
     }
 
     logger.info(`[VESPA-KNOWLEDGE] Completed ingestion for session=${sessionId}: ${sops.length} SOPs, ${facts.length} Facts`);
@@ -178,6 +184,7 @@ export class VespaKnowledgeIngestionService {
     sop: ExtractedSOP,
     sessionId: string,
     userId: string,
+    workspaceId: string,
   ): Promise<void> {
     const now = Date.now();
     const docId = randomUUID();
@@ -206,7 +213,7 @@ export class VespaKnowledgeIngestionService {
       reviewStatus: 'pending',
     };
 
-    await insertMemory(doc);
+    await insertMemory(doc, workspaceId);
     logger.info(
       `[VESPA-KNOWLEDGE] Inserted SOP docId=${docId} userQuery="${sop.userQuery}" chunks=${chatSummary.length}`,
     );
@@ -216,6 +223,7 @@ export class VespaKnowledgeIngestionService {
     fact: ExtractedFACT,
     sessionId: string,
     userId: string,
+    workspaceId: string,
   ): Promise<void> {
     const now = Date.now();
     const docId = randomUUID();
@@ -244,7 +252,7 @@ export class VespaKnowledgeIngestionService {
       reviewStatus: 'pending',
     };
 
-    await insertMemory(doc);
+    await insertMemory(doc, workspaceId);
     logger.info(
       `[VESPA-KNOWLEDGE] Inserted FACT docId=${docId} userQuery="${fact.userQuery}" chunks=${chatSummary.length}`,
     );

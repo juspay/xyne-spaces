@@ -83,7 +83,7 @@ class DocumentIngestionWorker {
     ];
 
     // 5. Atomically replace all docs for this session in Vespa
-    await vespaKnowledgeIngestionService.replaceSession(sessionId, userId, docs);
+    await vespaKnowledgeIngestionService.replaceSession(sessionId, userId, docs, job.data.workspaceId);
 
     logger.info(
       `[DOC-INGEST-WORKER] Completed job ${job.id} sessionId=${sessionId} file=${originalFilename} ` +

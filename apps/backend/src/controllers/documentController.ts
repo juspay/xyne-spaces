@@ -102,6 +102,7 @@ export class DocumentController {
         await documentIngestQueue.addJob({
           gcsUri,
           userId: userEmail,
+          workspaceId: user.workspaceId,
           sessionId,
           originalFilename: file.originalname,
           repoUrl,
@@ -126,12 +127,12 @@ export class DocumentController {
   /**
    * DELETE /api/documents/sessions
    * Body: { sessionIds: string[] }
-   * Deletes all Vespa memory documents for the given session IDs.
+   * Deletes the caller's workspace's Vespa memory documents for the given session IDs.
    */
   deleteBySessionIds = async (req: Request, res: Response): Promise<void> => {
     try {
-      const userId = req.user?.id;
-      if (!userId) {
+      const workspaceId = req.user?.workspaceId;
+      if (!workspaceId) {
         res.status(401).json({ success: false, error: 'Unauthorized' });
         return;
       }
@@ -142,7 +143,7 @@ export class DocumentController {
 
       await Promise.all(
         sessionIds.map((sessionId) =>
-          vespaKnowledgeIngestionService.deleteSession(sessionId),
+          vespaKnowledgeIngestionService.deleteSession(sessionId, workspaceId),
         ),
       );
 
@@ -155,7 +156,7 @@ export class DocumentController {
 
   /**
    * DELETE /api/documents/vespa-memory
-   * Cleanup: deletes ALL documents from the Vespa memory schema (all users, all sessions).
+   * Cleanup: deletes ALL memory documents of the caller's workspace (all users, all sessions).
    * Paginates until exhausted. CAUTION: irreversible.
    */
   cleanupAllVespaMemory = async (req: Request, res: Response): Promise<void> => {
@@ -179,7 +180,7 @@ export class DocumentController {
             limit: 400,
             offset: 0,
           },
-          '',
+          userId,
         );
 
         const docs = result.documents;

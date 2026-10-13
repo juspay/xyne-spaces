@@ -1,3 +1,5 @@
+import { DatabaseClient } from '@/database/client';
+import { resolveMemoryWorkspaceId } from '@/services/memoryService';
 import { BaseGcsAdapter } from './baseGcsAdapter';
 import type { MemoryIngestionContext } from '../types';
 
@@ -46,9 +48,17 @@ export class SessionAdapter extends BaseGcsAdapter {
 
   async buildMemoryContext(): Promise<MemoryIngestionContext> {
     const payload = await this.getRawPayload() as SessionPayload;
+    const prisma = DatabaseClient.getInstance();
+    const recording = await (prisma as any).sessionRecordingFile.findUnique({
+      where: { sessionId: this.sourceId },
+      select: { workspaceId: true },
+    });
+    const workspaceId: string =
+      recording?.workspaceId ?? (await resolveMemoryWorkspaceId(payload.userId ?? ''));
     return {
       sessionId: this.sourceId,
       userId: payload.userId ?? '',
+      workspaceId,
       repoUrl: payload.repoUrl ?? '',
       commitId: payload.commitId ?? '',
       ticketId: payload.ticketId ?? '',
