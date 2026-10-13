@@ -19,6 +19,11 @@ import type {
 import { validateFlowDefinition, formatValidationErrors } from '@xyne/shared';
 import { flowActionService } from '@/services/flowActionService';
 import { toast } from 'sonner';
+import {
+  presentFlowActionError,
+  presentThrownFlowActionError,
+  type PresentedFlowActionError,
+} from './flowActionErrorPresenter';
 
 interface FlowRendererProps {
   flow: FlowDefinition;
@@ -175,6 +180,28 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
   const draftScope = useFlowDraftScope();
   const draftClaimsFlow = validatedFlow !== null && (draftScope?.claims(validatedFlow) ?? false);
 
+  // Lets an error toast's Retry button re-run the same action without making
+  // executeAction depend on itself.
+  const executeActionRef = useRef<((action: FlowAction) => Promise<boolean>) | null>(null);
+  const showFlowActionError = useCallback(
+    (presented: PresentedFlowActionError, action: FlowAction) => {
+      toast.error(
+        presented.text,
+        presented.retryable
+          ? {
+              action: {
+                label: 'Retry',
+                onClick: () => {
+                  void executeActionRef.current?.(action);
+                },
+              },
+            }
+          : undefined,
+      );
+    },
+    [],
+  );
+
   const executeAction = useCallback(
     async (action: FlowAction): Promise<boolean> => {
       if (!validatedFlow) {
@@ -273,7 +300,7 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
         });
 
         if (response.type === 'error') {
-          toast.error(response.message);
+          showFlowActionError(presentFlowActionError(response), action);
           return false;
         }
         if (draftClaimsFlow && action.type === 'submit') {
@@ -289,11 +316,11 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
           error: message,
         });
         if (!isInputChange) {
-          toast.error(
+          const authorMessage =
             action.type === 'submit'
-              ? ((action as { errorMessage?: string }).errorMessage ?? message)
-              : message,
-          );
+              ? (action as { errorMessage?: string }).errorMessage
+              : undefined;
+          showFlowActionError(presentThrownFlowActionError(error, authorMessage), action);
         }
         return false;
       } finally {
@@ -306,8 +333,17 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
         }
       }
     },
-    [validatedFlow, messageId, conversationId, onAppAction, draftScope, draftClaimsFlow],
+    [
+      validatedFlow,
+      messageId,
+      conversationId,
+      onAppAction,
+      draftScope,
+      draftClaimsFlow,
+      showFlowActionError,
+    ],
   );
+  executeActionRef.current = executeAction;
 
   const isVisible = (component: FlowComponent): boolean => {
     if (component.hidden === undefined) return true;

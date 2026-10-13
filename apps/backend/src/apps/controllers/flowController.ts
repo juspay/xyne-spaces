@@ -13,7 +13,50 @@ import {
   validateFlowDefinition,
   validateAppActionResponse,
   formatValidationErrors,
+  flowActionErrorCodeFromStatus,
+  isRetryableFlowActionError,
+  FLOW_ACTION_ERROR_DEFAULT_MESSAGES,
+  type FlowActionErrorCode,
 } from '@xyne/shared';
+
+/**
+ * Error body for failures the Spaces backend itself detects (XYNE-66467).
+ * `error` keeps its historical text for existing consumers; `code` + `message`
+ * are what the dashboard shows. Never put raw upstream bodies in here.
+ */
+function sendFlowError(
+  res: Response,
+  status: number,
+  code: FlowActionErrorCode,
+  error: string,
+  message: string = FLOW_ACTION_ERROR_DEFAULT_MESSAGES[code]
+): void {
+  res.status(status).json({ error, code, message, retryable: isRetryableFlowActionError(code) });
+}
+
+/**
+ * When an app backend answers non-2xx with a well-formed
+ * `{ type: 'error', message, code? }` body, that body IS the user-facing
+ * answer. Return it (code defaulted from the HTTP status) instead of wrapping
+ * it as "App backend error N" with the JSON stringified into `details`.
+ */
+function typedAppError(status: number, text: string) {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  const result = validateAppActionResponse(parsed);
+  if (!result.success || result.data.type !== 'error') return null;
+  const code = result.data.code ?? flowActionErrorCodeFromStatus(status);
+  return {
+    type: 'error' as const,
+    message: result.data.message,
+    code,
+    retryable: result.data.retryable ?? isRetryableFlowActionError(code),
+  };
+}
 
 /** Extract appId from the <div data-flow-appid="..."> tag embedded in message content */
 function parseAppIdFromContent(content: string): string | null {
@@ -36,6 +79,10 @@ export class FlowController {
     if (!reqResult.success) {
       res.status(400).json({
         error: 'Invalid request',
+        code: 'INVALID_REQUEST',
+        message: FLOW_ACTION_ERROR_DEFAULT_MESSAGES.INVALID_REQUEST,
+        retryable: false,
+        // Request-shape errors describe the caller's own payload (no upstream data).
         details: formatValidationErrors(reqResult),
       });
       return;
@@ -48,10 +95,10 @@ export class FlowController {
     // 2. Validate the flowJSON carried inside the context
     const flowResult = validateFlowDefinition(flowJSON);
     if (!flowResult.success) {
-      res.status(400).json({
-        error: 'Invalid flowJSON in context',
-        details: formatValidationErrors(flowResult),
+      logger.warn('[FLOW-ACTION] Invalid flowJSON in context', {
+        errors: formatValidationErrors(flowResult),
       });
+      sendFlowError(res, 400, 'INVALID_REQUEST', 'Invalid flowJSON in context');
       return;
     }
 
@@ -75,24 +122,35 @@ export class FlowController {
       let appId: string | null;
       if (context.token) {
         if (!userId) {
-          res.status(401).json({ error: 'Unauthenticated' });
+          sendFlowError(res, 401, 'SESSION_EXPIRED', 'Unauthenticated');
           return;
         }
         appId = verifyFlowToken(context.token, userId, messageId);
         if (!appId) {
-          res.status(403).json({ error: 'Invalid or expired flow token' });
+          sendFlowError(res, 403, 'SESSION_EXPIRED', 'Invalid or expired flow token');
           return;
         }
       } else {
         const message = await repositories.messages.findById(messageId);
         if (!message) {
-          res.status(404).json({ error: `Message not found: ${messageId}` });
+          sendFlowError(
+            res,
+            404,
+            'NOT_FOUND',
+            `Message not found: ${messageId}`,
+            'This message no longer exists.'
+          );
           return;
         }
         appId = parseAppIdFromContent(message.content);
       }
       if (!appId) {
-        res.status(400).json({ error: 'Message is not a flow UI message or missing appId' });
+        sendFlowError(
+          res,
+          400,
+          'INVALID_REQUEST',
+          'Message is not a flow UI message or missing appId'
+        );
         return;
       }
 
@@ -102,7 +160,7 @@ export class FlowController {
       // webhook.
       const workspaceId = req.user?.workspaceId;
       if (!workspaceId) {
-        res.status(400).json({ error: 'Workspace not found for user' });
+        sendFlowError(res, 400, 'MISCONFIGURED', 'Workspace not found for user');
         return;
       }
       const installedApp = await repositories.installedApps.findFirst({
@@ -114,7 +172,7 @@ export class FlowController {
         },
       });
       if (!installedApp?.webhookUrl) {
-        res.status(502).json({ error: `No webhook URL configured for app: ${appId}` });
+        sendFlowError(res, 502, 'MISCONFIGURED', `No webhook URL configured for app: ${appId}`);
         return;
       }
 
@@ -125,7 +183,7 @@ export class FlowController {
       const app = await repositories.apps.findById(appId);
       if (!app?.signingSecret) {
         logger.error('[FLOW-ACTION] App signing secret is missing', { appId, messageId });
-        res.status(502).json({ error: `No signing secret configured for app: ${appId}` });
+        sendFlowError(res, 502, 'MISCONFIGURED', `No signing secret configured for app: ${appId}`);
         return;
       }
 
@@ -176,7 +234,7 @@ export class FlowController {
         } else {
           logger.error('[FLOW-ACTION] Could not resolve app webhook URL', { appId, error: err });
         }
-        res.status(502).json({ error: 'App webhook URL is not allowed' });
+        sendFlowError(res, 502, 'MISCONFIGURED', 'App webhook URL is not allowed');
         return;
       }
 
@@ -199,10 +257,26 @@ export class FlowController {
           status: appResponse.status,
           body: text.slice(0, 300),
         });
-        res.status(502).json({
-          error: `App backend error ${appResponse.status}`,
-          details: [text.slice(0, 200)],
-        });
+        const typed = typedAppError(appResponse.status, text);
+        if (typed) {
+          // The app answered with a proper typed error — that is the outcome
+          // the card renders (FlowRenderer handles `type: 'error'`).
+          logger.info('[FLOW-ACTION] App backend returned typed error', {
+            appId,
+            actionId,
+            status: appResponse.status,
+            code: typed.code,
+          });
+          res.status(200).json(typed);
+          return;
+        }
+        const code = flowActionErrorCodeFromStatus(appResponse.status);
+        sendFlowError(
+          res,
+          502,
+          code === 'INTERNAL' ? 'UPSTREAM_UNAVAILABLE' : code,
+          `App backend error ${appResponse.status}`
+        );
         return;
       }
 
@@ -214,10 +288,13 @@ export class FlowController {
         logger.error('[FLOW-ACTION] App backend returned invalid response', {
           errors: formatValidationErrors(responseResult),
         });
-        res.status(502).json({
-          error: 'App backend returned invalid response',
-          details: formatValidationErrors(responseResult),
-        });
+        sendFlowError(
+          res,
+          502,
+          'INTERNAL',
+          'App backend returned invalid response',
+          'The app returned a response this card cannot show.'
+        );
         return;
       }
 
@@ -229,10 +306,13 @@ export class FlowController {
           logger.error('[FLOW-ACTION] App backend returned malformed screen', {
             errors: formatValidationErrors(screenResult),
           });
-          res.status(502).json({
-            error: 'App backend returned malformed screen',
-            details: formatValidationErrors(screenResult),
-          });
+          sendFlowError(
+            res,
+            502,
+            'INTERNAL',
+            'App backend returned malformed screen',
+            'The app returned a screen this card cannot show.'
+          );
           return;
         }
 
@@ -256,11 +336,17 @@ export class FlowController {
     } catch (error) {
       if (error instanceof Error && error.name === 'TimeoutError') {
         logger.error('[FLOW-ACTION] App backend timed out', { messageId });
-        res.status(504).json({ error: 'App backend timed out' });
+        sendFlowError(
+          res,
+          504,
+          'UPSTREAM_UNAVAILABLE',
+          'App backend timed out',
+          'The app took too long to respond. It is safe to try again.'
+        );
         return;
       }
       logger.error('[FLOW-ACTION] Unexpected error', error);
-      res.status(500).json({ error: 'Internal server error' });
+      sendFlowError(res, 500, 'INTERNAL', 'Internal server error');
     }
   };
 }

@@ -16,6 +16,7 @@
 import { randomUUID } from "node:crypto";
 import { Router, type NextFunction, type Request, type Response } from "express";
 import { errMsg } from "../lib/errors.js";
+import { classifyToolError, flowActionError } from "../lib/flow-action-error.js";
 import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
@@ -96,13 +97,6 @@ function flagUserTokenRun(conversationId: string | undefined, agentSlug: string 
         errMsg(e),
       ),
     );
-}
-
-function approvalToolFailureMessage(errMsg: string): string {
-  if (/conversation not found/i.test(errMsg) || /Spaces API 404/i.test(errMsg)) {
-    return "target conversation not found — re-run the agent to regenerate this approval";
-  }
-  return errMsg;
 }
 
 const AGENT_CALL_CONSUMED_TTL_SEC = 24 * 60 * 60;
@@ -260,7 +254,7 @@ type AppActionResponse =
   | { type: "close_screen"; finalMessage?: string; message?: string }
   | { type: "update_screen_data"; data: Record<string, unknown>; componentUpdates?: Record<string, unknown> }
   | { type: "ack"; message?: string }
-  | { type: "error"; message: string; code?: string };
+  | { type: "error"; message: string; code?: string; retryable?: boolean };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -912,7 +906,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       const signatureOk = isAutomationCard || verifyActionSignatureAny([actionPayload, legacyActionPayload], signature);
       if (!signatureOk) {
         log.error("[flow-action] HMAC verification failed");
-        res.json({ type: "error", message: "HMAC verification failed — action may have been tampered with" } satisfies AppActionResponse);
+        res.json(flowActionError("INTEGRITY_FAILED") satisfies AppActionResponse);
         return;
       }
       const legacyWriteCard = !verifyActionSignatureAny([actionPayload, automationActionPayload], signature);
@@ -977,12 +971,14 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       if (serverType === "xyne-spaces" && tool === "spaces-send-message") {
         const agent = await findAgentForFlow(agentSlug, spacesAppId, writeUser.orgId);
         if (!agent?.spacesAppToken) {
-          res.json({ type: "error", message: `No spacesAppToken for agent ${agentSlug ?? "(default)"}` } satisfies AppActionResponse);
+          log.error(`[flow-action] No spacesAppToken for agent ${agentSlug ?? "(default)"}`);
+          res.json(flowActionError("MISCONFIGURED") satisfies AppActionResponse);
           return;
         }
         const appToken = decryptSpacesAppToken(agent.spacesAppToken);
         if (!appToken) {
-          res.json({ type: "error", message: "Invalid spacesAppToken format" } satisfies AppActionResponse);
+          log.error(`[flow-action] Invalid spacesAppToken format for agent ${agentSlug ?? "(default)"}`);
+          res.json(flowActionError("MISCONFIGURED") satisfies AppActionResponse);
           return;
         }
 
@@ -1032,14 +1028,15 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
               sent = `Posted in #${channelName}.`;
             }
           } catch (e) {
-            const errorText = approvalToolFailureMessage(errMsg(e));
-            log.error(`[flow-action] xyne-ai spaces-send-message failed conversationId=${conversationId} userId=${writeUserId} err=${errMsg(e)}`);
+            const failure = classifyToolError(e, { tool });
+            const errorText = failure.message;
+            log.error(`[flow-action] xyne-ai spaces-send-message failed code=${failure.code} conversationId=${conversationId} userId=${writeUserId} err=${errMsg(e)}`);
             await finishWriteFailure({
               tool, serverType, params, writeUserId, signature, agentSlug, spacesAppId, subagentId,
               messageId, conversationId, channelId: continueChannelId, errorText,
               xyneAi: xyneAiCard,
             });
-            res.status(422).json({ type: "error", code: "TOOL_EXECUTION_FAILED", message: errorText } satisfies AppActionResponse);
+            res.status(422).json(failure satisfies AppActionResponse);
             return;
           }
           await completeWriteSuccess({
@@ -1089,7 +1086,8 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       if (gatewayTarget) {
         const tenantUniqueId = resolveGatewayTenantForApproval();
         if (!tenantUniqueId) {
-          res.json({ type: "error", message: "Gateway tenant is not configured" } satisfies AppActionResponse);
+          log.error("[flow-action] Gateway tenant is not configured");
+          res.json(flowActionError("MISCONFIGURED") satisfies AppActionResponse);
           return;
         }
 
@@ -1098,7 +1096,8 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           select: { email: true },
         });
         if (!user?.email) {
-          res.json({ type: "error", message: `No user email found for ${writeUserId}` } satisfies AppActionResponse);
+          log.error(`[flow-action] No user email found for ${writeUserId}`);
+          res.json(flowActionError("MISCONFIGURED", "Your account has no email address, so this integration cannot run as you.") satisfies AppActionResponse);
           return;
         }
 
@@ -1113,16 +1112,16 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           const errText = sanitizeApprovalToolError(
             formatGatewayApprovalExecutionError(execution, gatewayTarget.serviceName, tool),
           );
-          const userMessage = approvalToolFailureMessage(errText);
+          const backendStatus = (execution as { backendStatus?: number }).backendStatus;
+          const failureResponse = classifyToolError(
+            new Error(execution.error ?? errText),
+            { tool, ...(typeof backendStatus === "number" ? { status: backendStatus } : {}) },
+          ) satisfies AppActionResponse;
+          const userMessage = failureResponse.message;
           log.error(
-            `[flow-action] gateway approval tool failed server=${serverType} tool=${tool} conversationId=${conversationId} userId=${writeUserId} spacesAppId=${spacesAppId ?? ""} err=${errText}`,
+            `[flow-action] gateway approval tool failed code=${failureResponse.code} server=${serverType} tool=${tool} conversationId=${conversationId} userId=${writeUserId} spacesAppId=${spacesAppId ?? ""} status=${backendStatus ?? ""} err=${errText}`,
           );
           // Same ordering rule as the success path.
-          const failureResponse = {
-            type: "error",
-            code: "TOOL_EXECUTION_FAILED",
-            message: userMessage,
-          } satisfies AppActionResponse;
           if (!xyneAiCard) res.status(422).json(failureResponse);
           await finishWriteFailure({
             tool, serverType, params, writeUserId, signature, agentSlug, spacesAppId, subagentId,
@@ -1184,7 +1183,8 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         const agent = await findAgentForFlow(agentSlug, spacesAppId, writeUser.orgId);
         const appToken = agent?.spacesAppToken ? decryptSpacesAppToken(agent.spacesAppToken) : null;
         if (!agent || !appToken) {
-          res.json({ type: "error", message: `No spacesAppToken for agent ${agentSlug ?? "(default)"}` } satisfies AppActionResponse);
+          log.error(`[flow-action] No spacesAppToken for agent ${agentSlug ?? "(default)"}`);
+          res.json(flowActionError("MISCONFIGURED") satisfies AppActionResponse);
           return;
         }
         const outcome = await applyConversationFork(
@@ -1335,7 +1335,8 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       const { hasConnectorDefinition } = await import("../mcp/connector-definitions.js");
       const { loadApprovedWriteCredentials, isPrivateUserCredential } = await import("../lib/credentials-loader.js");
       if (!(await hasConnectorDefinition(serverType))) {
-        res.json({ type: "error", message: `No adapter for ${serverType}` } satisfies AppActionResponse);
+        log.error(`[flow-action] No adapter for ${serverType}`);
+        res.json(flowActionError("MISCONFIGURED") satisfies AppActionResponse);
         return;
       }
       // `writeUserId` is the raw ID signed into the Flow card. Credential rows
@@ -1351,7 +1352,8 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         subagentId,
       });
       if (!effective) {
-        res.json({ type: "error", message: `No connection for user ${writeClawUserId} / ${serverType}` } satisfies AppActionResponse);
+        log.warn(`[flow-action] No connection for user ${writeClawUserId} / ${serverType}`);
+        res.json(flowActionError("CONNECTION_REQUIRED", `You haven't connected ${serverType} yet, or the connection expired. Connect it and try again.`) satisfies AppActionResponse);
         return;
       }
       // Private user credential on an approved write → flag the run for the ACL
@@ -1373,16 +1375,13 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           effective.instance,
         );
       } catch (err) {
-        const errText = sanitizeApprovalToolError(err);
-        const userMessage = approvalToolFailureMessage(errText);
+        // Classify from the RAW error: sanitizeApprovalToolError collapses JSON
+        // bodies to `{...}`, which is what users used to see. Raw text goes to logs only.
+        const failureResponse = classifyToolError(err, { tool }) satisfies AppActionResponse;
+        const userMessage = failureResponse.message;
         log.error(
-          `[flow-action] approval tool failed tool=${tool} conversationId=${conversationId} userId=${writeClawUserId} spacesAppId=${spacesAppId ?? ""} err=${errText}`,
+          `[flow-action] approval tool failed code=${failureResponse.code} tool=${tool} conversationId=${conversationId} userId=${writeClawUserId} spacesAppId=${spacesAppId ?? ""} err=${errMsg(err).slice(0, 1000)}`,
         );
-        const failureResponse = {
-          type: "error",
-          code: "TOOL_EXECUTION_FAILED",
-          message: userMessage,
-        } satisfies AppActionResponse;
         if (!xyneAiCard) res.status(422).json(failureResponse);
         await finishWriteFailure({
           tool, serverType, params, writeUserId, signature, agentSlug, spacesAppId, subagentId,
