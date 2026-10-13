@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import type { SearchFilterChip, SearchScope } from '@/src/features/global-search/types';
-import { DEFAULT_STRUCTURED_FILTERS } from '@/src/features/global-search/utils/filter-model';
+import {
+  DEFAULT_STRUCTURED_FILTERS,
+  resolveDateKeyword,
+} from '@/src/features/global-search/utils/filter-model';
 import {
   buildSearchRequest,
   toSearchParams,
@@ -159,7 +162,7 @@ describe('global search request', () => {
       assert.equal(sent['filterOnly'], 'true');
     });
 
-    it('maps date presets and showArchived on tickets', () => {
+    it('expands date presets to after/before and maps showArchived on tickets', () => {
       const sent = params({
         tab: 'tickets',
         structured: {
@@ -169,8 +172,28 @@ describe('global search request', () => {
         },
       });
 
-      assert.equal(sent['range'], 'last 7 days');
+      const bounds = resolveDateKeyword('last 7 days');
+      assert.ok(bounds);
+      assert.equal(sent['after'], bounds.after);
+      assert.equal(sent['before'], bounds.before);
+      assert.equal(sent['range'], undefined);
       assert.equal(sent['excludeArchived'], 'false');
+    });
+
+    it('maps a one-day preset to on (not equal after/before)', () => {
+      const sent = params({
+        tab: 'messages',
+        structured: {
+          ...DEFAULT_STRUCTURED_FILTERS,
+          dateRange: 'yesterday',
+        },
+      });
+
+      const bounds = resolveDateKeyword('yesterday');
+      assert.ok(bounds);
+      assert.equal(sent['on'], bounds.after);
+      assert.equal(sent['after'], undefined);
+      assert.equal(sent['before'], undefined);
     });
 
     it('does not treat the toggle alone as a query', () => {

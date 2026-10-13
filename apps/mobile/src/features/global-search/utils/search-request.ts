@@ -2,13 +2,19 @@ import type { VespaSearchFilters } from '@/src/types/search';
 import { buildVespaSearchParams, sanitizeSearchQuery } from '@/src/utils/search';
 import type { SearchFilterChip, SearchFilterPrefix, SearchScope } from '../types';
 import { toSearchQuery } from './exact-search';
-import { DEFAULT_STRUCTURED_FILTERS, type StructuredSearchFilters } from './filter-model';
+import {
+  DEFAULT_STRUCTURED_FILTERS,
+  resolveDateKeyword,
+  type StructuredSearchFilters,
+} from './filter-model';
 import { DEFAULT_SORT_BY, type SortBy } from './rank-sort';
 import { effectiveInputsForScope } from './scope';
 import type { GlobalSearchTab } from './search-tabs';
 
 /** Matches dashboard `BACKEND_RESULTS_LIMIT` — per category, not shared across them. */
-const RESULTS_LIMIT = 25;
+export const RESULTS_LIMIT = 25;
+/** Vespa caps query offset; stop paginating before the next page would cross it. */
+export const MAX_BACKEND_OFFSET = 1000;
 
 export type SearchCategory = 'messages' | 'tickets' | 'files' | 'calls';
 
@@ -168,21 +174,33 @@ function joinList(values: readonly string[]): string | undefined {
   return values.length > 0 ? values.join(',') : undefined;
 }
 
-/** Structured date → Vespa `on` / `after`+`before` / `range`. */
+/**
+ * Structured date → Vespa `on` / `after`+`before` / `range`.
+ * Presets (e.g. "last 7 days") expand to concrete bounds at the request boundary —
+ * same as dashboard `dateBounds` / `searchFilters` — so the wire matches dashboard.
+ */
 function dateParams(structured: StructuredSearchFilters): Partial<VespaSearchFilters> {
   const { dateRange, after, before } = structured;
-  if (after && before && after === before) return { on: after };
   if (after || before) {
+    // Equal day bounds must go as `on`: backend treats `before` as < start-of-day and
+    // `after` as > end-of-day, so the pair would match nothing.
+    if (after && before && after === before) return { on: after };
     return {
       ...(after ? { after } : {}),
       ...(before ? { before } : {}),
     };
   }
-  if (dateRange) return { range: dateRange };
-  return {};
+  if (!dateRange) return {};
+  const bounds = resolveDateKeyword(dateRange);
+  if (!bounds) return { range: dateRange };
+  if (bounds.after === bounds.before) return { on: bounds.after };
+  return { after: bounds.after, before: bounds.before };
 }
 
-export function buildSearchFilters(request: SearchRequest): VespaSearchFilters {
+export function buildSearchFilters(
+  request: SearchRequest,
+  options: { offset?: number } = {},
+): VespaSearchFilters {
   const {
     category,
     freeText,
@@ -207,7 +225,7 @@ export function buildSearchFilters(request: SearchRequest): VespaSearchFilters {
   const filters: VespaSearchFilters = {
     query: toSearchQuery(sanitized, exactMatch),
     limit: RESULTS_LIMIT,
-    offset: 0,
+    offset: options.offset ?? 0,
     presentationSummary: 'lean',
     ...CATEGORY_WIRE[category],
   };
@@ -325,8 +343,17 @@ export function buildSearchFilters(request: SearchRequest): VespaSearchFilters {
 
 /**
  * The query string as sent. Also the request's identity: two requests that would
- * produce the same call produce equal params.
+ * produce the same call produce equal params (offset excluded from identity — callers
+ * that key by identity should pass offset 0 / omit it).
  */
-export function toSearchParams(request: SearchRequest): Record<string, string> {
-  return buildVespaSearchParams(buildSearchFilters(request));
+export function toSearchParams(
+  request: SearchRequest,
+  options: { offset?: number } = {},
+): Record<string, string> {
+  return buildVespaSearchParams(buildSearchFilters(request, options));
+}
+
+/** Base params used as the React Query key (always page 0). */
+export function toSearchIdentityParams(request: SearchRequest): Record<string, string> {
+  return toSearchParams(request, { offset: 0 });
 }

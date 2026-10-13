@@ -101,6 +101,8 @@ export function HitResults({
       estimatedItemSize={72}
       empty={empty}
       skeletonTitle={label}
+      onEndReached={results.loadMore}
+      isFetchingMore={results.isFetchingMore}
     />
   );
 }
@@ -147,6 +149,8 @@ export function CallResults({ request, query, hasQuery, ...chrome }: RemoteProps
       empty={CALLS_EMPTY}
       skeletonVariant='call'
       skeletonTitle='Calls'
+      onEndReached={results.loadMore}
+      isFetchingMore={results.isFetchingMore}
     />
   );
 }

@@ -59,6 +59,10 @@ export type SearchListProps<T> = ListChrome & {
   empty: EmptyCopy;
   skeletonVariant?: 'default' | 'call';
   skeletonTitle?: string;
+  /** Dashboard-parity infinite scroll — fired near the end of the list. */
+  onEndReached?: () => void;
+  /** True while a subsequent page is loading (footer spinner). */
+  isFetchingMore?: boolean;
 };
 
 /** Sections with no items are dropped, so callers can declare theirs unconditionally. */
@@ -100,6 +104,8 @@ export function SearchList<T>({
   listContentTop,
   bottomContentInset,
   scrollOffset,
+  onEndReached,
+  isFetchingMore = false,
 }: SearchListProps<T>): ReactElement {
   const rows = useMemo(() => toRows(sections, itemKey), [itemKey, sections]);
 
@@ -144,6 +150,14 @@ export function SearchList<T>({
     );
   }, [empty, hasQuery, skeletonTitle, skeletonVariant, status]);
 
+  const footer = useMemo(
+    () =>
+      isFetchingMore ? (
+        <SearchResultsShimmer variant={skeletonVariant} rowCount={3} fill={false} />
+      ) : null,
+    [isFetchingMore, skeletonVariant],
+  );
+
   return (
     <VirtualList
       rows={rows}
@@ -153,6 +167,8 @@ export function SearchList<T>({
       bottomContentInset={bottomContentInset}
       scrollOffset={scrollOffset}
       emptyComponent={emptyComponent}
+      {...(onEndReached ? { onEndReached } : {})}
+      listFooter={footer}
     />
   );
 }
@@ -166,6 +182,8 @@ type VirtualListProps<T> = ListChrome & {
   renderRow: (row: SearchRow<T>) => ReactElement | null;
   estimatedItemSize: number;
   emptyComponent: ReactElement;
+  onEndReached?: () => void;
+  listFooter: ReactElement | null;
 };
 
 function VirtualListImpl<T>({
@@ -176,6 +194,8 @@ function VirtualListImpl<T>({
   bottomContentInset,
   scrollOffset,
   emptyComponent,
+  onEndReached,
+  listFooter,
 }: VirtualListProps<T>): ReactElement {
   // Every prop below keeps its identity between renders; a recycling list treats a
   // new style object or `renderItem` as a reason to re-render every mounted cell.
@@ -197,6 +217,7 @@ function VirtualListImpl<T>({
       estimatedItemSize={estimatedItemSize}
       recycleItems
       ListEmptyComponent={emptyComponent}
+      ListFooterComponent={listFooter}
       // RN 0.81+ stops delivering touches inside a ScrollView's contentInset region
       // (facebook/react-native#54123), which the inset under the floating toolbar
       // triggers: the list scrolls but rows cannot be tapped. iOS only.
@@ -208,6 +229,9 @@ function VirtualListImpl<T>({
       sharedValues={sharedValues}
       contentContainerStyle={contentContainerStyle}
       style={styles.list}
+      {...(onEndReached
+        ? { onEndReached, onEndReachedThreshold: 0.4 as const }
+        : {})}
     />
   );
 }

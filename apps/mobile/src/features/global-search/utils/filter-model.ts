@@ -74,7 +74,35 @@ export type SearchResultsFilters = StructuredSearchFilters & {
   rankProfile: string;
 };
 
-export const DATE_RANGE_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
+/**
+ * Range keywords that map to a whole-day window (`after`/`before` dates).
+ * Mirrors dashboard `RESOLVABLE_DATE_KEYWORDS` / backend `timeKeywordParser`.
+ */
+export const RESOLVABLE_DATE_KEYWORDS = [
+  'today',
+  'yesterday',
+  'last 24 hours',
+  'last 7 days',
+  'last 30 days',
+  'last three months',
+  'last 12 months',
+  'last three years',
+  'this week',
+  'last week',
+  'this month',
+  'last month',
+] as const;
+
+export type ResolvableDateKeyword = (typeof RESOLVABLE_DATE_KEYWORDS)[number];
+
+export const isResolvableDateKeyword = (value: string): value is ResolvableDateKeyword =>
+  (RESOLVABLE_DATE_KEYWORDS as readonly string[]).includes(value);
+
+/** Slack-style presets shown in the Filters Date section. */
+export const DATE_RANGE_OPTIONS: ReadonlyArray<{
+  value: ResolvableDateKeyword | '';
+  label: string;
+}> = [
   { value: '', label: 'Any time' },
   { value: 'today', label: 'Today' },
   { value: 'yesterday', label: 'Yesterday' },
@@ -84,6 +112,66 @@ export const DATE_RANGE_OPTIONS: ReadonlyArray<{ value: string; label: string }>
   { value: 'last 12 months', label: 'Last 12 months' },
   { value: 'last three years', label: 'Last three years' },
 ];
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const startOfDayUtc = (d: Date): Date =>
+  new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+const startOfMonthUtc = (d: Date): Date =>
+  new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
+/** Monday-start, matching the backend (date-fns would default to Sunday). */
+const startOfWeekUtc = (d: Date): Date => {
+  const day = d.getUTCDay();
+  const shift = day === 0 ? 6 : day - 1;
+  return new Date(startOfDayUtc(d).getTime() - shift * DAY_MS);
+};
+const asDate = (d: Date): string => d.toISOString().slice(0, 10);
+/** Calendar-month shift, clamped so e.g. 31 Mar − 1 month is 28/29 Feb. */
+const shiftMonthsUtc = (d: Date, months: number): Date => {
+  const target = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + months, 1, 0, 0, 0, 0));
+  const lastDay = new Date(
+    Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0),
+  ).getUTCDate();
+  target.setUTCDate(Math.min(d.getUTCDate(), lastDay));
+  return target;
+};
+
+/**
+ * Resolve a relative range keyword to concrete `after`/`before` YYYY-MM-DD bounds.
+ * Same windows as dashboard + backend — so the Filters preset selects the same docs.
+ * Returns null for unknown / sub-day keywords (those stay as `range:` on the wire).
+ */
+export function resolveDateKeyword(
+  keyword: string,
+  now: Date = new Date(),
+): { after: string; before: string } | null {
+  const key = keyword.trim().toLowerCase();
+  if (!isResolvableDateKeyword(key)) return null;
+  const startOfThisWeek = startOfWeekUtc(now);
+  const startOfThisMonth = startOfMonthUtc(now);
+  const lastMonthEnd = new Date(startOfThisMonth.getTime() - DAY_MS);
+  const startOfToday = startOfDayUtc(now);
+  const yesterday = new Date(startOfToday.getTime() - DAY_MS);
+  const windows: Record<ResolvableDateKeyword, { from: Date; to: Date }> = {
+    today: { from: startOfToday, to: now },
+    'last 24 hours': { from: yesterday, to: now },
+    yesterday: { from: yesterday, to: yesterday },
+    'last 7 days': { from: new Date(now.getTime() - 7 * DAY_MS), to: now },
+    'last three months': { from: shiftMonthsUtc(now, -3), to: now },
+    'last 12 months': { from: shiftMonthsUtc(now, -12), to: now },
+    'last three years': { from: shiftMonthsUtc(now, -36), to: now },
+    'last 30 days': { from: new Date(now.getTime() - 30 * DAY_MS), to: now },
+    'this week': { from: startOfThisWeek, to: now },
+    'last week': {
+      from: new Date(startOfThisWeek.getTime() - 7 * DAY_MS),
+      to: new Date(startOfThisWeek.getTime() - DAY_MS),
+    },
+    'this month': { from: startOfThisMonth, to: now },
+    'last month': { from: startOfMonthUtc(lastMonthEnd), to: lastMonthEnd },
+  };
+  const window = windows[key];
+  return { after: asDate(window.from), before: asDate(window.to) };
+}
 
 export const DATE_MODES = [
   { value: '__on__', label: 'On…' },
