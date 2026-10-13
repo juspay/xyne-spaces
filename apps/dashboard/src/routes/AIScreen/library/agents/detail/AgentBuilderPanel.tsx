@@ -6,7 +6,7 @@ import XyneAISidebar from '@/components/Chat/XyneAISidebar/XyneAISidebar';
 import { clawAgentDetailKey } from '@/hooks/useClawAgentDetail';
 import type { Agent } from '@/services/claw/clawAuthAgentTypes';
 
-export const BUILDER_DRIVER_SLUG = 'ask-ai';
+export const BUILDER_DRIVER_SLUG = 'xyne';
 
 type PanelMode = 'builder' | 'preview';
 
