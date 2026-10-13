@@ -125,6 +125,8 @@ import {
   processTextForCopy,
 } from '../Chat/XyneAISidebar/components/MessageItem';
 import { TurnTimeline } from '../Chat/XyneAISidebar/components/TurnTimeline';
+import { TurnErrorCard } from '../Chat/XyneAISidebar/components/TurnErrorCard';
+import { isErrorOnlyContent } from '../Chat/XyneAISidebar/components/turnAnswer';
 import { turnDurationLabel, turnFinishedAt } from '../Chat/XyneAISidebar/components/activityShared';
 import { PendingActionBlock } from '../Chat/XyneAISidebar/components/PendingActionBlock';
 import { respondToPendingAction } from '../../services/XyneAI/XyneAIPendingActionService';
@@ -1226,13 +1228,21 @@ function ChatMessageBubble({
             renderText={(text, { streaming }) =>
               renderAnswerMarkdown(prepareAnswerText(text, streaming))
             }
-            legacyAnswer={displayContent ? renderAnswerMarkdown(displayContent) : null}
+            legacyAnswer={
+              displayContent && !isErrorOnlyContent(message)
+                ? renderAnswerMarkdown(displayContent)
+                : null
+            }
             plan={
               message.planTodos?.length ? (
                 <PlanCard todos={message.planTodos} title={message.planTitle} />
               ) : undefined
             }
           />
+          {/* A failed turn says why, instead of ending at its step group. */}
+          {message.errorInfo && !message.isStreaming && (
+            <TurnErrorCard errorInfo={message.errorInfo} className='mt-1 rounded-md' />
+          )}
 
           {!isUser &&
             message.uiFlows?.map(flow => (
