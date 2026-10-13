@@ -155,14 +155,25 @@ export function useBriefRenderContext(
   key: string,
 ): BriefRenderContext {
   const [projects] = useCachedQuery(queries.getAllProjects());
+  // Board codes (e.g. SEA) aren't project codes; look up only the ones this brief mentions
+  const candidateCodes = useMemo(
+    () => [...new Set([...content.matchAll(TICKET_ID_RE)].map(match => match[1]))].sort(),
+    [content],
+  );
+  const [namespaces] = useCachedQuery(queries.ticketNamespacesByCodes({ codes: candidateCodes }), {
+    enabled: candidateCodes.length > 0,
+  });
   const ticketPrefixes = useMemo(
     () =>
       new Set(
-        ((projects ?? []) as Array<{ code?: string | null }>)
-          .map(p => (p.code ?? '').toUpperCase())
+        [
+          ...((projects ?? []) as Array<{ code?: string | null }>),
+          ...((namespaces ?? []) as Array<{ code?: string | null }>),
+        ]
+          .map(item => (item.code ?? '').toUpperCase())
           .filter(Boolean),
       ),
-    [projects],
+    [projects, namespaces],
   );
 
   return useMemo(() => {

@@ -90,7 +90,7 @@ export function createConversationWithEmailTx(self: EmailService, channelId: str
     }
 
     // Generate xyneId and create ticket
-    const xyneId = await generateTicketId(tx, projectId);
+    const xyneId = await generateTicketId(tx, boardId);
     const ticketTitle = (emailSubject ?? '').replace(SUBJECT_PREFIX_REGEX, '').trim() || emailSubject;
     const ticketPriority = derivePriorityFromSubject(emailSubject);
     const createdTicket = await tx.ticket.create({
@@ -141,7 +141,7 @@ export function addEmailToConversationTx(self: EmailService, emailData: { create
 export function createConversationFromEmailTx(self: EmailService, projectId: string, emailSubject: string, emailBody: string, userId: string, conversation: Conversation, channelId: string, channel: any, boardId: string, stageName: string, ticketPriority: TicketPriority, slaResolutionDue: Date | null, userGroupId: string | undefined, ticketMetadata: Record<string, unknown> | undefined) {
   return transaction(['Project', 'Ticket'], 'createConversationFromEmail: ticket id sequence plus ticket insert must commit atomically; tx is not ACL-wrapped', self.prisma, async (tx) => {
     // Generate xyneId using project-scoped format
-    const xyneId = await generateTicketId(tx, projectId);
+    const xyneId = await generateTicketId(tx, boardId);
 
     return await tx.ticket.create({
       data: {
@@ -199,7 +199,7 @@ export async function ingestEmailThreadTx(boardId: string | undefined, channelId
         },
       });
 
-      const xyneId = await generateTicketId(tx, projectId!);
+      const xyneId = await generateTicketId(tx, boardId!);
       const createdTicket = await tx.ticket.create({
         data: {
           title: firstEmail.subject,

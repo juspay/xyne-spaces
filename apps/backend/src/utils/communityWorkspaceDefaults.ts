@@ -1,6 +1,7 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { sanitizeProjectCode, ProjectType, TicketStatusV2 } from '@xyne/shared';
 import { ensureGeneralChannelForWorkspace } from './workspaceGeneralChannel';
+import { createDefaultTicketNamespace } from './ticketNamespaceUtils';
 
 type PrismaClientLike = PrismaClient | Prisma.TransactionClient;
 
@@ -15,6 +16,7 @@ interface WorkspaceDefaults {
   project: { id: string };
   channel: { id: string };
   workspace: { id: string; landingChannelId: string | null };
+  ticketNamespaceId: string | null;
 }
 
 export async function createWorkspaceDefaults(
@@ -38,6 +40,13 @@ export async function createWorkspaceDefaults(
     select: { id: true },
   });
 
+  const namespace = await createDefaultTicketNamespace(params.db, {
+    workspaceId: params.workspaceId,
+    projectId: project.id,
+    code: projectCode,
+    createdBy: params.createdBy,
+  });
+
   const { channel } = await ensureGeneralChannelForWorkspace({
     db: params.db,
     workspaceId: params.workspaceId,
@@ -54,7 +63,7 @@ export async function createWorkspaceDefaults(
     },
   });
 
-  return { project, channel, workspace };
+  return { project, channel, workspace, ticketNamespaceId: namespace?.id ?? null };
 }
 
 export async function createCommunityWorkspaceDefaults(
@@ -68,6 +77,7 @@ export async function createCommunityWorkspaceDefaults(
       projectId: defaults.project.id,
       workspaceId: params.workspaceId,
       createdBy: params.createdBy,
+      ...(defaults.ticketNamespaceId && { ticketNamespaceId: defaults.ticketNamespaceId }),
     },
     select: { id: true },
   });

@@ -300,6 +300,29 @@ async function ensureProjectAndBoard(workspaceId: string, createdBy: string) {
     });
   }
 
+  // Written directly: the shared helper is gated on the backfill, which never runs locally
+  const now = new Date();
+  const namespace = await prisma.ticketNamespace.create({
+    data: {
+      code: PROJECT_CODE,
+      workspaceId,
+      projectId: project.id,
+      createdBy,
+      ticketSequence: 0,
+      createdAt: now,
+      updatedAt: now,
+    },
+    select: { id: true },
+  });
+  await prisma.project.update({
+    where: { id: project.id },
+    data: { defaultTicketNamespaceId: namespace.id },
+  });
+  await prisma.board.update({
+    where: { id: board.id },
+    data: { ticketNamespaceId: namespace.id },
+  });
+
   return { projectId: project.id, boardId: board.id };
 }
 

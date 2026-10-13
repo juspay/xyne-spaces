@@ -59,12 +59,12 @@ import {
   type CustomFieldWritePayload,
 } from '@/services/ticketCustomFieldService';
 import { emitTicketUpdated } from '@/automations/triggers/ticket-updated.trigger';
-import { getTicketBotActorId } from '@/utils/etaNotificationUtils';
 import {
-  dispatchEtaNotifications,
-  etaSignalsFromResult,
-} from '@/services/etaManagement';
-import { transferTicketToBoardTx } from '@/bypassAcl/transactions/controllersTicketController';
+  BoardChangeError,
+  isCrossNamespaceChange,
+  loadBoardChangeBoards,
+  moveTicketToBoard,
+} from '@/services/tickets/ticketBoardChangeService';
 
 const externalSourceRepo = new ExternalSourceRepository();
 const externalMessageRepo = new ExternalMessageRepository();
@@ -387,53 +387,6 @@ const replaceTicketTags = async (ticketId: string, tags: string[]): Promise<void
         ticketId,
         name: { in: tagsToRemove },
       },
-    });
-  }
-};
-
-const transferTicketToBoard = async (params: {
-  ticketId: string;
-  targetBoardId: string;
-  updatedBy: string;
-}): Promise<void> => {
-  const { ticketId, targetBoardId, updatedBy } = params;
-  const now = new Date();
-
-  const currentTicket = await prismaClient.ticket.findUnique({
-    where: { id: ticketId },
-    select: {
-      workspaceId: true,
-      channelId: true,
-      statusV2: true,
-      assignedTo: true,
-      createdBy: true,
-      userGroupId: true,
-      eta: true,
-      metadata: true,
-    },
-  });
-  if (!currentTicket) {
-    throw new Error(`Ticket ${ticketId} not found`);
-  }
-
-  // Resolved outside the transaction: a stable bot-user lookup, not part of the
-  // transactional state, and best kept off the held connection.
-  const systemActorId = await getTicketBotActorId(currentTicket.workspaceId);
-
-  const txResult = await transferTicketToBoardTx(targetBoardId, ticketId, now, updatedBy, currentTicket, systemActorId);
-
-  // Post-commit notification dispatch - best-effort, must never affect the already-
-  // committed response. Suppressed while the ticket is paused.
-  if (txResult.updatedTicket.statusV2 !== TicketStatusV2.PAUSED) {
-    void dispatchEtaNotifications(etaSignalsFromResult(txResult.etaResult), {
-      ticketId,
-      createdBy: currentTicket.createdBy,
-      assignedTo: currentTicket.assignedTo,
-      ticketUserGroupId: currentTicket.userGroupId,
-      boardId: targetBoardId,
-      actorId: updatedBy,
-    }).catch(error => {
-      logger.error('[TicketController] Failed to dispatch ETA notifications', { ticketId, error });
     });
   }
 };
@@ -970,10 +923,25 @@ export class TicketController {
 
       // --- Execute updates ---
       if (boardId && boardId !== ticket.boardId) {
-        await transferTicketToBoard({
+        const { source, target } = await loadBoardChangeBoards(ticket.boardId, boardId, ticket.workspaceId);
+        // Ids are immutable, so a different ticket code needs a transfer, not an update
+        if (await isCrossNamespaceChange(source, target)) {
+          res.status(409).json({
+            error: 'Target board uses a different ticket code; use POST /api/tickets/:ticketId/change-board instead',
+            code: 'CROSS_NAMESPACE_BOARD_CHANGE',
+          });
+          return;
+        }
+        await moveTicketToBoard({
           ticketId,
           targetBoardId: boardId,
-          updatedBy: userId,
+          ctx: {
+            userID: userId,
+            workspaceId: ticket.workspaceId,
+            role: req.user!.role,
+            orgRole: req.user!.orgRole,
+            memberId: req.user!.memberId,
+          },
         });
         logger.info(`[TicketController] Ticket board updated: ${ticketId}`, { boardId });
       }
@@ -1093,6 +1061,10 @@ export class TicketController {
 
       res.status(200).json({ success: true });
     } catch (error) {
+      if (error instanceof BoardChangeError) {
+        res.status(error.status).json({ error: error.message, code: 'BOARD_CHANGE_REJECTED' });
+        return;
+      }
       const errorMessage = error instanceof Error ? error.message : String(error);
       const errorStack = error instanceof Error ? error.stack : undefined;
       logger.error('[TicketController] Error updating ticket:', {

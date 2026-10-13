@@ -129,7 +129,7 @@ export const ProjectForm = ({
       {!isEdit && (
         <div className='flex flex-col gap-1.5'>
           <label htmlFor='project-code' className='text-sm font-medium text-foreground'>
-            Project code
+            Ticket code
           </label>
           <Input
             id='project-code'
@@ -142,7 +142,8 @@ export const ProjectForm = ({
             data-testid='project-code-input'
           />
           <p className='text-xs text-muted-foreground'>
-            Tickets will be: {code || 'CODE'}-0001, {code || 'CODE'}-0002...
+            Your boards&apos; tickets will be {code || 'CODE'}-0001. You can add more codes per
+            board later.
           </p>
         </div>
       )}

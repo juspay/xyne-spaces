@@ -48,6 +48,10 @@ router.post(
 // Update a ticket (assignee, stage, group, title, description, priority, status, eta)
 router.patch('/:ticketId', ticketController.updateTicket);
 
+// Change a ticket's board: moves it within the same ticket namespace, otherwise
+// creates a linked ticket on the target board (optionally closing the original).
+router.post('/:ticketId/change-board', ticketController.changeTicketBoard);
+
 // Workflow metrics for tickets dashboard
 router.get('/workflow-metrics', analyticsAuthMiddleware.requireWorkspaceContext, analyticsController.getWorkflowMetrics);
 router.post('/duplicates', validate(ticketDuplicateCheckSchema), ticketController.checkDuplicateTickets);

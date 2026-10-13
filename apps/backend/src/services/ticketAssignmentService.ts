@@ -1,5 +1,5 @@
 import { DatabaseClient } from '@/database/client';
-import { TicketStatusV2, UserResponsibility } from '@xyne/shared';
+import { TicketStatusV2, UserResponsibility, type BoardMetadata } from '@xyne/shared';
 import { evaluateAllRoles, evaluateAssignmentRule, evaluateRoleSlots, filterMappingsToChannelParticipants } from '@/utils/assignmentEngine';
 import { logger } from '@/utils/logger';
 import { syncUserWorkload } from '@/utils/workloadUtils';
@@ -56,6 +56,20 @@ export function isRoleDrivenResult(
   r: AnyFullRoleAssignmentResult,
 ): r is RoleDrivenAssignmentResult {
   return 'assignments' in r && 'primaryUserId' in r;
+}
+
+/**
+ * True when the board has auto-assignment enabled — either the new
+ * `metadata.assignmentRoles` (non-empty) or the legacy `fullRoleAssignment`
+ * boolean. Drives whether `assignFullRoles` runs vs the single-assignee
+ * `evaluateAssignmentRule` path.
+ */
+export function hasBoardAutoAssignment(metadata: BoardMetadata | undefined): boolean {
+  if (!metadata) return false;
+  if (Array.isArray(metadata.assignmentRoles) && metadata.assignmentRoles.length > 0) {
+    return true;
+  }
+  return metadata.fullRoleAssignment === true;
 }
 
 /** Returns the primary assignee's userId regardless of which path produced `r`. */

@@ -35,7 +35,7 @@ export function createFlowStepTicketTx(requireActiveRoot: boolean | undefined, r
         doNotPostToChannel: false,
       },
     });
-    const xyneId = await generateTicketId(tx, rootTicket.projectId);
+    const xyneId = await generateTicketId(tx, rootTicket.boardId);
     const created = await ticketRepository.createTicket(
       {
         id: deterministicTicketId,

@@ -198,7 +198,7 @@ import { initializeRotationForGroup } from '@/utils/rotationEngine';
 import { livekitService } from '@/services/liveKitService';
 import { evaluateAssignmentRule, AssignmentType } from '@/utils/assignmentEngine';
 import { syncUserWorkload } from '@/utils/workloadUtils';
-import { ticketAssignmentService, primaryUserIdOf } from '@/services/ticketAssignmentService';
+import { ticketAssignmentService, primaryUserIdOf, hasBoardAutoAssignment } from '@/services/ticketAssignmentService';
 import { calculateETADeadline, calculateWorkingDurationMs } from '@/utils/etaCalculation';
 import { DEFAULT_ROLE_NAME_TO_ENUM } from '@/utils/roleFrameworkUtils';
 import { grantPermissionsForRole, syncResourceAdminAccess, syncOrgResourceAdminAccess } from '@/services/permissionMatrix';
@@ -218,7 +218,6 @@ import {
 } from '@/bots/unified/index.js';
 
 import { z } from 'zod';
-import { generateKeyBetween } from 'fractional-indexing';
 import { zql } from './queries';
 import { hasGuestChannelAccess } from './acl/core/guest-access';
 import { hasProjectAdminAccess } from './acl/core/admin-access';
@@ -767,20 +766,6 @@ async function assertCanvasThreadManageAccess(
   }
 
   await assertCanvasCommentEditAccess(tx, thread.canvasId, userId, workspaceId);
-}
-
-/**
- * True when the board has auto-assignment enabled — either the new
- * `metadata.assignmentRoles` (non-empty) or the legacy `fullRoleAssignment`
- * boolean. Drives whether `assignFullRoles` runs vs the single-assignee
- * `evaluateAssignmentRule` path.
- */
-function hasBoardAutoAssignment(metadata: BoardMetadata | undefined): boolean {
-  if (!metadata) return false;
-  if (Array.isArray(metadata.assignmentRoles) && metadata.assignmentRoles.length > 0) {
-    return true;
-  }
-  return metadata.fullRoleAssignment === true;
 }
 
 /**
@@ -6154,6 +6139,10 @@ export function createMutators(
         async ({ tx, args: params }) => {
           const ticket = await tx.run(zql.tickets.where('id', params.id).related('ticketDescription').one());
           if (!ticket) throw new Error('Ticket not found');
+          // Board changes go through POST /api/tickets/:ticketId/change-board only
+          if (params.boardId !== undefined && params.boardId !== ticket.boardId) {
+            throw new Error("Use the change-board API to change a ticket's board");
+          }
           const currentDescription = resolveTicketDescription(ticket);
           const currentBoard = await tx.run(zql.boards.where('id', ticket.boardId).one());
           if (
@@ -6223,10 +6212,9 @@ export function createMutators(
           }
 
           // ACL Business Logic: Check ticket transfer permission for assignedTo,
-          // eta, stageName (which triggers stage ETA recalculation), or boardId changes
+          // eta, or stageName (which triggers stage ETA recalculation) changes
           const isAssigneeChanging = params.assignedTo !== undefined && params.assignedTo !== ticket.assignedTo;
           const isEtaChanging = params.eta !== undefined && params.eta !== ticket.eta;
-          const isBoardChanging = params.boardId !== undefined && params.boardId !== ticket.boardId;
           const isStageChanging = params.stageName !== undefined && params.stageName !== ticket.stageName;
           const isEnteringTerminal =
             params.statusV2 !== undefined &&
@@ -6247,7 +6235,6 @@ export function createMutators(
           const needsBoardEtaContext =
             isAssigneeChanging ||
             isEtaChanging ||
-            isBoardChanging ||
             isStageChanging ||
             isEnteringTerminal ||
             isLeavingTerminal ||
@@ -6261,12 +6248,12 @@ export function createMutators(
           // ungated one is an indirect way to change the due date. The assignee is exempt:
           // they are the one doing the work, and requiring a configured role just to progress
           // their own ticket would break the normal workflow. Any other controlled change in
-          // the same call (eta/assignee/board) still gates them normally via the flags below.
+          // the same call (eta/assignee) still gates them normally via the flags below.
           const isActorAssignee = ticket.assignedTo === authData.sub;
           const isStageChangingGated =
             isStageChanging && boardEtaManagement.autoRecomputeEnabled && !isActorAssignee;
 
-          if ((isAssigneeChanging || isEtaChanging || isBoardChanging || isStageChangingGated) && ticket.userGroupId) {
+          if ((isAssigneeChanging || isEtaChanging || isStageChangingGated) && ticket.userGroupId) {
             const permission = await canUserModifyTicketControl(
               authData.sub,
               ticket.userGroupId,
@@ -6291,207 +6278,8 @@ export function createMutators(
           const updateData: any = { updatedAt: params.updatedAt, updatedBy: authData.sub };
           let latestTicketMetadata: unknown = ticket.metadata;
           const activities: any[] = [];
-          const fields = ['title', 'description', 'statusV2', 'priority', 'stageName', 'assignedTo', 'userGroupId', 'eta', 'boardId', 'metadata', 'isArchived', 'kanbanPosition', 'ticketType'] as const;
+          const fields = ['title', 'description', 'statusV2', 'priority', 'stageName', 'assignedTo', 'userGroupId', 'eta', 'metadata', 'isArchived', 'kanbanPosition', 'ticketType'] as const;
           const oldAssignedTo = ticket.assignedTo;
-          const oldBoardId = ticket.boardId;
-
-
-          // Handle board transfer
-          if (params.boardId !== undefined && params.boardId !== oldBoardId) {
-            const now = Date.now();
-
-            // Flow boards only receive tickets through the flow cascade or
-            // "Start flow"; runs would break if tickets moved in or out.
-            const targetBoard = await tx.run(zql.boards.where('id', params.boardId).one());
-            if (targetBoard?.boardType === BoardType.FLOW) {
-              throw new Error('Tickets cannot be moved onto a Flow board');
-            }
-            const sourceBoard = await tx.run(zql.boards.where('id', oldBoardId).one());
-            if (sourceBoard?.boardType === BoardType.FLOW) {
-              throw new Error('Tickets cannot be moved off a Flow board');
-            }
-
-            // 1. Fetch all stages of the new board
-            const newBoardStages = await tx.run(
-              zql.stages
-                .where('boardId', params.boardId)
-                .orderBy('sequenceNumber', 'asc')
-            );
-
-            if (newBoardStages.length === 0) {
-              throw new Error(`No stages found for board ${params.boardId}`);
-            }
-
-            const firstStage = newBoardStages[0];
-
-            // 2. Update ticket with first stage. `eta` is deliberately left untouched here -
-            // an automatic due date is only ever set/changed by the domain-service
-            // evaluation below, and only when the target board has opted into automatic ETA
-            // management.
-            const existingTicketsInFirstStage = await tx.run(
-              zql.tickets
-                .where('boardId', params.boardId)
-                .where('stageName', firstStage.name)
-                .where('kanbanPosition', 'IS NOT', null)
-                .orderBy('kanbanPosition', 'asc')
-                .limit(1)
-            );
-            const firstWithPosition = existingTicketsInFirstStage[0];
-            let newKanbanPosition: string;
-            try {
-              newKanbanPosition = generateKeyBetween(null, firstWithPosition?.kanbanPosition ?? null);
-            } catch {
-              newKanbanPosition = generateKeyBetween(null, null);
-            }
-            await tx.mutate.tickets.update({
-              id: params.id,
-              stageName: firstStage.name,
-              ...(firstStage.defaultTicketStatusV2 && {
-                statusV2: firstStage.defaultTicketStatusV2
-              }),
-              kanbanPosition: newKanbanPosition,
-              updatedAt: now,
-              updatedBy: authData.sub
-            });
-
-            // 4. Delete ALL old ticket_stage_eta entries
-            const oldStageEtaEntries = await tx.run(
-              zql.ticket_stage_eta.where('ticketId', params.id)
-            );
-
-            for (const entry of oldStageEtaEntries) {
-              await tx.mutate.ticket_stage_eta.delete({ id: entry.id });
-            }
-
-            // 5. Create new stage ETA entry for first stage (if it has ETA)
-            if (firstStage.eta !== null && firstStage.eta > 0) {
-              const stageEtaDeadline = calculateETADeadline(new Date(now), firstStage.eta).getTime();
-              const newEntryId = uuidv4();
-
-              await tx.mutate.ticket_stage_eta.insert({
-                workspaceId: authData.workspaceId,
-                id: newEntryId,
-                ticketId: params.id,
-                stageId: firstStage.id,
-                version: 1,
-                stageEnteredAt: now,
-                stageLeftAt: null,
-                stageEta: stageEtaDeadline,
-                createdAt: now,
-                updatedBy: authData.sub
-              });
-            }
-            // Forecast from the new board's first stage onward, extend-only against the
-            // ticket's pre-transfer due date. Boards without automation keep their date.
-            const targetBoardEtaManagement = parseBoardEtaManagement(targetBoard?.metadata ?? null, targetBoard?.boardType ?? BoardType.DEFAULT);
-            if (targetBoardEtaManagement.autoRecomputeEnabled) {
-              const effectiveStatusV2 = firstStage.defaultTicketStatusV2 ?? ticket.statusV2;
-              const etaCtx = await loadZeroEtaContext(tx, {
-                ticketId: params.id,
-                boardId: params.boardId,
-                ticketMetadata: ticket.metadata,
-                stage: firstStage,
-                stages: newBoardStages,
-              });
-              const { currentTicketEtaManagement } = etaCtx;
-
-              const etaResult = evaluateEta({
-                ticketId: params.id,
-                ticketStatus: effectiveStatusV2,
-                isTerminal: isTerminalStatus(effectiveStatusV2),
-                currentTicketEta: msToDate(ticket.eta),
-                currentTicketEtaManagement,
-                boardType: targetBoard?.boardType ?? '',
-                boardEtaManagement: targetBoardEtaManagement,
-                currentStageId: firstStage.id,
-                stages: etaCtx.stages,
-                transitions: etaCtx.transitions,
-                activeVisit: etaCtx.activeVisit,
-                trigger: 'STAGE_TRANSITION',
-                now: new Date(now),
-              });
-
-              const boardTransferActivityIntents = buildEtaActivityIntents(etaResult, {
-                currentStageId: firstStage.id,
-                oldEta: ticket.eta ?? null,
-                trigger: 'STAGE_TRANSITION',
-                systemReason: `Automatic recalculation after moving ticket to board "${targetBoard?.name ?? params.boardId}"`,
-                previousRiskFingerprint: currentTicketEtaManagement.planningRisk.fingerprint,
-              });
-              const mergedMetadata = mergeTicketEtaManagement(latestTicketMetadata, {
-                ...etaResult.ticketEtaManagementPatch,
-                pendingActivities: stageEtaActivityOutbox(boardTransferActivityIntents, now),
-              });
-              latestTicketMetadata = mergedMetadata;
-              await tx.mutate.tickets.update({
-                id: params.id,
-                ...(etaResult.etaDecision.changed && etaResult.etaDecision.newEta
-                  ? { eta: etaResult.etaDecision.newEta.getTime() }
-                  : {}),
-                metadata: mergedMetadata as ReadonlyJSONValue,
-                updatedAt: now,
-              });
-
-            }
-
-            if (ticket.userGroupId) {
-              // Fire and forget - retrigger autoassignment for the new board
-              asyncTasks.push(async () => {
-                try {
-                  logger.info(`[MUTATOR-TICKET-UPDATE] Board changed from ${oldBoardId} to ${params.boardId}, retriggering autoassignment for userGroupId: ${ticket.userGroupId}`);
-
-                  const newBoardId = params.boardId!;
-                  const boardRow = await tx.run(zql.boards.where('id', newBoardId).one());
-                  const boardMetadata = boardRow?.metadata as BoardMetadata | undefined;
-
-                  if (hasBoardAutoAssignment(boardMetadata)) {
-                    await assignFullRoles(tx, {
-                      ticketId: params.id,
-                      userGroupId: ticket.userGroupId!,
-                      boardId: newBoardId,
-                      oldAssignedTo: ticket.assignedTo,
-                      conversationId: null,
-                      createdBy: authData.sub,
-                      creatorName: authData.name,
-                      timestamp: Date.now(),
-                      projectId: ticket.projectId,
-                      workspaceId: authData.workspaceId,
-                      channelId: ticket.channelId,
-                    });
-                  } else {
-                    const assignmentResult = await evaluateAssignmentRule(ticket.userGroupId!, newBoardId, undefined, undefined, ticket.projectId, ticket.channelId);
-                    if (assignmentResult.assignedUserId) {
-                      logger.info(`[MUTATOR-TICKET-UPDATE] Autoassignment result: assigning to ${assignmentResult.assignedUserId}`);
-
-                      // Update the ticket with the auto-assigned user using tx.mutate
-                      await tx.mutate.tickets.update({
-                        id: params.id,
-                        assignedTo: assignmentResult.assignedUserId,
-                        updatedAt: Date.now(),
-                        updatedBy: authData.sub,
-                      });
-
-                      // Sync workload for the newly assigned user (async, non-blocking)
-                      asyncTasks.push(async () => {
-                        try {
-                          await syncUserWorkload(
-                            assignmentResult.assignedUserId!,
-                            ticket.userGroupId!,
-                            newBoardId,
-                            authData.sub
-                          );
-                        } catch (error) {
-                          logger.error('[Workload Sync] Failed to sync workload after board change:', error);
-                        }
-                      });
-                    }
-                  }
-                } catch (error) {
-                  logger.error('Failed to retrigger autoassignment for board change', error);
-                }
-              });
-            }
-          }
 
           // Flow-board cascade: instantiate the next plan steps / cascade-cancel
           // after this transaction commits (ticket creation cannot run inside
@@ -6520,7 +6308,7 @@ export function createMutators(
           // - Always track status change timestamp in statusUpdatedAt
           // - When leaving PAUSED (and ETA isn't explicitly set), push ETA forward by effective paused working duration.
           // - When ETA is manually changed while PAUSED, reset statusUpdatedAt to restart the pause timer
-          if (params.statusV2 !== undefined && params.statusV2 !== ticket.statusV2 && params.boardId === undefined) {
+          if (params.statusV2 !== undefined && params.statusV2 !== ticket.statusV2) {
             updateData.statusUpdatedAt = params.updatedAt;
 
             const isLeavingPaused =
@@ -6562,7 +6350,6 @@ export function createMutators(
               if (field === 'assignedTo') activityType = 'ASSIGNED_TO';
               if (field === 'userGroupId') activityType = 'USER_GROUP_ID';
               if (field === 'eta') activityType = 'ETA';
-              if (field === 'boardId') activityType = 'BOARD';
               if (field === 'isArchived') activityType = 'IS_ARCHIVED';
               if (field === 'ticketType') activityType = 'TICKET_TYPE';
 
@@ -6777,12 +6564,8 @@ export function createMutators(
           // Every trigger this mutator can produce that needs ETA re-evaluation. NON_LINEAR
           // direct stage changes already threw above.
           let etaActivityIntentsForTicketUpdate: ReturnType<typeof buildEtaActivityIntents> = [];
-          // Skipped when isBoardChanging: this block resolves the stage from the
-          // pre-transfer ticket.boardId, so running it here would clobber the transfer
-          // branch's already-correct evaluation with one against the deleted old visit.
           const needsEtaEvaluation =
-            !isBoardChanging &&
-            (isStageChanging || isEtaChanging || isEnteringTerminal || isLeavingTerminal || isResumingFromPause);
+            isStageChanging || isEtaChanging || isEnteringTerminal || isLeavingTerminal || isResumingFromPause;
 
           if (needsEtaEvaluation) {
             const effectiveStageName = (updateData.stageName as string | undefined) ?? ticket.stageName;
@@ -6975,8 +6758,7 @@ export function createMutators(
             const messageId = uuidv4();
             const timestamp = params.updatedAt;
             const creatorName = authData.name;
-            // Use the new board if changed, otherwise use existing board
-            const targetBoardId = params.boardId !== undefined ? params.boardId : ticket.boardId;
+            const targetBoardId = ticket.boardId;
 
             asyncTasks.push(async () => {
               try {
@@ -7115,10 +6897,6 @@ export function createMutators(
               const oldDate = activity.value.oldValue ? new Date(activity.value.oldValue).toLocaleDateString() : 'none';
               const newDate = activity.value.newValue ? new Date(activity.value.newValue).toLocaleDateString() : 'none';
               activityMessage = `${userName} updated ETA from ${oldDate} to ${newDate}`;
-            } else if (activity.activityType === ActivityType.BOARD) {
-              const oldBoard = await tx.run(zql.boards.where('id', activity.value.oldValue).one());
-              const newBoard = await tx.run(zql.boards.where('id', activity.value.newValue).one());
-              activityMessage = `${userName} moved ticket from board "${oldBoard?.name || activity.value.oldValue}" to "${newBoard?.name || activity.value.newValue}"`;
             } else if (activity.activityType === ActivityType.USER_GROUP_ID) {
               if (activity.value.newValue) {
                 const newGroup = await tx.run(zql.user_groups.where('id', activity.value.newValue).one());
@@ -8551,6 +8329,24 @@ export function createMutators(
         },
       ),
     },
+    ticketNamespace: {
+      update: defineMutator(
+        z.object({ namespaceId: z.string(), description: z.string(), timestamp: z.number() }),
+        async ({ tx, args: { namespaceId, description, timestamp } }) => {
+          const namespace = await tx.run(zql.ticket_namespaces.where('id', namespaceId).one());
+          if (!namespace) {
+            throw new Error('Ticket namespace not found');
+          }
+          // Only the description is editable; the ACL freezes code/projectId/sequence.
+          await tx.mutate.ticket_namespaces.update({
+            id: namespaceId,
+            description,
+            updatedBy: authData.sub,
+            updatedAt: timestamp,
+          });
+        },
+      ),
+    },
     board: {
       updateFlowPlan: defineMutator(
         z.object({
@@ -8586,6 +8382,7 @@ export function createMutators(
           description: z.string().optional(),
           projectId: z.string().optional(),
           boardType: z.nativeEnum(BoardType).optional(),
+          ticketNamespaceId: z.string().optional(),
           metadata: z.any().optional(),
           // Automatic ETA management. Merged into `metadata.etaManagement` below rather
           // than going through the raw `metadata` arg above, which is a whole-column
@@ -8633,6 +8430,7 @@ export function createMutators(
             description,
             projectId,
             boardType,
+            ticketNamespaceId,
             metadata,
             autoRecomputeEnabled,
             standardPathStageIds,
@@ -8647,6 +8445,16 @@ export function createMutators(
           const board = await tx.run(zql.boards.where('id', boardId).one());
           if (!board) {
             throw new Error('Board not found');
+          }
+
+          // A board can only be pointed at a ticket code of its own project.
+          if (ticketNamespaceId !== undefined && ticketNamespaceId !== board.ticketNamespaceId) {
+            const namespace = await tx.run(
+              zql.ticket_namespaces.where('id', ticketNamespaceId).one(),
+            );
+            if (!namespace || namespace.projectId !== board.projectId) {
+              throw new Error("Ticket code does not belong to this board's project");
+            }
           }
 
           if (board.boardType === BoardType.RELEASE) {
@@ -8795,6 +8603,7 @@ export function createMutators(
             ...(description !== undefined && { description }),
             ...(projectId !== undefined && { projectId }),
             ...(boardType !== undefined && { boardType }),
+            ...(ticketNamespaceId !== undefined && { ticketNamespaceId }),
             ...(nextMetadata !== undefined && { metadata: nextMetadata as ReadonlyJSONValue }),
             updatedBy: authData.sub,
             updatedAt: timestamp,

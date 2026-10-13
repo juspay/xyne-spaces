@@ -64,7 +64,7 @@ export interface RecordTicketTimelineEventInput {
 export async function recordTicketTimelineEvent(
   input: RecordTicketTimelineEventInput,
   client: Prisma.TransactionClient = db,
-): Promise<void> {
+): Promise<{ messageId?: string }> {
   const { activity, message } = input;
 
   if (activity) {
@@ -81,27 +81,29 @@ export async function recordTicketTimelineEvent(
     });
   }
 
-  if (message) {
-    await client.message.create({
-      data: {
-        conversationId: message.conversationId,
-        senderId: message.senderId,
-        content: message.content,
-        msgType: MessageType.SYSTEM,
-        hasAttachment: false,
-        edited: false,
-        isDeleted: false,
-        isSent: true,
-        showInChannel: false,
-        workspaceId: message.workspaceId,
-        ...(message.createdAt ? { createdAt: message.createdAt } : {}),
-        metadata: {
-          ...(message.extraMetadata ?? {}),
-          activityType: message.activityType,
-          isTicketActivity: true,
-          ...(message.isAutomation ? { isAutomation: true } : {}),
-        } as Prisma.InputJsonValue,
-      },
-    });
-  }
+  if (!message) return {};
+
+  const created = await client.message.create({
+    data: {
+      conversationId: message.conversationId,
+      senderId: message.senderId,
+      content: message.content,
+      msgType: MessageType.SYSTEM,
+      hasAttachment: false,
+      edited: false,
+      isDeleted: false,
+      isSent: true,
+      showInChannel: false,
+      workspaceId: message.workspaceId,
+      ...(message.createdAt ? { createdAt: message.createdAt } : {}),
+      metadata: {
+        ...(message.extraMetadata ?? {}),
+        activityType: message.activityType,
+        isTicketActivity: true,
+        ...(message.isAutomation ? { isAutomation: true } : {}),
+      } as Prisma.InputJsonValue,
+    },
+    select: { messageId: true },
+  });
+  return { messageId: created.messageId };
 }

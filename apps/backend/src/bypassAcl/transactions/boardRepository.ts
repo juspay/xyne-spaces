@@ -28,6 +28,7 @@ export function createWithStagesTx(self: BoardRepository, data: CreateBoardWithS
         createdBy: data.createdBy,
         boardType: resolvedBoardType,
         metadata: metadataWithEtaDefaults as Prisma.InputJsonValue,
+        ...(data.ticketNamespaceId && { ticketNamespaceId: data.ticketNamespaceId }),
         ...(data.flowPlan !== undefined && { flowPlan: serializeFlowPlan(data.flowPlan) }),
       },
     });

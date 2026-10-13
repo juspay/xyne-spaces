@@ -4527,6 +4527,21 @@ export const queries: AnyQueryRegistry = defineQueries({
         .orderBy('createdAt', 'asc');
     },
   ),
+  ticketNamespacesByProject: defineQuery(
+    z.object({ projectId: z.string() }),
+    ({ args: { projectId } }) => {
+      return zql.ticket_namespaces
+        .where('projectId', projectId)
+        .orderBy('createdAt', 'asc');
+    },
+  ),
+  // Only the codes a caller found in its text, so it never syncs the whole table
+  ticketNamespacesByCodes: defineQuery(
+    z.object({ codes: z.array(z.string()) }),
+    ({ args: { codes } }) => {
+      return zql.ticket_namespaces.where('code', 'IN', codes);
+    },
+  ),
   getAllBoards: defineQuery(() => {
     return zql.boards
       .orderBy('createdAt', 'desc')

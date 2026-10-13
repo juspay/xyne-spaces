@@ -176,7 +176,7 @@ interface ReleaseRepoContext {
   mainReleaseBoardId: string;
   projectKey: string;
   repoSlug: string;
-  code: string | null;
+  codes: string[];
   vcsProvider: 'BITBUCKET_SERVER' | 'GITHUB';
   deployedCommitId: string;
   newCommitId: string;
@@ -231,13 +231,13 @@ export class CommitAnalysisController {
       releaseTrackingMode: string | null;
     } | null,
     projectId: string,
-    projectCode: string | null,
+    codes: string[],
   ): Promise<{
     projectId: string;
     mainReleaseBoardId: string;
     projectKey: string;
     repoSlug: string;
-    code: string | null;
+    codes: string[];
     vcsProvider: 'BITBUCKET_SERVER' | 'GITHUB';
   } | null> {
     if (!board) return null;
@@ -296,7 +296,7 @@ export class CommitAnalysisController {
       repoSlug = parsed.repoSlug;
     }
 
-    return { projectId, mainReleaseBoardId: boardId, projectKey, repoSlug, code: projectCode, vcsProvider: provider };
+    return { projectId, mainReleaseBoardId: boardId, projectKey, repoSlug, codes, vcsProvider: provider };
   }
 
   private async deriveReleaseContexts(
@@ -309,6 +309,20 @@ export class CommitAnalysisController {
       select: { projectId: true, boardId: true, project: { select: { code: true } } },
     });
     if (!ticket?.boardId) return { contexts: [], skipped: [] };
+
+    // The project's ticket codes: every namespace code, plus the legacy project
+    // code during the transition. Any of these can appear in a PR title.
+    const namespaceRows = await db.ticketNamespace.findMany({
+      where: { projectId: ticket.projectId },
+      select: { code: true },
+    });
+    const ticketCodes = [
+      ...new Set(
+        [ticket.project.code, ...namespaceRows.map(row => row.code)].filter(
+          (code): code is string => !!code,
+        ),
+      ),
+    ];
 
     const rows = await db.releaseRepository.findMany({
       where: { releaseId: releaseTicketId },
@@ -368,7 +382,7 @@ export class CommitAnalysisController {
     const skipped: string[] = [];
     for (const entry of entries) {
       const boardMeta = boardMetaById.get(entry.boardId) ?? null;
-      const board = await this.deriveBoardContext(boardMeta, ticket.projectId, ticket.project.code);
+      const board = await this.deriveBoardContext(boardMeta, ticket.projectId, ticketCodes);
       if (!board) {
         skipped.push(boardMeta?.name ?? entry.boardId);
         continue;
@@ -394,7 +408,7 @@ export class CommitAnalysisController {
     appMatchSummary: Array<{ name: string; regex: string; matchCount: number; regexValid: boolean }>;
   }> {
     const { conversationId, userId, channelId, currentTicketId, userName, isHotFix, hotfixSync } = params;
-    const { deployedCommitId, newCommitId, branch, projectKey, repoSlug, vcsProvider, projectId, mainReleaseBoardId, code: projectCode } = ctx;
+    const { deployedCommitId, newCommitId, branch, projectKey, repoSlug, vcsProvider, projectId, mainReleaseBoardId, codes: ticketCodes } = ctx;
 
     const analysisRequest: AnalyzeCommitsRequest = {
       deployedCommitId,
@@ -403,9 +417,9 @@ export class CommitAnalysisController {
       projectKey,
       repositorySlug: repoSlug,
       workspaceId: params.workspaceId,
-      // Project's local code drives the dev-ticket-id regex (e.g. 'TSP').
-      // Falls through to 'XYNE' in the service if absent.
-      ...(projectCode && { ticketPrefix: projectCode }),
+      // The ticket codes (board-scoped namespaces + legacy project code) drive
+      // the dev-ticket-id regex. Falls through to ['XYNE'] in the service if absent.
+      ...(ticketCodes.length > 0 && { ticketPrefixes: ticketCodes }),
       // Hotfix syncs fire seconds after a merge; retry the eventually-consistent
       // PR lookup so the just-merged commit's PR isn't missed on the canvas.
       retryMissingPr: hotfixSync,

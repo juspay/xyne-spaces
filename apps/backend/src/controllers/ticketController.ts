@@ -54,6 +54,8 @@ import { activityService } from '@/services/activity/activityService';
 import { entityLinkOwnerSchema, type EntityLinkOwner } from '@xyne/shared';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { ticketSchema, fileSchema, SubApp } from '@/vespa/src/types';
+import { vespaBackfillQueue } from '@/queues/vespaQueue';
+import { pushVespaJobForTicket } from '@/apps/core/ticketutils';
 import { isSupportedMimeType } from '@/services/fileProcessor';
 import { logger } from '@/utils/logger';
 import { resolveChannelDefaultBoard } from '@/utils/channelDefaultBoard';
@@ -99,6 +101,14 @@ import { createTicketWithConversationTx } from '@/bypassAcl/transactions/control
 import { createTicketTx, TicketCreateAccessError } from '@/bypassAcl/transactions/controllersTicketController';
 import { mergeTicketTx } from '@/bypassAcl/transactions/controllersTicketController';
 import { unmergeTicketTx } from '@/bypassAcl/transactions/controllersTicketController';
+import { transferTicketAcrossNamespacesTx } from '@/bypassAcl/transactions/controllersTicketController';
+import {
+  BoardChangeError,
+  assertCanChangeBoard,
+  isCrossNamespaceChange,
+  loadBoardChangeBoards,
+  moveTicketToBoard,
+} from '@/services/tickets/ticketBoardChangeService';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
 
 
@@ -383,6 +393,144 @@ export class TicketController {
     } catch (error) {
       logger.error('[TicketController] Failed to fetch my ticket board ids', error);
       res.status(500).json({ error: 'Failed to fetch board ids' });
+    }
+  };
+
+  /**
+   * Every board change. Same namespace: move the ticket in place. Different namespace:
+   * ids are immutable, so create a ticket on the target board (new id from its
+   * namespace), link it to the original, copy labels and (by default) close the original.
+   */
+  changeTicketBoard = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user?.id;
+      const workspaceId = req.user?.workspaceId;
+      if (!userId || !workspaceId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      const ticketId = req.params.ticketId;
+      const { targetBoardId } = req.body as { targetBoardId?: string };
+      const closeOld = req.body?.closeOld !== false; // default: close the original
+      if (!ticketId || !targetBoardId) {
+        res.status(400).json({ error: 'ticketId and targetBoardId are required' });
+        return;
+      }
+
+      const source = await db.ticket.findFirst({
+        where: { id: ticketId, workspaceId },
+        select: {
+          id: true, xyneId: true, title: true, description: true, boardId: true,
+          projectId: true, channelId: true, assignedTo: true, priority: true,
+          userGroupId: true, eta: true, ticketType: true, isArchived: true, statusV2: true,
+          tags: { select: { name: true } },
+        },
+      });
+      if (!source) {
+        res.status(404).json({ error: 'Ticket not found' });
+        return;
+      }
+      if (source.boardId === targetBoardId) {
+        res.status(400).json({ error: 'Ticket is already on this board' });
+        return;
+      }
+
+      const { source: sourceBoard, target: targetBoard } = await loadBoardChangeBoards(
+        source.boardId,
+        targetBoardId,
+        workspaceId,
+      );
+
+      if (!(await isCrossNamespaceChange(sourceBoard, targetBoard))) {
+        const moved = await moveTicketToBoard({
+          ticketId,
+          targetBoardId,
+          ctx: {
+            userID: userId,
+            workspaceId,
+            role: req.user!.role,
+            orgRole: req.user!.orgRole,
+            memberId: req.user!.memberId,
+          },
+        });
+        res.status(200).json({ success: true, mode: 'moved', ticketId: moved.id, xyneId: moved.xyneId });
+        return;
+      }
+
+      await assertCanChangeBoard(source, sourceBoard, targetBoard, userId);
+      // Already closed (e.g. by an earlier transfer); a transfer would duplicate it
+      if (source.isArchived || source.statusV2 === TicketStatusV2.CANCELLED) {
+        res.status(409).json({ error: 'Cannot transfer an archived or cancelled ticket' });
+        return;
+      }
+
+      const relationType = closeOld
+        ? TicketReferenceRelation.MERGED_INTO
+        : TicketReferenceRelation.LINKED;
+
+      // Claim/close the original, create, link and copy labels atomically
+      const created = await transferTicketAcrossNamespacesTx(
+        source,
+        { boardId: targetBoardId, projectId: targetBoard.projectId },
+        workspaceId,
+        userId,
+        closeOld,
+        relationType,
+      );
+      if (!created) {
+        res.status(409).json({ error: 'Cannot transfer an archived or cancelled ticket' });
+        return;
+      }
+
+      // Index and publish after commit
+      pushVespaJobForTicket(created.ticketId, userId, workspaceId).catch((error) => {
+        logger.error(`[TRANSFER-TICKET] Vespa indexing failed for ${created.ticketId}:`, error);
+      });
+      void emitTicketCreated(
+        {
+          id: created.ticketId,
+          workspaceId,
+          boardId: targetBoardId,
+          projectId: targetBoard.projectId,
+          channelId: source.channelId,
+        },
+        undefined,
+        userId,
+      );
+      if (closeOld) {
+        try {
+          await vespaBackfillQueue.addJob({
+            schema: ticketSchema,
+            jobType: 'update',
+            docId: source.id,
+            userId,
+            workspaceId,
+          });
+        } catch (error) {
+          logger.error(`[TRANSFER-TICKET] Vespa re-index failed for ${source.id}:`, error);
+        }
+      }
+
+      res.status(200).json({
+        success: true,
+        mode: 'transferred',
+        newTicketId: created.ticketId,
+        newXyneId: created.xyneId,
+        oldTicketId: source.id,
+        oldXyneId: source.xyneId,
+        relationType,
+        closedOld: closeOld,
+      });
+    } catch (error) {
+      if (error instanceof BoardChangeError) {
+        res.status(error.status).json({ error: error.message });
+        return;
+      }
+      logger.error('[CHANGE-BOARD] Board change failed:', error);
+      res.status(500).json({
+        error: error instanceof Error ? error.message : 'Failed to change board',
+      });
     }
   };
 

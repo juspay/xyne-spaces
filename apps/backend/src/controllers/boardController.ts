@@ -10,20 +10,23 @@ import {
 import { validateFlowDecisionFieldsWithPrisma } from '@/services/flowDecisionFieldValidator';
 import { BoardRepository } from '../database/repositories/boardRepository';
 import { ProjectRepository } from '../database/repositories/projectRepository';
+import { TicketNamespaceRepository } from '../database/repositories/ticketNamespaceRepository';
 import { logger } from '@/utils/logger';
 
 export class BoardController {
   private boardRepository: BoardRepository;
   private projectRepository: ProjectRepository;
+  private ticketNamespaceRepository: TicketNamespaceRepository;
 
   constructor() {
     this.boardRepository = new BoardRepository();
     this.projectRepository = new ProjectRepository();
+    this.ticketNamespaceRepository = new TicketNamespaceRepository();
   }
 
   createBoard = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { name, description, projectId, stages, boardType, metadata, flowPlan } = req.body;
+      const { name, description, projectId, stages, boardType, metadata, flowPlan, namespaceId } = req.body;
       const userId = req.user?.id;
 
       if (!userId) {
@@ -49,6 +52,20 @@ export class BoardController {
       }
 
       const workspaceId = project.workspaceId;
+
+      // Resolve the ticket namespace: an explicit choice (must belong to this project)
+      // or the project default. Legacy projects with no default leave it unset (legacy path).
+      let ticketNamespaceId: string | undefined;
+      if (namespaceId) {
+        const namespace = await this.ticketNamespaceRepository.findById(namespaceId);
+        if (!namespace || namespace.projectId !== projectId.trim()) {
+          res.status(400).json({ error: 'Invalid ticket namespace for this project' });
+          return;
+        }
+        ticketNamespaceId = namespace.id;
+      } else if (project.defaultTicketNamespaceId) {
+        ticketNamespaceId = project.defaultTicketNamespaceId;
+      }
 
       // Validate stages if provided
       if (stages && Array.isArray(stages)) {
@@ -114,6 +131,7 @@ export class BoardController {
         createdBy: userId,
         stages: effectiveStages && effectiveStages.length > 0 ? effectiveStages : undefined,
         boardType: boardType || BoardType.DEFAULT,
+        ...(ticketNamespaceId && { ticketNamespaceId }),
         ...(metadata !== undefined && { metadata }),
         ...(effectiveFlowPlan !== undefined && { flowPlan: effectiveFlowPlan }),
       });

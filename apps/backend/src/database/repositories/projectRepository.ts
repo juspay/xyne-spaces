@@ -187,12 +187,9 @@ export class ProjectRepository extends BaseRepository<Project, CreateProjectInpu
     }
 
     // Check uniqueness
-    const existing = await this.db.project.findFirst({
-      where: { code: sanitizedCode, workspaceId }
-    });
-
-    if (existing && existing.id !== excludeId) {
-      throw new Error(`Project code '${sanitizedCode}' is already in use by '${existing.name}'`);
+    const duplicate = await this.checkDuplicateCodeWithInfo(sanitizedCode, excludeId, workspaceId);
+    if (duplicate.exists) {
+      throw new Error(`Project code '${sanitizedCode}' is already in use by '${duplicate.existingProject?.name}'`);
     }
   }
 
@@ -211,6 +208,19 @@ export class ProjectRepository extends BaseRepository<Project, CreateProjectInpu
         exists: true,
         existingProject: { name: existing.name }
       };
+    }
+
+    // The code must also be free as a ticket (namespace) code
+    const namespace = await this.db.ticketNamespace.findFirst({
+      where: {
+        code: sanitizedCode,
+        workspaceId,
+        ...(excludeId && { projectId: { not: excludeId } }),
+      },
+      select: { project: { select: { name: true } } },
+    });
+    if (namespace) {
+      return { exists: true, existingProject: { name: namespace.project.name } };
     }
     return { exists: false };
   }

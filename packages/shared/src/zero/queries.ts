@@ -3705,6 +3705,19 @@ export const queries = defineQueries({
       return zql.boards.where('projectId', projectId).orderBy('createdAt', 'asc');
     },
   ),
+  ticketNamespacesByProject: defineQuery(
+    z.object({ projectId: z.string() }),
+    ({ args: { projectId } }) => {
+      return zql.ticket_namespaces.where('projectId', projectId).orderBy('createdAt', 'asc');
+    },
+  ),
+  // Only the codes a caller found in its text, so it never syncs the whole table
+  ticketNamespacesByCodes: defineQuery(
+    z.object({ codes: z.array(z.string()) }),
+    ({ args: { codes } }) => {
+      return zql.ticket_namespaces.where('code', 'IN', codes);
+    },
+  ),
   // Lightweight global board list — only scalar fields, no related data.
   // Use this for dropdowns and pickers that only need board id/name.
   // For full board detail (editing), use boardFullDetailById.
