@@ -434,7 +434,7 @@ class TicketDuplicateService {
   async recheckDuplicatesForTicket(ticketId: string): Promise<DuplicateDetectionOutcome | null> {
     const ticket = await this.findTicketForDetection(ticketId);
     if (!ticket) return null;
-    return this.detectForSavedTicket(ticket);
+    return this.detectForSavedTicket(ticket, undefined, { reuseUnchanged: true });
   }
 
   private findTicketForDetection(ticketId: string) {

@@ -182,7 +182,13 @@ const duplicateScopeFieldIds = (value: unknown): string[] => {
 const formatDuplicateScope = (value: unknown, res: AuditResolution): string | null => {
   const scope = parseJsonText(value) as DuplicateScopeConfig | null;
   if (!scope || typeof scope !== 'object') return null;
-  if (!scope.enabled) return 'off';
+  if (!scope.enabled) {
+    // The window persists while detection is off; surface it so a window-only
+    // change doesn't log as "off -> off".
+    return typeof scope.lookbackDays === 'number' && scope.lookbackDays > 0
+      ? `off; window: Last ${scope.lookbackDays} days`
+      : 'off';
+  }
   const fields = formatSet(scope.scopeFieldGlobalIds, id => res.globalFieldName(id));
   const window = typeof scope.lookbackDays === 'number' && scope.lookbackDays > 0
     ? `; window: Last ${scope.lookbackDays} days`
