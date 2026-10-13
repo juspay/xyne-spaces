@@ -67,7 +67,8 @@ export async function prepareChannelFields(
   const values: ChannelFieldValue[] = names.map((name) => {
     const field = byName.get(name)!;
     try {
-      return { fieldId: field.id, ...normalizeCustomFieldValue(field, input[name]) };
+      // The value lives in actualFieldValue only, as the UI writes it, so clearing it there leaves no old value behind.
+      return { fieldId: field.id, fieldValue: '', actualFieldValue: normalizeCustomFieldValue(field, input[name]).actualFieldValue };
     } catch (err) {
       throw new ChannelFieldError('INVALID_VALUE', err instanceof Error ? err.message : `Invalid value for "${name}"`);
     }
@@ -144,8 +145,8 @@ export async function copyChannelFieldsToTicket(
   const skipped: string[] = [];
   const copied = new Set<string>();
   const rows = values.flatMap((value) => {
-    const current = value.actualFieldValue ?? value.fieldValue;
-    if (isEmptyValue(current)) return [];
+    const current = value.actualFieldValue;
+    if (current === null || isEmptyValue(current)) return [];
     // Only the current channel form's fields; values left from a replaced form aren't the channel's any more.
     const source = channelFieldOf.get(value.fieldId);
     if (!source) return [];
@@ -168,9 +169,8 @@ export async function copyChannelFieldsToTicket(
         formId: boardMapping.formId,
         fieldId: target.id,
         contextId: args.boardId,
-        // actualFieldValue is the current value (edits through the app only update it).
-        fieldValue: typeof value.actualFieldValue === 'string' ? value.actualFieldValue : value.fieldValue,
-        actualFieldValue: value.actualFieldValue ?? value.fieldValue,
+        fieldValue: '',
+        actualFieldValue: current,
       },
     ];
   });
