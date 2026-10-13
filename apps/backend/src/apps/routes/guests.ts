@@ -7,9 +7,9 @@ import { GuestController } from '../controllers/guestController';
 const router = Router();
 const guestController = new GuestController();
 
-router.post('/create', requirePermission('guests:write'), guestController.create);
-router.post('/get', requirePermission('guests:read'), guestController.list);
-router.post('/update', requirePermission('guests:write'), guestController.update);
-router.post('/token', requirePermission('guests:write'), guestController.token);
+router.post('/create', requirePermission('guests:write', { strict: true }), guestController.create);
+router.post('/get', requirePermission('guests:read', { strict: true }), guestController.list);
+router.post('/update', requirePermission('guests:write', { strict: true }), guestController.update);
+router.post('/token', requirePermission('guests:write', { strict: true }), guestController.token);
 
 export default router;
