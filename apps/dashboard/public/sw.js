@@ -80,7 +80,10 @@ self.addEventListener('push', (event) => {
         actionUrl: data.actionUrl,
         relatedEntityType: data.relatedEntityType,
         relatedEntityId: data.relatedEntityId,
-        ...data.metadata
+        // Keep metadata nested for click fallback code while also preserving
+        // the legacy top-level spread used by older notification payloads.
+        metadata: data.metadata || {},
+        ...(data.metadata || {})
       },
       actions: data.actions || [
         {
