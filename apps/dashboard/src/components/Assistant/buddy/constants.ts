@@ -92,9 +92,11 @@ export const SHOWN_ON_HOVER =
 
 /** These change data or reach other people, so Buddy points at them instead of clicking. */
 export const CHANGES_DATA =
-  /\b(send|delete|remove|archive|leave|end|log ?out|sign ?out|deactivate|revoke|disconnect|reject|decline|approve|merge|reset|ban|kick|block|unsubscribe|publish|post|invite|resolve|pay|admin|role|access|grant|permission|promote|demote|transfer|clear|discard|disable|wipe|yes|dial|mark|pin|unpin|star|unstar|mute|unmute|follow|unfollow|subscribe|rename|edit|save|snooze|assign|unassign|move|share|forward|duplicate|(?:start|stop)(?: \w+)? (?:record|recording|call|huddle|meeting)|join (?:\w+ )?(?:call|huddle|meeting))\b/;
+  /\b(send|delete|remove|(?:un)?archive|leave|end|log ?out|sign ?out|deactivate|revoke|disconnect|reject|decline|approve|merge|reset|ban|kick|(?:un)?block|unsubscribe|publish|post|invite|resolve|pay|admin|role|access|grant|permission|promote|demote|transfer|clear|discard|disable|wipe|yes|dial|mark|pin|unpin|star|unstar|mute|unmute|follow|unfollow|subscribe|rename|edit|save|snooze|assign|unassign|move|share|forward|duplicate|accept|answer (?:call|it)|^answer$|join (?:\w+ )?(?:call|huddle|meeting|channel)|^join$|restore|regenerate|retry|try again|enable|activate|connect|reconnect|run (?:now|it|again|automation|workflow|migration)|^run$|execute|toggle reaction|^react$|add them|switch (?:\w+ )?call|(?:start|stop)(?: \w+)? (?:record|recording|call|huddle|meeting))\b/;
 /** Opening a menu or panel changes nothing, whatever it is about. */
 export const OPENS_UI = /\b(open|trigger|menu|dropdown|tab|expand|collapse)$/;
+/** "Open conversation with …" and the like only open something; a bare "Open" can be a status. */
+export const OPENS_SOMETHING = /^open \S/i;
 export const MAKES_SOMETHING = /^(create|new|add|start)\b/i;
 export const FINISHES_FORM = /^(create|save|submit|confirm|add|update|apply|done|continue)\b/;
 
@@ -116,7 +118,8 @@ export const CHECK_OPTIONS = [
 export const MESSAGES = {
   opened: (what: string): string => `Opened ${what}.`,
   done: (what: string): string => `Done: ${what}.`,
-  alreadyOpen: (what: string): string => `Already open: ${what}.`,
+  clicked: (what: string): string => `Clicked ${what}.`,
+  gone: (what: string): string => `I couldn't find ${what} on this page anymore.`,
   alreadyIn: (what: string): string => `You're already in ${what}.`,
   triedBefore: (what: string): string => `Last time I opened ${what}.`,
   pointAt: (what: string): string => `Here's ${what}. I've highlighted it so you can finish.`,

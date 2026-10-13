@@ -113,8 +113,18 @@ function showsOnHover(el: HTMLElement): boolean {
   return hidden && node !== null && node !== el.ownerDocument.body && !inCollapsed(node);
 }
 
+/** A link that leaves the app or opens a new tab: Buddy neither follows nor walks into it. */
+const leavesApp = (el: HTMLElement): boolean => {
+  if (!isTag(el, 'A')) return false;
+  const link = el as HTMLAnchorElement;
+  if (!link.getAttribute('href')) return false;
+  return link.origin !== el.ownerDocument.location.origin || link.target === '_blank';
+};
+
 const pathOf = (el: HTMLElement): string | null =>
-  isTag(el, 'A') ? (el as HTMLAnchorElement).pathname.replace(WORKSPACE_PREFIX, '') : null;
+  isTag(el, 'A') && !leavesApp(el)
+    ? (el as HTMLAnchorElement).pathname.replace(WORKSPACE_PREFIX, '')
+    : null;
 
 function kindOf(el: HTMLElement, name: string): string {
   if (isTag(el, 'A')) return 'link';
@@ -126,6 +136,8 @@ function kindOf(el: HTMLElement, name: string): string {
 function changesData(el: HTMLElement, text: string, name: string): boolean {
   const { type, form } = el as HTMLButtonElement;
   if (isTag(el, 'BUTTON') && type === 'submit' && form) return true;
+  // Another site or a new tab is the user's to open.
+  if (leavesApp(el)) return true;
   if (isTag(el, 'A') || OPENS_UI.test(name.toLowerCase())) return false;
   // One that says it opens a menu or dialog only opens it: what the dialog does is asked there.
   const opens = el.getAttribute('aria-haspopup');
@@ -175,7 +187,10 @@ function toControl(el: HTMLElement, id: string): Control {
     label: labelOf(el, text, name),
     ...(path !== null && { href: path + (el as HTMLAnchorElement).search }),
     use,
-    ...(isOpener(el, use) && { opens: true }),
+    ...(isOpener(el, use) && {
+      opens: el.getAttribute('aria-haspopup') === 'dialog' ? 'dialog' : 'menu',
+    }),
+    ...(el.matches(SELECTORS.selectable) && { toggles: true as const }),
   };
 }
 

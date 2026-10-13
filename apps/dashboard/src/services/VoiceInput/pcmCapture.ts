@@ -143,6 +143,7 @@ export async function startPcmCapture(params: {
     return {
       label: stream.getAudioTracks()[0]?.label ?? '',
       stop(): void {
+        worklet.port.postMessage('stop');
         source.disconnect();
         worklet.disconnect();
         mute.disconnect();

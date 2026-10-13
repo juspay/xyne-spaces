@@ -7,6 +7,7 @@ import {
   MESSAGES,
   MAKES_SOMETHING,
   MIN_PROBABILITY,
+  OPENS_SOMETHING,
   STEP_BREAK,
   STOPPED,
   SURE_CLICK,
@@ -46,6 +47,8 @@ export interface WalkEnv<C extends WalkControl> {
   aborted(): boolean;
   settle?(): Promise<void>;
   tried?: ReadonlySet<string>;
+  /** Controls the last "Did you mean…?" asked about: landing on one again is the user's yes. */
+  askedAbout?: ReadonlySet<string>;
 }
 
 interface Round<C extends WalkControl> {
@@ -160,12 +163,26 @@ async function checked<C extends WalkControl>(
   if (round.decision.kind !== 'ask') return round;
   const passed = picks.filter((_, i) => !others[i]);
   const [only] = passed;
+  const lean = passed.find(pick => pick.id === round.leaning);
+  // The same "Did you mean…?" again: the user asking for it again is their yes to Jev's pick.
+  const again = lean ?? only;
+  if (again && passed.every(pick => env.askedAbout?.has(controlKey(pick)))) {
+    const why = `"${again.text}" was asked about and asked for again`;
+    return { ...round, decision: { kind: 'act', id: again.id, why } };
+  }
   // Jev leaned to it and the check is sure it is what was asked: nothing to ask, if it can be undone.
   if (passed.length === 1 && only && isSure(results[picks.indexOf(only)]) && undoable(only)) {
     return {
       ...round,
       decision: { kind: 'act', id: only.id, why: `Jev and the check: "${only.text}"` },
     };
+  }
+  // When Jev splits between links only, its pick is followed and looked on from if the check is
+  // sure it leads there, so a channel not listed here is found in Chat, not asked about.
+  const onlyLinks = passed.every(pick => !!pick.href && undoable(pick));
+  if (lean && onlyLinks && leadsThere(results[picks.indexOf(lean)])) {
+    const why = `following "${lean.text}", which the check says leads there`;
+    return { ...round, decision: { kind: 'act', id: lean.id, why } };
   }
   const local = closest(request, passed, env.here());
   if (local) {
@@ -199,8 +216,15 @@ const isSure = (result: JevResult | undefined): boolean =>
   result.chosen === 'same' &&
   (result.probability ?? 0) >= SURE_CLICK;
 
+const leadsThere = (result: JevResult | undefined): boolean =>
+  result?.route !== undefined &&
+  result.route !== 'unavailable' &&
+  (result.chosen === 'same' || result.chosen === 'leads') &&
+  (result.probability ?? 0) >= SURE_CLICK;
+
 const undoable = (option: WalkControl): boolean =>
-  option.use === 'click' && (!!option.href || isTab(option) || !!option.opens);
+  option.use === 'click' &&
+  (!!option.href || isTab(option) || !!option.opens || OPENS_SOMETHING.test(option.text));
 
 const isTab = ({ label }: WalkControl): boolean => label.startsWith('tab ');
 
@@ -227,11 +251,11 @@ async function lookInMenus<C extends WalkControl>(
     menus.push(menu);
     const round = await choose(request, env, controls, menus, onTheWay);
     const item = round && menuItemOf(round);
-    if (item?.opener !== opener) await env.close(menu);
+    if (item?.opener !== menu.opener) await env.close(menu);
     if (!round) return null;
     if (confirms(round, first)) return round;
     if (item || asksAboutMenu(round))
-      return item?.opener === opener ? { ...round, open: menu } : round;
+      return item?.opener === menu.opener ? { ...round, open: menu } : round;
     const firstHadNone = pickedIds(first.decision).length === 0 && !first.offTarget;
     if (firstHadNone && pickedIds(round.decision).length > 0) return checked(request, env, round);
   }
@@ -260,7 +284,7 @@ const isCurrent = ({ label }: WalkControl): boolean => label.includes(CURRENT);
 /** One menu of each kind, in screen order, to look in without a lead; of row menus, the current row's first. */
 export function menusToSweep<C extends WalkControl>(openers: C[]): C[] {
   const byKind = new Map<string, C>();
-  for (const opener of openers) {
+  for (const opener of openers.filter(({ opens }) => opens !== 'dialog')) {
     const kind = opener.track || opener.text;
     const kept = byKind.get(kind);
     if (!kept || (!isCurrent(kept) && isCurrent(opener))) byKind.set(kind, opener);
@@ -338,13 +362,15 @@ const confirmedRound = <C extends WalkControl>(option: Option<C>): Round<C> => (
   probability: 1,
 });
 
-/** On a page walked into: a control already used, or a link to this page or marked current. */
+/**
+ * On a page walked into: a control already used, or a link to the page open now. One only marked
+ * current (#general shown while Chat's address is still /chat/dir) is clicked, so the page stays.
+ */
 const leadsBack = <C extends WalkControl>(
   pick: Option<C>,
   used: ReadonlySet<string>,
   here: string,
-): boolean =>
-  (!!pick.href && (pick.href === here || isCurrent(pick))) || used.has(controlKey(pick));
+): boolean => (!!pick.href && pick.href === here) || used.has(controlKey(pick));
 
 /** Jev's pick is where the user already is: a link to this page, or a link or tab marked current. */
 function alreadyThere<C extends WalkControl>(
@@ -456,8 +482,16 @@ function towardNamed<C extends WalkControl>(
 ): Round<C> {
   if (round.decision.kind === 'ask_ai' || round.offTarget) return round;
   const named = namedItem(request, controls);
-  if (!named || pickedIds(round.decision).includes(named.item.id)) return round;
-  const [first] = pickedIds(round.decision);
+  if (!named) return round;
+  // Ids come from separate reads of the screen and can shift, so controls are compared by what they are.
+  const namedKey = controlKey(named.item);
+  const ids = pickedIds(round.decision);
+  const isNamed = (id: string): boolean => {
+    const option = round.optionOf(id);
+    return !!option && controlKey(option) === namedKey;
+  };
+  if (ids.some(isNamed)) return round;
+  const [first] = ids;
   const pick = first === undefined ? undefined : round.optionOf(first);
   // An item of a menu named for the item ("Duplicate" in "More actions for test") acts on it already.
   if (inMenu(pick) && saysName(pick.opener.text, named.name)) return round;

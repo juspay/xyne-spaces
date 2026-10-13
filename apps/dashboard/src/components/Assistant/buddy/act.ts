@@ -200,9 +200,7 @@ function outcomeOf(control: Control, before: Snapshot, after: Snapshot): string 
     after.popups > before.popups ||
     control.el.getAttribute('aria-expanded') === 'true';
   if (opened) return MESSAGES.opened(control.text);
-  return turnedOver(before, after)
-    ? MESSAGES.done(control.text)
-    : MESSAGES.alreadyOpen(control.text);
+  return turnedOver(before, after) ? MESSAGES.done(control.text) : MESSAGES.clicked(control.text);
 }
 
 /** The same control as it is now; a re-render may have replaced it. */
@@ -234,10 +232,13 @@ async function show(control: Control, signal: AbortSignal): Promise<Pressed | nu
   return { before, after: snapshot(), popup: newPopup(before) };
 }
 
-async function click(control: Control, signal: AbortSignal): Promise<string> {
-  const target = live(control) ?? control;
+async function click(control: Control, signal: AbortSignal): Promise<Used> {
+  const target = live(control);
+  if (!target) return { reply: MESSAGES.gone(control.text), acted: false };
   const pressed = await show(target, signal);
-  return pressed ? outcomeOf(target, pressed.before, pressed.after) : STOPPED;
+  return pressed
+    ? { reply: outcomeOf(target, pressed.before, pressed.after), acted: true }
+    : { reply: STOPPED, acted: false };
 }
 
 function point(control: Control, signal: AbortSignal): string {
@@ -283,21 +284,22 @@ export async function close({ opener }: Peeked<Control>): Promise<void> {
 
 /** Opens a menu and reads what is in it, leaving it open; never clicks inside. */
 export async function peek(opener: Control): Promise<Peeked<Control>> {
+  const current = live(opener) ?? opener;
   const before = snapshot();
-  const hide = unhide(opener.el);
-  press(opener.el);
+  const hide = unhide(current.el);
+  press(current.el);
   await settle();
-  await openByKey(opener.el);
+  await openByKey(current.el);
   hide();
   const popup = newPopup(before);
-  popups.set(opener, popup);
+  popups.set(current, popup);
   const items = popup ? readPopup(popup) : [];
   log(
     'peeked',
-    `${opener.id} "${opener.text}": ${items.length} controls`,
+    `${current.id} "${current.text}": ${items.length} controls`,
     items.map(i => i.label),
   );
-  return { opener, items };
+  return { opener: current, items };
 }
 
 async function reveal(
@@ -330,6 +332,7 @@ export async function openHidden(
 
 /** Clicks it, or points at it when it changes data. */
 export async function actOn(control: Control, signal: AbortSignal): Promise<Used> {
-  const reply = control.use === 'click' ? await click(control, signal) : point(control, signal);
-  return { reply, acted: reply !== STOPPED };
+  return control.use === 'click'
+    ? click(control, signal)
+    : { reply: point(control, signal), acted: true };
 }

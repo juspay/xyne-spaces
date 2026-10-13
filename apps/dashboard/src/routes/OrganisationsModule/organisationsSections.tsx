@@ -21,6 +21,8 @@ export type { OrganisationsSectionKey };
 export interface OrganisationsSection {
   key: OrganisationsSectionKey;
   label: string;
+  /** Its name away from its tabs (the site map), where the label alone could be anything. */
+  fullLabel?: string;
   description: string;
   icon: PikaIcon;
 }
@@ -71,6 +73,7 @@ export const ORGANISATIONS_SECTION_GROUPS: OrganisationsSectionGroup[] = [
       {
         key: 'general',
         label: 'General',
+        fullLabel: 'General settings',
         description: 'Workspace name, logo and settings',
         icon: Settings01,
       },

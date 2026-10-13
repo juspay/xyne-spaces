@@ -161,7 +161,7 @@ function nameTerms(rawName: string): string[] {
 // Most important first (the cap drops the tail): personal names, product terms, bot names.
 export async function buildKeyterms(user: VoiceInputUser): Promise<string[]> {
   const [personalNames, botNames] = await Promise.all([
-    getPersonalNames(user.userId, user),
+    getPersonalNames(`${user.workspaceId}:${user.userId}`, user),
     getBotNames(user.workspaceId, user),
   ]);
 

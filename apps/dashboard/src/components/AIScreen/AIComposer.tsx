@@ -167,6 +167,9 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
 ): ReactElement {
   const seed = initialExtras ?? EMPTY_COMPOSER_CONTEXT;
   const [value, setValue] = useState('');
+  // The walk is awaited, so it must compare against the latest input, not the render that started it.
+  const valueRef = useRef(value);
+  valueRef.current = value;
   const [attachments, setAttachments] = useState<AIComposerAttachment[]>([]);
   const [buddyWorking, setBuddyWorking] = useState(false);
   const [selections, setSelections] = useState<ContextSelections>(() => ({
@@ -504,6 +507,8 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     setBuddyWorking(true);
     try {
       const outcome = await tryBuddy(text);
+      // An edit made during the walk is the user's, so it is neither cleared nor sent.
+      if (valueRef.current.trim() !== text) return;
       if (outcome === 'done') setValue('');
       else if (outcome === 'missed' && !routedSubmit.route(trigger)) send(trigger);
     } finally {

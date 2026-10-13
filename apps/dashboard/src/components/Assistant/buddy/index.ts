@@ -2,13 +2,15 @@ import { routeWithJev } from '../../../services/assistantRouteService';
 import { ask, close, log, openHidden, peek, settle, actOn, type Choice } from './act';
 import {
   CHECK_OPTIONS,
+  ASKS_A_QUESTION,
+  ASKS_FOR_A_WAY,
   MESSAGES,
   MIN_PROBABILITY,
   STOPPED,
   TIMING,
   WORKSPACE_PREFIX,
 } from './constants';
-import { looping, remember, tried, turnOf, type Turn } from './history';
+import { controlKey, looping, normalise, remember, tried, turnOf, type Turn } from './history';
 import type { JevResult } from './decide';
 import { readScreen, topDocument, type Control } from './screen';
 import { runSteps, type Option, type Used, type WalkEnv } from './walk';
@@ -33,20 +35,23 @@ interface Doing {
   used?: Option<Control>;
 }
 
+function currentPage(): string {
+  const { pathname, search } = topDocument().location;
+  return pathname.replace(WORKSPACE_PREFIX, '') + search;
+}
+
 const liveScreen = (
   signal: AbortSignal,
   doing: Doing,
   triedHere: ReadonlySet<string>,
+  askedAbout: ReadonlySet<string>,
 ): WalkEnv<Control> => ({
   readScreen,
   peek,
   close,
   route: (request, options) => routeWithJev(request, options, signal, 'screen'),
   check: (request, label) => check(request, label, signal),
-  here: (): string => {
-    const { pathname, search } = topDocument().location;
-    return pathname.replace(WORKSPACE_PREFIX, '') + search;
-  },
+  here: currentPage,
   use: async (option): Promise<Used> => {
     const used = await use(option, signal);
     if (used.acted) doing.used = option;
@@ -60,6 +65,7 @@ const liveScreen = (
   aborted: () => signal.aborted,
   settle: () => settle(TIMING.lateQuietMs, signal),
   tried: triedHere,
+  askedAbout,
 });
 
 let running: AbortController | null = null;
@@ -67,26 +73,38 @@ let running: AbortController | null = null;
 let walking: Promise<unknown> = Promise.resolve();
 let hearing: string | undefined;
 let lastDecision = '';
-let asked: { options: Option<Control>[]; steps: string[] } | undefined;
+/** The last "Did you mean…?" and the steps it holds up, the first being the one asked about. */
+interface Question {
+  options: Option<Control>[];
+  steps: string[];
+}
+let asked: Question | undefined;
 let turns: Turn[] = [];
 
-/** A reply to "Did you mean…?": yes or that one takes the first, the second or other the second. */
+/** A whole short reply to "Did you mean…?": yes or the first takes the first, the second or other the second. */
 const ANSWER_TO_ASK =
-  /^\s*(?:(yes|yeah|yep|sure|ok(?:ay)?|that(?: one)?|the first(?: one)?)|(the (?:second|other)(?: one)?))\b/i;
+  /^\s*(?:(yes|yeah|yep|sure|ok(?:ay)?|that(?: one)?|the first(?: one)?)|(the (?:second|other)(?: one)?))(?: please)?\s*[.!?,]*\s*$/i;
 
 /** A new command, not an answer to the last question. */
 const NEW_COMMAND =
   /^\s*(?:open|go to|take me|show|start|create|archive|close|delete|send|find|search)\b/i;
 
-/** The option a reply picks from the last "Did you mean…?": yes, first or second, else whichever Jev hears in it. */
+/**
+ * The option a reply picks from the last "Did you mean…?": yes, first or second, or the request
+ * said again when there was one option; else whichever Jev leans to in it. A question or a new
+ * command picks nothing and is walked as new.
+ */
 async function pickedFromAsk(
   request: string,
-  options: Option<Control>[],
+  { options, steps }: Question,
   signal: AbortSignal,
 ): Promise<Option<Control> | undefined> {
+  const [only] = options.length === 1 ? options : [];
   const match = ANSWER_TO_ASK.exec(request);
   if (match) return options[match[1] ? 0 : 1];
-  if (NEW_COMMAND.test(request)) return undefined;
+  const step = normalise(steps[0] ?? '');
+  if (only && step && normalise(request.replace(ASKS_FOR_A_WAY, '')) === step) return only;
+  if (NEW_COMMAND.test(request) || ASKS_A_QUESTION.test(request)) return undefined;
   const described = options.map(({ id, label }) => ({ id, description: label }));
   const result = await routeWithJev(request, described, signal, 'screen');
   if (result.route === 'unavailable' || (result.probability ?? 0) < MIN_PROBABILITY)
@@ -98,22 +116,25 @@ async function walkFrom(request: string, signal: AbortSignal): Promise<string | 
   if (signal.aborted) return STOPPED;
   const question = asked;
   asked = undefined;
-  const picked = question && (await pickedFromAsk(request, question.options, signal));
-  const loop = !picked && looping(turns, request);
+  const picked = question && (await pickedFromAsk(request, question, signal));
+  const page = currentPage();
+  const loop = !picked && looping(turns, request, page);
   if (loop) {
     lastDecision = `"${loop.used?.text}" was tried twice for this`;
     return null;
   }
   const doing: Doing = { offered: [] };
-  const tries = picked ? new Set<string>() : tried(turns, request);
-  const screen = liveScreen(signal, doing, tries);
-  const page = screen.here();
+  const tries = picked ? new Set<string>() : tried(turns, request, page);
+  // A question about the option ("what does it do?") is not a yes to it.
+  const sayingAgain = !picked && !ASKS_A_QUESTION.test(request);
+  const askedAbout = new Set(sayingAgain ? (question?.options.map(controlKey) ?? []) : []);
+  const screen = liveScreen(signal, doing, tries, askedAbout);
   const { reply, why, left } = picked
     ? await runSteps(request, screen, { confirmed: picked, steps: question.steps })
     : await runSteps(request, screen);
   if (signal.aborted) return reply;
   if (left) asked = { options: doing.offered, steps: left };
-  turns = remember(turns, turnOf(request, page, reply, doing.used, !!left));
+  turns = remember(turns, turnOf(request, currentPage(), doing.used, !!left));
   lastDecision = why;
   const [last] = [...tries];
   const before = last && turns.find(turn => turn.used?.key === last)?.used?.text;

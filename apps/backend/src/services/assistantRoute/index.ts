@@ -196,8 +196,8 @@ export const routeAssistantMessage = async (
   if (!config) return unavailable('config_unavailable');
   if (!config.enabled) return unavailable('disabled');
 
-  // Shuffled against position bias. Built with fromEntries, not `criteria[id] =`: ids come from
-  // the request, and fromEntries defines own keys without going through prototype setters.
+  // Ordered as the mode wants (see PROMPTS). Built with fromEntries, not `criteria[id] =`: ids come
+  // from the request, and fromEntries defines own keys without going through prototype setters.
   const criteria: Record<string, string> = Object.fromEntries([
     ...prompt.order(actions).map((action) => [action.id, action.description]),
     [NONE_ID, prompt.none],
@@ -245,5 +245,5 @@ export const routeAssistantMessage = async (
   const offered = scored.filter(([, p]) => p >= config.alsoThreshold).map(([id]) => id);
   const actionIds = offered.length > 0 ? offered : [answer.choice];
 
-  return finish({ route: 'actions', actionIds, confidence, ...pick }, actionIds[0], confidence);
+  return finish({ route: 'actions', actionIds, confidence, ...pick }, pick.chosen, confidence);
 };

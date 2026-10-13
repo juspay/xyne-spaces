@@ -456,6 +456,28 @@ export const DEFAULT_TOOLBAR_PATHS: string[] = [
   '/apps-marketplace',
 ];
 
+// One-line description per toolbar-manageable path, shown under the label in
+// the workspace admin's Toolbar tab — same { name, description } shape as
+// the RESOURCES registry backing the Roles access grid (seed-acl.ts), so an
+// admin sees what they're hiding, not just a bare label.
+export const TOOLBAR_ITEM_DESCRIPTIONS: Record<string, string> = {
+  '/ai': 'AI chat assistant panel',
+  '/chat/dir': 'Channel-based team chat',
+  '/chat/dm': 'Direct messages between users',
+  '/chat/activity': 'Mentions and notification activity feed',
+  '/calls': 'Voice and video calling',
+  '/recordings': 'Call and meeting recordings',
+  '/chat/canvas': 'Personal canvas documents',
+  '/automations': 'Workflow automation triggers and actions',
+  '/browser': 'In-app browser tabs (desktop app only)',
+  '/apps': 'Installed app integrations',
+  '/apps-marketplace': 'Apps built on Xyne data, and creating your own',
+  '/guide': 'Product documentation and onboarding guide',
+  '/knowledge-base': 'File and folder knowledge base for Ask AI',
+  '/migrations/slack': 'Slack Migration tab under Migrations',
+  '/scheduled-messages': 'Messages scheduled for later delivery (Inbox)',
+};
+
 type Permissions = ReturnType<typeof usePermissions>;
 
 // Filters out items the current user cannot access (permission-gated routes and

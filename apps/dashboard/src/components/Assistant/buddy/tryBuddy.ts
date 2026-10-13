@@ -1,4 +1,5 @@
 import { toast } from 'sonner';
+import { VOICE_DEBUG_ENABLED } from '../../../services/VoiceInput/voiceDebug';
 import { buddy } from './index';
 
 export type BuddyOutcome = 'done' | 'stopped' | 'missed';
@@ -7,7 +8,7 @@ export type BuddyOutcome = 'done' | 'stopped' | 'missed';
 export const tryBuddy = async (text: string): Promise<BuddyOutcome> => {
   const reply = await buddy.answer(text);
   if (reply === '') return 'stopped';
-  const description = `You typed “${text}” · ${buddy.explain()}`;
-  toast(reply ?? 'Sent to Ask AI', { description });
-  return reply === null ? 'missed' : 'done';
+  if (reply === null) return 'missed';
+  toast(reply, VOICE_DEBUG_ENABLED ? { description: buddy.explain() } : undefined);
+  return 'done';
 };

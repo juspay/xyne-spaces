@@ -172,6 +172,16 @@ const ChannelItemV2 = memo(
       </div>
     );
 
+    // The badge and incident dot have no text of their own, so screen readers hear them here; the
+    // name stays the label, the one people (and Buddy) know the conversation by.
+    const dmDescription = [
+      'Direct message',
+      unreadCount > 0 && !isActive && `${unreadCount > 9 ? '9+' : unreadCount} unread`,
+      hasSlashCommandArtifactSideEffect && 'Active incident',
+    ]
+      .filter(Boolean)
+      .join(', ');
+
     return (
       <Link
         className=''
@@ -179,7 +189,7 @@ const ChannelItemV2 = memo(
         to={`/chat/dir/${channel.id}`}
         onClick={handleChannelClick}
         aria-label={isDM ? displayName : undefined}
-        aria-description={isDM ? 'Direct message' : 'Channel'}
+        aria-description={isDM ? dmDescription : 'Channel'}
         aria-current={isActive ? 'page' : undefined}
         data-track-category='CHAT_SIDEBAR'
         data-track-name='OPEN_CHANNEL'

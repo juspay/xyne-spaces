@@ -82,7 +82,7 @@ const setPhase = (phase: VoicePhase): void => {
 // Bumped when the session ends, so replies still in flight are dropped.
 let session = 0;
 /** Bumped on every hold, so a reply to an earlier utterance is dropped. */
-let turn = 0;
+let holds = 0;
 let host: VoiceHost | null = null;
 let unsubscribe: (() => void) | null = null;
 let utterance: Utterance | null = null;
@@ -245,19 +245,15 @@ function followReply(stream: StreamState): void {
 
 // Given up after UNDERSTAND_TIMEOUT_MS so the orb never stays busy.
 async function understand(text: string): Promise<string | null> {
-  if (!host?.answer) {
-    log('route', 'No router on this surface', 'sending to Ask AI');
-    return null;
-  }
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<'timeout'>(resolve => {
     timer = setTimeout(() => resolve('timeout'), UNDERSTAND_TIMEOUT_MS);
   });
   try {
-    const result = await Promise.race([host.answer(text), timeout]);
+    const result = await Promise.race([host?.answer?.(text) ?? null, timeout]);
     if (result !== 'timeout') return result;
     logError('route', 'Timed out', `no decision after ${UNDERSTAND_TIMEOUT_MS / 1000}s`);
-    host.onStop?.();
+    host?.onStop?.();
     return 'That took too long. Try again.';
   } finally {
     clearTimeout(timer);
@@ -270,7 +266,7 @@ async function understand(text: string): Promise<string | null> {
  */
 async function handleTranscript(rawText: string): Promise<void> {
   const current = session;
-  const mine = turn;
+  const hold = holds;
   try {
     const text = rawText.trim();
     if (!text) {
@@ -284,7 +280,7 @@ async function handleTranscript(rawText: string): Promise<void> {
     setPhase('understanding');
     const routeStarted = performance.now();
     const reply = await understand(text);
-    if (session !== current || turn !== mine || !host) return;
+    if (session !== current || holds !== hold || !host) return;
     const took = `${Math.round(performance.now() - routeStarted)}ms`;
     if (reply === '') {
       log('route', 'Handled, nothing to say', took);
@@ -307,7 +303,7 @@ async function handleTranscript(rawText: string): Promise<void> {
     watch(START_TIMEOUT_MS);
     host.submit(text);
   } catch (err) {
-    if (session !== current || turn !== mine) return;
+    if (session !== current || holds !== hold) return;
     const description = err instanceof Error ? err.message : 'Unknown error';
     logError('route', 'Failed', description);
     toast.error('Voice transcription failed', { description });
@@ -340,7 +336,7 @@ function startRecording(): void {
     host?.cancelAnswer?.();
     setPhase('idle');
   }
-  turn++;
+  holds++;
   voiceDebug.startTurn();
   holdStartedAt = performance.now();
   log('input', 'Hold start', `phase ${state.phase}`);
@@ -502,7 +498,6 @@ export const voiceSession = {
   startRecording,
   stopRecording,
   stop,
-  speak,
   resumePlayback: (): void => speech.resume(),
   exit: (): void => host?.onExit(),
 };

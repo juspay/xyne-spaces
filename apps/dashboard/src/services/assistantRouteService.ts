@@ -22,7 +22,9 @@ const ROUTE_DEADLINE_MS = 6000;
 
 const isRouteResponse = (body: unknown): body is RouteResponse => {
   if (typeof body !== 'object' || body === null) return false;
-  const { route, actionIds } = body as Record<string, unknown>;
+  const { route, actionIds, probability, chosen } = body as Record<string, unknown>;
+  if (probability !== undefined && typeof probability !== 'number') return false;
+  if (chosen !== undefined && typeof chosen !== 'string') return false;
   if (route === 'actions') {
     return Array.isArray(actionIds) && actionIds.every(id => typeof id === 'string');
   }

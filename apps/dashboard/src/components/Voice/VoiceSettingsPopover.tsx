@@ -54,6 +54,7 @@ function SettingsPanel(): ReactElement {
   const voice = pickVoice(catalog, voiceId);
   const micValue = mics.find(mic => mic.deviceId === micId)?.deviceId ?? DEFAULT_MIC;
   const previewRef = useRef<HTMLAudioElement | null>(null);
+  useEffect(() => () => previewRef.current?.pause(), []);
 
   const chooseVoice = async (id: string): Promise<void> => {
     updateVoiceSettings({ voiceId: id });

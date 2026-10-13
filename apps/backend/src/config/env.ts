@@ -1030,8 +1030,8 @@ export const config = {
   },
   elevenLabs: {
     apiKey: envVars.ELEVENLABS_API_KEY as string,
-    apiUrl: envVars.ELEVENLABS_API_URL as string,
-    sttUrl: (envVars.ELEVENLABS_API_URL as string).replace(/^http/, 'ws'),
+    apiUrl: (envVars.ELEVENLABS_API_URL as string).replace(/\/+$/, ''),
+    sttUrl: (envVars.ELEVENLABS_API_URL as string).replace(/\/+$/, '').replace(/^http/, 'ws'),
     sttModel: envVars.ELEVENLABS_STT_MODEL as string,
     ttsModel: envVars.ELEVENLABS_TTS_MODEL as string,
     ttsVoiceId: envVars.ELEVENLABS_TTS_VOICE_ID as string,

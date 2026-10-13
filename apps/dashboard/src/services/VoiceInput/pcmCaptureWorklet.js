@@ -9,11 +9,16 @@ class PcmCaptureProcessor extends AudioWorkletProcessor {
     this.acc = 0;
     this.count = 0;
     this.pos = 0;
+    this.stopped = false;
+    // Without this a disconnected node keeps being processed for the page's lifetime.
+    this.port.onmessage = () => {
+      this.stopped = true;
+    };
   }
 
   process(inputs) {
     const channel = inputs[0] && inputs[0][0];
-    if (!channel) return true;
+    if (!channel) return !this.stopped;
     const out = new Int16Array(Math.ceil(channel.length / this.ratio) + 1);
     let n = 0;
     for (let i = 0; i < channel.length; i++) {
@@ -32,7 +37,7 @@ class PcmCaptureProcessor extends AudioWorkletProcessor {
       const samples = out.slice(0, n);
       this.port.postMessage(samples.buffer, [samples.buffer]);
     }
-    return true;
+    return !this.stopped;
   }
 }
 

@@ -259,6 +259,10 @@ const XyneAISidebar = ({
 }: XyneAISidebarProps): ReactElement => {
   const isFullscreen = variant === 'fullscreen';
   const [inputValue, setInputValue] = useState('');
+  // The walk is awaited, so it must compare against the latest input, not the render that started it.
+  const inputValueRef = useRef(inputValue);
+  inputValueRef.current = inputValue;
+  const [buddyWorking, setBuddyWorking] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [conversationId, setConversationId] = useState<string>('');
   const [streamThreadKey, setStreamThreadKey] = useState<string>(
@@ -2177,8 +2181,11 @@ const XyneAISidebar = ({
     submit: trigger => void handleSubmit(trigger),
   });
 
-  // Voice goes through Buddy, cancelled in onStop.
   const handleAbort = (): void => {
+    if (buddyWorking) {
+      buddy.cancel();
+      return;
+    }
     if (routedSubmit.stop()) return;
     assistant.cancel();
     abortCurrentRequest();
@@ -2208,14 +2215,22 @@ const XyneAISidebar = ({
     activeSelectionInfos.length === 0;
 
   const runBuddy = async (text: string, trigger?: 'button' | 'enter'): Promise<void> => {
-    const outcome = await tryBuddy(text);
-    if (outcome === 'missed') sendOnward(trigger);
-    else if (outcome === 'done') setInputValue('');
+    setBuddyWorking(true);
+    try {
+      const outcome = await tryBuddy(text);
+      // An edit made during the walk is the user's, so it is neither cleared nor sent.
+      if (inputValueRef.current.trim() !== text) return;
+      if (outcome === 'missed') sendOnward(trigger);
+      else if (outcome === 'done') setInputValue('');
+    } finally {
+      setBuddyWorking(false);
+    }
   };
 
   // Not in handleSubmit, so auto-send, suggestion and follow-up sends are never routed.
   // An explicit "/command" is never re-routed by Auto either (same as the AI screen).
   const handleComposerSubmit = (trigger?: 'button' | 'enter'): void => {
+    if (buddyWorking) return;
     const text = inputValue.trim();
     if (buddyTyped && text !== '' && !text.startsWith('/')) {
       void runBuddy(text, trigger);
@@ -2762,7 +2777,7 @@ const XyneAISidebar = ({
                   <XyneAIInputBox
                     ref={xyneAIInputRef}
                     isOnboarding={aiOnboarding.isActive}
-                    isStreaming={isActiveSessionStreaming || assistant.isRouting}
+                    isStreaming={isActiveSessionStreaming || assistant.isRouting || buddyWorking}
                     selectedAgentSlug={effectiveAgentSlug}
                     agents={isV2 ? accessibleAgents : []}
                     {...(isV2 && !isAgentForced ? { onSelectAgent: handleSelectAgent } : {})}

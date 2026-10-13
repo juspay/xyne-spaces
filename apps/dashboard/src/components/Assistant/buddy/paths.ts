@@ -6,7 +6,10 @@ export interface MenuItem {
   label: string;
   href?: string;
   use: 'click' | 'point';
-  opens?: boolean;
+  /** A menu is peeked into; a dialog is not, since opening one is not a harmless look. */
+  opens?: 'menu' | 'dialog';
+  /** A toggle, tab or choice: pressing it again undoes or changes what it set. */
+  toggles?: true;
 }
 
 export interface Peeked<V extends MenuItem> {
