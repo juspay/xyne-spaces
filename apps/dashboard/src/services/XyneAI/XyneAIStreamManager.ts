@@ -2306,7 +2306,6 @@ class XyneAIStreamManager {
             return;
           }
           const sd = this.streamDataMap.get(streamId);
-          const st = this.activeStreams.get(threadId);
           if (
             partial &&
             sd &&
