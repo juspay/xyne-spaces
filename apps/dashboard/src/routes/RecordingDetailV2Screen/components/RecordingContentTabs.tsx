@@ -97,14 +97,7 @@ export const RecordingContentTabs = ({
   // since the template menu already owns that role.
   const [summaryTrigger, setSummaryTrigger] = useState<HTMLButtonElement | null>(null);
   const offerAnchor = useMemo(
-    () =>
-      summaryTrigger
-        ? {
-            current: {
-              getBoundingClientRect: (): DOMRect => summaryTrigger.getBoundingClientRect(),
-            },
-          }
-        : undefined,
+    () => (summaryTrigger ? { current: summaryTrigger } : undefined),
     [summaryTrigger],
   );
   const [hasInteracted, setHasInteracted] = useState(false);

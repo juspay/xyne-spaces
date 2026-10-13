@@ -545,6 +545,10 @@ export default function RecordingDetailV2Screen({
   });
 
   useEffect(() => {
+    // j/k navigation swaps the recording without remounting: neither the
+    // "set as default" offer nor a running tour belongs to the next one.
+    setDefaultTemplateOffer(null);
+    summaryTemplateTour.dismiss();
     if (recordingId) void loadRecording(recordingId);
   }, [recordingId]);
 

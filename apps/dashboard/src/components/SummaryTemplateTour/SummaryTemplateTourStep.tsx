@@ -90,13 +90,9 @@ export const SummaryTemplateTourStep = ({
     return (): void => element.removeAttribute('data-tour-active');
   }, [element, open]);
 
-  const anchor = useMemo(
-    () =>
-      element
-        ? { current: { getBoundingClientRect: (): DOMRect => element.getBoundingClientRect() } }
-        : undefined,
-    [element],
-  );
+  // The element itself, not a rect-only proxy, so floating-ui can watch the
+  // dialog's scroll container and the target's size.
+  const anchor = useMemo(() => (element ? { current: element } : undefined), [element]);
 
   if (!isActive || !anchor || stepIndex === null) return null;
 

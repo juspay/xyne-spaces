@@ -69,6 +69,7 @@ import { useNotificationKeywords } from '../../../hooks/useNotificationKeywords'
 import { Badge } from '../../ui/Badge/Badge';
 
 import { usePreferencesState, type PreferencesState } from '../../../hooks/usePreferencesState';
+import { useSummaryTemplates } from '../../../hooks/useSummaryTemplates';
 import {
   CALL_MEDIA_QUALITY_OPTIONS,
   type CallMediaQuality,
@@ -770,7 +771,6 @@ const RecordingsSection: FC<{ state: PreferencesState }> = ({ state }) => (
       </div>
       <DefaultSummaryTemplateSelect
         value={state.defaultSummaryTemplateId}
-        templates={state.summaryTemplates}
         onChange={state.setDefaultSummaryTemplateId}
       />
     </div>
@@ -782,9 +782,11 @@ const DEFAULT_SUMMARY_TEMPLATE_OPTION = { id: 'default', label: 'Default summary
 
 const DefaultSummaryTemplateSelect: FC<{
   value: string | null;
-  templates: PreferencesState['summaryTemplates'];
   onChange: (templateId: string | null) => void;
-}> = ({ value, templates, onChange }) => {
+}> = ({ value, onChange }) => {
+  // Queried here, not in usePreferencesState, so the template list only syncs
+  // while the Recordings section is actually on screen.
+  const { templates, isLoading } = useSummaryTemplates(true);
   const options: { id: string | null; label: string }[] = [
     AUTO_SUMMARY_TEMPLATE_OPTION,
     DEFAULT_SUMMARY_TEMPLATE_OPTION,
@@ -792,9 +794,11 @@ const DefaultSummaryTemplateSelect: FC<{
       .filter(template => template.id !== DEFAULT_SUMMARY_TEMPLATE_OPTION.id)
       .map(template => ({ id: template.id, label: template.name })),
   ];
-  // A default the user can no longer read (deleted, or the share was revoked).
-  const selectedLabel =
-    options.find(option => option.id === value)?.label ?? 'Unavailable template';
+  // A default the user can no longer read (deleted, or the share was revoked);
+  // not to be confused with the list simply not having arrived yet.
+  const selectedLabel = isLoading
+    ? 'Loading templates…'
+    : (options.find(option => option.id === value)?.label ?? 'Unavailable template');
   return (
     <div className='flex items-center justify-between gap-4'>
       <span id='default-summary-template-label' className='text-sm font-medium text-foreground'>
@@ -805,6 +809,7 @@ const DefaultSummaryTemplateSelect: FC<{
           <button
             id='default-summary-template'
             type='button'
+            disabled={isLoading}
             aria-labelledby='default-summary-template-label default-summary-template'
             className='flex h-8 min-w-48 max-w-72 items-center justify-between gap-2 rounded-md border border-border bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring'
             data-track-category='PREFERENCES'

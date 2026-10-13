@@ -219,7 +219,7 @@ import {
 
 import { z } from 'zod';
 import { generateKeyBetween } from 'fractional-indexing';
-import { zql } from './queries';
+import { readableSummaryTemplates, zql } from './queries';
 import { hasGuestChannelAccess } from './acl/core/guest-access';
 import { hasProjectAdminAccess } from './acl/core/admin-access';
 import vespaClient from '@/vespa/client';
@@ -16889,17 +16889,17 @@ export function createMutators(
           timestamp: z.number(),
         }),
         async ({ tx, ctx, args: { id, recordingDefaultSummaryTemplateId, timestamp } }) => {
-            // The default must be a template in this workspace (or the code-backed
-            // 'default'). Whether the user may still read it is re-checked when a
-            // summary is generated, falling back to the automatic pick.
-              if (recordingDefaultSummaryTemplateId && recordingDefaultSummaryTemplateId !== 'default') {
-              const template = await tx.run(
-                zql.summary_templates.where('id', recordingDefaultSummaryTemplateId).one(),
-              );
-              if (!template || template.workspaceId !== ctx.workspaceId) {
-                throw new Error('Summary template not found');
-              }
+          // The default must be a template the user can read today (or the
+          // code-backed 'default'), by the same rule as the template list. Access
+          // is re-checked at generation time in case it is revoked later.
+          if (recordingDefaultSummaryTemplateId && recordingDefaultSummaryTemplateId !== 'default') {
+            const template = await tx.run(
+              readableSummaryTemplates(ctx).where('id', recordingDefaultSummaryTemplateId).one(),
+            );
+            if (!template) {
+              throw new Error('Summary template not found or not accessible');
             }
+          }
 
           const existing = await tx.run(
             zql.user_preferences.where('userId', ctx.userID).one(),

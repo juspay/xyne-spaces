@@ -8,7 +8,7 @@ import { useSyncExternalStore } from 'react';
  * Summary Templates dialog. Finishing or skipping the tour marks it taken in
  * localStorage (same key style as `useWalkthrough`), which hides the pill.
  */
-export const SUMMARY_TEMPLATE_TOUR_TAKEN_KEY = 'walkthrough_summary_templates';
+const SUMMARY_TEMPLATE_TOUR_TAKEN_KEY = 'walkthrough_summary_templates';
 
 const takenListeners = new Set<() => void>();
 
@@ -91,7 +91,6 @@ export const isSummaryTemplateMenuStep = (step: SummaryTemplateTourStepId | null
   step === 'pick-template' || step === 'new-template';
 
 export const summaryTemplateTour = {
-  isActive: (): boolean => stepIndex !== null,
   start: (): void => setStepIndex(0),
   /** Moves on; past the last step the tour counts as taken and closes. */
   next: (): void => {

@@ -1311,11 +1311,6 @@ export class CallDocumentService {
   }
 
   /**
-   * Generate a headless-recording summary using a saved or code-backed template.
-   * `unnumberedTranscript` is the transcript before segment numbering; a bot-created
-   * call's template summary is built from it, like its first summary.
-   */
-  /**
    * The template the recording's creator chose as their default, if they set one in
    * Preferences and can still read it. `null` means fall through to the LLM pick.
    *
@@ -1357,6 +1352,11 @@ export class CallDocumentService {
     }
   }
 
+  /**
+   * Generate a headless-recording summary using a saved or code-backed template.
+   * `unnumberedTranscript` is the transcript before segment numbering; a bot-created
+   * call's template summary is built from it, like its first summary.
+   */
   async generateRecordingSummary(
     transcript: string,
     callId: string,
