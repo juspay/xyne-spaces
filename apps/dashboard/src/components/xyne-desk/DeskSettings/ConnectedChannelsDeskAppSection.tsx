@@ -5,26 +5,26 @@ import { Hash, Plus, Waypoints, X } from 'lucide-react';
 import { SearchableMultiSelect } from '../../ui/SearchableMultiSelect/SearchableMultiSelect';
 import { DisconnectConfirmDialog } from '../DisconnectConfirmDialog';
 import {
-  addHubChannel,
-  getHubDesk,
-  listHubChannels,
-  removeHubChannel,
-  type HubChannel,
-} from '../../../services/clients/hubDeskApi';
+  addChannelsDeskChannel,
+  getChannelsDesk,
+  listChannelsDeskChannels,
+  removeChannelsDeskChannel,
+  type ChannelsDeskChannel,
+} from '../../../services/clients/channelsDeskApi';
 
-interface ConnectedHubAppSectionProps {
+interface ConnectedChannelsDeskAppSectionProps {
   channelId: string;
   canManage: boolean;
 }
 
-/** HUB desks: the app this desk is for, and which of its channels feed the desk. */
-export const ConnectedHubAppSection: React.FC<ConnectedHubAppSectionProps> = ({
+/** Channels desks: the app this desk is for, and which of its channels feed the desk. */
+export const ConnectedChannelsDeskAppSection: React.FC<ConnectedChannelsDeskAppSectionProps> = ({
   channelId,
   canManage,
 }) => {
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['hub-desk', channelId],
-    queryFn: () => getHubDesk(channelId),
+    queryKey: ['channels-desk', channelId],
+    queryFn: () => getChannelsDesk(channelId),
     enabled: canManage,
   });
 
@@ -61,31 +61,31 @@ export const ConnectedHubAppSection: React.FC<ConnectedHubAppSectionProps> = ({
           </div>
         )}
       </div>
-      {data?.app && <HubChannelsSection channelId={channelId} />}
+      {data?.app && <ChannelsDeskChannelsSection channelId={channelId} />}
     </div>
   );
 };
 
 /** The app's channels feeding this desk: add from the ones it created, or remove. */
-const HubChannelsSection: React.FC<{ channelId: string }> = ({ channelId }) => {
+const ChannelsDeskChannelsSection: React.FC<{ channelId: string }> = ({ channelId }) => {
   const queryClient = useQueryClient();
-  const queryKey = ['hub-desk-channels', channelId];
+  const queryKey = ['channels-desk-channels', channelId];
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [pendingRemove, setPendingRemove] = useState<HubChannel | null>(null);
+  const [pendingRemove, setPendingRemove] = useState<ChannelsDeskChannel | null>(null);
 
   const { data, isLoading, isError } = useQuery({
     queryKey,
-    queryFn: () => listHubChannels(channelId),
+    queryFn: () => listChannelsDeskChannels(channelId),
   });
 
   const addMutation = useMutation({
-    mutationFn: (sourceChannelId: string) => addHubChannel(channelId, sourceChannelId),
+    mutationFn: (sourceChannelId: string) => addChannelsDeskChannel(channelId, sourceChannelId),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey }),
     onError: () => toast.error('Failed to add the channel. Please try again.'),
   });
 
   const removeMutation = useMutation({
-    mutationFn: (sourceChannelId: string) => removeHubChannel(channelId, sourceChannelId),
+    mutationFn: (sourceChannelId: string) => removeChannelsDeskChannel(channelId, sourceChannelId),
     onSuccess: () => {
       setPendingRemove(null);
       void queryClient.invalidateQueries({ queryKey });
@@ -128,7 +128,7 @@ const HubChannelsSection: React.FC<{ channelId: string }> = ({ channelId }) => {
                 onClick={() => setPendingRemove(channel)}
                 className='text-desk-accent-foreground hover:text-foreground'
                 data-track-category='DeskSettings'
-                data-track-name='HUB_REMOVE_CHANNEL'
+                data-track-name='CHANNELS_DESK_REMOVE_CHANNEL'
                 aria-label={`Remove ${channel.name}`}
               >
                 <X size={14} />
@@ -152,14 +152,14 @@ const HubChannelsSection: React.FC<{ channelId: string }> = ({ channelId }) => {
               emptyMessage='No matching channels'
               align='start'
               trackCategory='DeskSettings'
-              trackName='HUB_ADD_CHANNEL'
+              trackName='CHANNELS_DESK_ADD_CHANNEL'
               trigger={
                 <button
                   type='button'
                   className='inline-flex h-[28px] items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 py-1.5 text-desk-label text-foreground shadow-sm transition-colors hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50'
                   disabled={addMutation.isPending}
                   data-track-category='DeskSettings'
-                  data-track-name='HUB_OPEN_ADD_CHANNEL'
+                  data-track-name='CHANNELS_DESK_OPEN_ADD_CHANNEL'
                 >
                   <Plus size={14} />
                   <span>Add channel</span>

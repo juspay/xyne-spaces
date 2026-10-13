@@ -1,4 +1,4 @@
-// HUB desks: a desk linked to one installed Xyne App gets a ticket for every new thread in the
+// Channels desks: a desk linked to one installed Xyne App gets a ticket for every new thread in the
 // channels added to it (from those the app created). The ticket and a stub thread live on the desk;
 // the thread stays in its channel, named by an email row on the stub, so reading it still needs
 // access to that channel. A ticket the merchant opens on their own thread is separate.
@@ -6,7 +6,7 @@ import type { Ticket } from '@prisma/client';
 import { MessageType, TicketPriority } from '@xyne/shared';
 import { stripHtml } from '@/agents/xyne-ai/tools/helpers';
 import type { TicketLike } from '@/automations/triggers/ticket-context';
-import { insertHubTicket, readHubTicketsForThreads, type HubThreadTicket } from '@/bypassAcl/hubDeskServices';
+import { insertChannelsDeskTicket, readChannelsDeskTicketsForThreads, type ChannelsDeskThreadTicket } from '@/bypassAcl/channelsDeskServices';
 import { db } from '@/database/client';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
 import { vespaQueue } from '@/queues/vespaQueue';
@@ -18,42 +18,42 @@ import { syncUserWorkload } from '@/utils/workloadUtils';
 import { ticketSchema } from '@/vespa/src/types';
 
 /** The desk's link to its app is an ExternalSource, like other desk sources; one per installed app. */
-export const hubSourceName = (installedAppId: string): string => `${ExternalSourcePlatform.APP_HUB}:${installedAppId}`;
+export const channelsDeskSourceName = (installedAppId: string): string => `${ExternalSourcePlatform.APP_CHANNELS_DESK}:${installedAppId}`;
 
-/** Each channel added to a HUB desk is one too; the unique name keeps a channel on one desk. */
-export const hubChannelSourceName = (channelId: string): string =>
-  `${ExternalSourcePlatform.APP_HUB_CHANNEL}:${channelId}`;
+/** Each channel added to a Channels desk is one too; the unique name keeps a channel on one desk. */
+export const channelsDeskChannelSourceName = (channelId: string): string =>
+  `${ExternalSourcePlatform.APP_CHANNELS_DESK_CHANNEL}:${channelId}`;
 
 const TITLE_MAX_LENGTH = 120;
 
-export async function hubDeskOf(installedAppId: string): Promise<string | null> {
+export async function channelsDeskOf(installedAppId: string): Promise<string | null> {
   const source = await db.externalSource.findFirst({
-    where: { sourceType: ExternalSourcePlatform.APP_HUB, externalIdentifier: installedAppId, isActive: true },
+    where: { sourceType: ExternalSourcePlatform.APP_CHANNELS_DESK, externalIdentifier: installedAppId, isActive: true },
     select: { channelId: true },
   });
   return source?.channelId ?? null;
 }
 
-/** The installed app feeding a HUB desk. */
-export async function hubAppOf(deskId: string): Promise<{ id: string; name: string } | null> {
+/** The installed app feeding a Channels desk. */
+export async function channelsDeskAppOf(deskId: string): Promise<{ id: string; name: string } | null> {
   const source = await db.externalSource.findFirst({
-    where: { sourceType: ExternalSourcePlatform.APP_HUB, channelId: deskId, isActive: true },
+    where: { sourceType: ExternalSourcePlatform.APP_CHANNELS_DESK, channelId: deskId, isActive: true },
     select: { externalIdentifier: true, displayName: true },
   });
   return source?.externalIdentifier ? { id: source.externalIdentifier, name: source.displayName } : null;
 }
 
-/** The HUB desk this channel was added to, if any. */
-async function hubDeskForChannel(channelId: string): Promise<string | null> {
+/** The Channels desk this channel was added to, if any. */
+async function channelsDeskForChannel(channelId: string): Promise<string | null> {
   const source = await db.externalSource.findUnique({
-    where: { name: hubChannelSourceName(channelId) },
+    where: { name: channelsDeskChannelSourceName(channelId) },
     select: { channelId: true, isActive: true },
   });
   return source?.isActive ? source.channelId : null;
 }
 
-/** Creates the desk ticket for a new top-level thread; null when the channel has no HUB desk or it already has one. */
-export async function createHubTicket(conversationId: string): Promise<Ticket | null> {
+/** Creates the desk ticket for a new top-level thread; null when the channel has no Channels desk or it already has one. */
+export async function createChannelsDeskTicket(conversationId: string): Promise<Ticket | null> {
   const conversation = await db.conversation.findUnique({
     where: { conversationId },
     select: { workspaceId: true, channelId: true, ticketId: true, parentMessageId: true, initialMessageId: true },
@@ -62,7 +62,7 @@ export async function createHubTicket(conversationId: string): Promise<Ticket | 
     return null;
   }
   const sourceChannelId = conversation.channelId;
-  const deskId = await hubDeskForChannel(sourceChannelId);
+  const deskId = await channelsDeskForChannel(sourceChannelId);
   if (!deskId) return null;
 
   const [preference, message, sourceChannel] = await Promise.all([
@@ -86,14 +86,14 @@ export async function createHubTicket(conversationId: string): Promise<Ticket | 
       ])
     : [null, null];
   if (!boardId || !board || !firstStage) {
-    logger.error('[hub-desk] Desk has no usable board; no ticket created', { deskId, conversationId, boardId });
+    logger.error('[channels-desk] Desk has no usable board; no ticket created', { deskId, conversationId, boardId });
     return null;
   }
 
   // Blocks end in a space, so paragraphs don't run together in the title.
   const text = stripHtml(message.content.replace(/<\/(p|div|li|h[1-6])>|<br\s*\/?>/gi, ' '));
   const priority = TicketPriority.LOW;
-  const ticket = await insertHubTicket({
+  const ticket = await insertChannelsDeskTicket({
     workspaceId: conversation.workspaceId,
     conversationId,
     messageId: conversation.initialMessageId,
@@ -113,10 +113,10 @@ export async function createHubTicket(conversationId: string): Promise<Ticket | 
   });
   if (!ticket) return null;
 
-  logger.info('[hub-desk] Ticket created', { ticketId: ticket.id, deskId, conversationId, sourceChannelId });
+  logger.info('[channels-desk] Ticket created', { ticketId: ticket.id, deskId, conversationId, sourceChannelId });
   void messageMetadataService
     .syncInitialMessageMd(ticket.conversationId)
-    .catch((err: unknown) => logger.error('[hub-desk] Stub md sync failed', { ticketId: ticket.id, err }));
+    .catch((err: unknown) => logger.error('[channels-desk] Stub md sync failed', { ticketId: ticket.id, err }));
   await afterCreate(ticket, sourceChannelId);
   return ticket;
 }
@@ -138,10 +138,10 @@ async function afterCreate(ticket: Ticket, sourceChannelId: string): Promise<voi
       },
     },
     ticket.workspaceId,
-  ).catch((err: unknown) => logger.error('[hub-desk] TICKET_CREATED emit failed', { ticketId: ticket.id, err }));
+  ).catch((err: unknown) => logger.error('[channels-desk] TICKET_CREATED emit failed', { ticketId: ticket.id, err }));
   vespaQueue
     .addJob({ schema: ticketSchema, jobType: 'feed', docId: ticket.id, workspaceId: ticket.workspaceId })
-    .catch((err: unknown) => logger.error('[hub-desk] Vespa job failed', { ticketId: ticket.id, err }));
+    .catch((err: unknown) => logger.error('[channels-desk] Vespa job failed', { ticketId: ticket.id, err }));
 
   if (!ticket.userGroupId || !ticket.boardId) return;
   void emitTicketUpdated({
@@ -164,7 +164,7 @@ async function afterCreate(ticket: Ticket, sourceChannelId: string): Promise<voi
     await db.ticket.update({ where: { id: ticket.id }, data: { assignedTo: assignedUserId } });
     await syncUserWorkload(assignedUserId, ticket.userGroupId, ticket.boardId, ticket.createdBy);
   } catch (err) {
-    logger.error('[hub-desk] Auto-assignment failed', { ticketId: ticket.id, err });
+    logger.error('[channels-desk] Auto-assignment failed', { ticketId: ticket.id, err });
   }
 }
 
@@ -172,12 +172,12 @@ async function afterCreate(ticket: Ticket, sourceChannelId: string): Promise<voi
  * The desk tickets for the caller's own threads (SDK `tickets.forThreads`). The threads are read under
  * the caller's access first; null if any of them isn't one they can open.
  */
-export async function hubTicketsForThreads(
+export async function channelsDeskTicketsForThreads(
   workspaceId: string,
   conversationIds: string[],
-): Promise<HubThreadTicket[] | null> {
+): Promise<ChannelsDeskThreadTicket[] | null> {
   const ids = [...new Set(conversationIds)];
   const visible = await db.conversation.count({ where: { conversationId: { in: ids } } });
   if (visible !== ids.length) return null;
-  return readHubTicketsForThreads(workspaceId, ids);
+  return readChannelsDeskTicketsForThreads(workspaceId, ids);
 }

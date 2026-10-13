@@ -1,4 +1,4 @@
-// Linking a HUB desk to an installed app (one active desk per install, set up by an app admin or the
+// Linking a Channels desk to an installed app (one active desk per install, set up by an app admin or the
 // app's creator), and choosing which of the app's channels feed it.
 import { Prisma } from '@prisma/client';
 import { AccessType, ChannelScopeType, ChannelType } from '@xyne/shared';
@@ -6,7 +6,7 @@ import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
-import { hubAppOf, hubChannelSourceName, hubSourceName } from './hub';
+import { channelsDeskAppOf, channelsDeskChannelSourceName, channelsDeskSourceName } from './desk';
 
 /** Whether the user may manage Xyne Apps (ADMIN on XYNE-APPS). */
 export async function canManageApps(userId: string): Promise<boolean> {
@@ -27,7 +27,7 @@ export async function findInstalledApp(
 }
 
 /** Links the app to the desk. The link's unique name keeps an app on one desk, should two be created at once. */
-export async function linkHubDesk(args: {
+export async function linkChannelsDesk(args: {
   workspaceId: string;
   installedAppId: string;
   appName: string;
@@ -36,19 +36,19 @@ export async function linkHubDesk(args: {
 }): Promise<void> {
   await db.externalSource.create({
     data: {
-      name: hubSourceName(args.installedAppId),
-      sourceType: ExternalSourcePlatform.APP_HUB,
+      name: channelsDeskSourceName(args.installedAppId),
+      sourceType: ExternalSourcePlatform.APP_CHANNELS_DESK,
       displayName: args.appName,
       channelId: args.deskChannelId,
       externalIdentifier: args.installedAppId,
       workspaceId: args.workspaceId,
-      credentials: '', // A HUB link holds no secrets; the column is required.
+      credentials: '', // A Channels desk link holds no secrets; the column is required.
     },
   });
-  logger.info('[hub-desk] Linked', { installedAppId: args.installedAppId, deskChannelId: args.deskChannelId, by: args.linkedBy });
+  logger.info('[channels-desk] Linked', { installedAppId: args.installedAppId, deskChannelId: args.deskChannelId, by: args.linkedBy });
 }
 
-export interface HubChannel {
+export interface ChannelsDeskChannel {
   id: string;
   name: string;
 }
@@ -58,13 +58,13 @@ export interface HubChannel {
  * never a desk or a DM). A channel stays on the desk until it is removed, even if the app leaves it.
  * Read under the caller's own access, so private channels they aren't in are never listed.
  */
-export async function listHubChannels(deskId: string): Promise<{ added: HubChannel[]; available: HubChannel[] }> {
-  const app = await hubAppOf(deskId);
+export async function listChannelsDeskChannels(deskId: string): Promise<{ added: ChannelsDeskChannel[]; available: ChannelsDeskChannel[] }> {
+  const app = await channelsDeskAppOf(deskId);
   const install = app && (await db.installedApps.findUnique({ where: { id: app.id }, select: { userId: true } }));
   if (!install) return { added: [], available: [] };
   const [deskLinks, appChannels] = await Promise.all([
     db.externalSource.findMany({
-      where: { channelId: deskId, sourceType: ExternalSourcePlatform.APP_HUB_CHANNEL, isActive: true },
+      where: { channelId: deskId, sourceType: ExternalSourcePlatform.APP_CHANNELS_DESK_CHANNEL, isActive: true },
       select: { externalIdentifier: true },
     }),
     db.channel.findMany({
@@ -85,7 +85,7 @@ export async function listHubChannels(deskId: string): Promise<{ added: HubChann
       orderBy: { name: 'asc' },
     }),
     db.externalSource.findMany({
-      where: { name: { in: appChannels.map((channel) => hubChannelSourceName(channel.id)) }, isActive: true },
+      where: { name: { in: appChannels.map((channel) => channelsDeskChannelSourceName(channel.id)) }, isActive: true },
       select: { externalIdentifier: true },
     }),
   ]);
@@ -94,12 +94,12 @@ export async function listHubChannels(deskId: string): Promise<{ added: HubChann
 }
 
 /** Adds one of the app's channels to the desk. False if it isn't available (app not in it, or on another desk). */
-export async function addHubChannel(desk: { id: string; workspaceId: string }, channelId: string): Promise<boolean> {
-  const { added, available } = await listHubChannels(desk.id);
+export async function addChannelsDeskChannel(desk: { id: string; workspaceId: string }, channelId: string): Promise<boolean> {
+  const { added, available } = await listChannelsDeskChannels(desk.id);
   if (added.some((channel) => channel.id === channelId)) return true;
   const channel = available.find((candidate) => candidate.id === channelId);
   if (!channel) return false;
-  const name = hubChannelSourceName(channelId);
+  const name = channelsDeskChannelSourceName(channelId);
   try {
     // A removed channel leaves an inactive row; adding it again repoints that row.
     const repointed = await db.externalSource.updateMany({
@@ -110,12 +110,12 @@ export async function addHubChannel(desk: { id: string; workspaceId: string }, c
       await db.externalSource.create({
         data: {
           name,
-          sourceType: ExternalSourcePlatform.APP_HUB_CHANNEL,
+          sourceType: ExternalSourcePlatform.APP_CHANNELS_DESK_CHANNEL,
           displayName: channel.name,
           channelId: desk.id,
           externalIdentifier: channelId,
           workspaceId: desk.workspaceId,
-          credentials: '', // A HUB link holds no secrets; the column is required.
+          credentials: '', // A Channels desk link holds no secrets; the column is required.
         },
       });
     }
@@ -128,9 +128,9 @@ export async function addHubChannel(desk: { id: string; workspaceId: string }, c
 }
 
 /** Stops a channel feeding the desk; its existing tickets stay. False if it wasn't on this desk. */
-export async function removeHubChannel(deskId: string, channelId: string): Promise<boolean> {
+export async function removeChannelsDeskChannel(deskId: string, channelId: string): Promise<boolean> {
   const removed = await db.externalSource.updateMany({
-    where: { name: hubChannelSourceName(channelId), channelId: deskId, isActive: true },
+    where: { name: channelsDeskChannelSourceName(channelId), channelId: deskId, isActive: true },
     data: { isActive: false },
   });
   return removed.count > 0;

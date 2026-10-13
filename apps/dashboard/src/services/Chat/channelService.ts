@@ -34,9 +34,9 @@ export interface CreateChannelRequest {
   // Optional for native channels (decoupling); required for desk channels.
   projectId?: string;
   participants?: string[];
-  type?: 'DEFAULT' | 'EMAIL' | 'SUPPORT' | 'SLACK' | 'APP' | 'CALL' | 'HUB';
+  type?: 'DEFAULT' | 'EMAIL' | 'SUPPORT' | 'SLACK' | 'APP' | 'CALL' | 'CHANNELS';
   assigneeUserGroupId?: string;
-  deskType?: 'EMAIL' | 'DL' | 'SLACK' | 'APP' | 'CALL' | 'HUB';
+  deskType?: 'EMAIL' | 'DL' | 'SLACK' | 'APP' | 'CALL' | 'CHANNELS';
   dlEmail?: string;
   slackChannelId?: string;
   installedAppId?: string;
@@ -49,7 +49,7 @@ export type EmailDeskOpts =
   | { deskType: DeskType.SLACK; slackChannelId: string }
   | { deskType: DeskType.APP; installedAppId: string }
   | { deskType: DeskType.CALL }
-  | { deskType: DeskType.HUB; installedAppId: string };
+  | { deskType: DeskType.CHANNELS; installedAppId: string };
 
 export interface CreateChannelResponse {
   success: boolean;
@@ -123,7 +123,14 @@ export class ChannelService {
 
   async createChannel(
     formData: CreateChannelFormData,
-    channelType: 'DEFAULT' | 'EMAIL' | 'SUPPORT' | 'SLACK' | 'APP' | 'CALL' | 'HUB' = 'DEFAULT',
+    channelType:
+      | 'DEFAULT'
+      | 'EMAIL'
+      | 'SUPPORT'
+      | 'SLACK'
+      | 'APP'
+      | 'CALL'
+      | 'CHANNELS' = 'DEFAULT',
     emailDeskOpts?: EmailDeskOpts,
   ): Promise<CreateChannelResponse> {
     const requestData: CreateChannelRequest = {
@@ -156,9 +163,9 @@ export class ChannelService {
         emailDeskOpts.deskType === DeskType.CALL && {
           deskType: emailDeskOpts.deskType,
         }),
-      ...(channelType === 'HUB' &&
+      ...(channelType === 'CHANNELS' &&
         emailDeskOpts &&
-        emailDeskOpts.deskType === DeskType.HUB && {
+        emailDeskOpts.deskType === DeskType.CHANNELS && {
           installedAppId: emailDeskOpts.installedAppId,
         }),
     };

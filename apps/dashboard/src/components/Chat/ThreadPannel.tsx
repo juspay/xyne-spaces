@@ -159,7 +159,7 @@ interface ThreadMessagesProps {
   defaultTab?: TabType;
   headerActionsContainer?: HTMLElement | null;
   tabbedView?: boolean;
-  /** Opened from a HUB desk ticket: messages and details only, no thread actions, composer at the bottom. */
+  /** Opened from a Channels desk ticket: messages and details only, no thread actions, composer at the bottom. */
   deskView?: boolean;
 }
 

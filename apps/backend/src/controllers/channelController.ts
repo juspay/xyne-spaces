@@ -65,8 +65,8 @@ import { extractAllUsersForNotification, extractSpecialMentions, getChannelParti
 import { mentionRecipients } from '@/zero/side-effects/tables/mention-delivery';
 import { activityService } from '@/services/activity/activityService';
 import { encrypt, decrypt } from '@/services/encryptionService';
-import { canManageApps, findInstalledApp, linkHubDesk } from '@/hubDesk/admin';
-import { hubDeskOf } from '@/hubDesk/hub';
+import { canManageApps, findInstalledApp, linkChannelsDesk } from '@/channelsDesk/admin';
+import { channelsDeskOf } from '@/channelsDesk/desk';
 
 import { vespaService } from '@/services/vespaSearch';
 import { ChannelEmailAliasService } from '@/services/channelEmailAliasService';
@@ -75,7 +75,7 @@ import { groupDmParticipantService } from '@/services/groupDmParticipantService'
 import { AppError } from '@/middleware/errorHandler';
 import { sendForwardedMessageTx } from '@/bypassAcl/transactions/channelController';
 
-/** The signed-in user, for the app checks when creating a HUB desk. */
+/** The signed-in user, for the app checks when creating a Channels desk. */
 
 export class ChannelController {
   channelRepository: ChannelRepository;
@@ -682,7 +682,7 @@ export class ChannelController {
         visibility?: ChannelVisibility;
         projectId?: string;
         participants?: string[];
-        type?: 'DEFAULT' | 'EMAIL' | 'SUPPORT' | 'SLACK' | 'APP' | 'CALL' | 'HUB';
+        type?: 'DEFAULT' | 'EMAIL' | 'SUPPORT' | 'SLACK' | 'APP' | 'CALL' | 'CHANNELS';
         assigneeUserGroupId?: string;
         deskType?: DeskType;
         dlEmail?: string;
@@ -843,27 +843,27 @@ export class ChannelController {
       }
 
       // Checked before the desk channel is created, so a refused link leaves nothing behind.
-      let hubAppName = '';
-      if (channelType === 'HUB') {
+      let channelsDeskAppName = '';
+      if (channelType === 'CHANNELS') {
         if (!installedAppId) {
-          res.status(400).json({ error: 'installedAppId is required for HUB desks' });
+          res.status(400).json({ error: 'installedAppId is required for Channels desks' });
           return;
         }
-        const hubApp = await findInstalledApp(req.user!.workspaceId!, installedAppId);
-        if (!hubApp) {
+        const channelsDeskApp = await findInstalledApp(req.user!.workspaceId!, installedAppId);
+        if (!channelsDeskApp) {
           res.status(404).json({ error: 'Installed app not found in this workspace.' });
           return;
         }
         // The app's channels feed the desk, so only its creator or an app admin may link it.
-        if (hubApp.createdBy !== userId && !(await canManageApps(userId))) {
+        if (channelsDeskApp.createdBy !== userId && !(await canManageApps(userId))) {
           res.status(403).json({ error: "Only the app's creator or an app admin can link it to a desk." });
           return;
         }
-        if (await hubDeskOf(installedAppId)) {
+        if (await channelsDeskOf(installedAppId)) {
           res.status(409).json({ error: 'This app already has a desk.' });
           return;
         }
-        hubAppName = hubApp.name;
+        channelsDeskAppName = channelsDeskApp.name;
       }
 
       // For DM channels, ensure scopeId is provided (other user's ID)
@@ -1074,38 +1074,38 @@ export class ChannelController {
         }
       }
 
-      if (channelType === 'HUB') {
+      if (channelType === 'CHANNELS') {
         try {
-          const hubBoardId =
+          const channelsDeskBoardId =
             boardId ??
             (await db.board.findFirst({ where: { projectId }, orderBy: { createdAt: 'asc' }, select: { id: true } }))?.id;
-          if (!hubBoardId) {
+          if (!channelsDeskBoardId) {
             await db.channel.delete({ where: { id: channel.id } }).catch(() => {});
-            res.status(409).json({ error: 'Project has no boards configured — cannot create hub desk' });
+            res.status(409).json({ error: 'Project has no boards configured — cannot create channels desk' });
             return;
           }
           await this.emailChannelPreferenceRepository.create({
             channelId: channel.id,
             ownerUserId: userId,
-            deskType: DeskType.HUB,
-            boardId: hubBoardId,
+            deskType: DeskType.CHANNELS,
+            boardId: channelsDeskBoardId,
             emailMergeMode: EmailMergeMode.DISABLED,
             ...(assigneeUserGroupId && { assigneeUserGroupId }),
           });
-          await linkHubDesk({
+          await linkChannelsDesk({
             workspaceId: req.user!.workspaceId!,
             installedAppId: installedAppId!,
-            appName: hubAppName,
+            appName: channelsDeskAppName,
             deskChannelId: channel.id,
             linkedBy: userId,
           });
         } catch (error) {
-          logger.error('Failed to create hub desk, rolling back channel', error);
+          logger.error('Failed to create channels desk, rolling back channel', error);
           await db.emailChannelPreference.deleteMany({ where: { channelId: channel.id } }).catch(() => {});
           await db.channel.delete({ where: { id: channel.id } }).catch(err => {
             logger.error(`Channel rollback failed for ${channel.id}`, err);
           });
-          res.status(500).json({ error: 'Failed to create hub desk' });
+          res.status(500).json({ error: 'Failed to create channels desk' });
           return;
         }
       }

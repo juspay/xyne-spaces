@@ -1,4 +1,4 @@
-// HUB desk tickets: the conversation the ticket was opened for stays in its own channel, named by the
+// Channels desk tickets: the conversation the ticket was opened for stays in its own channel, named by the
 // email row on the ticket (externalThreadId). It opens in the regular thread view; Zero only returns
 // it to members of that channel, and everyone else on the desk sees why they can't open it.
 import type { ReactElement } from 'react';
@@ -7,7 +7,7 @@ import ThreadMessages from '../../components/Chat/ThreadPannel';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { queries } from '../../zero/queries';
 
-export function HubSourceThread({
+export function ChannelsDeskSourceThread({
   sourceConversationId,
 }: {
   /** The merchant's thread, from the ticket's email row. */

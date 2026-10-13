@@ -1,13 +1,13 @@
 import { Request, Response } from 'express';
 import { DeskType } from '@xyne/shared';
 import { db } from '@/database/client';
-import { addHubChannel, listHubChannels, removeHubChannel } from '@/hubDesk/admin';
-import { hubAppOf } from '@/hubDesk/hub';
+import { addChannelsDeskChannel, listChannelsDeskChannels, removeChannelsDeskChannel } from '@/channelsDesk/admin';
+import { channelsDeskAppOf } from '@/channelsDesk/desk';
 import { isDeskOwnerOrChannelAdmin } from '@/utils/channelMembership';
 import { logger } from '../utils/logger';
 
-/** /api/hub-desks/:channelId: a HUB desk's linked app and its channels, for desk settings. */
-export class HubDeskController {
+/** /api/channels-desks/:channelId: a Channels desk's linked app and its channels, for desk settings. */
+export class ChannelsDeskController {
   /** Desk settings are for the desk owner or a channel admin, as for desk metrics and reports. */
   private async canManageDesk(req: Request, res: Response): Promise<boolean> {
     const deskId = req.params.channelId;
@@ -15,8 +15,8 @@ export class HubDeskController {
       where: { channelId: deskId },
       select: { ownerUserId: true, deskType: true },
     });
-    if (!preference || preference.deskType !== DeskType.HUB) {
-      res.status(404).json({ error: 'HUB desk not found.' });
+    if (!preference || preference.deskType !== DeskType.CHANNELS) {
+      res.status(404).json({ error: 'Channels desk not found.' });
       return false;
     }
     if (!(await isDeskOwnerOrChannelAdmin(deskId, req.user!.id, preference.ownerUserId))) {
@@ -29,9 +29,9 @@ export class HubDeskController {
   get = async (req: Request, res: Response): Promise<void> => {
     try {
       if (!(await this.canManageDesk(req, res))) return;
-      res.status(200).json({ app: await hubAppOf(req.params.channelId) });
+      res.status(200).json({ app: await channelsDeskAppOf(req.params.channelId) });
     } catch (error) {
-      logger.error('[hub-desk] Failed to load desk settings', { channelId: req.params.channelId, error });
+      logger.error('[channels-desk] Failed to load desk settings', { channelId: req.params.channelId, error });
       res.status(500).json({ error: 'Internal server error' });
     }
   };
@@ -40,9 +40,9 @@ export class HubDeskController {
   listChannels = async (req: Request, res: Response): Promise<void> => {
     try {
       if (!(await this.canManageDesk(req, res))) return;
-      res.status(200).json(await listHubChannels(req.params.channelId));
+      res.status(200).json(await listChannelsDeskChannels(req.params.channelId));
     } catch (error) {
-      logger.error('[hub-desk] Failed to list channels', { channelId: req.params.channelId, error });
+      logger.error('[channels-desk] Failed to list channels', { channelId: req.params.channelId, error });
       res.status(500).json({ error: 'Internal server error' });
     }
   };
@@ -56,13 +56,13 @@ export class HubDeskController {
         return;
       }
       const desk = { id: req.params.channelId, workspaceId: req.user!.workspaceId };
-      if (!(await addHubChannel(desk, sourceChannelId))) {
+      if (!(await addChannelsDeskChannel(desk, sourceChannelId))) {
         res.status(409).json({ error: "This channel can't be added: it isn't one of the app's channels, or it's already on a desk." });
         return;
       }
       res.status(200).json({ success: true });
     } catch (error) {
-      logger.error('[hub-desk] Failed to add channel', { channelId: req.params.channelId, error });
+      logger.error('[channels-desk] Failed to add channel', { channelId: req.params.channelId, error });
       res.status(500).json({ error: 'Internal server error' });
     }
   };
@@ -70,16 +70,16 @@ export class HubDeskController {
   removeChannel = async (req: Request, res: Response): Promise<void> => {
     try {
       if (!(await this.canManageDesk(req, res))) return;
-      if (!(await removeHubChannel(req.params.channelId, req.params.sourceChannelId))) {
+      if (!(await removeChannelsDeskChannel(req.params.channelId, req.params.sourceChannelId))) {
         res.status(404).json({ error: 'This channel is not on this desk.' });
         return;
       }
       res.status(200).json({ success: true });
     } catch (error) {
-      logger.error('[hub-desk] Failed to remove channel', { channelId: req.params.channelId, error });
+      logger.error('[channels-desk] Failed to remove channel', { channelId: req.params.channelId, error });
       res.status(500).json({ error: 'Internal server error' });
     }
   };
 }
 
-export const hubDeskController = new HubDeskController();
+export const channelsDeskController = new ChannelsDeskController();

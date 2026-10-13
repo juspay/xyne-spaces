@@ -71,7 +71,7 @@ import {
   mentionRecipients,
   notifyMentioned,
 } from './mention-delivery';
-import { hubTicketForConversation } from '@/bypassAcl/hubDeskServices';
+import { channelsDeskTicketForConversation } from '@/bypassAcl/channelsDeskServices';
 
 const messageAttachmentRepository = new MessageAttachmentRepository();
 const channelRepository = new ChannelRepository();
@@ -351,9 +351,9 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       isReply: conversation.initialMessageId !== message.messageId,
     });
     if (conversation.initialMessageId === message.messageId) {
-      // A new thread in a channel that feeds a HUB desk gets a desk ticket.
-      hubTicketForConversation(conversation.workspaceId, conversationId).catch(error => {
-        logger.error('[MessagesSideEffect] HUB desk ticket failed:', { conversationId, error });
+      // A new thread in a channel that feeds a Channels desk gets a desk ticket.
+      channelsDeskTicketForConversation(conversation.workspaceId, conversationId).catch(error => {
+        logger.error('[MessagesSideEffect] Channels desk ticket failed:', { conversationId, error });
       });
     }
 

@@ -1,5 +1,5 @@
 /**
- * HUB desk operations. A thread's author (often a guest) can't read the desk it feeds, so the
+ * Channels desk operations. A thread's author (often a guest) can't read the desk it feeds, so the
  * ticket is created in a service scope bound to the thread's workspace.
  */
 import { randomUUID } from 'node:crypto';
@@ -8,11 +8,11 @@ import { BaseTicketType, ChannelType, EmailType, MessageType } from '@xyne/share
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { db } from '@/database/client';
 import { EmailRepository } from '@/database/repositories/emailRepository';
-import { createHubTicket } from '@/hubDesk/hub';
+import { createChannelsDeskTicket } from '@/channelsDesk/desk';
 import { generateTicketId } from './transactions/ticketIdService';
 import { asService, transaction } from './base';
 
-const HUB_TABLES = [
+const CHANNELS_DESK_TABLES = [
   'Conversation',
   'Message',
   'InstalledApps',
@@ -28,17 +28,17 @@ const HUB_TABLES = [
   'User',
 ] as const;
 
-/** Called after a new top-level thread is created; a no-op unless its channel feeds a HUB desk. */
-export function hubTicketForConversation(
+/** Called after a new top-level thread is created; a no-op unless its channel feeds a Channels desk. */
+export function channelsDeskTicketForConversation(
   workspaceId: string,
   conversationId: string
 ): Promise<Ticket | null> {
   return asService(
-    [...HUB_TABLES],
-    "HUB desk ticket: desk automation on a new thread, not the author's action",
-    'hub-desk',
+    [...CHANNELS_DESK_TABLES],
+    "Channels desk ticket: desk automation on a new thread, not the author's action",
+    'channels-desk',
     workspaceId,
-    () => createHubTicket(conversationId)
+    () => createChannelsDeskTicket(conversationId)
   );
 }
 
@@ -48,7 +48,7 @@ export function hubTicketForConversation(
  * merchant's thread is named by an email row on the stub (externalThreadId) and never written to.
  * Null if this thread already has a ticket on the desk.
  */
-export async function insertHubTicket(args: {
+export async function insertChannelsDeskTicket(args: {
   workspaceId: string;
   conversationId: string;
   messageId: string;
@@ -67,7 +67,7 @@ export async function insertHubTicket(args: {
 }): Promise<Ticket | null> {
   return transaction(
     ['Conversation', 'Message', 'Ticket', 'ChannelUserStatus', 'Project', 'Email', 'Channel'],
-    'HUB desk ticket: stub thread and ticket must commit together',
+    'Channels desk ticket: stub thread and ticket must commit together',
     db,
     async (tx) => {
       const existing = await tx.email.findFirst({
@@ -143,7 +143,7 @@ export async function insertHubTicket(args: {
   );
 }
 
-export interface HubThreadTicket {
+export interface ChannelsDeskThreadTicket {
   conversationId: string;
   ticketId: string;
   xyneId: string;
@@ -157,19 +157,19 @@ export interface HubThreadTicket {
 }
 
 /**
- * The tickets HUB desks opened for these threads, for someone already allowed to open the threads
- * (`hubTicketsForThreads` checks that). The desk is outside their access, so only these fields leave
+ * The tickets Channels desks opened for these threads, for someone already allowed to open the threads
+ * (`channelsDeskTicketsForThreads` checks that). The desk is outside their access, so only these fields leave
  * it: never the desk's own thread or its notes.
  */
-export function readHubTicketsForThreads(workspaceId: string, conversationIds: string[]): Promise<HubThreadTicket[]> {
+export function readChannelsDeskTicketsForThreads(workspaceId: string, conversationIds: string[]): Promise<ChannelsDeskThreadTicket[]> {
   return asService(
     ['Email', 'Channel', 'Ticket', 'User'],
-    "HUB desk ticket status for its thread's own members",
-    'hub-desk',
+    "Channels desk ticket status for its thread's own members",
+    'channels-desk',
     workspaceId,
     async () => {
       const links = await db.email.findMany({
-        where: { externalThreadId: { in: conversationIds }, channel: { type: ChannelType.HUB } },
+        where: { externalThreadId: { in: conversationIds }, channel: { type: ChannelType.CHANNELS } },
         select: { externalThreadId: true, conversationId: true },
       });
       const threadOf = new Map(links.map((link) => [link.conversationId, link.externalThreadId]));

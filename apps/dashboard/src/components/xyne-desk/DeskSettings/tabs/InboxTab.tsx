@@ -16,7 +16,7 @@ import { AppStoreDeskIntegrationCard } from '../../DeskIntegrationCard/AppStoreD
 import { MetaDeskIntegrationCard } from '../../DeskIntegrationCard/MetaDeskIntegrationCard';
 import { ConnectedAppsSection } from '../ConnectedAppsSection';
 import { ConnectedSlackSection } from '../ConnectedSlackSection';
-import { ConnectedHubAppSection } from '../ConnectedHubAppSection';
+import { ConnectedChannelsDeskAppSection } from '../ConnectedChannelsDeskAppSection';
 import { InlineSignatureEditor } from '../InlineSignatureEditor';
 import { Switch } from '../../../ui/Switch';
 import { SearchableMultiSelect } from '../../../ui/SearchableMultiSelect/SearchableMultiSelect';
@@ -62,7 +62,7 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
     isEmail,
     isApp,
     isSocial,
-    isHub,
+    isChannelsDesk,
     isDeskChannel,
     ownerId,
     setOwner,
@@ -182,12 +182,14 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
         went 1:N per channel, so unlike social they cannot be managed by a
         single-connection card.
       */}
-      {isHub && <ConnectedHubAppSection channelId={channelId} canManage={canManage} />}
-      {/* A HUB desk is fed only by its app's channels. */}
-      {isDeskChannel && !isHub && (
+      {isChannelsDesk && (
+        <ConnectedChannelsDeskAppSection channelId={channelId} canManage={canManage} />
+      )}
+      {/* A Channels desk is fed only by its app's channels. */}
+      {isDeskChannel && !isChannelsDesk && (
         <ConnectedAppsSection channelId={channelId} canManage={canManage} />
       )}
-      {isDeskChannel && !isHub && (
+      {isDeskChannel && !isChannelsDesk && (
         <ConnectedSlackSection channelId={channelId} canManage={canManage} />
       )}
 

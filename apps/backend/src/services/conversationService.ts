@@ -39,7 +39,7 @@ import { emitMessageReceived } from '@/automations/triggers/message-received.tri
 import { MessagesSideEffectHandler } from '@/zero/side-effects/tables/messages-handler';
 import { buildUserQueryContext } from '@/utils/queryContext';
 import { processMeetLinksFromChatMessage } from '@/services/meetLinkService';
-import { hubTicketForConversation } from '@/bypassAcl/hubDeskServices';
+import { channelsDeskTicketForConversation } from '@/bypassAcl/channelsDeskServices';
 
 interface UserInfo {
   id: string;
@@ -607,8 +607,8 @@ export class ConversationService {
         msgType: message.msgType as MessageType,
         userId,
       });
-      hubTicketForConversation(conversation.workspaceId, conversation.conversationId).catch(error => {
-        logger.error('[ConversationService] HUB desk ticket failed:', { conversationId: conversation.conversationId, error });
+      channelsDeskTicketForConversation(conversation.workspaceId, conversation.conversationId).catch(error => {
+        logger.error('[ConversationService] Channels desk ticket failed:', { conversationId: conversation.conversationId, error });
       });
     }
 

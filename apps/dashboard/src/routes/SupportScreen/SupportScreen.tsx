@@ -97,7 +97,7 @@ import { queries } from '../../zero/queries';
 import { useTicketKeysetWindow } from '../../hooks/useTicketKeysetWindow';
 import { QueryResultType } from '@rocicorp/zero';
 import ThreadMessages from '../../components/Chat/ThreadPannel';
-import { HubSourceThread } from './HubSourceThread';
+import { ChannelsDeskSourceThread } from './ChannelsDeskSourceThread';
 import { useChannel, useEmailChannels, useUserChannelStatuses } from '../../hooks/useChannels';
 import { useRefetchExternalSource } from '../../hooks/useRefetchExternalSource';
 import { useChannelFetchSources } from '../../hooks/useChannelFetchSources';
@@ -377,8 +377,8 @@ const COMPOSE_DISABLED_CHANNEL_TYPES: ReadonlySet<ChannelType | undefined> = new
   ChannelType.SLACK,
   ChannelType.APP,
   ChannelType.SOCIAL_MEDIA,
-  // Hub threads start in their own channels, not from the desk.
-  ChannelType.HUB,
+  // Channels desk threads start in their own channels, not from the desk.
+  ChannelType.CHANNELS,
 ]);
 
 const COMPOSE_INSTANCES_KEY_PREFIX = 'xyne:composeInstances:';
@@ -2647,7 +2647,7 @@ const SupportScreen = (): ReactElement => {
   const createChannelMutation = useMutation({
     mutationFn: async (
       data: CreateChannelFormData & {
-        channelType?: 'EMAIL' | 'SLACK' | 'APP' | 'CALL' | 'HUB' | undefined;
+        channelType?: 'EMAIL' | 'SLACK' | 'APP' | 'CALL' | 'CHANNELS' | undefined;
         emailDeskOpts?: EmailDeskOpts;
       },
     ) => {
@@ -2675,9 +2675,9 @@ const SupportScreen = (): ReactElement => {
   const handleCreateEmailChannel = (
     data: CreateChannelFormData & {
       connector?: 'google' | 'microsoft' | null;
-      channelType?: 'EMAIL' | 'SLACK' | 'APP' | 'CALL' | 'SOCIAL_MEDIA' | 'HUB' | undefined;
+      channelType?: 'EMAIL' | 'SLACK' | 'APP' | 'CALL' | 'SOCIAL_MEDIA' | 'CHANNELS' | undefined;
       assigneeUserGroupId?: string;
-      deskType?: 'EMAIL' | 'DL' | 'SLACK' | 'APP' | 'CALL' | 'SOCIAL_MEDIA' | 'HUB';
+      deskType?: 'EMAIL' | 'DL' | 'SLACK' | 'APP' | 'CALL' | 'SOCIAL_MEDIA' | 'CHANNELS';
       callSource?: 'OZONETEL';
       dlEmail?: string;
       slackChannelId?: string;
@@ -2841,15 +2841,15 @@ const SupportScreen = (): ReactElement => {
       return;
     }
 
-    if (deskType === 'HUB') {
+    if (deskType === 'CHANNELS') {
       if (!installedAppId) {
         toast.error('Please select an app');
         return;
       }
       createChannelMutation.mutate({
         ...rest,
-        channelType: 'HUB',
-        emailDeskOpts: { deskType: DeskType.HUB, installedAppId },
+        channelType: 'CHANNELS',
+        emailDeskOpts: { deskType: DeskType.CHANNELS, installedAppId },
       });
       return;
     }
@@ -3128,7 +3128,7 @@ const SupportScreen = (): ReactElement => {
                   label: 'Call',
                   className: 'bg-lime-100 text-lime-700 dark:bg-lime-500/20 dark:text-lime-200',
                 }
-              : c.type === ChannelType.HUB
+              : c.type === ChannelType.CHANNELS
                 ? {
                     label: 'Channels',
                     className: 'bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-200',
@@ -6446,17 +6446,17 @@ export const SupportTicketDetail = ({
                 )}
               </div>
             </div>
-            {/* A HUB ticket opens the merchant's thread in the regular thread view, composer included. */}
-            {channel?.type === ChannelType.HUB && emails[0]?.externalThreadId && (
+            {/* A Channels desk ticket opens the merchant's thread in the regular thread view, composer included. */}
+            {channel?.type === ChannelType.CHANNELS && emails[0]?.externalThreadId && (
               <div className='flex-1 min-h-0 flex flex-col'>
-                <HubSourceThread sourceConversationId={emails[0].externalThreadId} />
+                <ChannelsDeskSourceThread sourceConversationId={emails[0].externalThreadId} />
               </div>
             )}
             <div
               ref={threadScrollRef}
               className={cn(
                 'flex-1 overflow-y-auto no-scrollbar px-6 py-4',
-                channel?.type === ChannelType.HUB && 'hidden',
+                channel?.type === ChannelType.CHANNELS && 'hidden',
               )}
               style={{
                 paddingBottom: composerOverlayHeight + 12,
@@ -6651,7 +6651,7 @@ export const SupportTicketDetail = ({
                     </div>
                   </div>
                 )}
-              {channel?.type !== ChannelType.HUB && emails && emails.length > 0 && (
+              {channel?.type !== ChannelType.CHANNELS && emails && emails.length > 0 && (
                 <div className='mb-6'>
                   {isAppSourcedTicket ||
                   isSlackSourcedTicket ||
@@ -6698,8 +6698,8 @@ export const SupportTicketDetail = ({
               ref={composerOverlayRef}
             >
               <DuplicateTicketsBanner ticketId={mailboxTicketId} />
-              {/* HUB tickets reply in the thread view above. */}
-              {channel?.type === ChannelType.HUB ? null : isAppSourcedTicket ? (
+              {/* Channels desk tickets reply in the thread view above. */}
+              {channel?.type === ChannelType.CHANNELS ? null : isAppSourcedTicket ? (
                 conversationId ? (
                   <SlackComposer
                     conversationId={conversationId}

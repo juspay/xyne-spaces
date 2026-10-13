@@ -264,7 +264,7 @@ export async function evaluateAssignmentRule(
   projectId: string | undefined,
   // Required so every caller supplies the ticket's channel — private channels restrict the pool to participants.
   channelId: string | null,
-  // HUB desks: the ticket's conversation is in another channel, so candidates must be in that one too.
+  // Channels desks: the ticket's conversation is in another channel, so candidates must be in that one too.
   sourceChannelId?: string,
 ): Promise<AssignmentResult> {
   logger.info(`[Assignment] Evaluating for userGroupId: ${userGroupId}, boardId: ${boardId}, type: ${assignmentType}${excludeUserId ? `, excludeUserId: ${excludeUserId}` : ''}${projectId ? `, projectId: ${projectId}` : ''}${channelId ? `, channelId: ${channelId}` : ''}`);

@@ -150,7 +150,7 @@ interface ChatInputProps {
   threadParticipantIds?: ReadonlySet<string>;
   dockSlot?: React.ReactNode;
   twinEdit?: TwinEditSession | undefined;
-  /** Offers "Send to channel" on thread replies. Off where the reply must stay in the thread (HUB desk). */
+  /** Offers "Send to channel" on thread replies. Off where the reply must stay in the thread (Channels desk). */
   allowSendToChannel?: boolean;
 }
 

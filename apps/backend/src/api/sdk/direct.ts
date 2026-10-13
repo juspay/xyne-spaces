@@ -46,7 +46,7 @@ import { RadarActionError, radarManualActions } from '@/services/radar/radarManu
 import { radarFeedService } from '@/services/radar/radarFeedService';
 import { radarRuleStore } from '@/services/radar/radarRuleStore';
 import { canReadTicket } from '@/services/subTicketLinkService';
-import { hubTicketsForThreads } from '@/hubDesk/hub';
+import { channelsDeskTicketsForThreads } from '@/channelsDesk/desk';
 import { cleanConditions, parsePageQuery } from '@/routes/radarExecution';
 import { searchHandler } from '@/services/vespaSearch';
 import { schemaHandler } from '@/services/vespaSearch/schemaHandler';
@@ -302,16 +302,16 @@ const ROUTES: readonly DirectRoute[] = [
     controller: channelController.checkDuplicate,
   },
   /**
-   * HUB desk tickets for the caller's own threads: status fields only, and only for threads the caller
+   * Channels desk tickets for the caller's own threads: status fields only, and only for threads the caller
    * can open. Refused if any thread isn't theirs.
    */
   {
     method: 'post',
-    path: '/hub/tickets',
+    path: '/channels-desk/tickets',
     body: z.object({ conversationIds: z.array(z.string().min(1)).min(1).max(100) }),
     service: async (req, authData) => {
       const { conversationIds } = req.body as { conversationIds: string[] };
-      const tickets = await hubTicketsForThreads(authData.workspaceId, conversationIds);
+      const tickets = await channelsDeskTicketsForThreads(authData.workspaceId, conversationIds);
       if (!tickets) throw new SdkApiError('forbidden', 'One or more of these conversations are not yours to read.');
       return { tickets };
     },

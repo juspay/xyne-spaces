@@ -108,7 +108,7 @@ const DESK_SOURCES: ReadonlyArray<{
     icon: Share2,
   },
   {
-    value: DeskType.HUB,
+    value: DeskType.CHANNELS,
     label: 'Channels',
     description: 'Create a ticket for every new thread in the channels an installed app is in',
     icon: Waypoints,
@@ -188,7 +188,7 @@ interface AddChannelFormProps {
   onSubmit: (
     data: ChannelFormData & {
       connector?: ConnectorType;
-      channelType?: 'EMAIL' | 'SLACK' | 'APP' | 'CALL' | 'SOCIAL_MEDIA' | 'HUB' | undefined;
+      channelType?: 'EMAIL' | 'SLACK' | 'APP' | 'CALL' | 'SOCIAL_MEDIA' | 'CHANNELS' | undefined;
       deskType?: DeskType;
       callSource?: CallSource;
       dlEmail?: string;
@@ -229,7 +229,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
   const [dlEmailInput, setDlEmailInput] = useState<string>('');
   const [selectedSlackChannelId, setSelectedSlackChannelId] = useState<string>('');
   const [selectedInstalledAppId, setSelectedInstalledAppId] = useState<string>('');
-  const [selectedHubAppId, setSelectedHubAppId] = useState<string>('');
+  const [selectedChannelsDeskAppId, setSelectedChannelsDeskAppId] = useState<string>('');
   const [googlePlayApplications, setGooglePlayApplications] = useState<GooglePlayApplicationRow[]>([
     createGooglePlayApplication(),
   ]);
@@ -277,11 +277,12 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
     enabled: requireConnector && deskType === DeskType.APP,
   });
 
-  const [hubInstalledApps, hubInstalledAppsDetails] = useCachedQuery(
+  const [channelsDeskInstalledApps, channelsDeskInstalledAppsDetails] = useCachedQuery(
     queries.getWorkspaceInstalledApps({ limit: 100, start: null }),
-    { enabled: requireConnector && deskType === DeskType.HUB },
+    { enabled: requireConnector && deskType === DeskType.CHANNELS },
   );
-  const isLoadingHubApps = hubInstalledAppsDetails.type !== 'complete' && !hubInstalledApps?.length;
+  const isLoadingChannelsDeskApps =
+    channelsDeskInstalledAppsDetails.type !== 'complete' && !channelsDeskInstalledApps?.length;
 
   const { data: workspaceMailbox } = useQuery({
     queryKey: ['workspace-shared-mailbox-status'],
@@ -363,7 +364,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
           return;
         if (deskType === DeskType.SLACK && !selectedSlackChannelId) return;
         if (deskType === DeskType.APP && !selectedInstalledAppId) return;
-        if (deskType === DeskType.HUB && !selectedHubAppId) return;
+        if (deskType === DeskType.CHANNELS && !selectedChannelsDeskAppId) return;
         if (deskType === DeskType.SOCIAL_MEDIA && !isSocialMediaDeskValid(value.boardId)) return;
       }
       if (mode === 'promote') {
@@ -396,13 +397,13 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
             installedAppId: selectedInstalledAppId,
             assigneeUserGroupId: value.assigneeUserGroupId,
           });
-        } else if (deskType === DeskType.HUB) {
+        } else if (deskType === DeskType.CHANNELS) {
           onSubmit?.({
             ...value,
             connector: null,
-            channelType: 'HUB',
-            deskType: DeskType.HUB,
-            installedAppId: selectedHubAppId,
+            channelType: 'CHANNELS',
+            deskType: DeskType.CHANNELS,
+            installedAppId: selectedChannelsDeskAppId,
             assigneeUserGroupId: value.assigneeUserGroupId,
           });
         } else if (deskType === DeskType.SOCIAL_MEDIA) {
@@ -496,7 +497,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       (!workspaceMailbox?.configured || !dlEmailInput || !isValidDlEmail(dlEmailInput))) ||
     (requireConnector && deskType === DeskType.SLACK && !selectedSlackChannelId) ||
     (requireConnector && deskType === DeskType.APP && !selectedInstalledAppId) ||
-    (requireConnector && deskType === DeskType.HUB && !selectedHubAppId) ||
+    (requireConnector && deskType === DeskType.CHANNELS && !selectedChannelsDeskAppId) ||
     (requireConnector &&
       deskType === DeskType.SOCIAL_MEDIA &&
       !isSocialMediaDeskValid(boardIdValue)) ||
@@ -518,7 +519,8 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       }
       if (deskType === DeskType.SLACK && !selectedSlackChannelId)
         return 'Please select a Slack channel';
-      if (deskType === DeskType.HUB && !selectedHubAppId) return 'Please select an app';
+      if (deskType === DeskType.CHANNELS && !selectedChannelsDeskAppId)
+        return 'Please select an app';
       if (deskType === DeskType.SOCIAL_MEDIA && socialProvider === 'GOOGLE_PLAY') {
         if (!getServiceAccountEmail(googlePlayServiceAccountKey))
           return 'Upload the service account JSON key';
@@ -896,17 +898,17 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
         </div>
       )}
 
-      {requireConnector && deskType === DeskType.HUB && (
+      {requireConnector && deskType === DeskType.CHANNELS && (
         <div className='space-y-2'>
-          <label htmlFor='hub-app-select' className='text-sm font-medium text-foreground'>
+          <label htmlFor='channels-desk-app-select' className='text-sm font-medium text-foreground'>
             App <span className='text-muted-foreground'>*</span>
           </label>
-          {isLoadingHubApps ? (
+          {isLoadingChannelsDeskApps ? (
             <div className='flex items-center gap-2 py-3 text-sm text-muted-foreground'>
               <div className='h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent' />
               Loading apps...
             </div>
-          ) : !hubInstalledApps?.length ? (
+          ) : !channelsDeskInstalledApps?.length ? (
             <div className='flex items-start gap-2 rounded-lg border border-border bg-muted/50 p-3'>
               <AlertCircle
                 size={16}
@@ -921,12 +923,15 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
             </div>
           ) : (
             <>
-              <Select value={selectedHubAppId} onValueChange={setSelectedHubAppId}>
-                <SelectTrigger id='hub-app-select' className='w-full'>
+              <Select
+                value={selectedChannelsDeskAppId}
+                onValueChange={setSelectedChannelsDeskAppId}
+              >
+                <SelectTrigger id='channels-desk-app-select' className='w-full'>
                   <SelectValue placeholder='Select an app' />
                 </SelectTrigger>
                 <SelectContent>
-                  {hubInstalledApps.map(installed => (
+                  {channelsDeskInstalledApps.map(installed => (
                     <SelectItem key={installed.id} value={installed.id}>
                       {installed.app?.name ?? installed.id}
                     </SelectItem>

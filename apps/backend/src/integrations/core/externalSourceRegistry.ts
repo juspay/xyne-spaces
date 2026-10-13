@@ -18,8 +18,8 @@ const DISPLAY_BOT_EXCLUDED_SOURCE_TYPES = new Set([
   'google_calendar',
   'microsoft_calendar',
   'sdlc_vcs_credential',
-  ExternalSourcePlatform.APP_HUB, // HUB desk links, not message sources
-  ExternalSourcePlatform.APP_HUB_CHANNEL,
+  ExternalSourcePlatform.APP_CHANNELS_DESK, // Channels desk links, not message sources
+  ExternalSourcePlatform.APP_CHANNELS_DESK_CHANNEL,
 ]);
 
 /**
