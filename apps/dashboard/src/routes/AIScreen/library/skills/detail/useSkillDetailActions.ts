@@ -22,7 +22,11 @@ export interface SkillDetailActions {
   remove: () => Promise<void>;
 }
 
-export function useSkillDetailActions(skill: Skill | undefined): SkillDetailActions {
+export function useSkillDetailActions(
+  skill: Skill | undefined,
+  /** Where to go once the skill is deleted, in place of the library. A hub page passes its own close. */
+  onRemoved?: () => void,
+): SkillDetailActions {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { user } = useAuth();
@@ -96,8 +100,11 @@ export function useSkillDetailActions(skill: Skill | undefined): SkillDetailActi
     try {
       await deleteSkill(skill.slug, userId);
       refresh();
+      // A hub lists the skill as linked until its own data is read again.
+      void queryClient.invalidateQueries({ queryKey: ['sdlc-hub-knowledge'] });
       toast.success(`${skill.label || skill.name} deleted`);
-      void navigate(`${libraryPath}?tab=skills`);
+      if (onRemoved) onRemoved();
+      else void navigate(`${libraryPath}?tab=skills`);
     } catch (err) {
       toast.error(clawErrorText(err, 'Could not delete this skill'));
       setDeleting(false);

@@ -9,6 +9,12 @@ export interface SdlcWikiPage {
   archived: boolean;
 }
 
+/** A page with the Wiki it is in, for lists that span the hub's Wikis. */
+export interface SdlcWikiHubPage extends SdlcWikiPage {
+  scopeFolderId: string;
+  scopeName: string;
+}
+
 export interface HubItemEdge {
   sourceId: string;
   targetType: string;
