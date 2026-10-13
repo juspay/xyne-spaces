@@ -616,6 +616,7 @@ model WorkflowExecutionUsers {
   id                  String   @id @default(cuid())
   userId              String
   workflowExecutionId String
+  channelConnectId String? // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
@@ -624,6 +625,7 @@ model WorkflowExecutionUsers {
   @@unique([userId, workflowExecutionId])
   @@index([userId])
   @@index([workflowExecutionId])
+  @@index([channelConnectId])
   @@map("workflow_execution_users")
   @@schema("workflow")
 }
@@ -661,6 +663,7 @@ model WorkflowKnowledge {
   workspaceId String // denormalized tenant key (stamped on insert)
   id                  String   @id @default(cuid())
   workflowExecutionId String
+  channelConnectId String? // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
   checkpointId        String
   learningType        String
   title               String
@@ -669,6 +672,7 @@ model WorkflowKnowledge {
   filePaths           String[]
   createdAt           DateTime @default(now())
 
+  @@index([channelConnectId])
   @@map("workflow_knowledge")
   @@schema("workflow")
 }
@@ -4300,6 +4304,7 @@ model ReleaseRepository {
   workspaceId        String
   id                 String    @id @default(cuid())
   releaseId          String
+  channelConnectId String? // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
   mainReleaseBoardId String
   branch             String
   deployedCommit     String
@@ -4310,6 +4315,7 @@ model ReleaseRepository {
   @@unique([releaseId, mainReleaseBoardId])
   @@index([releaseId])
   @@index([releaseId, createdAt(sort: Desc), id(sort: Desc)], map: "release_repositories_releaseId_createdAt_id_idx")
+  @@index([channelConnectId])
   @@map("release_repositories")
   @@schema("non_zero")
 }
@@ -4348,6 +4354,7 @@ model ReleaseChange {
   workspaceId String // denormalized tenant key (stamped on insert)
   id                    String         @id @default(cuid())
   releaseId             String         // Release ticket ID
+  channelConnectId String? // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
   applicationReleaseId  String?        // Application release ID (SubTicket ID)
   applicationId         String?        // Application ID
   approvedBy            String?        // User ID (no FK constraint)
@@ -4357,6 +4364,7 @@ model ReleaseChange {
   @@index([releaseId])
   @@index([applicationReleaseId])
   @@index([applicationId])
+  @@index([channelConnectId])
   @@map("release_changes")
   @@schema("public")
 }
@@ -4374,6 +4382,7 @@ model ReleaseChangeType {
   applicationId   String   // Application ID
   changeType      String   // e.g., "env", "migrations", "database", etc.
   releaseId            String? // Parent release Ticket id (matches release_events.releaseId)
+  channelConnectId String? // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
   applicationReleaseId String? // Per-app SubTicket id (matches release_events.applicationReleaseId)
   devTicketXyneId      String? // Dev ticket xyneId carried from the source commit's PR title
   commitId             String? // Source commit hash
@@ -4391,6 +4400,7 @@ model ReleaseChangeType {
   @@index([devTicketXyneId])
   // Partial unique dedupe indexes (release_change_types_release_dedupe_key +
   // _nocommit_key) live in a raw migration — Prisma can't express filtered indexes.
+  @@index([channelConnectId])
   @@map("release_change_types")
   @@schema("public")
 }
@@ -4469,6 +4479,7 @@ model COE {
   workspaceId String // denormalized tenant key (stamped on insert)
   id              String        @id @default(cuid())
   rcaId           String        // RCA ID
+  channelConnectId String? // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
   ownerId         String        // User ID (no FK constraint)
   actionTypeId    String        // COEActionType ID
   action          String        // Description of the action
@@ -4481,6 +4492,7 @@ model COE {
   @@index([ownerId])
   @@index([status])
   @@index([actionTypeId])
+  @@index([channelConnectId])
   @@map("coes")
   @@schema("public")
 }
@@ -5316,6 +5328,7 @@ model ExecutionItem {
 model ExecutionThreadState {
   workspaceId        String // denormalized tenant key (stamped on insert)
   conversationId     String   @id
+  channelConnectId String? // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
   watermarkCreatedAt DateTime
   watermarkMsgId     String
   // Circuit breaker for a window the parser cannot handle. A failed parse
@@ -5327,6 +5340,7 @@ model ExecutionThreadState {
   updatedAt          DateTime @updatedAt
 
   // No secondary index: every access is a lookup by the conversationId PK.
+  @@index([channelConnectId])
   @@map("execution_thread_states")
   @@schema("non_zero")
 }
@@ -5340,6 +5354,7 @@ model ExecutionItemMutation {
   id              String   @id @default(cuid())
   itemId          String
   conversationId  String
+  channelConnectId String? // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
   op              String // create | resolve | reassign | reopen (String: no new PG enums)
   actorType       String // llm | manual
   actorId         String? // userId for manual CTAs, null for the parser
@@ -5349,6 +5364,7 @@ model ExecutionItemMutation {
 
   // The only reader is the debug trail, which fetches one item's history.
   @@index([itemId, createdAt])
+  @@index([channelConnectId])
   @@map("execution_item_mutations")
   @@schema("non_zero")
 }
@@ -5361,6 +5377,7 @@ model ExecutionRunLog {
   workspaceId    String // denormalized tenant key (stamped on insert)
   id             String   @id @default(cuid())
   conversationId String
+  channelConnectId String? // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
   gatePassed     Boolean
   gateReason     String // tracked-thread | new-mention | skip
   windowSize     Int
@@ -5383,6 +5400,7 @@ model ExecutionRunLog {
   // Near-free to maintain: createdAt only increases, so inserts always land on
   // the rightmost leaf.
   @@index([createdAt])
+  @@index([channelConnectId])
   @@map("execution_run_logs")
   @@schema("non_zero")
 }

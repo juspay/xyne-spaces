@@ -1,4 +1,4 @@
--- Slack Connect — `channelConnectId` on every table in a channel's subtree (78 tables). It holds the
+-- Slack Connect — `channelConnectId` on every table in a channel's subtree (87 tables). It holds the
 -- owning channel's connect_group handle (channels.connectId) so the row can later be queried by that
 -- handle and its workspace ACL resolved via connect_group. Column only: nullable, no default, so each
 -- ADD COLUMN is a metadata-only change (no table rewrite). Rows with no channel stay NULL and keep
@@ -78,6 +78,15 @@ ALTER TABLE "public"."impacts" ADD COLUMN "channelConnectId" TEXT;
 ALTER TABLE "public"."ticket_stage_requests" ADD COLUMN "channelConnectId" TEXT;
 ALTER TABLE "public"."release_attributions" ADD COLUMN "channelConnectId" TEXT;
 ALTER TABLE "public"."application_release_tickets" ADD COLUMN "channelConnectId" TEXT;
+ALTER TABLE "public"."coes" ADD COLUMN "channelConnectId" TEXT;
+ALTER TABLE "public"."release_changes" ADD COLUMN "channelConnectId" TEXT;
+ALTER TABLE "public"."release_change_types" ADD COLUMN "channelConnectId" TEXT;
+ALTER TABLE "non_zero"."release_repositories" ADD COLUMN "channelConnectId" TEXT;
+ALTER TABLE "non_zero"."execution_thread_states" ADD COLUMN "channelConnectId" TEXT;
+ALTER TABLE "non_zero"."execution_item_mutations" ADD COLUMN "channelConnectId" TEXT;
+ALTER TABLE "non_zero"."execution_run_logs" ADD COLUMN "channelConnectId" TEXT;
+ALTER TABLE "workflow"."workflow_execution_users" ADD COLUMN "channelConnectId" TEXT;
+ALTER TABLE "workflow"."workflow_knowledge" ADD COLUMN "channelConnectId" TEXT;
 ALTER TABLE "public"."pull_requests" ADD COLUMN "channelConnectId" TEXT;
 ALTER TABLE "public"."workflows" ADD COLUMN "channelConnectId" TEXT;
 ALTER TABLE "workflow"."workflow_executions" ADD COLUMN "channelConnectId" TEXT;
@@ -203,6 +212,15 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "impacts_channelConnectId_idx" ON "publi
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "ticket_stage_requests_channelConnectId_idx" ON "public"."ticket_stage_requests"("channelConnectId");
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "release_attributions_channelConnectId_idx" ON "public"."release_attributions"("channelConnectId");
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "application_release_tickets_channelConnectId_idx" ON "public"."application_release_tickets"("channelConnectId");
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "coes_channelConnectId_idx" ON "public"."coes"("channelConnectId");
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "release_changes_channelConnectId_idx" ON "public"."release_changes"("channelConnectId");
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "release_change_types_channelConnectId_idx" ON "public"."release_change_types"("channelConnectId");
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "release_repositories_channelConnectId_idx" ON "non_zero"."release_repositories"("channelConnectId");
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "execution_thread_states_channelConnectId_idx" ON "non_zero"."execution_thread_states"("channelConnectId");
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "execution_item_mutations_channelConnectId_idx" ON "non_zero"."execution_item_mutations"("channelConnectId");
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "execution_run_logs_channelConnectId_idx" ON "non_zero"."execution_run_logs"("channelConnectId");
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "workflow_execution_users_channelConnectId_idx" ON "workflow"."workflow_execution_users"("channelConnectId");
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "workflow_knowledge_channelConnectId_idx" ON "workflow"."workflow_knowledge"("channelConnectId");
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "pull_requests_channelConnectId_idx" ON "public"."pull_requests"("channelConnectId");
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "workflows_channelConnectId_idx" ON "public"."workflows"("channelConnectId");
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "workflow_executions_channelConnectId_idx" ON "workflow"."workflow_executions"("channelConnectId");
