@@ -22,7 +22,6 @@ export type ResourceName =
   | 'PROJECTS'
   | 'XYNE-APPS'
   | 'USER-MANAGEMENT'
-  | 'USERS'
   | 'FORMS'
   | 'SUPPORT'
   | 'LISTPROJECTS'
@@ -92,7 +91,6 @@ export const PERMISSION_MATRIX: Record<WorkspaceRole, readonly PermissionEntry[]
     { resourceName: 'AGENT-TOOLS-MAPPINGS', accessType: AccessType.ADMIN },
     { resourceName: 'ANALYTICS', accessType: AccessType.ADMIN },
     { resourceName: 'USER-MANAGEMENT', accessType: AccessType.ADMIN },
-    { resourceName: 'USERS', accessType: AccessType.ADMIN },
     { resourceName: 'FORMS', accessType: AccessType.ADMIN },
     { resourceName: 'SUPPORT', accessType: AccessType.ADMIN },
     { resourceName: 'PROJECTS', accessType: AccessType.ADMIN },
@@ -116,7 +114,6 @@ export const PERMISSION_MATRIX: Record<WorkspaceRole, readonly PermissionEntry[]
     { resourceName: 'AGENT-TOOLS-MAPPINGS', accessType: AccessType.ADMIN },
     { resourceName: 'ANALYTICS', accessType: AccessType.ADMIN },
     { resourceName: 'USER-MANAGEMENT', accessType: AccessType.ADMIN },
-    { resourceName: 'USERS', accessType: AccessType.ADMIN },
     { resourceName: 'FORMS', accessType: AccessType.ADMIN },
     { resourceName: 'SUPPORT', accessType: AccessType.ADMIN },
     { resourceName: 'PROJECTS', accessType: AccessType.ADMIN },

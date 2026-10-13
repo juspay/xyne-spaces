@@ -4,7 +4,7 @@
  * ACL System Seeding Script
  * 
  * This script sets up the complete ACL system by:
- * 1. Creating essential resources (TICKETS, USERS, WORKFLOWS, etc.)
+ * 1. Creating essential resources (TICKETS, USER-MANAGEMENT, WORKFLOWS, etc.)
  * 2. Setting up default user groups with proper permissions
  * 3. Creating a default admin user
  * 4. Cleaning up expired user sessions
@@ -34,7 +34,7 @@ const prisma = new PrismaClient();
 const ESSENTIAL_RESOURCES = [
   { name: 'PROJECTS', description: 'Project management endpoints (/api/projects/*)' },
   { name: 'TICKETS', description: 'Ticket management endpoints (/api/tickets/*)' },
-  { name: 'USERS', description: 'User management endpoints (/api/users/*)' },
+  { name: 'USER-MANAGEMENT', description: 'User and user-group administration endpoints (/api/user-management/*)' },
   { name: 'WORKFLOWS', description: 'Workflow management endpoints (/api/workflows/*)' },
   { name: 'AGENTS', description: 'Agent management endpoints (/api/agents/*)' },
   { name: 'TOOLS', description: 'Tool management endpoints (/api/tools/*)' },

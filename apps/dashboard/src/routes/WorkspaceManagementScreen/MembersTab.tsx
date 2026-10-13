@@ -55,7 +55,7 @@ export const MembersTab = (): ReactElement => {
   const z = useZero();
   const users = useUsers();
   const { isMobile } = usePlatform();
-  const canEditAccess = useHasResourceAccess('USERS');
+  const canEditAccess = useHasResourceAccess('USER-MANAGEMENT');
   const [searchQuery, setSearchQuery] = useState('');
   const debouncedSearchQuery = useDebouncedValue(searchQuery, 300);
   const [editingUser, setEditingUser] = useState<UserType | null>(null);

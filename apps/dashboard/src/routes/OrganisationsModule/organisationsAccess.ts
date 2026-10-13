@@ -16,7 +16,7 @@ type Permissions = ReturnType<typeof usePermissions>;
 
 /**
  * Which Organisations sections a user may open. Mirrors the route guards in
- * AppRoot: WORKSPACE admin for workspace settings, USERS admin also unlocks
+ * AppRoot: WORKSPACE admin for workspace settings, USER-MANAGEMENT admin also unlocks
  * Members (it replaced User Management), USER-GROUPS write or owning a group,
  * ROLES admin, ORGANIZATIONS admin. The rail shows Organisations when any is true.
  */
@@ -36,7 +36,7 @@ export const organisationsAccess = (
   const workspace = isAdmin('WORKSPACE');
   return {
     general: workspace,
-    members: workspace || isAdmin('USERS'),
+    members: workspace || isAdmin('USER-MANAGEMENT'),
     invitations: workspace,
     guests: workspace,
     'repository-credentials': workspace,
