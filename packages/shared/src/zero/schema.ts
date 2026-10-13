@@ -4761,6 +4761,12 @@ export const formEntityValuesTableRelationships = relationships(formEntityValues
     destField: ['entityId'],
     destSchema: messageAttachmentTable,
   }),
+  // The channel a CHANNEL row describes (entityId = channels.id); other rows match none.
+  channel: one({
+    sourceField: ['entityId'],
+    destField: ['id'],
+    destSchema: channelTable,
+  }),
 }));
 
 export const ticketStageRequestTableRelationships = relationships(ticketStageRequestTable, ({ one }) => ({
