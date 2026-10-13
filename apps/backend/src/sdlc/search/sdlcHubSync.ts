@@ -131,7 +131,11 @@ export async function syncSdlcHub(hubId: string): Promise<SdlcHubSyncResult | nu
   // Stale entries: what Vespa still places in this hub that Postgres no longer does. Items are
   // found through the containers they reference, so this runs before stale containers go.
   // Vespa is asked only for entries outside the live set, so a large hub is not paged through.
-  const inHub = `sdlcContainerIds contains "${hubId}"`;
+  // Documents and messages carry the hub in their imported sdlcScopeIds; a ticket carries only
+  // the containers it sits in, so it is found through every container Vespa has for the hub.
+  const inHub = `sdlcScopeIds contains "${hubId}"`;
+  const indexedContainers = (await indexedHits(sdlcContainerSchema, `channelId contains "${hubId}"`)).map(hit => hit.id);
+  const hubContainers = [...new Set([...index.containers.keys(), ...indexedContainers])];
   let cleared = 0;
   const staleFiles = await indexedHits(
     fileSchema, notIn(inHub, [...index.canvases.keys(), ...index.attachments.keys()]), ['subApp'],
@@ -141,7 +145,10 @@ export async function syncSdlcHub(hubId: string): Promise<SdlcHubSyncResult | nu
     jobs.push({ schema: fileSchema, jobType: 'update', docId: hit.id, app, fields: fileFields, ...base });
     cleared++;
   }
-  for (const hit of await indexedHits(ticketSchema, notIn(inHub, [...index.tickets.keys()]))) {
+  const ticketsInHub = hubContainers.length
+    ? await indexedHits(ticketSchema, notIn(`sdlcContainerId in (${hubContainers.map(id => JSON.stringify(id)).join(', ')})`, [...index.tickets.keys()]))
+    : [];
+  for (const hit of ticketsInHub) {
     jobs.push({ schema: ticketSchema, jobType: 'update', docId: hit.id, fields: ticketFields, ...base });
     cleared++;
   }
@@ -150,8 +157,7 @@ export async function syncSdlcHub(hubId: string): Promise<SdlcHubSyncResult | nu
     cleared++;
   }
 
-  const staleContainers = (await indexedHits(sdlcContainerSchema, notIn(`channelId contains "${hubId}"`, [...index.containers.keys()])))
-    .map(hit => hit.id);
+  const staleContainers = indexedContainers.filter(id => !index.containers.has(id));
   for (const id of staleContainers) {
     jobs.push({ schema: sdlcContainerSchema, jobType: 'delete', docId: id, ...base });
   }
