@@ -1,3 +1,4 @@
+import { runWithToolCall } from "../src/tool-call-context.js";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -168,7 +169,9 @@ describe("tool-output seam", () => {
 
   it("filters the result, saves the whole thing first, and tells the model the true total", async () => {
     const full = searchResult([2, 9, 15]);
-    const out = await inRun("none,+jev_result_sift", () => promoteIfOversized(dir, "custom", "spaces-search-v2", full));
+    const out = await inRun("none,+jev_result_sift", () =>
+      runWithToolCall({ tool: "spaces-search-v2", args: {}, sift: true }, () => promoteIfOversized(dir, "custom", "spaces-search-v2", full)),
+    );
     expect(out.length).toBeLessThan(full.length * 0.6);
     expect(out).toContain("of 20 items");
     expect(out).toContain("counts and totals must use 20");
@@ -185,9 +188,14 @@ describe("tool-output seam", () => {
     expect(out).toContain(files[0]!);
   });
 
-  it("changes nothing when the switch is off", async () => {
+  it("changes nothing unless the call asks for sifting", async () => {
     const full = searchResult([2, 9, 15]);
-    expect(await inRun("none", () => promoteIfOversized(dir, "custom", "spaces-search-v2", full))).toBe(full);
+    expect(await inRun("none,+jev_result_sift", () => promoteIfOversized(dir, "custom", "spaces-search-v2", full))).toBe(full);
+    expect(
+      await inRun("none,+jev_result_sift", () =>
+        runWithToolCall({ tool: "spaces-search-v2", args: {}, sift: false }, () => promoteIfOversized(dir, "custom", "spaces-search-v2", full)),
+      ),
+    ).toBe(full);
   });
 
   it("never filters a non-retrieval tool such as read", async () => {

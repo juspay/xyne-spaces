@@ -152,14 +152,80 @@ export const scheduleTask: ToolDefinition = {
   },
 };
 
+const INACTIVE_JOB_STATUSES = new Set(["cancelled", "completed"]);
+
+type ListedScheduledJob = {
+  id: string;
+  label?: string | null;
+  type?: string | null;
+  status?: string | null;
+  cronExpression?: string | null;
+  nextRunAt?: string | null;
+  task?: string | null;
+  replyMode?: string | null;
+  createdAt?: string | null;
+};
+
+/**
+ * Backs scheduled-job-control action='list'. Reuses claw-auth's GET
+ * /scheduled-jobs: on the S2S path it scopes to every id alias of the
+ * `userId` query param, the same identity the control actions already send
+ * in the body (scheduled-jobs.ts resolveScopedUserIdFilter). Filtered to the
+ * calling agent so one agent never surfaces another agent's schedules.
+ */
+export async function listScheduledJobs(opts: {
+  authUrl: string;
+  s2sKey: string;
+  userId: string;
+  agentSlug: string;
+  includeInactive: boolean;
+  fetchImpl?: typeof fetch;
+}): Promise<string> {
+  const doFetch = opts.fetchImpl ?? fetch;
+  const qs = new URLSearchParams({ userId: opts.userId, agentSlug: opts.agentSlug });
+  try {
+    const res = await doFetch(`${opts.authUrl}/claw/api/v1/scheduled-jobs?${qs.toString()}`, {
+      method: "GET",
+      headers: { ...(opts.s2sKey ? { "x-s2s-key": opts.s2sKey } : {}) },
+      signal: AbortSignal.timeout(10_000),
+    });
+    const data = (await res.json().catch(() => null)) as {
+      success?: boolean;
+      data?: ListedScheduledJob[];
+      error?: string;
+    } | null;
+    if (!res.ok || !data?.success) {
+      return `Error: Failed to list scheduled jobs: ${data?.error ?? res.statusText}`;
+    }
+    const jobs = (data.data ?? []).filter(
+      (j) => opts.includeInactive || !INACTIVE_JOB_STATUSES.has(String(j.status ?? "")),
+    );
+    if (jobs.length === 0) {
+      return opts.includeInactive
+        ? "No scheduled jobs found for this user on this agent."
+        : "No active or paused scheduled jobs found for this user on this agent.";
+    }
+    const lines = jobs.map((j) => {
+      const when = j.type === "cron" && j.cronExpression ? `cron "${j.cronExpression}"` : "one-time";
+      const next = j.nextRunAt ? `, next run ${j.nextRunAt}` : "";
+      const task = j.task ? ` — task: ${j.task.length > 160 ? `${j.task.slice(0, 157)}...` : j.task}` : "";
+      return `- jobId: ${j.id} | "${j.label ?? "(no label)"}" | ${j.status ?? "unknown"} | ${when}${next}${task}`;
+    });
+    return `Scheduled jobs (${jobs.length}):\n${lines.join("\n")}\nUse one of these exact jobIds with action='pause' | 'resume' | 'cancel' | 'update'.`;
+  } catch (err) {
+    return `Error: Failed to list scheduled jobs: ${err instanceof Error ? err.message : String(err)}`;
+  }
+}
+
 export const scheduledJobControl: ToolDefinition = {
   slug: "scheduled-job-control",
   name: "Control Scheduled Job",
   description:
-    "Pause, resume, cancel, or update an existing scheduled agent job. " +
+    "List, pause, resume, cancel, or update the current user's scheduled agent jobs. " +
+    "Use action='list' (no jobId needed) to see the user's schedules on this agent with their job IDs — call it first whenever you do not already have the exact jobId (e.g. the user says 'stop my sneakers alert' or the chat was reset with /new). " +
     "When this tool is called from a scheduled-job run, use jobId='current' to control the schedule that triggered this turn. " +
     "Use action='pause' to temporarily stop future runs, action='resume' to restart a paused job, action='cancel' to permanently stop future runs, and action='update' to rewrite the task/prompt (pass 'task') and/or the label (pass 'label') the job runs on each fire. " +
-    "Only control jobs owned by the current user/agent; do not use guessed job IDs.",
+    "Only control jobs owned by the current user/agent; never guess job IDs — list first.",
   source: "custom:schedule",
   configSchema: SCHEDULE_CONFIG_SCHEMA,
   inputSchema: {
@@ -167,14 +233,14 @@ export const scheduledJobControl: ToolDefinition = {
     properties: {
       action: {
         type: "string",
-        enum: ["pause", "resume", "cancel", "update"],
+        enum: ["list", "pause", "resume", "cancel", "update"],
         description:
-          "The control action to apply. Use 'update' to rewrite the task/prompt (and optionally the label) the job runs on each fire.",
+          "The action to apply. Use 'list' to find the user's jobs and their IDs. Use 'update' to rewrite the task/prompt (and optionally the label) the job runs on each fire.",
       },
       jobId: {
         type: "string",
         description:
-          "Scheduled job id, or 'current' when running inside that scheduled job",
+          "Scheduled job id, or 'current' when running inside that scheduled job. Not needed for action='list'.",
       },
       reason: {
         type: "string",
@@ -190,8 +256,13 @@ export const scheduledJobControl: ToolDefinition = {
         description:
           "For action='update': optional new human-friendly label for the job.",
       },
+      includeInactive: {
+        type: "boolean",
+        description:
+          "For action='list': also include cancelled and completed jobs. Defaults to false (active, paused and pending-approval only).",
+      },
     },
-    required: ["action", "jobId"],
+    required: ["action"],
   },
   async execute(params, context) {
     if (!context) return "Error: No execution context available.";
@@ -205,8 +276,18 @@ export const scheduledJobControl: ToolDefinition = {
       return "Error: Cannot control scheduled job — no agent slug available in execution context.";
 
     const action = params["action"] as string;
-    if (!["pause", "resume", "cancel", "update"].includes(action)) {
-      return "Error: action must be one of pause, resume, cancel, or update.";
+    if (!["list", "pause", "resume", "cancel", "update"].includes(action)) {
+      return "Error: action must be one of list, pause, resume, cancel, or update.";
+    }
+
+    if (action === "list") {
+      return listScheduledJobs({
+        authUrl: context.config["XYNE_CLAW_AUTH_URL"] ?? "http://localhost:3003",
+        s2sKey: context.config["XYNE_CLAW_S2S_KEY"] ?? "",
+        userId: String(userId),
+        agentSlug: String(agentSlug),
+        includeInactive: params["includeInactive"] === true,
+      });
     }
     if (action === "update" && params["task"] == null && params["label"] == null) {
       return "Error: action='update' requires 'task' and/or 'label'.";
