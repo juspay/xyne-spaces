@@ -49,6 +49,7 @@ import type {
   DebugEventRecord,
 } from '../Chat/XyneAISidebar/utils/XyneAITypes';
 import { buildXyneAIStreamThreadId } from '../../utils/xyneAIStreamThreadId';
+import { lastAgentSlugOf } from '../../utils/xyneAIStreamRouting';
 import { cn } from '../../utils/classNames';
 import { AskAiRatingButtons } from './AskAiRatingButtons';
 import { isAssistantMessage } from '../Assistant/turns';
@@ -1639,7 +1640,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     (forSessionId: string, loaded: Message[]): void => {
       if (!isV2 || agentSyncedForSessionRef.current === forSessionId) return;
       agentSyncedForSessionRef.current = forSessionId;
-      const lastAgentSlug = [...loaded].reverse().find(m => m.agentSlug)?.agentSlug;
+      const lastAgentSlug = lastAgentSlugOf(loaded);
       if (!lastAgentSlug) return;
       setSelectedAgentSlug(lastAgentSlug === 'ask-ai' ? null : lastAgentSlug);
     },
@@ -2016,7 +2017,10 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
               detach: xyneAIStreamManager.attachLiveViewer(
                 threadId,
                 sessionId,
-                effectiveAgentSlugRef.current || 'ask-ai',
+                // The in-flight turn's agent, from the transcript. The selected
+                // agent ref is stale here: continueWithLastAgent above only
+                // takes effect on the next render (XYNE-66346).
+                lastAgentSlugOf(loadedMessages) || effectiveAgentSlugRef.current || 'ask-ai',
                 loadedMessages,
               ),
             };
@@ -2622,7 +2626,9 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
                             detach: xyneAIStreamManager.attachLiveViewer(
                               threadId,
                               conversationId,
-                              effectiveAgentSlug || 'ask-ai',
+                              // The action's agent resumes the run, not the
+                              // one currently picked (XYNE-66346).
+                              message.agentSlug || effectiveAgentSlug || 'ask-ai',
                               xyneAIStreamManager.getActiveStream(threadId)?.messages ?? messages,
                             ),
                           };
