@@ -131,11 +131,19 @@ jobs:
           pnpm config set registry "https://asia-south1-npm.pkg.dev/xyne-infra-external/npm-mirror/"
           echo "//asia-south1-npm.pkg.dev/xyne-infra-external/npm-mirror/:_authToken=${{ steps.gcp-auth.outputs.access_token }}" >> .npmrc
 
+      # TEST: higher network concurrency against our own mirror — see the same
+      # comment on the backend job above.
       - name: Install dependencies
-        run: pnpm install ${{ env.PNPM_FLAGS }} --filter xyne-spaces-dashboard...
+        run: >-
+          pnpm install ${{ env.PNPM_FLAGS }}
+          ${{ vars.USE_SELF_HOSTED_CI == 'true' && '--network-concurrency 64' || '' }}
+          --filter xyne-spaces-dashboard...
 
-      - name: Build workspace libraries
-        run: pnpm --filter @xyne/shared --filter @xyne/icons run build
+      # No "Build workspace libraries" step needed here (unlike backend):
+      # @xyne/shared AND @xyne/icons both have their own `prepare: pnpm run
+      # build` hooks, so pnpm already builds both automatically during
+      # `Install dependencies` above. Backend still needs the step because
+      # agentic-framework has no prepare script of its own.
 
       # --- lint leg ---------------------------------------------------------
       # errors-only (warnings ignored).
