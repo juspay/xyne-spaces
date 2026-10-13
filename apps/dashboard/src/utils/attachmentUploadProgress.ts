@@ -15,6 +15,28 @@ export interface AttachmentUploadSummary {
   percent: number;
 }
 
+/**
+ * Upload progress lives in browser memory, so after a reload a file whose upload failed is
+ * only known from its persisted row (`uploadStatus === 'FAILED'`). Fold those rows into the
+ * in-memory map so the composer still shows the failed chip and keeps send blocked, instead
+ * of letting the message go out without the file.
+ */
+export const PERSISTED_UPLOAD_FAILED_ERROR =
+  'Upload did not finish — remove the file and attach it again';
+
+export function mergePersistedUploadFailures(
+  uploads: Record<string, AttachmentUploadState>,
+  rows: readonly { id: string; uploadStatus?: string | null }[],
+): Record<string, AttachmentUploadState> {
+  let merged: Record<string, AttachmentUploadState> | null = null;
+  for (const row of rows) {
+    if (row.uploadStatus !== 'FAILED' || uploads[row.id]) continue;
+    merged ??= { ...uploads };
+    merged[row.id] = { phase: 'failed', loaded: 0, total: 0, error: PERSISTED_UPLOAD_FAILED_ERROR };
+  }
+  return merged ?? uploads;
+}
+
 export function uploadPercent(state: Pick<AttachmentUploadState, 'loaded' | 'total'>): number {
   if (state.total <= 0) return 0;
   return Math.min(100, Math.max(0, Math.round((state.loaded / state.total) * 100)));

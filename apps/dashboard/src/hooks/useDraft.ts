@@ -415,6 +415,22 @@ export function useDraftAttachments() {
     return uploadAttachment(attachmentId);
   }, []);
 
+  // Retry needs the original File, which only exists in this tab's memory. After a reload a
+  // failed row can only be removed and re-attached.
+  const canRetryUpload = useCallback((attachmentId: string) => !!uploadJobs[attachmentId], []);
+
+  const getPersistedUploadFailures = useCallback(
+    (channelId: string, conversationId: string | null): { id: string; uploadStatus: string }[] => {
+      const draftMessage = draftMessages.find(
+        d => d.channelId === channelId && d.conversationId === conversationId,
+      );
+      return (draftMessage?.attachments ?? [])
+        .filter(a => (a as { uploadStatus?: string | null }).uploadStatus === 'FAILED')
+        .map(a => ({ id: a.id, uploadStatus: 'FAILED' }));
+    },
+    [draftMessages],
+  );
+
   const removeDroppedFile = useCallback(
     // eslint-disable-next-line @typescript-eslint/require-await
     async (attachmentId: string) => {
@@ -529,6 +545,8 @@ export function useDraftAttachments() {
     () => ({
       addDroppedFiles,
       retryUpload,
+      canRetryUpload,
+      getPersistedUploadFailures,
       removeDroppedFile,
       removeDroppedFiles,
       clearDroppedFiles,
@@ -537,6 +555,8 @@ export function useDraftAttachments() {
     [
       addDroppedFiles,
       retryUpload,
+      canRetryUpload,
+      getPersistedUploadFailures,
       removeDroppedFile,
       removeDroppedFiles,
       clearDroppedFiles,

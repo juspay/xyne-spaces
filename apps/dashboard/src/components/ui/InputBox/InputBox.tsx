@@ -75,6 +75,7 @@ import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
 import { isEventFromInput } from '../../../utils/chatUtils';
 import { useDraftAttachments } from '../../../hooks/useDraft';
 import { useAttachmentUploadStore } from '../../../store/useAttachmentUploadStore';
+import { mergePersistedUploadFailures } from '../../../utils/attachmentUploadProgress';
 import { MediaViewer } from '../files';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { MobileEditor } from './MobileEditor';
@@ -306,8 +307,17 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       clearDroppedFiles: providerClearDroppedFiles,
       getDroppedFilesForEntity,
       retryUpload: providerRetryUpload,
+      canRetryUpload,
+      getPersistedUploadFailures,
     } = useDraftAttachments();
-    const attachmentUploads = useAttachmentUploadStore(state => state.uploads);
+    const storeAttachmentUploads = useAttachmentUploadStore(state => state.uploads);
+    const [persistedUploadFailures, setPersistedUploadFailures] = useState<
+      { id: string; uploadStatus: string }[]
+    >([]);
+    const attachmentUploads = React.useMemo(
+      () => mergePersistedUploadFailures(storeAttachmentUploads, persistedUploadFailures),
+      [storeAttachmentUploads, persistedUploadFailures],
+    );
     const handleRetryUpload = useCallback(
       (attachmentId: string) => {
         void providerRetryUpload(attachmentId).then(ok => {
@@ -363,6 +373,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         try {
           const map = getDroppedFilesForEntity(channelId, conversationId ?? null);
           setAttachmentsMap(map);
+          setPersistedUploadFailures(getPersistedUploadFailures(channelId, conversationId ?? null));
         } catch (error) {
           logger.error(Event.FRONTEND_ERROR, {
             type: 'migrated_console_error',
@@ -378,7 +389,13 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       };
 
       void loadAttachments();
-    }, [channelId, conversationId, getDroppedFilesForEntity, disableDraftUpload]);
+    }, [
+      channelId,
+      conversationId,
+      getDroppedFilesForEntity,
+      getPersistedUploadFailures,
+      disableDraftUpload,
+    ]);
 
     // Convert Map to array for rendering (keep attachmentId for removal)
     const allAttachments = React.useMemo(() => {
@@ -1844,7 +1861,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                           onPreview={() => void handlePreview(file, attachmentId)}
                           isUploading={false}
                           upload={attachmentUploads[attachmentId]}
-                          onRetry={() => handleRetryUpload(attachmentId)}
+                          onRetry={
+                            canRetryUpload(attachmentId)
+                              ? () => handleRetryUpload(attachmentId)
+                              : undefined
+                          }
                         />
                       ))}
                       {attachedCanvas && (
@@ -1922,7 +1943,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     onPreview={() => void handlePreview(file, attachmentId)}
                     isUploading={false}
                     upload={attachmentUploads[attachmentId]}
-                    onRetry={() => handleRetryUpload(attachmentId)}
+                    onRetry={
+                      canRetryUpload(attachmentId)
+                        ? () => handleRetryUpload(attachmentId)
+                        : undefined
+                    }
                   />
                 ))}
               </div>

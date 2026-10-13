@@ -56,7 +56,11 @@ import {
   isAttachmentUploadInFlight,
 } from '@xyne/shared/zero/mutators';
 import { useAttachmentUploadStore } from '../../../store/useAttachmentUploadStore';
-import { describeUploadBlock, summarizeUploads } from '../../../utils/attachmentUploadProgress';
+import {
+  describeUploadBlock,
+  mergePersistedUploadFailures,
+  summarizeUploads,
+} from '../../../utils/attachmentUploadProgress';
 import { useShortcutById } from '../../../shortcuts';
 import { isTestEnv } from '../../../config';
 import { createTicket, CreateTicketRequest } from '../../../services/ticketService';
@@ -477,14 +481,15 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       [messageId, channelDraftForSend?.attachments],
     );
     const attachmentUploads = useAttachmentUploadStore(state => state.uploads);
-    const attachmentUploadSummary = useMemo(
-      () =>
-        summarizeUploads(
-          attachmentUploads,
-          messageId ? [] : (channelDraftForSend?.attachments ?? []).map(a => a.id),
-        ),
-      [attachmentUploads, messageId, channelDraftForSend?.attachments],
-    );
+    const attachmentUploadSummary = useMemo(() => {
+      const rows = messageId ? [] : (channelDraftForSend?.attachments ?? []);
+      // Failed rows are read from the DB as well as the in-memory store, so a failure
+      // survives a page reload and still blocks the send.
+      return summarizeUploads(
+        mergePersistedUploadFailures(attachmentUploads, rows),
+        rows.map(a => a.id),
+      );
+    }, [attachmentUploads, messageId, channelDraftForSend?.attachments]);
     const hasFailedAttachmentUpload = attachmentUploadSummary.failed > 0;
     const isAttachmentSendBlocked = isAttachmentUploading || hasFailedAttachmentUpload;
     const attachmentSendBlockedReason =
@@ -699,7 +704,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
             {
               description: hasFailedAttachmentUpload
                 ? attachmentSendBlockedReason
-                : `${attachmentSendBlockedReason} — it will send once the upload finishes.`,
+                : `${attachmentSendBlockedReason} — send again once the upload finishes.`,
             },
           );
           throw new Error(ATTACHMENT_STILL_UPLOADING);
