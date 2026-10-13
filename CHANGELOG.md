@@ -1,3 +1,16 @@
+## [1.493.0](https://github.com/juspay/xyne-spaces/compare/v1.492.0...v1.493.0) (2026-10-13)
+
+
+### Features
+
+* added tools to get board fields and to send email in… ([#2826](https://github.com/juspay/xyne-spaces/issues/2826)) ([1db27f3](https://github.com/juspay/xyne-spaces/commit/1db27f36aa862f981b8ac21b7b5318ae3a3024a2))
+
+
+### Bug Fixes
+
+* honour hideLivePreview for automation and scheduled runs ([#2899](https://github.com/juspay/xyne-spaces/issues/2899)) ([845e4c3](https://github.com/juspay/xyne-spaces/commit/845e4c3ae64c86096b6ce13fdfd6a6cd9bca9ab5))
+* send claw-auth's internal SDLC calls to the SDLC backend ([#2933](https://github.com/juspay/xyne-spaces/issues/2933)) ([068a82c](https://github.com/juspay/xyne-spaces/commit/068a82c51af5221c8754fdc096b43229ecfa0973))
+
 ## [1.492.0](https://github.com/juspay/xyne-spaces/compare/v1.491.0...v1.492.0) (2026-10-13)
 
 
