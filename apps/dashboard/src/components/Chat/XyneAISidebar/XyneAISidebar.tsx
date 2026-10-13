@@ -91,6 +91,7 @@ import type { UserActivity } from '../../../hooks/useUserActivity';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useDefaultAgent, useSelectedAgent } from '../../../hooks/useSelectedAgent';
 import { useAskAIAuto } from '../../../hooks/useAskAIAuto';
+import { useUserPreference } from '../../../machines/userPreferencesMachine';
 import { fetchAccessibleClawAgents } from '../../../services/clawAgentListService';
 import { fetchClawAgentModels } from '../../../services/clawAgentModelsService';
 import { collectionsForAgent } from '../../Composer/ComposerCollections';
@@ -892,6 +893,8 @@ const XyneAISidebar = ({
 
   const effectiveAgentSlug = selectedAgentSlug;
   const { isAuto: isAutoStored, setAuto } = useAskAIAuto();
+  // Beta: Auto acts on screen only once turned on in Preferences → Developer.
+  const screenActions = useUserPreference('screenActionsEnabled');
   // An agent restored from an earlier visit wins over Auto.
   const isAuto = isAutoStored && !isAgentForced && selectedAgentSlug === null;
   // Same key the sidebar's own streams register under (see the adopt/attach
@@ -2207,6 +2210,7 @@ const XyneAISidebar = ({
   };
 
   const buddyTyped =
+    screenActions &&
     isAuto &&
     !aiOnboarding.isActive &&
     !editingMessageId &&
@@ -2245,11 +2249,14 @@ const XyneAISidebar = ({
     setInputValue(text);
     setAutoSendRequest(request => request + 1);
   }, []);
-  const screenEnabled = isAuto && !aiOnboarding.isActive;
+  const screenEnabled = screenActions && isAuto && !aiOnboarding.isActive;
   const answerTranscript = useCallback(
-    (text: string): Promise<string | null> =>
-      screenEnabled ? buddy.answer(text) : Promise.resolve(null),
-    [screenEnabled],
+    async (text: string): Promise<string | null> => {
+      // '' means Buddy was stopped, so the action cards are not asked.
+      const walked = screenEnabled ? await buddy.answer(text) : null;
+      return walked ?? (canRoute ? assistant.answer(text) : null);
+    },
+    [screenEnabled, canRoute, assistant],
   );
   const ownsStream = useCallback(
     (state: StreamState): boolean => state.streamSlotKey === streamThreadKey,
@@ -2263,7 +2270,10 @@ const XyneAISidebar = ({
       buddy.cancel();
       handleAbort();
     },
-    cancelAnswer: buddy.cancel,
+    cancelAnswer: () => {
+      buddy.cancel();
+      assistant.cancel();
+    },
     onExit: () => setVoiceMode(false),
   });
 

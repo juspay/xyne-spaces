@@ -39,6 +39,7 @@ import {
   useSelectedAgent,
 } from '../../hooks/useSelectedAgent';
 import { useAskAIAuto } from '../../hooks/useAskAIAuto';
+import { useUserPreference } from '../../machines/userPreferencesMachine';
 import { useRoutedSubmit, type AssistantRouting } from '../Assistant/useRoutedSubmit';
 import { buddy } from '../Assistant/buddy';
 import { tryBuddy } from '../Assistant/buddy/tryBuddy';
@@ -217,6 +218,8 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   const { selectedAgentSlug, setSelectedAgentSlug } = useSelectedAgent();
   const { isAuto, setAuto } = useAskAIAuto();
   const isAutoOn = isAuto && assistant !== undefined && selectedAgentSlug === null;
+  // Beta: Auto acts on screen only once turned on in Preferences → Developer.
+  const screenActions = useUserPreference('screenActionsEnabled');
   const { data: agents = [] } = useQuery({
     queryKey: ['accessible-claw-agents'],
     queryFn: fetchAccessibleClawAgents,
@@ -526,8 +529,8 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       attachments.length === 0 &&
       !trimmed.startsWith('/') &&
       applyStudioMode(trimmed) === trimmed;
-    if (isRoutable) void askBuddy(trimmed, trigger);
-    else send(trigger);
+    if (isRoutable && screenActions) void askBuddy(trimmed, trigger);
+    else if (!isRoutable || !routedSubmit.route(trigger)) send(trigger);
   }
 
   const handleStop = (): void => {
@@ -611,11 +614,14 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   const answerTranscript = useMemo(
     () =>
       isAutoOn && assistant
-        ? async (text: string): Promise<string | null> =>
+        ? async (text: string): Promise<string | null> => {
+            if (detectStudioIntent(text)) return null;
             // '' means Buddy was stopped, so the action cards are not asked.
-            detectStudioIntent(text) ? null : ((await buddy.answer(text)) ?? assistant.answer(text))
+            const walked = screenActions ? await buddy.answer(text) : null;
+            return walked ?? assistant.answer(text);
+          }
         : undefined,
-    [isAutoOn, assistant],
+    [isAutoOn, assistant, screenActions],
   );
   useVoiceHost(voiceMode, {
     submit: submitTranscript,
