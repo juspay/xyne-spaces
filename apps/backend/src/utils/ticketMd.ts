@@ -164,6 +164,48 @@ export const writeConversationAnchor = async (
   });
 };
 
+/**
+ * writeConversationAnchor for many conversations that share one anchor (every
+ * child of the same parent): one read, one update, with the same skip rules.
+ */
+export const applyAnchorToConversations = async (
+  tx: PrismaTransaction,
+  conversationIds: string[],
+  summary: ParentMessageSummary,
+): Promise<void> => {
+  const anchorMd = serializeParentMessageMd(summary);
+  if (!anchorMd) return;
+
+  const targetIds = conversationIds.filter((id) => id !== summary.conversationId);
+  if (targetIds.length === 0) return;
+
+  const conversations = await tx.conversation.findMany({
+    where: { conversationId: { in: targetIds } },
+    select: { conversationId: true, parent_message_md: true },
+  });
+  const toUpdate = conversations
+    .filter((conversation) => {
+      const existing = parseParentMessageMd(conversation.parent_message_md);
+      if (
+        existing &&
+        resolveConversationAnchorType(existing) !== resolveConversationAnchorType(summary)
+      ) {
+        return false;
+      }
+      return conversation.parent_message_md !== anchorMd;
+    })
+    .map((conversation) => conversation.conversationId);
+  if (toUpdate.length === 0) return;
+
+  await tx.conversation.updateMany({
+    where: { conversationId: { in: toUpdate } },
+    data: {
+      parentMessageId: summary.messageId,
+      parent_message_md: anchorMd,
+    },
+  });
+};
+
 export const linkSubTicketConversationToParent = async (
   tx: PrismaTransaction,
   childTicketId: string,

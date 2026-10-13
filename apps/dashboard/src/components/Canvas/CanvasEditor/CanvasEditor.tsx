@@ -65,7 +65,7 @@ import { toast } from 'sonner';
 import { TableOfContents, TocHeading } from '../TableOfContents';
 import { CanvasSearch } from '../CanvasSearch/CanvasSearch';
 import { CanvasCodeCopyButton } from '../CanvasCodeCopyButton';
-import { useCanvasTableFilters } from '../useCanvasTableFilters';
+import { useCanvasTableFilters, type CanvasTableTicketDraft } from '../useCanvasTableFilters';
 import { useScope, useShortcutById } from '../../../shortcuts';
 import { useAuth } from '../../../hooks/useAuth';
 import { useUsers, useSelf, searchUsers } from '../../../hooks/useUsers';
@@ -88,6 +88,7 @@ import { createCanvasFormattingToolbar } from '../CanvasFormattingToolbar/Canvas
 import { CanvasWidthHandles } from '../CanvasWidthHandles';
 import { useCanvasCommentEditorBridge } from '../useCanvasCommentEditorBridge';
 import { useCanvasTicketEditorBridge } from '../useCanvasTicketEditorBridge';
+import { CanvasBulkTicketCreationFlow } from '../CanvasBulkTicketCreationFlow/CanvasBulkTicketCreationFlow';
 import { CanvasTicketCreationFlow } from '../CanvasTicketCreationFlow/CanvasTicketCreationFlow';
 import { CanvasTicketLinkFlow } from '../CanvasTicketLinkFlow/CanvasTicketLinkFlow';
 
@@ -401,7 +402,6 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
     const [isFocused, setIsFocused] = useState(false);
     const [isSearchOpen, setIsSearchOpen] = useState(false);
 
-    useCanvasTableFilters(containerRef);
     const getCanvasCommentEditor = useCallback(
       () => (editor ? asBlockNoteEditorForView(editor) : null),
       [editor],
@@ -441,6 +441,21 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
       channelId,
       containerRef,
       getEditor: getCanvasCommentEditor,
+    });
+
+    const [tableTicketDraft, setTableTicketDraft] = useState<CanvasTableTicketDraft | null>(null);
+    const handleCreateTicketsFromTable = useCallback((draft: CanvasTableTicketDraft): void => {
+      if (draft.titles.length < 2) {
+        toast.error('Add at least two rows to create tickets from this table');
+        return;
+      }
+      setTableTicketDraft(draft);
+    }, []);
+    const closeTableTicketModal = useCallback((): void => setTableTicketDraft(null), []);
+
+    useCanvasTableFilters(containerRef, {
+      canCreateTickets: editable && !isTicketChannelArchived,
+      onCreateTickets: handleCreateTicketsFromTable,
     });
 
     // Expose presentation and comment drawer methods via ref
@@ -697,6 +712,12 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
           anchor={activeTicketAction === 'link' ? activeTicketAnchor : null}
           onClose={closeTicketModal}
           onTicketSelected={handleTicketCreated}
+        />
+
+        <CanvasBulkTicketCreationFlow
+          draft={tableTicketDraft}
+          channelId={channelId}
+          onClose={closeTableTicketModal}
         />
 
         {/* Presentation Modal */}

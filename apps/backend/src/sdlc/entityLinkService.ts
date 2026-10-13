@@ -293,3 +293,121 @@ export async function linkCreatedEntities(
     }
   }
 }
+
+/**
+ * linkCreatedEntities for many freshly created entities with one owner (a bulk
+ * ticket batch). Writes the same links, but the owner/channel check and the
+ * track lookup run once per distinct channel rather than once per entity, and
+ * every link goes in one insert.
+ */
+export async function linkCreatedEntitiesBatch(
+  db: Db,
+  owner: EntityLinkOwner,
+  items: Array<{ channelId: string; conversationId?: string; ticketId?: string }>,
+  actor: EntityLinkActor
+): Promise<void> {
+  const channelIds = Array.from(new Set(items.map(item => item.channelId)));
+  const allowedChannelIds = new Set<string>();
+  for (const channelId of channelIds) {
+    if (await validateOwnerInChannel(db, owner, channelId)) {
+      allowedChannelIds.add(channelId);
+    } else {
+      logger.warn('[entityLinkService] owner not in channel; skipping links', {
+        channelId,
+        sourceType: owner.sourceType,
+        sourceId: owner.sourceId,
+      });
+    }
+  }
+  const allowed = items.filter(item => allowedChannelIds.has(item.channelId));
+  if (allowed.length === 0) return;
+
+  // A canvas's track is read per channel, as linkCreatedEntities does; every
+  // other owner has one track whatever the channel.
+  const trackIdByChannel = new Map<string, string | null>();
+  if (allowed.some(item => item.ticketId)) {
+    if (owner.sourceType === 'CANVAS') {
+      for (const channelId of allowedChannelIds) {
+        const trackEdge = await db.sdlcEntityLink.findFirst({
+          where: {
+            channelId,
+            sourceType: 'TRACK',
+            targetType: 'CANVAS',
+            targetId: owner.sourceId,
+            relationType: SDLC_TRACK_FLAT_RELATION,
+          },
+          select: { sourceId: true },
+        });
+        trackIdByChannel.set(channelId, trackEdge?.sourceId ?? null);
+      }
+    } else {
+      const trackId =
+        owner.sourceType === 'TRACK'
+          ? owner.sourceId
+          : await resolveItemTrackId(db, owner.sourceType, owner.sourceId);
+      for (const channelId of allowedChannelIds) trackIdByChannel.set(channelId, trackId);
+    }
+  }
+
+  const conversationIds = allowed
+    .map(item => item.conversationId)
+    .filter((id): id is string => Boolean(id));
+  const discussed = new Set(
+    conversationIds.length > 0
+      ? (
+          await db.sdlcEntityLink.findMany({
+            where: {
+              targetType: 'CONVERSATION',
+              targetId: { in: conversationIds },
+              relationType: 'DISCUSSION',
+            },
+            select: { targetId: true },
+          })
+        ).map(link => link.targetId)
+      : []
+  );
+
+  const links: EnsureLinkInput[] = [];
+  for (const { channelId, conversationId, ticketId } of allowed) {
+    if (conversationId && !discussed.has(conversationId)) {
+      links.push({
+        channelId,
+        sourceType: owner.sourceType,
+        sourceId: owner.sourceId,
+        targetType: 'CONVERSATION',
+        targetId: conversationId,
+        relationType: 'DISCUSSION',
+      });
+    }
+    if (ticketId) {
+      // Only a track has no owner edge of its own to add.
+      if (owner.sourceType !== 'TRACK') {
+        links.push({
+          channelId,
+          sourceType: owner.sourceType,
+          sourceId: owner.sourceId,
+          targetType: 'TICKET',
+          targetId: ticketId,
+          relationType: 'TICKET',
+        });
+      }
+      const trackId = trackIdByChannel.get(channelId);
+      if (trackId) {
+        links.push({
+          channelId,
+          sourceType: 'TRACK',
+          sourceId: trackId,
+          targetType: 'TICKET',
+          targetId: ticketId,
+          relationType: 'TRACK_ITEM',
+        });
+      }
+    }
+  }
+  if (links.length === 0) return;
+
+  await db.sdlcEntityLink.createMany({
+    data: links.map(link => ({ ...link, workspaceId: actor.workspaceId, createdBy: actor.userId })),
+    skipDuplicates: true,
+  });
+}
