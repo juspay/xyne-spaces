@@ -126,6 +126,21 @@ export const CreateFormModal = ({
   });
 
   const selectedContextType = watch('contextType');
+  // A workspace has one channel form: a second would replace it and hide every saved value.
+  const [workspaceForm] = useCachedQuery(
+    queries.getFormMappingByContextId({
+      contextId: user?.workspaceId ?? '',
+      contextType: FormContextType.WORKSPACE,
+      entityType: FormEntityType.CHANNEL,
+    }),
+    {
+      enabled:
+        open &&
+        !isEditMode &&
+        selectedContextType === FormContextType.WORKSPACE &&
+        !!user?.workspaceId,
+    },
+  );
 
   // Combobox does not filter internally (`filteredItems={items}`), so the
   // project list is narrowed here against the typed query.
@@ -522,6 +537,12 @@ export const CreateFormModal = ({
       } else {
         // Create mode - use API
         const { formName, formDescription, contextType, entityType } = formData;
+
+        if (contextType === FormContextType.WORKSPACE && workspaceForm) {
+          throw new Error(
+            'This workspace already has a channel form. Edit it to add fields for another use case.',
+          );
+        }
 
         if (!effectiveProjectId) {
           throw new Error('Project is required to create form fields');

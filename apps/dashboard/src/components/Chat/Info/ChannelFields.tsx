@@ -1,6 +1,6 @@
 // A channel's fields (e.g. which merchant it is for), from the workspace's channel form. Shown only on
-// channels that have values; channel admins correct them there. A Channels desk copies them onto the tickets
-// it opens for the channel.
+// channels that have values, and only the fields the channel has (the form may hold other use cases' fields);
+// channel admins correct them or add another. A Channels desk copies them onto the tickets it opens for the channel.
 import { useState, type ReactElement } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from 'sonner';
@@ -15,6 +15,7 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { queries } from '../../../zero/queries';
+import { Button } from '../../ui/Button/Button';
 import Input from '../../ui/Input';
 import { EditableFormField } from '../../Tickets/TicketDetails/EditableFormField';
 
@@ -74,6 +75,9 @@ export function ChannelFields({
   const [values, valuesDetails] = useCachedQuery(
     queries.getFormEntityValuesByEntityId({ entityId: channelId }),
   );
+  // Fields picked with "Add field", shown until they get a value.
+  const [added, setAdded] = useState<Set<string>>(new Set());
+  const [picking, setPicking] = useState(false);
 
   if (!mapping || mapping.formFields.length === 0) return null;
   // Wait for the saved values: an edit made before they load would be lost, or saved as a second value.
@@ -100,6 +104,8 @@ export function ChannelFields({
   );
   // Only channels given fields (e.g. by the app that made them) show them; others stay as they are.
   if (!fields.some(field => valueOf.has(field.id))) return null;
+  const shown = fields.filter(field => valueOf.has(field.id) || added.has(field.id));
+  const hidden = fields.filter(field => !valueOf.has(field.id) && !added.has(field.id));
 
   const save = async (fieldId: string, newValue: string[]): Promise<void> => {
     const existing = valueOf.get(fieldId);
@@ -135,7 +141,7 @@ export function ChannelFields({
             Copied onto tickets a Channels desk opens for this channel.
           </p>
         </div>
-        {fields.map(field => {
+        {shown.map(field => {
           const value = valueOf.get(field.id);
           const current = value?.actualFieldValue ?? value?.fieldValue ?? null;
           if (!TEXT_TYPES.has(field.type)) {
@@ -166,6 +172,33 @@ export function ChannelFields({
             </label>
           );
         })}
+        {canEdit && hidden.length > 0 && !picking && (
+          <Button
+            variant='link'
+            size='inline'
+            className='p-0 text-sm'
+            onClick={() => setPicking(true)}
+          >
+            + Add field
+          </Button>
+        )}
+        {canEdit && picking && (
+          <div className='flex flex-wrap gap-2'>
+            {hidden.map(field => (
+              <Button
+                key={field.id}
+                variant='outline'
+                size='sm'
+                onClick={() => {
+                  setAdded(prev => new Set(prev).add(field.id));
+                  setPicking(false);
+                }}
+              >
+                {field.name}
+              </Button>
+            ))}
+          </div>
+        )}
         {!canEdit && (
           <p className='text-sm text-muted-foreground'>
             You don&apos;t have permission to change these fields.
