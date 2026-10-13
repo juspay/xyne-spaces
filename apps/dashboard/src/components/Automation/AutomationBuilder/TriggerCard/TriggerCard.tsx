@@ -44,7 +44,7 @@ function omitProperties(schema: JsonSchema, keys: string[]): JsonSchema {
   return schema;
 }
 
-function ResolveIcon({
+export function ResolveIcon({
   name,
   className,
   fallback: Fallback = Zap,

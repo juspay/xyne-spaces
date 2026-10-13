@@ -9,7 +9,7 @@ import type {
   ValidationIssue,
   JsonSchema,
 } from '../Automation.types';
-import { CONDITIONAL_STEP_TYPE, SWITCH_STEP_TYPE } from '../Automation.types';
+import { CONDITIONAL_STEP_TYPE, SWITCH_STEP_TYPE, makeStepId } from '../Automation.types';
 import type { VariablePickerSource } from './VariablePicker/VariablePicker.types';
 import { resolveSchema } from './SchemaForm/SchemaForm.utils';
 
@@ -94,35 +94,45 @@ export function buildVariableSources(
     if (step.type === CONDITIONAL_STEP_TYPE || step.type === SWITCH_STEP_TYPE) continue;
     const schema = schemaCache[step.type];
     if (!schema) continue;
-    const groupLabel = `Step ${i + 1} — ${schema.name}`;
-    sources.push({
-      sourceKey: step.id,
-      role: 'input',
-      label: `Step ${i + 1} input`,
-      sublabel: schema.name,
-      groupKey: step.id,
-      groupLabel,
-      schema: schema.configSchema,
-    });
-
-    const outputSchema =
-      step.type === 'RUN_AGENT'
-        ? buildOutputSchemaFromRunAgentConfig(step.config)
-        : step.type === 'TRIGGER_WEBHOOK'
-          ? buildOutputSchemaFromWebhookConfig(step.config)
-          : schema.outputSchema;
-    sources.push({
-      sourceKey: step.id,
-      role: 'output',
-      label: `Step ${i + 1} output`,
-      sublabel: schema.name,
-      groupKey: step.id,
-      groupLabel,
-      schema: outputSchema,
-    });
+    pushStepVariableSources(sources, step as ActionStepConfig, schema, `Step ${i + 1}`);
   }
 
   return sources;
+}
+
+/** Pushes the input + output picker sources for one action step. */
+export function pushStepVariableSources(
+  sources: VariablePickerSource[],
+  step: ActionStepConfig,
+  schema: StepSchema,
+  label: string,
+): void {
+  const groupLabel = `${label} — ${schema.name}`;
+  sources.push({
+    sourceKey: step.id,
+    role: 'input',
+    label: `${label} input`,
+    sublabel: schema.name,
+    groupKey: step.id,
+    groupLabel,
+    schema: schema.configSchema,
+  });
+
+  const outputSchema =
+    step.type === 'RUN_AGENT'
+      ? buildOutputSchemaFromRunAgentConfig(step.config)
+      : step.type === 'TRIGGER_WEBHOOK'
+        ? buildOutputSchemaFromWebhookConfig(step.config)
+        : schema.outputSchema;
+  sources.push({
+    sourceKey: step.id,
+    role: 'output',
+    label: `${label} output`,
+    sublabel: schema.name,
+    groupKey: step.id,
+    groupLabel,
+    schema: outputSchema,
+  });
 }
 
 export function buildOutputSchemaFromRunAgentConfig(
@@ -192,6 +202,19 @@ export function buildOutputSchemaFromWebhookConfig(config: Record<string, unknow
   };
 }
 
+/** A new If/else step with an empty condition; `ifTrue` seeds the True branch. */
+export function makeConditionalStep(ifTrue: AutomationStepConfig[] = []): ConditionalStepConfig {
+  return {
+    id: makeStepId(),
+    type: CONDITIONAL_STEP_TYPE,
+    config: {
+      condition: { variable: '', operator: 'eq', value: '' },
+      if_true: ifTrue,
+      if_false: [],
+    },
+  };
+}
+
 export function moveStep(
   steps: AutomationStepConfig[],
   index: number,
@@ -237,4 +260,13 @@ function walk(steps: AutomationStepConfig[], set: Set<string>): void {
 export function issuesUnder(all: ValidationIssue[] | undefined, prefix: string): ValidationIssue[] {
   if (!all) return [];
   return all.filter(i => i.path.startsWith(prefix));
+}
+
+/** Issues on one step (`steps[1]`), without also matching `steps[10]`. */
+export function issuesAtStep(
+  all: ValidationIssue[] | undefined,
+  stepPrefix: string,
+): ValidationIssue[] {
+  if (!all) return [];
+  return all.filter(i => i.path === stepPrefix || i.path.startsWith(`${stepPrefix}.`));
 }

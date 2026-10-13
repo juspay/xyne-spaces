@@ -1,9 +1,11 @@
 import { cn } from '../../../../utils/classNames';
 import { CONDITIONAL_STEP_TYPE, SWITCH_STEP_TYPE, makeStepId } from '../../Automation.types';
 import {
-  buildOutputSchemaFromRunAgentConfig,
-  buildOutputSchemaFromWebhookConfig,
+  issuesAtStep,
+  makeConditionalStep,
+  pushStepVariableSources,
 } from '../AutomationBuilder.utils';
+import { stepNumberForPrefix } from '../FlowAutomationView/FlowAutomationView.utils';
 import type {
   ActionStepConfig,
   AutomationStepConfig,
@@ -74,6 +76,7 @@ function buildBranchVariableSources(
   steps: AutomationStepConfig[],
   schemaCache: Record<string, StepSchema | undefined>,
   upToIndex: number,
+  pathPrefix: string,
 ): VariablePickerSource[] {
   if (upToIndex === 0) return parentSources;
 
@@ -83,31 +86,9 @@ function buildBranchVariableSources(
     if (!s || s.type === CONDITIONAL_STEP_TYPE || s.type === SWITCH_STEP_TYPE) continue;
     const schema = schemaCache[s.type];
     if (!schema) continue;
-    const groupLabel = `Branch step ${i + 1} — ${schema.name}`;
-    sources.push({
-      sourceKey: s.id,
-      role: 'input',
-      label: `Branch step ${i + 1} input`,
-      sublabel: schema.name,
-      groupKey: s.id,
-      groupLabel,
-      schema: schema.configSchema,
-    });
-    const outputSchema =
-      s.type === 'RUN_AGENT'
-        ? buildOutputSchemaFromRunAgentConfig(s.config)
-        : s.type === 'TRIGGER_WEBHOOK'
-          ? buildOutputSchemaFromWebhookConfig(s.config)
-          : schema.outputSchema;
-    sources.push({
-      sourceKey: s.id,
-      role: 'output',
-      label: `Branch step ${i + 1} output`,
-      sublabel: schema.name,
-      groupKey: s.id,
-      groupLabel,
-      schema: outputSchema,
-    });
+    // Same "Step 2.1" number the card shows.
+    const label = `Step ${stepNumberForPrefix(`${pathPrefix}[${i}]`)}`;
+    pushStepVariableSources(sources, s as ActionStepConfig, schema, label);
   }
   return sources;
 }
@@ -131,16 +112,7 @@ export function BranchSteps({
 }: BranchStepsProps): React.ReactElement {
   const handleAdd = (type: string): void => {
     if (type === CONDITIONAL_STEP_TYPE) {
-      const cond: ConditionalStepConfig = {
-        id: makeStepId(),
-        type: CONDITIONAL_STEP_TYPE,
-        config: {
-          condition: { variable: '', operator: 'eq', value: '' },
-          if_true: [],
-          if_false: [],
-        },
-      };
-      onChange([...steps, cond]);
+      onChange([...steps, makeConditionalStep()]);
       return;
     }
     if (type === SWITCH_STEP_TYPE) {
@@ -192,9 +164,6 @@ export function BranchSteps({
     onChange(copy);
   };
 
-  const issuesUnder = (prefix: string): ValidationIssue[] =>
-    issues.filter(i => i.path.startsWith(prefix));
-
   return (
     <div className={cn('flex flex-1 flex-col gap-2 rounded-lg border p-3', ACCENT_CLASSES[accent])}>
       <div className='text-xs font-medium uppercase tracking-wide text-foreground'>{label}</div>
@@ -205,12 +174,13 @@ export function BranchSteps({
           </div>
         ) : (
           steps.map((s, i) => {
-            const stepIssues = issuesUnder(`${pathPrefix}[${i}]`);
+            const stepIssues = issuesAtStep(issues, `${pathPrefix}[${i}]`);
             const stepVariableSources = buildBranchVariableSources(
               variableSources,
               steps,
               schemaCache,
               i,
+              pathPrefix,
             );
             const renderProps: ControlFlowRenderProps = {
               catalog,
@@ -268,7 +238,7 @@ export function BranchSteps({
             );
           })
         )}
-        <AddStepRow catalog={catalog} onPick={handleAdd} variant='compact' />
+        <AddStepRow catalog={catalog} onPick={handleAdd} variant='compact' inert={readOnly} />
       </div>
     </div>
   );

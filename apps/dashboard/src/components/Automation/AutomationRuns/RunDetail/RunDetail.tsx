@@ -1,9 +1,45 @@
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, CheckCircle2, Hourglass, Loader2, XCircle } from 'lucide-react';
+import {
+  ArrowLeft,
+  Check,
+  CheckCircle2,
+  Copy,
+  Hourglass,
+  List,
+  Loader2,
+  Workflow,
+  XCircle,
+} from 'lucide-react';
 import { cn } from '../../../../utils/classNames';
-import { fetchAutomationRun } from '../../../../api/automationsApi';
-import type { AutomationRunStatus } from '../../Automation.types';
+import { useCopyButton } from '../../../../hooks/useCopyButton';
+import HighlightedJsonBlock from '../../../DynamicDashboard/ComponentGrid/preview/JsonBlock';
+import {
+  fetchAutomationRun,
+  fetchAutomationVersions,
+  fetchStepCatalog,
+  fetchTriggerCatalog,
+  type RunDetail as RunDetailData,
+} from '../../../../api/automationsApi';
+import { CONDITIONAL_STEP_TYPE, SWITCH_STEP_TYPE } from '../../Automation.types';
+import type { AutomationConfig, AutomationRunStatus } from '../../Automation.types';
+import { FlowAutomationView } from '../../AutomationBuilder/FlowAutomationView/FlowAutomationView';
+import type {
+  FlowItem,
+  FlowRunOverlay,
+} from '../../AutomationBuilder/FlowAutomationView/FlowAutomationView.types';
+import { stepNameForPath } from '../../AutomationBuilder/FlowAutomationView/FlowAutomationView.utils';
 import type { RunDetailProps } from './RunDetail.types';
+import { RunValueView } from './RunValueView';
+
+const noop = (): void => undefined;
+// Only used by the builder side panel, which the run overlay replaces.
+const renderNothing = (): React.ReactElement => <></>;
+
+const VIEW_OPTIONS = [
+  { mode: 'list', label: 'List view', Icon: List },
+  { mode: 'flow', label: 'Flow view', Icon: Workflow },
+] as const;
 
 const STATUS_CLASSES: Record<AutomationRunStatus, string> = {
   PENDING: 'bg-muted text-muted-foreground border-border',
@@ -48,6 +84,32 @@ export function RunDetail({ runId, onBack }: RunDetailProps): React.ReactElement
   const isLoading = queryLoading && !run;
   const notFound = isError || (!queryLoading && !run);
 
+  const [view, setView] = useState<'list' | 'flow'>('list');
+  // Step rows are named by position, so draw the version that actually ran —
+  // not the automation's current config. Query keys match the builder's.
+  const versionsQuery = useQuery({
+    queryKey: ['automation-versions', run?.automationId],
+    queryFn: () => fetchAutomationVersions(run?.automationId ?? ''),
+    enabled: Boolean(run?.automationId),
+  });
+  const triggerCatalogQuery = useQuery({
+    queryKey: ['automations', 'schema', 'triggers'],
+    queryFn: fetchTriggerCatalog,
+  });
+  const stepCatalogQuery = useQuery({
+    queryKey: ['automations', 'schema', 'steps'],
+    queryFn: fetchStepCatalog,
+  });
+  const ranConfig: AutomationConfig | null =
+    versionsQuery.data?.find(v => v.id === run?.automationId)?.config ?? null;
+  const canShowFlow = ranConfig !== null;
+
+  const runOverlay = useMemo<FlowRunOverlay | undefined>(
+    () => (data ? buildRunOverlay(data) : undefined),
+    [data],
+  );
+  const showFlow = view === 'flow' && canShowFlow;
+
   return (
     <div className='flex h-full w-full flex-col bg-background'>
       <div className='flex items-center gap-3 border-b border-border px-6 py-4'>
@@ -73,9 +135,54 @@ export function RunDetail({ runId, onBack }: RunDetailProps): React.ReactElement
             {STATUS_LABELS[run.status] ?? run.status}
           </span>
         )}
+        {canShowFlow && (
+          <div className='ml-auto flex items-center rounded-md border border-border p-0.5'>
+            {VIEW_OPTIONS.map(({ mode, label, Icon }) => (
+              <button
+                key={mode}
+                type='button'
+                aria-label={label}
+                aria-pressed={view === mode}
+                data-track-category='automation-runs'
+                data-track-name={`run-detail-${mode}-view`}
+                onClick={() => setView(mode)}
+                className={cn(
+                  'flex h-7 w-7 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:text-foreground',
+                  view === mode && 'bg-accent text-foreground',
+                )}
+              >
+                <Icon className='size-4' aria-hidden='true' />
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
-      <div className='flex-1 overflow-y-auto'>
+      {showFlow && ranConfig && runOverlay && (
+        <FlowAutomationView
+          config={ranConfig}
+          onConfigChange={noop}
+          onTriggerTypeChange={noop}
+          onTriggerConfigChange={noop}
+          onScheduleChange={noop}
+          triggerCatalog={triggerCatalogQuery.data ?? []}
+          triggerSchema={null}
+          stepCatalog={stepCatalogQuery.data ?? []}
+          stepSchemaCache={{}}
+          schemaLoadingFor={() => false}
+          triggerSchemaLoading={false}
+          ensureSchema={noop}
+          operators={[]}
+          validation={null}
+          editMode={false}
+          onAddStep={() => ''}
+          renderConditionalCard={renderNothing}
+          renderSwitchCard={renderNothing}
+          runOverlay={runOverlay}
+        />
+      )}
+
+      <div className={cn('flex-1 overflow-y-auto', showFlow && 'hidden')}>
         {isLoading ? (
           <div className='flex items-center justify-center py-12 text-sm text-muted-foreground'>
             <Loader2 className='mr-2 size-4 animate-spin' />
@@ -152,12 +259,18 @@ function Metric({ label, value }: { label: string; value: string }): React.React
   );
 }
 
-function StepOutputs({ context }: { context: Record<string, unknown> }): React.ReactElement {
-  const stepsRaw = (
+type ContextSteps = Record<string, { input?: unknown; output?: unknown }>;
+
+function readContextSteps(context: Record<string, unknown>): ContextSteps | null {
+  return (
     context && typeof context === 'object' && 'steps' in context
       ? (context as { steps?: unknown }).steps
       : null
-  ) as Record<string, { input?: unknown; output?: unknown }> | null;
+  ) as ContextSteps | null;
+}
+
+function StepOutputs({ context }: { context: Record<string, unknown> }): React.ReactElement {
+  const stepsRaw = readContextSteps(context);
 
   if (!stepsRaw || Object.keys(stepsRaw).length === 0) {
     return (
@@ -187,38 +300,52 @@ function StepCard({
   stepId,
   input,
   output,
+  title,
+  error,
+  stacked = false,
+  status,
 }: {
   index: number;
   stepId: string;
   input: unknown;
   output: unknown;
+  /** Replaces "Step {index}" (the flow panel passes the step's name). */
+  title?: string;
+  error?: string | undefined;
+  /** Single column, for the narrow flow side panel. */
+  stacked?: boolean;
+  /** The flow panel's resolved step status; the list view leaves it unset. */
+  status?: string | null;
 }): React.ReactElement {
   return (
     <div className='flex flex-col gap-3 rounded-md border border-border bg-background p-5'>
       <div className='flex items-start gap-3'>
         <div className='flex size-8 items-center justify-center rounded-md bg-accent/40'>
-          <CheckCircle2 className='size-4 text-green-600' />
+          {error || status === 'FAILED' ? (
+            <XCircle className='size-4 text-red-600' />
+          ) : status === undefined || status === 'COMPLETED' ? (
+            <CheckCircle2 className='size-4 text-green-600' />
+          ) : status === 'EXTERNAL_WAIT' ? (
+            <Hourglass className='size-4 text-purple-600' />
+          ) : status === 'RUNNING' ? (
+            <Loader2 className='size-4 animate-spin text-blue-600' />
+          ) : (
+            <XCircle className='size-4 text-muted-foreground' />
+          )}
         </div>
         <div className='flex flex-col'>
-          <span className='text-sm font-medium text-foreground'>Step {index}</span>
+          <span className='text-sm font-medium text-foreground'>{title ?? `Step ${index}`}</span>
           <span className='font-mono text-[11px] text-muted-foreground'>{stepId}</span>
         </div>
       </div>
-      <div className='grid grid-cols-1 gap-3 lg:grid-cols-2'>
-        <div className='flex flex-col gap-1.5'>
-          <span className='text-[11px] uppercase tracking-wide text-muted-foreground'>
-            Resolved input
-          </span>
-          <pre className='max-h-[280px] overflow-auto rounded-md border border-border bg-muted/40 p-3 text-[11px] leading-relaxed text-foreground font-mono'>
-            {input === undefined ? '— (no input recorded)' : prettyJson(input)}
-          </pre>
+      {error && (
+        <div className='whitespace-pre-wrap rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-700 dark:text-red-400'>
+          {error}
         </div>
-        <div className='flex flex-col gap-1.5'>
-          <span className='text-[11px] uppercase tracking-wide text-muted-foreground'>Output</span>
-          <pre className='max-h-[280px] overflow-auto rounded-md border border-border bg-muted/40 p-3 text-[11px] leading-relaxed text-foreground font-mono'>
-            {output === undefined || output === null ? '— (no output)' : prettyJson(output)}
-          </pre>
-        </div>
+      )}
+      <div className={cn('grid grid-cols-1 gap-3', !stacked && 'lg:grid-cols-2')}>
+        <JsonBlock title='Resolved input' value={input} placeholder='— (no input recorded)' />
+        <JsonBlock title='Output' value={output} placeholder='— (no output)' />
       </div>
     </div>
   );
@@ -248,17 +375,178 @@ function SectionCard({
           )}
         </div>
       </div>
-      <pre className='max-h-[280px] overflow-auto rounded-md border border-border bg-muted/40 p-3 text-[11px] leading-relaxed text-foreground font-mono'>
-        {prettyJson(json)}
-      </pre>
+      <JsonBlock title='Payload' value={json} placeholder='— (no data)' />
     </div>
   );
 }
 
-function prettyJson(value: unknown): string {
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
+const PAYLOAD_MODES = [
+  { mode: 'fields', label: 'Fields' },
+  { mode: 'json', label: 'Raw JSON' },
+] as const;
+
+/**
+ * A run payload as labelled fields or highlighted JSON, scrolling past 320px.
+ * Copy always copies the JSON; `placeholder` shows when nothing was recorded.
+ */
+function JsonBlock({
+  title,
+  value,
+  placeholder,
+}: {
+  title: string;
+  value: unknown;
+  placeholder: string;
+}): React.ReactElement {
+  const [mode, setMode] = useState<'fields' | 'json'>('fields');
+  const { copied, copy } = useCopyButton();
+  if (value === undefined || value === null) {
+    return (
+      <div className='rounded-md border border-border bg-muted/40 p-3 text-[11px] text-muted-foreground'>
+        <span className='font-semibold uppercase tracking-wide'>{title}</span> {placeholder}
+      </div>
+    );
   }
+  return (
+    <div className='flex max-h-[320px] flex-col overflow-hidden rounded-md border border-border'>
+      <div className='flex items-center gap-2 border-b border-border bg-muted/40 px-3 py-1.5'>
+        <span className='text-[11px] font-semibold uppercase tracking-wide text-muted-foreground'>
+          {title}
+        </span>
+        <div className='ml-auto flex items-center rounded-md border border-border p-0.5'>
+          {PAYLOAD_MODES.map(option => (
+            <button
+              key={option.mode}
+              type='button'
+              aria-pressed={mode === option.mode}
+              onClick={() => setMode(option.mode)}
+              data-track-category='automation-runs'
+              data-track-name={`run-detail-payload-${option.mode}`}
+              className={cn(
+                'rounded-sm px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground',
+                mode === option.mode && 'bg-accent text-foreground',
+              )}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+        <button
+          type='button'
+          aria-label='Copy JSON'
+          title='Copy JSON'
+          onClick={() => copy(JSON.stringify(value, null, 2))}
+          data-track-category='automation-runs'
+          data-track-name='run-detail-copy-json'
+          className='flex size-6 items-center justify-center rounded border border-border bg-background text-muted-foreground hover:text-foreground'
+        >
+          {copied ? <Check className='size-3.5' /> : <Copy className='size-3.5' />}
+        </button>
+      </div>
+      {mode === 'fields' ? (
+        <div className='min-h-0 overflow-auto p-3'>
+          <RunValueView value={value} />
+        </div>
+      ) : (
+        <HighlightedJsonBlock title={title} value={value} hideHeader />
+      )}
+    </div>
+  );
+}
+
+/**
+ * A step row's status, corrected by the run's: rows left RUNNING/EXTERNAL_WAIT by a
+ * nested pause or a cancel/fail outside the walk would otherwise show a live badge.
+ * CANCELLED means the step started but never finished.
+ */
+function resolveStepStatus(rowStatus: string, runStatus: AutomationRunStatus): string {
+  if (rowStatus !== 'RUNNING' && rowStatus !== 'EXTERNAL_WAIT') return rowStatus;
+  if (runStatus === 'EXTERNAL_WAIT') return 'EXTERNAL_WAIT';
+  if (runStatus === 'FAILED') return 'FAILED';
+  return ['COMPLETED', 'CANCELLED', 'SKIPPED'].includes(runStatus) ? 'CANCELLED' : rowStatus;
+}
+
+/** A nested row name, e.g. `step_1__case_0__step_2` → owner `step_1`, branch `case_0`. */
+const NESTED_STEP_NAME = /^(.*)__(if_true|if_false|default|case_\d+)__step_\d+$/;
+
+/** Node statuses + side panel for the flow view, from the run's step rows and context. */
+function buildRunOverlay({ run, steps }: RunDetailData): FlowRunOverlay {
+  const statusByStepName: Record<string, string> = {};
+  const errorByStepName: Record<string, string> = {};
+  const takenBranchByStepName: Record<string, string> = {};
+  for (const row of steps) {
+    if (!row.stepName || !row.status) continue;
+    statusByStepName[row.stepName] = resolveStepStatus(row.status, run.status);
+    const data = row.data as { type?: unknown; output?: unknown; error?: unknown } | null;
+    // markStepFailed stores the message on the row, not in the run context.
+    if (typeof data?.error === 'string') errorByStepName[row.stepName] = data.error;
+    // A finished If/Switch records its branch (conditional.step.ts / switch.step.ts)…
+    const output = data?.output as { result?: unknown; matchedIndex?: unknown } | undefined;
+    if (data?.type === CONDITIONAL_STEP_TYPE && typeof output?.result === 'boolean') {
+      takenBranchByStepName[row.stepName] = output.result ? 'if_true' : 'if_false';
+    } else if (data?.type === SWITCH_STEP_TYPE && typeof output?.matchedIndex === 'number') {
+      takenBranchByStepName[row.stepName] =
+        output.matchedIndex >= 0 ? `case:${output.matchedIndex}` : 'default';
+    }
+    // …one still running, paused or failed inside a branch only shows it via its nested rows.
+    const nested = NESTED_STEP_NAME.exec(row.stepName);
+    if (nested?.[1] && nested[2]) {
+      takenBranchByStepName[nested[1]] ??= nested[2].replace(/^case_/, 'case:');
+    }
+  }
+  const contextSteps = readContextSteps(run.context) ?? {};
+
+  const renderPanel = (item: FlowItem | null): React.ReactNode => {
+    if (!item) {
+      return (
+        <div className='flex flex-col gap-3'>
+          <SummaryCard
+            startedAt={run.startedAt}
+            completedAt={run.completedAt}
+            error={run.error}
+            status={run.status}
+          />
+          <p className='text-xs text-muted-foreground'>
+            Select a step to see its input and output. Faded steps did not run.
+          </p>
+        </div>
+      );
+    }
+    if (item.nodeType === 'trigger') {
+      return (
+        <SectionCard
+          icon={<CheckCircle2 className='size-4 text-amber-600' />}
+          title='Trigger payload'
+          subtitle='What fired the run.'
+          json={run.triggerData}
+        />
+      );
+    }
+    if (!item.step) return null;
+    const stepName = stepNameForPath(item.path);
+    const title = item.label ?? (item.nodeType === 'switch' ? 'Switch' : 'Condition');
+    const status = statusByStepName[stepName];
+    if (!status) {
+      return (
+        <div className='rounded-md border border-border bg-background p-5 text-sm text-muted-foreground'>
+          {title} did not run.
+        </div>
+      );
+    }
+    const payload = contextSteps[item.step.id];
+    return (
+      <StepCard
+        index={0}
+        title={title}
+        stepId={item.step.id}
+        input={payload?.input}
+        output={payload?.output}
+        error={errorByStepName[stepName]}
+        status={status}
+        stacked
+      />
+    );
+  };
+
+  return { statusByStepName, takenBranchByStepName, renderPanel };
 }

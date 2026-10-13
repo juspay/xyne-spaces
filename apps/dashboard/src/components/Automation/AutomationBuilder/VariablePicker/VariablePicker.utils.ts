@@ -2,6 +2,7 @@ import type { JsonSchema } from '../../Automation.types';
 import {
   detectEntityKindFromPath,
   followAnyOf,
+  humanise,
   resolveSchema,
 } from '../SchemaForm/SchemaForm.utils';
 import type {
@@ -112,7 +113,7 @@ function walk(
     sourceKey: source.sourceKey,
     role: source.role,
     path: pathSoFar,
-    label: `${source.groupLabel} / ${source.role === 'trigger' ? '' : `${source.role} / `}${pathSoFar.replace(/\./g, ' / ')}`,
+    label: formatVariableLabel(source.groupLabel, source.role, pathSoFar),
     leafType: leafTypeLabel(resolved),
     reference: buildReference(source.sourceKey, source.role, pathSoFar),
     entityKind,
@@ -165,13 +166,27 @@ export function parseReference(
   return { sourceKey, role: 'output', path: tail };
 }
 
+/** A variable path in words, e.g. `ticket.channelId` → "Ticket › Channel ID". */
+export function formatPathLabel(path: string): string {
+  return path.split('.').map(humanise).join(' › ');
+}
+
+export function formatVariableLabel(
+  groupLabel: string,
+  role: VariablePickerSourceRole,
+  path: string,
+): string {
+  const parts = [groupLabel];
+  if (role !== 'trigger') parts.push(role === 'input' ? 'Input' : 'Output');
+  if (path) parts.push(formatPathLabel(path));
+  return parts.join(' › ');
+}
+
 export function formatReferenceLabel(ref: string, sources: VariablePickerSource[]): string {
   const parsed = parseReference(ref);
   if (!parsed) return ref;
   const source = sources.find(s => s.sourceKey === parsed.sourceKey && s.role === parsed.role);
   const fallback = sources.find(s => s.sourceKey === parsed.sourceKey);
   const groupLabel = source?.groupLabel ?? fallback?.groupLabel ?? parsed.sourceKey;
-  const roleLabel = parsed.role === 'trigger' ? '' : ` / ${parsed.role}`;
-  if (!parsed.path) return `${groupLabel}${roleLabel}`;
-  return `${groupLabel}${roleLabel} / ${parsed.path.replace(/\./g, ' / ')}`;
+  return formatVariableLabel(groupLabel, parsed.role, parsed.path);
 }

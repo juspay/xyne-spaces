@@ -29,6 +29,7 @@ import {
   detectFieldKind,
   EntityKind,
   getVariableRefInner,
+  humanise,
   isRichTextField,
   isVariableRefValue,
   issuesForField,
@@ -958,13 +959,6 @@ function RecordRow({
       </button>
     </div>
   );
-}
-
-function humanise(key: string): string {
-  return key
-    .replace(/[_-]+/g, ' ')
-    .replace(/([a-z])([A-Z])/g, '$1 $2')
-    .replace(/^(.)/, c => c.toUpperCase());
 }
 
 function sanitiseDescription(description?: string): string | undefined {
