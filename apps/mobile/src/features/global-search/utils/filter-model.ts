@@ -158,7 +158,10 @@ export function structuredFiltersEqual(
   );
 }
 
-/** True when any modal-counted / request-affecting structured field is set. */
+/**
+ * True when any request-affecting structured field is set.
+ * `showArchived` is a modifier (like Bot / Exact) — alone it must not start a search.
+ */
 export function hasStructuredFilterInput(filters: StructuredSearchFilters): boolean {
   return (
     filters.withUsers.length > 0 ||
@@ -175,8 +178,7 @@ export function hasStructuredFilterInput(filters: StructuredSearchFilters): bool
     filters.toEmails.length > 0 ||
     filters.dateRange !== '' ||
     filters.after !== '' ||
-    filters.before !== '' ||
-    filters.showArchived
+    filters.before !== ''
   );
 }
 

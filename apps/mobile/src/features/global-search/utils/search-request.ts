@@ -2,16 +2,8 @@ import type { VespaSearchFilters } from '@/src/types/search';
 import { buildVespaSearchParams, sanitizeSearchQuery } from '@/src/utils/search';
 import type { SearchFilterChip, SearchFilterPrefix, SearchScope } from '../types';
 import { toSearchQuery } from './exact-search';
-import {
-  DEFAULT_STRUCTURED_FILTERS,
-  hasStructuredFilterInput,
-  type StructuredSearchFilters,
-} from './filter-model';
-import {
-  DEFAULT_SORT_BY,
-  effectiveRankProfile,
-  type SortBy,
-} from './rank-sort';
+import { DEFAULT_STRUCTURED_FILTERS, type StructuredSearchFilters } from './filter-model';
+import { DEFAULT_SORT_BY, type SortBy } from './rank-sort';
 import { effectiveInputsForScope } from './scope';
 import type { GlobalSearchTab } from './search-tabs';
 
@@ -71,6 +63,48 @@ export function categoryForTab(tab: GlobalSearchTab): SearchCategory | null {
   return CATEGORY_FOR_TAB[tab];
 }
 
+/** Structured fields that this category actually serializes onto the wire. */
+function hasApplicableStructuredInput(
+  category: SearchCategory,
+  structured: StructuredSearchFilters,
+): boolean {
+  const hasDates = Boolean(structured.dateRange || structured.after || structured.before);
+  if (hasDates) return true;
+
+  if (category === 'messages') {
+    return (
+      structured.withUsers.length > 0 ||
+      structured.mentionUsers.length > 0 ||
+      structured.mentionChannels.length > 0 ||
+      structured.mentionGroups.length > 0 ||
+      structured.tags.length > 0 ||
+      structured.entities.length > 0 ||
+      structured.fromEmails.length > 0 ||
+      structured.toEmails.length > 0
+    );
+  }
+
+  if (category === 'tickets') {
+    return (
+      structured.assignees.length > 0 ||
+      structured.boards.length > 0 ||
+      structured.priority !== '' ||
+      structured.statuses.length > 0 ||
+      structured.tags.length > 0 ||
+      structured.entities.length > 0 ||
+      structured.fromEmails.length > 0 ||
+      structured.toEmails.length > 0
+    );
+  }
+
+  if (category === 'calls') {
+    return structured.withUsers.length > 0;
+  }
+
+  // files — only dates (handled above) apply from the structured set
+  return false;
+}
+
 /**
  * The request for what is on screen, or `null` when nothing should be sent.
  * Every rule about *whether* to search lives here.
@@ -95,9 +129,12 @@ export function buildSearchRequest({
   // A locked scope narrows the request; it is not something the user asked for.
   // Mode toggles alone do not count either: alone they would mean "every hit in
   // every channel I am in" / "every bot message".
+  // Structured fields only count when this category actually sends them.
   const hasUserInput = scope
     ? freeText.length > 0
-    : freeText.length > 0 || chips.length > 0 || hasStructuredFilterInput(structured);
+    : freeText.length > 0 ||
+      chips.length > 0 ||
+      hasApplicableStructuredInput(category, structured);
   if (!hasUserInput) return null;
 
   return {
@@ -156,32 +193,16 @@ export function buildSearchFilters(request: SearchRequest): VespaSearchFilters {
     exactMatch,
     sortBy,
     rankProfile,
-    tab,
   } = request;
   const from = chipIds(chips, 'from:');
   const inside = chipIds(chips, 'in:');
   const withUsers = entityIds(structured.withUsers);
   const sanitized = sanitizeSearchQuery(freeText);
 
-  const hasEntityFilters = Boolean(
-    from ||
-      inside ||
-      withUsers ||
-      structured.assignees.length ||
-      structured.mentionUsers.length ||
-      structured.mentionChannels.length ||
-      structured.mentionGroups.length ||
-      structured.boards.length ||
-      structured.tags.length ||
-      structured.entities.length ||
-      structured.statuses.length ||
-      structured.fromEmails.length ||
-      structured.toEmails.length ||
-      structured.priority ||
-      structured.dateRange ||
-      structured.after ||
-      structured.before,
-  );
+  const isMessages = category === 'messages';
+  const isTickets = category === 'tickets';
+  const isCalls = category === 'calls';
+  const isMessagesOrTickets = isMessages || isTickets;
 
   const filters: VespaSearchFilters = {
     query: toSearchQuery(sanitized, exactMatch),
@@ -191,41 +212,93 @@ export function buildSearchFilters(request: SearchRequest): VespaSearchFilters {
     ...CATEGORY_WIRE[category],
   };
 
+  /** Entity / facet filters that justify `filterOnly` when the query is empty. */
+  let hasAppliedEntityFilter = false;
+
   // Call search filters on participants via `with` → `withUser`. Message search
   // uses `from:` for senders and structured `withUsers` for the With filter.
   if (from) {
-    if (category === 'calls') filters.with = from;
+    if (isCalls) filters.with = from;
     else filters.from = from;
+    hasAppliedEntityFilter = true;
   }
-  if (inside) filters.in = inside;
-  if (withUsers && (category === 'messages' || (category === 'calls' && !from))) {
+  if (inside) {
+    filters.in = inside;
+    hasAppliedEntityFilter = true;
+  }
+  if (withUsers && (isMessages || (isCalls && !from))) {
     filters.with = withUsers;
+    hasAppliedEntityFilter = true;
   }
 
-  const mentions = entityIds(structured.mentionUsers);
-  const channelMentions = entityIds(structured.mentionChannels);
-  const groupMentions = entityIds(structured.mentionGroups);
-  const assignee = entityIds(structured.assignees);
-  const board = entityIds(structured.boards);
-  const tags = joinList(structured.tags);
-  const entity = joinList(structured.entities);
-  const status = joinList(structured.statuses);
-  const fromEmail = joinList(structured.fromEmails);
-  const toEmail = joinList(structured.toEmails);
+  if (isMessages) {
+    const mentions = entityIds(structured.mentionUsers);
+    const channelMentions = entityIds(structured.mentionChannels);
+    const groupMentions = entityIds(structured.mentionGroups);
+    if (mentions) {
+      filters.mentions = mentions;
+      hasAppliedEntityFilter = true;
+    }
+    if (channelMentions) {
+      filters.channelMentions = channelMentions;
+      hasAppliedEntityFilter = true;
+    }
+    if (groupMentions) {
+      filters.groupMentions = groupMentions;
+      hasAppliedEntityFilter = true;
+    }
+  }
 
-  if (mentions) filters.mentions = mentions;
-  if (channelMentions) filters.channelMentions = channelMentions;
-  if (groupMentions) filters.groupMentions = groupMentions;
-  if (assignee) filters.assignee = assignee;
-  if (structured.priority) filters.priority = structured.priority;
-  if (board) filters.board = board;
-  if (tags) filters.tags = tags;
-  if (entity) filters.entity = entity;
-  if (status) filters.status = status;
-  if (fromEmail) filters.fromEmail = fromEmail;
-  if (toEmail) filters.toEmail = toEmail;
+  if (isTickets) {
+    const assignee = entityIds(structured.assignees);
+    const board = entityIds(structured.boards);
+    const status = joinList(structured.statuses);
+    if (assignee) {
+      filters.assignee = assignee;
+      hasAppliedEntityFilter = true;
+    }
+    if (structured.priority) {
+      filters.priority = structured.priority;
+      hasAppliedEntityFilter = true;
+    }
+    if (board) {
+      filters.board = board;
+      hasAppliedEntityFilter = true;
+    }
+    if (status) {
+      filters.status = status;
+      hasAppliedEntityFilter = true;
+    }
+  }
 
-  Object.assign(filters, dateParams(structured));
+  if (isMessagesOrTickets) {
+    const tags = joinList(structured.tags);
+    const entity = joinList(structured.entities);
+    const fromEmail = joinList(structured.fromEmails);
+    const toEmail = joinList(structured.toEmails);
+    if (tags) {
+      filters.tags = tags;
+      hasAppliedEntityFilter = true;
+    }
+    if (entity) {
+      filters.entity = entity;
+      hasAppliedEntityFilter = true;
+    }
+    if (fromEmail) {
+      filters.fromEmail = fromEmail;
+      hasAppliedEntityFilter = true;
+    }
+    if (toEmail) {
+      filters.toEmail = toEmail;
+      hasAppliedEntityFilter = true;
+    }
+  }
+
+  const dates = dateParams(structured);
+  if (Object.keys(dates).length > 0) {
+    Object.assign(filters, dates);
+    hasAppliedEntityFilter = true;
+  }
 
   // `in:` carries an implicit `false` so the backend does not re-narrow an explicit
   // channel list to joined channels. The toggle, when on, overrides it.
@@ -233,17 +306,19 @@ export function buildSearchFilters(request: SearchRequest): VespaSearchFilters {
   else if (inside) filters.onlyMyChannels = false;
 
   // Bot inclusion only applies to message search (dashboard `appliesTo: isMessageType`).
-  if (category === 'messages') filters.includeBotMessages = includeBotMessages;
+  if (isMessages) filters.includeBotMessages = includeBotMessages;
 
   // Show archived inverts excludeArchived on tickets (desk not a mobile tab).
-  if (category === 'tickets') filters.excludeArchived = !structured.showArchived;
+  if (isTickets) filters.excludeArchived = !structured.showArchived;
 
-  if (!freeText && hasEntityFilters) filters.filterOnly = true;
+  if (!freeText && hasAppliedEntityFilter) filters.filterOnly = true;
 
   // Prefer server-side order so pagination stays consistent with Newest/Oldest.
   if (sortBy !== DEFAULT_SORT_BY) filters.orderBy = sortBy;
 
-  filters.rankProfile = effectiveRankProfile(tab, rankProfile);
+  // Only send an explicit Rank pick. Omitting lets the backend use its default —
+  // do not force `default_native` on every request.
+  if (rankProfile) filters.rankProfile = rankProfile;
 
   return filters;
 }

@@ -35,12 +35,7 @@ const RANK_PROFILE_OPTIONS_BY_TYPE: Partial<Record<SearchDocType, RankProfileOpt
   messages: [
     { value: 'default_native', label: 'default_native' },
     { value: 'personalized', label: 'personalized' },
-    { value: 'default_random', label: 'default_random' },
     { value: 'default_fuzzy', label: 'default_fuzzy' },
-    ...Array.from({ length: 23 }, (_, i) => ({
-      value: `default_native_${i}`,
-      label: `default_native_${i}`,
-    })),
   ],
   files: [
     { value: 'default_native', label: 'default_native' },
@@ -59,7 +54,6 @@ const RANK_PROFILE_OPTIONS_BY_TYPE: Partial<Record<SearchDocType, RankProfileOpt
     { value: 'default_fuzzy', label: 'default_fuzzy' },
     { value: 'global_sorted', label: 'global_sorted' },
     { value: 'default_bm25', label: 'default_bm25' },
-    { value: 'default_ai', label: 'default_ai' },
   ],
 };
 

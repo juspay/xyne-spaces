@@ -12,6 +12,9 @@ import { FilterSheetHeader } from './filter-sheet-header';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
+/** Fixed height — nested `dynamic` sheets with short content can measure to ~0 and leave a stuck touch-blocker. */
+const DATE_SHEET_SNAP_POINTS = ['50%'];
+
 function toIso(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
@@ -74,6 +77,10 @@ function DateModeSheetBody({
   );
   const [end, setEnd] = useState(initial.before || toIso(new Date()));
   const [editing, setEditing] = useState<'start' | 'end'>('start');
+  // Android: mount the native dialog only while picking. Start open so choosing
+  // On/Before/After/Range immediately shows the picker; dismiss in onChange so
+  // value updates do not re-open it (tickets-date-filter pattern).
+  const [androidPickerOpen, setAndroidPickerOpen] = useState(Platform.OS === 'android');
   const { accentText } = useBubbleAccent();
   const muted = useCSSVariable('--color-bottomsheet-text-muted') as string;
 
@@ -93,7 +100,11 @@ function DateModeSheetBody({
   }, [canSave, end, isRange, mode, onSave, start]);
 
   const onPickerChange = useCallback(
-    (_event: DateTimePickerEvent, date?: Date) => {
+    (event: DateTimePickerEvent, date?: Date) => {
+      if (Platform.OS === 'android') {
+        setAndroidPickerOpen(false);
+        if (event.type !== 'set' || !date) return;
+      }
       if (!date) return;
       const iso = toIso(date);
       if (editing === 'end') setEnd(iso);
@@ -102,12 +113,20 @@ function DateModeSheetBody({
     [editing],
   );
 
+  const openAndroidPicker = useCallback((field: 'start' | 'end') => {
+    setEditing(field);
+    if (Platform.OS === 'android') setAndroidPickerOpen(true);
+  }, []);
+
+  const showPicker = Platform.OS === 'ios' || androidPickerOpen;
+
   return (
     <AppBottomSheet
       isOpen={isOpen}
       onOpenChange={onOpenChange}
       onDismiss={onDismiss}
-      mode='dynamic'
+      mode='snap'
+      snapPoints={DATE_SHEET_SNAP_POINTS}
       backdropOpacity={0.4}
     >
       <FilterSheetHeader
@@ -120,7 +139,7 @@ function DateModeSheetBody({
       />
       <View className='gap-3 px-4 pb-6 pt-2'>
         <Pressable
-          onPress={() => setEditing('start')}
+          onPress={() => openAndroidPicker('start')}
           className='rounded-xl border border-border px-3 py-3'
           style={editing === 'start' ? { borderColor: accentText } : undefined}
         >
@@ -131,7 +150,7 @@ function DateModeSheetBody({
         </Pressable>
         {isRange ? (
           <Pressable
-            onPress={() => setEditing('end')}
+            onPress={() => openAndroidPicker('end')}
             className='rounded-xl border border-border px-3 py-3'
             style={editing === 'end' ? { borderColor: accentText } : undefined}
           >
@@ -141,12 +160,14 @@ function DateModeSheetBody({
             <Text className='mt-0.5 text-[16px] text-foreground'>{end}</Text>
           </Pressable>
         ) : null}
-        <DateTimePicker
-          value={editing === 'end' ? endDate : startDate}
-          mode='date'
-          display={Platform.OS === 'ios' ? 'inline' : 'default'}
-          onChange={onPickerChange}
-        />
+        {showPicker ? (
+          <DateTimePicker
+            value={editing === 'end' ? endDate : startDate}
+            mode='date'
+            display={Platform.OS === 'ios' ? 'inline' : 'default'}
+            onChange={onPickerChange}
+          />
+        ) : null}
       </View>
     </AppBottomSheet>
   );

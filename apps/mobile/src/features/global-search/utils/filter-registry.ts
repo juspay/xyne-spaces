@@ -82,13 +82,15 @@ export function docTypeForTab(tab: GlobalSearchTab): SearchDocType {
 }
 
 /**
- * Filters drawer visibility. Mobile has no Type=All control; the drawer always
- * matches dashboard's `all` filter set (From / In / With / Mentions / Date /
- * Assignee / Priority / Board / Tags / Entity). Opening from DMs lands on the
- * Chats tab, which would otherwise map to `people` and show an empty sheet.
+ * Filters drawer visibility follows the active tab so ticket-only fields are not
+ * shown on Messages (and vice versa). Chats / Channels are local Zero lists with
+ * no remote filter fields — fall back to messages so opening Filters from DMs
+ * (default Chats tab) is not an empty Sort-only sheet.
  */
-export function modalDocTypeForTab(_tab: GlobalSearchTab): SearchDocType {
-  return 'all';
+export function modalDocTypeForTab(tab: GlobalSearchTab): SearchDocType {
+  const docType = docTypeForTab(tab);
+  if (docType === 'people' || docType === 'channels') return 'messages';
+  return docType;
 }
 
 export const FILTER_MODAL_ENTRIES: readonly ModalFilterEntry[] = [
@@ -102,7 +104,8 @@ export const FILTER_MODAL_ENTRIES: readonly ModalFilterEntry[] = [
   {
     id: 'rank',
     label: 'Rank',
-    appliesTo: () => true,
+    // Experiment profiles — keep off production builds until CAC / internal gating exists.
+    appliesTo: () => typeof __DEV__ !== 'undefined' && __DEV__,
     isActive: f => isRankActive(f.rankProfile),
     control: { kind: 'rank' },
   },

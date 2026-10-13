@@ -7,6 +7,7 @@ import {
   structuredFiltersEqual,
   type StructuredSearchFilters,
 } from '../utils/filter-model';
+import { clearInapplicableStructured } from '../utils/filter-registry';
 import {
   DEFAULT_RANK_PROFILE,
   DEFAULT_SORT_BY,
@@ -103,14 +104,19 @@ function chipsEqual(a: readonly SearchFilterChip[], b: readonly SearchFilterChip
  */
 export function searchReducer(state: SearchState, action: SearchAction): SearchState {
   switch (action.type) {
-    case 'tabChanged':
-      // Keep structured filters across tabs; reset rank — profiles are schema-scoped.
+    case 'tabChanged': {
+      // Drop fields that do not apply to the destination tab; reset rank
+      // (profiles are schema-scoped).
       if (state.tab === action.tab) return state;
+      const cleared = clearInapplicableStructured(action.tab, state.structured, state.chips);
       return {
         ...state,
         tab: action.tab,
         rankProfile: DEFAULT_RANK_PROFILE,
+        structured: cleared.structured,
+        chips: cleared.chips,
       };
+    }
 
     case 'queryCommitted': {
       if (state.query === action.query) return state;

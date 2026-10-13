@@ -10,14 +10,16 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { BottomSheetScrollView } from '@gorhom/bottom-sheet';
+import { BottomSheetFlatList, BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { ChevronDown, X } from 'lucide-react-native';
 import { useCSSVariable } from 'uniwind';
 
 import { AppBottomSheet } from '@/src/components/ui/app-bottom-sheet';
+import { useCachedQuery } from '@/src/hooks/useCachedQuery';
 import { useUserGroups } from '@/src/hooks/useUserGroups';
 import { useBubbleAccent } from '@/src/theme/useBubbleAccent';
 import { haptics } from '@/src/utils/haptics';
+import { queries } from '@/src/zero/queries';
 import { useMountWhileOpen, type SheetMountProps } from '../../hooks/use-mount-while-open';
 import type { SearchFilterChip } from '../../types';
 import {
@@ -37,6 +39,7 @@ import {
   countActiveFilters,
   entitiesToFromChips,
   entitiesToInChips,
+  modalDocTypeForTab,
   modalFieldEntries,
   type ModalFilterEntry,
 } from '../../utils/filter-registry';
@@ -56,7 +59,6 @@ import { FilterSheetHeader } from './filter-sheet-header';
 import { FromFilterSheet } from './from-filter-sheet';
 import { InFilterSheet } from './in-filter-sheet';
 import { OptionPickerSheet } from './option-picker-sheet';
-import { BottomSheetFlatList } from '@gorhom/bottom-sheet';
 
 type NestedPicker =
   | { kind: 'from' }
@@ -66,6 +68,7 @@ type NestedPicker =
   | { kind: 'mentionUsers' }
   | { kind: 'mentionChannels' }
   | { kind: 'mentionGroups' }
+  | { kind: 'boards' }
   | null;
 
 type FiltersSheetProps = {
@@ -143,14 +146,30 @@ function FiltersSheetBody({
   useEffect(() => {
     if (Platform.OS !== 'android' || !isOpen) return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      // Nested pickers / date first — don't dismiss the whole Filters sheet.
+      if (pendingDateMode) {
+        setPendingDateMode(null);
+        return true;
+      }
+      if (picker) {
+        setPicker(null);
+        return true;
+      }
+      if (priorityOpen) {
+        setPriorityOpen(false);
+        return true;
+      }
+      if (rankOpen) {
+        setRankOpen(false);
+        return true;
+      }
       onOpenChange(false);
       return true;
     });
     return (): void => sub.remove();
-  }, [isOpen, onOpenChange]);
+  }, [isOpen, onOpenChange, pendingDateMode, picker, priorityOpen, rankOpen]);
 
-  // Always the dashboard Type=All set — see `modalDocTypeForTab`.
-  const fieldEntries = useMemo(() => modalFieldEntries('all'), []);
+  const fieldEntries = useMemo(() => modalFieldEntries(modalDocTypeForTab(tab)), [tab]);
   const rankOptions = useMemo(() => getRankProfileOptions(tab), [tab]);
   const draftCount = countActiveFilters(draft);
 
@@ -216,13 +235,6 @@ function FiltersSheetBody({
         const list = parseCommaList(raw);
         if (entry.control.field === 'tags') next = { ...next, tags: list };
         if (entry.control.field === 'entities') next = { ...next, entities: list };
-      }
-      if (textDrafts['board'] !== undefined) {
-        const list = parseCommaList(textDrafts['board']);
-        next = {
-          ...next,
-          boards: list.map(token => ({ id: token, label: token })),
-        };
       }
       return next;
     },
@@ -343,24 +355,8 @@ function FiltersSheetBody({
           </View>
         );
       case 'boards':
-        return (
-          <View className='mb-4'>
-            {fieldLabel(entry.label)}
-            <TextInput
-              value={textDrafts['board'] ?? draft.boards.map(board => board.label).join(', ')}
-              onChangeText={text => setTextDrafts(prev => ({ ...prev, board: text }))}
-              onBlur={() => {
-                const list = parseCommaList(textDrafts['board'] ?? '');
-                patch({
-                  boards: list.map(token => ({ id: token, label: token })),
-                });
-              }}
-              placeholder={control.placeholder}
-              placeholderTextColor={muted}
-              className='rounded-xl border px-3 py-3 text-[15px]'
-              style={{ borderColor: border, backgroundColor: inputBg, color: fieldText }}
-            />
-          </View>
+        return renderPeopleRow(entry.label, draft.boards, control.placeholder, () =>
+          setPicker({ kind: 'boards' }),
         );
       case 'sort':
         // Inline chips — a nested sheet for 3 options left a stuck touch-blocker
@@ -670,6 +666,16 @@ function FiltersSheetBody({
         }}
       />
 
+      <BoardsFilterSheet
+        isOpen={picker?.kind === 'boards'}
+        onClose={() => setPicker(null)}
+        selected={draft.boards}
+        onApply={entities => {
+          patch({ boards: entities });
+          setPicker(null);
+        }}
+      />
+
       <PrioritySheet
         isOpen={priorityOpen}
         onClose={() => setPriorityOpen(false)}
@@ -766,6 +772,23 @@ function MentionGroupsSheet({
   );
 }
 
+function BoardsFilterSheet({
+  isOpen,
+  onClose,
+  selected,
+  onApply,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  selected: readonly FilterEntity[];
+  onApply: (entities: FilterEntity[]) => void;
+}): ReactElement | null {
+  const { shouldRender, sheetProps } = useMountWhileOpen(isOpen, onClose);
+  if (!shouldRender) return null;
+
+  return <BoardsFilterSheetBody {...sheetProps} selected={selected} onApply={onApply} />;
+}
+
 function MentionGroupsSheetBody({
   isOpen,
   onOpenChange,
@@ -800,6 +823,77 @@ function MentionGroupsSheetBody({
       onDismiss={onDismiss}
       title='Mention groups'
       searchPlaceholder='Search groups'
+      query={query}
+      onQueryChange={setQuery}
+      selectionCount={draft.length}
+      onApply={() => onApply(draft)}
+      onClear={() => onApply([])}
+    >
+      <BottomSheetFlatList
+        style={{ flex: 1 }}
+        data={rows}
+        keyExtractor={item => item.id}
+        keyboardShouldPersistTaps='handled'
+        renderItem={({ item }) => (
+          <FilterOptionRow
+            title={item.label}
+            query={query}
+            isSelected={draftIds.has(item.id)}
+            onPress={() => {
+              setDraft(prev =>
+                prev.some(entry => entry.id === item.id)
+                  ? prev.filter(entry => entry.id !== item.id)
+                  : [...prev, item],
+              );
+            }}
+          />
+        )}
+      />
+    </FilterMultiSelectSheet>
+  );
+}
+
+function BoardsFilterSheetBody({
+  isOpen,
+  onOpenChange,
+  onDismiss,
+  selected,
+  onApply,
+}: SheetMountProps & {
+  selected: readonly FilterEntity[];
+  onApply: (entities: FilterEntity[]) => void;
+}): ReactElement {
+  const [boards] = useCachedQuery(queries.getAllBoardsList());
+  const [query, setQuery] = useState('');
+  const [draft, setDraft] = useState<FilterEntity[]>(() => [...selected]);
+  const draftIds = useMemo(() => new Set(draft.map(item => item.id)), [draft]);
+
+  const rows = useMemo(() => {
+    const asEntities = (boards ?? [])
+      .map(board => {
+        const id = board.id;
+        const label = (board.name ?? '').trim();
+        if (!id || !label) return null;
+        return { id, label };
+      })
+      .filter((item): item is FilterEntity => item !== null);
+    const trimmed = query.trim().toLowerCase();
+    const filtered = trimmed
+      ? asEntities.filter(item => item.label.toLowerCase().includes(trimmed))
+      : asEntities;
+    if (trimmed) return filtered;
+    const listed = new Set(filtered.map(item => item.id));
+    const missing = draft.filter(item => !listed.has(item.id));
+    return selectionFirst(filtered, draftIds, missing);
+  }, [boards, draft, draftIds, query]);
+
+  return (
+    <FilterMultiSelectSheet
+      isOpen={isOpen}
+      onOpenChange={onOpenChange}
+      onDismiss={onDismiss}
+      title='Board'
+      searchPlaceholder='Search boards'
       query={query}
       onQueryChange={setQuery}
       selectionCount={draft.length}

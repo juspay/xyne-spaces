@@ -259,6 +259,33 @@ describe('global search state', () => {
       assert.equal(next.sortBy, 'newest');
     });
 
+    it('drops structured fields that do not apply when the tab changes', () => {
+      const onMessages = searchReducer(initial, { type: 'tabChanged', tab: 'messages' });
+      const busy = searchReducer(onMessages, {
+        type: 'structuredApplied',
+        structured: {
+          ...DEFAULT_STRUCTURED_FILTERS,
+          priority: 'HIGH',
+          assignees: [{ id: 'u1', label: 'Ada' }],
+          withUsers: [{ id: 'u2', label: 'Bob' }],
+        },
+        chips: [{ id: 'u9', label: 'From', prefix: 'from:', entityType: 'user' }],
+        onlyMyChannels: false,
+        sortBy: 'newest',
+        rankProfile: DEFAULT_RANK_PROFILE,
+      });
+      const onTickets = searchReducer(busy, { type: 'tabChanged', tab: 'tickets' });
+
+      assert.equal(onTickets.structured.priority, 'HIGH');
+      assert.deepEqual(onTickets.structured.assignees, [{ id: 'u1', label: 'Ada' }]);
+      assert.deepEqual(onTickets.structured.withUsers, []);
+      assert.equal(onTickets.chips.length, 1);
+
+      const backToMessages = searchReducer(onTickets, { type: 'tabChanged', tab: 'messages' });
+      assert.equal(backToMessages.structured.priority, '');
+      assert.deepEqual(backToMessages.structured.assignees, []);
+    });
+
     it('does not reset rank when re-selecting the same tab', () => {
       const ranked = apply(initial, { rankProfile: 'personalized' });
       const same = searchReducer(ranked, { type: 'tabChanged', tab: 'chats' });

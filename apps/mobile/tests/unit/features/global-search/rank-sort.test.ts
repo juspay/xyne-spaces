@@ -99,7 +99,7 @@ describe('global search rank and sort', () => {
       assert.equal(params['rankProfile'], 'personalized');
     });
 
-    it('omits orderBy for Relevance and still sends the default rank', () => {
+    it('omits orderBy for Relevance and omits unset rankProfile', () => {
       assert.equal(effectiveRankProfile('tickets', ''), 'default_native');
 
       const request = buildSearchRequest({
@@ -115,7 +115,7 @@ describe('global search rank and sort', () => {
       });
       assert.ok(request);
       const params = toSearchParams(request);
-      assert.equal(params['rankProfile'], 'default_native');
+      assert.equal(params['rankProfile'], undefined);
       assert.equal(params['orderBy'], undefined);
     });
 
@@ -134,7 +134,7 @@ describe('global search rank and sort', () => {
         })!,
       );
       assert.equal(params['orderBy'], 'oldest');
-      assert.equal(params['rankProfile'], 'default_native');
+      assert.equal(params['rankProfile'], undefined);
     });
 
     it('does not treat sort/rank alone as enough to search', () => {
@@ -169,7 +169,7 @@ describe('global search rank and sort', () => {
       assert.ok(request);
       assert.equal(request.tab, 'messages');
       assert.equal(request.category, 'messages');
-      assert.equal(toSearchParams(request)['rankProfile'], 'default_native');
+      assert.equal(toSearchParams(request)['rankProfile'], undefined);
       assert.equal(toSearchParams(request)['orderBy'], 'newest');
     });
   });

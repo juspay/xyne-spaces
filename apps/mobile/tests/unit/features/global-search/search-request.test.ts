@@ -148,6 +148,7 @@ describe('global search request', () => {
 
     it('searches when only a modal filter is set', () => {
       const sent = params({
+        tab: 'tickets',
         structured: {
           ...DEFAULT_STRUCTURED_FILTERS,
           assignees: [{ id: 'u9', label: 'Ada' }],
@@ -293,11 +294,53 @@ describe('global search request', () => {
       assert.equal(params({ query: 'deploy', sortBy: 'relevance' })['orderBy'], undefined);
     });
 
-    it('always sends an effective rankProfile (default_native when unset)', () => {
-      assert.equal(params({ query: 'deploy' })['rankProfile'], 'default_native');
+    it('omits rankProfile when unset so the backend keeps its default', () => {
+      assert.equal(params({ query: 'deploy' })['rankProfile'], undefined);
       assert.equal(
         params({ query: 'deploy', rankProfile: 'personalized' })['rankProfile'],
         'personalized',
+      );
+    });
+
+    it('does not start a search for showArchived alone', () => {
+      assert.equal(
+        buildSearchRequest(
+          input({
+            tab: 'tickets',
+            structured: { ...DEFAULT_STRUCTURED_FILTERS, showArchived: true },
+          }),
+        ),
+        null,
+      );
+    });
+
+    it('does not send ticket-only filters on the messages tab', () => {
+      const sent = params({
+        tab: 'messages',
+        query: 'deploy',
+        structured: {
+          ...DEFAULT_STRUCTURED_FILTERS,
+          priority: 'HIGH',
+          assignees: [{ id: 'u9', label: 'Ada' }],
+        },
+      });
+
+      assert.equal(sent['priority'], undefined);
+      assert.equal(sent['assignee'], undefined);
+    });
+
+    it('does not search files for a With filter (field does not apply)', () => {
+      assert.equal(
+        buildSearchRequest(
+          input({
+            tab: 'files',
+            structured: {
+              ...DEFAULT_STRUCTURED_FILTERS,
+              withUsers: [{ id: 'u1', label: 'Ada' }],
+            },
+          }),
+        ),
+        null,
       );
     });
 
