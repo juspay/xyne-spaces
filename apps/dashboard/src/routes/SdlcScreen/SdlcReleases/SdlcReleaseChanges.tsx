@@ -340,6 +340,10 @@ function ReleaseNotes({
 
   const insights = readReleaseInsights(release.metadata);
   const running = analyzing || readIsGeneratingInsights(release.metadata);
+  const notesUrl = (release.metadata as { releaseNotesCanvasUrl?: unknown } | null | undefined)
+    ?.releaseNotesCanvasUrl;
+  const notesCanvasId =
+    typeof notesUrl === 'string' ? (/\/canvas\/([^/?#]+)/.exec(notesUrl)?.[1] ?? null) : null;
 
   const analyze = async (): Promise<void> => {
     if (
@@ -368,7 +372,7 @@ function ReleaseNotes({
     }
   };
 
-  const headerAction = canManage && (insights || running || analysisCanvasId) && (
+  const headerAction = canManage && (insights || running || analysisCanvasId || notesCanvasId) && (
     <Button
       variant='ghost'
       size='sm'
@@ -402,7 +406,7 @@ function ReleaseNotes({
           migrationCount={migrationCount}
         />
       )}
-      {!running && !insights && !analysisCanvasId && (
+      {!running && !insights && !analysisCanvasId && !notesCanvasId && (
         <div className='flex flex-wrap items-center gap-4 rounded-[14px] border border-border bg-background px-[22px] py-5'>
           <span className='flex size-[38px] shrink-0 items-center justify-center rounded-[10px] border border-border bg-muted text-muted-foreground'>
             <Sparkles size={17} />
@@ -424,6 +428,25 @@ function ReleaseNotes({
             </Button>
           )}
         </div>
+      )}
+      {notesCanvasId && (
+        <button
+          type='button'
+          onClick={() => onOpenCanvas(notesCanvasId)}
+          className='flex w-full max-w-[420px] items-center gap-3 self-start rounded-xl border border-border bg-background p-3 text-left transition-[border-color,box-shadow] hover:border-foreground/20 hover:shadow-sm'
+          data-track-category={TRACK_CATEGORY}
+          data-track-name='ReleaseNotesCanvasOpened'
+        >
+          <span className='flex size-10 shrink-0 items-center justify-center rounded-lg bg-status-success text-white'>
+            <FileText size={18} />
+          </span>
+          <span className='flex min-w-0 flex-col gap-1'>
+            <span className='truncate text-sm font-semibold text-foreground'>
+              📝 Release Notes: {release.xyneId}
+            </span>
+            <span className='text-[13px] text-muted-foreground'>Click to open canvas</span>
+          </span>
+        </button>
       )}
       {analysisCanvasId && (
         <button
