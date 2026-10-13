@@ -41,7 +41,8 @@ export function extractChannelMentions(htmlContent: string): string[] {
 
 // The opening tag @xyne/shared's extractUserMentions / extractGroupMentions match: no closing tag
 // needed, either quote at each end. Mentions are found (and notified) from this tag alone.
-const MENTION_TAG = /<span[^>]*data-mention-type=["'](user|group)["'][^>]*>/g;
+// [^<>] stops each try at the next tag, so many unclosed '<span's can't make it quadratic.
+const MENTION_TAG = /<span[^<>]*data-mention-type=["'](user|group)["'][^<>]*>/g;
 const MENTION_USER_ID = /data-user-id=(["'])([^"']+)\1/;
 
 /**

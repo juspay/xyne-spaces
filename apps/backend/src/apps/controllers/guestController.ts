@@ -122,7 +122,7 @@ export class GuestController {
       res.status(error.status).json({ error: error.message, code: error.code });
       return;
     }
-    logger.error(`[APP-GUESTS] Guest ${action} failed:`, error);
+    logger.error('[APP-GUESTS] Guest request failed', { action, error: error instanceof Error ? error.message : 'unknown' });
     res.status(500).json({ error: 'Internal server error' });
   }
 }
