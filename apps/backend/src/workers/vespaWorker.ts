@@ -7,6 +7,7 @@ import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { fetchAndMapBySchema, fetchDataBySchema, mapBySchema, mapSdlcFieldsOnly, VespaOperationType } from '@/zero/vespa-injection/core/mapper';
 import { vespaPostIngestHooks } from './vespaPostIngestHooks';
+import { runSdlcSearchSync } from '@/sdlc/search/sdlcHubSync';
 import { VespaInsertionStatus } from '@xyne/shared';
 import { config } from '@/config/env';
 
@@ -197,6 +198,12 @@ export class VespaWorker {
 	 */
 	private async processJob(job: Bull.Job<VespaJob>): Promise<any> {
 		const { schema, docId, jobType, app } = job.data;
+
+		// Not a document job: re-sync an SDLC hub, which queues that hub's document jobs.
+		if (job.data.sdlcSync) {
+			logger.info(`[VESPA_WORKER] Running SDLC search sync ${docId} (Job ID: ${job.id})`);
+			return runSdlcSearchSync(job.data.sdlcSync);
+		}
 
 		logger.info(
 			`[VESPA_WORKER] Processing ${jobType} job for ${schema}/${docId} (Job ID: ${job.id}, Job Name: ${job.name})`

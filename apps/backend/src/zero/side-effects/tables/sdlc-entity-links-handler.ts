@@ -1,6 +1,6 @@
 import { BaseSideEffectHandler } from '../base-handler';
 import type { SdlcEntityLinkPreviousValue, SideEffectJobConfig } from '../types';
-import { requestSdlcSearchSync } from '@/queues/sdlcSearchSyncQueue';
+import { requestSdlcSearchSync } from '@/sdlc/search/sdlcSearchSync';
 
 /**
  * Removing an SDLC edge (unlinking a ticket or context, unfiling an item, deleting a

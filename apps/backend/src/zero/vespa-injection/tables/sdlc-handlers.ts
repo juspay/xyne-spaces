@@ -4,7 +4,7 @@ import { BaseVespaHandler } from '../core/base-handler';
 import type { TableName, VespaQueueHandler } from '../core/types';
 import type { QueryContext } from '../../acl/core/types';
 import { sdlcContainerSchema, sdlcRepositorySchema } from '@/vespa/src/types';
-import { requestSdlcSearchSync, type SdlcSearchSyncTarget } from '@/queues/sdlcSearchSyncQueue';
+import { requestSdlcSearchSync, type SdlcSearchSyncTarget } from '@/sdlc/search/sdlcSearchSync';
 
 /**
  * SDLC Hub search: hub changes made through Zero mutators (the hub UI) request a debounced

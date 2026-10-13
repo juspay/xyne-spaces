@@ -32,7 +32,17 @@ export interface VespaJobConfig<S extends keyof SchemaDataMap> {
   // same docId with content later. On a field-scoped 'update' it maps metadata only, for
   // fields that don't need the content (a transcript's title/ACL/labels).
   nameOnly?: boolean;
+  // Not a document job: re-sync the SDLC hub this names (or the hub of the item it names).
+  // schema and docId only route and key it; see sdlc/search/sdlcSearchSync.ts.
+  sdlcSync?: SdlcSearchSyncTarget & { reason?: string };
 }
+
+/** What an SDLC search sync is asked for: a hub, or an item whose hub the worker resolves. */
+export type SdlcSearchSyncTarget =
+  | { hubId: string }
+  | { containerId: string }
+  | { canvasId: string }
+  | { repoId: string };
 
 export type VespaQueueHandler = VespaJobConfig<keyof SchemaDataMap>
 export type VespaJob = VespaJobConfig<keyof SchemaDataMap>

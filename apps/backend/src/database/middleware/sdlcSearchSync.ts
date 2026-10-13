@@ -1,6 +1,6 @@
 import type { PrismaClient } from '@prisma/client';
 import { logger } from '@/utils/logger';
-import { requestSdlcSearchSync, type SdlcSearchSyncTarget } from '@/queues/sdlcSearchSyncQueue';
+import { requestSdlcSearchSync, type SdlcSearchSyncTarget } from '@/sdlc/search/sdlcSearchSync';
 
 /**
  * Prisma middleware that keeps SDLC Hub search in step with server-side writes.

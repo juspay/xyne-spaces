@@ -16,8 +16,9 @@ import {
   ticketSchema,
   type VespaSchema,
 } from '@/vespa/src/types';
-import type { VespaJob } from '@/zero/vespa-injection/core/types';
+import type { SdlcSearchSyncTarget, VespaJob } from '@/zero/vespa-injection/core/types';
 import { hubOfContainer, invalidateSdlcHubIndex, loadSdlcHubIndex } from './sdlcSearchIndex';
+import { requestSdlcSearchSync } from './sdlcSearchSync';
 
 const TAG = '[SDLC-SEARCH-SYNC]';
 // Vespa's per-query hit limit (query maxHits); larger sets are read in pages, up to the highest
@@ -249,6 +250,30 @@ async function indexedHits(schema: VespaSchema, where: string, fields: string[] 
     });
     return hits;
   }
+}
+
+/**
+ * Runs one SDLC search sync request (queued by requestSdlcSearchSync; run by the Vespa worker).
+ * A request that names an item becomes a request for its hub, so a burst of writes to different
+ * items of one hub collapses into that hub's one debounced sync.
+ */
+export async function runSdlcSearchSync(target: SdlcSearchSyncTarget & { reason?: string }): Promise<SdlcHubSyncResult[]> {
+  const hubIds = await hubsOfSyncTarget(target);
+  // A repository in no hub (detached from its last one) has no hub to sync; re-feed it
+  // directly so its hubIds empty out.
+  if ('repoId' in target && hubIds.length === 0) {
+    await vespaQueue.addJob({ schema: sdlcRepositorySchema, jobType: 'feed', docId: target.repoId });
+  }
+  if (!('hubId' in target)) {
+    for (const hubId of hubIds) requestSdlcSearchSync({ hubId }, target.reason);
+    return [];
+  }
+  const results: SdlcHubSyncResult[] = [];
+  for (const hubId of hubIds) {
+    const result = await syncSdlcHub(hubId);
+    if (result) results.push(result);
+  }
+  return results;
 }
 
 /** The hubs a sync request reaches, for requests that name an item instead of a hub. */

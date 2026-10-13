@@ -3,8 +3,11 @@ import { logger } from '@/utils/logger';
 import { VespaJob } from '@/zero/vespa-injection/core/types';
 import { db } from '@/database/client';
 import { registerVespaBackfillQueueMetrics } from '@/services/otel/vespaMetrics';
-import { fileSchema, SubApp } from '@/vespa/src/types';
+import { fileSchema, sdlcContainerSchema, SubApp } from '@/vespa/src/types';
 import { config } from '@/config/env';
+
+// An SDLC hub sync waits this long, so a burst of changes to one hub collapses into one sync.
+const SDLC_SYNC_DEBOUNCE_MS = 3000;
 
 class VespaQueue {
 	private queues: Map<string, Bull.Queue<VespaJob>> = new Map();
@@ -187,6 +190,40 @@ class VespaQueue {
 			);
 			throw error;
 		}
+	}
+
+	/**
+	 * Queue an SDLC hub search sync (see sdlc/search/sdlcSearchSync.ts), keyed by `key`.
+	 * Unlike addJob, it goes to one queue only, the first non-file one (vespa-ingestion by
+	 * default): a copy on every queue would run the sync once per consumer, and the sync already
+	 * sends the document jobs it makes to every queue through addJob.
+	 *
+	 * Debounced per key: while a sync for the same key is waiting, it absorbs the request. A
+	 * request that arrives while that sync runs gets one follow-up run, so no change is missed.
+	 */
+	async addSdlcSearchSync(sync: NonNullable<VespaJob['sdlcSync']>, key: string): Promise<void> {
+		if (this.queues.size === 0 || !this.isInitialized) {
+			throw new Error('Vespa queue not initialized Properly');
+		}
+		const fileQueueName = this.fileQueueNameOverride || process.env.VESPA_FILE_QUEUE_NAME || 'vespa-files';
+		const queue = [...this.queues.entries()].find(([name]) => name !== fileQueueName)?.[1];
+		if (!queue) {
+			throw new Error(`No non-file queue for SDLC search sync. Available: ${[...this.queues.keys()].join(', ')}`);
+		}
+
+		const jobKey = `sdlc-sync-${key}`;
+		const existing = await queue.getJob(jobKey);
+		const state = existing ? await existing.getState() : null;
+		if (state === 'waiting' || state === 'delayed') return;
+		if (existing && state !== 'active') await existing.remove();
+		await queue.add('sdlc-search-sync', { schema: sdlcContainerSchema, jobType: 'update', docId: key, sdlcSync: sync }, {
+			jobId: state === 'active' ? `${jobKey}-followup` : jobKey,
+			delay: SDLC_SYNC_DEBOUNCE_MS,
+			priority: 5,
+			// Removed when done, so the next change can reuse the key.
+			removeOnComplete: true,
+			removeOnFail: true,
+		});
 	}
 
 	/**
