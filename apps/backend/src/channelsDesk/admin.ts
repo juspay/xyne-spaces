@@ -93,13 +93,22 @@ export async function listChannelsDeskChannels(deskId: string): Promise<{ added:
   return { added, available: appChannels.filter((channel) => !onADesk.has(channel.id)) };
 }
 
-/** Adds one of the app's channels to the desk. False if it isn't available (app not in it, or on another desk). */
-export async function addChannelsDeskChannel(desk: { id: string; workspaceId: string }, channelId: string): Promise<boolean> {
+/**
+ * Adds one of the app's channels to the desk. 'not-eligible' if it can't go on a desk (the app isn't in it,
+ * or it's a DM, an archived channel or a desk); 'other-desk' if another desk has it.
+ */
+export async function addChannelsDeskChannel(
+  desk: { id: string; workspaceId: string },
+  channelId: string,
+): Promise<'added' | 'not-eligible' | 'other-desk'> {
   const { added, available } = await listChannelsDeskChannels(desk.id);
-  if (added.some((channel) => channel.id === channelId)) return true;
+  if (added.some((channel) => channel.id === channelId)) return 'added';
   const channel = available.find((candidate) => candidate.id === channelId);
-  if (!channel) return false;
   const name = channelsDeskChannelSourceName(channelId);
+  if (!channel) {
+    const onADesk = await db.externalSource.findFirst({ where: { name, isActive: true }, select: { id: true } });
+    return onADesk ? 'other-desk' : 'not-eligible';
+  }
   try {
     // A removed channel leaves an inactive row; adding it again repoints that row.
     const repointed = await db.externalSource.updateMany({
@@ -121,10 +130,10 @@ export async function addChannelsDeskChannel(desk: { id: string; workspaceId: st
     }
   } catch (err) {
     // Another desk added it at the same moment.
-    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') return false;
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') return 'other-desk';
     throw err;
   }
-  return true;
+  return 'added';
 }
 
 /** Stops a channel feeding the desk; its existing tickets stay. False if it wasn't on this desk. */
@@ -144,13 +153,13 @@ export async function setAppChannelOnDesk(
   app: { installedAppId: string; workspaceId: string },
   channelId: string,
   onDesk: boolean,
-): Promise<'done' | 'no-desk' | 'other-desk'> {
+): Promise<'done' | 'no-desk' | 'not-eligible' | 'other-desk'> {
   const deskId = await channelsDeskOf(app.installedAppId);
   if (!deskId) return 'no-desk';
   if (!onDesk) {
     await removeChannelsDeskChannel(deskId, channelId);
     return 'done';
   }
-  // The caller checked it's the app's channel, so a refusal means another desk has it.
-  return (await addChannelsDeskChannel({ id: deskId, workspaceId: app.workspaceId }, channelId)) ? 'done' : 'other-desk';
+  const result = await addChannelsDeskChannel({ id: deskId, workspaceId: app.workspaceId }, channelId);
+  return result === 'added' ? 'done' : result;
 }

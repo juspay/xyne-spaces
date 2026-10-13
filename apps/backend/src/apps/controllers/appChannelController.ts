@@ -36,6 +36,10 @@ const UpdateChannelBodySchema = z
 
 const NO_DESK = { error: 'This app has no Channels desk yet; an admin links one in Desks.', code: 'NO_DESK' };
 const ON_OTHER_DESK = { error: 'This channel is already on another desk.', code: 'CHANNEL_ON_OTHER_DESK' };
+const NOT_ELIGIBLE = {
+  error: 'Only regular channels can go on a desk (not DMs, archived channels or desks).',
+  code: 'CHANNEL_NOT_ELIGIBLE',
+};
 
 const channelController = new ChannelController();
 
@@ -131,6 +135,10 @@ export class AppChannelController {
       const result = await setAppChannelOnDesk(app, channelId, desk);
       if (result === 'no-desk') {
         res.status(400).json(NO_DESK);
+        return;
+      }
+      if (result === 'not-eligible') {
+        res.status(400).json(NOT_ELIGIBLE);
         return;
       }
       if (result === 'other-desk') {

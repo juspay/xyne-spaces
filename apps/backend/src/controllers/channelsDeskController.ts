@@ -56,7 +56,7 @@ export class ChannelsDeskController {
         return;
       }
       const desk = { id: req.params.channelId, workspaceId: req.user!.workspaceId };
-      if (!(await addChannelsDeskChannel(desk, sourceChannelId))) {
+      if ((await addChannelsDeskChannel(desk, sourceChannelId)) !== 'added') {
         res.status(409).json({ error: "This channel can't be added: it isn't one of the app's channels, or it's already on a desk." });
         return;
       }
