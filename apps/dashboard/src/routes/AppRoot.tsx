@@ -48,6 +48,7 @@ import { APP_BASE_PATH, isSdlcSurface } from '../config';
 import SdlcFrameHost from './SdlcScreen/SdlcFrameHost';
 import SdlcFrameViewport from './SdlcScreen/SdlcFrameViewport';
 import { SdlcFrameProvider } from './SdlcScreen/SdlcFrameContext';
+import ArtifactAppPoolHost from '../components/ArtifactApp/ArtifactAppPool';
 import { useSdlcFrameBridge } from './SdlcScreen/useSdlcFrameBridge';
 import ReleaseDetailScreen from './ReleaseDetailScreen/ReleaseDetailScreen';
 
@@ -807,6 +808,7 @@ const AppRoot = (): ReactElement => {
                       rather than destroying it. */}
                     <SdlcFrameProvider>
                       {!isSdlcSurface && <SdlcFrameHost />}
+                      <ArtifactAppPoolHost />
                       {shouldShowMobileHeader && externalId && (
                         <MobileCallHeader
                           participants={participants}

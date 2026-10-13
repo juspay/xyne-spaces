@@ -16,6 +16,7 @@ import {
   type HostDataMessage,
   type HostMutateResultMessage,
 } from './artifactData.constants';
+import { artifactFrame, isFromArtifactFrame, type ArtifactVisibility } from './artifactFrame';
 
 /** The SandpackPreview ref itself — only its client's iframe is used here. */
 export type PreviewClientRef = SandpackPreviewRef;
@@ -31,6 +32,8 @@ interface BridgeArgs {
   /** Assigned by the bridge so the header refresh button can trigger a re-resolve.
    *  A ref (not a prop) so triggering refresh never re-renders the sandbox. */
   refreshRef: MutableRefObject<(() => Promise<void>) | null>;
+  /** While hidden, refreshes wait for the app to be shown and writes are refused. */
+  visibility?: ArtifactVisibility;
 }
 
 /**
@@ -53,6 +56,7 @@ export function useArtifactDataBridge({
   appId,
   previewRef,
   refreshRef,
+  visibility,
 }: BridgeArgs): void {
   useEffect(() => {
     const declared = requirements ?? [];
@@ -63,6 +67,7 @@ export function useArtifactDataBridge({
     let cancelled = false;
     const snapshot: ArtifactDataSnapshot = {};
     let lastResolveStartedAt = 0;
+    let heldRefresh = false;
     const inflight = new Set<string>();
 
     for (const requirement of declared) {
@@ -76,13 +81,8 @@ export function useArtifactDataBridge({
           };
     }
 
-    /** The app's window, resolved at call time — the client may not exist yet
-     *  under lazy init, and the iframe is replaced on reload. */
-    const appWindow = (): Window | null =>
-      previewRef.current?.getClient()?.iframe?.contentWindow ?? null;
-
     const postSnapshot = (): void => {
-      const target = appWindow();
+      const target = artifactFrame(previewRef);
       if (!target) return;
       const message: HostDataMessage = {
         source: 'xyne-artifact-host',
@@ -91,7 +91,7 @@ export function useArtifactDataBridge({
         payloads: snapshot,
       };
       try {
-        target.postMessage(message, '*');
+        target.window.postMessage(message, target.origin);
       } catch {
         // Structured clone failed — something in a result isn't serialisable.
         // Replace the offending payloads with an error so the app can render.
@@ -101,7 +101,7 @@ export function useArtifactDataBridge({
           }
         }
         try {
-          target.postMessage({ ...message, payloads: snapshot }, '*');
+          target.window.postMessage({ ...message, payloads: snapshot }, target.origin);
         } catch {
           /* give up — the app keeps showing its loading state */
         }
@@ -178,7 +178,7 @@ export function useArtifactDataBridge({
     };
 
     const postMutateResult = (requestId: string, ok: boolean, error?: string): void => {
-      const target = appWindow();
+      const target = artifactFrame(previewRef);
       if (!target) return;
       const message: HostMutateResultMessage = {
         source: 'xyne-artifact-host',
@@ -189,7 +189,7 @@ export function useArtifactDataBridge({
         ...(error ? { error } : {}),
       };
       try {
-        target.postMessage(message, '*');
+        target.window.postMessage(message, target.origin);
       } catch {
         /* the app's own timeout will fire */
       }
@@ -230,8 +230,7 @@ export function useArtifactDataBridge({
       if (!isAppArtifactMessage(event.data)) return;
       // Several artifacts can be mounted at once and they all post to this same
       // window, so only accept messages from *our* iframe.
-      const target = appWindow();
-      if (!target || event.source !== target) return;
+      if (!isFromArtifactFrame(event, previewRef)) return;
 
       if (event.data.type === 'ready') {
         // Re-deliver what we already hold. An iframe reload must not re-query.
@@ -240,6 +239,10 @@ export function useArtifactDataBridge({
       }
 
       if (event.data.type === 'refresh') {
+        if (visibility && !visibility.isActive()) {
+          heldRefresh = true;
+          return;
+        }
         if (Date.now() - lastResolveStartedAt < REFRESH_THROTTLE_MS) return;
         void resolve(event.data.name);
         return;
@@ -248,18 +251,33 @@ export function useArtifactDataBridge({
       if (event.data.type === 'mutate') {
         const { requestId, name, args } = event.data;
         if (!requestId || !name) return;
+        // Not queued: the app times a write out after 30s, so a late replay would apply a change it reported as failed.
+        if (visibility && !visibility.isActive()) {
+          postMutateResult(
+            requestId,
+            false,
+            'This app is in the background, so it cannot make changes.',
+          );
+          return;
+        }
         void runMutation(requestId, name, args);
       }
     };
 
     window.addEventListener('message', onMessage);
     refreshRef.current = (): Promise<void> => resolve();
+    const stopResume = visibility?.onResume(() => {
+      if (!heldRefresh) return;
+      heldRefresh = false;
+      void resolve();
+    });
     void resolve();
 
     return (): void => {
       cancelled = true;
       window.removeEventListener('message', onMessage);
       refreshRef.current = null;
+      stopResume?.();
     };
-  }, [requirements, canWrite, appId, previewRef, refreshRef]);
+  }, [requirements, canWrite, appId, previewRef, refreshRef, visibility]);
 }

@@ -1,7 +1,7 @@
-import { ReactElement, useCallback, useMemo, useState } from 'react';
+import { ReactElement, useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Globe, Lock } from 'lucide-react';
+import { ArrowLeft, Globe, Lock, RefreshCw } from 'lucide-react';
 import { Button } from '../ui/Button/index';
 import { ArtifactAppSettings, ReactArtifactView } from '../AIScreen/ReactArtifact';
 import type { ReactArtifactRef } from '../AIScreen/ReactArtifact';
@@ -32,7 +32,7 @@ const LAYOUT_BY_SURFACE = {
   channel: 'panel',
 } as const;
 
-interface ArtifactAppHostProps {
+export interface ArtifactAppHostProps {
   appId: string;
   /**
    * Passed through to the app as its context, so one build can lay itself out
@@ -56,6 +56,9 @@ interface ArtifactAppHostProps {
   onBack?: () => void;
 }
 
+/** Age after which a running app re-checks for a new build. */
+const VERSION_CHECK_STALE_MS = 30_000;
+
 /**
  * A saved app, running. Owners get the publish control; everyone else simply
  * gets the pinned build, which the server enforces — this component never
@@ -69,16 +72,33 @@ export const ArtifactAppHost = ({
   onBack,
   placement,
   showPayloadTitle = false,
-}: ArtifactAppHostProps): ReactElement => {
+  visible = true,
+}: ArtifactAppHostProps & {
+  /** False while pooled off-screen. */
+  visible?: boolean;
+}): ReactElement => {
   const queryClient = useQueryClient();
   const { workspaceId } = useParams<{ workspaceId: string }>();
   const [error, setError] = useState<string | null>(null);
 
-  const { data, isLoading, isError, refetch } = useQuery({
+  const { data, dataUpdatedAt, isLoading, refetch } = useQuery({
     queryKey: ['artifact-app', appId],
     queryFn: () => getArtifactApp(appId),
     enabled: Boolean(appId),
+    staleTime: VERSION_CHECK_STALE_MS,
+    refetchOnWindowFocus: visible,
+    refetchOnMount: 'always',
   });
+
+  // Kept-alive apps never remount, so re-check the version when shown.
+  useEffect(() => {
+    if (!visible || !appId) return;
+    void queryClient.refetchQueries({
+      queryKey: ['artifact-app', appId],
+      stale: true,
+      type: 'active',
+    });
+  }, [visible, appId, queryClient]);
 
   const app = data?.app;
   const versions = useMemo(() => data?.versions ?? [], [data]);
@@ -100,6 +120,25 @@ export const ArtifactAppHost = ({
     return versions.find(v => v.id === preferred) ?? versions[0];
   }, [app, versions]);
 
+  // The payload is the build current at mount, so only data fetched since then says what's running.
+  const [mountedAt] = useState(() => Date.now());
+  const fresh = dataUpdatedAt >= mountedAt;
+  const [runningVersionId, setRunningVersionId] = useState<string | null>(null);
+  const [reloads, setReloads] = useState(0);
+  const isOwner = Boolean(app?.isOwner);
+  const reload = useCallback((): void => {
+    setRunningVersionId(shown?.id ?? null);
+    setReloads(n => n + 1);
+  }, [shown]);
+  useEffect(() => {
+    if (!shown || !fresh || shown.id === runningVersionId) return;
+    if (runningVersionId === null) setRunningVersionId(shown.id);
+    // Owners follow new builds at once; viewers get a reload prompt.
+    else if (isOwner) reload();
+  }, [shown, fresh, isOwner, runningVersionId, reload]);
+  const running = versions.find(v => v.id === runningVersionId) ?? shown;
+  const updateAvailable = Boolean(shown && runningVersionId && shown.id !== runningVersionId);
+
   const hostContext = useMemo(
     (): XyneAppContext => ({
       v: 1,
@@ -117,8 +156,8 @@ export const ArtifactAppHost = ({
   // path but keeps one ref shape across the chat and saved-app surfaces.
   const artifact: ReactArtifactRef | null = useMemo(
     () =>
-      app && shown ? { attachmentId: '', manifest: shown.manifest, savedAppId: app.id } : null,
-    [app, shown],
+      app && running ? { attachmentId: '', manifest: running.manifest, savedAppId: app.id } : null,
+    [app, running],
   );
 
   const invalidate = useCallback((): void => {
@@ -157,7 +196,8 @@ export const ArtifactAppHost = ({
     );
   }
 
-  if (isError || !app || !artifact) {
+  // Not on error alone: a failed background check must not kill a running app.
+  if (!app || !artifact) {
     return (
       <div className='flex h-full flex-col items-center justify-center gap-2'>
         <p className='text-sm font-medium text-foreground'>Could not open this app</p>
@@ -222,16 +262,36 @@ export const ArtifactAppHost = ({
 
       {error && <p className='px-4 py-2 text-xs text-destructive'>{error}</p>}
 
+      {updateAvailable && (
+        <div className='flex items-center gap-2 border-b border-border bg-muted px-4 py-1.5 text-xs text-muted-foreground'>
+          <span className='flex-1'>A newer version of this app is available.</span>
+          <button
+            type='button'
+            onClick={reload}
+            className='flex items-center gap-1 rounded px-2 py-0.5 font-medium text-foreground hover:bg-accent'
+            data-track-category='AskAI'
+            data-track-name='ArtifactAppLoadNewerVersion'
+          >
+            <RefreshCw className='h-3 w-3' aria-hidden='true' />
+            Reload
+          </button>
+        </div>
+      )}
+
       <div className='min-h-0 flex-1'>
+        {/* Remount on a new build; the payload route serves the current one. */}
         <ReactArtifactView
+          key={reloads}
           artifact={artifact}
           fill
           hostContext={hostContext}
           hideTitle={!showPayloadTitle}
+          hideSavedIndicator={placement.surface !== 'channel'}
+          active={visible}
           settingsSlot={
             <ArtifactAppSettings
               app={app}
-              viewing={shown ?? null}
+              viewing={running ?? null}
               versions={versions}
               {...(app.isOwner ? { onIconChange: setIcon.mutate } : {})}
             />
