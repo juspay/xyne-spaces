@@ -91,7 +91,7 @@ export class KataClient {
     this.template = options.template ?? DEFAULT_TEMPLATE;
     this.minCreateSpacingMs =
       options.minCreateSpacingMs ?? DEFAULT_MIN_CREATE_SPACING_MS;
-    this.k8sClient = createKubeClient();
+    this.k8sClient = options.k8sClient ?? createKubeClient();
   }
 
   private async claimCreateSlot(): Promise<void> {
@@ -138,8 +138,14 @@ export class KataClient {
       },
     );
 
-    const sandboxName = await this.waitForSandboxAssignment(claimName, namespace, readyTimeoutMs);
-    await this.waitForSandboxRunning(sandboxName, namespace, readyTimeoutMs);
+    let sandboxName: string;
+    try {
+      sandboxName = await this.waitForSandboxAssignment(claimName, namespace, readyTimeoutMs);
+      await this.waitForSandboxRunning(sandboxName, namespace, readyTimeoutMs);
+    } catch (err) {
+      await this.deleteClaimQuietly(claimName, namespace);
+      throw err;
+    }
 
     return new Session({
       sandboxId: sandboxName,
@@ -162,6 +168,23 @@ export class KataClient {
       return await session.commands.run(cmd, options.timeoutMs ?? ONE_SHOT_SESSION_TIMEOUT_MS);
     } finally {
       await session.destroy();
+    }
+  }
+
+  private async deleteClaimQuietly(claimName: string, namespace: string): Promise<void> {
+    try {
+      await this.k8sClient.deleteNamespacedCustomObject(
+        GROUP,
+        VERSION,
+        namespace,
+        SANDBOX_CLAIMS_PLURAL,
+        claimName,
+      );
+    } catch (err) {
+      const status = err as { statusCode?: number; response?: { statusCode?: number } };
+      const code = status.statusCode ?? status.response?.statusCode;
+      if (code === 404) return;
+      console.error(`Failed to delete orphaned SandboxClaim ${claimName} in ${namespace} after provisioning error:`, err);
     }
   }
 
