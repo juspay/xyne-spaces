@@ -92,6 +92,13 @@ export interface RecoverySessionContext {
   channelName: string;
   conversationId: string;
   task: string;
+  /** Agent identity. MUST be carried here: xyne-claw can mint its own
+   *  sessionId (e.g. when the dispatch id is not a valid internal id), so
+   *  callbacks like /webhook/progress resolve ctx from THIS recovery context
+   *  rather than the Redis session. Without agentId, per-agent config reads
+   *  (e.g. `hideLivePreview`) silently fall back to defaults. */
+  agentId?: string;
+  agentOrgId?: string | null;
   agentSlug?: string | undefined;
   agentName?: string | undefined;
   responseMode: "conversation" | "approval";

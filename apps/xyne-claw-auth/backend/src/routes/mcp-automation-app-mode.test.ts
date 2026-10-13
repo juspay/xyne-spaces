@@ -89,6 +89,9 @@ describe("userOnly tools in app mode", () => {
       ...["agents", "create", "get", "run", "runs", "schema", "submit", "update", "validate", "variables", "versions", "webhook", "webhook-issue"].map(
         (t) => `spaces-automation-${t}`,
       ),
+      // Sends as the desk on a human's behalf through a user-session-only
+      // Spaces route, so an automation run cannot reach it.
+      "spaces-send-ticket-email",
       "spaces-update-bulk-tickets",
       "spaces-update-ticket",
       "spaces-upload-to-kb",
