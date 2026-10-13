@@ -520,6 +520,10 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
 
       return groupDMChannel.id;
     }
+
+    // Large group: create nothing — back the group with the initiator's own self-DM
+    // (the "Saved messages" DM, keyed on the bare userId). Calls get their access
+    // from call_participants, so invitees still see and join without a channel.
     return this.findOrCreateSelfDm(userId, projectId, channelParticipants, workspaceId, options);
   }
 
