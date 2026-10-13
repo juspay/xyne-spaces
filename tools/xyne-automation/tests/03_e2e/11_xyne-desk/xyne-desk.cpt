@@ -1,0 +1,4 @@
+# Creating DL Desk channel <channelAlias> for user <userAlias> in project <projectAlias>
+* ensuring project <projectAlias> exists in fixture for user <userAlias>
+* configuring mock Desk shared mailbox for user <userAlias>
+* creating mock DL Desk channel <channelAlias> for user <userAlias> in project <projectAlias>

@@ -9,6 +9,11 @@ export interface ServiceConfig {
   baseUrl: string;
 }
 
+export interface DeskConfig {
+  mockDlEmail: string;
+  mockSharedMailbox: string;
+}
+
 export interface Config {
   backend: ServiceConfig;
   dashboard: ServiceConfig;
@@ -19,6 +24,7 @@ export interface Config {
   enableBrowserConsoleLogs: boolean;
   parallel: number;
   testProgressFile?: string;
+  desk: DeskConfig;
 }
 
 export function getEnvironment(): Environment {
@@ -142,6 +148,14 @@ function getParallel(env: Environment): number {
   }
 }
 
+// Mock Desk addresses must share the backend's DESK_MOCK_DEFAULT_EMAIL_DOMAIN.
+function getDeskConfig(): DeskConfig {
+  return {
+    mockDlEmail: process.env.DESK_MOCK_DL_EMAIL || 'support-dl@desk-mock.xyne.test',
+    mockSharedMailbox: process.env.DESK_MOCK_SHARED_MAILBOX || 'support@desk-mock.xyne.test',
+  };
+}
+
 function getConfigForEnv(env: Environment): Config {
   return {
     backend: {
@@ -157,6 +171,7 @@ function getConfigForEnv(env: Environment): Config {
     enableBrowserConsoleLogs: getEnableBrowserConsoleLogs(env),
     parallel: getParallel(env),
     testProgressFile: process.env.XYNE_TEST_PROGRESS_FILE || undefined,
+    desk: getDeskConfig(),
   };
 }
 

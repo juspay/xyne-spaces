@@ -17,6 +17,7 @@ import { config } from '@/config';
 import { closeLogger, gaugeLogger, setLoggerFileLabel } from '@/lib/logger';
 import { appendScenarioProgressEvent } from '@/lib/test-progress';
 import { loadBaselineFixtureIntoWorkerContext } from '@/fixtures/baseline';
+import { resetDeskScenarioState } from '@/tests/03_e2e/11_xyne-desk/xyne-desk-state';
 import { testContext } from '@/tests/shared/runtime/test-context';
 import {
   closeAllBrowserSessions,
@@ -96,6 +97,7 @@ export default class HooksSteps {
 
     await resetAllBrowserSessionsForReuse();
     testContext.resetScenarioState();
+    await resetDeskScenarioState();
 
     const progressFile = config.testProgressFile;
     const scenario = context.getCurrentScenario();
