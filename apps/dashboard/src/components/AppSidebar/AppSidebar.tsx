@@ -1,4 +1,4 @@
-import { ReactElement, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, ReactElement, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, type Location } from 'react-router-dom';
 import { useRouterSelector, useStableNavigate } from '../../hooks/useStableRouter';
 import { Tooltip } from '../ui/Tooltip/Tooltip';
@@ -28,6 +28,7 @@ import {
   AlertCircle,
   TicketToken,
   UserPlus,
+  DragableSixDots,
 } from '@xyne/icons';
 import { WorkspaceType } from '@xyne/shared';
 
@@ -41,6 +42,7 @@ import { isStatusExpired, resolveUserStatus } from '../../utils/statusUtils';
 import { UpdateStatusModal } from './UpdateStatusModal';
 import { StatusIndicator } from '../ui/StatusIndicator';
 import { useMissedCallCount } from '../../hooks/useMissedCallCount';
+import { useHasUnreadRecordingSummaries } from '../../hooks/useHasUnreadRecordingSummaries';
 import { useUnreadActivitiesCount } from '../../hooks/useUnreadActivitiesCount';
 import { useRecapUnreadCount } from '../../hooks/useRecapData';
 import { usePlatform } from '../../hooks/usePlatform';
@@ -50,7 +52,15 @@ import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { useVisibleNavigationItems } from '../../hooks/useVisibleNavigationItems';
 import { useIsCommunityWorkspace } from '../../hooks/useIsCommunityWorkspace';
 import { AppIcon } from '../AppIcon/AppIcon';
-import { toolbarItemsStore, useAppSnapshots, appIdOf } from '../../hooks/barItems';
+import { toolbarItemsStore, useAppSnapshots, appIdOf, appItemId } from '../../hooks/barItems';
+import { AI_TOOLBAR_PATH, useAiLaunchPreference } from '../../hooks/useAiLaunchPreference';
+import {
+  preventNativeDrag,
+  useMoreSlot,
+  useRailDrag,
+  type RailDrag,
+  type RailDrop,
+} from '../../hooks/useRailDrag';
 import type { NavigationItem } from './navigationConfig';
 
 /** One slot in the rail: a built-in destination or an artifact app. */
@@ -237,6 +247,7 @@ const AppSidebar = (): ReactElement => {
   const toolbarIds = toolbarItemsStore.useItems();
   const appSnapshots = useAppSnapshots();
   const missedCallCount = useMissedCallCount();
+  const hasUnreadRecordingSummaries = useHasUnreadRecordingSummaries();
   const hasOngoingCall = useRailActiveCalls().length > 0;
   const unreadActivityCount = useUnreadActivitiesCount();
   const { unreadCount: recapUnreadCount } = useRecapUnreadCount();
@@ -389,6 +400,69 @@ const AppSidebar = (): ReactElement => {
   );
   const isMoreActive = moreItems.some(item => item.path === activeRoute);
 
+  const { setAiInToolbar } = useAiLaunchPreference();
+  const railIds = useMemo(
+    () =>
+      railEntries.map(entry => (entry.kind === 'app' ? appItemId(entry.appId) : entry.item.path)),
+    [railEntries],
+  );
+  const railDrag = useRailDrag({
+    ids: railIds,
+    canHide: id => appIdOf(id) === null,
+    moreSlotFor: id => {
+      const order = visibleNavigationItems.map(item => item.path);
+      const at = order.indexOf(id);
+      return moreItems.filter(item => order.indexOf(item.path) < at).length;
+    },
+    onDrop: (drop: RailDrop) => {
+      const stored = toolbarItemsStore.get();
+      if (drop.kind === 'move') {
+        const target = railIds[drop.to];
+        if (target) toolbarItemsStore.move(stored.indexOf(drop.id), stored.indexOf(target));
+        return;
+      }
+      if (drop.kind === 'add') {
+        const before = railIds[drop.at];
+        toolbarItemsStore.add(drop.id, before ? stored.indexOf(before) : stored.length);
+        return;
+      }
+      if (drop.id === AI_TOOLBAR_PATH) setAiInToolbar(false);
+      else toolbarItemsStore.remove(drop.id);
+    },
+  });
+
+  const moreButtonRef = useRef<HTMLButtonElement>(null);
+  const moreAnchorRect = useRef<DOMRect | null>(null);
+  const moreAnchor = useRef({
+    getBoundingClientRect: (): DOMRect => {
+      if (!moreAnchorRect.current && moreButtonRef.current) {
+        moreAnchorRect.current = moreButtonRef.current.getBoundingClientRect();
+      }
+      return moreAnchorRect.current ?? new DOMRect();
+    },
+  });
+  const morePanelRef = railDrag.panelRef;
+
+  useEffect(() => {
+    if (!isMoreOpen) return;
+    let frame = 0;
+    const pin = (): void => {
+      const content = morePanelRef.current?.closest<HTMLElement>('[data-slot="popover-content"]');
+      const wrapper = content?.parentElement;
+      const button = moreButtonRef.current;
+      if (!content || !wrapper || !button || wrapper.style.transform.includes('-200%')) {
+        frame = requestAnimationFrame(pin);
+        return;
+      }
+      const { top } = wrapper.getBoundingClientRect();
+      const { left, width, height } = button.getBoundingClientRect();
+      moreAnchorRect.current = new DOMRect(left, top, width, height);
+      content.style.maxHeight = `${Math.min(window.innerHeight * 0.8, window.innerHeight - top - 12)}px`;
+    };
+    frame = requestAnimationFrame(pin);
+    return (): void => cancelAnimationFrame(frame);
+  }, [isMoreOpen, morePanelRef]);
+
   const permittedGlobalPaths = useMemo(
     () => new Set(visibleNavigationItems.map(item => item.path)),
     [visibleNavigationItems],
@@ -407,7 +481,9 @@ const AppSidebar = (): ReactElement => {
     );
   }, [visibleChannels, unreadCounts]);
 
-  const handleNavigationClick = (_label: string, _openedInNewWindow = false): void => {};
+  const handleNavigationClick = (_label: string, _openedInNewWindow = false): void => {
+    setIsMoreOpen(false);
+  };
 
   const railShortcuts = railShortcutsAvailable();
 
@@ -475,7 +551,10 @@ const AppSidebar = (): ReactElement => {
       <div className='w-full h-[52px] shrink-0' style={APP_DRAG_STYLE} />
       <div className='app-sidenav-frame flex-1 min-h-0 p-3 flex flex-col items-center justify-between border-t border-r border-sidebar-border-muted'>
         <WorkspaceSwitcher />
-        <div className='flex-1 mt-5 space-y-8 overflow-y-auto scrollbar-none min-h-0 pr-2 -mr-2'>
+        <div
+          ref={railDrag.scrollRef}
+          className='flex-1 mt-5 space-y-8 overflow-y-auto scrollbar-none min-h-0 pr-2 -mr-2'
+        >
           {isSupportContext ? (
             <SupportRail
               prefixWs={prefixWs}
@@ -486,6 +565,11 @@ const AppSidebar = (): ReactElement => {
           ) : (
             <nav>
               <ul className='relative flex flex-col gap-4'>
+                <li
+                  ref={railDrag.gapRef}
+                  aria-hidden
+                  className='pointer-events-none absolute left-0 top-0 size-8 rounded-lg border-[1.5px] border-dashed border-foreground/15 bg-foreground/[0.02] opacity-0'
+                />
                 {railEntries.map((entry, index) => {
                   const shortcutIndex =
                     railShortcuts && index < RAIL_SHORTCUT_LIMIT ? index + 1 : null;
@@ -503,10 +587,27 @@ const AppSidebar = (): ReactElement => {
                       entry.title
                     );
                     return (
-                      <li key={`app:${entry.appId}`} className='relative'>
+                      <li
+                        key={`app:${entry.appId}`}
+                        ref={railDrag.tileRef(appItemId(entry.appId))}
+                        data-rail-tile=''
+                        data-rail-label={entry.title}
+                        onPointerDown={event =>
+                          railDrag.startRailPress(appItemId(entry.appId), event)
+                        }
+                        onDragStart={preventNativeDrag}
+                        className='relative'
+                      >
+                        <span
+                          data-rail-socket
+                          aria-hidden
+                          className='pointer-events-none absolute inset-0 rounded-lg border-[1.5px] border-dashed border-foreground/15 bg-foreground/[0.02] opacity-0'
+                        />
                         <Tooltip content={appTooltip} side='right' delayDuration={0}>
                           <Link
                             to={prefixWs(path)}
+                            draggable={false}
+                            data-rail-glyph=''
                             onClick={() => handleNavigationClick(entry.title)}
                             aria-label={entry.title}
                             data-testid={`nav-artifact-app-${entry.appId}`}
@@ -537,6 +638,8 @@ const AppSidebar = (): ReactElement => {
                   const showOngoingCallDot =
                     item.path === '/calls' && hasOngoingCall && !showMissedCallBadge;
                   const showPendingDmDot = item.path === '/chat/dm' && hasPendingDirectMessages;
+                  const showRecordingSummaryDot =
+                    item.path === '/recordings' && hasUnreadRecordingSummaries;
                   const showActivityBadge =
                     item.path === '/chat/activity' && unreadActivityCount > 0;
                   const Icon = item.icon;
@@ -557,6 +660,8 @@ const AppSidebar = (): ReactElement => {
                   const navLink = (
                     <Link
                       to={prefixWs(item.path)}
+                      draggable={false}
+                      data-rail-glyph=''
                       onClick={event => {
                         const openedInNewWindow =
                           !!item.popout && openInAppWindow(prefixWs(item.path), event);
@@ -565,7 +670,13 @@ const AppSidebar = (): ReactElement => {
                           event.preventDefault();
                         }
                       }}
-                      aria-label={showPendingDmDot ? 'DMs unread' : item.label}
+                      aria-label={
+                        showPendingDmDot
+                          ? 'DMs unread'
+                          : showRecordingSummaryDot
+                            ? 'Recordings, new summaries'
+                            : item.label
+                      }
                       data-testid={testId}
                       data-track-category='App_Sidebar'
                       data-track-name='Sidebar_Nav_Item'
@@ -581,7 +692,7 @@ const AppSidebar = (): ReactElement => {
                       )}
                     >
                       <Icon size={item.iconSize ?? 16} variant={isActive ? 'Solid' : 'Stroke'} />
-                      {showPendingDmDot && (
+                      {(showPendingDmDot || showRecordingSummaryDot) && (
                         <span
                           aria-hidden='true'
                           className='absolute top-1 right-1 size-[9px] rounded-full bg-sidebar-primary border border-sidebar-accent-ring'
@@ -607,7 +718,20 @@ const AppSidebar = (): ReactElement => {
                   );
 
                   return (
-                    <li key={item.path} className='relative'>
+                    <li
+                      key={item.path}
+                      ref={railDrag.tileRef(item.path)}
+                      data-rail-tile=''
+                      data-rail-label={item.label}
+                      onPointerDown={event => railDrag.startRailPress(item.path, event)}
+                      onDragStart={preventNativeDrag}
+                      className='relative'
+                    >
+                      <span
+                        data-rail-socket
+                        aria-hidden
+                        className='pointer-events-none absolute inset-0 rounded-lg border-[1.5px] border-dashed border-foreground/15 bg-foreground/[0.02] opacity-0'
+                      />
                       {item.path === '/calls' ? (
                         <CallsRailHoverCard tooltip={tooltipContent}>{navLink}</CallsRailHoverCard>
                       ) : (
@@ -633,10 +757,26 @@ const AppSidebar = (): ReactElement => {
                 })}
 
                 {/* More menu — overflow items + customize toolbar (Slack-style) */}
-                <li className='relative'>
+                <li ref={railDrag.moreRef} className='group/more relative'>
                   <Popover
                     open={isMoreOpen}
-                    onOpenChange={setIsMoreOpen}
+                    onOpenChange={open => {
+                      if (open) moreAnchorRect.current = null;
+                      setIsMoreOpen(open);
+                    }}
+                    anchor={moreAnchor}
+                    onInteractOutside={event => {
+                      const { target } = event;
+                      if (!(target instanceof Element) || !target.closest('[data-rail-tile]')) {
+                        return;
+                      }
+                      const original = event.detail.originalEvent;
+                      const primaryPress =
+                        original instanceof PointerEvent
+                          ? original.button === 0
+                          : !target.matches(':focus-visible');
+                      if (primaryPress) event.preventDefault();
+                    }}
                     side='right'
                     align='start'
                     sideOffset={8}
@@ -645,13 +785,15 @@ const AppSidebar = (): ReactElement => {
                     className='p-1.5 w-64 max-h-[80vh] overflow-y-auto rounded-xl'
                     trigger={
                       <button
+                        ref={moreButtonRef}
                         type='button'
                         aria-label='More'
                         data-testid='nav-more'
                         data-track-category='App_Sidebar'
                         data-track-name='Sidebar_More_Toggle'
                         className={cn(
-                          'size-8 flex items-center justify-center rounded-lg cursor-pointer border border-transparent transition-colors',
+                          'size-8 flex items-center justify-center rounded-lg cursor-pointer border border-transparent transition-[color,background-color,border-color,transform]',
+                          'group-data-[drop-target]/more:scale-105 group-data-[drop-target]/more:bg-sidebar-accent group-data-[drop-target]/more:border-sidebar-border group-data-[drop-target]/more:text-sidebar-accent-foreground',
                           isMoreActive || isMoreOpen
                             ? 'bg-sidebar-accent border-sidebar-border text-sidebar-accent-foreground'
                             : 'bg-transparent text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
@@ -667,6 +809,7 @@ const AppSidebar = (): ReactElement => {
                       prefixWs={prefixWs}
                       onNavigate={handleMoreNavigate}
                       onCustomize={handleCustomizeToolbar}
+                      drag={railDrag}
                     />
                   </Popover>
                 </li>
@@ -674,6 +817,7 @@ const AppSidebar = (): ReactElement => {
             </nav>
           )}
         </div>
+        {railDrag.layer}
 
         <div
           className={cn('flex flex-col items-center justify-center', !isElectronApp() && 'pb-4')}
@@ -860,52 +1004,91 @@ const SidebarMoreMenu = ({
   prefixWs,
   onNavigate,
   onCustomize,
+  drag,
 }: {
   items: NavigationItem[];
   activeRoute: string;
   prefixWs: (path: string) => string;
   onNavigate: (label: string, openedInNewWindow?: boolean) => void;
   onCustomize: () => void;
+  drag: RailDrag;
 }): ReactElement => {
+  const slot = useMoreSlot(drag.session);
+  const slotRow = (
+    <li
+      data-more-slot
+      aria-hidden
+      className='relative h-0 overflow-hidden transition-[height] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)]'
+    >
+      <span className='absolute inset-0 rounded-md border-[1.5px] border-dashed border-foreground/15 bg-foreground/[0.02]' />
+    </li>
+  );
   return (
-    <div className='flex flex-col'>
-      <p className='px-2.5 pt-1 pb-1.5 text-sm font-semibold text-popover-foreground'>More</p>
-      {items.length > 0 ? (
+    <div ref={drag.panelRef} className='flex flex-col'>
+      <div className='flex items-baseline justify-between gap-3 px-2.5 pt-1 pb-1.5'>
+        <p className='text-sm font-semibold text-popover-foreground'>More</p>
+        {items.length > 0 && <span className='text-xs text-muted-foreground'>Drag to pin</span>}
+      </div>
+      {items.length > 0 || slot !== null ? (
         <ul className='flex flex-col'>
-          {items.map(item => {
+          {items.map((item, index) => {
             const Icon = item.icon;
             const isActive = activeRoute === item.path;
             return (
-              <li key={item.path}>
-                <Link
-                  to={prefixWs(item.path)}
-                  onClick={event => {
-                    const openedInNewWindow =
-                      !!item.popout && openInAppWindow(prefixWs(item.path), event);
-                    onNavigate(item.label, openedInNewWindow);
-                    if (openedInNewWindow) {
-                      event.preventDefault();
-                    }
-                  }}
-                  data-testid={`more-${item.label.toLowerCase().replace(/\s+/g, '-')}`}
-                  data-track-category='App_Sidebar'
-                  data-track-name='Sidebar_More_Item'
-                  data-track-metadata={JSON.stringify({ path: item.path, label: item.label })}
-                  className={cn(
-                    'flex items-center gap-3 rounded-md px-2.5 py-2 text-sm transition-colors',
-                    isActive
-                      ? 'bg-accent text-accent-foreground font-medium'
-                      : 'text-popover-foreground hover:bg-accent hover:text-accent-foreground',
-                  )}
+              <Fragment key={item.path}>
+                {slot === index && slotRow}
+                <li
+                  ref={drag.rowRef(item.path)}
+                  data-more-row=''
+                  data-rail-label={item.label}
+                  onPointerDown={event => drag.startMorePress(item.path, event)}
+                  onDragStart={preventNativeDrag}
+                  className='group/row relative'
                 >
-                  <span className='flex size-5 shrink-0 items-center justify-center'>
-                    <Icon size={16} variant={isActive ? 'Solid' : 'Stroke'} />
-                  </span>
-                  <span className='truncate'>{item.label}</span>
-                </Link>
-              </li>
+                  <span
+                    data-rail-socket
+                    aria-hidden
+                    className='pointer-events-none absolute inset-0 rounded-md border-[1.5px] border-dashed border-foreground/15 bg-foreground/[0.02] opacity-0'
+                  />
+                  <Link
+                    to={prefixWs(item.path)}
+                    draggable={false}
+                    onClick={event => {
+                      const openedInNewWindow =
+                        !!item.popout && openInAppWindow(prefixWs(item.path), event);
+                      onNavigate(item.label, openedInNewWindow);
+                      if (openedInNewWindow) {
+                        event.preventDefault();
+                      }
+                    }}
+                    data-testid={`more-${item.label.toLowerCase().replace(/\s+/g, '-')}`}
+                    data-track-category='App_Sidebar'
+                    data-track-name='Sidebar_More_Item'
+                    data-track-metadata={JSON.stringify({ path: item.path, label: item.label })}
+                    className={cn(
+                      'flex items-center gap-3 rounded-md px-2.5 py-2 text-sm transition-colors',
+                      isActive
+                        ? 'bg-accent text-accent-foreground font-medium'
+                        : 'text-popover-foreground hover:bg-accent hover:text-accent-foreground',
+                    )}
+                  >
+                    <span
+                      data-rail-glyph=''
+                      className='flex size-5 shrink-0 items-center justify-center'
+                    >
+                      <Icon size={16} variant={isActive ? 'Solid' : 'Stroke'} />
+                    </span>
+                    <span className='truncate'>{item.label}</span>
+                    <DragableSixDots
+                      aria-hidden
+                      className='ml-auto size-3.5 shrink-0 opacity-0 transition-opacity duration-150 ease-out [@media(hover:hover)_and_(pointer:fine)]:group-hover/row:opacity-40'
+                    />
+                  </Link>
+                </li>
+              </Fragment>
             );
           })}
+          {slot === items.length && slotRow}
         </ul>
       ) : (
         <p className='px-2.5 py-2 text-sm text-muted-foreground'>All items are in your toolbar.</p>

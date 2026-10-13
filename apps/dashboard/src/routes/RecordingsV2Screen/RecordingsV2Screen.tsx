@@ -23,6 +23,7 @@ import {
   SUMMARY_TEMPLATES_DIALOG_CLASS,
 } from '../RecordingDetailV2Screen/components/SummaryTemplatesModal';
 import { useLeaveRecording } from '../../hooks/useLeaveRecording';
+import { useUnreadRecordingSummaryCallIds } from '../../hooks/useHasUnreadRecordingSummaries';
 import { useSummaryTemplates } from '../../hooks/useSummaryTemplates';
 import { usePlatform } from '../../hooks/usePlatform';
 import { getRecordingDefaultLayout } from '../../hooks/useRecordingDefaultLayout';
@@ -100,6 +101,7 @@ const RecordingsV2Screen = (): ReactElement => {
   const recordingPauseStartedAt = useRecordingStore(context => context.pauseStartedAt);
   const recordingAccumulatedPausedMs = useRecordingStore(context => context.accumulatedPausedMs);
   const pendingAutoStart = useRecordingStore(context => context.pendingAutoStart);
+  const unreadSummaryCallIds = useUnreadRecordingSummaryCallIds();
   const handleStartRecording = useCallback((): void => {
     if (recordingStatus !== 'idle' && recordingStatus !== 'error') return;
 
@@ -676,6 +678,7 @@ const RecordingsV2Screen = (): ReactElement => {
                           row.item.labels.filter(label => !isResolved(label)).length
                         }
                         resolveLabel={resolveLabel}
+                        hasNewSummary={unreadSummaryCallIds.has(row.item.id)}
                         onOpen={handleOpenRecording}
                         onShare={handleShareRecording}
                         onLeave={recording => void handleLeaveRecording(recording)}

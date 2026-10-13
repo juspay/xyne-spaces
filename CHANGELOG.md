@@ -1,3 +1,54 @@
+## [1.492.0](https://github.com/juspay/xyne-spaces/compare/v1.491.0...v1.492.0) (2026-10-13)
+
+
+### Features
+
+* drag to customize the sidebar rail and More menu ([#2892](https://github.com/juspay/xyne-spaces/issues/2892)) ([f893485](https://github.com/juspay/xyne-spaces/commit/f89348510d152ba6e7995bcce0be316a8d7e4d59))
+
+
+### Bug Fixes
+
+* forward modal ignores the first pick from the suggested list ([#2895](https://github.com/juspay/xyne-spaces/issues/2895)) ([ce4e120](https://github.com/juspay/xyne-spaces/commit/ce4e120a2d9d782a40674b61f22923eb9538c921))
+
+## [1.491.0](https://github.com/juspay/xyne-spaces/compare/v1.490.0...v1.491.0) (2026-10-12)
+
+
+### Features
+
+* Removed Release Manager Navigation ([#2921](https://github.com/juspay/xyne-spaces/issues/2921)) ([#2926](https://github.com/juspay/xyne-spaces/issues/2926)) ([2f6d42b](https://github.com/juspay/xyne-spaces/commit/2f6d42b710bb4e64b22439c392528cfeb45fe1f8))
+
+## [1.490.0](https://github.com/juspay/xyne-spaces/compare/v1.489.3...v1.490.0) (2026-10-12)
+
+
+### Features
+
+* add recurring holidays to automation business hours ([#2695](https://github.com/juspay/xyne-spaces/issues/2695)) ([8b500ac](https://github.com/juspay/xyne-spaces/commit/8b500ace73e9f24a9d596da043ec0ce77d218f48))
+* fall back to getChannelById in useChannel when id is missing from channel sets ([#2908](https://github.com/juspay/xyne-spaces/issues/2908)) ([a8497dc](https://github.com/juspay/xyne-spaces/commit/a8497dc53c2c2dc307fdcf4381aed5f4c0b2a87a))
+* incoming call media presets ([#2889](https://github.com/juspay/xyne-spaces/issues/2889)) ([eab4676](https://github.com/juspay/xyne-spaces/commit/eab4676aef25501e32b5602c36d87e1688333f26))
+* inline start-call suggestion card for public channels and threads ([#2868](https://github.com/juspay/xyne-spaces/issues/2868)) ([3f1ba57](https://github.com/juspay/xyne-spaces/commit/3f1ba5745f68110a266baa4124483d26af05cbaf))
+* removed-unwanted-queries-and-increases-timeout ([#2839](https://github.com/juspay/xyne-spaces/issues/2839)) ([cc6754e](https://github.com/juspay/xyne-spaces/commit/cc6754e657d319ee156d47c24fd4f7bf1a9a5610))
+* summary generated dot on recording sidebar ([#2900](https://github.com/juspay/xyne-spaces/issues/2900)) ([fb18b81](https://github.com/juspay/xyne-spaces/commit/fb18b815352db867fdfdff580de33c4894efb612))
+
+
+### Bug Fixes
+
+* accept #-prefixed channel names in slack adapter ([#2876](https://github.com/juspay/xyne-spaces/issues/2876)) ([1b7a3c5](https://github.com/juspay/xyne-spaces/commit/1b7a3c50896eee857785b47f134ec898e024c23d))
+* adding mirror to decrease build time ([#2914](https://github.com/juspay/xyne-spaces/issues/2914)) ([c3428be](https://github.com/juspay/xyne-spaces/commit/c3428bea03acc18481c86b3c68e521aad241b8d3))
+* batch streamed progress chunks into one claw-auth POST per 200ms ([#2881](https://github.com/juspay/xyne-spaces/issues/2881)) ([81b97a4](https://github.com/juspay/xyne-spaces/commit/81b97a490dddf13bca7f921dacacfc07f2867449))
+* cap concurrent queue runs per claw pod ([#2878](https://github.com/juspay/xyne-spaces/issues/2878)) ([a25c4f2](https://github.com/juspay/xyne-spaces/commit/a25c4f28c2daea3bcf35b81019cf082ac3908013))
+* claw mcp scoping + tested agent approvals ([#2894](https://github.com/juspay/xyne-spaces/issues/2894)) ([13be66b](https://github.com/juspay/xyne-spaces/commit/13be66ba9191665d33e8b9dbb8e58afcee64f262))
+* compress the run-end debug trace off the main thread ([#2883](https://github.com/juspay/xyne-spaces/issues/2883)) ([12ef7a5](https://github.com/juspay/xyne-spaces/commit/12ef7a5671939a63f181674caaddbfa034a9bde8))
+* don't re-dispatch runs that are still waiting in the run queue ([#2886](https://github.com/juspay/xyne-spaces/issues/2886)) ([4009791](https://github.com/juspay/xyne-spaces/commit/40097910c358af7c9aaf139d18b1b698484ca82c))
+* export claw scaling metrics over OpenTelemetry ([#2901](https://github.com/juspay/xyne-spaces/issues/2901)) ([a6ad2d0](https://github.com/juspay/xyne-spaces/commit/a6ad2d03b5a3a45958458c4ffad086f733829937))
+* fixing build because of dockerfile ([#2888](https://github.com/juspay/xyne-spaces/issues/2888)) ([24dcf71](https://github.com/juspay/xyne-spaces/commit/24dcf71eee14bc062f9e1b197214f95d6fe00c59))
+* keep mini call window buttons clickable over the electron drag strip ([#2909](https://github.com/juspay/xyne-spaces/issues/2909)) ([efb2e4d](https://github.com/juspay/xyne-spaces/commit/efb2e4d125497b174a55275169f15250c2a284d3))
+* make claw memory pressure read the container's own cgroup and export pressure metrics ([#2880](https://github.com/juspay/xyne-spaces/issues/2880)) ([873e72d](https://github.com/juspay/xyne-spaces/commit/873e72d87a2e2851e736362f98b6b4222309fc58))
+* priortising merge queue ([#2906](https://github.com/juspay/xyne-spaces/issues/2906)) ([822887a](https://github.com/juspay/xyne-spaces/commit/822887a8abc876a88c89bf3133b6926a37ea5966))
+* regenerate an app call's summary from its template only ([#2923](https://github.com/juspay/xyne-spaces/issues/2923)) ([1c9c2b6](https://github.com/juspay/xyne-spaces/commit/1c9c2b66cca723dbf07a0e257405fb09be38a188))
+* start stdio MCP servers once per claw pod and reap idle playwright-mcp ([#2882](https://github.com/juspay/xyne-spaces/issues/2882)) ([baf171d](https://github.com/juspay/xyne-spaces/commit/baf171d9adcf1f8eccb316e9b294fa042a56e278))
+* testing fast build ([#2919](https://github.com/juspay/xyne-spaces/issues/2919)) ([d926298](https://github.com/juspay/xyne-spaces/commit/d926298982b80e3711a3bac23dbd106755054c78))
+* use only our internal Jev (xor) and remove the TypeSafe backend ([#2931](https://github.com/juspay/xyne-spaces/issues/2931)) ([d42b67c](https://github.com/juspay/xyne-spaces/commit/d42b67c83c0d53832e82b874570455f46c461d9b))
+
 ## [1.489.3](https://github.com/juspay/xyne-spaces/compare/v1.489.2...v1.489.3) (2026-10-11)
 
 

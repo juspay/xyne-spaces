@@ -16,6 +16,9 @@ export interface PendingWriteAction {
   params: Record<string, unknown>;
   userId: string;
   signature: string;
+  /** Signed in when a subagent's own credential decided the call; the approval
+   *  resolves that credential from it. See writeActionPayload in routes/mcp.ts. */
+  subagentId?: string;
 }
 
 /** Routing the card is bound to. Empty strings give absent fields one form. */
@@ -33,6 +36,7 @@ export interface WriteCardAction {
   userId: string;
   signature: string;
   agentSlug: string;
+  subagentId?: string;
   channelId?: string;
   conversationId?: string;
   /** Claw's original signature — how a surface that also renders raw pending
@@ -194,12 +198,14 @@ export function readPendingWriteAction(raw: unknown): PendingWriteAction | null 
   const userId = typeof r["userId"] === "string" ? r["userId"] : "";
   const signature = typeof r["signature"] === "string" ? r["signature"] : "";
   if (!serverType || !tool || !userId || !signature) return null;
+  const subagentId = typeof r["subagentId"] === "string" ? r["subagentId"] : "";
   return {
     serverType,
     tool,
     params: r["params"] && typeof r["params"] === "object" ? (r["params"] as Record<string, unknown>) : {},
     userId,
     signature,
+    ...(subagentId ? { subagentId } : {}),
   };
 }
 
@@ -209,13 +215,8 @@ export async function mintWriteCardAction(
   action: PendingWriteAction,
   id: WriteCardIdentity,
 ): Promise<WriteCardAction> {
-  const { signAction, verifyActionSignature } = await import("../routes/mcp.js");
-  const pendingActionPayload = {
-    serverType: action.serverType,
-    tool: action.tool,
-    params: action.params,
-    userId: action.userId,
-  };
+  const { signAction, verifyActionSignature, writeActionPayload } = await import("../routes/mcp.js");
+  const pendingActionPayload = writeActionPayload(action);
   if (!verifyActionSignature(pendingActionPayload, action.signature)) {
     throw new Error("Invalid pending write-action signature");
   }

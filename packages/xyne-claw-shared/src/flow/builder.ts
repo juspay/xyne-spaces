@@ -347,6 +347,9 @@ export function buildWriteApprovalFlow(
     userId: string;
     signature: string;
     agentSlug: string;
+    /** Signed into the action when a subagent's credential decided the call —
+     *  flow-action re-resolves that credential from it on approve. */
+    subagentId?: string;
     channelId?: string;
     conversationId?: string;
   },
@@ -375,6 +378,7 @@ export function buildWriteApprovalFlow(
       userId: action.userId,
       signature: action.signature,
       agentSlug: action.agentSlug,
+      ...(action.subagentId ? { subagentId: action.subagentId } : {}),
       ...(action.channelId !== undefined ? { channelId: action.channelId } : {}),
       ...(action.conversationId !== undefined ? { conversationId: action.conversationId } : {}),
     })
@@ -399,6 +403,7 @@ export function buildWriteResultFlow(opts: {
     userId: string;
     signature: string;
     agentSlug: string;
+    subagentId?: string;
     channelId?: string;
     conversationId?: string;
     spacesAppId?: string;
@@ -430,6 +435,7 @@ export function buildWriteResultFlow(opts: {
       userId: opts.retry.userId,
       signature: opts.retry.signature,
       agentSlug: opts.retry.agentSlug,
+      ...(opts.retry.subagentId ? { subagentId: opts.retry.subagentId } : {}),
       ...(opts.retry.channelId !== undefined ? { channelId: opts.retry.channelId } : {}),
       ...(opts.retry.conversationId !== undefined ? { conversationId: opts.retry.conversationId } : {}),
       ...(opts.retry.spacesAppId !== undefined ? { spacesAppId: opts.retry.spacesAppId } : {}),
@@ -1165,6 +1171,9 @@ export function buildTicketProposalFlow(
     userId: string;
     signature: string;
     agentSlug: string;
+    /** Signed into the action when a subagent's credential decided the call —
+     *  flow-action re-resolves that credential from it on approve. */
+    subagentId?: string;
     channelId?: string;
     conversationId?: string;
   },
@@ -1193,6 +1202,7 @@ export function buildTicketProposalFlow(
       userId: action.userId,
       signature: action.signature,
       agentSlug: action.agentSlug,
+      ...(action.subagentId ? { subagentId: action.subagentId } : {}),
       ...(action.channelId !== undefined ? { channelId: action.channelId } : {}),
       ...(action.conversationId !== undefined ? { conversationId: action.conversationId } : {}),
     })

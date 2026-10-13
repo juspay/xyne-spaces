@@ -287,7 +287,7 @@ export async function handleEval(
 ): Promise<void> {
   const trimmed = question.trim();
   if (!trimmed) {
-    await ctx.reply("`/eval <question>` — runs the question on every configured provider and posts a comparison. Add `opts=none|all` to A/B the optimization switches, or `judges=llm,jev,ournormaljev,ourtrainedjev` to compare judge backends, on one provider.", REPLY_LABEL);
+    await ctx.reply("`/eval <question>` — runs the question on every configured provider and posts a comparison. Add `opts=none|all` to A/B the optimization switches, or `judges=llm,xor,ourtrainedjev` to compare judge backends, on one provider.", REPLY_LABEL);
     return;
   }
 
