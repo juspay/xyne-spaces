@@ -414,7 +414,6 @@ export function useSaveReleaseRepoConfig(): {
       try {
         const response = await zero.mutate(
           mutators.project.saveReleaseBoardConfig({
-            projectId: repo.projectId,
             mainBoardId: draft.mainBoardId || uuidv4(),
             mainBoardName,
             releaseTrackingMode: draft.mode,
