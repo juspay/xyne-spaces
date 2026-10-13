@@ -7804,7 +7804,6 @@ export function createMutators(
       // repositories; release tickets are created in the chosen release channel (channelId).
       saveReleaseBoardConfig: defineMutator(
         z.object({
-          projectId: z.string(),
           mainBoardId: z.string(),
           mainBoardName: z.string(),
           releaseTrackingMode: z.nativeEnum(ReleaseTrackingMode),
@@ -7827,7 +7826,6 @@ export function createMutators(
         async ({
           tx,
           args: {
-            projectId,
             mainBoardId,
             mainBoardName: rawMainBoardName,
             releaseTrackingMode,
@@ -7839,7 +7837,16 @@ export function createMutators(
         }) => {
           await assertReleaseManageAccess();
 
-          // Validate project exists
+          const hub = await tx.run(zql.channels.where('id', hubChannelId).one());
+          if (!hub || hub.type !== ChannelType.SDLC) {
+            throw new Error('Release configs belong to an SDLC hub');
+          }
+          // Boards and their tickets live in a project, so the hub's project is the
+          // only one its release boards can be created in.
+          const projectId = hub.projectId;
+          if (!projectId) {
+            throw new Error('This SDLC hub is not linked to a project');
+          }
           const project = await tx.run(zql.projects.where('id', projectId).one());
           if (!project) {
             throw new Error('Project not found');
@@ -7849,16 +7856,6 @@ export function createMutators(
           const channel = await tx.run(zql.channels.where('id', channelId).one());
           if (!channel) {
             throw new Error('Channel not found');
-          }
-
-          const hub = await tx.run(zql.channels.where('id', hubChannelId).one());
-          if (!hub || hub.type !== ChannelType.SDLC) {
-            throw new Error('Release configs belong to an SDLC hub');
-          }
-          // Boards and their tickets live in a project, so the hub's project is the
-          // only one its release boards can be created in.
-          if (hub.projectId !== projectId) {
-            throw new Error('The SDLC hub belongs to a different project');
           }
 
           const repo = await tx.run(
