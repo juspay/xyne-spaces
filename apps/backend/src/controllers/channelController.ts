@@ -75,8 +75,6 @@ import { groupDmParticipantService } from '@/services/groupDmParticipantService'
 import { AppError } from '@/middleware/errorHandler';
 import { sendForwardedMessageTx } from '@/bypassAcl/transactions/channelController';
 
-/** The signed-in user, for the app checks when creating a Channels desk. */
-
 export class ChannelController {
   channelRepository: ChannelRepository;
   private channelParticipantRepository: ChannelParticipantRepository;

@@ -1,9 +1,9 @@
 // Channels desks: a desk linked to one installed Xyne App gets a ticket for every new thread in the
-// channels added to it (from those the app created). The ticket and a stub thread live on the desk;
+// channels added to it (from those the app is in). The ticket and a stub thread live on the desk;
 // the thread stays in its channel, named by an email row on the stub, so reading it still needs
 // access to that channel. A ticket the merchant opens on their own thread is separate.
 import type { Ticket } from '@prisma/client';
-import { MessageType, TicketPriority } from '@xyne/shared';
+import { MessageType, TicketPriority, UserType } from '@xyne/shared';
 import { stripHtml } from '@/agents/xyne-ai/tools/helpers';
 import type { TicketLike } from '@/automations/triggers/ticket-context';
 import { insertChannelsDeskTicket, readChannelsDeskTicketsForThreads, type ChannelsDeskThreadTicket } from '@/bypassAcl/channelsDeskServices';
@@ -80,11 +80,14 @@ export async function createChannelsDeskTicket(conversationId: string): Promise<
     }),
     db.message.findUnique({
       where: { messageId: conversation.initialMessageId },
-      select: { content: true, senderId: true, createdAt: true, msgType: true, sender: { select: { email: true } } },
+      select: { content: true, senderId: true, createdAt: true, msgType: true, sender: { select: { email: true, userType: true } } },
     }),
     db.channel.findUnique({ where: { id: sourceChannelId }, select: { name: true } }),
   ]);
-  if (!message || message.msgType === MessageType.SYSTEM || !sourceChannel) return null;
+  // Threads a bot, app or agent starts (welcomes, alerts, summaries) are not requests for the desk.
+  if (!message || message.msgType === MessageType.SYSTEM || message.sender.userType !== UserType.USER || !sourceChannel) {
+    return null;
+  }
 
   const boardId = preference?.boardId ?? (await resolveChannelDefaultBoard(db, deskId))?.boardId;
   const [board, firstStage] = boardId

@@ -66,7 +66,7 @@ export const ConnectedChannelsDeskAppSection: React.FC<ConnectedChannelsDeskAppS
   );
 };
 
-/** The app's channels feeding this desk: add from the ones it created, or remove. */
+/** The app's channels feeding this desk: add from the ones it is in, or remove. */
 const ChannelsDeskChannelsSection: React.FC<{ channelId: string }> = ({ channelId }) => {
   const queryClient = useQueryClient();
   const queryKey = ['channels-desk-channels', channelId];
@@ -98,8 +98,8 @@ const ChannelsDeskChannelsSection: React.FC<{ channelId: string }> = ({ channelI
       <div className='flex flex-col gap-[4px]'>
         <div className='text-desk-label'>Channels</div>
         <div className='text-desk-helper w-full max-w-[500px]'>
-          New threads in these channels become tickets here. Pick from the channels this app
-          created; a channel can be on one desk at a time.
+          New threads in these channels become tickets here. Pick from the channels this app is
+          in; a channel can be on one desk at a time.
         </div>
       </div>
 
@@ -169,7 +169,7 @@ const ChannelsDeskChannelsSection: React.FC<{ channelId: string }> = ({ channelI
           )}
           {!data?.added.length && !data?.available.length && (
             <div className='text-desk-helper'>
-              This app hasn&apos;t created any channels yet. Ones it creates show up here.
+              This app isn&apos;t in any channels yet. Ones it creates or is added to show up here.
             </div>
           )}
         </div>
