@@ -1075,6 +1075,11 @@ function ChatMessageBubble({
                     value={editText}
                     onChange={e => setEditText(e.target.value)}
                     onKeyDown={e => {
+                      // CJK IMEs use Enter to commit a candidate and Escape to dismiss
+                      // it; neither should save or cancel the edit mid-composition.
+                      // keyCode 229 covers Safari, which reports isComposing=false
+                      // on the keydown that ends composition.
+                      if (e.nativeEvent.isComposing || e.keyCode === 229) return;
                       if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();
                         if (editText.trim()) {
