@@ -85,6 +85,7 @@ import { consumeClawStream } from "../lib/consume-claw-stream.js";
 import { cancelRunSession } from "../lib/experiment.js";
 import { redisService } from "../redis.js";
 import { subscribeLive, publishLiveEvent, type LiveEvent } from "../lib/live-conversation-bus.js";
+import { pickCancellableLiveRun } from "../lib/live-cancellable-run.js";
 import { pushDelta, pushToolPart, endDeltaCoalescer, liveUserIdForSession } from "../lib/live-delta-coalescer.js";
 import { resolveSdlcRepositoryForUser } from "../lib/sdlc-repository-context.js";
 
@@ -3413,6 +3414,14 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
     // that's already been generated, before the first live `delta` arrives.
     const runningMsg = visible.find((m) => m.role === "assistant" && m.status === "running");
 
+    // The caller's own in-flight run id, so a tab that reattached mid-run can
+    // Stop it (POST /run/stream/cancel). Never another user's run (XYNE-66347).
+    const runSessionId = pickCancellableLiveRun(agentRuns, {
+      requesterAliases: liveUserAliases,
+      slug,
+      ...(runningMsg ? { runningMsgId: runningMsg.id } : {}),
+    });
+
     // Redis pub/sub has no replay, so a mid-run joiner would otherwise miss
     // every card emitted before it connected.
     const uiFlowsByMsgId: Record<string, unknown[]> = {};
@@ -3427,6 +3436,7 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
         agentSlug: slug,
         invocationsByMsgId,
         inProgress,
+        ...(runSessionId ? { runSessionId } : {}),
         ...(Object.keys(uiFlowsByMsgId).length > 0 ? { uiFlowsByMsgId } : {}),
         ...(runningMsg
           ? {
