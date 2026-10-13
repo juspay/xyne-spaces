@@ -116,3 +116,54 @@ export const getWeekdayOccurrence = (
     ordinalWord: ORDINAL_WORDS[occurrence - 1] || `${occurrence}th`,
   };
 };
+
+const isOffsetName = (name: string): boolean =>
+  !name || name.startsWith('GMT') || name.startsWith('UTC');
+
+type TimeZoneNameStyle = 'short' | 'shortOffset' | 'long';
+
+// Building an Intl.DateTimeFormat is the costly part, so each locale/style pair is made once.
+const timeZoneNameFormatters = new Map<string, Intl.DateTimeFormat | null>();
+const getTimeZoneNameFormatter = (
+  locale: string | undefined,
+  style: TimeZoneNameStyle,
+): Intl.DateTimeFormat | null => {
+  const key = `${locale ?? ''}|${style}`;
+  if (!timeZoneNameFormatters.has(key)) {
+    let formatter: Intl.DateTimeFormat | null = null;
+    try {
+      formatter = new Intl.DateTimeFormat(locale, { timeZoneName: style });
+    } catch {
+      // Older engines lack some styles (e.g. shortOffset); the label falls back without it.
+    }
+    timeZoneNameFormatters.set(key, formatter);
+  }
+  return timeZoneNameFormatters.get(key) ?? null;
+};
+
+/**
+ * Viewer's timezone for `date`, e.g. "IST · GMT+5:30". Intl only abbreviates zones
+ * the viewer's locale knows (en-US renders IST as "GMT+5:30"), so otherwise the
+ * abbreviation is built from the long name's initials ("India Standard Time" → IST).
+ * Names too short to abbreviate reliably ("Nepal Time") show just the offset.
+ */
+export const getTimezoneLabel = (date: Date): string => {
+  const at = isValidDate(date) ? date : new Date();
+  const part = (locale: string | undefined, style: TimeZoneNameStyle): string =>
+    getTimeZoneNameFormatter(locale, style)
+      ?.formatToParts(at)
+      .find(p => p.type === 'timeZoneName')?.value ?? '';
+  const offset = part('en-US', 'shortOffset');
+  const abbr = part(undefined, 'short');
+  if (!isOffsetName(abbr)) return offset ? `${abbr} · ${offset}` : abbr;
+  const words = part('en-US', 'long').split(/\s+/);
+  if (isOffsetName(words[0] ?? '') || words[0] === 'Coordinated' || words.length < 3) return offset;
+  // European zones leave "Standard" out of the abbreviation ("Central European Standard Time" → CET).
+  const initials = words
+    .filter(w => !(w === 'Standard' && words.includes('European')))
+    .map(w => w[0]?.toUpperCase() ?? '')
+    .join('');
+  // "Greenwich Mean Time" → GMT would just repeat the offset.
+  if (initials === offset) return offset;
+  return offset ? `${initials} · ${offset}` : initials;
+};
