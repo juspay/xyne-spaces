@@ -1,4 +1,4 @@
-import { jevAsk, jevEnabled, jevThreshold, type JevQuestion } from "./jev.js";
+import { xor, xorEnabled, xorThreshold, type XorQuestion } from "./xor.js";
 import { createLogger } from "./logger.js";
 import { metric } from "./metrics.js";
 
@@ -34,9 +34,9 @@ function buildState(input: AssessAnswerInput): string {
 }
 
 export async function assessAnswer(input: AssessAnswerInput): Promise<AnswerAssessment | null> {
-  if (!jevEnabled() || !input.task.trim() || !input.answer.trim()) return null;
+  if (!xorEnabled() || !input.task.trim() || !input.answer.trim()) return null;
 
-  const questions: Record<string, JevQuestion> = {
+  const questions: Record<string, XorQuestion> = {
     answered: {
       type: "noul",
       instructions:
@@ -57,13 +57,13 @@ export async function assessAnswer(input: AssessAnswerInput): Promise<AnswerAsse
   };
 
   const started = Date.now();
-  const answers = await jevAsk(buildState(input), questions, { purpose: "answer-completeness" });
+  const answers = await xor({ state: buildState(input), questions, purpose: "answer-completeness" });
   if (!answers) return null;
 
   const answered = answers["answered"]?.noul ?? 0;
   const finished = answers["finished"]?.noul ?? 0;
   const intent = answers["intent"]?.noul ?? 0;
-  const threshold = jevThreshold("JEV_COMPLETENESS_THRESHOLD", 0.5);
+  const threshold = xorThreshold("JEV_COMPLETENESS_THRESHOLD", 0.5);
 
   const verdict: AnswerVerdict =
     intent >= threshold && answered < threshold

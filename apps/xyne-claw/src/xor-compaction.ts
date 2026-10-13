@@ -14,7 +14,7 @@
  * Returns null whenever it cannot do the job, so the caller keeps pi's path.
  */
 
-import { jevEnabled, jevScoreItems, jevThreshold } from "./jev.js";
+import { xorEnabled, xorScoreItems, xorThreshold } from "./xor.js";
 import { createLogger } from "./logger.js";
 import { metric } from "./metrics.js";
 
@@ -190,7 +190,7 @@ export async function buildJevCompaction(
   messages: readonly unknown[],
   preserveRecent = preserveRecentDefault(),
 ): Promise<JevCompactionOutcome | null> {
-  if (!jevEnabled() || messages.length === 0) return null;
+  if (!xorEnabled() || messages.length === 0) return null;
 
   const { rows, calls } = normalise(messages, preserveRecent);
   const candidates = [...calls.values()].filter((c) => !c.pinned);
@@ -203,18 +203,22 @@ export async function buildJevCompaction(
   const unscored = new Set(ordered.slice(maxScoredCalls()).map((c) => c.id));
 
   const state = buildState(rows, calls);
-  const threshold = jevThreshold("JEV_COMPACTION_THRESHOLD", 0.5);
+  const threshold = xorThreshold("JEV_COMPACTION_THRESHOLD", 0.5);
   const started = Date.now();
 
   const [keepCall, keepResult] = await Promise.all([
-    jevScoreItems(state, scorable, {
+    xorScoreItems({
+      state,
+      items: scorable,
       purpose: "compaction-call",
       key: (c) => c.id,
       instructions: (c) =>
         `Knowing that this tool call was made still matters for continuing the work. ` +
         `Call \`${c.name}\` with input ${c.args}`,
     }),
-    jevScoreItems(state, scorable, {
+    xorScoreItems({
+      state,
+      items: scorable,
       purpose: "compaction-result",
       key: (c) => c.id,
       instructions: (c) =>
@@ -229,7 +233,7 @@ export async function buildJevCompaction(
     return null;
   }
 
-  // jevScoreItems only returns null when EVERY batch fails. A partial failure
+  // xorScoreItems only returns null when EVERY batch fails. A partial failure
   // (one batch timed out) leaves holes; reading a hole as score 0 would drop
   // calls nobody judged. Too many holes → fall back; a few → keep an excerpt.
   const missing = scorable.filter((c) => !keepCall.has(c.id) || !keepResult.has(c.id)).length;

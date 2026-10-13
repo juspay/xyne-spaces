@@ -1246,16 +1246,9 @@ router.get("/:slug/litellm-models", async (req: Request<{ slug: string }>, res: 
 
 // POST /agents/:slug/chat — send a message, stream progress via SSE, return result
 
-function evalRunSwitches(
-  req: Request,
-  optimizations: unknown,
-  judgeBackend: unknown,
-): { optimizations?: string; judgeBackend?: string } {
+function evalRunSwitches(req: Request, optimizations: unknown): { optimizations?: string } {
   if (!s2sKeyMatches(req.headers["x-s2s-key"])) return {};
-  return {
-    ...(typeof optimizations === "string" && /^[a-z0-9_,+\-]{1,400}$/i.test(optimizations) ? { optimizations } : {}),
-    ...(typeof judgeBackend === "string" && /^[a-z0-9_]{1,40}$/i.test(judgeBackend) ? { judgeBackend } : {}),
-  };
+  return typeof optimizations === "string" && /^[a-z0-9_,+\-]{1,400}$/i.test(optimizations) ? { optimizations } : {};
 }
 
 router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response) => {
@@ -1274,7 +1267,6 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       attachedContext,
       providerOverride,
       optimizations: requestedOptimizations,
-      judgeBackend: requestedJudgeBackend,
       isRegenerate,
       isEditUserMessage,
       parentUserMessageId,
@@ -1296,7 +1288,6 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       attachedContext?: unknown;
       providerOverride?: { provider?: string; model?: string };
       optimizations?: unknown;
-      judgeBackend?: unknown;
       /** Branching: regenerate the assistant reply for `parentUserMessageId` as
        *  a sibling of the existing assistant. */
       isRegenerate?: boolean;
@@ -2052,7 +2043,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       fastMode: fastModeEnabled,
       // /compact shrinks the session before answering, not just summarises it.
       ...(studioMode !== "design" && aiScreenCommand.compactBeforeRun ? { compactBeforeRun: true } : {}),
-      ...evalRunSwitches(req, requestedOptimizations, requestedJudgeBackend),
+      ...evalRunSwitches(req, requestedOptimizations),
     };
 
     const forwardedTask = typeof forwardBody["task"] === "string" ? forwardBody["task"] as string : "";

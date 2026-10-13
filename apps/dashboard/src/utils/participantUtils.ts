@@ -81,6 +81,35 @@ export function parseParticipants(input: string): ParsedParticipant[] {
 }
 
 /**
+ * Split a typed or pasted guest list into entries, each a plain address or "Name <email>".
+ * Unlike parseParticipants this also splits on whitespace: guests are always addresses,
+ * whereas teammate input is matched by name too, so "Jane Doe" there must stay whole.
+ * Bare words right before an address are read as its display name, so
+ * "Jane Doe jane@x.com" stays one entry and "Alice <a@x.com> Bob <b@y.com>" is two.
+ */
+export function splitGuestEntries(input: string): string[] {
+  return input
+    .split(/[,;\n]+/)
+    .flatMap(part => attachDisplayNames(part.match(/<[^>]*>|[^\s<]+/g) ?? []));
+}
+
+/** Folds the words leading up to each address (bare or `<addr>`) into it as `Name <addr>`. */
+function attachDisplayNames(tokens: string[]): string[] {
+  const entries: string[] = [];
+  let name: string[] = [];
+  for (const token of tokens) {
+    if (!token.includes('@')) {
+      name.push(token);
+      continue;
+    }
+    const address = token.replace(/^<|>$/g, '');
+    entries.push(name.length > 0 ? `${name.join(' ')} <${address}>` : address);
+    name = [];
+  }
+  return [...entries, ...name];
+}
+
+/**
  * Match parsed participants against active users
  * Matches by email or by name (case-insensitive)
  */

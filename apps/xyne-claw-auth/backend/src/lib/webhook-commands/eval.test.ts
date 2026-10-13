@@ -34,18 +34,17 @@ describe("/eval parsing", () => {
       kind: "eval",
       question: "how many tickets are open?",
       providers: [],
-      judges: [],
       opts: [],
     });
   });
 
   it("extracts a providers filter without leaving it in the question", () => {
     const parsed = parseSlashCommand("/eval providers=claude,codex summarize the channel");
-    expect(parsed).toEqual({ kind: "eval", question: "summarize the channel", providers: ["claude", "codex"], judges: [], opts: [] });
+    expect(parsed).toEqual({ kind: "eval", question: "summarize the channel", providers: ["claude", "codex"], opts: [] });
   });
 
   it("treats a bare /eval as a usage request", () => {
-    expect(parseSlashCommand("/eval")).toEqual({ kind: "eval", question: "", providers: [], judges: [], opts: [] });
+    expect(parseSlashCommand("/eval")).toEqual({ kind: "eval", question: "", providers: [], opts: [] });
   });
 
   it("does not claim commands that merely start with eval", () => {
@@ -212,63 +211,21 @@ describe("eval full sessions", () => {
   });
 });
 
-describe("eval judge arms", () => {
+describe("eval judge stats", () => {
   const started = new Date("2026-09-20T10:00:00.000Z");
 
-  it("parses judges= without leaving it in the question", () => {
-    expect(parseSlashCommand("/eval judges=llm,jev,xor,ourtrainedjev summarize the channel")).toEqual({
-      kind: "eval",
-      question: "summarize the channel",
-      providers: [],
-      judges: ["llm", "jev", "xor", "ourtrainedjev"],
-      opts: [],
-    });
-  });
-
-  it("expands aliases and all, and ignores unknown judges", async () => {
-    const { normalizeJudges, armKey, armLabel } = await import("../eval-run.js");
-    expect(normalizeJudges(["all"])).toEqual(["llm", "xor", "ourtrainedjev"]);
-    expect(normalizeJudges(["trained", "jev", "bogus", "jev", "normal"])).toEqual(["ourtrainedjev", "xor"]);
-    expect(normalizeJudges(["ourjev"])).toEqual([]);
-    expect(normalizeJudges([])).toEqual([]);
-    expect(armKey({ provider: "claude", useOverride: true, judge: "xor" })).toBe("claude-xor");
-    expect(armLabel({ provider: "claude", judge: "ourtrainedjev" })).toBe("claude + ourtrainedjev");
-  });
-
-  it("labels arms as llm + judge and reports the judge's cost and agreement", () => {
+  it("reports the judge's cost on each arm", () => {
     const run = {
       agentSlug: "xyne",
       startedAt: started.toISOString(),
       events: [],
-      judge: {
-        backend: "xor",
-        calls: 6,
-        failed: 1,
-        questions: 140,
-        totalMs: 900,
-        byPurpose: {},
-        shadows: [
-          { primary: "xor", shadow: "llm", purpose: "sift", questions: 10, agreed: 8, meanAbsDiff: 0.2, primaryMs: 150, shadowMs: 4000 },
-        ],
-      },
+      judge: { backend: "xor", calls: 6, failed: 1, questions: 140, totalMs: 900, byPurpose: {} },
     } as unknown as DebugTraceRun;
     const traces = new Map<string, EvalTrace>([["s-claude", { run, timing: null }]]);
-    const html = renderEvalHtml("q", [result("claude", { judge: "xor" })], started, traces, "xyne");
-    expect(html).toContain("claude + xor");
+    const html = renderEvalHtml("q", [result("claude")], started, traces, "xyne");
     expect(html).toContain("6 calls · 140 q");
     expect(html).toContain("1 failed");
-    expect(html).toContain("Judge agreement");
-    expect(html).toContain("80%");
-  });
-
-  it("flags a run whose judge was not the one the arm asked for", () => {
-    const run = {
-      agentSlug: "xyne", startedAt: started.toISOString(), events: [],
-      judge: { backend: "jev", calls: 1, failed: 0, questions: 1, totalMs: 5, byPurpose: {}, shadows: [] },
-    } as unknown as DebugTraceRun;
-    const traces = new Map<string, EvalTrace>([["s-claude", { run, timing: null }]]);
-    const html = renderEvalHtml("q", [result("claude", { judge: "ourtrainedjev" })], started, traces, "xyne");
-    expect(html).toContain("asked ourtrainedjev");
+    expect(html).not.toContain("Judge agreement");
   });
 });
 
@@ -278,7 +235,6 @@ describe("eval optimization arms", () => {
       kind: "eval",
       question: "what is aravind talking about",
       providers: [],
-      judges: [],
       opts: ["none", "all", "all,-jev_compaction"],
     });
   });

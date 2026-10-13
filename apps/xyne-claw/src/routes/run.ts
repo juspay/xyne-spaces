@@ -65,7 +65,7 @@ import {
 } from "xyne-claw-shared";
 import { loadCustomTools } from "../custom-tools.js";
 import { buildCopilotTool } from "../copilot.js";
-import { pinRunJudgeBackend } from "../judge-backend.js";
+import { beginJudgeRun } from "../judge-trace.js";
 import { optEnabled, pinRunOptimizations, tierOptimizationDefaults } from "../optimizations.js";
 import { activeToolCap, demotedCatalogItem, planActiveToolCap, readToolUsageRank } from "../active-tool-cap.js";
 import { buildExperimentTools, buildExperimentReviewTools, type ExperimentContext } from "../experiment.js";
@@ -577,7 +577,6 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     detached,
     fastMode,
     resumedFromHandoff,
-    judgeBackend,
     optimizations,
     memoryBankId,
     senderName,
@@ -591,7 +590,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
   } = req.body as InternalRunPayload;
 
   const experiment = normalizeExperimentContext(rawExperiment);
-  pinRunJudgeBackend(judgeBackend);
+  beginJudgeRun();
   pinRunOptimizations(optimizations, agentConfig?.["optimizations"], tierOptimizationDefaults(delegationMode));
 
   // [AUTODBG] claw-side receipt of every /run forward (esp. automations). Confirms
@@ -1604,6 +1603,7 @@ export async function processTask(
   const suggestProvidersRef: SuggestProvidersRef = {};
   const blockedConnectors = new Set<string>();
   const emitBriefRef: EmitBriefRef = {};
+  let experimentEnded = false;
   let callbackProvider = provider ?? "spaces";
   // Seed from THIS run's provider — a hardcoded default made every early
   // failure report the wrong model (740 codex / 461 claude rows, 2026-08-29).
@@ -2944,7 +2944,10 @@ export async function processTask(
       allTools.push(
         ...(experiment.mode === "review"
           ? buildExperimentReviewTools(experiment)
-          : buildExperimentTools(experiment, abortRun)),
+          : buildExperimentTools(experiment, () => {
+              experimentEnded = true;
+              abortRun?.();
+            })),
       );
       log(
         experiment.mode === "review"
@@ -5116,6 +5119,27 @@ export async function processTask(
         status: "completed",
         result: "",
         dailyBrief: emitBriefRef.value,
+        ...(err instanceof RunCancelledError && err.toolsUsed.length > 0 ? { toolsUsed: err.toolsUsed } : {}),
+        ...(err instanceof RunCancelledError && err.toolInvocations.length > 0 ? { toolInvocations: err.toolInvocations } : {}),
+        ...(err instanceof RunCancelledError ? { tokenUsage: err.tokenUsage } : {}),
+        provider: callbackProvider,
+        model: callbackModel,
+      });
+    } else if (
+      experimentEnded &&
+      !isUserCancel &&
+      (err instanceof RunCancelledError || abortSignal?.aborted)
+    ) {
+      log(`Session terminated by end-experiment: ${sessionId}`);
+      const partialResult = err instanceof RunCancelledError ? err.partialText?.trim() : "";
+      await sendCallback(callbackUrl, sessionToken, {
+        sessionId,
+        userId,
+        conversationId: conversationId ?? null,
+        agentSlug: agentSlug ?? null,
+        fastMode: fastModeForCallback,
+        status: "completed",
+        result: partialResult || "Experiment complete — report recorded.",
         ...(err instanceof RunCancelledError && err.toolsUsed.length > 0 ? { toolsUsed: err.toolsUsed } : {}),
         ...(err instanceof RunCancelledError && err.toolInvocations.length > 0 ? { toolInvocations: err.toolInvocations } : {}),
         ...(err instanceof RunCancelledError ? { tokenUsage: err.tokenUsage } : {}),

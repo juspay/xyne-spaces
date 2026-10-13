@@ -80,7 +80,7 @@ async function pool<T>(items: T[], limit: number, fn: (item: T) => Promise<void>
 }
 
 async function processJob(job: Job<EvalGenerationJobData>): Promise<EvalGenerationProgress> {
-  const { runId, agentSlug, userId, conversationIds, genProvider, genModel, optimizations, judgeBackend } = job.data;
+  const { runId, agentSlug, userId, conversationIds, genProvider, genModel, optimizations } = job.data;
   const jobId = job.id!;
   // Pin the generation LLM for every replayed turn when the run requested one.
   const providerOverride = genProvider ? { provider: genProvider, ...(genModel ? { model: genModel } : {}) } : undefined;
@@ -135,7 +135,7 @@ async function processJob(job: Job<EvalGenerationJobData>): Promise<EvalGenerati
             status: "running",
             clawConversationId: clawConvId,
           });
-          return replayTurn(agentSlug, turn.message, clawConvId, userId, providerOverride, abortCtl.signal, { optimizations, judgeBackend });
+          return replayTurn(agentSlug, turn.message, clawConvId, userId, providerOverride, abortCtl.signal, { optimizations });
         });
         const status = reply.status === "completed" ? "completed" : "failed";
         await evalRepository.upsertTurnResult({

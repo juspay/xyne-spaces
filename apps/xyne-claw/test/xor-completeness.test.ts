@@ -1,13 +1,13 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 const ask = vi.fn();
-vi.mock("../src/jev.js", () => ({
-  jevEnabled: () => true,
-  jevThreshold: (_n: string, fallback: number) => fallback,
-  jevAsk: (...args: unknown[]) => ask(...args),
+vi.mock("../src/xor.js", () => ({
+  xorEnabled: () => true,
+  xorThreshold: (_n: string, fallback: number) => fallback,
+  xor: (...args: unknown[]) => ask(...args),
 }));
 
-const { assessAnswer } = await import("../src/jev-completeness.js");
+const { assessAnswer } = await import("../src/xor-completeness.js");
 
 function scores(answered: number, finished: number, intent: number) {
   ask.mockResolvedValue({
@@ -55,6 +55,6 @@ describe("answer completeness", () => {
   it("includes open plan items in what it shows Jev", async () => {
     scores(0.9, 0.9, 0.1);
     await assessAnswer({ task: "do it", answer: "done", pendingPlanItems: 2 });
-    expect(String(ask.mock.calls[0]?.[0])).toContain("Plan items still open");
+    expect(String(ask.mock.calls[0]?.[0]?.state)).toContain("Plan items still open");
   });
 });

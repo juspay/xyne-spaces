@@ -1,13 +1,13 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
 const scoreItems = vi.fn();
-vi.mock("../src/jev.js", () => ({
-  jevEnabled: () => true,
-  jevThreshold: (_n: string, fallback: number) => fallback,
-  jevScoreItems: (...args: unknown[]) => scoreItems(...args),
+vi.mock("../src/xor.js", () => ({
+  xorEnabled: () => true,
+  xorThreshold: (_n: string, fallback: number) => fallback,
+  xorScoreItems: (...args: unknown[]) => scoreItems(...args),
 }));
 
-const { buildJevCompaction } = await import("../src/jev-compaction.js");
+const { buildJevCompaction } = await import("../src/xor-compaction.js");
 
 function call(id: string, name: string, args: Record<string, unknown> = {}) {
   return { type: "toolCall", id, name, arguments: args };
@@ -24,7 +24,7 @@ function user(text: string) {
 
 /** Score every call the same, for both the call and result questions. */
 function scoreAll(v: number) {
-  scoreItems.mockImplementation(async (_state: string, items: { id: string }[]) =>
+  scoreItems.mockImplementation(async ({ items }: { items: { id: string }[] }) =>
     new Map(items.map((i) => [i.id, v])),
   );
 }
@@ -59,7 +59,7 @@ describe("jev compaction selection", () => {
   it("keeps a high-scoring call verbatim while dropping a low-scoring one", async () => {
     // Per-call scores: c_keep matters, c_junk does not. Dropping the bulky junk
     // result is what produces the reduction the size guard requires.
-    scoreItems.mockImplementation(async (_state: string, items: { id: string }[]) =>
+    scoreItems.mockImplementation(async ({ items }: { items: { id: string }[] }) =>
       new Map(items.map((i) => [i.id, i.id === "c_keep" ? 0.9 : 0.05])),
     );
     const out = await buildJevCompaction([

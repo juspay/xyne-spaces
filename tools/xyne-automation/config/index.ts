@@ -18,6 +18,8 @@ export interface Config {
   browser: BrowserType;
   enableBrowserConsoleLogs: boolean;
   parallel: number;
+  // Record a .webm per browser session into <run artifact dir>/videos.
+  recordVideo: boolean;
   testProgressFile?: string;
 }
 
@@ -134,12 +136,16 @@ function getParallel(env: Environment): number {
   switch (env) {
     case 'local':
     case 'local-test':
-      return 3;
+      return 5;
     case 'test':
       return 1; // Jenkins runs serially — single Gauge worker
     default:
       return 1;
   }
+}
+
+function getRecordVideo(): boolean {
+  return process.env.RECORD_VIDEO === 'true';
 }
 
 function getConfigForEnv(env: Environment): Config {
@@ -156,6 +162,7 @@ function getConfigForEnv(env: Environment): Config {
     browser: getBrowser(),
     enableBrowserConsoleLogs: getEnableBrowserConsoleLogs(env),
     parallel: getParallel(env),
+    recordVideo: getRecordVideo(),
     testProgressFile: process.env.XYNE_TEST_PROGRESS_FILE || undefined,
   };
 }
