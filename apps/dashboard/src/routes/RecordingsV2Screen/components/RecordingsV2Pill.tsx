@@ -76,6 +76,8 @@ export interface RecordingsV2PillProps {
   pendingLabelCount?: number;
   /** Resolves a tag value (Tag id) to its display text. Defaults to identity. */
   resolveLabel?: (label: string) => string;
+  /** Summary is ready and the user hasn't opened the recording since. */
+  hasNewSummary?: boolean;
   onOpen: (recordingId: string) => void;
   onShare: (recording: RecordingsV2PillProps['recording']) => void;
   /** Give up your own access. Only offered to non-owners. */
@@ -171,6 +173,7 @@ const RecordingsV2Pill = ({
   suggestedTags = [],
   pendingLabelCount = 0,
   resolveLabel = (label: string) => label,
+  hasNewSummary = false,
   onOpen,
   onShare,
   onLeave,
@@ -351,8 +354,15 @@ const RecordingsV2Pill = ({
                 Generating title…
               </TextShimmer>
             ) : (
-              <span className='block truncate text-sm font-semibold text-foreground'>
-                {titleState.text}
+              <span className='flex min-w-0 items-center gap-2'>
+                <span className='truncate text-sm font-semibold text-foreground'>
+                  {titleState.text}
+                </span>
+                {hasNewSummary && (
+                  <span className='shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium leading-4 text-primary'>
+                    Summary ready
+                  </span>
+                )}
               </span>
             )}
             <span className='mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground'>

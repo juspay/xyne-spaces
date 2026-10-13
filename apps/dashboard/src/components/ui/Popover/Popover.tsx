@@ -36,6 +36,7 @@ export interface PopoverProps {
   showClose?: boolean;
   closeButtonClassName?: string;
   focusRef?: React.RefObject<HTMLElement | null>;
+  anchor?: React.ComponentProps<typeof PopoverPrimitive.Anchor>['virtualRef'];
 }
 
 /**
@@ -188,6 +189,7 @@ export const Popover = ({
   showClose = false,
   closeButtonClassName,
   focusRef,
+  anchor,
 }: PopoverProps): React.ReactElement => {
   const portalContainer =
     container ??
@@ -213,6 +215,7 @@ export const Popover = ({
       {...(onOpenChange !== undefined && { onOpenChange })}
       {...(modal !== undefined && { modal })}
     >
+      {anchor && <PopoverPrimitive.Anchor virtualRef={anchor} />}
       <PopoverPrimitive.Trigger asChild data-slot='popover-trigger'>
         {trigger}
       </PopoverPrimitive.Trigger>

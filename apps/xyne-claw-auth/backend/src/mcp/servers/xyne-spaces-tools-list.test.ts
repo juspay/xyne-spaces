@@ -985,3 +985,181 @@ describe("spaces-automation-webhook-issue", () => {
   });
 });
 
+
+describe("spaces-board-fields", () => {
+  it("names each field, its type and what it accepts", async () => {
+    mocks.spacesFetch.mockResolvedValue({
+      boardId: "board-1",
+      boardName: "F2 Program Desk",
+      formId: "form-1",
+      fields: [
+        { fieldName: "MID", fieldType: "STRING", required: true, options: [] },
+        { fieldName: "Severity", fieldType: "SINGLE_SELECT", required: false, options: ["P1", "P2"] },
+        {
+          fieldName: "Breach reason",
+          fieldType: "STRING",
+          required: false,
+          options: [],
+          shownWhen: { fieldName: "Severity", equals: "P1" },
+        },
+      ],
+    });
+
+    const tool = await loadTool("spaces-board-fields");
+    const result = await tool.handler({ boardId: "board-1" }, ctx);
+    const text = (result.content[0] as { text: string }).text;
+
+    expect(mocks.spacesFetch).toHaveBeenCalledWith("/api/tickets/claw/board-fields?boardId=board-1");
+    expect(text).toContain("MID (STRING, required)");
+    expect(text).toContain("Allowed values: P1 | P2");
+    expect(text).toContain("Only applies when Severity = P1");
+  });
+
+  it("says so plainly when the board has no form", async () => {
+    mocks.spacesFetch.mockResolvedValue({ boardId: "board-2", boardName: "Plain", formId: null, fields: [] });
+    const tool = await loadTool("spaces-board-fields");
+    const result = await tool.handler({ boardId: "board-2" }, ctx);
+    expect((result.content[0] as { text: string }).text).toContain("No custom fields");
+  });
+});
+
+describe("spaces-create-ticket custom fields", () => {
+  it("forwards dynamicFields to the Spaces create endpoint", async () => {
+    mocks.spacesFetch.mockResolvedValue({
+      id: "t-1",
+      xyneId: "PROG-412",
+      conversationId: "conv-1",
+      title: "Settlement mismatch",
+      priority: "MEDIUM",
+      status: "TODO",
+    });
+    const tool = await loadTool("spaces-create-ticket");
+    await tool.handler(
+      {
+        title: "Settlement mismatch",
+        description: "Merchant reports a gap",
+        projectId: "proj-1",
+        boardId: "board-1",
+        channelId: "chan-1",
+        dynamicFields: { MID: "merchant_1234" },
+      },
+      ctx,
+    );
+    const body = JSON.parse((mocks.spacesFetch.mock.calls[0]?.[1] as { body: string }).body);
+    expect(body.dynamicFields).toEqual({ MID: "merchant_1234" });
+  });
+
+  it("drops a dynamicFields that is not an object rather than sending junk", async () => {
+    mocks.spacesFetch.mockResolvedValue({
+      id: "t-2",
+      xyneId: "PROG-413",
+      conversationId: "conv-2",
+      title: "T",
+      priority: "MEDIUM",
+      status: "TODO",
+    });
+    const tool = await loadTool("spaces-create-ticket");
+    await tool.handler(
+      {
+        title: "T",
+        description: "D",
+        projectId: "proj-1",
+        boardId: "board-1",
+        channelId: "chan-1",
+        dynamicFields: "MID=merchant_1234",
+      },
+      ctx,
+    );
+    const body = JSON.parse((mocks.spacesFetch.mock.calls[0]?.[1] as { body: string }).body);
+    expect(body.dynamicFields).toBeUndefined();
+  });
+});
+
+describe("spaces-send-ticket-email", () => {
+  const ticketRow = {
+    id: "t-1",
+    xyneId: "PROG-412",
+    title: "Settlement mismatch",
+    conversationId: "conv-1",
+    channelId: "chan-1",
+  };
+
+  it("sends on the ticket's own thread, as HTML, and reports where it landed", async () => {
+    mockModels({ ticket: [ticketRow], channel: [{ id: "chan-1", name: "f2program-desk", type: "EMAIL" }] });
+    mocks.spacesFetch.mockResolvedValue({ emailId: "mail-1", threadId: "thread-1" });
+
+    const tool = await loadTool("spaces-send-ticket-email");
+    const result = await tool.handler(
+      {
+        ticketId: "t-1",
+        to: ["ops@merchant.com", "ops@merchant.com"],
+        cc: ["finance@merchant.com"],
+        body: "Hi there,\n\nWe are looking into the **settlement gap**.\n\nThanks",
+      },
+      ctx,
+    );
+
+    const [path, init] = mocks.spacesFetch.mock.calls[0] as [string, { method: string; body: string }];
+    const body = JSON.parse(init.body);
+    expect(path).toBe("/api/email/conv-1/reply");
+    expect(init.method).toBe("POST");
+    expect(body.to).toEqual(["ops@merchant.com"]);
+    expect(body.cc).toEqual(["finance@merchant.com"]);
+    // No subject was passed, so none is sent: on an existing thread Spaces
+    // keeps the thread's own subject, and inventing the ticket title here
+    // would go out as "Re: <internal title>" and split the thread. A thread
+    // being opened is made to supply one at queue time instead.
+    expect(body.subject).toBeUndefined();
+    expect(body.body).toContain("<p>Hi there,</p>");
+    expect(body.body).toContain("<strong>settlement gap</strong>");
+
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain("ops@merchant.com");
+    expect(text).toContain("PROG-412");
+  });
+
+  it("sends the subject it was given, verbatim", async () => {
+    mockModels({ ticket: [ticketRow], channel: [{ id: "chan-1", name: "f2program-desk", type: "EMAIL" }] });
+    mocks.spacesFetch.mockResolvedValue({ emailId: "mail-1", threadId: "thread-1" });
+    const tool = await loadTool("spaces-send-ticket-email");
+    await tool.handler(
+      { ticketId: "t-1", to: ["ops@merchant.com"], subject: "Settlement gap on 12 Oct", body: "Hello" },
+      ctx,
+    );
+    const body = JSON.parse((mocks.spacesFetch.mock.calls[0]?.[1] as { body: string }).body);
+    expect(body.subject).toBe("Settlement gap on 12 Oct");
+  });
+
+  it("refuses to send without a recipient instead of inventing one", async () => {
+    mockModels({ ticket: [ticketRow] });
+    const tool = await loadTool("spaces-send-ticket-email");
+    const result = await tool.handler({ ticketId: "t-1", to: [], body: "Hello" }, ctx);
+    expect(result.isError).toBe(true);
+    expect((result.content[0] as { text: string }).text).toContain("recipient");
+    expect(mocks.spacesFetch).not.toHaveBeenCalled();
+  });
+
+  it("takes the Xyne id too, since that is what people quote", async () => {
+    // First lookup (by internal id) misses, second (by xyneId) hits.
+    mocks.interact
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([ticketRow])
+      .mockResolvedValue([{ id: "chan-1", name: "f2program-desk", type: "EMAIL" }]);
+    mocks.spacesFetch.mockResolvedValue({ emailId: "mail-1", threadId: "thread-1" });
+
+    const tool = await loadTool("spaces-send-ticket-email");
+    const result = await tool.handler({ ticketId: "PROG-412", to: ["ops@merchant.com"], body: "Hello" }, ctx);
+
+    expect(result.isError).toBeUndefined();
+    expect((mocks.spacesFetch.mock.calls[0] as [string, unknown])[0]).toBe("/api/email/conv-1/reply");
+  });
+
+  it("explains an unknown ticket id instead of posting nowhere", async () => {
+    mockModels({ ticket: [] });
+    const tool = await loadTool("spaces-send-ticket-email");
+    const result = await tool.handler({ ticketId: "nope", to: ["a@b.com"], body: "Hello" }, ctx);
+    expect(result.isError).toBe(true);
+    expect((result.content[0] as { text: string }).text).toContain("Internal ID");
+    expect(mocks.spacesFetch).not.toHaveBeenCalled();
+  });
+});

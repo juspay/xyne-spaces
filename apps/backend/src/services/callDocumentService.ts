@@ -1244,6 +1244,7 @@ export class CallDocumentService {
     callId: string,
     template: SummaryTemplate,
     onDelta?: (accumulatedContent: string) => void | Promise<void>,
+    modelType?: SummaryModelType,
   ): Promise<string | null> {
     const context = sanitizeInput(template.autoTriggerPrompt).trim();
     const sections = sanitizeInput(formatSummaryTemplateSections(template.sections));
@@ -1261,6 +1262,7 @@ export class CallDocumentService {
       operation: 'bot_call_summary_generation',
       callId,
       ...(systemPrompt ? { systemPrompt } : {}),
+      ...(modelType ? { modelType } : {}),
       onDelta,
     });
 
@@ -1308,7 +1310,11 @@ export class CallDocumentService {
     return rawSummary ? normalizeDetailedSummaryMarkdown(rawSummary) : null;
   }
 
-  /** Generate a headless-recording summary using a saved or code-backed template. */
+  /**
+   * Generate a headless-recording summary using a saved or code-backed template.
+   * `unnumberedTranscript` is the transcript before segment numbering; a bot-created
+   * call's template summary is built from it, like its first summary.
+   */
   async generateRecordingSummary(
     transcript: string,
     callId: string,
@@ -1316,26 +1322,40 @@ export class CallDocumentService {
     onDelta?: (accumulatedContent: string) => void | Promise<void>,
     citationSegments?: CitationContext['segments'],
     modelType?: SummaryModelType,
+    unnumberedTranscript?: string,
   ): Promise<{
     summary: string;
     template: SummaryTemplate;
     markedItems: RecordingSummaryMarkedItem[];
+    // The untouched model output of a bot-created call's template summary.
+    rawSummary?: string;
   } | null> {
     const call = await repositories.calls.findByExternalId(callId);
     if (!call?.workspaceId) return null;
 
+    // A bot-created call (e.g. a regeneration requested by its app) follows its template
+    // alone, as its first summary did in generateAndPostDetailedSummary: no Xyne-generated
+    // system prompt and none of the recording summary's Markdown instructions.
+    const botCreated = !isRecording(call) && (await this.isBotCreatedCall(call));
     const selectedTemplate = templateId
       ? await summaryTemplateService.findAccessibleById(
           templateId,
           call.workspaceId,
           call.createdByUserId,
         )
-      : await this.selectRecordingSummaryTemplateForTranscript(
-          transcript,
-          call.workspaceId,
-          call.createdByUserId,
-          callId,
-        );
+      : botCreated
+        ? await this.resolveBotCallSummaryTemplate(
+            unnumberedTranscript ?? transcript,
+            call,
+            call.workspaceId,
+            callId,
+          )
+        : await this.selectRecordingSummaryTemplateForTranscript(
+            transcript,
+            call.workspaceId,
+            call.createdByUserId,
+            callId,
+          );
 
     if (!selectedTemplate) {
       logger.error(`[${callId}] recording_summary_generation_failed`, {
@@ -1343,6 +1363,23 @@ export class CallDocumentService {
         template_id: templateId,
       });
       return null;
+    }
+
+    if (botCreated) {
+      const rawSummary = await this.generateBotCallSummary(
+        unnumberedTranscript ?? transcript,
+        callId,
+        selectedTemplate,
+        onDelta,
+        modelType,
+      );
+      if (!rawSummary) return null;
+      return {
+        summary: stripRecordingSummaryMarkedItemAnnotations(rawSummary),
+        template: selectedTemplate,
+        markedItems: [],
+        rawSummary,
+      };
     }
 
     const template = await summaryTemplateService.ensureGeneratedSystemPrompt(selectedTemplate);

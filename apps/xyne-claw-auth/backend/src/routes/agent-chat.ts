@@ -4119,7 +4119,7 @@ router.get("/:slug/conversations", async (req: Request<{ slug: string }>, res: R
 /**
  * POST /agents/:slug/chat/approve-action
  * User clicked "Approve" on a write-tool card inside the chat UI.
- * Body: { pendingAction: { serverType, tool, params, userId, signature } }
+ * Body: { pendingAction: { serverType, tool, params, userId, signature, subagentId? } }
  * Returns the tool's execution result so the UI can render it inline.
  */
 router.post("/:slug/chat/approve-action", async (req: Request<{ slug: string }>, res: Response) => {
@@ -4138,6 +4138,7 @@ router.post("/:slug/chat/approve-action", async (req: Request<{ slug: string }>,
 
     const action = pendingAction as {
       serverType?: string; tool?: string; params?: Record<string, unknown>; userId?: string; signature?: string;
+      subagentId?: unknown;
     };
     if (!action.serverType || !action.tool || !action.userId || !action.signature) {
       res.status(400).json({ success: false, error: "pendingAction must include serverType, tool, userId, signature" });
@@ -4185,6 +4186,23 @@ router.post("/:slug/chat/approve-action", async (req: Request<{ slug: string }>,
       return;
     }
 
+    // Signed in when a subagent's credential queued the write. Clients that
+    // rebuild the action from its four base fields (the Xyne AI sidebar, via
+    // Spaces) drop it, so fall back to the copy this run stored. That is safe
+    // without an ownership check: the HMAC below rejects any id the action
+    // was not signed with.
+    let subagentId = typeof action.subagentId === "string" && action.subagentId ? action.subagentId : undefined;
+    if (!subagentId && approvedConversationId) {
+      const stored = await chatMessageRepository
+        .findPendingAction(approvedConversationId, action.signature)
+        .catch((err: unknown) => {
+          log.warn(`[agent-chat] stored pending action lookup failed: ${errMsg(err)}`);
+          return null;
+        });
+      const storedSubagentId = stored?.["subagentId"];
+      if (typeof storedSubagentId === "string" && storedSubagentId) subagentId = storedSubagentId;
+    }
+
     const { executeWriteAction } = await import("../lib/write-actions.js");
     const result = await executeWriteAction({
       serverType: action.serverType,
@@ -4192,6 +4210,7 @@ router.post("/:slug/chat/approve-action", async (req: Request<{ slug: string }>,
       params: action.params ?? {},
       userId: action.userId,
       signature: action.signature,
+      ...(subagentId ? { subagentId } : {}),
     });
 
     if (!result.ok) {

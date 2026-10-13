@@ -117,7 +117,8 @@ export async function resolveSdlcHubContextForUser(
 
 function s2sAuth(): { s2sKey: string; baseUrl: string } | undefined {
   const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? process.env["XYNE_CLAW_S2S_KEY"] ?? "";
-  return s2sKey ? { s2sKey, baseUrl: CONFIG.spacesInternalUrl } : undefined;
+  // The SDLC backend ships ahead of the main one, so a new internal route can exist only there.
+  return s2sKey ? { s2sKey, baseUrl: CONFIG.sdlcBackendUrl || CONFIG.spacesInternalUrl } : undefined;
 }
 
 export interface SdlcHubKnowledge {

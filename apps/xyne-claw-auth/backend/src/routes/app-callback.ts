@@ -506,6 +506,7 @@ router.post("/callback", async (req: Request, res: Response) => {
     const actionChannelId = context["channelId"] as string | undefined;
     const actionConversationId = context["conversationId"] as string | undefined;
     const actionOriginalTask = context["originalTask"] as string | undefined;
+    const subagentId = typeof context["subagentId"] === "string" && context["subagentId"] ? context["subagentId"] : undefined;
 
     if (!serverType || !tool || !paramsStr || !writeUserId || !signature) {
       log.error("[app-callback] Missing write action fields");
@@ -515,8 +516,8 @@ router.post("/callback", async (req: Request, res: Response) => {
     const params = JSON.parse(paramsStr) as Record<string, unknown>;
 
     // Verify HMAC signature
-    const { verifyActionSignature } = await import("./mcp.js");
-    const action = { serverType, tool, params, userId: writeUserId };
+    const { verifyActionSignature, writeActionPayload } = await import("./mcp.js");
+    const action = writeActionPayload({ serverType, tool, params, userId: writeUserId, subagentId });
     if (!verifyActionSignature(action, signature)) {
       log.error("[app-callback] HMAC verification failed — action may have been tampered with");
       return;
@@ -723,13 +724,19 @@ router.post("/callback", async (req: Request, res: Response) => {
       // MCP-based tools — execute via MCP runner
       const { callTool } = await import("../mcp/runner.js");
       const { hasConnectorDefinition } = await import("../mcp/connector-definitions.js");
-      const { loadEffectiveCredentials, isPrivateUserCredential } = await import("../lib/credentials-loader.js");
+      const { loadApprovedWriteCredentials, isPrivateUserCredential } = await import("../lib/credentials-loader.js");
       if (!(await hasConnectorDefinition(serverType))) {
         log.error(`[app-callback] No adapter for ${serverType}`);
         return;
       }
 
-      const effective = await loadEffectiveCredentials(writeUserId, serverType, agentSlug);
+      const effective = await loadApprovedWriteCredentials({
+        userId: writeUserId,
+        serverType,
+        agentSlug,
+        spacesAppId,
+        subagentId,
+      });
       if (!effective) {
         log.error(`[app-callback] No connection for user ${writeUserId} / ${serverType}`);
         return;
@@ -739,7 +746,16 @@ router.post("/callback", async (req: Request, res: Response) => {
       // (excludes the ambient Spaces session — see isPrivateUserCredential).
       if (isPrivateUserCredential(serverType, effective.source)) flagUserTokenRun(actionConversationId, agentSlug);
 
-      const result = await callTool(writeUserId, serverType, effective.credentials, tool, params, agentSlug);
+      const result = await callTool(
+        writeUserId,
+        serverType,
+        effective.credentials,
+        tool,
+        params,
+        agentSlug,
+        undefined,
+        effective.instance,
+      );
       log.info(`[app-callback] Write action approved: ${tool} → ${result.content.slice(0, 100)}`);
     } catch (err) {
       const errText = errMsg(err);

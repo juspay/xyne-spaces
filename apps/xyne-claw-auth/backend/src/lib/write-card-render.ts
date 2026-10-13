@@ -16,6 +16,9 @@ export interface PendingWriteAction {
   params: Record<string, unknown>;
   userId: string;
   signature: string;
+  /** Signed in when a subagent's own credential decided the call; the approval
+   *  resolves that credential from it. See writeActionPayload in routes/mcp.ts. */
+  subagentId?: string;
 }
 
 /** Routing the card is bound to. Empty strings give absent fields one form. */
@@ -33,6 +36,7 @@ export interface WriteCardAction {
   userId: string;
   signature: string;
   agentSlug: string;
+  subagentId?: string;
   channelId?: string;
   conversationId?: string;
   /** Claw's original signature — how a surface that also renders raw pending
@@ -44,6 +48,32 @@ export interface WriteCardAction {
  *  summarised by count — every ticket in `params` is still created on approve,
  *  since the executed payload comes from the HMAC-signed action, not the card. */
 const BULK_TICKETS_CARD_LIMIT = 25;
+
+/** "MID: merchant_1234" pairs out of a custom-field map, or nothing. */
+function fieldMapEntries(value: unknown): Array<[string, string]> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  return Object.entries(value as Record<string, unknown>)
+    .map(([key, raw]): [string, string] => [
+      key,
+      Array.isArray(raw) ? raw.map((v) => String(v)).join(", ") : String(raw ?? ""),
+    ])
+    .filter(([, text]) => text.trim() !== "");
+}
+
+/** The same 12-field cap as the WhatsApp card, with the same honest marker:
+ *  a silently shortened list reads as the whole list. */
+function fieldMapLines(value: unknown): string[] {
+  const entries = fieldMapEntries(value);
+  const shown = entries.slice(0, 12).map(([key, text]) => `**${key}:** ${text}`);
+  if (entries.length > 12) shown.push(`_…and ${entries.length - 12} more (all are written)_`);
+  return shown;
+}
+
+/** A recipient list the approver can read, from an array or a bare string. */
+function fieldList(value: unknown): string {
+  if (Array.isArray(value)) return value.map((v) => String(v)).filter(Boolean).join(", ");
+  return typeof value === "string" ? value.trim() : "";
+}
 
 export function formatActionDescription(tool: string, params: Record<string, unknown>, options?: { channelName?: string }): string {
   if (tool === "user-send-message") {
@@ -73,6 +103,29 @@ export function formatActionDescription(tool: string, params: Record<string, unk
     const desc = (params["description"] as string ?? "").slice(0, 300);
     const lines = [`**Create Ticket**`, ``, `**Title:** ${title}`];
     if (desc) lines.push(`**Description:** ${desc}${(params["description"] as string ?? "").length > 300 ? "..." : ""}`);
+    // Custom fields are the point of some desks (a MID, a merchant name) and
+    // are invisible in the title, so a card that omits them asks for approval
+    // of a value the approver cannot see.
+    lines.push(...fieldMapLines(params["dynamicFields"]));
+    return lines.join("\n");
+  }
+
+  if (tool === "spaces-send-ticket-email") {
+    const to = fieldList(params["to"]);
+    const cc = fieldList(params["cc"]);
+    const bcc = fieldList(params["bcc"]);
+    const subject = (params["subject"] as string) ?? "";
+    const fullBody = (params["body"] as string) ?? "";
+    const body = fullBody.slice(0, 1500);
+    const lines = [`**Send Email from Ticket**`, ``, `**To:** ${to || "(nobody)"}`];
+    if (cc) lines.push(`**Cc:** ${cc}`);
+    if (bcc) lines.push(`**Bcc:** ${bcc}`);
+    if (subject) lines.push(`**Subject:** ${subject}`);
+    lines.push(
+      ``,
+      `**Message:**`,
+      `${body}${fullBody.length > 1500 ? "\n…(truncated — the full message is sent)" : ""}`,
+    );
     return lines.join("\n");
   }
 
@@ -95,7 +148,10 @@ export function formatActionDescription(tool: string, params: Record<string, unk
       const tags = Array.isArray(ticket["tags"]) ? (ticket["tags"] as unknown[]).join(", ") : "";
       const rawDesc = String(ticket["description"] ?? "");
       const desc = rawDesc.slice(0, 200);
-      const meta = [priority, assignee && `→ ${assignee}`, tags && `[${tags}]`].filter(Boolean).join(" · ");
+      const fields = fieldMapEntries(ticket["dynamicFields"] ?? params["defaultDynamicFields"])
+        .map(([key, value]) => `${key}: ${value}`)
+        .join(" · ");
+      const meta = [priority, assignee && `→ ${assignee}`, tags && `[${tags}]`, fields].filter(Boolean).join(" · ");
       lines.push(`**${index + 1}. ${title}**${meta ? ` — ${meta}` : ""}`);
       if (desc) lines.push(`${desc}${rawDesc.length > 200 ? "…" : ""}`);
       lines.push(``);
@@ -194,12 +250,14 @@ export function readPendingWriteAction(raw: unknown): PendingWriteAction | null 
   const userId = typeof r["userId"] === "string" ? r["userId"] : "";
   const signature = typeof r["signature"] === "string" ? r["signature"] : "";
   if (!serverType || !tool || !userId || !signature) return null;
+  const subagentId = typeof r["subagentId"] === "string" ? r["subagentId"] : "";
   return {
     serverType,
     tool,
     params: r["params"] && typeof r["params"] === "object" ? (r["params"] as Record<string, unknown>) : {},
     userId,
     signature,
+    ...(subagentId ? { subagentId } : {}),
   };
 }
 
@@ -209,13 +267,8 @@ export async function mintWriteCardAction(
   action: PendingWriteAction,
   id: WriteCardIdentity,
 ): Promise<WriteCardAction> {
-  const { signAction, verifyActionSignature } = await import("../routes/mcp.js");
-  const pendingActionPayload = {
-    serverType: action.serverType,
-    tool: action.tool,
-    params: action.params,
-    userId: action.userId,
-  };
+  const { signAction, verifyActionSignature, writeActionPayload } = await import("../routes/mcp.js");
+  const pendingActionPayload = writeActionPayload(action);
   if (!verifyActionSignature(pendingActionPayload, action.signature)) {
     throw new Error("Invalid pending write-action signature");
   }
