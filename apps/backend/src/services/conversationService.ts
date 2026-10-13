@@ -349,10 +349,8 @@ export class ConversationService {
    * EXACT extraction from conversationController.ts lines 82-179
    */
   /** Guests may only mention people in the channel (see keepMentionsWithin), on every path that saves a message. */
-  private async guestSafeContent(userId: string, channelId: string, content: string): Promise<string> {
-    if (!content.includes('data-mention-type')) return content;
-    const sender = await this.userRepository.findById(userId);
-    if (sender?.role !== WorkspaceRole.GUEST) return content;
+  private async guestSafeContent(senderRole: string | undefined, channelId: string, content: string): Promise<string> {
+    if (senderRole !== WorkspaceRole.GUEST || !content.includes('data-mention-type')) return content;
     const participants = await this.channelParticipantRepository.getChannelParticipants(channelId);
     return keepMentionsWithin(content, new Set(participants.map((p) => p.userId)));
   }
@@ -418,8 +416,10 @@ export class ConversationService {
       processedFiles.push(...uploadedFiles);
     }
 
+    // Read once: the guest check and the author's participation below both need it.
+    const sender = await this.userRepository.findById(userId);
     const messageContent = await this.guestSafeContent(
-      userId,
+      sender?.role,
       channelId,
       await replaceEmojisInContent(content?.trim() || ''),
     );
@@ -477,7 +477,7 @@ export class ConversationService {
     const conversation = await this.conversationRepository.create(conversationData);
     const message = await this.messageRepository.create(messageData);
 
-    if (await this.userRepository.findById(userId)) {
+    if (sender) {
       await this.conversationParticipantRepository.createOrUpdateConversationParticipant(
         conversation.conversationId,
         userId,
@@ -690,8 +690,10 @@ export class ConversationService {
       processedFiles.push(...uploadedFiles);
     }
 
+    // Read once: the guest check and the author's participation below both need it.
+    const sender = await this.userRepository.findById(userId);
     const messageContent = await this.guestSafeContent(
-      userId,
+      sender?.role,
       conversation.channelId,
       await replaceEmojisInContent(content?.trim() || ''),
     );
@@ -713,7 +715,7 @@ export class ConversationService {
     };
 
     const message = await this.messageRepository.create(messageData);
-    if (await this.userRepository.findById(userId)) {
+    if (sender) {
       await this.conversationParticipantRepository.createOrUpdateConversationParticipant(
         conversationId,
         userId,

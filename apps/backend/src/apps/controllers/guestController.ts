@@ -5,7 +5,7 @@ import { GuestError, createGuest, issueGuestToken, listGuests, updateGuest, type
 
 const email = z.string().trim().email().max(254);
 const displayName = z.string().trim().min(1).max(80);
-const channelIds = z.array(z.string().min(1).max(64)).min(1).max(100);
+const channelIds = z.array(z.string().min(1).max(64)).min(1).max(10);
 
 const CreateGuestBodySchema = z.object({ email, displayName, channelIds }).strict();
 

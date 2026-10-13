@@ -231,6 +231,7 @@ import {
 } from '@/services/flowCascadeService';
 import { validateFlowDecisionFields } from '@/zero/utils/flowPlanValidation';
 import { getEncryptionProvider } from '@/services/encryption';
+import { escapeHtml } from '@/utils/htmlEscape';
 
 function sortCallParticipantsForPreview<T extends {
   id: string;
@@ -986,8 +987,9 @@ async function createNonParticipantSystemMessages(
     logger.info(`📝 [NON-PARTICIPANT] Creating system message for ${nonParticipants.length} non-participants`);
 
     // Generate HTML content with mentions (matching format of regular messages)
+    // Escaped: a raw '<' or '"' in a name would break the tag, and the mention with it.
     const mentionSpans = nonParticipants.map(np =>
-      `<span data-mention="true" data-mention-type="user" data-user-id="${np.userId}" data-username="${np.userName}" class="mention-text">${np.userName}</span>`
+      `<span data-mention="true" data-mention-type="user" data-user-id="${escapeHtml(np.userId)}" data-username="${escapeHtml(np.userName)}" class="mention-text">${escapeHtml(np.userName)}</span>`
     ).join(', ');
 
     const channelStatsForPolicy = channel ? await tx.run(zql.channel_stats.where('channelId', channel.id).one()) : null;

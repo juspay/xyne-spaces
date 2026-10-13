@@ -53,12 +53,13 @@ export async function resolveChannelId(
 /** Active, non-guest workspace members by email, in the order given. */
 export async function findMembers(app: GuestApp, emails: string[]): Promise<string[]> {
   if (emails.length === 0) return [];
-  const users = await db.user.findMany({ where: { workspaceId: app.workspaceId, email: { in: emails } } });
+  // Stored emails may carry capitals (e.g. from SSO); the request's are lowercased.
+  const users = await db.user.findMany({ where: { workspaceId: app.workspaceId, email: { in: emails, mode: 'insensitive' } } });
   const members = await findOrgMembers(app, users.map((user) => user.orgMemberId));
   const inOrg = new Set(members.filter((member) => !member.leftAt).map((member) => member.memberId));
-  const byEmail = new Map(users.map((user) => [user.email, user]));
+  const byEmail = new Map(users.map((user) => [user.email.toLowerCase(), user]));
   const invalid = emails.filter((email) => {
-    const user = byEmail.get(email);
+    const user = byEmail.get(email.toLowerCase());
     return (
       !user ||
       user.role === WorkspaceRole.GUEST ||
@@ -70,7 +71,7 @@ export async function findMembers(app: GuestApp, emails: string[]): Promise<stri
   if (invalid.length > 0) {
     throw new GuestError(404, 'MEMBER_NOT_FOUND', `No active member with email ${invalid.join(', ')}.`);
   }
-  return emails.map((email) => byEmail.get(email)!.id);
+  return emails.map((email) => byEmail.get(email.toLowerCase())!.id);
 }
 
 /** The project a new channel goes in, by its name (unique per workspace). */

@@ -15,7 +15,8 @@ import { asService, transaction } from './base';
 /** Whether any org already has this email (org_members.email is unique across orgs). */
 export function isOrgEmailTaken(app: GuestApp, email: string): Promise<boolean> {
   return asService(['OrgMember'], 'app guest create: the email check spans every org', app.botUserId, app.workspaceId, async () =>
-    !!(await db.orgMember.findUnique({ where: { email }, select: { memberId: true } })),
+    // A member stored as Priya@… still has priya@….
+    !!(await db.orgMember.findFirst({ where: { email: { equals: email, mode: 'insensitive' } }, select: { memberId: true } })),
   );
 }
 
