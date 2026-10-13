@@ -4,8 +4,9 @@
  * form_entity_values row per channel per field. A Channels desk copies them onto the tickets it opens.
  */
 import type { Prisma } from '@prisma/client';
-import { FormContextType, FormEntityType } from '@xyne/shared';
+import { FormContextType, FormEntityType, FormFieldType } from '@xyne/shared';
 import { db } from '@/database/client';
+import { logger } from '@/utils/logger';
 import { normalizeCustomFieldValue } from '@/apps/controllers/ticketController.helpers';
 import { resolveFormFieldDefinitionsForForm, type ResolvedFormFieldDefinition } from '@/utils/fieldDefinition';
 
@@ -105,10 +106,18 @@ export async function writeChannelFields(
   }
 }
 
+// Option ids belong to their field's definition, so these only copy onto the same definition.
+const OPTION_TYPES = new Set<string>([FormFieldType.SINGLE_SELECT, FormFieldType.MULTI_SELECT]);
+
+function isEmptyValue(value: Prisma.JsonValue): boolean {
+  return value === null || value === '' || (Array.isArray(value) && value.length === 0);
+}
+
 /**
  * Copies a channel's fields onto a new ticket of the given board, inside the ticket's transaction.
- * A value lands on the board field with the same definition (global field), else the same name;
- * fields the board doesn't have are skipped.
+ * A value lands on the board field with the same definition (global field), else one with the same
+ * name and type (not for option fields). Values the board can't take are skipped and logged; the copy
+ * never fails the ticket.
  */
 export async function copyChannelFieldsToTicket(
   client: Client,
@@ -130,12 +139,27 @@ export async function copyChannelFieldsToTicket(
   ]);
   const boardById = new Map(boardFields.map((field) => [field.id, field]));
   const boardByName = new Map(boardFields.map((field) => [field.fieldName, field]));
-  const nameOf = new Map((form?.fields ?? []).map((field) => [field.id, field.fieldName]));
+  const channelFieldOf = new Map((form?.fields ?? []).map((field) => [field.id, field]));
 
+  const skipped: string[] = [];
+  const copied = new Set<string>();
   const rows = values.flatMap((value) => {
-    const name = nameOf.get(value.fieldId);
-    const target = boardById.get(value.fieldId) ?? (name ? boardByName.get(name) : undefined);
-    if (!target) return [];
+    const current = value.actualFieldValue ?? value.fieldValue;
+    if (isEmptyValue(current)) return [];
+    // Only the current channel form's fields; values left from a replaced form aren't the channel's any more.
+    const source = channelFieldOf.get(value.fieldId);
+    if (!source) return [];
+    const byName = boardByName.get(source.fieldName);
+    const target =
+      boardById.get(value.fieldId) ??
+      (byName && byName.fieldType === source.fieldType && !OPTION_TYPES.has(byName.fieldType) ? byName : undefined);
+    if (!target) {
+      skipped.push(source.fieldName);
+      return [];
+    }
+    // One value per ticket field: a second would break the unique index and roll back the ticket.
+    if (copied.has(target.id)) return [];
+    copied.add(target.id);
     return [
       {
         workspaceId: args.workspaceId,
@@ -150,5 +174,13 @@ export async function copyChannelFieldsToTicket(
       },
     ];
   });
-  if (rows.length > 0) await client.formEntityValues.createMany({ data: rows });
+  if (skipped.length > 0) {
+    logger.warn('[channels-desk] Channel fields not copied: the board has no matching field', {
+      ticketId: args.ticketId,
+      boardId: args.boardId,
+      channelId: args.channelId,
+      fields: skipped,
+    });
+  }
+  if (rows.length > 0) await client.formEntityValues.createMany({ data: rows, skipDuplicates: true });
 }
