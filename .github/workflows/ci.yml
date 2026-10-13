@@ -60,8 +60,17 @@ jobs:
           pnpm config set registry "https://asia-south1-npm.pkg.dev/xyne-infra-external/npm-mirror/"
           echo "//asia-south1-npm.pkg.dev/xyne-infra-external/npm-mirror/:_authToken=${{ steps.gcp-auth.outputs.access_token }}" >> .npmrc
 
+      # TEST: higher network concurrency against our own mirror (same
+      # region, low-latency, under our control) — default 16 is tuned for
+      # arbitrary public registries, overly conservative here. Only applied
+      # on self-hosted/mirror, not against the public registry on
+      # ubuntu-latest — don't want to hammer npmjs.org with 64 concurrent
+      # requests.
       - name: Install dependencies
-        run: pnpm install ${{ env.PNPM_FLAGS }} --filter xyne-spaces-backend...
+        run: >-
+          pnpm install ${{ env.PNPM_FLAGS }}
+          ${{ vars.USE_SELF_HOSTED_CI == 'true' && '--network-concurrency 64' || '' }}
+          --filter xyne-spaces-backend...
 
       - name: Build workspace libraries
         run: pnpm --filter @xyne/shared --filter agentic-framework run build
