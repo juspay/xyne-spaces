@@ -1,3 +1,15 @@
+## [1.492.0](https://github.com/juspay/xyne-spaces/compare/v1.491.0...v1.492.0) (2026-10-13)
+
+
+### Features
+
+* drag to customize the sidebar rail and More menu ([#2892](https://github.com/juspay/xyne-spaces/issues/2892)) ([f893485](https://github.com/juspay/xyne-spaces/commit/f89348510d152ba6e7995bcce0be316a8d7e4d59))
+
+
+### Bug Fixes
+
+* forward modal ignores the first pick from the suggested list ([#2895](https://github.com/juspay/xyne-spaces/issues/2895)) ([ce4e120](https://github.com/juspay/xyne-spaces/commit/ce4e120a2d9d782a40674b61f22923eb9538c921))
+
 ## [1.491.0](https://github.com/juspay/xyne-spaces/compare/v1.490.0...v1.491.0) (2026-10-12)
 
 

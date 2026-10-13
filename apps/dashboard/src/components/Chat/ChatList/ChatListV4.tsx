@@ -1689,6 +1689,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
       // hand the selection to.
       if (isMobile) return;
       if (!(event.target instanceof Element)) return;
+      if (!event.currentTarget.contains(event.target)) return;
       if (
         event.target.closest(
           'a, button, input, textarea, select, [contenteditable="true"], [role="button"], [role="menuitem"]',
