@@ -40,6 +40,26 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
+      # TEST: npm mirror via Artifact Registry pull-through cache, scoped to
+      # this job only while validating — see npm-mirror in xyne-infra-external.
+      # Static SA key (not Workload Identity): the GKE_METADATA interception
+      # that WI needs doesn't work reliably with this cluster's Calico CNI.
+      # Only pull through the mirror on self-hosted — on ubuntu-latest the
+      # public registry is already fast and this secret/step is unneeded.
+      - name: Authenticate to GCP (npm mirror)
+        id: gcp-auth
+        if: vars.USE_SELF_HOSTED_CI == 'true'
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.NPM_MIRROR_SA_KEY }}
+          token_format: access_token
+
+      - name: Configure pnpm for Artifact Registry npm mirror
+        if: vars.USE_SELF_HOSTED_CI == 'true'
+        run: |
+          pnpm config set registry "https://asia-south1-npm.pkg.dev/xyne-infra-external/npm-mirror/"
+          echo "//asia-south1-npm.pkg.dev/xyne-infra-external/npm-mirror/:_authToken=${{ steps.gcp-auth.outputs.access_token }}" >> .npmrc
+
       - name: Install dependencies
         run: pnpm install ${{ env.PNPM_FLAGS }} --filter xyne-spaces-backend...
 
@@ -82,6 +102,22 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
+
+      # TEST: npm mirror via Artifact Registry pull-through cache — see the
+      # same steps/comment on the backend job above.
+      - name: Authenticate to GCP (npm mirror)
+        id: gcp-auth
+        if: vars.USE_SELF_HOSTED_CI == 'true'
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.NPM_MIRROR_SA_KEY }}
+          token_format: access_token
+
+      - name: Configure pnpm for Artifact Registry npm mirror
+        if: vars.USE_SELF_HOSTED_CI == 'true'
+        run: |
+          pnpm config set registry "https://asia-south1-npm.pkg.dev/xyne-infra-external/npm-mirror/"
+          echo "//asia-south1-npm.pkg.dev/xyne-infra-external/npm-mirror/:_authToken=${{ steps.gcp-auth.outputs.access_token }}" >> .npmrc
 
       - name: Install dependencies
         run: pnpm install ${{ env.PNPM_FLAGS }} --filter xyne-spaces-dashboard...
@@ -208,16 +244,33 @@ jobs:
   # Framework lint — self-contained (no workspace deps).
   framework-lint:
     name: Framework lint
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-mini' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v5
 
       - uses: pnpm/action-setup@v4
 
       - uses: actions/setup-node@v5
+        if: vars.USE_SELF_HOSTED_CI != 'true'
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
+
+      # npm mirror via Artifact Registry pull-through cache — see the same
+      # steps/comment on the backend job above.
+      - name: Authenticate to GCP (npm mirror)
+        id: gcp-auth
+        if: vars.USE_SELF_HOSTED_CI == 'true'
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.NPM_MIRROR_SA_KEY }}
+          token_format: access_token
+
+      - name: Configure pnpm for Artifact Registry npm mirror
+        if: vars.USE_SELF_HOSTED_CI == 'true'
+        run: |
+          pnpm config set registry "https://asia-south1-npm.pkg.dev/xyne-infra-external/npm-mirror/"
+          echo "//asia-south1-npm.pkg.dev/xyne-infra-external/npm-mirror/:_authToken=${{ steps.gcp-auth.outputs.access_token }}" >> .npmrc
 
       - name: Install dependencies
         run: pnpm install ${{ env.PNPM_FLAGS }} --filter agentic-framework...
@@ -260,7 +313,7 @@ jobs:
   # ---------------------------------------------------------------------------
   gitleaks:
     name: Secret scan (gitleaks)
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-mini' || 'ubuntu-latest' }}
     env:
       GITLEAKS_VERSION: "8.30.1"
     steps:
@@ -304,7 +357,7 @@ jobs:
   # ---------------------------------------------------------------------------
   trivy:
     name: Vulnerability scan (Trivy)
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-mini' || 'ubuntu-latest' }}
     env:
       TRIVY_VERSION: "0.72.0"
       # secrets handled by gitleaks; scan deps (vuln) + IaC (misconfig) only.

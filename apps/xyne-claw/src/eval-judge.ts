@@ -14,7 +14,7 @@
 import { LITELLM, litellmEndpoint } from "./config.js";
 import { withLlmSlot, pauseLlmGate, retryAfterMs } from "./llm-gate.js";
 import { jevAskOn, judgeBackendConfigured, type JevQuestion } from "./jev.js";
-import { isJudgeBackend, type JudgeBackendName } from "./judge-backend.js";
+import { resolveJudgeBackend, type JudgeBackendName } from "./judge-backend.js";
 
 import { createLogger } from "./logger.js";
 const log = createLogger("eval-judge");
@@ -181,8 +181,8 @@ async function judgeViaJev(backend: JudgeBackendName, input: EvalJudgeInput): Pr
 }
 
 export async function judgeSemanticMatch(input: EvalJudgeInput): Promise<EvalJudgeResult> {
-  const requested = input.model?.trim().toLowerCase();
-  if (!input.copilot?.token && isJudgeBackend(requested) && requested !== "llm") {
+  const requested = resolveJudgeBackend(input.model);
+  if (!input.copilot?.token && requested && requested !== "llm") {
     return judgeViaJev(requested, input);
   }
   const viaCopilot = !!input.copilot?.token;

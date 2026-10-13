@@ -41,6 +41,7 @@ import { isStatusExpired, resolveUserStatus } from '../../utils/statusUtils';
 import { UpdateStatusModal } from './UpdateStatusModal';
 import { StatusIndicator } from '../ui/StatusIndicator';
 import { useMissedCallCount } from '../../hooks/useMissedCallCount';
+import { useHasUnreadRecordingSummaries } from '../../hooks/useHasUnreadRecordingSummaries';
 import { useUnreadActivitiesCount } from '../../hooks/useUnreadActivitiesCount';
 import { useRecapUnreadCount } from '../../hooks/useRecapData';
 import { usePlatform } from '../../hooks/usePlatform';
@@ -237,6 +238,7 @@ const AppSidebar = (): ReactElement => {
   const toolbarIds = toolbarItemsStore.useItems();
   const appSnapshots = useAppSnapshots();
   const missedCallCount = useMissedCallCount();
+  const hasUnreadRecordingSummaries = useHasUnreadRecordingSummaries();
   const hasOngoingCall = useRailActiveCalls().length > 0;
   const unreadActivityCount = useUnreadActivitiesCount();
   const { unreadCount: recapUnreadCount } = useRecapUnreadCount();
@@ -537,6 +539,8 @@ const AppSidebar = (): ReactElement => {
                   const showOngoingCallDot =
                     item.path === '/calls' && hasOngoingCall && !showMissedCallBadge;
                   const showPendingDmDot = item.path === '/chat/dm' && hasPendingDirectMessages;
+                  const showRecordingSummaryDot =
+                    item.path === '/recordings' && hasUnreadRecordingSummaries;
                   const showActivityBadge =
                     item.path === '/chat/activity' && unreadActivityCount > 0;
                   const Icon = item.icon;
@@ -565,7 +569,13 @@ const AppSidebar = (): ReactElement => {
                           event.preventDefault();
                         }
                       }}
-                      aria-label={showPendingDmDot ? 'DMs unread' : item.label}
+                      aria-label={
+                        showPendingDmDot
+                          ? 'DMs unread'
+                          : showRecordingSummaryDot
+                            ? 'Recordings, new summaries'
+                            : item.label
+                      }
                       data-testid={testId}
                       data-track-category='App_Sidebar'
                       data-track-name='Sidebar_Nav_Item'
@@ -581,7 +591,7 @@ const AppSidebar = (): ReactElement => {
                       )}
                     >
                       <Icon size={item.iconSize ?? 16} variant={isActive ? 'Solid' : 'Stroke'} />
-                      {showPendingDmDot && (
+                      {(showPendingDmDot || showRecordingSummaryDot) && (
                         <span
                           aria-hidden='true'
                           className='absolute top-1 right-1 size-[9px] rounded-full bg-sidebar-primary border border-sidebar-accent-ring'

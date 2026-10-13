@@ -771,6 +771,7 @@ async function finishWriteFailure(opts: {
   signature: string;
   agentSlug: string | undefined;
   spacesAppId: string | undefined;
+  subagentId: string | undefined;
   messageId: string;
   conversationId?: string | undefined;
   channelId?: string | undefined;
@@ -789,6 +790,8 @@ async function finishWriteFailure(opts: {
       userId: opts.writeUserId,
       signature: opts.signature,
       agentSlug: opts.agentSlug ?? "",
+      // The retry re-submits this signature, which covers the subagent id.
+      ...(opts.subagentId ? { subagentId: opts.subagentId } : {}),
       ...(opts.channelId !== undefined ? { channelId: opts.channelId } : {}),
       ...(opts.conversationId !== undefined ? { conversationId: opts.conversationId } : {}),
       ...(opts.spacesAppId !== undefined ? { spacesAppId: opts.spacesAppId } : {}),
@@ -843,6 +846,9 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       const signature = data["signature"] as string;
       const agentSlug = data["agentSlug"] as string | undefined;
       const spacesAppId = data["spacesAppId"] as string | undefined;
+      // Present when a subagent's own credential decided the call. Covered by
+      // the signature below, so a card cannot be pointed at another subagent.
+      const subagentId = typeof data["subagentId"] === "string" && data["subagentId"] ? data["subagentId"] : undefined;
 
       const continueChannelId = data["channelId"] as string | undefined;
 
@@ -893,20 +899,12 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
 
       // Verify the complete card identity before any approve/decline side
       // effect. Empty strings give absent routing fields one canonical form.
-      const { verifyActionSignatureAny } = await import("./mcp.js");
+      const { verifyActionSignatureAny, writeActionPayload } = await import("./mcp.js");
+      const legacyActionPayload = writeActionPayload({ serverType, tool, params, userId: writeUserId, subagentId });
       const actionPayload = {
-        serverType,
-        tool,
-        params,
-        userId: writeUserId,
+        ...legacyActionPayload,
         agentSlug: agentSlug ?? "",
         spacesAppId: spacesAppId ?? "",
-      };
-      const legacyActionPayload = {
-        serverType,
-        tool,
-        params,
-        userId: writeUserId,
       };
       const automationActionPayload = { ...actionPayload, automation: true };
       const isAutomationCard = verifyActionSignatureAny([automationActionPayload], signature);
@@ -1036,7 +1034,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             const errorText = approvalToolFailureMessage(errMsg(e));
             log.error(`[flow-action] xyne-ai spaces-send-message failed conversationId=${conversationId} userId=${writeUserId} err=${errMsg(e)}`);
             await finishWriteFailure({
-              tool, serverType, params, writeUserId, signature, agentSlug, spacesAppId,
+              tool, serverType, params, writeUserId, signature, agentSlug, spacesAppId, subagentId,
               messageId, conversationId, channelId: continueChannelId, errorText,
               xyneAi: xyneAiCard,
             });
@@ -1126,7 +1124,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           } satisfies AppActionResponse;
           if (!xyneAiCard) res.status(422).json(failureResponse);
           await finishWriteFailure({
-            tool, serverType, params, writeUserId, signature, agentSlug, spacesAppId,
+            tool, serverType, params, writeUserId, signature, agentSlug, spacesAppId, subagentId,
             messageId, conversationId, channelId: continueChannelId, errorText: userMessage,
             xyneAi: xyneAiCard,
           });
@@ -1306,7 +1304,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       // MCP-based tools
       const { callTool } = await import("../mcp/runner.js");
       const { hasConnectorDefinition } = await import("../mcp/connector-definitions.js");
-      const { loadEffectiveCredentials, isPrivateUserCredential } = await import("../lib/credentials-loader.js");
+      const { loadApprovedWriteCredentials, isPrivateUserCredential } = await import("../lib/credentials-loader.js");
       if (!(await hasConnectorDefinition(serverType))) {
         res.json({ type: "error", message: `No adapter for ${serverType}` } satisfies AppActionResponse);
         return;
@@ -1314,8 +1312,15 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       // `writeUserId` is the raw ID signed into the Flow card. Credential rows
       // and MCP execution are Claw-owned by the card-signed write owner, so
       // use writeClawUserId — never the approver (callerUserId), which differs
-      // for automation cards.
-      const effective = await loadEffectiveCredentials(writeClawUserId, serverType, agentSlug);
+      // for automation cards. The card's agent + subagent pick the identity
+      // the write was queued under.
+      const effective = await loadApprovedWriteCredentials({
+        userId: writeClawUserId,
+        serverType,
+        agentSlug,
+        spacesAppId,
+        subagentId,
+      });
       if (!effective) {
         res.json({ type: "error", message: `No connection for user ${writeClawUserId} / ${serverType}` } satisfies AppActionResponse);
         return;
@@ -1326,7 +1331,18 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
 
       let toolResult: Awaited<ReturnType<typeof callTool>>;
       try {
-        toolResult = await callTool(writeClawUserId, serverType, effective.credentials, tool, params);
+        // The instance keys the runner session to this credential, so the call
+        // can't reuse a client another identity (the tool listing) spawned.
+        toolResult = await callTool(
+          writeClawUserId,
+          serverType,
+          effective.credentials,
+          tool,
+          params,
+          agentSlug,
+          undefined,
+          effective.instance,
+        );
       } catch (err) {
         const errText = sanitizeApprovalToolError(err);
         const userMessage = approvalToolFailureMessage(errText);
@@ -1340,7 +1356,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         } satisfies AppActionResponse;
         if (!xyneAiCard) res.status(422).json(failureResponse);
         await finishWriteFailure({
-          tool, serverType, params, writeUserId, signature, agentSlug, spacesAppId,
+          tool, serverType, params, writeUserId, signature, agentSlug, spacesAppId, subagentId,
           messageId, conversationId, channelId: continueChannelId, errorText: userMessage,
           xyneAi: xyneAiCard,
         });

@@ -111,15 +111,17 @@ describe("judgeSemanticMatch via a jev backend", () => {
     vi.unstubAllGlobals();
   });
 
-  it("grades with the hosted jev backend", async () => {
-    process.env["JEV_API_KEY"] = "k-jev";
+  it("routes the legacy jev name to our normal Jev, never the hosted service", async () => {
+    process.env["JEV_API_KEY"] = "k-hosted";
+    process.env["OUR_NORMAL_JEV_URL"] = "https://grid.example/v1/systemone";
+    process.env["OUR_JEV_API_KEY"] = "k-ours";
     fetchMock.mockResolvedValue(systemOneReply({ same: 0.95, minor: 0.1, misses: 0, contradicts: 0, empty: 0 }));
     const result = await judgeSemanticMatch({ expected: "a", generated: "a", model: "JEV " });
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(String(fetchMock.mock.calls[0]![0])).toBe("https://api.typesafe.ai/v1/systemone");
-    expect((fetchMock.mock.calls[0]![1] as RequestInit).headers).toMatchObject({ Authorization: "Bearer k-jev" });
+    expect(String(fetchMock.mock.calls[0]![0])).toBe("https://grid.example/v1/systemone");
+    expect((fetchMock.mock.calls[0]![1] as RequestInit).headers).toMatchObject({ Authorization: "Bearer k-ours" });
     expect(result.score).toBeGreaterThanOrEqual(90);
-    expect(result.reasoning).toContain("jev:");
+    expect(result.reasoning).toContain("xor:");
     expect(result.reasoning.length).toBeLessThanOrEqual(200);
   });
 
@@ -135,13 +137,14 @@ describe("judgeSemanticMatch via a jev backend", () => {
   });
 
   it("fails open when the backend is not configured", async () => {
-    const result = await judgeSemanticMatch({ expected: "a", generated: "b", model: "ournormaljev" });
+    const result = await judgeSemanticMatch({ expected: "a", generated: "b", model: "xor" });
     expect(result).toEqual({ score: null, reasoning: "judge_unavailable" });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("fails open when jev returns an error", async () => {
-    process.env["JEV_API_KEY"] = "k-jev";
+    process.env["OUR_NORMAL_JEV_URL"] = "https://grid.example/v1/systemone";
+    process.env["OUR_JEV_API_KEY"] = "k-ours";
     fetchMock.mockResolvedValue(new Response("nope", { status: 500 }));
     const result = await judgeSemanticMatch({ expected: "a", generated: "b", model: "jev" });
     expect(result).toEqual({ score: null, reasoning: "judge_unavailable" });

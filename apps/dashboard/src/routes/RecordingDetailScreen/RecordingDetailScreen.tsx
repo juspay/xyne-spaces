@@ -38,6 +38,7 @@ import { CollaborativeCanvasEditor } from '../../components/Canvas/Collaborative
 import type { Canvas } from '../../components/Canvas/Canvas.types';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { removeRecordingsFromCache } from '../../hooks/usePaginatedRecordings';
+import { useMarkRecordingSummaryReadOnOpen } from '../../hooks/useHasUnreadRecordingSummaries';
 import { RecordingShareModal } from '../RecordingDetailV2Screen/components/RecordingShareModal';
 
 interface RecordingNavState {
@@ -151,6 +152,7 @@ export default function RecordingDetailScreen(): ReactElement {
   const speakerIdentificationEnabled = useSpeakerIdentificationEnabled();
 
   const [recording, setRecording] = useState<RecordingDetail | null>(null);
+  useMarkRecordingSummaryReadOnOpen(recording?.id);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isEditingTitle, setIsEditingTitle] = useState(false);

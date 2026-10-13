@@ -15,14 +15,8 @@ export interface SystemOneBackendSpec {
 }
 
 export const SYSTEM_ONE_BACKENDS = {
-  jev: {
-    label: "Jev (typed evaluator)",
-    envPrefix: "JEV",
-    defaultUrl: "https://api.typesafe.ai/v1/systemone",
-    defaultModel: "jev-latest",
-  },
-  ournormaljev: {
-    label: "Our Jev — normal",
+  xor: {
+    label: "Xor — our Jev",
     envPrefix: "OUR_NORMAL_JEV",
     sharedEnvPrefix: "OUR_JEV",
     defaultModel: "jev-latest",
@@ -87,17 +81,27 @@ const store = new AsyncLocalStorage<JudgeRunContext>();
 const collectors = new AsyncLocalStorage<JudgeExchange[]>();
 const MAX_PENDING = 100;
 
+export const DEFAULT_JUDGE_BACKEND: JudgeBackendName = "xor";
+
+const LEGACY_BACKEND_ALIASES: Record<string, JudgeBackendName> = { jev: "xor", ournormaljev: "xor" };
+
 export function isJudgeBackend(value: unknown): value is JudgeBackendName {
   return typeof value === "string" && (value === "llm" || (SYSTEM_ONE_BACKEND_NAMES as readonly string[]).includes(value));
 }
 
+export function resolveJudgeBackend(value: unknown): JudgeBackendName | null {
+  if (typeof value !== "string") return null;
+  const name = value.trim().toLowerCase();
+  if (isJudgeBackend(name)) return name;
+  return LEGACY_BACKEND_ALIASES[name] ?? null;
+}
+
 function envDefault(): JudgeBackendName {
-  const raw = process.env["JUDGE_BACKEND"]?.trim().toLowerCase();
-  return isJudgeBackend(raw) ? raw : "jev";
+  return resolveJudgeBackend(process.env["JUDGE_BACKEND"]) ?? DEFAULT_JUDGE_BACKEND;
 }
 
 export function pinRunJudgeBackend(requested: unknown): JudgeBackendName {
-  const backend = isJudgeBackend(requested) ? requested : envDefault();
+  const backend = resolveJudgeBackend(requested) ?? envDefault();
   store.enterWith({ backend, calls: [], shadows: [] });
   return backend;
 }
@@ -107,10 +111,11 @@ export function activeJudgeBackend(): JudgeBackendName {
 }
 
 export function shadowJudgeBackends(primary: JudgeBackendName): JudgeBackendName[] {
-  return (process.env["JUDGE_SHADOW"] ?? "")
+  const shadows = (process.env["JUDGE_SHADOW"] ?? "")
     .split(",")
-    .map((s) => s.trim().toLowerCase())
-    .filter((s): s is JudgeBackendName => isJudgeBackend(s) && s !== primary);
+    .map((s) => resolveJudgeBackend(s))
+    .filter((s): s is JudgeBackendName => s !== null && s !== primary);
+  return [...new Set(shadows)];
 }
 
 export function setJudgeDebugSink(sink: JudgeDebugSink): void {

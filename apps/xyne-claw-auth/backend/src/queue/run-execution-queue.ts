@@ -46,6 +46,14 @@ export async function enqueueRun(payload: RunExecutionJobData): Promise<void> {
   await q.add(payload.sessionId, payload, { jobId: payload.sessionId });
 }
 
+const WAITING_STATES = new Set(["waiting", "delayed", "prioritized", "waiting-children"]);
+
+export async function isRunWaitingInQueue(sessionId: string): Promise<boolean> {
+  const job = await getRunExecutionQueue().getJob(sessionId);
+  if (!job) return false;
+  return WAITING_STATES.has(await job.getState());
+}
+
 export const RUN_EXECUTION_QUEUE_NAME = QUEUE_NAME;
 
 export async function closeRunExecutionQueue(): Promise<void> {

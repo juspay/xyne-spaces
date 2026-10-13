@@ -22,10 +22,6 @@ export type ActivityVisibilityFields = {
  */
 export const isAllVisibleActivity = (activity: ActivityVisibilityFields): boolean => {
   const classification = activity.classification ?? ActivityClassification.PENDING;
-  if (activity.actionSource === 'call' && activity.actorAction === 'missed_call') {
-    return false;
-  }
-
   if (classification === ActivityClassification.SKIP) return false;
   if (activity.actorAction === 'direct_message') {
     return (

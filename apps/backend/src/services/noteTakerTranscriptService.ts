@@ -22,7 +22,7 @@ import {
   ActivityClassification,
 } from '@xyne/shared';
 import { recordingSharingService } from '@/services/recordingSharingService';
-import { isRecording } from '@/utils/callTypeUtils';
+import { callSubject, isRecording } from '@/utils/callTypeUtils';
 import { isTranscriptUnlinked } from '@/utils/transcriptUnlink';
 import { notificationService } from '@/services/notificationService';
 import { activityService } from '@/services/activity/activityService';
@@ -40,6 +40,8 @@ interface DetailedSummaryCanvasResult {
   canvasId: string;
   summaryTemplateId: string;
   markedItems: RecordingSummaryMarkedItem[];
+  // The untouched model output of a bot-created call's template summary.
+  rawSummary?: string;
 }
 
 /**
@@ -189,7 +191,7 @@ class NoteTakerTranscriptService {
         ...(detailedSummary ? { markedItems: detailedSummary.markedItems } : {}),
       });
       if (detailedSummary) {
-        await this.notifySummaryReady(call);
+        await this.notifySummaryReady(call, detailedSummary.rawSummary);
       }
       await this.queueVespaIndexing(call);
 
@@ -283,7 +285,7 @@ class NoteTakerTranscriptService {
       markedItems,
     });
 
-    await this.notifySummaryReady(call);
+    await this.notifySummaryReady(call, detailedSummary.rawSummary);
 
     return {
       summaryTemplateId: detailedSummary.summaryTemplateId,
@@ -299,7 +301,7 @@ class NoteTakerTranscriptService {
    * Best-effort: neither may fail the generation flow, so each is wrapped
    * independently and its errors are logged and swallowed.
    */
-  private async notifySummaryReady(call: Call): Promise<void> {
+  private async notifySummaryReady(call: Call, rawSummary?: string): Promise<void> {
     const actionUrl = isRecording(call)
       ? `/recordings/${call.externalId}`
       : `/calls/${call.externalId}/detail`;
@@ -334,7 +336,8 @@ class NoteTakerTranscriptService {
     // route through regenerateSummary); regular calls are covered from
     // transcriptService.processCallWithSummary. No-ops unless the call carries
     // an initiatedByInstalledAppId, and never throws.
-    await emitCallSummaryReadyToApp(call.externalId);
+    // A bot-created call's template output goes out untouched, not via the canvas.
+    await emitCallSummaryReadyToApp(call.externalId, rawSummary);
   }
 
   /**
@@ -346,6 +349,8 @@ class NoteTakerTranscriptService {
   private async recordSummaryReadyActivity(call: Call): Promise<void> {
     try {
       if (!call.workspaceId) return;
+      // 'recording' vs 'call' — drives the dashboard's Recordings sidebar dot.
+      const actionSource = callSubject(call);
 
       const existing = await db.activity.findFirst({
         where: {
@@ -360,7 +365,7 @@ class NoteTakerTranscriptService {
         // re-sorts the row to the top rather than stacking a second entry.
         await db.activity.update({
           where: { id: existing.id },
-          data: { isRead: false, updatedAt: new Date() },
+          data: { isRead: false, updatedAt: new Date(), actionSource },
         });
         return;
       }
@@ -371,7 +376,7 @@ class NoteTakerTranscriptService {
         // notional actor and the only recipient.
         actorId: call.createdByUserId,
         actorAction: RECORDING_SUMMARY_READY_ACTION,
-        actionSource: 'call',
+        actionSource,
         actionSourceId: call.id,
         callId: call.id,
         workspaceId: call.workspaceId,
@@ -813,6 +818,7 @@ class NoteTakerTranscriptService {
           undefined,
           citationCtx.segments,
           modelType,
+          formattedTranscript,
         );
         if (!generated) {
           logDetailedSummaryFailed(callId, 'generation_failed');
@@ -853,6 +859,7 @@ class NoteTakerTranscriptService {
           canvasId,
           summaryTemplateId: generated.template.id,
           markedItems: generated.markedItems,
+          rawSummary: generated.rawSummary,
         };
       }
 
@@ -981,6 +988,7 @@ class NoteTakerTranscriptService {
           },
           citationCtx.segments,
           modelType,
+          formattedTranscript,
         );
       } finally {
         writerActive = false;
@@ -1039,6 +1047,7 @@ class NoteTakerTranscriptService {
         canvasId: newCanvasId,
         summaryTemplateId: generated.template.id,
         markedItems: generated.markedItems,
+        rawSummary: generated.rawSummary,
       };
     } catch (error) {
       logDetailedSummaryFailed(callId, 'unexpected_error', error);

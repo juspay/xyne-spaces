@@ -1,6 +1,6 @@
 import { DelayedError, Worker, type Job } from "bullmq";
 import { executeRunFromPayload, type InternalRunPayload, type RunOutcome } from "./run-execution.js";
-import { abortRunForOwnershipLoss, sendCallback } from "./routes/run.js";
+import { abortRunForOwnershipLoss, getActiveRunCount, sendCallback } from "./routes/run.js";
 import { gcsDownloadResultMarker } from "./storage.js";
 import {
   claimOwnership,
@@ -42,6 +42,13 @@ const PRESSURE_BACKOFF_BASE_MS = 2_000;
 const PRESSURE_BACKOFF_MAX_MS = 30_000;
 const PRESSURE_BACKOFF_MAX_EXPONENT = 4;
 const OWNER_DEFER_MS = 15_000;
+const DEFAULT_RUN_QUEUE_CONCURRENCY = 40;
+const SLOT_METRIC_INTERVAL_MS = 15_000;
+
+export function runQueueConcurrency(): number {
+  const parsed = Math.floor(Number(process.env["RUN_QUEUE_CONCURRENCY"]));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_RUN_QUEUE_CONCURRENCY;
+}
 
 let drainPaused = false;
 
@@ -200,7 +207,7 @@ async function runClaimedJob(
 
 export const RUN_EXECUTION_QUEUE_NAME = "run-execution";
 
-function connectionOptions(): {
+export function runQueueConnectionOptions(): {
   host: string;
   port: number;
   password?: string;
@@ -219,13 +226,14 @@ function connectionOptions(): {
 }
 
 export function startRunQueueWorker(): Worker<InternalRunPayload> | null {
-  const connection = connectionOptions();
+  const connection = runQueueConnectionOptions();
   if (!connection) {
     clog.error("[run-queue] REDIS_HOST is not set — run queue worker not started");
     return null;
   }
 
   warmOwnershipClient();
+  const concurrency = runQueueConcurrency();
   const worker = new Worker<InternalRunPayload>(
     RUN_EXECUTION_QUEUE_NAME,
     async (job: Job<InternalRunPayload>, token?: string) => {
@@ -240,6 +248,11 @@ export function startRunQueueWorker(): Worker<InternalRunPayload> | null {
         metric.count("run_queue_pressure_rejected", { agent, session: sessionId });
         clog.warn(`[run-queue] under pressure — re-queueing session=${sessionId} ${describePressure()}`);
         await postProgressLabel(job.data, "🕒 Re-queued — will resume shortly").catch(() => {});
+        await job.moveToDelayed(Date.now() + pressureBackoffMs(job), token);
+        throw new DelayedError();
+      }
+      if (getActiveRunCount() >= concurrency) {
+        metric.count("run_queue_capacity_deferred", { agent, session: sessionId, active: getActiveRunCount() });
         await job.moveToDelayed(Date.now() + pressureBackoffMs(job), token);
         throw new DelayedError();
       }
@@ -273,7 +286,7 @@ export function startRunQueueWorker(): Worker<InternalRunPayload> | null {
     },
     {
       connection,
-      concurrency: 10_000,
+      concurrency,
       lockDuration: 180_000,
       maxStalledCount: 2,
     },
@@ -316,6 +329,10 @@ export function startRunQueueWorker(): Worker<InternalRunPayload> | null {
     }
   }, PRESSURE_CHECK_INTERVAL_MS).unref();
 
-  clog.info(`[run-queue] worker started queue=${RUN_EXECUTION_QUEUE_NAME} redis=${connection.host}:${connection.port} concurrency=10000 automationConcurrency=${automationConcurrencyLimit() || "unlimited"}`);
+  setInterval(() => {
+    metric.observe("claw_active_runs", getActiveRunCount(), { cap: concurrency, automation: activeAutomationRuns() });
+  }, SLOT_METRIC_INTERVAL_MS).unref();
+
+  clog.info(`[run-queue] worker started queue=${RUN_EXECUTION_QUEUE_NAME} redis=${connection.host}:${connection.port} concurrency=${concurrency} automationConcurrency=${automationConcurrencyLimit() || "unlimited"}`);
   return worker;
 }

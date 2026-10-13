@@ -216,22 +216,22 @@ describe("eval judge arms", () => {
   const started = new Date("2026-09-20T10:00:00.000Z");
 
   it("parses judges= without leaving it in the question", () => {
-    expect(parseSlashCommand("/eval judges=llm,jev,ournormaljev,ourtrainedjev summarize the channel")).toEqual({
+    expect(parseSlashCommand("/eval judges=llm,jev,xor,ourtrainedjev summarize the channel")).toEqual({
       kind: "eval",
       question: "summarize the channel",
       providers: [],
-      judges: ["llm", "jev", "ournormaljev", "ourtrainedjev"],
+      judges: ["llm", "jev", "xor", "ourtrainedjev"],
       opts: [],
     });
   });
 
   it("expands aliases and all, and ignores unknown judges", async () => {
     const { normalizeJudges, armKey, armLabel } = await import("../eval-run.js");
-    expect(normalizeJudges(["all"])).toEqual(["llm", "jev", "ournormaljev", "ourtrainedjev"]);
-    expect(normalizeJudges(["trained", "jev", "bogus", "jev", "normal"])).toEqual(["ourtrainedjev", "jev", "ournormaljev"]);
+    expect(normalizeJudges(["all"])).toEqual(["llm", "xor", "ourtrainedjev"]);
+    expect(normalizeJudges(["trained", "jev", "bogus", "jev", "normal"])).toEqual(["ourtrainedjev", "xor"]);
     expect(normalizeJudges(["ourjev"])).toEqual([]);
     expect(normalizeJudges([])).toEqual([]);
-    expect(armKey({ provider: "claude", useOverride: true, judge: "jev" })).toBe("claude-jev");
+    expect(armKey({ provider: "claude", useOverride: true, judge: "xor" })).toBe("claude-xor");
     expect(armLabel({ provider: "claude", judge: "ourtrainedjev" })).toBe("claude + ourtrainedjev");
   });
 
@@ -241,20 +241,20 @@ describe("eval judge arms", () => {
       startedAt: started.toISOString(),
       events: [],
       judge: {
-        backend: "jev",
+        backend: "xor",
         calls: 6,
         failed: 1,
         questions: 140,
         totalMs: 900,
         byPurpose: {},
         shadows: [
-          { primary: "jev", shadow: "llm", purpose: "sift", questions: 10, agreed: 8, meanAbsDiff: 0.2, primaryMs: 150, shadowMs: 4000 },
+          { primary: "xor", shadow: "llm", purpose: "sift", questions: 10, agreed: 8, meanAbsDiff: 0.2, primaryMs: 150, shadowMs: 4000 },
         ],
       },
     } as unknown as DebugTraceRun;
     const traces = new Map<string, EvalTrace>([["s-claude", { run, timing: null }]]);
-    const html = renderEvalHtml("q", [result("claude", { judge: "jev" })], started, traces, "xyne");
-    expect(html).toContain("claude + jev");
+    const html = renderEvalHtml("q", [result("claude", { judge: "xor" })], started, traces, "xyne");
+    expect(html).toContain("claude + xor");
     expect(html).toContain("6 calls · 140 q");
     expect(html).toContain("1 failed");
     expect(html).toContain("Judge agreement");

@@ -467,6 +467,36 @@ export function signAction(action: Record<string, unknown>): string {
   return hmac(CONFIG.actionSigningKey, canonicalActionPayload(action));
 }
 
+export type WriteActionCore = {
+  serverType: string;
+  tool: string;
+  params: Record<string, unknown>;
+  userId: string;
+  subagentId?: string;
+};
+
+/** The fields a pending write action's HMAC covers — mint and every verifier
+ *  build it here. `subagentId` is bound only when a subagent's own credential
+ *  decided the call (EffectiveCredentials.viaSubagent): approval re-resolves
+ *  that identity from it, so it must be tamper-proof, and a surface that drops
+ *  it then fails verification instead of running on the parent's account.
+ *  Every other action keeps the four-field payload it was always signed over. */
+export function writeActionPayload(action: {
+  serverType: string;
+  tool: string;
+  params: Record<string, unknown>;
+  userId: string;
+  subagentId?: unknown;
+}): WriteActionCore {
+  return {
+    serverType: action.serverType,
+    tool: action.tool,
+    params: action.params,
+    userId: action.userId,
+    ...(typeof action.subagentId === "string" && action.subagentId ? { subagentId: action.subagentId } : {}),
+  };
+}
+
 function candidateSignatures(action: Record<string, unknown>): string[] {
   const canonical = canonicalActionPayload(action);
   const raw = JSON.stringify(action);
@@ -2089,7 +2119,13 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
         res.json({ success: true, data: { content: `Cannot ${tool}: ${validationError}` } });
         return;
       }
-      const action = { serverType, tool, params: effectiveParams, userId };
+      const action = writeActionPayload({
+        serverType,
+        tool,
+        params: effectiveParams,
+        userId,
+        subagentId: effective.viaSubagent,
+      });
       const signature = signAction(action);
       res.json({
         success: true,
@@ -2445,9 +2481,11 @@ router.post("/:sessionId/actions/sign", async (req: Request<{ sessionId: string 
     let serverType: string | undefined;
     let tool: string | undefined;
     let actionParams: Record<string, unknown>;
-    // Preserve the subagent-pinned credential identity across the write-approval
-    // replay: use whichever shape carried it (undefined = normal cascade).
-    const subagentId = body.subagentId ?? body.pendingAction?.subagentId;
+    // The subagent whose credential the action runs under (undefined = normal
+    // cascade). A re-sign keeps the one the pending action was signed with; a
+    // fresh signature binds whatever the resolver reports below.
+    let subagentId = body.subagentId;
+    let signedSubagentId: string | undefined;
 
     if (body.pendingAction && typeof body.pendingAction === "object") {
       // Re-sign shape: verify the existing signature before re-issuing.
@@ -2463,11 +2501,19 @@ router.post("/:sessionId/actions/sign", async (req: Request<{ sessionId: string 
         return;
       }
       actionParams = params ?? {};
-      const action = { serverType: st, tool: t, params: actionParams, userId: pendingUserId };
+      const action = writeActionPayload({
+        serverType: st,
+        tool: t,
+        params: actionParams,
+        userId: pendingUserId,
+        subagentId: body.pendingAction.subagentId,
+      });
       if (!verifyActionSignature(action, signature)) {
         res.status(400).json({ success: false, error: "Invalid pendingAction signature" });
         return;
       }
+      subagentId = action.subagentId;
+      signedSubagentId = action.subagentId;
       serverType = st;
       tool = t;
     } else if (typeof body.serverType === "string" && typeof body.tool === "string") {
@@ -2593,6 +2639,7 @@ router.post("/:sessionId/actions/sign", async (req: Request<{ sessionId: string 
         res.status(404).json({ success: false, error: `No connection found for user and server type: ${serverType}` });
         return;
       }
+      if (!body.pendingAction) signedSubagentId = effective?.viaSubagent;
 
         const validationError = await validateWriteAction(serverType, tool, actionParams, {
           ...credentials,
@@ -2605,7 +2652,7 @@ router.post("/:sessionId/actions/sign", async (req: Request<{ sessionId: string 
       }
     }
 
-    const signedAction = { serverType, tool, params: actionParams, userId };
+    const signedAction = writeActionPayload({ serverType, tool, params: actionParams, userId, subagentId: signedSubagentId });
     const signedSignature = signAction(signedAction);
 
     log.info(`[actions/sign] Signed write action: user=${userId} server=${serverType} tool=${tool}`);
