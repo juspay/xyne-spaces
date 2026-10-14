@@ -142,10 +142,10 @@ const WHEN_SOMETHING_IS_UNAVAILABLE = [
 ];
 
 const HOW_TO_PROPOSE = [
-  'To change the draft, call create-agent with the fields you want to set.',
+  'To change the draft, call propose-agent with the setup you want.',
   'Your proposal is applied to this draft only — it creates nothing, and the',
-  'user saves it themselves when they are happy. Do not call update-agent:',
-  'there is no saved agent to update yet.',
+  'user saves it themselves when they are happy. Do not call create-agent or',
+  'update-agent: there is no saved agent yet, and they would bypass the form.',
   'After the proposal, reply with one or two plain sentences saying what you',
   'changed and why. Do not narrate tool calls or context lookups.',
   'Describe only what you actually granted. Do not say the agent can read a',

@@ -642,7 +642,7 @@ function ChatMessageBubble({
   readOnly?: boolean;
   /** FlowUI actions are dispatched against (messageId, conversationId). */
   conversationId?: string | undefined;
-  onFlowActionComplete?: (() => void) | undefined;
+  onFlowActionComplete?: ((finalMessage?: string) => void) | undefined;
   /** Run dimensions merged into every act-on-answer click (joins to the run). */
   trackContext?: Record<string, unknown> | undefined;
   agentSlug?: string | undefined;
@@ -1175,7 +1175,7 @@ function ChatMessageBubble({
           )}
           {!isEditing && (
             <div className='mt-0.5 flex items-center gap-1'>
-              <div className='flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100'>
+              <div className='flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-focus-within:opacity-100 group-hover:opacity-100'>
                 {hasUserContent && (
                   <button
                     type='button'

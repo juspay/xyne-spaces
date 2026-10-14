@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, type ReactElement } from 'react';
-import type { FlowDefinition } from '@xyne/shared';
+import type { AgentDraftProps, FlowDefinition } from '@xyne/shared';
 import { toast } from 'sonner';
 import XyneAISidebar from '@/components/Chat/XyneAISidebar/XyneAISidebar';
 import type { PendingAction } from '@/components/Chat/XyneAISidebar/utils/XyneAITypes';
@@ -13,6 +13,33 @@ import { BUILDER_DRIVER_SLUG } from '../detail/AgentBuilderPanel';
 const DRAFT_TOOLS = new Set(['create-agent', 'update-agent']);
 
 const APPROVE_ACTIONS = new Set(['approve-write', 'approve-continue']);
+
+const AGENT_CARD_APPROVE = 'agent-draft-approve';
+
+function agentCardParams(flow: FlowDefinition): Record<string, unknown> | null {
+  const props = flow.components.find(component => component.type === 'agent')?.props as
+    | AgentDraftProps
+    | undefined;
+  if (!props || props.variant !== 'draft') return null;
+
+  const { agent, toolSelection } = props;
+  const selected = [
+    ...(toolSelection?.subagents ?? []),
+    ...(toolSelection?.direct ?? []),
+    ...(toolSelection?.custom ?? []),
+    ...(toolSelection?.gateway ?? []),
+  ];
+  const tools = selected.length > 0 ? selected : (agent.capabilities ?? []).map(c => c.id);
+
+  return {
+    name: agent.name,
+    slug: agent.slug,
+    ...(agent.description ? { description: agent.description } : {}),
+    ...(agent.color ? { color: agent.color } : {}),
+    ...(agent.systemPrompt ? { systemPrompt: agent.systemPrompt } : {}),
+    tools,
+  };
+}
 
 function parseFlowParams(raw: unknown): Record<string, unknown> | null {
   if (raw && typeof raw === 'object') return raw as Record<string, unknown>;
@@ -91,10 +118,16 @@ export function AgentDraftBuilderPanel({
     () => ({
       claims: (flow: FlowDefinition): boolean => {
         const data = flow.data ?? {};
+        if (data['actionType'] === 'agent-card' && data['variant'] === 'draft') return true;
         if (data['actionType'] !== 'write') return false;
         return typeof data['tool'] === 'string' && bareToolSlug(data['tool']) === 'create-agent';
       },
       onApplied: (actionId: string, flow: FlowDefinition): void => {
+        if (actionId === AGENT_CARD_APPROVE) {
+          const params = agentCardParams(flow);
+          if (params) applyProposal(params);
+          return;
+        }
         if (!APPROVE_ACTIONS.has(actionId)) return;
         const params = parseFlowParams((flow.data ?? {})['params']);
         if (params) applyProposal(params);

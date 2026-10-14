@@ -82,6 +82,10 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
       <StatusChip label='Created' />
     ) : props.phase === 'rejected' ? (
       <StatusChip label='Declined' tone='rejected' />
+    ) : props.phase === 'superseded' ? (
+      <StatusChip label='Superseded' tone='muted' />
+    ) : props.phase === 'applied' ? (
+      <StatusChip label='Applied' />
     ) : (
       <StatusChip label='Draft' tone='muted' />
     );
@@ -89,24 +93,29 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
   // Built as nodes, not a string, so the actor renders as a mention. No decision
   // time — the chin names who decided, not when; the message's own timestamp in
   // the thread already places it.
-  const auditNode = (
-    <div className='flex min-w-0 items-center gap-1.5'>
-      {/* Same avatar treatment as the reply tray — the decider is a person, so
+  const auditNode =
+    props.phase === 'superseded' ? (
+      <AuditLine>Replaced by a newer draft</AuditLine>
+    ) : props.phase === 'applied' ? (
+      <AuditLine>Applied to the draft — press Create agent on the left to save it</AuditLine>
+    ) : (
+      <div className='flex min-w-0 items-center gap-1.5'>
+        {/* Same avatar treatment as the reply tray — the decider is a person, so
           they read as one rather than as a name in prose. */}
-      {props.decidedById && (
-        <Avatar userId={props.decidedById} size='xs' rounded showActiveStatus={false} />
-      )}
-      <AuditLine>
-        {props.phase === 'created' ? 'Created' : 'Declined'}
-        {props.decidedBy && (
-          <>
-            {' by '}
-            <Mention handle={props.decidedBy} />
-          </>
+        {props.decidedById && (
+          <Avatar userId={props.decidedById} size='xs' rounded showActiveStatus={false} />
         )}
-      </AuditLine>
-    </div>
-  );
+        <AuditLine>
+          {props.phase === 'created' ? 'Created' : 'Declined'}
+          {props.decidedBy && (
+            <>
+              {' by '}
+              <Mention handle={props.decidedBy} />
+            </>
+          )}
+        </AuditLine>
+      </div>
+    );
 
   const decidedFooter = (
     <div className='flex w-full items-center justify-between gap-3'>

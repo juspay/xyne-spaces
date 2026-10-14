@@ -3,7 +3,9 @@ import { prisma } from "../db.js";
 import { createLogger } from "../logger.js";
 import { agentRepository } from "../repositories/index.js";
 import { agentRequestRepository } from "../repositories/agentRequestRepository.js";
+import { chatMessageRepository } from "../repositories/chatMessageRepository.js";
 import { buildAvailableToolsCatalog } from "../routes/tools.js";
+import { errMsg } from "./errors.js";
 import {
   draftNote,
   expandMcpRequests,
@@ -170,6 +172,40 @@ export async function renderAgentProfileListCard(
   return posted;
 }
 
+export async function retireSupersededAgentCards(
+  requestIds: string[],
+  conversationId: string,
+): Promise<void> {
+  for (const requestId of requestIds) {
+    const screenId = `agent-card-${requestId}`;
+    const row = await prisma.chatMessage.findFirst({
+      where: { conversationId, uiFlows: { array_contains: [{ screenId }] } },
+      select: { id: true, uiFlows: true },
+    });
+    if (!row || !Array.isArray(row.uiFlows)) {
+      log.info(`[agent-card] no card to retire for superseded request ${requestId} in ${conversationId}`);
+      continue;
+    }
+
+    const stored = (row.uiFlows as Array<Record<string, unknown>>).find(
+      (flow) => flow?.["screenId"] === screenId,
+    );
+    const components = stored?.["components"];
+    const card = Array.isArray(components) ? (components[0] as Record<string, unknown> | undefined) : undefined;
+    const cardProps = card?.["props"] as Record<string, unknown> | undefined;
+    if (!stored || !cardProps || cardProps["phase"] !== "pending") continue;
+
+    const patched = {
+      ...stored,
+      components: [{ ...card, props: { ...cardProps, phase: "superseded" } }],
+    };
+    const replaced = await chatMessageRepository
+      .replaceUiFlow(row.id, screenId, patched)
+      .catch(() => false);
+    if (replaced) log.info(`[agent-card] retired superseded card ${screenId} on ${row.id}`);
+  }
+}
+
 export type AgentDraftCardResult =
   | { ok: false; reason: "invalid-slug" | "duplicate"; message: string }
   | { ok: true; flow: FlowDefinition; identity: AgentIdentity; requestId: string; leadIn: string };
@@ -247,6 +283,9 @@ export async function prepareAgentDraftCard(
   });
   if (outcome.supersededCount > 0) {
     log.info(`[agent-card] superseded ${outcome.supersededCount} stale draft(s) for ${spec.slug} by ${id.userId}`);
+    void retireSupersededAgentCards(outcome.supersededIds, id.conversationId).catch((err: unknown) => {
+      log.warn(`[agent-card] retiring superseded cards failed for ${spec.slug}: ${errMsg(err)}`);
+    });
   }
 
   const draftExtras = await resolveDraftExtras(spec, id.orgId, id.userId);

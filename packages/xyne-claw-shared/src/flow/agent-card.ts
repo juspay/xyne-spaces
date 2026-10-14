@@ -125,7 +125,7 @@ export interface AgentIdentity {
   connectLinks?: AgentConnectLink[];
 }
 
-export type AgentDraftPhase = 'pending' | 'created' | 'rejected';
+export type AgentDraftPhase = 'pending' | 'created' | 'rejected' | 'superseded' | 'applied';
 
 export interface AgentToolSelection {
   subagents?: string[];

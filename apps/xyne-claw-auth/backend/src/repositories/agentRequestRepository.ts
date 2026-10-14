@@ -213,7 +213,7 @@ export const agentRequestRepository = {
     requestNote?: string | null;
   }) =>
     prisma.$transaction(async (tx) => {
-      const superseded = await tx.agentRequest.updateMany({
+      const stale = await tx.agentRequest.findMany({
         where: {
           targetType: "agent",
           agentSlug: data.agentSlug,
@@ -221,6 +221,11 @@ export const agentRequestRepository = {
           requestType: "agent_create",
           status: "pending",
         },
+        select: { id: true },
+      });
+      const supersededIds = stale.map((row) => row.id);
+      const superseded = await tx.agentRequest.updateMany({
+        where: { id: { in: supersededIds } },
         data: {
           status: "rejected",
           reviewerId: data.requesterId,
@@ -239,7 +244,7 @@ export const agentRequestRepository = {
           requestNote: data.requestNote ?? null,
         },
       });
-      return { request, supersededCount: superseded.count };
+      return { request, supersededCount: superseded.count, supersededIds };
     }),
 
   /**
