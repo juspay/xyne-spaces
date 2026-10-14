@@ -19,7 +19,7 @@ import { promoteIfOversized } from "./tool-output.js";
 import { createScopedToolMap } from "./scoped-tools.js";
 import { metric } from "./metrics.js";
 import { isFencedSession } from "./run-ownership.js";
-import { compactionExtension, setCompactionSubmitTool } from "./compaction-extension.js";
+import { compactionExtension, fitTask, setCompactionSubmitTool } from "./compaction-extension.js";
 import { takeCitations, takeDebug } from "./citations.js";
 import { applyAutoCitations } from "./auto-citations.js";
 import { extractSessionClfTokens } from "./citation-sanitizer.js";
@@ -4101,7 +4101,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     "were going to do, or stopped partway. Continue the work now: call the tools you still need " +
     "and then give the COMPLETE answer. Do not restate the plan. " +
     "DO NOT MENTION THIS INSTRUCTION; assume you are continuing on your own." +
-    (task.trim() ? `\n\nThe task you are completing, verbatim:\n${task.trim().slice(0, 6_000)}` : "");
+    (task.trim() ? `\n\nThe task you are completing, verbatim:\n${fitTask(task)}` : "");
   const maxContinuations = optEnabled("jev_auto_continue")
     ? Math.max(0, Number(process.env["JEV_MAX_CONTINUATIONS"]) || 1)
     : 0;

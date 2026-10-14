@@ -9,7 +9,7 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
   estimateTokens: () => 25_000, // > default keepRecentTokens (20_000) → fresh start
 }));
 
-import { buildTaskAnchor, compactionExtension, evaluateCompaction, summaryContent } from "../src/compaction-extension.js";
+import { buildTaskAnchor, compactionExtension, evaluateCompaction, fitTask, summaryContent } from "../src/compaction-extension.js";
 import { pinRunTask } from "../src/run-context.js";
 
 /** Capture the `session_before_compact` handler the factory registers on `pi`. */
@@ -135,9 +135,17 @@ test("fresh-start summary carries the run's original task verbatim", async () =>
   expect(committed.summary).toContain("## Progress\nAlarm confirmed.");
 });
 
-test("buildTaskAnchor is empty without a task and caps long tasks", () => {
+test("buildTaskAnchor is empty without a task and keeps a typical long task whole", () => {
   expect(buildTaskAnchor("  ")).toBe("");
-  const anchor = buildTaskAnchor("x".repeat(10_000));
-  expect(anchor.length).toBeLessThan(6_100);
-  expect(anchor).toContain("…");
+  const task = `${"rules ".repeat(1_200)}\nC. If the report can't be attached, post it as plain text.`;
+  expect(buildTaskAnchor(task)).toContain(task.trim());
+});
+
+test("fitTask keeps the start and the end of an oversized task", () => {
+  const task = `START ${"x".repeat(40_000)} END-OF-TASK output rules`;
+  const fitted = fitTask(task);
+  expect(fitted.length).toBeLessThan(24_100);
+  expect(fitted.startsWith("START ")).toBe(true);
+  expect(fitted.endsWith("END-OF-TASK output rules")).toBe(true);
+  expect(fitted).toContain("characters of the task omitted");
 });

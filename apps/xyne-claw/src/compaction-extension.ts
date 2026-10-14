@@ -138,12 +138,21 @@ export function summaryContent(summary: string): string {
   return summary.replace(FILE_LIST_BLOCK_RE, "").trim();
 }
 
-const TASK_ANCHOR_MAX_CHARS = 6_000;
+const TASK_ANCHOR_MAX_CHARS = 24_000;
+const TASK_ANCHOR_TAIL_CHARS = 8_000;
+
+export function fitTask(task: string): string {
+  const trimmed = task.trim();
+  if (trimmed.length <= TASK_ANCHOR_MAX_CHARS) return trimmed;
+  const head = trimmed.slice(0, TASK_ANCHOR_MAX_CHARS - TASK_ANCHOR_TAIL_CHARS);
+  const tail = trimmed.slice(-TASK_ANCHOR_TAIL_CHARS);
+  const omitted = trimmed.length - head.length - tail.length;
+  return `${head}\n[… ${omitted} characters of the task omitted …]\n${tail}`;
+}
 
 export function buildTaskAnchor(task: string): string {
-  const trimmed = task.trim();
-  if (!trimmed) return "";
-  const body = trimmed.length > TASK_ANCHOR_MAX_CHARS ? `${trimmed.slice(0, TASK_ANCHOR_MAX_CHARS)}…` : trimmed;
+  const body = fitTask(task);
+  if (!body) return "";
   return `## Original Task (verbatim)\n${body}\n\n`;
 }
 
