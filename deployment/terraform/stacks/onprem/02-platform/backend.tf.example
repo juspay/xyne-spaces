@@ -1,0 +1,15 @@
+terraform {
+  backend "s3" {
+    bucket       = "example-tfstate"
+    key          = "xyne/02-platform/terraform.tfstate"
+    region       = "default"
+    use_lockfile = true
+
+    endpoints                   = { s3 = "https://s3.example.internal:7442" }
+    use_path_style              = true
+    skip_credentials_validation = true
+    skip_region_validation      = true
+    skip_requesting_account_id  = true
+    skip_metadata_api_check     = true
+  }
+}

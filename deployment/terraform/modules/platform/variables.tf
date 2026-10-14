@@ -9,8 +9,8 @@ variable "cluster" {
   })
 
   validation {
-    condition     = contains(["gcp", "aws", "azure"], var.cluster.cloud)
-    error_message = "cluster.cloud must be gcp, aws or azure."
+    condition     = contains(["gcp", "aws", "azure", "onprem"], var.cluster.cloud)
+    error_message = "cluster.cloud must be gcp, aws, azure or onprem."
   }
 }
 
@@ -63,6 +63,7 @@ variable "app_secrets" {
     litellm_api_key             = optional(string, "")
     hindsight_api_key           = optional(string, "")
     hindsight_llm_api_key       = optional(string, "")
+    spaces_db_url               = optional(string, "")
     google_client_id            = optional(string, "")
     google_client_secret        = optional(string, "")
   })
@@ -290,6 +291,15 @@ variable "argocd_expose" {
   default = false
 }
 
+# Namespaces the AppProject is allowed to deploy into, beyond the ones derived
+# from the built-in addons. Required for any overlay_sources entry that targets a
+# namespace of its own — without it the Application is rejected with
+# "destination ... does not match any of the allowed destinations".
+variable "argocd_extra_destinations" {
+  type    = list(string)
+  default = []
+}
+
 variable "argocd_host" {
   type    = string
   default = ""
@@ -368,6 +378,10 @@ variable "overlay_sources" {
     chart_version   = optional(string, "")
     namespace       = optional(string, "")
     helm_values     = optional(string, "")
+    # Helm value files, as paths inside repo_url. Relative to path, so an entry
+    # outside the chart directory needs "../" - Argo CD allows that as long as it
+    # stays inside the repository. Applied before helm_values, which outranks them.
+    value_files     = optional(list(string), [])
   }))
   default = []
 
