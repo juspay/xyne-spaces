@@ -549,7 +549,7 @@ function sdlcSyncKey(target: SdlcSearchSyncTarget): string {
 
 /**
  * Asks for an SDLC hub's search entries to be refreshed after a change in it (see
- * sdlc/search/sdlcHubSync.ts). The SDLC services call it after their writes; a request names the
+ * zero/vespa-injection/core/sdlc-sync.ts). The SDLC services call it after their writes; a request names the
  * hub, or an item whose hub the worker resolves. Fire-and-forget: indexing must never fail the
  * write that triggered it.
  */

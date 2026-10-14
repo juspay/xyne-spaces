@@ -22,8 +22,8 @@ import {
   type VespaSdlcRepositoryDocument,
 } from '@/vespa/src/types';
 import type { SdlcSearchSyncTarget, VespaJob } from '@/zero/vespa-injection/core/types';
-import { hubOfContainer, invalidateSdlcHubIndex, loadSdlcHubIndex, sdlcFieldsForTicket } from './sdlcSearchIndex';
-import { mapSdlcRepository } from '@/zero/vespa-injection/core/mapper';
+import { hubOfContainer, invalidateSdlcHubIndex, loadSdlcHubIndex, sdlcFieldsForTicket } from './sdlc-index';
+import { mapSdlcRepository } from './mapper';
 
 const TAG = '[SDLC-SEARCH-SYNC]';
 // Vespa's per-query hit limit (query maxHits); larger sets are read in pages, up to the highest

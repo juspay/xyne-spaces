@@ -7,7 +7,7 @@ import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { fetchAndMapBySchema, fetchDataBySchema, mapBySchema, VespaOperationType } from '@/zero/vespa-injection/core/mapper';
 import { vespaPostIngestHooks } from './vespaPostIngestHooks';
-import { runSdlcSearchSync } from '@/sdlc/search/sdlcHubSync';
+import { runSdlcSearchSync } from '@/zero/vespa-injection/core/sdlc-sync';
 import { VespaInsertionStatus } from '@xyne/shared';
 import { config } from '@/config/env';
 

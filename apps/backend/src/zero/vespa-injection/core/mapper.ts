@@ -9,7 +9,7 @@ import {
   sdlcFieldsForCanvas,
   sdlcFieldsForConversation,
   sdlcFieldsForTicket,
-} from '@/sdlc/search/sdlcSearchIndex';
+} from './sdlc-index';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import type { InsertValue } from '@rocicorp/zero';
 import {
