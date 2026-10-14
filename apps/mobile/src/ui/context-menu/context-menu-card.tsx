@@ -10,6 +10,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { OVERLAY_BORDER_WIDTH, useOverlayBorderColor } from '@/src/ui/overlay-border';
 import { Portal } from '@/src/components/primitives/portal';
 import { TAB_OVERLAY_PORTAL_HOST } from '@/src/components/tab-pager/tab-overlay-portal';
 import { Z_INDEX } from '@/src/ui/z-index';
@@ -53,6 +54,7 @@ export function ContextMenuCard({
   const menu = useContextMenuState('ContextMenu.Content');
   const { anchor, close } = menu;
   const insets = useSafeAreaInsets();
+  const borderColor = useOverlayBorderColor();
 
   // Measured on the first layout, then placed. Until then the card is laid
   // out off-screen so it can size itself without being seen doing it.
@@ -144,8 +146,9 @@ export function ContextMenuCard({
                     transformOrigin: `${placement.originX}px ${placement.origin}`,
                   },
               size !== null ? { width: size.width } : null,
+              { borderColor },
             ]}
-            className='bg-spaces-surface-raised'
+            className='bg-spaces-background'
           >
             {label !== undefined ? (
               <Text numberOfLines={1} style={styles.label} className='text-spaces-muted'>
@@ -177,6 +180,8 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     paddingVertical: 6,
     boxShadow: '0px 8px 24px 0px rgba(18, 20, 28, 0.16), 0px 2px 6px 0px rgba(18, 20, 28, 0.08)',
+    borderCurve: 'continuous',
+    borderWidth: OVERLAY_BORDER_WIDTH,
   },
   label: {
     height: MENU_LABEL_HEIGHT,

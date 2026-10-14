@@ -46,6 +46,14 @@ export const FLAGS = {
     // would be unreachable.
     requires: 'ui.shell',
   },
+  'ui.channels': {
+    label: 'New Channels screen',
+    description: 'The redesigned channel list with sections, in place of the classic one.',
+    default: false,
+    removeBy: '2026-12-31',
+    // Same reason as the DMs screen: search lives in the new bottom bar.
+    requires: 'ui.shell',
+  },
 } as const satisfies Record<string, FlagDefinition>;
 
 export type FlagKey = keyof typeof FLAGS;

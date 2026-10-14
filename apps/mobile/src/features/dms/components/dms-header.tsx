@@ -26,7 +26,8 @@ export function DmsHeader(): ReactElement {
   );
 }
 
-function UserProfile() {
+/** The profile avatar. Shared with the Channels header so the two match. */
+export function UserProfile(): ReactElement {
   const { user } = useAuth();
   const router = useRouter();
 

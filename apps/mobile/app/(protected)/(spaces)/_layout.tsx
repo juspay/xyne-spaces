@@ -33,7 +33,7 @@ type SpacesTabsProps = {
 };
 
 /**
- * The navigator, inside `<Tray>` so the bar can open it.
+ * The navigator, inside `<Tray.Root>` so the bar can open it.
  *
  * Customize is a tray view now rather than a pushed route, and the thing that
  * opens it is a button in the bar — so the opener has to come from above the
@@ -41,8 +41,8 @@ type SpacesTabsProps = {
  * importing the customization feature that already imports it back.
  */
 function SpacesTabs({ screenOptions }: SpacesTabsProps): ReactElement {
-  const { open } = useTray();
-  const openCustomize = useCallback(() => open('customize'), [open]);
+  const { setOpen } = useTray();
+  const openCustomize = useCallback(() => setOpen(true), [setOpen]);
 
   /**
    * States the bar's height for anything positioning itself above it.
@@ -117,13 +117,13 @@ export default function SpacesLayout(): ReactElement {
       */}
       <View style={shellStyle}>
         <SpacesHeaderProvider>
-          <Tray defaultView='customize'>
+          <Tray.Root defaultView='customize'>
             <SpacesTabs screenOptions={screenOptions} />
             {/*
               List FABs and their dim render through this host so they can cover
               the header and the bar, which they cannot do from inside a scene.
-              After <Tabs> so it paints above the bar — and inside <Tray>, before
-              the sheet, so the sheet still covers the FABs.
+              After <Tabs> so it paints above the bar. The tray below is a native
+              presentation, so it covers the FABs on its own.
             */}
             <PortalHost name={TAB_OVERLAY_PORTAL_HOST} />
             {/*
@@ -131,10 +131,16 @@ export default function SpacesLayout(): ReactElement {
               shell, not one per tab — see `QuickActionSheets`.
             */}
             <QuickActionSheets />
-            <Tray.Content>
+            {/*
+              Not draggable. Morphlet's card pans as one native gesture, which
+              wins over the list's own press-and-hold reorder, so holding a row
+              moved the tray instead. Dismissal is the close button, Save and
+              the backdrop.
+            */}
+            <Tray.Content draggable={false}>
               <CustomizeTrayView />
             </Tray.Content>
-          </Tray>
+          </Tray.Root>
         </SpacesHeaderProvider>
       </View>
     </WorkspaceDrawer>
