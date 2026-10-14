@@ -6,7 +6,10 @@
   "CA_CERT_FILE": "ca.example.cert",
   "FRONTEND_URL": "https://app.spaces.example.com",
   "CLAW_AUTH_URL": "https://app.spaces.example.com",
+  "UNPROTECTED_URL": "https://spaces.example.com",
   "UI_ZIP_URL": "https://app.spaces.example.com/releases/dashboard.zip",
+  "TRUSTED_HOST_SUFFIXES": [".spaces.example.com"],
+  "enableMtls": true,
   "window": {
     "title": "Example Spaces"
   }

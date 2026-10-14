@@ -16,6 +16,14 @@ export interface AppConfig {
   UNPROTECTED_URL: string;
   FRONTEND_URL: string;
   CLAW_AUTH_URL: string;
+  // Extra first-party host suffixes, beyond the hosts named by the URLs above.
+  // Read by utils/first-party.ts, which gates the privileged preload bridge, the
+  // permission guards and the frontend CSP. Per-tenant, because a deployment may
+  // serve sibling hosts it never names here (auth, releases, per-env
+  // subdomains). Every entry trusts ALL subdomains of that suffix, so list only
+  // domains this deployment alone serves. Omit it to trust exactly the hosts
+  // above, which is what the community channel wants.
+  TRUSTED_HOST_SUFFIXES?: string[];
   DEEP_LINK_PROTOCOL: string;
   USER_DATA_SUFFIX: string;         // Appended to userData dir to isolate flavors
   APP_NAME: string;
@@ -115,6 +123,9 @@ const sandboxConfig: AppConfig = {
   UNPROTECTED_URL: 'https://spaces.xyne.juspay.net', // Non-mTLS endpoint only reserved for pre-enrollment logs and metrics
   FRONTEND_URL: 'https://app.spaces.sandbox.xyne.juspay.net',
   CLAW_AUTH_URL: 'https://app.spaces.sandbox.xyne.juspay.net',
+  // The internal zone this channel is served from, kept as a suffix because the
+  // sandbox lane reaches sibling hosts the fields above do not name.
+  TRUSTED_HOST_SUFFIXES: ['.xyne.juspay.net'],
   DEEP_LINK_PROTOCOL: 'xyne-spaces-sandbox',
   USER_DATA_SUFFIX: '-sandbox',
   APP_NAME: 'Xyne Spaces Sandbox',

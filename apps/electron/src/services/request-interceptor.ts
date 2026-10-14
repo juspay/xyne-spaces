@@ -1,6 +1,7 @@
 import log from 'electron-log/main';
 import { session, BrowserWindow, app } from 'electron';
 import { config } from '../app/config';
+import { firstPartyCspSources, isFirstPartyUrl } from '../utils/first-party';
 import { clearAllCookies } from './cookies';
 import path from 'path';
 import { existsSync, mkdirSync } from 'fs';
@@ -178,20 +179,6 @@ function isTopLevelMainWindow(webContents: Electron.WebContents | undefined): bo
   if (!mainWindow || mainWindow.isDestroyed()) return false;
   return webContents === mainWindow.webContents;
 }
-// Mirrors preload.ts isTrustedOrigin(), but evaluated main-side against a webContents URL.
-function isFirstPartyUrl(rawUrl: string | undefined): boolean {
-  if (!rawUrl) return false;
-  try {
-    const { protocol, hostname } = new URL(rawUrl);
-    if (protocol.startsWith('xyne-spaces')) return true;              // bundled UI custom scheme
-    if (protocol === 'file:') return true;                            // bundled local HTML
-    if (protocol === 'https:' && (hostname === 'xyne.juspay.net' || hostname.endsWith('.xyne.juspay.net'))) return true;
-    if ((protocol === 'http:' || protocol === 'https:') && (hostname === 'localhost' || hostname === '127.0.0.1')) return true;
-    return false;
-  } catch {
-    return false;
-  }
-}
 function installMediaPermissionGuard(targetSession: Electron.Session, label: string): void {
   targetSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
     if (RESTRICTED_MEDIA_PERMISSIONS.has(permission)) {
@@ -246,8 +233,11 @@ function setupMediaPermissionGuard(): void {
 }
 
 function installFrontendCsp(): void {
-  const xyneHosts = 'https://*.xyne.juspay.net';
-  const xyneWs = 'wss://*.xyne.juspay.net';
+  // Config-derived (utils/first-party.ts), so a deployment this build points at
+  // is in its own CSP. A host missing from this list loses every cross-host
+  // fetch, socket and form post the app makes to it.
+  const xyneHosts = firstPartyCspSources('http');
+  const xyneWs = firstPartyCspSources('ws');
   const googleApis = 'https://apis.google.com https://accounts.google.com';
   const googleFontsCss = 'https://fonts.googleapis.com';
   const googleFontsFiles = 'https://fonts.gstatic.com';

@@ -10,6 +10,7 @@ Tenant identity is baked into the binary, so every new domain is a new build, a 
 |---|---|---|---|
 | Backend/frontend hostnames | `src/app/config.ts` — `APP_ENV` selected one of three literal objects, editing the tree being the only way to add a fourth | Tenant, selected at build time (§3); the `prod` channel default is now the **community** deployment, and internal domains are tenant files in the private repo | **done** |
 | mTLS trust root | `src/services/mtls.ts` — CA filename derived from `USER_DATA_SUFFIX === '-sandbox'`, so a third CA had no way to be named | Tenant, via `CA_CERT_FILE` (`mtls.ts:123`) | **done** |
+| First-party trust boundary — privileged preload bridge, permission guards, frontend CSP | `preload.ts`, `ipc/handlers.ts`, `services/request-interceptor.ts` — four copies of a literal `*.xyne.juspay.net` allowlist, so a new domain silently lost `window.electronAPI` and its own CSP | Derived from the resolved config in `utils/first-party.ts`; widened per deployment with `TRUSTED_HOST_SUFFIXES` | **done** |
 | Bundle identity (appId, productName, scheme) | `build.prod.json` / `build.sbx.json` | Channel — never tenant | by design |
 | UI bundle | `UI_ZIP_URL` + `RELEASE_CONFIG_URL`, already OTA | Tenant | works |
 | Shell version | nothing — no update path exists | Release (§5) | **missing** |

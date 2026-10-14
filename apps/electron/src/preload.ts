@@ -26,6 +26,12 @@ interface RecordingPillState {
 // that origin must NOT inherit this bridge. We therefore gate exposure on a
 // strict first-party origin allowlist. An untrusted frame simply never gets
 // `window.electronAPI`, so it cannot reach any privileged IPC channel.
+interface FirstPartyHostRules {
+  hosts: string[];
+  suffixes: string[];
+  localHosts: string[];
+}
+
 function isTrustedOrigin(): boolean {
   try {
     const { protocol, hostname } = window.location;
@@ -33,15 +39,29 @@ function isTrustedOrigin(): boolean {
     if (protocol.startsWith('xyne-spaces')) return true;
     // Bundled local HTML: loading/error pages, meeting popup, recording pill, recorder
     if (protocol === 'file:') return true;
-    // First-party Xyne web app + auth origins (prod + sandbox live under *.xyne.juspay.net)
-    if (protocol === 'https:' && (hostname === 'xyne.juspay.net' || hostname.endsWith('.xyne.juspay.net'))) {
-      return true;
-    }
+    if (protocol !== 'https:' && protocol !== 'http:') return false;
+
+    // First-party Xyne web app + auth origins. The rules are config-derived and
+    // live in main (utils/first-party.ts): this preload is sandboxed, so it can
+    // neither require that module nor read config, and a host list copied here
+    // goes stale the moment a build points at another deployment. Asked
+    // synchronously because exposure must be decided before the page runs.
+    //
+    // Fails closed: no rules, no bridge.
+    const rules = ipcRenderer.sendSync('get-first-party-host-rules') as
+      | FirstPartyHostRules
+      | undefined;
+    if (!rules) return false;
+
+    const host = hostname.toLowerCase();
     // Local development
-    if ((protocol === 'http:' || protocol === 'https:') && (hostname === 'localhost' || hostname === '127.0.0.1')) {
-      return true;
-    }
-    return false;
+    if (rules.localHosts.includes(host)) return true;
+    // Plaintext http is first party only for local development.
+    if (protocol === 'http:') return false;
+    return (
+      rules.hosts.includes(host) ||
+      rules.suffixes.some((suffix) => host === suffix.slice(1) || host.endsWith(suffix))
+    );
   } catch {
     return false;
   }

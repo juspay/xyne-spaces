@@ -12,6 +12,7 @@ import { performHardReload } from '../services/version-checker';
 import { Logger, errorLogger } from '../services/logger/Logger';
 import ElectronEvent from '../services/logger/electron-events';
 import { normalizeExternalUrl } from '../utils/validation';
+import { firstPartyHostRules, isFirstPartyHost } from '../utils/first-party';
 import {
   requestAllMediaPermissions,
 } from '../services/media-permission';
@@ -200,6 +201,16 @@ export function setupIpcHandlers(): void {
     event.returnValue = preloadPath;
   });
 
+  // preload.ts runs sandboxed and cannot read the config-derived host rules it
+  // gates its privileged bridge on, so it asks for them here before exposing
+  // anything. Deliberately unauthenticated: every renderer, trusted or not,
+  // must be able to ask, and the answer is only this deployment's hostnames.
+  // Registered before any window is created (setupIpcHandlers runs ahead of
+  // createMainWindow in app/main.ts), because a missing reply means no bridge.
+  ipcMain.on('get-first-party-host-rules', (event) => {
+    event.returnValue = firstPartyHostRules();
+  });
+
   // Focus the embedder. A <webview> guest holds focus in its own web contents,
   // and nothing in the renderer can take it back — window.focus() and blurring
   // the element both leave it where it is. Until focus returns, the first click
@@ -228,9 +239,7 @@ export function setupIpcHandlers(): void {
     } catch {
       throw new Error('Invalid sync URL');
     }
-    const isXyne = host === 'xyne.juspay.net' || host.endsWith('.xyne.juspay.net');
-    const isLocal = host === 'localhost' || host === '127.0.0.1';
-    if (!isXyne && !isLocal) {
+    if (!isFirstPartyHost(host)) {
       errorLogger.warn('[sync-cookies] Rejected non-Xyne origin');
       throw new Error('Cookie sync only allowed for Xyne origins');
     }
