@@ -641,12 +641,12 @@ const CallHistoryV2Screen = (): ReactElement => {
         </div>
         {/* Page body */}
         <div className='max-w-[884px] w-full flex flex-col gap-6 px-4 pb-20'>
-          {/* UPCOMING section */}
+          {/* UPCOMING & ACTIVE section */}
           {(!hasCallSearch || isVespaCallSearching || hasUpcomingCallsToday) && (
             <div className='flex flex-col gap-3'>
               <div className='flex items-center justify-between shrink-0'>
                 <span className='text-xs font-medium tracking-wide text-muted-foreground/70 uppercase'>
-                  Upcoming
+                  Upcoming &amp; Active
                 </span>
                 <span className='text-xs text-muted-foreground/70'>
                   {format(new Date(now), 'EEE, MMMM d')}
