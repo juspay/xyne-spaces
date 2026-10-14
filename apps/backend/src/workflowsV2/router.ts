@@ -36,8 +36,7 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> =>
  */
 type WorkflowUnderTest = (req: Request) => Promise<string | undefined>;
 
-/** A conversation is an execution; its workflow is the one the app must be attached to. */
-const workflowOfConversation = async (id: unknown): Promise<string | undefined> => {
+const workflowOfExecution = async (id: unknown): Promise<string | undefined> => {
   if (typeof id !== 'string' || id === '') return undefined;
   return (await persistence.getExecution(id))?.workflowId ?? undefined;
 };
@@ -52,11 +51,15 @@ const APP_AUTH_ROUTES = new Map<string, WorkflowUnderTest>([
       const body = isPlainObject(req.body) ? req.body : {};
       // Starting names the workflow; answering and reading name the conversation.
       if (typeof body['workflowId'] === 'string') return body['workflowId'];
-      return workflowOfConversation(body['conversationId']);
+      return workflowOfExecution(body['conversationId']);
     },
   ],
-  ['GET /conversations/:id', (req) => workflowOfConversation(req.params['id'])],
-  ['POST /conversations/:id/end', (req) => workflowOfConversation(req.params['id'])],
+  ['GET /conversations/:id', (req) => workflowOfExecution(req.params['id'])],
+  ['POST /conversations/:id/end', (req) => workflowOfExecution(req.params['id'])],
+  [
+    'POST /executions/:execId/waits/:stepId',
+    (req) => workflowOfExecution(req.params['execId']),
+  ],
 ]);
 
 /**
@@ -315,7 +318,7 @@ const mount = (
     if (allow && !allow.has(key)) continue;
 
     const middleware: express.RequestHandler[] = route.multipart
-      ? [uploadConfig.any()]
+      ? [uploadConfig.any(), express.json({ limit: '10mb' })]
       : route.rawBody
         ? [express.raw({ type: () => true, limit: '10mb' })]
         : [express.json({ limit: '10mb' })];
