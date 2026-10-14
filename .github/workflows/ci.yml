@@ -434,7 +434,7 @@ jobs:
           mkdir -p security-reports
           trivy fs --scanners "$TRIVY_SCANNERS" \
             --skip-dirs .securitybin --skip-dirs security-reports \
-            --skip-dirs '**/node_modules' --skip-dirs '**/dist' --skip-dirs deployment/terraform \
+            --skip-dirs '**/node_modules' --skip-dirs '**/dist' \
             --format json -o security-reports/trivy-fs.json \
             --exit-code 0 --no-progress .
           trivy convert --format table security-reports/trivy-fs.json
