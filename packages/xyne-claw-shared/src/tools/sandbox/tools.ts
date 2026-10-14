@@ -2841,9 +2841,12 @@ export const sandboxDestroy: ToolDefinition = {
       destroyError = err instanceof Error ? err.message : String(err);
     }
     evictSession(session, storeKey);
+    // `sandboxId` is the session actually torn down, which can differ from the
+    // `sessionId` argument when the lookup fell back to the run's store key.
+    // claw-auth marks that sandbox's preview rows STALE (XYNE-66339).
     if (destroyError) {
-      return JSON.stringify({ sessionId, destroyed: false, evicted: true, error: destroyError });
+      return JSON.stringify({ sessionId, sandboxId: session.id, destroyed: false, evicted: true, error: destroyError });
     }
-    return JSON.stringify({ sessionId, destroyed: true });
+    return JSON.stringify({ sessionId, sandboxId: session.id, destroyed: true });
   },
 };

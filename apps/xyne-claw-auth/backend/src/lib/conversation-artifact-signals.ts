@@ -1,6 +1,8 @@
 import { createLogger } from "./../logger.js";
 import {
   detectLinkProvider,
+  isSandboxMarkedEnded,
+  markSandboxArtifactsStale,
   normalizeExternalUrl,
   recordConversationArtifact,
   type ArtifactRefService,
@@ -130,6 +132,33 @@ function firstUrl(records: Record<string, unknown>[]): string | null {
   return direct && /^https?:\/\//i.test(direct) ? direct : null;
 }
 
+/** Claw's own sandbox teardown tool (xyne-claw-shared tools/sandbox). */
+const SANDBOX_DESTROY_TOOL = "sandbox-destroy";
+
+/**
+ * The id of the sandbox a successful `sandbox-destroy` call ended, or null.
+ * The tool returns `{ sessionId, sandboxId, destroyed: true }` as JSON text,
+ * either bare or wrapped in MCP content parts. A failed destroy
+ * (`destroyed: false`) or an error string returns null, and nothing is marked.
+ * `sandboxId` is the session actually destroyed; older builds only send
+ * `sessionId`.
+ */
+function destroyedSandboxId(result: unknown): string | null {
+  let record = asRecord(result);
+  if (!record || (record["destroyed"] === undefined && record["content"] !== undefined)) {
+    const parts = Array.isArray(result) ? result : Array.isArray(record?.["content"]) ? (record["content"] as unknown[]) : [];
+    record = null;
+    for (const part of parts) {
+      const text = part && typeof part === "object" ? (part as { text?: unknown }).text : undefined;
+      record = asRecord(text);
+      if (record) break;
+    }
+  }
+  if (!record || record["destroyed"] !== true) return null;
+  const id = [record["sandboxId"], record["sessionId"]].find((v): v is string => typeof v === "string" && v.trim() !== "");
+  return id ? id.trim() : null;
+}
+
 /**
  * Best-effort artifact write. Never throws, but reports whether a row was
  * actually written: `recordConversationArtifact` can also return `null`
@@ -157,6 +186,18 @@ export async function ingestArtifactSignals(input: IngestArtifactSignalsInput): 
   try {
     const { toolName, toolResult, conversationId, userId } = input;
     if (!conversationId || !userId || !toolName) return;
+
+    // XYNE-66339: the run tore its sandbox down, so its preview has ended.
+    if (toolName === SANDBOX_DESTROY_TOOL) {
+      const sandboxId = destroyedSandboxId(toolResult);
+      if (!sandboxId) return;
+      try {
+        await markSandboxArtifactsStale([sandboxId], { conversationId });
+      } catch (err) {
+        log.warn(`sandbox-destroy stale marking failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
 
     const records = candidateRecords(toolResult);
     if (records.length === 0) return;
@@ -224,6 +265,13 @@ export async function ingestSandboxPreviewSignals(
   try {
     const sandboxId = typeof payload?.sandboxId === "string" ? payload.sandboxId.trim() : "";
     if (!sandboxId || !ctx.conversationId || !ctx.userId) return { recorded: false, reason: "missing-input" };
+    // XYNE-66339: frames are ingested concurrently, so an announce can land
+    // after the destroy. Recording it would upsert the rows back to ACTIVE.
+    // An ended sandbox never comes back, so skip it.
+    if (await isSandboxMarkedEnded(sandboxId)) {
+      log.info(`skipped preview for ended sandbox ${sandboxId}`);
+      return { recorded: false };
+    }
     const base = {
       conversationId: ctx.conversationId,
       messageId: ctx.messageId ?? null,

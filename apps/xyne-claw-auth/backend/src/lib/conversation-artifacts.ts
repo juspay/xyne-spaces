@@ -308,6 +308,75 @@ export async function findArtifactsByRef(
   });
 }
 
+/** Kinds whose row points at a live Claw sandbox (refService CLAW, refId = sandbox id). */
+const SANDBOX_ARTIFACT_KINDS = ["PREVIEW", "DIFF"];
+
+/** Same shape as the sandbox router's id check (routes/sandbox-access.ts). */
+const SANDBOX_ID_RE = /^[A-Za-z0-9][A-Za-z0-9-]{0,62}$/;
+
+/**
+ * XYNE-66339: mark every ACTIVE preview / code-changes row for an ended sandbox
+ * as STALE, so the Workspace pane shows "This sandbox has ended" instead of
+ * framing a dead endpoint. A sandbox id is a unique Kubernetes name, so once it
+ * has ended it never comes back.
+ *
+ * Rows are never deleted: the sandbox router authorizes
+ * /claw-preview|code|term/<id> from them (routes/sandbox-access.ts).
+ *
+ * When `conversationId` is given, nothing is marked unless that conversation
+ * itself announced the sandbox. This keeps one run from ending previews it never
+ * owned. Returns the number of rows changed.
+ */
+export async function markSandboxArtifactsStale(
+  sandboxIds: string[],
+  opts: { conversationId?: string | null } = {},
+): Promise<number> {
+  const ids = [
+    ...new Set(sandboxIds.map((id) => (typeof id === "string" ? id.trim() : "")).filter((id) => SANDBOX_ID_RE.test(id))),
+  ];
+  if (ids.length === 0) return 0;
+
+  if (opts.conversationId !== undefined) {
+    const base = baseConversationId(opts.conversationId);
+    if (!base) return 0;
+    const announced = await prisma.conversationArtifact.findFirst({
+      where: {
+        refService: "CLAW",
+        refId: { in: ids },
+        kind: { in: SANDBOX_ARTIFACT_KINDS },
+        conversationId: { startsWith: base },
+      },
+      select: { id: true },
+    });
+    if (!announced) return 0;
+  }
+
+  const rows: Array<{ id: string; conversationId: string }> = await prisma.conversationArtifact.findMany({
+    where: { refService: "CLAW", refId: { in: ids }, kind: { in: SANDBOX_ARTIFACT_KINDS }, status: "ACTIVE" },
+    select: { id: true, conversationId: true },
+  });
+  if (rows.length === 0) return 0;
+  const { count } = await prisma.conversationArtifact.updateMany({
+    where: { id: { in: rows.map((row) => row.id) }, status: "ACTIVE" },
+    data: { status: "STALE" },
+  });
+  for (const conversationId of new Set(rows.map((row) => row.conversationId))) signalArtifacts(conversationId);
+  log.info(`marked ${count} sandbox artifact(s) STALE for sandbox(es) ${ids.join(",")}`);
+  return count;
+}
+
+/** True when a preview / code-changes row for this sandbox is already STALE,
+ *  i.e. the sandbox is known to have ended. */
+export async function isSandboxMarkedEnded(sandboxId: string): Promise<boolean> {
+  const id = typeof sandboxId === "string" ? sandboxId.trim() : "";
+  if (!SANDBOX_ID_RE.test(id)) return false;
+  const row = await prisma.conversationArtifact.findFirst({
+    where: { refService: "CLAW", refId: id, kind: { in: SANDBOX_ARTIFACT_KINDS }, status: "STALE" },
+    select: { id: true },
+  });
+  return row !== null;
+}
+
 export function toOpenRef(artifact: ConversationArtifact): {
   kind: string;
   service: string;
