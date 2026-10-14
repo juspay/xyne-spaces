@@ -157,9 +157,9 @@ export class AuthSessionService {
   }
 
   /**
-   * Refresh: when the `xs` cookie is missing, re-attach the device to its active
-   * auth session by rotating its token (the raw token is irrecoverable from the
-   * stored hash), or create a session when none is active. Never throws.
+   * Refresh: when the `xs` cookie is missing and the device has no active auth
+   * session, create one. An existing active session is left untouched (the
+   * device re-attaches on next login). Never throws.
    */
   async ensureOnRefresh(req: Request, res: Response, identity: AuthSessionIdentity): Promise<void> {
     if (req.cookies?.[AUTH_SESSION_COOKIE]) return;
@@ -193,10 +193,7 @@ export class AuthSessionService {
       });
 
       if (active) {
-        const { token, tokenHash } = mintToken();
-        await db.authSession.update({ where: { id: active.id }, data: { tokenHash } });
-        this.setAuthSessionCookie(req, res, token, active.absExpiry);
-        logger.info('[AUTH-SESSION] Rotated auth session token during refresh (xs cookie was missing)', {
+        logger.info('[AUTH-SESSION] Active auth session exists for device, xs cookie missing - leaving session untouched', {
           authSessionId: active.id,
           orgId,
           orgMemberId: identity.orgMemberId,
