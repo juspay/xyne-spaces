@@ -1,6 +1,9 @@
 import { useObserve, useValue } from '@legendapp/state/react';
-import { useRef, type ReactElement } from 'react';
-import { ScrollView, Text, View } from 'react-native';
+import { useCallback, type ReactElement } from 'react';
+import { Text, View } from 'react-native';
+import Animated, { useAnimatedRef, useScrollOffset, useSharedValue } from 'react-native-reanimated';
+
+import { ScrollToTopButton } from '@/src/components/ui/scroll-to-top-button';
 
 import { useFabClearance } from '@/src/features/quick-actions';
 import { useReportTabReady } from '@/src/observability/logging/hooks/navigation/useReportTabReady';
@@ -37,7 +40,14 @@ export function ChannelsList(): ReactElement {
   const groups = useValue(channelGroups$);
   const bottomInset = useFabClearance();
 
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useAnimatedRef<Animated.ScrollView>();
+
+  // Tracked on the UI thread; only the button reads it.
+  const scrollOffset = useSharedValue(0);
+  useScrollOffset(scrollRef, scrollOffset);
+  const scrollToTop = useCallback(() => {
+    scrollRef.current?.scrollTo({ y: 0, animated: true });
+  }, [scrollRef]);
 
   // A new filter is a new list, so it starts at the top.
   useObserve(channelFilter$, () => {
@@ -50,19 +60,22 @@ export function ChannelsList(): ReactElement {
   const hasRows = groups.some(group => group.channelIds.length > 0 || group.kind === 'section');
 
   return (
-    <ScrollView
-      ref={scrollRef}
-      keyboardDismissMode='on-drag'
-      keyboardShouldPersistTaps='handled'
-      showsVerticalScrollIndicator={false}
-      className='flex-1 bg-spaces-background'
-      contentContainerStyle={{ paddingBottom: bottomInset }}
-    >
-      <ChannelsFilterBar />
-      {groups.map(group => (
-        <ChannelGroupView key={group.id} group={group} />
-      ))}
-      {isEmpty || !hasRows ? <EmptyState isFiltering={isFiltering} /> : null}
-    </ScrollView>
+    <View className='flex-1 bg-spaces-background'>
+      <Animated.ScrollView
+        ref={scrollRef}
+        keyboardDismissMode='on-drag'
+        keyboardShouldPersistTaps='handled'
+        showsVerticalScrollIndicator={false}
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingBottom: bottomInset }}
+      >
+        <ChannelsFilterBar />
+        {groups.map(group => (
+          <ChannelGroupView key={group.id} group={group} />
+        ))}
+        {isEmpty || !hasRows ? <EmptyState isFiltering={isFiltering} /> : null}
+      </Animated.ScrollView>
+      <ScrollToTopButton offset={scrollOffset} onPress={scrollToTop} />
+    </View>
   );
 }
