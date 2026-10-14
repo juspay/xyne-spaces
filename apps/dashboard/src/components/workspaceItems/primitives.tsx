@@ -75,7 +75,7 @@ function PreviewFrame({
   useEffect(() => {
     if (status !== 'loading') return undefined;
     const timer = window.setTimeout(() => setStatus('timedOut'), FRAME_LOAD_TIMEOUT_MS);
-    return () => window.clearTimeout(timer);
+    return (): void => window.clearTimeout(timer);
   }, [status]);
 
   return (
@@ -112,8 +112,7 @@ export function SandboxedFrame({ url, title }: { url: string; title: string }): 
   if (mode.kind === 'shares-dashboard-origin') {
     return (
       <Centered>
-        This preview is served from the same address as Xyne, so it can&apos;t be shown here. Open
-        it in a new tab instead.
+        This preview needs the dedicated preview host and can&apos;t be shown here.
       </Centered>
     );
   }

@@ -2,9 +2,9 @@ export const IFRAME_SANDBOX = 'allow-scripts allow-forms allow-modals allow-popu
 
 const SANDBOX_PREVIEW_PREFIXES = ['/claw-preview/', '/claw-code/', '/claw-term/'];
 
-export const SANDBOX_PREVIEW_IFRAME_SANDBOX = `${IFRAME_SANDBOX} allow-same-origin allow-popups-to-escape-sandbox allow-downloads`;
+export const SANDBOX_PREVIEW_IFRAME_SANDBOX = `${IFRAME_SANDBOX} allow-same-origin allow-downloads`;
 
-export const SANDBOX_PREVIEW_ALLOW = 'clipboard-read; clipboard-write; fullscreen';
+export const SANDBOX_PREVIEW_ALLOW = 'clipboard-write; fullscreen';
 
 /**
  * Where sandbox previews are served from. Empty until the preview host exists,

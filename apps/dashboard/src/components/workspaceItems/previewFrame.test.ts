@@ -19,6 +19,12 @@ describe('previewFrameMode', () => {
     });
   });
 
+  it('does not let a preview escape the sandbox through popups or read the clipboard', () => {
+    expect(SANDBOX_PREVIEW_IFRAME_SANDBOX).not.toContain('allow-popups-to-escape-sandbox');
+    expect(SANDBOX_PREVIEW_ALLOW).not.toContain('clipboard-read');
+    expect(SANDBOX_PREVIEW_ALLOW).toContain('clipboard-write');
+  });
+
   it.each(PREVIEW_PATHS)('treats %s on the preview origin as a sandbox preview', path => {
     const mode = previewFrameMode(`${PREVIEW}${path}`, DASHBOARD, PREVIEW);
     expect(mode.kind === 'frame' && mode.sandbox).toContain('allow-same-origin');
