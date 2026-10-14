@@ -6,6 +6,7 @@ import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { getRequesterId, getOrgId } from "../middleware/agent-acl.js";
 import { getSpacesAuthForUser, getWorkspaceIdForUser, requestWorkspaceHint } from "../lib/spaces-db.js";
+import { resolveSpacesAppCreds } from "../lib/spaces-agent-install.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("spaces");
@@ -111,20 +112,27 @@ async function resolveUserSpacesAuth(userId: string, workspaceHint?: string): Pr
   };
 }
 
-async function resolveAgentAppToken(orgId: string | undefined, agentSlug?: string): Promise<string | null> {
+async function resolveAgentAppToken(
+  orgId: string | undefined,
+  agentSlug: string | undefined,
+  workspaceId?: string,
+): Promise<string | null> {
   if (!orgId) {
     log.error(`[spaces] orgId is required; refusing global app-token lookup agentSlug=${agentSlug ?? "none"}`);
     return null;
   }
   const agent = await prisma.agent.findFirst({
-    where: agentSlug
-      ? { orgId, slug: agentSlug, spacesAppToken: { not: null } }
-      : { orgId, isDefault: true, spacesAppToken: { not: null } },
-    select: { spacesAppToken: true },
+    where: agentSlug ? { orgId, slug: agentSlug } : { orgId, isDefault: true },
+    select: { spacesAppId: true, spacesAppToken: true, spacesAppUserId: true },
   });
-  if (!agent?.spacesAppToken) return null;
+  if (!agent) return null;
 
-  const parts = agent.spacesAppToken.split(":");
+  // Per-workspace install first (SurfaceAgentInstall); the inline column
+  // holds only the latest install's token and stays the fallback.
+  const creds = await resolveSpacesAppCreds(agent, workspaceId);
+  if (!creds.spacesAppToken) return null;
+
+  const parts = creds.spacesAppToken.split(":");
   if (parts.length !== 3 || !parts[0] || !parts[1] || !parts[2]) return null;
 
   return decrypt(parts[0], parts[1], parts[2], CONFIG.encryptionKey) || null;
@@ -215,7 +223,7 @@ router.get("/channels", async (req: Request, res: Response) => {
   }
 
   // Path 2: no user MCP connection — use agent app token with /api/apps/channel/list
-  const appToken = await resolveAgentAppToken(orgId, agentSlug).catch((err) => {
+  const appToken = await resolveAgentAppToken(orgId, agentSlug, requestWorkspaceHint(req)).catch((err) => {
     log.error("[spaces/channels] failed to load agent app token:", err);
     return null;
   });
