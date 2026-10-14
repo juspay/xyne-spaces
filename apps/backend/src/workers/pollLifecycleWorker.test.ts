@@ -14,6 +14,8 @@ const queueMock = {
   on: jest.fn(),
   close: jest.fn(),
 };
+const findPollsWithPendingLifecycleMock = jest.fn();
+const runInPollWorkspaceMock = jest.fn((_pollId: string, fn: () => Promise<void>) => fn());
 const createNotificationMock = jest.fn();
 const filterUsersMock = jest.fn();
 
@@ -27,6 +29,10 @@ jest.mock('@/services/notificationService', () => ({
 }));
 jest.mock('@/services/notificationFilterService', () => ({
   filterUsers: filterUsersMock,
+}));
+jest.mock('@/bypassAcl/pollLifecycleServices', () => ({
+  findPollsWithPendingLifecycle: findPollsWithPendingLifecycleMock,
+  runInPollWorkspace: runInPollWorkspaceMock,
 }));
 jest.mock('@/utils/logger', () => ({
   logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
@@ -92,7 +98,7 @@ describe('remindPollNonVoters', () => {
       ['user-1', 'user-2'],
       'channel-1',
       false,
-      'channel_message',
+      'mention',
       { notificationType: 'CHANNEL_MESSAGE' },
       undefined,
       false,
@@ -164,14 +170,21 @@ describe('remindPollNonVoters', () => {
 });
 
 describe('processPollLifecycleJob', () => {
-  it('routes CLOSE and REMIND jobs', async () => {
+  it('routes CLOSE and REMIND jobs inside the poll workspace', async () => {
     await processPollLifecycleJob({ pollId: 'poll-1', kind: 'CLOSE' });
+    expect(runInPollWorkspaceMock).toHaveBeenCalledWith('poll-1', expect.any(Function));
     expect(dbMock.poll.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: 'poll-1', closedAt: null } }),
     );
 
     await processPollLifecycleJob({ pollId: 'poll-1', kind: 'REMIND' });
     expect(filterUsersMock).toHaveBeenCalled();
+  });
+
+  it('does nothing when the poll no longer exists', async () => {
+    runInPollWorkspaceMock.mockImplementationOnce(async () => undefined);
+    await processPollLifecycleJob({ pollId: 'gone', kind: 'CLOSE' });
+    expect(dbMock.poll.updateMany).not.toHaveBeenCalled();
   });
 
   it('rejects an unknown kind', async () => {
@@ -197,7 +210,7 @@ describe('pollLifecycleWorker', () => {
 
   it('re-enqueues open polls with a pending close or reminder, deduped by jobId', async () => {
     jest.useFakeTimers({ now: new Date('2026-10-14T12:00:00.000Z') });
-    dbMock.poll.findMany.mockResolvedValue([
+    findPollsWithPendingLifecycleMock.mockResolvedValue([
       {
         id: 'poll-1',
         closesAt: new Date('2026-10-14T13:00:00.000Z'),
@@ -212,13 +225,7 @@ describe('pollLifecycleWorker', () => {
       jest.useRealTimers();
     }
 
-    expect(dbMock.poll.findMany).toHaveBeenCalledWith({
-      where: {
-        closedAt: null,
-        OR: [{ closesAt: { not: null } }, { remindAt: { not: null } }],
-      },
-      select: { id: true, closesAt: true, remindAt: true },
-    });
+    expect(findPollsWithPendingLifecycleMock).toHaveBeenCalledTimes(1);
     expect(queueMock.add.mock.calls).toEqual([
       [{ pollId: 'poll-1', kind: 'CLOSE' }, { jobId: 'poll-close:poll-1', delay: 3_600_000 }],
       [{ pollId: 'poll-1', kind: 'REMIND' }, { jobId: 'poll-remind:poll-1', delay: 0 }],

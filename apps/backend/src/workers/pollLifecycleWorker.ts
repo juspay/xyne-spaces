@@ -6,6 +6,10 @@ import { notificationService } from '@/services/notificationService';
 import { redisService } from '@/services/redisService';
 import { logger } from '@/utils/logger';
 import {
+  findPollsWithPendingLifecycle,
+  runInPollWorkspace,
+} from '@/bypassAcl/pollLifecycleServices';
+import {
   POLL_LIFECYCLE_JOB_OPTIONS,
   POLL_LIFECYCLE_QUEUE_NAME,
   addPollLifecycleJobs,
@@ -64,7 +68,9 @@ export async function remindPollNonVoters(pollId: string): Promise<void> {
     recipients,
     channel.id,
     channel.scopeType === ChannelScopeType.DM,
-    'channel_message',
+    // A reminder is addressed to each non-voter, so it passes MENTIONS_ONLY like a
+    // mention does; a channel muted to NONE still blocks it.
+    'mention',
     { notificationType: NotificationType.CHANNEL_MESSAGE },
     undefined,
     channel.scopeType === ChannelScopeType.GROUP_DM,
@@ -120,13 +126,12 @@ export async function remindPollNonVoters(pollId: string): Promise<void> {
 }
 
 export async function processPollLifecycleJob(data: PollLifecycleJobData): Promise<void> {
-  if (data.kind === 'CLOSE') {
-    await closePoll(data.pollId);
-  } else if (data.kind === 'REMIND') {
-    await remindPollNonVoters(data.pollId);
-  } else {
+  if (data.kind !== 'CLOSE' && data.kind !== 'REMIND') {
     throw new Error(`Unsupported poll lifecycle job kind: ${String(data.kind)}`);
   }
+  await runInPollWorkspace(data.pollId, () =>
+    data.kind === 'CLOSE' ? closePoll(data.pollId) : remindPollNonVoters(data.pollId)
+  );
 }
 
 class PollLifecycleWorker {
@@ -159,13 +164,7 @@ class PollLifecycleWorker {
   /** `polls` is the durable record. Bull dedupes by jobId, so re-adding a queued job is a no-op. */
   async reenqueuePendingPolls(): Promise<void> {
     const queue = this.getQueue();
-    const polls = await db.poll.findMany({
-      where: {
-        closedAt: null,
-        OR: [{ closesAt: { not: null } }, { remindAt: { not: null } }],
-      },
-      select: { id: true, closesAt: true, remindAt: true },
-    });
+    const polls = await findPollsWithPendingLifecycle();
     for (const poll of polls) {
       await addPollLifecycleJobs(queue, poll);
     }

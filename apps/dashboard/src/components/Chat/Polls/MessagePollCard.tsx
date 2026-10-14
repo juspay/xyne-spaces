@@ -194,7 +194,8 @@ function LoadedMessagePollCard({ poll, channelId }: { poll: LoadedPoll; channelI
             {resultsVisible && <TypedResultSummary question={question} aggregate={aggregate} />}
             {resultsVisible ? (
               <p className='text-xs text-muted-foreground'>
-                {results.voterCount} {results.voterCount === 1 ? 'voter' : 'voters'}
+                {results.voterCount} {isChoice ? 'voter' : 'response'}
+                {results.voterCount === 1 ? '' : 's'}
               </p>
             ) : (
               resultsLocked && (
@@ -523,8 +524,6 @@ function TypedResultSummary({
     return (
       <div className='rounded-md bg-muted/40 px-3 py-2 text-sm text-muted-foreground'>
         Average <span className='font-semibold text-foreground'>{rating.average || '—'}</span>/5
-        {' · '}
-        {rating.responseCount} {rating.responseCount === 1 ? 'response' : 'responses'}
       </div>
     );
   }
@@ -541,14 +540,6 @@ function TypedResultSummary({
           </li>
         ))}
       </ol>
-    );
-  }
-  if (question.responseType === 'SHORT_TEXT' || question.responseType === 'Q_AND_A') {
-    const count = aggregate?.voterCount ?? 0;
-    return (
-      <p className='text-xs text-muted-foreground'>
-        {count} {count === 1 ? 'response' : 'responses'}
-      </p>
     );
   }
   return null;
