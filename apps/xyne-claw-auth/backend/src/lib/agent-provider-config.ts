@@ -290,7 +290,13 @@ export function buildProviderConfig(provider: string, row: CredRow): ProviderCon
  */
 export async function resolveAgentProviderConfigs(
   agent: { id: string; config?: unknown },
-  opts: { headlessBulk?: boolean; speed?: ModelSpeed } = {},
+  opts: {
+    headlessBulk?: boolean;
+    speed?: ModelSpeed;
+    /** Read-only callers (the model picker) only need the ranking + models —
+     *  skip the OAuth token refresh so a GET never rotates/persists a token. */
+    skipOAuthRefresh?: boolean;
+  } = {},
 ): Promise<ResolvedAgentProviders> {
   // Fast mode may run on its own provider profile (see providerConfigForSpeed).
   // Callers that know a per-run speed pass it; otherwise the agent default applies.
@@ -347,7 +353,7 @@ export async function resolveAgentProviderConfigs(
   // Refresh short-lived OAuth tokens before use (persist the rotated token back
   // to the agent cred row), same as the chat path. api_key / not-yet-expired
   // tokens pass through with no network call.
-  const claudeCfg = providerConfigs["claude"];
+  const claudeCfg = opts.skipOAuthRefresh ? undefined : providerConfigs["claude"];
   if (claudeCfg && claudeCfg.authType === "oauth_token") {
     const credRow = agentCredsByProvider.get("claude");
     if (credRow) {
@@ -361,7 +367,7 @@ export async function resolveAgentProviderConfigs(
       }
     }
   }
-  const codexCfg = providerConfigs["codex"];
+  const codexCfg = opts.skipOAuthRefresh ? undefined : providerConfigs["codex"];
   if (codexCfg && codexCfg.authType === "oauth_token") {
     const credRow = agentCredsByProvider.get("codex");
     if (credRow) {
