@@ -62,7 +62,11 @@ export interface UserPreferences {
    * TODO: on by default, and then the switch removed, once tried with prod users.
    */
   screenActionsEnabled: boolean;
+  /** What "@" opens in the chat and AI composers: the people list, or the tabbed all-context menu. */
+  mentionMenuMode: 'people' | 'all';
 }
+
+export type MentionMenuMode = UserPreferences['mentionMenuMode'];
 
 export const DEFAULT_USER_PREFERENCES: UserPreferences = {
   sdlcSidebarCollapsed: false,
@@ -83,6 +87,7 @@ export const DEFAULT_USER_PREFERENCES: UserPreferences = {
   relatedContextDebounceMs: 1000,
   aiWorkspaceAutoOpen: true,
   screenActionsEnabled: false,
+  mentionMenuMode: 'people',
 };
 
 export interface UserPreferencesContext {

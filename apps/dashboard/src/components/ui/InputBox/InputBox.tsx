@@ -1670,6 +1670,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             mentionItems={mentionItems}
             {...(onMentionSearch && { onMentionSearch })}
             {...(onMentionSelect && { onMentionSelect })}
+            allowAllMode
           />
         )}
 

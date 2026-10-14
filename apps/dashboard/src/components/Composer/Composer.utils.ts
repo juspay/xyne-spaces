@@ -1,5 +1,6 @@
 import type { DisplaySearchResult } from '../../types/search';
 import type { ContextSelections } from '../Chat/XyneAISidebar/components/ContextPickerPanel';
+import type { MentionRow } from '../MentionMenu/MentionMenu.utils';
 import type { ContextRef, PickedContext, TriggerChar } from './Composer.types';
 
 // ── Triggers ────────────────────────────────────────────────────────────────
@@ -166,6 +167,29 @@ export function pickFromChannel(
     mention: displayName,
     isPrivate: (channel.visibility ?? '').toUpperCase() === 'PRIVATE',
   };
+}
+
+/**
+ * What the composer attaches for a row of the @ menu. Null for rows that are
+ * not context: groups and @channel/@here tag people in a chat, but name no one
+ * the agent can read about.
+ */
+export function rowToPick(row: MentionRow): PickedContext | null {
+  switch (row.type) {
+    case 'person': {
+      const { person } = row;
+      if (person.isSpecial || person.type !== 'user') return null;
+      // The chat composer's list marks you "Name (you)"; the pill is just the name.
+      const name = person.name.replace(/ \(you\)$/, '').trim();
+      return name ? { kind: 'person', id: person.id, label: name, mention: name } : null;
+    }
+    case 'channel':
+      return pickFromChannel(row.channel, row.displayName);
+    case 'result':
+      return pickFromResult(row.result);
+    case 'app':
+      return { kind: 'app', id: row.app.id, label: row.app.title, mention: row.app.title };
+  }
 }
 
 /**

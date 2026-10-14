@@ -1,65 +1,42 @@
-import React, { useCallback } from 'react';
-import Avatar from '../Avatar/Avatar';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Hash, Lock } from 'lucide-react';
 import { PluginKey } from '@tiptap/pm/state';
-import { UserStatus, type MentionResult } from '@xyne/shared';
+import { ChannelVisibility, type MentionResult } from '@xyne/shared';
 import type { MentionSelectorProps } from './Selectors.types';
 import { detectMentionTrigger, detectChannelTrigger, createVirtualAnchor } from './Selectors.utils';
 import { mentionPluginKey, channelMentionPluginKey } from '../TipTapExtensions';
 import { BasePopoverSelector, type BaseSelectorPluginState } from './BasePopoverSelector';
-import { useUser } from '../../../hooks/useUsers';
-import { resolveUserStatus } from '../../../utils/statusUtils';
-import { renderEmoji } from '../../../utils/customEmojiUtils';
+import {
+  MENTION_MENU_CONTAINER,
+  MentionMenu,
+  MentionPersonRow,
+  type MentionMenuHandle,
+  type MentionMenuProps,
+  type MentionRow,
+} from '../../MentionMenu/MentionMenu';
+import { resultTitle } from '../../MentionMenu/MentionMenu.utils';
+import { pickFromResult } from '../../Composer/Composer.utils';
+import { useUserPreference } from '../../../machines/userPreferencesMachine';
+import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
+import { computeSearchResultPath } from '../../../utils/searchNavigation';
 
 /**
- * Sub-component to render user avatar with resolved profile picture URL.
- * Hooks must be called at component top level, not inside callbacks.
+ * The all-context menu, clearing the rows it handed the selector when it
+ * closes so the next "@" never starts on the previous one's rows.
  */
-const UserAvatarItem: React.FC<{ item: MentionResult }> = ({ item }) => {
-  const user = useUser(item.id);
-  const status = resolveUserStatus(user);
-  const hasValidStatus = status.hasStatus;
-  const statusText = status.content ?? undefined;
-  const isDeactivated = user?.status === UserStatus.INACTIVE || item.isDeactivated;
-
+const AllContextMenu = React.forwardRef<
+  MentionMenuHandle,
+  Omit<MentionMenuProps, 'mode' | 'onRowsChange'> & {
+    onRowsChange: (rows: MentionRow[]) => void;
+  }
+>(function AllContextMenu({ onRowsChange, ...props }, ref) {
+  const latest = useRef(onRowsChange);
+  latest.current = onRowsChange;
+  useEffect(() => (): void => latest.current([]), []);
   return (
-    <>
-      <Avatar userId={item.id} size='sm' rounded showActiveStatus={false} />
-      <div className='flex-1 min-w-0 flex flex-col gap-0.5'>
-        <div className='flex items-center gap-2'>
-          <span
-            className={`text-sm font-medium whitespace-nowrap overflow-hidden text-ellipsis ${isDeactivated ? 'text-muted-foreground' : 'text-foreground'}`}
-          >
-            {item.name}
-          </span>
-          {hasValidStatus && !isDeactivated && (
-            <span className='inline-flex flex-shrink-0'>{renderEmoji(status.emoji)}</span>
-          )}
-          {statusText && !isDeactivated && (
-            <span className='text-sm text-muted-foreground whitespace-nowrap overflow-hidden text-ellipsis'>
-              {statusText}
-            </span>
-          )}
-          {item.isChannelMember === false && (
-            <span className='text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded'>
-              Not in channel
-            </span>
-          )}
-          {isDeactivated && (
-            <span className='text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded shrink-0'>
-              Deactivated
-            </span>
-          )}
-        </div>
-        {item.email && (
-          <span className='text-xs text-muted-foreground whitespace-nowrap overflow-hidden text-ellipsis'>
-            {item.email}
-          </span>
-        )}
-      </div>
-    </>
+    <MentionMenu ref={ref} mode='all' onRowsChange={rows => onRowsChange([...rows])} {...props} />
   );
-};
+});
 
 export const MentionSelector: React.FC<MentionSelectorProps> = ({
   editor,
@@ -67,9 +44,18 @@ export const MentionSelector: React.FC<MentionSelectorProps> = ({
   onMentionSearch,
   onMentionSelect,
   triggerChar = '@',
+  allowAllMode = false,
 }) => {
   const pluginKey = triggerChar === '#' ? channelMentionPluginKey : mentionPluginKey;
   const detectFunc = triggerChar === '#' ? detectChannelTrigger : detectMentionTrigger;
+  const menuMode = useUserPreference('mentionMenuMode');
+  // Other editors (Slack replies, automation fields) can't hold channel pills or
+  // Xyne links, so they keep the people list whatever the setting.
+  const allMode = allowAllMode && triggerChar === '@' && menuMode === 'all';
+  const shareableOrigin = useShareableOrigin();
+  const [query, setQuery] = useState('');
+  const [rows, setRows] = useState<MentionRow[]>([]);
+  const menuRef = useRef<MentionMenuHandle>(null);
 
   const detectTriggerWithSearch = useCallback(
     (ed: typeof editor) => {
@@ -78,35 +64,37 @@ export const MentionSelector: React.FC<MentionSelectorProps> = ({
       if (trigger) {
         const searchQuery = trigger.query.replace(/[.,!?:;)]*$/, '');
         onMentionSearch?.(searchQuery);
+        setQuery(searchQuery);
       }
       return trigger;
     },
     [onMentionSearch, detectFunc],
   );
 
+  /** The typed "@…" / "#…" before the caret, which a pick replaces. */
+  const triggerRange = useCallback((): { from: number; to: number } | null => {
+    if (!editor) return null;
+    const { from, $from } = editor.state.selection;
+    const textBefore = $from.parent.textBetween(0, $from.parentOffset, '\n', '\0');
+
+    // Match pattern based on trigger character
+    const pattern = triggerChar === '#' ? /#([\w-]*)$/ : /@([\w\s.-]*)$/;
+    const mentionMatch = textBefore.match(pattern);
+    return mentionMatch ? { from: from - mentionMatch[0].length, to: from } : null;
+  }, [editor, triggerChar]);
+
   const handleSelect = useCallback(
     (mention: MentionResult) => {
       if (!editor) return;
 
-      const { state } = editor;
-      const { from } = state.selection;
-      const { $from } = state.selection;
-      const textBefore = $from.parent.textBetween(0, $from.parentOffset, '\n', '\0');
-
-      // Match pattern based on trigger character
-      const pattern = triggerChar === '#' ? /#([\w-]*)$/ : /@([\w\s.-]*)$/;
-      const mentionMatch = textBefore.match(pattern);
-
-      if (mentionMatch) {
-        const mentionStart = from - mentionMatch[0].length;
-        const mentionEnd = from;
-
+      const range = triggerRange();
+      if (range) {
         // Handle channel mentions (triggered by #)
         if (triggerChar === '#' && mention.type === 'channel') {
           editor
             .chain()
             .focus()
-            .deleteRange({ from: mentionStart, to: mentionEnd })
+            .deleteRange(range)
             .insertChannelMention({
               channelId: mention.id,
               channelName: mention.name,
@@ -120,7 +108,7 @@ export const MentionSelector: React.FC<MentionSelectorProps> = ({
           editor
             .chain()
             .focus()
-            .deleteRange({ from: mentionStart, to: mentionEnd })
+            .deleteRange(range)
             .insertSpecialMention({
               mentionType: mention.type,
             })
@@ -132,7 +120,7 @@ export const MentionSelector: React.FC<MentionSelectorProps> = ({
           editor
             .chain()
             .focus()
-            .deleteRange({ from: mentionStart, to: mentionEnd })
+            .deleteRange(range)
             .insertMention({
               userId: mention.id,
               username: mention.name.replace(/ \(you\)$/, ''),
@@ -147,7 +135,7 @@ export const MentionSelector: React.FC<MentionSelectorProps> = ({
           editor
             .chain()
             .focus()
-            .deleteRange({ from: mentionStart, to: mentionEnd })
+            .deleteRange(range)
             .insertGroupMention({
               groupId: mention.id,
               groupName: mention.name,
@@ -161,88 +149,154 @@ export const MentionSelector: React.FC<MentionSelectorProps> = ({
 
       onMentionSelect?.(mention);
     },
-    [editor, onMentionSelect, triggerChar],
+    [editor, onMentionSelect, triggerChar, triggerRange],
   );
 
-  const mentionBasedClass = triggerChar === '#' ? 'h-8' : 'p-3 gap-3 rounded-xl';
+  /**
+   * A pick from the all-context menu. People keep their mention pills and
+   * channels become channel pills; a message, file, canvas or ticket can't be
+   * mentioned in chat, so it goes in as a link to it.
+   */
+  const handleRowSelect = useCallback(
+    (row: MentionRow) => {
+      if (!editor) return;
+      if (row.type === 'person') {
+        handleSelect(row.person);
+        return;
+      }
+      const range = triggerRange();
+      if (!range || row.type === 'app') return;
+
+      if (row.type === 'channel') {
+        // An editor without channel pills has no command to insert one.
+        if (!editor.schema.nodes['channelMention']) return;
+        editor
+          .chain()
+          .focus()
+          .deleteRange(range)
+          .insertChannelMention({
+            channelId: row.channel.id,
+            channelName: row.displayName,
+            isPrivate: row.channel.visibility === ChannelVisibility.PRIVATE,
+          })
+          .insertContent(' ')
+          .run();
+        return;
+      }
+
+      const { result } = row;
+      const target = computeSearchResultPath(result);
+      const href =
+        target?.kind === 'internal'
+          ? `${shareableOrigin}${target.path}`
+          : target?.kind === 'external'
+            ? target.url
+            : null;
+      // The label reads like the AI composer's token ("Emma's message", a file
+      // name, a ticket id); with nowhere to point it stays plain text.
+      const label = pickFromResult(result)?.mention || resultTitle(result) || 'Link';
+      const marks =
+        href && editor.schema.marks['link'] ? [{ type: 'link', attrs: { href } }] : undefined;
+      editor
+        .chain()
+        .focus()
+        .deleteRange(range)
+        .insertContent([
+          { type: 'text', text: label, ...(marks && { marks }) },
+          { type: 'text', text: ' ' },
+        ])
+        .run();
+    },
+    [editor, handleSelect, triggerRange, shareableOrigin],
+  );
+
+  const cycleSection = useCallback(
+    (backwards: boolean) => menuRef.current?.cycleSection(backwards),
+    [],
+  );
+
+  const renderAllList = useCallback(
+    ({
+      selectedIndex,
+      setSelectedIndex,
+      select,
+    }: {
+      selectedIndex: number;
+      setSelectedIndex: (index: number) => void;
+      select: (row: MentionRow) => void;
+    }) => (
+      <AllContextMenu
+        ref={menuRef}
+        query={query}
+        defaultSection='people'
+        people={mentionItems}
+        highlightedIndex={selectedIndex}
+        onHighlightedIndexChange={setSelectedIndex}
+        onRowsChange={setRows}
+        onSelect={select}
+        trackCategory='CHAT_INPUT'
+      />
+    ),
+    [query, mentionItems],
+  );
+
   const emptyMessage = triggerChar === '#' ? 'No channels found' : 'No users or groups found';
 
   const renderItem = useCallback(
     (item: MentionResult, _index: number, isSelected: boolean) => {
+      // People, groups and @channel/@here: the same rows as the AI composer's people list.
+      if (triggerChar !== '#' || item.type !== 'channel') {
+        return <MentionPersonRow item={item} selected={isSelected} />;
+      }
+      // Channel mentions (triggered by #)
       return (
         <div
-          className={`flex items-center transition-all duration-200 ease-in active:scale-[0.98] ${mentionBasedClass} ${
+          className={`flex items-center transition-[transform,background-color] duration-200 ease-in active:scale-[0.98] h-8 ${
             isSelected ? 'bg-accent' : ''
           }`}
         >
-          {/* Channel mentions (triggered by #) */}
-          {triggerChar === '#' && item.type === 'channel' ? (
-            <>
-              <div className='w-8 h-8 flex items-center justify-center flex-shrink-0'>
-                {item.isPrivate ? (
-                  <Lock className='h-3.5 w-3.5 text-muted-foreground' />
-                ) : (
-                  <Hash className='h-3.5 w-3.5 text-muted-foreground' />
-                )}
-              </div>
-              <div className='flex-1 min-w-0 flex flex-col gap-0.5'>
-                <span className='text-sm font-medium text-foreground whitespace-nowrap overflow-hidden text-ellipsis'>
-                  {item.name}
-                </span>
-              </div>
-            </>
-          ) : item.isSpecial ? (
-            <>
-              <div className='w-8 h-8 flex items-center justify-center bg-orange-50 rounded-full border border-orange-200 flex-shrink-0'>
-                <span className='text-base leading-none'>
-                  {item.type === 'channel' ? '📢' : '👋'}
-                </span>
-              </div>
-              <div className='flex-1 min-w-0 flex flex-col gap-0.5'>
-                <span className='text-sm font-medium text-orange-700 whitespace-nowrap overflow-hidden text-ellipsis'>
-                  @{item.name}
-                </span>
-                <span className='text-xs text-muted-foreground whitespace-nowrap overflow-hidden text-ellipsis'>
-                  {item.description}
-                </span>
-              </div>
-            </>
-          ) : item.type === 'group' ? (
-            <>
-              <div
-                className={`w-8 h-8 flex items-center justify-center rounded-full border flex-shrink-0 ${
-                  item.isDeactivated
-                    ? 'bg-muted border-muted-foreground/30'
-                    : 'bg-green-50 border-green-200'
-                }`}
-              >
-                <span className='text-base leading-none'>👥</span>
-              </div>
-              <div className='flex-1 min-w-0 flex flex-col gap-0.5'>
-                <span
-                  className={`text-sm font-medium whitespace-nowrap overflow-hidden text-ellipsis ${
-                    item.isDeactivated ? 'text-muted-foreground' : 'text-foreground'
-                  }`}
-                >
-                  {item.alias ? `@${item.alias}` : item.name}
-                  {item.isDeactivated && ' (Deactivated)'}
-                </span>
-                <span className='text-xs text-muted-foreground whitespace-nowrap overflow-hidden text-ellipsis'>
-                  {item.alias && item.name !== item.alias ? item.name : ''}
-                </span>
-              </div>
-            </>
-          ) : (
-            <UserAvatarItem item={item} />
-          )}
+          <div className='w-8 h-8 flex items-center justify-center flex-shrink-0'>
+            {item.isPrivate ? (
+              <Lock className='h-3.5 w-3.5 text-muted-foreground' />
+            ) : (
+              <Hash className='h-3.5 w-3.5 text-muted-foreground' />
+            )}
+          </div>
+          <div className='flex-1 min-w-0 flex flex-col gap-0.5'>
+            <span className='text-sm font-medium text-foreground whitespace-nowrap overflow-hidden text-ellipsis'>
+              {item.name}
+            </span>
+          </div>
         </div>
       );
     },
-    [triggerChar, mentionBasedClass],
+    [triggerChar],
   );
+
+  if (allMode) {
+    return (
+      <BasePopoverSelector<MentionRow>
+        // Keyed apart from the people list, so a preference switch never
+        // carries one's open state and items into the other.
+        key='all'
+        editor={editor}
+        // The plugin only counts and indexes its items, whatever their shape.
+        pluginKey={mentionPluginKey as unknown as PluginKey<BaseSelectorPluginState<MentionRow>>}
+        items={rows}
+        detectTrigger={detectTriggerWithSearch}
+        getPosition={createVirtualAnchor}
+        onSelect={handleRowSelect}
+        renderList={renderAllList}
+        onTab={cycleSection}
+        contentClassName={MENTION_MENU_CONTAINER.all}
+        triggerChar={triggerChar}
+      />
+    );
+  }
 
   return (
     <BasePopoverSelector<MentionResult>
+      key='people'
       editor={editor}
       pluginKey={pluginKey as PluginKey<BaseSelectorPluginState<MentionResult>>}
       items={mentionItems}

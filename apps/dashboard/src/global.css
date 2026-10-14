@@ -1396,6 +1396,33 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
     @apply bg-muted-foreground;
   }
 
+  /* Composer menus: a hairline thumb, no track. */
+  .scrollbar-minimal {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--foreground) / 0.18) transparent;
+  }
+  .scrollbar-minimal::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+  .scrollbar-minimal::-webkit-scrollbar-track,
+  .scrollbar-minimal::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  .scrollbar-minimal::-webkit-scrollbar-thumb {
+    background: hsl(var(--foreground) / 0.18);
+    border-radius: 9999px;
+  }
+  .scrollbar-minimal::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--foreground) / 0.32);
+  }
+
+  /* A list that continues below fades its last row out instead of cutting it. */
+  .mask-fade-bottom {
+    -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 48px), transparent);
+    mask-image: linear-gradient(to bottom, #000 calc(100% - 48px), transparent);
+  }
+
   /* Common overflow and sizing utilities for workflow components */
   .overflow-safe {
     @apply overflow-hidden max-w-full min-w-0;
