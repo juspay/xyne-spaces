@@ -1,9 +1,9 @@
 import type { DeleteID, InsertValue, Transaction, UpdateValue } from '@rocicorp/zero';
-import { isPollClosedAt, type Schema } from '@xyne/shared';
+import { isPollClosed, type Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, type TableSchema } from '../core/types';
 import { zql } from '../../queries';
-import { requireAccessiblePoll } from './poll-acl-utils';
+import { requireAccessiblePoll, requirePollCreatorForDelete } from './poll-acl-utils';
 
 export class PollVotesACL extends BaseACL<'poll_votes'> {
   constructor(ctx: ConstructorParameters<typeof BaseACL<'poll_votes'>>[0]) {
@@ -23,7 +23,7 @@ export class PollVotesACL extends BaseACL<'poll_votes'> {
   }
 
   private validatePollOpen(poll: { closedAt?: number | null }): void {
-    if (isPollClosedAt(poll, Date.now())) {
+    if (isPollClosed(poll)) {
       throw new MutationACLError('This poll is closed', 'poll_votes');
     }
   }
@@ -63,6 +63,11 @@ export class PollVotesACL extends BaseACL<'poll_votes'> {
     const vote = await tx.run(zql.poll_votes.where('id', '=', args.id).one());
     if (!vote) {
       throw new MutationACLError('Poll ballot does not exist', 'poll_votes');
+    }
+    if (vote.userId !== this.ctx.userID) {
+      // Only deletePollGraph removes other people's ballots, on behalf of the poll creator.
+      await requirePollCreatorForDelete(vote.pollId, this.ctx, tx, 'poll_votes');
+      return;
     }
     this.validateOwnerAndWorkspace(vote);
     const poll = await requireAccessiblePoll(vote.pollId, this.ctx, tx, 'poll_votes');

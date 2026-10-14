@@ -248,14 +248,14 @@ describe("spaces-messages poll projection", () => {
           question: "Secret?",
           responseType: "SINGLE_CHOICE",
           position: 0,
+          options: [
+            { id: "yes", text: "Yes", createdBy: "creator-1" },
+            { id: "no", text: "No", createdBy: "creator-1" },
+          ],
         },
       ])
       .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([
-        { id: "yes", questionId: "question-1", text: "Yes", position: 0 },
-        { id: "no", questionId: "question-1", text: "No", position: 1 },
-      ]);
+      .mockResolvedValueOnce([]);
 
     const result = await (
       await messagesTool()
@@ -300,6 +300,10 @@ describe("spaces-messages poll projection", () => {
           question: "Lunch?",
           responseType: "SINGLE_CHOICE",
           position: 0,
+          options: [
+            { id: "yes", text: "Yes", createdBy: "creator-1" },
+            { id: "no", text: "No", createdBy: "creator-1" },
+          ],
         },
       ])
       .mockResolvedValueOnce([
@@ -309,11 +313,7 @@ describe("spaces-messages poll projection", () => {
           optionCounts: { yes: 1, no: 1 },
         },
       ])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([
-        { id: "yes", questionId: "question-1", text: "Yes", position: 0 },
-        { id: "no", questionId: "question-1", text: "No", position: 1 },
-      ]);
+      .mockResolvedValueOnce([]);
 
     const result = await (
       await messagesTool()

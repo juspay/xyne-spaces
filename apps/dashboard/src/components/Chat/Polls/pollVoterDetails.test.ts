@@ -15,17 +15,8 @@ const usersById = new Map([
 ]);
 
 describe('buildPollVoterDetails', () => {
-  it('groups voter names by option for the creator of an identifiable poll', () => {
-    expect(
-      buildPollVoterDetails({
-        creatorId: 'creator',
-        currentUserId: 'creator',
-        isAnonymous: false,
-        options,
-        ballots,
-        usersById,
-      }),
-    ).toEqual([
+  it('groups voter names by option', () => {
+    expect(buildPollVoterDetails({ options, ballots, usersById })).toEqual([
       { optionId: 'goa', optionText: 'Goa', voters: [{ userId: 'user-1', name: 'Asha' }] },
       {
         optionId: 'coorg',
@@ -37,43 +28,11 @@ describe('buildPollVoterDetails', () => {
       },
     ]);
   });
-
-  it('hides voter details from non-creators', () => {
-    expect(
-      buildPollVoterDetails({
-        creatorId: 'creator',
-        currentUserId: 'viewer',
-        isAnonymous: false,
-        options,
-        ballots,
-        usersById,
-      }),
-    ).toBeNull();
-  });
-
-  it('hides voter details from everyone for anonymous polls', () => {
-    expect(
-      buildPollVoterDetails({
-        creatorId: 'creator',
-        currentUserId: 'creator',
-        isAnonymous: true,
-        options,
-        ballots,
-        usersById,
-      }),
-    ).toBeNull();
-  });
 });
 
 describe('buildPollResponseDetails', () => {
-  it('formats creator-visible text, rating, and ranking answers', () => {
-    const common = {
-      creatorId: 'creator',
-      currentUserId: 'creator',
-      isAnonymous: false,
-      options,
-      usersById,
-    };
+  it('formats text, rating, and ranking answers', () => {
+    const common = { options, usersById };
 
     expect(
       buildPollResponseDetails({
@@ -96,19 +55,5 @@ describe('buildPollResponseDetails', () => {
         ballots: [{ userId: 'user-1', optionIds: [], rankedOptionIds: ['coorg', 'goa'] }],
       }),
     ).toEqual([{ userId: 'user-1', name: 'Asha', answer: '1. Coorg, 2. Goa' }]);
-  });
-
-  it('does not expose typed responses from anonymous polls', () => {
-    expect(
-      buildPollResponseDetails({
-        creatorId: 'creator',
-        currentUserId: 'creator',
-        isAnonymous: true,
-        responseType: 'SHORT_TEXT',
-        options,
-        usersById,
-        ballots: [{ userId: 'user-1', optionIds: [], textAnswer: 'Secret' }],
-      }),
-    ).toBeNull();
   });
 });

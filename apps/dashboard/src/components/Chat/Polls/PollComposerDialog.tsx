@@ -1,7 +1,15 @@
 import { useState } from 'react';
-import { Plus, Trash2 } from 'lucide-react';
+import { Circle, Plus, Trash2 } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
-import type { PollDraft, PollResponseType, PollResultVisibility, PollSchedule } from '@xyne/shared';
+import {
+  POLL_LIMITS,
+  POLL_RESPONSE_TYPES,
+  type PollDraft,
+  type PollResponseType,
+  type PollResultVisibility,
+  type PollSchedule,
+} from '@xyne/shared';
+import { useConfirmDialog } from '../../../hooks/useConfirmDialog';
 import Dialog from '../../ui/Dialog';
 import { Button } from '../../ui/Button';
 import { Checkbox } from '../../ui/Checkbox/Checkbox';
@@ -14,6 +22,15 @@ type DraftQuestion = {
   question: string;
   responseType: PollResponseType;
   choices: Array<{ id: string; text: string }>;
+};
+
+const RESPONSE_TYPE_LABEL: Record<PollResponseType, string> = {
+  SINGLE_CHOICE: 'Select one option',
+  MULTIPLE_CHOICE: 'Select many options',
+  SHORT_TEXT: 'Write a short text',
+  RANKING: 'Rank options',
+  RATING_1_TO_5: 'Rate from 1 to 5',
+  Q_AND_A: 'Ask me anything (Q&A)',
 };
 
 type TimingMode = 'NONE' | '10' | '30' | '60' | '180' | '1440' | '10080' | 'CUSTOM';
@@ -84,12 +101,10 @@ function TimingField({
 
 export function PollComposerDialog({
   open,
-  isPublishing,
   onClose,
   onPublish,
 }: {
   open: boolean;
-  isPublishing: boolean;
   onClose: () => void;
   onPublish: (draft: PollDraft, schedule: PollSchedule) => Promise<void>;
 }) {
@@ -99,7 +114,6 @@ export function PollComposerDialog({
   const [allowAudienceChoices, setAllowAudienceChoices] = useState(false);
   const [isAnonymous, setIsAnonymous] = useState(false);
   const [resultVisibility, setResultVisibility] = useState<PollResultVisibility>('EVERYONE');
-  const [sortResultsByVotes, setSortResultsByVotes] = useState(false);
   const [publishMode, setPublishMode] = useState<TimingMode>('NONE');
   const [closeMode, setCloseMode] = useState<TimingMode>('NONE');
   const [reminderMode, setReminderMode] = useState<TimingMode>('NONE');
@@ -108,6 +122,8 @@ export function PollComposerDialog({
   const [customReminderAt, setCustomReminderAt] = useState<Date | null>(null);
   const [publishError, setPublishError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showErrors, setShowErrors] = useState(false);
+  const { confirm, ConfirmDialog } = useConfirmDialog();
 
   const reset = () => {
     setPollId(uuidv4());
@@ -116,7 +132,6 @@ export function PollComposerDialog({
     setAllowAudienceChoices(false);
     setIsAnonymous(false);
     setResultVisibility('EVERYONE');
-    setSortResultsByVotes(false);
     setPublishMode('NONE');
     setCloseMode('NONE');
     setReminderMode('NONE');
@@ -125,10 +140,30 @@ export function PollComposerDialog({
     setCustomReminderAt(null);
     setPublishError(null);
     setIsSubmitting(false);
+    setShowErrors(false);
   };
   const close = () => {
     reset();
     onClose();
+  };
+  const hasDraftContent = questions.some(
+    question => question.question.trim() || question.choices.some(choice => choice.text.trim()),
+  );
+  // Escape and outside clicks are easy to trigger by accident, so a typed draft
+  // is only discarded after confirmation. Cancel stays an explicit discard.
+  const requestClose = async (): Promise<void> => {
+    if (
+      hasDraftContent &&
+      !(await confirm({
+        title: 'Discard this poll?',
+        description: 'Your questions, options and settings will be lost.',
+        confirmLabel: 'Discard',
+        variant: 'destructive',
+      }))
+    ) {
+      return;
+    }
+    close();
   };
 
   const now = Date.now();
@@ -148,7 +183,8 @@ export function PollComposerDialog({
       question =>
         question.question.trim() &&
         (!['SINGLE_CHOICE', 'MULTIPLE_CHOICE', 'RANKING'].includes(question.responseType) ||
-          (question.choices.length >= 2 && question.choices.every(choice => choice.text.trim()))),
+          (question.choices.length >= POLL_LIMITS.minOptions &&
+            question.choices.every(choice => choice.text.trim()))),
     );
 
   const draft: PollDraft = {
@@ -156,7 +192,6 @@ export function PollComposerDialog({
     allowAudienceChoices,
     isAnonymous,
     resultVisibility,
-    sortResultsByVotes,
     questions: questions.map(question => ({
       id: question.id,
       question: question.question.trim(),
@@ -168,7 +203,11 @@ export function PollComposerDialog({
   };
 
   const submit = async (): Promise<void> => {
-    if (!valid || isPublishing || isSubmitting) return;
+    if (isSubmitting) return;
+    if (!valid) {
+      setPublishError('That time has passed. Go back and pick a later time.');
+      return;
+    }
     setPublishError(null);
     setIsSubmitting(true);
     try {
@@ -188,7 +227,9 @@ export function PollComposerDialog({
   return (
     <Dialog
       open={open}
-      onOpenChange={value => !value && close()}
+      onOpenChange={value => {
+        if (!value) void requestClose();
+      }}
       title='Create a poll'
       className='w-[calc(100vw-2rem)] max-w-2xl overflow-hidden'
     >
@@ -225,12 +266,16 @@ export function PollComposerDialog({
                     </div>
                     <Input
                       value={question.question}
-                      maxLength={500}
+                      maxLength={POLL_LIMITS.maxQuestionLength}
                       placeholder='Write your question…'
+                      aria-invalid={showErrors && !question.question.trim()}
                       onChange={event =>
                         updateQuestion(question.id, { question: event.target.value })
                       }
                     />
+                    {showErrors && !question.question.trim() && (
+                      <p className='text-xs text-destructive'>Write your question</p>
+                    )}
                     <Select
                       value={question.responseType}
                       onValueChange={value =>
@@ -246,49 +291,56 @@ export function PollComposerDialog({
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value='SINGLE_CHOICE'>Select one option</SelectItem>
-                        <SelectItem value='MULTIPLE_CHOICE'>Select many options</SelectItem>
-                        <SelectItem value='SHORT_TEXT'>Write a short text</SelectItem>
-                        <SelectItem value='RANKING'>Rank options</SelectItem>
-                        <SelectItem value='RATING_1_TO_5'>Rate from 1 to 5</SelectItem>
-                        <SelectItem value='Q_AND_A'>Ask me anything (Q&amp;A)</SelectItem>
+                        {POLL_RESPONSE_TYPES.map(responseType => (
+                          <SelectItem key={responseType} value={responseType}>
+                            {RESPONSE_TYPE_LABEL[responseType]}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                     {usesChoices &&
                       question.choices.map((choice, choiceIndex) => (
-                        <div key={choice.id} className='flex gap-2'>
-                          <Input
-                            value={choice.text}
-                            maxLength={200}
-                            placeholder={`Choice ${choiceIndex + 1}`}
-                            onChange={event =>
-                              updateQuestion(question.id, {
-                                choices: question.choices.map(item =>
-                                  item.id === choice.id
-                                    ? { ...item, text: event.target.value }
-                                    : item,
-                                ),
-                              })
-                            }
-                          />
-                          {question.choices.length > 2 && (
-                            <Button
-                              type='button'
-                              variant='ghost'
-                              size='iconSm'
-                              aria-label='Remove choice'
-                              onClick={() =>
+                        <div key={choice.id} className='space-y-1'>
+                          <div className='flex gap-2'>
+                            <Input
+                              value={choice.text}
+                              maxLength={POLL_LIMITS.maxOptionLength}
+                              placeholder={`Option ${choiceIndex + 1}`}
+                              aria-invalid={showErrors && !choice.text.trim()}
+                              onChange={event =>
                                 updateQuestion(question.id, {
-                                  choices: question.choices.filter(item => item.id !== choice.id),
+                                  choices: question.choices.map(item =>
+                                    item.id === choice.id
+                                      ? { ...item, text: event.target.value }
+                                      : item,
+                                  ),
                                 })
                               }
-                            >
-                              <Trash2 />
-                            </Button>
+                            />
+                            {question.choices.length > POLL_LIMITS.minOptions && (
+                              <Button
+                                type='button'
+                                variant='ghost'
+                                size='iconSm'
+                                aria-label='Remove option'
+                                onClick={() =>
+                                  updateQuestion(question.id, {
+                                    choices: question.choices.filter(item => item.id !== choice.id),
+                                  })
+                                }
+                              >
+                                <Trash2 />
+                              </Button>
+                            )}
+                          </div>
+                          {showErrors && !choice.text.trim() && (
+                            <p className='text-xs text-destructive'>
+                              Fill in this option or remove it
+                            </p>
                           )}
                         </div>
                       ))}
-                    {usesChoices && question.choices.length < 10 && (
+                    {usesChoices && question.choices.length < POLL_LIMITS.maxOptions && (
                       <Button
                         type='button'
                         variant='ghost'
@@ -305,7 +357,7 @@ export function PollComposerDialog({
                   </section>
                 );
               })}
-              {questions.length < 10 && (
+              {questions.length < POLL_LIMITS.maxQuestions && (
                 <Button
                   type='button'
                   variant='outline'
@@ -326,11 +378,6 @@ export function PollComposerDialog({
                   checked={allowAudienceChoices}
                   onChange={setAllowAudienceChoices}
                   label='Allow others to add options'
-                />
-                <Checkbox
-                  checked={sortResultsByVotes}
-                  onChange={setSortResultsByVotes}
-                  label='Order results by most votes'
                 />
                 <div className='space-y-2'>
                   <p className='text-sm font-medium'>Show results of the poll</p>
@@ -392,12 +439,14 @@ export function PollComposerDialog({
                   {question.options.length > 0 && (
                     <ul className='mt-2 space-y-1 text-sm text-muted-foreground'>
                       {question.options.map(option => (
-                        <li key={option.id}>○ {option.text}</li>
+                        <li key={option.id} className='flex items-center gap-2'>
+                          <Circle className='size-3 shrink-0' /> {option.text}
+                        </li>
                       ))}
                     </ul>
                   )}
                   <p className='mt-2 text-xs text-muted-foreground'>
-                    {(question.responseType ?? 'SINGLE_CHOICE').replaceAll('_', ' ')}
+                    {RESPONSE_TYPE_LABEL[question.responseType ?? 'SINGLE_CHOICE']}
                   </p>
                 </section>
               ))}
@@ -422,14 +471,23 @@ export function PollComposerDialog({
             {step === 'preview' ? 'Back' : 'Cancel'}
           </Button>
           {step === 'edit' ? (
-            <Button type='button' disabled={!valid} onClick={() => setStep('preview')}>
+            <Button
+              type='button'
+              onClick={() => {
+                if (valid) {
+                  setStep('preview');
+                } else {
+                  setShowErrors(true);
+                }
+              }}
+            >
               Preview
             </Button>
           ) : (
             <Button
               type='button'
-              disabled={isPublishing || isSubmitting}
-              loading={isPublishing || isSubmitting}
+              disabled={isSubmitting}
+              loading={isSubmitting}
               onClick={() => void submit()}
             >
               {publishMode === 'NONE' ? 'Post poll' : 'Schedule poll'}
@@ -437,6 +495,7 @@ export function PollComposerDialog({
           )}
         </footer>
       </div>
+      <ConfirmDialog />
     </Dialog>
   );
 }

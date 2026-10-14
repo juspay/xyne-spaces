@@ -23,23 +23,17 @@ export type PollResponseDetail = PollVoterDetail & { answer: string };
 const voterName = (user: PollUserLike | undefined): string =>
   user?.displayName?.trim() || user?.name?.trim() || user?.email?.trim() || 'Unknown voter';
 
+// Callers pass only ballots the viewer may see: PollVotesACL already limits
+// identified ballots to the creator of a non-anonymous poll.
 export function buildPollVoterDetails({
-  creatorId,
-  currentUserId,
-  isAnonymous,
   options,
   ballots,
   usersById,
 }: {
-  creatorId: string;
-  currentUserId: string;
-  isAnonymous: boolean;
   options: readonly PollOptionLike[];
   ballots: readonly PollBallotLike[];
   usersById: ReadonlyMap<string, PollUserLike>;
-}): PollOptionVoterDetails[] | null {
-  if (isAnonymous || currentUserId !== creatorId) return null;
-
+}): PollOptionVoterDetails[] {
   return options.map(option => ({
     optionId: option.id,
     optionText: option.text,
@@ -50,23 +44,16 @@ export function buildPollVoterDetails({
 }
 
 export function buildPollResponseDetails({
-  creatorId,
-  currentUserId,
-  isAnonymous,
   responseType,
   options,
   ballots,
   usersById,
 }: {
-  creatorId: string;
-  currentUserId: string;
-  isAnonymous: boolean;
   responseType: string;
   options: readonly PollOptionLike[];
   ballots: readonly PollBallotLike[];
   usersById: ReadonlyMap<string, PollUserLike>;
-}): PollResponseDetail[] | null {
-  if (isAnonymous || currentUserId !== creatorId) return null;
+}): PollResponseDetail[] {
   const optionText = new Map(options.map(option => [option.id, option.text]));
 
   return ballots.map(ballot => {

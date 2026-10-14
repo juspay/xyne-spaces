@@ -1,194 +1,228 @@
 jest.mock('@xyne/shared', () => ({
+  ChannelScopeType: { DM: 'DM', GROUP_DM: 'GROUP_DM' },
   NotificationType: { CHANNEL_MESSAGE: 'CHANNEL_MESSAGE' },
 }));
 
 const dbMock = {
-  pollJob: {
-    findMany: jest.fn(),
-    findUnique: jest.fn(),
-    findUniqueOrThrow: jest.fn(),
-    updateMany: jest.fn(),
-  },
-  poll: { updateMany: jest.fn() },
+  poll: { findUnique: jest.fn(), findMany: jest.fn(), updateMany: jest.fn() },
   channelParticipant: { findMany: jest.fn() },
   pollVote: { findMany: jest.fn() },
-  pollReminderDelivery: {
-    createMany: jest.fn(),
-    updateMany: jest.fn(),
-    update: jest.fn(),
-  },
 };
-
+const queueMock = {
+  add: jest.fn(),
+  process: jest.fn(),
+  on: jest.fn(),
+  close: jest.fn(),
+};
 const createNotificationMock = jest.fn();
 const filterUsersMock = jest.fn();
 
+jest.mock('bull', () => jest.fn(() => queueMock));
 jest.mock('@/database/client', () => ({ db: dbMock }));
+jest.mock('@/services/redisService', () => ({
+  redisService: { getRedisConfig: () => ({}) },
+}));
 jest.mock('@/services/notificationService', () => ({
   notificationService: { createNotification: createNotificationMock },
 }));
 jest.mock('@/services/notificationFilterService', () => ({
   filterUsers: filterUsersMock,
 }));
+jest.mock('@/utils/logger', () => ({
+  logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+}));
 
-import { processClaimablePollJobs, processPollLifecycleJob } from './pollLifecycleWorker';
+import {
+  closePoll,
+  pollLifecycleWorker,
+  processPollLifecycleJob,
+  remindPollNonVoters,
+} from './pollLifecycleWorker';
 
-const now = new Date('2026-10-06T12:10:00.000Z');
-
-function reminderJob(pollOverrides: Record<string, unknown> = {}) {
+function reminderPoll(overrides: Record<string, unknown> = {}) {
   return {
-    id: 'job-1',
-    pollId: 'poll-1',
-    kind: 'REMINDER',
-    attempts: 1,
-    maxAttempts: 5,
-    poll: {
-      id: 'poll-1',
-      workspaceId: 'workspace-1',
-      createdBy: 'creator-1',
-      messageId: 'message-1',
-      closedAt: null,
-      message: {
-        isDeleted: false,
-        createdAt: new Date('2026-10-06T12:00:00.000Z'),
-        conversation: { channelId: 'channel-1' },
-      },
-      ...pollOverrides,
+    id: 'poll-1',
+    workspaceId: 'workspace-1',
+    createdBy: 'creator-1',
+    messageId: 'message-1',
+    remindAt: new Date('2026-10-14T12:30:00.000Z'),
+    closedAt: null,
+    message: {
+      isDeleted: false,
+      conversation: { channel: { id: 'channel-1', scopeType: 'DEFAULT' } },
     },
-  };
-}
-
-function claimableJob(overrides: Record<string, unknown> = {}) {
-  return {
-    id: 'job-1',
-    status: 'PENDING',
-    runAt: now,
-    attempts: 0,
-    maxAttempts: 5,
-    leaseExpiresAt: null,
     ...overrides,
   };
 }
 
 beforeEach(() => {
   jest.clearAllMocks();
-  dbMock.pollJob.findUnique.mockResolvedValue(claimableJob());
-  dbMock.pollJob.updateMany.mockResolvedValue({ count: 1 });
-  dbMock.pollJob.findUniqueOrThrow.mockResolvedValue(reminderJob());
-  dbMock.pollJob.updateMany.mockResolvedValue({ count: 1 });
-  dbMock.pollReminderDelivery.createMany.mockResolvedValue({ count: 1 });
-  dbMock.pollReminderDelivery.updateMany.mockResolvedValue({ count: 0 });
-  dbMock.pollReminderDelivery.update.mockResolvedValue(undefined);
-  dbMock.channelParticipant.findMany.mockResolvedValue([{ userId: 'user-1' }]);
-  dbMock.pollVote.findMany.mockResolvedValue([]);
-  filterUsersMock.mockResolvedValue({ desktopUsers: ['user-1'], mobileUsers: [] });
+  dbMock.poll.findUnique.mockResolvedValue(reminderPoll());
+  dbMock.poll.updateMany.mockResolvedValue({ count: 1 });
+  dbMock.channelParticipant.findMany.mockResolvedValue([
+    { userId: 'creator-1' },
+    { userId: 'voter-1' },
+    { userId: 'user-1' },
+    { userId: 'user-2' },
+  ]);
+  dbMock.pollVote.findMany.mockResolvedValue([{ userId: 'voter-1' }]);
+  filterUsersMock.mockResolvedValue({ desktopUsers: ['user-1'], mobileUsers: ['user-1', 'user-2'] });
   createNotificationMock.mockResolvedValue(undefined);
 });
 
-describe('poll lifecycle worker', () => {
-  it('scans only due pending or expired-lease jobs in a bounded batch', async () => {
-    dbMock.pollJob.findMany.mockResolvedValue([{ id: 'job-1' }]);
+describe('closePoll', () => {
+  it('closes only a poll that is still open', async () => {
+    const now = new Date('2026-10-14T13:00:00.000Z');
 
-    await processClaimablePollJobs(now, 'worker-1');
+    await closePoll('poll-1', now);
 
-    expect(dbMock.pollJob.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        take: 100,
-        where: expect.objectContaining({ runAt: { lte: now } }),
-      })
-    );
-    expect(dbMock.pollJob.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          status: 'RUNNING',
-          leaseOwner: 'worker-1',
-          leaseExpiresAt: new Date(now.getTime() + 5 * 60_000),
-        }),
-      })
-    );
+    expect(dbMock.poll.updateMany).toHaveBeenCalledWith({
+      where: { id: 'poll-1', closedAt: null },
+      data: { closedAt: now },
+    });
   });
+});
 
-  it('reclaims an expired RUNNING lease', async () => {
-    dbMock.pollJob.findUnique.mockResolvedValue(
-      claimableJob({
-        status: 'RUNNING',
-        leaseExpiresAt: new Date(now.getTime() - 1),
-      })
-    );
+describe('remindPollNonVoters', () => {
+  it('filters every non-voter in one call, claims the reminder, then notifies', async () => {
+    await remindPollNonVoters('poll-1');
 
-    await processPollLifecycleJob({ pollJobId: 'job-1' }, now, 'worker-2');
-
-    expect(dbMock.pollJob.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({ id: 'job-1', attempts: 0 }),
-        data: expect.objectContaining({ leaseOwner: 'worker-2' }),
-      })
-    );
-  });
-
-  it('skips reminders for manually closed polls', async () => {
-    dbMock.pollJob.findUniqueOrThrow.mockResolvedValue(
-      reminderJob({ closedAt: new Date('2026-10-06T12:05:00.000Z') })
-    );
-
-    await processPollLifecycleJob({ pollJobId: 'job-1' }, now, 'worker-1');
-
-    expect(createNotificationMock).not.toHaveBeenCalled();
-    expect(dbMock.pollJob.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ status: 'COMPLETED', leaseOwner: null }),
-      })
-    );
-  });
-
-  it('honors notification preferences before delivering reminders', async () => {
-    filterUsersMock.mockResolvedValue({ desktopUsers: [], mobileUsers: [] });
-
-    await processPollLifecycleJob({ pollJobId: 'job-1' }, now, 'worker-1');
-
+    expect(filterUsersMock).toHaveBeenCalledTimes(1);
     expect(filterUsersMock).toHaveBeenCalledWith(
-      ['user-1'],
+      ['user-1', 'user-2'],
       'channel-1',
       false,
       'channel_message',
-      { notificationType: 'CHANNEL_MESSAGE' }
+      { notificationType: 'CHANNEL_MESSAGE' },
+      undefined,
+      false,
     );
+    expect(dbMock.poll.updateMany).toHaveBeenCalledWith({
+      where: { id: 'poll-1', remindAt: { not: null }, closedAt: null },
+      data: { remindAt: null },
+    });
+    expect(createNotificationMock).toHaveBeenCalledTimes(2);
+    expect(createNotificationMock).toHaveBeenCalledWith(
+      'user-1',
+      expect.objectContaining({ relatedEntityId: 'message-1', workspaceId: 'workspace-1' }),
+      { sendDesktop: true, sendMobile: true },
+    );
+    expect(createNotificationMock).toHaveBeenCalledWith('user-2', expect.anything(), {
+      sendDesktop: false,
+      sendMobile: true,
+    });
+  });
+
+  it.each([
+    ['DM', true, false],
+    ['GROUP_DM', false, true],
+  ])('passes the DM flags for a %s channel', async (scopeType, isDM, isGroupDM) => {
+    dbMock.poll.findUnique.mockResolvedValue(
+      reminderPoll({
+        message: { isDeleted: false, conversation: { channel: { id: 'channel-1', scopeType } } },
+      }),
+    );
+
+    await remindPollNonVoters('poll-1');
+
+    const args = filterUsersMock.mock.calls[0];
+    expect(args[2]).toBe(isDM);
+    expect(args[6]).toBe(isGroupDM);
+  });
+
+  it('sends nothing when another run already claimed the reminder', async () => {
+    dbMock.poll.updateMany.mockResolvedValue({ count: 0 });
+
+    await remindPollNonVoters('poll-1');
+
     expect(createNotificationMock).not.toHaveBeenCalled();
   });
 
-  it('does not resend an existing recipient ledger', async () => {
-    dbMock.pollReminderDelivery.createMany.mockResolvedValue({ count: 0 });
+  it.each([
+    ['already reminded', { remindAt: null }],
+    ['closed', { closedAt: new Date('2026-10-14T12:00:00.000Z') }],
+    [
+      'on a deleted message',
+      { message: { isDeleted: true, conversation: { channel: { id: 'channel-1', scopeType: 'DEFAULT' } } } },
+    ],
+  ])('skips a poll that is %s', async (_label, overrides) => {
+    dbMock.poll.findUnique.mockResolvedValue(reminderPoll(overrides));
 
-    await processPollLifecycleJob({ pollJobId: 'job-1' }, now, 'worker-1');
+    await remindPollNonVoters('poll-1');
 
+    expect(filterUsersMock).not.toHaveBeenCalled();
+    expect(dbMock.poll.updateMany).not.toHaveBeenCalled();
     expect(createNotificationMock).not.toHaveBeenCalled();
   });
 
-  it('retries a recipient whose previous delivery failed', async () => {
-    dbMock.pollReminderDelivery.createMany.mockResolvedValue({ count: 0 });
-    dbMock.pollReminderDelivery.updateMany.mockResolvedValue({ count: 1 });
+  it('does not throw (and so is not retried) when one notification fails', async () => {
+    createNotificationMock.mockRejectedValueOnce(new Error('push failed'));
 
-    await processPollLifecycleJob({ pollJobId: 'job-1' }, now, 'worker-1');
+    await expect(remindPollNonVoters('poll-1')).resolves.toBeUndefined();
+    expect(createNotificationMock).toHaveBeenCalledTimes(2);
+  });
+});
 
-    expect(dbMock.pollReminderDelivery.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({ id: 'job-1:user-1', status: 'FAILED' }),
-      })
+describe('processPollLifecycleJob', () => {
+  it('routes CLOSE and REMIND jobs', async () => {
+    await processPollLifecycleJob({ pollId: 'poll-1', kind: 'CLOSE' });
+    expect(dbMock.poll.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'poll-1', closedAt: null } }),
     );
-    expect(createNotificationMock).toHaveBeenCalledTimes(1);
+
+    await processPollLifecycleJob({ pollId: 'poll-1', kind: 'REMIND' });
+    expect(filterUsersMock).toHaveBeenCalled();
   });
 
-  it('marks a job FAILED after its final attempt', async () => {
-    dbMock.pollJob.findUnique.mockResolvedValue(claimableJob({ attempts: 4, maxAttempts: 5 }));
-    dbMock.pollJob.findUniqueOrThrow.mockRejectedValue(new Error('boom'));
+  it('rejects an unknown kind', async () => {
+    await expect(
+      processPollLifecycleJob({ pollId: 'poll-1', kind: 'OTHER' as never }),
+    ).rejects.toThrow('Unsupported poll lifecycle job kind');
+  });
+});
 
-    await expect(processPollLifecycleJob({ pollJobId: 'job-1' }, now, 'worker-1')).rejects.toThrow(
-      'boom'
-    );
+describe('pollLifecycleWorker', () => {
+  afterEach(async () => {
+    await pollLifecycleWorker.shutdown();
+  });
 
-    expect(dbMock.pollJob.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ status: 'FAILED', failedAt: now, leaseOwner: null }),
-      })
-    );
+  it('registers the Bull processor once and closes the queue on shutdown', async () => {
+    await pollLifecycleWorker.start();
+    await pollLifecycleWorker.start();
+    expect(queueMock.process).toHaveBeenCalledTimes(1);
+
+    await pollLifecycleWorker.shutdown();
+    expect(queueMock.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-enqueues open polls with a pending close or reminder, deduped by jobId', async () => {
+    jest.useFakeTimers({ now: new Date('2026-10-14T12:00:00.000Z') });
+    dbMock.poll.findMany.mockResolvedValue([
+      {
+        id: 'poll-1',
+        closesAt: new Date('2026-10-14T13:00:00.000Z'),
+        remindAt: new Date('2026-10-14T11:00:00.000Z'),
+      },
+      { id: 'poll-2', closesAt: null, remindAt: new Date('2026-10-14T12:30:00.000Z') },
+    ]);
+
+    try {
+      await pollLifecycleWorker.reenqueuePendingPolls();
+    } finally {
+      jest.useRealTimers();
+    }
+
+    expect(dbMock.poll.findMany).toHaveBeenCalledWith({
+      where: {
+        closedAt: null,
+        OR: [{ closesAt: { not: null } }, { remindAt: { not: null } }],
+      },
+      select: { id: true, closesAt: true, remindAt: true },
+    });
+    expect(queueMock.add.mock.calls).toEqual([
+      [{ pollId: 'poll-1', kind: 'CLOSE' }, { jobId: 'poll-close:poll-1', delay: 3_600_000 }],
+      [{ pollId: 'poll-1', kind: 'REMIND' }, { jobId: 'poll-remind:poll-1', delay: 0 }],
+      [{ pollId: 'poll-2', kind: 'REMIND' }, { jobId: 'poll-remind:poll-2', delay: 1_800_000 }],
+    ]);
   });
 });

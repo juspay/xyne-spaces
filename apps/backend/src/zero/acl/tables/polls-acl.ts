@@ -4,7 +4,7 @@ import { BaseACL } from '../core/base-acl';
 import { MutationACLError, type TableSchema } from '../core/types';
 import { zql } from '../../queries';
 import { hasChannelMutationAccess } from '../core/guest-access';
-import { requireAccessiblePoll } from './poll-acl-utils';
+import { requireAccessiblePoll, requirePollCreatorForDelete } from './poll-acl-utils';
 
 export class PollsACL extends BaseACL<'polls'> {
   constructor(ctx: ConstructorParameters<typeof BaseACL<'polls'>>[0]) {
@@ -40,10 +40,7 @@ export class PollsACL extends BaseACL<'polls'> {
     args: DeleteID<TableSchema<'polls'>>,
     tx: Transaction<Schema>,
   ): Promise<void> {
-    const poll = await requireAccessiblePoll(args.id, this.ctx, tx, 'polls');
-    if (poll.createdBy !== this.ctx.userID) {
-      throw new MutationACLError('Only the poll author can delete a poll', 'polls');
-    }
+    await requirePollCreatorForDelete(args.id, this.ctx, tx, 'polls');
   }
 
   async canUpdate(

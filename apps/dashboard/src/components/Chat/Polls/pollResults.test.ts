@@ -49,23 +49,10 @@ describe('calculatePollResults', () => {
 });
 
 describe('typed poll results', () => {
-  it('calculates a rating average and distribution', () => {
-    expect(
-      calculateRatingResult({
-        responseCount: 3,
-        ratingTotal: 12,
-        ratingCounts: { 3: 1, 4: 1, 5: 1 },
-      }),
-    ).toEqual({
+  it('averages the rating total over the voter count', () => {
+    expect(calculateRatingResult({ voterCount: 3, ratingTotal: 12 })).toEqual({
       responseCount: 3,
       average: 4,
-      counts: [
-        { rating: 1, count: 0 },
-        { rating: 2, count: 0 },
-        { rating: 3, count: 1 },
-        { rating: 4, count: 1 },
-        { rating: 5, count: 1 },
-      ],
     });
   });
 
@@ -73,7 +60,7 @@ describe('typed poll results', () => {
     expect(
       calculateRankingResult([{ id: 'a' }, { id: 'b' }], {
         rankTotals: { a: 2, b: 5 },
-        rankResponseCount: 2,
+        voterCount: 2,
       }),
     ).toEqual([
       { optionId: 'a', totalRank: 2, averageRank: 1 },

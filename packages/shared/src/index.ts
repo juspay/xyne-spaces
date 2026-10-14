@@ -79,4 +79,5 @@ export * from './flowActionErrors';
 export * from './sdlc';
 export * from './sdlcFolderAncestry';
 export { refileSdlcFolderEdges } from './zero/sdlcFolderAncestry';
+export { insertPollGraph, deletePollGraph } from './zero/pollGraph';
 export * from './validation/etaManagementSchema';

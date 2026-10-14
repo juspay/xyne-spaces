@@ -4,7 +4,7 @@ import { MessageType } from '../zero/schema.js';
 import type { EntityLinkContextInput } from '../sdlc.js';
 import { mutators } from '../zero/mutators.js';
 import type { ConversationRef } from './conversationRef.js';
-import type { PollDraft } from '../polls/index.js';
+import type { PollDraft, PollSchedule } from '../polls/index.js';
 import { clearDraft } from './draft.js';
 import { emitMessageSent } from './events.js';
 import { subscribeSendLifecycle } from './mutationLifecycle.js';
@@ -27,6 +27,7 @@ export type SendPayload = {
   attachments?: PendingAttachment[];
   entityLinkContext?: EntityLinkContextInput;
   poll?: PollDraft;
+  pollSchedule?: PollSchedule;
 };
 
 export type SendResult = {
@@ -77,6 +78,7 @@ export function sendMessage(
     ...(attachments.length > 0 && { attachments }),
     ...(payload.entityLinkContext !== undefined && { entityLinkContext: payload.entityLinkContext }),
     ...(payload.poll !== undefined && { poll: payload.poll }),
+    ...(payload.pollSchedule !== undefined && { pollSchedule: payload.pollSchedule }),
     sessionId: getCurrentSessionId(),
     zeroStateAtSend,
     mutatorFired: false,
@@ -133,6 +135,7 @@ export function sendMessage(
               entityLinkContext: payload.entityLinkContext,
             }),
             ...(payload.poll !== undefined && { poll: payload.poll }),
+            ...(payload.pollSchedule !== undefined && { pollSchedule: payload.pollSchedule }),
           }),
         )
       : zero.mutate(

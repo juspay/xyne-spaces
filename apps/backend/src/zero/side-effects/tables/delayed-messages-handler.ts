@@ -59,6 +59,7 @@ export class DelayedMessagesSideEffectHandler extends BaseSideEffectHandler {
         hasAttachment: true,
         scheduledFor: true,
         status: true,
+        pollDraft: true,
       },
     });
 
@@ -169,6 +170,7 @@ export class DelayedMessagesSideEffectHandler extends BaseSideEffectHandler {
           senderId: record.senderId,
           content: record.content,
           hasAttachment: record.hasAttachment,
+          hasPollDraft: record.pollDraft != null,
         });
 
         if (!result.success) {

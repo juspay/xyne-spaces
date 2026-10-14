@@ -34,38 +34,22 @@ export function calculatePollResults(
 }
 
 export function calculateRatingResult(
-  aggregate:
-    | {
-        ratingCounts?: unknown;
-        ratingTotal?: number;
-        responseCount?: number;
-      }
-    | null
-    | undefined,
+  aggregate: { ratingTotal?: number; voterCount?: number } | null | undefined,
 ) {
-  const responseCount = Math.max(0, aggregate?.responseCount ?? 0);
+  const responseCount = Math.max(0, aggregate?.voterCount ?? 0);
   const ratingTotal = Math.max(0, aggregate?.ratingTotal ?? 0);
-  const rawCounts = aggregate?.ratingCounts;
-  const counts = [1, 2, 3, 4, 5].map(rating => ({
-    rating,
-    count:
-      rawCounts && typeof rawCounts === 'object' && !Array.isArray(rawCounts)
-        ? Math.max(0, Number((rawCounts as Record<string, unknown>)[String(rating)]) || 0)
-        : 0,
-  }));
   return {
     responseCount,
     average: responseCount === 0 ? 0 : Math.round((ratingTotal / responseCount) * 10) / 10,
-    counts,
   };
 }
 
 export function calculateRankingResult(
   options: readonly PollOptionLike[],
-  aggregate: { rankTotals?: unknown; rankResponseCount?: number } | null | undefined,
+  aggregate: { rankTotals?: unknown; voterCount?: number } | null | undefined,
 ) {
   const totals = aggregate?.rankTotals;
-  const responseCount = Math.max(0, aggregate?.rankResponseCount ?? 0);
+  const responseCount = Math.max(0, aggregate?.voterCount ?? 0);
   return options
     .map(option => ({
       optionId: option.id,

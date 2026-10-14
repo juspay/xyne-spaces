@@ -298,11 +298,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   // Matches Slack, where a channel-level ephemeral message has no thread
   // affordance at all.
   const replies = ((): typeof repliesProp => {
-    const commentsDisabled =
-      metadata?.['messageSubtype'] === 'poll' && metadata?.['pollAllowComments'] === false;
-    if (!repliesProp || (metadata?.['__xyneEphemeral'] !== true && !commentsDisabled)) {
-      return repliesProp;
-    }
+    if (!repliesProp || metadata?.['__xyneEphemeral'] !== true) return repliesProp;
     const withoutThread = { ...repliesProp };
     delete withoutThread.onOpenThread;
     return withoutThread;

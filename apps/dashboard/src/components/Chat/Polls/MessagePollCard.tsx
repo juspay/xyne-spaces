@@ -1,14 +1,24 @@
 import { useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { Check, ChevronDown, Lock, Plus, ShieldCheck } from 'lucide-react';
+import { formatDistanceToNow } from 'date-fns';
+import { toast } from 'sonner';
+import { Check, ChevronDown, ChevronUp, Circle, Lock, Plus, ShieldCheck } from 'lucide-react';
 import type { QueryResultType } from '@rocicorp/zero';
-import { POLL_LIMITS, type PollNonChoiceResponseType, type PollResponseInput } from '@xyne/shared';
+import {
+  POLL_LIMITS,
+  isChoiceResponseType,
+  isPollClosed,
+  type PollNonChoiceResponseType,
+  type PollResponseInput,
+} from '@xyne/shared';
 import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
 import { useQuery } from '../../../hooks/useQuery';
 import { useUsersById } from '../../../hooks/useUsers';
 import { useZero } from '../../../hooks/useZero';
+import { useConfirmDialog } from '../../../hooks/useConfirmDialog';
 import { surfaceMutationError } from '../../../utils/zeroMutationToast';
+import { Badge } from '../../ui/Badge';
 import { Button } from '../../ui/Button';
 import Input from '../../ui/Input';
 import Textarea from '../../ui/Textarea';
@@ -27,10 +37,16 @@ export function MessagePollCard({
   messageId: string;
   channelId?: string;
 }) {
-  const [poll] = useQuery(queries.pollByMessageId({ messageId, ...(channelId && { channelId }) }));
+  const [poll, details] = useQuery(
+    queries.pollByMessageId({ messageId, ...(channelId && { channelId }) }),
+  );
 
   if (!poll) {
-    return <div className='text-sm text-muted-foreground'>Loading poll…</div>;
+    return (
+      <div className='text-sm text-muted-foreground'>
+        {details.type === 'unknown' ? 'Loading poll…' : 'This poll is unavailable.'}
+      </div>
+    );
   }
 
   return <LoadedMessagePollCard poll={poll} {...(channelId && { channelId })} />;
@@ -40,7 +56,9 @@ function LoadedMessagePollCard({ poll, channelId }: { poll: LoadedPoll; channelI
   const zero = useZero();
   const usersById = useUsersById();
   const isCreator = poll.createdBy === zero.userID;
-  const [resultRows] = useQuery(
+  const showVoterDetails = isCreator && !poll.isAnonymous;
+  const { confirm, ConfirmDialog } = useConfirmDialog();
+  const [resultRows, resultDetails] = useQuery(
     queries.pollQuestionResultsByPollId({ pollId: poll.id, ...(channelId && { channelId }) }),
   );
   const [myVotes] = useQuery(
@@ -48,107 +66,127 @@ function LoadedMessagePollCard({ poll, channelId }: { poll: LoadedPoll; channelI
   );
   const [voterBallots] = useQuery(
     queries.pollVoterDetails({ pollId: poll.id, ...(channelId && { channelId }) }),
-    isCreator && !poll.isAnonymous,
+    showVoterDetails,
   );
   const [newChoices, setNewChoices] = useState<Record<string, string>>({});
-  const isClosed = poll.closedAt !== null && poll.closedAt !== undefined;
+  const isClosed = isPollClosed(poll);
   // A zero-valued result row is created with every question. If ACLs hide that
   // row, this array is empty; the UI never reimplements result authorization.
   const resultsVisible = resultRows.length > 0;
+  // Only claim results are hidden once the query has settled empty; EVERYONE
+  // polls are never hidden, so they never show the lock.
+  const resultsLocked =
+    !resultsVisible && resultDetails.type === 'complete' && poll.resultVisibility !== 'EVERYONE';
+
+  const closePoll = async (): Promise<void> => {
+    const confirmed = await confirm({
+      title: 'Close this poll?',
+      description: 'Voting ends for everyone. A closed poll cannot be reopened.',
+      confirmLabel: 'Close poll',
+      variant: 'destructive',
+    });
+    if (!confirmed) return;
+    const mutation = zero.mutate(mutators.polls.close({ pollId: poll.id, timestamp: Date.now() }));
+    void surfaceMutationError(mutation, 'Unable to close this poll');
+  };
 
   return (
     <section className='w-full max-w-xl space-y-5 rounded-xl border border-border bg-card p-4'>
       <div className='flex items-center justify-between gap-3'>
         <p className='text-xs font-medium uppercase tracking-wide text-muted-foreground'>Poll</p>
-        {poll.isAnonymous && (
-          <span className='flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground'>
-            <ShieldCheck className='h-3.5 w-3.5' /> Anonymous
-          </span>
-        )}
-        {isClosed && <span className='text-xs font-medium text-muted-foreground'>Poll closed</span>}
+        <div className='flex items-center gap-2'>
+          {poll.isAnonymous && (
+            <Badge variant='secondary'>
+              <ShieldCheck /> Anonymous
+            </Badge>
+          )}
+          {isClosed ? (
+            <span className='text-xs font-medium text-muted-foreground'>Poll closed</span>
+          ) : (
+            !!poll.closesAt && (
+              <span className='text-xs text-muted-foreground'>
+                Closes {formatDistanceToNow(poll.closesAt, { addSuffix: true })}
+              </span>
+            )
+          )}
+        </div>
       </div>
 
       {poll.questions.map(question => {
         const aggregate = resultRows.find(result => result.questionId === question.id);
         const ownVotes = myVotes.filter(vote => vote.questionId === question.id);
         const results = calculatePollResults(question.options, aggregate, ownVotes);
-        const voterDetails = buildPollVoterDetails({
-          creatorId: poll.createdBy,
-          currentUserId: zero.userID ?? '',
-          isAnonymous: poll.isAnonymous,
-          options: question.options,
-          ballots: voterBallots.filter(ballot => ballot.questionId === question.id),
-          usersById,
-        });
-        const responseDetails = buildPollResponseDetails({
-          creatorId: poll.createdBy,
-          currentUserId: zero.userID ?? '',
-          isAnonymous: poll.isAnonymous,
-          responseType: question.responseType,
-          options: question.options,
-          ballots: voterBallots.filter(ballot => ballot.questionId === question.id),
-          usersById,
-        });
+        const isChoice = isChoiceResponseType(question.responseType);
+        const isSingleChoice = question.responseType === 'SINGLE_CHOICE';
+        const questionBallots = voterBallots.filter(ballot => ballot.questionId === question.id);
 
         return (
           <fieldset key={question.id} className='space-y-2'>
             <legend className='mb-2 font-semibold text-foreground'>{question.question}</legend>
-            {['SINGLE_CHOICE', 'MULTIPLE_CHOICE'].includes(question.responseType) ? (
-              question.options
-                .slice()
-                .sort((a, b) =>
-                  poll.sortResultsByVotes
-                    ? (results.options.find(item => item.optionId === b.id)?.count ?? 0) -
-                      (results.options.find(item => item.optionId === a.id)?.count ?? 0)
-                    : a.position - b.position,
-                )
-                .map(option => {
-                  const result = results.options.find(item => item.optionId === option.id)!;
-                  const selected = results.currentSelections.includes(option.id);
-                  return (
-                    <button
-                      key={option.id}
-                      type='button'
-                      data-prevent-thread
-                      aria-pressed={selected}
-                      disabled={isClosed}
-                      data-track-category='POLL'
-                      data-track-name='VOTE'
-                      onClick={() => {
-                        const mutation = zero.mutate(
-                          mutators.polls.vote({
-                            voteId: uuidv4(),
-                            pollId: poll.id,
-                            questionId: question.id,
-                            optionId: option.id,
-                            selected: !selected,
-                            timestamp: Date.now(),
-                          }),
-                        );
-                        void surfaceMutationError(mutation, 'Unable to update your vote');
-                      }}
-                      className='relative flex w-full items-center gap-2 overflow-hidden rounded-lg border border-border px-3 py-2 text-left hover:bg-accent'
-                    >
+            {isChoice && (
+              <p className='text-xs text-muted-foreground'>
+                {isSingleChoice ? 'Select one' : 'Select any'}
+              </p>
+            )}
+            {isChoice ? (
+              question.options.map(option => {
+                const result = results.options.find(item => item.optionId === option.id)!;
+                const selected = results.currentSelections.includes(option.id);
+                return (
+                  <button
+                    key={option.id}
+                    type='button'
+                    data-prevent-thread
+                    aria-pressed={selected}
+                    disabled={isClosed}
+                    data-track-category='POLL'
+                    data-track-name='VOTE'
+                    onClick={() => {
+                      const mutation = zero.mutate(
+                        mutators.polls.vote({
+                          voteId: uuidv4(),
+                          pollId: poll.id,
+                          questionId: question.id,
+                          optionId: option.id,
+                          selected: !selected,
+                          timestamp: Date.now(),
+                        }),
+                      );
+                      void surfaceMutationError(mutation, 'Unable to update your vote');
+                    }}
+                    className='relative flex w-full items-center gap-2 overflow-hidden rounded-lg border border-border px-3 py-2 text-left hover:bg-accent'
+                  >
+                    <span
+                      className='absolute inset-y-0 left-0 bg-primary/10 transition-[width]'
+                      style={{ width: resultsVisible ? `${result.percentage}%` : '0%' }}
+                    />
+                    {isSingleChoice ? (
                       <span
-                        className='absolute inset-y-0 left-0 bg-primary/10 transition-[width]'
-                        style={{ width: resultsVisible ? `${result.percentage}%` : '0%' }}
-                      />
-                      <span className='relative flex h-5 w-5 shrink-0 items-center justify-center rounded border border-primary'>
-                        {selected && <Check className='h-3.5 w-3.5' />}
+                        className={`relative flex size-4 shrink-0 items-center justify-center rounded-full border-[1.5px] ${selected ? 'border-primary' : 'border-secondary-foreground/50'}`}
+                      >
+                        {selected && <Circle className='size-2 fill-primary stroke-none' />}
                       </span>
-                      <span className='relative flex-1 text-sm'>{option.text}</span>
-                      {resultsVisible && (
-                        <span className='relative text-xs text-muted-foreground'>
-                          {result.count} · {result.percentage}%
-                        </span>
-                      )}
-                    </button>
-                  );
-                })
+                    ) : (
+                      <span
+                        className={`relative flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[4px] border ${selected ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-card'}`}
+                      >
+                        {selected && <Check className='size-3' />}
+                      </span>
+                    )}
+                    <span className='relative flex-1 text-sm'>{option.text}</span>
+                    {resultsVisible && (
+                      <span className='relative text-xs text-muted-foreground'>
+                        {result.count} · {result.percentage}%
+                      </span>
+                    )}
+                  </button>
+                );
+              })
             ) : (
               <NonChoicePollAnswer
                 pollId={poll.id}
                 question={question}
+                key={`${question.options.map(option => option.id).join(',')}:${ownVotes[0]?.updatedAt ?? ''}`}
                 ownResponse={ownVotes[0]}
                 disabled={isClosed}
               />
@@ -159,17 +197,19 @@ function LoadedMessagePollCard({ poll, channelId }: { poll: LoadedPoll; channelI
                 {results.voterCount} {results.voterCount === 1 ? 'voter' : 'voters'}
               </p>
             ) : (
-              <p className='flex items-center gap-1 text-xs text-muted-foreground'>
-                <Lock className='h-3.5 w-3.5' />
-                {poll.resultVisibility === 'AFTER_CLOSE'
-                  ? 'Results are visible when the poll closes.'
-                  : poll.resultVisibility === 'ADMIN_ONLY'
-                    ? 'Results are visible to the poll creator and channel admins.'
-                    : 'Results are only visible to the poll creator.'}
-              </p>
+              resultsLocked && (
+                <p className='flex items-center gap-1 text-xs text-muted-foreground'>
+                  <Lock className='h-3.5 w-3.5' />
+                  {poll.resultVisibility === 'AFTER_CLOSE'
+                    ? 'Results are visible when the poll closes.'
+                    : poll.resultVisibility === 'ADMIN_ONLY'
+                      ? 'Results are visible to the poll creator and channel admins.'
+                      : 'Results are only visible to the poll creator.'}
+                </p>
+              )
             )}
 
-            {resultsVisible && voterDetails && (
+            {resultsVisible && showVoterDetails && (
               <details
                 className='group rounded-lg border border-border bg-muted/20'
                 data-prevent-thread
@@ -178,48 +218,45 @@ function LoadedMessagePollCard({ poll, channelId }: { poll: LoadedPoll; channelI
                   View responses
                   <ChevronDown className='h-4 w-4 transition-transform group-open:rotate-180' />
                 </summary>
-                <div className='space-y-3 border-t border-border px-3 py-3'>
-                  {voterDetails.map(option => (
-                    <div key={option.optionId}>
-                      <p className='text-xs font-medium text-foreground'>{option.optionText}</p>
-                      {option.voters.length === 0 ? (
-                        <p className='mt-1 text-xs text-muted-foreground'>No votes yet</p>
-                      ) : (
-                        <ul className='mt-1.5 space-y-1.5'>
-                          {option.voters.map(voter => (
-                            <li key={voter.userId} className='flex items-center gap-2 text-sm'>
-                              <UserAvatar
-                                userId={voter.userId}
-                                size={AvatarSize.SM}
-                                showActiveStatus={false}
-                              />
-                              <span>{voter.name}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </details>
-            )}
-
-            {resultsVisible &&
-              responseDetails &&
-              !['SINGLE_CHOICE', 'MULTIPLE_CHOICE'].includes(question.responseType) && (
-                <details
-                  className='group rounded-lg border border-border bg-muted/20'
-                  data-prevent-thread
-                >
-                  <summary className='flex cursor-pointer list-none items-center justify-between px-3 py-2 text-sm font-medium'>
-                    View responses
-                    <ChevronDown className='h-4 w-4 transition-transform group-open:rotate-180' />
-                  </summary>
+                {isChoice ? (
+                  <div className='space-y-3 border-t border-border px-3 py-3'>
+                    {buildPollVoterDetails({
+                      options: question.options,
+                      ballots: questionBallots,
+                      usersById,
+                    }).map(option => (
+                      <div key={option.optionId}>
+                        <p className='text-xs font-medium text-foreground'>{option.optionText}</p>
+                        {option.voters.length === 0 ? (
+                          <p className='mt-1 text-xs text-muted-foreground'>No votes yet</p>
+                        ) : (
+                          <ul className='mt-1.5 space-y-1.5'>
+                            {option.voters.map(voter => (
+                              <li key={voter.userId} className='flex items-center gap-2 text-sm'>
+                                <UserAvatar
+                                  userId={voter.userId}
+                                  size={AvatarSize.SM}
+                                  showActiveStatus={false}
+                                />
+                                <span>{voter.name}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
                   <ul className='space-y-3 border-t border-border px-3 py-3'>
-                    {responseDetails.length === 0 ? (
+                    {questionBallots.length === 0 ? (
                       <li className='text-xs text-muted-foreground'>No responses yet</li>
                     ) : (
-                      responseDetails.map(response => (
+                      buildPollResponseDetails({
+                        responseType: question.responseType,
+                        options: question.options,
+                        ballots: questionBallots,
+                        usersById,
+                      }).map(response => (
                         <li key={response.userId} className='flex items-start gap-2 text-sm'>
                           <UserAvatar
                             userId={response.userId}
@@ -236,10 +273,12 @@ function LoadedMessagePollCard({ poll, channelId }: { poll: LoadedPoll; channelI
                       ))
                     )}
                   </ul>
-                </details>
-              )}
+                )}
+              </details>
+            )}
 
-            {!isClosed &&
+            {isChoice &&
+              !isClosed &&
               poll.allowAudienceChoices &&
               question.options.length < POLL_LIMITS.maxOptions && (
                 <div className='flex gap-2' data-prevent-thread>
@@ -251,7 +290,7 @@ function LoadedMessagePollCard({ poll, channelId }: { poll: LoadedPoll; channelI
                         [question.id]: event.target.value,
                       }))
                     }
-                    placeholder='Add a choice'
+                    placeholder='Add an option'
                     maxLength={POLL_LIMITS.maxOptionLength}
                     data-track-category='POLL'
                     data-track-name='TYPE_AUDIENCE_CHOICE'
@@ -259,7 +298,7 @@ function LoadedMessagePollCard({ poll, channelId }: { poll: LoadedPoll; channelI
                   />
                   <Button
                     type='button'
-                    aria-label='Add choice'
+                    aria-label='Add option'
                     variant='outline'
                     size='icon'
                     data-track-category='POLL'
@@ -275,7 +314,7 @@ function LoadedMessagePollCard({ poll, channelId }: { poll: LoadedPoll; channelI
                           timestamp: Date.now(),
                         }),
                       );
-                      void surfaceMutationError(mutation, 'Unable to add this choice').then(ok => {
+                      void surfaceMutationError(mutation, 'Unable to add this option').then(ok => {
                         if (ok) {
                           setNewChoices(current => ({ ...current, [question.id]: '' }));
                         }
@@ -302,16 +341,12 @@ function LoadedMessagePollCard({ poll, channelId }: { poll: LoadedPoll; channelI
           className='w-fit'
           data-track-category='POLL'
           data-track-name='CLOSE'
-          onClick={() => {
-            const mutation = zero.mutate(
-              mutators.polls.close({ pollId: poll.id, timestamp: Date.now() }),
-            );
-            void surfaceMutationError(mutation, 'Unable to close this poll');
-          }}
+          onClick={() => void closePoll()}
         >
           Close poll
         </Button>
       )}
+      <ConfirmDialog />
     </section>
   );
 }
@@ -347,28 +382,34 @@ function NonChoicePollAnswer({
         timestamp: Date.now(),
       }),
     );
-    void surfaceMutationError(mutation, 'Unable to submit your response');
+    return surfaceMutationError(mutation, 'Unable to submit your response');
+  };
+  const submitWithToast = (
+    answer: Omit<PollResponseInput, 'questionId' | 'responseType'>,
+  ): void => {
+    void submit(answer).then(ok => ok && toast.success('Response submitted'));
   };
 
   if (question.responseType === 'RATING_1_TO_5') {
     return (
       <div className='flex flex-wrap gap-2' data-prevent-thread>
         {[1, 2, 3, 4, 5].map(value => (
-          <button
+          <Button
             key={value}
             type='button'
+            variant={rating === value ? 'default' : 'outline'}
+            size='icon'
             disabled={disabled}
             aria-pressed={rating === value}
-            className={`h-9 w-9 rounded-md border ${rating === value ? 'border-primary bg-primary/10' : 'border-border'}`}
             onClick={() => {
               setRating(value);
-              submit({ rating: value });
+              void submit({ rating: value });
             }}
             data-track-category='POLL'
             data-track-name='RATE'
           >
             {value}
-          </button>
+          </Button>
         ))}
       </div>
     );
@@ -397,37 +438,41 @@ function NonChoicePollAnswer({
             <span className='flex-1'>
               {question.options.find(option => option.id === optionId)?.text}
             </span>
-            <button
+            <Button
               type='button'
+              variant='ghost'
+              size='iconSm'
               aria-label={`Move ${question.options.find(option => option.id === optionId)?.text ?? 'option'} up`}
               disabled={disabled || index === 0}
               onClick={() => move(index, -1)}
               data-track-category='POLL'
               data-track-name='RANK_UP'
             >
-              ↑
-            </button>
-            <button
+              <ChevronUp />
+            </Button>
+            <Button
               type='button'
+              variant='ghost'
+              size='iconSm'
               aria-label={`Move ${question.options.find(option => option.id === optionId)?.text ?? 'option'} down`}
               disabled={disabled || index === ranking.length - 1}
               onClick={() => move(index, 1)}
               data-track-category='POLL'
               data-track-name='RANK_DOWN'
             >
-              ↓
-            </button>
+              <ChevronDown />
+            </Button>
           </div>
         ))}
         <Button
           type='button'
           disabled={disabled}
           size='sm'
-          onClick={() => submit({ rankedOptionIds: ranking })}
+          onClick={() => submitWithToast({ rankedOptionIds: ranking })}
           data-track-category='POLL'
           data-track-name='SUBMIT_RANKING'
         >
-          Submit ranking
+          {ownResponse ? 'Update ranking' : 'Submit ranking'}
         </Button>
       </div>
     );
@@ -438,7 +483,11 @@ function NonChoicePollAnswer({
       <Textarea
         value={text}
         disabled={disabled}
-        maxLength={question.responseType === 'SHORT_TEXT' ? 500 : 5000}
+        maxLength={
+          question.responseType === 'SHORT_TEXT'
+            ? POLL_LIMITS.maxShortTextLength
+            : POLL_LIMITS.maxLongTextLength
+        }
         rows={question.responseType === 'SHORT_TEXT' ? 2 : 4}
         placeholder={
           question.responseType === 'SHORT_TEXT' ? 'Write a short response' : 'Write your answer'
@@ -452,11 +501,11 @@ function NonChoicePollAnswer({
         type='button'
         disabled={disabled || !text.trim()}
         size='sm'
-        onClick={() => submit({ textAnswer: text.trim() })}
+        onClick={() => submitWithToast({ textAnswer: text.trim() })}
         data-track-category='POLL'
         data-track-name='SUBMIT_RESPONSE'
       >
-        Submit response
+        {ownResponse ? 'Update response' : 'Submit response'}
       </Button>
     </div>
   );
@@ -495,7 +544,7 @@ function TypedResultSummary({
     );
   }
   if (question.responseType === 'SHORT_TEXT' || question.responseType === 'Q_AND_A') {
-    const count = aggregate?.responseCount ?? 0;
+    const count = aggregate?.voterCount ?? 0;
     return (
       <p className='text-xs text-muted-foreground'>
         {count} {count === 1 ? 'response' : 'responses'}

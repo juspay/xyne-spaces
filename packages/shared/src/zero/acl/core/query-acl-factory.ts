@@ -43,10 +43,8 @@ import {
   ReactionsACL,
   PollsACL,
   PollQuestionsACL,
-  PollOptionsACL,
   PollVotesACL,
   PollQuestionResultsACL,
-  PollJobsACL,
   RecurringCallParticipantsACL,
   StagesACL,
   StageTransitionsACL,
@@ -230,14 +228,10 @@ export class QueryACLFactory {
         return new PollsACL(ctx) as BaseQueryACL<TTable>;
       case 'poll_questions':
         return new PollQuestionsACL(ctx) as BaseQueryACL<TTable>;
-      case 'poll_options':
-        return new PollOptionsACL(ctx) as BaseQueryACL<TTable>;
       case 'poll_votes':
         return new PollVotesACL(ctx) as BaseQueryACL<TTable>;
       case 'poll_question_results':
         return new PollQuestionResultsACL(ctx) as BaseQueryACL<TTable>;
-      case 'poll_jobs':
-        return new PollJobsACL(ctx) as BaseQueryACL<TTable>;
       case 'recurring_call_participants':
         return new RecurringCallParticipantsACL(ctx) as BaseQueryACL<TTable>;
       case 'stages':

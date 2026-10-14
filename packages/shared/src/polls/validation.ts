@@ -77,7 +77,6 @@ export const pollDraftSchema = z
     allowAudienceChoices: z.boolean(),
     isAnonymous: z.boolean(),
     resultVisibility: z.enum(POLL_RESULT_VISIBILITIES).default("EVERYONE"),
-    sortResultsByVotes: z.boolean().default(false),
     questions: z
       .array(pollQuestionDraftSchema)
       .min(1, "At least one question is required")
@@ -167,7 +166,7 @@ export const pollResponseSchema = z
   .object({
     questionId: stableIdSchema,
     responseType: z.enum(POLL_NON_CHOICE_RESPONSE_TYPES),
-    textAnswer: z.string().trim().min(1).max(5000).optional(),
+    textAnswer: z.string().trim().min(1).max(POLL_LIMITS.maxLongTextLength).optional(),
     rankedOptionIds: z.array(stableIdSchema).min(2).optional(),
     rating: z.number().int().min(1).max(5).optional(),
   })
@@ -189,6 +188,16 @@ export const pollResponseSchema = z
       context.addIssue({
         code: z.ZodIssueCode.custom,
         message: "Text responses require an answer",
+      });
+    }
+    if (
+      response.responseType === "SHORT_TEXT" &&
+      (response.textAnswer?.length ?? 0) > POLL_LIMITS.maxShortTextLength
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Short answers are limited to 500 characters",
+        path: ["textAnswer"],
       });
     }
     if (

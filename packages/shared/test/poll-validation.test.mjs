@@ -3,17 +3,11 @@ import assert from 'node:assert/strict';
 
 import {
   buildPollMessageSummary,
-  isPollClosedAt,
   normalizePollDraft,
   pollDraftSchema,
   pollResponseSchema,
   pollScheduleSchema,
 } from '../dist/polls/index.js';
-
-test('treats an explicit closure as closed', () => {
-  assert.equal(isPollClosedAt({ closedAt: null }, 999), false);
-  assert.equal(isPollClosedAt({ closedAt: 1 }, 0), true);
-});
 
 test('validates publish, reminder, and close schedule ordering', () => {
   assert.equal(pollScheduleSchema.safeParse({
@@ -53,7 +47,6 @@ test('normalizes poll text while preserving stable client IDs and settings', () 
     allowAudienceChoices: false,
     isAnonymous: false,
     resultVisibility: 'EVERYONE',
-    sortResultsByVotes: false,
     questions: [
       {
         id: 'question-1',
@@ -231,4 +224,13 @@ test('escapes user-controlled poll summary text', () => {
     buildPollMessageSummary(poll),
     'Poll: &lt;img src=x onerror=alert(1)&gt; &amp; team',
   );
+});
+
+test('limits short text answers more tightly than Q&A answers', () => {
+  const answer = (responseType, length) =>
+    pollResponseSchema.safeParse({ questionId: 'q', responseType, textAnswer: 'x'.repeat(length) }).success;
+  assert.equal(answer('SHORT_TEXT', 500), true);
+  assert.equal(answer('SHORT_TEXT', 501), false);
+  assert.equal(answer('Q_AND_A', 5000), true);
+  assert.equal(answer('Q_AND_A', 5001), false);
 });

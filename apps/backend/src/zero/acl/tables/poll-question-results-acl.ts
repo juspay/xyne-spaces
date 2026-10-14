@@ -1,10 +1,9 @@
-import type { InsertValue, Transaction } from '@rocicorp/zero';
+import type { DeleteID, InsertValue, Transaction, UpdateValue } from '@rocicorp/zero';
 import type { Schema } from '@xyne/shared';
-
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, type TableSchema } from '../core/types';
 import { zql } from '../../queries';
-import { requireAccessiblePoll } from './poll-acl-utils';
+import { requireAccessiblePoll, requirePollCreatorForDelete } from './poll-acl-utils';
 
 export class PollQuestionResultsMutationACL extends BaseACL<'poll_question_results'> {
   constructor(ctx: ConstructorParameters<typeof BaseACL<'poll_question_results'>>[0]) {
@@ -36,46 +35,38 @@ export class PollQuestionResultsMutationACL extends BaseACL<'poll_question_resul
     }
     if (
       args.voterCount !== 0 ||
-      args.responseCount !== 0 ||
-      args.rankResponseCount !== 0 ||
       args.ratingTotal !== 0 ||
       Object.keys(args.optionCounts).length > 0 ||
-      Object.keys(args.rankTotals).length > 0 ||
-      Object.keys(args.ratingCounts).length > 0
+      Object.keys(args.rankTotals).length > 0
     ) {
       throw new MutationACLError('Poll result rows must start empty', 'poll_question_results');
     }
   }
-}
 
-export class PollJobsMutationACL extends BaseACL<'poll_jobs'> {
-  constructor(ctx: ConstructorParameters<typeof BaseACL<'poll_jobs'>>[0]) {
-    super(ctx, 'poll_jobs');
-  }
-
-  async canInsert(
-    args: InsertValue<TableSchema<'poll_jobs'>>,
+  /** Voters' mutators recompute the row from ballots after each vote or response. */
+  async canUpdate(
+    args: UpdateValue<TableSchema<'poll_question_results'>>,
     tx: Transaction<Schema>
   ): Promise<void> {
-    if (args.workspaceId !== this.ctx.workspaceId) {
-      throw new MutationACLError('Poll job must use the current workspace', 'poll_jobs');
+    const result = await tx.run(
+      zql.poll_question_results.where('questionId', '=', args.questionId).one()
+    );
+    if (!result || result.workspaceId !== this.ctx.workspaceId) {
+      throw new MutationACLError('Poll result not found in this workspace', 'poll_question_results');
     }
-    const poll = await requireAccessiblePoll(args.pollId, this.ctx, tx, 'poll_jobs');
-    if (poll.createdBy !== this.ctx.userID) {
-      throw new MutationACLError('Only the poll author can schedule poll jobs', 'poll_jobs');
+    await requireAccessiblePoll(result.pollId, this.ctx, tx, 'poll_question_results');
+  }
+
+  async canDelete(
+    args: DeleteID<TableSchema<'poll_question_results'>>,
+    tx: Transaction<Schema>
+  ): Promise<void> {
+    const result = await tx.run(
+      zql.poll_question_results.where('questionId', '=', args.questionId).one()
+    );
+    if (!result) {
+      throw new MutationACLError('Poll result does not exist', 'poll_question_results');
     }
-    if (
-      !['CLOSE', 'REMINDER'].includes(args.kind) ||
-      args.status !== 'PENDING' ||
-      args.attempts !== 0 ||
-      args.maxAttempts !== 5 ||
-      args.leaseOwner !== null ||
-      args.leaseExpiresAt !== null ||
-      args.completedAt !== null ||
-      args.failedAt !== null ||
-      args.lastError !== null
-    ) {
-      throw new MutationACLError('Poll jobs must use the initial lifecycle state', 'poll_jobs');
-    }
+    await requirePollCreatorForDelete(result.pollId, this.ctx, tx, 'poll_question_results');
   }
 }

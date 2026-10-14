@@ -4,6 +4,8 @@ export const POLL_LIMITS = {
   minOptions: 2,
   maxOptions: 10,
   maxOptionLength: 200,
+  maxShortTextLength: 500,
+  maxLongTextLength: 5000,
 } as const;
 
 export const POLL_RESPONSE_TYPES = [
@@ -16,6 +18,15 @@ export const POLL_RESPONSE_TYPES = [
 ] as const;
 
 export type PollResponseType = (typeof POLL_RESPONSE_TYPES)[number];
+
+export const POLL_CHOICE_RESPONSE_TYPES = ["SINGLE_CHOICE", "MULTIPLE_CHOICE"] as const;
+
+export type PollChoiceResponseType = (typeof POLL_CHOICE_RESPONSE_TYPES)[number];
+
+export const isChoiceResponseType = (
+  responseType: string,
+): responseType is PollChoiceResponseType =>
+  (POLL_CHOICE_RESPONSE_TYPES as readonly string[]).includes(responseType);
 
 export const POLL_NON_CHOICE_RESPONSE_TYPES = [
   "SHORT_TEXT",
@@ -35,6 +46,13 @@ export const POLL_RESULT_VISIBILITIES = [
 ] as const;
 
 export type PollResultVisibility = (typeof POLL_RESULT_VISIBILITIES)[number];
+
+/** One entry of `poll_questions.options`; array order is display order. */
+export type PollOption = {
+  id: string;
+  text: string;
+  createdBy: string;
+};
 
 export interface PollOptionDraft {
   id: string;
@@ -61,7 +79,6 @@ export interface PollDraft {
   allowAudienceChoices: boolean;
   isAnonymous: boolean;
   resultVisibility?: PollResultVisibility;
-  sortResultsByVotes?: boolean;
   questions: PollQuestionDraft[];
 }
 
@@ -69,12 +86,4 @@ export interface PollSchedule {
   publishAt?: string | null;
   closeAt?: string | null;
   remindAt?: string | null;
-}
-
-export interface PollResultAccessContext {
-  visibility: PollResultVisibility;
-  isPollCreator: boolean;
-  isChannelCreator: boolean;
-  isChannelAdmin: boolean;
-  isClosed: boolean;
 }

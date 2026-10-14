@@ -6,11 +6,9 @@ jest.mock('@xyne/shared', () => ({
 
 import type { PrismaClient } from '@prisma/client';
 import type { ACLContext } from '../base-acl';
-import {
-  PollQuestionResultsACL,
-  PollReminderDeliveriesACL,
-  PollVotesACL,
-} from './polls-acl';
+import { PollsACL } from './polls-acl';
+import { PollVotesACL } from './poll-votes-acl';
+import { PollQuestionResultsACL } from './poll-question-results-acl';
 
 const context: ACLContext = {
   userId: 'user-1',
@@ -78,11 +76,31 @@ describe('poll query ACLs', () => {
     expect(where).not.toHaveProperty('userId');
   });
 
-  it('denies request-principal access to the server-only reminder ledger', async () => {
-    const acl = new PollReminderDeliveriesACL(context, prisma);
+  it('limits writes to the principal: own ballots, own polls, no result rows', async () => {
+    await expect(new PollVotesACL(context, prisma).getMutateWhere()).resolves.toEqual({
+      workspaceId: context.workspaceId,
+      userId: context.userId,
+    });
+    await expect(new PollsACL(context, prisma).getMutateWhere()).resolves.toEqual({
+      workspaceId: context.workspaceId,
+      createdBy: context.userId,
+    });
+    const results = new PollQuestionResultsACL(context, prisma);
+    await expect(results.getMutateWhere()).resolves.toEqual({ questionId: { in: [] } });
+    await expect(results.canCreate()).resolves.toBe(false);
+  });
 
-    await expect(acl.getWhereClause()).resolves.toEqual({ id: { in: [] } });
-    await expect(acl.getMutateWhere()).resolves.toEqual({ id: { in: [] } });
-    await expect(acl.canCreate()).resolves.toBe(false);
+  it('only creates ballots for the principal in its workspace', async () => {
+    const votes = new PollVotesACL(context, prisma);
+    const ballot = {
+      id: 'vote-1',
+      workspaceId: context.workspaceId,
+      pollId: 'poll-1',
+      questionId: 'question-1',
+      userId: context.userId,
+      optionIds: [],
+    };
+    await expect(votes.canCreate(ballot)).resolves.toBe(true);
+    await expect(votes.canCreate({ ...ballot, userId: 'someone-else' })).resolves.toBe(false);
   });
 });
