@@ -34,14 +34,6 @@ export function createSelectorPlugin<T extends BaseSelectorItem>(
         const { state, dispatch } = view;
         const pluginState = pluginKey.getState(state);
 
-        // A tabbed list takes Tab to switch tabs, even while the tab it shows
-        // has no rows ("Type to search messages"): another tab may have some.
-        if (pluginState?.isOpen && pluginState.onTab && event.key === 'Tab') {
-          event.preventDefault();
-          pluginState.onTab(event.shiftKey);
-          return true;
-        }
-
         if (pluginState && pluginState.isOpen && pluginState.items.length > 0) {
           if (event.key === 'ArrowDown') {
             event.preventDefault();

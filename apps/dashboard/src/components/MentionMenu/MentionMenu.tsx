@@ -10,14 +10,12 @@ import {
   useRef,
   useState,
   type ComponentType,
-  type ForwardedRef,
   type MutableRefObject,
   type ReactElement,
   type ReactNode,
 } from 'react';
 import { AppWindow, Loader2 } from 'lucide-react';
 import {
-  AtMark,
   ChatDefault,
   CheckTickSingle,
   File02Text,
@@ -27,19 +25,10 @@ import {
   MicOn,
   ReminderAnticlockwise,
   TicketToken,
-  UserThree,
   UserTwo,
 } from '@xyne/icons';
-import {
-  ChannelVisibility,
-  UserStatus,
-  isDeskChannelType,
-  type Channel,
-  type MentionResult,
-} from '@xyne/shared';
+import { ChannelVisibility, isDeskChannelType, type Channel } from '@xyne/shared';
 import { cn } from '../../utils/classNames';
-import { renderEmoji } from '../../utils/customEmojiUtils';
-import { resolveUserStatus } from '../../utils/statusUtils';
 import { useAuthContextValues } from '../../hooks/useAuth';
 import {
   useAllChannels,
@@ -47,7 +36,7 @@ import {
   useUserChannelStatuses,
 } from '../../hooks/useChannels';
 import { useSearchMetrics } from '../../hooks/useSearchMetrics';
-import { useUser, useUsersById } from '../../hooks/useUsers';
+import { useUsersById } from '../../hooks/useUsers';
 import type { User, VisibleChannel } from '../../machines/stateMachine';
 import type { DisplaySearchResult } from '../../types/search';
 import Avatar from '../ui/Avatar/Avatar';
@@ -74,7 +63,6 @@ import {
   initialSection,
   messageTime,
   peopleSuggestions,
-  toMentionPerson,
   personRow,
   plainText,
   resultKind,
@@ -82,65 +70,44 @@ import {
   resultTitle,
   sectionToTab,
   stepSection,
+  toMentionPerson,
   uniqueRows,
   type MentionGroup,
-  type MentionMenuMode,
   type MentionRow,
   type MentionSection,
 } from './MentionMenu.utils';
 
 export { MENTION_SECTIONS };
-export type { MentionMenuMode, MentionRow, MentionSection };
+export type { MentionRow, MentionSection };
 
 // ── Public API ──────────────────────────────────────────────────────────────
 
-/** How a row was picked: Enter / Tab, or a click. The AI composer keeps its
+/** How a row was picked: Enter / Tab, or a click. The composer keeps its
  *  picker open after a click (several can be picked in a row) and closes it
  *  after Enter, the way a mention usually ends. */
 export type MentionPickVia = 'keyboard' | 'pointer';
 
 export interface MentionMenuHandle {
   /** A key the editor forwards (the menu never takes focus). ArrowUp/ArrowDown move the highlight (wrapping),
-   *  Enter picks the highlighted row, Tab/Shift+Tab cycle tabs in the all view and pick in the people view.
-   *  Returns true when the key was used. */
+   *  Enter picks the highlighted row, Tab/Shift+Tab cycle the tabs. Returns true when the key was used. */
   handleKey: (key: string, shiftKey: boolean) => boolean;
-  /** Tab / Shift+Tab in the all view (no-op in the people view). */
-  cycleSection: (backwards: boolean) => void;
 }
 
 export interface MentionMenuProps {
-  mode: MentionMenuMode;
   /** Text typed after "@". */
   query: string;
-  /** Tab the all view opens on. Both composers pass 'people' (@ is for tagging people). Default 'people'. */
+  /** Tab the menu opens on. The composer passes 'people' (@ is for tagging people). Default 'people'. */
   defaultSection?: MentionSection;
   /** Tabs offered, in MENTION_SECTIONS order. Default MENTION_SECTIONS. */
   sections?: readonly MentionSection[];
-  /** People rows — the chat composer passes its channel-aware mention results (users, groups, @channel/@here).
-   *  Omitted (AI composer): the menu finds people itself — your recent DMs first, then the workspace, never yourself. */
-  people?: readonly MentionResult[];
-  /** Whether the channel lists include DMs and group DMs (the AI composer can attach a DM as context; a chat message cannot mention one). Default false. */
-  includeDirectMessages?: boolean;
-  /** Rows already attached get a tick (AI composer). */
+  /** Rows already attached get a tick. */
   isPicked?: (row: MentionRow) => boolean;
   onSelect: (row: MentionRow, via: MentionPickVia) => void;
-  /** Controlled highlight — the chat composer's keyboard plugin owns the index. Uncontrolled when omitted. */
-  highlightedIndex?: number;
-  onHighlightedIndexChange?: (index: number) => void;
-  /** Every selectable row in display order, whenever it changes (the chat composer pushes them into its plugin). */
-  onRowsChange?: (rows: readonly MentionRow[]) => void;
-  /** People view only: "Search everything" in its empty state asks the host to show the all view for this @. Omit to hide the button. */
-  onRequestAllMode?: () => void;
-  /** data-track-category for the menu's own controls. Default 'MentionMenu'. */
-  trackCategory?: string;
 }
 
-/** Size + surface each host gives the menu's container, so both composers render the same box. */
-export const MENTION_MENU_CONTAINER: Record<MentionMenuMode, string> = {
-  // The old @ list, unchanged look.
-  people: 'w-80 max-w-[calc(100vw-24px)] rounded-2xl border border-border bg-popover shadow-lg',
-  all: 'flex h-[min(348px,60vh)] w-[420px] max-w-[calc(100vw-24px)] flex-col overflow-hidden rounded-2xl border border-border/70 bg-popover text-popover-foreground shadow-[0_16px_40px_-16px_rgba(0,0,0,0.25)]',
-};
+/** Size and surface the composer gives the menu's box. */
+export const MENTION_MENU_CONTAINER =
+  'flex h-[min(348px,60vh)] w-[420px] max-w-[calc(100vw-24px)] flex-col overflow-hidden rounded-2xl border border-border/70 bg-popover text-popover-foreground shadow-[0_16px_40px_-16px_rgba(0,0,0,0.25)]';
 
 /**
  * Adds `mask-fade-bottom` while the element has more content below its
@@ -186,78 +153,11 @@ export function useScrollFade<T extends HTMLElement>(): {
   return { ref: setEl, fadeBottom };
 }
 
-/**
- * The common "@" menu of the chat and AI composers. `people` mode is the old
- * people list; `all` mode is the tabbed view over people, channels and what
- * the search index holds (messages, files, canvases, tickets). The editor
- * keeps focus throughout: it forwards keys through the handle (or its own
- * keyboard plugin drives `highlightedIndex`), and picks happen on click.
- */
-export const MentionMenu = forwardRef<MentionMenuHandle, MentionMenuProps>(
-  function MentionMenu(props, ref): ReactElement {
-    if (props.mode === 'all') return <AllView {...props} handleRef={ref} />;
-    if (props.people) return <PeopleList {...props} people={props.people} handleRef={ref} />;
-    return <OwnPeopleList {...props} handleRef={ref} />;
-  },
-);
+// ── Helpers ─────────────────────────────────────────────────────────────────
 
-// ── Shared state ────────────────────────────────────────────────────────────
-
-type ViewProps = MentionMenuProps & { handleRef: ForwardedRef<MentionMenuHandle> };
-
-const DEFAULT_TRACK_CATEGORY = 'MentionMenu';
+const TRACK_CATEGORY = 'XyneAI';
 
 const preventFocusLoss = (event: { preventDefault: () => void }): void => event.preventDefault();
-
-/**
- * The highlighted row: the host's when it passes `highlightedIndex`, else the
- * menu's own. It snaps to the first row whenever the row set changes, so
- * Enter after typing takes the best match.
- */
-function useHighlight({
-  count,
-  resetKey,
-  highlightedIndex,
-  onHighlightedIndexChange,
-}: {
-  count: number;
-  resetKey: string;
-  highlightedIndex: number | undefined;
-  onHighlightedIndexChange: ((index: number) => void) | undefined;
-}): { index: number; setIndex: (index: number) => void } {
-  const [own, setOwn] = useState(0);
-  const controlled = highlightedIndex !== undefined;
-  const onChange = useRef(onHighlightedIndexChange);
-  onChange.current = onHighlightedIndexChange;
-
-  const setIndex = useCallback(
-    (index: number): void => {
-      if (!controlled) setOwn(index);
-      onChange.current?.(index);
-    },
-    [controlled],
-  );
-
-  useEffect(() => {
-    setIndex(0);
-  }, [resetKey, setIndex]);
-
-  const raw = controlled ? highlightedIndex : own;
-  return { index: count === 0 ? -1 : Math.min(Math.max(raw, 0), count - 1), setIndex };
-}
-
-/** Hands the host every row whenever the set changes (by ids, so a re-render alone never loops). */
-function useReportRows(
-  rows: readonly MentionRow[],
-  onRowsChange: ((rows: readonly MentionRow[]) => void) | undefined,
-): void {
-  const latest = useRef({ rows, onRowsChange });
-  latest.current = { rows, onRowsChange };
-  const key = rows.map(row => row.id).join('|');
-  useEffect(() => {
-    latest.current.onRowsChange?.(latest.current.rows);
-  }, [key]);
-}
 
 /**
  * Keeps a highlight the keyboard moved in view. A row the pointer highlighted
@@ -299,29 +199,6 @@ function useSearchSession(handlers: {
       session.current.resetSearchState();
     };
   }, []);
-}
-
-/** Arrow keys move the highlight (wrapping); Enter picks it. True when the key was used. */
-function moveOrPick(
-  key: string,
-  rows: readonly MentionRow[],
-  index: number,
-  setIndex: (index: number) => void,
-  onSelect: (row: MentionRow, via: MentionPickVia) => void,
-): boolean {
-  if (key === 'ArrowDown' || key === 'ArrowUp') {
-    if (rows.length === 0) return false;
-    const step = key === 'ArrowDown' ? 1 : -1;
-    setIndex((Math.max(index, 0) + step + rows.length) % rows.length);
-    return true;
-  }
-  if (key === 'Enter') {
-    const row = rows[index];
-    if (!row) return false;
-    onSelect(row, 'keyboard');
-    return true;
-  }
-  return false;
 }
 
 // ── Data ────────────────────────────────────────────────────────────────────
@@ -425,247 +302,7 @@ function useRecentPartners(
   }, [enabled, corpus, selfId, usersById]);
 }
 
-// ── People view ─────────────────────────────────────────────────────────────
-
-/**
- * The people list when the host passes no `people` (the AI composer): your
- * recent DMs, then the workspace. ⌘K's search pinned to People finds them, so
- * each "@" is a search session, as in the all view.
- */
-function OwnPeopleList(props: ViewProps): ReactElement {
-  const selfId = useAuthContextValues().userID ?? '';
-  const { corpus } = useChannelCorpus();
-  const hasQuery = props.query.trim().length > 0;
-  const recent = useRecentPartners(corpus, selfId, !hasQuery);
-  const { filteredLocalUsers, setText, setActiveTab, onOpen, onClose, resetSearchState } =
-    useSearchMetrics({ searchLocalOnlyOnShownTabs: true });
-  useSearchSession({ onOpen, onClose, resetSearchState });
-  useLayoutEffect(() => {
-    const tab = sectionToTab('people');
-    if (tab) setActiveTab(tab);
-  }, [setActiveTab]);
-  useEffect(() => {
-    setText(props.query);
-  }, [props.query, setText]);
-  const people = useMemo(
-    () => peopleSuggestions({ recent, hits: filteredLocalUsers, selfId, hasQuery }),
-    [recent, filteredLocalUsers, selfId, hasQuery],
-  );
-  return <PeopleList {...props} people={people} />;
-}
-
-/** The old chat-composer @ list: the same rows, box and keys (Tab picks, like Enter). */
-function PeopleList({
-  query,
-  people,
-  isPicked,
-  onSelect,
-  highlightedIndex,
-  onHighlightedIndexChange,
-  onRowsChange,
-  onRequestAllMode,
-  trackCategory = DEFAULT_TRACK_CATEGORY,
-  handleRef,
-}: ViewProps & { people: readonly MentionResult[] }): ReactElement {
-  const rows = useMemo(() => uniqueRows(people.map(personRow)), [people]);
-  const { index, setIndex } = useHighlight({
-    count: rows.length,
-    resetKey: `people|${query}|${rows.length}`,
-    highlightedIndex,
-    onHighlightedIndexChange,
-  });
-  useReportRows(rows, onRowsChange);
-
-  const [list, setList] = useState<HTMLDivElement | null>(null);
-  const pointerIndex = useRef(-1);
-  useHighlightInView(list, index, pointerIndex);
-
-  useImperativeHandle(
-    handleRef,
-    () => ({
-      handleKey: (key: string): boolean =>
-        moveOrPick(key === 'Tab' ? 'Enter' : key, rows, index, setIndex, onSelect),
-      cycleSection: (): void => {},
-    }),
-    [rows, index, setIndex, onSelect],
-  );
-
-  return (
-    <div role='presentation' onMouseDown={preventFocusLoss}>
-      {rows.length === 0 ? (
-        <div className='p-2 px-3 text-sm text-muted-foreground text-center'>
-          No people match
-          {onRequestAllMode && query.trim() && (
-            <button
-              type='button'
-              onClick={onRequestAllMode}
-              className='ml-1.5 font-medium text-foreground underline-offset-2 hover:underline'
-              data-track-category={trackCategory}
-              data-track-name='MENTION_MENU_SEARCH_ALL'
-            >
-              Search everything
-            </button>
-          )}
-        </div>
-      ) : (
-        <div
-          ref={setList}
-          className='max-h-80 overflow-y-auto scroll-smooth flex flex-col gap-1 p-2 scrollbar-minimal'
-        >
-          {rows.map((row, i) =>
-            row.type === 'person' ? (
-              <button
-                key={row.id}
-                type='button'
-                data-mention-index={i}
-                onPointerMove={() => {
-                  if (i === index) return;
-                  pointerIndex.current = i;
-                  setIndex(i);
-                }}
-                onClick={() => onSelect(row, 'pointer')}
-                className={cn(
-                  'w-full text-left rounded-xl',
-                  i === index ? 'bg-accent' : 'hover:bg-accent',
-                )}
-                data-track-category={trackCategory}
-                data-track-name='MENTION_MENU_PICK'
-                data-track-metadata={JSON.stringify({ kind: row.person.type })}
-              >
-                <MentionPersonRow
-                  item={row.person}
-                  selected={i === index}
-                  picked={isPicked?.(row) ?? false}
-                />
-              </button>
-            ) : null,
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/**
- * User avatar, name, status and badges for a people row. Hooks must be called
- * at component top level, not inside callbacks.
- */
-const UserAvatarItem = ({ item }: { item: MentionResult }): ReactElement => {
-  const user = useUser(item.id);
-  const status = resolveUserStatus(user);
-  const hasValidStatus = status.hasStatus;
-  const statusText = status.content ?? undefined;
-  const isDeactivated = user?.status === UserStatus.INACTIVE || item.isDeactivated;
-
-  return (
-    <>
-      <Avatar userId={item.id} size='sm' rounded showActiveStatus={false} />
-      <div className='flex-1 min-w-0 flex flex-col gap-0.5'>
-        <div className='flex items-center gap-2'>
-          <span
-            className={`text-sm font-medium whitespace-nowrap overflow-hidden text-ellipsis ${isDeactivated ? 'text-muted-foreground' : 'text-foreground'}`}
-          >
-            {item.name}
-          </span>
-          {hasValidStatus && !isDeactivated && (
-            <span className='inline-flex flex-shrink-0'>{renderEmoji(status.emoji)}</span>
-          )}
-          {statusText && !isDeactivated && (
-            <span className='text-sm text-muted-foreground whitespace-nowrap overflow-hidden text-ellipsis'>
-              {statusText}
-            </span>
-          )}
-          {item.isChannelMember === false && (
-            <span className='text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded'>
-              Not in channel
-            </span>
-          )}
-          {isDeactivated && (
-            <span className='text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded shrink-0'>
-              Deactivated
-            </span>
-          )}
-        </div>
-        {item.email && (
-          <span className='text-xs text-muted-foreground whitespace-nowrap overflow-hidden text-ellipsis'>
-            {item.email}
-          </span>
-        )}
-      </div>
-    </>
-  );
-};
-
-/**
- * The OLD people row (avatar, name, status, badges, email; groups;
- * @channel/@here), moved here from MentionSelector so the chat composer's
- * people list and the AI composer's people view are the same rows. `picked`
- * adds the attached tick (AI composer).
- */
-export function MentionPersonRow({
-  item,
-  selected,
-  picked = false,
-}: {
-  item: MentionResult;
-  selected: boolean;
-  picked?: boolean;
-}): ReactElement {
-  return (
-    <div
-      className={cn(
-        'flex items-center transition-[transform,background-color] duration-200 ease-in active:scale-[0.98] p-3 gap-3 rounded-xl',
-        selected && 'bg-accent',
-      )}
-    >
-      {item.isSpecial ? (
-        <>
-          <div className='w-8 h-8 flex items-center justify-center bg-orange-50 rounded-full border border-orange-200 flex-shrink-0'>
-            <span className='text-base leading-none'>{item.type === 'channel' ? '📢' : '👋'}</span>
-          </div>
-          <div className='flex-1 min-w-0 flex flex-col gap-0.5'>
-            <span className='text-sm font-medium text-orange-700 whitespace-nowrap overflow-hidden text-ellipsis'>
-              @{item.name}
-            </span>
-            <span className='text-xs text-muted-foreground whitespace-nowrap overflow-hidden text-ellipsis'>
-              {item.description}
-            </span>
-          </div>
-        </>
-      ) : item.type === 'group' ? (
-        <>
-          <div
-            className={`w-8 h-8 flex items-center justify-center rounded-full border flex-shrink-0 ${
-              item.isDeactivated
-                ? 'bg-muted border-muted-foreground/30'
-                : 'bg-green-50 border-green-200'
-            }`}
-          >
-            <span className='text-base leading-none'>👥</span>
-          </div>
-          <div className='flex-1 min-w-0 flex flex-col gap-0.5'>
-            <span
-              className={`text-sm font-medium whitespace-nowrap overflow-hidden text-ellipsis ${
-                item.isDeactivated ? 'text-muted-foreground' : 'text-foreground'
-              }`}
-            >
-              {item.alias ? `@${item.alias}` : item.name}
-              {item.isDeactivated && ' (Deactivated)'}
-            </span>
-            <span className='text-xs text-muted-foreground whitespace-nowrap overflow-hidden text-ellipsis'>
-              {item.alias && item.name !== item.alias ? item.name : ''}
-            </span>
-          </div>
-        </>
-      ) : (
-        <UserAvatarItem item={item} />
-      )}
-      {picked && <PickedTick />}
-    </div>
-  );
-}
-
-// ── All view ────────────────────────────────────────────────────────────────
+// ── Menu ────────────────────────────────────────────────────────────────────
 
 const SECTION_ICONS: Record<MentionSection, ComponentType<{ size?: number }>> = {
   all: ReminderAnticlockwise,
@@ -682,34 +319,19 @@ const SECTION_ICONS: Record<MentionSection, ComponentType<{ size?: number }>> = 
 const CHANNELS_LIMIT = 50;
 
 /**
- * The tabbed view — ⌘K's search, picking instead of navigating. It opens on
- * `defaultSection`; All mixes the best people and channels with what the
- * index found, a heading per kind; the other tabs narrow it to one kind.
+ * The AI composer's "@" menu: ⌘K's search, attaching instead of navigating.
+ * It opens on `defaultSection`; All mixes the best people and channels with
+ * what the index found (messages, files, canvases, tickets), a heading per
+ * kind; the other tabs narrow it to one kind. The editor keeps focus
+ * throughout — it forwards keys through the handle — and picks happen on
+ * click.
  */
-function AllView({
-  query,
-  defaultSection = 'people',
-  sections = MENTION_SECTIONS,
-  people: peopleProp,
-  includeDirectMessages = false,
-  isPicked,
-  onSelect,
-  highlightedIndex,
-  onHighlightedIndexChange,
-  onRowsChange,
-  trackCategory = DEFAULT_TRACK_CATEGORY,
-  handleRef,
-}: ViewProps): ReactElement {
+export const MentionMenu = forwardRef<MentionMenuHandle, MentionMenuProps>(function MentionMenu(
+  { query, defaultSection = 'people', sections = MENTION_SECTIONS, isPicked, onSelect },
+  ref,
+): ReactElement {
   const selfId = useAuthContextValues().userID ?? '';
   const { corpus, displayNames } = useChannelCorpus();
-  // A chat message can't mention a DM; the AI composer can attach one.
-  const channelCorpus = useMemo(
-    () =>
-      includeDirectMessages
-        ? corpus
-        : corpus.filter(entry => !isDMChannel(entry.channel.scopeType)),
-    [corpus, includeDirectMessages],
-  );
   const {
     searchResults,
     isSearching,
@@ -726,7 +348,7 @@ function AllView({
     onClose,
     resetSearchState,
   } = useSearchMetrics({
-    allChannels: channelCorpus,
+    allChannels: corpus,
     defaultOnlyMyChannels: true,
     groupByDocType: true,
     searchLocalOnlyOnShownTabs: true,
@@ -757,10 +379,10 @@ function AllView({
   const hasQuery = query.trim().length > 0;
   const searching = isSearching || isSearchPending;
   const apps = useArtifactAppOptions(query, section === 'apps');
-  const recent = useRecentPartners(corpus, selfId, !peopleProp && !hasQuery);
+  const recent = useRecentPartners(corpus, selfId, !hasQuery);
   const people = useMemo(
-    () => peopleProp ?? peopleSuggestions({ recent, hits: filteredLocalUsers, selfId, hasQuery }),
-    [peopleProp, recent, filteredLocalUsers, selfId, hasQuery],
+    () => peopleSuggestions({ recent, hits: filteredLocalUsers, selfId, hasQuery }),
+    [recent, filteredLocalUsers, selfId, hasQuery],
   );
   const channels = useMemo(
     () =>
@@ -777,7 +399,7 @@ function AllView({
         return buildAllSections({
           // Before anything is typed, the people you talk to — not the
           // workspace's first users padding a short DM history.
-          people: peopleProp ?? (hasQuery ? people : recent.map(toMentionPerson)),
+          people: hasQuery ? people : recent.map(toMentionPerson),
           channels,
           results: searchResults,
           hasQuery,
@@ -799,7 +421,7 @@ function AllView({
         // The index has nothing to offer an empty query (no recents for these yet).
         return [{ section, rows: hasQuery ? resultRowsFor(section, searchResults) : [] }];
     }
-  }, [section, peopleProp, people, recent, channels, searchResults, hasQuery, apps.options]);
+  }, [section, people, recent, channels, searchResults, hasQuery, apps.options]);
   const rows = useMemo(() => groups.flatMap(group => group.rows), [groups]);
 
   // "@barclays" names no one: rather than a dead end on People, the search
@@ -810,14 +432,14 @@ function AllView({
     if (noOneMatches && !tabChosenRef.current) setSection('all');
   }, [noOneMatches]);
 
+  // The highlight snaps to the first row whenever the rows change, so Enter
+  // after typing takes the best match.
   const resetKey = `${section}|${query}|${rows.length}`;
-  const { index, setIndex } = useHighlight({
-    count: rows.length,
-    resetKey,
-    highlightedIndex,
-    onHighlightedIndexChange,
-  });
-  useReportRows(rows, onRowsChange);
+  const [highlight, setHighlight] = useState(0);
+  useEffect(() => {
+    setHighlight(0);
+  }, [resetKey]);
+  const index = rows.length === 0 ? -1 : Math.min(Math.max(highlight, 0), rows.length - 1);
 
   const fade = useScrollFade<HTMLDivElement>();
   const [list, setList] = useState<HTMLDivElement | null>(null);
@@ -837,23 +459,30 @@ function AllView({
     list?.scrollTo({ top: 0 });
   }, [list, resetKey]);
 
-  const cycleSection = useCallback(
-    (backwards: boolean): void => chooseSection(stepSection(sections, section, backwards)),
-    [chooseSection, sections, section],
-  );
   useImperativeHandle(
-    handleRef,
+    ref,
     () => ({
       handleKey: (key: string, shiftKey: boolean): boolean => {
         if (key === 'Tab') {
-          cycleSection(shiftKey);
+          chooseSection(stepSection(sections, section, shiftKey));
           return true;
         }
-        return moveOrPick(key, rows, index, setIndex, onSelect);
+        if (key === 'ArrowDown' || key === 'ArrowUp') {
+          if (rows.length === 0) return false;
+          const step = key === 'ArrowDown' ? 1 : -1;
+          setHighlight((Math.max(index, 0) + step + rows.length) % rows.length);
+          return true;
+        }
+        if (key === 'Enter') {
+          const row = rows[index];
+          if (!row) return false;
+          onSelect(row, 'keyboard');
+          return true;
+        }
+        return false;
       },
-      cycleSection,
     }),
-    [cycleSection, rows, index, setIndex, onSelect],
+    [chooseSection, sections, section, rows, index, onSelect],
   );
 
   const label = section === 'all' ? 'results' : SECTION_LABELS[section].toLowerCase();
@@ -876,7 +505,7 @@ function AllView({
             type='button'
             onClick={() => chooseSection('all')}
             className='ml-1.5 font-medium text-foreground underline-offset-2 hover:underline'
-            data-track-category={trackCategory}
+            data-track-category={TRACK_CATEGORY}
             data-track-name='MENTION_MENU_SEARCH_ALL'
           >
             Search everything
@@ -907,9 +536,8 @@ function AllView({
         onPointerHighlight={() => {
           if (i === index) return;
           pointerIndex.current = i;
-          setIndex(i);
+          setHighlight(i);
         }}
-        trackCategory={trackCategory}
       />
     );
   };
@@ -937,7 +565,7 @@ function AllView({
                   ? 'inline-flex h-8 shrink-0 items-center gap-2 rounded-lg bg-accent px-2 text-sm text-foreground'
                   : 'inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground'
               }
-              data-track-category={trackCategory}
+              data-track-category={TRACK_CATEGORY}
               data-track-name='MENTION_MENU_TAB'
               data-track-metadata={JSON.stringify({ tab: id })}
             >
@@ -982,13 +610,13 @@ function AllView({
       </div>
     </div>
   );
-}
+});
 
 // ── Rows ────────────────────────────────────────────────────────────────────
 
 const ICON_CLASS = 'shrink-0 text-muted-foreground';
 
-/** One 40px row of the all view; a message row previews the message on hover. */
+/** One 40px row; a message row previews the message on hover. */
 function MenuRow({
   row,
   index,
@@ -996,7 +624,6 @@ function MenuRow({
   picked,
   onPick,
   onPointerHighlight,
-  trackCategory,
 }: {
   row: MentionRow;
   index: number;
@@ -1004,7 +631,6 @@ function MenuRow({
   picked: boolean;
   onPick: (row: MentionRow, via: MentionPickVia) => void;
   onPointerHighlight: () => void;
-  trackCategory: string;
 }): ReactElement {
   const { content, trailing } = rowParts(row);
   const button = (
@@ -1018,7 +644,7 @@ function MenuRow({
         'flex h-10 w-full shrink-0 scroll-mb-12 cursor-pointer items-center gap-3 rounded-[10px] px-3 text-left text-[15px] text-foreground',
         highlighted && 'bg-accent',
       )}
-      data-track-category={trackCategory}
+      data-track-category={TRACK_CATEGORY}
       data-track-name='MENTION_MENU_PICK'
       data-track-metadata={JSON.stringify({
         kind: row.type === 'result' ? resultKind(row.result) : row.type,
@@ -1064,7 +690,7 @@ export function RowHoverCard({
 }): ReactElement {
   const scrollRoot = useContext(MenuScrollRootContext);
   // The card portals to the body, so it takes the z-index of the overlay
-  // hosting the menu (the ⌘K quick DM, a canvas comment) to stay on top of it.
+  // hosting the menu to stay on top of it.
   const overlayZ = useOverlayZIndex();
   const [open, setOpen] = useState(false);
   useEffect(() => {
@@ -1100,15 +726,18 @@ export function RowHoverCard({
   );
 }
 
-const Badge = ({ children }: { children: ReactNode }): ReactElement => (
-  <span className='rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground'>{children}</span>
-);
-
 /** A row's icon and text, and what sits at its right edge. */
 function rowParts(row: MentionRow): { content: ReactNode; trailing?: ReactNode } {
   switch (row.type) {
     case 'person':
-      return personParts(row.person);
+      return {
+        content: (
+          <>
+            <Avatar userId={row.person.id} size='xs' showActiveStatus={false} />
+            <span className='min-w-0 truncate'>{row.person.name}</span>
+          </>
+        ),
+      };
     case 'channel':
       return {
         content: (
@@ -1143,53 +772,6 @@ function rowParts(row: MentionRow): { content: ReactNode; trailing?: ReactNode }
         trailing: <span className='text-sm text-muted-foreground'>{row.subtitle}</span>,
       };
   }
-}
-
-function personParts(person: MentionResult): { content: ReactNode; trailing?: ReactNode } {
-  if (person.isSpecial) {
-    return {
-      content: (
-        <>
-          <AtMark size={16} className={ICON_CLASS} />
-          <span className='shrink-0'>@{person.name}</span>
-          {person.description && (
-            <span className='min-w-0 truncate text-muted-foreground'>{person.description}</span>
-          )}
-        </>
-      ),
-    };
-  }
-  if (person.type === 'group') {
-    return {
-      content: (
-        <>
-          <UserThree size={16} className={ICON_CLASS} />
-          <span className='min-w-0 truncate'>
-            {person.alias ? `@${person.alias}` : person.name}
-          </span>
-          {person.alias && person.name !== person.alias && (
-            <span className='min-w-0 truncate text-muted-foreground'>{person.name}</span>
-          )}
-        </>
-      ),
-      ...(person.isDeactivated ? { trailing: <Badge>Deactivated</Badge> } : {}),
-    };
-  }
-  const badges = [
-    person.isChannelMember === false && <Badge key='member'>Not in channel</Badge>,
-    person.isDeactivated && <Badge key='deactivated'>Deactivated</Badge>,
-  ].filter(Boolean);
-  return {
-    content: (
-      <>
-        <Avatar userId={person.id} size='xs' showActiveStatus={false} />
-        <span className={cn('min-w-0 truncate', person.isDeactivated && 'text-muted-foreground')}>
-          {person.name}
-        </span>
-      </>
-    ),
-    ...(badges.length > 0 ? { trailing: badges } : {}),
-  };
 }
 
 const senderOf = (result: DisplaySearchResult): string =>

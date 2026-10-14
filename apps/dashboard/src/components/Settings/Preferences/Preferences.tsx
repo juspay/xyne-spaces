@@ -906,7 +906,6 @@ const MessagingSection: FC<{ state: PreferencesState }> = ({ state }) => (
         onCheckedChange={state.setAllowThreadBroadcastMentions}
       />
     </div>
-    <MentionMenuPreference />
     <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
       <div>
         <p className='text-sm font-medium text-foreground'>Show thread tags</p>
@@ -941,26 +940,6 @@ const MessagingSection: FC<{ state: PreferencesState }> = ({ state }) => (
     <RelatedContextPreference />
   </div>
 );
-
-/** What "@" opens in the composers — kept on this device (userPreferencesMachine). */
-const MentionMenuPreference: FC = () => {
-  const mode = useUserPreference('mentionMenuMode');
-  return (
-    <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
-      <div>
-        <p className='text-sm font-medium text-foreground'>@ menu</p>
-        <p className='text-xs text-muted-foreground mt-0.5'>
-          Show channels, messages, files, canvases and tickets when you type @
-        </p>
-      </div>
-      <Switch
-        id='mention-menu-mode'
-        checked={mode === 'all'}
-        onCheckedChange={on => setUserPreference('mentionMenuMode', on ? 'all' : 'people')}
-      />
-    </div>
-  );
-};
 
 /**
  * Related conversations while writing — kept on this device (userPreferencesMachine),

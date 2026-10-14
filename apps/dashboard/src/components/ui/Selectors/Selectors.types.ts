@@ -7,9 +7,6 @@ export interface MentionSelectorProps {
   onMentionSearch?: (query: string) => void;
   onMentionSelect?: (mention: MentionResult) => void;
   triggerChar?: '@' | '#'; // Which trigger character to use (default: '@')
-  /** "@" may open the all-context menu when the user turned it on in Settings. Only
-   *  for editors that hold channel mentions and Xyne links (the chat InputBox). */
-  allowAllMode?: boolean;
 }
 
 export interface CommandItem {

@@ -170,18 +170,15 @@ export function pickFromChannel(
 }
 
 /**
- * What the composer attaches for a row of the @ menu. Null for rows that are
- * not context: groups and @channel/@here tag people in a chat, but name no one
- * the agent can read about.
+ * What the composer attaches for a row of the @ menu. Null for a row that is
+ * not context: only a person is, never a group or @channel/@here.
  */
 export function rowToPick(row: MentionRow): PickedContext | null {
   switch (row.type) {
     case 'person': {
       const { person } = row;
-      if (person.isSpecial || person.type !== 'user') return null;
-      // The chat composer's list marks you "Name (you)"; the pill is just the name.
-      const name = person.name.replace(/ \(you\)$/, '').trim();
-      return name ? { kind: 'person', id: person.id, label: name, mention: name } : null;
+      if (person.isSpecial || person.type !== 'user' || !person.name) return null;
+      return { kind: 'person', id: person.id, label: person.name, mention: person.name };
     }
     case 'channel':
       return pickFromChannel(row.channel, row.displayName);

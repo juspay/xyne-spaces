@@ -17,7 +17,6 @@ import type { CommandDef } from '@xyne/shared/commands';
 import { cn } from '../../utils/classNames';
 import useMeasure from '../../hooks/useMeasure';
 import { posthogService } from '../../services/Analytics/posthogService';
-import { useUserPreference } from '../../machines/userPreferencesMachine';
 import { LinkSyncPlugin } from '../ui/TipTapExtensions/LinkSyncPlugin';
 import { VoiceInput, type VoiceInputHandle } from '../ui/InputBox/VoiceInput';
 import { AttachmentPreview, MediaViewer } from '../ui/files';
@@ -28,7 +27,6 @@ import type {
   ComposerProps,
   ComposerTrayItem,
   ContextRef,
-  OpenTriggerOptions,
   PickedContext,
 } from './Composer.types';
 import {
@@ -39,7 +37,7 @@ import {
   refKey,
   rowToPick,
 } from './Composer.utils';
-import { ContextMention, VoiceShimmerMark, mentionRefs } from './ComposerEditor';
+import { CommandHighlight, ContextMention, VoiceShimmerMark, mentionRefs } from './ComposerEditor';
 import { ChannelMenu, CommandList } from './ComposerMenus';
 import {
   MENTION_MENU_CONTAINER,
@@ -98,9 +96,6 @@ interface MentionSession {
   queryFrom: number;
   /** Opened by a typed "@" (which deleting closes it), not by a pick. */
   typedAt: boolean;
-  /** Shows the all-context view whatever the preference ("Add context",
-   *  "Search everything"); carried across picks, gone with the session. */
-  mode?: 'all';
 }
 
 interface DocMapping {
@@ -110,13 +105,7 @@ interface DocMapping {
 
 const sameTrigger = (a: ActiveTrigger | null, b: ActiveTrigger | null): boolean =>
   a === b ||
-  (!!a &&
-    !!b &&
-    a.char === b.char &&
-    a.query === b.query &&
-    a.from === b.from &&
-    a.to === b.to &&
-    a.mode === b.mode);
+  (!!a && !!b && a.char === b.char && a.query === b.query && a.from === b.from && a.to === b.to);
 
 /** Plain text → paragraphs, for text the host sets (a prompt, a cleared box). */
 const textToDoc = (text: string): { type: 'doc'; content: object[] } => ({
@@ -148,7 +137,6 @@ function readSession(editor: Editor, session: MentionSession): ActiveTrigger | n
     query: typed.replace(/^[@\s]+/, ''),
     from: session.from,
     to: caret,
-    ...(session.mode ? { mode: session.mode } : {}),
   };
 }
 
@@ -234,8 +222,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const triggerRef = useRef<ActiveTrigger | null>(null);
   const dismissedAtRef = useRef<number | null>(null);
   const sessionRef = useRef<MentionSession | null>(null);
-  /** Where an "@" typed for "Add context" sits until its picker opens. */
-  const allModeAtRef = useRef<number | null>(null);
   const lastEmittedRef = useRef(value);
   // Programmatic edits (clear, setText, removing a pill's mentions) must not
   // read as the user deleting a mention.
@@ -248,14 +234,9 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
   const refreshTrigger = useCallback((editor: Editor, change?: DocMapping): void => {
     const session = sessionRef.current;
-    if (change?.docChanged) {
-      if (session) {
-        session.from = change.mapping.map(session.from, -1);
-        session.queryFrom = change.mapping.map(session.queryFrom, -1);
-      }
-      if (allModeAtRef.current !== null) {
-        allModeAtRef.current = change.mapping.map(allModeAtRef.current, -1);
-      }
+    if (session && change?.docChanged) {
+      session.from = change.mapping.map(session.from, -1);
+      session.queryFrom = change.mapping.map(session.queryFrom, -1);
     }
     // An open @ picker survives blur (it reappears on refocus) and spaces.
     let next = session ? readSession(editor, session) : null;
@@ -264,18 +245,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       const found = editor.isFocused ? readTrigger(editor) : null;
       if (!found) dismissedAtRef.current = null;
       next = found && found.from !== dismissedAtRef.current ? found : null;
-      // The "@" that "Add context" typed opens the all-context view; once the
-      // editor has focus it either just opened or never will.
-      const allAt = allModeAtRef.current;
-      if (editor.isFocused) allModeAtRef.current = null;
       if (next?.char === '@') {
-        const all = allAt === next.from;
-        sessionRef.current = {
-          from: next.from,
-          queryFrom: next.from + 1,
-          typedAt: true,
-          ...(all ? { mode: 'all' as const } : {}),
-        };
+        sessionRef.current = { from: next.from, queryFrom: next.from + 1, typedAt: true };
         next = readSession(editor, sessionRef.current);
       }
     }
@@ -357,6 +328,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       LinkSyncPlugin,
       ContextMention,
       VoiceShimmerMark,
+      // A leading "/design" reads as picked, like a channel pill — aliases too.
+      CommandHighlight.configure({
+        isCommand: name =>
+          latest.current.commands.some(c => c.name === name || !!c.aliases?.includes(name)),
+      }),
     ],
     content: textToDoc(value),
     onCreate: ({ editor: created }) => {
@@ -538,7 +514,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   }, []);
 
   const openTrigger = useCallback(
-    (char: '@' | '/', options?: OpenTriggerOptions): void => {
+    (char: '@' | '/'): void => {
       const current = editorRef.current;
       if (!current) return;
       dismissedAtRef.current = null;
@@ -562,11 +538,9 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         current.chain().focus().insertContentAt(1, '/').setTextSelection(2).run();
         return;
       }
-      // "Add context" while an @ picker is open (a typed "@" showing people):
-      // widen that picker rather than typing a second "@" into its search.
-      const live = sessionRef.current;
-      if (options?.mode === 'all' && live) {
-        live.mode = 'all';
+      // "Add context" while an @ picker is already open: back to it, rather
+      // than typing a second "@" into its search.
+      if (sessionRef.current) {
         current.commands.focus();
         refreshTrigger(current);
         return;
@@ -574,20 +548,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       const { $from } = current.state.selection;
       const before = $from.parent.textBetween(0, $from.parentOffset, undefined, ATOM_PLACEHOLDER);
       const lead = before === '' || /[\s(]$/.test(before) ? '' : ' ';
-      allModeAtRef.current = null;
       current.chain().focus().insertContent(`${lead}@`).run();
-      if (options?.mode !== 'all') return;
-      // The caret sits just after the new "@". Its picker is open already when
-      // the editor kept focus; otherwise it opens when focus comes back (a
-      // frame later), so it is remembered by where it is.
-      const at = current.state.selection.from - 1;
-      const session = sessionRef.current;
-      if (session?.from === at) {
-        session.mode = 'all';
-        refreshTrigger(current);
-      } else {
-        allModeAtRef.current = at;
-      }
     },
     [refreshTrigger],
   );
@@ -655,7 +616,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       if (!latest.current.onPick(item)) return false;
       // Seen before insertion, so the sync doesn't attach it a second time.
       mentionedRef.current.set(refKey(item), { kind: item.kind, id: item.id });
-      const mode = sessionRef.current?.mode;
       sessionRef.current = null;
       current
         .chain()
@@ -671,12 +631,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       if (stays) {
         // The picker stays for the next pick, searching what is typed from here.
         const caret = current.state.selection.from;
-        sessionRef.current = {
-          from: caret,
-          queryFrom: caret,
-          typedAt: false,
-          ...(mode ? { mode } : {}),
-        };
+        sessionRef.current = { from: caret, queryFrom: caret, typedAt: false };
         refreshTrigger(current);
       }
       return true;
@@ -770,20 +725,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const canSend = !isEmpty && !isStreaming;
   const showVoiceMode = !!onEnterVoiceMode && isEmpty && !isStreaming;
 
-  // A typed "@" opens what the user chose in Settings; "Add context" and
-  // "Search everything" open the all-context view for that one picker.
-  const preferredMentionMode = useUserPreference('mentionMenuMode');
-  const mentionMode = trigger?.mode ?? preferredMentionMode;
-
-  /** "Search everything" in the people list: this picker becomes the all-context view. */
-  const showAllMentions = useCallback((): void => {
-    const current = editorRef.current;
-    const session = sessionRef.current;
-    if (!current || !session) return;
-    session.mode = 'all';
-    refreshTrigger(current);
-  }, [refreshTrigger]);
-
   const isMentionPicked = useCallback(
     (row: MentionRow): boolean => {
       const item = rowToPick(row);
@@ -825,15 +766,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       menu = (
         <MentionMenu
           ref={mentionRef}
-          mode={mentionMode}
           query={trigger.query}
           defaultSection='people'
           sections={MENTION_MENU_SECTIONS}
-          includeDirectMessages
           isPicked={isMentionPicked}
           onSelect={pickMention}
-          onRequestAllMode={showAllMentions}
-          trackCategory='XyneAI'
         />
       );
     } else if (trigger.char === '#') {
@@ -853,7 +790,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           role='presentation'
           onMouseDown={e => e.preventDefault()}
           className={cn(
-            trigger?.char === '@' ? MENTION_MENU_CONTAINER[mentionMode] : LIST_MENU_SURFACE,
+            trigger?.char === '@' ? MENTION_MENU_CONTAINER : LIST_MENU_SURFACE,
             // Last, so the composer's width caps the surface's own max width.
             'absolute left-2 z-40 max-w-[calc(100%-16px)] duration-150 animate-in fade-in-0',
             menuSide === 'bottom'
@@ -939,8 +876,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                   plus={plus}
                   collections={<CollectionsSubmenu knowledge={plus.knowledge} />}
                   agents={agent ? <AgentsSubmenu agent={agent} /> : null}
-                  // "Add context" opens the all-context view, whatever "@" is set to.
-                  onTrigger={char => openTrigger(char, char === '@' ? { mode: 'all' } : undefined)}
+                  onTrigger={openTrigger}
                   returnFocus={returnFocus}
                   side={menuSide}
                 />

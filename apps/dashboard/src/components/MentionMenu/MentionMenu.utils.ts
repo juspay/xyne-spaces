@@ -8,9 +8,6 @@ import type { DisplaySearchResult } from '../../types/search';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
-/** What "@" opens: the people list, or the tabbed all-context view. */
-export type MentionMenuMode = 'people' | 'all';
-
 /** A tab of the all-context view. 'all' is the mixed view (recent people and channels before anything is typed). */
 export type MentionSection =
   | 'all'
@@ -22,7 +19,7 @@ export type MentionSection =
   | 'tickets'
   | 'apps';
 
-/** The seven tabs of the reference, in order. Hosts that can attach artifact apps append 'apps'. */
+/** The seven tabs of the reference, in order. The composer appends 'apps' (artifact apps). */
 export const MENTION_SECTIONS: readonly MentionSection[] = [
   'all',
   'people',
@@ -33,10 +30,7 @@ export const MENTION_SECTIONS: readonly MentionSection[] = [
   'tickets',
 ];
 
-/**
- * One selectable row. `id` is unique across the rows of one render — the chat
- * composer feeds these rows to a ProseMirror selector plugin whose items need `{ id }`.
- */
+/** One selectable row. `id` is unique across the rows of one render (it keys the row). */
 export type MentionRow =
   | { type: 'person'; id: string; person: MentionResult }
   | { type: 'channel'; id: string; channel: Channel; displayName: string }
@@ -296,7 +290,7 @@ export function buildAllSections({
       ? ALL_RESULT_SECTIONS.map(section => ({ section, rows: resultRowsFor(section, results) }))
       : []),
   ];
-  // One id once across the whole tab, so the keyboard plugin's items stay unique.
+  // One id once across the whole tab, so every row keys once.
   const seen = new Set<string>();
   return groups
     .map(group => ({ ...group, rows: uniqueRows(group.rows, seen) }))
@@ -325,9 +319,9 @@ export const toMentionPerson = (user: PersonLike): MentionResult => ({
 });
 
 /**
- * The menu's own people list (hosts that pass no `people`): with nothing
- * typed, whoever you DM'd most recently, then everyone else; with a query, the
- * matches. Never yourself, each person once.
+ * The menu's people list: with nothing typed, whoever you DM'd most recently,
+ * then everyone else; with a query, the matches. Never yourself, each person
+ * once.
  */
 export function peopleSuggestions({
   recent,

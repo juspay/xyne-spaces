@@ -14,15 +14,6 @@ export interface ActiveTrigger {
   /** Doc range covering the trigger character and its query. */
   from: number;
   to: number;
-  /** "@" only: this picker shows the all-context view whatever the user's
-   *  @ menu preference (opened by "Add context", or widened by "Search
-   *  everything"). It ends with the picker. */
-  mode?: 'all';
-}
-
-export interface OpenTriggerOptions {
-  /** "@" opens the all-context view rather than the preferred one. */
-  mode?: 'all';
 }
 
 /** Everything the @ and # menus can attach. One kind per pill family. */
@@ -217,7 +208,7 @@ export interface ComposerHandle {
   setText: (text: string) => void;
   insertText: (text: string) => void;
   /** Types a trigger at the caret, exactly as if the key was pressed. */
-  openTrigger: (char: '@' | '/', options?: OpenTriggerOptions) => void;
+  openTrigger: (char: '@' | '/') => void;
   /** A menu is open — Enter selects in it rather than sending. */
   isMenuOpen: () => boolean;
   /** Strip unfinished dictation right before a send. */
