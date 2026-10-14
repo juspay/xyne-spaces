@@ -302,16 +302,17 @@ const CallDetailsSheet: React.FC<CallDetailsSheetProps> = ({
     }
   }, [call]);
 
+  const canManage = !!call && isScheduledCallManageable(call, currentUserId);
   const canEdit = useMemo(
     () =>
-      !!call &&
-      (isScheduledCallManageable(call, currentUserId) ||
+      canManage ||
+      (!!call &&
         canEditScheduledCallParticipants(
           call,
           currentUserId,
           stateMachineActor.getSnapshot().context.visibleChannels,
         )),
-    [call, currentUserId],
+    [call, canManage, currentUserId],
   );
   const isRosterLoaded = fullParticipantsDetails.type === 'complete';
   const handleEditPress = useCallback((): void => {
@@ -330,25 +331,38 @@ const CallDetailsSheet: React.FC<CallDetailsSheetProps> = ({
 
   const handleDeletePress = useCallback(() => {
     if (!call) return;
+    const seriesId = call.recurringSeriesId;
+    const cancel = (run: () => Promise<void>) => async (): Promise<void> => {
+      try {
+        await run();
+        dismissSheetAfter(() => {
+          onDeleted?.(call.id);
+        });
+      } catch {
+        Alert.alert('Error', 'Failed to delete call');
+      }
+    };
     Alert.alert(
       'Delete Call',
-      'Are you sure you want to cancel this call?',
+      seriesId
+        ? 'Cancel just this call, or every call in the series?'
+        : 'Are you sure you want to cancel this call?',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Delete',
+          text: seriesId ? 'This call' : 'Delete',
           style: 'destructive',
-          onPress: async (): Promise<void> => {
-            try {
-              await callService.cancelScheduledCall(call.externalId);
-              dismissSheetAfter(() => {
-                onDeleted?.(call.id);
-              });
-            } catch {
-              Alert.alert('Error', 'Failed to delete call');
-            }
-          },
+          onPress: cancel(() => callService.cancelScheduledCall(call.externalId)),
         },
+        ...(seriesId
+          ? [
+              {
+                text: 'Entire series',
+                style: 'destructive' as const,
+                onPress: cancel(() => callService.cancelRecurringSeries(seriesId)),
+              },
+            ]
+          : []),
       ],
       { cancelable: true },
     );
@@ -539,7 +553,7 @@ const CallDetailsSheet: React.FC<CallDetailsSheetProps> = ({
                             <Text className='text-sm font-medium text-foreground'>Copy link</Text>
                           </Pressable>
                         )}
-                        {call.isOutgoing && (
+                        {canManage && (
                           <Pressable
                             onPress={handleDeletePress}
                             className='flex-1 h-16 gap-1 items-center justify-center rounded-2xl bg-secondary active:bg-secondary/80'

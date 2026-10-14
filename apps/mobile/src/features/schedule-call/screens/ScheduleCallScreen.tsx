@@ -55,9 +55,6 @@ export default function ScheduleCallScreen({ onClose }: ScheduleCallScreenProps)
   const [editCall] = useState(getEditSession);
   const isEditMode = editCall !== null;
   const form = useScheduleCallForm(editCall);
-  const seriesSwitchLabel = form.participantsOnly
-    ? 'Apply these people to all calls in this series'
-    : 'Apply to all calls in this series';
   const { postUpdates, selectRepeat, participants, setParticipants, guests, setGuests } = form;
   const placeholderColor = useCSSVariable('--color-settings-description') as string;
 
@@ -245,7 +242,7 @@ export default function ScheduleCallScreen({ onClose }: ScheduleCallScreenProps)
               onTimeChange={form.setEndTime}
               error={form.endsAtError}
             />
-            {isEditMode && !form.applyToSeries ? null : (
+            {isEditMode ? null : (
               <>
                 <ListRowDivider inset={0} />
                 <ListRow
@@ -276,34 +273,6 @@ export default function ScheduleCallScreen({ onClose }: ScheduleCallScreenProps)
             <ExternalGuestsCard guests={guests} onChange={setGuests} onAdded={showGuestList} />
           </View>
         )}
-
-        {editCall?.recurringSeriesId ? (
-          <SectionCard className='mt-3'>
-            <ListRow
-              icon={Repeat}
-              label='Apply to the whole series'
-              trailing={
-                <Switch
-                  isSelected={form.applyToSeries}
-                  isDisabled={!form.canApplyToSeries}
-                  onSelectedChange={form.setApplyToSeries}
-                  accessibilityLabel={seriesSwitchLabel}
-                />
-              }
-              onPress={
-                form.canApplyToSeries
-                  ? (): void => form.setApplyToSeries(!form.applyToSeries)
-                  : undefined
-              }
-            >
-              <Text className='text-xs' style={{ color: placeholderColor }}>
-                {form.participantsOnly
-                  ? 'These people are added to every call in this series, not just this one.'
-                  : 'Changes are saved to every call in this series, not just this one.'}
-              </Text>
-            </ListRow>
-          </SectionCard>
-        ) : null}
 
         {form.participantsOnly ? null : (
           <>

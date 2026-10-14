@@ -3,7 +3,6 @@
 // the invitation editor are reduced for v1.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { useQuery } from '@/src/hooks/useQuery';
 import { useSelf } from '@/src/hooks/useUsers';
 import { stateMachineActor } from '@/src/machines/stateMachine';
 import {
@@ -14,7 +13,6 @@ import {
 } from '@/src/services/Call/callService';
 import { mergeTimePart } from '@/src/utils/timeSelection';
 import { showMessageToast } from '@/src/utils/toast';
-import { queries } from '@/src/zero/queries';
 
 import {
   mergeDateWithTime,
@@ -23,7 +21,6 @@ import {
 } from '../utils/callTimeValidation';
 import { getDefaultScheduledStartTime, getWeekdayOccurrence, toHHMM } from '../utils/dateTime';
 import { getEditPrefill } from '../utils/editPrefill';
-import { getRecurrencePreset } from '../utils/recurrencePreset';
 import { toRecipients } from '../utils/recipients';
 import type { EditCallData } from '../utils/types';
 import { useChannelMembers } from './useChannelMembers';
@@ -143,16 +140,10 @@ export const useScheduleCallForm = (editCall: EditCallData | null = null): Sched
   } = recurrence;
 
   const isEditMode = editCall !== null;
-  const seriesId = editCall?.recurringSeriesId ?? null;
-  const [applyToSeries, setApplyToSeriesState] = useState(false);
-  const [repeatTouched, setRepeatTouched] = useState(false);
-  const [hasCustomRule, setHasCustomRule] = useState(false);
-  const [seriesData, seriesDetails] = useQuery(
-    queries.recurringSeriesById({ seriesId: seriesId ?? '' }),
-    { enabled: seriesId !== null },
-  );
-  const canApplyToSeries = seriesId !== null && seriesDetails.type === 'complete' && !!seriesData;
-  const isSeriesSubmit = isEditMode ? applyToSeries : isRecurring;
+  // ponytail: editing one occurrence only. "Apply to the whole series" needs per-field change
+  // tracking (the series endpoint shifts every occurrence from startTime, and replaces the people
+  // and guest lists) and must not send the phone's timezone; add it with those in place.
+  const isSeriesSubmit = !isEditMode && isRecurring;
 
   const selfId = self?.id;
   const participantsOnly =
@@ -212,13 +203,11 @@ export const useScheduleCallForm = (editCall: EditCallData | null = null): Sched
   }, []);
 
   // ── Repeat (the dashboard dropdown's presets; Custom… comes later) ─────────
-  const repeatOptionId: RepeatOptionId = hasCustomRule
-    ? 'custom'
-    : isRecurring
-      ? REPEAT_OPTION_BY_FREQUENCY[recurrenceFrequency]
-      : 'none';
+  const repeatOptionId: RepeatOptionId = isRecurring
+    ? REPEAT_OPTION_BY_FREQUENCY[recurrenceFrequency]
+    : 'none';
 
-  const applyRepeat = useCallback(
+  const selectRepeat = useCallback(
     (id: RepeatChoice): void => {
       if (id === 'none') {
         setIsRecurring(false);
@@ -240,41 +229,6 @@ export const useScheduleCallForm = (editCall: EditCallData | null = null): Sched
     [setIsRecurring, setMonthlyType, setRecurrenceDays, setRecurrenceFrequency],
   );
 
-  const selectRepeat = useCallback(
-    (id: RepeatChoice): void => {
-      setRepeatTouched(true);
-      setHasCustomRule(false);
-      applyRepeat(id);
-    },
-    [applyRepeat],
-  );
-
-  const seriesRule = seriesData?.recurrenceRule;
-  useEffect(() => {
-    if (!seriesRule) return;
-    const preset = getRecurrencePreset(seriesRule);
-    if (preset === 'custom') {
-      setIsRecurring(true);
-      setHasCustomRule(true);
-      return;
-    }
-    applyRepeat(preset);
-  }, [applyRepeat, seriesRule, setIsRecurring]);
-
-  // Turning "apply to the series" off drops the changes made under it, as on the dashboard.
-  const setApplyToSeries = useCallback(
-    (on: boolean): void => {
-      setApplyToSeriesState(on);
-      if (on || !prefill) return;
-      // The reset below drops the channel's exclusions; let the edit seeding put them back.
-      exclusionsSeeded.current = false;
-      setRange({ startsAt: prefill.startsAt, endsAt: prefill.endsAt });
-      setParticipants(prefill.participants);
-      setGuests(prefill.guests);
-    },
-    [prefill],
-  );
-
   const monthlyRepeatLabel = useMemo(() => {
     const { weekday, ordinalWord } = getWeekdayOccurrence(startsAt);
     return `Monthly on ${ordinalWord} ${weekday}`;
@@ -289,7 +243,6 @@ export const useScheduleCallForm = (editCall: EditCallData | null = null): Sched
       return { startsAtError: startsAtChanged ? startsAtError : null, endsAtError };
     }
     const recurringError = validateRecurringCallTimes(recurringStartTime, recurringEndTime);
-    if (isEditMode) return { startsAtError: null, endsAtError: endsAtError ?? recurringError };
     const tooFar =
       startsAt.getTime() - Date.now() > MAX_SERIES_START_AHEAD_MS
         ? 'A repeating call can start at most 60 days ahead'
@@ -300,7 +253,6 @@ export const useScheduleCallForm = (editCall: EditCallData | null = null): Sched
     };
   }, [
     endsAt,
-    isEditMode,
     isSeriesSubmit,
     participantsOnly,
     recurringEndTime,
@@ -330,8 +282,11 @@ export const useScheduleCallForm = (editCall: EditCallData | null = null): Sched
   const canSubmit = !isSubmitting && blockers.length === 0;
 
   // ── Submit (payload as the dashboard's onSubmit builds it) ────────────────
+  // State alone can let a second tap through before React re-renders; the ref closes that gap.
+  const inFlight = useRef(false);
   const submit = useCallback(async (): Promise<boolean> => {
-    if (!canSubmit) return false;
+    if (!canSubmit || inFlight.current) return false;
+    inFlight.current = true;
     setIsSubmitting(true);
     try {
       const recipients = toRecipients(participants, channelMembers);
@@ -345,42 +300,22 @@ export const useScheduleCallForm = (editCall: EditCallData | null = null): Sched
       };
 
       if (editCall) {
-        if (participantsOnly) {
-          const request = { targetUserIds: participants.users.map(user => user.id) };
-          if (applyToSeries && seriesId) {
-            await callService.updateRecurringSeries(seriesId, request);
-            showMessageToast('Recurring series updated', 'success');
-          } else {
-            await callService.updateScheduledCall(editCall.externalId, request);
-            showMessageToast('Call updated', 'success');
-          }
-          return true;
-        }
-        if (applyToSeries && seriesId) {
-          await callService.updateRecurringSeries(seriesId, {
-            title: title.trim(),
-            ...recipients,
-            ...callUpdatesChannel,
-            timezone: invitation.timezone,
-            startTime: recurringStartTime,
-            endTime: recurringEndTime,
-            externalInvitees: guests,
-            ...(repeatTouched && isRecurring ? { recurrenceRule: buildRrule() } : {}),
-          });
-          showMessageToast('Recurring series updated', 'success');
-        } else {
-          await callService.updateScheduledCall(editCall.externalId, {
-            title: title.trim(),
-            ...(startsAtChanged ? { startsAt: startsAt.getTime() } : {}),
-            ...(endsAt.getTime() !== new Date(editCall.endsAt).getTime()
-              ? { endsAt: endsAt.getTime() }
-              : {}),
-            ...recipients,
-            ...callUpdatesChannel,
-            externalInvitees: guests,
-          });
-          showMessageToast('Call updated', 'success');
-        }
+        await callService.updateScheduledCall(
+          editCall.externalId,
+          participantsOnly
+            ? { targetUserIds: participants.users.map(user => user.id) }
+            : {
+                title: title.trim(),
+                ...(startsAtChanged ? { startsAt: startsAt.getTime() } : {}),
+                ...(endsAt.getTime() !== new Date(editCall.endsAt).getTime()
+                  ? { endsAt: endsAt.getTime() }
+                  : {}),
+                ...recipients,
+                ...callUpdatesChannel,
+                externalInvitees: guests,
+              },
+        );
+        showMessageToast('Call updated', 'success');
         return true;
       }
 
@@ -429,10 +364,10 @@ export const useScheduleCallForm = (editCall: EditCallData | null = null): Sched
       );
       return false;
     } finally {
+      inFlight.current = false;
       setIsSubmitting(false);
     }
   }, [
-    applyToSeries,
     canSubmit,
     channelMembers,
     editCall,
@@ -440,8 +375,6 @@ export const useScheduleCallForm = (editCall: EditCallData | null = null): Sched
     guests,
     isRecurring,
     participantsOnly,
-    repeatTouched,
-    seriesId,
     startsAtChanged,
     postUpdates.postCallUpdates,
     selectedChannelId,
@@ -467,15 +400,12 @@ export const useScheduleCallForm = (editCall: EditCallData | null = null): Sched
     startsAtError: timeErrors.startsAtError,
     endsAtError: timeErrors.endsAtError,
     repeatOptionId,
-    repeatLabel: hasCustomRule ? 'Custom' : recurrence.recurrenceLabel,
+    repeatLabel: recurrence.recurrenceLabel,
     monthlyRepeatLabel,
     selectRepeat,
     isEditMode,
     participantsOnly,
     lockedUserIds,
-    canApplyToSeries,
-    applyToSeries,
-    setApplyToSeries,
     participants,
     setParticipants,
     setExcludedMembers,
@@ -509,9 +439,6 @@ export interface ScheduleCallForm {
   isEditMode: boolean;
   participantsOnly: boolean;
   lockedUserIds: ReadonlySet<string> | undefined;
-  canApplyToSeries: boolean;
-  applyToSeries: boolean;
-  setApplyToSeries: (on: boolean) => void;
   participants: ScheduleCallParticipants;
   setParticipants: (participants: ScheduleCallParticipants) => void;
   /** Sets which members of the picked channel are left out. */
