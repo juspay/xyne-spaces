@@ -378,9 +378,10 @@ class TicketDuplicateService {
    * the only path where a machine writes to the ticket afterwards, so if it fills a
    * configured scope key, the run below is the first one able to find anything.
    *
-   * APPEND-ONLY: the creation-time result stands. createMany(skipDuplicates) plus the
-   * unique (source, target, relationType) constraint means re-running can add rows but
-   * never duplicates one, and it never removes a link a human may have acted on.
+   * APPEND-ONLY: the creation-time result stands. A pre-insert existence check (either
+   * direction, any duplicate relation type) plus the unique (source, target,
+   * relationType) constraint means re-running can add a row but never duplicates one,
+   * and it never removes a link a human may have acted on.
    *
    * No-ops unless the channel is scoped AND one of the fields classification just wrote
    * is a configured scope key — otherwise the search would be identical to the one that
@@ -452,8 +453,8 @@ class TicketDuplicateService {
    * Searches as the ticket's creator and as of its creation, like the creation-time
    * run, so the result doesn't depend on who opened it or when: only tickets created
  * before it, within the desk's window counted back from its creation. Excludes the
- * ticket's parents (a sub-ticket is not a duplicate of the ticket it came from),
- * tickets already linked as duplicates, and dismissed candidates.
+ * ticket's parents (a sub-ticket is not a duplicate of the ticket it came from)
+ * and dismissed candidates.
    */
   private async detectForSavedTicket(
     ticket: NonNullable<Awaited<ReturnType<TicketDuplicateService['findTicketForDetection']>>>,
@@ -478,7 +479,7 @@ class TicketDuplicateService {
       };
     }
 
-    const [savedValues, parentMappings, duplicateReferences, referenceActivities] = await Promise.all([
+    const [savedValues, parentMappings, referenceActivities] = await Promise.all([
       prisma.formEntityValues.findMany({
         where: { entityId: ticket.id, entityType: 'TICKET' },
         orderBy: [{ version: 'desc' }, { updatedAt: 'desc' }],
@@ -488,13 +489,6 @@ class TicketDuplicateService {
       prisma.ticketSubTicketMapping.findMany({
         where: { subTicket: { mappedTicketId: ticket.id } },
         select: { ticketId: true },
-      }),
-      prisma.ticketReferenceMapping.findMany({
-        where: {
-          relationType: { in: DUPLICATE_RELATIONS },
-          OR: [{ sourceTicketId: ticket.id }, { targetTicketId: ticket.id }],
-        },
-        select: { sourceTicketId: true, targetTicketId: true },
       }),
       prisma.ticketActivity.findMany({
         where: { ticketId: ticket.id, activityType: ActivityType.REFERENCE_TICKET },
@@ -513,13 +507,8 @@ class TicketDuplicateService {
       .map(([counterpart]) => counterpart);
 
     const parentTicketIds = parentMappings.map(mapping => mapping.ticketId);
-    const excludeTicketIds = [
-      ...parentTicketIds,
-      ...duplicateReferences.map(reference =>
-        reference.sourceTicketId === ticket.id ? reference.targetTicketId : reference.sourceTicketId,
-      ),
-      ...dismissedTicketIds,
-    ];
+    // Search excludes parents and dismissed candidates only.
+    const excludeTicketIds = [...parentTicketIds, ...dismissedTicketIds];
     const scopeFieldValues = savedValues.map(v => ({ fieldId: v.fieldId, value: v.actualFieldValue }));
 
     // Linked duplicates are deliberately OUT of the fingerprint: a new link must not
@@ -944,32 +933,50 @@ class TicketDuplicateService {
         return noLink;
       }
 
-      const workspaceId = await resolveWorkspaceIdFromModel(prisma, 'project', { id: projectId });
-
-      const referenceRows = [
-        {
-          sourceTicketId: ticketId,
-          targetTicketId: duplicateCandidate.id,
-          workspaceId,
-          relationType: TicketReferenceRelation.DUPLICATE_POSSIBLE,
-          createdBy: ticketCreatedBy,
+      // An existing duplicate link to this counterpart — either direction, possible or
+      // confirmed — is the same duplicate. The unique key includes relationType, so
+      // relying on skipDuplicates alone would stack a POSSIBLE row next to a CONFIRMED
+      // one; check before inserting instead.
+      const existingDuplicateLink = await prisma.ticketReferenceMapping.findFirst({
+        where: {
+          relationType: { in: DUPLICATE_RELATIONS },
+          OR: [
+            { sourceTicketId: ticketId, targetTicketId: duplicateCandidate.id },
+            { sourceTicketId: duplicateCandidate.id, targetTicketId: ticketId },
+          ],
         },
-      ];
-
-      const { count } = await prisma.ticketReferenceMapping.createMany({
-        data: referenceRows,
-        skipDuplicates: true,
+        select: { id: true },
       });
+
+      let createdNow = false;
+      if (!existingDuplicateLink) {
+        const workspaceId = await resolveWorkspaceIdFromModel(prisma, 'project', { id: projectId });
+
+        const { count } = await prisma.ticketReferenceMapping.createMany({
+          data: [
+            {
+              sourceTicketId: ticketId,
+              targetTicketId: duplicateCandidate.id,
+              workspaceId,
+              relationType: TicketReferenceRelation.DUPLICATE_POSSIBLE,
+              createdBy: ticketCreatedBy,
+            },
+          ],
+          skipDuplicates: true,
+        });
+        createdNow = count > 0;
+      }
 
       logger.info('[TicketDuplicateService] Linked possible duplicate', {
         ticketId,
         targetTicketId: duplicateCandidate.id,
         confidence: analysis.confidence,
-        created: count > 0,
+        created: createdNow,
       });
 
-      // skipDuplicates makes an existing link a silent no-op; only report a link made now.
-      return { ...noLink, linkedTicketId: count > 0 ? duplicateCandidate.id : null };
+      // A re-finding of an existing link still means the ticket IS a duplicate of
+      // this candidate — report it regardless of whether the row was created now.
+      return { ...noLink, linkedTicketId: duplicateCandidate.id };
     } catch (error) {
       logger.error('Failed to persist duplicate ticket references', error);
       return null;
