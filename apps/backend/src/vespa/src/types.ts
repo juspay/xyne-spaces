@@ -232,7 +232,7 @@ export interface VespaChatContainerDocument extends VespaDocument {
   memberCount: number;
 }
 
-export interface VespaChatMessageDocument extends Omit<VespaDocument, 'orgId' | 'workspaceId'>, Partial<SdlcDiscussionFields> {
+export interface VespaChatMessageDocument extends Omit<VespaDocument, 'orgId' | 'workspaceId'>, SdlcFieldValues<SdlcDiscussionFields> {
   text: string;
   chunks: string[];
   links?: string[];
@@ -277,7 +277,7 @@ export interface VespaProjectDocument extends VespaDocument {
   updatedAt: number;
 }
 
-export interface VespaTicketDocument extends Omit<VespaDocument, 'orgId' | 'workspaceId'>, Partial<SdlcTicketFields> {
+export interface VespaTicketDocument extends Omit<VespaDocument, 'orgId' | 'workspaceId'>, SdlcFieldValues<SdlcTicketFields> {
   convId: string;
   userGroupId: string;
   channelRef: string;
@@ -366,7 +366,7 @@ export interface VespaChunkMeta {
   block_labels: string[];
 }
 
-export interface VespaFileDocument extends VespaDocument, Partial<SdlcFileFields> {
+export interface VespaFileDocument extends VespaDocument, SdlcFieldValues<SdlcFileFields> {
   fileName: string;
   description: string;
   chunks: string[];
@@ -679,6 +679,9 @@ export interface SdlcTicketFields {
   /** Every repository whose wiki holds an item it is linked from (sdlc_repository docIds). */
   sdlcRepoIds: string[];
 }
+
+/** SDLC fields as fed: each may be null, which leaves it unset (and clears it on an update). */
+export type SdlcFieldValues<T> = { [K in keyof T]?: T[K] | null };
 
 export const SDLC_DISCUSSION_FIELDS: readonly (keyof SdlcDiscussionFields)[] = ['sdlcContainerRef', 'sdlcDocumentId'];
 export const SDLC_TICKET_FIELDS: readonly (keyof SdlcTicketFields)[] = ['sdlcContainerIds', 'sdlcDocumentIds', 'sdlcRepoIds'];

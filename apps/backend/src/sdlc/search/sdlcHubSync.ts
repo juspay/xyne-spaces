@@ -14,10 +14,16 @@ import {
   sdlcRepositorySchema,
   SubApp,
   ticketSchema,
+  type SdlcDiscussionFields,
+  type SdlcFileFields,
+  type SdlcTicketFields,
   type VespaSchema,
+  type VespaSdlcContainerDocument,
+  type VespaSdlcRepositoryDocument,
 } from '@/vespa/src/types';
 import type { SdlcSearchSyncTarget, VespaJob } from '@/zero/vespa-injection/core/types';
-import { hubOfContainer, invalidateSdlcHubIndex, loadSdlcHubIndex } from './sdlcSearchIndex';
+import { hubOfContainer, invalidateSdlcHubIndex, loadSdlcHubIndex, sdlcFieldsForTicket } from './sdlcSearchIndex';
+import { mapSdlcRepository } from '@/zero/vespa-injection/core/mapper';
 import { requestSdlcSearchSync } from './sdlcSearchSync';
 
 const TAG = '[SDLC-SEARCH-SYNC]';
@@ -42,14 +48,17 @@ export interface SdlcHubSyncResult {
 
 /**
  * Brings one hub's search entries in line with Postgres:
- *  - feeds every track and folder (sdlc_container) and every attached repository;
- *  - re-places the hub's documents, uploads, tickets and conversation messages with
- *    field-scoped updates of their SDLC fields only (no content re-read, no re-embedding);
+ *  - feeds the tracks and folders (sdlc_container) and attached repositories whose entry in
+ *    Vespa differs from Postgres, or that Vespa does not have;
+ *  - re-places the hub's documents, uploads, tickets and conversation messages whose SDLC
+ *    fields differ, with field-scoped updates of those fields (the Vespa workers' usual
+ *    update path), and feeds in full the ones Vespa does not have;
  *  - clears the SDLC fields of items Vespa still places in the hub but Postgres no longer
  *    does, then deletes containers that no longer exist (found by querying Vespa, since a
  *    deleted row no longer says where it was).
- * Recomputing the whole hub keeps renames, moves and deletes right with one code path; hubs
- * are small, and a moved folder only re-feeds containers, never the documents under it.
+ * Comparing with what Vespa holds keeps each sync to what changed: a moved document is one
+ * update, a renamed folder one container feed (documents under it read the new path through
+ * their reference), however big the hub.
  */
 export async function syncSdlcHub(hubId: string): Promise<SdlcHubSyncResult | null> {
   invalidateSdlcHubIndex(hubId);
@@ -63,28 +72,44 @@ export async function syncSdlcHub(hubId: string): Promise<SdlcHubSyncResult | nu
   const fileFields = [...SDLC_FILE_FIELDS];
   const placementFields = [...SDLC_DISCUSSION_FIELDS];
   const ticketFields = [...SDLC_TICKET_FIELDS];
+  let fedDocuments = 0;
 
   // The hub's own entry: containers import its id and members (permissions) through channelRef,
   // and a hub created on the server (not through Zero) is never fed otherwise.
-  jobs.push({ schema: channelSchema, jobType: 'feed', docId: hubId, ...base });
-  for (const containerId of index.containers.keys()) {
-    jobs.push({ schema: sdlcContainerSchema, jobType: 'feed', docId: containerId, ...base });
+  const hub = (await indexedValues(channelSchema, [hubId])).get(hubId);
+  if (hub?.channelType !== 'SDLC') {
+    jobs.push({ schema: channelSchema, jobType: 'feed', docId: hubId, ...base });
   }
+
+  const containerIds = [...index.containers.keys()];
+  const containerValues = await indexedValues(sdlcContainerSchema, containerIds, ['default', 'lean']);
+  for (const [containerId, container] of index.containers) {
+    const indexed = containerValues.get(containerId);
+    if (!indexed || !sameContainer(container, indexed)) {
+      jobs.push({ schema: sdlcContainerSchema, jobType: 'feed', docId: containerId, ...base });
+    }
+  }
+  const indexedRepos = await indexedValues(sdlcRepositorySchema, index.repoIds);
   for (const repoId of index.repoIds) {
-    jobs.push({ schema: sdlcRepositorySchema, jobType: 'feed', docId: repoId, ...base });
+    const repo = await mapSdlcRepository(repoId);
+    const indexed = indexedRepos.get(repoId);
+    if (repo && (!indexed || !sameRepository(repo, indexed))) {
+      jobs.push({ schema: sdlcRepositorySchema, jobType: 'feed', docId: repoId, ...base });
+    }
   }
+
   // A field-scoped update of a document Vespa does not have yet is a no-op, so a document that
   // was never indexed (created before indexing ran, or by a path that skipped it) gets a full
   // feed instead, which carries its SDLC fields too. A missing upload is fed only when its file
   // type is one the upload path indexes (attachmentController); others are never in Vespa.
-  const indexedFiles = await existingIds(fileSchema, [...index.canvases.keys(), ...index.attachments.keys()]);
-  let fedDocuments = 0;
-  for (const canvasId of index.canvases.keys()) {
-    if (indexedFiles.has(canvasId)) {
-      jobs.push({ schema: fileSchema, jobType: 'update', docId: canvasId, app: SubApp.CANVAS, fields: fileFields, ...base });
-    } else {
+  const indexedFiles = await indexedValues(fileSchema, [...index.canvases.keys(), ...index.attachments.keys()], ['sdlc']);
+  for (const [canvasId, fields] of index.canvases) {
+    const indexed = indexedFiles.get(canvasId);
+    if (!indexed) {
       jobs.push({ schema: fileSchema, jobType: 'feed', docId: canvasId, app: SubApp.CANVAS, ...base });
       fedDocuments++;
+    } else if (!sameFileFields(fields, indexed)) {
+      jobs.push({ schema: fileSchema, jobType: 'update', docId: canvasId, app: SubApp.CANVAS, fields: fileFields, ...base });
     }
   }
   const missingUploads = [...index.attachments.keys()].filter(id => !indexedFiles.has(id));
@@ -98,35 +123,45 @@ export async function syncSdlcHub(hubId: string): Promise<SdlcHubSyncResult | nu
           .map(a => a.id)
       : [],
   );
-  for (const attachmentId of index.attachments.keys()) {
-    if (indexedFiles.has(attachmentId)) {
-      jobs.push({ schema: fileSchema, jobType: 'update', docId: attachmentId, app: SubApp.CHAT_ATTACHMENT, fields: fileFields, ...base });
+  for (const [attachmentId, fields] of index.attachments) {
+    const indexed = indexedFiles.get(attachmentId);
+    if (indexed) {
+      if (!sameFileFields(fields, indexed)) {
+        jobs.push({ schema: fileSchema, jobType: 'update', docId: attachmentId, app: SubApp.CHAT_ATTACHMENT, fields: fileFields, ...base });
+      }
     } else if (readableUploads.has(attachmentId)) {
       jobs.push({ schema: fileSchema, jobType: 'feed', docId: attachmentId, app: SubApp.CHAT_ATTACHMENT, ...base });
       fedDocuments++;
     }
   }
-  // Tickets and messages the same way: placed if Vespa has them, fed in full if it does not
-  // (a ticket's thread message is written on the server, and may never have been indexed).
-  const indexedTickets = await existingIds(ticketSchema, [...index.tickets.keys()]);
+  // Tickets and messages the same way: re-placed if Vespa's values differ, fed in full if Vespa
+  // does not have them (a ticket's thread message is written on the server, and may never have
+  // been indexed). A ticket is compared with its places across every hub it is linked in.
+  const indexedTickets = await indexedValues(ticketSchema, [...index.tickets.keys()], ['sdlc']);
   for (const ticketId of index.tickets.keys()) {
-    jobs.push(indexedTickets.has(ticketId)
-      ? { schema: ticketSchema, jobType: 'update', docId: ticketId, fields: ticketFields, ...base }
-      : { schema: ticketSchema, jobType: 'feed', docId: ticketId, ...base });
-    if (!indexedTickets.has(ticketId)) fedDocuments++;
+    const indexed = indexedTickets.get(ticketId);
+    if (!indexed) {
+      jobs.push({ schema: ticketSchema, jobType: 'feed', docId: ticketId, ...base });
+      fedDocuments++;
+    } else if (!sameTicketFields(await sdlcFieldsForTicket(ticketId), indexed)) {
+      jobs.push({ schema: ticketSchema, jobType: 'update', docId: ticketId, fields: ticketFields, ...base });
+    }
   }
   const messages = index.conversations.size
     ? await db.message.findMany({
         where: { conversationId: { in: [...index.conversations.keys()] }, isDeleted: false },
-        select: { messageId: true },
+        select: { messageId: true, conversationId: true },
       })
     : [];
-  const indexedMessages = await existingIds(messageSchema, messages.map(m => m.messageId));
+  const indexedMessages = await indexedValues(messageSchema, messages.map(m => m.messageId), ['sdlc']);
   for (const m of messages) {
-    jobs.push(indexedMessages.has(m.messageId)
-      ? { schema: messageSchema, jobType: 'update', docId: m.messageId, fields: placementFields, ...base }
-      : { schema: messageSchema, jobType: 'feed', docId: m.messageId, ...base });
-    if (!indexedMessages.has(m.messageId)) fedDocuments++;
+    const indexed = indexedMessages.get(m.messageId);
+    if (!indexed) {
+      jobs.push({ schema: messageSchema, jobType: 'feed', docId: m.messageId, ...base });
+      fedDocuments++;
+    } else if (!sameDiscussionFields(index.conversations.get(m.conversationId!)!, indexed)) {
+      jobs.push({ schema: messageSchema, jobType: 'update', docId: m.messageId, fields: placementFields, ...base });
+    }
   }
 
   // Stale entries: what Vespa still places in this hub that Postgres no longer does. Items are
@@ -194,17 +229,75 @@ export async function syncSdlcHub(hubId: string): Promise<SdlcHubSyncResult | nu
   return result;
 }
 
-/** Which of `ids` Vespa has in `schema` (by docId), read in batches. */
-async function existingIds(schema: VespaSchema, ids: string[]): Promise<Set<string>> {
-  const found = new Set<string>();
+/**
+ * What Vespa holds for each of `ids` in `schema`, by docId, read in batches; an id Vespa does not
+ * have is absent. Each summary is read and merged, since no one summary returns every fed field.
+ */
+async function indexedValues(
+  schema: VespaSchema,
+  ids: string[],
+  summaries: string[] = ['default'],
+): Promise<Map<string, Record<string, unknown>>> {
+  const found = new Map<string, Record<string, unknown>>();
   for (let i = 0; i < ids.length; i += PAGE) {
-    const batch = ids.slice(i, i + PAGE);
-    const list = batch.map(id => JSON.stringify(id)).join(', ');
-    for (const hit of await indexedHits(schema, `docId in (${list})`, ['docId'])) {
-      found.add(String(hit.fields.docId ?? hit.id));
+    const list = ids.slice(i, i + PAGE).map(id => JSON.stringify(id)).join(', ');
+    for (const summary of summaries) {
+      for (const hit of await indexedHits(schema, `docId in (${list})`, [], summary)) {
+        found.set(hit.id, { ...found.get(hit.id), ...hit.fields });
+      }
     }
   }
   return found;
+}
+
+// Vespa leaves empty values out of results, so '', [] and null all compare as absent.
+const norm = (value: unknown): string | undefined =>
+  value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0)
+    ? undefined
+    : JSON.stringify(value);
+const same = (pairs: [unknown, unknown][]): boolean => pairs.every(([a, b]) => norm(a) === norm(b));
+/** The document id a reference (id:<namespace>:<schema>::<id>) points at. */
+const refId = (ref: string): string => (ref ? ref.slice(ref.lastIndexOf('::') + 2) : '');
+
+const CONTAINER_FIELDS = [
+  'name', 'description', 'branch', 'containerType', 'trackId', 'trackStatus', 'parentId', 'parentType',
+  'repoRef', 'scopeIds', 'depth', 'path', 'projectId', 'createdBy', 'createdAt', 'updatedAt',
+] as const;
+
+function sameContainer(container: VespaSdlcContainerDocument, indexed: Record<string, unknown>): boolean {
+  return same([
+    ...CONTAINER_FIELDS.map(field => [container[field], indexed[field]] as [unknown, unknown]),
+    [refId(container.channelRef), indexed.channelId],
+  ]);
+}
+
+function sameRepository(repo: VespaSdlcRepositoryDocument, indexed: Record<string, unknown>): boolean {
+  const hubIds = (ids: unknown) => (Array.isArray(ids) ? [...ids].sort() : ids);
+  return same([
+    [repo.name, indexed.name], [repo.url, indexed.url], [repo.orgId, indexed.orgId],
+    [repo.workspaceId, indexed.workspaceId], [repo.projectId, indexed.projectId],
+    [hubIds(repo.hubIds), hubIds(indexed.hubIds)],
+  ]);
+}
+
+function sameFileFields(fields: SdlcFileFields, indexed: Record<string, unknown>): boolean {
+  return same([
+    [refId(fields.sdlcContainerRef), indexed.sdlcContainerId], [fields.sdlcTypeName, indexed.sdlcTypeName],
+    [fields.sdlcStatus, indexed.sdlcStatus], [fields.sdlcRelatedDocumentIds, indexed.sdlcRelatedDocumentIds],
+  ]);
+}
+
+function sameDiscussionFields(fields: SdlcDiscussionFields, indexed: Record<string, unknown>): boolean {
+  return same([
+    [refId(fields.sdlcContainerRef), indexed.sdlcContainerId], [fields.sdlcDocumentId, indexed.sdlcDocumentId],
+  ]);
+}
+
+function sameTicketFields(fields: SdlcTicketFields, indexed: Record<string, unknown>): boolean {
+  return same([
+    [fields.sdlcContainerIds, indexed.sdlcContainerIds], [fields.sdlcDocumentIds, indexed.sdlcDocumentIds],
+    [fields.sdlcRepoIds, indexed.sdlcRepoIds],
+  ]);
 }
 
 /** `where`, minus the entries whose docId is in `liveIds`. */
@@ -222,22 +315,26 @@ interface IndexedHit {
  * Entries of `schema` matching `where`. If Vespa stops answering part way, what was read so far
  * is kept (with a warning).
  */
-async function indexedHits(schema: VespaSchema, where: string, fields: string[] = []): Promise<IndexedHit[]> {
+async function indexedHits(schema: VespaSchema, where: string, fields: string[] = [], summary?: string): Promise<IndexedHit[]> {
   const hits: IndexedHit[] = [];
   try {
-    const select = ['documentid', ...fields].join(', ');
+    const select = summary ? '*' : ['documentid', ...fields].join(', ');
     for (let page = 0; page * PAGE <= MAX_OFFSET; page++) {
       const response = await vespa.vespaClient.search<{
         root?: { children?: { id?: string; fields?: Record<string, unknown> }[] };
       }>({
         yql: `select ${select} from ${schema} where ${where}`,
+        ...(summary ? { 'presentation.summary': summary } : {}),
         hits: PAGE,
         offset: page * PAGE,
         timeout: '5s',
       });
       const children = response.root?.children ?? [];
       for (const hit of children) {
-        const id = hit.fields?.documentid ? String(hit.fields.documentid).split('::')[1] : hit.id?.split('::')[1];
+        // A named summary may not return documentid, and the hit id is then not a document id.
+        const id = hit.fields?.documentid
+          ? String(hit.fields.documentid).split('::')[1]
+          : typeof hit.fields?.docId === 'string' ? hit.fields.docId : hit.id?.split('::')[1];
         if (id) hits.push({ id, fields: hit.fields ?? {} });
       }
       if (children.length < PAGE) return hits;

@@ -1,7 +1,7 @@
 import { readFromYSweetStrict } from '@/utils/ysweetUtils';
 import { extractMentionsFromContent } from '@/utils/mentionUtils';
 import { extractChannelMentions, extractGroupMentions } from '@/utils/mentionParser';
-import { appSchema, callSchema, channelSchema, InsertDocument, mailSchema, messageSchema, projectSchema, schemaToDocType, SubApp, ticketSchema, userSchema, VespaAppDocument, VespaCallDocument, VespaChatContainerDocument, VespaChatMessageDocument, VespaDocType, VespaFileDocument, VespaMailDocument, VespaProjectDocument, VespaSchema, VespaTicketDocument, samTranscriptSchema, sdlcContainerSchema, sdlcRepositorySchema, SDLC_DISCUSSION_FIELDS, SDLC_FILE_FIELDS, SDLC_TICKET_FIELDS, type SdlcDiscussionFields, type SdlcFileFields, type SdlcTicketFields, type VespaSdlcContainerDocument, type VespaSdlcRepositoryDocument } from '@/vespa/src/types';
+import { appSchema, callSchema, channelSchema, InsertDocument, mailSchema, messageSchema, projectSchema, schemaToDocType, SubApp, ticketSchema, userSchema, VespaAppDocument, VespaCallDocument, VespaChatContainerDocument, VespaChatMessageDocument, VespaDocType, VespaFileDocument, VespaMailDocument, VespaProjectDocument, VespaSchema, VespaTicketDocument, samTranscriptSchema, sdlcContainerSchema, sdlcRepositorySchema, type SdlcDiscussionFields, type SdlcFieldValues, type SdlcFileFields, type SdlcTicketFields, type VespaSdlcContainerDocument, type VespaSdlcRepositoryDocument } from '@/vespa/src/types';
 import {
   hubOfContainer,
   loadSdlcHubIndex,
@@ -1576,22 +1576,18 @@ export const mapEmail = async (email: Email, workspaceId?: string, orgId?: strin
 };
 
 /**
- * SDLC fields on a feed. A Vespa reference must hold a document id, so an item in no hub
- * leaves sdlcContainerRef out rather than sending ''; a feed is a put, so leaving it out clears it.
+ * SDLC fields on a feed: all of them, empty ones as null. A Vespa reference cannot hold '', and
+ * null leaves a field unset; sending it rather than leaving it out lets a field-scoped update
+ * clear a placement the item no longer has. An item in no hub gets every field null.
  */
-const sdlcPlacement = (fields: SdlcDiscussionFields): Partial<SdlcDiscussionFields> => {
-  if (!fields.sdlcContainerRef) return {};
-  return fields.sdlcDocumentId ? { ...fields } : { sdlcContainerRef: fields.sdlcContainerRef };
-};
+const sdlcValues = <T extends object>(fields: T, placed: boolean): SdlcFieldValues<T> =>
+  Object.fromEntries(Object.entries(fields).map(([field, value]) =>
+    [field, !placed || value === '' || (Array.isArray(value) && value.length === 0) ? null : value],
+  )) as SdlcFieldValues<T>;
 
-/** A ticket's places and linked documents; left out for a ticket in no hub. */
-const sdlcTicketPlacement = (fields: SdlcTicketFields): Partial<SdlcTicketFields> =>
-  fields.sdlcContainerIds.length || fields.sdlcDocumentIds.length ? { ...fields } : {};
-
-const sdlcFileFields = (fields: SdlcFileFields): Partial<SdlcFileFields> => {
-  if (!fields.sdlcContainerRef) return {};
-  return { ...fields };
-};
+const sdlcPlacement = (fields: SdlcDiscussionFields) => sdlcValues(fields, Boolean(fields.sdlcContainerRef));
+const sdlcTicketPlacement = (fields: SdlcTicketFields) => sdlcValues(fields, true);
+const sdlcFileFields = (fields: SdlcFileFields) => sdlcValues(fields, Boolean(fields.sdlcContainerRef));
 
 /** A track or folder of an SDLC hub, as indexed: built with the rest of its hub. */
 export const mapSdlcContainer = async (containerId: string): Promise<VespaSdlcContainerDocument | null> => {
@@ -1622,46 +1618,6 @@ export const mapSdlcRepository = async (repoId: string): Promise<VespaSdlcReposi
     name: repo.name,
     url: repo.url ?? '',
   };
-};
-
-/**
- * The SDLC fields of an indexed item, computed on their own: a hub sync re-places every item in
- * the hub, and rebuilding each full document (a canvas's content, a ticket's thread) just to
- * send its placement would be wasted work. Null when `fields` asks for anything else.
- * Missing values come back undefined; the worker turns those into a clear.
- */
-export const mapSdlcFieldsOnly = async (
-  schema: VespaSchema,
-  docId: string,
-  fields: readonly string[],
-  app?: SubApp,
-): Promise<Record<string, unknown> | null> => {
-  const pick = (all: Record<string, unknown>) =>
-    Object.fromEntries(fields.map(field => [field, all[field] === '' ? undefined : all[field]]));
-  if (schema === fileSchema && fields.every(f => (SDLC_FILE_FIELDS as readonly string[]).includes(f))) {
-    if (app === SubApp.CANVAS) {
-      const canvas = await db.canvas.findUnique({ where: { id: docId }, select: { id: true, channelId: true } });
-      return pick({ ...(canvas ? await sdlcFieldsForCanvas(canvas) : {}) });
-    }
-    if (app === SubApp.CHAT_ATTACHMENT) {
-      const attachment = await db.messageAttachment.findUnique({
-        where: { id: docId },
-        select: { id: true, entityType: true, entityId: true },
-      });
-      return pick({ ...(attachment ? await sdlcFieldsForAttachment(attachment) : {}) });
-    }
-    return null;
-  }
-  if (schema === ticketSchema) {
-    if (!fields.every(f => (SDLC_TICKET_FIELDS as readonly string[]).includes(f))) return null;
-    return pick({ ...(await sdlcFieldsForTicket(docId)) });
-  }
-  if (!fields.every(f => (SDLC_DISCUSSION_FIELDS as readonly string[]).includes(f))) return null;
-  if (schema === messageSchema) {
-    const message = await db.message.findUnique({ where: { messageId: docId }, select: { conversationId: true } });
-    return pick({ ...(await sdlcFieldsForConversation(message?.conversationId)) });
-  }
-  return null;
 };
 
 export const mapBySchema = async (
