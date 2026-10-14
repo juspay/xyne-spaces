@@ -340,6 +340,95 @@ export function buildAgentCardFlow(props: AgentCardProps, data: AgentCardData): 
     .build();
 }
 
+export type AgentChangeField = 'name' | 'description' | 'modelId' | 'color' | 'systemPrompt' | 'tools';
+
+export interface AgentChange {
+  field: AgentChangeField;
+  label: string;
+  before?: string;
+  after?: string;
+  added?: string[];
+  removed?: string[];
+}
+
+export interface AgentUpdateCardProps {
+  agent: AgentIdentity;
+  changes: AgentChange[];
+  summary?: string;
+  note?: string;
+}
+
+export interface AgentUpdateApprovalAction {
+  serverType: string;
+  tool: string;
+  params: Record<string, unknown>;
+  userId: string;
+  signature: string;
+  agentSlug: string;
+  subagentId?: string;
+  channelId?: string;
+  conversationId?: string;
+}
+
+const MAX_CHANGE_VALUE = 300;
+const MAX_UPDATE_SUMMARY = 2_000;
+const MAX_CHANGE_TOOLS = MAX_CAPABILITIES;
+
+const changeValueCap = (field: AgentChangeField): number =>
+  field === 'systemPrompt' ? MAX_CARD_PROMPT : field === 'description' ? MAX_DESC : MAX_CHANGE_VALUE;
+
+const changeTools = (values: string[] | undefined): string[] =>
+  (values ?? []).map((v) => v.trim()).filter(Boolean).slice(0, MAX_CHANGE_TOOLS);
+
+function normalizeChange(change: AgentChange): AgentChange {
+  const cap = changeValueCap(change.field);
+  const before = trimmed(change.before, cap);
+  const after = trimmed(change.after, cap);
+  const added = changeTools(change.added);
+  const removed = changeTools(change.removed);
+  return {
+    field: change.field,
+    label: change.label.trim() || change.field,
+    ...(before ? { before } : {}),
+    ...(after ? { after } : {}),
+    ...(added.length > 0 ? { added } : {}),
+    ...(removed.length > 0 ? { removed } : {}),
+  };
+}
+
+export function buildAgentUpdateApprovalFlow(
+  props: AgentUpdateCardProps,
+  action: AgentUpdateApprovalAction,
+): FlowDefinition {
+  const summary = trimmed(props.summary, MAX_UPDATE_SUMMARY);
+  const note = trimmed(props.note, MAX_DESC);
+  return new FlowBuilder(`agent-update-${crypto.randomUUID()}`)
+    .addComponent({
+      id: AGENT_COMPONENT_ID,
+      type: 'agent',
+      props: {
+        variant: 'update',
+        agent: props.agent,
+        changes: props.changes.map(normalizeChange),
+        ...(summary ? { summary } : {}),
+        ...(note ? { note } : {}),
+      },
+    })
+    .setData({
+      actionType: 'write',
+      serverType: action.serverType,
+      tool: action.tool,
+      params: JSON.stringify(action.params),
+      userId: action.userId,
+      signature: action.signature,
+      agentSlug: action.agentSlug,
+      ...(action.subagentId ? { subagentId: action.subagentId } : {}),
+      ...(action.channelId !== undefined ? { channelId: action.channelId } : {}),
+      ...(action.conversationId !== undefined ? { conversationId: action.conversationId } : {}),
+    })
+    .build();
+}
+
 export const MAX_AGENT_LIST_CARDS = 5;
 
 export interface AgentListCardData extends Omit<AgentCardData, 'targetSlug'> {

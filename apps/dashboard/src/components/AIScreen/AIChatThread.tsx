@@ -55,6 +55,7 @@ import { isAssistantMessage } from '../Assistant/turns';
 import { useTranscript } from '../Assistant/useTranscript';
 import type { AssistantActions } from '../Assistant/useAssistantActions';
 import { AIComposer, type AIComposerAttachment, type AIComposerHandle } from './AIComposer';
+import { ASSISTANT_PANEL_ATTR } from '../Assistant/buddy/constants';
 import { ReadonlyContextPills, useSentMentions } from './ReadonlyContextPills';
 import { type ComposerContext, toStreamOverrides, withoutPickedContext } from './composerContext';
 import { AgentByline, AgentRecipient } from './ConversationAgents';
@@ -521,6 +522,7 @@ function BranchNavigator({
     <div className='flex items-center gap-0.5 text-xs text-muted-foreground'>
       <button
         type='button'
+        aria-label='Previous version'
         onClick={() => onNavigate('prev')}
         className='rounded p-0.5 transition-colors hover:bg-muted'
         data-track-category='XyneAI'
@@ -533,6 +535,7 @@ function BranchNavigator({
       </span>
       <button
         type='button'
+        aria-label='Next version'
         onClick={() => onNavigate('next')}
         className='rounded p-0.5 transition-colors hover:bg-muted'
         data-track-category='XyneAI'
@@ -1490,6 +1493,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     initialQuery && initialExtras ? withoutPickedContext(initialExtras) : initialExtras,
   );
   const dropZoneRef = useRef<HTMLDivElement | null>(null);
+  const [voiceStageHost, setVoiceStageHost] = useState<HTMLDivElement | null>(null);
   const dragCounterRef = useRef(0);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -2548,7 +2552,11 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
           as a sibling of the scroll area rather than inside it — anything
           positioned inside an overflow container scrolls away with the content,
           so the rail has to be anchored to the frame that stays put. */}
-        <div className='relative min-h-0 flex-1'>
+        <div
+          ref={setVoiceStageHost}
+          {...{ [ASSISTANT_PANEL_ATTR]: '' }}
+          className='relative min-h-0 flex-1'
+        >
           <PromptMarkerRail markers={promptMarkers} scrollRef={scrollRef} />
           {/* Messages area — tabIndex enables keyboard scroll (PageUp/Home/ArrowUp)
             which the auto-scroll effect listens for to unstick from bottom. */}
@@ -2726,7 +2734,10 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
             agrees: once width is tight enough that the cap stops binding — App
             Creation mode — a narrower gutter here would make the composer
             wider than the messages it sits under. */}
-        <div className='relative shrink-0 px-4 pb-2 pt-3 sm:px-6 md:px-10'>
+        <div
+          {...{ [ASSISTANT_PANEL_ATTR]: '' }}
+          className='relative shrink-0 px-4 pb-2 pt-3 sm:px-6 md:px-10'
+        >
           {showJumpPill && (
             <button
               type='button'
@@ -2760,6 +2771,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
               pending={isAnyMessageStreaming || (assistant?.isRouting ?? false)}
               onStop={handleStop}
               assistant={assistant && assistant.actions.length > 0 ? assistant : undefined}
+              voiceStageHost={voiceStageHost}
             />
           </div>
         </div>

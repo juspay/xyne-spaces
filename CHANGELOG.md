@@ -1,3 +1,17 @@
+## [1.499.0](https://github.com/juspay/xyne-spaces/compare/v1.498.0...v1.499.0) (2026-10-14)
+
+
+### Features
+
+* Add logs for every api/sdk/ call ([#2851](https://github.com/juspay/xyne-spaces/issues/2851)) ([30ec8a8](https://github.com/juspay/xyne-spaces/commit/30ec8a817f5232f5dba66552448b120eb775984c))
+* merging all dashbaord builds into one ([#2992](https://github.com/juspay/xyne-spaces/issues/2992)) ([5fd7923](https://github.com/juspay/xyne-spaces/commit/5fd792389c55c0e8515f6b5f889dda4f5088889e))
+* xyne assistant  ([#2831](https://github.com/juspay/xyne-spaces/issues/2831)) ([dde4127](https://github.com/juspay/xyne-spaces/commit/dde41271cecc7eb5471b8f874d0b0d66bba5320f))
+
+
+### Bug Fixes
+
+* Subticket link/unlink fix in SDK and MCP ([#2938](https://github.com/juspay/xyne-spaces/issues/2938)) ([64f38b7](https://github.com/juspay/xyne-spaces/commit/64f38b7b15116092081e86a22a085a88b4bbd0f1))
+
 ## [1.498.0](https://github.com/juspay/xyne-spaces/compare/v1.497.0...v1.498.0) (2026-10-14)
 
 

@@ -272,6 +272,7 @@ const PlanNodeCard: React.FC<NodeProps<PlanNodeData>> = ({ data, selected }) => 
                       : 'hover:bg-muted text-muted-foreground hover:text-[#6276be]'
                   }`}
                   title='Configure what this step waits on'
+                  aria-label='Configure what this step waits on'
                 >
                   <Settings2 size={12} />
                 </button>
@@ -282,6 +283,7 @@ const PlanNodeCard: React.FC<NodeProps<PlanNodeData>> = ({ data, selected }) => 
                   data-track-name='delete_step'
                   className='p-1 rounded-md hover:bg-red-50 text-muted-foreground hover:text-red-500 transition-colors'
                   title='Delete step'
+                  aria-label='Delete step'
                 >
                   <Trash2 size={12} />
                 </button>
@@ -456,6 +458,7 @@ const DecisionNodeCard: React.FC<NodeProps<DecisionNodeData>> = ({ data, selecte
           <>
             <button
               type='button'
+              aria-label='Configure decision'
               onClick={data.onConfigure}
               data-track-category='flow_plan_editor'
               data-track-name='configure_decision'
@@ -465,6 +468,7 @@ const DecisionNodeCard: React.FC<NodeProps<DecisionNodeData>> = ({ data, selecte
             </button>
             <button
               type='button'
+              aria-label='Delete decision'
               onClick={data.onDelete}
               data-track-category='flow_plan_editor'
               data-track-name='delete_decision'

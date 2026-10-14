@@ -24,6 +24,7 @@ import {
   experimentRepository,
 } from "../repositories/index.js";
 import type { DraftAgentSpec } from "../lib/agent-card.js";
+import { createAgentQueueError, draftCardCarriesReply, postAgentDraftCard, draftSpecFromCreateAgentParams } from "../lib/agent-draft-card.js";
 import { toResolvedAgent, type ResolvedAgent } from "../lib/resolved-agent.js";
 import { stripLeadingAgentMention } from "../lib/strip-agent-mention.js";
 import { resolveUserSpacesAuth } from "../surfaces/spaces/user-auth.js";
@@ -61,7 +62,7 @@ import { prisma } from "../db.js";
 import { redisService } from "../redis.js";
 import { publishLiveEvent } from "../lib/live-conversation-bus.js";
 import { deliverXyneAiFlow, postFlowCard, resolveXyneAiCardTarget } from "../lib/flow-card-delivery.js";
-import { agentDraftTranscript, prepareAgentDraftCard, renderAgentProfileCard, renderAgentProfileListCard, renderAgentSummaryCard } from "../lib/agent-card-render.js";
+import { renderAgentProfileCard, renderAgentProfileListCard, renderAgentSummaryCard } from "../lib/agent-card-render.js";
 import { renderConnectorSuggestCard, renderProviderSuggestCard } from "../lib/connector-card-render.js";
 import { buildWriteApprovalCardFlow, formatActionDescription, mintWriteCardAction, readPendingWriteAction } from "../lib/write-card-render.js";
 import { UNREGISTERED_USER_TEMPLATE } from "../constants.js";
@@ -678,6 +679,12 @@ async function pendingActionTargetValidation(
   const conversationId = pendingActionTargetConversationId(action);
   const channelId = pendingActionTargetChannelId(action);
 
+  if (action["tool"] === "create-agent" && ctx.agentOrgId) {
+    const params = action["params"] && typeof action["params"] === "object" ? (action["params"] as Record<string, unknown>) : {};
+    const error = await createAgentQueueError(params, ctx.agentOrgId);
+    if (error) return { error };
+  }
+
   if (action["tool"] === "user-send-message" && !!conversationId === !!channelId) {
     return { error: "provide exactly one target: use conversationId for an existing thread or channelId to post into a channel" };
   }
@@ -795,14 +802,48 @@ export async function fetchConversationHistory(
 
 // buildAppActionFrontmatter removed — replaced by buildTwinApprovalFlow from xyne-claw-shared
 
+function rendersAgentDraftCard(action: Record<string, unknown>, ctx: SessionContext): boolean {
+  if (action["tool"] !== "create-agent" || !ctx.agentSlug || !ctx.agentOrgId) return false;
+  const params = action["params"] && typeof action["params"] === "object" ? (action["params"] as Record<string, unknown>) : {};
+  return draftSpecFromCreateAgentParams(params) !== null;
+}
+
 async function postWriteApprovalAction(args: {
   action: Record<string, unknown>;
   ctx: SessionContext;
   token: string;
   targetValidation: { channelName?: string };
+  runOwnerId?: string | undefined;
 }): Promise<void> {
   const { action, ctx, token, targetValidation } = args;
   const params = action["params"] as Record<string, unknown>;
+
+  // create-agent renders the agent draft card, not the generic write card: it
+  // is the same decision propose-agent raises, and the generic card truncates
+  // the system prompt at 200 chars — the one thing a reviewer must read.
+  if (action["tool"] === "create-agent" && ctx.agentSlug && ctx.agentOrgId) {
+    const spec = draftSpecFromCreateAgentParams(params);
+    if (spec) {
+      await postAgentDraftCard({
+        spec,
+        ctx: {
+          agentSlug: ctx.agentSlug,
+          agentOrgId: ctx.agentOrgId,
+          requesterId: ctx.senderId,
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          spacesAppUserId: ctx.spacesAppUserId,
+          spacesAppId: ctx.spacesAppId,
+          appToken: token,
+        },
+        runOwnerId: args.runOwnerId ?? ctx.senderId,
+        log: clog,
+      });
+      return;
+    }
+    clog.warn(`[agent-card] create-agent params were not a usable draft; falling back to the write card`);
+  }
+
   const actionDesc = formatActionDescription(action["tool"] as string, params, targetValidation);
 
   // The pending-action signature is minted before the Spaces delivery target is
@@ -824,9 +865,10 @@ async function postWriteApprovalAction(args: {
   // The rich `ticket` FlowUI component is only rendered by newer Spaces
   // backends; older deployments reject it. Track when we used it so a flow-
   // schema rejection can fall back to the generic approval card below.
-  const { flow: cardFlow, usedTicketCard: usedRichTicketCard } = buildWriteApprovalCardFlow(
+  const { flow: cardFlow, usedRichCard } = await buildWriteApprovalCardFlow(
     cardAction,
     actionDesc,
+    ctx.agentOrgId,
   );
   const writeFlow = withSpacesAppId(cardFlow, spacesAppId);
 
@@ -886,9 +928,9 @@ async function postWriteApprovalAction(args: {
     // (auth, channel validation, network) re-throws so the caller's skip/target
     // logic is unaffected. Once Spaces ships `ticket`, the rich card works again
     // with no code change.
-    if (!usedRichTicketCard || !isFlowSchemaRejection(err)) throw err;
+    if (!usedRichCard || !isFlowSchemaRejection(err)) throw err;
     clog.warn(
-      `[webhook/result] ticket approval card rejected by Spaces flow schema; falling back to generic approval card tool=${cardAction.tool} channelId=${ctx.channelId} conversationId=${ctx.conversationId ?? ""}`,
+      `[webhook/result] rich approval card rejected by Spaces flow schema; falling back to generic approval card tool=${cardAction.tool} channelId=${ctx.channelId} conversationId=${ctx.conversationId ?? ""}`,
     );
     await postCard(withSpacesAppId(buildWriteApprovalFlow(actionDesc, cardAction), spacesAppId));
   }
@@ -3336,7 +3378,9 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     }
     const toolOf = (a: Record<string, unknown>): string =>
       typeof a["tool"] === "string" && a["tool"].trim() ? a["tool"].trim() : "write action";
-    const queued = pendingActionList.filter((a) => !pendingActionValidation.get(a)?.error);
+    const queued = pendingActionList.filter(
+      (a) => !pendingActionValidation.get(a)?.error && !rendersAgentDraftCard(a, ctx),
+    );
     const rejected = pendingActionList.filter((a) => pendingActionValidation.get(a)?.error);
 
     const lines: string[] = [];
@@ -4535,108 +4579,22 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     ctx.agentSlug &&
     ctx.agentOrgId
   ) {
-    const token = ctx.appToken;
-    const spec = pendingAgentCard.agent;
-    try {
-      const orgId = ctx.agentOrgId;
-      const requesterId = ctx.senderId;
-
-      // Validation, duplicate check, capability resolution, AgentRequest
-      // persistence and the card itself are shared with the Xyne AI surface
-      // (run-stream.ts) — only delivery differs per surface.
-      const prepared = await prepareAgentDraftCard(spec, {
+    await postAgentDraftCard({
+      spec: pendingAgentCard.agent,
+      ctx: {
         agentSlug: ctx.agentSlug,
-        orgId,
-        userId: requesterId,
-        conversationId: ctx.conversationId,
-        channelId: ctx.channelId,
-        spacesAppId: ctx.spacesAppId,
-      });
-      if (!prepared.ok) {
-        await postAgentMessage(
-          { spacesAppUserId: ctx.spacesAppUserId, appToken: token },
-          {
-            channelId: ctx.channelId,
-            conversationId: ctx.conversationId,
-            markdownText: prepared.message,
-            metadata: { contentFormat: "markdown" },
-          }
-        );
-        await deleteSession(sessionId).catch(() => {});
-        return;
-      }
-      const { flow, identity } = prepared;
-
-      // A lead-in line so the card isn't dropped into the thread wordlessly.
-      try {
-        await postAgentMessage(
-          { spacesAppUserId: ctx.spacesAppUserId, appToken: token },
-          {
-            channelId: ctx.channelId,
-            conversationId: ctx.conversationId,
-            markdownText: prepared.leadIn,
-            metadata: { contentFormat: "markdown" },
-          }
-        );
-      } catch (e) {
-        // Non-fatal: the card is the deliverable and still posts below.
-        log.warn("Failed to post agent-draft lead-in (non-fatal)", {
-          error: errMsg(e),
-        });
-      }
-
-      await postFlowCard(flow, {
-        kind: "spaces",
+        agentOrgId: ctx.agentOrgId,
+        requesterId: ctx.senderId,
         channelId: ctx.channelId,
         conversationId: ctx.conversationId,
         spacesAppUserId: ctx.spacesAppUserId,
-        appToken: token,
-      });
-      log.info(`[agent-card] posted draft card slug=${spec.slug} request=${prepared.requestId} conv=${ctx.conversationId}`);
-
-      // Persist an assistant transcript row: the interactive card exists only in
-      // Spaces, so without this the claw chat shows nothing for this turn and the
-      // next user message groups as a sibling branch. Same reasoning as the plan
-      // card's transcript row above.
-      try {
-        const parentId = await chatMessageRepository
-          .latestMessageId(ctx.conversationId, ctx.agentSlug)
-          .catch(() => null);
-        await chatMessageRepository.create({
-          conversationId: ctx.conversationId,
-          agentSlug: ctx.agentSlug,
-          userId: runOwnerId,
-          orgId,
-          ...(parentId ? { parentId } : {}),
-          role: "assistant",
-          content: agentDraftTranscript(identity),
-          status: "completed",
-          ...(payload.reasoning ? { reasoning: payload.reasoning } : {}),
-        });
-      } catch (e) {
-        log.warn("Failed to persist agent-draft assistant transcript row (non-fatal)", {
-          error: errMsg(e),
-        });
-      }
-    } catch (err) {
-      log.error("Failed to post agent draft card", {
-        error: errMsg(err),
-        slug: spec.slug,
-      });
-      try {
-        await postAgentMessage(
-          { spacesAppUserId: ctx.spacesAppUserId, appToken: token },
-          {
-            channelId: ctx.channelId,
-            conversationId: ctx.conversationId,
-            markdownText: "I drafted the agent but couldn't post it for approval. Please try again.",
-            metadata: { contentFormat: "markdown" },
-          }
-        );
-      } catch {
-        // The user already lost this turn; don't compound it with a throw.
-      }
-    }
+        spacesAppId: ctx.spacesAppId,
+        appToken: ctx.appToken,
+      },
+      runOwnerId,
+      ...(payload.reasoning ? { reasoning: payload.reasoning } : {}),
+      log,
+    });
     await deleteSession(sessionId).catch(() => {});
     return;
   }
@@ -4652,6 +4610,18 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     return;
   }
 
+  const draftCardIsTheReply = draftCardCarriesReply({
+    completed: payload.status === "completed",
+    conversation: ctx.responseMode === "conversation",
+    actions: pendingActionList.map((a) => ({
+      rendersDraftCard: rendersAgentDraftCard(a, ctx),
+      rejected: Boolean(pendingActionValidation.get(a)?.error),
+    })),
+    hasAttachments: Boolean(payload.attachments?.length),
+    hasPendingResponses: Boolean(payload.pendingResponses?.length),
+    replyText: typeof payload.result === "string" ? payload.result : "",
+  });
+
   // Notify user if result is empty (but not if copilot has pendingResponses, and
   // not when a capability card was just posted — there the card IS the answer
   // and an apology under it would be nonsense).
@@ -4665,7 +4635,8 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     !resultWithCitations.trim() &&
     !payload.attachments?.length &&
     !payload.pendingResponses?.length &&
-    !postedAgentProfileCard
+    !postedAgentProfileCard &&
+    !draftCardIsTheReply
   ) {
     if (deferCompletedRecoveryForEmptyResult) {
       const recoveryEmptyResult = await handleRunCompletion(sessionId, "failed", "empty_result").catch((err) => {
@@ -5185,7 +5156,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             continue;
           }
 
-          await postWriteApprovalAction({ action, ctx, token, targetValidation });
+          await postWriteApprovalAction({ action, ctx, token, targetValidation, runOwnerId });
           copilotApprovalCardsSent += 1;
         }
         log.info(`Copilot: posted ${copilotApprovalCardsSent}/${copilotPendingActions.length} write action approval(s)`);
@@ -5262,7 +5233,9 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         },
       );
 
-      if (prepared.attachments.length > 0) {
+      if (draftCardIsTheReply) {
+        log.info(`Agent ${ctx.agentSlug}: reply dropped — the create-agent draft card carries it, thread ${ctx.conversationId}`);
+      } else if (prepared.attachments.length > 0) {
         const form = new FormData();
         for (const att of prepared.attachments) {
           const buffer = Buffer.from(att.data, "base64");
@@ -5542,7 +5515,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           continue;
         }
 
-        await postWriteApprovalAction({ action, ctx, token, targetValidation });
+        await postWriteApprovalAction({ action, ctx, token, targetValidation, runOwnerId });
         approvalCardsSent += 1;
       }
 

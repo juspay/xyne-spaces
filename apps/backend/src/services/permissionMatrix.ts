@@ -47,7 +47,7 @@ export interface PermissionEntry {
  * Replaces the 3 divergent helpers: DEFAULT_USER_RESOURCES (8 WRITE),
  * grantDefaultResources (4 WRITE), grantWorkspaceOwnerResources (21 ADMIN).
  *
- * MEMBER: 12 WRITE | ADMIN: 21 ADMIN | OWNER: 21 ADMIN | GUEST: 3 WRITE + 2 READ
+ * MEMBER: 13 WRITE | ADMIN: 21 ADMIN | OWNER: 21 ADMIN | GUEST: 3 WRITE + 2 READ
  *
  * Typed as Record<WorkspaceRole, readonly PermissionEntry[]> so that:
  *   1. Every WorkspaceRole must have an entry (exhaustiveness).
@@ -67,6 +67,7 @@ export const PERMISSION_MATRIX: Record<WorkspaceRole, readonly PermissionEntry[]
     { resourceName: 'CHANNELS', accessType: AccessType.WRITE },
     { resourceName: 'CANVASES', accessType: AccessType.WRITE },
     { resourceName: 'SDLC', accessType: AccessType.WRITE },
+    { resourceName: 'SUPPORT', accessType: AccessType.WRITE },
   ],
   COMMUNITY_MEMBER: [
     { resourceName: 'TICKETS', accessType: AccessType.WRITE },
@@ -81,6 +82,7 @@ export const PERMISSION_MATRIX: Record<WorkspaceRole, readonly PermissionEntry[]
     { resourceName: 'CHANNELS', accessType: AccessType.WRITE },
     { resourceName: 'CANVASES', accessType: AccessType.WRITE },
     { resourceName: 'SDLC', accessType: AccessType.WRITE },
+    { resourceName: 'SUPPORT', accessType: AccessType.WRITE },
   ],
   ADMIN: [
     { resourceName: 'TICKETS', accessType: AccessType.ADMIN },

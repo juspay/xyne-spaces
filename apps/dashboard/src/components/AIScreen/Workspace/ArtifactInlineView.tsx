@@ -49,6 +49,10 @@ export function artifactInlineActions(artifact: ConversationArtifact): ReactElem
 
   const linkable = artifact.kind === 'PREVIEW' || artifact.kind === 'DIFF';
 
+  if (linkable && artifact.status === 'STALE') {
+    return <span className='flex-shrink-0 text-xs text-muted-foreground'>Ended</span>;
+  }
+
   if (linkable && !url) {
     return <span className='flex-shrink-0 text-xs text-muted-foreground'>Link unavailable</span>;
   }
@@ -118,6 +122,7 @@ export function ArtifactInlineView({
     case 'DIFF':
       if (isLocalDiffArtifact(artifact))
         return <LocalDiffView artifact={artifact} guide={reviewGuide ?? null} />;
+      if (artifact.status === 'STALE') return <Centered>This sandbox has ended.</Centered>;
       return url ? (
         <SandboxedFrame url={url} title={artifact.title} />
       ) : (

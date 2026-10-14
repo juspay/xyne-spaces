@@ -38,24 +38,26 @@ export function stripCodeRegions(htmlContent: string): string {
   );
 }
 
-export function extractUserMentions(htmlContent: string): string[] {
+// One <span ...> tag per match, stopping at the next tag, then each tag read on its own. A single
+// regex spanning the attributes ([^>]* on both sides) re-scans the rest of the message from every
+// unclosed '<span' (js/polynomial-redos); a real tag's attributes never hold a raw '<'.
+const SPAN_TAG = /<span\b[^<>]*>/g;
+
+function mentionIds(htmlContent: string, type: 'user' | 'group', idAttr: RegExp): string[] {
+  const typeAttr = type === 'user' ? /data-mention-type=["']user["']/ : /data-mention-type=["']group["']/;
+  const ids: string[] = [];
   // Ignore mentions nested inside code blocks / inline code.
-  const scannable = stripCodeRegions(htmlContent);
-  // Match span tags that have both data-mention-type=user and data-user-id in any order.
-  // Accept either quote style: Slack blocks/attachments emit single-quoted spans (isStringified).
-  const userMentionRegex = /<span[^>]*data-mention-type=["']user["'][^>]*>/g;
-  const userIdRegex = /data-user-id=(["'])([^"']+)\1/;
+  for (const [tag] of stripCodeRegions(htmlContent).matchAll(SPAN_TAG)) {
+    if (!typeAttr.test(tag)) continue;
+    const id = tag.match(idAttr)?.[2];
+    if (id) ids.push(id);
+  }
+  return [...new Set(ids)];
+}
 
-  const spans = [...scannable.matchAll(userMentionRegex)];
-  const userIds = spans
-    .map(spanMatch => {
-      const userIdMatch = spanMatch[0].match(userIdRegex);
-      return userIdMatch ? userIdMatch[2] : null;
-    })
-    .filter((id): id is string => id !== null);
-
-  // Return unique user IDs
-  return [...new Set(userIds)];
+export function extractUserMentions(htmlContent: string): string[] {
+  // Either quote style: Slack blocks/attachments emit single-quoted spans (isStringified).
+  return mentionIds(htmlContent, 'user', /data-user-id=(["'])([^"']+)\1/);
 }
 
 /**
@@ -69,23 +71,7 @@ export function extractUserMentions(htmlContent: string): string[] {
  * @returns Array of unique group IDs
  */
 export function extractGroupMentions(htmlContent: string): string[] {
-  // Ignore mentions nested inside code blocks / inline code.
-  const scannable = stripCodeRegions(htmlContent);
-  // Match span tags that have both data-mention-type=group and data-group-id in any order.
-  // Accept either quote style: Slack blocks/attachments emit single-quoted spans (isStringified).
-  const groupMentionRegex = /<span[^>]*data-mention-type=["']group["'][^>]*>/g;
-  const groupIdRegex = /data-group-id=(["'])([^"']+)\1/;
-
-  const spans = [...scannable.matchAll(groupMentionRegex)];
-  const groupIds = spans
-    .map(spanMatch => {
-      const groupIdMatch = spanMatch[0].match(groupIdRegex);
-      return groupIdMatch ? groupIdMatch[2] : null;
-    })
-    .filter((id): id is string => id !== null);
-
-  // Return unique group IDs
-  return [...new Set(groupIds)];
+  return mentionIds(htmlContent, 'group', /data-group-id=(["'])([^"']+)\1/);
 }
 
 /**

@@ -427,6 +427,7 @@ function Row({
 }) {
   return (
     <div
+      aria-current={selected ? 'true' : undefined}
       className={`flex items-center gap-2 rounded-md border px-2 py-1.5 transition ${
         selected
           ? 'border-emerald-400 bg-emerald-50'
@@ -753,7 +754,7 @@ function SelectedPanel({
                 data-track-category='Claw Agents'
                 data-track-name='Remove knowledge base selection'
                 className='flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground transition hover:bg-muted hover:text-foreground'
-                aria-label='Remove'
+                aria-label={`Remove ${it.label}`}
                 title='Remove'
               >
                 <X size={12} />

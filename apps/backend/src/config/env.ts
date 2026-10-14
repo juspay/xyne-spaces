@@ -343,6 +343,13 @@ const envSchema = Joi.object({
   JEV_API_KEY: Joi.string().allow('').default(''),
   JEV_URL: Joi.string().uri().default('https://api.typesafe.ai/v1/systemone'),
   JEV_MODEL: Joi.string().default('jev-1.13.0'),
+  ELEVENLABS_API_KEY: Joi.string().allow('').default(''),
+  ELEVENLABS_API_URL: Joi.string().uri().default('https://api.elevenlabs.io'),
+  ELEVENLABS_STT_MODEL: Joi.string().default('scribe_v2_realtime'),
+  ELEVENLABS_TTS_MODEL: Joi.string().default('eleven_flash_v2_5'),
+  ELEVENLABS_TTS_VOICE_ID: Joi.string().allow('').default(''),
+  VOICE_INPUT_STT_STREAM_PROVIDER: Joi.string().valid('google', 'elevenlabs').default('google'),
+  TTS_PROVIDER: Joi.string().valid('azure', 'elevenlabs').default('azure'),
   // Genius Bot API Configuration
   GENIUS_API_URL: Joi.string().uri().default('http://localhost:8000'),
   GENIUS_API_KEY: Joi.string().allow('').default(''),
@@ -1020,6 +1027,20 @@ export const config = {
     apiKey: envVars.JEV_API_KEY,
     url: envVars.JEV_URL,
     model: envVars.JEV_MODEL,
+  },
+  elevenLabs: {
+    apiKey: envVars.ELEVENLABS_API_KEY as string,
+    apiUrl: (envVars.ELEVENLABS_API_URL as string).replace(/\/+$/, ''),
+    sttUrl: (envVars.ELEVENLABS_API_URL as string).replace(/\/+$/, '').replace(/^http/, 'ws'),
+    sttModel: envVars.ELEVENLABS_STT_MODEL as string,
+    ttsModel: envVars.ELEVENLABS_TTS_MODEL as string,
+    ttsVoiceId: envVars.ELEVENLABS_TTS_VOICE_ID as string,
+  },
+  voiceInputStream: {
+    provider: envVars.VOICE_INPUT_STT_STREAM_PROVIDER as 'google' | 'elevenlabs',
+  },
+  tts: {
+    provider: envVars.TTS_PROVIDER as 'azure' | 'elevenlabs',
   },
   genius: {
     apiUrl: envVars.GENIUS_API_URL,

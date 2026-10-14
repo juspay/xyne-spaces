@@ -123,6 +123,7 @@ export const LinkDialog: React.FC<LinkDialogProps> = ({
           {hasSelection ? 'Edit link' : 'Insert link'}
         </h2>
         <button
+          aria-label='Close link dialog'
           onClick={() => setOpen(false)}
           data-track-category='EDITOR_TOOLBAR'
           data-track-name='CLOSE_LINK_DIALOG'

@@ -157,6 +157,7 @@ const BoardCreateScreen = ({
           {/* Left Section */}
           <div className='flex items-center gap-[4px]'>
             <Button
+              aria-label='Go back'
               onClick={handleClose}
               variant='ghost'
               size='iconSm'

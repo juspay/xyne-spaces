@@ -68,7 +68,7 @@ interface UseDragRescheduleReturn {
   onDragEnd: (event: DragEndEvent) => void;
   onDragCancel: () => void;
   dialogOpen: boolean;
-  confirm: () => void;
+  confirm: (notifyParticipantsByEmail: boolean) => void;
   cancel: () => void;
   pendingChange: PendingCallChange | null;
 }
@@ -229,12 +229,13 @@ export function useDragReschedule(
     cleanup();
   }, [cleanup]);
 
-  const confirm = useCallback((): void => {
+  const confirm = useCallback((notifyParticipantsByEmail: boolean): void => {
     const pending = pendingRescheduleRef.current;
     if (!pending) return;
     void callService.updateScheduledCall(pending.externalId, {
       startsAt: pending.newStartsAt,
       endsAt: pending.newEndsAt,
+      ...(notifyParticipantsByEmail && { notifyParticipantsByEmail }),
     });
     pendingRescheduleRef.current = null;
     setDialogOpen(false);

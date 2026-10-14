@@ -935,6 +935,7 @@ const WhatsAppBulkMigrationScreen = (): ReactElement => {
                             const isSelected = selectedPurgeSourceId === source.externalSourceId;
                             return (
                               <button
+                                aria-current={isSelected ? 'true' : undefined}
                                 key={source.externalSourceId}
                                 type='button'
                                 onClick={() => {
