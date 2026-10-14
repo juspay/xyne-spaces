@@ -38,7 +38,7 @@ concurrency:
 jobs:
   nix:
     name: Nix build + runtime smoke test
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-mini' || 'ubuntu-latest' }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
