@@ -35,7 +35,6 @@ import {
   buildUserParticipantOption,
 } from '../participantOptions';
 import { Controller, useForm } from 'react-hook-form';
-import { getUserDisplayName } from '../../../utils/userDisplayName';
 import {
   parseParticipants,
   matchParticipants,
