@@ -1737,17 +1737,14 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
   // composer's pin belongs to the composer's agent's model list, so it only
   // applies when the turn was answered by that same agent; any other agent
   // re-runs on its own default (explicit null, never a stale pin).
-  const reRunModelOverrides = useCallback(
-    (turnAgentSlug: string | undefined): StreamOverrides => {
-      const composerAgent = effectiveAgentSlugRef.current ?? 'ask-ai';
-      const sameAgent = (turnAgentSlug ?? composerAgent) === composerAgent;
-      return {
-        ...modelOverridesFrom(sameAgent ? latestComposerContextRef.current : null),
-        ...(turnAgentSlug ? { agentSlug: turnAgentSlug } : {}),
-      };
-    },
-    [],
-  );
+  const reRunModelOverrides = useCallback((turnAgentSlug: string | undefined): StreamOverrides => {
+    const composerAgent = effectiveAgentSlugRef.current ?? 'ask-ai';
+    const sameAgent = (turnAgentSlug ?? composerAgent) === composerAgent;
+    return {
+      ...modelOverridesFrom(sameAgent ? latestComposerContextRef.current : null),
+      ...(turnAgentSlug ? { agentSlug: turnAgentSlug } : {}),
+    };
+  }, []);
 
   const { submitQuery, abortCurrentRequest } = useXyneAIStream({
     channelIds: [],

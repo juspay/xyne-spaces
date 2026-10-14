@@ -257,7 +257,6 @@ function withTurnDuration(msg: Message): Message {
   return Number.isFinite(ms) && ms >= 0 ? { ...msg, durationMs: ms } : msg;
 }
 
-
 /** `runOrigin` off a stream event, when it is a well-formed origin object. */
 function readRunOrigin(raw: unknown): XyneAIRunOrigin | undefined {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;

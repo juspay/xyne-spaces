@@ -975,9 +975,8 @@ export function ModelMenu({
   const recommended = useMemo(
     () =>
       model.selectedModel === null && model.recommendedId
-        ? (model.models.find(
-            m => m.id === model.recommendedId && m.provider === 'local-harness',
-          ) ?? null)
+        ? (model.models.find(m => m.id === model.recommendedId && m.provider === 'local-harness') ??
+          null)
         : null,
     [model.models, model.selectedModel, model.recommendedId],
   );
@@ -1032,9 +1031,7 @@ export function ModelMenu({
       <Menu.Trigger asChild disabled={model.disabled}>
         <button
           type='button'
-          title={
-            selected ? selected.id : (recommended?.name ?? model.defaultModel ?? 'Auto')
-          }
+          title={selected ? selected.id : (recommended?.name ?? model.defaultModel ?? 'Auto')}
           className='inline-flex h-8 min-w-0 shrink items-center rounded-full px-3 text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60 data-[state=open]:bg-secondary data-[state=open]:text-foreground'
           data-track-category='XyneAI'
           data-track-name='OPEN_MODEL_SELECTOR'
