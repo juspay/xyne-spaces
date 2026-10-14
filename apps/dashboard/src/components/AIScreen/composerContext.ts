@@ -68,6 +68,11 @@ export interface ComposerContext {
   /** Which provider the model pin rides — the models endpoint's pinProvider.
    *  null when no model is picked. */
   modelProvider: 'litellm' | 'spaces' | 'local-harness' | null;
+  /** The model pill says this run goes to the user's device: a local-harness
+   *  pin, or Auto while the models endpoint's `recommendedId` names a device
+   *  harness (the one a no-pin run routes to). A prediction, not the outcome —
+   *  the reply's runOrigin is the truth. */
+  runsOnDevice: boolean;
   /** Per-run thinking level from the composer's thinking dropdown.
    *  null = the agent's configured default. */
   thinkingLevel: 'off' | 'minimal' | 'low' | 'medium' | 'high' | null;
@@ -98,6 +103,7 @@ export const EMPTY_COMPOSER_CONTEXT: ComposerContext = {
   instant: false,
   model: null,
   modelProvider: null,
+  runsOnDevice: false,
   thinkingLevel: null,
   sandboxMode: 'remote',
 };
@@ -203,8 +209,27 @@ export function toStreamOverrides(ctx: ComposerContext): StreamOverrides {
     ...(ctx.model
       ? { model: ctx.model, ...(ctx.modelProvider ? { modelProvider: ctx.modelProvider } : {}) }
       : {}),
+    ...(ctx.runsOnDevice ? { expectOnDevice: true } : {}),
     ...(ctx.thinkingLevel ? { thinkingLevel: ctx.thinkingLevel } : {}),
     ...(ctx.sandboxMode !== 'remote' ? { sandboxMode: ctx.sandboxMode } : {}),
     researchContext: ctx.research,
+  };
+}
+
+/**
+ * The model part of the composer's live snapshot, as per-submit overrides —
+ * for re-runs (regenerate / edit) that do not go through the composer's own
+ * submit. Explicit `model: null` when there is no pin, so the re-run never
+ * silently inherits a stale hook-level model.
+ */
+export function modelOverridesFrom(
+  ctx: ComposerContext | null,
+): Pick<StreamOverrides, 'model' | 'modelProvider' | 'thinkingLevel' | 'expectOnDevice'> {
+  if (!ctx) return { model: null, modelProvider: null };
+  return {
+    model: ctx.model,
+    modelProvider: ctx.model ? ctx.modelProvider : null,
+    ...(ctx.thinkingLevel ? { thinkingLevel: ctx.thinkingLevel } : {}),
+    ...(ctx.runsOnDevice ? { expectOnDevice: true } : {}),
   };
 }

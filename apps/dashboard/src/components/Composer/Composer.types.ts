@@ -101,6 +101,9 @@ export interface ComposerModelControl {
   defaultModel: string | null;
   defaultModelName: string | null;
   selectedModel: string | null;
+  /** The device harness Auto routes to right now (the models endpoint's
+   *  `recommendedId`). Present = Auto runs on the user's device. */
+  recommendedId?: string | null;
   onSelectModel: (model: string | null) => void;
   thinkingLevel: ThinkingLevel | null;
   onSelectThinking: (level: ThinkingLevel | null) => void;

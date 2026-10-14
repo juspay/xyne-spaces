@@ -736,6 +736,9 @@ export async function runClawAgentStream(
                   type: 'start',
                   sessionId: clawConversationId,
                   traceId: parsed.sessionId,
+                  // Where the run executes (set when it went to the user's
+                  // device) — the composer labels the reply from it (XYNE-66324).
+                  ...(parsed.clawRunOrigin && { runOrigin: parsed.clawRunOrigin }),
                 })}\n\n`
               );
               if (typeof (res as any).flush === 'function') (res as any).flush();
@@ -839,6 +842,7 @@ export async function runClawAgentStream(
                   ...(parsed.followUpsPending === true && { followUpsPending: true }),
                   // The turn as ordered thinking / text / tool parts.
                   ...(Array.isArray(parsed.parts) && { parts: parsed.parts }),
+                  ...(parsed.clawRunOrigin && { runOrigin: parsed.clawRunOrigin }),
                 })}\n\n`
               );
               if (typeof (res as any).flush === 'function') (res as any).flush();
