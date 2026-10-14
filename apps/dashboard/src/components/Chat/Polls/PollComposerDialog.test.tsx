@@ -46,12 +46,7 @@ describe('PollComposerDialog current-context flow', () => {
     const onPublish = vi.fn().mockResolvedValue(undefined);
     act(() => {
       root.render(
-        <PollComposerDialog
-          open
-          isPublishing={false}
-          onClose={vi.fn()}
-          onPublish={onPublish}
-        />,
+        <PollComposerDialog open isPublishing={false} onClose={vi.fn()} onPublish={onPublish} />,
       );
     });
 
@@ -81,12 +76,7 @@ describe('PollComposerDialog current-context flow', () => {
     const onPublish = vi.fn().mockRejectedValue(new Error('Unavailable'));
     act(() => {
       root.render(
-        <PollComposerDialog
-          open
-          isPublishing={false}
-          onClose={vi.fn()}
-          onPublish={onPublish}
-        />,
+        <PollComposerDialog open isPublishing={false} onClose={vi.fn()} onPublish={onPublish} />,
       );
     });
     const inputs = [...container.querySelectorAll('input')];
