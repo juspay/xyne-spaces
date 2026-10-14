@@ -46,7 +46,8 @@ export function CustomizeTrayView(): ReactElement {
   const { theme } = useUniwind();
   const isDark = theme === 'dark';
 
-  const surface = useCSSVariable('--color-card') as string;
+  const accent = useCSSVariable('--color-spaces-accent') as string;
+  const accentForeground = useCSSVariable('--color-spaces-accent-foreground') as string;
   const foreground = useCSSVariable('--color-foreground') as string;
   const muted = useCSSVariable('--color-secondary-text') as string;
 
@@ -100,9 +101,9 @@ export function CustomizeTrayView(): ReactElement {
           accessibilityRole='button'
           accessibilityLabel='Save'
           onPress={save}
-          style={[styles.save, { backgroundColor: foreground }]}
+          style={[styles.save, { backgroundColor: accent }]}
         >
-          <Text style={[styles.saveLabel, { color: surface }]}>Save</Text>
+          <Text style={[styles.saveLabel, { color: accentForeground }]}>Save</Text>
         </Pressable>
       }
     >

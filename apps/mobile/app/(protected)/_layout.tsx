@@ -1,5 +1,4 @@
 import React, { ReactElement, Suspense, useEffect, useMemo } from 'react';
-import { Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Stack, useLocalSearchParams, usePathname, useSegments } from 'expo-router';
 import { useCSSVariable } from 'uniwind';
@@ -114,7 +113,7 @@ function NativeShell(): ReactElement {
               <Stack
                 screenOptions={{
                   headerShown: false,
-                  freezeOnBlur: Platform.OS === 'android',
+                  // freezeOnBlur: Platform.OS === 'android',
                   contentStyle: { backgroundColor: stackContentBackground },
                 }}
               >

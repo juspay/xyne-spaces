@@ -58,7 +58,15 @@ export function PortalHost({ name = DEFAULT_PORTAL_HOST }: { name?: string }) {
   const map = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   const portalMap = map.get(name) ?? new Map<string, React.ReactNode>();
   if (portalMap.size === 0) return null;
-  return <>{Array.from(portalMap.values())}</>;
+  // Keyed by portal name: unkeyed, the entries are matched by position, so one
+  // portal leaving hands its component state to whichever now holds its slot.
+  return (
+    <>
+      {Array.from(portalMap, ([portalName, children]) => (
+        <React.Fragment key={portalName}>{children}</React.Fragment>
+      ))}
+    </>
+  );
 }
 
 // --------------------------------------------------

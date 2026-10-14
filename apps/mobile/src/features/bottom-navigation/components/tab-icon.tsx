@@ -25,13 +25,11 @@ import {
   PILL_BORDER_RADIUS,
   PILL_HEIGHT,
   PILL_WIDTH,
-  BADGE_BACKGROUND,
   BADGE_FONT_SIZE,
   BADGE_HEIGHT,
   BADGE_OFFSET_RIGHT,
   BADGE_OFFSET_TOP,
   BADGE_PADDING_HORIZONTAL,
-  BADGE_TEXT,
   tabCenterX,
   useTabBarPalette,
 } from '../constants';
@@ -292,8 +290,13 @@ export const TabIcon = memo(function TabIcon({
             </>
           )}
           {badgeLabel === null ? null : (
-            <View pointerEvents='none' style={styles.badge}>
-              <Text numberOfLines={1} allowFontScaling={false} style={styles.badgeLabel}>
+            <View pointerEvents='none' style={styles.badge} className='bg-spaces-accent'>
+              <Text
+                numberOfLines={1}
+                allowFontScaling={false}
+                style={styles.badgeLabel}
+                className='text-spaces-accent-foreground'
+              >
                 {badgeLabel}
               </Text>
             </View>
@@ -346,12 +349,10 @@ const styles = StyleSheet.create({
     height: BADGE_HEIGHT,
     paddingHorizontal: BADGE_PADDING_HORIZONTAL,
     borderRadius: BADGE_HEIGHT / 2,
-    backgroundColor: BADGE_BACKGROUND,
     alignItems: 'center',
     justifyContent: 'center',
   },
   badgeLabel: {
-    color: BADGE_TEXT,
     fontSize: BADGE_FONT_SIZE,
     fontWeight: '700',
     // The glyph box is taller than the digits; without this the label sits low.

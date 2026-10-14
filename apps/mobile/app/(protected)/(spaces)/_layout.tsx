@@ -13,6 +13,8 @@ import { Tray, useTray } from '@/src/ui/tray';
 import { isFlagOn } from '@/src/flags';
 import { SPACES_INITIAL_TAB, tabRoute } from '@/src/navigation/routes';
 
+import { QuickActionSheets } from '@/src/features/quick-actions';
+
 import { SpacesHeaderProvider } from './_header-provider';
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- Expo Router requires this export name.
@@ -124,6 +126,11 @@ export default function SpacesLayout(): ReactElement {
               the sheet, so the sheet still covers the FABs.
             */}
             <PortalHost name={TAB_OVERLAY_PORTAL_HOST} />
+            {/*
+              The surfaces the quick-action button opens. One copy for the
+              shell, not one per tab — see `QuickActionSheets`.
+            */}
+            <QuickActionSheets />
             <Tray.Content>
               <CustomizeTrayView />
             </Tray.Content>

@@ -1,6 +1,6 @@
 import type { ThemeName } from 'uniwind';
 
-import { neutral } from './primitives';
+import { coral, neutral } from './primitives';
 import type { RoleValues } from './roles';
 
 export type ThemeMode = 'light' | 'dark';
@@ -20,12 +20,34 @@ const PALETTES = {
   default: {
     variant: { light: 'light', dark: 'dark' },
     light: {
+      /**
+       * Off-white, not white, so a floating surface can be whiter than the
+       * page it floats over. Elevation in a light theme is carried by the
+       * card being brighter than its background; with a white page there is
+       * nowhere brighter to go and a menu can only be told apart by its
+       * shadow.
+       */
       background: neutral[50],
       foreground: neutral[900],
+      muted: neutral[600],
+      surface: neutral[100],
+      'surface-raised': neutral[0],
+      accent: coral[500],
+      'accent-foreground': neutral[0],
     },
     dark: {
       background: neutral[900],
       foreground: neutral[0],
+      muted: neutral[400],
+      surface: neutral[800],
+      /**
+       * Lighter than both the page and `surface`, which is the dark-theme
+       * elevation model: the further from the page a thing floats, the
+       * lighter it gets. A chip sits in the page; a menu hovers over it.
+       */
+      'surface-raised': neutral[700],
+      accent: coral[500],
+      'accent-foreground': neutral[0],
     },
   },
 } satisfies Record<string, Palette>;
