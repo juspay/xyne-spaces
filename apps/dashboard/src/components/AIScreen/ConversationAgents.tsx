@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { Check, ListFilter, Loader2, X } from 'lucide-react';
-import type { ConversationHistory } from '../Chat/XyneAISidebar/utils/XyneAITypes';
+import type { AnsweredBy, ConversationHistory } from '../Chat/XyneAISidebar/utils/XyneAITypes';
+import { answeredByFallbackNote, answeredByModelLabel, answeredByTitle } from './answeredByLabel';
 import {
   agentIdentity,
   agentNamesLabel,
@@ -171,17 +172,44 @@ export function AgentRecipient({ slug, className }: AgentRecipientProps): ReactE
   );
 }
 
-/** The agent answering, above the start of its response: avatar, then name. */
-export function AgentByline({ slug, className }: AgentRecipientProps): ReactElement {
+interface AgentBylineProps extends AgentRecipientProps {
+  /** Provider/model that produced this reply. Per message, so each agent in a
+   *  multi-agent chat shows its own model (XYNE-66326). */
+  answeredBy?: AnsweredBy | undefined;
+}
+
+/** The agent answering, above the start of its response: avatar, name, and the
+ *  model that actually answered — with a note when the run fell back from the
+ *  model it asked for (XYNE-66319). */
+export function AgentByline({ slug, className, answeredBy }: AgentBylineProps): ReactElement {
   const directory = useAgentDirectory();
   const identity = agentIdentity(directory, slug);
+  const fallbackNote = answeredBy ? answeredByFallbackNote(answeredBy) : null;
   return (
     <div
       data-testid='message-agent'
-      className={cn('flex items-center gap-2 text-sm leading-5', className)}
+      className={cn('flex min-w-0 items-center gap-2 text-sm leading-5', className)}
     >
       <IdentityGlyph identity={identity} size={20} rounded />
       <span className='truncate font-medium text-foreground'>{identity.name}</span>
+      {answeredBy && (
+        <span
+          data-testid='message-answered-by'
+          title={answeredByTitle(answeredBy)}
+          className='flex min-w-0 items-center gap-1 text-xs text-muted-foreground'
+        >
+          <span aria-hidden>·</span>
+          <span className='truncate'>{answeredByModelLabel(answeredBy)}</span>
+          {fallbackNote && (
+            <span
+              data-testid='message-answered-by-fallback'
+              className='truncate text-amber-600 dark:text-amber-400'
+            >
+              ({fallbackNote})
+            </span>
+          )}
+        </span>
+      )}
     </div>
   );
 }

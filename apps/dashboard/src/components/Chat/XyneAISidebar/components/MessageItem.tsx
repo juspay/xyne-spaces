@@ -1333,7 +1333,7 @@ export const MessageItem = React.memo(
             <AgentRecipient slug={message.agentSlug} className='pr-1' />
           )}
           {isV2 && message.type === 'bot' && message.agentSlug && (
-            <AgentByline slug={message.agentSlug} className='mb-2' />
+            <AgentByline slug={message.agentSlug} answeredBy={message.answeredBy} className='mb-2' />
           )}
           {/* The legacy "displayStatus + bouncing dots" loading state lived
               here as the TRUE branch of a ternary. Removed in favor of the
@@ -1739,6 +1739,7 @@ export const MessageItem = React.memo(
         prev.message.agentSlug === next.message.agentSlug &&
         prev.message.errorInfo === next.message.errorInfo &&
         prev.message.durationMs === next.message.durationMs &&
+        prev.message.answeredBy === next.message.answeredBy &&
         prev.message.followUpSuggestions === next.message.followUpSuggestions &&
         prev.isLatestBotMessage === next.isLatestBotMessage &&
         prev.onFollowUpSuggestionClick === next.onFollowUpSuggestionClick &&

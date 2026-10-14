@@ -39,7 +39,10 @@ import type {
   PendingActionResolution,
   ToolInvocation,
 } from '../../components/Chat/XyneAISidebar/utils/XyneAITypes';
-import { mergeUiFlows } from '../../components/Chat/XyneAISidebar/utils/XyneAITypes';
+import {
+  mergeUiFlows,
+  parseAnsweredBy,
+} from '../../components/Chat/XyneAISidebar/utils/XyneAITypes';
 import type { ToolOutput as GeniusToolOutput } from '../../types/toolOutput';
 import type { ResearchContext } from '@xyne/shared';
 import type { AttachedContextItem } from '../../components/Chat/XyneAISidebar/components/ContextPickerPanel';
@@ -1968,12 +1971,15 @@ class XyneAIStreamManager {
       ...(att.metadata ? { metadata: att.metadata } : {}),
     }));
 
+    const answeredBy = parseAnsweredBy(data['answeredBy']);
+
     updateMessages(prev =>
       prev.map(msg => {
         if (msg.id !== botMessageId) return msg;
         const { traceId } = msg;
         const updatedMsg: Message = {
           ...msg,
+          ...(answeredBy && { answeredBy }),
           content: finalParsed.summary,
           isStreaming: false,
           streamingContent: finalParsed.summary,

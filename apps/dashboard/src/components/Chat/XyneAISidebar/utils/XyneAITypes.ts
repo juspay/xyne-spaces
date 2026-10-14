@@ -112,6 +112,9 @@ export interface StoredMessage {
   parts?: AssistantPart[];
   /** How long the turn took to answer, start to finish ("Worked for 2m 31s"). */
   durationMs?: number;
+  /** Provider/model that actually answered this turn (per reply, so a
+   *  multi-agent chat shows each agent's own model). */
+  answeredBy?: AnsweredBy;
 
   /**
    * Tool invocations made during the response (v2)
@@ -561,6 +564,48 @@ export interface PlanTodo {
   status: 'pending' | 'in_progress' | 'completed' | 'failed';
 }
 
+/** Which provider/model produced an assistant reply, and — when the run had to
+ *  fall back — what it originally asked for. From claw-auth (`done` frame and
+ *  GET /messages), sourced from the run's agent_runs row. */
+export interface AnsweredBy {
+  provider: string;
+  model?: string;
+  fallbackFrom?: {
+    fromProvider: string;
+    fromModel?: string;
+    reason: 'quota' | 'auth' | 'transient' | 'empty' | 'unknown';
+  };
+}
+
+/** Narrow an untrusted `answeredBy` payload; undefined when malformed. */
+export function parseAnsweredBy(raw: unknown): AnsweredBy | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const r = raw as Record<string, unknown>;
+  const provider = r['provider'];
+  if (typeof provider !== 'string' || !provider) return undefined;
+  const model = r['model'];
+  const fb = r['fallbackFrom'];
+  const fbObj =
+    fb && typeof fb === 'object' && !Array.isArray(fb) ? (fb as Record<string, unknown>) : undefined;
+  const fromProvider = fbObj?.['fromProvider'];
+  const fromModel = fbObj?.['fromModel'];
+  const reasons = ['quota', 'auth', 'transient', 'empty', 'unknown'] as const;
+  const reason = reasons.find(x => x === fbObj?.['reason']) ?? 'unknown';
+  return {
+    provider,
+    ...(typeof model === 'string' && model ? { model } : {}),
+    ...(typeof fromProvider === 'string' && fromProvider
+      ? {
+          fallbackFrom: {
+            fromProvider,
+            ...(typeof fromModel === 'string' && fromModel ? { fromModel } : {}),
+            reason,
+          },
+        }
+      : {}),
+  };
+}
+
 export interface Message {
   /** Agent this turn was sent to / answered by. A chat can switch agents
    *  mid-conversation, so identity is per message. Absent on v1 rows. */
@@ -641,6 +686,9 @@ export interface Message {
   parts?: AssistantPart[];
   /** How long the turn took to answer, start to finish ("Worked for 2m 31s"). */
   durationMs?: number;
+  /** Provider/model that actually answered this turn (per reply, so a
+   *  multi-agent chat shows each agent's own model). */
+  answeredBy?: AnsweredBy;
 
   /**
    * Tool invocations made during the response (v2)
