@@ -160,16 +160,16 @@ export function useDefaultAgent(agents: ReadonlyArray<{ slug: string }> | undefi
       writeUrlAgent(null);
       emit();
     }
-    // An Ask AI chat restored before the list arrived set `null` — the same
-    // value as "nothing decided" — so the store, not the slug, says it was a
-    // choice. Without this, reloading an Ask AI chat switched it to the default.
-    if (currentSlug !== null || agentChosenThisLoad) return;
+    if (currentSlug !== null) return;
     const choice = readChoice();
     if (choice === 'ask-ai') {
       setAskAIAuto(false);
       return;
     }
-    if (choice === 'auto' || !known.has(DEFAULT_AGENT_SLUG)) return;
+    // An Ask AI chat restored before the list arrived set `null` — the same
+    // value as "nothing decided" — so the store, not the slug, says it was a
+    // choice. Without this, reloading an Ask AI chat switched it to the default.
+    if (agentChosenThisLoad || choice === 'auto' || !known.has(DEFAULT_AGENT_SLUG)) return;
     defaultSlug = DEFAULT_AGENT_SLUG;
     currentSlug = DEFAULT_AGENT_SLUG;
     emit();

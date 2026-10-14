@@ -4,6 +4,7 @@ import { AlertCircle, Bot, ChevronRight, Link2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import type { ToolInvocation, ClawCitation } from '../utils/XyneAITypes';
 import { buildClawCitationUrl, getClawCitationLabel } from '../utils/clawCitationUrl';
+import { readableResult } from '../utils/XyneAIUtils';
 import { cn } from '../../../../utils/classNames';
 import {
   agentLabel,
@@ -139,21 +140,6 @@ function previewOf(args: Record<string, unknown>): { key: string; text: string }
     if (typeof value === 'string' && value.trim()) return { key, text: value.trim() };
   }
   return null;
-}
-
-/** A result as text a person reads: MCP tools wrap theirs in a
- *  `{"content":[{"type":"text","text":…}]}` envelope, which is unwrapped. */
-function readableResult(result: string): string {
-  if (!result.trimStart().startsWith('{"content"')) return result;
-  try {
-    const parsed = JSON.parse(result) as { content?: Array<{ type?: string; text?: unknown }> };
-    const texts = (parsed.content ?? [])
-      .filter(block => block.type === 'text' && typeof block.text === 'string')
-      .map(block => block.text as string);
-    return texts.length > 0 ? texts.join('\n\n') : result;
-  } catch {
-    return result;
-  }
 }
 
 /** Only rendered once its row is opened, so results are parsed on demand. */

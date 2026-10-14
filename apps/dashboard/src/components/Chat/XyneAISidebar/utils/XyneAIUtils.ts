@@ -6,8 +6,10 @@ import type {
 import type {
   ConversationHistory,
   Message,
+  PlanTodo,
   StoredMessage,
   StreamingParsedContent,
+  ToolInvocation,
 } from './XyneAITypes';
 
 export function normalizeLoadedMessagesForDisplay(
@@ -460,4 +462,104 @@ export function agentNamesLabel(names: string[]): string {
   if (names.length <= 1) return names[0] ?? '';
   if (names.length === 2) return `${names[0]} & ${names[1]}`;
   return `${names[0]}, ${names[1]} +${names.length - 2}`;
+}
+
+/** A result as text a person reads: MCP tools wrap theirs in a
+ *  `{"content":[{"type":"text","text":…}]}` envelope, which is unwrapped. */
+export function readableResult(result: string): string {
+  if (!result.trimStart().startsWith('{"content"')) return result;
+  try {
+    const parsed = JSON.parse(result) as { content?: Array<{ type?: string; text?: unknown }> };
+    const texts = (parsed.content ?? [])
+      .filter(block => block.type === 'text' && typeof block.text === 'string')
+      .map(block => block.text as string);
+    return texts.length > 0 ? texts.join('\n\n') : result;
+  } catch {
+    return result;
+  }
+}
+
+/** The plan tools — claw's `todo-write` and the local harness's
+ *  `update-plan` — whose calls carry the turn's checklist. */
+export function isPlanCall(invocation: Pick<ToolInvocation, 'toolName'> | undefined): boolean {
+  const base = invocation?.toolName.split('__').pop() ?? '';
+  return /^(todo[-_]?write|update[-_]plan)$/i.test(base);
+}
+
+const PLAN_STATUSES: ReadonlySet<string> = new Set([
+  'pending',
+  'in_progress',
+  'completed',
+  'failed',
+]);
+
+/** The checklist a plan call wrote, cleaned the way the tool cleans it. */
+function planFromCall(call: ToolInvocation): { todos: PlanTodo[]; title?: string } | null {
+  const args: Record<string, unknown> = call.args ?? {};
+  if (!Array.isArray(args['todos'])) return null;
+  const todos = args['todos'].map((raw: unknown, index): PlanTodo => {
+    const item = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+    const id = item['id'];
+    const title = typeof item['title'] === 'string' ? item['title'].trim() : '';
+    const status = item['status'];
+    return {
+      id:
+        (typeof id === 'string' || typeof id === 'number' ? String(id).trim() : '') ||
+        String(index),
+      title: title || `Step ${index + 1}`,
+      status:
+        typeof status === 'string' && PLAN_STATUSES.has(status)
+          ? (status as PlanTodo['status'])
+          : 'pending',
+    };
+  });
+  const title = typeof args['title'] === 'string' ? args['title'].trim() : '';
+  return { todos, ...(title ? { title } : {}) };
+}
+
+/**
+ * The turn's plan card. It is read from the turn's latest plan call — stored
+ * with the run like every other tool call, so it survives a reload — and falls
+ * back to the live `plan` event for runs whose calls carry no list (the local
+ * harness). A call the tool rejected never replaces the plan, and a subagent's
+ * plan is not the turn's. A turn that ended without completing leaves no step
+ * in progress: it reads as stopped.
+ */
+export function turnPlan(
+  message: Pick<
+    Message,
+    | 'toolInvocations'
+    | 'planTodos'
+    | 'planTitle'
+    | 'isStreaming'
+    | 'isAborted'
+    | 'errorInfo'
+    | 'runStatus'
+  >,
+): { todos: PlanTodo[]; title?: string } | null {
+  let plan: { todos: PlanTodo[]; title?: string } | null = null;
+  const calls = message.toolInvocations ?? [];
+  for (let i = calls.length - 1; i >= 0 && !plan; i--) {
+    const call = calls[i]!;
+    if (call.parentToolCallId || !isPlanCall(call)) continue;
+    if (call.isError || call.status === 'error') continue;
+    if (call.result && /^\s*Error\b/.test(readableResult(call.result))) continue;
+    plan = planFromCall(call);
+  }
+  if (!plan && message.planTodos?.length) {
+    plan = { todos: message.planTodos, ...(message.planTitle ? { title: message.planTitle } : {}) };
+  }
+  if (!plan?.todos.length) return null;
+  const ended =
+    !message.isStreaming &&
+    (!!message.isAborted ||
+      !!message.errorInfo ||
+      (message.runStatus !== undefined && message.runStatus !== 'completed'));
+  if (!ended || !plan.todos.some(todo => todo.status === 'in_progress')) return plan;
+  return {
+    ...plan,
+    todos: plan.todos.map(todo =>
+      todo.status === 'in_progress' ? { ...todo, status: 'stopped' as const } : todo,
+    ),
+  };
 }

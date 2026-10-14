@@ -139,6 +139,7 @@ import {
   resolveActivePath,
   getSiblings,
   BRANCH_ROOT_KEY,
+  turnPlan,
 } from '../Chat/XyneAISidebar/utils/XyneAIUtils';
 
 type FeedbackValue = 'LIKE' | 'DISLIKE' | null;
@@ -832,6 +833,22 @@ function ChatMessageBubble({
   );
 
   const markdownComponents = useMemo(() => createMarkdownComponents(message.id), [message.id]);
+  // The plan card reads the turn's own plan calls, so it is the same live and
+  // after a reload.
+  const plan = useMemo(
+    () => (message.type === 'bot' ? turnPlan(message) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the fields turnPlan reads
+    [
+      message.type,
+      message.toolInvocations,
+      message.planTodos,
+      message.planTitle,
+      message.isStreaming,
+      message.isAborted,
+      message.errorInfo,
+      message.runStatus,
+    ],
+  );
 
   // Resolve @-mentions to the same avatar+name chip the sidebar uses, so user
   // tagging looks identical on the AIScreen. Only names that map to exactly one
@@ -1237,11 +1254,7 @@ function ChatMessageBubble({
               renderAnswerMarkdown(prepareAnswerText(text, streaming))
             }
             legacyAnswer={displayContent ? renderAnswerMarkdown(displayContent) : null}
-            plan={
-              message.planTodos?.length ? (
-                <PlanCard todos={message.planTodos} title={message.planTitle} />
-              ) : undefined
-            }
+            plan={plan ? <PlanCard todos={plan.todos} title={plan.title} /> : undefined}
           />
 
           {!isUser &&
@@ -1830,13 +1843,20 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
       undefined, // isEditUserMessage
       undefined, // editedUserMessageId
       undefined, // parentAssistantMessageId
-      {
-        // Same context the turn was sent with, plus the current toggles.
-        ...toTurnStreamOverrides(lastUserMessage.attachedContext, latestComposerContextRef.current),
-        ...(turnAgentSlug ? { agentSlug: turnAgentSlug } : {}),
-      },
+      // Same context and agent the turn was sent with, plus the current toggles.
+      toTurnStreamOverrides(
+        { attachedContext: lastUserMessage.attachedContext, agentSlug: turnAgentSlug },
+        latestComposerContextRef.current,
+        selectedAgentSlug,
+      ),
     );
-  }, [isActiveSessionStreaming, displayMessages, abortCurrentRequest, submitQuery]);
+  }, [
+    isActiveSessionStreaming,
+    displayMessages,
+    abortCurrentRequest,
+    submitQuery,
+    selectedAgentSlug,
+  ]);
 
   // Edit: fork a sibling branch with new content under the same parent. For v2
   // (claw) we pass `isEditUserMessage` + `editedUserMessageId` so claw-auth
@@ -1864,15 +1884,12 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
         true, // isEditUserMessage
         messageToEdit.id, // editedUserMessageId
         editedParentAssistant, // parentAssistantMessageId
-        {
-          // Editing re-asks that turn: same context and agent it was sent
-          // with, plus the current toggles.
-          ...toTurnStreamOverrides(messageToEdit.attachedContext, latestComposerContextRef.current),
-          ...(messageToEdit.agentSlug ? { agentSlug: messageToEdit.agentSlug } : {}),
-        },
+        // Editing re-asks that turn: same context and agent it was sent with,
+        // plus the current toggles.
+        toTurnStreamOverrides(messageToEdit, latestComposerContextRef.current, selectedAgentSlug),
       );
     },
-    [isActiveSessionStreaming, messages, abortCurrentRequest, submitQuery],
+    [isActiveSessionStreaming, messages, abortCurrentRequest, submitQuery, selectedAgentSlug],
   );
 
   // Navigate between sibling branches at a given message.

@@ -1999,8 +1999,7 @@ class XyneAIStreamManager {
           finalStatus !== 'completed'
         ) {
           updatedMsg.planTodos = stopOpenPlanTodos(updatedMsg.planTodos);
-        }
-        else if (msg.parts?.length)
+        } else if (msg.parts?.length)
           updatedMsg.parts = closeAssistantParts(msg.parts, new Date().toISOString());
         if (traceId) updatedMsg.traceId = traceId;
         return withTurnDuration(updatedMsg);

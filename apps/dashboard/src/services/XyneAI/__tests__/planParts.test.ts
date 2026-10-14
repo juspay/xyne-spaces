@@ -26,7 +26,11 @@ describe('planParts', () => {
   });
 
   it('marks the in-progress step stopped and is a no-op otherwise', () => {
-    expect(stopOpenPlanTodos(todos).map(t => t.status)).toEqual(['completed', 'stopped', 'pending']);
+    expect(stopOpenPlanTodos(todos).map(t => t.status)).toEqual([
+      'completed',
+      'stopped',
+      'pending',
+    ]);
     const settled = [todos[0]!];
     expect(stopOpenPlanTodos(settled)).toBe(settled);
   });

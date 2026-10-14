@@ -567,6 +567,9 @@ export interface Message {
   agentSlug?: string;
   planTodos?: PlanTodo[];
   planTitle?: string;
+  /** How the run behind this answer ended (from `done`, or the stored row on
+   *  reload). A turn that did not complete shows its open plan step stopped. */
+  runStatus?: 'completed' | 'failed' | 'cancelled';
   /** FlowUI artifact cards posted on this message, deduped by `screenId`. */
   uiFlows?: FlowDefinition[];
   id: string;
