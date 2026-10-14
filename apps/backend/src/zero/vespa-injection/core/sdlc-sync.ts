@@ -99,12 +99,31 @@ export function queueSdlcSearchJobs(hubId: string, change: SdlcSearchChange): vo
 }
 
 async function jobsFor(hubId: string, change: SdlcSearchChange): Promise<VespaJob[]> {
-  invalidateSdlcHubIndex(hubId); // read the hub as it is now, not as cached before this write
-  const index = await loadSdlcHubIndex(hubId);
-  if (!index) return []; // not an SDLC hub
-  const base = { workspaceId: index.workspaceId };
   const jobs = new Map<string, VespaJob>();
+  let base: { workspaceId?: string } = {};
   const add = (job: VespaJob) => jobs.set(`${job.schema}:${job.docId}`, { ...job, ...base });
+  const repository = async (id: string) => {
+    const exists = await db.repo.findUnique({ where: { id }, select: { id: true } });
+    add({ schema: sdlcRepositorySchema, jobType: exists ? 'feed' : 'delete', docId: id });
+  };
+
+  // The hub's own entry and its repositories need no hub tree, so they are queued even from the
+  // transaction that creates the hub, before the hub can be read.
+  if (change.hub) add({ schema: channelSchema, jobType: 'feed', docId: hubId });
+  for (const id of change.repositories ?? []) await repository(id);
+
+  invalidateSdlcHubIndex(hubId); // read the hub as it is now, not as cached before this write
+  let index = await loadSdlcHubIndex(hubId);
+  if (!index) {
+    // A channel that is not an SDLC hub has no SDLC entries. One that does not exist yet is a hub
+    // being created in this transaction: queue what the change names, with nothing under it yet.
+    if (await db.channel.findUnique({ where: { id: hubId }, select: { id: true } })) return [...jobs.values()];
+    index = {
+      hubId, projectId: '', workspaceId: '', containers: new Map(), canvases: new Map(),
+      attachments: new Map(), tickets: new Map(), conversations: new Map(), repoIds: [],
+    };
+  }
+  if (index.workspaceId) base = { workspaceId: index.workspaceId };
 
   // A track or folder, and every container under it (their paths and scope ids include it).
   const container = (id: string, removed = false) => {
@@ -140,10 +159,6 @@ async function jobsFor(hubId: string, change: SdlcSearchChange): Promise<VespaJo
     for (const [conversationId, fields] of index.conversations) {
       if (fields.sdlcDocumentId === id) await conversation(conversationId);
     }
-  };
-  const repository = async (id: string) => {
-    const exists = await db.repo.findUnique({ where: { id }, select: { id: true } });
-    add({ schema: sdlcRepositorySchema, jobType: exists ? 'feed' : 'delete', docId: id });
   };
   // What an edge places or links: its target, and for a context link both ends.
   const item = async (type: string, id: string, relation: string, removed: boolean) => {
@@ -185,8 +200,5 @@ async function jobsFor(hubId: string, change: SdlcSearchChange): Promise<VespaJo
       if (index.canvases.has(canvas.id)) await document('CANVAS', canvas.id, false);
     }
   }
-  for (const id of change.repositories ?? []) await repository(id);
-  if (change.hub) add({ schema: channelSchema, jobType: 'feed', docId: hubId });
-
   return [...jobs.values()];
 }

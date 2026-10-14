@@ -493,6 +493,8 @@ export async function createSdlcChannel(tx: TransactionClient, actor: SdlcActor,
       })),
     });
 
+    // A hub made here is a Prisma write, so no Zero channel handler feeds its entry.
+    queueSdlcSearchJobs(channelId, { hub: true });
     return channelId;
   }
 
@@ -528,7 +530,7 @@ export async function attachRepositoriesToChannel(tx: TransactionClient, actor: 
       })),
       skipDuplicates: true,
     });
-    queueSdlcSearchJobs(channelId, { hub: true, repositories: repos.map((repo: { id: string }) => repo.id) });
+    queueSdlcSearchJobs(channelId, { repositories: repos.map((repo: { id: string }) => repo.id) });
     await ensureHubKnowledgeFolder(tx, actor, channelId);
     await ensureHubWikiFolder(tx, actor, channelId);
     for (const repo of repos) {
