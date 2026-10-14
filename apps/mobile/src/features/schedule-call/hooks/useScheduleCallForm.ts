@@ -6,7 +6,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSelf } from '@/src/hooks/useUsers';
 import { stateMachineActor } from '@/src/machines/stateMachine';
 import {
-  ApiError,
   callService,
   type CreateRecurringSeriesRequest,
   type ScheduleCallRequest,
@@ -353,15 +352,8 @@ export const useScheduleCallForm = (editCall: EditCallData | null = null): Sched
         );
       }
       return true;
-    } catch (error) {
-      showMessageToast(
-        error instanceof ApiError && error.message
-          ? error.message
-          : editCall
-            ? 'Error updating call'
-            : 'Failed to schedule call',
-        'error',
-      );
+    } catch {
+      showMessageToast(editCall ? 'Error updating call' : 'Failed to schedule call', 'error');
       return false;
     } finally {
       inFlight.current = false;
