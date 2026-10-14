@@ -109,7 +109,15 @@ function getFlowCardNotificationLabel(content: string): string | null {
       .replace(/&amp;/g, '&');
     const flow = JSON.parse(json) as {
       components?: Array<{ type?: string; props?: Record<string, unknown> }>;
+      data?: Record<string, unknown>;
     };
+    const experimentCard = Array.isArray(flow.components)
+      ? flow.components.find((c) => c?.type === 'experiment_status' || c?.type === 'experiment_epoch')
+      : undefined;
+    if (experimentCard) {
+      const fallback = flow.data?.['fallbackText'];
+      return typeof fallback === 'string' && fallback.trim() ? `🧪 ${fallback.trim()}` : '🧪 Experiment update';
+    }
     const plan = Array.isArray(flow.components)
       ? flow.components.find((c) => c?.type === 'plan')
       : undefined;

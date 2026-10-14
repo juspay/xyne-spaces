@@ -36,6 +36,8 @@ type FlowComponentType =
   | 'provider_suggest'
   | 'mcpConfigure'
   | 'pr'
+  | 'experiment_status'
+  | 'experiment_epoch'
   | 'user_question'
   | 'code'
   | 'diff'

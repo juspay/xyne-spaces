@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
 import { logger } from '@/utils/logger';
-import { ingestAttachment } from '../core/fileUtils';
+import { attachFilesToMessage, ingestAttachment } from '../core/fileUtils';
 import { resolveChannelId } from '../utils/channelUtils';
 import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';
 import { storageService, getStorageService } from '@/services/storage/index';
@@ -17,6 +17,7 @@ const UploadFilesBodySchema = z.object({
   markdownText: z.string().optional(),
   metadata: z.string().optional(), // JSON-encoded string
   conversationId: z.string().trim().optional(),
+  messageId: z.string().trim().min(1).optional(),
 }).refine(
   data => !!data.channelId || !!data.channelName || !!data.conversationId,
   { message: 'Either channelId, channelName, or conversationId is required', path: ['channelId'] }
@@ -145,7 +146,7 @@ export class FilesController {
         return;
       }
 
-      const { channelId, channelName, text, markdownText, metadata, conversationId } = bodyResult.data;
+      const { channelId, channelName, text, markdownText, metadata, conversationId, messageId } = bodyResult.data;
       const userId = req.user!.id; // bot's userId from the verified app token
 
       // Resolve channelId from channelName or conversationId if not provided
@@ -161,6 +162,17 @@ export class FilesController {
           error: 'At least one file is required',
           code: 'MISSING_FILES',
         });
+        return;
+      }
+
+      if (messageId) {
+        const attached = await attachFilesToMessage({
+          messageId,
+          files,
+          userId,
+          channelId: resolvedChannelId,
+        });
+        res.status(201).json(attached);
         return;
       }
 

@@ -21,6 +21,8 @@ import {
   formatExperimentStatus,
 } from "./experiment-format.js";
 import type { WebhookCommandCtx } from "./context.js";
+import { postExperimentStatusCard, settleExperimentCards } from "../experiment-cards.js";
+import { experimentExitRule } from "../experiment-card-model.js";
 
 const REPLY_LABEL = "Failed to post /experiment reply";
 
@@ -94,6 +96,7 @@ const handlers: ExperimentHandlers = {
       ...(cancelledEpoch ? ["cancelled the running epoch"] : []),
       ...(cancelledCheckers > 0 ? [`cancelled ${cancelledCheckers} checker run${cancelledCheckers === 1 ? "" : "s"}`] : []),
     ];
+    await settleExperimentCards(run.id).catch(() => undefined);
     await ctx.reply(stoppedParts.length > 0
       ? `Stopped /experiment (${stoppedParts.join(", ")}).`
       : "Stopped /experiment.", REPLY_LABEL);
@@ -269,24 +272,32 @@ const handlers: ExperimentHandlers = {
     const seededPaths = isUnderstanding
       ? await seedUnderstandingFrontier(run.id, experimentCommand.focus).catch(() => 0)
       : 0;
-    await ctx.reply([
-      isUnderstanding ? "**/understanding started**" : "**/experiment started**",
-      isUnderstanding
-        ? `Mode: coverage-gated understanding loop (ends when the code-path frontier is exhausted)`
-        : `Mode: time-boxed autonomous exploration`,
-      `${isUnderstanding ? "Safety cap" : "Duration"}: ${formatDuration(experimentCommand.durationMs)}`,
-      ...(experimentCommand.provider ? [`Model: ${formatExperimentModel(experimentCommand.provider, experimentCommand.model)}`] : []),
-      seededPaths > 0
-        ? `Frontier: ${seededPaths} path(s) seeded from your list — the run ends when all of them are closed.`
-        : `Focus: ${experimentCommand.focus?.trim() || "(none)"}`,
-      // Never drop part of the user's scope in silence: the old cap cut a
-      // 57-table list mid-word and the run explored a narrower scope than the
-      // user believed they had asked for.
-      ...(experimentCommand.droppedFocus
-        ? [`Focus was too long — this was NOT included: \`${experimentCommand.droppedFocus.slice(0, 400)}\`${experimentCommand.droppedFocus.length > 400 ? " …" : ""}\nStart a second run for the remainder, or shorten the focus.`]
-        : []),
-      `Use \`/experiment status\` to inspect progress.`,
-    ].join("\n"), REPLY_LABEL);
+    const droppedFocusNote = experimentCommand.droppedFocus
+      ? `Focus was too long — this was NOT included: \`${experimentCommand.droppedFocus.slice(0, 400)}\`${experimentCommand.droppedFocus.length > 400 ? " …" : ""}\nStart a second run for the remainder, or shorten the focus.`
+      : null;
+    const carded = !ctx.channelDelivery && await postExperimentStatusCard(run.id);
+    if (carded) {
+      const notes = [
+        ...(seededPaths > 0 ? [`Frontier: ${seededPaths} path(s) seeded from your list — the run ends when all of them are closed.`] : []),
+        ...(droppedFocusNote ? [droppedFocusNote] : []),
+      ];
+      if (notes.length > 0) await ctx.reply(notes.join("\n"), REPLY_LABEL);
+    } else {
+      await ctx.reply([
+        isUnderstanding ? "**/understanding started**" : "**/experiment started**",
+        `Mode: ${experimentExitRule(experimentCommand.kind, experimentCommand.durationMs)}`,
+        `${isUnderstanding ? "Safety cap" : "Duration"}: ${formatDuration(experimentCommand.durationMs)}`,
+        ...(experimentCommand.provider ? [`Model: ${formatExperimentModel(experimentCommand.provider, experimentCommand.model)}`] : []),
+        seededPaths > 0
+          ? `Frontier: ${seededPaths} path(s) seeded from your list — the run ends when all of them are closed.`
+          : `Focus: ${experimentCommand.focus?.trim() || "(none)"}`,
+        // Never drop part of the user's scope in silence: the old cap cut a
+        // 57-table list mid-word and the run explored a narrower scope than the
+        // user believed they had asked for.
+        ...(droppedFocusNote ? [droppedFocusNote] : []),
+        `Use \`/experiment status\` to inspect progress.`,
+      ].join("\n"), REPLY_LABEL);
+    }
     try {
       await dispatchExperimentEpoch(run);
     } catch (err) {
@@ -295,6 +306,7 @@ const handlers: ExperimentHandlers = {
       const msg = errMsg(err);
       log.warn("[experiment] initial dispatch failed", { error: msg });
       await experimentRepository.update(run.id, { status: "aborted", lastEpochEndedAt: new Date() }).catch(() => undefined);
+      await settleExperimentCards(run.id).catch(() => undefined);
       await ctx.reply(`/experiment could not start: ${msg.slice(0, 300)}\nThe experiment was aborted — fix the issue and start again.`, REPLY_LABEL);
     }
   },

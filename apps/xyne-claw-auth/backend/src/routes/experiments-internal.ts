@@ -5,17 +5,16 @@ import { proofWasDelivered } from "../repositories/experimentRepository.js";
 import { buildLedgerMarkdown, postExperimentNotice } from "../lib/experiment.js";
 import { createLogger } from "../logger.js";
 import { hasResolvableCitation } from "../lib/experiment-text.js";
+import { experimentCounts } from "../lib/webhook-commands/experiment-format.js";
+import {
+  recordExperimentHypothesis,
+  refreshExperimentEpochCard,
+  refreshExperimentStatusCard,
+  settleExperimentCards,
+} from "../lib/experiment-cards.js";
 
 export const experimentsInternalRouter = Router();
 const log = createLogger("experiments-internal");
-
-function counts(findings: Array<{ status: string }>): { conjecture: number; proved: number; refuted: number } {
-  return {
-    conjecture: findings.filter((f) => f.status === "conjecture").length,
-    proved: findings.filter((f) => f.status === "proved").length,
-    refuted: findings.filter((f) => f.status === "refuted").length,
-  };
-}
 
 function notFound(res: Response): void {
   res.status(404).json({ success: false, error: "experiment not found" });
@@ -33,7 +32,7 @@ experimentsInternalRouter.get("/:id/ledger", async (req: Request<{ id: string }>
     success: true,
     data: {
       markdown: buildLedgerMarkdown(run, findings),
-      counts: counts(findings),
+      counts: experimentCounts(findings),
       deadlineAt: run.deadlineAt.toISOString(),
       epoch: run.epoch,
       // Exposed so the claw-side end-experiment gate can enforce the
@@ -99,6 +98,8 @@ experimentsInternalRouter.post("/:id/findings", async (req: Request<{ id: string
     note: typeof body.note === "string" ? body.note.slice(0, 2000) : null,
     proofArtifactPath: typeof body.proofArtifactPath === "string" ? body.proofArtifactPath.slice(0, 500) : null,
   });
+  void refreshExperimentStatusCard(run.id);
+  if (run.currentSessionId) void refreshExperimentEpochCard(run.currentSessionId);
   res.json({ success: true, data: { id: row.id, status, ...(downgradeNote ? { warning: downgradeNote } : {}) } });
 });
 
@@ -133,6 +134,7 @@ experimentsInternalRouter.post("/:id/reviews", async (req: Request<{ id: string 
     reason: body.reason,
     duplicateOf: typeof body.duplicateOf === "string" ? body.duplicateOf : null,
   });
+  void refreshExperimentStatusCard(run.id);
   res.json({ success: true, data: { id: row.id } });
 });
 
@@ -162,7 +164,8 @@ experimentsInternalRouter.post("/:id/hypothesis", async (req: Request<{ id: stri
   // Only currentHypothesis — NEVER the run's epoch counter. The caller sends
   // its dispatch-time epoch, so a zombie session from a recovered epoch would
   // otherwise rewind run.epoch under the live one.
-  await experimentRepository.update(run.id, { currentHypothesis: body.text.slice(0, 500) });
+  const updated = await experimentRepository.update(run.id, { currentHypothesis: body.text.slice(0, 500) });
+  void recordExperimentHypothesis(updated, body.text.slice(0, 500)).catch(() => undefined);
   res.json({ success: true });
 });
 
@@ -196,5 +199,6 @@ experimentsInternalRouter.post("/:id/complete", async (req: Request<{ id: string
   void postExperimentNotice(updated).catch((err) => {
     log.warn(`[experiment] complete notice failed id=${updated.id}: ${errMsg(err)}`);
   });
+  void settleExperimentCards(updated.id).catch(() => undefined);
   res.json({ success: true });
 });

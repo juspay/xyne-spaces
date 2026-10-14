@@ -436,6 +436,104 @@ export type PrStatus = z.infer<typeof prStatusSchema>;
 export type PrProvider = z.infer<typeof prProviderSchema>;
 export type PrProps = z.infer<typeof prPropsSchema>;
 
+export const experimentKindSchema = z.enum([
+  'experiment',
+  'understanding',
+  'framework',
+  'security',
+  'repo-history',
+]);
+
+export const experimentFindingStatusSchema = z.enum(['conjecture', 'proved', 'refuted']);
+
+export const experimentLinksSchema = z
+  .object({
+    preview: z.string().min(1).optional(),
+    code: z.string().min(1).optional(),
+    terminal: z.string().min(1).optional(),
+  })
+  .strict();
+
+export const experimentFindingRowSchema = z
+  .object({
+    title: z.string(),
+    status: experimentFindingStatusSchema,
+    epoch: z.number().int(),
+    proof: z.string().optional(),
+    verdict: z.string().optional(),
+  })
+  .strict();
+
+export const experimentStatusPropsSchema = z
+  .object({
+    runId: z.string().min(1),
+    kind: experimentKindSchema,
+    status: z.enum(['running', 'finishing', 'done', 'stopped']),
+    title: z.string(),
+    focus: z.string().optional(),
+    model: z.string(),
+    exitRule: z.string(),
+    startedAt: z.string(),
+    deadlineAt: z.string(),
+    endedAt: z.string().optional(),
+    updatedAt: z.string(),
+    epoch: z.number().int(),
+    counts: z
+      .object({
+        proved: z.number().int(),
+        refuted: z.number().int(),
+        open: z.number().int(),
+      })
+      .strict(),
+    epochs: z
+      .object({
+        completed: z.number().int(),
+        failed: z.number().int(),
+      })
+      .strict(),
+    hypothesis: z.string().optional(),
+    findings: z.array(experimentFindingRowSchema),
+    totalFindings: z.number().int(),
+    needsYou: z.array(z.string()),
+    links: experimentLinksSchema.optional(),
+    report: z.string().optional(),
+  })
+  .strict();
+
+export const experimentStatusComponentSchema = baseComponentSchema.extend({
+  type: z.literal('experiment_status'),
+  props: experimentStatusPropsSchema,
+});
+
+export const experimentEpochPropsSchema = z
+  .object({
+    runId: z.string().min(1),
+    epoch: z.number().int(),
+    status: z.enum(['running', 'done', 'failed', 'cancelled']),
+    hypothesis: z.string().optional(),
+    plan: z.array(execTodoSchema),
+    links: experimentLinksSchema.optional(),
+    retries: z.number().int(),
+    error: z.string().optional(),
+    summary: z.string().optional(),
+    attachments: z.array(z.string()),
+    findings: z.array(experimentFindingRowSchema),
+    startedAt: z.string(),
+    endedAt: z.string().optional(),
+  })
+  .strict();
+
+export const experimentEpochComponentSchema = baseComponentSchema.extend({
+  type: z.literal('experiment_epoch'),
+  props: experimentEpochPropsSchema,
+});
+
+export type ExperimentKind = z.infer<typeof experimentKindSchema>;
+export type ExperimentFindingRow = z.infer<typeof experimentFindingRowSchema>;
+export type ExperimentLinks = z.infer<typeof experimentLinksSchema>;
+export type ExperimentStatusProps = z.infer<typeof experimentStatusPropsSchema>;
+export type ExperimentEpochProps = z.infer<typeof experimentEpochPropsSchema>;
+
 // ── PR approval artifact (interactive HITL) ─────────────────────────────────
 // An interactive human-in-the-loop gate: the agent wants to perform a write
 // (merge a PR) and asks the human to Approve/Deny. Unlike the read-only `pr`
@@ -1081,6 +1179,8 @@ export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
     planComponentSchema,
     prComponentSchema,
     prApprovalComponentSchema,
+    experimentStatusComponentSchema,
+    experimentEpochComponentSchema,
     callScheduleComponentSchema,
     userQuestionComponentSchema,
     codeComponentSchema,
@@ -1128,7 +1228,7 @@ export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
 const KNOWN_COMPONENT_TYPES = new Set([
   'text', 'heading', 'input', 'textarea', 'dropdown', 'select', 'multiselect',
   'date', 'button', 'divider', 'image', 'link', 'table', 'plan', 'pr',
-  'pr_approval', 'call_schedule', 'agent', 'agent_summary', 'mcpConfigure', 'mcp_suggest', 'provider_suggest', 'row', 'column', 'card',
+  'pr_approval', 'experiment_status', 'experiment_epoch', 'call_schedule', 'agent', 'agent_summary', 'mcpConfigure', 'mcp_suggest', 'provider_suggest', 'row', 'column', 'card',
 ]);
 
 const unknownComponentSchema = baseComponentSchema

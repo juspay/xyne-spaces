@@ -70,6 +70,7 @@ import { registerRunRecovery } from "../queue/run-recovery-worker.js";
 import { enqueueDelayedJob, enqueueCronJob, type ScheduledJobData } from "../queue/scheduled-jobs-queue.js";
 import { retryNowByToken, cancelProviderRetry } from "../queue/provider-retry-worker.js";
 import { resolveClawUserIdForSpacesIdentity } from "../lib/users-jit.js";
+import { handleExperimentCardAction } from "../lib/experiment-card-actions.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("flow-action");
@@ -2282,6 +2283,16 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
     // "Retry now" dispatches immediately + stops the poller; "Stop retrying"
     // deschedules it. Both only carry the retryToken; the re-dispatch payload
     // lives in redis under that token (provider-retry-worker).
+    if (actionType === "experiment-card") {
+      resp = await handleExperimentCardAction({
+        actionId,
+        experimentId: data["experimentId"] as string | undefined,
+        callerUserId,
+      });
+      res.status(resp.type === "error" ? 400 : 200).json(resp);
+      return;
+    }
+
     if (actionType === "capacity-retry") {
       const retryToken = data["retryToken"] as string | undefined;
       const capUserId = data["userId"] as string | undefined;

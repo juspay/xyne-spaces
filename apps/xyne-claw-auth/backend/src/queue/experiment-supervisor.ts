@@ -2,6 +2,7 @@ import { experimentRepository, agentRunRepository } from "../repositories/index.
 import { errMsg } from "../lib/errors.js";
 import { dispatchExperimentEpoch, postExperimentNotice } from "../lib/experiment.js";
 import { createLogger } from "../logger.js";
+import { failRunningExperimentEpochs, settleExperimentCards } from "../lib/experiment-cards.js";
 
 const log = createLogger("experiment-supervisor");
 
@@ -31,6 +32,7 @@ async function tickOnce(): Promise<void> {
         await postExperimentNotice({ ...run, finalReport: run.finalReport ?? "(experiment ended without final report)" }).catch((err) => {
           log.warn(`[experiment] force-done notice failed id=${run.id}: ${errMsg(err)}`);
         });
+        await settleExperimentCards(run.id).catch(() => undefined);
         continue;
       }
 
@@ -45,6 +47,7 @@ async function tickOnce(): Promise<void> {
       // that are BOTH inactive and quiet past the stale window.
       const stale = now - run.updatedAt.getTime() > STALE_MS;
       if (!stale) continue;
+      await failRunningExperimentEpochs(run.id, "No response from the agent for 10 minutes; starting the next epoch.").catch(() => undefined);
 
       if (now < deadlineMs && run.status === "running") {
         const next = await experimentRepository.update(run.id, {

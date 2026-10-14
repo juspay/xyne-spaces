@@ -8,6 +8,8 @@ import { findOrCreateConversation } from './conversationUtils';
 import { resolveSlackMentions } from '@/integrations/adapters/slack-webhook-tickets/utils/slackUserResolver';
 import { SlackBlockKitParser } from '@/integrations/adapters/slack-webhook-tickets/utils/slackBlockKitParser';
 import { config } from '@/config/env';
+import { db } from '@/database/client';
+import { conversationService } from '@/services/conversationService';
 
 // Initialize Block Kit parser instance
 const blockKitParser = new SlackBlockKitParser();
@@ -102,4 +104,39 @@ export async function ingestAttachment(
     logger.error('[INGEST-ATTACHMENT] Error ingesting attachment:', error);
     throw error;
   }
+}
+
+export async function attachFilesToMessage(params: {
+  messageId: string;
+  files: Express.Multer.File[];
+  userId: string;
+  channelId: string;
+}): Promise<FileUploadResponse> {
+  const { messageId, files, userId, channelId } = params;
+  const message = await db.message.findUnique({
+    where: { messageId },
+    select: { messageId: true, conversationId: true, senderId: true, isDeleted: true },
+  });
+  if (!message || message.isDeleted) throw new Error(`Message not found: ${messageId}`);
+  if (message.senderId !== userId) throw new Error(`Message not found: ${messageId}`);
+  const conversation = await db.conversation.findUnique({
+    where: { conversationId: message.conversationId },
+    select: { channelId: true },
+  });
+  if (!conversation || conversation.channelId !== channelId) throw new Error(`Message not found: ${messageId}`);
+
+  await conversationService.updateMessageContent({ messageId, files });
+  const attachments = await new MessageAttachmentRepository().findByMessageId(messageId);
+  return {
+    eventType: FileUploadEventType.FILE_UPLOADED,
+    conversationId: message.conversationId,
+    messageId,
+    attachments: attachments.map(att => ({
+      fileid: att.id,
+      originalFilename: att.originalFilename,
+      url: att.url,
+      size: att.size,
+      mimeType: att.mimetype,
+    })),
+  };
 }

@@ -90,6 +90,30 @@ export type {
 } from "./flow/agent-card.js";
 export type { Todo, TodoStatus, PlanPhase, PlanTodoInput } from "./flow/plan-flow.js";
 export { buildPrFlow, prScreenId, PR_COMPONENT_ID } from "./flow/pr-flow.js";
+export {
+  buildExperimentStatusFlow,
+  buildExperimentEpochFlow,
+  experimentStatusScreenId,
+  experimentEpochScreenId,
+  experimentStatusFallbackText,
+  experimentEpochFallbackText,
+  experimentKindLabel,
+  EXPERIMENT_STATUS_COMPONENT_ID,
+  EXPERIMENT_EPOCH_COMPONENT_ID,
+} from "./flow/experiment-flow.js";
+export type {
+  ExperimentKind,
+  ExperimentCardStatus,
+  ExperimentEpochStatus,
+  ExperimentFindingStatus,
+  ExperimentPlanStatus,
+  ExperimentLinks,
+  ExperimentFindingRow,
+  ExperimentStatusCard,
+  ExperimentPlanItem,
+  ExperimentEpochCard,
+  ExperimentCardRouting,
+} from "./flow/experiment-flow.js";
 export type { PrProvider, PrStatus, PrCardInput, PrIdentity } from "./flow/pr-flow.js";
 export { todoTools, todoWriteTool, todoReadTool, getPlan, clearPlan, PLAN_TOOL_SLUGS, isPlanToolSlug } from "./tools/todo/todo-tools.js";
 export { isReadOnlyJob } from "./tools/sandbox/repo-configs.js";

@@ -220,6 +220,10 @@ export const CONFIG = {
   // LIVE_TOOLCALLS_ENABLED=false to disable.
   liveToolCallsEnabled: process.env["LIVE_TOOLCALLS_ENABLED"] !== "false",
   chatTitleGenerationEnabled: process.env["CHAT_TITLE_GENERATION_ENABLED"] !== "false",
+  experimentCardsEnabled: process.env["EXPERIMENT_CARDS"] === "true",
+  experimentStatusCardGapMs: Number(process.env["EXPERIMENT_STATUS_CARD_GAP_MS"] ?? 15_000),
+  experimentEpochCardGapMs: Number(process.env["EXPERIMENT_EPOCH_CARD_GAP_MS"] ?? 3_000),
+  experimentEpochOpenWaitMs: Number(process.env["EXPERIMENT_EPOCH_OPEN_WAIT_MS"] ?? 8_000),
   runRecoveryMaxRetries: Number(process.env["RUN_RECOVERY_MAX_RETRIES"] ?? 3),
   // Must be > SESSION_LOCK_TTL_MS (15 min in xyne-claw) — when equal, a slow but
   // progressing run keeps refreshing its lock on every message_end while the

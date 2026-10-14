@@ -26,6 +26,8 @@ export type FlowComponentType =
   | 'plan'
   | 'pr'
   | 'pr_approval'
+  | 'experiment_status'
+  | 'experiment_epoch'
   | 'call_schedule'
   | 'user_question'
   | 'code'

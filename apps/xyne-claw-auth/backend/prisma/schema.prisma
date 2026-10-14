@@ -2406,13 +2406,42 @@ model ExperimentRun {
   /// a stopped run kept emitting checker output into the thread.
   checkerSessionIds  String[]            @default([])
   finalReport        String?             @db.Text
+  statusMessageId    String?
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
   findings           ExperimentFinding[]
   reviews            ExperimentReview[]
+  epochs             ExperimentEpoch[]
 
   @@index([conversationId, status])
   @@map("experiment_runs")
+}
+
+// workspace-check:ignore — tenant scope inherited via experimentId -> ExperimentRun.orgId (FK, onDelete: Cascade); never queried cross-tenant.
+model ExperimentEpoch {
+  id              String        @id @default(cuid())
+  experimentId    String
+  experiment      ExperimentRun @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  epoch           Int
+  sessionId       String        @unique
+  messageId       String?
+  status          String        @default("running")
+  hypothesis      String?       @db.Text
+  plan            Json?
+  previewUrl      String?
+  codeUrl         String?
+  terminalUrl     String?
+  retries         Int           @default(0)
+  error           String?       @db.Text
+  summary         String?       @db.Text
+  attachmentNames String[]      @default([])
+  needsYou        String[]      @default([])
+  startedAt       DateTime      @default(now())
+  endedAt         DateTime?
+  updatedAt       DateTime      @updatedAt
+
+  @@index([experimentId, epoch])
+  @@map("experiment_epochs")
 }
 
 // workspace-check:ignore — tenant scope inherited via experimentId -> ExperimentRun.orgId (FK, onDelete: Cascade); never queried cross-tenant.

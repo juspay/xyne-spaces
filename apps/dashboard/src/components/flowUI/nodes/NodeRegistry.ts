@@ -15,6 +15,8 @@ import { TableNode } from './TableNode';
 import { LinkNode } from './LinkNode';
 import { PlanNode } from './PlanNode';
 import { PrNode } from './PrNode';
+import { ExperimentStatusNode } from './ExperimentStatusNode';
+import { ExperimentEpochNode } from './ExperimentEpochNode';
 import { CallScheduleNode } from './CallScheduleNode';
 import { UserQuestionNode } from './UserQuestionNode';
 import { CodeNode } from './CodeNode';
@@ -73,6 +75,8 @@ NodeRegistry.register('table', TableNode);
 NodeRegistry.register('link', LinkNode);
 NodeRegistry.register('plan', PlanNode);
 NodeRegistry.register('pr', PrNode);
+NodeRegistry.register('experiment_status', ExperimentStatusNode);
+NodeRegistry.register('experiment_epoch', ExperimentEpochNode);
 // NodeRegistry.register('pr_approval', PrApprovalNode); // unlinked for now
 NodeRegistry.register('call_schedule', CallScheduleNode);
 NodeRegistry.register('user_question', UserQuestionNode);

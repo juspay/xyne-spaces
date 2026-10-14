@@ -272,6 +272,8 @@ function nodeHeight(node: FlowComponent, widthPx: number): number {
     case 'plan':
     case 'pr':
     case 'pr_approval':
+    case 'experiment_status':
+    case 'experiment_epoch':
     case 'call_schedule':
     case 'user_question':
     case 'diff':

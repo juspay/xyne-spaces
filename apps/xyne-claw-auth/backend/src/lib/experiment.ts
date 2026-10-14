@@ -524,6 +524,8 @@ export async function dispatchExperimentEpoch(run: ExperimentRun): Promise<{ ses
   const task = buildEpochTask(run, buildLedgerMarkdown(run, findings, reviews));
   const result = await dispatchExperimentRun(run, { task, claimAsCurrent: true, recover: true });
   log.info(`[experiment] dispatched epoch=${run.epoch} id=${run.id} session=${result.sessionId}`);
+  const { openExperimentEpochCard } = await import("./experiment-cards.js");
+  await openExperimentEpochCard({ ...run, currentSessionId: result.sessionId }, result.sessionId);
   return result;
 }
 

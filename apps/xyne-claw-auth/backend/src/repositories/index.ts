@@ -23,6 +23,7 @@ export { subagentDefinitionRepository } from "./subagentDefinitionRepository.js"
 export { subagentShareRepository } from "./subagentShareRepository.js";
 export { activeGoalRepository } from "./activeGoalRepository.js";
 export { experimentRepository } from "./experimentRepository.js";
+export { experimentEpochRepository } from "./experimentEpochRepository.js";
 export { evalRepository } from "./evalRepository.js";
 export type { EvalTurnInput, ImportConversationInput } from "./evalRepository.js";
 export { searchEvalRepository, computeSearchEvalSummary, toMetricsSummary } from "./searchEvalRepository.js";

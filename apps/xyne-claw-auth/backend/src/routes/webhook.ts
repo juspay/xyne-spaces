@@ -25,6 +25,13 @@ import {
 } from "../repositories/index.js";
 import type { DraftAgentSpec } from "../lib/agent-card.js";
 import { toResolvedAgent, type ResolvedAgent } from "../lib/resolved-agent.js";
+import {
+  finishExperimentEpoch,
+  refreshExperimentStatusCard,
+  routeExperimentPlan,
+  routeExperimentPreview,
+} from "../lib/experiment-cards.js";
+import { experimentFailureText } from "../lib/experiment-card-model.js";
 import { stripLeadingAgentMention } from "../lib/strip-agent-mention.js";
 import { resolveUserSpacesAuth } from "../surfaces/spaces/user-auth.js";
 import { IMMEDIATE_TASK_COMMAND_RE, RECORD_SKILL_COMMAND_RE, isVideoAttachment, videoFileExtension, SDLC_AGENT_SLUG } from "xyne-claw-shared";
@@ -591,6 +598,7 @@ async function continueExperimentAfterResult(ctx: SessionContext, sessionId: str
   const now = Date.now();
   if (active.status === "finishing") {
     await experimentRepository.update(active.id, { status: "done", lastEpochEndedAt: new Date() });
+    void refreshExperimentStatusCard(active.id);
     return false;
   }
 
@@ -3780,6 +3788,17 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // (unprefixed) error and the full failure path runs then — the thread is
     // never permanently silent.
     const isShutdownDrain = /^SHUTDOWN_DRAIN:/.test(rawErr);
+    if (
+      ctx?.isExperiment &&
+      !isShutdownDrain &&
+      await finishExperimentEpoch(sessionId, ctx, {
+        status: payload.status === "cancelled" ? "cancelled" : "failed",
+        ...(payload.status === "cancelled" ? {} : { error: experimentFailureText(payload) }),
+      }).catch(() => false)
+    ) {
+      clog.info(`[webhook/result] experiment epoch ${payload.status} recorded on its card session=${sessionId}`);
+      return;
+    }
     // ── Handle failure chain if configured ──
     if (payload.status === "failed" && !isShutdownDrain && ctx?.agentSlug && ctx.agentOrgId) {
       try {
@@ -4691,6 +4710,13 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       }
     }
 
+    if (ctx.isExperiment && await finishExperimentEpoch(sessionId, ctx, payload.emptyReason === "provider_capacity"
+      ? { status: "failed", error: experimentFailureText(payload) }
+      : { status: "done" }).catch(() => false)) {
+      log.info(`[webhook/result] empty experiment epoch recorded on its card session=${sessionId}`);
+      return;
+    }
+
     // Capacity failures often surface as an EMPTY result (status=completed,
     // emptyReason=provider_capacity), not status=failed — so hook the auto-retry
     // here too. The card replaces the generic "try again in a moment" notice.
@@ -5262,7 +5288,16 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         },
       );
 
-      if (prepared.attachments.length > 0) {
+      const recordedOnEpochCard = ctx.isExperiment
+        ? await finishExperimentEpoch(sessionId, ctx, {
+            status: "done",
+            text: prepared.text,
+            attachments: prepared.attachments.map((att) => ({ fileName: att.fileName, mimeType: att.mimeType, data: att.data })),
+          }).catch(() => false)
+        : false;
+      if (recordedOnEpochCard) {
+        log.info(`Agent ${ctx.agentSlug}: experiment epoch result recorded on its card (${prepared.attachments.length} attachment(s))`);
+      } else if (prepared.attachments.length > 0) {
         const form = new FormData();
         for (const att of prepared.attachments) {
           const buffer = Buffer.from(att.data, "base64");
@@ -5645,6 +5680,7 @@ async function doRenderPlanCard(
     );
   }
 
+  if (ctx.isExperiment && await routeExperimentPlan(sessionId, ctx, renderTodos).catch(() => false)) return;
   // Snapshot exactly what this card is about to show. Nothing else records the
   // todo list, so this is what reconcileStalePlanTodos reads at run end to find
   // a step the agent left `in_progress` and never closed.
@@ -6636,6 +6672,14 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
     // router's access check (and the Workspace pane) depend on it.
     if (await isLivePreviewMessageHidden(ctx, log)) {
       log.info(`Sandbox preview message suppressed by agent config (sandboxId=${sandboxId} agentId=${ctx.agentId ?? "-"} agentSlug=${ctx.agentSlug ?? "-"})`);
+      return;
+    }
+    if (ctx.isExperiment && await routeExperimentPreview(sessionId, ctx, {
+      previewUrl: sandboxPreviewUrl,
+      ...(sandboxCodePreviewUrl ? { codeUrl: `${sandboxCodePreviewUrl}/` } : {}),
+      ...(sandboxTermUrl ? { terminalUrl: sandboxTermUrl } : {}),
+    }).catch(() => false)) {
+      log.info(`Sandbox preview routed into the experiment epoch card (sandboxId=${sandboxId})`);
       return;
     }
     try {
