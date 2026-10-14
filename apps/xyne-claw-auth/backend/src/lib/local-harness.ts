@@ -725,8 +725,13 @@ export async function relayResult(
   },
   opts: { localHarnessUnreachable?: boolean } = {},
 ): Promise<void> {
+  // Always attribute a finished device run, even when the owner lookup fails:
+  // run-stream reads a missing attribution as a server failover.
   const localHarness = result.status === "done"
-    ? await describeLocalHarnessRun(run).catch(() => null)
+    ? await describeLocalHarnessRun(run).catch(() => {
+        const harnessName = localHarnessProviderLabel(run.provider);
+        return { provider: run.provider, harnessName, label: harnessName, ownerName: "" };
+      })
     : null;
 
   await fetch(run.callbackUrl, {

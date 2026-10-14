@@ -82,6 +82,10 @@ export interface AIComposerHandle {
    *  Used on chat switch to carry the opened conversation's last-turn context
    *  into the composer. */
   setContext: (items: AttachedContextItem[]) => void;
+  /** The composer's current picks (model, thinking, toggles, context). Lets
+   *  regenerate / edit fall back to them when a turn's own run options are
+   *  unknown (a reloaded conversation). */
+  getContext: () => ComposerContext;
 }
 
 interface AIComposerProps {
@@ -306,6 +310,16 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
           : modelPinProvider,
       thinkingLevel: effectiveThinkingLevel,
       sandboxMode,
+      // Where the send will run: a pinned laptop model, or — on Auto — the
+      // device harness claw-auth recommends (it routes Auto runs there when
+      // the device is online). Display-only (XYNE-66324).
+      localHarnessTarget: effectiveModel
+        ? effectiveModel.startsWith('local-harness:')
+          ? effectiveModel
+          : null
+        : modelsArePreviousAgent
+          ? null
+          : (agentModelsData?.recommendedId ?? null),
     }),
     [
       selections,
@@ -325,6 +339,8 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       effectiveThinkingLevel,
       webSearchAccessible,
       deepResearchAccessible,
+      modelsArePreviousAgent,
+      agentModelsData?.recommendedId,
     ],
   );
 
@@ -571,6 +587,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
         onSubmit?.(trimmed, undefined, buildContext(), 'programmatic');
         return true;
       },
+      getContext: (): ComposerContext => buildContext(),
       setContext: (items: AttachedContextItem[]): void => {
         const next = attachedContextToSelections(items);
         setSelections({
@@ -861,6 +878,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
           defaultModelName: modelsArePreviousAgent
             ? null
             : (agentModelsData?.defaultModelName ?? null),
+          recommendedId: modelsArePreviousAgent ? null : (agentModelsData?.recommendedId ?? null),
           selectedModel: effectiveModel,
           onSelectModel: setSelectedModel,
           thinkingLevel: effectiveThinkingLevel,

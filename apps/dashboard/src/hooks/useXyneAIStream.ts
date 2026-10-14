@@ -73,6 +73,11 @@ export interface StreamOverrides {
    *  switch agents mid-conversation; regenerating or editing a turn re-runs it
    *  with the agent that owned it. */
   agentSlug?: string | null;
+  /** Display-only: the device harness (`local-harness:<provider>`) this run is
+   *  expected to land on — a pinned laptop model, or the one Auto routes to.
+   *  Stamped on the bot message so the reply can say when it ran on the
+   *  server instead. Never sent to the backend. */
+  localHarnessTarget?: string | null;
 }
 
 interface UseXyneAIStreamParams {
@@ -456,6 +461,17 @@ export const useXyneAIStream = ({
             ...(parentMessageId && { parentId: parentMessageId }),
             ...(isV2 && { agentSlug: eAgentSlug ?? 'ask-ai' }),
             ...(userTags && Object.keys(userTags).length > 0 && { userTags }),
+            // What this turn ran with, so regenerate / edit can re-run it the
+            // same way (XYNE-66322). Client-only — see TurnRunOptions.
+            runOptions: {
+              model: eModel ?? null,
+              modelProvider: eModel ? (eModelProvider ?? null) : null,
+              thinkingLevel: eThinkingLevel ?? null,
+              webSearchEnabled: eWebSearchEnabled,
+              deepResearchEnabled: eDeepResearchEnabled,
+              createCanvasEnabled: eCreateCanvasEnabled,
+              ...(ov?.sandboxMode ? { sandboxMode: ov.sandboxMode } : {}),
+            },
             ...(displayContextForMessage && displayContextForMessage.length > 0
               ? { attachedContext: displayContextForMessage }
               : {}),
@@ -482,6 +498,7 @@ export const useXyneAIStream = ({
         participants: [],
         parentId: localUserMessageId, // Bot is child of user message in tree
         ...(isV2 && { agentSlug: eAgentSlug ?? 'ask-ai' }),
+        ...(ov?.localHarnessTarget ? { expectedLocalHarness: ov.localHarnessTarget } : {}),
       };
 
       // Build initial messages list for stream manager

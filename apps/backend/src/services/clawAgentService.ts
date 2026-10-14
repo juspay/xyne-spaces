@@ -23,6 +23,11 @@ import { Agent } from 'undici';
 const briefStreamDispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0, connectTimeout: 10_000 });
 
 
+/** A JSON object (not null / array) — guards fields forwarded from claw-auth SSE. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 /** Claw agent that answers the cmd+K AI overview in one turn (claw-auth provisions it). */
 export const CMDK_ANSWER_AGENT_SLUG = 'cmdk-answer';
 
@@ -736,6 +741,11 @@ export async function runClawAgentStream(
                   type: 'start',
                   sessionId: clawConversationId,
                   traceId: parsed.sessionId,
+                  // Device (local-harness) runs say so up front — the Xyne AI
+                  // screen labels the reply "on your device" (XYNE-66324).
+                  ...(isPlainObject(parsed.clawRunOrigin) && {
+                    clawRunOrigin: parsed.clawRunOrigin,
+                  }),
                 })}\n\n`
               );
               if (typeof (res as any).flush === 'function') (res as any).flush();
@@ -837,6 +847,11 @@ export async function runClawAgentStream(
                     followUpSuggestions: parsed.followUpSuggestions,
                   }),
                   ...(parsed.followUpsPending === true && { followUpsPending: true }),
+                  // Where the reply actually ran — final, since a device run
+                  // can fail over to the server after dispatch (XYNE-66324).
+                  ...(isPlainObject(parsed.clawRunOrigin) && {
+                    clawRunOrigin: parsed.clawRunOrigin,
+                  }),
                   // The turn as ordered thinking / text / tool parts.
                   ...(Array.isArray(parsed.parts) && { parts: parsed.parts }),
                 })}\n\n`

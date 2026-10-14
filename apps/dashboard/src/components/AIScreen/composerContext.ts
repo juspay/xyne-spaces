@@ -14,7 +14,7 @@ import {
   type AttachedContextItem,
 } from '../Chat/XyneAISidebar/components/ContextPickerPanel';
 import type { StreamOverrides } from '../../hooks/useXyneAIStream';
-import type { UserTag } from '../Chat/XyneAISidebar/utils/XyneAITypes';
+import type { Message, UserTag } from '../Chat/XyneAISidebar/utils/XyneAITypes';
 
 /**
  * Full snapshot of the extra composer state on the /ai page — everything the
@@ -72,6 +72,10 @@ export interface ComposerContext {
    *  null = the agent's configured default. */
   thinkingLevel: 'off' | 'minimal' | 'low' | 'medium' | 'high' | null;
   sandboxMode: 'remote' | 'local' | 'container';
+  /** Display-only: the device harness (`local-harness:<provider>`) a send is
+   *  expected to run on — the pinned laptop model, or the models endpoint's
+   *  `recommendedId` when the pick is Auto. Never sent to the backend. */
+  localHarnessTarget?: string | null;
 }
 
 export const EMPTY_COMPOSER_CONTEXT: ComposerContext = {
@@ -205,6 +209,63 @@ export function toStreamOverrides(ctx: ComposerContext): StreamOverrides {
       : {}),
     ...(ctx.thinkingLevel ? { thinkingLevel: ctx.thinkingLevel } : {}),
     ...(ctx.sandboxMode !== 'remote' ? { sandboxMode: ctx.sandboxMode } : {}),
+    ...(ctx.localHarnessTarget ? { localHarnessTarget: ctx.localHarnessTarget } : {}),
     researchContext: ctx.research,
+  };
+}
+
+/** Context item types that ride the request (activities are re-added by the hook). */
+const REPLAY_SKIPPED_TYPES = new Set<AttachedContextItem['type']>(['activity']);
+
+/**
+ * Overrides that re-run an earlier user turn (regenerate / edit) the way it was
+ * asked (XYNE-66322, XYNE-66350):
+ *
+ * - context (channels, tickets, canvases, calls, KB files/folders/collections,
+ *   messages, people, apps) is rebuilt from the turn's own `attachedContext` —
+ *   persisted per user message by claw-auth, so it survives a reload;
+ * - model pin, thinking level and the web-search / deep-research / canvas
+ *   toggles come from the turn's `runOptions` (stamped at send time) and, when
+ *   those are missing (a reloaded conversation), from the composer's current
+ *   picks — never silently from nothing.
+ *
+ * Every field is set explicitly so the hook's closure defaults (empty for the
+ * /ai page) can't leak in.
+ */
+export function turnReplayOverrides(
+  turn: Pick<Message, 'attachedContext' | 'runOptions'>,
+  current: ComposerContext | null,
+): StreamOverrides {
+  const items = (turn.attachedContext ?? []).filter(i => !REPLAY_SKIPPED_TYPES.has(i.type));
+  const idsOf = (type: AttachedContextItem['type']): string[] =>
+    items.filter(i => i.type === type).map(i => i.id);
+
+  const run = turn.runOptions;
+  const model = run ? run.model : (current?.model ?? null);
+  const modelProvider = run ? run.modelProvider : (current?.modelProvider ?? null);
+  const thinkingLevel = run ? run.thinkingLevel : (current?.thinkingLevel ?? null);
+  const sandboxMode = run ? run.sandboxMode : current?.sandboxMode;
+  const localHarnessTarget = model?.startsWith('local-harness:')
+    ? model
+    : model === null
+      ? (current?.localHarnessTarget ?? null)
+      : null;
+
+  return {
+    channelIds: idsOf('channel'),
+    ticketIds: idsOf('ticket'),
+    canvasIds: idsOf('canvas'),
+    callIds: idsOf('call'),
+    attachedContext: items,
+    displayAttachedContext: items,
+    webSearchEnabled: run ? run.webSearchEnabled : (current?.webSearchEnabled ?? false),
+    deepResearchEnabled: run ? run.deepResearchEnabled : (current?.deepResearchEnabled ?? false),
+    createCanvasEnabled: run ? run.createCanvasEnabled : (current?.createCanvasEnabled ?? false),
+    // `model` present (even null) wins over the hook-level pin — explicit "Auto".
+    model,
+    modelProvider: model ? modelProvider : null,
+    ...(thinkingLevel ? { thinkingLevel } : {}),
+    ...(sandboxMode && sandboxMode !== 'remote' ? { sandboxMode } : {}),
+    ...(localHarnessTarget ? { localHarnessTarget } : {}),
   };
 }
