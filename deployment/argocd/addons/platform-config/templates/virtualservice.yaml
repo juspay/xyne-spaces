@@ -25,6 +25,23 @@ spec:
     {{- range .Values.routes.extra }}
     - {{- toYaml . | nindent 6 }}
     {{- end }}
+    {{- if .Values.routes.streamTimeout }}
+    # Long-lived Xyne AI SSE streams. `apiTimeout` is a TOTAL request duration
+    # in Envoy — SSE keepalive pings cannot reset it — so these would be cut
+    # mid-run. Must sit above the `/api/` prefix route (first match wins).
+    - name: api-stream
+      match:
+        - uri:
+            regex: ^/api/xyne-ai/?$
+        - uri:
+            regex: ^/api/xyne-ai/v2/conversations/[^/]+/live$
+      route:
+        - destination:
+            host: {{ $s.backend.host }}
+            port:
+              number: {{ $s.backend.port }}
+      timeout: {{ .Values.routes.streamTimeout }}
+    {{- end }}
     - name: api
       match:
         - uri:
