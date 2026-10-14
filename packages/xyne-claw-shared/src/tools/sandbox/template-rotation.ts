@@ -195,3 +195,8 @@ export function isSameTemplateFamily(candidate: string | undefined, base: string
 export function rotatedTemplateNames(): string[] {
   return Object.entries(ROTATION_SETS).flatMap(([base, variants]) => [base, ...variants]);
 }
+
+/** Only the numbered variants, not their base names. */
+export function rotationVariantNames(): string[] {
+  return Object.values(ROTATION_SETS).flat();
+}

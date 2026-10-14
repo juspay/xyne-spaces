@@ -8,6 +8,7 @@ import type {
   StepRecord,
   WorkflowRecord,
 } from '@xyne/workflow-sdk';
+import { GateCategory } from '@xyne/workflow-sdk';
 import type { Workflow, WorkflowFolder } from '@prisma/client';
 import { DEFAULT_FOLDER_ID } from './constants';
 import type { XyneResourceAttrs } from './types';
@@ -201,12 +202,19 @@ export const toStepRecord = (row: {
   status: string | null;
   stepExecutorType: string;
   data: string | null;
+  stepSubType?: string | null;
 }): StepRecord => ({
   stepName: row.stepName ?? '',
   status: row.status ?? '',
   executorType: row.stepExecutorType,
   data: row.data,
+  ...(isGateCategory(row.stepSubType) ? { category: row.stepSubType } : {}),
 });
+
+const GATE_CATEGORIES: ReadonlySet<string> = new Set(Object.values(GateCategory));
+
+const isGateCategory = (value: string | null | undefined): value is GateCategory =>
+  value !== null && value !== undefined && GATE_CATEGORIES.has(value);
 
 export const toCredentialSummary = (row: {
   name: string;

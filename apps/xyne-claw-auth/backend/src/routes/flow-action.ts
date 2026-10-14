@@ -1228,6 +1228,16 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           void replaceFlowCardWithText(messageId, agentSlug, `${outcome.error}`, conversationId, undefined, spacesAppId);
           return;
         }
+        // An Ask AI card has no channel, so the hub comes from the signed params the sign route added.
+        const signedHubId = params["sdlcChannelId"];
+        const hubChannelId = typeof signedHubId === "string" ? signedHubId : continueChannelId;
+        if (hubChannelId) {
+          const { linkSdlcHubSkill } = await import("../lib/sdlc-repository-context.js");
+          // The card's raw Spaces id names the hub's workspace; converting the Claw id back could pick another one.
+          void linkSdlcHubSkill(hubChannelId, rawCallerUserId ?? writeUserId, outcome.id).catch((err) =>
+            log.warn(`[flow-action] create-skill hub link failed slug=${outcome.slug}: ${err instanceof Error ? err.message : String(err)}`),
+          );
+        }
         resp = { type: "close_screen", finalMessage: `${outcome.message}` };
         if (xyneAiCard) {
           await finishTextWriteOnRow({

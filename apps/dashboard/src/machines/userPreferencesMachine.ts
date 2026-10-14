@@ -17,6 +17,9 @@ export interface UserPreferences {
   sdlcExplorerCollapsed: boolean;
   sdlcSidebarSectionsCollapsed: Record<string, boolean>;
   sdlcShowClosedTracks: boolean;
+  sdlcShowArchivedKnowledge: boolean;
+  /** The Wiki pages this reader opened, per hub, newest first. */
+  sdlcWikiViews: Record<string, Array<{ canvasId: string; at: number }>>;
   // TODO: move relatedContextEnabled and relatedContextDebounceMs to the server-side
   // user_preferences table (with the other Messaging preferences) once the
   // related-context feature is confirmed; kept per device while it is on trial.
@@ -38,6 +41,8 @@ export const DEFAULT_USER_PREFERENCES: UserPreferences = {
   sdlcExplorerCollapsed: false,
   sdlcSidebarSectionsCollapsed: {},
   sdlcShowClosedTracks: false,
+  sdlcShowArchivedKnowledge: false,
+  sdlcWikiViews: {},
   relatedContextEnabled: false,
   relatedContextDebounceMs: 1000,
 };

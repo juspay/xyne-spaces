@@ -24,6 +24,7 @@ import { markRunQueueDrainPaused, startRunQueueWorker } from "./run-queue-worker
 import { startLoopWatchdog, stopLoopWatchdog } from "./loop-watchdog.js";
 import { stopRunControlSubscriber } from "./run-control.js";
 import { createLogger } from "./logger.js";
+import { installSandboxRepoConfigLoader } from "./sandbox-repo-configs.js";
 import { startPodAddressPublisher } from "./run-ownership.js";
 const log = createLogger("main");
 
@@ -54,6 +55,7 @@ if (!DATA_DIR_IS_EXPLICIT && process.env["NODE_ENV"] === "production") {
 
 startLoopWatchdog();
 initStore();
+installSandboxRepoConfigLoader();
 startSessionCleanup();
 const runQueueWorker = startRunQueueWorker();
 

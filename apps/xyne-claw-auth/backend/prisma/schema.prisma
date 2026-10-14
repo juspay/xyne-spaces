@@ -2843,6 +2843,23 @@ model ErrorBucket {
   @@map("error_buckets")
 }
 
+// workspace-check:ignore — platform-wide sandbox infra config managed by CLAW_ADMIN, not tenant data
+model SandboxRepoConfig {
+  id              String   @id @default(cuid())
+  key             String   @unique
+  config          Json
+  enabled         Boolean  @default(true)
+  // Spaces workspace that owns it. Null: shows nowhere until assigned, unless the key overrides a built-in.
+  workspaceId     String?
+  createdByUserId String?
+  updatedByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([workspaceId])
+  @@map("sandbox_repo_configs")
+}
+
 model EntityTypeDefinition {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id          String  @id @default(cuid())

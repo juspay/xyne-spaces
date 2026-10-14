@@ -1,5 +1,6 @@
 import { Router, type Request, type RequestHandler, type Response } from "express";
 import { errMsg } from "../lib/errors.js";
+import { notifySdlcAgentRegistered } from "../lib/sdlc-repository-context.js";
 import { assertSafeOutboundUrl } from "../mcpgateway/services/http-client.js";
 import { safeFetch } from "../lib/safe-fetch.js";
 import {
@@ -475,7 +476,11 @@ router.get("/", asyncHandler(async (req: Request, res: Response) => {
   const view = req.query["view"] === "full" ? "full" : "light";
   const sanitized = agents.map((a: typeof agents[number]) => {
     if (view === "light") {
-      return lightAgentProjection(a as unknown as Record<string, unknown>, adminScope.allOrgs ? orgNames : undefined);
+      return {
+        ...lightAgentProjection(a as unknown as Record<string, unknown>, adminScope.allOrgs ? orgNames : undefined),
+        // ownerUserId is the canonical Claw id, which a Spaces caller cannot compare with its own id.
+        ...(scopeUserId ? { ownedByScopeUser: !!a.ownerUserId && visibilityUserIds.includes(a.ownerUserId) } : {}),
+      };
     }
     const row = sanitizeAgent(a as unknown as Record<string, unknown>);
     return adminScope.allOrgs ? { ...row, ...withOrgLabel({ orgId: a.orgId }, orgNames) } : row;
@@ -2769,6 +2774,12 @@ router.post("/:slug/install-app", requireAgentOwnerOrAdmin, async (req: Request<
     });
 
     log.info(`[agents] Installed Spaces App ${agent.spacesAppId} for ${req.params.slug} (botUser=${appUserId})`);
+    // The hub's Agents page also promotes on read, so a failed notice only delays the join.
+    if (appUserId) {
+      notifySdlcAgentRegistered(agent.id, appUserId).catch((err) =>
+        log.warn(`[agents] install-app: SDLC hub notice failed for ${req.params.slug} — ${errMsg(err)}`),
+      );
+    }
     res.json({ success: true, data: { spacesAppUserId: appUserId } });
   } catch (err) {
     log.error("[agents] install-app error:", err);

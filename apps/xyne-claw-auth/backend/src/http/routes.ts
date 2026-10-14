@@ -30,6 +30,9 @@ import sandboxRouter from "../routes/sandbox.js";
 import sandboxAccessRouter from "../routes/sandbox-access.js";
 import { adminRouter } from "../routes/admin.js";
 import { adminDigitalTwinRouter } from "../routes/admin-digital-twin.js";
+import { adminSandboxReposRouter } from "../routes/admin-sandbox-repos.js";
+import { sandboxReposInternalRouter } from "../routes/sandbox-repos-internal.js";
+import { sandboxProfilesInternalRouter } from "../routes/sandbox-profiles-internal.js";
 import { organizationsRouter } from "../routes/organizations.js";
 // TEMPORARY — delete after backfill of agents.signingSecret is complete.
 import { adminBackfillSigningSecretsRouter } from "../routes/admin-backfill-signing-secrets.js";
@@ -188,6 +191,7 @@ function mountCoreApi(app: Express): void {
   app.use(`${BASE}/sandbox`, requireAuth, requireNoAccessToken, sandboxRouter);
   app.use(`${BASE}/organizations`, requireAuth, requireNoAccessToken, organizationsRouter);
   app.use(`${BASE}/admin/digital-twin`, requireAuth, requireNoAccessToken, requireClawAdmin, adminDigitalTwinRouter);
+  app.use(`${BASE}/admin/sandbox-repos`, requireAuth, requireNoAccessToken, requireClawAdmin, adminSandboxReposRouter);
   app.use(`${BASE}/admin`, requireAuth, requireNoAccessToken, adminRouter);
   // TEMPORARY — delete this mount + the import above + the file after backfill.
   app.use(`${BASE}/admin`, requireAuth, requireNoAccessToken, adminBackfillSigningSecretsRouter);
@@ -218,6 +222,8 @@ function mountCoreApi(app: Express): void {
   app.use(`${BASE}/error-pipeline`, errorPipelineIngestRouter); // Grafana webhook ingest (JWT-authed inside)
   app.use(`${BASE}/internal/error-pipeline`, requireStrictS2S, errorPipelineInternalRouter); // run-result callback from xyne-claw (S2S only)
   app.use(`${BASE}/internal/tts`, requireStrictS2S, ttsRouter);
+  app.use(`${BASE}/internal/sandbox-repos`, requireStrictS2S, sandboxReposInternalRouter);
+  app.use(`${BASE}/internal/sandbox-profiles`, requireInternalS2S, sandboxProfilesInternalRouter); // Spaces → sandbox profile editor
   app.use(`${BASE}/internal/connectors`, requireStrictS2S, connectorsInternalRouter); // connector availability lookup for xyne-claw (S2S only)
   app.use(`${BASE}/internal/providers`, requireStrictS2S, providersInternalRouter); // AI provider availability lookup for xyne-claw (S2S only)
 }
