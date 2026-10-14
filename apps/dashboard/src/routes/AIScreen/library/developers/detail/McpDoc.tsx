@@ -102,8 +102,57 @@ const TOOL_GROUPS: { label: string; tools: McpTool[] }[] = [
 const ALL_TOOLS = TOOL_GROUPS.flatMap(group => group.tools);
 const WRITE_COUNT = ALL_TOOLS.filter(tool => tool.write).length;
 
-const SERVER_PATH = '<path-to-xyne-spaces>/packages/xyne-spaces-mcp/dist/index.js';
-const SETUP_OPTIONS = ['In the xyne-spaces repo', 'Claude Code', 'Cursor and others'] as const;
+const SERVER_NAME = 'xyne-spaces';
+const MCP_PACKAGE = '@xyne/spaces-mcp';
+const SETUP_OPTIONS = [
+  'Claude Code',
+  'Cursor',
+  'VS Code',
+  'Claude Desktop and others',
+  'In the xyne-spaces repo',
+] as const;
+
+/** How every client launches the published server, pointed at this deployment. */
+function serverConfig(baseUrl: string): {
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+} {
+  return { command: 'npx', args: ['-y', MCP_PACKAGE], env: { XYNE_SPACES_BASE_URL: baseUrl } };
+}
+
+/** Cursor's install deep link takes the server config as base64 JSON. */
+function cursorInstallUrl(baseUrl: string): string {
+  const config = btoa(JSON.stringify(serverConfig(baseUrl)));
+  return `cursor://anysphere.cursor-deeplink/mcp/install?name=${SERVER_NAME}&config=${encodeURIComponent(config)}`;
+}
+
+/** VS Code's install deep link takes the named server config as URL-encoded JSON. */
+function vscodeInstallUrl(baseUrl: string): string {
+  const config = { name: SERVER_NAME, type: 'stdio', ...serverConfig(baseUrl) };
+  return `vscode:mcp/install?${encodeURIComponent(JSON.stringify(config))}`;
+}
+
+function InstallLink({
+  href,
+  label,
+  trackName,
+}: {
+  href: string;
+  label: string;
+  trackName: string;
+}): ReactElement {
+  return (
+    <a
+      href={href}
+      data-track-category='Developer tools'
+      data-track-name={trackName}
+      className='flex h-8 w-fit items-center rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90'
+    >
+      {label}
+    </a>
+  );
+}
 
 function ConnectInstructions({ option }: { option: (typeof SETUP_OPTIONS)[number] }): ReactElement {
   const baseUrl = spacesBaseUrl();
@@ -111,40 +160,57 @@ function ConnectInstructions({ option }: { option: (typeof SETUP_OPTIONS)[number
     return (
       <Text>
         Nothing to do. The repo&apos;s <InlineCode>.mcp.json</InlineCode> registers the server and{' '}
-        <InlineCode>pnpm install</InlineCode> builds it, so an agent opened at the repo root already
-        has it. Go straight to signing in.
+        <InlineCode>pnpm install</InlineCode> builds it from{' '}
+        <InlineCode>packages/xyne-spaces-mcp</InlineCode>, so an agent opened at the repo root
+        already has it, running the latest code. Go straight to signing in.
       </Text>
     );
   }
   if (option === 'Claude Code') {
     return (
       <>
-        <Text>To use it from any other project, register it once with Claude Code:</Text>
+        <Text>Run this once. It adds the server to every project:</Text>
         <CodeBlock
-          code={`claude mcp add --scope user xyne-spaces \\\n  --env XYNE_SPACES_BASE_URL=${baseUrl} \\\n  -- node ${SERVER_PATH}`}
+          code={`claude mcp add --scope user ${SERVER_NAME} \\\n  --env XYNE_SPACES_BASE_URL=${baseUrl} \\\n  -- npx -y ${MCP_PACKAGE}`}
           trackName='Spaces MCP: copy Claude Code command'
         />
       </>
     );
   }
-  const config = JSON.stringify(
-    {
-      mcpServers: {
-        'xyne-spaces': {
-          command: 'node',
-          args: [SERVER_PATH],
-          env: { XYNE_SPACES_BASE_URL: baseUrl },
-        },
-      },
-    },
-    null,
-    2,
-  );
+  if (option === 'Cursor') {
+    return (
+      <>
+        <Text>Click to add it to Cursor, then confirm the install in Cursor:</Text>
+        <InstallLink
+          href={cursorInstallUrl(baseUrl)}
+          label='Add to Cursor'
+          trackName='Spaces MCP: install in Cursor'
+        />
+      </>
+    );
+  }
+  if (option === 'VS Code') {
+    return (
+      <>
+        <Text>
+          Click to add it to VS Code, then confirm the install. Its tools are used in Copilot&apos;s
+          agent mode.
+        </Text>
+        <InstallLink
+          href={vscodeInstallUrl(baseUrl)}
+          label='Add to VS Code'
+          trackName='Spaces MCP: install in VS Code'
+        />
+      </>
+    );
+  }
+  const config = JSON.stringify({ mcpServers: { [SERVER_NAME]: serverConfig(baseUrl) } }, null, 2);
   return (
     <>
       <Text>
-        Add it to your client&apos;s MCP config: <InlineCode>.cursor/mcp.json</InlineCode> for
-        Cursor, or the equivalent file for Windsurf, Zed or Continue.
+        Add this to your client&apos;s MCP config and restart it. In Claude Desktop that is Settings
+        → Developer → Edit Config; for Windsurf, Zed or Continue it is the client&apos;s own MCP
+        config file.
       </Text>
       <CodeBlock code={config} trackName='Spaces MCP: copy client config' />
     </>
@@ -196,9 +262,9 @@ export function McpDoc(): ReactElement {
 
       <DocSection eyebrow='Get started' title='Set up in three steps'>
         <Callout>
-          The server ships in the <strong>xyne-spaces</strong> repository at{' '}
-          <InlineCode>packages/xyne-spaces-mcp</InlineCode>. Clone the repo and run{' '}
-          <InlineCode>pnpm install</InlineCode>, which builds it.
+          The server is published on npm as <InlineCode>{MCP_PACKAGE}</InlineCode> and your agent
+          runs it with <InlineCode>npx</InlineCode>, so there is nothing to clone or build. You need{' '}
+          <strong>Node.js 22</strong> or later.
         </Callout>
         <div className='flex flex-col'>
           <Step n={1} title='Connect it to your agent'>
@@ -222,10 +288,13 @@ export function McpDoc(): ReactElement {
           <Step n={3} title='Choose what it may do'>
             <Text>
               It starts <strong>read-only</strong>. To let it send messages, create threads and
-              update tickets, turn writes on and restart your agent:
+              update tickets, add this to the server&apos;s <InlineCode>env</InlineCode> in your
+              client&apos;s MCP config (with Claude Code, add{' '}
+              <InlineCode>--env XYNE_SPACES_READONLY=0</InlineCode> to the command above), then
+              restart your agent:
             </Text>
             <CodeBlock
-              code='export XYNE_SPACES_READONLY=0'
+              code='"XYNE_SPACES_READONLY": "0"'
               trackName='Spaces MCP: copy enable writes'
             />
             <Text>Writes are real and immediate, and other people see them.</Text>

@@ -65,7 +65,7 @@ const ALLOWED_UPLOAD_EXTENSIONS = new Set([
   'rtf', 'pages', 'numbers', 'key', 'eml', 'msg', 'ics', 'vcf',
   // text / data
   'txt', 'md', 'csv', 'tsv', 'log', 'json', 'jsonl', 'xml', 'yaml', 'yml', 'toml',
-  'ini', 'conf', 'env', 'sql', 'har', 'html', 'htm', 'xhtml',
+  'ini', 'conf', 'env', 'sql', 'har', 'sarif', 'html', 'htm', 'xhtml',
   // archives
   'zip', 'tar', 'gz', 'tgz', 'bz2', '7z', 'rar', 'xz',
   // mobile build artifacts

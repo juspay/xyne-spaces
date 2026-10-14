@@ -1,0 +1,87 @@
+# The mobile app installs on its own, with its own lockfile, so its React Native
+# dependency tree never changes what the rest of the monorepo resolves.
+# @xyne/shared is linked from packages/shared (see DEV_SETUP.md).
+packages:
+  - .
+
+# Security pins from the root package.json `pnpm.overrides` that apply to this
+# app's dependencies. Keep them in sync when the root pins change.
+overrides:
+  '@grpc/grpc-js': 1.14.4
+  '@livekit/components-core': 0.12.12
+  '@livekit/protocol': 1.48.0
+  '@opentelemetry/auto-instrumentations-node': 0.78.0
+  '@opentelemetry/core': 2.8.0
+  '@opentelemetry/core@2': 2.8.0
+  '@opentelemetry/exporter-prometheus': 0.220.0
+  '@opentelemetry/propagator-jaeger': 2.9.0
+  '@opentelemetry/sdk-node': 0.217.0
+  '@tiptap/core': 3.30.6
+  '@tiptap/pm': 3.30.6
+  '@xmldom/xmldom': 0.8.15
+  'ajv@6': 6.14.0
+  'ajv@8': 8.18.0
+  axios: 1.18.1
+  body-parser: 2.3.0
+  'brace-expansion@1': 1.1.18
+  'brace-expansion@2': 2.1.4
+  'brace-expansion@5': 5.0.9
+  defu: 6.1.7
+  'diff@8': 8.0.3
+  'fast-uri@2': 2.4.4
+  'fast-uri@3': 3.1.7
+  'fast-uri@4': 4.1.4
+  fast-xml-builder: 1.3.0
+  'fast-xml-parser@4': 4.5.7
+  'fast-xml-parser@5': 5.10.1
+  'fastify@4': 5.12.4
+  'fastify@5': 5.12.4
+  find-my-way: 9.7.0
+  flatted: 3.4.2
+  'form-data@2': 2.5.6
+  'form-data@4': 4.0.6
+  joi: 17.13.7
+  'js-yaml@3': 3.15.1
+  'js-yaml@4': 4.3.2
+  lodash: 4.18.1
+  'minimatch@10': 10.2.5
+  'minimatch@3': 3.1.5
+  'minimatch@5': 5.1.9
+  'minimatch@9': 9.0.9
+  'nanoid@3': 3.3.18
+  'nanoid@4': 5.1.16
+  'nanoid@5': 5.1.16
+  node-forge: 1.4.0
+  'picomatch@2': 2.3.2
+  'picomatch@4': 4.0.5
+  postcss: 8.5.23
+  'protobufjs@7': 7.6.5
+  'protobufjs@8': 8.7.1
+  qs: 6.16.0
+  shell-quote: 1.11.0
+  socket.io-parser: 4.2.7
+  systeminformation: 5.31.17
+  'tinypool@2': 2.1.2
+  'tough-cookie@2': 4.1.3
+  'undici@5': 5.29.0
+  'undici@6': 6.28.0
+  'undici@7': 7.29.0
+  'undici@8': 8.9.0
+  'uuid@10': 11.1.1
+  'uuid@11': 11.1.1
+  'uuid@13': 14.0.2
+  'uuid@3': 11.1.1
+  'uuid@8': 11.1.1
+  'uuid@9': 11.1.1
+  'ws@6': 6.2.6
+  'ws@7': 7.5.13
+  'ws@8': 8.21.1
+
+patchedDependencies:
+  '@react-native-cookies/cookies@6.2.1': 'patches/@react-native-cookies+cookies+6.2.1.patch'
+  'expo-modules-jsi@57.0.4': 'patches/expo-modules-jsi+57.0.4.patch'
+  'react-native-callkeep@4.3.16': 'patches/react-native-callkeep+4.3.16.patch'
+  'react-native-enriched-markdown@0.7.4': 'patches/react-native-enriched-markdown+0.7.4.patch'
+  'react-native-enriched@0.8.1': 'patches/react-native-enriched+0.8.1.patch'
+  'react-native-notify-kit@10.5.0': 'patches/react-native-notify-kit+10.5.0.patch'
+  'react-native-webview@13.16.1': 'patches/react-native-webview+13.16.1.patch'

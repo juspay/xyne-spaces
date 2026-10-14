@@ -1,0 +1,64 @@
+# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
+
+# dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native
+.kotlin/
+*.orig.*
+*.jks
+*.key.store
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Metro
+.metro-health-check*
+
+# debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+*.swp
+*.pyc
+__pycache__/
+.yarn/install-state.gz
+
+# macOS
+.DS_Store
+*.pem
+
+# local env files
+.env*.local
+
+# typescript
+*.tsbuildinfo
+
+app-example
+
+# generated native folders
+/ios
+/android
+
+!src/data
+# Root .gitignore ignores `data/`; re-include the chat v3 data sources.
+!/src/features/chat/v3/data/
+
+# Signing material is supplied out-of-band and must never enter the public tree.
+assets/secrets/
+.airborne
+
+# Firebase config per variant (API keys) is supplied out-of-band too.
+assets/configs/*/google-services.json
+assets/configs/*/GoogleService-Info.plist
+
+# Local env files hold real values; only the example is committed.
+.env.*
+!.env.example

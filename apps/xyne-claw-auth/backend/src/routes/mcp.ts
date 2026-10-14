@@ -1126,7 +1126,7 @@ async function buildMcpResolutionEntries(args: {
     // Only swap when the app token actually resolves AND the app-tools
     // server row exists — otherwise we'd strip Spaces access and silently
     // break the run. Keep the user server and log loudly instead.
-    const appCreds = await getAppTokenCredentials(userId);
+    const appCreds = await getAppTokenCredentials(runCtx?.spacesAppUserId || userId);
     const appToolsRow = await prisma.mcpServer.findUnique({ where: { type: "xyne-spaces-app-tools" } });
     if (appCreds && appToolsRow) {
       automationAppSwap = true;
@@ -1143,7 +1143,7 @@ async function buildMcpResolutionEntries(args: {
       );
     } else {
       log.warn(
-        `[mcp/tools] automation app-mode SKIPPED for userId=${userId}: ` +
+        `[mcp/tools] automation app-mode SKIPPED for userId=${userId} appUserId=${runCtx?.spacesAppUserId ?? "none"}: ` +
         `appCreds=${!!appCreds} appToolsRow=${!!appToolsRow}. ` +
         "Keeping xyne-spaces user MCP to avoid stripping Spaces access. " +
         "If this is an automation run, the agent's app is likely not installed / app token missing.",

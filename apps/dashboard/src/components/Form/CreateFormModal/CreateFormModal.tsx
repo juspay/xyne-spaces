@@ -4,6 +4,7 @@ import { useForm, Controller } from 'react-hook-form';
 import { useMutation } from '@tanstack/react-query';
 import { arrayMove } from '@dnd-kit/sortable';
 import { useZero } from '../../../hooks/useZero';
+import { useAuth } from '../../../hooks/useAuth';
 import {
   PlusDefault,
   DeleteDustbin02,
@@ -84,6 +85,7 @@ export const CreateFormModal = ({
   onSuccess,
 }: CreateFormModalProps): ReactElement => {
   const zero = useZero();
+  const { user } = useAuth();
   const [fields, setFields] = useState<FormField[]>([]);
   const [isReadOnly, setIsReadOnly] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Set<number>>(new Set());
@@ -99,6 +101,9 @@ export const CreateFormModal = ({
       : queries.getFormFieldsByFormId({ formId: '' }),
     { enabled: isEditMode && !!form },
   );
+  // Forms don't store a project; a saved form's is its fields' (they can't move to another one).
+  const savedProjectId = formFields?.find(field => field.globalField?.projectId)?.globalField
+    ?.projectId;
 
   const [projects] = useCachedQuery(queries.getAllProjectsList(), {
     enabled: open && shouldSelectProject,
@@ -109,6 +114,7 @@ export const CreateFormModal = ({
     handleSubmit: handleFormSubmit,
     watch,
     reset,
+    setValue,
   } = useForm<CreateFormFormData>({
     defaultValues: {
       formName: '',
@@ -120,6 +126,21 @@ export const CreateFormModal = ({
   });
 
   const selectedContextType = watch('contextType');
+  // A workspace has one channel form: a second would replace it and hide every saved value.
+  const [workspaceForm] = useCachedQuery(
+    queries.getFormMappingByContextId({
+      contextId: user?.workspaceId ?? '',
+      contextType: FormContextType.WORKSPACE,
+      entityType: FormEntityType.CHANNEL,
+    }),
+    {
+      enabled:
+        open &&
+        !isEditMode &&
+        selectedContextType === FormContextType.WORKSPACE &&
+        !!user?.workspaceId,
+    },
+  );
 
   // Combobox does not filter internally (`filteredItems={items}`), so the
   // project list is narrowed here against the typed query.
@@ -138,8 +159,8 @@ export const CreateFormModal = ({
   }, [projects, selectedProjectId]);
 
   useEffect(() => {
-    if (projectId) {
-      setSelectedProjectId(projectId);
+    if (projectId ?? savedProjectId) {
+      setSelectedProjectId(projectId ?? savedProjectId ?? '');
       return;
     }
 
@@ -156,7 +177,7 @@ export const CreateFormModal = ({
     if (selectedProjectId) {
       setSelectedProjectId('');
     }
-  }, [open, projectId, projects, selectedProjectId]);
+  }, [open, projectId, savedProjectId, projects, selectedProjectId]);
 
   // Initialize form data when opening in edit mode
   useEffect(() => {
@@ -221,7 +242,25 @@ export const CreateFormModal = ({
     mutationFn: async (data: CreateFormRequest) => {
       return formService.createForm(data);
     },
-    onSuccess: data => {
+    onSuccess: async (data, request) => {
+      // A workspace form applies to the whole workspace, so it is bound as soon as it exists
+      // (boards bind theirs from the board screen).
+      if (request.contextType === FormContextType.WORKSPACE && data.id && user?.workspaceId) {
+        const mapping = await zero.mutate(
+          mutators.formContextMapping.upsert({
+            contextId: user.workspaceId,
+            contextType: FormContextType.WORKSPACE,
+            entityType: request.entityType,
+            formId: data.id,
+            mappingId: uuidv4(),
+          }),
+        ).server;
+        if (mapping.type === 'error') {
+          toast.error('Form created, but it could not be applied to this workspace', {
+            description: mapping.error.message,
+          });
+        }
+      }
       reset();
       setFields([]);
       onOpenChange(false);
@@ -499,6 +538,12 @@ export const CreateFormModal = ({
         // Create mode - use API
         const { formName, formDescription, contextType, entityType } = formData;
 
+        if (contextType === FormContextType.WORKSPACE && workspaceForm) {
+          throw new Error(
+            'This workspace already has a channel form. Edit it to add fields for another use case.',
+          );
+        }
+
         if (!effectiveProjectId) {
           throw new Error('Project is required to create form fields');
         }
@@ -667,9 +712,9 @@ export const CreateFormModal = ({
             <div>
               {/* Not a <label htmlFor>: Combobox owns its input id internally */}
               <span className='block text-sm font-medium text-foreground mb-1.5'>
-                Project {!isReadOnly && <span className='text-red-500'>*</span>}
+                Project {!isReadOnly && !savedProjectId && <span className='text-red-500'>*</span>}
               </span>
-              {isReadOnly ? (
+              {isReadOnly || savedProjectId ? (
                 <div className='px-3 py-2 text-sm bg-muted border border-border rounded-lg'>
                   {projects?.find(project => project.id === selectedProjectId)?.name || '-'}
                 </div>
@@ -792,7 +837,14 @@ export const CreateFormModal = ({
                 render={({ field: { onChange, value } }) => (
                   <Select
                     value={value}
-                    onValueChange={next => onChange(next as FormContextType)}
+                    onValueChange={next => {
+                      onChange(next as FormContextType);
+                      // Keep the entity type one this context supports (WORKSPACE only has CHANNEL).
+                      const entityTypes = getEntityTypesForContext(next as FormContextType);
+                      if (!entityTypes.includes(watch('entityType')) && entityTypes[0]) {
+                        setValue('entityType', entityTypes[0]);
+                      }
+                    }}
                     disabled={isEditMode || createFormMutation.isPending}
                   >
                     <SelectTrigger
@@ -835,6 +887,8 @@ export const CreateFormModal = ({
                 rules={{ required: 'Entity type is required' }}
                 render={({ field: { onChange, value } }) => (
                   <Select
+                    // Remounted per context so it shows the entity type picked for the new context.
+                    key={selectedContextType}
                     value={value}
                     onValueChange={onChange}
                     disabled={isEditMode || createFormMutation.isPending}

@@ -1311,6 +1311,48 @@ export class CallDocumentService {
   }
 
   /**
+   * The template the recording's creator chose as their default, if they set one in
+   * Preferences and can still read it. `null` means fall through to the LLM pick.
+   *
+   * Best effort: a default that no longer resolves, or a lookup that fails outright
+   * (e.g. the preference column is not migrated yet), must never block the summary.
+   */
+  private async resolveUserDefaultRecordingSummaryTemplate(
+    call: Call,
+  ): Promise<SummaryTemplate | null> {
+    if (!isRecording(call) || !call.workspaceId) return null;
+    try {
+      const preference = await db.userPreference.findUnique({
+        where: { userId: call.createdByUserId },
+        select: { recordingDefaultSummaryTemplateId: true },
+      });
+      const templateId = preference?.recordingDefaultSummaryTemplateId;
+      if (!templateId) return null;
+
+      const template = await summaryTemplateService.findAccessibleById(
+        templateId,
+        call.workspaceId,
+        call.createdByUserId,
+      );
+      if (template) {
+        logger.info(`[${call.externalId}] recording_summary_template_user_default`, {
+          template_id: template.id,
+        });
+        return template;
+      }
+      logger.warn(`[${call.externalId}] recording_summary_template_user_default_unavailable`, {
+        template_id: templateId,
+      });
+      return null;
+    } catch (error) {
+      logger.warn(`[${call.externalId}] recording_summary_template_user_default_lookup_failed`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+  }
+
+  /**
    * Generate a headless-recording summary using a saved or code-backed template.
    * `unnumberedTranscript` is the transcript before segment numbering; a bot-created
    * call's template summary is built from it, like its first summary.
@@ -1350,12 +1392,13 @@ export class CallDocumentService {
             call.workspaceId,
             callId,
           )
-        : await this.selectRecordingSummaryTemplateForTranscript(
+        : ((await this.resolveUserDefaultRecordingSummaryTemplate(call)) ??
+          (await this.selectRecordingSummaryTemplateForTranscript(
             transcript,
             call.workspaceId,
             call.createdByUserId,
             callId,
-          );
+          )));
 
     if (!selectedTemplate) {
       logger.error(`[${callId}] recording_summary_generation_failed`, {

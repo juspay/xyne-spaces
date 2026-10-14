@@ -193,6 +193,19 @@ export function agentDraftLeadIn(spec: Pick<DraftAgentSpec, "summary">): string 
  * Delivery stays with the caller (Spaces thread vs Xyne AI row), so both
  * surfaces share one validation + persistence path and cannot drift.
  */
+export async function resolveDraftCapabilities(spec: DraftAgentSpec, orgId: string, userId: string) {
+  const catalog = await buildAvailableToolsCatalog(undefined, orgId);
+  const callableOptions = await listCallableAgentOptions(orgId, userId, spec.slug);
+  const expandedMcps = expandMcpRequests(spec.mcps, catalog);
+  const resolved = await resolveAgentCapabilities(
+    [...(spec.tools ?? []), ...expandedMcps.tokens],
+    catalog,
+    userId,
+    callableOptions,
+  );
+  return { resolved, expandedMcps };
+}
+
 export async function prepareAgentDraftCard(
   spec: DraftAgentSpec,
   id: AgentCardIdentity,
@@ -216,18 +229,10 @@ export async function prepareAgentDraftCard(
     };
   }
 
-  const catalog = await buildAvailableToolsCatalog(undefined, id.orgId);
-  const callableOptions = await listCallableAgentOptions(id.orgId, id.userId, spec.slug);
-  const expandedMcps = expandMcpRequests(spec.mcps, catalog);
+  const { resolved, expandedMcps } = await resolveDraftCapabilities(spec, id.orgId, id.userId);
   if (expandedMcps.unknown.length > 0) {
     log.info(`[agent-card] draft ${spec.slug}: unmatched MCPs [${expandedMcps.unknown.join(", ")}]`);
   }
-  const resolved = await resolveAgentCapabilities(
-    [...(spec.tools ?? []), ...expandedMcps.tokens],
-    catalog,
-    id.userId,
-    callableOptions,
-  );
   if (resolved.unknown.length > 0) {
     log.info(`[agent-card] draft ${spec.slug}: unmatched tools [${resolved.unknown.join(", ")}]`);
   }

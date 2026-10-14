@@ -14,6 +14,7 @@ import { join } from "node:path";
 
 import { createLogger } from "./logger.js";
 import { SandboxUnavailableError, isSandboxUnavailableDeferEnabled, isSandboxUnavailable } from "./sandbox-unavailable.js";
+import { CREATE_AGENT_TOOL, checkCreateAgent, createAgentDroppedToolsNote, createAgentRefusedText, createAgentUnknownToolsText } from "./create-agent-check.js";
 const log = createLogger("custom-tools");
 
 interface Attachment {
@@ -156,6 +157,7 @@ export function loadCustomTools(
 ): CustomToolsResult {
   const agentSlug = meta?.["agentSlug"];
   const userId = meta?.["userId"] ?? "";
+  let createAgentToolsSentBack = false;
   const allCustomTools = getAllCustomTools();
   const config = agentConfig ?? {};
 
@@ -337,12 +339,28 @@ export function loadCustomTools(
                 details: {},
               };
             }
+            let droppedToolsNote = "";
+            if (ct.slug === CREATE_AGENT_TOOL) {
+              const check = await checkCreateAgent(userId, params as Record<string, unknown>);
+              if (check.refusal) {
+                log.info(`[custom-tool] ${ct.slug} refused before queueing: ${check.refusal}`);
+                return { content: [{ type: "text" as const, text: createAgentRefusedText(check.refusal) }], details: {} };
+              }
+              if (check.notGranted.length > 0) {
+                if (!createAgentToolsSentBack) {
+                  createAgentToolsSentBack = true;
+                  log.info(`[custom-tool] ${ct.slug} sent back for unknown tools: ${check.notGranted.join(", ")}`);
+                  return { content: [{ type: "text" as const, text: createAgentUnknownToolsText(check.notGranted) }], details: {} };
+                }
+                droppedToolsNote = createAgentDroppedToolsNote(check.notGranted);
+              }
+            }
             const serverType = ct.source.replace("custom:", "");
             const signedAction = await signWriteAction(sessionId, sessionToken, serverType, ct.slug, params as Record<string, unknown>);
             allPendingActions.push(signedAction);
             log.info(`[custom-tool] ${ct.slug} is a write tool — queued for approval`);
             return {
-              content: [{ type: "text" as const, text: `Action queued for user approval: ${ct.name}. The user will see an Approve/Decline prompt.` }],
+              content: [{ type: "text" as const, text: writeToolQueuedText(ct) + droppedToolsNote }],
               details: {},
             };
           } catch (err) {
@@ -554,4 +572,8 @@ export function loadCustomTools(
     getPendingResponses: () => allPendingResponses,
     getLastAttachmentSummary: () => lastAttachmentSummary,
   };
+}
+
+export function writeToolQueuedText(tool: { name: string; queuedForApprovalText?: string | undefined }): string {
+  return tool.queuedForApprovalText ?? `Action queued for user approval: ${tool.name}. The user will see an Approve/Decline prompt.`;
 }

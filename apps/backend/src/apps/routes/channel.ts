@@ -60,5 +60,6 @@ router.post('/deskChannelConfig', requirePermission('desk:read'), validateChanne
 router.get('/list', requirePermission('channels:read'), channelController.listChannels);
 
 router.post('/create', requirePermission('channels:write', { strict: true }), appChannelController.create);
+router.post('/update', requirePermission('channels:write', { strict: true }), appChannelController.update);
 
 export default router;
