@@ -521,75 +521,6 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
       )}
 
       {isDeskChannel && (
-        <div className='flex flex-col gap-[8px]'>
-          <div className='flex flex-col gap-[4px]'>
-            <div className='text-desk-label'>Duplicate detection window</div>
-            <div className='text-desk-helper w-full max-w-[500px]'>
-              A ticket is compared against tickets created within this window before it. The check
-              runs only when &quot;Limit duplicate detection by field&quot; is on — when a ticket is
-              created and again when it is opened.
-            </div>
-          </div>
-          <div className='flex flex-wrap items-center gap-2'>
-            <Select
-              value={lookbackSelectValue}
-              onValueChange={value => {
-                if (value === 'custom') {
-                  setLookbackCustom(true);
-                  // Start from the current window, or a month when it was all time.
-                  if (duplicateLookbackDays === 0) setDuplicateLookbackDays(30);
-                  return;
-                }
-                setLookbackCustom(false);
-                setDuplicateLookbackDays(Number(value));
-              }}
-              disabled={!canManage}
-            >
-              <SelectTrigger
-                size='sm'
-                className='w-[180px]'
-                aria-label='Duplicate detection window'
-                data-track-category='DeskSettings'
-                data-track-name='SelectDuplicateLookback'
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {DUPLICATE_LOOKBACK_PRESETS.map(preset => (
-                  <SelectItem key={preset.days} value={String(preset.days)}>
-                    {preset.label}
-                  </SelectItem>
-                ))}
-                <SelectItem value='custom'>Custom</SelectItem>
-              </SelectContent>
-            </Select>
-            {lookbackCustom && (
-              <div className='flex items-center gap-2'>
-                <span className='text-sm text-desk-muted'>Last</span>
-                <input
-                  type='number'
-                  min={DUPLICATE_LOOKBACK_CUSTOM_MIN_DAYS}
-                  max={DUPLICATE_LOOKBACK_CUSTOM_MAX_DAYS}
-                  value={lookbackDaysInput}
-                  onChange={e => setLookbackDaysInput(e.target.value)}
-                  onBlur={commitLookbackDaysInput}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') e.currentTarget.blur();
-                  }}
-                  disabled={!canManage}
-                  aria-label='Custom duplicate detection window in days'
-                  data-track-category='DeskSettings'
-                  data-track-name='EditDuplicateLookbackCustomDays'
-                  className='h-8 w-20 rounded-md border border-input bg-transparent px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none'
-                />
-                <span className='text-sm text-desk-muted'>days</span>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {isDeskChannel && (
         <div className='flex flex-col gap-[16px]'>
           <div className='flex items-start justify-between gap-4'>
             <div className='flex flex-col gap-[4px]'>
@@ -607,6 +538,73 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
               disabled={!canManage}
               aria-label='Toggle limiting duplicate detection by field'
             />
+          </div>
+
+          <div className='flex flex-col gap-[8px]'>
+            <div className='flex flex-col gap-[4px]'>
+              <div className='text-desk-label'>Duplicate detection window</div>
+              <div className='text-desk-helper w-full max-w-[500px]'>
+                A ticket is compared against tickets created within this window before it. The check
+                runs only when &quot;Limit duplicate detection by field&quot; is on — when a ticket
+                is created and again when it is opened.
+              </div>
+            </div>
+            <div className='flex flex-wrap items-center gap-2'>
+              <Select
+                value={lookbackSelectValue}
+                onValueChange={value => {
+                  if (value === 'custom') {
+                    setLookbackCustom(true);
+                    // Start from the current window, or a month when it was all time.
+                    if (duplicateLookbackDays === 0) setDuplicateLookbackDays(30);
+                    return;
+                  }
+                  setLookbackCustom(false);
+                  setDuplicateLookbackDays(Number(value));
+                }}
+                disabled={!canManage || !duplicateDetectionEnabled}
+              >
+                <SelectTrigger
+                  size='sm'
+                  className='w-[180px]'
+                  aria-label='Duplicate detection window'
+                  data-track-category='DeskSettings'
+                  data-track-name='SelectDuplicateLookback'
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {DUPLICATE_LOOKBACK_PRESETS.map(preset => (
+                    <SelectItem key={preset.days} value={String(preset.days)}>
+                      {preset.label}
+                    </SelectItem>
+                  ))}
+                  <SelectItem value='custom'>Custom</SelectItem>
+                </SelectContent>
+              </Select>
+              {lookbackCustom && (
+                <div className='flex items-center gap-2'>
+                  <span className='text-sm text-desk-muted'>Last</span>
+                  <input
+                    type='number'
+                    min={DUPLICATE_LOOKBACK_CUSTOM_MIN_DAYS}
+                    max={DUPLICATE_LOOKBACK_CUSTOM_MAX_DAYS}
+                    value={lookbackDaysInput}
+                    onChange={e => setLookbackDaysInput(e.target.value)}
+                    onBlur={commitLookbackDaysInput}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') e.currentTarget.blur();
+                    }}
+                    disabled={!canManage || !duplicateDetectionEnabled}
+                    aria-label='Custom duplicate detection window in days'
+                    data-track-category='DeskSettings'
+                    data-track-name='EditDuplicateLookbackCustomDays'
+                    className='h-8 w-20 rounded-md border border-input bg-transparent px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none'
+                  />
+                  <span className='text-sm text-desk-muted'>days</span>
+                </div>
+              )}
+            </div>
           </div>
 
           {duplicateDetectionEnabled && (

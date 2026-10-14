@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
 import { logger } from '@/utils/logger';
-import { ActivityType, MAX_DUPLICATE_SCOPE_FIELDS, TicketReferenceRelation } from '@xyne/shared';
+import { ActivityType, MAX_DUPLICATE_LOOKBACK_DAYS, MAX_DUPLICATE_SCOPE_FIELDS, TicketReferenceRelation } from '@xyne/shared';
 import {
   resolveBoardTicketFormId,
   resolveFormFieldDefinitionsForForm,
@@ -68,7 +68,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 // instead of paying for another search and Jev/LLM call. The TTL bounds how long a
 // candidate indexed late can go unseen.
 const recheckCacheKey = (ticketId: string): string => `ticket:duplicate-recheck-result:${ticketId}`;
-const RECHECK_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60;
+const RECHECK_CACHE_TTL_SECONDS = 24 * 60 * 60;
 
 /**
  * Earliest createdAt a duplicate candidate may have: the desk's
@@ -81,8 +81,7 @@ const lookbackCutoff = (
   lookbackDays: number | null | undefined,
   asOf: number,
 ): number | undefined => {
-  const days = lookbackDays;
-  return days && days > 0 ? asOf - days * DAY_MS : undefined;
+  return lookbackDays && lookbackDays > 0 ? asOf - lookbackDays * DAY_MS : undefined;
 };
 
 /** What one detection run found, and the ticket it linked as a possible duplicate. */
@@ -119,7 +118,7 @@ type ResolvedDuplicateScopeField = {
 const duplicateScopeConfigSchema = z.object({
   enabled: z.boolean().optional().default(false),
   scopeFieldGlobalIds: z.array(z.string()).max(MAX_DUPLICATE_SCOPE_FIELDS).optional().default([]),
-  lookbackDays: z.number().int().min(0).max(3650).nullable().optional(),
+  lookbackDays: z.number().int().min(0).max(MAX_DUPLICATE_LOOKBACK_DAYS).nullable().optional(),
 });
 type DuplicateScopeConfig = z.infer<typeof duplicateScopeConfigSchema>;
 
@@ -452,8 +451,9 @@ class TicketDuplicateService {
    *
    * Searches as the ticket's creator and as of its creation, like the creation-time
    * run, so the result doesn't depend on who opened it or when: only tickets created
-   * before it, within the desk's window counted back from its creation. Excludes only
-   * the ticket's parents: a sub-ticket is not a duplicate of the ticket it came from.
+ * before it, within the desk's window counted back from its creation. Excludes the
+ * ticket's parents (a sub-ticket is not a duplicate of the ticket it came from),
+ * tickets already linked as duplicates, and dismissed candidates.
    */
   private async detectForSavedTicket(
     ticket: NonNullable<Awaited<ReturnType<TicketDuplicateService['findTicketForDetection']>>>,
@@ -512,8 +512,9 @@ class TicketDuplicateService {
       .filter(([, value]) => isDismissal(value))
       .map(([counterpart]) => counterpart);
 
+    const parentTicketIds = parentMappings.map(mapping => mapping.ticketId);
     const excludeTicketIds = [
-      ...parentMappings.map(mapping => mapping.ticketId),
+      ...parentTicketIds,
       ...duplicateReferences.map(reference =>
         reference.sourceTicketId === ticket.id ? reference.targetTicketId : reference.sourceTicketId,
       ),
@@ -521,16 +522,20 @@ class TicketDuplicateService {
     ];
     const scopeFieldValues = savedValues.map(v => ({ fieldId: v.fieldId, value: v.actualFieldValue }));
 
+    // Linked duplicates are deliberately OUT of the fingerprint: a new link must not
+    // invalidate the cache, or every open would re-run and keep linking the next
+    // candidate — a silently growing chain plus an LLM call per open. Parents and
+    // dismissals stay in: a dismissal means "look again". lookbackDays is already
+    // covered by the scopeConfig string.
     const fingerprint = createHash('sha256')
       .update(JSON.stringify({
         title: ticket.title,
         description: ticket.description,
         projectId: ticket.projectId,
         channelId: ticket.channelId,
-        lookbackDays: scope?.config?.lookbackDays ?? null,
         scopeConfig: preference?.duplicateScopeConfig ?? null,
         scopeFieldValues: [...scopeFieldValues].sort((a, b) => a.fieldId.localeCompare(b.fieldId)),
-        excludeTicketIds: [...excludeTicketIds].sort(),
+        excludeTicketIds: [...parentTicketIds, ...dismissedTicketIds].sort(),
       }))
       .digest('hex');
 
@@ -636,7 +641,7 @@ class TicketDuplicateService {
       if (!scope) {
         return { candidates: [], analysis: skippedAnalysis(SKIP_REASON_NOT_CONFIGURED) };
       }
-      deskLookbackDays = scope?.config?.lookbackDays ?? undefined;
+      deskLookbackDays = scope.config.lookbackDays ?? undefined;
       const scopeTokens = await this.buildScopeDynamicFieldValues({
         scope,
         channelId,

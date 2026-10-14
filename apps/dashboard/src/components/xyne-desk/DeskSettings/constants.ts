@@ -1,3 +1,5 @@
+import { MAX_DUPLICATE_LOOKBACK_DAYS } from '@xyne/shared';
+
 /** Default AI priority-detection prompt. A desk with no custom prompt uses this. */
 export const DEFAULT_PRIORITY_PROMPT = `You are an expert support ticket prioritizer for a customer support desk.
 
@@ -35,6 +37,6 @@ export const DUPLICATE_LOOKBACK_PRESETS: ReadonlyArray<{ days: number; label: st
   { days: 730, label: 'Last 2 years' },
 ];
 
-/** Bounds for a custom window; the server accepts 0–3650. */
+/** Bounds for a custom window; the max is whatever the server accepts. */
 export const DUPLICATE_LOOKBACK_CUSTOM_MIN_DAYS = 1;
-export const DUPLICATE_LOOKBACK_CUSTOM_MAX_DAYS = 3650;
+export const DUPLICATE_LOOKBACK_CUSTOM_MAX_DAYS = MAX_DUPLICATE_LOOKBACK_DAYS;
