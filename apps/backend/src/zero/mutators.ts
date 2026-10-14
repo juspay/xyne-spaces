@@ -168,7 +168,7 @@ import {
   assertFieldIsCurrentlyActive,
 } from './formsMutatorHelpers';
 import { v4 as uuidv4 } from 'uuid';
-import { extractAllMentions } from '@/utils/mentionParser';
+import { extractAllMentions, keepMentionsWithin } from '@/utils/mentionParser';
 import { detectVcsProvider } from '@/utils/repoUrlParser';
 import { getStorageService } from '@/services/storage';
 import { repositories } from '@/database/repositories';
@@ -231,6 +231,7 @@ import {
 } from '@/services/flowCascadeService';
 import { validateFlowDecisionFields } from '@/zero/utils/flowPlanValidation';
 import { getEncryptionProvider } from '@/services/encryption';
+import { escapeHtml } from '@/utils/htmlEscape';
 
 function sortCallParticipantsForPreview<T extends {
   id: string;
@@ -575,6 +576,18 @@ async function resolveCollectionPermissionRole(
     if (!role || COLLECTION_ROLE_RANK[candidate] > COLLECTION_ROLE_RANK[role]) role = candidate;
   }
   return role;
+}
+
+/** Guests may only mention people in the channel (see keepMentionsWithin). */
+async function guestSafeContent(
+  tx: Transaction<Schema>,
+  role: string | undefined,
+  channelId: string,
+  content: string,
+): Promise<string> {
+  if (role !== WorkspaceRole.GUEST || !content.includes('data-mention-type')) return content;
+  const participants = await tx.run(zql.channel_participants.where('channelId', channelId));
+  return keepMentionsWithin(content, new Set(participants.map(participant => participant.userId)));
 }
 
 async function resolveMentionParticipantUserIds(
@@ -974,8 +987,9 @@ async function createNonParticipantSystemMessages(
     logger.info(`📝 [NON-PARTICIPANT] Creating system message for ${nonParticipants.length} non-participants`);
 
     // Generate HTML content with mentions (matching format of regular messages)
+    // Escaped: a raw '<' or '"' in a name would break the tag, and the mention with it.
     const mentionSpans = nonParticipants.map(np =>
-      `<span data-mention="true" data-mention-type="user" data-user-id="${np.userId}" data-username="${np.userName}" class="mention-text">${np.userName}</span>`
+      `<span data-mention="true" data-mention-type="user" data-user-id="${escapeHtml(np.userId)}" data-username="${escapeHtml(np.userName)}" class="mention-text">${escapeHtml(np.userName)}</span>`
     ).join(', ');
 
     const channelStatsForPolicy = channel ? await tx.run(zql.channel_stats.where('channelId', channel.id).one()) : null;
@@ -2716,6 +2730,7 @@ export function createMutators(
           if (content === '') {
             throw new Error('Message content or files are required to start a conversation');
           }
+          content = await guestSafeContent(tx, authData.role, channelId, content);
 
           const user = await tx.run(zql.users.where('id', authData.sub).one());
           const now = timestamp;
@@ -3570,6 +3585,7 @@ export function createMutators(
           if (!conversation) {
             throw new Error("Message doesn't belong to a conversation");
           }
+          content = await guestSafeContent(tx, authData.role, conversation.channelId, content);
           const [channel, participant, channelDrafts] = await Promise.all([
             tx.run(zql.channels.where('id', conversation.channelId).related('project').one()),
             tx.run(zql.channel_participants
@@ -4016,6 +4032,10 @@ export function createMutators(
             if (message.msgType === MessageType.BOT) {
               throw new Error('BOT Messages cannot be edited');
             }
+          }
+          if (content !== undefined && authData.role === WorkspaceRole.GUEST) {
+            const edited = await tx.run(zql.conversations.where('conversationId', message.conversationId).one());
+            content = await guestSafeContent(tx, authData.role, edited?.channelId ?? '', content);
           }
 
           // Only process mention changes if content is being updated
