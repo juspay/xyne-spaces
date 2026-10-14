@@ -16,12 +16,15 @@
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { errMsg } from "../../lib/errors.js";
+import { createLogger } from "../../logger.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
   type CallToolResult,
 } from "@modelcontextprotocol/sdk/types.js";
+
+const log = createLogger("bitbot-server");
 
 // BITBOT_BASE_URL is set by adapters/bitbot.ts from CONFIG.bitbotBaseUrl when
 // this server is spawned via the MCP adapter — that's the production path.
@@ -76,7 +79,7 @@ const postJsonTool = async (
     const causeStr = cause
       ? JSON.stringify(cause, Object.getOwnPropertyNames(cause as object))
       : "(no cause)";
-    console.error(
+    log.error(
       `[bitbot] ${toolName} fetch fail name=${(error as Error)?.name} msg=${message} cause=${causeStr}`,
     );
     return {
@@ -173,7 +176,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToo
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error("[bitbot-server] Connected and listening on stdio");
+log.info("[bitbot-server] Connected and listening on stdio");
 
 process.on("SIGINT", async () => { await server.close(); process.exit(0); });
 process.on("SIGTERM", async () => { await server.close(); process.exit(0); });

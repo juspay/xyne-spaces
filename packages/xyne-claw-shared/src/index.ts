@@ -158,8 +158,11 @@ export {
   createTraceId,
   withLogContext,
   setLogContext,
+  startLogRedactConfigSync,
+  logRedactConfigValue,
 } from "./logger.js";
 export type { LogContext, Logger } from "./logger.js";
+export { forwardChildStderr } from "./mcp-stderr.js";
 export { AGENT_INTROSPECT_TOOL_DEFS } from "./tools/agent-introspect/index.js";
 export {
   TASK_COMMAND_NAMES,

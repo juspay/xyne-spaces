@@ -2,6 +2,7 @@ import winston from 'winston';
 import { AsyncLocalStorage } from 'async_hooks';
 import fluentLogger from 'fluent-logger';
 import type { Socket } from 'net';
+import { shredRecordInPlace, shredText } from '@xyne/logger';
 import { config } from '@/config/env';
 
 export interface LogContext {
@@ -29,14 +30,6 @@ const REDACTED = '[REDACTED]';
 const MAX_LIBRARY_STACK_FRAMES = 3;
 const SAFE_ERROR_FIELDS = ['code', 'status', 'statusCode', 'errno', 'syscall'] as const;
 
-const redact = (value: string): string =>
-  value
-    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [REDACTED]')
-    .replace(
-      /\b(authorization|token|password|secret|api[_-]?key)\s*[:=]\s*[^\s,;]+/gi,
-      '$1=[REDACTED]'
-    );
-
 const isLibraryStackFrame = (line: string): boolean =>
   /(?:[/\\]node_modules[/\\]|\bnode:[^)\s]+|\bat (?:async )?internal[/\\])/.test(line);
 
@@ -54,7 +47,7 @@ export const limitLibraryStackFrames = (stack: string): string => {
 };
 
 const stackFor = (error: Error): string | undefined =>
-  error.stack ? redact(limitLibraryStackFrames(error.stack)) : undefined;
+  error.stack ? shredText(limitLibraryStackFrames(error.stack)) : undefined;
 
 const findError = (value: unknown, depth = 0): Error | undefined => {
   if (value instanceof Error) return value;
@@ -75,13 +68,13 @@ export function serializeError(value: unknown): Record<string, unknown> {
   if (!(value instanceof Error)) {
     return {
       name: 'NonError',
-      message: redact(typeof value === 'string' ? value : String(value)),
+      message: shredText(typeof value === 'string' ? value : String(value)),
     };
   }
 
   const serialized: Record<string, unknown> = {
     name: value.name,
-    message: redact(value.message),
+    message: shredText(value.message),
     stack: stackFor(value),
   };
   for (const field of SAFE_ERROR_FIELDS) {
@@ -118,7 +111,7 @@ export function describeRejection(reason: unknown): Record<string, unknown> {
 const normalizeErrors = winston.format((info) => {
   const infoRecord = info as Record<string, unknown>;
   if (typeof infoRecord.stack === 'string') {
-    infoRecord.stack = redact(limitLibraryStackFrames(infoRecord.stack));
+    infoRecord.stack = shredText(limitLibraryStackFrames(infoRecord.stack));
   }
 
   for (const key of Object.keys(info)) {
@@ -165,12 +158,20 @@ function decycle(value: unknown, ancestors: unknown[]): unknown {
 
 const sanitizeForFluent = winston.format((info) => decycle(info, []) as winston.Logform.TransformableInfo);
 
+// Redact secret values on every sink. In sharedFormat (before the per-transport
+// clone) so the Fluent sink is covered too, not just error messages. Values only,
+// so field names / level / timestamp stay intact => frozen Grafana contract unchanged.
+const shredSecrets = winston.format(
+  (info) => shredRecordInPlace(info as unknown as Record<string, unknown>) as unknown as winston.Logform.TransformableInfo
+);
+
 // Runs once at call time, before winston-transport's per-transport clone drops Error fields.
 const sharedFormat = winston.format.combine(
   winston.format.timestamp(),
   winston.format.errors({ stack: true }),
   normalizeErrors(),
-  injectContext()
+  injectContext(),
+  shredSecrets()
 );
 
 // sharedFormat's timestamp is UTC ISO for Fluent Bit; re-render local for console output.

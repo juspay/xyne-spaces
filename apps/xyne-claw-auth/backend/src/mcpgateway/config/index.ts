@@ -3,6 +3,10 @@
  * Constants, timeouts, and environment-based settings
  */
 
+import { createLogger } from "../../logger.js";
+
+const log = createLogger("mcpgateway/config");
+
 // ============================================================================
 // Timeouts (milliseconds)
 // ============================================================================
@@ -45,7 +49,7 @@ export const ENCRYPTION = {
 function getOptionalEnvVar(name: string): string {
   const value = process.env[name];
   if (!value) {
-    console.warn(`[mcpgateway/config] Missing optional environment variable: ${name}. MCP Gateway will be disabled.`);
+    log.warn(`[mcpgateway/config] Missing optional environment variable: ${name}. MCP Gateway will be disabled.`);
     return "";
   }
   return value;
@@ -92,9 +96,9 @@ export const isGatewayEnabled =
 
 if (!isGatewayEnabled) {
   if (!hasEncryptionKey) {
-    console.warn("[mcpgateway/config] MCP Gateway is DISABLED: BACKEND_CLIENT_SECRET_ENCRYPTION_KEY or ENCRYPTION_KEY is required to encrypt backend secrets.");
+    log.warn("[mcpgateway/config] MCP Gateway is DISABLED: BACKEND_CLIENT_SECRET_ENCRYPTION_KEY or ENCRYPTION_KEY is required to encrypt backend secrets.");
   } else {
-    console.warn("[mcpgateway/config] MCP Gateway is DISABLED due to missing environment variables. Gateway tool calls will return an error.");
+    log.warn("[mcpgateway/config] MCP Gateway is DISABLED due to missing environment variables. Gateway tool calls will return an error.");
   }
 }
 

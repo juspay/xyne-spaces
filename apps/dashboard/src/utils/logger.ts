@@ -384,6 +384,17 @@ export class Logger implements LoggerConfig {
     }
   }
 
+  setRedactConfig(redactConfig: unknown): void {
+    if (this.worker) {
+      const message: WorkerMessage = {
+        type: 'SET_REDACT_CONFIG',
+        payload: { redactConfig },
+      };
+      this.worker.postMessage(message);
+    }
+    window.electronAPI?.setLogRedactConfig?.(redactConfig);
+  }
+
   setNotificationWsId(notificationWsId: string): void {
     this.notificationWsId = notificationWsId;
     if (this.worker) {

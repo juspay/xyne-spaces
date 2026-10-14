@@ -343,7 +343,6 @@ async function handleDeepLink(url: string): Promise<void> {
             name: 'pending_invitation_id'
           });
           log.info('[DeepLinks] Verified cookies:', cookies.map(c => c.name));
-          log.info('[DeepLinks] Cookie details:', cookies)
         } catch (cookieError) {
           log.error('[DeepLinks] Failed to set cookie:', cookieError);
         }

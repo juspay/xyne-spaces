@@ -9,12 +9,13 @@ export class MobilePushChannel {
     const { token, voipToken, platform, payload, userId, appVersion } = job;
 
     logger.info('[MobilePush] Delivering push notification...', {
+      module: 'MobilePush',
       userId,
       platform,
       notificationId: payload.notificationId,
       type: payload.type,
-      voipToken: voipToken?.substring(0, 6),
-      token: token?.substring(0, 6),
+      voipTokenPreview: voipToken?.substring(0, 6),
+      tokenPreview: token?.substring(0, 6),
       appVersion: appVersion,
     });
 

@@ -1,9 +1,11 @@
 import { notificationService } from './index';
 import { logger } from '@/utils/logger';
+import { startLogRedactConfigSync } from '@/services/logRedactConfig';
 
 async function startNotificationWorker() {
   try {
     logger.info('Starting notification worker...');
+    startLogRedactConfigSync();
 
     await notificationService.initialize();
 

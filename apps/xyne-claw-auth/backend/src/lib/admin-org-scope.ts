@@ -1,6 +1,9 @@
 import type { Request } from "express";
 import { prisma } from "../db.js";
 import { getOrgId, getRequesterId } from "../middleware/agent-acl.js";
+import { createLogger } from "../logger.js";
+
+const log = createLogger("admin-org-scope");
 
 export interface AdminOrgScope {
   allOrgs: boolean;
@@ -12,11 +15,10 @@ export function getAdminOrgScope(req: Request, endpoint: string, allowAll = true
   const allOrgs = allowAll && req.query["orgScope"] === "all";
   if (allOrgs) {
     const userId = getRequesterId(req) ?? "unknown";
-    console.info("[admin-org-scope]", {
+    log.info("[admin-org-scope]", {
       userId,
       orgId: orgId ?? "unknown",
       endpoint,
-      timestamp: new Date().toISOString(),
     });
   }
   return { allOrgs, orgId: allOrgs ? undefined : orgId };

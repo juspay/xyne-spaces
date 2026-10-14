@@ -260,6 +260,7 @@ const electronAPI = {
   getDeviceInfo: () => ipcRenderer.invoke('get-device-info'),
   setUserEmail: (email: string) => ipcRenderer.send('set-user-email', email),
   getClientSessionId: () => ipcRenderer.invoke('logger:get-client-session-id'),
+  setLogRedactConfig: (value: unknown) => ipcRenderer.send('logger:set-redact-config', value),
 
   // Browser Settings APIs
   getBrowserSettings: () => ipcRenderer.invoke('get-browser-settings'),

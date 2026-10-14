@@ -8,8 +8,11 @@
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { errMsg } from "../../lib/errors.js";
+import { createLogger } from "../../logger.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema, type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+
+const log = createLogger("query-routing-server");
 
 const HOST = (process.env["QUERY_ROUTING_HOST"] ?? "").replace(/\/+$/, "");
 const TOKEN = process.env["QUERY_ROUTING_TOKEN"] ?? "";
@@ -17,7 +20,7 @@ const AGENT = process.env["QUERY_ROUTING_AGENT"] || "investigation";
 const SOURCE = process.env["QUERY_ROUTING_SOURCE"] || "xyne_spaces";
 
 if (!HOST || !TOKEN) {
-  process.stderr.write("query-routing-server: QUERY_ROUTING_HOST and QUERY_ROUTING_TOKEN must be set\n");
+  log.error("[query-routing-server] QUERY_ROUTING_HOST and QUERY_ROUTING_TOKEN must be set");
   process.exit(1);
 }
 
@@ -135,7 +138,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToo
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error("[query-routing-server] Connected and listening on stdio");
+log.info("[query-routing-server] Connected and listening on stdio");
 
 process.on("SIGINT", async () => { await server.close(); process.exit(0); });
 process.on("SIGTERM", async () => { await server.close(); process.exit(0); });

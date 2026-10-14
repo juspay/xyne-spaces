@@ -17,14 +17,15 @@ import {
   type CallToolResult,
 } from "@modelcontextprotocol/sdk/types.js";
 import { tools, type JenkinsConfig } from "./jenkins-tools.js";
+import { createLogger } from "../../logger.js";
+
+const log = createLogger("jenkins-server");
 
 const username = process.env["JENKINS_USERNAME"];
 const apiToken = process.env["JENKINS_API_TOKEN"];
 
 if (!username || !apiToken) {
-  process.stderr.write(
-    "jenkins-server: JENKINS_USERNAME and JENKINS_API_TOKEN must be set\n",
-  );
+  log.error("[jenkins-server] JENKINS_USERNAME and JENKINS_API_TOKEN must be set");
   process.exit(1);
 }
 

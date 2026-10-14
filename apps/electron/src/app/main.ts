@@ -13,7 +13,7 @@ import {
 } from '../services/request-interceptor';
 import { setupMTLS } from '../services/mtls';
 import { agentAuthService } from '../services/agent-auth';
-import { installElectronLogStackHook, Logger } from '../services/logger/Logger';
+import { installElectronLogHooks, Logger } from '../services/logger/Logger';
 import { localHarnessBridge } from '../services/local-harness';
 import { BrowserWindow } from 'electron';
 import { EnrollmentEvent } from '../services/logger/enrollment-events';
@@ -49,7 +49,7 @@ app.setAppUserModelId(config.APP_ID);
 // Initialize electron-log for main process
 process.setSourceMapsEnabled(true);
 log.initialize();
-installElectronLogStackHook();
+installElectronLogHooks();
 log.transports.file.level = 'info';
 log.transports['console'].level = 'info';
 log.info('[Main] Electron app starting...');

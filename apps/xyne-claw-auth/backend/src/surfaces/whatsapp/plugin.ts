@@ -36,6 +36,9 @@ import { makeStoredAuthState } from "./auth-state.js";
 import { formatForWhatsApp, WHATSAPP_RESULT_SECTIONS } from "../whatsapp-shared/format.js";
 import { labelMentions, toInbound, type MediaDescriptor, type SelfIdentity } from "./messages.js";
 import { jidFromTarget, phoneFromJid, whatsappChannelConfigSchema, type WhatsAppChannelConfig } from "./schema.js";
+import { redactLibsignalSessionLogs } from "./libsignal-console.js";
+
+redactLibsignalSessionLogs();
 
 const MAX_TEXT_CHARS = 4000;
 const MAX_IMAGE_BYTES = 16 * 1024 * 1024;

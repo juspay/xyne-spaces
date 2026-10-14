@@ -174,8 +174,10 @@ async function spawnSandboxPwClient(
     // playwright-mcp creates a `.playwright-mcp` state dir in cwd; spawning
     // from /app/xyne-claw fails with EACCES. /tmp is always writable.
     cwd: "/tmp",
+    // Without "pipe" the child inherits our stderr, `transport.stderr` is null and the listener below never runs.
+    stderr: "pipe",
   });
-  // Surface the child's stderr so MCP-side errors aren't silent.
+  // Surface the child's stderr through the logger (and its shredder) so MCP-side errors aren't silent.
   transport.stderr?.on("data", (chunk: Buffer) => {
     const line = chunk.toString("utf8").trimEnd();
     if (line) log.warn(`[sandbox-pw:${session.id.slice(0, 8)}] ${line}`);

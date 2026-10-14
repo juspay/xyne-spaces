@@ -1,6 +1,7 @@
 import winston from "winston";
 import { AsyncLocalStorage } from "node:async_hooks";
 import crypto from "node:crypto";
+import { getRedactConfig, shredRecordInPlace, syncRedactConfig } from "@xyne/logger";
 
 /**
  * Structured JSON logger shared across the claw backend services
@@ -78,44 +79,18 @@ const captureSplat = winston.format((info) => {
   return info;
 });
 
-const SECRET_PATTERNS: Array<[RegExp, string]> = [
-  [/(\bapi[_-]?key\b["'\s]*[:=]\s*["']?)([A-Za-z0-9_\-]{12,})/gi, "$1<redacted>"],
-  [/\bsk-[A-Za-z0-9]{16,}\b/g, "sk-<redacted>"],
-  [/(\b[Bb]earer\s+)[A-Za-z0-9._\-]{16,}/g, "$1<redacted>"],
-];
-
-function redactString(s: string): string {
-  let out = s;
-  for (const [re, rep] of SECRET_PATTERNS) out = out.replace(re, rep);
-  return out;
-}
-
-function redactValue(v: unknown): unknown {
-  if (typeof v === "string") return redactString(v);
-  if (Array.isArray(v)) return v.map(redactValue);
-  if (v && typeof v === "object") {
-    const out: Record<string, unknown> = {};
-    for (const [k, val] of Object.entries(v as Record<string, unknown>)) out[k] = redactValue(val);
-    return out;
-  }
-  return v;
-}
-
-const redactSecrets = winston.format((info) => {
-  if (typeof info.message === "string") info.message = redactString(info.message);
-  for (const key of Object.keys(info)) {
-    if (key === "message" || key === "level" || key === "timestamp") continue;
-    (info as Record<string, unknown>)[key] = redactValue((info as Record<string, unknown>)[key]);
-  }
-  return info;
-});
+// Secret-value redaction on every sink, via the shared @xyne/logger shredder
+// (replaces the old hand-rolled redactSecrets — same contract, wider coverage).
+const shredSecrets = winston.format(
+  (info) => shredRecordInPlace(info as unknown as Record<string, unknown>) as unknown as winston.Logform.TransformableInfo,
+);
 
 const productionFormat = winston.format.combine(
   winston.format.timestamp({ format: "YYYY-MM-DD HH:mm:ss" }),
   winston.format.errors({ stack: true }),
   captureSplat(),
   injectContext(),
-  redactSecrets(),
+  shredSecrets(),
   winston.format.printf(({ timestamp, level, message, ...meta }) =>
     JSON.stringify({ timestamp, level, message, ...meta }),
   ),
@@ -127,7 +102,7 @@ const devFormat = winston.format.combine(
   winston.format.errors({ stack: true }),
   captureSplat(),
   injectContext(),
-  redactSecrets(),
+  shredSecrets(),
   winston.format.printf(({ timestamp, level, message, component, service, ...meta }) => {
     const ctx = component || service;
     const prefix = ctx ? `[${ctx}] ` : "";
@@ -138,16 +113,48 @@ const devFormat = winston.format.combine(
 
 const isDev = process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test";
 
+// Stdio MCP children: stdout is the JSON-RPC channel, so every level must go to stderr.
+const logToStderr = process.env.LOG_TO_STDERR === "1";
+
 export const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || "info",
   format: isDev ? devFormat : productionFormat,
-  transports: [new winston.transports.Console()],
+  transports: [
+    new winston.transports.Console(
+      logToStderr ? { stderrLevels: Object.keys(winston.config.npm.levels) } : {},
+    ),
+  ],
   exitOnError: false,
   defaultMeta: {
     version: "1.0",
     service: process.env.SERVICE_NAME || "xyne-claw",
   },
 });
+
+/**
+ * Keep the log redaction config in sync from an upstream S2S endpoint that
+ * returns `{ value }` (Spaces for claw-auth, claw-auth for claw). No value = defaults.
+ */
+export function startLogRedactConfigSync(url: string, s2sKey: string): () => void {
+  if (!s2sKey) return () => {};
+  return syncRedactConfig(
+    async () => {
+      const res = await fetch(url, { headers: { "x-s2s-key": s2sKey }, signal: AbortSignal.timeout(5_000) });
+      if (!res.ok) return undefined;
+      return ((await res.json()) as { value?: unknown }).value ?? null;
+    },
+    {
+      // redactCanary prints [REDACTED] while `canary` is in secretWords (end-to-end check).
+      onChange: ({ accepted, rejected }) =>
+        logger.info("Log redaction config updated", { module: "logger", accepted, rejected, redactCanary: "visible" }),
+    },
+  );
+}
+
+/** The active redaction config in its upstream format, for serving to downstream services. */
+export function logRedactConfigValue(): { value: unknown } {
+  return { value: getRedactConfig().value };
+}
 
 export type Logger = winston.Logger;
 

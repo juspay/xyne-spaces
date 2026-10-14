@@ -7,6 +7,7 @@ WORKDIR /repo
 # Manifests + lockfile first so the install layer caches independently of source.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY packages/shared/package.json           packages/shared/
+COPY packages/logger/package.json           packages/logger/
 COPY packages/icons/package.json            packages/icons/
 COPY apps/dashboard/package.json            apps/dashboard/
 COPY apps/backend/package.json              apps/backend/
@@ -22,10 +23,11 @@ RUN pnpm install --frozen-lockfile --prod=false --ignore-scripts \
       --filter xyne-spaces-dashboard... --filter xyne-spaces-backend
 
 COPY packages/shared packages/shared
+COPY packages/logger packages/logger
 COPY packages/icons  packages/icons
 
 # dashboard consumes both from their built dist/
-RUN pnpm --filter @xyne/shared --filter @xyne/icons run build
+RUN pnpm --filter @xyne/logger --filter @xyne/shared --filter @xyne/icons run build
 
 # Prisma client (schema only — cheap layer, changes rarely)
 COPY apps/backend/prisma apps/backend/prisma

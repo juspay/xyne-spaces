@@ -1,5 +1,6 @@
 import { type Express, type NextFunction, type Request, type Response } from "express";
 import { requestLogger } from "../middleware/requestLogger.js";
+import { logRedactConfigValue } from "../logger.js";
 import { errorMiddleware } from "../lib/http.js";
 import { serversRouter } from "../routes/servers.js";
 import { connectionsRouter } from "../routes/connections.js";
@@ -231,6 +232,9 @@ function mountCoreApi(app: Express): void {
   app.use(`${BASE}/internal/sandbox-profiles`, requireInternalS2S, sandboxProfilesInternalRouter); // Spaces → sandbox profile editor
   app.use(`${BASE}/internal/connectors`, requireStrictS2S, connectorsInternalRouter); // connector availability lookup for xyne-claw (S2S only)
   app.use(`${BASE}/internal/providers`, requireStrictS2S, providersInternalRouter); // AI provider availability lookup for xyne-claw (S2S only)
+  app.get(`${BASE}/internal/log-redact-config`, requireStrictS2S, (_req: Request, res: Response) => {
+    res.json(logRedactConfigValue()); // log redaction config relayed to xyne-claw
+  });
 }
 
 function mountOAuthProviders(app: Express): void {

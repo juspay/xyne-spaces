@@ -20,6 +20,9 @@ import { Agent } from "undici";
 import { errMsg } from "./errors.js";
 import { ClawSseParser, type ClawStreamEvent, type ClawDoneStatus, type Todo, type UiWidget } from "xyne-claw-shared";
 import { ingestArtifactSignals, ingestSandboxPreviewSignals } from "./conversation-artifact-signals.js";
+import { createLogger } from "../logger.js";
+
+const log = createLogger("consume-claw-stream");
 
 // An SSE run goes silent between frames while the model composes; undici's
 // default 300s bodyTimeout severs the socket mid-stream ("terminated"). Every
@@ -237,7 +240,7 @@ function scheduleIngest(event: ClawStreamEvent, ctx: StreamArtifactContext, gate
   if (gate.inFlight >= MAX_IN_FLIGHT_INGESTS) {
     if (!gate.warned) {
       gate.warned = true;
-      console.warn(
+      log.warn(
         `[consume-claw-stream] artifact ingestion saturated at ${MAX_IN_FLIGHT_INGESTS} in flight; dropping further frames for this stream`,
       );
     }
@@ -265,7 +268,7 @@ async function ingestFrame(event: ClawStreamEvent, ctx: StreamArtifactContext): 
 }
 
 function logHandlerError(eventName: string, err: unknown): void {
-  console.warn(`[consume-claw-stream] handler for "${eventName}" threw: ${errMsg(err)}`);
+  log.warn(`[consume-claw-stream] handler for "${eventName}" threw: ${errMsg(err)}`);
 }
 
 // ── SSE-to-legacy-POSTs bridge ─────────────────────────────────────────────
@@ -320,7 +323,7 @@ export async function bridgeClawSseToLegacyPosts(opts: BridgeOptions): Promise<v
         signal: AbortSignal.timeout(15_000),
       });
     } catch (err) {
-      console.warn(`[${tag}] progress POST failed (session=${sid}): ${errMsg(err)}`);
+      log.warn(`[${tag}] progress POST failed (session=${sid}): ${errMsg(err)}`);
     }
   };
 
@@ -377,11 +380,11 @@ export async function bridgeClawSseToLegacyPosts(opts: BridgeOptions): Promise<v
           body: JSON.stringify({ ...result.result, sessionId: sid }),
         });
       } catch (err) {
-        console.warn(`[${tag}] callback POST failed (session=${sid}): ${errMsg(err)}`);
+        log.warn(`[${tag}] callback POST failed (session=${sid}): ${errMsg(err)}`);
       }
     }
   } catch (err) {
-    console.error(`[${tag}] bridge failed (session=${sid}): ${errMsg(err)}`);
+    log.error(`[${tag}] bridge failed (session=${sid}): ${errMsg(err)}`);
     // Surface failure to the caller as a final callback POST so their run
     // tracker doesn't hang in "running" forever. Matches the failure-callback
     // claw's catch handler would have sent in the legacy path.

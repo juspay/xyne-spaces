@@ -29,6 +29,8 @@ import { setupMTLSIpcHandlers } from './mtls-handlers';
 import { config, ENABLE_LOCAL_HARNESS } from '../app/config';
 import { performHardReload } from '../services/version-checker';
 import { Logger, errorLogger } from '../services/logger/Logger';
+import { setRedactConfig } from '@xyne/logger';
+import log from 'electron-log/main';
 import ElectronEvent from '../services/logger/electron-events';
 import { normalizeExternalUrl } from '../utils/validation';
 import {
@@ -300,6 +302,13 @@ export function setupIpcHandlers(): void {
       Logger.setEmailId(email);
       setCachedUser(email);
     }
+  });
+
+  // Log redaction config from Superposition, forwarded by the dashboard (redactCanary: end-to-end check).
+  ipcMain.on('logger:set-redact-config', (event, value: unknown) => {
+    if (!isMainWindowSender(event)) return;
+    const { accepted, rejected } = setRedactConfig(value);
+    log.info('Log redaction config updated', { module: 'logger', accepted, rejected, redactCanary: 'visible' });
   });
 
   ipcMain.handle('logger:get-client-session-id', () => {

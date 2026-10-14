@@ -1,4 +1,4 @@
-import { createLogger } from "./logger.js";
+import { createLogger, startLogRedactConfigSync } from "./logger.js";
 const log = createLogger("main");
 
 // Identify this process in structured logs (overridden by deployment env).
@@ -28,6 +28,10 @@ mountRoutes(app);
 
 initializeOpenTelemetry();
 registerDailyBriefGauges();
+startLogRedactConfigSync(
+  `${CONFIG.spacesInternalUrl}/api/internal/log-redact-config`,
+  process.env["INTERNAL_S2S_KEY"] ?? process.env["XYNE_CLAW_S2S_KEY"] ?? "",
+);
 
 startEventLoopMonitor();
 

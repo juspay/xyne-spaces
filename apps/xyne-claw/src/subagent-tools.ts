@@ -23,7 +23,7 @@ import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import { AGENT, LITELLM, SERVER } from "./config.js";
 import { runWithSubagentMcpId } from "./subagent-mcp-context.js";
 import { ensureSessionDebugDir, sessionDir } from "./session-store.js";
-import { SUBAGENT_DEFINITIONS, findSubagentDefinitionForServer, isPresentationToolSource, getSandboxSession, probeSession, buildSandboxStoreKey, type SubagentDefinition, type SetupStep } from "xyne-claw-shared";
+import { SUBAGENT_DEFINITIONS, findSubagentDefinitionForServer, isPresentationToolSource, getSandboxSession, probeSession, buildSandboxStoreKey, forwardChildStderr, type SubagentDefinition, type SetupStep } from "xyne-claw-shared";
 import { acquireFollowUpLock, isValidFollowUpHandle } from "./subagent-followup.js";
 import { matchesDirectPick } from "./tool-resolution.js";
 import { optEnabled } from "./optimizations.js";
@@ -460,7 +460,9 @@ async function loadMcpTools(
   // closed`. The `npx --no-install` playwright path passes through untouched
   // (its leading flag means no package spec is parsed); non-npx commands too.
   const launch = await provisionStdioCommand(command, args);
-  const transport = new StdioClientTransport({ command: launch.command, args: launch.args });
+  // Pipe the child's stderr through our logger (and its shredder) instead of inheriting it.
+  const transport = new StdioClientTransport({ command: launch.command, args: launch.args, stderr: "pipe" });
+  forwardChildStderr(transport, log, prefix);
   const client = new Client({ name: "xyne-claw", version: "1.0.0" }, { capabilities: {} });
   await client.connect(transport);
 

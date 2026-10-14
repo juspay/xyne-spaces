@@ -9,11 +9,14 @@ type CacConfigResponse<TConfig> = {
 interface UseCacConfigOptions<TConfig> {
   key: string;
   fallbackConfig: TConfig;
+  /** Re-fetch every N ms, even while hidden. */
+  refetchInterval?: number;
 }
 
 export const useCacConfig = <TConfig>({
   key,
   fallbackConfig,
+  refetchInterval,
 }: UseCacConfigOptions<TConfig>): UseQueryResult<CacConfigResponse<TConfig>> & {
   config: TConfig;
 } => {
@@ -24,6 +27,7 @@ export const useCacConfig = <TConfig>({
       httpClient.get<CacConfigResponse<TConfig>>(`/cac-config/${key}`),
     staleTime: 60 * 60 * 1000,
     retry: 1,
+    ...(refetchInterval ? { refetchInterval, refetchIntervalInBackground: true } : {}),
   });
 
   return {

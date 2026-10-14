@@ -7,6 +7,9 @@ import type { Response } from "express";
 import * as registrationService from "../services/registration.js";
 import type { GatewayRequest } from "../middleware/gateway-auth.js";
 import type { ServiceRegistration } from "../types/index.js";
+import { createLogger } from "../../logger.js";
+
+const log = createLogger("gateway/register");
 
 /**
  * POST /gateway/registry/register
@@ -14,7 +17,7 @@ import type { ServiceRegistration } from "../types/index.js";
 export async function register(req: GatewayRequest, res: Response): Promise<void> {
   const tokenEndpointUrl = req.body.tokenEndpointUrl || req.body.token_endpoint_url || req.body.tokenEndpoint;
 
-  console.log("[gateway/register] incoming request", {
+  log.info("[gateway/register] incoming request", {
     tenantId: req.tenantId,
     serviceName: req.body.serviceName,
     backendId: req.body.backendId,

@@ -16,6 +16,7 @@ import { provisionStdioCommand } from "./provision.js";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
+import { forwardChildStderr } from "xyne-claw-shared";
 
 import { createLogger } from "../logger.js";
 import { recordKnownMcpTools } from "../lib/mcp-tool-name-index.js";
@@ -412,9 +413,15 @@ async function spawnSession(
     transport = new StdioClientTransport({
       command: launch.command,
       args: launch.args,
-      env: { ...process.env, ...env } as Record<string, string>,
+      env: { ...process.env, ...env, LOG_TO_STDERR: "1" } as Record<string, string>,
       cwd: "/tmp",
+      // Pipe (not inherit) the child's stderr so it goes through our logger —
+      // and therefore the @xyne/logger shredder — instead of straight to the
+      // container's stderr. mcp-remote and friends print request headers and
+      // bearer tokens there.
+      stderr: "pipe",
     });
+    forwardChildStderr(transport, log, serverType);
   }
 
   const client = new Client(
