@@ -2020,6 +2020,7 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
               >
                 <button
                   type='button'
+                  aria-label='About emailing call details to participants'
                   className='text-muted-foreground hover:text-foreground transition-colors'
                 >
                   <Info className='size-3.5' strokeWidth={2} />
