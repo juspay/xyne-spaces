@@ -256,13 +256,3 @@ export function canEditScheduledCallParticipants(
     channel.scopeType === ChannelScopeType.GROUP_DM
   );
 }
-
-export function hasOnlyParticipantPreview(call: {
-  status: string;
-  participantCount?: number | null | undefined;
-  participants?: readonly unknown[] | null | undefined;
-}): boolean {
-  if (call.status === CallStatus.ACTIVE) return false;
-  if (call.participantCount === null || call.participantCount === undefined) return true;
-  return getCallParticipantCount(call) > (call.participants?.length ?? 0);
-}

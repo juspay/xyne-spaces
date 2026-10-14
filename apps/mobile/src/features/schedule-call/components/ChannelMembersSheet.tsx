@@ -34,8 +34,8 @@ const SELECT_ALL_ID = 'select-all';
 interface ChannelMembersSheetProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Fired once the sheet has finished closing; the form unmounts it then (see the screen). */
-  onClosed: () => void;
+  /** Fired once the sheet has finished closing; the owner unmounts it then (useMountWhileOpen). */
+  onDismiss: () => void;
   channel: { id: string; name: string; excludedUserIds?: string[] | undefined };
   /** Called with the ids left out when Done is tapped. Swiping the sheet away discards the draft. */
   onApply: (excludedUserIds: string[]) => void;
@@ -45,7 +45,7 @@ interface ChannelMembersSheetProps {
 export const ChannelMembersSheet = ({
   isOpen,
   onOpenChange,
-  onClosed,
+  onDismiss,
   channel,
   onApply,
 }: ChannelMembersSheetProps): ReactElement => {
@@ -170,7 +170,7 @@ export const ChannelMembersSheet = ({
       ref={sheetRef}
       isOpen={isOpen}
       onOpenChange={onOpenChange}
-      onClose={onClosed}
+      onDismiss={onDismiss}
       mode='fullscreen'
       footerComponent={renderFooter}
       keyboardBehavior='extend'

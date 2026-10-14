@@ -23,6 +23,7 @@ import {
   SectionFootnote,
 } from '@/src/components/ui/settings-list';
 import { Switch } from '@/src/components/ui/switch';
+import { useMountWhileOpen } from '@/src/features/global-search/hooks/use-mount-while-open';
 import { useBubbleAccent } from '@/src/theme/useBubbleAccent';
 import { formatDate, formatTime } from '@/src/utils/timeSelection';
 
@@ -124,44 +125,37 @@ export default function ScheduleCallScreen({ onClose }: ScheduleCallScreenProps)
     router.push('/(protected)/schedule-call/repeat');
   }, [form.monthlyRepeatLabel, form.repeatOptionId, isEditMode, router, selectRepeat]);
 
-  // A sheet exists only while it is open or closing: it mounts on open and unmounts once its close
-  // animation ends, so a closed sheet holds no data subscriptions and nothing re-renders it. The
-  // updater keeps a quick reopen from being unmounted by the previous close finishing.
-  const [peopleSheet, setPeopleSheet] = useState<'unmounted' | 'open' | 'closed'>('unmounted');
+  // A sheet exists only while it is open or closing (useMountWhileOpen), so a closed sheet holds
+  // no data subscriptions and nothing re-renders it.
+  const [isPeopleOpen, setIsPeopleOpen] = useState(false);
+  const people = useMountWhileOpen(
+    isPeopleOpen,
+    useCallback((): void => setIsPeopleOpen(false), []),
+  );
   const openPeoplePicker = useCallback((): void => {
     Keyboard.dismiss();
-    setPeopleSheet('open');
-  }, []);
-  const onPeopleOpenChange = useCallback((open: boolean): void => {
-    setPeopleSheet(open ? 'open' : 'closed');
-  }, []);
-  const onPeopleClosed = useCallback((): void => {
-    setPeopleSheet(state => (state === 'closed' ? 'unmounted' : state));
+    setIsPeopleOpen(true);
   }, []);
 
-  const [membersSheet, setMembersSheet] = useState<'unmounted' | 'open' | 'closed'>('unmounted');
+  const [isMembersOpen, setIsMembersOpen] = useState(false);
+  const members = useMountWhileOpen(
+    isMembersOpen,
+    useCallback((): void => setIsMembersOpen(false), []),
+  );
   const openMembersPicker = useCallback((): void => {
     Keyboard.dismiss();
-    setMembersSheet('open');
-  }, []);
-  const onMembersOpenChange = useCallback((open: boolean): void => {
-    setMembersSheet(open ? 'open' : 'closed');
-  }, []);
-  const onMembersClosed = useCallback((): void => {
-    setMembersSheet(state => (state === 'closed' ? 'unmounted' : state));
+    setIsMembersOpen(true);
   }, []);
 
   const { selectedChannel, selectChannel, setPostCallUpdates } = postUpdates;
-  const [channelSheet, setChannelSheet] = useState<'unmounted' | 'open' | 'closed'>('unmounted');
+  const [isChannelOpen, setIsChannelOpen] = useState(false);
+  const channel = useMountWhileOpen(
+    isChannelOpen,
+    useCallback((): void => setIsChannelOpen(false), []),
+  );
   const openChannelPicker = useCallback((): void => {
     Keyboard.dismiss();
-    setChannelSheet('open');
-  }, []);
-  const onChannelOpenChange = useCallback((open: boolean): void => {
-    setChannelSheet(open ? 'open' : 'closed');
-  }, []);
-  const onChannelClosed = useCallback((): void => {
-    setChannelSheet(state => (state === 'closed' ? 'unmounted' : state));
+    setIsChannelOpen(true);
   }, []);
 
   /** Turning the toggle on opens the channel sheet when none is picked yet. */
@@ -327,34 +321,24 @@ export default function ScheduleCallScreen({ onClose }: ScheduleCallScreenProps)
         onPress={() => void handleSubmit()}
       />
 
-      {peopleSheet === 'unmounted' ? null : (
+      {people.shouldRender ? (
         <PeopleSheet
-          isOpen={peopleSheet === 'open'}
-          onOpenChange={onPeopleOpenChange}
-          onClosed={onPeopleClosed}
+          {...people.sheetProps}
           participants={participants}
           onApply={setParticipants}
           lockedUserIds={form.lockedUserIds}
         />
-      )}
-      {membersSheet === 'unmounted' || !participants.channel ? null : (
+      ) : null}
+      {members.shouldRender && participants.channel ? (
         <ChannelMembersSheet
-          isOpen={membersSheet === 'open'}
-          onOpenChange={onMembersOpenChange}
-          onClosed={onMembersClosed}
+          {...members.sheetProps}
           channel={participants.channel}
           onApply={form.setExcludedMembers}
         />
-      )}
-      {channelSheet === 'unmounted' ? null : (
-        <ChannelSheet
-          isOpen={channelSheet === 'open'}
-          onOpenChange={onChannelOpenChange}
-          onClosed={onChannelClosed}
-          selected={selectedChannel}
-          onSelect={selectChannel}
-        />
-      )}
+      ) : null}
+      {channel.shouldRender ? (
+        <ChannelSheet {...channel.sheetProps} selected={selectedChannel} onSelect={selectChannel} />
+      ) : null}
     </View>
   );
 }
