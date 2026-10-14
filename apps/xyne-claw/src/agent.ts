@@ -23,7 +23,7 @@ import { compactionExtension, fitTask, setCompactionSubmitTool } from "./compact
 import { takeCitations, takeDebug } from "./citations.js";
 import { applyAutoCitations } from "./auto-citations.js";
 import { extractSessionClfTokens } from "./citation-sanitizer.js";
-import { checkReplyFormat, replyFormatNudge, type ResultSectionLimits, getSandboxSession, isSharedOrReadOnlySandbox } from "xyne-claw-shared";
+import { checkReplyFormat, replyFormatNudge, type ResultSectionLimits, getSandboxSession, isSharedOrReadOnlySandbox, isSandboxSessionOwnedByContext } from "xyne-claw-shared";
 import { decideSandboxPreviewAnnounce } from "./sandbox-preview-announce.js";
 import type {
   ClawAttachmentPayload,
@@ -1827,6 +1827,7 @@ export interface RunTaskOptions {
    *  RAW conversationId + agentSlug, threaded separately so /webhook/progress
    *  can fall back to it when a refired run minted a fresh sessionId. */
   progressMeta?: { conversationId?: string | null; agentSlug?: string | null } | undefined;
+  sandboxToolMeta?: Record<string, string> | undefined;
   /** Set on a fallback attempt following an EMPTY completion: compact the
    *  resumed session before prompting the next provider so it doesn't inherit
    *  the same over-window context that produced nothing (and overflow again). */
@@ -3271,9 +3272,11 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
           const storeKey = conversationId ?? sessionId ?? "unknown";
           const decision = decideSandboxPreviewAnnounce({
             toolArgs: started.args,
+            toolResult: event.result,
             storeKey,
             announced: announcedSandboxIds,
             getSession: getSandboxSession,
+            isOwned: (lookupKey) => isSandboxSessionOwnedByContext(lookupKey, opts.sandboxToolMeta ? { meta: opts.sandboxToolMeta } : undefined),
             isSharedOrReadOnly: isSharedOrReadOnlySandbox,
           });
           if (decision.announce) {
@@ -3293,6 +3296,8 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
               loggedSharedSandboxSkips.add(decision.sandboxId);
               log.info(`[agent] Sandbox preview skipped: shared read-only sandbox ${decision.sandboxId} (tool=${event.toolName})`);
             }
+          } else if (decision.reason === "not-owned") {
+            log.warn(`[agent] Sandbox preview skipped: sandbox ${decision.sandboxId} is not owned by this run (tool=${event.toolName})`);
           } else if (decision.reason === "no-session") {
             log.info(`[agent] Sandbox preview skipped: no SESSION_STORE entry for storeKey=${storeKey} (tool=${event.toolName})`);
           }

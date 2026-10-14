@@ -490,6 +490,14 @@ export function isSharedOrReadOnlySandbox(sessionId: string): boolean {
   return SHARED_SESSIONS.has(sessionId) || READONLY_SESSIONS.has(sessionId);
 }
 
+export function isSandboxSessionOwnedByContext(
+  lookupKey: string,
+  context: { meta?: Record<string, string> } | undefined,
+): boolean {
+  const session = SESSION_STORE.get(lookupKey);
+  return !!session && isSessionOwnedByContext(session, lookupKey, context);
+}
+
 /** Remove run-bound Git credential material without destroying reusable sandboxes. */
 export async function cleanupSdlcSandboxCredentialsForContext(
   context: ToolExecutionContext,
