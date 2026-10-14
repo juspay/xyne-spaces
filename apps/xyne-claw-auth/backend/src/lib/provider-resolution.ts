@@ -115,8 +115,8 @@ export async function resolveProvidersForDispatch(
       : userCredRefreshTarget(targetUserId, provider, credRow as SharedCredRow);
     try {
       cfg.apiKey = provider === "claude"
-        ? await getValidClaudeBearer(target.credKey, credRow as Parameters<typeof getValidClaudeBearer>[1], target.persist)
-        : await getValidCodexBearer(target.credKey, credRow as Parameters<typeof getValidCodexBearer>[1], target.persist);
+        ? await getValidClaudeBearer(target.credKey, credRow as Parameters<typeof getValidClaudeBearer>[1], target.persist, target.reload)
+        : await getValidCodexBearer(target.credKey, credRow as Parameters<typeof getValidCodexBearer>[1], target.persist, target.reload);
     } catch (err) {
       log.warn(`${provider === "claude" ? "Claude" : "Codex"} OAuth refresh failed — credential likely needs reconnect`, {
         scope,

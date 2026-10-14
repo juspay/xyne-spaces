@@ -69,6 +69,7 @@ import { useNotificationKeywords } from '../../../hooks/useNotificationKeywords'
 import { Badge } from '../../ui/Badge/Badge';
 
 import { usePreferencesState, type PreferencesState } from '../../../hooks/usePreferencesState';
+import { useSummaryTemplates } from '../../../hooks/useSummaryTemplates';
 import {
   CALL_MEDIA_QUALITY_OPTIONS,
   type CallMediaQuality,
@@ -760,8 +761,85 @@ const RecordingsSection: FC<{ state: PreferencesState }> = ({ state }) => (
         <Radio value='thinking'>Thinking &mdash; higher quality, slower</Radio>
       </RadioGroup>
     </div>
+
+    <div className='p-3 rounded-lg border border-border bg-muted/30 space-y-3'>
+      <div>
+        <p className='text-sm font-medium text-foreground'>Default summary template</p>
+        <p className='text-xs text-muted-foreground mt-0.5'>
+          The template every new recording summary uses. Pick automatically lets Xyne match a
+          template to each meeting from its context.
+        </p>
+      </div>
+      <DefaultSummaryTemplateSelect
+        value={state.defaultSummaryTemplateId}
+        onChange={state.setDefaultSummaryTemplateId}
+      />
+    </div>
   </div>
 );
+
+const AUTO_SUMMARY_TEMPLATE_OPTION = { id: null, label: 'Pick automatically' } as const;
+const DEFAULT_SUMMARY_TEMPLATE_OPTION = { id: 'default', label: 'Default summary' } as const;
+
+const DefaultSummaryTemplateSelect: FC<{
+  value: string | null;
+  onChange: (templateId: string | null) => void;
+}> = ({ value, onChange }) => {
+  // Queried here, not in usePreferencesState, so the template list only syncs
+  // while the Recordings section is actually on screen.
+  const { templates, isLoading } = useSummaryTemplates(true);
+  const options: { id: string | null; label: string }[] = [
+    AUTO_SUMMARY_TEMPLATE_OPTION,
+    DEFAULT_SUMMARY_TEMPLATE_OPTION,
+    ...templates
+      .filter(template => template.id !== DEFAULT_SUMMARY_TEMPLATE_OPTION.id)
+      .map(template => ({ id: template.id, label: template.name })),
+  ];
+  // A default the user can no longer read (deleted, or the share was revoked);
+  // not to be confused with the list simply not having arrived yet.
+  const selectedLabel = isLoading
+    ? 'Loading templates…'
+    : (options.find(option => option.id === value)?.label ?? 'Unavailable template');
+  return (
+    <div className='flex items-center justify-between gap-4'>
+      <span id='default-summary-template-label' className='text-sm font-medium text-foreground'>
+        Template
+      </span>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            id='default-summary-template'
+            type='button'
+            disabled={isLoading}
+            aria-labelledby='default-summary-template-label default-summary-template'
+            className='flex h-8 min-w-48 max-w-72 items-center justify-between gap-2 rounded-md border border-border bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring'
+            data-track-category='PREFERENCES'
+            data-track-name='default-summary-template'
+          >
+            <span className='truncate'>{selectedLabel}</span>
+            <ChevronDown className='size-3.5 shrink-0 text-muted-foreground' />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align='end' className='max-h-80 min-w-48 overflow-y-auto'>
+          {options.map(option => (
+            <DropdownMenuItem
+              key={option.id ?? 'auto'}
+              onClick={() => onChange(option.id)}
+              className='flex items-center justify-between gap-3'
+              data-track-category='PREFERENCES'
+              data-track-name={`default-summary-template-${option.id ?? 'auto'}`}
+            >
+              <span className='truncate'>{option.label}</span>
+              {option.id === value && (
+                <Check className='size-3.5 shrink-0 text-primary' aria-hidden />
+              )}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+};
 
 // ─── Messaging ──────────────────────────────────────────────────────────────
 // Section is desktop-only (see NAV_ITEMS), so no isMobile branching needed.

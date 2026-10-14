@@ -137,6 +137,7 @@ import deskMetricsAggregateRoutes from '@/routes/deskMetricsAggregateRoutes';
 import deskMetricsClawRoutes from '@/routes/deskMetricsClawRoutes';
 import deskReportPanelRoutes from '@/routes/deskReportPanelRoutes';
 import aiRetriggerRoutes from '@/routes/aiRetriggerRoutes';
+import deskAutoAssignRoutes from '@/routes/deskAutoAssignRoutes';
 import testAuthRoutes from '@/routes/testAuth';
 import customInstructionRoutes from '@/routes/customInstruction';
 import dailyBriefRoutes from '@/routes/dailyBrief';
@@ -185,6 +186,7 @@ import { boardConfigCopyWorker } from '@/workers/boardConfigCopyWorker';
 import { assignmentReactivationQueue } from '@/queues/assignmentReactivationQueue';
 import { ticketReassignmentQueue } from '@/queues/ticketReassignmentQueue';
 import { onCallRotationQueue } from '@/queues/onCallRotationQueue';
+import { autoAssignSweepQueue } from '@/queues/autoAssignSweepQueue';
 import { scheduledMessageQueue } from '@/queues/scheduledMessageQueue';
 import { conversationIngestQueue } from '@/queues/conversationIngestQueue';
 import { documentIngestQueue } from '@/queues/documentIngestQueue';
@@ -219,6 +221,7 @@ import { createSdkPublicRouter, createSdkRouter } from '@/api/sdk';
 import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
 import sdkSsoRoutes from '@/routes/sdk-sso';
 import { authenticateSdk } from '@/middleware/sdkAuth';
+import channelsDeskRoutes from '@/routes/channelsDesks';
 
 
 export class App {
@@ -388,6 +391,7 @@ export class App {
       this.app.use('/api/sdk', authenticateSdk, createSdkRouter(), sdkErrorHandler);
       logger.info('Public SDK API mounted at /api/sdk');
     }
+    this.app.use('/api/channels-desks', authMiddleware.authenticate, channelsDeskRoutes);
 
     this.app.use('/api/automation-webhooks', webhookLimiter, automationWebhookRoutes);
 
@@ -409,6 +413,7 @@ export class App {
     this.app.use('/api/desk-metrics', authMiddleware.authenticate, deskMetricsAggregateRoutes);
     this.app.use('/api/desk-report', authMiddleware.authenticate, deskReportPanelRoutes);
     this.app.use('/api/channels/:channelId/ai-retrigger', authMiddleware.authenticate, aiRetriggerRoutes);
+    this.app.use('/api/channels/:channelId/desk', authMiddleware.authenticate, deskAutoAssignRoutes);
 
     // Meet callback route (API key auth - called by SAM service)
     this.app.use('/api/meet', meetCallbackRoutes);
@@ -965,6 +970,9 @@ export class App {
         (async () => {
           logger.info('Initializing email classification queue...');
           await emailClassificationQueue.initialize();
+          // A sweep job does nothing but enqueue classification jobs.
+          logger.info('Initializing auto-assign sweep queue...');
+          await autoAssignSweepQueue.initialize();
         })(),
       ]);
 
@@ -1011,6 +1019,9 @@ export class App {
 
       logger.info('Initializing email classification queue...');
       await emailClassificationQueue.initialize();
+
+      logger.info('Initializing auto-assign sweep queue...');
+      await autoAssignSweepQueue.initialize();
 
       // Call transcription is producer-only here (lazy queue on enqueue); the consumer
       // runs in the worker process — see ENABLE_CALL_TRANSCRIPTION_WORKER.
@@ -1246,6 +1257,9 @@ export class App {
 
       // Close on-call rotation queue
       await onCallRotationQueue.close();
+
+      // Close auto-assign sweep queue
+      await autoAssignSweepQueue.close();
 
       // Close scheduled message queue
       await scheduledMessageQueue.close();

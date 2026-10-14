@@ -37,6 +37,7 @@ import { XyneAIStar } from '../../../components/icons/xyne-ai';
 import Avatar from '../../../components/ui/Avatar/Avatar';
 import { Button } from '../../../components/ui/Button/Button';
 import { Popover } from '../../../components/ui/Popover';
+import { SummaryTemplateTourStep } from '../../../components/SummaryTemplateTour';
 import { Switch } from '../../../components/ui/Switch';
 import { useHasResourceAccess } from '../../../hooks/usePermissions';
 import { useUser } from '../../../hooks/useUsers';
@@ -379,6 +380,12 @@ export function SummaryTemplatesModal({
     },
     [],
   );
+
+  const startNewTemplate = (): void => {
+    setDraft(NEW_TEMPLATE(currentUserId));
+    setOriginalDraft(null);
+    setIsCreatingTemplate(true);
+  };
 
   useEffect(() => {
     if (draft) return;
@@ -872,12 +879,7 @@ export function SummaryTemplatesModal({
             <Button
               type='button'
               variant='outline'
-              onClick={() => {
-                const next = NEW_TEMPLATE(currentUserId);
-                setDraft(next);
-                setOriginalDraft(null);
-                setIsCreatingTemplate(true);
-              }}
+              onClick={startNewTemplate}
               className='h-9 w-full gap-2.5 rounded-lg border-border px-3 shadow-none hover:bg-muted'
               data-track-category='SummaryTemplates'
               data-track-name='NewTemplate'
@@ -1525,6 +1527,7 @@ export function SummaryTemplatesModal({
               (willSaveDraft && !draftRequirements.isComplete)
             }
             className='h-9 rounded-lg px-4 text-sm font-semibold'
+            data-tour='summary-template-save'
           >
             {saving
               ? 'Saving…'
@@ -1538,6 +1541,10 @@ export function SummaryTemplatesModal({
           </Button>
         </div>
       </footer>
+
+      {/* Tour coachmarks live inside the dialog tree so Radix keeps the dialog open
+          while the user clicks through them. */}
+      <SummaryTemplateTourStep step='save' target='summary-template-save' side='top' align='end' />
     </div>
   );
 }

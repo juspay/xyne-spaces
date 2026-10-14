@@ -159,6 +159,8 @@ interface ThreadMessagesProps {
   defaultTab?: TabType;
   headerActionsContainer?: HTMLElement | null;
   tabbedView?: boolean;
+  /** Opened from a Channels desk ticket: messages and details only, no thread actions, composer at the bottom. */
+  deskView?: boolean;
 }
 
 export const ThreadMessages = ({
@@ -184,6 +186,7 @@ export const ThreadMessages = ({
   defaultTab,
   headerActionsContainer,
   tabbedView = false,
+  deskView = false,
 }: ThreadMessagesProps = {}): ReactElement => {
   const {
     channelId: paramChannelId,
@@ -382,6 +385,11 @@ export const ThreadMessages = ({
 
   // Tab state - default to 'details' when opening from a ticket card
   const [activeTab, setActiveTab] = useState<TabType>(selectedTab);
+  // On a desk ticket, the thread's ticket card opens its Details tab here.
+  const deskNavigation = useMemo(
+    () => ({ ...threadNavigation, openTicket: () => setActiveTab('details') }),
+    [threadNavigation],
+  );
 
   // Sync activeTab with URL query param when it changes
   useEffect(() => {
@@ -892,8 +900,12 @@ export const ThreadMessages = ({
     ];
 
     // Filter out Details tab when ticketId doesn't exist
-    return !derivedTicketId ? allTabs.filter(tab => tab.value !== 'details') : allTabs;
+    const visibleTabs = !derivedTicketId ? allTabs.filter(tab => tab.value !== 'details') : allTabs;
+    return deskView
+      ? visibleTabs.filter(tab => tab.value === 'thread' || tab.value === 'details')
+      : visibleTabs;
   }, [
+    deskView,
     files.length,
     ticketId,
     derivedTicketId,
@@ -1561,7 +1573,7 @@ export const ThreadMessages = ({
               </h3>
               {focusedChannelBreadcrumb}
             </div>
-            <div className='flex gap-x-2 shrink-0'>
+            <div className={cn('flex gap-x-2 shrink-0', deskView && 'hidden')}>
               {/* Ask AI */}
               {!isStandaloneWindow() && askAIAvailable && (
                 <Tooltip content='Ask AI Conversation'>
@@ -1754,7 +1766,8 @@ export const ThreadMessages = ({
             onValueChange={value => {
               setActiveTab(value as TabType);
               // Mirror it back, or re-opening the same tab from outside is a no-op.
-              if (!searchParams.has('selectedTab')) return;
+              // Not on a desk ticket: the URL's tab belongs to the desk's own panel.
+              if (deskView || !searchParams.has('selectedTab')) return;
               const next = new URLSearchParams(searchParams);
               next.set('selectedTab', value);
               setSearchParams(next, { replace: true });
@@ -1803,6 +1816,7 @@ export const ThreadMessages = ({
                   {!isThreadsRoute &&
                     !headerActionsContainer &&
                     isTicketThread &&
+                    !deskView &&
                     (resolvedOnClose ? (
                       <Button
                         variant='ghost'
@@ -1842,34 +1856,44 @@ export const ThreadMessages = ({
                 </div>
               ) : (
                 <>
-                  <ThreadList
-                    inspectedTag={inspectedTag}
-                    channelId={derivedChannelId || ''}
-                    conversationId={derivedConversationId || ''}
-                    threadMessages={messages}
-                    {...(onUserClick && { onUserClick })}
-                    messagesWithSeparators={messagesWithSeparators}
-                    initialScrollOffset={0}
-                    isTicketThread={true}
-                    spawnedTicketMessageIds={spawnedTicketMessageIds}
-                    channelScopeType={channel?.scopeType}
-                    conversation={conversation}
-                    enableCollapsing={previewCardMode}
-                    enableJumpFab={!previewCardMode}
-                    isMessagesLoaded={isMessagesLoaded}
-                    {...(disableAskAI !== undefined && { disableAskAI })}
-                    conversationParticipant={conversationParticipant}
-                  />
+                  <ThreadNavigationContext.Provider
+                    value={deskView ? deskNavigation : threadNavigation}
+                  >
+                    <ThreadList
+                      inspectedTag={inspectedTag}
+                      channelId={derivedChannelId || ''}
+                      conversationId={derivedConversationId || ''}
+                      threadMessages={messages}
+                      {...(onUserClick && { onUserClick })}
+                      messagesWithSeparators={messagesWithSeparators}
+                      initialScrollOffset={0}
+                      isTicketThread={true}
+                      spawnedTicketMessageIds={spawnedTicketMessageIds}
+                      channelScopeType={channel?.scopeType}
+                      conversation={conversation}
+                      enableCollapsing={previewCardMode}
+                      enableJumpFab={!previewCardMode}
+                      isMessagesLoaded={isMessagesLoaded}
+                      {...(disableAskAI !== undefined && { disableAskAI })}
+                      conversationParticipant={conversationParticipant}
+                    />
+                  </ThreadNavigationContext.Provider>
 
                   {/* ChatInput at the bottom - only show if user is a member.
                       Suppressed entirely in a deactivated 1:1 DM archive. */}
                   {isDmReadOnly ? null : isUserMember || channel?.isArchived ? (
-                    <div className='pb-3 bg-background shrink-0 px-[var(--composer-px)] [--composer-px:0.75rem]'>
+                    <div
+                      className={cn(
+                        'pb-3 bg-background shrink-0 px-[var(--composer-px)] [--composer-px:0.75rem]',
+                        deskView && 'mt-auto',
+                      )}
+                    >
                       <ChatInput
                         ref={inputRef}
                         channelId={derivedChannelId}
                         conversation={conversation ?? undefined}
                         placeholder='Reply to this thread...'
+                        allowSendToChannel={!deskView}
                         hasTicket={hasTicketInMessages}
                         threadParticipantIds={threadParticipantIds}
                         dockSlot={twinDock}
@@ -1961,7 +1985,7 @@ export const ThreadMessages = ({
           /* Regular Thread or Simple View */
           <>
             {/* Header with tabs for simpleView, or simple header for regular view */}
-            {!hideHeader && (
+            {!hideHeader && !deskView && (
               <div
                 className='flex justify-between items-center w-full pl-2 pr-3 pt-3 gap-4'
                 style={isDraggableThreadPanel ? APP_DRAG_STYLE : undefined}
@@ -2045,7 +2069,12 @@ export const ThreadMessages = ({
                 {/* ChatInput at the bottom - only show if user is a member.
                     Suppressed entirely in a deactivated 1:1 DM archive. */}
                 {isDmReadOnly ? null : isUserMember || channel?.isArchived ? (
-                  <div className='pb-3 bg-background shrink-0 px-[var(--composer-px)] [--composer-px:0.75rem]'>
+                  <div
+                    className={cn(
+                      'pb-3 bg-background shrink-0 px-[var(--composer-px)] [--composer-px:0.75rem]',
+                      deskView && 'mt-auto',
+                    )}
+                  >
                     <ChatInput
                       // eslint-disable-next-line jsx-a11y/no-autofocus
                       autoFocus={previewCardMode || skipInputAutoFocus ? null : 'end'}
@@ -2053,6 +2082,7 @@ export const ThreadMessages = ({
                       channelId={derivedChannelId}
                       conversation={conversation ?? undefined}
                       placeholder='Reply to this thread...'
+                      allowSendToChannel={!deskView}
                       hasTicket={hasTicketInMessages}
                       threadParticipantIds={threadParticipantIds}
                       dockSlot={twinDock}

@@ -1,3 +1,40 @@
+## [1.500.0](https://github.com/juspay/xyne-spaces/compare/v1.499.0...v1.500.0) (2026-10-14)
+
+
+### Features
+
+* add RESOLVE_CONVERSATION automation step that hydrat… ([#2907](https://github.com/juspay/xyne-spaces/issues/2907)) ([f441297](https://github.com/juspay/xyne-spaces/commit/f4412972916150e8715a047b7953f231e50ffe22))
+* added connectId in channel's child table ([#2825](https://github.com/juspay/xyne-spaces/issues/2825)) ([e0dcbbe](https://github.com/juspay/xyne-spaces/commit/e0dcbbe52ef0e76560ceb77a4d87e8747a452a96))
+* added jev node in automations ([#3003](https://github.com/juspay/xyne-spaces/issues/3003)) ([4a6089c](https://github.com/juspay/xyne-spaces/commit/4a6089cbafdcd05b13215ef693c94d5fae188f99))
+* added lookback and on open duplicate ticket detection ([#2628](https://github.com/juspay/xyne-spaces/issues/2628)) ([7854da1](https://github.com/juspay/xyne-spaces/commit/7854da1c650a39695087bf4c52564b674b9f7837))
+* channel fields (e.g. Merchant ID), set by the app and copied onto Channels desk tickets ([#2913](https://github.com/juspay/xyne-spaces/issues/2913)) ([1df4fda](https://github.com/juspay/xyne-spaces/commit/1df4fda6a3963718be71ce64ba6635283d95d9b1))
+* Channels desk: tickets for new threads in the app channels added to it, readable by their merchants ([#2612](https://github.com/juspay/xyne-spaces/issues/2612)) ([da26407](https://github.com/juspay/xyne-spaces/commit/da26407de768b62f0bb253ccbe7c85dbd007e600))
+* consume Jev results for desk email tag generation an… ([#2890](https://github.com/juspay/xyne-spaces/issues/2890)) ([312a120](https://github.com/juspay/xyne-spaces/commit/312a120846d9405c3b0ce110f1dba5fa224dffe6))
+* create-agent renders the agent draft card ([#2769](https://github.com/juspay/xyne-spaces/issues/2769)) ([cf72fc2](https://github.com/juspay/xyne-spaces/commit/cf72fc2d5a572c0236f2dc37008e5009906f21fb))
+* emailing all participants on scheduled call changes ([#2902](https://github.com/juspay/xyne-spaces/issues/2902)) ([fd5db6a](https://github.com/juspay/xyne-spaces/commit/fd5db6a81912d67b156055ad6a6ff8297d0b1aeb))
+* Improve template feature discoverability ([#2963](https://github.com/juspay/xyne-spaces/issues/2963)) ([aa5ce82](https://github.com/juspay/xyne-spaces/commit/aa5ce827d32d79e57437fe6cfbbabc9fd0b854cf))
+* move the mobile app into the monorepo ([#2998](https://github.com/juspay/xyne-spaces/issues/2998)) ([cb8d879](https://github.com/juspay/xyne-spaces/commit/cb8d8792210d76105cae8046a26682207dfa4899))
+* moving the builds to our ([#3047](https://github.com/juspay/xyne-spaces/issues/3047)) ([6a08a6a](https://github.com/juspay/xyne-spaces/commit/6a08a6a9bd3159e60b99aa55c3308a5cc7bd244e))
+* Published version of Spaces MCP in Developers Tab ([#3008](https://github.com/juspay/xyne-spaces/issues/3008)) ([8a301e9](https://github.com/juspay/xyne-spaces/commit/8a301e99433da514bf8811bcb2938ac349fa47f4))
+* rename calls upcoming section header to Upcoming & Active ([#3002](https://github.com/juspay/xyne-spaces/issues/3002)) ([ada0a36](https://github.com/juspay/xyne-spaces/commit/ada0a36cb7684675ad3a4ecd509f20d40bc0d78e))
+* show workspace name in analytics page subtitle ([#3025](https://github.com/juspay/xyne-spaces/issues/3025)) ([a92c6bd](https://github.com/juspay/xyne-spaces/commit/a92c6bd249a92d6ea25aed5a3c4c8ec2e4d7937a))
+* Xyne Apps manage guest users and their channels for the Spaces SDK ([#2394](https://github.com/juspay/xyne-spaces/issues/2394)) ([c916a5e](https://github.com/juspay/xyne-spaces/commit/c916a5e4de32af0d6ab840be21cbb44eed61dee0))
+
+
+### Bug Fixes
+
+* added a manual job to auto assigne unassigned tickets every… ([#2650](https://github.com/juspay/xyne-spaces/issues/2650)) ([79250fe](https://github.com/juspay/xyne-spaces/commit/79250fe8c8ce5010ee35b08fbb10b47bee3a7008))
+* adding all item and labels for social media, call and slack type desk also ([#3010](https://github.com/juspay/xyne-spaces/issues/3010)) ([11f3f23](https://github.com/juspay/xyne-spaces/commit/11f3f233a9fac11135b2b57dab5f72bbc8f7cddd))
+* allow .sarif file uploads ([#2920](https://github.com/juspay/xyne-spaces/issues/2920)) ([e089d45](https://github.com/juspay/xyne-spaces/commit/e089d45e35a849476c76bf77265e68a07d84f3e6))
+* FlowUI artifact previews render an empty Threads panel on Xyne AI ([#3017](https://github.com/juspay/xyne-spaces/issues/3017)) ([075f664](https://github.com/juspay/xyne-spaces/commit/075f66488138b75f5c8fe98e47fe651fb6298d7d))
+* JUSPROD-6128 show channel link in unreads inbox thread panel ([#2957](https://github.com/juspay/xyne-spaces/issues/2957)) ([f32269a](https://github.com/juspay/xyne-spaces/commit/f32269a6d903497cfb842de7a3d04713c6710192))
+* keep forwards to people on the DMs page ([#3000](https://github.com/juspay/xyne-spaces/issues/3000)) ([c30afbb](https://github.com/juspay/xyne-spaces/commit/c30afbb64d26f5359bc42a91e54cc0e7ec1b5769))
+* refresh a shared Claude or Codex login on one claw-auth pod at a time ([#2962](https://github.com/juspay/xyne-spaces/issues/2962)) ([77dc186](https://github.com/juspay/xyne-spaces/commit/77dc1869cc41f473af930da7f84942b066f07f3b))
+* show org apps from sibling workspaces and all marketplace apps on the Apps screen ([#2943](https://github.com/juspay/xyne-spaces/issues/2943)) ([f3f9106](https://github.com/juspay/xyne-spaces/commit/f3f910668713fc4f80b54d96dac8498e5bc6ec25))
+* show support rail to members like SDLC ([#3018](https://github.com/juspay/xyne-spaces/issues/3018)) ([fbd38fd](https://github.com/juspay/xyne-spaces/commit/fbd38fd99c02045b8d1fea007c767d44040208fb))
+* tag analytics fixes ([#2947](https://github.com/juspay/xyne-spaces/issues/2947)) ([ce0d46a](https://github.com/juspay/xyne-spaces/commit/ce0d46a92572f411325da32a98ac71441b53648e))
+* XYNE-66328 XYNE-66329 XYNE-66336 XYNE-66340 XYNE-66342 Xyne AI workspace opens only for a run's new artifacts, remembers a close, and sandbox previews load ([#2990](https://github.com/juspay/xyne-spaces/issues/2990)) ([c33b12c](https://github.com/juspay/xyne-spaces/commit/c33b12c4560795829d7a5696bce1cbdb4c74845c))
+
 ## [1.499.0](https://github.com/juspay/xyne-spaces/compare/v1.498.0...v1.499.0) (2026-10-14)
 
 

@@ -7,6 +7,7 @@ import {
   ChannelRole,
   ChannelAddUserPolicy,
   Channel,
+  WorkspaceRole,
 } from '@xyne/shared';
 import { useZero } from '../../../hooks/useZero';
 import { QueryResultType } from '@rocicorp/zero';
@@ -125,6 +126,11 @@ const Info = ({
     currentUserParticipant?.role === ChannelRole.ADMIN || channel.createdBy === context.userID;
   const canManageScheduledMessages =
     isDefaultChannel && currentUserParticipant?.role === ChannelRole.ADMIN;
+  // Channel fields: channel admins and workspace admins edit, others read.
+  const canEditChannelFields =
+    currentUserParticipant?.role === ChannelRole.ADMIN ||
+    (context.role as WorkspaceRole) === WorkspaceRole.ADMIN ||
+    (context.role as WorkspaceRole) === WorkspaceRole.OWNER;
 
   const addUserPolicy = channel.channelStats?.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE;
   const showAddPeopleButton =
@@ -517,6 +523,7 @@ const Info = ({
             <ChannelSettings
               channel={channel}
               isAdmin={currentUserParticipant?.role === ChannelRole.ADMIN}
+              canEditFields={canEditChannelFields}
               previousChannelId={previousChannelId}
               {...(onClose && { onClose })}
             />

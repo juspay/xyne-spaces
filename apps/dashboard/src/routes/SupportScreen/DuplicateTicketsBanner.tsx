@@ -6,8 +6,6 @@ import {
   ChevronDown,
   ChevronUp,
   MultipleCrossCancelDefault as X,
-  Refresh as RefreshCw,
-  Spinner as Loader2,
 } from '@xyne/icons';
 import { queries } from '../../zero/queries';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
@@ -16,7 +14,6 @@ import {
   formatReferenceLabel,
 } from '../../hooks/useTicketReferences';
 import { Badge } from '../../components/ui/Badge/Badge';
-import { useRecheckTicketDuplicates } from '../../hooks/useRecheckTicketDuplicates';
 
 interface DuplicateTicketsBannerProps {
   /** DB ticket id (not xyneId) — `ticketByIdV2` keys on the primary key. */
@@ -43,7 +40,6 @@ const DuplicateTicketsBanner = ({ ticketId }: DuplicateTicketsBannerProps): Reac
 
   const [isExpanded, setIsExpanded] = useState(false);
   const [isDismissed, setIsDismissed] = useState(false);
-  const { isRechecking, recheck } = useRecheckTicketDuplicates(ticketId);
 
   // Dismissal is per-view, not persisted — reopening the ticket surfaces it
   // again. This component stays mounted as the agent moves between tickets.
@@ -105,23 +101,6 @@ const DuplicateTicketsBanner = ({ ticketId }: DuplicateTicketsBannerProps): Reac
         >
           {duplicates.length} possible duplicate{duplicates.length === 1 ? '' : 's'}
           {isExpanded ? <ChevronDown className='size-4' /> : <ChevronUp className='size-4' />}
-        </button>
-        <button
-          type='button'
-          onClick={recheck}
-          disabled={isRechecking}
-          aria-label='Re-check for duplicates'
-          title='Re-check for duplicates'
-          className='flex size-5 shrink-0 items-center justify-center rounded-md hover:bg-amber-500/20 disabled:opacity-60'
-          data-track-category='Support'
-          data-track-name='RecheckDuplicates'
-          data-track-metadata={JSON.stringify({ surface: 'banner' })}
-        >
-          {isRechecking ? (
-            <Loader2 className='size-3 animate-spin' />
-          ) : (
-            <RefreshCw className='size-3' />
-          )}
         </button>
         <button
           type='button'

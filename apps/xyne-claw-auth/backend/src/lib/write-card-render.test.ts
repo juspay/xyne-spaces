@@ -50,7 +50,7 @@ describe("mintWriteCardAction — carries the subagent onto the approval card", 
     expect(card.subagentId).toBe("sub-a");
     expect(verifyActionSignature({ ...writeActionPayload(card), ...identity }, card.signature)).toBe(true);
     expect(verifyActionSignature({ ...base, ...identity }, card.signature)).toBe(false);
-    expect(buildWriteApprovalCardFlow(card, "Create payout").flow.data?.["subagentId"]).toBe("sub-a");
+    expect((await buildWriteApprovalCardFlow(card, "Create payout", null)).flow.data?.["subagentId"]).toBe("sub-a");
   });
 
   it("keeps it on the ticket proposal card too", async () => {
@@ -58,9 +58,9 @@ describe("mintWriteCardAction — carries the subagent onto the approval card", 
       pending("sub-a", { serverType: "xyne-spaces", tool: "spaces-create-ticket", params: { title: "Refund" } }),
     )!;
 
-    const { flow, usedTicketCard } = buildWriteApprovalCardFlow(await mintWriteCardAction(action, identity), "Create ticket");
+    const { flow, usedRichCard } = await buildWriteApprovalCardFlow(await mintWriteCardAction(action, identity), "Create ticket", null);
 
-    expect(usedTicketCard).toBe(true);
+    expect(usedRichCard).toBe(true);
     expect(flow.data?.["subagentId"]).toBe("sub-a");
   });
 
@@ -74,7 +74,7 @@ describe("mintWriteCardAction — carries the subagent onto the approval card", 
     const card = await mintWriteCardAction(readPendingWriteAction(pending())!, identity);
 
     expect("subagentId" in card).toBe(false);
-    expect(Object.keys(buildWriteApprovalCardFlow(card, "Create payout").flow.data ?? {})).not.toContain("subagentId");
+    expect(Object.keys((await buildWriteApprovalCardFlow(card, "Create payout", null)).flow.data ?? {})).not.toContain("subagentId");
   });
 });
 

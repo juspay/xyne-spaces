@@ -109,6 +109,7 @@ export const ScheduleCallSchema = z.object({
   externalInvitees: z.array(z.string().email()).optional(),
   externalInviteDelivery: z.enum(['standalone', 'conversation_reply']).optional(),
   invitation: CallInvitationSchema.optional(),
+  notifyParticipantsByEmail: z.boolean().optional(),
   // Pins the detailed-summary template so no LLM template selection runs for this call.
   summaryTemplateId: z.string().trim().min(1).optional(),
 }).refine(
@@ -168,6 +169,7 @@ export const RecurringScheduleCallSchema = z
     endsOn: z.number().optional(),
     externalInvitees: z.array(z.string().email()).optional(),
     invitation: CallInvitationSchema.optional(),
+    notifyParticipantsByEmail: z.boolean().optional(),
     // Pinned onto every instance of the series; see ScheduleCallSchema.summaryTemplateId.
     summaryTemplateId: z.string().trim().min(1).optional(),
   })
@@ -210,6 +212,7 @@ export const UpdateScheduleCallSchema = z
     channelId: z.string().optional(),
     callUpdatesChannel: z.string().optional(),
     externalInvitees: z.array(z.string().email()).optional(),
+    notifyParticipantsByEmail: z.boolean().optional(),
     // null clears the pinned template (back to LLM selection).
     summaryTemplateId: z.string().trim().min(1).nullable().optional(),
   })
@@ -243,6 +246,7 @@ export const UpdateRecurringSeriesSchema = z
     channelId: z.string().optional(),
     callUpdatesChannel: z.string().optional(),
     externalInvitees: z.array(z.string().email()).optional(),
+    notifyParticipantsByEmail: z.boolean().optional(),
     // null clears the pinned template (back to LLM selection).
     summaryTemplateId: z.string().trim().min(1).nullable().optional(),
   })

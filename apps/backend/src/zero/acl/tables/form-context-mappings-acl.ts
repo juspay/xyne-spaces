@@ -7,7 +7,7 @@ import { FormContextType, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
 import { assertGuestWriteBlocked } from '../core/guest-access';
-import { hasProjectAdminAccess } from '../core/admin-access';
+import { hasProjectAdminAccess, verifyWorkspaceAdminOrOwnerFromContext } from '../core/admin-access';
 
 export class FormContextMappingsACL extends BaseACL<'forms_context_mapping'> {
 
@@ -69,6 +69,14 @@ export class FormContextMappingsACL extends BaseACL<'forms_context_mapping'> {
       if (!(await hasProjectAdminAccess(this.ctx, tx))) {
         throw new MutationACLError('Form context mapping failed: only a project admin can bind forms to a release change', 'forms_context_mapping');
       }
+      return;
+    }
+    // Workspace-wide forms (e.g. channel fields) apply to every channel, so only workspace admins bind them.
+    if (contextType === FormContextType.WORKSPACE) {
+      if (contextId !== this.ctx.workspaceId) {
+        throw new MutationACLError('Form context mapping failed: not this workspace', 'forms_context_mapping');
+      }
+      verifyWorkspaceAdminOrOwnerFromContext(this.ctx, 'forms_context_mapping');
       return;
     }
     throw new MutationACLError('Form context mapping failed: unsupported context type', 'forms_context_mapping');
