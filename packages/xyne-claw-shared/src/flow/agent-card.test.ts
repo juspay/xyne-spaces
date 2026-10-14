@@ -191,6 +191,18 @@ describe("buildAgentUpdateApprovalFlow", () => {
     });
   });
 
+  it("binds the subagent that queued the write into the card data", () => {
+    const flow = buildAgentUpdateApprovalFlow(
+      {
+        agent: agentIdentity({ name: "A", slug: "a" }),
+        changes: [{ field: "description", label: "Description", after: "x" }],
+      },
+      { ...action, subagentId: "sub-a" },
+    );
+
+    expect(flow.data?.["subagentId"]).toBe("sub-a");
+  });
+
   it("keeps a long summary whole", () => {
     const summary = "Adding charting and a sandbox. ".repeat(30).trim();
     const flow = buildAgentUpdateApprovalFlow(

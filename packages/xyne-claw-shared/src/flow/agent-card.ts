@@ -365,6 +365,7 @@ export interface AgentUpdateApprovalAction {
   userId: string;
   signature: string;
   agentSlug: string;
+  subagentId?: string;
   channelId?: string;
   conversationId?: string;
 }
@@ -421,6 +422,7 @@ export function buildAgentUpdateApprovalFlow(
       userId: action.userId,
       signature: action.signature,
       agentSlug: action.agentSlug,
+      ...(action.subagentId ? { subagentId: action.subagentId } : {}),
       ...(action.channelId !== undefined ? { channelId: action.channelId } : {}),
       ...(action.conversationId !== undefined ? { conversationId: action.conversationId } : {}),
     })
