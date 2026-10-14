@@ -7,6 +7,7 @@ import {
   ChannelScopeType,
   validateMessageContentLength,
 } from '@xyne/shared';
+import { composeDmPeople } from '@xyne/shared/utils';
 import { CircleAlert } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
@@ -278,21 +279,10 @@ export const ComposeDmPanel: React.FC = () => {
   // Rank people by matchesAllTokens + MFU affinity + DM recency (useRankedActivePeople seeds recent
   // DM partners at rest). Preserve the self rules: drop self, then prepend it only for a query that
   // is "self" or matches the current user's name (self is never shown in the empty browse state).
-  const filteredUsers = useMemo(() => {
-    const currentUserId = context.userID;
-    const others = rankedPeople.filter(u => u.id !== currentUserId).slice(0, 10);
-
-    const trimmed = searchValue.trim();
-    const currentUser = usersById.get(currentUserId);
-    if (trimmed && currentUser) {
-      const isSelfSearch = trimmed.toLowerCase() === 'self';
-      const nameMatches = rankedPeople.some(u => u.id === currentUserId);
-      if (isSelfSearch || nameMatches) {
-        return [currentUser, ...others].slice(0, 10);
-      }
-    }
-    return others;
-  }, [rankedPeople, searchValue, context.userID, usersById]);
+  const filteredUsers = useMemo(
+    () => composeDmPeople(rankedPeople, searchValue, context.userID, usersById),
+    [rankedPeople, searchValue, context.userID, usersById],
+  );
 
   const mergedSearchItems = useMemo<SearchEntry[]>(() => {
     // Re-read channel affinity once weights load (rankChannelsByAffinity reads it imperatively).

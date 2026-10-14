@@ -12,6 +12,10 @@ export {
   rankUsers,
   rankUsersWithMfu,
   buildDmContactRecency,
+  buildVisibleDmContactRecency,
+  rankActivePeople,
+  composeDmPeople,
+  type RankedPeopleOptions,
   type UserWeightLookup,
 } from './userRanking.js';
 export {

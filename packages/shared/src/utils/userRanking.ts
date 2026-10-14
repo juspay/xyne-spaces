@@ -1,11 +1,13 @@
 import { ChannelScopeType, UserStatus } from '../zero/types.js';
+import type { User } from '../zero/schema.js';
 import { matchesAllTokens } from './tokenMatch.js';
 
 /**
  * People search ranking shared by the dashboard (Cmd+K, pickers) and the mobile app's global
- * search. Moved verbatim from the dashboard (`utils/rankingUtils.ts`, `utils/userDisplayName.ts`,
- * the Cmd+K DM-contact map in `ChannelCommandMenu.tsx`) except that MFU affinity is passed in as
- * `getUserWeight`: each app owns its own `AffinityService`.
+ * search and New DM picker. Moved verbatim from the dashboard (`utils/rankingUtils.ts`,
+ * `utils/userDisplayName.ts`, the Cmd+K DM-contact map in `ChannelCommandMenu.tsx`,
+ * `hooks/useRankedPeopleSearch.ts`, the self rule in `ComposeDmPanel.tsx`) except that MFU
+ * affinity is passed in as `getUserWeight`: each app owns its own `AffinityService`.
  */
 
 /** MFU (affinity) weight for a user id. 0 when unknown or personalization is off. */
@@ -214,4 +216,140 @@ export function buildDmContactRecency(
     }
   });
   return map;
+}
+
+/**
+ * Map of 1:1 DM partner id → recency index (0 = most recent), from visible DM channels.
+ * `rankUsers` reads it as the "frequent contact" signal and DM-recency tie-break.
+ */
+export function buildVisibleDmContactRecency(
+  visibleChannels: ReadonlyArray<{
+    name: string;
+    scopeType: ChannelScopeType;
+    channelStats?: { lastActivityAt?: number | null } | null | undefined;
+  }>,
+  currentUserId: string,
+): Map<string, number> {
+  const oneToOne = [...visibleChannels]
+    .filter(ch => ch.scopeType === ChannelScopeType.DM)
+    .sort((a, b) => (b.channelStats?.lastActivityAt ?? 0) - (a.channelStats?.lastActivityAt ?? 0));
+  const map = new Map<string, number>();
+  for (const ch of oneToOne) {
+    const otherId = ch.name.split(',').find(id => id && id !== currentUserId);
+    if (otherId && !map.has(otherId)) map.set(otherId, map.size);
+  }
+  return map;
+}
+
+export interface RankedPeopleOptions {
+  /** Recovery pool for MFU recovery (default: active users). Slash passes `allUsers` to stay exact. */
+  recoveryPool?: User[] | undefined;
+  /** DM-recency map override (default: `useDmContactRecency`). Slash passes its parent-built map. */
+  dmContactRecency?: Map<string, number> | undefined;
+  /** Drop from candidates AND recovery pool — slash `/call` self-exclusion. */
+  excludeUserId?: string | undefined;
+  /** Inject at rest so a self-DM stays reachable when the cap sliced it out — slash `/chat`. */
+  ensureUserIdAtRest?: string | undefined;
+  /** Seed DM contacts into the empty-query candidate set so the browse state shows recent partners. */
+  seedDmContactsAtRest?: boolean | undefined;
+  /** Substring fallback when Fuse returns nothing (1-char / gapped 2-char queries). */
+  substringFallback?: boolean | undefined;
+}
+
+/**
+ * Active-user candidates (`searchCandidates`: `useActiveUserSearch`, which already embeds the
+ * `matchesAllTokens` recall pass) ranked by `rankUsersWithMfu` (relevance tier → MFU affinity →
+ * DM recency). The dashboard's `useRankedActivePeople` recipe; `defaultRecency` is its
+ * `useDmContactRecency` map (`buildVisibleDmContactRecency`).
+ *
+ * The "rich" behaviors (`seedDmContactsAtRest`, `substringFallback`) default ON for the picker
+ * surfaces; slash pickers turn them off and pass the override opts so the swap is a no-op.
+ */
+export function rankActivePeople(
+  query: string,
+  limit: number,
+  activeUsers: User[],
+  searchCandidates: User[],
+  defaultRecency: Map<string, number>,
+  opts: RankedPeopleOptions = {},
+  getUserWeight: UserWeightLookup = NO_WEIGHT,
+): User[] {
+  const {
+    recoveryPool,
+    dmContactRecency,
+    excludeUserId,
+    ensureUserIdAtRest,
+    seedDmContactsAtRest = true,
+    substringFallback = true,
+  } = opts;
+
+  const trimmed = query.trim();
+  const pool = recoveryPool ?? activeUsers;
+  const recency = dmContactRecency ?? defaultRecency;
+
+  // Fuse ignores <2-char and single-token queries; fall back to matchesUserQuery over the pool
+  // (same matcher the pickers use) so short keystrokes still match.
+  let candidates: User[] =
+    substringFallback && trimmed.length > 0 && searchCandidates.length === 0
+      ? pool.filter(u => matchesUserQuery(u, trimmed)).slice(0, limit)
+      : searchCandidates;
+
+  // `/call`: self can't be a target — remove from candidates and the recovery pool so
+  // rankUsersWithMfu can't float a weighted self back in.
+  let effectivePool = pool;
+  if (excludeUserId) {
+    candidates = candidates.filter(u => u.id !== excludeUserId);
+    effectivePool = pool.filter(u => u.id !== excludeUserId);
+  }
+
+  // At rest, seed the recent DM partners so the browse list mirrors "people you talk to".
+  // Build a new array — `candidates` may be the memoized useActiveUserSearch result; mutating it
+  // would corrupt that memo across renders.
+  if (!trimmed && seedDmContactsAtRest) {
+    const byId = new Map(effectivePool.map(u => [u.id, u]));
+    const present = new Set(candidates.map(u => u.id));
+    const seeds: User[] = [];
+    for (const id of recency.keys()) {
+      if (present.has(id)) continue;
+      const u = byId.get(id);
+      if (u) {
+        seeds.push(u);
+        present.add(id);
+      }
+    }
+    if (seeds.length > 0) candidates = [...candidates, ...seeds];
+  }
+
+  // `/chat`: inject self at rest so the self-DM stays reachable (ranked, not pinned).
+  if (!trimmed && ensureUserIdAtRest && !candidates.some(u => u.id === ensureUserIdAtRest)) {
+    const self = effectivePool.find(u => u.id === ensureUserIdAtRest);
+    if (self) candidates = [...candidates, self];
+  }
+
+  return rankUsersWithMfu(candidates, effectivePool, query, recency, getUserWeight);
+}
+
+/**
+ * The New DM picker's people (dashboard `ComposeDmPanel`): `rankedPeople` from
+ * `rankActivePeople`, with the self rules. Drop self, then prepend it only for a query that is
+ * "self" or matches the current user's name (self is never shown in the empty browse state).
+ */
+export function composeDmPeople(
+  rankedPeople: User[],
+  searchValue: string,
+  currentUserId: string,
+  usersById: ReadonlyMap<string, User>,
+): User[] {
+  const others = rankedPeople.filter(u => u.id !== currentUserId).slice(0, 10);
+
+  const trimmed = searchValue.trim();
+  const currentUser = usersById.get(currentUserId);
+  if (trimmed && currentUser) {
+    const isSelfSearch = trimmed.toLowerCase() === 'self';
+    const nameMatches = rankedPeople.some(u => u.id === currentUserId);
+    if (isSelfSearch || nameMatches) {
+      return [currentUser, ...others].slice(0, 10);
+    }
+  }
+  return others;
 }
