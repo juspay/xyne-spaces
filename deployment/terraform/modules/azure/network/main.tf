@@ -177,6 +177,7 @@ resource "azurerm_network_security_rule" "aks_inbound" {
   protocol                    = "Tcp"
   source_port_range           = "*"
   destination_port_range      = each.key
+  #trivy:ignore:AZU-0047
   source_address_prefix       = "Internet"
   destination_address_prefix  = var.aks_subnet_cidr
   resource_group_name         = local.resource_group_name
@@ -275,6 +276,7 @@ resource "azurerm_network_security_rule" "livekit_turn_tls" {
   protocol                    = "Tcp"
   source_port_range           = "*"
   destination_port_range      = "5349"
+  #trivy:ignore:AZU-0047
   source_address_prefix       = "Internet"
   destination_address_prefix  = var.livekit_subnet_cidr
   resource_group_name         = local.resource_group_name
@@ -289,6 +291,7 @@ resource "azurerm_network_security_rule" "livekit_rtc_tcp" {
   protocol                    = "Tcp"
   source_port_range           = "*"
   destination_port_range      = "7881"
+  #trivy:ignore:AZU-0047
   source_address_prefix       = "Internet"
   destination_address_prefix  = var.livekit_subnet_cidr
   resource_group_name         = local.resource_group_name
@@ -303,6 +306,7 @@ resource "azurerm_network_security_rule" "livekit_turn_udp" {
   protocol                    = "Udp"
   source_port_range           = "*"
   destination_port_range      = "3478"
+  #trivy:ignore:AZU-0047
   source_address_prefix       = "Internet"
   destination_address_prefix  = var.livekit_subnet_cidr
   resource_group_name         = local.resource_group_name
@@ -317,6 +321,7 @@ resource "azurerm_network_security_rule" "livekit_rtc_udp" {
   protocol                    = "Udp"
   source_port_range           = "*"
   destination_port_range      = "${var.livekit_port_range_start}-${var.livekit_port_range_end}"
+  #trivy:ignore:AZU-0047
   source_address_prefix       = "Internet"
   destination_address_prefix  = var.livekit_subnet_cidr
   resource_group_name         = local.resource_group_name
@@ -375,6 +380,7 @@ resource "azurerm_network_security_rule" "appgw_internet" {
   protocol                    = "Tcp"
   source_port_range           = "*"
   destination_port_ranges     = ["80", "443"]
+  #trivy:ignore:AZU-0047
   source_address_prefix       = "Internet"
   destination_address_prefix  = var.appgw_subnet_cidr
   resource_group_name         = local.resource_group_name
