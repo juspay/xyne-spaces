@@ -224,7 +224,7 @@ export function formatCallWindow(startsAt: Date, endsAt: Date, timezone?: string
 /**
  * Email a call's participants about a create / update / cancel / removal.
  * Callers invoke this only when the organizer opted in.
- * Recipients are deduped by address, one email each so addresses are never exposed to each other.
+ * Recipients are deduped by address and sent a single email (all in To), like a calendar invite.
  */
 export async function sendCallChangeEmails(params: CallChangeEmailParams): Promise<void> {
   const exclude = new Set(params.excludeUserIds ?? []);
@@ -276,17 +276,15 @@ export async function sendCallChangeEmails(params: CallChangeEmailParams): Promi
   });
 
   const { emailService: genericEmailService } = await import('@/services/email/factory');
-  for (const to of recipients) {
-    const result = await genericEmailService.sendEmail({
-      to: [to],
-      subject: `${copy.subject}: ${params.callTitle}`,
-      html,
-    });
-    if (!result.success) {
-      logger.error(
-        `[sendCallChangeEmails] Failed | externalId=${sanitizeForLog(params.externalId)} kind=${params.kind} to=${sanitizeForLog(to)} error=${sanitizeForLog(result.error)}`,
-      );
-    }
+  const result = await genericEmailService.sendEmail({
+    to: recipients,
+    subject: `${copy.subject}: ${params.callTitle}`,
+    html,
+  });
+  if (!result.success) {
+    logger.error(
+      `[sendCallChangeEmails] Failed | externalId=${sanitizeForLog(params.externalId)} kind=${params.kind} recipients=${recipients.length} error=${sanitizeForLog(result.error)}`,
+    );
   }
   logger.info(
     `[sendCallChangeEmails] Done | externalId=${sanitizeForLog(params.externalId)} kind=${params.kind} recipients=${recipients.length}`,
