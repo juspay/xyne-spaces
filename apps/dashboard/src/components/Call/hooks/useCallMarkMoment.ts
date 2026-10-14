@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { logRecordingError } from '../../../utils/recordingUtils';
+import { addCallMarkedMoment, getNextCallTranscriptId } from '../../../stores/callTranscriptStore';
 
 export interface UseCallMarkMomentReturn {
   /** Flag the current point in the call. No-op when `canMark` is false. */
@@ -38,9 +39,11 @@ export function useCallMarkMoment(
     if (!externalId || !canMark) return;
 
     // No known start means nothing to measure against.
-    const timestampSeconds = callStartedAtMs
-      ? Math.max(0, Math.round((Date.now() - callStartedAtMs) / 1000))
-      : 0;
+    const elapsedMs = callStartedAtMs ? Math.max(0, Date.now() - callStartedAtMs) : 0;
+    const timestampSeconds = Math.round(elapsedMs / 1000);
+
+    // Anchor on the *next* line so the divider sits after everything said up to now.
+    addCallMarkedMoment({ transcriptId: getNextCallTranscriptId(), timestampSeconds, elapsedMs });
 
     void (async (): Promise<void> => {
       try {
@@ -55,7 +58,7 @@ export function useCallMarkMoment(
         if (result.type === 'error') {
           throw new Error(result.error?.message ?? 'Failed to save marked moment');
         }
-        // Nothing on screen changes, so the toast is the only receipt.
+        // Confirms the save; the transcript divider is the in-panel receipt.
         toast.success('Moment marked');
       } catch (err) {
         logRecordingError('useCallMarkMoment.markMoment', err);
