@@ -11,14 +11,11 @@ import { callKitService } from '@/src/services/CallKitService';
 import { getCallTalkStart } from '@/src/components/call/callTalkClock';
 import { formatCallDuration } from '@/src/components/call/callStage.utils';
 import { MicIcon, MicOffIcon, PhoneOffIcon } from '@/src/components/call/CallControls/icons';
+import { GlassButton, NATIVE_GLASS } from '@/src/components/ui/glass-button';
 import { CALL_BAR_HEIGHT, useCallBarVisibility } from '@/src/hooks/useIsCallBarVisible';
 import { useBubbleAccent } from '@/src/theme/useBubbleAccent';
-import {
-  isDarkSurface,
-  parseHexColor,
-  readableTextOn,
-  withAlpha,
-} from '@/src/theme/accent-contrast';
+import { isDarkSurface, parseHexColor, readableTextOn } from '@/src/theme/accent-contrast';
+import { cn } from '@/src/utils/cn';
 import { CallType } from '@xyne/shared';
 
 const ANIMATION_MS = 250;
@@ -35,6 +32,7 @@ export function OngoingCallBanner(): React.ReactElement | null {
   const insets = useRawSafeAreaInsets();
   const router = useRouter();
   const { isVisible, isCallActive } = useCallBarVisibility();
+  const foreground = useCSSVariable('--color-foreground') as string;
   const accentForeground = useCSSVariable('--color-accent-foreground') as string;
   const dangerFill = useCSSVariable('--color-button-danger-bg') as string;
   const { theme } = useUniwind();
@@ -113,7 +111,7 @@ export function OngoingCallBanner(): React.ReactElement | null {
       }
     }
 
-    return (): void => {
+    return () => {
       if (durationIntervalRef.current) {
         clearInterval(durationIntervalRef.current);
       }
@@ -125,7 +123,7 @@ export function OngoingCallBanner(): React.ReactElement | null {
   useEffect(() => {
     if (!isVisible) return;
 
-    const updateMicState = (): void => {
+    const updateMicState = () => {
       const room = callRuntimeNativeService.getRoom();
       if (room) {
         setIsMicEnabled(room.localParticipant.isMicrophoneEnabled);
@@ -135,7 +133,7 @@ export function OngoingCallBanner(): React.ReactElement | null {
     updateMicState();
     const interval = setInterval(updateMicState, 250);
 
-    return (): void => clearInterval(interval);
+    return () => clearInterval(interval);
   }, [isVisible]);
 
   const handleToggleMic = useCallback(async () => {
@@ -149,7 +147,6 @@ export function OngoingCallBanner(): React.ReactElement | null {
       await callRuntimeNativeService.toggleMic(newState);
       setIsMicEnabled(newState);
     } catch (error) {
-      // eslint-disable-next-line no-console
       console.error('[OngoingCallBanner] Failed to toggle mic:', error);
     }
   }, [isMicEnabled]);
@@ -164,7 +161,6 @@ export function OngoingCallBanner(): React.ReactElement | null {
       try {
         await callRuntimeNativeService.disconnect();
       } catch (error) {
-        // eslint-disable-next-line no-console
         console.error('[OngoingCallBanner] Failed to end call:', error);
       }
       // Always release CallKit, even if the LiveKit disconnect threw.
@@ -200,9 +196,8 @@ export function OngoingCallBanner(): React.ReactElement | null {
   }
 
   const participantText = participantCount <= 1 ? 'Just you' : `${participantCount} participants`;
-  // The enabled icon follows the bar's contrast colour (as the label does), not a fixed theme token.
   const micIcon = isMicEnabled ? (
-    <MicIcon size={18} color={textColor} />
+    <MicIcon size={18} color={foreground} />
   ) : (
     <MicOffIcon size={18} color={accentForeground} />
   );
@@ -232,16 +227,33 @@ export function OngoingCallBanner(): React.ReactElement | null {
             style={{ height: CALL_BAR_HEIGHT }}
             className='flex-row items-center gap-3 px-3'
           >
-            <TouchableOpacity
-              onPress={handleToggleMic}
-              hitSlop={10}
-              accessibilityRole='button'
-              accessibilityLabel={isMicEnabled ? 'Mute microphone' : 'Unmute microphone'}
-              className='h-9 w-9 items-center justify-center rounded-full'
-              style={{ backgroundColor: isMicEnabled ? withAlpha(textColor, 0.18) : dangerFill }}
-            >
-              {micIcon}
-            </TouchableOpacity>
+            {NATIVE_GLASS ? (
+              <GlassButton
+                onPress={handleToggleMic}
+                isDark={isDark}
+                size={36}
+                height={36}
+                borderRadius={18}
+                {...(isMicEnabled
+                  ? { className: 'bg-foreground/15 border-transparent' }
+                  : { fillColor: dangerFill })}
+              >
+                {micIcon}
+              </GlassButton>
+            ) : (
+              <TouchableOpacity
+                onPress={handleToggleMic}
+                hitSlop={10}
+                accessibilityRole='button'
+                accessibilityLabel={isMicEnabled ? 'Mute microphone' : 'Unmute microphone'}
+                className={cn(
+                  'h-9 w-9 items-center justify-center rounded-full',
+                  isMicEnabled ? 'bg-foreground/15' : 'bg-button-danger-bg',
+                )}
+              >
+                {micIcon}
+              </TouchableOpacity>
+            )}
 
             <Text
               numberOfLines={1}
@@ -251,16 +263,28 @@ export function OngoingCallBanner(): React.ReactElement | null {
               {participantText} · {duration}
             </Text>
 
-            <TouchableOpacity
-              onPress={handleEndCall}
-              hitSlop={10}
-              accessibilityRole='button'
-              accessibilityLabel='End call'
-              className='h-9 w-9 items-center justify-center rounded-full'
-              style={{ backgroundColor: dangerFill }}
-            >
-              <PhoneOffIcon size={18} color={accentForeground} />
-            </TouchableOpacity>
+            {NATIVE_GLASS ? (
+              <GlassButton
+                onPress={handleEndCall}
+                isDark={isDark}
+                size={36}
+                height={36}
+                borderRadius={18}
+                fillColor={dangerFill}
+              >
+                <PhoneOffIcon size={18} color={accentForeground} />
+              </GlassButton>
+            ) : (
+              <TouchableOpacity
+                onPress={handleEndCall}
+                hitSlop={10}
+                accessibilityRole='button'
+                accessibilityLabel='End call'
+                className='h-9 w-9 items-center justify-center rounded-full bg-button-danger-bg'
+              >
+                <PhoneOffIcon size={18} color={accentForeground} />
+              </TouchableOpacity>
+            )}
           </TouchableOpacity>
         </View>
         {([0, 1] as const).map(side => (

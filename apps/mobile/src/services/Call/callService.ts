@@ -200,20 +200,9 @@ function extractCredentials(
   };
 }
 
-/** The server's `error` text, unless it is a stringified Zod issue array (starts with `[`). */
-function readServerMessage(responseBody: string): string | null {
-  try {
-    const { error } = JSON.parse(responseBody) as { error?: unknown };
-    return typeof error === 'string' && !error.trimStart().startsWith('[') ? error : null;
-  } catch {
-    return null;
-  }
-}
-
 /**
- * Run a schedule or cancel request and surface the server's reason as an ApiError. The backend
- * answers some validation failures with an unreadable Zod array or a bare 500, so those fall back
- * to `fallback`.
+ * Run a schedule or cancel request as an ApiError carrying `fallback`. The server's own error text
+ * is written for developers, so it is never shown to the user.
  */
 async function withApiError<T>(fallback: string, run: (token: string) => Promise<T>): Promise<T> {
   const authToken = await getAuthToken();
@@ -224,11 +213,7 @@ async function withApiError<T>(fallback: string, run: (token: string) => Promise
     return await run(authToken);
   } catch (error) {
     if (!isMtlsRequestError(error)) throw error;
-    throw new ApiError(
-      readServerMessage(error.responseBody) ?? fallback,
-      error.statusCode,
-      'UNKNOWN_ERROR',
-    );
+    throw new ApiError(fallback, error.statusCode, 'UNKNOWN_ERROR');
   }
 }
 
