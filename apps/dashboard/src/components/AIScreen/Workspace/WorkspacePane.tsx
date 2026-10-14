@@ -42,6 +42,7 @@ import {
   type TabState,
 } from '../../workspaceItems';
 import { artifactKindIcon } from './artifactKinds';
+import { sortPreviewCandidates, withDistinctPreviewTitles } from './previewArtifacts';
 import { isLocalDiffArtifact } from './LocalDiffView';
 import { attachedLocalFolder } from './localFolderContext';
 import { useDesignStudio } from './design/designStudioContext';
@@ -182,7 +183,16 @@ function WorkspacePaneInner({
     setTabs(current => closeTab(current, id));
   }, []);
   const [transientAppId, setTransientAppId] = useState<string | null>(null);
-  const { artifacts, isLoading, isError, patch } = useConversationArtifacts(conversationId);
+  const {
+    artifacts: storedArtifacts,
+    isLoading,
+    isError,
+    patch,
+  } = useConversationArtifacts(conversationId);
+  // Every sandbox records its preview and diff under the same fixed titles; give
+  // colliding rows a distinct label everywhere the pane shows them.
+  const artifacts = useMemo(() => withDistinctPreviewTitles(storedArtifacts), [storedArtifacts]);
+  const [previewId, setPreviewId] = useState<string | null>(null);
   const citations = useCitationDocs();
   const citationActiveId = citations?.activeId ?? null;
   const studio = useDesignStudio();
@@ -206,6 +216,7 @@ function WorkspacePaneInner({
   useEffect(() => {
     setSelectedId(null);
     setTransientAppId(null);
+    setPreviewId(null);
     seenArtifactIds.current = null;
   }, [conversationId]);
 
@@ -229,6 +240,7 @@ function WorkspacePaneInner({
       setTab('preview');
       setTransientAppId(null);
       setSelectedId(null);
+      setPreviewId(localDiff.id);
       return;
     }
     const pages = artifacts.filter(a => a.kind === 'PAGE' && isNew(a));
@@ -314,15 +326,13 @@ function WorkspacePaneInner({
   }, [artifacts]);
   const reviewGuide = useReviewGuide(artifacts);
 
-  const previewArtifact = useMemo(() => {
-    const candidates = artifacts.filter(a => a.kind === 'PREVIEW' || a.kind === 'DIFF');
-    if (candidates.length === 0) return null;
-    return (
-      [...candidates].sort(
-        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-      )[0] ?? null
-    );
-  }, [artifacts]);
+  const previewCandidates = useMemo(() => sortPreviewCandidates(artifacts), [artifacts]);
+  // The pick sticks while its row exists; otherwise the newest sandbox's preview shows.
+  const previewArtifact = useMemo(
+    () => previewCandidates.find(a => a.id === previewId) ?? previewCandidates[0] ?? null,
+    [previewCandidates, previewId],
+  );
+  const showPreviewPicker = tab === 'preview' && previewCandidates.length > 1;
 
   const openArtifact = useCallback((artifact: ConversationArtifact): void => {
     setSelectedId(artifact.id);
@@ -494,9 +504,27 @@ function WorkspacePaneInner({
               sections={quickSwitchSections}
               icon={item => artifactKindIcon((item.row as ConversationArtifact).kind, 'h-3 w-3')}
             />
-            <span className='min-w-0 flex-1 truncate text-sm font-medium text-foreground'>
-              {TABS.find(item => item.id === tab)?.label ?? ''}
-            </span>
+            {showPreviewPicker && previewArtifact ? (
+              <select
+                value={previewArtifact.id}
+                onChange={event => setPreviewId(event.target.value)}
+                aria-label='Choose a preview'
+                title={previewArtifact.title}
+                className='h-7 min-w-0 flex-1 truncate rounded border border-border bg-background px-1.5 text-sm font-medium text-foreground hover:bg-secondary/60 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring'
+                data-track-category='AskAI'
+                data-track-name='workspace-preview-picker'
+              >
+                {previewCandidates.map(candidate => (
+                  <option key={candidate.id} value={candidate.id}>
+                    {candidate.title}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span className='min-w-0 flex-1 truncate text-sm font-medium text-foreground'>
+                {TABS.find(item => item.id === tab)?.label ?? ''}
+              </span>
+            )}
           </>
         )}
         {showOpenApp && (
