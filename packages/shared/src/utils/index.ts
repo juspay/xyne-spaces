@@ -7,6 +7,20 @@ export {
   normalizeChannelName,
 } from './search.js';
 export { matchesAllTokens } from './tokenMatch.js';
+export {
+  matchesUserQuery,
+  rankUsers,
+  rankUsersWithMfu,
+  buildDmContactRecency,
+  type UserWeightLookup,
+} from './userRanking.js';
+export {
+  filterChannelsBySearchableNames,
+  rankChannelsByAffinity,
+  type ChannelSearchItem,
+  type ChannelWeightLookup,
+} from './channelRanking.js';
+export { groupChannelsByScope, getDMNames, buildCmdkChannelGroups } from './channelGroups.js';
 export { tierOf, TIER_FUZZY, type Tier } from './searchTier.js';
 export {
   mergeRankedCandidates,
