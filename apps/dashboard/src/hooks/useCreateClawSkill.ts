@@ -5,6 +5,7 @@ import { useAuth } from './useAuth';
 import { createSkill, replaceSkillFiles } from '../services/claw/clawSkillsService';
 import type { PendingSkillFile } from '../services/claw/clawSkillFileUtils';
 import type { Skill } from '../services/claw/clawSkillsTypes';
+import { apiInstance } from '../services/clients/apiClient';
 
 export interface SkillCreateSubmission {
   slug: string;
@@ -19,7 +20,10 @@ export interface SkillCreateSubmission {
  * create — replaces its file bundle (`PUT /skills/:slug/files`). On success,
  * invalidate the skill list and route to the new skill's detail screen.
  */
-export const useCreateClawSkill = (): UseMutationResult<Skill, Error, SkillCreateSubmission> => {
+export const useCreateClawSkill = (
+  /** Set when the form is shown inside a hub: link the skill there and stay on the page. */
+  hub?: { channelId: string; onCreated: () => void },
+): UseMutationResult<Skill, Error, SkillCreateSubmission> => {
   const { user } = useAuth();
   const userId = user?.id;
   const queryClient = useQueryClient();
@@ -53,12 +57,25 @@ export const useCreateClawSkill = (): UseMutationResult<Skill, Error, SkillCreat
         );
       }
 
+      if (hub) {
+        try {
+          await apiInstance.post(
+            `/sdlc/channels/${encodeURIComponent(hub.channelId)}/knowledge/skills`,
+            { skillId: skill.id },
+          );
+        } catch {
+          toast.error('Skill created, but it could not be linked to the hub.');
+        }
+      }
+
       return skill;
     },
     onSuccess: skill => {
       void queryClient.invalidateQueries({ queryKey: ['claw-skills'] });
+      void queryClient.invalidateQueries({ queryKey: ['sdlc-hub-knowledge'] });
       toast.success('Skill created');
-      void navigate(`${libraryPath}/skill/${skill.slug}`);
+      if (hub) hub.onCreated();
+      else void navigate(`${libraryPath}/skill/${skill.slug}`);
     },
   });
 };

@@ -81,7 +81,7 @@ import { CreateTicketModal } from '../CreateTicketModal/CreateTicketModal';
 import { MappedTicketModal } from '../MappedTicketModal/MappedTicketModal';
 import { EditableFormField } from './EditableFormField';
 import { queries } from '../../../zero/queries';
-import { useChannel, useAllChannels } from '../../../hooks/useChannels';
+import { useChannel, useAllChannels, useChannelParticipation } from '../../../hooks/useChannels';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
 import UserAvatar, { AvatarShape, AvatarSize } from '../../UserAvatar/UserAvatar';
@@ -1203,6 +1203,17 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   // Query channel if ticket has conversation with channelId
   const channelId = ticket?.conversation?.channelId;
   const channel = useChannel(channelId || '');
+
+  // A release opens in the release view of the SDLC hub that owns its board's release
+  // config. Only hub members can read that config edge, so others get a disabled button.
+  const isRelease = !!ticket && isReleaseTicket(ticket.ticketType as BaseTicketType);
+  const [releaseConfig] = useCachedQuery(
+    queries.releaseConfigByMainBoardId({ boardId: ticket?.boardId ?? '' }),
+    { enabled: isRelease && !!ticket?.boardId },
+  );
+  const releaseHubId = releaseConfig?.channelId ?? '';
+  const releaseHubParticipation = useChannelParticipation(releaseHubId);
+  const canOpenReleaseView = !!releaseHubId && !!releaseHubParticipation;
 
   const allChannels = useAllChannels();
   const channelTypeMap = useMemo(
@@ -5505,19 +5516,25 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           </div>
         </DetailSection>
 
-        {ticket && isReleaseTicket(ticket.ticketType as BaseTicketType) && ticket.projectId && (
+        {ticket && isRelease && (
           <div className='mt-4'>
             <button
               type='button'
+              disabled={!canOpenReleaseView}
+              title={
+                canOpenReleaseView
+                  ? undefined
+                  : "Only members of this release's SDLC hub can open the release view"
+              }
               onClick={() =>
-                void navigate(`/listProjects/${ticket.projectId}/releases/${ticket.id}`, {
-                  state: { returnToUrl: location.pathname + location.search },
-                })
+                void navigate(
+                  `/sdlc/${releaseHubId}/releases?${new URLSearchParams({ release: ticket.id, discussion: '1', chat: 'conversations' }).toString()}`,
+                )
               }
               data-track-category='Tickets'
               data-track-name='OpenReleaseViewFromTicket'
               data-testid='open-release-view-button'
-              className='group flex items-center justify-between gap-3 w-full px-4 py-3 rounded-xl border border-border bg-background text-foreground shadow-sm hover:shadow-md hover:border-input transition-all'
+              className='group flex items-center justify-between gap-3 w-full px-4 py-3 rounded-xl border border-border bg-background text-foreground shadow-sm hover:shadow-md hover:border-input transition-all disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:shadow-sm disabled:hover:border-border'
             >
               <span className='inline-flex items-center gap-3'>
                 <span className='flex h-9 w-9 items-center justify-center rounded-full bg-muted text-foreground'>

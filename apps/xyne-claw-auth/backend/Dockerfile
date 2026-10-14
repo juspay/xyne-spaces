@@ -39,6 +39,8 @@ COPY apps/xyne-claw-auth/backend/prisma        apps/xyne-claw-auth/backend/prism
 COPY apps/xyne-claw-auth/backend/tsconfig.json apps/xyne-claw-auth/backend/
 COPY apps/xyne-claw-auth/backend/src           apps/xyne-claw-auth/backend/src
 COPY apps/xyne-claw-auth/backend/scripts       apps/xyne-claw-auth/backend/scripts
+# SandboxTemplate names for the sandbox profile editor's template list (lib/sandbox-templates.ts).
+COPY claw-deployments/kata-infra               claw-deployments/kata-infra
 
 WORKDIR /repo/apps/xyne-claw-auth/backend
 RUN npx prisma generate
