@@ -23,8 +23,6 @@ import { FlowController } from '../controllers/flowController';
 import { PermissionController } from '../controllers/permissionController';
 import { AppResourceController } from '../controllers/appResourceController';
 import { webhookLimiter } from '@/middleware/rateLimiters';
-import { PlatformAdapterRegistry } from '../platform-adapters/types';
-import { SlackAdapter } from '../platform-adapters/slack';
 
 const router = Router();
 const appController = new AppController();
@@ -32,9 +30,6 @@ const chatController = new ChatController();
 const flowController = new FlowController();
 const permissionController = new PermissionController();
 const appResourceController = new AppResourceController();
-const platformRegistry = new PlatformAdapterRegistry();
-
-platformRegistry.register(new SlackAdapter());
 
 // Type-prefixed webhook routes must stay ABOVE the 3-segment catch-all below,
 // otherwise the prefix is captured as :workspaceId.
@@ -123,9 +118,6 @@ router.use("/pr-check", prCheckCallbackRouter);
 
 // Flow UI route
 router.post("/flow/action", authMiddleware.authenticate, flowController.executeAction);
-
-// Platform adapter routes
-platformRegistry.mountAll(router);
 
 // ─── Permission management (user auth) ─────────────────────────────────────
 // matched as an appId param.

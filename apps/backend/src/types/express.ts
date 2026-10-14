@@ -61,6 +61,9 @@ declare global {
     interface Request {
       user?: AuthenticatedUser;
       authenticatedSessionId?: string;
+      // Set by validateChannelAccessForPostWithDm when a channelId names a user:
+      // the bot's DM channel id, consumed by the chat controller.
+      _resolvedChannelId?: string;
     }
   }
 }
