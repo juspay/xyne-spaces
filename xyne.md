@@ -1,4 +1,4 @@
-# Xyne Spaces - Project Guidelines
+# Xyne Spaces - Project Guidelines........
 
 This is the main entry point for AI/LLM agents working in this repository. Read this file first to understand the project structure, then navigate to the appropriate subdirectory guidelines for detailed information.
 
