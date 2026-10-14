@@ -893,13 +893,15 @@ export const agentRunRepository = {
    * `metadata.modelFallback`. Callers MUST pass sessionIds that already came
    * out of an ACL-scoped list.
    */
-  listAnsweredBy: (sessionIds: string[]) =>
-    sessionIds.length === 0
-      ? Promise.resolve([] as Array<{ sessionId: string; provider: string | null; model: string | null; metadata: Prisma.JsonValue }>)
-      : prisma.agentRun.findMany({
-          where: { sessionId: { in: sessionIds } },
-          select: { sessionId: true, provider: true, model: true, metadata: true },
-        }),
+  listAnsweredBy: async (
+    sessionIds: string[],
+  ): Promise<Array<{ sessionId: string; provider: string | null; model: string | null; metadata: Prisma.JsonValue }>> => {
+    if (sessionIds.length === 0) return [];
+    return prisma.agentRun.findMany({
+      where: { sessionId: { in: sessionIds } },
+      select: { sessionId: true, provider: true, model: true, metadata: true },
+    });
+  },
 
   findBySessionId: (sessionId: string) =>
     prisma.agentRun.findUnique({ where: { sessionId } }),
