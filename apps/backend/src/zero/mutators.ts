@@ -16407,6 +16407,9 @@ export function createMutators(
             joinedAt: timestamp,
             userId: 'deprecated-placeholder', // Deprecated field, kept for backward compatibility
           });
+
+          const ownerEmail = admin.email;
+          asyncTasks.push(() => syncOrgResourceAdminAccess(orgId, ownerEmail, authData.sub));
         },
       ),
     },
@@ -16563,6 +16566,9 @@ export function createMutators(
               userId: 'deprecated-placeholder', // Deprecated field, kept for backward compatibility
             });
           }
+
+          // The added/reactivated member may already have workspace user rows (matched by email)
+          asyncTasks.push(() => syncOrgResourceAdminAccess(orgId, email, authData.sub));
         },
       ),
       updateRole: defineMutator(
