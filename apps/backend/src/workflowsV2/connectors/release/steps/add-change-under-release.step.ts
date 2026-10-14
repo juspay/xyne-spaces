@@ -7,7 +7,7 @@ import { ReleaseRepository } from '@/database/repositories/releaseRepository';
 import { DiffParser, FileChangeType } from '@/services/release/core';
 import { XyneRelease } from '@/services/release/xyne/xyneRelease';
 import { XyneChangeType } from '@/services/release/xyne/xyneReleaseForm';
-import { actorOf, workspaceOf } from '../context';
+import { actorOf, workspaceOf } from '../../xyne-spaces/context';
 
 const AddChangeUnderReleaseConfigSchema = z.object({
   ticket: variableRef(z.string().min(1)).describe("Ticket id or ID like PLAT-12 of a release's service ticket"),

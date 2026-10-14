@@ -2,7 +2,7 @@ import { BaseActionStep, variableRef } from '@xyne/workflow-sdk';
 import type { StepExecutionContext } from '@xyne/workflow-sdk';
 import { z } from 'zod';
 import { db } from '@/database/client';
-import { workspaceOf } from '../context';
+import { workspaceOf } from '../../xyne-spaces/context';
 
 const UpdateDeployedCommitConfigSchema = z.object({
   releaseTicket: variableRef(z.string().min(1)).describe('Release ticket id or ID like PLAT-12'),

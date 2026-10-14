@@ -468,6 +468,11 @@ export class CommitAnalysisController {
   async analyzeCommits(params: CommitAnalysisParams): Promise<CommitAnalysisResponse> {
     const { conversationId, userId, channelId, newCommitId, deployedCommitId, branch, currentTicketId, hotfixSync } = params;
 
+    if (!config.release.autoAnalysisEnabled) {
+      logger.info('[ReleaseTrigger] skipped: RELEASE_AUTO_ANALYSIS_ENABLED=false');
+      return { success: false, error: 'Release commit analysis is turned off (RELEASE_AUTO_ANALYSIS_ENABLED=false)' };
+    }
+
     let loadingMessageId: string | null = null;
 
     try {

@@ -29,7 +29,6 @@ import { TicketSearchInput } from '../../../components/Tickets/TicketsHeader/Tic
 import { hasAnyFilterChip } from '../../../components/Tickets/TicketsHeader/filterChips';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useAllChannels } from '../../../hooks/useChannels';
-import { useCanManageRelease } from '../../../hooks/usePermissions';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useScrollFade } from '../../../hooks/useScrollFade';
 import { useUserGroups } from '../../../hooks/useUserGroup';
@@ -318,7 +317,6 @@ function ReleaseTitle({
   xyneId: string | null;
   title: string;
 }): ReactElement {
-  const canManage = useCanManageRelease();
   const { editing, draft, setDraft, start, finish, cancel } = useReleaseFieldEditor(
     releaseId,
     'title',
@@ -344,8 +342,6 @@ function ReleaseTitle({
       {title}
     </>
   );
-
-  if (!canManage) return <h1 className={headingClass}>{headingText}</h1>;
 
   if (editing) {
     return (
@@ -415,7 +411,6 @@ function ReleaseDescription({
   releaseId: string;
   description: string;
 }): ReactElement | null {
-  const canManage = useCanManageRelease();
   const { isMac } = usePlatform();
   const { editing, draft, setDraft, start, finish, cancel } = useReleaseFieldEditor(
     releaseId,
@@ -438,14 +433,6 @@ function ReleaseDescription({
     el.style.height = '0px';
     el.style.height = `${Math.min(el.scrollHeight, window.innerHeight * 0.4)}px`;
   }, [editing, draft]);
-
-  if (!canManage) {
-    return summary ? (
-      <p className='whitespace-pre-wrap break-words text-[15px] leading-normal text-muted-foreground'>
-        {summary}
-      </p>
-    ) : null;
-  }
 
   if (editing) {
     return (
@@ -599,7 +586,6 @@ function TicketsTab({
   const [showOverdueOnly, setShowOverdueOnly] = useState(false);
   const [tagQuery, setTagQuery] = useState('');
   const deferredFilters = useDeferredValue(filters);
-  const canManage = useCanManageRelease();
   const usersById = useUsersById();
   const userGroups = useUserGroups();
   const assignQa = useAssignReleaseQa();
@@ -697,7 +683,7 @@ function TicketsTab({
             setShowOverdueOnly(false);
           }}
         />
-        {canManage && canRerun && <RerunAnalysisButton releaseId={releaseId} className='ml-auto' />}
+        {canRerun && <RerunAnalysisButton releaseId={releaseId} className='ml-auto' />}
       </div>
       <div className='flex min-h-0 flex-col overflow-hidden rounded-[10px] border border-border bg-background'>
         <div
@@ -793,7 +779,6 @@ function NoTicketsCard({
   repo: SdlcReleaseRepo | undefined;
   range: ReleaseRepositoryRow | undefined;
 }): ReactElement {
-  const canManage = useCanManageRelease();
   const isVersionRelease = repo?.config?.mode === ReleaseTrackingMode.VERSION;
 
   const facts: { label: string; value: string; mono?: boolean }[] = isVersionRelease
@@ -828,7 +813,7 @@ function NoTicketsCard({
               : "None of the commits in this range reference a ticket. Link commits to tickets, then re-run analysis to build what's in it, env and migration changes, and release notes."}
           </span>
         </div>
-        {canManage && !isVersionRelease && <RerunAnalysisButton releaseId={releaseId} />}
+        {!isVersionRelease && <RerunAnalysisButton releaseId={releaseId} />}
       </div>
       <div className='grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-x-6 gap-y-3.5 border-t border-border/70 bg-muted/30 px-5 py-3.5'>
         {facts.map(fact => (

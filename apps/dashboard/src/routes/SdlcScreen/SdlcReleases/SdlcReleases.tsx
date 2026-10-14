@@ -13,7 +13,6 @@ import { Popover } from '../../../components/ui/Popover';
 import { Tooltip } from '../../../components/ui/Tooltip';
 import Avatar from '../../../components/ui/Avatar/Avatar';
 import { CreateTicketModal } from '../../../components/Tickets/CreateTicketModal/CreateTicketModal';
-import { useCanManageRelease } from '../../../hooks/usePermissions';
 import { useScrollFade } from '../../../hooks/useScrollFade';
 import { useShortcut } from '../../../shortcuts';
 import { cn } from '../../../utils/classNames';
@@ -166,7 +165,6 @@ function ReleaseList({
     [filteredRepo, configuredRepos],
   );
   const { releases, loading, loadingMore, hasMore, loadMore } = useSdlcReleases(scopedRepos);
-  const canCreateRelease = useCanManageRelease();
   const virtualizer = useVirtualizer({
     count: releases.length + (hasMore || loadingMore ? 1 : 0),
     getScrollElement: () => scroller,
@@ -248,17 +246,6 @@ function ReleaseList({
     ),
   ];
   const releaseChannelId = releaseChannelIds[0] ?? null;
-  const newReleaseButton = (
-    <Button
-      onClick={() => setCreatingRelease(true)}
-      disabled={!canCreateRelease || !releaseChannelId || !projectId}
-      data-track-category={TRACK_CATEGORY}
-      data-track-name='NewReleaseOpened'
-    >
-      + New release
-    </Button>
-  );
-
   return (
     <div className='flex min-h-0 flex-1 flex-col overflow-hidden px-8 pt-7'>
       <div className='mx-auto flex min-h-0 w-full max-w-[1074px] flex-1 flex-col gap-5'>
@@ -279,13 +266,14 @@ function ReleaseList({
             onConfigure={onConfigure}
           />
           <span className='flex-1' />
-          {canCreateRelease ? (
-            newReleaseButton
-          ) : (
-            <Tooltip content='Only release managers can create releases'>
-              <span className='inline-flex'>{newReleaseButton}</span>
-            </Tooltip>
-          )}
+          <Button
+            onClick={() => setCreatingRelease(true)}
+            disabled={!releaseChannelId || !projectId}
+            data-track-category={TRACK_CATEGORY}
+            data-track-name='NewReleaseOpened'
+          >
+            + New release
+          </Button>
           <Tooltip content='Release configuration'>
             <Button
               variant='outline'

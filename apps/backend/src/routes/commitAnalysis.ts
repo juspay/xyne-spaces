@@ -25,7 +25,7 @@ router.get('/latest-deployed-commit', commitAnalysisController.getLatestDeployed
 // Re-run commit analysis for an existing release ticket. Used by the "Re-run"
 // button on the Release Detail screen — saves the create-delete-recreate dance
 // when the user iterates on Application regex / paths config.
-router.post('/re-run/:ticketId', authorizePrivilegedOrResource('RELEASE-MANAGER', AccessType.WRITE), async (req: Request, res: Response): Promise<void> => {
+router.post('/re-run/:ticketId', authorizePrivilegedOrResource('SDLC', AccessType.WRITE), async (req: Request, res: Response): Promise<void> => {
   const { ticketId } = req.params;
   const userId = req.user?.id;
   if (!userId) {
@@ -141,7 +141,7 @@ router.get('/repos/:releaseId', async (req: Request, res: Response): Promise<voi
   }
 });
 
-router.post('/test-connection', authorizePrivilegedOrResource('RELEASE-MANAGER', AccessType.WRITE), async (req: Request, res: Response): Promise<void> => {
+router.post('/test-connection', authorizePrivilegedOrResource('SDLC', AccessType.WRITE), async (req: Request, res: Response): Promise<void> => {
   const { repoUrl } = req.body as { repoUrl?: string };
   if (!repoUrl) {
     res.status(400).json({ ok: false, message: 'repoUrl is required' });
@@ -172,7 +172,7 @@ router.post('/test-connection', authorizePrivilegedOrResource('RELEASE-MANAGER',
 // tree, to prefill a release config. Supports GitHub and Bitbucket Server.
 // Scope note: the repository is one registered in the caller's workspace (repoId),
 // and listing uses the org-wide token; the VCS host is pinned to config (no SSRF).
-router.post('/suggest-services', authorizePrivilegedOrResource('RELEASE-MANAGER', AccessType.WRITE), async (req: Request, res: Response): Promise<void> => {
+router.post('/suggest-services', authorizePrivilegedOrResource('SDLC', AccessType.WRITE), async (req: Request, res: Response): Promise<void> => {
   const { repoId, projectId: rawProjectId } = req.body as { repoId?: string; projectId?: unknown };
   const projectId = typeof rawProjectId === 'string' && rawProjectId ? rawProjectId : null;
   const userId = req.user?.id;

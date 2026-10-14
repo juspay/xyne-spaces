@@ -551,12 +551,12 @@ export class TicketController {
           req.user.orgRole === OrgRole.ADMIN ||
           req.user.orgRole === OrgRole.OWNER;
         if (!privileged) {
-          const releaseResource = await new ResourceRepository().findByName('RELEASE-MANAGER');
-          const allowed = releaseResource
-            ? await new ResourceAccessRepository().hasAccess(req.user.id, releaseResource.id, AccessType.WRITE)
+          const sdlcResource = await new ResourceRepository().findByName('SDLC');
+          const allowed = sdlcResource
+            ? await new ResourceAccessRepository().hasAccess(req.user.id, sdlcResource.id, AccessType.WRITE)
             : false;
           if (!allowed) {
-            res.status(403).json({ error: 'Release Manager write access is required to create a release.' });
+            res.status(403).json({ error: 'SDLC write access is required to create a release.' });
             return;
           }
         }

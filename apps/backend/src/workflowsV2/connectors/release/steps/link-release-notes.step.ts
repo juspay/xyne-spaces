@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { buildWorkspaceCanvasUrl } from '@/services/canvasService';
-import { workspaceOf } from '../context';
+import { workspaceOf } from '../../xyne-spaces/context';
 
 const LinkReleaseNotesConfigSchema = z.object({
   releaseTicket: variableRef(z.string().min(1)).describe('Release ticket id or ID like XYNE-12'),

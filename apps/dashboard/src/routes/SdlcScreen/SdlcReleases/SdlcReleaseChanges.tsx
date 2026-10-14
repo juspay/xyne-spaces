@@ -25,7 +25,6 @@ import {
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useConfirmDialog } from '../../../hooks/useConfirmDialog';
 import { useCopyButton } from '../../../hooks/useCopyButton';
-import { useCanManageRelease } from '../../../hooks/usePermissions';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { queries } from '../../../zero/queries';
 import { getApiErrorMessage } from '../../../utils/apiError';
@@ -335,7 +334,6 @@ function ReleaseNotes({
   onOpenCanvas: (canvasId: string) => void;
 }): ReactElement {
   const [analyzing, setAnalyzing] = useState(false);
-  const canManage = useCanManageRelease();
   const { confirm, ConfirmDialog } = useConfirmDialog();
 
   const insights = readReleaseInsights(release.metadata);
@@ -372,7 +370,7 @@ function ReleaseNotes({
     }
   };
 
-  const headerAction = canManage && (insights || running || analysisCanvasId || notesCanvasId) && (
+  const headerAction = (insights || running || analysisCanvasId || notesCanvasId) && (
     <Button
       variant='ghost'
       size='sm'
@@ -417,16 +415,14 @@ function ReleaseNotes({
               Get a summary, the release mix, risk, and what to check before deploy.
             </span>
           </div>
-          {canManage && (
-            <Button
-              onClick={() => void analyze()}
-              className='h-[34px] px-3.5 text-[13.5px] font-semibold'
-              data-track-category={TRACK_CATEGORY}
-              data-track-name='ReleaseAnalyzeClicked'
-            >
-              Analyze release
-            </Button>
-          )}
+          <Button
+            onClick={() => void analyze()}
+            className='h-[34px] px-3.5 text-[13.5px] font-semibold'
+            data-track-category={TRACK_CATEGORY}
+            data-track-name='ReleaseAnalyzeClicked'
+          >
+            Analyze release
+          </Button>
         </div>
       )}
       {notesCanvasId && (

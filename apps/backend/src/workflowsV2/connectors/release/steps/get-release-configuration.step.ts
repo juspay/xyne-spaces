@@ -6,8 +6,8 @@ import { z } from 'zod';
 import { db } from '@/database/client';
 import type { XyneCtx } from '@/workflowsV2/types';
 import { parseBitbucketRepoUrl, parseGitHubRepoUrl } from '@/utils/repoUrlParser';
-import { boardOptions, noOptions, optionsQuery } from '../options';
-import { workspaceOf } from '../context';
+import { boardOptions, noOptions, optionsQuery } from '../../xyne-spaces/options';
+import { workspaceOf } from '../../xyne-spaces/context';
 
 const GetReleaseConfigurationConfigSchema = z.object({
   boardId: withOptions(variableRef(z.string().min(1))).describe('The main release board'),

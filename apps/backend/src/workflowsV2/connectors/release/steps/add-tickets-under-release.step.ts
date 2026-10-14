@@ -4,7 +4,7 @@ import { BaseTicketType } from '@xyne/shared';
 import { z } from 'zod';
 import { db } from '@/database/client';
 import { ApplicationRepository } from '@/database/repositories/applicationRepository';
-import { workspaceOf } from '../context';
+import { workspaceOf } from '../../xyne-spaces/context';
 
 const AddTicketsUnderReleaseConfigSchema = z.object({
   ticket: variableRef(z.string().min(1)).describe("Ticket id or ID like PLAT-12 of the release's service ticket"),

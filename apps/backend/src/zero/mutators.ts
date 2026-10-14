@@ -1098,8 +1098,7 @@ export function createMutators(
   awaitedPostCommitTasks: Array<() => Promise<void>>,
 ) {
   // Release-config edits are open to workspace/org ADMIN and OWNER by role, and
-  // to anyone individually granted RELEASE-MANAGER WRITE. Mirrors the HTTP
-  // authorizePrivilegedOrResource middleware.
+  // to anyone with SDLC WRITE. Mirrors the HTTP authorizePrivilegedOrResource middleware.
   const assertReleaseManageAccess = async (): Promise<void> => {
     const isPrivileged =
       authData.role === WorkspaceRole.ADMIN ||
@@ -1107,12 +1106,12 @@ export function createMutators(
       authData.orgRole === OrgRole.ADMIN ||
       authData.orgRole === OrgRole.OWNER;
     if (isPrivileged) return;
-    const resource = await repositories.resources.findByName('RELEASE-MANAGER');
+    const resource = await repositories.resources.findByName('SDLC');
     if (
       !resource ||
       !(await repositories.resourceAccess.hasAccess(authData.sub, resource.id, AccessType.WRITE))
     ) {
-      throw new Error('This endpoint requires administrator or owner privileges');
+      throw new Error('SDLC write access is required to change the release configuration');
     }
   };
 

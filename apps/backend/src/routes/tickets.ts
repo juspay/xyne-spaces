@@ -66,10 +66,10 @@ router.post('/:ticketId/emails/:emailId/transcribe', ticketController.transcribe
 router.post('/:ticketId/emails/:emailId/summarize', ticketController.summarizeCallTranscript);
 
 router.post('/:ticketId/release-notes/generate', releaseNotesController.generateReleaseNotes);
-// Gated like the other release-manager AI actions (suggest/analyze), not plain TICKETS WRITE.
+// Gated like the other release AI actions (suggest/analyze), not plain TICKETS WRITE.
 router.post(
   '/:ticketId/release-insights',
-  authorizePrivilegedOrResource('RELEASE-MANAGER', AccessType.WRITE),
+  authorizePrivilegedOrResource('SDLC', AccessType.WRITE),
   releaseInsightsController.generate,
 );
 router.post(

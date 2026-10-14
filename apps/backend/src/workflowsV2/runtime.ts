@@ -1,4 +1,5 @@
 import { XyneSpacesConnector } from './connectors/xyne-spaces';
+import { ReleaseConnector } from './connectors/release';
 import {
   ApprovalRequirement,
   BaseConnector,
@@ -49,6 +50,7 @@ const services = new ServiceRegistry();
 
 const connectors = new ConnectorRegistry();
 connectors.register(new XyneSpacesConnector());
+connectors.register(new ReleaseConnector());
 connectors.register(new GitHubConnector());
 connectors.register(new BitbucketConnector({ apiBaseUrl: config.bitbucket.baseUrl }));
 if (config.jenkins.baseUrl) {

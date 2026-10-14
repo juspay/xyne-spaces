@@ -491,7 +491,7 @@ const envSchema = Joi.object({
   MICROSOFT_GRAPH_CLIENT_STATE_BACKFILL_ENABLED: Joi.boolean().default(true),
   // Code sandbox for workflow CODE steps; CODE steps fail when unset
   SANDBOX_URL: Joi.string().uri().allow('').default(''),
-  // Run release commit analysis automatically on release ticket creation and on PR merge
+  // Deterministic release commit analysis: on release ticket creation, on PR merge and on re-run
   RELEASE_AUTO_ANALYSIS_ENABLED: Joi.boolean().default(true),
   // XYNE Claw Integration (Ask AI v2)
   XYNE_CLAW_URL: Joi.string().uri().default('http://localhost:3002'),
