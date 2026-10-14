@@ -28,7 +28,14 @@ import { useQuery } from '@/src/hooks/useQuery';
 import { queries } from '@/src/zero/queries';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { useIsInCall } from '@/src/hooks/useRoomMachine';
-import { isScheduledCallJoinable } from '@/src/components/call-log/callHistoryItem.utils';
+import {
+  canEditScheduledCallParticipants,
+  isScheduledCallJoinable,
+  isScheduledCallManageable,
+} from '@/src/components/call-log/callHistoryItem.utils';
+import { stateMachineActor } from '@/src/machines/stateMachine';
+import { openEditSession } from '@/src/features/schedule-call/editSession';
+import { buildEditCallData } from '@/src/features/schedule-call/utils/types';
 import { AppBottomSheet } from '@/src/components/ui/app-bottom-sheet';
 import { cn } from '@/src/utils/cn';
 import { useBubbleAccent } from '@/src/theme/useBubbleAccent';
@@ -94,7 +101,7 @@ const CallDetailsSheet: React.FC<CallDetailsSheetProps> = ({
 
   // History rows only carry the current user's participant row (participant-only query, as
   // on the dashboard); load the full roster while the sheet is open.
-  const [fullParticipants] = useQuery(
+  const [fullParticipants, fullParticipantsDetails] = useQuery(
     queries.callParticipantsByCallId({ callId: call?.id ?? '' }),
     {
       enabled: isOpen && !!call?.id,
@@ -295,6 +302,32 @@ const CallDetailsSheet: React.FC<CallDetailsSheetProps> = ({
     }
   }, [call]);
 
+  const canEdit = useMemo(
+    () =>
+      !!call &&
+      (isScheduledCallManageable(call, currentUserId) ||
+        canEditScheduledCallParticipants(
+          call,
+          currentUserId,
+          stateMachineActor.getSnapshot().context.visibleChannels,
+        )),
+    [call, currentUserId],
+  );
+  const isRosterLoaded = fullParticipantsDetails.type === 'complete';
+  const handleEditPress = useCallback((): void => {
+    if (!call || !isRosterLoaded) return;
+    const roster = (fullParticipants ?? []).map(p => ({
+      userId: p.userId,
+      email: p.email ?? null,
+      isExternal: p.isExternal,
+      invitedBy: p.invitedBy,
+    }));
+    dismissSheetAfter(() => {
+      openEditSession(buildEditCallData(call, roster));
+      router.push('/(protected)/schedule-call');
+    });
+  }, [call, dismissSheetAfter, fullParticipants, isRosterLoaded]);
+
   const handleDeletePress = useCallback(() => {
     if (!call) return;
     Alert.alert(
@@ -484,10 +517,19 @@ const CallDetailsSheet: React.FC<CallDetailsSheetProps> = ({
                     {/* Edit + Copy link + Delete — only for SCHEDULED calls */}
                     {call.isScheduled && (
                       <View className='flex-row gap-2'>
-                        <Pressable className='flex-1 h-16 gap-1 items-center justify-center rounded-2xl bg-secondary active:bg-secondary/80'>
-                          <Pencil size={20} color={foregroundColor} />
-                          <Text className='text-sm font-medium text-foreground'>Edit</Text>
-                        </Pressable>
+                        {canEdit && (
+                          <Pressable
+                            onPress={handleEditPress}
+                            disabled={!isRosterLoaded}
+                            className={cn(
+                              'flex-1 h-16 gap-1 items-center justify-center rounded-2xl bg-secondary active:bg-secondary/80',
+                              !isRosterLoaded && 'opacity-50',
+                            )}
+                          >
+                            <Pencil size={20} color={foregroundColor} />
+                            <Text className='text-sm font-medium text-foreground'>Edit</Text>
+                          </Pressable>
+                        )}
                         {call.roomLink && (
                           <Pressable
                             onPress={handleCopyLink}

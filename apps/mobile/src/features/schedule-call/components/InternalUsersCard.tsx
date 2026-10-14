@@ -23,24 +23,27 @@ interface ChipProps {
   leading: ReactElement;
   label: string;
   onRemove: () => void;
+  locked?: boolean;
 }
 
 /** A selected recipient: round picture, a remove badge on its corner, and the name below. */
-const Chip = ({ leading, label, onRemove }: ChipProps): ReactElement => {
+const Chip = ({ leading, label, onRemove, locked = false }: ChipProps): ReactElement => {
   const foreground = useCSSVariable('--color-foreground') as string;
   return (
     <View className='w-18 items-center gap-2 pt-0.5'>
       <View>
         {leading}
-        <Pressable
-          accessibilityRole='button'
-          accessibilityLabel={`Remove ${label}`}
-          hitSlop={10}
-          onPress={onRemove}
-          className='absolute -right-1 -top-1.5 size-5 items-center justify-center rounded-full border-2 border-settings-section-bg bg-accent'
-        >
-          <X size={10} strokeWidth={3.4} color={foreground} />
-        </Pressable>
+        {locked ? null : (
+          <Pressable
+            accessibilityRole='button'
+            accessibilityLabel={`Remove ${label}`}
+            hitSlop={10}
+            onPress={onRemove}
+            className='absolute -right-1 -top-1.5 size-5 items-center justify-center rounded-full border-2 border-settings-section-bg bg-accent'
+          >
+            <X size={10} strokeWidth={3.4} color={foreground} />
+          </Pressable>
+        )}
       </View>
       <Text className='w-full text-center text-xs text-foreground' numberOfLines={2}>
         {label}
@@ -76,6 +79,7 @@ interface InternalUsersCardProps {
   onChange: (participants: ScheduleCallParticipants) => void;
   /** Opens the people sheet (people, groups, channels). */
   onOpenPicker: () => void;
+  lockedUserIds?: ReadonlySet<string> | undefined;
 }
 
 const subtitleFor = ({ users, channel }: ScheduleCallParticipants): string => {
@@ -92,6 +96,7 @@ const InternalUsersCardBase = ({
   participants,
   onChange,
   onOpenPicker,
+  lockedUserIds,
 }: InternalUsersCardProps): ReactElement => {
   const { accentText } = useBubbleAccent();
   const sectionBackground = useCSSVariable('--color-settings-section-bg') as string;
@@ -155,6 +160,7 @@ const InternalUsersCardBase = ({
                 key={user.id}
                 leading={<Avatar userIds={[user.id]} size={52} />}
                 label={user.name}
+                locked={!!lockedUserIds?.has(user.id)}
                 onRemove={() =>
                   onChange({ ...participants, users: users.filter(u => u.id !== user.id) })
                 }

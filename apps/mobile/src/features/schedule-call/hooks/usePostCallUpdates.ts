@@ -12,6 +12,7 @@ export interface PostCallUpdatesChannel {
 
 interface UsePostCallUpdatesParams {
   participantCount: number;
+  initialChannel?: PostCallUpdatesChannel | null;
 }
 
 export interface PostCallUpdates {
@@ -26,9 +27,12 @@ export interface PostCallUpdates {
 
 export function usePostCallUpdates({
   participantCount,
+  initialChannel = null,
 }: UsePostCallUpdatesParams): PostCallUpdates {
-  const [postCallUpdates, setPostCallUpdates] = useState(false);
-  const [selectedChannel, setSelectedChannel] = useState<PostCallUpdatesChannel | null>(null);
+  const [postCallUpdates, setPostCallUpdates] = useState(initialChannel !== null);
+  const [selectedChannel, setSelectedChannel] = useState<PostCallUpdatesChannel | null>(
+    initialChannel,
+  );
 
   const updateChannelError = postCallUpdates && !selectedChannel;
   const showPostCallUpdates = participantCount > 0 || postCallUpdates;

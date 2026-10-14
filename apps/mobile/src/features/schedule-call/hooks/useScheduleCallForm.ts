@@ -1,9 +1,11 @@
 // Form state, validation and submit for the Schedule a call screen. Rules follow the dashboard's
 // ScheduleCallModal (defaults, start/end handling, payload shape); the people/channel pickers and
 // the invitation editor are reduced for v1.
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
+import { useQuery } from '@/src/hooks/useQuery';
 import { useSelf } from '@/src/hooks/useUsers';
+import { stateMachineActor } from '@/src/machines/stateMachine';
 import {
   ApiError,
   callService,
@@ -12,6 +14,7 @@ import {
 } from '@/src/services/Call/callService';
 import { mergeTimePart } from '@/src/utils/timeSelection';
 import { showMessageToast } from '@/src/utils/toast';
+import { queries } from '@/src/zero/queries';
 
 import {
   mergeDateWithTime,
@@ -19,6 +22,9 @@ import {
   validateRecurringCallTimes,
 } from '../utils/callTimeValidation';
 import { getDefaultScheduledStartTime, getWeekdayOccurrence, toHHMM } from '../utils/dateTime';
+import { getEditPrefill } from '../utils/editPrefill';
+import { getRecurrencePreset } from '../utils/recurrencePreset';
+import type { EditCallData } from '../utils/types';
 import { usePostCallUpdates, type PostCallUpdates } from './usePostCallUpdates';
 import { useRecurringCallForm } from './useRecurringCallForm';
 
@@ -56,7 +62,8 @@ const toRecipients = ({ users, channel }: ScheduleCallParticipants): Recipients 
 type Recipients = { channelId: string } | { targetUserIds: string[] };
 
 // ponytail: presets only. Add 'custom' (and the Custom editor) when that screen exists.
-export type RepeatOptionId = 'none' | 'daily' | 'weekdays' | 'monthly';
+export type RepeatChoice = 'none' | 'daily' | 'weekdays' | 'monthly';
+export type RepeatOptionId = RepeatChoice | 'custom';
 
 /** Each preset has its own frequency, so the frequency alone says which one is picked. */
 const REPEAT_OPTION_BY_FREQUENCY = { DAY: 'daily', WEEK: 'weekdays', MONTH: 'monthly' } as const;
@@ -69,23 +76,29 @@ const formatCallDuration = (ms: number): string => {
   return rest === 0 ? `${hours} hr` : `${hours} hr ${rest} min`;
 };
 
-export const useScheduleCallForm = (): ScheduleCallForm => {
+export const useScheduleCallForm = (editCall: EditCallData | null = null): ScheduleCallForm => {
   const self = useSelf();
   const firstName = (self?.name ?? '').trim().split(/\s+/)[0] ?? '';
   const defaultTitle = firstName ? `${firstName}'s Call` : 'New call';
 
+  const [prefill] = useState(() => {
+    if (!editCall) return null;
+    const { users, visibleChannels } = stateMachineActor.getSnapshot().context;
+    return getEditPrefill(editCall, self?.id, users, visibleChannels);
+  });
+
   const [defaultStart] = useState(getDefaultScheduledStartTime);
-  const [titleDraft, setTitleDraft] = useState<string | null>(null);
+  const [titleDraft, setTitleDraft] = useState<string | null>(prefill?.title ?? null);
   // Start and end move together (changing one can push the other), so they share one state
   // object: updates are atomic and the setters below stay referentially stable.
   const [range, setRange] = useState(() => ({
-    startsAt: defaultStart,
-    endsAt: new Date(defaultStart.getTime() + HOUR_MS),
+    startsAt: prefill?.startsAt ?? defaultStart,
+    endsAt: prefill?.endsAt ?? new Date(defaultStart.getTime() + HOUR_MS),
   }));
   const { startsAt, endsAt } = range;
-  const [participants, setParticipants] = useState(NO_PARTICIPANTS);
+  const [participants, setParticipants] = useState(prefill?.participants ?? NO_PARTICIPANTS);
   const participantCount = countParticipants(participants);
-  const [guests, setGuests] = useState<string[]>([]);
+  const [guests, setGuests] = useState<string[]>(prefill?.guests ?? []);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const title = titleDraft ?? defaultTitle;
@@ -101,12 +114,47 @@ export const useScheduleCallForm = (): ScheduleCallForm => {
     setMonthlyType,
   } = recurrence;
 
+  const isEditMode = editCall !== null;
+  const seriesId = editCall?.recurringSeriesId ?? null;
+  const [applyToSeries, setApplyToSeriesState] = useState(false);
+  const [repeatTouched, setRepeatTouched] = useState(false);
+  const [hasCustomRule, setHasCustomRule] = useState(false);
+  const [seriesData, seriesDetails] = useQuery(
+    queries.recurringSeriesById({ seriesId: seriesId ?? '' }),
+    { enabled: seriesId !== null },
+  );
+  const canApplyToSeries = seriesId !== null && seriesDetails.type === 'complete' && !!seriesData;
+  const isSeriesSubmit = isEditMode ? applyToSeries : isRecurring;
+
+  const selfId = self?.id;
+  const participantsOnly =
+    !!editCall?.organizerUserId && !!selfId && editCall.organizerUserId !== selfId;
+  const lockedUserIds = useMemo(
+    () =>
+      participantsOnly && editCall
+        ? new Set(
+            editCall.participants
+              .filter(
+                p =>
+                  !p.isExternal &&
+                  p.userId !== selfId &&
+                  (p.userId === editCall.organizerUserId || p.invitedBy !== selfId),
+              )
+              .map(p => p.userId),
+          )
+        : undefined,
+    [editCall, participantsOnly, selfId],
+  );
+
   // A series is sent as the local HH:mm of its start and end. Deriving them here (instead of
   // syncing the hook's own copies) means they can never drift from the pickers.
   const recurringStartTime = toHHMM(startsAt);
   const recurringEndTime = toHHMM(endsAt);
 
-  const postUpdates = usePostCallUpdates({ participantCount });
+  const postUpdates = usePostCallUpdates({
+    participantCount,
+    initialChannel: prefill?.callUpdatesChannel ?? null,
+  });
   const selectedChannelId = postUpdates.selectedChannel?.id;
 
   // ── Dates and times ───────────────────────────────────────────────────────
@@ -136,12 +184,14 @@ export const useScheduleCallForm = (): ScheduleCallForm => {
   }, []);
 
   // ── Repeat (the dashboard dropdown's presets; Custom… comes later) ─────────
-  const repeatOptionId: RepeatOptionId = isRecurring
-    ? REPEAT_OPTION_BY_FREQUENCY[recurrenceFrequency]
-    : 'none';
+  const repeatOptionId: RepeatOptionId = hasCustomRule
+    ? 'custom'
+    : isRecurring
+      ? REPEAT_OPTION_BY_FREQUENCY[recurrenceFrequency]
+      : 'none';
 
-  const selectRepeat = useCallback(
-    (id: RepeatOptionId): void => {
+  const applyRepeat = useCallback(
+    (id: RepeatChoice): void => {
       if (id === 'none') {
         setIsRecurring(false);
         return;
@@ -162,16 +212,54 @@ export const useScheduleCallForm = (): ScheduleCallForm => {
     [setIsRecurring, setMonthlyType, setRecurrenceDays, setRecurrenceFrequency],
   );
 
+  const selectRepeat = useCallback(
+    (id: RepeatChoice): void => {
+      setRepeatTouched(true);
+      setHasCustomRule(false);
+      applyRepeat(id);
+    },
+    [applyRepeat],
+  );
+
+  const seriesRule = seriesData?.recurrenceRule;
+  useEffect(() => {
+    if (!seriesRule) return;
+    const preset = getRecurrencePreset(seriesRule);
+    if (preset === 'custom') {
+      setIsRecurring(true);
+      setHasCustomRule(true);
+      return;
+    }
+    applyRepeat(preset);
+  }, [applyRepeat, seriesRule, setIsRecurring]);
+
+  // Turning "apply to the series" off drops the changes made under it, as on the dashboard.
+  const setApplyToSeries = useCallback(
+    (on: boolean): void => {
+      setApplyToSeriesState(on);
+      if (on || !prefill) return;
+      setRange({ startsAt: prefill.startsAt, endsAt: prefill.endsAt });
+      setParticipants(prefill.participants);
+      setGuests(prefill.guests);
+    },
+    [prefill],
+  );
+
   const monthlyRepeatLabel = useMemo(() => {
     const { weekday, ordinalWord } = getWeekdayOccurrence(startsAt);
     return `Monthly on ${ordinalWord} ${weekday}`;
   }, [startsAt]);
 
   // ── Validation ────────────────────────────────────────────────────────────
+  const startsAtChanged = !editCall || startsAt.getTime() !== new Date(editCall.startsAt).getTime();
   const timeErrors = useMemo(() => {
+    if (participantsOnly) return { startsAtError: null, endsAtError: null };
     const { startsAtError, endsAtError } = validateCallDateTimes(startsAt, endsAt);
-    if (!isRecurring) return { startsAtError, endsAtError };
+    if (!isSeriesSubmit) {
+      return { startsAtError: startsAtChanged ? startsAtError : null, endsAtError };
+    }
     const recurringError = validateRecurringCallTimes(recurringStartTime, recurringEndTime);
+    if (isEditMode) return { startsAtError: null, endsAtError: endsAtError ?? recurringError };
     const tooFar =
       startsAt.getTime() - Date.now() > MAX_SERIES_START_AHEAD_MS
         ? 'A repeating call can start at most 60 days ahead'
@@ -180,10 +268,20 @@ export const useScheduleCallForm = (): ScheduleCallForm => {
       startsAtError: startsAtError ?? tooFar,
       endsAtError: endsAtError ?? recurringError,
     };
-  }, [endsAt, isRecurring, recurringEndTime, recurringStartTime, startsAt]);
+  }, [
+    endsAt,
+    isEditMode,
+    isSeriesSubmit,
+    participantsOnly,
+    recurringEndTime,
+    recurringStartTime,
+    startsAt,
+    startsAtChanged,
+  ]);
 
-  const titleError =
-    title.trim().length === 0
+  const titleError = participantsOnly
+    ? null
+    : title.trim().length === 0
       ? 'Add a title'
       : title.length > MAX_TITLE_LENGTH
         ? `Title must be less than ${MAX_TITLE_LENGTH} characters`
@@ -195,7 +293,7 @@ export const useScheduleCallForm = (): ScheduleCallForm => {
     participantCount === 0 ? 'Add at least one person' : null,
     timeErrors.startsAtError,
     timeErrors.endsAtError,
-    postUpdates.updateChannelError ? 'Pick a channel for post updates' : null,
+    postUpdates.updateChannelError && !participantsOnly ? 'Pick a channel for post updates' : null,
   ].filter((reason): reason is string => reason !== null);
   const canSubmit = !isSubmitting && blockers.length === 0;
 
@@ -213,6 +311,46 @@ export const useScheduleCallForm = (): ScheduleCallForm => {
         bodyHtml: DEFAULT_INVITATION_HTML,
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       };
+
+      if (editCall) {
+        if (participantsOnly) {
+          const request = { targetUserIds: participants.users.map(user => user.id) };
+          if (applyToSeries && seriesId) {
+            await callService.updateRecurringSeries(seriesId, request);
+            showMessageToast('Recurring series updated', 'success');
+          } else {
+            await callService.updateScheduledCall(editCall.externalId, request);
+            showMessageToast('Call updated', 'success');
+          }
+          return true;
+        }
+        if (applyToSeries && seriesId) {
+          await callService.updateRecurringSeries(seriesId, {
+            title: title.trim(),
+            ...recipients,
+            ...callUpdatesChannel,
+            timezone: invitation.timezone,
+            startTime: recurringStartTime,
+            endTime: recurringEndTime,
+            externalInvitees: guests,
+            ...(repeatTouched && isRecurring ? { recurrenceRule: buildRrule() } : {}),
+          });
+          showMessageToast('Recurring series updated', 'success');
+        } else {
+          await callService.updateScheduledCall(editCall.externalId, {
+            title: title.trim(),
+            ...(startsAtChanged ? { startsAt: startsAt.getTime() } : {}),
+            ...(endsAt.getTime() !== new Date(editCall.endsAt).getTime()
+              ? { endsAt: endsAt.getTime() }
+              : {}),
+            ...recipients,
+            ...callUpdatesChannel,
+            externalInvitees: guests,
+          });
+          showMessageToast('Call updated', 'success');
+        }
+        return true;
+      }
 
       if (isRecurring) {
         const request: CreateRecurringSeriesRequest = {
@@ -250,7 +388,11 @@ export const useScheduleCallForm = (): ScheduleCallForm => {
       return true;
     } catch (error) {
       showMessageToast(
-        error instanceof ApiError && error.message ? error.message : 'Failed to schedule call',
+        error instanceof ApiError && error.message
+          ? error.message
+          : editCall
+            ? 'Error updating call'
+            : 'Failed to schedule call',
         'error',
       );
       return false;
@@ -258,10 +400,16 @@ export const useScheduleCallForm = (): ScheduleCallForm => {
       setIsSubmitting(false);
     }
   }, [
+    applyToSeries,
     canSubmit,
+    editCall,
     endsAt,
     guests,
     isRecurring,
+    participantsOnly,
+    repeatTouched,
+    seriesId,
+    startsAtChanged,
     postUpdates.postCallUpdates,
     selectedChannelId,
     buildRrule,
@@ -286,9 +434,15 @@ export const useScheduleCallForm = (): ScheduleCallForm => {
     startsAtError: timeErrors.startsAtError,
     endsAtError: timeErrors.endsAtError,
     repeatOptionId,
-    repeatLabel: recurrence.recurrenceLabel,
+    repeatLabel: hasCustomRule ? 'Custom' : recurrence.recurrenceLabel,
     monthlyRepeatLabel,
     selectRepeat,
+    isEditMode,
+    participantsOnly,
+    lockedUserIds,
+    canApplyToSeries,
+    applyToSeries,
+    setApplyToSeries,
     participants,
     setParticipants,
     guests,
@@ -317,7 +471,13 @@ export interface ScheduleCallForm {
   repeatOptionId: RepeatOptionId;
   repeatLabel: string;
   monthlyRepeatLabel: string;
-  selectRepeat: (id: RepeatOptionId) => void;
+  selectRepeat: (id: RepeatChoice) => void;
+  isEditMode: boolean;
+  participantsOnly: boolean;
+  lockedUserIds: ReadonlySet<string> | undefined;
+  canApplyToSeries: boolean;
+  applyToSeries: boolean;
+  setApplyToSeries: (on: boolean) => void;
   participants: ScheduleCallParticipants;
   setParticipants: (participants: ScheduleCallParticipants) => void;
   guests: string[];
