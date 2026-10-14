@@ -171,6 +171,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { extractAllMentions } from '@/utils/mentionParser';
 import { detectVcsProvider } from '@/utils/repoUrlParser';
 import { getStorageService } from '@/services/storage';
+import { summaryTemplateService } from '@/services/summaryTemplateService';
 import { repositories } from '@/database/repositories';
 import { db } from '@/database/client';
 import { parseDlAliases, dlAddressesFor } from '@/services/dlResolver';
@@ -219,7 +220,7 @@ import {
 
 import { z } from 'zod';
 import { generateKeyBetween } from 'fractional-indexing';
-import { readableSummaryTemplates, zql } from './queries';
+import { zql } from './queries';
 import { hasGuestChannelAccess } from './acl/core/guest-access';
 import { hasProjectAdminAccess } from './acl/core/admin-access';
 import vespaClient from '@/vespa/client';
@@ -16889,15 +16890,17 @@ export function createMutators(
           timestamp: z.number(),
         }),
         async ({ tx, ctx, args: { id, recordingDefaultSummaryTemplateId, timestamp } }) => {
-          // The default must be a template the user can read today (or the
-          // code-backed 'default'), by the same zql rule the template list uses.
-          // Access is re-checked at generation time in case it is revoked later.
-          if (recordingDefaultSummaryTemplateId && recordingDefaultSummaryTemplateId !== 'default') {
-            const template = await tx.run(
-              readableSummaryTemplates(ctx).where('id', recordingDefaultSummaryTemplateId).one(),
+          // The default must be a template the user can use today: the same service
+          // check generation time relies on, which also covers the code-backed
+          // 'default'. Access is re-checked at generation time in case it is revoked.
+          if (recordingDefaultSummaryTemplateId) {
+            const template = await summaryTemplateService.findAccessibleById(
+              recordingDefaultSummaryTemplateId,
+              ctx.workspaceId,
+              ctx.userID,
             );
             if (!template) {
-              throw new Error('Summary template not found or not accessible');
+              throw new ApplicationError('Summary template not found or not accessible');
             }
           }
 
