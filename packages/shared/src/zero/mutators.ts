@@ -234,8 +234,6 @@ async function resolveCollectionPermissionRole(
   return role;
 }
 
-export const ATTACHMENT_STILL_UPLOADING = 'Attachment is still uploading';
-
 /**
  * An attachment row is created the moment a file is picked, and its bytes land later over
  * a separate upload request. Rows predating `uploadStatus` carry only a url.
@@ -252,21 +250,15 @@ export function isAttachmentUploaded(attachment: {
 }
 
 /**
- * Inside this window an unfinished upload is probably still streaming, so the send is
- * rejected and the caller retries. Beyond it the upload is never coming back (the client
- * died mid-transfer and its cleanup never reached the server), and the message goes
- * without the attachment — otherwise one orphan row would block the composer forever.
+ * Send never waits for an upload. A PENDING row moves onto the message with an empty url and
+ * fills in when its upload lands, which Zero syncs out to every viewer. Only rows already
+ * known dead are dropped, so a message is never published pointing at a file that is never
+ * coming — the one failure #1356 set out to fix.
  */
-const ATTACHMENT_UPLOAD_WINDOW_MS = 30 * 60 * 1000;
-
-export function isAttachmentUploadInFlight(attachment: {
+export function isAttachmentSendable(attachment: {
   uploadStatus?: string | null;
-  createdAt: number;
 }): boolean {
-  return (
-    attachment.uploadStatus !== AttachmentUploadStatus.FAILED &&
-    Date.now() - attachment.createdAt < ATTACHMENT_UPLOAD_WINDOW_MS
-  );
+  return attachment.uploadStatus !== AttachmentUploadStatus.FAILED;
 }
 
 
@@ -1934,12 +1926,7 @@ export const mutators = defineMutators({
                 attachedCount++;
                 continue;
               }
-              if (!isAttachmentUploaded(attachment)) {
-                if (isAttachmentUploadInFlight(attachment)) {
-                  throw new Error(ATTACHMENT_STILL_UPLOADING);
-                }
-                continue;
-              }
+              if (!isAttachmentSendable(attachment)) continue;
               await tx.mutate.message_attachments.update({
                 id: attachmentId,
                 entityId: messageId,
@@ -1969,12 +1956,7 @@ export const mutators = defineMutators({
 
             let attachedCount = 0;
             for (const attachment of draftAttachments) {
-              if (!isAttachmentUploaded(attachment)) {
-                if (isAttachmentUploadInFlight(attachment)) {
-                  throw new Error(ATTACHMENT_STILL_UPLOADING);
-                }
-                continue;
-              }
+              if (!isAttachmentSendable(attachment)) continue;
               await tx.mutate.message_attachments.update({
                 id: attachment.id,
                 entityId: messageId,
@@ -2557,12 +2539,7 @@ export const mutators = defineMutators({
                 attachedCount++;
                 continue;
               }
-              if (!isAttachmentUploaded(attachment)) {
-                if (isAttachmentUploadInFlight(attachment)) {
-                  throw new Error(ATTACHMENT_STILL_UPLOADING);
-                }
-                continue;
-              }
+              if (!isAttachmentSendable(attachment)) continue;
               await tx.mutate.message_attachments.update({
                 id: attachmentId,
                 entityId: messageId,
@@ -2592,12 +2569,7 @@ export const mutators = defineMutators({
 
             let attachedCount = 0;
             for (const attachment of draftAttachments) {
-              if (!isAttachmentUploaded(attachment)) {
-                if (isAttachmentUploadInFlight(attachment)) {
-                  throw new Error(ATTACHMENT_STILL_UPLOADING);
-                }
-                continue;
-              }
+              if (!isAttachmentSendable(attachment)) continue;
               await tx.mutate.message_attachments.update({
                 id: attachment.id,
                 entityId: messageId,

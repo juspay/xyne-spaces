@@ -157,11 +157,7 @@ import {
   validateFlowPlan,
 } from '@xyne/shared';
 import { stringFromFormValue } from '@xyne/shared/zero';
-import {
-  ATTACHMENT_STILL_UPLOADING,
-  isAttachmentUploaded,
-  isAttachmentUploadInFlight,
-} from '@xyne/shared/zero/mutators';
+import { isAttachmentSendable } from '@xyne/shared/zero/mutators';
 import {
   validateFieldBranches,
   validateUniqueFieldNames,
@@ -2903,14 +2899,7 @@ export function createMutators(
                   attachedCount++;
                   continue;
                 }
-                if (!isAttachmentUploaded(attachment)) {
-                  if (isAttachmentUploadInFlight(attachment)) {
-                    throw new ApplicationError(ATTACHMENT_STILL_UPLOADING, {
-                      details: { attachmentId },
-                    });
-                  }
-                  continue;
-                }
+                if (!isAttachmentSendable(attachment)) continue;
                 await tx.mutate.message_attachments.update({
                   id: attachmentId,
                   entityId: messageId,
@@ -2937,14 +2926,7 @@ export function createMutators(
 
               let attachedCount = 0;
               for (const attachment of draftAttachments) {
-                if (!isAttachmentUploaded(attachment)) {
-                  if (isAttachmentUploadInFlight(attachment)) {
-                    throw new ApplicationError(ATTACHMENT_STILL_UPLOADING, {
-                      details: { attachmentId: attachment.id },
-                    });
-                  }
-                  continue;
-                }
+                if (!isAttachmentSendable(attachment)) continue;
                 await tx.mutate.message_attachments.update({
                   id: attachment.id,
                   entityId: messageId,
@@ -3642,14 +3624,7 @@ export function createMutators(
                   attachedCount++;
                   continue;
                 }
-                if (!isAttachmentUploaded(attachment)) {
-                  if (isAttachmentUploadInFlight(attachment)) {
-                    throw new ApplicationError(ATTACHMENT_STILL_UPLOADING, {
-                      details: { attachmentId },
-                    });
-                  }
-                  continue;
-                }
+                if (!isAttachmentSendable(attachment)) continue;
                 await tx.mutate.message_attachments.update({
                   id: attachmentId,
                   entityId: messageId,
@@ -3670,14 +3645,7 @@ export function createMutators(
 
               let attachedCount = 0;
               for (const attachment of draftAttachments) {
-                if (!isAttachmentUploaded(attachment)) {
-                  if (isAttachmentUploadInFlight(attachment)) {
-                    throw new ApplicationError(ATTACHMENT_STILL_UPLOADING, {
-                      details: { attachmentId: attachment.id },
-                    });
-                  }
-                  continue;
-                }
+                if (!isAttachmentSendable(attachment)) continue;
                 await tx.mutate.message_attachments.update({
                   id: attachment.id,
                   entityId: messageId,
