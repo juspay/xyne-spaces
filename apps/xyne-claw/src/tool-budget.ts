@@ -3,7 +3,7 @@ import type {
   BeforeToolCallContext,
   BeforeToolCallResult,
 } from "@earendil-works/pi-agent-core";
-import type { JevAnswer, JevQuestion } from "./jev.js";
+import type { XorAnswer, XorQuestion } from "./xor.js";
 import { answerProb, runJudgeSite } from "./judge-site.js";
 import { buildJudgeState } from "./judge-state.js";
 import { createLogger } from "./logger.js";
@@ -62,7 +62,7 @@ export function getToolBudgetConfig(scale = 1): { warnAt: number; nudgeEvery: nu
 const PROGRESS_START = 30;
 const PROGRESS_EVERY = 15;
 
-export const PROGRESS_QUESTIONS: Record<string, JevQuestion> = {
+export const PROGRESS_QUESTIONS: Record<string, XorQuestion> = {
   progress: {
     type: "score",
     instructions: "Are the agent's recent tool calls still making progress toward answering the request?",
@@ -75,7 +75,7 @@ export const PROGRESS_QUESTIONS: Record<string, JevQuestion> = {
 };
 
 /** Pure: true = clearly stalled (nudge now). */
-export function stalledFromJev(answers: Record<string, JevAnswer>): boolean | null {
+export function stalledFromJev(answers: Record<string, XorAnswer>): boolean | null {
   const p = answerProb(answers, "progress");
   if (p === undefined) return null;
   return p <= 0.25;
@@ -127,7 +127,6 @@ export function installToolBudget(
       void runJudgeSite<boolean>({
         site: "tool-progress",
         enabled: true,
-        budgetMs: 2_500,
         state: buildJudgeState({
           task: currentRunTask(),
           messages: currentRunMessages(),

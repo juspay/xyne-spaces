@@ -547,6 +547,7 @@ export const QueryDashboardScreen: React.FC = () => {
             <div className='flex items-center justify-between px-6 py-4 border-b border-border/30 bg-gradient-to-r from-background/80 to-background/60 backdrop-blur-sm'>
               <div className='flex items-center gap-3'>
                 <Button
+                  aria-label='Close query editor'
                   onClick={handleCloseModal}
                   data-track-category='ANALYTICS'
                   data-track-name='CLOSE_QUERY_MODAL'
@@ -769,6 +770,7 @@ export const QueryDashboardScreen: React.FC = () => {
                               className='w-24 px-3 py-1.5 text-sm border-border/50 bg-background/80 hover:bg-background focus:bg-background focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all rounded-md'
                             />
                             <Button
+                              aria-label={`Remove aggregation ${i + 1}`}
                               variant='ghost'
                               size='icon'
                               onClick={() =>
@@ -854,6 +856,7 @@ export const QueryDashboardScreen: React.FC = () => {
                                 width='100%'
                               />
                               <Button
+                                aria-label={`Remove group by ${i + 1}`}
                                 variant='ghost'
                                 size='icon'
                                 onClick={() => setGroupBy(prev => prev.filter((_, x) => x !== i))}
@@ -965,6 +968,7 @@ export const QueryDashboardScreen: React.FC = () => {
                             width='auto'
                           />
                           <Button
+                            aria-label={`Remove order by ${i + 1}`}
                             variant='ghost'
                             size='icon'
                             onClick={() => setOrderBy(prev => prev.filter((_, x) => x !== i))}

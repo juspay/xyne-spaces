@@ -12,6 +12,7 @@ import {
   VolumeX,
 } from 'lucide-react';
 import { getAttachmentStreamUrl } from '../../../services/clients/apiClient';
+import { streamSourceOf } from '../streamSource';
 import { cn } from '../../../utils/classNames';
 import {
   PreviewButton,
@@ -326,7 +327,7 @@ export default function VideoPreview(props: PreviewerProps): ReactElement {
             <video
               ref={setVideo}
               key={`${props.file.id}:${attempt}`}
-              src={getAttachmentStreamUrl(props.file.id)}
+              src={streamSourceOf(props.file, getAttachmentStreamUrl)}
               // The stream may be another origin's; its cookies still have to go.
               crossOrigin='use-credentials'
               playsInline

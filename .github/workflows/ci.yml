@@ -60,11 +60,20 @@ jobs:
           pnpm config set registry "https://asia-south1-npm.pkg.dev/xyne-infra-external/npm-mirror/"
           echo "//asia-south1-npm.pkg.dev/xyne-infra-external/npm-mirror/:_authToken=${{ steps.gcp-auth.outputs.access_token }}" >> .npmrc
 
+      # TEST: higher network concurrency against our own mirror (same
+      # region, low-latency, under our control) — default 16 is tuned for
+      # arbitrary public registries, overly conservative here. Only applied
+      # on self-hosted/mirror, not against the public registry on
+      # ubuntu-latest — don't want to hammer npmjs.org with 64 concurrent
+      # requests.
       - name: Install dependencies
-        run: pnpm install ${{ env.PNPM_FLAGS }} --filter xyne-spaces-backend...
+        run: >-
+          pnpm install ${{ env.PNPM_FLAGS }}
+          ${{ vars.USE_SELF_HOSTED_CI == 'true' && '--network-concurrency 64' || '' }}
+          --filter xyne-spaces-backend...
 
       - name: Build workspace libraries
-        run: pnpm --filter @xyne/shared --filter agentic-framework run build
+        run: pnpm --filter agentic-framework run build
 
       - name: Prisma generate (app + common schemas)
         run: |
@@ -84,12 +93,15 @@ jobs:
   # Dashboard: depends on @xyne/shared and @xyne/icons, consumed from dist/.
   # ---------------------------------------------------------------------------
   dashboard:
-    name: Dashboard ${{ matrix.task }}
-    runs-on: ${{ vars.USE_SELF_HOSTED_CI != 'true' && 'ubuntu-latest' || matrix.task == 'build' && 'ci-cluster-github-runners-mini-max' || 'ci-cluster-github-runners-mini' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        task: [lint, typecheck, build]
+    name: Dashboard
+    # TEST: merged from 3 matrix legs (lint/typecheck/build) into one job.
+    # Each leg used to run its own Install dependencies in parallel — 3
+    # concurrent installs against the mirror per PR. Trades wall-clock time
+    # on this job (steps now run sequentially, one pod) for far less
+    # concurrent load on the shared mirror/node pool. Pinned to mini-max only
+    # for this test, per request — not the usual self-hosted/ubuntu-latest
+    # fallback ternary.
+    runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-mini-max' || 'ubuntu-latest' }}
     env:
       NODE_OPTIONS: "--max-old-space-size=8192"
     steps:
@@ -119,25 +131,28 @@ jobs:
           pnpm config set registry "https://asia-south1-npm.pkg.dev/xyne-infra-external/npm-mirror/"
           echo "//asia-south1-npm.pkg.dev/xyne-infra-external/npm-mirror/:_authToken=${{ steps.gcp-auth.outputs.access_token }}" >> .npmrc
 
+      # TEST: higher network concurrency against our own mirror — see the same
+      # comment on the backend job above.
       - name: Install dependencies
-        run: pnpm install ${{ env.PNPM_FLAGS }} --filter xyne-spaces-dashboard...
+        run: >-
+          pnpm install ${{ env.PNPM_FLAGS }}
+          ${{ vars.USE_SELF_HOSTED_CI == 'true' && '--network-concurrency 64' || '' }}
+          --filter xyne-spaces-dashboard...
 
-      - name: Build workspace libraries
-        run: pnpm --filter @xyne/shared --filter @xyne/icons run build
+      # No "Build workspace libraries" step needed here (unlike backend):
+      # @xyne/shared AND @xyne/icons both have their own `prepare: pnpm run
+      # build` hooks, so pnpm already builds both automatically during
+      # `Install dependencies` above. Backend still needs the step because
+      # agentic-framework has no prepare script of its own.
 
-      # --- lint leg ---------------------------------------------------------
       # errors-only (warnings ignored).
       - name: Lint (errors only)
-        if: matrix.task == 'lint'
         run: pnpm --filter xyne-spaces-dashboard run lint:errors-only:ci
 
-      # --- typecheck leg ----------------------------------------------------
       - name: Format check
-        if: matrix.task == 'typecheck'
         run: pnpm --filter xyne-spaces-dashboard run format:check
 
       - name: Restore tsc incremental state
-        if: matrix.task == 'typecheck'
         uses: actions/cache@v4
         with:
           path: apps/dashboard/node_modules/.tmp/tsconfig.app.tsbuildinfo
@@ -146,20 +161,23 @@ jobs:
             dashboard-tsbuildinfo-${{ runner.os }}-
 
       - name: Typecheck
-        if: matrix.task == 'typecheck'
         run: pnpm --filter xyne-spaces-dashboard run typecheck
 
       - name: Build
-        if: matrix.task == 'build'
         run: pnpm --filter xyne-spaces-dashboard run build
 
   test:
     name: Automation tests
-    if: github.event_name == 'merge_group' && vars.RUN_TEST_CASE == 'true'
+    # Runs only in the merge queue, not on every PR; RUN_TEST_CASE is the kill switch.
+    if: >-
+      github.event_name == 'merge_group'
+      && vars.RUN_TEST_CASE == 'true'
     runs-on: ci-cluster-github-runners
     env:
       TEST_ENV: test
       BROWSER: chromium
+      # Gauge workers; forwarded into the automation container by the runner.
+      PARALLEL: 5
     steps:
       - uses: actions/checkout@v5
 

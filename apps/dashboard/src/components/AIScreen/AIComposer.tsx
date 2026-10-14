@@ -10,14 +10,15 @@ import {
   type ChangeEvent,
   type ReactElement,
 } from 'react';
+import { createPortal } from 'react-dom';
 import { Lock, MousePointerClick, Sparkles, TextQuote, Box } from 'lucide-react';
 import { toast } from 'sonner';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { DANGEROUS_EXTENSIONS } from '@xyne/shared';
 import { commandsForSurface } from '@xyne/shared/commands';
 import { fetchClawAgentModels } from '../../services/clawAgentModelsService';
-import { useVoiceMode } from '../Voice/useVoiceMode';
-import { VoiceModeBar } from '../Voice/VoiceModeBar';
+import { useVoiceHost } from '../Voice/voiceSession';
+import { VoiceStage } from '../Voice/VoiceStage';
 import type { StreamState } from '../../services/XyneAI';
 import { detectStudioIntent } from './voice/studioIntent';
 import { apiInstance } from '../../services/clients/apiClient';
@@ -38,7 +39,10 @@ import {
   useSelectedAgent,
 } from '../../hooks/useSelectedAgent';
 import { useAskAIAuto } from '../../hooks/useAskAIAuto';
+import { useUserPreference } from '../../machines/userPreferencesMachine';
 import { useRoutedSubmit, type AssistantRouting } from '../Assistant/useRoutedSubmit';
+import { buddy } from '../Assistant/buddy';
+import { tryBuddy } from '../Assistant/buddy/tryBuddy';
 import { Composer } from '../Composer/Composer';
 import type {
   ComposerHandle,
@@ -112,6 +116,7 @@ interface AIComposerProps {
   /** Which edge stays put: 'top' on the landing page (grows and opens menus
    *  downward), 'bottom' in a chat. See the Composer's `anchor`. */
   anchor?: 'top' | 'bottom';
+  voiceStageHost: HTMLElement | null;
 }
 
 interface XyneAIConfigResponse {
@@ -157,12 +162,17 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     initialExtras,
     onContextChange,
     anchor = 'bottom',
+    voiceStageHost,
   },
   ref,
 ): ReactElement {
   const seed = initialExtras ?? EMPTY_COMPOSER_CONTEXT;
   const [value, setValue] = useState('');
+  // The walk is awaited, so it must compare against the latest input, not the render that started it.
+  const valueRef = useRef(value);
+  valueRef.current = value;
   const [attachments, setAttachments] = useState<AIComposerAttachment[]>([]);
+  const [buddyWorking, setBuddyWorking] = useState(false);
   const [selections, setSelections] = useState<ContextSelections>(() => ({
     channels: seed.channels,
     tickets: seed.tickets,
@@ -208,6 +218,8 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   const { selectedAgentSlug, setSelectedAgentSlug } = useSelectedAgent();
   const { isAuto, setAuto } = useAskAIAuto();
   const isAutoOn = isAuto && assistant !== undefined && selectedAgentSlug === null;
+  // Beta: Auto acts on screen only once turned on in Preferences → Developer.
+  const screenActions = useUserPreference('screenActionsEnabled');
   const { data: agents = [] } = useQuery({
     queryKey: ['accessible-claw-agents'],
     queryFn: fetchAccessibleClawAgents,
@@ -494,8 +506,21 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     submit: send,
   });
 
+  async function askBuddy(text: string, trigger: 'button' | 'enter'): Promise<void> {
+    setBuddyWorking(true);
+    try {
+      const outcome = await tryBuddy(text);
+      // An edit made during the walk is the user's, so it is neither cleared nor sent.
+      if (valueRef.current.trim() !== text) return;
+      if (outcome === 'done') setValue('');
+      else if (outcome === 'missed' && !routedSubmit.route(trigger)) send(trigger);
+    } finally {
+      setBuddyWorking(false);
+    }
+  }
+
   function submit(trigger: 'button' | 'enter'): void {
-    if (pending) return;
+    if (pending || buddyWorking) return;
     const trimmed = value.trim();
     if (!trimmed) return;
     // An explicit command is never re-routed by Auto.
@@ -504,13 +529,24 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       attachments.length === 0 &&
       !trimmed.startsWith('/') &&
       applyStudioMode(trimmed) === trimmed;
-    if (isRoutable && routedSubmit.route(trigger)) return;
-    send(trigger);
+    if (isRoutable && screenActions) void askBuddy(trimmed, trigger);
+    else if (!isRoutable || !routedSubmit.route(trigger)) send(trigger);
   }
 
   const handleStop = (): void => {
+    if (buddyWorking) {
+      buddy.cancel();
+      return;
+    }
     if (routedSubmit.stop()) return;
     onStop?.();
+  };
+
+  // Voice bypasses routedSubmit, so its routing is cancelled directly.
+  const handleVoiceStop = (): void => {
+    buddy.cancel();
+    assistant?.cancel();
+    handleStop();
   };
 
   useImperativeHandle(
@@ -578,16 +614,25 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   const answerTranscript = useMemo(
     () =>
       isAutoOn && assistant
-        ? async (text: string): Promise<string | null> =>
-            detectStudioIntent(text) ? null : assistant.answer(text)
+        ? async (text: string): Promise<string | null> => {
+            if (detectStudioIntent(text)) return null;
+            // '' means Buddy was stopped, so the action cards are not asked.
+            const walked = screenActions ? await buddy.answer(text) : null;
+            return walked ?? assistant.answer(text);
+          }
         : undefined,
-    [isAutoOn, assistant],
+    [isAutoOn, assistant, screenActions],
   );
-  const voice = useVoiceMode({
-    enabled: voiceMode,
+  useVoiceHost(voiceMode, {
     submit: submitTranscript,
     ownsStream: startedOnAIPage,
-    ...(answerTranscript && { answer: answerTranscript }),
+    answer: answerTranscript,
+    onStop: handleVoiceStop,
+    cancelAnswer: () => {
+      buddy.cancel();
+      assistant?.cancel();
+    },
+    onExit: () => setVoiceMode(false),
   });
 
   // ── Context: picks, pills ──────────────────────────────────────────────────
@@ -685,15 +730,17 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
 
   if (voiceMode) {
     return (
-      <div className='relative'>
-        <VoiceModeBar
-          phase={voice.phase}
-          studioMode={voiceStudioMode}
-          onHoldStart={voice.startRecording}
-          onHoldEnd={voice.stopRecording}
-          onExit={() => setVoiceMode(false)}
-        />
-      </div>
+      <>
+        {voiceStageHost &&
+          createPortal(
+            <div className='absolute inset-0 z-30 bg-background'>
+              <div className='mx-auto flex h-full max-w-xl'>
+                <VoiceStage studioMode={voiceStudioMode} />
+              </div>
+            </div>,
+            voiceStageHost,
+          )}
+      </>
     );
   }
 
@@ -713,7 +760,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
         onValueChange={setValue}
         {...(placeholder ? { placeholder } : {})}
         {...(autoFocus ? { autoFocus } : {})}
-        isStreaming={pending}
+        isStreaming={pending || buddyWorking}
         anchor={anchor}
         onSubmit={submit}
         onStop={handleStop}

@@ -185,7 +185,7 @@ export function useScheduleCallInitialization({
 
     if (displayName !== 'Unknown') {
       reset({
-        title: initialTitle ?? `${displayName.split(' ')[0]}'s Call`,
+        title: initialTitle ?? '',
         startsAt: start,
         endsAt: end,
         participants: prefilledParticipants,

@@ -40,6 +40,7 @@ import {
 } from '@xyne/shared';
 import { channelService } from '../../../services/Chat/channelService';
 import { useNavigate } from 'react-router-dom';
+import { useRouteContext } from '../../../hooks/useRouteContext';
 import { useZero } from '../../../hooks/useZero';
 import { v4 as uuidv4 } from 'uuid';
 import { mutators } from '../../../zero/mutators';
@@ -102,6 +103,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
   const comboboxInputRef = useRef<HTMLInputElement>(null);
   const inputBoxRef = useRef<InputBoxHandle>(null);
   const navigate = useNavigate();
+  const { baseRoute } = useRouteContext();
   const zero = useZero();
   const [forwardMode, setForwardMode] = useState<ForwardMode>('message');
   const [addAgent, setAddAgent] = useState(true);
@@ -361,7 +363,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
         onSuccess?.();
 
         // Navigate to the DM channel
-        void navigate(`/chat/dir/${response.id}`);
+        void navigate(`${baseRoute === '/chat/dm' ? '/chat/dm' : '/chat/dir'}/${response.id}`);
       } catch (error) {
         logger.error(Event.FRONTEND_ERROR, {
           type: 'migrated_console_error',

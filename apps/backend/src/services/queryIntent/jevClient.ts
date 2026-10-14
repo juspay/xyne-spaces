@@ -13,7 +13,7 @@ import { config as envConfig } from '@/config/env';
  * index.ts must be re-tuned against whichever one is live.
  */
 
-/** A yes/no question. Jev also has `score`; add it when a caller needs one. */
+/** A yes/no question. */
 export interface JevNoulQuestion {
   type: 'noul';
   instructions: string;
@@ -27,7 +27,14 @@ export interface JevChoiceQuestion {
   criteria: Record<string, string>;
 }
 
-export type JevQuestion = JevNoulQuestion | JevChoiceQuestion;
+/** Where the state falls on ordered levels, lowest first (`criteria[0]` is the lowest). */
+export interface JevScoreQuestion {
+  type: 'score';
+  instructions: string;
+  criteria: string[];
+}
+
+export type JevQuestion = JevNoulQuestion | JevChoiceQuestion | JevScoreQuestion;
 
 export type JevAnswer =
   | { type: 'noul'; noul: number }
@@ -37,6 +44,15 @@ export type JevAnswer =
       /** Probability per option id. */
       probabilities: Record<string, number>;
       /** Jev's confidence in `choice`, when it gave one. */
+      confidence?: number;
+    }
+  | {
+      type: 'score';
+      /** 0 at the lowest level, 1 at the highest. */
+      score: number;
+      /** Index into `criteria` of the most likely level. */
+      level: number;
+      /** Jev's confidence in `level`, when it gave one. */
       confidence?: number;
     };
 
@@ -52,7 +68,83 @@ export const isJevConfigured = (): boolean => Boolean(envConfig.jev.apiKey);
 export const isPrivateJevConfigured = (): boolean =>
   isJevConfigured() && Boolean(process.env.JEV_URL?.trim());
 
+const ERROR_BODY_LIMIT = 2048;
+const ERROR_TYPE = /^[a-z0-9_.-]{1,64}$/i;
+
+/** Hostname of the Jev endpoint for logs, or undefined when the URL doesn't parse. */
+const jevHost = (url: string): string | undefined => {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * A safe label for a non-2xx reply: LiteLLM's `error.type` when it looks like an
+ * identifier, `html` for a gateway page, else `unknown`. The body is read (capped) and
+ * released, but never logged or returned: it can echo the request, and the grid's
+ * `error.message` includes part of the API key.
+ */
+const readErrorType = async (response: Response): Promise<string> => {
+  let text = '';
+  try {
+    const reader = response.body?.getReader();
+    const decoder = new TextDecoder();
+    while (reader && text.length < ERROR_BODY_LIMIT) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value, { stream: true });
+    }
+    await reader?.cancel();
+  } catch {
+    // A body that can't be read is just an unknown error type.
+  }
+  if (response.headers.get('content-type')?.includes('html') || text.trimStart().startsWith('<')) {
+    return 'html';
+  }
+  try {
+    const type = (JSON.parse(text) as { error?: { type?: unknown } } | null)?.error?.type;
+    return typeof type === 'string' && ERROR_TYPE.test(type) ? type : 'unknown';
+  } catch {
+    return 'unknown';
+  }
+};
+
 const isProbability = (p: unknown): p is number => typeof p === 'number' && p >= 0 && p <= 1;
+
+/**
+ * Jev reports a score as the expected level index (0..n-1, e.g. 1.98 with 3 levels). Derived
+ * from the per-level probabilities when all are present, so it is right whichever endpoint
+ * answered; otherwise the index is rescaled.
+ */
+const readScore = (
+  question: JevScoreQuestion,
+  answer: Record<string, unknown>
+): JevAnswer | null => {
+  const top = question.criteria.length - 1;
+  if (top < 1 || typeof answer.score !== 'number' || !Number.isFinite(answer.score)) return null;
+
+  const raw = (answer.probabilities ?? {}) as Record<string, unknown>;
+  const probabilities = question.criteria.map((_, level) => raw[String(level)]);
+  const complete = probabilities.every(isProbability);
+  const total = complete ? probabilities.reduce((sum, p) => sum + p, 0) : 0;
+
+  const index =
+    complete && total > 0
+      ? probabilities.reduce((sum, p, level) => sum + level * p, 0) / total
+      : answer.score;
+  const score = Math.min(1, Math.max(0, index / top));
+  const level = complete
+    ? probabilities.indexOf(Math.max(...probabilities))
+    : Math.round(score * top);
+  const confidence = isProbability(answer.confidence)
+    ? answer.confidence
+    : complete
+      ? probabilities[level]
+      : undefined;
+  return { type: 'score', score, level, ...(confidence !== undefined ? { confidence } : {}) };
+};
 
 /** The answer to `question`, or null when Jev's reply for it is unusable. */
 const readAnswer = (question: JevQuestion, raw: unknown): JevAnswer | null => {
@@ -62,6 +154,8 @@ const readAnswer = (question: JevQuestion, raw: unknown): JevAnswer | null => {
   if (question.type === 'noul') {
     return isProbability(answer.noul) ? { type: 'noul', noul: answer.noul } : null;
   }
+
+  if (question.type === 'score') return readScore(question, answer);
 
   const choice = answer.choice;
   // Own keys only: `in` would also accept "constructor" and the like.
@@ -147,6 +241,7 @@ export const askJev = async (
 ): Promise<Record<string, JevAnswer> | null> => {
   const { apiKey, url, model } = envConfig.jev;
   if (!apiKey) return null;
+  const target = { model, host: jevHost(url) };
 
   try {
     const response = await fetch(url, {
@@ -158,10 +253,10 @@ export const askJev = async (
         : AbortSignal.timeout(timeoutMs),
     });
     if (!response.ok) {
-      // Status only: an error body can echo the request, which carries user text. The
-      // body is still released, so the connection goes back to the pool.
-      logger.warn('Jev request failed', { status: response.status });
-      await response.body?.cancel();
+      const errorType = await readErrorType(response);
+      // Cancelled by the caller while the body was read: not a failure, as in the catch below.
+      if (signal?.aborted) return null;
+      logger.warn('Jev request failed', { status: response.status, errorType, ...target });
       onFailure?.({ kind: 'status', status: response.status });
       return null;
     }
@@ -182,6 +277,7 @@ export const askJev = async (
         questions: unusable.slice(0, 5),
         unusable: unusable.length,
         of: Object.keys(questions).length,
+        ...target,
       });
       if (!partial || unusable.length === Object.keys(questions).length) {
         onFailure?.({ kind: 'unusable' });
@@ -197,6 +293,7 @@ export const askJev = async (
     // and it can echo the request.
     logger.warn(`Jev request ${timedOut ? `timed out after ${timeoutMs}ms` : 'errored'}`, {
       error: error instanceof Error ? error.name : 'unknown',
+      ...target,
     });
     onFailure?.({ kind: timedOut ? 'timeout' : 'network' });
     return null;

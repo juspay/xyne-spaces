@@ -65,7 +65,7 @@ import {
 } from "xyne-claw-shared";
 import { loadCustomTools } from "../custom-tools.js";
 import { buildCopilotTool } from "../copilot.js";
-import { pinRunJudgeBackend } from "../judge-backend.js";
+import { beginJudgeRun } from "../judge-trace.js";
 import { optEnabled, pinRunOptimizations, tierOptimizationDefaults } from "../optimizations.js";
 import { activeToolCap, demotedCatalogItem, planActiveToolCap, readToolUsageRank } from "../active-tool-cap.js";
 import { buildExperimentTools, buildExperimentReviewTools, type ExperimentContext } from "../experiment.js";
@@ -163,7 +163,7 @@ import { buildTwinPersonaBlock } from "../twin-persona.js";
 import { buildProposePlanTool, PROPOSE_PLAN_TOOL_NAME, type ProposePlanRef } from "../propose-plan.js";
 import { presentationCatalogDefaultOn, isFreePresentationTool, buildPresentationPrimer } from "../presentation-catalog.js";
 import { buildProposeAgentTool, type ProposeAgentRef } from "../propose-agent.js";
-import { buildDescribeAgentTool, type DescribeAgentRef } from "../describe-agent.js";
+import { buildDescribeAgentTool, describeAgentCardForReply, type DescribeAgentRef } from "../describe-agent.js";
 import { buildSuggestConnectorsTool, SUGGEST_CONNECTORS_TOOL_NAME, type SuggestConnectorsRef } from "../suggest-connectors.js";
 import { buildSuggestProvidersTool, SUGGEST_PROVIDERS_TOOL_NAME, type SuggestProvidersRef } from "../suggest-providers.js";
 import { buildEmitBriefTool, EMIT_BRIEF_TOOL_NAME, type EmitBriefRef } from "../daily-brief.js";
@@ -577,7 +577,6 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     detached,
     fastMode,
     resumedFromHandoff,
-    judgeBackend,
     optimizations,
     memoryBankId,
     senderName,
@@ -591,7 +590,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
   } = req.body as InternalRunPayload;
 
   const experiment = normalizeExperimentContext(rawExperiment);
-  pinRunJudgeBackend(judgeBackend);
+  beginJudgeRun();
   pinRunOptimizations(optimizations, agentConfig?.["optimizations"], tierOptimizationDefaults(delegationMode));
 
   // [AUTODBG] claw-side receipt of every /run forward (esp. automations). Confirms
@@ -1604,6 +1603,7 @@ export async function processTask(
   const suggestProvidersRef: SuggestProvidersRef = {};
   const blockedConnectors = new Set<string>();
   const emitBriefRef: EmitBriefRef = {};
+  let experimentEnded = false;
   let callbackProvider = provider ?? "spaces";
   // Seed from THIS run's provider — a hardcoded default made every early
   // failure report the wrong model (740 codex / 461 claude rows, 2026-08-29).
@@ -2944,7 +2944,10 @@ export async function processTask(
       allTools.push(
         ...(experiment.mode === "review"
           ? buildExperimentReviewTools(experiment)
-          : buildExperimentTools(experiment, abortRun)),
+          : buildExperimentTools(experiment, () => {
+              experimentEnded = true;
+              abortRun?.();
+            })),
       );
       log(
         experiment.mode === "review"
@@ -4821,9 +4824,10 @@ export async function processTask(
         ? { pendingProviderSuggestions: suggestProvidersRef.value }
         : {}),
       ...(blockedConnectors.size > 0 ? { blockedConnectors: [...blockedConnectors] } : {}),
-      ...(proposeAgentRef.value || describeAgentRef.value
-        ? { pendingAgentCard: proposeAgentRef.value ?? describeAgentRef.value }
-        : {}),
+      ...(() => {
+        const card = proposeAgentRef.value ?? describeAgentCardForReply(describeAgentRef.value, dedupedPendingActions);
+        return card ? { pendingAgentCard: card } : {};
+      })(),
       // Daily brief: emit_brief normally aborts (→ catch branch below), but if the
       // run finished cleanly with a brief emitted, carry it here too. claw-auth
       // persists it to GeneratedContent and (on the SSE regenerate path) forwards
@@ -5014,7 +5018,10 @@ export async function processTask(
         pendingResponses: pendingResponsesAtError,
         // A queued capability card must survive the copilot terminal path too,
         // or "what can you do?" silently loses its card on those agents.
-        ...(describeAgentRef.value ? { pendingAgentCard: describeAgentRef.value } : {}),
+        ...(() => {
+          const card = describeAgentCardForReply(describeAgentRef.value, dedupedPendingActionsAtError);
+          return card ? { pendingAgentCard: card } : {};
+        })(),
         ...(suggestConnectorsRef.value
           ? { pendingConnectorSuggestions: suggestConnectorsRef.value }
           : {}),
@@ -5116,6 +5123,27 @@ export async function processTask(
         status: "completed",
         result: "",
         dailyBrief: emitBriefRef.value,
+        ...(err instanceof RunCancelledError && err.toolsUsed.length > 0 ? { toolsUsed: err.toolsUsed } : {}),
+        ...(err instanceof RunCancelledError && err.toolInvocations.length > 0 ? { toolInvocations: err.toolInvocations } : {}),
+        ...(err instanceof RunCancelledError ? { tokenUsage: err.tokenUsage } : {}),
+        provider: callbackProvider,
+        model: callbackModel,
+      });
+    } else if (
+      experimentEnded &&
+      !isUserCancel &&
+      (err instanceof RunCancelledError || abortSignal?.aborted)
+    ) {
+      log(`Session terminated by end-experiment: ${sessionId}`);
+      const partialResult = err instanceof RunCancelledError ? err.partialText?.trim() : "";
+      await sendCallback(callbackUrl, sessionToken, {
+        sessionId,
+        userId,
+        conversationId: conversationId ?? null,
+        agentSlug: agentSlug ?? null,
+        fastMode: fastModeForCallback,
+        status: "completed",
+        result: partialResult || "Experiment complete — report recorded.",
         ...(err instanceof RunCancelledError && err.toolsUsed.length > 0 ? { toolsUsed: err.toolsUsed } : {}),
         ...(err instanceof RunCancelledError && err.toolInvocations.length > 0 ? { toolInvocations: err.toolInvocations } : {}),
         ...(err instanceof RunCancelledError ? { tokenUsage: err.tokenUsage } : {}),

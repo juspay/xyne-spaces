@@ -490,6 +490,7 @@ export const V1_MAPPER: Readonly<Record<string, V1Target>> = {
   'tickets.listTable': { kind: 'query', name: 'tableTicketsPage' },
   'tickets.listByChannelInWindow': { kind: 'query', name: 'topicsExplorerTickets' },
   'tickets.get': { kind: 'query', name: 'ticketByIdV2' },
+  'tickets.forThreads': { kind: 'direct', method: 'POST', path: () => '/channels-desk/tickets' },
   'tickets.getDetails': { kind: 'query', name: 'ticketDetailsByIdV2' },
   'tickets.getByKey': { kind: 'query', name: 'ticketByXyneIdV3' },
   'tickets.getMany': { kind: 'query', name: 'ticketsByIds' },

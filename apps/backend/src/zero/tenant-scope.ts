@@ -45,6 +45,17 @@ const CUSTOM_SCOPES: Record<string, OrgScopeRule> = {
     ),
 };
 
+// apps.workspaceId is only the creating workspace; visibility is org/GLOBAL (mirrors AppsACL).
+const CROSS_WORKSPACE_SCOPES: Record<string, OrgScopeRule> = {
+  apps: (query, ctx) =>
+    query.where(({ or, cmp, exists }: any) =>
+      or(
+        cmp('scope', '=', 'GLOBAL'),
+        exists('orgWorkspaces', (w: ScopableQuery) => w.where('id', ctx.workspaceId)),
+      ),
+    ),
+};
+
 /** Reference data that is the same for every tenant. */
 const GLOBAL_REFERENCE_TABLES = new Set(['lookup_values', 'merchants', 'resources']);
 
@@ -61,6 +72,13 @@ export function scopeQueryToTenant<T>(query: T, ctx: Context, queryName: string)
   // fall through to the "unscoped table" error once workspaceId is dropped from them.
   if (CONNECT_SCOPED_TABLES.has(table)) {
     return query;
+  }
+  const crossWorkspaceRule = CROSS_WORKSPACE_SCOPES[table];
+  if (crossWorkspaceRule) {
+    if (!ctx.workspaceId) {
+      logger.warn('zero_query_missing_workspace', { query: queryName, table });
+    }
+    return crossWorkspaceRule(scopable, ctx) as unknown as T;
   }
   if (zeroTables[table] && 'workspaceId' in zeroTables[table].columns) {
     // Not expected on the read path — real callers carry a workspaceId. An absent

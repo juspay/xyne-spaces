@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { keepMentionsWithin } from '@/utils/mentionParser';
 import {
   ConversationRepository,
   CreateConversationInput,
@@ -14,9 +15,10 @@ import { ReactionRepository } from '../database/repositories/reactionRepository'
 import { UserRepository } from '../database/repositories/users';
 import { websocketService } from '../services/websocketService';
 import { redisService } from '../services/redisService';
+import { clearConversationAgentProgress, requestClawAgentCancel } from '../services/agentProgressService';
 import { uploadFiles, UploadedFileResult } from '../services/fileUploadService';
 import { Message } from '@prisma/client';
-import { MessageType, AttachmentEntityType, ChannelScopeType, ChannelRole } from '@xyne/shared';
+import { MessageType, AttachmentEntityType, ChannelScopeType, ChannelRole, WorkspaceRole } from '@xyne/shared';
 import { BotCommandParser, botProcessor, BotMessageMetadata } from '../services/bots';
 import { getBotInfo, isRegisteredBot } from '../bots/core/bot-utils';
 import { v4 as uuidv4 } from 'uuid';
@@ -382,7 +384,7 @@ export class ConversationController {
     try {
       const { channelId } = req.params;
       const {
-        content,
+        content: rawContent,
         msgType,
         visibleTo,
         fileMetadata: fileMetadataJson,
@@ -392,6 +394,16 @@ export class ConversationController {
         visibleTo?: string | null;
         fileMetadata?: string;
       } = req.body;
+      // Guests may only mention people in the channel (see keepMentionsWithin).
+      const content =
+        req.user?.role === WorkspaceRole.GUEST && rawContent?.includes('data-mention-type')
+          ? keepMentionsWithin(
+              rawContent,
+              new Set(
+                (await this.channelParticipantRepository.getChannelParticipants(channelId)).map(p => p.userId),
+              ),
+            )
+          : rawContent;
       const reqFiles =
         (req as Express.Request & { files?: { [fieldname: string]: Express.Multer.File[] } })
           .files || {};
@@ -1960,38 +1972,7 @@ export class ConversationController {
       const conversation = await this.conversationRepository.findById(conversationId);
       const channelId = conversation?.channelId;
       if (!channelId) return;
-
-      const key = `agent_progress:conversation:${conversationId}`;
-      const raw = await redisService.getAllHashFields(key);
-      const fields = Object.keys(raw);
-      if (fields.length === 0) return;
-
-      for (const agentUserId of fields) {
-        let stored: Record<string, unknown> = {};
-        try {
-          stored = JSON.parse(raw[agentUserId]) as Record<string, unknown>;
-        } catch {
-          /* malformed field — still broadcast a best-effort done below */
-        }
-        // Write the session-scoped tombstone so any straggler `working` events from
-        // this cancelled run are suppressed by the agentProgress endpoint and never
-        // repopulate the hash (which would cause a ghost spinner on the next rehydrate).
-        const storedSessionId = typeof stored.sessionId === 'string' ? stored.sessionId : null;
-        if (storedSessionId) {
-          await redisService.set(`agent_progress_done_session:${storedSessionId}`, new Date().toISOString(), 120);
-        }
-        const payload = { ...stored, conversationId, channelId, agentUserId, status: 'done', timestamp: new Date().toISOString() };
-        await redisService.broadcastMessageToSession(channelId, {
-          messageId: `agent_progress_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-          conversationId,
-          senderId: agentUserId,
-          senderName: String(stored.agentSlug ?? ''),
-          content: JSON.stringify({ type: 'agent_progress', data: payload }),
-          msgType: MessageType.SYSTEM,
-          createdAt: new Date(),
-        });
-      }
-      await redisService.deleteHashField(key, fields);
+      await clearConversationAgentProgress(conversationId, channelId);
     } catch (error) {
       logger.error('[clearConversationAgentProgress] failed:', error);
       throw error;
@@ -2014,16 +1995,7 @@ export class ConversationController {
         return;
       }
 
-      const clawAuthUrl = `${config.xyneClaw.authUrl}/claw/api/v1/agent-chat/${encodeURIComponent(agentSlug)}/chat/cancel`;
-      const cancelRes = await fetch(clawAuthUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-id': userId,
-          ...(config.xyneClaw.s2sKey ? { 'x-s2s-key': config.xyneClaw.s2sKey } : {}),
-        },
-        body: JSON.stringify({ conversationId }),
-      });
+      const cancelRes = await requestClawAgentCancel({ conversationId, agentSlug, userId });
 
       if (!cancelRes.ok) {
         const body = (await cancelRes.json().catch(() => ({}))) as { error?: string };

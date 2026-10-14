@@ -31,7 +31,7 @@ import { LITELLM, litellmEndpoint } from "./config.js";
 import { createLogger } from "./logger.js";
 import { metric } from "./metrics.js";
 import { optEnabled } from "./optimizations.js";
-import { recordJudgeOutcome } from "./judge-backend.js";
+import { recordJudgeOutcome } from "./judge-trace.js";
 import { holdErrors, holdThreshold, passThreshold, precheckEnabled, runPrecheck, type PrecheckAsk } from "./verify-prefilter.js";
 const log = createLogger("verify-response");
 

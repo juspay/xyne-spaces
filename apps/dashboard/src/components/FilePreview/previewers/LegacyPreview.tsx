@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react';
 import { AttachmentPreviewPane } from '../../FileViewer/AttachmentPreviewPane';
+import { isApiAddress } from '../streamSource';
 import type { PreviewerProps } from '../types';
 
 /**
@@ -16,6 +17,7 @@ export default function LegacyPreview(props: PreviewerProps): ReactElement {
         fileName={props.file.name}
         mimeType={props.file.mimetype}
         fileSize={props.file.size}
+        {...(isApiAddress(props.file.id) ? { fileUrl: props.file.id } : {})}
         flush
       />
     </div>

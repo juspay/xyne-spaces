@@ -6,6 +6,19 @@ import { getStoredUser } from '@/fixtures/fixture-helpers';
 import { testContext } from '@/tests/shared/runtime/test-context';
 import { assertValidUserAlias } from '@/tests/shared/support/literal-validation';
 
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// The link dialog hands focus back to its trigger when it unmounts; waiting for
+// that keeps the next keyboard step from racing the focus restore.
+async function waitForLinkDialogToClose(): Promise<void> {
+  await testContext.activePage
+    .locator('input[type="url"][placeholder*="example.com"]')
+    .first()
+    .waitFor({ state: 'hidden' });
+}
+
 export default class InputBoxSteps {
   // ===========================================
   // SETUP
@@ -286,6 +299,12 @@ export default class InputBoxSteps {
   @Step('selecting all text in editor')
   public async selectAllTextInEditor(): Promise<void> {
     const page = testContext.activePage;
+    const editor = page.locator("[data-testid='message-input']").first();
+    // A closing dialog (e.g. the link dialog) hands focus back to its trigger
+    // asynchronously; without this the shortcut can land outside the editor.
+    // Focus rather than click: clicking a link in the editor opens its popover.
+    await editor.focus();
+    await expect(editor).toBeFocused();
     const isMac = process.platform === 'darwin';
     await page.keyboard.press(isMac ? 'Meta+a' : 'Control+a');
   }
@@ -627,6 +646,7 @@ export default class InputBoxSteps {
   public async clickApplyLinkButton(): Promise<void> {
     const page = testContext.activePage;
     await page.locator('button:has-text("Apply")').first().click();
+    await waitForLinkDialogToClose();
   }
 
   @Step('clicking update link button')
@@ -635,6 +655,7 @@ export default class InputBoxSteps {
     // Button label toggles "Update"/"Apply" by selection state; both share this
     // track-name and the same handler, so target it directly.
     await page.locator("[data-track-name='APPLY_LINK']").first().click();
+    await waitForLinkDialogToClose();
   }
 
   @Step('clicking remove link button')
@@ -686,10 +707,9 @@ export default class InputBoxSteps {
   public async verifyLinkUrlContains(expectedUrl: string): Promise<void> {
     const page = testContext.activePage;
     const link = page.locator("[data-testid='message-input'] a").first();
-    const href = await link.getAttribute('href');
-    assert.ok(
-      href?.includes(expectedUrl),
-      `Expected href to contain "${expectedUrl}", got "${href}"`
+    await expect(link, `Expected link href to contain "${expectedUrl}"`).toHaveAttribute(
+      'href',
+      new RegExp(escapeRegExp(expectedUrl))
     );
   }
 
@@ -697,10 +717,9 @@ export default class InputBoxSteps {
   public async verifyLinkUrlWasUpdated(): Promise<void> {
     const page = testContext.activePage;
     const link = page.locator("[data-testid='message-input'] a").first();
-    const href = await link.getAttribute('href');
-    assert.ok(
-      href?.includes('updated.com'),
-      `Expected href to be updated to updated.com, got "${href}"`
+    await expect(link, 'Expected link href to be updated to updated.com').toHaveAttribute(
+      'href',
+      /updated\.com/
     );
   }
 

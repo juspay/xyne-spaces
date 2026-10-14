@@ -17,7 +17,6 @@ import {
 } from 'lucide-react';
 import { type TabItem } from '../../ui/Tabs';
 import { cn } from '../../../utils/classNames';
-import { downloadFile } from '../../../services/clients/fileFetchService';
 import { useCitationDocs } from '../citationDocs';
 import CitationDocsPanel from '../CitationDocsPanel';
 import type { ConversationArtifact } from '../../../services/XyneAI/XyneAIArtifactsService';
@@ -112,6 +111,19 @@ function writeLastOpen(conversationId: string | null, id: string | null): void {
   }
 }
 
+const PREVIEW_TIME = new Intl.DateTimeFormat(undefined, {
+  month: 'short',
+  day: 'numeric',
+  hour: 'numeric',
+  minute: '2-digit',
+});
+
+function previewLabel(artifact: ConversationArtifact): string {
+  const created = new Date(artifact.createdAt);
+  const when = Number.isNaN(created.getTime()) ? '' : ` · ${PREVIEW_TIME.format(created)}`;
+  return `${artifact.title}${when}${artifact.status === 'STALE' ? ' · ended' : ''}`;
+}
+
 const TRANSIENT_APP_ARTIFACT_ID = '__workspace-transient-app__';
 const TRANSIENT_DESIGN_ARTIFACT_ID = '__workspace-transient-design__';
 
@@ -183,6 +195,8 @@ function WorkspacePaneInner({
     setTabs(current => closeTab(current, id));
   }, []);
   const [transientAppId, setTransientAppId] = useState<string | null>(null);
+  const [previewId, setPreviewId] = useState<string | null>(null);
+  const [previewKept, setPreviewKept] = useState(false);
   const { artifacts, isLoading, isError, patch } = useConversationArtifacts(conversationId);
   const citations = useCitationDocs();
   const citationActiveId = citations?.activeId ?? null;
@@ -207,6 +221,8 @@ function WorkspacePaneInner({
   useEffect(() => {
     setSelectedId(null);
     setTransientAppId(null);
+    setPreviewId(null);
+    setPreviewKept(false);
     seenArtifactIds.current = null;
   }, [conversationId]);
 
@@ -228,6 +244,7 @@ function WorkspacePaneInner({
     const localDiff = artifacts.find(a => isLocalDiffArtifact(a) && isNew(a));
     if (localDiff) {
       setTab('preview');
+      setPreviewId(localDiff.id);
       setTransientAppId(null);
       setSelectedId(null);
       return;
@@ -267,6 +284,7 @@ function WorkspacePaneInner({
   useEffect(() => {
     if (seq === 0) return;
     setTab(requestedTab);
+    if (requestedTab === 'preview' && openArtifactId) setPreviewId(openArtifactId);
     if (openAppId) return;
     setTransientAppId(null);
     setSelectedId(openArtifactId ?? null);
@@ -315,15 +333,26 @@ function WorkspacePaneInner({
   }, [artifacts]);
   const reviewGuide = useReviewGuide(artifacts);
 
-  const previewArtifact = useMemo(() => {
-    const candidates = artifacts.filter(a => a.kind === 'PREVIEW' || a.kind === 'DIFF');
-    if (candidates.length === 0) return null;
-    return (
-      [...candidates].sort(
-        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-      )[0] ?? null
-    );
-  }, [artifacts]);
+  const previewCandidates = useMemo(
+    () =>
+      artifacts
+        .filter(a => a.kind === 'PREVIEW' || a.kind === 'DIFF')
+        .sort(
+          (a, b) =>
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime() ||
+            (a.kind === 'PREVIEW' ? 0 : 1) - (b.kind === 'PREVIEW' ? 0 : 1),
+        ),
+    [artifacts],
+  );
+
+  const previewArtifact = useMemo(
+    () =>
+      previewCandidates.find(a => a.id === previewId) ??
+      previewCandidates.find(a => a.status !== 'STALE') ??
+      previewCandidates[0] ??
+      null,
+    [previewCandidates, previewId],
+  );
 
   const openArtifact = useCallback((artifact: ConversationArtifact): void => {
     setSelectedId(artifact.id);
@@ -370,7 +399,13 @@ function WorkspacePaneInner({
     writeLastOpen(conversationId, selectedId);
   }, [conversationId, selectedId]);
 
-  const showDetail = (tab === 'artifacts' || tab === 'sources') && selected !== null;
+  const showDetail =
+    (tab === 'artifacts' || tab === 'sources' || tab === 'files') && selected !== null;
+  const previewShown = !showDetail && tab === 'preview';
+
+  useEffect(() => {
+    if (previewShown) setPreviewKept(true);
+  }, [previewShown]);
   // A web page open in a tab, kept loaded for the agent while the conversation is.
   const hasOpenPages = surfaceItems.some(
     item => tabs.openIds.includes(item.id) && (item.kind === 'link' || item.kind === 'page'),
@@ -588,6 +623,43 @@ function WorkspacePaneInner({
             />
           </div>
         ) : null}
+        {previewArtifact && (previewShown || previewKept) ? (
+          <div
+            className={
+              previewShown
+                ? 'flex h-full min-h-0 w-full flex-col'
+                : 'invisible absolute inset-0 flex flex-col'
+            }
+            aria-hidden={previewShown ? undefined : true}
+          >
+            {previewCandidates.length > 1 && (
+              <div className='flex-shrink-0 border-b border-border px-3 py-1.5'>
+                <select
+                  value={previewArtifact.id}
+                  onChange={event => setPreviewId(event.target.value)}
+                  aria-label='Choose a preview'
+                  className='h-7 w-full truncate rounded border border-border bg-background px-2 text-xs text-foreground'
+                  data-track-category='AskAI'
+                  data-track-name='workspace-preview-pick'
+                >
+                  {previewCandidates.map(candidate => (
+                    <option key={candidate.id} value={candidate.id}>
+                      {previewLabel(candidate)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <div className='min-h-0 flex-1'>
+              <ArtifactInlineView
+                key={previewArtifact.id}
+                artifact={previewArtifact}
+                appPane={appPane}
+                reviewGuide={reviewGuide}
+              />
+            </div>
+          </div>
+        ) : null}
         {showDetail ? null : tab === 'artifacts' ? (
           <ArtifactList
             artifacts={listedArtifacts}
@@ -613,13 +685,7 @@ function WorkspacePaneInner({
             />
           )
         ) : tab === 'preview' ? (
-          previewArtifact ? (
-            <ArtifactInlineView
-              artifact={previewArtifact}
-              appPane={appPane}
-              reviewGuide={reviewGuide}
-            />
-          ) : (
+          previewArtifact ? null : (
             <div className='flex h-full flex-col items-center justify-center gap-1 px-8 text-center'>
               <p className='text-sm font-medium text-foreground'>Nothing to preview</p>
               <p className='text-xs text-muted-foreground'>
@@ -656,12 +722,7 @@ function WorkspacePaneInner({
                 isError={isError}
                 emptyTitle='No files yet'
                 emptyBody='Files the agent delivers in this conversation will appear here.'
-                onOpen={(artifact): void => {
-                  void downloadFile(
-                    `/xyne-ai/v2/attachments/${encodeURIComponent(artifact.openRef.refId)}/download`,
-                    artifact.title,
-                  );
-                }}
+                onOpen={openArtifact}
                 onPatch={patch}
               />
             </div>

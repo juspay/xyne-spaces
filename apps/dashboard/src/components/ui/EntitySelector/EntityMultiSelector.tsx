@@ -198,6 +198,7 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
             </span>
             <button
               type='button'
+              aria-label={`Remove ${opt.label}`}
               onClick={e => {
                 e.stopPropagation();
                 removeValue(opt.value);
@@ -228,6 +229,7 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
               </span>
               <button
                 type='button'
+                aria-label='Clear all selected'
                 onClick={e => {
                   e.stopPropagation();
                   onMultiSelect([]);

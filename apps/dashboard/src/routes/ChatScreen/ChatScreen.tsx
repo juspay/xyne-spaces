@@ -54,17 +54,22 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
   const chatSidebarPanelRef = useRef<PanelImperativeHandle>(null);
 
   // Listen for resize events from global shortcuts
-  const handleResizeEvent = useCallback((event: Event) => {
-    const customEvent = event as CustomEvent<{ pixelDelta: number }>;
-    if (chatSidebarPanelRef.current) {
-      const { inPixels } = chatSidebarPanelRef.current.getSize();
-      const nextWidth = Math.min(
-        CHAT_SIDEBAR_MAX_WIDTH,
-        Math.max(CHAT_SIDEBAR_MIN_WIDTH, inPixels + customEvent.detail.pixelDelta),
-      );
-      chatSidebarPanelRef.current.resize(`${nextWidth}px`);
-    }
-  }, []);
+  const handleResizeEvent = useCallback(
+    (event: Event) => {
+      // Resizing would reopen the collapsed panel, leaving it visible but inert.
+      if (isFullScreenPage) return;
+      const customEvent = event as CustomEvent<{ pixelDelta: number }>;
+      if (chatSidebarPanelRef.current) {
+        const { inPixels } = chatSidebarPanelRef.current.getSize();
+        const nextWidth = Math.min(
+          CHAT_SIDEBAR_MAX_WIDTH,
+          Math.max(CHAT_SIDEBAR_MIN_WIDTH, inPixels + customEvent.detail.pixelDelta),
+        );
+        chatSidebarPanelRef.current.resize(`${nextWidth}px`);
+      }
+    },
+    [isFullScreenPage],
+  );
 
   useEffect(() => {
     window.addEventListener('chat-resize-left-panel', handleResizeEvent);
@@ -145,7 +150,8 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
                 collapsible
                 collapsedSize={0}
               >
-                <aside className='w-full h-full'>
+                {/* Collapsed, it is out of reach for keyboard and screen readers too. */}
+                <aside className='w-full h-full' inert={isFullScreenPage}>
                   <ChatDirectory
                     channelData={channelData}
                     allChannelsUserStatus={allChannelsUserStatus}

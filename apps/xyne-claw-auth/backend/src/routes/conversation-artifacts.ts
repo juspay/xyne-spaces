@@ -8,10 +8,10 @@ import {
   getConversationArtifact,
   isArtifactRefService,
   isArtifactStatus,
+  canReadConversation,
   listConversationArtifacts,
   toOpenRef,
   updateConversationArtifact,
-  userOwnsConversation,
 } from "../lib/conversation-artifacts.js";
 
 const log = createLogger("conversation-artifacts-routes");
@@ -24,12 +24,22 @@ function serialize(artifact: NonNullable<ArtifactRow>): Record<string, unknown> 
   return { ...artifact, openRef: toOpenRef(artifact) };
 }
 
+// Spaces' ACL keys membership by the Spaces id; requireAuth only stamps it when
+// it differs from the Claw id, so fall back to that (as run-stream does).
+function spacesUserIdOf(req: Request): string | undefined {
+  const value = req.headers["x-spaces-user-id"];
+  return (typeof value === "string" && value.trim()) || getRequesterId(req) || undefined;
+}
+
 // Artifact rows and conversation chat rows may be keyed by EITHER verified id
 // form of a user (canonical Claw id or the workspace's raw Spaces alias) —
 // every ACL compare must match the caller's full alias set, not one form.
-async function canRead(artifact: NonNullable<ArtifactRow>, requesterAliases: readonly string[]): Promise<boolean> {
+// Reading is conversation-scoped: anyone who can access the conversation can
+// read its artifacts. Writing stays creator-only (canWrite).
+async function canRead(artifact: NonNullable<ArtifactRow>, req: Request): Promise<boolean> {
+  const requesterAliases = getRequesterAliases(req);
   if (requesterAliases.includes(artifact.createdByUserId)) return true;
-  return userOwnsConversation(artifact.conversationId, [...requesterAliases]);
+  return canReadConversation(artifact.conversationId, [...requesterAliases], spacesUserIdOf(req));
 }
 
 function canWrite(artifact: NonNullable<ArtifactRow>, requesterAliases: readonly string[]): boolean {
@@ -48,7 +58,7 @@ conversationArtifactsRouter.get("/", async (req: Request, res: Response): Promis
       res.status(400).json({ success: false, error: "conversationId is required" });
       return;
     }
-    const rows = await listConversationArtifacts(conversationId, getRequesterAliases(req));
+    const rows = await listConversationArtifacts(conversationId, getRequesterAliases(req), spacesUserIdOf(req));
     res.json({ success: true, artifacts: rows.map(serialize) });
   } catch (err) {
     log.error("list failed", err);
@@ -72,7 +82,7 @@ conversationArtifactsRouter.get("/by-ref", async (req: Request, res: Response): 
     const rows = await findArtifactsByRef(service, refId);
     const visible: Record<string, unknown>[] = [];
     for (const row of rows) {
-      if (await canRead(row, getRequesterAliases(req))) visible.push(serialize(row));
+      if (await canRead(row, req)) visible.push(serialize(row));
     }
     res.json({ success: true, artifacts: visible });
   } catch (err) {
@@ -89,7 +99,7 @@ conversationArtifactsRouter.get("/:id", async (req: Request<{ id: string }>, res
       return;
     }
     const artifact = await getConversationArtifact(req.params.id);
-    if (!artifact || !(await canRead(artifact, getRequesterAliases(req)))) {
+    if (!artifact || !(await canRead(artifact, req))) {
       res.status(404).json({ success: false, error: "Artifact not found" });
       return;
     }
@@ -109,7 +119,7 @@ conversationArtifactsRouter.patch("/:id", async (req: Request<{ id: string }>, r
     }
     const artifact = await getConversationArtifact(req.params.id);
     const requesterAliases = getRequesterAliases(req);
-    if (!artifact || !(await canRead(artifact, requesterAliases))) {
+    if (!artifact || !(await canRead(artifact, req))) {
       res.status(404).json({ success: false, error: "Artifact not found" });
       return;
     }
@@ -206,7 +216,7 @@ async function readableArtifact(req: Request, res: Response): Promise<NonNullabl
     res.status(404).json({ success: false, error: "Artifact not found" });
     return null;
   }
-  if (!(await canRead(artifact, getRequesterAliases(req)))) {
+  if (!(await canRead(artifact, req))) {
     res.status(403).json({ success: false, error: "Not allowed" });
     return null;
   }

@@ -869,6 +869,8 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
               >
                 <button
                   type='button'
+                  aria-label='Starred only'
+                  aria-pressed={showStarredOnly}
                   className={`flex size-7 shrink-0 items-center justify-center rounded-md transition-colors ${
                     showStarredOnly
                       ? 'bg-amber-50 text-amber-600'

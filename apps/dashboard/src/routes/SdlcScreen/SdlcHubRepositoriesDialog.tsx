@@ -27,10 +27,12 @@ export function SdlcHubRepositoriesDialog(props: {
   onOpenChange: (open: boolean) => void;
   channelId: string;
   projectId: string;
+  /** Hub admins only; everyone else gets the list without the add and disconnect controls. */
+  canManage: boolean;
   /** Live from Zero, so the list follows each add and disconnect once it syncs. */
   repositories: Array<{ id: string; name: string; url: string }>;
 }): ReactElement {
-  const { open, onOpenChange, channelId, projectId, repositories } = props;
+  const { open, onOpenChange, channelId, projectId, canManage, repositories } = props;
   const [adding, setAdding] = useState(false);
   const [registeringLink, setRegisteringLink] = useState(false);
   const [providerKey, setProviderKey] = useState<string | null>(null);
@@ -137,7 +139,7 @@ export function SdlcHubRepositoriesDialog(props: {
     }
   };
 
-  if (registeringLink) {
+  if (canManage && registeringLink) {
     return (
       <Dialog open={open} onOpenChange={onOpenChange} title='Register repository'>
         <SdlcRegisterRepositoryForm
@@ -161,7 +163,7 @@ export function SdlcHubRepositoriesDialog(props: {
     );
   }
 
-  if (adding) {
+  if (canManage && adding) {
     return (
       <Dialog open={open} onOpenChange={onOpenChange} title='Add repositories'>
         <div className='p-6'>
@@ -261,6 +263,7 @@ export function SdlcHubRepositoriesDialog(props: {
         <h2 className='text-lg font-semibold tracking-tight'>Hub repositories</h2>
         <p className='mt-1.5 text-sm leading-6 text-muted-foreground'>
           Repositories this hub covers.
+          {!canManage && ' Only a hub admin can add or disconnect one.'}
         </p>
 
         <ul className='mt-6 max-h-72 divide-y overflow-y-auto rounded-lg border'>
@@ -273,16 +276,18 @@ export function SdlcHubRepositoriesDialog(props: {
                   {repository.url}
                 </span>
               </span>
-              <Button
-                type='button'
-                variant='ghost'
-                size='sm'
-                trackAction={() => disconnect(repository.id)}
-                data-track-category='SdlcHub'
-                data-track-name='HubRepositoryDisconnected'
-              >
-                Disconnect
-              </Button>
+              {canManage && (
+                <Button
+                  type='button'
+                  variant='ghost'
+                  size='sm'
+                  trackAction={() => disconnect(repository.id)}
+                  data-track-category='SdlcHub'
+                  data-track-name='HubRepositoryDisconnected'
+                >
+                  Disconnect
+                </Button>
+              )}
             </li>
           ))}
           {repositories.length === 0 && (
@@ -290,17 +295,20 @@ export function SdlcHubRepositoriesDialog(props: {
           )}
         </ul>
 
-        <div className='mt-7 flex justify-between gap-2'>
-          <Button
-            type='button'
-            variant='outline'
-            onClick={() => setAdding(true)}
-            data-track-category='SdlcHub'
-            data-track-name='HubRepositoriesAddOpened'
-          >
-            <Plus />
-            Add repositories
-          </Button>
+        <div className='mt-7 flex justify-end gap-2'>
+          {canManage && (
+            <Button
+              type='button'
+              variant='outline'
+              className='mr-auto'
+              onClick={() => setAdding(true)}
+              data-track-category='SdlcHub'
+              data-track-name='HubRepositoriesAddOpened'
+            >
+              <Plus />
+              Add repositories
+            </Button>
+          )}
           <Button
             type='button'
             onClick={() => onOpenChange(false)}
