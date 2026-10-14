@@ -1,9 +1,10 @@
+import { pipeline } from 'node:stream/promises';
 import express, { type Request, type Response, type Router } from 'express';
 import { createWorkflowRouter, type RouteAccess, type RouteRequest } from '@xyne/workflow-sdk';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { webhookLimiter } from '@/middleware/rateLimiters';
-import { uploadConfig } from '@/middleware/upload';
+import { workflowAttachmentUpload } from '@/middleware/upload';
 import { ShareableEntityType } from '@xyne/shared';
 import { appResourceAccessService } from '@/services/appResourceAccessService';
 import { SDLC_AUTHOR_METADATA_KEY, sdlcAuthorOf } from './agents/sdlc-dispatch';
@@ -159,6 +160,32 @@ const assertAppMayUseWorkflow = async (
   }
 };
 
+const resolveWorkflowUploadScope: express.RequestHandler = (req, res, next) => {
+  void (async () => {
+    const fromSession = req.user?.workspaceId;
+    if (fromSession) {
+      (req as { workflowUploadWorkspaceId?: string }).workflowUploadWorkspaceId = fromSession;
+      next();
+      return;
+    }
+
+    const execId = req.params['execId'];
+    if (typeof execId === 'string' && execId !== '') {
+      const workflowId = await workflowOfExecution(execId);
+      const workflow = workflowId ? await persistence.getWorkflow(workflowId) : null;
+      const workspaceId = attrsOf(workflow?.attributes)?.workspaceId;
+      if (workspaceId) {
+        (req as { workflowUploadWorkspaceId?: string }).workflowUploadWorkspaceId = workspaceId;
+        next();
+        return;
+      }
+    }
+
+    // No session and no run to inherit from: refuse before reading a byte.
+    res.status(404).json({ error: 'Not found' });
+  })().catch(next);
+};
+
 const buildRouteRequest = (req: Request, rawBodyRoute: boolean): RouteRequest => {
   const body: unknown = req.body;
 
@@ -174,13 +201,17 @@ const buildRouteRequest = (req: Request, rawBodyRoute: boolean): RouteRequest =>
     }
   }
 
-  // Multer puts parsed files on req.files; the SDK's upload routes read them from here.
+  // Multer streamed each part into storage as it parsed; a route sees the
+  // reference, never the bytes. `path` is the key it filed under.
   const multerFiles = Array.isArray(req.files) ? req.files : [];
   const files = multerFiles.map((f) => ({
     fieldName: f.fieldname,
-    name: f.originalname,
-    mimeType: f.mimetype,
-    bytes: new Uint8Array(f.buffer),
+    attachment: {
+      name: f.originalname,
+      mimeType: f.mimetype,
+      handle: f.path,
+      size: f.size,
+    },
   }));
 
   const rawBody = Buffer.isBuffer(body)
@@ -227,7 +258,16 @@ const sendRouteResponse = async (
     return;
   }
 
-  // Binary — attachment bytes streamed through `storage.read`.
+  if (response.bodyStream) {
+    if (routePath === '/attachments') {
+      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(downloadName)}"`);
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+    }
+    res.status(response.status);
+    await pipeline(response.bodyStream as NodeJS.ReadableStream, res);
+    return;
+  }
+
   if (response.body instanceof Uint8Array) {
     // Defence in depth. The SDK already sets these on /attachments, but this route emits
     // raw user-uploaded bytes: an uploaded HTML or SVG must never render in the app
@@ -318,7 +358,11 @@ const mount = (
     if (allow && !allow.has(key)) continue;
 
     const middleware: express.RequestHandler[] = route.multipart
-      ? [uploadConfig.any(), express.json({ limit: '10mb' })]
+      ? [
+          resolveWorkflowUploadScope,
+          workflowAttachmentUpload.any(),
+          express.json({ limit: '10mb' }),
+        ]
       : route.rawBody
         ? [express.raw({ type: () => true, limit: '10mb' })]
         : [express.json({ limit: '10mb' })];
