@@ -1,15 +1,23 @@
 import { type ReactElement } from 'react';
 
+import { ActivityScreen as NewActivityScreen } from '@/src/features/activity';
+import { useFlag } from '@/src/flags';
 import ActivityScreen from '@/src/screens/tabs/activity-screen';
 
 import { SpacesTabScreen } from './_tab-screen';
 
 /**
- * Route shell. The screen is shared with the classic shell; only the chrome
- * around it is per-shell, because the classic shell renders its header above
- * the pager and this one does not have a pager.
+ * Route shell.
+ *
+ * The classic screen renders its list only and takes its header from the
+ * chrome, so it keeps the `SpacesTabScreen` wrapper. The new one owns its
+ * layout and needs none.
  */
 export default function Screen(): ReactElement {
+  if (useFlag('ui.activity')) {
+    return <NewActivityScreen />;
+  }
+
   return (
     <SpacesTabScreen tab='activity'>
       <ActivityScreen />
