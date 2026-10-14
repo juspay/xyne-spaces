@@ -1252,6 +1252,12 @@ export async function prepareRun(
             effectiveProviderConfigs = Object.fromEntries(nextConfigs);
           }
           effectiveProviderOrder = [];
+          // Clearing providerOrder is not enough: claw still appends the
+          // "spaces" platform model as a terminal fallback for any non-spaces
+          // primary (xyne-claw routes/run.ts attempt chain). A pinned run must
+          // answer on the pinned model or fail visibly — never silently swap
+          // to a different model the user did not pick (XYNE-66320).
+          mergedAgentConfig = { ...mergedAgentConfig, providerFallbackToSpaces: false };
         } else if (runOverride.provider === "litellm" && runOverride.model?.trim()) {
           // No agent litellm credential — the pick came off the platform
           // allowed-model list (litellm-models' claw fallback). Apply it as a

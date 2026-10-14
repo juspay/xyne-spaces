@@ -4,6 +4,7 @@ import { prisma, type AppTransactionClient } from "../db.js";
 import { formatDayIST } from "../lib/ist-time.js";
 import { createLogger } from "../logger.js";
 import { userIdFilter } from "./userIdFilter.js";
+import { answeredByFrom, modelFallbackFromRunMetadata, type AnsweredBy, type ModelFallbackInfo } from "../lib/run-answered-by.js";
 
 const log = createLogger("agent-run");
 
@@ -243,6 +244,10 @@ export interface FinalizeRunInput {
    *  deterministically once branching introduces multiple assistant siblings. */
   chatMessageId?: string | null;
   fastMode?: boolean | null;
+  /** Set when claw answered on a later provider attempt than the one the run
+   *  asked for. Merged into `metadata.modelFallback` (no dedicated column) so
+   *  /messages can show "Answered by X — fell back from Y" (XYNE-66319). */
+  modelFallback?: ModelFallbackInfo | null;
 }
 
 /**
@@ -497,8 +502,17 @@ export const agentRunRepository = {
     // "running" placeholders (see below).
     const existingRow = await tx.agentRun.findUnique({
       where: { sessionId },
-      select: { toolInvocations: true, userId: true, agentSlug: true },
+      select: { toolInvocations: true, userId: true, agentSlug: true, metadata: true },
     });
+    // Merge (never replace) metadata: it also carries integration config such
+    // as the external result callback.
+    const existingMetadata =
+      existingRow?.metadata && typeof existingRow.metadata === "object" && !Array.isArray(existingRow.metadata)
+        ? (existingRow.metadata as Record<string, unknown>)
+        : {};
+    const mergedMetadata = input.modelFallback
+      ? ({ ...existingMetadata, modelFallback: input.modelFallback } as unknown as Prisma.InputJsonValue)
+      : undefined;
     const existing = Array.isArray(existingRow?.toolInvocations)
       ? (existingRow!.toolInvocations as Array<Record<string, unknown>>)
       : [];
@@ -567,6 +581,7 @@ export const agentRunRepository = {
           lastRetryReason: input.latency.lastRetryReason ?? null,
         } : {}),
         ...(input.chatMessageId !== undefined ? { chatMessageId: input.chatMessageId } : {}),
+        ...(mergedMetadata !== undefined ? { metadata: mergedMetadata } : {}),
         completedAt: new Date(),
         currentToolLabel: null,
       },
@@ -633,6 +648,27 @@ export const agentRunRepository = {
 
   /** Accepts one id or the caller's alias pair (canonical + raw Spaces id);
    *  runs may be keyed by either (see getRequesterAliases). */
+  /**
+   * "Answered by" per run for the chat transcript: the provider/model that
+   * produced the reply plus the fallback descriptor from metadata. Reads
+   * metadata here and returns ONLY the sanitized fallback — metadata also holds
+   * integration secrets (encrypted callback secret) and must never be sent to
+   * clients wholesale.
+   */
+  answeredByForSessions: async (sessionIds: string[]): Promise<Map<string, AnsweredBy>> => {
+    const out = new Map<string, AnsweredBy>();
+    if (sessionIds.length === 0) return out;
+    const rows = await prisma.agentRun.findMany({
+      where: { sessionId: { in: sessionIds } },
+      select: { sessionId: true, provider: true, model: true, metadata: true },
+    });
+    for (const row of rows) {
+      const answeredBy = answeredByFrom(row.provider, row.model, modelFallbackFromRunMetadata(row.metadata));
+      if (answeredBy) out.set(row.sessionId, answeredBy);
+    }
+    return out;
+  },
+
   listByUser: (userIds: string | string[], opts?: { status?: string; limit?: number; conversationId?: string; agentSlug?: string }) =>
     prisma.agentRun.findMany({
       where: {

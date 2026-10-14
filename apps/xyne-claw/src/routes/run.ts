@@ -185,6 +185,12 @@ import { ingestAttachments } from "../attachment-ingest.js";
 import { metric } from "../metrics.js";
 import { decidePlanTracking, isShortFollowUp, readPreviousAgentReply } from "../plan-gate.js";
 import { runWithProviderFallback } from "../provider-fallback.js";
+import {
+  buildModelFallbackReport,
+  reportedModelForAttempt,
+  type ModelFallbackReason,
+  type PlatformModelDefaults,
+} from "../run-model-report.js";
 import { isDraining } from "../drain.js";
 import { routeTaskMode } from "../mode-router.js";
 import {
@@ -3236,6 +3242,20 @@ export async function processTask(
     // repos read-only). A rare automation that genuinely needs to write/run can
     // opt out with agentConfig.allowWriteInReadOnlyJob.
     const isReadOnlyJob = eventType === "automation" || eventType === "scheduled" || isScheduledRun;
+    // Platform (LiteLLM) branch model precedence — mirrors agent.ts runTask:
+    // modelSettings.model (per-agent or per-run "spaces" pin) → automation
+    // model for automation/scheduled runs → platform default (XYNE-66321).
+    const modelReportDefaults: PlatformModelDefaults = {
+      modelSettingsModel: modelSettings?.model,
+      automationRun: isReadOnlyJob,
+      defaultModel: LITELLM.model,
+      automationModel: LITELLM.automationModel,
+    };
+    // Early failures (before the attempt loop) report this run's platform
+    // model, not always the default.
+    if (callbackProvider === "spaces") {
+      callbackModel = reportedModelForAttempt({ provider: "spaces", config: undefined }, modelReportDefaults);
+    }
     const allowWriteInReadOnlyJob = agentConfig?.["allowWriteInReadOnlyJob"] === true;
     // forceReadOnlySandbox: per-agent opt-in to the read-only sbx-git path for ALL
     // runs (reviewer agents). It wins over allowWriteInReadOnlyJob — explicit
@@ -4219,6 +4239,9 @@ export async function processTask(
     // fallback (a 429/quota rate_limit_error, or "empty completion from <p>").
     let providerFellBack = false;
     let lastFallbackUnderlying: string | undefined;
+    // Why the most recent fallback happened — surfaced to the user as part of
+    // "Answered by X (fell back from Y)" (XYNE-66319).
+    let lastFallbackReason: ModelFallbackReason | undefined;
 
     // Provider-fallback state machine (empty-completion + quota fallback,
     // compact-before-fallback). Decision logic extracted to provider-fallback.ts
@@ -4259,11 +4282,24 @@ export async function processTask(
           providerFellBack = true;
           lastFallbackUnderlying =
             lastErr instanceof Error ? lastErr.message : String(lastErr);
+          lastFallbackReason =
+            lastErr instanceof QuotaExhaustedError || isQuotaExhaustedError(lastErr)
+              ? "quota"
+              : isProviderAuthError(lastErr)
+                ? "auth"
+                : isTransientProviderError(lastErr)
+                  ? "transient"
+                  : lastFallbackUnderlying.startsWith("empty completion")
+                    ? "empty"
+                    : "unknown";
           metric.count("agent_provider_fallback", { from, to, agentSlug });
           if (to === "spaces" && from !== "spaces") {
             const wantedAttempt = attemptByProvider.get(from);
             if (wantedAttempt?.config) {
-              const usingModel = LITELLM.model;
+              const usingModel = reportedModelForAttempt(
+                { provider: "spaces", config: undefined },
+                modelReportDefaults,
+              );
               clog.warn(
                 `[agent] provider-fallthrough session=${sessionId} wanted=${from}/${wantedAttempt.config.model} using=spaces/${usingModel} reason=${lastFallbackUnderlying}`,
               );
@@ -4483,9 +4519,20 @@ export async function processTask(
     // sent two prod diagnoses down the wrong path (2026-08-27/28). Only spaces
     // may default to the platform model; anything else reports undefined
     // (column left unset) rather than a model that never ran.
-    const completedModel =
-      completedAttempt?.config?.model ??
-      (completedProvider === "spaces" ? LITELLM.model : undefined);
+    // The spaces attempt reports the platform model it actually ran:
+    // modelSettings.model → automation model → LITELLM.model (XYNE-66321).
+    const completedModel = reportedModelForAttempt(
+      completedAttempt ?? { provider: completedProvider, config: undefined },
+      modelReportDefaults,
+    );
+    // Present only when the answer came from a later attempt than the one the
+    // run asked for, so the UI can say "fell back from <requested>".
+    const modelFallback = buildModelFallbackReport({
+      attempts,
+      completedAttempt,
+      reason: lastFallbackReason,
+      defaults: modelReportDefaults,
+    });
     callbackProvider = completedProvider;
     callbackModel = completedModel;
 
@@ -4767,6 +4814,7 @@ export async function processTask(
       fastMode: fastModeForCallback,
       status: "completed",
       result: callbackResultText,
+      ...(modelFallback ? { modelFallback } : {}),
       ...(emptyReason ? { emptyReason } : {}),
       ...(emptyReasonDetail ? { emptyReasonDetail } : {}),
       // Raw JSON for machine consumers (chain-workflows/triggers). Present only

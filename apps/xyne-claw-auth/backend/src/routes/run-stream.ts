@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from "express";
+import { answeredByFrom, parseModelFallback, type AnsweredBy } from "../lib/run-answered-by.js";
 import { errMsg } from "../lib/errors.js";
 import { randomUUID } from "node:crypto";
 import { CONFIG } from "../config.js";
@@ -91,6 +92,8 @@ interface PendingStream {
     clawRunOrigin?: Record<string, unknown> | undefined;
     /** The turn as ordered thinking / text / tool parts (null: render from content). */
     parts?: AssistantPart[] | null | undefined;
+    /** Provider/model that produced the reply (+ fallback origin). */
+    answeredBy?: AnsweredBy | undefined;
   }) => void;
   reject: (error: Error) => void;
   setClosed: () => void;
@@ -204,6 +207,7 @@ type StreamBusEvent =
       followUpSuggestions?: string[];
       followUpsPending?: boolean;
       parts?: AssistantPart[] | null;
+      answeredBy?: AnsweredBy;
     }
   | { kind: "follow_ups"; streamId: string; suggestions: string[] };
 
@@ -251,6 +255,7 @@ function ensureStreamEventsSubscriber(): void {
       ...(msg.followUpSuggestions?.length ? { followUpSuggestions: msg.followUpSuggestions } : {}),
       ...(msg.followUpsPending === true ? { followUpsPending: true } : {}),
       ...(msg.parts ? { parts: msg.parts } : {}),
+      ...(msg.answeredBy ? { answeredBy: msg.answeredBy } : {}),
     });
   });
 }
@@ -1360,6 +1365,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       followUpsPending?: boolean | undefined;
       clawRunOrigin?: Record<string, unknown> | undefined;
       parts?: AssistantPart[] | null | undefined;
+      answeredBy?: AnsweredBy | undefined;
     }>((resolve, reject) => {
       let closed = false;
       pendingStreams.set(streamId, {
@@ -1967,6 +1973,9 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         ...(result.followUpSuggestions?.length ? { followUpSuggestions: result.followUpSuggestions } : {}),
         ...(result.followUpsPending === true ? { followUpsPending: true } : {}),
         ...(result.parts ? { parts: result.parts } : {}),
+        // Which provider/model actually answered (and what it fell back from) —
+        // the same shape GET /messages returns, so live == reloaded.
+        ...(result.answeredBy ? { answeredBy: result.answeredBy } : {}),
       })}\n\n`);
       if (result.followUpsPending === true) await holdForLateFollowUps(res, streamId, assistantMsg?.id);
       if (!res.writableEnded) res.end();
@@ -2251,6 +2260,8 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
     const llmCitations = body.llmCitations;
     const provider = typeof body.provider === "string" ? body.provider : undefined;
     const model = typeof body.model === "string" ? body.model : undefined;
+    const modelFallback = parseModelFallback(body["modelFallback"]);
+    const answeredBy = status === "completed" ? answeredByFrom(provider, model, modelFallback) : undefined;
     const sessionId = typeof body.sessionId === "string" ? body.sessionId : undefined;
 
     // Append LLM-provided citations (same logic as agent-chat.ts). For a
@@ -2622,6 +2633,7 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
           error: status !== "completed" ? (isSessionLockedFailure ? "session_locked" : (rawError ?? content)) : null,
           ...(provider ? { provider } : {}),
           ...(model ? { model } : {}),
+          ...(modelFallback ? { modelFallback } : {}),
           toolsUsed: (body.toolsUsed as string[]) ?? [],
           // Branching: link run → assistant message so /messages can pair
           // them by id instead of by chronology (which breaks once a user
@@ -2666,6 +2678,7 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
         ...(followUpsPending ? { followUpsPending: true } : {}),
         ...(callbackRunOrigin ? { clawRunOrigin: callbackRunOrigin } : {}),
         parts: turn.parts,
+        ...(answeredBy ? { answeredBy } : {}),
       });
     } else if (meta?.conversationId) {
       // Stream lives on another pod (the multi-replica case that returns
@@ -2686,6 +2699,7 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
         ...(followUpSuggestions?.length ? { followUpSuggestions } : {}),
         ...(followUpsPending ? { followUpsPending: true } : {}),
         ...(turn.parts ? { parts: turn.parts } : {}),
+        ...(answeredBy ? { answeredBy } : {}),
       });
     } else {
       log.warn(`[run-stream] callback streamId=${streamId} resolved without local stream or conversationId — no SSE done frame will be sent`);
