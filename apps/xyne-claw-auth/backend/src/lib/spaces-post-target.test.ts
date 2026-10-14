@@ -34,6 +34,14 @@ describe("getSpacesPostTarget", () => {
     interact.mockRejectedValue(new Error("Spaces API 500"));
     await expect(getSpacesPostTarget({ channelId: "ch-general" }, auth)).resolves.toBeNull();
   });
+
+  it("names a recipientUserId DM target by the recipient's display name", async () => {
+    await expect(getSpacesPostTarget({ recipientUserId: "usr-samit" }, auth)).resolves.toEqual({
+      channelName: null,
+      directMessage: { with: ["Samit Barai"] },
+    });
+    expect(interact.mock.calls.map((c) => (c[0] as { model: string }).model)).toEqual(["user"]);
+  });
 });
 
 describe("spacesConversationExists", () => {

@@ -7,6 +7,7 @@ import { logger } from '@/utils/logger';
 import { withWorkspaceScope } from '@/database/tenant/context';
 import { newConnectId } from '@/database/connectGroup';
 import { createChannelWithConnectGroupTx } from '@/bypassAcl/transactions/connectGroupEntities';
+import { findOrCreateOneOnOneDmTx, type OneOnOneDmInput } from '@/bypassAcl/transactions/channelRepository';
 //import { queueChannelIngestion } from '@/queues/vespaQueue';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { channelSchema } from '@/vespa/src/types';
@@ -414,6 +415,38 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
   }
 
   /**
+   * Atomically find or create a 1:1 DM. The pair's sorted user ids are its
+   * canonical key. The probe and insert run in one SERIALIZABLE transaction
+   * (same pattern as ticketRepository.claimReleaseInsightsGeneration): when two
+   * requests race for the same pair, Postgres fails one commit with a
+   * serialization error (Prisma P2034) and the retry re-probes and reuses the
+   * channel the winner created. This closes the probe-then-insert race without
+   * raw SQL (tenant extensions still see every query) and without a unique-index
+   * migration over historical duplicate DMs. Participants and their status/count
+   * rows are committed in the same transaction as a newly-created channel.
+   */
+  async findOrCreateOneOnOneDMChannel(
+    options: OneOnOneDmInput,
+  ): Promise<{ channel: Channel; isExisting: boolean }> {
+    const { workspaceId } = options;
+    const attemptFindOrCreate = () => withWorkspaceScope(() => findOrCreateOneOnOneDmTx(this.db, options));
+
+    const maxAttempts = 3;
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await attemptFindOrCreate();
+      } catch (error) {
+        const isSerializationConflict = (error as { code?: string } | null)?.code === 'P2034';
+        if (!isSerializationConflict || attempt >= maxAttempts) throw error;
+        logger.info('DM find-or-create serialization conflict; retrying', {
+          workspaceId,
+          attempt,
+        });
+      }
+    }
+  }
+
+  /**
    * Find or create a DM or GROUP_DM channel based on the number of invited users.
    * If the resulting channel name would exceed 255 characters (>~10 members),
    * falls back to the initiator's self-DM to avoid the DB constraint.
@@ -456,32 +489,15 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     if (invitedUserIds.length === 1) {
       const targetUserId = invitedUserIds[0];
 
-      // Check if DM channel exists
-      let dmChannel = await this.getDMChannel(userId, targetUserId);
-
-      if (dmChannel) {
-        if (options.indexInVespa) await this.queueVespaFeed(dmChannel.id, workspaceId);
-        return dmChannel.id;
-      }
-
-      // Create new DM channel
-      const dmChannelName = [userId, targetUserId].sort().join(',');
-
-      dmChannel = await this.create({
-        scopeType: ChannelScopeType.DM,
-        name: dmChannelName,
-        visibility: ChannelVisibility.PRIVATE,
-        createdBy: userId,
-        projectId,
+      const { channel } = await this.findOrCreateOneOnOneDMChannel({
+        userId,
+        targetUserId,
+        channelParticipants,
         workspaceId,
+        projectId,
       });
-
-      // Add both users as participants
-      await channelParticipants.addParticipant(dmChannel.id, userId, 'ADMIN', false);
-      await channelParticipants.addParticipant(dmChannel.id, targetUserId, 'MEMBER', false);
-      if (options.indexInVespa) await this.queueVespaFeed(dmChannel.id, workspaceId);
-
-      return dmChannel.id;
+      if (options.indexInVespa) await this.queueVespaFeed(channel.id, workspaceId);
+      return channel.id;
     }
 
     // Multiple users - create or find group DM channel

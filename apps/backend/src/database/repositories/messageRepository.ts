@@ -147,21 +147,19 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
     return conversation.workspaceId;
   }
 
-  async create(data: CreateMessageInput): Promise<Message> {
-
-      await this.validateString(data.conversationId, 'conversationId');
+  private async validateCreateInput(data: CreateMessageInput): Promise<void> {
+    await this.validateString(data.conversationId, 'conversationId');
     await this.validateString(data.senderId, 'senderId');
-    
-    // Content is required unless there are attachments OR it's a SYSTEM message with metadata
+
+    // Content is required unless there are attachments OR it's a SYSTEM message with metadata.
     const isSystemMessageWithMetadata = data.msgType === MessageType.SYSTEM && data.metadata;
     if (!data.hasAttachment && !isSystemMessageWithMetadata && (!data.content || data.content.trim() === '')) {
       throw new Error('content is required when no attachments are present');
     }
-    
-    // Validate content if provided
+
     if (data.content && data.content.trim() !== '') {
       await this.validateString(data.content, 'content');
-      this.validateContentLength(data.content); // Max 10k visible characters
+      this.validateContentLength(data.content);
     }
 
     if (data.msgType) {
@@ -169,26 +167,35 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
     }
 
     this.sanitizeMarkdownContent(data);
+  }
 
-     const workspaceId = await this.resolveMessageWorkspaceId(data);
-     const result = await this.db.message.create({
-        data: {
-          ...(data.messageId && { messageId: data.messageId }),
-          conversationId: data.conversationId,
-          senderId: data.senderId,
-          workspaceId,
-          content: data.content,
-          msgType: data.msgType || 'USER',
-          hasAttachment: data.hasAttachment || false,
-          showInChannel: data.showInChannel ?? false,
-          visibleTo: data.visibleTo ?? null,
-          childConversationId: data.childConversationId,
-          metadata: data.metadata,
-          ...(data.createdAt && { createdAt: data.createdAt }),
-        }
-      });
+  async createInTransaction(
+    tx: Parameters<Parameters<typeof this.db.$transaction>[0]>[0],
+    data: CreateMessageInput,
+    workspaceId: string,
+  ): Promise<Message> {
+    await this.validateCreateInput(data);
+    return tx.message.create({
+      data: {
+        ...(data.messageId && { messageId: data.messageId }),
+        conversationId: data.conversationId,
+        senderId: data.senderId,
+        workspaceId,
+        content: data.content,
+        msgType: data.msgType || 'USER',
+        hasAttachment: data.hasAttachment || false,
+        showInChannel: data.showInChannel ?? false,
+        visibleTo: data.visibleTo ?? null,
+        childConversationId: data.childConversationId,
+        metadata: data.metadata,
+        ...(data.createdAt && { createdAt: data.createdAt }),
+      },
+    });
+  }
 
-      return result;
+  async create(data: CreateMessageInput): Promise<Message> {
+    const workspaceId = await this.resolveMessageWorkspaceId(data);
+    return this.createInTransaction(this.db, data, workspaceId);
   }
 
   async findById(id: string): Promise<Message | null> {

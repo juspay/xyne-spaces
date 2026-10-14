@@ -75,7 +75,11 @@ function fieldList(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-export function formatActionDescription(tool: string, params: Record<string, unknown>, options?: { channelName?: string }): string {
+export function formatActionDescription(
+  tool: string,
+  params: Record<string, unknown>,
+  options?: { channelName?: string; recipientName?: string },
+): string {
   if (tool === "user-send-message") {
     const fullContent = mentionShorthandToText(params["content"] as string ?? "");
     const content = fullContent.slice(0, 300);
@@ -93,6 +97,9 @@ export function formatActionDescription(tool: string, params: Record<string, unk
       );
     } else if (conversationId) {
       lines.push(`**Destination:** reply in an existing thread`);
+    } else if (typeof params["recipientUserId"] === "string" && params["recipientUserId"].trim()) {
+      // Never print the raw recipient id; name it when resolved, else stay generic.
+      lines.push(`**Destination:** direct message to ${options?.recipientName ?? "a Spaces user"}`);
     }
     if (content) lines.push(``, `**Message:** ${content}${fullContent.length > 300 ? "..." : ""}`);
     return lines.join("\n");

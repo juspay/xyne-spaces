@@ -44,11 +44,19 @@ export async function spacesConversationExists(conversationId: string, auth: Spa
 }
 
 export async function getSpacesPostTarget(
-  target: { channelId?: string; conversationId?: string },
+  target: { channelId?: string; conversationId?: string; recipientUserId?: string },
   auth: SpacesAuthContext,
   actingUserId?: string,
 ): Promise<SpacesPostTarget | null> {
   try {
+    if (target.recipientUserId && !target.channelId && !target.conversationId) {
+      const recipient = await first<{ name?: string }>(
+        { model: "user", operation: "findMany", where: { id: { equals: target.recipientUserId } }, take: 1 },
+        auth,
+      );
+      const name = recipient?.name?.trim();
+      return { channelName: null, directMessage: { with: name ? [name] : [] } };
+    }
     let channelId = target.channelId ?? "";
     let thread: SpacesPostTarget["thread"];
     if (target.conversationId) {
@@ -88,7 +96,7 @@ export async function getSpacesPostTarget(
     }
     return { channelName: channel?.name ?? null, ...(thread ? { thread } : {}) };
   } catch (err) {
-    log.warn(`[post-target] channelId=${target.channelId ?? ""} conversationId=${target.conversationId ?? ""} err=${errMsg(err)}`);
+    log.warn(`[post-target] channelId=${target.channelId ?? ""} conversationId=${target.conversationId ?? ""} recipientUserId=${target.recipientUserId ?? ""} err=${errMsg(err)}`);
     return null;
   }
 }
