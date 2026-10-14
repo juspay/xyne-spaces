@@ -6,6 +6,7 @@ import { CallTrigger } from './triggers/call.trigger';
 import { UpdateTicketStep } from './steps/update-ticket.step';
 import { SendMessageStep } from './steps/send-message.step';
 import { ReplyOnMessageStep } from './steps/reply-on-message.step';
+import { ZipFilesStep } from './steps/zip-files.step';
 
 export class XyneSpacesConnector extends BaseConnector {
   readonly id = 'xyne-spaces';
@@ -25,5 +26,6 @@ export class XyneSpacesConnector extends BaseConnector {
     new SendMessageStep(),
     new UpdateTicketStep(),
     new ReplyOnMessageStep(),
+    new ZipFilesStep(),
   ];
 }
