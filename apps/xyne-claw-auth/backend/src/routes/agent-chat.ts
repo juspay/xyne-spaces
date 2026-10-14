@@ -56,6 +56,7 @@ import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { KNOWN_PROVIDERS, buildProviderConfig, agentCredRefreshTarget, userCredRefreshTarget, agentDefaultSpeed, providerConfigForSpeed, applyFastModeModels, resolveAgentDefaultModel } from "../lib/agent-provider-config.js";
 import { awaitTurnHandoff, isTurnControlCommand } from "../lib/run-turn-handoff.js";
+import { platformDefaultFromErrorBody } from "../lib/platform-models.js";
 import { dispatchLocalHarnessRun, isLocalHarnessProvider, localHarnessProviderLabel, pinnedModelForProvider, resolveLocalHarnessTarget, resolveLocalHarnessTargetForProvider, resolveLocalSandbox } from "../lib/local-harness.js";
 
 import { planServerContinuation } from "../lib/local-harness-continuation.js";
@@ -1083,7 +1084,10 @@ async function listPlatformModels(): Promise<{
     if (!upstream.ok) {
       const text = await upstream.text().catch(() => "");
       log.error(`[agent-chat] platform models via claw failed: ${upstream.status} ${text.slice(0, 200)}`);
-      return empty;
+      // claw still reports its LITELLM.model default when only the listing
+      // failed — keep it so a no-pin "spaces" run's label is not blank
+      // (XYNE-66325).
+      return { ...empty, defaultModel: platformDefaultFromErrorBody(text) };
     }
     const payload = (await upstream.json()) as { data?: Array<{ id?: string; name?: string }>; defaultModel?: string | null };
     const data = (payload.data ?? [])
