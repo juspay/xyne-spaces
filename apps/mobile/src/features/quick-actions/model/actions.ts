@@ -63,6 +63,8 @@ const SHARED_ACTIONS: readonly QuickActionId[] = ['instant-call', 'record-note']
 const TAB_ACTIONS = {
   dms: ['create-dm'],
   channels: ['create-channel', 'create-section'],
+  // Nothing of its own: the shared actions are the whole menu here.
+  activity: [],
 } as const satisfies Partial<Record<TabName, readonly QuickActionId[]>>;
 
 type TabWithActions = keyof typeof TAB_ACTIONS;
