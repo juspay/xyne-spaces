@@ -9,6 +9,7 @@ import hashlib
 import os
 import time
 import traceback
+from urllib.parse import urlsplit
 
 import httpx
 import websockets
@@ -58,6 +59,11 @@ CLAW_CODE_DEFAULT_PORT = _get_claw_code_port()
 # there is no claw-auth to ask. In the cluster the chart always sets it.
 CLAW_AUTH_URL = os.environ.get("CLAW_AUTH_URL", "").rstrip("/")
 SANDBOX_ACCESS_PATH = "/claw/api/v1/sandbox-access"
+PUBLIC_ORIGINS = frozenset(
+    o.strip().rstrip("/").lower()
+    for o in os.environ.get("PUBLIC_ORIGINS", "").split(",")
+    if o.strip()
+)
 # One /api/auth/me round trip per decision, so allow is cached for a minute:
 # a cold VS Code load is ~100 asset requests. Deny is cached briefly too, or a
 # denied tab's retries become a request amplifier against claw-auth.
@@ -135,6 +141,43 @@ def _split_sandbox_path(sandbox_path: str):
 
 def _valid_sandbox_id(sandbox_id: str) -> bool:
     return bool(sandbox_id) and sandbox_id.replace("-", "").isalnum()
+
+
+_DEFAULT_PORTS = {"http": "80", "https": "443", "ws": "80", "wss": "443"}
+
+
+def _normalize_netloc(netloc: str, scheme: str) -> str:
+    netloc = netloc.strip().lower()
+    default = _DEFAULT_PORTS.get(scheme)
+    if default and netloc.endswith(f":{default}") and not netloc.endswith("]"):
+        netloc = netloc[: -len(default) - 1]
+    return netloc
+
+
+def _first(value: str) -> str:
+    return value.split(",", 1)[0].strip()
+
+
+def _origin_allowed(headers, request_scheme: str) -> bool:
+    origin = headers.get("origin", "").strip()
+    if not origin or origin == "null":
+        return False
+    if origin.rstrip("/").lower() in PUBLIC_ORIGINS:
+        return True
+    try:
+        parts = urlsplit(origin)
+    except ValueError:
+        return False
+    if parts.scheme not in ("http", "https") or not parts.netloc:
+        return False
+    proto = _first(headers.get("x-forwarded-proto", "")).lower() or request_scheme
+    if proto in ("https", "wss") and parts.scheme != "https":
+        return False
+    origin_netloc = _normalize_netloc(parts.netloc, parts.scheme)
+    hosts = [_first(headers.get("x-forwarded-host", "")), headers.get("host", "")]
+    return any(
+        h and _normalize_netloc(h, parts.scheme) == origin_netloc for h in hosts
+    )
 
 
 def _deny_page(message: str) -> str:
@@ -423,7 +466,7 @@ async def proxy_claw_preview_ws(websocket: WebSocket, sandbox_path: str):
 # Registered before the catch-all for the same reason as claw-preview.
 @app.api_route(
     "/claw-code/{sandbox_path:path}",
-    methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
+    methods=['GET', 'HEAD', 'OPTIONS', 'POST', 'PUT', 'DELETE', 'PATCH'],
 )
 async def proxy_claw_code_http(request: Request, sandbox_path: str):
     sandbox_id, rest = _split_sandbox_path(sandbox_path)
@@ -432,6 +475,9 @@ async def proxy_claw_code_http(request: Request, sandbox_path: str):
         raise HTTPException(status_code=400, detail="claw-code path requires a sandboxId")
     if not _valid_sandbox_id(sandbox_id):
         raise HTTPException(status_code=400, detail="Invalid claw-code sandboxId")
+    if "origin" in request.headers and not _origin_allowed(request.headers, request.url.scheme):
+        print(f"[claw-code] deny '{sandbox_id}' (cross-origin {request.headers.get('origin')!r})")
+        raise HTTPException(status_code=403, detail="Cross-origin request refused")
 
     # code-server builds its asset URLs relative to the CURRENT directory, so
     # on /claw-code/<id> the workbench dials /claw-code/<asset> — one level too
@@ -535,6 +581,10 @@ async def proxy_claw_code_ws(websocket: WebSocket, sandbox_path: str):
 
     if not _valid_sandbox_id(sandbox_id):
         await websocket.close(code=1008, reason="invalid claw-code sandboxId")
+        return
+    if not _origin_allowed(websocket.headers, websocket.url.scheme):
+        print(f"[claw-code WS] deny '{sandbox_id}' (origin {websocket.headers.get('origin')!r})")
+        await websocket.close(code=1008, reason="cross-origin")
         return
 
     allowed, _status, reason = await _claw_code_access(

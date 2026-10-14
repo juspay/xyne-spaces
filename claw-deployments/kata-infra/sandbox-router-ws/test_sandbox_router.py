@@ -25,6 +25,7 @@ from starlette.websockets import WebSocketDisconnect
 import sandbox_router
 
 SBX = "sbx-1"
+SAME_ORIGIN = "http://testserver"
 UPSTREAM = f"{SBX}.xyne-apps.svc.cluster.local:8443"
 
 
@@ -110,7 +111,7 @@ def test_prefix_is_stripped():
 def test_host_and_origin_agree():
     """code-server rejects a request whose Origin host differs from its Host."""
     client, seen = build()
-    signed_in(client).get(f"/claw-code/{SBX}/", headers={"origin": "https://app.xyne.test"})
+    signed_in(client).get(f"/claw-code/{SBX}/", headers={"origin": SAME_ORIGIN})
     assert seen[0].headers["host"] == UPSTREAM
     assert seen[0].headers["origin"] == f"http://{UPSTREAM}"
 
@@ -300,11 +301,128 @@ def test_gate_keys_on_the_session():
 
 
 def test_ws_upgrade_is_gated():
-    client, _ = build()
+    gate_calls = []
+
+    def counting_gate(request):
+        gate_calls.append(request)
+        return httpx.Response(403, json={"allow": False})
+
+    client, _ = build(gate=counting_gate)
     with pytest.raises(WebSocketDisconnect) as excinfo:
-        with client.websocket_connect(f"/claw-code/{SBX}/"):
+        with signed_in(client).websocket_connect(f"/claw-code/{SBX}/", headers={"origin": SAME_ORIGIN}):
             pass
     assert excinfo.value.code == 1008
+    assert len(gate_calls) == 1
+
+
+# ── Origin ──
+
+def test_same_origin_http_is_proxied():
+    client, seen = build()
+    resp = signed_in(client).post(f"/claw-code/{SBX}/vscode-remote", headers={"origin": SAME_ORIGIN})
+    assert resp.status_code == 200
+    assert len(seen) == 1
+
+
+def test_forwarded_public_host_is_same_origin():
+    client, seen = build()
+    resp = signed_in(client).get(
+        f"/claw-code/{SBX}/",
+        headers={
+            "origin": "https://app.xyne.test",
+            "x-forwarded-host": "app.xyne.test",
+            "x-forwarded-proto": "https",
+        },
+    )
+    assert resp.status_code == 200
+    assert len(seen) == 1
+
+
+def test_foreign_origin_http_is_403():
+    client, seen = build()
+    resp = signed_in(client).post(
+        f"/claw-code/{SBX}/vscode-remote", headers={"origin": "https://evil.test"},
+    )
+    assert resp.status_code == 403
+    assert seen == []
+
+
+def test_http_origin_under_https_is_403():
+    client, seen = build()
+    resp = signed_in(client).get(
+        f"/claw-code/{SBX}/",
+        headers={
+            "origin": "http://app.xyne.test",
+            "host": "app.xyne.test",
+            "x-forwarded-proto": "https",
+        },
+    )
+    assert resp.status_code == 403
+    assert seen == []
+
+
+def test_http_without_origin_is_proxied():
+    """Top-level navigations and same-origin GETs may carry no Origin."""
+    client, seen = build()
+    resp = signed_in(client).get(f"/claw-code/{SBX}/")
+    assert resp.status_code == 200
+    assert len(seen) == 1
+
+
+def test_public_origins_allowlist(monkeypatch):
+    monkeypatch.setattr(sandbox_router, "PUBLIC_ORIGINS", frozenset({"https://app.xyne.test"}))
+    client, seen = build()
+    resp = signed_in(client).get(f"/claw-code/{SBX}/", headers={"origin": "https://app.xyne.test"})
+    assert resp.status_code == 200
+    assert len(seen) == 1
+
+
+def test_head_and_options_are_routed():
+    client, seen = build()
+    signed_in(client)
+    assert client.head(f"/claw-code/{SBX}/").status_code == 200
+    assert client.options(f"/claw-code/{SBX}/", headers={"origin": SAME_ORIGIN}).status_code == 200
+    assert [r.method for r in seen] == ["HEAD", "OPTIONS"]
+
+
+def _ws_rejected_before_gate(headers):
+    gate_calls = []
+
+    def counting_gate(request):
+        gate_calls.append(request)
+        return httpx.Response(200, json={"allow": True})
+
+    client, seen = build(gate=counting_gate)
+    with pytest.raises(WebSocketDisconnect) as excinfo:
+        with signed_in(client).websocket_connect(f"/claw-code/{SBX}/", headers=headers):
+            pass
+    assert excinfo.value.code == 1008
+    assert gate_calls == []
+    assert seen == []
+
+
+def test_foreign_origin_ws_is_403():
+    _ws_rejected_before_gate({"origin": "https://evil.test"})
+
+
+def test_missing_origin_ws_is_403():
+    _ws_rejected_before_gate({})
+
+
+def test_same_origin_ws_reaches_upstream(monkeypatch):
+    pumped = []
+
+    async def fake_pump(websocket, target, origin, label, sandbox_id):
+        pumped.append((target, origin))
+        await websocket.accept()
+        await websocket.send_text("hello")
+        await websocket.close()
+
+    monkeypatch.setattr(sandbox_router, "_pump_ws", fake_pump)
+    client, _ = build()
+    with signed_in(client).websocket_connect(f"/claw-code/{SBX}/", headers={"origin": SAME_ORIGIN}) as ws:
+        assert ws.receive_text() == "hello"
+    assert pumped == [(f"ws://{UPSTREAM}/", f"http://{UPSTREAM}")]
 
 
 # ── claw-preview, which shares the WS pump ──
