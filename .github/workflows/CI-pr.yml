@@ -1,9 +1,9 @@
 name: CI-pr
 
-# Runs the full CI suite (ci.yml) on every pull request and on merge queue
-# entries (merge_group) — the queue's required checks come from this workflow.
+# Runs the full CI suite (ci.yml) only on merge queue entries (merge_group) —
+# not on every pull request push. The queue's required checks come from this
+# workflow.
 on:
-  pull_request:
   merge_group:
 
 permissions:

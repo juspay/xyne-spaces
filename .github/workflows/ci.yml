@@ -303,7 +303,7 @@ jobs:
   # ---------------------------------------------------------------------------
   xyne-claw:
     name: xyne-claw typecheck
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-mini' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v5
 
@@ -315,6 +315,8 @@ jobs:
           cache: pnpm
 
       - name: Install dependencies
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
         run: pnpm install ${{ env.PNPM_FLAGS }} --filter xyne-claw...
 
       - name: Typecheck xyne-claw-shared
