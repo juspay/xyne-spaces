@@ -19,6 +19,7 @@ import type { TriggerRegistry } from '../triggers/trigger-registry';
 import type { StepRegistry } from '../steps/step-registry';
 import { collectRefs, isPureRef } from '../util/variable-ref';
 import { WEBHOOK_EVENT } from '../triggers/webhook.trigger';
+import { buildAskJevOutputSchema } from '../steps/ask-jev.step';
 
 const FORBIDDEN_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
 
@@ -373,7 +374,9 @@ export class ConfigValidator {
           ? buildWebhookActionOutputSchema(step.config)
           : step.type === 'RUN_AGENT'
             ? buildRunAgentOutputSchema(step.config)
-            : stepImpl.outputSchema,
+            : step.type === 'ASK_JEV'
+              ? buildAskJevOutputSchema(step.config)
+              : stepImpl.outputSchema,
       );
     }
   }
