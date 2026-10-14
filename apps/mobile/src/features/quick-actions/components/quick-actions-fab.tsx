@@ -11,6 +11,7 @@ import { entryHref, tabEntry } from '@/src/features/bottom-navigation';
 import type { TabName } from '@/src/navigation/routes';
 
 import { quickActionsForTab, type QuickActionId } from '../model/actions';
+import { requestCreateSection } from '../state/create-section-request';
 import { openQuickActionSheet } from '../state/sheet-store';
 import { FabActions } from './fab-actions';
 import { FabButton } from './fab-button';
@@ -102,6 +103,14 @@ export function QuickActionsFab({ tab }: QuickActionsFabProps): ReactElement | n
       switch (id) {
         case 'create-dm':
           openQuickActionSheet('create-dm');
+          break;
+        case 'create-channel':
+          openQuickActionSheet('create-channel');
+          break;
+        case 'create-section':
+          // Not a shell sheet: the section tray belongs to the Channels screen,
+          // which is the only place this action is offered.
+          requestCreateSection();
           break;
         case 'instant-call':
           openQuickActionSheet('instant-call');

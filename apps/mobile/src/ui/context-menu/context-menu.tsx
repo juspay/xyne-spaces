@@ -17,6 +17,7 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { useCSSVariable } from 'uniwind';
+import { ChevronRight } from 'lucide-react-native';
 
 import { useIsDark } from '@/src/design-system';
 import Animated, { Easing, FadeInUp } from 'react-native-reanimated';
@@ -26,6 +27,7 @@ import { haptics } from '@/src/utils/haptics';
 
 import {
   MENU_ICON_GAP,
+  MENU_CHEVRON_SIZE,
   MENU_ICON_SIZE,
   MENU_ITEM_FADE_MS,
   MENU_ITEM_HEIGHT,
@@ -168,6 +170,10 @@ function Content({ label, children }: ContextMenuContentProps): ReactElement | n
 export type ContextMenuItemProps = {
   label: string;
   icon?: ReactNode;
+  /** Current setting, right-aligned — "None" beside a Section item. */
+  value?: string;
+  /** A chevron after the value, for an item that opens a further choice. */
+  chevron?: boolean;
   onSelect?: (() => void) | undefined;
   destructive?: boolean;
   disabled?: boolean;
@@ -182,6 +188,8 @@ export type ContextMenuItemProps = {
 function Item({
   label,
   icon,
+  value,
+  chevron = false,
   onSelect,
   destructive = false,
   disabled = false,
@@ -189,6 +197,7 @@ function Item({
   const { close } = useContextMenuState('ContextMenu.Item');
   const isDark = useIsDark();
   const ripple = isDark ? RIPPLE_DARK : RIPPLE_LIGHT;
+  const chevronColor = useCSSVariable('--color-spaces-muted') as string;
 
   return (
     <Pressable
@@ -214,6 +223,14 @@ function Item({
       >
         {label}
       </Text>
+      {value !== undefined ? (
+        <Text numberOfLines={1} style={styles.value} className='text-spaces-muted'>
+          {value}
+        </Text>
+      ) : null}
+      {chevron ? (
+        <ChevronRight size={MENU_CHEVRON_SIZE} color={chevronColor} style={styles.chevron} />
+      ) : null}
     </Pressable>
   );
 }
@@ -244,8 +261,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // Pushed to the trailing edge by `marginLeft: 'auto'`, with a floor of 12
+  // between it and the label. Both may shrink, but only once the card is at
+  // its maximum width.
+  value: {
+    flexShrink: 1,
+    maxWidth: 140,
+    marginLeft: 'auto',
+    paddingLeft: 12,
+    fontSize: MENU_ITEM_TEXT_SIZE - 1,
+  },
+  chevron: {
+    marginLeft: 6,
+  },
+  // Not `flex: 1`. The card measures itself to its content before it is
+  // placed, and a flex-basis-zero label contributes no width to that
+  // measurement — so a row with a value measured too narrow and the label was
+  // the part that got truncated.
   itemLabel: {
-    flex: 1,
+    flexShrink: 1,
     fontSize: MENU_ITEM_TEXT_SIZE,
     fontWeight: '500',
   },

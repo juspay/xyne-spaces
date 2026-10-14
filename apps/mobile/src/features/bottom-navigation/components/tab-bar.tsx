@@ -137,8 +137,18 @@ export const TabBar = memo(function TabBar({
   const search = useButtonGestures(toggleSearch);
   const close = useButtonGestures(toggleSearch);
 
+  /**
+   * Rides the keyboard only while search is open.
+   *
+   * The bar is keyboard-aware for one reason: the search field lives in it. A
+   * keyboard raised by anything else — a tray's text input, a sheet — has no
+   * business moving it, but `useReanimatedKeyboardAnimation` is global and
+   * reports every keyboard, so the bar has to opt out itself. Gated on the
+   * search progress rather than on React state so it flips on the same frame
+   * the field starts opening.
+   */
   const keyboardStyle = useAnimatedStyle((): { transform: { translateY: number }[] } => ({
-    transform: [{ translateY: keyboardHeight.get() }],
+    transform: [{ translateY: searchProgress.get() > 0 ? keyboardHeight.get() : 0 }],
   }));
 
   /**

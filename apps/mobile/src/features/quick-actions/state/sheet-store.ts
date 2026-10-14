@@ -1,7 +1,7 @@
 import { batch, observable } from '@legendapp/state';
 
 /** The surfaces an action can open, as opposed to navigate to. */
-export type QuickActionSheet = 'create-dm' | 'instant-call';
+export type QuickActionSheet = 'create-dm' | 'create-channel' | 'instant-call';
 
 type QuickActionSheetState = {
   /** The sheet on screen, or `null`. */
