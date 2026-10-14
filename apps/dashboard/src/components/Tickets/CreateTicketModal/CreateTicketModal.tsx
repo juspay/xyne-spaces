@@ -2524,6 +2524,13 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
               onNotSame={suggestion =>
                 setDuplicateNotSame(current => new Set([...current, suggestion.candidate.id]))
               }
+              onUndoNotSame={candidateId =>
+                setDuplicateNotSame(current => {
+                  const next = new Set(current);
+                  next.delete(candidateId);
+                  return next;
+                })
+              }
             />
 
             {/* Description Field */}
