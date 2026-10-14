@@ -3704,12 +3704,37 @@ export class CallController {
   };
 
   /**
-   * GET /api/calls/pulse-orgs
+   * GET /api/calls/pulse-orgs?channelId=...
    * Return the list of Pulse organisations so the frontend can let users
    * reassign a merchant without exposing Pulse credentials to the browser.
+   * Only members of a channel in PULSE_ENABLED_CHANNELS may read the list.
    */
-  getPulseOrgs = async (_req: Request, res: Response): Promise<void> => {
+  getPulseOrgs = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const channelId = typeof req.query['channelId'] === 'string' ? req.query['channelId'].trim() : '';
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    if (!channelId) {
+      res.status(400).json({ success: false, error: 'channelId is required' });
+      return;
+    }
+
+    if (!config.pulse.enabledChannels.includes(channelId)) {
+      res.status(403).json({ success: false, error: 'Pulse is not enabled for this channel' });
+      return;
+    }
+
     try {
+      const isMember = await repositories.channelParticipants.isParticipant(channelId, userId);
+      if (!isMember) {
+        res.status(403).json({ success: false, error: 'Not a member of this channel' });
+        return;
+      }
+
       const { pulseService } = await import('@/services/pulseService');
       const orgs = await pulseService.fetchOrgList();
 
