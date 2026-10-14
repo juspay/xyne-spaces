@@ -563,5 +563,7 @@ export class ACLFactory {
       // Slack Connect reach table — default ACL in Phase 1 (no per-row restriction yet).
       return new BaseQueryACL(ctx, prisma)
     }
+
+    throw new Error(`ACLFactory: uncapitalized model '${modelName}' has no ACL class`)
   }
 }

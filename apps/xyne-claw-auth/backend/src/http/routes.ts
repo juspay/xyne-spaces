@@ -34,8 +34,6 @@ import { adminSandboxReposRouter } from "../routes/admin-sandbox-repos.js";
 import { sandboxReposInternalRouter } from "../routes/sandbox-repos-internal.js";
 import { sandboxProfilesInternalRouter } from "../routes/sandbox-profiles-internal.js";
 import { organizationsRouter } from "../routes/organizations.js";
-// TEMPORARY — delete after backfill of agents.signingSecret is complete.
-import { adminBackfillSigningSecretsRouter } from "../routes/admin-backfill-signing-secrets.js";
 import { dashboardRouter } from "../routes/dashboard.js";
 import { messagingRouter } from "../surfaces/messaging/routes/index.js";
 import { agentChatRouter, agentChatInternalRouter } from "../routes/agent-chat.js";
@@ -197,8 +195,6 @@ function mountCoreApi(app: Express): void {
   app.use(`${BASE}/admin/digital-twin`, requireAuth, requireNoAccessToken, requireClawAdmin, adminDigitalTwinRouter);
   app.use(`${BASE}/admin/sandbox-repos`, requireAuth, requireNoAccessToken, requireClawAdmin, adminSandboxReposRouter);
   app.use(`${BASE}/admin`, requireAuth, requireNoAccessToken, adminRouter);
-  // TEMPORARY — delete this mount + the import above + the file after backfill.
-  app.use(`${BASE}/admin`, requireAuth, requireNoAccessToken, adminBackfillSigningSecretsRouter);
   app.use(`${BASE}/dashboard`, requireAuth, requireNoAccessToken, dashboardRouter);
   app.use(`${BASE}/agent-chat`, requireAuth, requireNoAccessToken, agentChatRouter);
   app.use(`${BASE}/artifact-apps`, requireAuth, artifactAppsRouter);
