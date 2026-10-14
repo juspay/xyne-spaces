@@ -24,13 +24,20 @@ interface ChipProps {
   label: string;
   onRemove: () => void;
   locked?: boolean;
+  onPress?: () => void;
 }
 
 /** A selected recipient: round picture, a remove badge on its corner, and the name below. */
-const Chip = ({ leading, label, onRemove, locked = false }: ChipProps): ReactElement => {
+const Chip = ({ leading, label, onRemove, locked = false, onPress }: ChipProps): ReactElement => {
   const foreground = useCSSVariable('--color-foreground') as string;
   return (
-    <View className='w-18 items-center gap-2 pt-0.5'>
+    <Pressable
+      disabled={!onPress}
+      onPress={onPress}
+      accessibilityRole={onPress ? 'button' : undefined}
+      accessibilityLabel={onPress ? `Choose members of ${label}` : undefined}
+      className='w-18 items-center gap-2 pt-0.5'
+    >
       <View>
         {leading}
         {locked ? null : (
@@ -48,7 +55,7 @@ const Chip = ({ leading, label, onRemove, locked = false }: ChipProps): ReactEle
       <Text className='w-full text-center text-xs text-foreground' numberOfLines={2}>
         {label}
       </Text>
-    </View>
+    </Pressable>
   );
 };
 
@@ -79,11 +86,16 @@ interface InternalUsersCardProps {
   onChange: (participants: ScheduleCallParticipants) => void;
   /** Opens the people sheet (people, groups, channels). */
   onOpenPicker: () => void;
+  /** Opens the member list of the picked channel. */
+  onOpenMembers: () => void;
   lockedUserIds?: ReadonlySet<string> | undefined;
 }
 
 const subtitleFor = ({ users, channel }: ScheduleCallParticipants): string => {
-  if (channel) return 'Whole channel';
+  if (channel) {
+    const left = channel.excludedUserIds?.length ?? 0;
+    return left > 0 ? `Whole channel, ${left} left out` : 'Whole channel';
+  }
   if (users.length === 0) return 'Pick people to invite';
   return users.length === 1 ? '1 person' : `${users.length} people · newest first`;
 };
@@ -96,6 +108,7 @@ const InternalUsersCardBase = ({
   participants,
   onChange,
   onOpenPicker,
+  onOpenMembers,
   lockedUserIds,
 }: InternalUsersCardProps): ReactElement => {
   const { accentText } = useBubbleAccent();
@@ -110,7 +123,11 @@ const InternalUsersCardBase = ({
         icon={Building2}
         title='Internal'
         subtitle={subtitleFor(participants)}
-        {...(hasSelection ? { action: { label: 'See all', onPress: onOpenPicker } } : {})}
+        {...(channel
+          ? { action: { label: 'Members', onPress: onOpenMembers } }
+          : hasSelection
+            ? { action: { label: 'See all', onPress: onOpenPicker } }
+            : {})}
       />
       <View>
         <ScrollView
@@ -148,6 +165,7 @@ const InternalUsersCardBase = ({
                 </RoundTile>
               }
               label={channel.name}
+              onPress={onOpenMembers}
               onRemove={() => onChange(NO_PARTICIPANTS)}
             />
           ) : null}

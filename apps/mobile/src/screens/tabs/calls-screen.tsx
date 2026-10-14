@@ -13,7 +13,12 @@ import { useRegisterTabScrollToTop } from '@/src/hooks/useRegisterTabScrollToTop
 import { useTabHeaderScrollY } from '@/src/components/tab-pager/tab-pager-context';
 import { useTabPageFocusEffect, useTabPageIsFocused } from '@/src/hooks/useTabPageFocus';
 import { CallsFab } from '@/src/components/call/calls-fab';
-import { InstantCallSheet } from '@/src/components/call/instant-call-sheet';
+import { PeopleSheet } from '@/src/features/schedule-call/components/PeopleSheet';
+import {
+  NO_PARTICIPANTS,
+  type ScheduleCallParticipants,
+} from '@/src/features/schedule-call/hooks/useScheduleCallForm';
+import { useInstantCall } from '@/src/hooks/useInstantCall';
 import { useZero } from '@/src/hooks/useZero';
 import { mutators } from '@/src/zero/mutators';
 import { useDeferredLiveData } from '@/src/hooks/useDeferredLiveData';
@@ -243,15 +248,15 @@ const CallsScreen = (): ReactElement => {
 
   const [selectedCall, setSelectedCall] = useState<CallDisplayData | null>(null);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
-  const [isInstantCallOpen, setIsInstantCallOpen] = useState(false);
+  const [instantCall, setInstantCall] = useState<'unmounted' | 'open' | 'closed'>('unmounted');
   const router = useRouter();
   // The Instant Call sheet exists only while it is open or closing. Left mounted it keeps a full
-  // fullscreen sheet (native glass buttons, a 20-row user list) alive under the call list,
+  // fullscreen sheet (its user list and channel subscriptions) alive under the call list,
   // re-rendering it on every user/channel update and republishing it to the portal host on every
   // render of this screen, which is what made this list laggy.
-  const [isInstantCallMounted, setIsInstantCallMounted] = useState(false);
-  const isInstantCallOpenRef = useRef(false);
-  isInstantCallOpenRef.current = isInstantCallOpen;
+  const { startCall } = useInstantCall();
+  // Who Start call was tapped for; the call begins once the sheet has finished closing.
+  const pendingInstantCall = useRef<ScheduleCallParticipants | null>(null);
   const [shouldLoadRemoteAvatars, setShouldLoadRemoteAvatars] = useState(false);
 
   const handleLayout = useCallback(() => {
@@ -298,15 +303,28 @@ const CallsScreen = (): ReactElement => {
     [router],
   );
   // Stable refs so the memoised CallsFab (and its Portal push) skips live-data re-renders.
-  const openInstantCall = useCallback(() => {
-    setIsInstantCallMounted(true);
-    setIsInstantCallOpen(true);
+  const openInstantCall = useCallback(() => setInstantCall('open'), []);
+  const onInstantCallOpenChange = useCallback(
+    (open: boolean) => setInstantCall(open ? 'open' : 'closed'),
+    [],
+  );
+  const applyInstantCall = useCallback((picked: ScheduleCallParticipants) => {
+    pendingInstantCall.current = picked;
   }, []);
-  const closeInstantCall = useCallback(() => setIsInstantCallOpen(false), []);
-  // Unmount once its close animation has finished, unless it was reopened in the meantime.
-  const unmountInstantCall = useCallback(() => {
-    if (!isInstantCallOpenRef.current) setIsInstantCallMounted(false);
-  }, []);
+  // Once the close animation has finished: start the call if one was confirmed, then unmount
+  // unless the sheet was reopened in the meantime.
+  const onInstantCallClosed = useCallback(() => {
+    const picked = pendingInstantCall.current;
+    pendingInstantCall.current = null;
+    if (picked) {
+      startCall(picked);
+      router.push('/(protected)/native-call');
+    }
+    // An updater, not a ref read: a swipe-away reports "open changed" and "closed" in one tick,
+    // before this screen re-renders, so a ref would still say open and the sheet would stay mounted
+    // (and reopen with the previous picks).
+    setInstantCall(state => (state === 'closed' ? 'unmounted' : state));
+  }, [router, startCall]);
   const openScheduleCall = useCallback(() => router.push('/(protected)/schedule-call'), [router]);
 
   // Handler for avatar press - same destination as the row
@@ -447,15 +465,19 @@ const CallsScreen = (): ReactElement => {
         <CallsFab
           onStartCall={openInstantCall}
           onScheduleCall={openScheduleCall}
-          isHidden={isInstantCallOpen || isDetailsOpen}
+          isHidden={instantCall === 'open' || isDetailsOpen}
         />
       )}
 
-      {isInstantCallMounted && (
-        <InstantCallSheet
-          isOpen={isInstantCallOpen}
-          onClose={closeInstantCall}
-          onDismissed={unmountInstantCall}
+      {instantCall !== 'unmounted' && (
+        <PeopleSheet
+          isOpen={instantCall === 'open'}
+          onOpenChange={onInstantCallOpenChange}
+          onClosed={onInstantCallClosed}
+          participants={NO_PARTICIPANTS}
+          onApply={applyInstantCall}
+          title='Start an instant call'
+          confirmLabel='Start call'
         />
       )}
 

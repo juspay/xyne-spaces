@@ -172,6 +172,10 @@ interface PeopleSheetProps {
   onApply: (participants: ScheduleCallParticipants) => void;
   /** People who cannot be removed (participants-only edit). Channels are not offered then. */
   lockedUserIds?: ReadonlySet<string> | undefined;
+  /** Sheet heading. */
+  title?: string;
+  /** Replaces "Done" on the confirm button, which then stays disabled until someone is picked. */
+  confirmLabel?: string;
 }
 
 /**
@@ -185,6 +189,8 @@ export const PeopleSheet = ({
   participants,
   onApply,
   lockedUserIds,
+  title = 'Internal users',
+  confirmLabel,
 }: PeopleSheetProps): ReactElement => {
   const sheetRef = useRef<AppBottomSheetRef>(null);
   const insets = useSafeAreaInsets();
@@ -424,18 +430,21 @@ export const PeopleSheet = ({
     toggleUser,
   ]);
 
+  const canConfirm = !confirmLabel || countParticipants(draft) > 0;
   const handleDone = useCallback((): void => {
+    if (!canConfirm) return;
     void haptics.buttonTap();
     onApply(draft);
     dismiss();
-  }, [dismiss, draft, onApply]);
+  }, [canConfirm, dismiss, draft, onApply]);
 
   const peopleCount = draft.users.length;
+  const verb = confirmLabel ?? 'Done';
   const doneLabel = draft.channel
-    ? `Done · #${draft.channel.name}`
+    ? `${verb} · #${draft.channel.name}`
     : peopleCount > 0
-      ? `Done · ${peopleCount} invited`
-      : 'Done';
+      ? `${verb} · ${confirmLabel ? peopleCount : `${peopleCount} invited`}`
+      : verb;
   const emptyText = q ? 'No matches' : 'Nothing to show';
 
   const renderFooter = useCallback(
@@ -455,10 +464,11 @@ export const PeopleSheet = ({
             />
             <Pressable
               accessibilityRole='button'
-              accessibilityLabel='Done'
+              accessibilityLabel={verb}
+              accessibilityState={{ disabled: !canConfirm }}
               onPress={handleDone}
               className='h-12 items-center justify-center rounded-full active:opacity-80'
-              style={{ backgroundColor: accentBg }}
+              style={{ backgroundColor: accentBg, opacity: canConfirm ? 1 : 0.45 }}
             >
               <Text
                 className='text-base font-semibold'
@@ -472,7 +482,7 @@ export const PeopleSheet = ({
         </KeyboardStickyView>
       </BottomSheetFooter>
     ),
-    [accentBg, accentFg, doneLabel, handleDone, insets.bottom, sheetBackground],
+    [accentBg, accentFg, canConfirm, doneLabel, handleDone, insets.bottom, sheetBackground, verb],
   );
 
   return (
@@ -488,7 +498,7 @@ export const PeopleSheet = ({
     >
       <View className='flex-1'>
         <Text className='px-5 pb-2.5 pt-1.5 text-xl font-bold text-bottomsheet-text-header'>
-          Internal users
+          {title}
         </Text>
 
         <View className='mx-4 h-11 flex-row items-center gap-2.5 rounded-full bg-secondary px-4'>

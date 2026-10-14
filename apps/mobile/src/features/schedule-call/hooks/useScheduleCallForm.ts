@@ -1,7 +1,7 @@
 // Form state, validation and submit for the Schedule a call screen. Rules follow the dashboard's
 // ScheduleCallModal (defaults, start/end handling, payload shape); the people/channel pickers and
 // the invitation editor are reduced for v1.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useQuery } from '@/src/hooks/useQuery';
 import { useSelf } from '@/src/hooks/useUsers';
@@ -24,7 +24,9 @@ import {
 import { getDefaultScheduledStartTime, getWeekdayOccurrence, toHHMM } from '../utils/dateTime';
 import { getEditPrefill } from '../utils/editPrefill';
 import { getRecurrencePreset } from '../utils/recurrencePreset';
+import { toRecipients } from '../utils/recipients';
 import type { EditCallData } from '../utils/types';
+import { useChannelMembers } from './useChannelMembers';
 import { usePostCallUpdates, type PostCallUpdates } from './usePostCallUpdates';
 import { useRecurringCallForm } from './useRecurringCallForm';
 
@@ -47,19 +49,13 @@ export interface ScheduleCallUser {
  */
 export interface ScheduleCallParticipants {
   users: ScheduleCallUser[];
-  channel: { id: string; name: string } | null;
+  channel: { id: string; name: string; excludedUserIds?: string[] } | null;
 }
 
 export const NO_PARTICIPANTS: ScheduleCallParticipants = { users: [], channel: null };
 
 export const countParticipants = ({ users, channel }: ScheduleCallParticipants): number =>
   channel ? 1 : users.length;
-
-/** A channel goes as `channelId` (the backend invites its members); otherwise as user ids. */
-const toRecipients = ({ users, channel }: ScheduleCallParticipants): Recipients =>
-  channel ? { channelId: channel.id } : { targetUserIds: users.map(u => u.id) };
-
-type Recipients = { channelId: string } | { targetUserIds: string[] };
 
 // ponytail: presets only. Add 'custom' (and the Custom editor) when that screen exists.
 export type RepeatChoice = 'none' | 'daily' | 'weekdays' | 'monthly';
@@ -99,6 +95,38 @@ export const useScheduleCallForm = (editCall: EditCallData | null = null): Sched
   const [participants, setParticipants] = useState(prefill?.participants ?? NO_PARTICIPANTS);
   const participantCount = countParticipants(participants);
   const [guests, setGuests] = useState<string[]>(prefill?.guests ?? []);
+
+  const channelMembers = useChannelMembers(participants.channel?.id ?? null);
+  const excludedIds = useMemo(
+    () => new Set(participants.channel?.excludedUserIds),
+    [participants.channel?.excludedUserIds],
+  );
+  const allMembersExcluded =
+    !!channelMembers &&
+    channelMembers.length > 0 &&
+    channelMembers.every(m => excludedIds.has(m.id));
+  // Without the member list the unchecked people can't be sent, which would invite the whole channel.
+  const membersLoading = excludedIds.size > 0 && !channelMembers;
+
+  // As on the dashboard, an edited channel call starts with the members who were not on it
+  // unchecked, once the member list is in, so the form shows who is really invited.
+  const exclusionsSeeded = useRef(false);
+  useEffect(() => {
+    const channel = participants.channel;
+    if (exclusionsSeeded.current || !editCall || !channelMembers || !channel) return;
+    if (channel.id !== editCall.channelId) return;
+    exclusionsSeeded.current = true;
+    const invited = new Set(editCall.participants.filter(p => !p.isExternal).map(p => p.userId));
+    const excludedUserIds = channelMembers.filter(m => !invited.has(m.id)).map(m => m.id);
+    if (excludedUserIds.length > 0) {
+      setParticipants({ ...participants, channel: { ...channel, excludedUserIds } });
+    }
+  }, [channelMembers, editCall, participants]);
+  const setExcludedMembers = useCallback((excludedUserIds: string[]): void => {
+    setParticipants(prev =>
+      prev.channel ? { ...prev, channel: { ...prev.channel, excludedUserIds } } : prev,
+    );
+  }, []);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const title = titleDraft ?? defaultTitle;
@@ -238,6 +266,8 @@ export const useScheduleCallForm = (editCall: EditCallData | null = null): Sched
     (on: boolean): void => {
       setApplyToSeriesState(on);
       if (on || !prefill) return;
+      // The reset below drops the channel's exclusions; let the edit seeding put them back.
+      exclusionsSeeded.current = false;
       setRange({ startsAt: prefill.startsAt, endsAt: prefill.endsAt });
       setParticipants(prefill.participants);
       setGuests(prefill.guests);
@@ -291,6 +321,8 @@ export const useScheduleCallForm = (editCall: EditCallData | null = null): Sched
   const blockers = [
     titleError,
     participantCount === 0 ? 'Add at least one person' : null,
+    allMembersExcluded ? 'Include at least one channel participant' : null,
+    membersLoading ? 'Loading channel members…' : null,
     timeErrors.startsAtError,
     timeErrors.endsAtError,
     postUpdates.updateChannelError && !participantsOnly ? 'Pick a channel for post updates' : null,
@@ -302,7 +334,7 @@ export const useScheduleCallForm = (editCall: EditCallData | null = null): Sched
     if (!canSubmit) return false;
     setIsSubmitting(true);
     try {
-      const recipients = toRecipients(participants);
+      const recipients = toRecipients(participants, channelMembers);
       const callUpdatesChannel =
         postUpdates.postCallUpdates && selectedChannelId
           ? { callUpdatesChannel: selectedChannelId }
@@ -402,6 +434,7 @@ export const useScheduleCallForm = (editCall: EditCallData | null = null): Sched
   }, [
     applyToSeries,
     canSubmit,
+    channelMembers,
     editCall,
     endsAt,
     guests,
@@ -445,6 +478,7 @@ export const useScheduleCallForm = (editCall: EditCallData | null = null): Sched
     setApplyToSeries,
     participants,
     setParticipants,
+    setExcludedMembers,
     guests,
     setGuests,
     postUpdates,
@@ -480,6 +514,8 @@ export interface ScheduleCallForm {
   setApplyToSeries: (on: boolean) => void;
   participants: ScheduleCallParticipants;
   setParticipants: (participants: ScheduleCallParticipants) => void;
+  /** Sets which members of the picked channel are left out. */
+  setExcludedMembers: (excludedUserIds: string[]) => void;
   guests: string[];
   setGuests: (emails: string[]) => void;
   postUpdates: PostCallUpdates;
