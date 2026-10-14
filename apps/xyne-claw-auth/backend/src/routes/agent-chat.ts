@@ -57,6 +57,7 @@ import { CONFIG } from "../config.js";
 import { KNOWN_PROVIDERS, buildProviderConfig, agentCredRefreshTarget, userCredRefreshTarget, agentDefaultSpeed, providerConfigForSpeed, applyFastModeModels } from "../lib/agent-provider-config.js";
 import { awaitTurnHandoff, isTurnControlCommand } from "../lib/run-turn-handoff.js";
 import { dispatchLocalHarnessRun, isLocalHarnessProvider, localHarnessProviderLabel, pinnedModelForProvider, resolveLocalHarnessTarget, resolveLocalHarnessTargetForProvider, resolveLocalSandbox } from "../lib/local-harness.js";
+import { parseLocalHarnessOverride } from "../lib/local-harness-override.js";
 
 import { planServerContinuation } from "../lib/local-harness-continuation.js";
 import { authenticatedProviders, localHarnessRepository } from "../repositories/localHarnessRepository.js";
@@ -1426,10 +1427,13 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     // Eval runs pin the generation LLM per request. Validate up-front (clean
     // 400) — once the SSE stream opens we can only fail mid-stream.
     const OVERRIDABLE = new Set(["spaces", "copilot", "claude", "codex", "litellm"]);
-    const harnessPinned = providerOverride?.provider === "local-harness";
-    const pinnedHarnessProvider = harnessPinned && typeof providerOverride?.model === "string"
-      ? providerOverride.model.replace(/^local-harness:/, "")
-      : undefined;
+    const localOverride = parseLocalHarnessOverride(providerOverride);
+    if ("error" in localOverride) {
+      res.status(400).json({ success: false, error: localOverride.error });
+      return;
+    }
+    const harnessPinned = localOverride.pinned;
+    const pinnedHarnessProvider = localOverride.pinned ? localOverride.provider : undefined;
     const override = providerOverride?.provider && OVERRIDABLE.has(providerOverride.provider) ? providerOverride : undefined;
     if (providerOverride?.provider && !override && !harnessPinned) {
       res.status(400).json({ success: false, error: `Unknown provider override "${providerOverride.provider}"` });
@@ -2070,7 +2074,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       log.info(`[agent-chat] local sandbox requested for conv=${conversationId}: command=/${sandboxCommand}`);
     }
 
-    const pinnedHarnessTarget = !harnessBlockedByCommand && pinnedHarnessProvider && isLocalHarnessProvider(pinnedHarnessProvider)
+    const pinnedHarnessTarget = !harnessBlockedByCommand && pinnedHarnessProvider
       ? await resolveLocalHarnessTargetForProvider(userId, pinnedHarnessProvider).catch(() => undefined)
       : undefined;
     if (!harnessBlockedByCommand && pinnedHarnessProvider && !pinnedHarnessTarget) {

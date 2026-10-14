@@ -15,6 +15,7 @@ import { chatMessageRepository, agentRunRepository, chatAttachmentRepository, us
 import { awaitTurnHandoff, isTurnControlCommand } from "../lib/run-turn-handoff.js";
 import { dispatchLocalHarnessRun, localHarnessProviderLabel, pinnedModelForProvider, resolveLocalHarnessTarget, resolveLocalHarnessTargetForProvider, resolveLocalSandbox } from "../lib/local-harness.js";
 import { isLocalHarnessProvider, IMMEDIATE_TASK_COMMAND_RE, parseLocalSandboxCommand } from "xyne-claw-shared";
+import { parseLocalHarnessOverride } from "../lib/local-harness-override.js";
 import { planServerContinuation } from "../lib/local-harness-continuation.js";
 import { buildAgentHandoff, conversationPath, handoffMessagesFrom } from "../lib/multi-agent-chat.js";
 import { isDirectChatConversation } from "../lib/conversation-kind.js";
@@ -866,7 +867,12 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         ? resolvedProviders.providerOrder
         : undefined;
     const pinnedOverride = (providerOverride ?? undefined) as { provider?: string; model?: string } | undefined;
-    const harnessPinned = pinnedOverride?.provider === "local-harness";
+    const localOverride = parseLocalHarnessOverride(pinnedOverride);
+    if ("error" in localOverride) {
+      res.status(400).json({ success: false, error: localOverride.error });
+      return;
+    }
+    const harnessPinned = localOverride.pinned;
     const serverPinned =
       !harnessPinned &&
       (pinnedOverride?.provider === "litellm" || pinnedOverride?.provider === "spaces") &&
@@ -1707,10 +1713,8 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     } else if (CONFIG.localHarnessEnabled && localSandboxRequested) {
       log.info(`[run-stream] local sandbox requested for conv=${convId}: command=/${sandboxCommand}`);
     }
-    const pinnedHarnessProvider = harnessPinned && typeof pinnedOverride?.model === "string"
-      ? pinnedOverride.model.replace(/^local-harness:/, "")
-      : undefined;
-    const pinnedHarnessTarget = harnessEligible && pinnedHarnessProvider && isLocalHarnessProvider(pinnedHarnessProvider)
+    const pinnedHarnessProvider = localOverride.pinned ? localOverride.provider : undefined;
+    const pinnedHarnessTarget = harnessEligible && pinnedHarnessProvider
       ? await resolveLocalHarnessTargetForProvider(userId, pinnedHarnessProvider).catch((harnessErr: unknown) => {
           log.warn("[run-stream] pinned local-harness resolution failed:", errMsg(harnessErr));
           return undefined;
