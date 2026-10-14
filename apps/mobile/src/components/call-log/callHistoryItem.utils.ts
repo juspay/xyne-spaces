@@ -218,11 +218,14 @@ export function isScheduledCallJoinable(call: {
   return Date.now() >= call.startsAt;
 }
 
-type UpcomingCall = { status: string; startsAt?: number | null; startedAt?: number | null };
+type UpcomingCall = { status: string; startsAt?: number | null };
 
-/** A call keeps status SCHEDULED after it starts (people can rejoin); only an unstarted one is editable. */
+/**
+ * A call keeps status SCHEDULED after it starts (people can rejoin), so the start time decides.
+ * Not `startedAt`: that column is required on every call row, so it is set before the call starts.
+ */
 export function isScheduledCallUpcoming(call: UpcomingCall): boolean {
-  if (call.status !== CallStatus.SCHEDULED || call.startedAt) return false;
+  if (call.status !== CallStatus.SCHEDULED) return false;
   return !call.startsAt || call.startsAt > Date.now();
 }
 

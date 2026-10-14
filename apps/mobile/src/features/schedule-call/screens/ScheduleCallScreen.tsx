@@ -193,7 +193,9 @@ export default function ScheduleCallScreen({ onClose }: ScheduleCallScreenProps)
           </Text>
           <TextInput
             value={form.title}
-            onChangeText={form.setTitle}
+            onChangeText={text => form.setTitle(text.replace(/\s*\n\s*/g, ' '))}
+            multiline
+            submitBehavior='blurAndSubmit'
             placeholder='Call title'
             placeholderTextColor={placeholderColor}
             accessibilityLabel='Call title'
