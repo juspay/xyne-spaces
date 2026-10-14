@@ -320,6 +320,7 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
                                 onClick={() => onCreateCanvasInFolder(folderGroup.folder)}
                                 disabled={isCreatingCanvas}
                                 title='Create canvas in folder'
+                                aria-label='Create canvas in folder'
                                 data-testid={`channel-folder-create-canvas-${folderGroup.folder.id}`}
                                 data-ph-capture-attribute-track-id='create_canvas_in_channel_folder'
                                 data-track-category='CANVAS'

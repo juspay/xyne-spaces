@@ -34,9 +34,9 @@ const queued = (what: string) => async (): Promise<string> =>
 const toolsProperty = {
   type: "array" as const,
   description:
-    "Tool identifiers to grant, e.g. 'web-search', 'sandbox-run-command', or a subagent name like 'github'. " +
+    "Tool identifiers to grant, e.g. 'web-search', 'sandbox-run', or a subagent name like 'github'. " +
     "Names that do not exist in this workspace are dropped and reported on the card rather than failing the whole request — " +
-    "call list-available-tools first if you are unsure what exists.",
+    "call search_tools first if you are unsure what exists.",
   items: { type: "string" as const },
 };
 
@@ -69,7 +69,9 @@ export const createAgentTool: ToolDefinition = {
     "On approval the agent is created as a PERSONAL agent owned by the approving user. " +
     "Write a real system prompt — role, procedure, which tools to use when, output format and limits — not a one-line summary; " +
     "a vague prompt produces an agent that does not work. " +
-    "Use this when the user asks you to 'create an agent', 'make me a bot for X', or 'set up an agent that does Y'.",
+    "Use this when the user asks you to 'create an agent', 'make me a bot for X', or 'set up an agent that does Y'. " +
+    "Your `summary` is the ONLY text the user should see about the draft: do not write any message announcing, " +
+    "describing or asking them to approve it — not before this call, not after it.",
   source: AGENT_TOOLS_SOURCE,
   isWriteTool: true,
   inputSchema: {
@@ -98,9 +100,61 @@ export const createAgentTool: ToolDefinition = {
           `if the agent genuinely needs none. An empty array is a valid answer — never add a tool ` +
           `just to fill this field.`,
       },
+      mcps: {
+        type: "array",
+        description:
+          "Integrations to grant by NAME when the user asks for one — 'github', 'bitbucket', 'grafana'. " +
+          "Several integrations also ship a subagent under the SAME name, and a name in `tools` always resolves " +
+          "to the subagent, so put integrations here rather than in `tools`.",
+        items: { type: "string" },
+      },
+      skills: {
+        type: "array",
+        description: "Skill names to attach, matched against the org's skills. Only when the user asked for them.",
+        items: { type: "string" },
+      },
+      knowledge: {
+        type: "object",
+        description: "Knowledge-base access. Only when the user asked for it; omit to leave the org default.",
+        properties: {
+          scope: { type: "string", enum: ["COLLECTIONS", "USER"] },
+          collections: { type: "array", items: { type: "string" } },
+        },
+      },
+      providerOrder: {
+        type: "array",
+        description:
+          "AI providers in preference order, e.g. ['claude','codex']. Only when the user named one — an " +
+          "unrequested provider is worse than the org default.",
+        items: { type: "string" },
+      },
+      memory: {
+        type: "object",
+        description: "Agent memory. Only when the user asked for it.",
+        properties: {
+          enabled: { type: "boolean" },
+          requiresApproval: { type: "boolean" },
+        },
+        required: ["enabled"],
+      },
+      scope: {
+        type: "string",
+        enum: ["personal", "global"],
+        description: "'personal' (default) belongs to the requester; 'global' is org-wide. Only set when asked.",
+      },
+      summary: {
+        type: "string",
+        description:
+          "Required. ONE short sentence (max ~25 words) posted above the card, in your own voice, saying only WHY you " +
+          "granted these tools or left something out. The card already shows the name, description and tools, so do NOT " +
+          "say what the agent does, how it formats answers, or that it needs approval.",
+      },
     },
-    required: ["name", "description", "systemPrompt", "tools"],
+    required: ["name", "description", "systemPrompt", "tools", "summary"],
   },
+  queuedForApprovalText:
+    "Queued: the user now gets the agent draft card, with your `summary` posted above it. Together they already say " +
+    "everything, so your reply after this must be EMPTY — no recap, no tool list, no 'approve the card' line.",
   execute: queued("create-agent"),
 };
 
@@ -147,10 +201,10 @@ export const updateAgentTool: ToolDefinition = {
     "applied until they approve, and approval is refused unless the approver may edit that agent (its owner, an EDITOR, or an admin). " +
     "Send ONLY the fields you want to change — omitted fields are left exactly as they are. " +
     "To change the system prompt, PREFER `promptEdits` — anchored {oldText, newText} replacements against the current prompt " +
-    "(read it first via get-agent-config so your oldText anchors are exact; each must appear exactly once). " +
+    "(read it first via get_agent_config so your oldText anchors are exact; each must appear exactly once). " +
     "`systemPrompt` (full replacement) is only accepted while the current prompt is under ~8K chars — larger bodies get " +
     "truncated as tool arguments and would destroy the prompt, so the server rejects them. " +
-    "`tools` REPLACES the agent's tool list rather than adding to it, so read the agent's current tools first (get-agent-config) " +
+    "`tools` REPLACES the agent's tool list rather than adding to it, so read the agent's current tools first (get_agent_config) " +
     "and send the full intended list. " +
     "This mutates an agent that may be running right now, so prefer a narrow change over a rewrite.",
   source: AGENT_TOOLS_SOURCE,

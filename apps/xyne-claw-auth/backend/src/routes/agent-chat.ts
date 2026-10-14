@@ -1885,7 +1885,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
           ? agentCredRefreshTarget(agent.id, "claude", credRow as { sharedCredentialId?: string | null })
           : userCredRefreshTarget(userId, "claude", credRow as { sharedCredentialId?: string | null });
         try {
-          claudeCfg.apiKey = await getValidClaudeBearer(target.credKey, credRow, target.persist);
+          claudeCfg.apiKey = await getValidClaudeBearer(target.credKey, credRow, target.persist, target.reload);
         } catch (err) {
           log.warn("[agent-chat] Claude OAuth refresh failed — credential likely needs reconnect:", err instanceof Error ? err.message : err);
         }

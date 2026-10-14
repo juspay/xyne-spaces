@@ -2611,6 +2611,7 @@ export const queries = defineQueries({
             ChannelType.APP,
             ChannelType.CALL,
             ChannelType.SOCIAL_MEDIA,
+            ChannelType.CHANNELS,
           ])
           .related('channelStats'),
       );
@@ -2628,6 +2629,7 @@ export const queries = defineQueries({
             ChannelType.APP,
             ChannelType.CALL,
             ChannelType.SOCIAL_MEDIA,
+            ChannelType.CHANNELS,
           ])
           .related('channelStats'),
       );

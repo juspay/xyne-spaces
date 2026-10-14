@@ -111,6 +111,7 @@ export const ConversationLabelSubmenu = ({
               const color = label.color ?? colorForName(label.name);
               return (
                 <button
+                  aria-pressed={isSelected}
                   key={label.id}
                   onClick={() => handleSelect(label.id)}
                   type='button'

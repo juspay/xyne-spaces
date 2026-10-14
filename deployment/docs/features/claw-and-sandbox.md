@@ -180,10 +180,13 @@ consumer shed the frame under load — has no row for the gate to match, and the
 `unknown-sandbox`: a 403 even for the person who started it. Before the gate existed the link was
 simply dead, so this is newly visible rather than newly broken (XYNE-65825).
 
-The editor does not render in the Xyne AI workspace pane — that iframe withholds
-`allow-same-origin`, and VS Code needs `localStorage`, IndexedDB and a service worker, so the
-workbench cannot boot there — and the pane offers a button that opens it in a tab instead. The tab
-is not a security boundary: see [security](../concepts/security.md#sandboxes). From the desktop app
+The Xyne AI workspace pane does not embed the editor; it offers a button that opens it in a tab.
+Neither is a security boundary: frames under `/claw-preview/` and `/claw-code/` are granted
+`allow-same-origin` (`iframeSandboxFor`), so inline or in a tab the sandbox's pages run on the
+Spaces origin — see [security](../concepts/security.md#sandboxes). The router refuses a
+`/claw-code/` request whose `Origin` is not the public host it arrived on (or one listed in
+`PUBLIC_ORIGINS`), and a `/claw-code/` WebSocket upgrade with no `Origin` at all, before it rewrites
+`Origin` for code-server. From the desktop app
 it is the system browser, which carries its own cookies, so a refusal there is a short page asking
 the reader to sign in to Xyne in that browser rather than a dead end.
 

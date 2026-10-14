@@ -22,15 +22,13 @@ function attachmentDownloadUrl(refId: string): string {
   return `/xyne-ai/v2/attachments/${encodeURIComponent(refId)}/download`;
 }
 
-// The sandbox editor is code-server, and code-server needs localStorage,
-// IndexedDB and a service worker. SandboxedFrame withholds allow-same-origin,
-// so the frame gets an opaque origin where all three throw and the workbench
-// never boots. Hence the button: the reason is functional, not a security
-// boundary. /claw-code is served from this origin, so the tab it opens is
-// same-origin too — anything the agent serves there can call /api/* as the
-// viewer, who may be any member of the conversation. The sandbox-access gate in
-// the router narrows who is exposed; only moving the sandbox routes to their own
-// origin removes it (XYNE-65792 follow-up).
+// The sandbox editor (code-server, a full workbench) opens in its own tab
+// rather than inline. That is not a security boundary: /claw-code is served
+// from this origin, and iframeSandboxFor grants frames under /claw-preview and
+// /claw-code allow-same-origin, so inline or in a tab, anything the agent serves
+// there can call /api/* as the viewer, who may be any member of the
+// conversation. The sandbox-access gate and the router's Origin check narrow
+// who is exposed; only a dedicated preview origin removes it (#2993, #3007).
 function isSandboxEditorUrl(url: string): boolean {
   try {
     return new URL(url).pathname.startsWith('/claw-code/');
@@ -83,6 +81,10 @@ export function artifactInlineActions(artifact: ConversationArtifact): ReactElem
   }
 
   const linkable = artifact.kind === 'PREVIEW' || artifact.kind === 'DIFF';
+
+  if (linkable && artifact.status === 'STALE') {
+    return <span className='flex-shrink-0 text-xs text-muted-foreground'>Ended</span>;
+  }
 
   if (linkable && !url) {
     return <span className='flex-shrink-0 text-xs text-muted-foreground'>Link unavailable</span>;
@@ -153,6 +155,7 @@ export function ArtifactInlineView({
     case 'DIFF':
       if (isLocalDiffArtifact(artifact))
         return <LocalDiffView artifact={artifact} guide={reviewGuide ?? null} />;
+      if (artifact.status === 'STALE') return <Centered>This sandbox has ended.</Centered>;
       if (url && isSandboxEditorUrl(url)) return <SandboxEditorCard url={url} />;
       return url ? (
         <SandboxedFrame url={url} title={artifact.title} />

@@ -1,0 +1,28 @@
+diff --git a/android/src/main/java/com/swmansion/enriched/textinput/EnrichedTextInputView.kt b/android/src/main/java/com/swmansion/enriched/textinput/EnrichedTextInputView.kt
+index cdcad4e..96cac4f 100644
+--- a/android/src/main/java/com/swmansion/enriched/textinput/EnrichedTextInputView.kt
++++ b/android/src/main/java/com/swmansion/enriched/textinput/EnrichedTextInputView.kt
+@@ -217,7 +217,9 @@ class EnrichedTextInputView :
+     inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+ 
+     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+-      breakStrategy = LineBreaker.BREAK_STRATEGY_HIGH_QUALITY
++      // SIMPLE fills each line. HIGH_QUALITY balances every row and leaves
++      // short lines that reflow on the next keystroke.
++      breakStrategy = LineBreaker.BREAK_STRATEGY_SIMPLE
+     }
+ 
+     setPadding(0, 0, 0, 0)
+diff --git a/android/src/main/java/com/swmansion/enriched/textinput/MeasurementStore.kt b/android/src/main/java/com/swmansion/enriched/textinput/MeasurementStore.kt
+index 09363e0..d7f22b2 100644
+--- a/android/src/main/java/com/swmansion/enriched/textinput/MeasurementStore.kt
++++ b/android/src/main/java/com/swmansion/enriched/textinput/MeasurementStore.kt
+@@ -88,7 +88,7 @@ object MeasurementStore {
+         .setLineSpacing(0f, 1f)
+ 
+     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+-      builder.setBreakStrategy(LineBreaker.BREAK_STRATEGY_HIGH_QUALITY)
++      builder.setBreakStrategy(LineBreaker.BREAK_STRATEGY_SIMPLE)
+     }
+ 
+     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {

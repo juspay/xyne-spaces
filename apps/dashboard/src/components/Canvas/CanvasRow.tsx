@@ -157,6 +157,7 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
           <button
             className='flex min-w-0 flex-1 items-center gap-3 text-left'
             onClick={event => onSelect(event, canvas)}
+            aria-current={isSelected ? 'true' : undefined}
             data-track-category='CANVAS'
             data-track-name={trackNames.canvasOpen}
           >
@@ -215,6 +216,7 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
                 onToggleStar?.(canvas);
               }}
               title={canvas.isStarred ? 'Unstar canvas' : 'Star canvas'}
+              aria-label={`${canvas.isStarred ? 'Unstar' : 'Star'} ${canvas.title || 'Untitled'}`}
               data-ph-capture-attribute-track-id='toggle_canvas_star'
               data-track-category='CANVAS'
               data-track-name='TOGGLE_CANVAS_STAR'
@@ -235,6 +237,7 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
                   menuOpen ? 'flex' : 'hidden group-hover:flex',
                 )}
                 onClick={event => event.stopPropagation()}
+                aria-label={`More actions for ${canvas.title || 'Untitled'}`}
                 data-track-category='CANVAS'
                 data-track-name={trackNames.actionsMenu}
               >

@@ -52,6 +52,12 @@ import {
   ArrowLeft,
 } from '@xyne/icons';
 import { Button } from '../../components/ui/Button/Button';
+import {
+  isSummaryTemplateMenuStep,
+  summaryTemplateTour,
+  useSummaryTemplateTour,
+  useSummaryTemplateTourTaken,
+} from '../../components/SummaryTemplateTour';
 import { Dialog } from '../../components/ui/Dialog';
 import { Popover } from '../../components/ui/Popover';
 import { cn, Tooltip } from '../../components/ui/Tooltip';
@@ -111,6 +117,12 @@ import {
   getTemplateIcon,
 } from './components/SummaryTemplatesModal';
 import { useSummaryTemplates } from '../../hooks/useSummaryTemplates';
+import {
+  markDefaultSummaryTemplateOffered,
+  recordSummaryTemplateSwitch,
+  shouldOfferDefaultSummaryTemplate,
+  useRecordingDefaultSummaryTemplate,
+} from '../../hooks/useRecordingDefaultSummaryTemplate';
 import { useSummaryModelPreference } from '../../hooks/useSummaryModelPreference';
 import { useMarkRecordingSummaryReadOnOpen } from '../../hooks/useHasUnreadRecordingSummaries';
 
@@ -206,7 +218,7 @@ export default function RecordingDetailV2Screen({
   recordingId: recordingIdOverride,
   onBack,
 }: RecordingDetailV2ScreenProps): ReactElement {
-  const { isMobile } = usePlatform();
+  const { isMobile, isElectron } = usePlatform();
   const askAIAvailable = useAskAIAvailable();
   const params = useParams<{ recordingId: string }>();
   const recordingId = recordingIdOverride ?? params.recordingId;
@@ -265,10 +277,37 @@ export default function RecordingDetailV2Screen({
   const [googleDocPreviewNonce, setGoogleDocPreviewNonce] = useState(0);
   const [isExportingGoogleDoc, setIsExportingGoogleDoc] = useState(false);
   const [templatesModalMode, setTemplatesModalMode] = useState<'browse' | 'new' | null>(null);
+  // The template tour starts in the dropdown and finishes inside the templates
+  // dialog; closing that dialog mid-way, or leaving the recording, ends it.
+  const { activeStep: templateTourStep } = useSummaryTemplateTour();
+  const templateTourTaken = useSummaryTemplateTourTaken();
+  useEffect(() => {
+    if (
+      templateTourStep &&
+      !isSummaryTemplateMenuStep(templateTourStep) &&
+      templatesModalMode === null
+    ) {
+      summaryTemplateTour.dismiss();
+    }
+  }, [templateTourStep, templatesModalMode]);
+  useEffect(() => (): void => summaryTemplateTour.dismiss(), []);
+  const [isTemplateInfoOpen, setIsTemplateInfoOpen] = useState(false);
+  const handleStartTemplateTour = (): void => {
+    setIsTemplateInfoOpen(false);
+    handleTabSelect('summary');
+    summaryTemplateTour.start();
+  };
   const [shouldLoadSummaryTemplates, setShouldLoadSummaryTemplates] = useState(false);
   const { templates: summaryTemplates, isLoading: summaryTemplatesLoading } = useSummaryTemplates(
     shouldLoadSummaryTemplates || templatesModalMode !== null,
   );
+  const { defaultSummaryTemplateId, setDefaultSummaryTemplateId } =
+    useRecordingDefaultSummaryTemplate();
+  // Shown next to the template selector once a template has been switched to often.
+  const [defaultTemplateOffer, setDefaultTemplateOffer] = useState<{
+    templateId: string;
+    name: string;
+  } | null>(null);
   const storedSummaryTemplateId = recording?.summaryTemplateId ?? '';
   const shouldQueryStoredSummaryTemplate =
     storedSummaryTemplateId.length > 0 && storedSummaryTemplateId !== 'default';
@@ -506,6 +545,10 @@ export default function RecordingDetailV2Screen({
   });
 
   useEffect(() => {
+    // j/k navigation swaps the recording without remounting: neither the
+    // "set as default" offer nor a running tour belongs to the next one.
+    setDefaultTemplateOffer(null);
+    summaryTemplateTour.dismiss();
     if (recordingId) void loadRecording(recordingId);
   }, [recordingId]);
 
@@ -811,6 +854,14 @@ export default function RecordingDetailV2Screen({
   ): Promise<void> => {
     if (!recording || isRegeneratingSummary) return;
 
+    // A switch is an explicit pick that differs from the template the summary was
+    // written with; first generations and "Retry with …" model changes are not.
+    const isTemplateSwitch =
+      !modelType &&
+      Boolean(summaryTemplateId) &&
+      Boolean(recording.summaryTemplateId) &&
+      summaryTemplateId !== recording.summaryTemplateId;
+
     // Re-running a template we cannot read is not possible: asking for it by id
     // fails the server's own template check, and omitting it resolves to the
     // default, quietly rewriting the summary in a different style. Both the
@@ -871,6 +922,19 @@ export default function RecordingDetailV2Screen({
       toast.success(`Generating ${selectedName} summary`, {
         description: "We'll notify you when it's ready.",
       });
+      // Once the user keeps coming back to the same template in the desktop app,
+      // offer to make it the default for future recordings. The option always
+      // lives in Preferences › Recordings.
+      if (isElectron && isTemplateSwitch) {
+        recordSummaryTemplateSwitch(resolvedTemplateId);
+        if (
+          resolvedTemplateId !== defaultSummaryTemplateId &&
+          shouldOfferDefaultSummaryTemplate(resolvedTemplateId)
+        ) {
+          markDefaultSummaryTemplateOffered(resolvedTemplateId);
+          setDefaultTemplateOffer({ templateId: resolvedTemplateId, name: selectedName });
+        }
+      }
     } catch (err) {
       logRecordingError('RecordingDetailV2Screen.regenerateSummary', err);
       // Drop the placeholder too: a failed request leaves nothing on its way, and
@@ -1317,30 +1381,101 @@ export default function RecordingDetailV2Screen({
               {/* Templates are only offered once the recording has ended — while live
                   the second segment is the transcript and there is nothing to
                   regenerate from yet. */}
-              <RecordingContentTabs
-                visibleTab={visibleTab}
-                secondTab={secondTab}
-                onSelect={handleTabSelect}
-                hasSummary={hasDetailedSummary}
-                selectedTemplate={selectedSummaryTemplate}
-                {...(isLive || !canEdit
-                  ? {}
-                  : {
-                      // showSummaryShimmer covers both a click in this tab and a
-                      // backend-published 'pending' (e.g. auto-generation after
-                      // the call ended, or a regen started from another tab).
-                      isRegenerating: isRegeneratingSummary || showSummaryShimmer,
-                      regeneratingTemplateId: regeneratingSummaryTemplateId,
-                      templates: summaryTemplateOptions,
-                      templatesLoading: summaryTemplatesLoading,
-                      onTemplateMenuOpen: () => setShouldLoadSummaryTemplates(true),
-                      onTemplateSelect: summaryTemplateId =>
-                        void handleRegenerateSummary(summaryTemplateId),
-                      onRegenerate: () => void handleRegenerateSummary(selectedSummaryTemplate.id),
-                      onOpenTemplates: handleOpenSummaryTemplates,
-                      onNewTemplate: handleNewSummaryTemplate,
-                    })}
-              />
+              <div className='flex items-center gap-1'>
+                <RecordingContentTabs
+                  visibleTab={visibleTab}
+                  secondTab={secondTab}
+                  onSelect={handleTabSelect}
+                  hasSummary={hasDetailedSummary}
+                  selectedTemplate={selectedSummaryTemplate}
+                  {...(isLive || !canEdit
+                    ? {}
+                    : {
+                        // showSummaryShimmer covers both a click in this tab and a
+                        // backend-published 'pending' (e.g. auto-generation after
+                        // the call ended, or a regen started from another tab).
+                        isRegenerating: isRegeneratingSummary || showSummaryShimmer,
+                        regeneratingTemplateId: regeneratingSummaryTemplateId,
+                        templates: summaryTemplateOptions,
+                        templatesLoading: summaryTemplatesLoading,
+                        onTemplateMenuOpen: () => setShouldLoadSummaryTemplates(true),
+                        onTemplateSelect: summaryTemplateId =>
+                          void handleRegenerateSummary(summaryTemplateId),
+                        onRegenerate: () =>
+                          void handleRegenerateSummary(selectedSummaryTemplate.id),
+                        onOpenTemplates: handleOpenSummaryTemplates,
+                        onNewTemplate: handleNewSummaryTemplate,
+                        defaultTemplateOffer,
+                        onAcceptDefaultTemplateOffer: (): void => {
+                          if (!defaultTemplateOffer) return;
+                          setDefaultSummaryTemplateId(defaultTemplateOffer.templateId);
+                          toast.success(
+                            `${defaultTemplateOffer.name} is now your default template`,
+                            {
+                              description:
+                                'New recordings will use it. Change it in Preferences › Recordings.',
+                            },
+                          );
+                          setDefaultTemplateOffer(null);
+                        },
+                        onDismissDefaultTemplateOffer: (): void => setDefaultTemplateOffer(null),
+                      })}
+                />
+                {!isLive && canEdit && hasDetailedSummary && !templateTourTaken && (
+                  <Popover
+                    open={isTemplateInfoOpen}
+                    onOpenChange={setIsTemplateInfoOpen}
+                    side='bottom'
+                    align='start'
+                    sideOffset={8}
+                    showArrow
+                    className='w-72 rounded-xl border-border p-3.5 shadow-xl'
+                    trigger={
+                      <Button
+                        type='button'
+                        variant='ghost'
+                        size='inline'
+                        title='About summary templates'
+                        className='h-6 gap-1 rounded-full bg-primary/10 px-2 text-[11px] font-semibold uppercase tracking-wide text-primary hover:bg-primary/15 hover:text-primary'
+                        aria-label='About summary templates'
+                        data-track-category='RecordingDetailV2'
+                        data-track-name='open_summary_template_info'
+                      >
+                        <XyneAIStar size={11} />
+                        New
+                      </Button>
+                    }
+                  >
+                    <p className='text-sm font-semibold'>Want a different summary?</p>
+                    <p className='mt-1 text-xs text-muted-foreground'>
+                      Pick another template for this recording, or learn how to customise one of
+                      your own.
+                    </p>
+                    <div className='mt-3 flex items-center justify-end gap-2'>
+                      <Button
+                        type='button'
+                        variant='ghost'
+                        size='sm'
+                        onClick={() => setIsTemplateInfoOpen(false)}
+                        className='text-muted-foreground'
+                        data-track-category='RecordingDetailV2'
+                        data-track-name='dismiss_summary_template_info'
+                      >
+                        Not now
+                      </Button>
+                      <Button
+                        type='button'
+                        size='sm'
+                        onClick={handleStartTemplateTour}
+                        data-track-category='RecordingDetailV2'
+                        data-track-name='start_summary_template_tour'
+                      >
+                        Show me how
+                      </Button>
+                    </div>
+                  </Popover>
+                )}
+              </div>
 
               {/* The right slot belongs to whichever action the state allows: flag a
                   moment while capturing, share the finished recording once ended. */}

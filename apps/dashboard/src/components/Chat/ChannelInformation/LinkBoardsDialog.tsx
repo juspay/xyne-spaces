@@ -96,6 +96,7 @@ function ProjectRow({
               const isSelected = selected.has(board.id);
               return (
                 <button
+                  aria-pressed={isSelected}
                   key={board.id}
                   type='button'
                   disabled={isLinked}

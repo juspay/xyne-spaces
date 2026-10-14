@@ -77,6 +77,7 @@ export const AddCustomEmojiModal: React.FC<AddCustomEmojiModalProps> = ({
         <div className='flex items-center justify-between px-6 py-4 border-b'>
           <h2 className='text-lg font-semibold'>Add emoji</h2>
           <button
+            aria-label='Close add emoji dialog'
             onClick={onClose}
             data-track-category='EDITOR_TOOLBAR'
             data-track-name='CLOSE_EMOJI_PICKER'

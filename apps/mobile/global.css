@@ -1,0 +1,904 @@
+@import "tailwindcss";
+@import "uniwind";
+
+/* Spaces design tokens — generated from src/design-system/tokens/.
+   Adds `--color-spaces-*` to the light and dark themes; declares nothing the
+   classic design owns, so the blocks below are untouched. */
+@import "./src/design-system/generated/spaces-tokens.css";
+
+@layer theme {
+  :root {
+    @variant light {
+      --color-background: #e5eaef;
+      --color-foreground: #101828;
+      --color-secondary: #f1f5f9;
+      --color-secondary-foreground: #667085;
+      --color-tertiary: #7c8698;
+      --color-brand: #fe6d36;
+      --color-card: #fff;
+      --color-card-foreground: #101828;
+      --color-border: #d6dce6;
+      --color-muted: #b7bfcc;
+      --color-popover: #f1f5f9;
+      --color-accent: #e9eef5;
+      --color-accent-foreground: #ffffff;
+      --color-input: #f2f4f5;
+
+      /* Self message variants - darker for reply banners/forwarded sections */
+      --color-self-muted: hsl(16, 97%, 45%);
+      /* chat theme */
+      --color-chat-root-background: #e5eaef; /* --color-background */
+      --color-chat-background: #f4f1ea;
+      --color-chat-card: #f9f9f9;
+      --color-chat-card-self: #dcf8c7;
+      --color-chat-card-muted: #f8fafc;
+      --color-chat-card-foreground-muted: #667085; /* --color-secondary-foreground */
+      --color-chat-foreground: #101828; /* --color-foreground */
+      --color-chat-foreground-muted: #98a2b3;
+
+      /*
+        Previous chat theme colors
+        --color-chat-background: #ffffff;
+        --color-chat-card: #E9EEF5;
+        --color-chat-card-self: #FFE8DB;
+      */
+      --color-chat-background: #f4f1ea;
+      --color-chat-card: #f9f9f9;
+      --color-chat-card-muted: #f1f5f9;
+      --color-chat-card-foreground-muted: #667085; /* --color-secondary-foreground */
+      --color-chat-foreground: #101828; /* --color-foreground */
+      --color-chat-foreground-muted: #98a2b3;
+
+      /* ===================== New Tokens ===================== */
+
+      /* Base */
+      --color-base-0: #ffffff;
+      --color-base-50: #f9f9f9;
+      --color-base-100: #f8fafc;
+      --color-base-150: #f4f4f4;
+      --color-base-400: #7c8698;
+      --color-base-500: #767779;
+      --color-base-600: #304460;
+      --color-base-900: #101828;
+
+      /* Green scale */
+      --color-green-100: #dcf8c7;
+      --color-green-200: #d0fecf;
+      --color-green-600: #1dab61;
+      --color-green-700: #098d68;
+      --color-green-800: #15603e;
+
+      /* Blue scale */
+      --color-blue-100: #e5f1fe;
+      --color-blue-700: #1264a3;
+
+      /* Yellow scale */
+      --color-yellow-100: #fef9c3;
+      --color-yellow-700: #a16207;
+
+      /* Activity icon tokens */
+      --color-activity-thread-icon: #15803d;
+      --color-activity-thread-bg: #dcfce7;
+      --color-activity-thread-bg-unread: #dcfce7;
+      --color-activity-ticket-icon: #6e49c6;
+      --color-activity-call-icon: #37aa82;
+      --color-activity-call-bg: #ddf7f4;
+      --color-activity-call-update-icon: #ffb463;
+      --color-activity-call-update-bg: #fff3eb;
+
+      /* Activity icon tokens */
+      --color-activity-thread-icon: #15803d;
+      --color-activity-thread-bg: #dcfce7;
+      --color-activity-thread-bg-unread: #dcfce7;
+      --color-activity-ticket-icon: #6e49c6;
+      --color-activity-call-icon: #37aa82;
+      --color-activity-call-bg: #ddf7f4;
+      --color-activity-call-update-icon: #ffb463;
+      --color-activity-call-update-bg: #fff3eb;
+
+      /* Red scale */
+      --color-red-100: #fee2e2;
+      --color-red-600: #dc2626;
+      --color-red-700: #b91c1c;
+
+      /* Semantic */
+      --color-primary-bg: var(--color-base-0);
+      --color-secondary-bg: var(--color-base-100);
+      --color-tertiary-bg: var(--color-base-150);
+      --color-tabs-screen: var(--color-card);
+
+      --color-primary-text: var(--color-base-900);
+      --color-secondary-text: var(--color-base-400);
+      --color-muted-text: var(--color-base-500);
+
+      --color-input-bg: var(--color-base-100);
+      --color-input-placeholder: var(--color-base-400);
+
+      --color-tab-active-bg: var(--color-green-200);
+      --color-tab-active-text: var(--color-green-800);
+      --color-tab-inactive-bg: var(--color-base-150);
+      --color-tab-inactive-text: var(--color-base-500);
+      /* Only just separates the tab bar from the screen it sits on — both are
+         painted in --color-tabs-screen, so this is the one thing giving the
+         bar an edge. --color-border is far too strong for that job here. */
+      --color-tab-bar-border: #ededed;
+
+      --color-status-success: var(--color-green-600);
+      --color-status-danger: var(--color-red-600);
+      --color-action-primary: var(--color-green-600);
+      --color-chat-mention-text: #0a6e63;
+      --color-dm-swipe-archive: #3a82f7;
+      --color-dm-swipe-read: #34c759;
+      --color-dm-swipe-star: #ff9500;
+
+      /* Mention highlight backgrounds (composer input editor) */
+      --color-mention-you-bg: #fff1b8;
+      --color-mention-you-text: #6a5200;
+      --color-mention-other-bg: #eef2ff;
+      --color-mention-other-text: #4453a6;
+
+      /* Rendered message mention chips (2x2: message author x mention target) */
+      --color-chat-mention-inline-other-bg: #eef2ff;
+      --color-chat-mention-inline-other-text: #4453a6;
+      --color-chat-mention-inline-current-other-bg: #eef2ff;
+      --color-chat-mention-inline-current-other-text: #4453a6;
+      --color-chat-mention-inline-mentioned-you-bg: #d6a21f;
+      --color-chat-mention-inline-mentioned-you-text: #251700;
+      --color-chat-mention-inline-current-self-bg: #d6a21f;
+      --color-chat-mention-inline-current-self-text: #251700;
+
+      /* Chat  */
+      --color-chat-msg-incoming-bg: var(--color-base-50);
+      --color-chat-msg-incoming-text: var(--color-base-900);
+
+      --color-chat-message-bubble-1: #d8fdd2;
+      --color-chat-message-bubble-2: #d8fdd2;
+      --color-chat-message-bubble-3: #2d68ea;
+      --color-chat-message-bubble-4: #d2e8ff;
+      --color-chat-message-bubble-5: #5e47df;
+      --color-chat-message-bubble-6: #e7e0ff;
+      --color-chat-message-bubble-7: #0b4b79;
+      --color-chat-message-bubble-8: #d2e3ed;
+      --color-chat-message-bubble-9: #c15add;
+      --color-chat-message-bubble-10: #f2d9f8;
+      --color-chat-message-bubble-11: #333333;
+      --color-chat-message-bubble-12: #dadcdb;
+      --color-chat-message-bubble-13: #e56d53;
+      --color-chat-message-bubble-14: #fee2d7;
+      --color-chat-message-bubble-15: #3d503a;
+      --color-chat-message-bubble-16: #dee8df;
+      --color-chat-message-bubble-17: #028377;
+      --color-chat-message-bubble-18: #cbf2ef;
+      --color-chat-message-bubble-19: #731a2e;
+      --color-chat-message-bubble-20: #fdcdd9;
+      --color-chat-message-bubble-21: #9e6947;
+      --color-chat-message-bubble-22: #f4ded1;
+      --color-chat-message-bubble-23: #c1a987;
+      --color-chat-message-bubble-24: #f0e9df;
+      --color-chat-message-bubble-25: #01a884;
+      --color-chat-message-bubble-26: #d4fded;
+      --color-chat-message-bubble-27: #e6cb00;
+      --color-chat-message-bubble-28: #fcf8af;
+      --color-chat-message-bubble-29: #72a431;
+      --color-chat-message-bubble-30: #e2ffbd;
+      --color-chat-message-bubble-31: #e53472;
+      --color-chat-message-bubble-32: #ffdbe7;
+      --color-chat-message-bubble-33: #e90038;
+      --color-chat-message-bubble-34: #fbd8dc;
+      --color-chat-message-bubble-35: #e5391d;
+      --color-chat-message-bubble-36: #ffdbcb;
+      --color-chat-message-bubble-37: #f87916;
+      --color-chat-message-bubble-38: #ffe4c7;
+
+      --color-chat-msg-outgoing-bg: var(--color-green-100);
+      --color-chat-msg-outgoing-text: var(--color-base-900);
+      /* Own messages use same fill as outgoing bubble (see Message `bg-chat-card-self`) */
+      --color-chat-card-self: var(--color-chat-msg-outgoing-bg);
+
+      --color-chat-preview-msg-text: #475467;
+      --color-chat-unread-preview-msg-text: var(--color-base-600);
+
+      --color-chat-unread-count-badge-bg: var(--color-green-600);
+      --color-chat-unread-count-badge-text: #ffffff;
+
+      --color-chat-time-text: var(--color-base-500);
+      --color-chat-unread-time-text: var(--color-green-600);
+
+      --color-chat-search-bg: var(--color-base-100);
+      --color-chat-search-placeholder: var(--color-base-400);
+
+      /* Ticket details */
+      --color-ticket-header-accessory: #f3f4f6;
+      --color-ticket-overview-board-bg: #f5f3ff;
+      --color-ticket-overview-board-text: #7c3aed;
+      --color-ticket-overview-id-text: #98a2b3;
+      --color-ticket-overview-title-text: #101828;
+      --color-ticket-overview-meta-text: #475467;
+      --color-ticket-overview-due-text: #c2410c;
+      --color-ticket-overview-divider: #eef0f3;
+      --color-ticket-meta-left-text: #667085;
+      --color-ticket-meta-right-text: #101828;
+
+      --color-ticket-priority-low: #10b981;
+      --color-ticket-priority-medium: #f59e0b;
+      --color-ticket-priority-high: #c2410c;
+      --color-ticket-priority-critical: #dc2626;
+
+      /* Channel tickets table: statusV2 pills (mirrors dashboard StatusOptions). */
+      --color-ticket-status-todo: #ea580c;
+      --color-ticket-status-todo-soft: #fff1e6;
+      --color-ticket-status-started: #2563eb;
+      --color-ticket-status-started-soft: #e8f0fe;
+      --color-ticket-status-paused: #0d9488;
+      --color-ticket-status-paused-soft: #e6f7f5;
+      --color-ticket-status-cancelled: #dc2626;
+      --color-ticket-status-cancelled-soft: #fdeaea;
+      --color-ticket-status-completed: #16a34a;
+      --color-ticket-status-completed-soft: #e8f7ec;
+      --color-ticket-table-header-bg: #f9fafb;
+      --color-ticket-table-divider: #eef0f3;
+
+      --color-ticket-label-red-bg: #fef2f2;
+      --color-ticket-label-red-text: #b91c1c;
+      --color-ticket-label-blue-bg: #dbeafe;
+      --color-ticket-label-blue-text: #2b7fff;
+      --color-ticket-label-green-bg: #ecfdf5;
+      --color-ticket-label-green-text: #15603e;
+      --color-ticket-label-neutral-bg: #e5e7eb;
+      --color-ticket-label-neutral-text: #374151;
+
+      --color-ticket-activity-day-bg: #f3f4f6;
+      --color-ticket-activity-day-text: #667085;
+      --color-ticket-activity-line: #d0d5dd;
+      --color-ticket-activity-time: #98a2b3;
+      --color-ticket-activity-old: #98a2b3;
+      --color-ticket-activity-accent: #15603e;
+
+      --color-ticket-status-todo: #9ca3af;
+      --color-ticket-status-started: #f59e0b;
+      --color-ticket-status-paused: #8b5cf6;
+      --color-ticket-status-completed: #22c55e;
+      --color-ticket-status-cancelled: #dc2626;
+
+      /* Chat Input Composer */
+      --color-bottomsheet-bg: #ffffff;
+      --color-bottomsheet-container-bg: #f3f3f3;
+      --color-bottomsheet-container-bg-secondary: #f3f3f3;
+      --color-bottomsheet-container-foreground: #212121;
+      --color-bottomsheet-container-text-secondary: #7a7a7a;
+      --color-bottomsheet-text-header: #212121;
+      --color-bottomsheet-text-muted: #989898;
+      --color-bottomsheet-action-blue: #0091ff;
+
+      /* Conversation composer */
+      --color-conversation-composer-root-bg-user: var(--color-chat-message-bubble-2);
+      --color-conversation-composer-root-bg-other: #ffffff;
+      --color-conversation-composer-root-text-user: #0a0a0a;
+      --color-conversation-composer-root-text-other: #0a0a0a;
+      --color-conversation-composer-forwarded-bg-user: #d6f3d0;
+      --color-conversation-composer-forwarded-bg-other: #f4f4f4;
+      --color-conversation-composer-timestamp-user: #666666;
+      --color-conversation-composer-timestamp-other: #666666;
+      --color-conversation-composer-icon-user: #666666;
+      --color-conversation-composer-icon-other: #666666;
+
+      /* Conversation composer — call stub */
+      --color-conversation-composer-call-bg: #ffffff;
+      --color-conversation-composer-call-pill-bg: rgba(194, 189, 184, 0.15);
+      --color-conversation-composer-call-icon-bg: rgba(0, 0, 0, 0.1);
+      --color-conversation-composer-call-icon: #101828;
+      --color-conversation-composer-call-title: rgba(0, 0, 0, 0.9);
+      --color-conversation-composer-call-meta: rgba(28, 30, 33, 0.4);
+      --color-conversation-composer-call-divider: rgba(0, 0, 0, 0.08);
+      --color-conversation-composer-call-action: #1b8755;
+
+      /* Conversation composer — system pill */
+      --color-conversation-composer-system-bg: #fffefd;
+      --color-conversation-composer-system-text: #666665;
+
+      /* Conversation composer — flow card */
+      --color-flow-card-header-title: #7b7a7f;
+      --color-flow-card-progress-text: var(--color-chat-foreground-muted);
+      --color-flow-card-status-completed-bg: #009d2a1f;
+      --color-flow-card-status-completed-text: #009d2a;
+      --color-flow-card-status-pending-bg: #f2f2f2;
+      --color-flow-card-status-pending-text: #9f9fa2;
+      --color-flow-card-status-failed-bg: #ffe8e8;
+      --color-flow-card-status-failed-text: #cc2121;
+      /* Diff artifact (match dashboard --diff-stat-*) */
+      --color-diff-stat-add-fg: #16a34a;
+      --color-diff-stat-del-fg: #dc2626;
+      --color-diff-line-add-bg: #e6ffec;
+      --color-diff-line-del-bg: #ffebe9;
+      --color-diff-line-hunk-fg: #656d76;
+      --color-diff-card-bg: #f6f8fa;
+      --color-flow-card-step-checked-fill: #101828cc;
+      --color-flow-card-step-check-icon: #ffffff;
+      --color-flow-card-step-empty-border: #10182833;
+      --color-flow-card-step-spinner: var(--color-chat-foreground-muted);
+      --color-flow-card-step-failed-fill: #e7000b;
+      --color-flow-card-step-failed-icon: #ffffff;
+      --color-pr-badge-created-bg: #ebfaf0;
+      --color-pr-badge-created-fg: #16a34a;
+      --color-pr-badge-merged-bg: #f0ebfa;
+      --color-pr-badge-merged-fg: #3716a3;
+      --color-pr-badge-danger-bg: #faebeb;
+      --color-pr-badge-danger-fg: #ff0f0f;
+
+      /* App button variants */
+      --color-button-primary-bg: #101828;
+      --color-button-primary-text: #ffffff;
+      --color-button-primary-border: #101828;
+      --color-button-secondary-bg: #e9eef5;
+      --color-button-secondary-text: #101828;
+      --color-button-secondary-border: #e9eef5;
+      --color-button-warning-bg: #ff6900;
+      --color-button-warning-text: #ffffff;
+      --color-button-warning-border: #ff6900;
+      --color-button-danger-bg: #f65c5b;
+      --color-button-danger-text: #ffffff;
+      --color-button-danger-border: #f65c5b;
+      --color-button-disabled-opacity: 0.55;
+
+      --color-conversation-input-surface: var(--color-chat-background);
+      --color-conversation-input-also-send-to-channel-text: #8c8986;
+      --color-conversation-input-bg: #ffffff;
+      --color-conversation-input-pill-bg: #f3f4f6;
+      --color-conversation-input-pill-border: #d1d5db;
+      --color-conversation-input-text: #1c1e21;
+      --color-conversation-input-border: #1c1e21;
+      --color-conversation-input-placeholder: #1c1e2166;
+      --color-conversation-input-icon: #1c1e21;
+      --color-conversation-input-send-bg: #2b3b29;
+      --color-conversation-input-send-icon: #ffffff;
+      --color-conversation-input-toolbar-bg: var(--color-chat-background);
+      --color-conversation-input-toolbar-icon: #767779;
+      --color-conversation-input-toolbar-divider: #d1d5db;
+      --color-conversation-input-code-text: #1c1e21;
+      --color-conversation-input-code-background: #bab8b8;
+      --conversation-input-backdrop-blur: 2px;
+      --color-conversation-input-attachment-remove-bg: #212121;
+      --color-conversation-input-attachment-remove-icon: #ffffff;
+
+      --color-chat-screen: var(--color-chat-background);
+      --color-chat-input-ctr-bg: var(--color-chat-background);
+
+      /* Settings — iOS-style palette (light theme) */
+      --color-settings-bg: var(--color-base-150);
+      --color-settings-section-bg: #ffffff;
+      --color-settings-section-label: #6c6c70;
+      --color-settings-row-divider: rgba(60, 60, 67, 0.12);
+      --color-settings-search-bg: #e3e3e8;
+      --color-settings-label: #000000;
+      --color-settings-description: #8e8e93;
+      --color-settings-status: #8e8e93;
+      --color-settings-chevron: #8e8e93;
+      --color-settings-footnote: #8e8e93;
+      --color-settings-badge-red: #ff3b30;
+      --color-settings-icon-orange: #ff9500;
+      --color-settings-icon-blue: #007aff;
+      --color-settings-icon-green: #34c759;
+      --color-settings-icon-indigo: #5856d6;
+      --color-settings-icon-purple: #af52de;
+      --color-settings-icon-pink: #ff2d55;
+      --color-settings-icon-teal: #5ac8fa;
+      --color-settings-icon-gray: #8e8e93;
+      --color-settings-icon-red: #ff3b30;
+      --color-settings-icon-fg: #ffffff;
+
+      /* App header */
+      --color-app-header-bg-start: #457d56;
+      --color-app-header-bg-end: #335e40;
+      --color-app-header-title: #ffffff;
+
+      /* Username colors — deterministic per-user palette (light theme) */
+      --color-username-1: #1f6feb;
+      --color-username-2: #d63344;
+      --color-username-3: #15803d;
+      --color-username-4: #7c3aed;
+      --color-username-5: #0891b2;
+      --color-username-6: #be185d;
+      --color-username-7: #c2410c;
+      --color-username-8: #4338ca;
+      --color-username-9: #059669;
+      --color-username-10: #e11d48;
+      --color-username-11: #9333ea;
+      --color-username-12: #b45309;
+
+      /* Activity V2 */
+      --color-activity-v2-card-bg: #ffffff;
+      --color-activity-v2-card-unread-bg: #f4f8f5;
+      --color-activity-v2-channel-mention-badge-bg: #fff1d6;
+      --color-activity-v2-channel-mention-badge-text: #c58a11;
+      --color-activity-v2-user-mention-badge-bg: #ebf3fe;
+      --color-activity-v2-user-mention-badge-text: #3b82f6;
+      --color-activity-v2-reaction-badge-bg: #f3f4f6;
+      --color-activity-heading: #212121;
+      --color-activity-description: #6b6b6b;
+      --color-activity-time: #7d7d7d;
+      --color-activity-divider: #e0e0e0;
+
+      /* Auth / Login screen */
+      --color-auth-background: #ffffff;
+      --color-auth-card-bg: #f8fafc;
+      --color-auth-card-border: #e2e8f0;
+      --color-auth-primary-text: #0f172a;
+      --color-auth-secondary-text: #64748b;
+      --color-auth-tertiary-text: #334155;
+      --color-auth-muted-text: #cbd5e1;
+      --color-auth-input-bg: #ffffff;
+      --color-auth-input-border: #cbd5e1;
+      --color-auth-input-text: #0f172a;
+      --color-auth-placeholder: #94a3b8;
+      --color-auth-divider: #e2e8f0;
+      --color-auth-primary-btn-bg: #10131f;
+      --color-auth-primary-btn-text: #ffffff;
+      --color-auth-secondary-btn-bg: #2f2f2f;
+      --color-auth-secondary-btn-text: #ffffff;
+      --color-auth-link: #2563eb;
+      --color-auth-error: #dc2626;
+      --color-auth-success: #16a34a;
+      --color-auth-activity-indicator: #2563eb;
+      --color-auth-warning-icon-bg: #fef3c7;
+      --color-auth-warning-icon: #ea580c;
+      --color-auth-info-icon-bg: #eff6ff;
+      --color-auth-info-icon: #2563eb;
+
+      /* Enrollment screen */
+      --color-enrollment-background: #f5f5f5;
+      --color-enrollment-surface: #ffffff;
+      --color-enrollment-surface-border: #e5e7eb;
+      --color-enrollment-primary-text: #000000;
+      --color-enrollment-secondary-text: #666666;
+      --color-enrollment-muted-text: #9ca3af;
+      --color-enrollment-accent: #ff4f4f;
+      --color-enrollment-button-bg: #ff4f4f;
+      --color-enrollment-button-text: #ffffff;
+      --color-enrollment-secondary-button-border: #e5e7eb;
+      --color-enrollment-secondary-button-text: #6b7280;
+      --color-enrollment-error-bg: #fee2e2;
+      --color-enrollment-error-border: #ef4444;
+      --color-enrollment-error-text: #dc2626;
+      --color-enrollment-error-subtext: #991b1b;
+    }
+    @variant dark {
+      --color-background: #171717;
+      --color-foreground: #e0e0e0;
+      --color-secondary: #262626;
+      --color-secondary-foreground: #9ca3af;
+      --color-tertiary: #808080;
+      --color-brand: #fe6d36;
+      --color-card: #181818;
+      --color-card-foreground: #beb9b9;
+      --color-border: #404040;
+      --color-muted: #808080;
+      --color-popover: #2e2e2e;
+      --color-accent: #404040;
+      --color-accent-foreground: #ffffff;
+      --color-input: #262626;
+
+      /* Self message variants - darker for reply banners/forwarded sections */
+      --color-self-muted: hsl(25, 60%, 40%);
+      /* chat theme */
+      --color-chat-root-background: #101012;
+      --color-chat-background: #0a0a0a;
+      --color-chat-card: #1f272a;
+      --color-chat-card-self: #134d37;
+      --color-chat-card-muted: #2e2e2e;
+      --color-chat-card-foreground-muted: #f8fafc; /* --color-secondary-foreground */
+      --color-chat-foreground: #f8fafc; /* --color-foreground */
+      --color-chat-foreground-muted: #98a2b3;
+
+      /*
+        Previous chat theme colors  
+        --color-chat-background: #181818;
+        --color-chat-card: #262626;
+        --color-chat-card-self: #DC590F;
+      */
+      --color-chat-background: #0a0a0a;
+      --color-chat-card: #232529;
+      --color-chat-card-muted: #2e2e2e;
+      --color-chat-card-foreground-muted: #f8fafc; /* --color-secondary-foreground */
+      --color-chat-foreground: #f8fafc; /* --color-foreground */
+      --color-chat-foreground-muted: #98a2b3;
+
+      /* ===================== New Tokens ===================== */
+
+      /* Base */
+      --color-base-0: #181818;
+      --color-base-50: #101012;
+      --color-base-100: #262626;
+      --color-base-150: #2e2e2e;
+      --color-base-400: #9aa6b2;
+      --color-base-500: #7f8a96;
+      --color-base-600: #3b4f6b;
+      --color-base-900: #f8fafc;
+
+      /* Green scale  */
+      --color-green-100: #1f3d2b;
+      --color-green-200: #005c4b;
+      --color-green-600: #22c55e;
+      --color-green-700: #34d399;
+      --color-green-800: #86efac;
+
+      /* Blue scale */
+      --color-blue-100: rgba(96, 165, 250, 0.25);
+      --color-blue-700: #60a5fa;
+
+      /* Yellow scale */
+      --color-yellow-100: #3a2e0a;
+      --color-yellow-700: #fbbf24;
+
+      /* Activity icon tokens */
+      --color-activity-thread-icon: #4ade80;
+      --color-activity-thread-bg: #163122;
+      --color-activity-thread-bg-unread: #163122;
+      --color-activity-ticket-icon: #6e49c6;
+      --color-activity-call-icon: #d2fffa;
+      --color-activity-call-bg: #73a59f;
+      --color-activity-call-update-icon: #fff3eb;
+      --color-activity-call-update-bg: #b38e74;
+
+      /* Red scale */
+      --color-red-100: #4a1f1f;
+      --color-red-600: #f87171;
+      --color-red-700: #ef4444;
+
+      /* Semantic */
+      --color-primary-bg: var(--color-base-0);
+      --color-secondary-bg: var(--color-base-100);
+      --color-tertiary-bg: var(--color-base-150);
+      --color-tabs-screen: #0a0a0a;
+
+      --color-primary-text: var(--color-base-900);
+      --color-secondary-text: var(--color-base-400);
+      --color-muted-text: var(--color-base-500);
+
+      --color-input-bg: var(--color-base-100);
+      --color-input-placeholder: var(--color-base-400);
+
+      --color-tab-active-bg: var(--color-green-200);
+      --color-tab-active-text: var(--color-green-800);
+      --color-tab-inactive-bg: var(--color-base-150);
+      --color-tab-inactive-text: var(--color-base-500);
+      --color-tab-bar-border: #1f1f1f;
+
+      --color-status-success: var(--color-green-600);
+      --color-status-danger: var(--color-red-600);
+      --color-action-primary: var(--color-green-600);
+      --color-chat-mention-text: #25d366;
+      --color-dm-swipe-archive: #3a82f7;
+      --color-dm-swipe-read: #34c759;
+      --color-dm-swipe-star: #ff9500;
+
+      /* Mention highlight backgrounds (composer input editor) */
+      --color-mention-you-bg: #5b4a16;
+      --color-mention-you-text: #ffe08a;
+      --color-mention-other-bg: #2b3357;
+      --color-mention-other-text: #b8c4ff;
+
+      /* Rendered message mention chips (2x2: message author x mention target) */
+      --color-chat-mention-inline-other-bg: #23364a;
+      --color-chat-mention-inline-other-text: #8fd3ff;
+      --color-chat-mention-inline-current-other-bg: #23364a;
+      --color-chat-mention-inline-current-other-text: #8fd3ff;
+      --color-chat-mention-inline-mentioned-you-bg: #d6a21f;
+      --color-chat-mention-inline-mentioned-you-text: #251700;
+      --color-chat-mention-inline-current-self-bg: #d6a21f;
+      --color-chat-mention-inline-current-self-text: #251700;
+
+      /* Chat */
+      --color-chat-msg-incoming-bg: var(--color-base-150);
+      --color-chat-msg-incoming-text: var(--color-base-900);
+
+      --color-chat-message-bubble-1: #134d37;
+      --color-chat-message-bubble-2: #134d37;
+      --color-chat-message-bubble-3: #04488f;
+      --color-chat-message-bubble-4: #082f5a;
+      --color-chat-message-bubble-5: #433597;
+      --color-chat-message-bubble-6: #2c2a5b;
+      --color-chat-message-bubble-7: #0b4b79;
+      --color-chat-message-bubble-8: #08344d;
+      --color-chat-message-bubble-9: #713082;
+      --color-chat-message-bubble-10: #4a2159;
+      --color-chat-message-bubble-11: #4c4c4c;
+      --color-chat-message-bubble-12: #333333;
+      --color-chat-message-bubble-13: #853b23;
+      --color-chat-message-bubble-14: #4d2c25;
+      --color-chat-message-bubble-15: #3d503a;
+      --color-chat-message-bubble-16: #293328;
+      --color-chat-message-bubble-17: #045d57;
+      --color-chat-message-bubble-18: #0a3d3e;
+      --color-chat-message-bubble-19: #7e112e;
+      --color-chat-message-bubble-20: #531323;
+      --color-chat-message-bubble-21: #5b3c28;
+      --color-chat-message-bubble-22: #35271e;
+      --color-chat-message-bubble-23: #7b654d;
+      --color-chat-message-bubble-24: #3b342a;
+      --color-chat-message-bubble-25: #0c7360;
+      --color-chat-message-bubble-26: #0d493d;
+      --color-chat-message-bubble-27: #b39a00;
+      --color-chat-message-bubble-28: #5c5101;
+      --color-chat-message-bubble-29: #577d26;
+      --color-chat-message-bubble-30: #2f4214;
+      --color-chat-message-bubble-31: #bc285e;
+      --color-chat-message-bubble-32: #581e36;
+      --color-chat-message-bubble-33: #a71136;
+      --color-chat-message-bubble-34: #61172e;
+      --color-chat-message-bubble-35: #8a1f0f;
+      --color-chat-message-bubble-36: #57140b;
+      --color-chat-message-bubble-37: #8a3b0b;
+      --color-chat-message-bubble-38: #5b2607;
+
+      --color-chat-msg-outgoing-bg: var(--color-green-200);
+      --color-chat-msg-outgoing-text: var(--color-base-900);
+      /* Own messages use same fill as outgoing bubble (see Message `bg-chat-card-self`) */
+      --color-chat-card-self: var(--color-chat-msg-outgoing-bg);
+
+      --color-chat-unread-preview-msg-text: var(--color-base-400);
+      --color-chat-preview-msg-text: var(--color-base-400);
+
+      --color-chat-unread-count-badge-bg: var(--color-green-600);
+      --color-chat-unread-count-badge-text: #ffffff;
+
+      --color-chat-time-text: var(--color-base-500);
+      --color-chat-unread-time-text: var(--color-green-600);
+
+      --color-chat-search-bg: var(--color-base-100);
+      --color-chat-search-placeholder: var(--color-base-400);
+
+      /* Ticket details */
+      --color-ticket-header-accessory: #1f1f1f;
+      --color-ticket-overview-board-bg: #2e223f;
+      --color-ticket-overview-board-text: #c4b5fd;
+      --color-ticket-overview-id-text: #94a3b8;
+      --color-ticket-overview-title-text: #f8fafc;
+      --color-ticket-overview-meta-text: #cbd5e1;
+      --color-ticket-overview-due-text: #fdba74;
+      --color-ticket-overview-divider: #2f3744;
+      --color-ticket-meta-left-text: #94a3b8;
+      --color-ticket-meta-right-text: #f8fafc;
+
+      --color-ticket-priority-low: #34d399;
+      --color-ticket-priority-medium: #fbbf24;
+      --color-ticket-priority-high: #fb923c;
+      --color-ticket-priority-critical: #f87171;
+
+      /* Channel tickets table: statusV2 pills (dark). */
+      --color-ticket-status-todo: #fb923c;
+      --color-ticket-status-todo-soft: #3a2415;
+      --color-ticket-status-started: #60a5fa;
+      --color-ticket-status-started-soft: #172a4a;
+      --color-ticket-status-paused: #2dd4bf;
+      --color-ticket-status-paused-soft: #12332f;
+      --color-ticket-status-cancelled: #f87171;
+      --color-ticket-status-cancelled-soft: #3b1c1c;
+      --color-ticket-status-completed: #4ade80;
+      --color-ticket-status-completed-soft: #15301d;
+      --color-ticket-table-header-bg: #1f1f1f;
+      --color-ticket-table-divider: #2a2a2a;
+
+      --color-ticket-label-red-bg: #3f1d24;
+      --color-ticket-label-red-text: #fecdd3;
+      --color-ticket-label-blue-bg: #1e3a8a;
+      --color-ticket-label-blue-text: #bfdbfe;
+      --color-ticket-label-green-bg: #14532d;
+      --color-ticket-label-green-text: #bbf7d0;
+      --color-ticket-label-neutral-bg: #1f2937;
+      --color-ticket-label-neutral-text: #e5e7eb;
+
+      --color-ticket-activity-day-bg: #2a2f3a;
+      --color-ticket-activity-day-text: #94a3b8;
+      --color-ticket-activity-line: #475467;
+      --color-ticket-activity-time: #94a3b8;
+      --color-ticket-activity-old: #94a3b8;
+      --color-ticket-activity-accent: #34d399;
+
+      --color-ticket-status-todo: #94a3b8;
+      --color-ticket-status-started: #fbbf24;
+      --color-ticket-status-paused: #a78bfa;
+      --color-ticket-status-completed: #4ade80;
+      --color-ticket-status-cancelled: #f87171;
+
+      --color-bottomsheet-bg: #181818;
+      --color-bottomsheet-container-bg: #262626;
+      --color-bottomsheet-container-bg-secondary: #262626;
+      --color-bottomsheet-container-foreground: #f3f3f3;
+      --color-bottomsheet-container-text-secondary: #7a7a7a;
+      --color-bottomsheet-text-header: #f8f4ec;
+      --color-bottomsheet-text-muted: #a0a0a0;
+      --color-bottomsheet-action-blue: #0091ff;
+
+      /* Conversation composer */
+      --color-conversation-composer-root-bg-user: var(--color-chat-message-bubble-2);
+      --color-conversation-composer-root-bg-other: #232626;
+      --color-conversation-composer-root-text-user: #f1fff9;
+      --color-conversation-composer-root-text-other: #f1fff9;
+      --color-conversation-composer-forwarded-bg-user: #103e2c;
+      --color-conversation-composer-forwarded-bg-other: #161717;
+      --color-conversation-composer-timestamp-user: #a7a8a8;
+      --color-conversation-composer-timestamp-other: #a7a8a8;
+      --color-conversation-composer-icon-user: #a7a8a8;
+      --color-conversation-composer-icon-other: #a7a8a8;
+
+      /* Conversation composer — call stub */
+      --color-conversation-composer-call-bg: #1d1f1f;
+      --color-conversation-composer-call-pill-bg: rgba(255, 210, 121, 0.05);
+      --color-conversation-composer-call-icon-bg: rgba(255, 210, 121, 0.1);
+      --color-conversation-composer-call-icon: #ffd279;
+      --color-conversation-composer-call-title: #ffd279;
+      --color-conversation-composer-call-meta: rgba(255, 210, 121, 0.4);
+      --color-conversation-composer-call-divider: rgba(255, 255, 255, 0.08);
+      --color-conversation-composer-call-action: #21c063;
+
+      /* Conversation composer — system pill */
+      --color-conversation-composer-system-bg: #1d1f1f;
+      --color-conversation-composer-system-text: #a5a5a5;
+
+      /* Conversation composer — flow card */
+      --color-flow-card-header-title: #e1e4ea99;
+      --color-flow-card-progress-text: var(--color-chat-foreground-muted);
+      --color-flow-card-status-completed-bg: #009d2a1f;
+      --color-flow-card-status-completed-text: #009d2a;
+      --color-flow-card-status-pending-bg: #222227;
+      --color-flow-card-status-pending-text: #616368;
+      --color-flow-card-status-failed-bg: #ffe8e8;
+      --color-flow-card-status-failed-text: #cc2121;
+      /* Diff artifact (match dashboard --diff-stat-*) */
+      --color-diff-stat-add-fg: #4ade80;
+      --color-diff-stat-del-fg: #f87171;
+      --color-diff-line-add-bg: #12261e;
+      --color-diff-line-del-bg: #2d1214;
+      --color-diff-line-hunk-fg: #8b949e;
+      --color-diff-card-bg: #161b22;
+      --color-flow-card-step-checked-fill: #ffffff;
+      --color-flow-card-step-check-icon: #000000;
+      --color-flow-card-step-empty-border: #ffffff40;
+      --color-flow-card-step-spinner: var(--color-chat-foreground-muted);
+      --color-flow-card-step-failed-fill: #e7000b;
+      --color-flow-card-step-failed-icon: #ffffff;
+      --color-pr-badge-created-bg: #10281a;
+      --color-pr-badge-created-fg: #4ade80;
+      --color-pr-badge-merged-bg: #1e1633;
+      --color-pr-badge-merged-fg: #a78bfa;
+      --color-pr-badge-danger-bg: #2a1414;
+      --color-pr-badge-danger-fg: #f87171;
+
+      /* App button variants */
+      --color-button-primary-bg: #ffffff;
+      --color-button-primary-text: #101828;
+      --color-button-primary-border: #ffffff;
+      --color-button-secondary-bg: #35353a;
+      --color-button-secondary-text: #e1e4ea;
+      --color-button-secondary-border: #35353a;
+      --color-button-warning-bg: #ff6900;
+      --color-button-warning-text: #ffffff;
+      --color-button-warning-border: #ff6900;
+      --color-button-danger-bg: #f65c5b;
+      --color-button-danger-text: #ffffff;
+      --color-button-danger-border: #f65c5b;
+      --color-button-disabled-opacity: 0.55;
+
+      /* Conversation input */
+      --color-conversation-input-surface: var(--color-chat-background);
+      --color-conversation-input-also-send-to-channel-text: #f3f4f6;
+      --color-conversation-input-bg: #242626;
+      --color-conversation-input-pill-bg: #2a2a2a;
+      --color-conversation-input-pill-border: #3f3f46;
+      --color-conversation-input-text: #f3f4f6;
+      --color-conversation-input-border: #242626;
+      --color-conversation-input-placeholder: #f3f4f699;
+      --color-conversation-input-icon: #e5e7eb;
+      --color-conversation-input-send-bg: #4a6b46;
+      --color-conversation-input-send-icon: #f9fafb;
+      --color-conversation-input-toolbar-bg: var(--color-chat-background);
+      --color-conversation-input-toolbar-icon: #a1a1aa;
+      --color-conversation-input-toolbar-divider: #3f3f46;
+      --color-conversation-input-code-text: #101828;
+      --color-conversation-input-code-background: #bab8b8;
+      --conversation-input-backdrop-blur: 2px;
+      --color-conversation-input-attachment-remove-bg: #212121;
+      --color-conversation-input-attachment-remove-icon: #ffffff;
+      --color-chat-screen: var(--color-chat-background);
+      --color-chat-input-ctr-bg: var(--color-chat-background);
+
+      /* Settings — iOS-style palette (dark theme) */
+      --color-settings-bg: var(--color-tabs-screen);
+      --color-settings-section-bg: var(--color-base-0);
+      --color-settings-section-label: #8e8e93;
+      --color-settings-row-divider: rgba(84, 84, 88, 0.34);
+      --color-settings-search-bg: #242427;
+      --color-settings-label: #ffffff;
+      --color-settings-description: #8e8e93;
+      --color-settings-status: #8e8e93;
+      --color-settings-chevron: #6c6c70;
+      --color-settings-footnote: #8e8e93;
+      --color-settings-badge-red: #ff453a;
+      --color-settings-icon-orange: #ff9f0a;
+      --color-settings-icon-blue: #0a84ff;
+      --color-settings-icon-green: #30d158;
+      --color-settings-icon-indigo: #5e5ce6;
+      --color-settings-icon-purple: #bf5af2;
+      --color-settings-icon-pink: #ff375f;
+      --color-settings-icon-teal: #64d2ff;
+      --color-settings-icon-gray: #8e8e93;
+      --color-settings-icon-red: #ff453a;
+      --color-settings-icon-fg: #ffffff;
+
+      /* App header */
+      --color-app-header-bg-start: #2e5b3a;
+      --color-app-header-bg-end: #1f3d28;
+      --color-app-header-title: #ffffff;
+
+      /* Username colors — deterministic per-user palette (dark theme) */
+      --color-username-1: #60a5fa;
+      --color-username-2: #fb7185;
+      --color-username-3: #4ade80;
+      --color-username-4: #c4b5fd;
+      --color-username-5: #22d3ee;
+      --color-username-6: #f472b6;
+      --color-username-7: #fb923c;
+      --color-username-8: #a5b4fc;
+      --color-username-9: #34d399;
+      --color-username-10: #fda4af;
+      --color-username-11: #d8b4fe;
+      --color-username-12: #fbbf24;
+
+      /* Activity V2 */
+      --color-activity-v2-card-bg: var(--color-tabs-screen);
+      --color-activity-v2-card-unread-bg: #1f2120;
+      --color-activity-v2-channel-mention-badge-bg: #33260a;
+      --color-activity-v2-channel-mention-badge-text: #e6b93d;
+      --color-activity-v2-user-mention-badge-bg: #10263d;
+      --color-activity-v2-user-mention-badge-text: #5ba7ff;
+      --color-activity-v2-reaction-badge-bg: #262626;
+      --color-activity-heading: #f8f4ec;
+      --color-activity-description: #b0b0b0;
+      --color-activity-time: #7d7d7d;
+      --color-activity-divider: #343434;
+
+      /* Auth / Login screen */
+      --color-auth-background: #171717;
+      --color-auth-card-bg: #1a1a1a;
+      --color-auth-card-border: #404040;
+      --color-auth-primary-text: #f8fafc;
+      --color-auth-secondary-text: #9ca3af;
+      --color-auth-tertiary-text: #cbd5e1;
+      --color-auth-muted-text: #94a3b8;
+      --color-auth-input-bg: #262626;
+      --color-auth-input-border: #404040;
+      --color-auth-input-text: #f8fafc;
+      --color-auth-placeholder: #7f8a96;
+      --color-auth-divider: #404040;
+      --color-auth-primary-btn-bg: #ffffff;
+      --color-auth-primary-btn-text: #10131f;
+      --color-auth-secondary-btn-bg: #2e2e2e;
+      --color-auth-secondary-btn-text: #ffffff;
+      --color-auth-link: #60a5fa;
+      --color-auth-error: #f87171;
+      --color-auth-success: #4ade80;
+      --color-auth-activity-indicator: #60a5fa;
+      --color-auth-warning-icon-bg: #422006;
+      --color-auth-warning-icon: #fbbf24;
+      --color-auth-info-icon-bg: #1e3a5f;
+      --color-auth-info-icon: #60a5fa;
+
+      /* Enrollment screen */
+      --color-enrollment-background: #171717;
+      --color-enrollment-surface: #1a1a1a;
+      --color-enrollment-surface-border: #404040;
+      --color-enrollment-primary-text: #f8fafc;
+      --color-enrollment-secondary-text: #9ca3af;
+      --color-enrollment-muted-text: #7f8a96;
+      --color-enrollment-accent: #ff4f4f;
+      --color-enrollment-button-bg: #ff4f4f;
+      --color-enrollment-button-text: #ffffff;
+      --color-enrollment-secondary-button-border: #404040;
+      --color-enrollment-secondary-button-text: #9ca3af;
+      --color-enrollment-error-bg: #4a1f1f;
+      --color-enrollment-error-border: #f87171;
+      --color-enrollment-error-text: #f87171;
+      --color-enrollment-error-subtext: #fca5a5;
+    }
+  }
+}

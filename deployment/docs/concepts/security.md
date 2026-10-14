@@ -158,13 +158,21 @@ drops `Set-Cookie`, `Clear-Site-Data` and `Service-Worker-Allowed`, so a sandbox
 cannot set a cookie on the Spaces origin, sign the viewer out, or claim a
 service-worker scope wider than its own path.
 
+code-server's own cross-origin check compares `Origin` with `Host`, and the
+router rewrites both to the pod's address, so the router does that check
+itself first: a `/claw-code/` request whose `Origin` is not the public host it
+came in on (or an entry in `PUBLIC_ORIGINS`) gets a 403, and so does a
+`/claw-code/` WebSocket upgrade with no `Origin`. Without it, a page on any site
+whose request carried the viewer's cookie could drive the editor.
+
 Both routes still answer on the dashboard's origin, and that is the remaining
 exposure: whatever the agent serves in the sandbox runs there, so it can call
 `/api/*` as whoever opened the link — and for `/claw-code/` that reader can be
-any member of the conversation, not only the person who started the run. The
-gate decides who gets that far; it does not make the page harmless. Serving the
-sandbox routes from their own origin is the real fix and is tracked as the
-XYNE-65792 follow-up.
+any member of the conversation, not only the person who started the run. That
+holds inside the Xyne AI workspace pane too: its iframe grants
+`allow-same-origin` to `/claw-preview/` and `/claw-code/` URLs. The gate decides
+who gets that far; it does not make the page harmless. Serving the sandbox
+routes from a dedicated preview origin is the real fix (#2993, #3007).
 
 ## Workload hardening
 

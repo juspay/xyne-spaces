@@ -360,6 +360,7 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
           </span>
           {isScheduleCall && canDismiss && (
             <button
+              aria-label='Dismiss nudge'
               onClick={handleDismiss}
               disabled={isActing}
               data-ph-capture-attribute-track-id='dismiss_schedule_call_nudge'

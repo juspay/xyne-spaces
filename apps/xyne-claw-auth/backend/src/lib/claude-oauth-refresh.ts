@@ -14,6 +14,7 @@
 import { decrypt, encrypt } from "../crypto.js";
 import { errMsg } from "./errors.js";
 import { CONFIG } from "../config.js";
+import { OAuthRefreshBusyError, refreshUnderLock } from "./oauth-refresh-lock.js";
 import { parseClaudeCred, type ClaudeOAuthBundle } from "./claude-creds.js";
 
 export const CLAUDE_OAUTH_TOKEN_URL = "https://platform.claude.com/v1/oauth/token";
@@ -55,6 +56,7 @@ export async function getValidClaudeBearer(
   credKey: string,
   cred: ClaudeCredRow,
   persist: (enc: EncryptedCred) => Promise<void>,
+  reload?: () => Promise<ClaudeCredRow | null>,
 ): Promise<string> {
   if (!cred.encryptedKey || !cred.iv || !cred.authTag) {
     throw new ClaudeAuthError("Claude credential is missing");
@@ -72,7 +74,13 @@ export async function getValidClaudeBearer(
   if (existing) return existing;
 
   const refreshToken = bundle.refresh_token;
-  const p = (async () => {
+  const alreadyRefreshed = async (): Promise<string | null> => {
+    const row = reload ? await reload().catch(() => null) : null;
+    if (!row?.encryptedKey || !row.iv || !row.authTag) return null;
+    const latest = parseClaudeCred(decrypt(row.encryptedKey, row.iv, row.authTag, CONFIG.encryptionKey));
+    return latest.refresh_token && latest.refresh_token !== refreshToken ? latest.access_token : null;
+  };
+  const doRefresh = async (): Promise<string> => {
     let res: Response;
     try {
       res = await fetch(CLAUDE_OAUTH_TOKEN_URL, {
@@ -103,9 +111,15 @@ export async function getValidClaudeBearer(
     const enc = encrypt(JSON.stringify(next), CONFIG.encryptionKey);
     await persist({ encryptedKey: enc.ciphertext, iv: enc.iv, authTag: enc.authTag });
     return next.access_token;
-  })().finally(() => {
-    inflight.delete(credKey);
-  });
+  };
+  const p = refreshUnderLock(credKey, alreadyRefreshed, doRefresh)
+    .catch((err: unknown) => {
+      if (err instanceof OAuthRefreshBusyError) throw new ClaudeAuthError(err.message);
+      throw err;
+    })
+    .finally(() => {
+      inflight.delete(credKey);
+    });
 
   inflight.set(credKey, p);
   return p;
