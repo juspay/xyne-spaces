@@ -13,6 +13,7 @@ import type {
   DebugArtifactBundle,
   DebugEventRecord,
   ReactArtifactManifest,
+  MessageAnsweredBy,
 } from '../../components/Chat/XyneAISidebar/utils/XyneAITypes';
 import type { AttachedContextItem } from '../../components/Chat/XyneAISidebar/components/ContextPickerPanel';
 import { registerClawIcons } from '../../components/Chat/XyneAISidebar/utils/clawCitationUrl';
@@ -89,6 +90,8 @@ interface ClawChatMessage {
   followUpSuggestions?: string[];
   /** Assistant rows: how long the run took, start to finish. */
   durationMs?: number;
+  /** Assistant rows: which provider/model actually answered (+ fallback). */
+  answeredBy?: MessageAnsweredBy;
   attachments?: Array<{
     id: string;
     mimeType: string;
@@ -330,6 +333,7 @@ export async function fetchV2ConversationMessages(
         : {}),
       ...(!isUser && runByMsgId?.[msg.id] ? { debugSessionId: runByMsgId[msg.id] } : {}),
       ...(!isUser && typeof msg.durationMs === 'number' ? { durationMs: msg.durationMs } : {}),
+      ...(!isUser && msg.answeredBy?.provider ? { answeredBy: msg.answeredBy } : {}),
       // Seed 👍/👎 thumb state from the run's persisted rating (up→1, down→2).
       ...(!isUser && ratingByMsgId?.[msg.id]?.rating
         ? {

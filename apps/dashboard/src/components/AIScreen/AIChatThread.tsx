@@ -59,6 +59,7 @@ import { ASSISTANT_PANEL_ATTR } from '../Assistant/buddy/constants';
 import { ReadonlyContextPills, useSentMentions } from './ReadonlyContextPills';
 import { type ComposerContext, toStreamOverrides, withoutPickedContext } from './composerContext';
 import { AgentByline, AgentRecipient } from './ConversationAgents';
+import { AnsweredByLabel } from './AnsweredByLabel';
 import { FollowUpSuggestions } from './FollowUpSuggestions';
 import {
   anchorFromArgs,
@@ -1227,6 +1228,7 @@ function ChatMessageBubble({
       ) : (
         <div className='flex min-w-0 flex-col gap-2'>
           {isV2 && agentSlug && <AgentByline slug={agentSlug} />}
+          <AnsweredByLabel answeredBy={message.answeredBy} />
           {/* The turn in order — thinking, text, tool calls, … answer — with
               each run of steps folded into one expandable group. Shared with
               the sidebar and the overlay. */}
