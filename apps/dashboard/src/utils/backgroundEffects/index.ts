@@ -34,7 +34,9 @@ const WASM_SIMD_PROBE = new Uint8Array([
 
 function supportsWasmSimd(): boolean {
   try {
-    return typeof WebAssembly !== 'undefined' && WebAssembly.validate(WASM_SIMD_PROBE);
+    // Compile rather than validate(): a CSP without 'wasm-unsafe-eval' (e.g. older Electron
+    // builds) blocks compilation but not validation, and the effect would then fail on use.
+    return typeof WebAssembly !== 'undefined' && !!new WebAssembly.Module(WASM_SIMD_PROBE);
   } catch {
     return false;
   }
