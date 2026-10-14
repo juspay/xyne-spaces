@@ -113,7 +113,7 @@ export function OngoingCallBanner(): React.ReactElement | null {
       }
     }
 
-    return () => {
+    return (): void => {
       if (durationIntervalRef.current) {
         clearInterval(durationIntervalRef.current);
       }
@@ -125,7 +125,7 @@ export function OngoingCallBanner(): React.ReactElement | null {
   useEffect(() => {
     if (!isVisible) return;
 
-    const updateMicState = () => {
+    const updateMicState = (): void => {
       const room = callRuntimeNativeService.getRoom();
       if (room) {
         setIsMicEnabled(room.localParticipant.isMicrophoneEnabled);
@@ -135,7 +135,7 @@ export function OngoingCallBanner(): React.ReactElement | null {
     updateMicState();
     const interval = setInterval(updateMicState, 250);
 
-    return () => clearInterval(interval);
+    return (): void => clearInterval(interval);
   }, [isVisible]);
 
   const handleToggleMic = useCallback(async () => {
@@ -149,6 +149,7 @@ export function OngoingCallBanner(): React.ReactElement | null {
       await callRuntimeNativeService.toggleMic(newState);
       setIsMicEnabled(newState);
     } catch (error) {
+      // eslint-disable-next-line no-console
       console.error('[OngoingCallBanner] Failed to toggle mic:', error);
     }
   }, [isMicEnabled]);
@@ -163,6 +164,7 @@ export function OngoingCallBanner(): React.ReactElement | null {
       try {
         await callRuntimeNativeService.disconnect();
       } catch (error) {
+        // eslint-disable-next-line no-console
         console.error('[OngoingCallBanner] Failed to end call:', error);
       }
       // Always release CallKit, even if the LiveKit disconnect threw.
