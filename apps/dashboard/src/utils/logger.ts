@@ -7,7 +7,9 @@ import {
   MAX_RETRIES,
   isLocalhost,
   ENABLE_REMOTE_LOGGING,
+  API_BASE_URL,
 } from '../config';
+import axios from 'axios';
 import type { WorkerMessage } from './logger.worker';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -600,6 +602,46 @@ export const getLogger = async (): Promise<Logger> => {
 
 export const logger = await getLogger();
 setReactNativeBridgeLogger(logger);
+
+// Every request to our own backend carries the persistent device key, whatever the
+// transport: bare `axios` (bypasses apiInstance's interceptor) and `fetch`. Matching is
+// by resolved URL prefix so third-party requests (presigned uploads, CDNs) never get it.
+const DEVICE_KEY_HEADER = 'x-device-id';
+
+const isBackendUrl = (rawUrl: string): boolean => {
+  try {
+    const base = new URL(API_BASE_URL, window.location.href).href.replace(/\/+$/, '');
+    const target = new URL(rawUrl, window.location.href).href;
+    return target === base || target.startsWith(`${base}/`) || target.startsWith(`${base}?`);
+  } catch {
+    return false;
+  }
+};
+
+axios.interceptors.request.use(config => {
+  const deviceKey = logger.clientSessionId;
+  const url =
+    config.baseURL && config.url && !/^[a-z][a-z\d+.-]*:|^\/\//i.test(config.url)
+      ? `${config.baseURL.replace(/\/+$/, '')}/${config.url.replace(/^\/+/, '')}`
+      : (config.url ?? '');
+  if (deviceKey && isBackendUrl(url) && !config.headers[DEVICE_KEY_HEADER]) {
+    config.headers[DEVICE_KEY_HEADER] = deviceKey;
+  }
+  return config;
+});
+
+const nativeFetch = window.fetch.bind(window);
+window.fetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  const deviceKey = logger.clientSessionId;
+  const url = input instanceof Request ? input.url : String(input);
+  if (!deviceKey || !isBackendUrl(url)) return nativeFetch(input, init);
+
+  const headers = new Headers(
+    init?.headers ?? (input instanceof Request ? input.headers : undefined),
+  );
+  if (!headers.has(DEVICE_KEY_HEADER)) headers.set(DEVICE_KEY_HEADER, deviceKey);
+  return nativeFetch(input, { ...init, headers });
+};
 
 export const cleanupLogger = (): void => {
   if (loggerInstance) {
