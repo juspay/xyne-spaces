@@ -14,6 +14,8 @@ import {
 
 export * from './types';
 
+import type { PollOption } from '../polls/types.js';
+
 import {
   AccessType,
   ActivityClassification,
@@ -970,7 +972,8 @@ export const pollTable = table('polls')
     allowAudienceChoices: boolean(),
     isAnonymous: boolean(),
     resultVisibility: string(),
-    sortResultsByVotes: boolean(),
+    closesAt: number().optional(),
+    remindAt: number().optional(),
     closedAt: number().optional(),
     createdAt: number(),
   })
@@ -984,19 +987,7 @@ export const pollQuestionTable = table("poll_questions")
     question: string(),
     position: number(),
     responseType: string(),
-    createdAt: number(),
-  })
-  .primaryKey('id');
-
-export const pollOptionTable = table('poll_options')
-  .columns({
-    id: string(),
-    workspaceId: string(),
-    questionId: string(),
-    text: string(),
-    normalizedText: string(),
-    position: number(),
-    createdBy: string(),
+    options: json<PollOption[]>(),
     createdAt: number(),
   })
   .primaryKey('id');
@@ -1024,34 +1015,11 @@ export const pollQuestionResultTable = table('poll_question_results')
     pollId: string(),
     voterCount: number(),
     optionCounts: json<Record<string, number>>(),
-    responseCount: number(),
     rankTotals: json<Record<string, number>>(),
-    rankResponseCount: number(),
-    ratingCounts: json<Record<string, number>>(),
     ratingTotal: number(),
     updatedAt: number(),
   })
   .primaryKey('questionId');
-
-export const pollJobTable = table('poll_jobs')
-  .columns({
-    id: string(),
-    workspaceId: string(),
-    pollId: string(),
-    kind: string(),
-    runAt: number(),
-    status: string(),
-    attempts: number(),
-    maxAttempts: number(),
-    leaseOwner: string().optional(),
-    leaseExpiresAt: number().optional(),
-    completedAt: number().optional(),
-    failedAt: number().optional(),
-    lastError: string().optional(),
-    createdAt: number(),
-    updatedAt: number(),
-  })
-  .primaryKey('id');
 
 // Deliberately self-contained: the global artifact subscription must not relate
 // to `messages`, or every message delta in the workspace would flow through its
@@ -3831,11 +3799,6 @@ export const pollTableRelationships = relationships(pollTable, ({ one, many }) =
     destField: ['pollId'],
     destSchema: pollQuestionResultTable,
   }),
-  jobs: many({
-    sourceField: ['id'],
-    destField: ['pollId'],
-    destSchema: pollJobTable,
-  }),
 }));
 
 export const pollQuestionTableRelationships = relationships(
@@ -3846,11 +3809,6 @@ export const pollQuestionTableRelationships = relationships(
       destField: ['id'],
       destSchema: pollTable,
     }),
-    options: many({
-      sourceField: ['id'],
-      destField: ['questionId'],
-      destSchema: pollOptionTable,
-    }),
     votes: many({
       sourceField: ['id'],
       destField: ['questionId'],
@@ -3860,17 +3818,6 @@ export const pollQuestionTableRelationships = relationships(
       sourceField: ['id'],
       destField: ['questionId'],
       destSchema: pollQuestionResultTable,
-    }),
-  }),
-);
-
-export const pollOptionTableRelationships = relationships(
-  pollOptionTable,
-  ({ one }) => ({
-    question: one({
-      sourceField: ['questionId'],
-      destField: ['id'],
-      destSchema: pollQuestionTable,
     }),
   }),
 );
@@ -3906,14 +3853,6 @@ export const pollQuestionResultTableRelationships = relationships(
     }),
   }),
 );
-
-export const pollJobTableRelationships = relationships(pollJobTable, ({ one }) => ({
-  poll: one({
-    sourceField: ['pollId'],
-    destField: ['id'],
-    destSchema: pollTable,
-  }),
-}));
 
 export const messageArtifactTableRelationships = relationships(
   messageArtifactTable,
@@ -5295,10 +5234,8 @@ export const schema = createSchema({
     messageTable,
     pollTable,
     pollQuestionTable,
-    pollOptionTable,
     pollVoteTable,
     pollQuestionResultTable,
-    pollJobTable,
     messageArtifactTable,
     messageAttachmentTable,
     draftMessageTable,
@@ -5440,10 +5377,8 @@ export const schema = createSchema({
     messageTableRelationships,
     pollTableRelationships,
     pollQuestionTableRelationships,
-    pollOptionTableRelationships,
     pollVoteTableRelationships,
     pollQuestionResultTableRelationships,
-    pollJobTableRelationships,
     messageArtifactTableRelationships,
     draftMessageTableRelationships,
     delayedMessageTableRelationships,
@@ -5586,10 +5521,8 @@ export type Conversation = Row<typeof schema.tables.conversations>;
 export type Message = Row<typeof schema.tables.messages>;
 export type Poll = Row<typeof schema.tables.polls>;
 export type PollQuestion = Row<typeof schema.tables.poll_questions>;
-export type PollOption = Row<typeof schema.tables.poll_options>;
 export type PollVote = Row<typeof schema.tables.poll_votes>;
 export type PollQuestionResult = Row<typeof schema.tables.poll_question_results>;
-export type PollJob = Row<typeof schema.tables.poll_jobs>;
 export type MessageAttachment = Row<typeof schema.tables.message_attachments>;
 export type DraftMessage = Row<typeof schema.tables.draft_messages>;
 export type DelayedMessage = Row<typeof schema.tables.delayed_messages>;

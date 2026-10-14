@@ -157,13 +157,18 @@ const DelayedMessageRow = ({
     </div>
   );
 
+  // A scheduled poll's content is generated from its poll draft, so it cannot be
+  // edited as text or converted back into a plain message draft.
+  const isPoll = !!delayedMessage.pollDraft;
   const actions = (
     <DelayedMessageDropdown
       delayedMessage={delayedMessage}
-      onEdit={() => onEdit(delayedMessage)}
+      {...(!isPoll && {
+        onEdit: () => onEdit(delayedMessage),
+        onSaveToDrafts: handleSaveToDrafts,
+      })}
       onReschedule={handleRescheduleClick}
       onSendNow={() => setShowSendNowConfirm(true)}
-      onSaveToDrafts={handleSaveToDrafts}
       onDelete={() => setShowDeleteConfirm(true)}
       loading={isSendNowLoading}
     />
@@ -180,7 +185,9 @@ const DelayedMessageRow = ({
         timestampLayout='floating'
         actions={actions}
         className='rounded-xl'
-        onClick={() => onEdit(delayedMessage)}
+        onClick={() => {
+          if (!isPoll) onEdit(delayedMessage);
+        }}
         trackCategory='delayed-messages'
         trackName='scheduled-message-row-open'
         attachments={panelAttachments}

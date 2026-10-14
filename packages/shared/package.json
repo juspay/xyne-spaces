@@ -17,6 +17,11 @@
       "import": "./dist/sdlc.js",
       "default": "./dist/sdlc.js"
     },
+    "./polls/policy": {
+      "types": "./dist/polls/policy.d.ts",
+      "import": "./dist/polls/policy.js",
+      "default": "./dist/polls/policy.js"
+    },
     "./commands": {
       "types": "./dist/commands.d.ts",
       "import": "./dist/commands.js",

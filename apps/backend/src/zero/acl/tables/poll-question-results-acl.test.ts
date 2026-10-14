@@ -13,6 +13,7 @@ jest.mock('../../queries', () => ({
   zql: {
     polls: query,
     poll_questions: query,
+    poll_question_results: query,
     channels: query,
     guest_access: query,
     channel_participants: query,
@@ -22,7 +23,7 @@ jest.mock('../../queries', () => ({
 import type { Transaction } from '@rocicorp/zero';
 import type { Schema } from '@xyne/shared';
 import type { QueryContext } from '../core/types';
-import { PollJobsMutationACL, PollQuestionResultsMutationACL } from './poll-derived-acl';
+import { PollQuestionResultsMutationACL } from './poll-question-results-acl';
 
 const context: QueryContext = {
   userID: 'user-1',
@@ -52,35 +53,13 @@ const resultRow = (overrides: Record<string, unknown> = {}) => ({
   pollId: 'poll-1',
   voterCount: 0,
   optionCounts: {},
-  responseCount: 0,
   rankTotals: {},
-  rankResponseCount: 0,
-  ratingCounts: {},
   ratingTotal: 0,
   updatedAt: 1,
   ...overrides,
 });
 
-const job = (overrides: Record<string, unknown> = {}) => ({
-  id: 'poll-1:CLOSE',
-  workspaceId: 'workspace-1',
-  pollId: 'poll-1',
-  kind: 'CLOSE',
-  runAt: 2,
-  status: 'PENDING',
-  attempts: 0,
-  maxAttempts: 5,
-  leaseOwner: null,
-  leaseExpiresAt: null,
-  completedAt: null,
-  failedAt: null,
-  lastError: null,
-  createdAt: 1,
-  updatedAt: 1,
-  ...overrides,
-});
-
-describe('poll derived-table mutation ACLs', () => {
+describe('PollQuestionResultsMutationACL', () => {
   it('allows the poll author to initialize an empty aggregate row', async () => {
     const tx = transactionReturning(poll, publicChannel, {
       id: 'question-1',
@@ -103,15 +82,20 @@ describe('poll derived-table mutation ACLs', () => {
     ).rejects.toThrow('start empty');
   });
 
-  it('allows the poll author to initialize a lifecycle job', async () => {
-    const tx = transactionReturning(poll, publicChannel);
-    await expect(new PollJobsMutationACL(context).canInsert(job(), tx)).resolves.toBeUndefined();
+  it('lets a voter with channel access recompute the aggregate row', async () => {
+    const tx = transactionReturning(resultRow(), { ...poll, createdBy: 'someone-else' }, publicChannel);
+    await expect(
+      new PollQuestionResultsMutationACL(context).canUpdate(
+        { questionId: 'question-1', voterCount: 1 },
+        tx
+      )
+    ).resolves.toBeUndefined();
   });
 
-  it('rejects a lifecycle job that is already completed', async () => {
-    const tx = transactionReturning(poll, publicChannel);
+  it('only lets the poll creator delete the aggregate row', async () => {
+    const tx = transactionReturning(resultRow(), { ...poll, createdBy: 'someone-else' }, publicChannel);
     await expect(
-      new PollJobsMutationACL(context).canInsert(job({ status: 'COMPLETED' }), tx)
-    ).rejects.toThrow('initial lifecycle state');
+      new PollQuestionResultsMutationACL(context).canDelete({ questionId: 'question-1' }, tx)
+    ).rejects.toThrow('Only the poll creator');
   });
 });

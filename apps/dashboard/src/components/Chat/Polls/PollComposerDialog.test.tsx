@@ -5,10 +5,35 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PollComposerDialog, resolvePollScheduleTime } from './PollComposerDialog';
 
-vi.mock('../../ui/Dialog', () => ({
-  default: ({ open, children }: { open: boolean; children: React.ReactNode }) =>
-    open ? <div>{children}</div> : null,
-}));
+// Stub the Radix dialog (its module graph needs app globals); the dismiss
+// button stands in for Escape / outside click.
+vi.mock('../../ui/Dialog/Dialog', () => {
+  const Dialog = ({
+    open,
+    title,
+    onOpenChange,
+    children,
+  }: {
+    open: boolean;
+    title?: string;
+    onOpenChange?: (open: boolean) => void;
+    children: React.ReactNode;
+  }) =>
+    open ? (
+      <div>
+        <button
+          type='button'
+          data-track-category='TEST'
+          data-track-name='DISMISS'
+          onClick={() => onOpenChange?.(false)}
+        >
+          Dismiss {title}
+        </button>
+        {children}
+      </div>
+    ) : null;
+  return { Dialog, default: Dialog };
+});
 
 const setInputValue = (input: HTMLInputElement, value: string): void => {
   const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.bind(
@@ -45,16 +70,14 @@ describe('PollComposerDialog current-context flow', () => {
   it('publishes in the current context without a distribution or comments control', async () => {
     const onPublish = vi.fn().mockResolvedValue(undefined);
     act(() => {
-      root.render(
-        <PollComposerDialog open isPublishing={false} onClose={vi.fn()} onPublish={onPublish} />,
-      );
+      root.render(<PollComposerDialog open onClose={vi.fn()} onPublish={onPublish} />);
     });
 
     const inputs = [...container.querySelectorAll('input')];
     act(() => {
       setInputValue(inputs.find(input => input.placeholder === 'Write your question…')!, 'Lunch?');
-      setInputValue(inputs.find(input => input.placeholder === 'Choice 1')!, 'Yes');
-      setInputValue(inputs.find(input => input.placeholder === 'Choice 2')!, 'No');
+      setInputValue(inputs.find(input => input.placeholder === 'Option 1')!, 'Yes');
+      setInputValue(inputs.find(input => input.placeholder === 'Option 2')!, 'No');
     });
     expect(container.textContent).not.toContain('Allow comments');
     expect(container.textContent).not.toContain('Poll Distribution');
@@ -72,18 +95,61 @@ describe('PollComposerDialog current-context flow', () => {
     );
   });
 
+  it('keeps Preview enabled and marks empty inputs when the draft is incomplete', () => {
+    act(() => {
+      root.render(<PollComposerDialog open onClose={vi.fn()} onPublish={vi.fn()} />);
+    });
+    const inputs = [...container.querySelectorAll('input')];
+    act(() => {
+      setInputValue(inputs.find(input => input.placeholder === 'Write your question…')!, 'Lunch?');
+      setInputValue(inputs.find(input => input.placeholder === 'Option 1')!, 'Yes');
+    });
+
+    act(() => clickButton(container, 'Preview'));
+
+    expect(container.textContent).toContain('Fill in this option or remove it');
+    expect(container.querySelector('[placeholder="Option 2"]')?.getAttribute('aria-invalid')).toBe(
+      'true',
+    );
+    expect(container.textContent).not.toContain('Post poll');
+  });
+
+  it('asks before Escape or an outside click discards a typed draft', async () => {
+    const onClose = vi.fn();
+    act(() => {
+      root.render(<PollComposerDialog open onClose={onClose} onPublish={vi.fn()} />);
+    });
+    act(() => {
+      setInputValue(
+        container.querySelector('[placeholder="Write your question…"]') as HTMLInputElement,
+        'Lunch?',
+      );
+    });
+
+    await act(async () => {
+      clickButton(container, 'Dismiss Create a poll');
+      await Promise.resolve();
+    });
+    expect(container.textContent).toContain('Discard this poll?');
+    expect(onClose).not.toHaveBeenCalled();
+
+    await act(async () => {
+      clickButton(container, 'Discard');
+      await Promise.resolve();
+    });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps the draft open when publication fails', async () => {
     const onPublish = vi.fn().mockRejectedValue(new Error('Unavailable'));
     act(() => {
-      root.render(
-        <PollComposerDialog open isPublishing={false} onClose={vi.fn()} onPublish={onPublish} />,
-      );
+      root.render(<PollComposerDialog open onClose={vi.fn()} onPublish={onPublish} />);
     });
     const inputs = [...container.querySelectorAll('input')];
     act(() => {
       setInputValue(inputs.find(input => input.placeholder === 'Write your question…')!, 'Keep me');
-      setInputValue(inputs.find(input => input.placeholder === 'Choice 1')!, 'One');
-      setInputValue(inputs.find(input => input.placeholder === 'Choice 2')!, 'Two');
+      setInputValue(inputs.find(input => input.placeholder === 'Option 1')!, 'One');
+      setInputValue(inputs.find(input => input.placeholder === 'Option 2')!, 'Two');
     });
     act(() => clickButton(container, 'Preview'));
     await act(async () => {

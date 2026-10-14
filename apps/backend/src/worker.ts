@@ -124,15 +124,15 @@ class WorkerService {
         logger.info('Starting notification worker service...')
         // Redis connection is required for notification worker checks
         await redisService.connect()
-
+        
         // Initialize real-time notification service (Producer) for CallTimeoutWorker
         await realTimeNotificationService.initialize()
 
         await notificationWorker.startWorker()
-
+        
         logger.info('Starting call timeout worker service...')
         await callTimeoutWorker.startWorker()
-      }
+      } 
 
       if (vespaFileWorkerEnabled) {
         await vespaFileWorker.start()
@@ -412,7 +412,9 @@ class WorkerService {
 
       if (appConfig.enablePollLifecycleWorker) {
         logger.info('Starting poll lifecycle worker...');
+        await notificationService.initialize();
         await pollLifecycleWorker.start();
+        await pollLifecycleWorker.reenqueuePendingPolls();
       }
 
       if (enableNotificationProducer) {
@@ -606,19 +608,19 @@ class WorkerService {
         await pollLifecycleWorker.shutdown();
       }
 
-      await DatabaseClient.disconnect();
-      await CommonDatabaseClient.disconnect();
+      await DatabaseClient.disconnect()
+      await CommonDatabaseClient.disconnect()
 
       await shutdownOpenTelemetry();
 
-      logger.info('Worker service shutdown complete');
-      process.exit(0);
+      logger.info('Worker service shutdown complete')
+      process.exit(0)
     } catch (error) {
-      logger.error('Error during worker shutdown:', error);
-      process.exit(1);
+      logger.error('Error during worker shutdown:', error)
+      process.exit(1)
     }
   }
 }
 
-const worker = new WorkerService();
-worker.start();
+const worker = new WorkerService()
+worker.start()

@@ -71,11 +71,8 @@ import {
   ReactionsACL,
   PollsACL,
   PollQuestionsACL,
-  PollOptionsACL,
   PollVotesACL,
   PollQuestionResultsACL,
-  PollJobsACL,
-  PollReminderDeliveriesACL,
   RecurringCallSeriesACL,
   ReleaseAttributionsACL,
   ReleaseChangesACL,
@@ -298,16 +295,10 @@ export class ACLFactory {
       return new PollsACL(ctx, prisma)
     case 'pollQuestion':
       return new PollQuestionsACL(ctx, prisma)
-    case 'pollOption':
-      return new PollOptionsACL(ctx, prisma)
     case 'pollVote':
       return new PollVotesACL(ctx, prisma)
     case 'pollQuestionResult':
       return new PollQuestionResultsACL(ctx, prisma)
-    case 'pollJob':
-      return new PollJobsACL(ctx, prisma)
-    case 'pollReminderDelivery':
-      return new PollReminderDeliveriesACL(ctx, prisma)
     case 'recurringCallSeries':
       return new RecurringCallSeriesACL(ctx, prisma)
     case 'releaseAttribution':

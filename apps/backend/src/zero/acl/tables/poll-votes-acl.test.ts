@@ -1,7 +1,7 @@
 jest.mock('@xyne/shared', () => ({
   ChannelVisibility: { PUBLIC: 'PUBLIC', PRIVATE: 'PRIVATE' },
   GuestEntity: { CHANNEL: 'CHANNEL' },
-  isPollClosedAt: (poll: { closedAt?: number | null }) => poll.closedAt != null,
+  isPollClosed: (poll: { closedAt?: number | null }) => poll.closedAt != null,
   schema: { tables: {} },
 }));
 
@@ -135,5 +135,32 @@ describe('PollVotesACL', () => {
     });
 
     await expect(new PollVotesACL(context).canInsert(ballot(), tx)).rejects.toThrow('closed');
+  });
+
+  it("lets the poll creator delete another voter's ballot when removing the poll", async () => {
+    const tx = transactionReturning(
+      ballot({ userId: 'voter-2' }),
+      pollScope({
+        createdBy: context.userID,
+        message: { isDeleted: true, conversation: { channelId: 'channel-1' } },
+      }),
+      { id: 'channel-1', workspaceId: context.workspaceId, visibility: 'PUBLIC' },
+    );
+
+    await expect(
+      new PollVotesACL(context).canDelete({ id: 'vote-1' }, tx),
+    ).resolves.toBeUndefined();
+  });
+
+  it("rejects deleting another voter's ballot on someone else's poll", async () => {
+    const tx = transactionReturning(
+      ballot({ userId: 'voter-2' }),
+      pollScope({ createdBy: 'someone-else' }),
+      { id: 'channel-1', workspaceId: context.workspaceId, visibility: 'PUBLIC' },
+    );
+
+    await expect(new PollVotesACL(context).canDelete({ id: 'vote-1' }, tx)).rejects.toThrow(
+      'Only the poll creator',
+    );
   });
 });

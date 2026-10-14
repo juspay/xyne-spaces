@@ -236,7 +236,7 @@ class DelayedMessageWorker {
         senderId,
         content,
         hasAttachment: job.data.hasAttachment,
-        poll: delayedMessage?.pollDraft ?? null,
+        hasPollDraft: delayedMessage?.pollDraft != null,
       });
 
       if (!result.success) {
@@ -282,3 +282,4 @@ class DelayedMessageWorker {
 }
 
 export const delayedMessageWorker = new DelayedMessageWorker();
+

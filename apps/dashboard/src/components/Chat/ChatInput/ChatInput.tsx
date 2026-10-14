@@ -23,6 +23,7 @@ import {
   ChannelType,
   BaseTicketType,
   CommandAccessibility,
+  buildPollMessageSummary,
   type PollDraft,
   type PollSchedule,
 } from '@xyne/shared';
@@ -110,7 +111,6 @@ import { openSearchResult } from '../../../utils/searchNavigation';
 import { isElectronApp } from '../../../utils/electronApp';
 import type { RelatedItem } from '../../../types/search';
 import { PollComposerDialog } from '../Polls/PollComposerDialog';
-import { publishPollToChannel } from '../Polls/publishPoll';
 
 const CHAT_MESSAGE_SENT_EVENT = 'xyne:chat-message-sent';
 
@@ -700,19 +700,33 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       async (poll: PollDraft, pollSchedule: PollSchedule): Promise<void> => {
         if (!user?.id) throw new Error('Sign in before publishing a poll');
 
-        await publishPollToChannel(
-          { poll, pollSchedule, channelId },
-          {
-            createId: uuidv4,
-            schedule: async input => {
-              const result = await zero.mutate(mutators.delayedMessages.create(input)).server;
-              if (result.type === 'error') {
-                throw new Error(result.error?.message ?? 'Failed to schedule poll');
-              }
-            },
-            send: (ref, payload) =>
-              sendMessage(zero as Parameters<typeof sendMessage>[0], ref, payload),
-          },
+        const content = buildPollMessageSummary(poll);
+        const timestamp = Date.now();
+        if (pollSchedule.publishAt) {
+          const scheduledFor = Date.parse(pollSchedule.publishAt);
+          const result = await zero.mutate(
+            mutators.delayedMessages.create({
+              id: uuidv4(),
+              channelId,
+              content,
+              poll,
+              pollSchedule,
+              scheduledFor,
+              timestamp,
+            }),
+          ).server;
+          if (result.type === 'error') {
+            throw new Error(result.error?.message ?? 'Failed to schedule poll');
+          }
+          toast.success('Poll scheduled', {
+            description: `Will be posted at ${new Date(scheduledFor).toLocaleString()}`,
+          });
+          return;
+        }
+        sendMessage(
+          zero as Parameters<typeof sendMessage>[0],
+          { kind: 'channel', channelId },
+          { content, type: MessageType.USER, timestamp, poll, pollSchedule },
         );
       },
       [channelId, user?.id, zero],
@@ -1527,7 +1541,6 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         ) : null}
         <PollComposerDialog
           open={pollComposerOpen}
-          isPublishing={false}
           onClose={() => setPollComposerOpen(false)}
           onPublish={handlePublishPoll}
         />
