@@ -14,6 +14,12 @@ export interface InputBoxFeatures {
   mentions?: boolean;
   fileAttachments?: boolean;
   emojiPicker?: boolean;
+  /**
+   * Floating formatting toolbar that appears on a non-empty text selection
+   * (Slack-style). Defaults to on when richText is enabled; set false to
+   * suppress it (e.g. per a user preference). Desktop only.
+   */
+  selectionToolbar?: boolean;
 }
 
 export interface InputBoxProps {
