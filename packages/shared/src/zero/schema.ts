@@ -635,6 +635,7 @@ export const userPreferenceTable = table('user_preferences')
     threadReplyNotificationsEnabled: boolean(), // Receive thread reply notifications globally
     channelWideMentionsEnabled: boolean(),      // Receive @channel and @here notifications
     notificationKeywords: string().optional(), // Stringified JSON array of keywords (max 50, each <= 80 chars)
+    notificationSchedule: string().optional(), // Stringified JSON working-hours schedule; null = always notify
     showThreadTags: boolean(), // Render thread classification chips in chat; opt-in
     createdAt: number(),
     updatedAt: number(),

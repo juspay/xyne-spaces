@@ -562,6 +562,7 @@ export const userPreferenceTable = table("user_preferences")
     threadReplyNotificationsEnabled: boolean(),
     channelWideMentionsEnabled: boolean(),
     notificationKeywords: string().optional(),
+    notificationSchedule: string().optional(),
     createdAt: number(),
     updatedAt: number(),
   })

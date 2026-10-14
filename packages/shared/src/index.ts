@@ -50,6 +50,7 @@ export * from './utils/socialMedia';
 export * from './utils/csv';
 export * from './release/releaseReport';
 export * from './utils/notificationKeywords';
+export * from './utils/notificationSchedule';
 export * from './utils/hostControls';
 export * from './utils/slashCommandArtifact';
 export {

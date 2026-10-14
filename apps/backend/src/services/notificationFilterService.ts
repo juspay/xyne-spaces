@@ -1,6 +1,13 @@
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
-import { parseNotificationKeywords, NotificationLevel, NotificationType } from '@xyne/shared';
+import {
+  parseNotificationKeywords,
+  parseNotificationSchedule,
+  isOutsideWorkingHours,
+  NotificationLevel,
+  NotificationType,
+  type NotificationSchedule,
+} from '@xyne/shared';
 import { withWorkspaceScope } from '@/database/tenant/context';
 
 const prisma = DatabaseClient.getInstance();
@@ -52,6 +59,7 @@ type UserPreferenceRow = {
   threadReplyNotificationsEnabled: boolean;
   channelWideMentionsEnabled: boolean;
   notificationKeywords?: string[];
+  notificationSchedule?: NotificationSchedule | null;
 };
 
 /**
@@ -116,6 +124,7 @@ async function prefetchFilterDataInner(
         threadReplyNotificationsEnabled: true,
         channelWideMentionsEnabled: true,
         notificationKeywords: true,
+        notificationSchedule: true,
       },
     }).catch(e => {
       logger.error('[NotificationFilter] Failed to prefetch userPreference', { error: e });
@@ -128,13 +137,14 @@ async function prefetchFilterDataInner(
     presences:       new Map(presences.map(p => [p.userId, p.notificationsPausedUntil])),
     // notificationKeywords is stringified JSON at rest (TEXT column); parse to
     // string[] | undefined so downstream keyword matching stays typed and safe.
-    preferences:     new Map(prefs.map(({ userId, notificationKeywords, ...rest }): [string, UserPreferenceRow] => {
+    preferences:     new Map(prefs.map(({ userId, notificationKeywords, notificationSchedule, ...rest }): [string, UserPreferenceRow] => {
       const parsed = parseNotificationKeywords(notificationKeywords);
       return [
         userId,
         ({
           ...rest,
           notificationKeywords: parsed.length > 0 ? parsed : undefined,
+          notificationSchedule: parseNotificationSchedule(notificationSchedule),
         }) as UserPreferenceRow,
       ];
     })),
@@ -294,6 +304,8 @@ export interface FilterUsersOptions {
  * 2. DM shortcut — if `isDMChannel=true`, only the per-channel NONE check applies.
  *    DMs are exempt from the level picker (MENTIONS_ONLY still delivers DMs) and from
  *    type-specific toggles (thread reply toggle does not apply inside DMs).
+ * 2b. Working hours — outside the user's UserPreference.notificationSchedule (evaluated in
+ *    the user's saved time zone), the user is excluded. Skipped for 1:1 DMs and group DMs.
  * 3. Layer 4 type-specific gates (regular channels only, channel override ?? UserPreference global):
  *    - THREAD_REPLY  → threadReplyNotificationsEnabled toggle
  *    - @channel/@here → channelWideMentionsEnabled toggle
@@ -386,6 +398,7 @@ async function filterUsersInner(
           globalMobileNotificationLevel: true,
           threadReplyNotificationsEnabled: true,
           channelWideMentionsEnabled: true,
+          notificationSchedule: true,
         },
       }).catch(e => {
         logger.error('[NotificationFilter] Failed to fetch userPreference', { error: e });
@@ -395,7 +408,10 @@ async function filterUsersInner(
 
     channelStatusMap = new Map(channelStatuses.map(({ userId, ...rest }) => [userId, rest as ChannelStatusRow]));
     globalPauseMap   = new Map(userPresences.map(p => [p.userId, p.notificationsPausedUntil]));
-    userPrefMap      = new Map(userPreferences.map(({ userId, ...rest }) => [userId, rest as UserPreferenceRow]));
+    userPrefMap      = new Map(userPreferences.map(({ userId, notificationSchedule, ...rest }) => [
+      userId,
+      { ...rest, notificationSchedule: parseNotificationSchedule(notificationSchedule) } as UserPreferenceRow,
+    ]));
   }
 
   for (const userId of userIds) {
@@ -446,6 +462,17 @@ async function filterUsersInner(
         desktop: dmDesktop, mobile: dmMobile, reason: 'dm_path',
         channelMobileLevel: channelStatus?.mobileNotificationLevel ?? null,
         effectiveMobileLevel: mobileLevel, effectiveDesktopLevel: desktopLevel,
+      });
+      continue;
+    }
+
+    // ─── Working-hours gate (skipped for 1:1 and group DMs) ───────────────
+    if (!isGroupDM && isOutsideWorkingHours(pref?.notificationSchedule ?? null)) {
+      emitDecisionTrace(userId, {
+        channelId, context, isDMChannel, isGroupDM,
+        notificationType: notificationType ?? null, mentionType: mentionType ?? null,
+        desktop: false, mobile: false, reason: 'outside_working_hours',
+        timeZone: pref?.notificationSchedule?.timeZone ?? null,
       });
       continue;
     }
@@ -542,6 +569,7 @@ async function filterUsersInner(
  *
  * Applies:
  *   1. Global pause
+ *   1b. Working hours (UserPreference.notificationSchedule)
  *   2. Layer 4 type-specific gate (THREAD_REPLY toggle)
  *   3. Global notification level gated by `context` (desktop and mobile independently)
  *
@@ -590,6 +618,7 @@ async function filterGlobalUsersInner(
       globalDesktopNotificationLevel: true,
       globalMobileNotificationLevel: true,
       threadReplyNotificationsEnabled: true,
+      notificationSchedule: true,
     },
   }).catch(e => {
     logger.error('[NotificationFilter] Failed to fetch userPreference', { error: e });
@@ -615,6 +644,17 @@ async function filterGlobalUsersInner(
     }
 
     const pref = userPrefMap.get(userId);
+
+    // ─── Working-hours gate ───────────────────────────────────────────────
+    const schedule = parseNotificationSchedule(pref?.notificationSchedule);
+    if (isOutsideWorkingHours(schedule)) {
+      emitDecisionTrace(userId, {
+        channelId: null, context, notificationType,
+        desktop: false, mobile: false, reason: 'outside_working_hours',
+        timeZone: schedule?.timeZone ?? null,
+      });
+      continue;
+    }
 
     // ─── Layer 4: Type-specific gate ──────────────────────────────────────
     if (notificationType === NotificationType.THREAD_REPLY) {

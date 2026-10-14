@@ -117,6 +117,11 @@ import {
   normalizeNotificationKeywords,
 } from '../utils/notificationKeywords.js';
 import {
+  MAX_NOTIFICATION_SCHEDULE_TIMEZONE_LENGTH,
+  NOTIFICATION_SCHEDULE_TIME_PATTERN,
+  normalizeNotificationSchedule,
+} from '../utils/notificationSchedule.js';
+import {
   isDeskChannelType,
   deskTypeForChannelType,
   canPublishAppsTo,
@@ -10710,6 +10715,60 @@ export const mutators = defineMutators({
             threadReplyNotificationsEnabled: true,
             channelWideMentionsEnabled: true,
             notificationKeywords,
+            showThreadTags: false,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+        }
+      },
+    ),
+    setNotificationSchedule: defineMutator(
+      z.object({
+        id: z.string(),
+        schedule: z
+          .object({
+            enabled: z.boolean(),
+            timeZone: z.string().min(1).max(MAX_NOTIFICATION_SCHEDULE_TIMEZONE_LENGTH),
+            days: z
+              .array(
+                z.object({
+                  day: z.number().int().min(0).max(6),
+                  start: z.string().regex(NOTIFICATION_SCHEDULE_TIME_PATTERN),
+                  end: z.string().regex(NOTIFICATION_SCHEDULE_TIME_PATTERN),
+                }),
+              )
+              .max(7),
+          })
+          .nullable(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, schedule, timestamp } }) => {
+        const notificationSchedule = schedule
+          ? JSON.stringify(normalizeNotificationSchedule(schedule))
+          : null;
+        const existing = await tx.run(
+          zql.user_preferences.where('userId', ctx.userID).one(),
+        );
+        if (existing) {
+          await tx.mutate.user_preferences.update({
+            id: existing.id,
+            notificationSchedule,
+            updatedAt: timestamp,
+          });
+        } else {
+          await tx.mutate.user_preferences.insert({
+            workspaceId: ctx.workspaceId,
+            id,
+            userId: ctx.userID,
+            channelSortOrder: ChannelSortOrder.RECENCY,
+            enterSendsMessage: true,
+            allowThreadBroadcastMentions: false,
+            globalDesktopNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+            globalMobileNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+            threadReplyNotificationsEnabled: true,
+            channelWideMentionsEnabled: true,
+            notificationKeywords: '[]',
+            notificationSchedule,
             showThreadTags: false,
             createdAt: timestamp,
             updatedAt: timestamp,

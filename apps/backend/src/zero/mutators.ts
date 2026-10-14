@@ -93,6 +93,9 @@ import {
   MAX_NOTIFICATION_KEYWORDS,
   MAX_NOTIFICATION_KEYWORD_LENGTH,
   normalizeNotificationKeywords,
+  MAX_NOTIFICATION_SCHEDULE_TIMEZONE_LENGTH,
+  NOTIFICATION_SCHEDULE_TIME_PATTERN,
+  normalizeNotificationSchedule,
   isDeskChannelType,
   deskTypeForChannelType,
   Platform,
@@ -16874,6 +16877,60 @@ export function createMutators(
               threadReplyNotificationsEnabled: true,
               channelWideMentionsEnabled: true,
               notificationKeywords,
+              showThreadTags: false,
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            });
+          }
+        },
+      ),
+      setNotificationSchedule: defineMutator(
+        z.object({
+          id: z.string(),
+          schedule: z
+            .object({
+              enabled: z.boolean(),
+              timeZone: z.string().min(1).max(MAX_NOTIFICATION_SCHEDULE_TIMEZONE_LENGTH),
+              days: z
+                .array(
+                  z.object({
+                    day: z.number().int().min(0).max(6),
+                    start: z.string().regex(NOTIFICATION_SCHEDULE_TIME_PATTERN),
+                    end: z.string().regex(NOTIFICATION_SCHEDULE_TIME_PATTERN),
+                  }),
+                )
+                .max(7),
+            })
+            .nullable(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, schedule, timestamp } }) => {
+          const notificationSchedule = schedule
+            ? JSON.stringify(normalizeNotificationSchedule(schedule))
+            : null;
+          const existing = await tx.run(
+            zql.user_preferences.where('userId', authData.sub).one(),
+          );
+          if (existing) {
+            await tx.mutate.user_preferences.update({
+              id: existing.id,
+              notificationSchedule,
+              updatedAt: timestamp,
+            });
+          } else {
+            await tx.mutate.user_preferences.insert({
+              workspaceId: authData.workspaceId,
+              id,
+              userId: authData.sub,
+              channelSortOrder: ChannelSortOrder.RECENCY,
+              enterSendsMessage: true,
+              allowThreadBroadcastMentions: false,
+              globalDesktopNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+              globalMobileNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+              threadReplyNotificationsEnabled: true,
+              channelWideMentionsEnabled: true,
+              notificationKeywords: '[]',
+              notificationSchedule,
               showThreadTags: false,
               createdAt: timestamp,
               updatedAt: timestamp,
