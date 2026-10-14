@@ -93,15 +93,15 @@ jobs:
   # Dashboard: depends on @xyne/shared and @xyne/icons, consumed from dist/.
   # ---------------------------------------------------------------------------
   dashboard:
-    name: Dashboard ${{ matrix.task }}
-    # build and lint route to mini-max (lint moved there too — it was the one
-    # consistently causing OOM/eviction pressure on mini earlier in testing).
-    # typecheck stays on mini.
-    runs-on: ${{ vars.USE_SELF_HOSTED_CI != 'true' && 'ubuntu-latest' || (matrix.task == 'build' || matrix.task == 'lint') && 'ci-cluster-github-runners-mini-max' || 'ci-cluster-github-runners-mini' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        task: [lint, typecheck, build]
+    name: Dashboard
+    # TEST: merged from 3 matrix legs (lint/typecheck/build) into one job.
+    # Each leg used to run its own Install dependencies in parallel — 3
+    # concurrent installs against the mirror per PR. Trades wall-clock time
+    # on this job (steps now run sequentially, one pod) for far less
+    # concurrent load on the shared mirror/node pool. Pinned to mini-max only
+    # for this test, per request — not the usual self-hosted/ubuntu-latest
+    # fallback ternary.
+    runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-mini-max' || 'ubuntu-latest' }}
     env:
       NODE_OPTIONS: "--max-old-space-size=8192"
     steps:
@@ -145,19 +145,14 @@ jobs:
       # `Install dependencies` above. Backend still needs the step because
       # agentic-framework has no prepare script of its own.
 
-      # --- lint leg ---------------------------------------------------------
       # errors-only (warnings ignored).
       - name: Lint (errors only)
-        if: matrix.task == 'lint'
         run: pnpm --filter xyne-spaces-dashboard run lint:errors-only:ci
 
-      # --- typecheck leg ----------------------------------------------------
       - name: Format check
-        if: matrix.task == 'typecheck'
         run: pnpm --filter xyne-spaces-dashboard run format:check
 
       - name: Restore tsc incremental state
-        if: matrix.task == 'typecheck'
         uses: actions/cache@v4
         with:
           path: apps/dashboard/node_modules/.tmp/tsconfig.app.tsbuildinfo
@@ -166,11 +161,9 @@ jobs:
             dashboard-tsbuildinfo-${{ runner.os }}-
 
       - name: Typecheck
-        if: matrix.task == 'typecheck'
         run: pnpm --filter xyne-spaces-dashboard run typecheck
 
       - name: Build
-        if: matrix.task == 'build'
         run: pnpm --filter xyne-spaces-dashboard run build
 
   test:
