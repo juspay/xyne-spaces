@@ -75,8 +75,7 @@ sudo apt-get install -y python3 make g++ libcairo2-dev libpango1.0-dev \
                         libjpeg-dev libgif-dev librsvg2-dev libssl-dev
 ```
 
-**Windows** — use WSL2. `pnpm run services:win` exists for the Windows-native path
-but is less exercised than the macOS and Linux flows.
+**Windows** — use WSL2 and the [Nix setup](nix.md).
 
 ## Next
 

@@ -61,9 +61,8 @@ them again with `direnv allow`.
 
 ## Access over a LAN or Tailscale
 
-Set `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS` to your hostname in the local
-`apps/backend/.env.local`, then run `direnv reload`. In
-`apps/dashboard/.env.local`, enable the development proxy:
+The Vite dev server accepts LAN and Tailscale hostnames without extra host
+configuration. In `apps/dashboard/.env.local`, enable the development proxy:
 
 ```dotenv
 VITE_DEV_PROXY=true
@@ -107,6 +106,10 @@ data**; use them only when you intend to start from an empty database.
 
 ## Nix-specific runtime configuration
 
+pnpm is pinned to the root `packageManager` version via a Nix override until the
+pnpm 12 migration lands.
+
+- PostgreSQL is pinned to 17 to keep existing developer data directories compatible.
 - Linux Prisma engines are pinned to Prisma 5.22.0 and patched for Nix. The shell
   and service environment set `PRISMA_QUERY_ENGINE_LIBRARY` and
   `PRISMA_SCHEMA_ENGINE_BINARY`. Do not suppress checksum errors: a `linux-nixos`
@@ -114,19 +117,29 @@ data**; use them only when you intend to start from an empty database.
   was not re-entered. Both the npm version and `nix/prisma-engines.nix` must be
   updated together when upgrading Prisma.
 - LiveKit uses loopback addresses for Redis and backend webhooks. `just prepare`
-  replaces published sample LiveKit keys with random local values. LiveKit and the
-  transcription agent read the backend env file at runtime, keeping secrets out
+  replaces published sample LiveKit keys with random local values. LiveKit, Zero (including `ZERO_AUTH_SECRET`), and the
+  transcription agent read `apps/backend/.env.local` at runtime, keeping secrets out
   of the Nix store. Existing custom keys are preserved.
-- On Linux, the transcription process gets the C++ runtime and zlib library paths
-  needed by native Python wheels. The first launch installs its Python dependencies
-  and may take several minutes; its readiness probe allows up to 15 minutes for
-  this initial setup. Zero creates its replica directory itself, including when
-  started directly by the smoke test.
+- The transcription agent runs a Python 3.11 environment built from `uv.lock` by
+  uv2nix, with native wheels patched by Nix. No dependency installation happens at
+  service startup. Docker's `requirements.txt` is exported from the same lock with
+  `uv export --format requirements-txt --no-dev --no-emit-project`.
+  Zero creates its replica directory itself, including in the smoke test.
+
+## Diarization
+
+Diarization is not part of the Nix environment.
+Its `requirements-diarization.txt` torch/torchaudio pins are mutually incompatible and need fixing by whoever owns that feature.
 
 ## Verification
 
+`nix/scripts/check-compose-refs.sh`, run by `nix flake check` as the `compose-refs`
+check, fails on any file containing `docker-compose` or `docker compose` that is
+not listed in `nix/compose-refs.allowlist`. A migration PR removes entries as it
+deletes references; a new entry needs a justification in the PR description.
+
 ```bash
-nix flake check --no-build
+nix flake check -L
 nix build .#xyne-space-services
 nix develop --command just prepare
 # Stop any running local services/backend before this command:

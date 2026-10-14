@@ -14,7 +14,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "postinstall": "pnpm exec playwright install chromium",
+    "postinstall": "node scripts/install-browser.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -27,7 +27,7 @@
     "pdf-lib": "^1.17.1",
     "pdf-parse": "^2.4.5",
     "pdfkit": "^0.15.2",
-    "playwright": "^1.59.1",
+    "playwright": "1.63.0",
     "pptxgenjs": "^4.0.1",
     "sanitize-html": "^2.17.7",
     "winston": "^3.19.0",
