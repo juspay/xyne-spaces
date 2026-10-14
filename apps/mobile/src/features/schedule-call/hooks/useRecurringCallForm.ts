@@ -14,9 +14,20 @@ interface UseRecurringCallFormParams {
   startsAt: Date;
 }
 
-// Return type left inferred, as in the dashboard, to keep this a close port.
-// eslint-disable-next-line @typescript-eslint/explicit-function-return-type
-export function useRecurringCallForm({ startsAt }: UseRecurringCallFormParams) {
+export interface RecurringCallForm {
+  buildRrule: () => string;
+  isRecurring: boolean;
+  monthlyType: MonthlyType;
+  recurrenceDays: string[];
+  recurrenceFrequency: RecurrenceFrequency;
+  recurrenceLabel: string;
+  setIsRecurring: (on: boolean) => void;
+  setMonthlyType: (type: MonthlyType) => void;
+  setRecurrenceDays: (days: string[]) => void;
+  setRecurrenceFrequency: (frequency: RecurrenceFrequency) => void;
+}
+
+export function useRecurringCallForm({ startsAt }: UseRecurringCallFormParams): RecurringCallForm {
   const [isRecurring, setIsRecurring] = useState(false);
   const [monthlyType, setMonthlyType] = useState<MonthlyType>('monthly_day');
   const [recurrenceFrequency, setRecurrenceFrequency] = useState<RecurrenceFrequency>('WEEK');

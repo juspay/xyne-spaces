@@ -218,19 +218,26 @@ export function isScheduledCallJoinable(call: {
   return Date.now() >= call.startsAt;
 }
 
+type UpcomingCall = { status: string; startsAt?: number | null; startedAt?: number | null };
+
+/** A call keeps status SCHEDULED after it starts (people can rejoin); only an unstarted one is editable. */
+export function isScheduledCallUpcoming(call: UpcomingCall): boolean {
+  if (call.status !== CallStatus.SCHEDULED || call.startedAt) return false;
+  return !call.startsAt || call.startsAt > Date.now();
+}
+
 export function isScheduledCallManageable(
-  call: { status: string; organizerId?: string | null; createdByUserId: string },
+  call: UpcomingCall & { organizerId?: string | null; createdByUserId: string },
   currentUserId: string | undefined,
 ): boolean {
-  if (!currentUserId || call.status !== CallStatus.SCHEDULED) return false;
+  if (!currentUserId || !isScheduledCallUpcoming(call)) return false;
 
   const organizerUserId = call.organizerId ?? call.createdByUserId;
   return organizerUserId === currentUserId;
 }
 
 export function canEditScheduledCallParticipants(
-  call: {
-    status: string;
+  call: UpcomingCall & {
     organizerId?: string | null;
     createdByUserId: string;
     channelId?: string | null;
@@ -238,7 +245,7 @@ export function canEditScheduledCallParticipants(
   currentUserId: string | undefined,
   visibleChannels: readonly { id: string; scopeType: ChannelScopeType }[],
 ): boolean {
-  if (!currentUserId || call.status !== CallStatus.SCHEDULED || !call.channelId) return false;
+  if (!currentUserId || !isScheduledCallUpcoming(call) || !call.channelId) return false;
   if (isScheduledCallManageable(call, currentUserId)) return false;
   if (visibleChannels.length === 0) return false;
 
