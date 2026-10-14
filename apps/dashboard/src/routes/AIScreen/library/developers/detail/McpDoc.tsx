@@ -67,6 +67,16 @@ const TOOL_GROUPS: { label: string; tools: McpTool[] }[] = [
         description: 'Move a ticket to another stage.',
         write: true,
       },
+      {
+        name: 'spaces_ticket_link_sub_ticket',
+        description: 'Make an existing ticket a sub-ticket of another.',
+        write: true,
+      },
+      {
+        name: 'spaces_ticket_unlink_sub_ticket',
+        description: 'Detach a sub-ticket from its parent.',
+        write: true,
+      },
     ],
   },
   {

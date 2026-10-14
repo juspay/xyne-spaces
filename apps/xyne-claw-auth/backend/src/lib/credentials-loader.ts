@@ -1,6 +1,10 @@
 /**
  * Effective MCP credential resolution. Resolution order (first hit wins):
  *
+ *   0. subagent — SubagentMcpConnection, or the subagent's mcpInstanceMap
+ *               routing to one agent instance. Only consulted when caller
+ *               passes `subagentId` (a call from inside a subagent's run, or
+ *               the approval of a write one queued).
  *   1. agent  — AgentMcpConnection pinned by the agent owner. The agent
  *               wins because pasting creds on an agent is a deliberate
  *               operator contract ("this agent talks to THIS Grafana").
@@ -53,6 +57,11 @@ export interface EffectiveCredentials {
    *  agent-pinned and global creds. */
   isUserOwned: boolean;
   instance?: string;
+  /** The subagent that determined this credential — its own pinned connection,
+   *  or its mcpInstanceMap routing to one agent instance. A write queued under
+   *  it binds this id into its signature, so the approval resolves the same
+   *  identity instead of falling back to the parent agent's. */
+  viaSubagent?: string;
 }
 
 async function subagentInstanceFor(
@@ -327,6 +336,7 @@ export async function loadEffectiveCredentials(
           credentials: JSON.parse(decrypted) as Record<string, unknown>,
           isUserOwned: false,
           instance: `subagent:${subConn.id}`,
+          viaSubagent: subagentId,
         };
       } catch (err) {
         // A pinned-but-undecryptable credential is a config error. When the pin
@@ -399,14 +409,18 @@ export async function loadEffectiveCredentials(
         credentials: JSON.parse(decrypted) as Record<string, unknown>,
         isUserOwned: false,
         instance: agentConn.slug,
+        ...(instanceFromSubagent && subagentId ? { viaSubagent: subagentId } : {}),
       };
     }
-    if (instanceFromSubagent) {
-      log.warn(
-        `[creds-loader] ${serverType} userId=${userId} agent=${agentSlug} subagent=${subagentId} instance=${agentInstance} → mapped connection not found`,
-      );
-      return null;
-    }
+  }
+  // A subagent routed to one agent instance must never land on a weaker
+  // identity: not when that instance is gone, and not when the caller has no
+  // agent in scope to look it up on.
+  if (instanceFromSubagent) {
+    log.warn(
+      `[creds-loader] ${serverType} userId=${userId} agent=${agentSlug ?? "(none)"} subagent=${subagentId} instance=${agentInstance} → mapped connection not found`,
+    );
+    return null;
   }
 
   // xyne-spaces priority order: live Spaces DB FIRST, cached
@@ -523,4 +537,33 @@ export async function loadEffectiveCredentials(
     credentials: JSON.parse(decrypted) as Record<string, unknown>,
     isUserOwned: false,
   };
+}
+
+/**
+ * Credentials for running a write a human approved. The approval must land on
+ * the identity /mcp/call resolved when it queued the write: the subagent pin
+ * (bound into the signed action as `subagentId`), then the session agent,
+ * user, global. Anything less and an approved payout runs on the parent
+ * agent's account instead of the subagent's. `spacesAppId` scopes the agent
+ * and subagent lookups to the agent's org, as resolveSessionAgentOrgId does
+ * for the run itself.
+ */
+export async function loadApprovedWriteCredentials(args: {
+  userId: string;
+  serverType: string;
+  agentSlug?: string | undefined;
+  spacesAppId?: string | undefined;
+  subagentId?: string | undefined;
+}): Promise<EffectiveCredentials | null> {
+  const agentOrgId = args.spacesAppId
+    ? (await prisma.agent.findUnique({ where: { spacesAppId: args.spacesAppId }, select: { orgId: true } }))?.orgId ?? undefined
+    : undefined;
+  return loadEffectiveCredentials(
+    args.userId,
+    args.serverType,
+    args.agentSlug || undefined,
+    undefined,
+    agentOrgId,
+    args.subagentId || undefined,
+  );
 }

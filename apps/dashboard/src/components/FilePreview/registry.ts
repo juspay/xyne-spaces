@@ -4,6 +4,9 @@ import type { PreviewFile, Previewer } from './types';
 
 const MB = 1024 * 1024;
 
+/** What the conversion endpoint accepts — `officeConversionUpload`'s own limit. */
+const OFFICE_CONVERSION_MAX_BYTES = 100 * MB;
+
 const TextPreview = lazy(() => import('./previewers/TextPreview'));
 const MarkdownPreview = lazy(() => import('./previewers/MarkdownPreview'));
 const HtmlPreview = lazy(() => import('./previewers/HtmlPreview'));
@@ -12,7 +15,7 @@ const SpreadsheetPreview = lazy(() => import('./previewers/SpreadsheetPreview'))
 const ImagePreview = lazy(() => import('./previewers/ImagePreview'));
 const VideoPreview = lazy(() => import('./previewers/VideoPreview'));
 const PdfPreview = lazy(() => import('./previewers/PdfPreview'));
-const LegacyPreview = lazy(() => import('./previewers/LegacyPreview'));
+const OfficePreview = lazy(() => import('./previewers/OfficePreview'));
 
 /**
  * Every previewer, in the order they are tried. A new one is a component under
@@ -163,16 +166,17 @@ export const PREVIEWERS: readonly Previewer[] = [
     skeleton: 'document',
     component: PdfPreview,
   },
-  // Until these have previewers of their own (documents and slides as PDFs the
-  // server makes, in the PDF previewer), the app's existing viewers draw them.
+  // Documents and slides as the PDFs the server makes of them, in the PDF
+  // previewer. Read whole because that is what the conversion endpoint takes.
   {
     id: 'word',
     label: 'Word document',
     extensions: ['docx'],
     mimeTypes: ['application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
-    reads: { kind: 'stream' },
+    reads: { kind: 'file' },
+    maxBytes: OFFICE_CONVERSION_MAX_BYTES,
     skeleton: 'document',
-    component: LegacyPreview,
+    component: OfficePreview,
   },
   {
     id: 'slides',
@@ -182,9 +186,10 @@ export const PREVIEWERS: readonly Previewer[] = [
       'application/vnd.openxmlformats-officedocument.presentationml.presentation',
       'application/vnd.ms-powerpoint',
     ],
-    reads: { kind: 'stream' },
+    reads: { kind: 'file' },
+    maxBytes: OFFICE_CONVERSION_MAX_BYTES,
     skeleton: 'document',
-    component: LegacyPreview,
+    component: OfficePreview,
   },
 ];
 

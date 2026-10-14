@@ -147,6 +147,12 @@ const ContainerDropZone = ({
   );
 };
 
+const GROUP_NAMES: Record<SidebarGroup, string> = {
+  starred: 'Starred',
+  channels: 'Channels',
+  dms: 'Direct messages',
+};
+
 const GroupSettingsMenu = ({
   group,
   trackName,
@@ -191,7 +197,7 @@ const GroupSettingsMenu = ({
             e.preventDefault();
             e.stopPropagation();
           }}
-          aria-label='Section options'
+          aria-label={`${GROUP_NAMES[group]} section options`}
           data-track-category='CHAT_SIDEBAR'
           data-track-name={trackName}
         >
@@ -715,8 +721,8 @@ const ChatDirectory = ({
         s => s.channelId === c.id && s.userId === context.userID,
       );
       const isDM = c.scopeType === ChannelScopeType.DM || c.scopeType === ChannelScopeType.GROUP_DM;
-      if (status?.desktopNotificationLevel === NotificationLevel.NONE) continue;
       const hasUnreadCount = (unreadCounts[c.id] ?? 0) > 0;
+      if (status?.desktopNotificationLevel === NotificationLevel.NONE && !hasUnreadCount) continue;
       let isUnread = hasUnreadCount;
       if (!isDM) {
         const hasNewActivity =
@@ -1312,6 +1318,7 @@ const ChatDirectory = ({
                             e.stopPropagation();
                             void navigate('/chat/search?mode=channels');
                           }}
+                          aria-label='Browse channels'
                           data-track-category='CHAT_SIDEBAR'
                           data-track-name='BROWSE_CHANNELS'
                         >
@@ -1335,6 +1342,7 @@ const ChatDirectory = ({
                             e.stopPropagation();
                             setShowAddChannelForm(true);
                           }}
+                          aria-label='Create channel'
                           data-testid='create-new-channel'
                           data-track-event='BUTTON_CLICK'
                           data-track-category='CHAT_SIDEBAR'
@@ -1439,6 +1447,7 @@ const ChatDirectory = ({
                           e.stopPropagation();
                           handleAddDirectMessage();
                         }}
+                        aria-label='Add direct message'
                         data-testid='create-new-dm'
                         data-track-event='BUTTON_CLICK'
                         data-track-category='CHAT_SIDEBAR'

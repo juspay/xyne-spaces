@@ -31,10 +31,9 @@ import { InstantCallModal } from '../../components/Call/InstantCallModal/Instant
 import { ScheduleCallModal } from '../../components/Call/ScheduleCallModal/ScheduleCallModal';
 import { useActiveUserSearch, useUsers } from '../../hooks/useUsers';
 import { useAllChannels } from '../../hooks/useChannels';
-import { useZero } from '../../hooks/useZero';
+import { useMarkMissedCallsReadOnVisit } from '../../hooks/useMissedCallCount';
 import { cn } from '../../utils/classNames';
 import { isSameDay } from '../../utils/dateUtils';
-import { mutators } from '../../zero/mutators';
 import { CallCard } from './components/CallCard';
 import {
   Call,
@@ -325,7 +324,6 @@ const CallHistoryV2Screen = (): ReactElement => {
     return vespaCallSearchResults.map(r => mapVespaCallResultToCall(r, wsId));
   }, [vespaCallSearchResults, user?.workspaceId]);
 
-  const zero = useZero();
   const callHistoryLoadStartTimeRef = useRef<number | null>(null);
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(null);
 
@@ -344,13 +342,7 @@ const CallHistoryV2Screen = (): ReactElement => {
 
   const showRecentCallsLoader = isLoading || (showMinLoader && (calls?.length ?? 0) === 0);
 
-  const endedCallsCount = calls?.filter(c => c.status === CallStatus.ENDED).length ?? 0;
-
-  useEffect(() => {
-    if (endedCallsCount === 0) return;
-
-    void zero.mutate(mutators.activities.markMissedCallsAsRead({}));
-  }, [endedCallsCount]);
+  useMarkMissedCallsReadOnVisit();
 
   useEffect(() => {
     if (queryDetails.type === 'unknown') {
@@ -649,12 +641,12 @@ const CallHistoryV2Screen = (): ReactElement => {
         </div>
         {/* Page body */}
         <div className='max-w-[884px] w-full flex flex-col gap-6 px-4 pb-20'>
-          {/* UPCOMING section */}
+          {/* UPCOMING & ACTIVE section */}
           {(!hasCallSearch || isVespaCallSearching || hasUpcomingCallsToday) && (
             <div className='flex flex-col gap-3'>
               <div className='flex items-center justify-between shrink-0'>
                 <span className='text-xs font-medium tracking-wide text-muted-foreground/70 uppercase'>
-                  Upcoming
+                  Upcoming &amp; Active
                 </span>
                 <span className='text-xs text-muted-foreground/70'>
                   {format(new Date(now), 'EEE, MMMM d')}
@@ -725,6 +717,7 @@ const CallHistoryV2Screen = (): ReactElement => {
                   id='channel-calls-toggle'
                   checked={showChannelCalls}
                   onCheckedChange={setShowChannelCalls}
+                  aria-label='Show channel calls'
                 />
               </div>
             </div>
@@ -958,6 +951,7 @@ const StartCallPill = ({ onInstantCall, onScheduleCall }: StartCallPillProps): R
           <Button
             variant='ghost'
             size='inline'
+            aria-haspopup='dialog'
             data-testid='start-instant-call-option'
             data-track-category='CALLS'
             data-track-name='start-instant-call'

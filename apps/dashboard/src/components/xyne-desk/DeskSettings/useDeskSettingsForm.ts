@@ -122,6 +122,7 @@ export function useDeskSettingsForm(
   const isApp = channelType === ChannelType.APP;
   const isSocial = channelType === ChannelType.SOCIAL_MEDIA;
   const isCall = channelType === ChannelType.CALL;
+  const isChannelsDesk = channelType === ChannelType.CHANNELS;
   const isDeskChannel = isDeskChannelType(channelType);
   const isDl = emailChannelPreference?.deskType === DeskType.DL;
   const dlEmail = emailChannelPreference?.dlEmail ?? null;
@@ -588,6 +589,7 @@ export function useDeskSettingsForm(
     isApp,
     isSocial,
     isCall,
+    isChannelsDesk,
     isDeskChannel,
     isDirty,
     saving,

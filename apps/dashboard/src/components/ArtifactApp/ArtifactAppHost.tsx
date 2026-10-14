@@ -1,7 +1,8 @@
 import { ReactElement, useCallback, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Globe, Lock } from 'lucide-react';
+import { ArrowLeft, Check, Copy, Globe, Lock } from 'lucide-react';
+import { toast } from 'sonner';
 import { Button } from '../ui/Button/index';
 import { ArtifactAppSettings, ReactArtifactView } from '../AIScreen/ReactArtifact';
 import type { ReactArtifactRef } from '../AIScreen/ReactArtifact';
@@ -13,6 +14,8 @@ import {
   updateArtifactAppIcon,
 } from '../../services/claw/artifactAppsService';
 import { clawErrorText } from '../../services/claw/clawRequest';
+import { copyTextToClipboard } from '../../utils/clipboardUtils';
+import { appFolderName, appInitCommand } from './appInitCommand';
 import type { XyneAppContext, XyneContextChannel } from '../AIScreen/ReactArtifact';
 
 /**
@@ -73,6 +76,7 @@ export const ArtifactAppHost = ({
   const queryClient = useQueryClient();
   const { workspaceId } = useParams<{ workspaceId: string }>();
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['artifact-app', appId],
@@ -157,18 +161,37 @@ export const ArtifactAppHost = ({
     );
   }
 
-  if (isError || !app || !artifact) {
+  const backButton = onBack ? (
+    <button
+      type='button'
+      onClick={onBack}
+      className='rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground'
+      aria-label='Back to apps'
+      data-track-category='AskAI'
+      data-track-name='ArtifactAppBack'
+    >
+      <ArrowLeft className='h-4 w-4' />
+    </button>
+  ) : null;
+
+  if (isError || !app) {
     return (
-      <div className='flex h-full flex-col items-center justify-center gap-2'>
-        <p className='text-sm font-medium text-foreground'>Could not open this app</p>
-        <Button
-          variant='secondary'
-          onClick={() => void refetch()}
-          data-track-category='AskAI'
-          data-track-name='ArtifactAppRetryLoad'
-        >
-          Try again
-        </Button>
+      <div className='flex h-full flex-col'>
+        {backButton && <div className='px-4 py-2'>{backButton}</div>}
+        <div className='flex flex-1 flex-col items-center justify-center gap-2'>
+          <p className='text-sm font-medium text-foreground'>Could not open this app</p>
+          <p className='max-w-sm text-center text-xs text-muted-foreground'>
+            It may have been removed, made private, or the connection dropped.
+          </p>
+          <Button
+            variant='secondary'
+            onClick={() => void refetch()}
+            data-track-category='AskAI'
+            data-track-name='ArtifactAppRetryLoad'
+          >
+            Try again
+          </Button>
+        </div>
       </div>
     );
   }
@@ -176,49 +199,115 @@ export const ArtifactAppHost = ({
   const isPublished = app.visibility === 'WORKSPACE';
   const busy = publish.isPending || unpublish.isPending;
 
-  return (
-    <div className='flex h-full flex-col'>
-      <div className='flex items-center gap-3 border-b border-border px-4 py-2'>
-        {onBack && (
-          <button
-            type='button'
-            onClick={onBack}
-            className='rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground'
-            aria-label='Back to apps'
-            data-track-category='AskAI'
-            data-track-name='ArtifactAppBack'
-          >
-            <ArrowLeft className='h-4 w-4' />
-          </button>
-        )}
-        <div className='min-w-0 flex-1'>
-          <div className='truncate text-sm font-medium text-foreground'>{app.title}</div>
-          {app.description && (
-            <div className='truncate text-xs text-muted-foreground'>{app.description}</div>
-          )}
-        </div>
-
-        <span className='flex shrink-0 items-center gap-1 text-xs text-muted-foreground'>
-          {isPublished ? <Globe className='h-3.5 w-3.5' /> : <Lock className='h-3.5 w-3.5' />}
-          {isPublished ? 'Workspace' : 'Private'}
-        </span>
-
-        {app.isOwner && (
-          <Button
-            variant={isPublished ? 'secondary' : 'default'}
-            disabled={busy || !shown}
-            onClick={() => {
-              setError(null);
-              if (isPublished) unpublish.mutate();
-              else publish.mutate();
-            }}
-            data-track-category='AskAI'
-            data-track-name={isPublished ? 'ArtifactAppUnpublish' : 'ArtifactAppPublish'}
-          >
-            {isPublished ? 'Unpublish' : 'Publish to workspace'}
-          </Button>
+  const header = (
+    <div className='flex items-center gap-3 border-b border-border px-4 py-2'>
+      {backButton}
+      <div className='min-w-0 flex-1'>
+        <div className='truncate text-sm font-medium text-foreground'>{app.title}</div>
+        {app.description && (
+          <div className='truncate text-xs text-muted-foreground'>{app.description}</div>
         )}
       </div>
+
+      <span className='flex shrink-0 items-center gap-1 text-xs text-muted-foreground'>
+        {isPublished ? <Globe className='h-3.5 w-3.5' /> : <Lock className='h-3.5 w-3.5' />}
+        {isPublished ? 'Workspace' : 'Private'}
+      </span>
+
+      {app.isOwner && shown && (
+        <Button
+          variant={isPublished ? 'secondary' : 'default'}
+          disabled={busy}
+          onClick={() => {
+            setError(null);
+            if (isPublished) unpublish.mutate();
+            else publish.mutate();
+          }}
+          data-track-category='AskAI'
+          data-track-name={isPublished ? 'ArtifactAppUnpublish' : 'ArtifactAppPublish'}
+        >
+          {isPublished ? 'Unpublish' : 'Publish to workspace'}
+        </Button>
+      )}
+    </div>
+  );
+
+  // Created from Create app and not pushed yet: the app exists, its code does
+  // not. That is a normal first state, not a failure, so it says what to do.
+  if (!artifact) {
+    const command = appInitCommand(app.title, app.id);
+    const folder = appFolderName(app.title);
+    return (
+      <div className='flex h-full flex-col'>
+        {header}
+        <div className='flex flex-1 items-center justify-center overflow-y-auto px-6 py-10'>
+          <div className='flex w-full max-w-xl flex-col gap-4'>
+            <div className='flex flex-col gap-1'>
+              <h2 className='text-base font-semibold text-foreground'>Nothing built yet</h2>
+              <p className='text-sm leading-6 text-muted-foreground'>
+                {app.isOwner
+                  ? 'This app has a name but no code. Build it locally with the Spaces CLI, then push it: the first push shows up here.'
+                  : 'Its owner has not built this app yet. Check back later.'}
+              </p>
+            </div>
+            {app.isOwner && (
+              <>
+                <div className='flex flex-col gap-2'>
+                  <span className='text-xs font-medium text-muted-foreground'>
+                    1. Set up the project (skip if you already have)
+                  </span>
+                  <div className='flex items-start gap-2 rounded-xl bg-zinc-900 px-4 py-3'>
+                    <pre className='min-w-0 flex-1 whitespace-pre-wrap break-all font-mono text-[12px] leading-5 text-zinc-100'>
+                      {command}
+                    </pre>
+                    <button
+                      type='button'
+                      onClick={() => {
+                        copyTextToClipboard(command)
+                          .then(() => setCopied(true))
+                          .catch(() => toast.error('Could not copy the command'));
+                      }}
+                      aria-label='Copy command'
+                      className='shrink-0 rounded-md p-1.5 text-zinc-300 transition-colors hover:bg-zinc-800 hover:text-white'
+                      data-track-category='AskAI'
+                      data-track-name='ArtifactAppEmptyCopyCommand'
+                    >
+                      {copied ? (
+                        <Check className='h-3.5 w-3.5' />
+                      ) : (
+                        <Copy className='h-3.5 w-3.5' />
+                      )}
+                    </button>
+                  </div>
+                </div>
+                <div className='flex flex-col gap-2'>
+                  <span className='text-xs font-medium text-muted-foreground'>
+                    2. Build it, then push from the project folder
+                  </span>
+                  <pre className='whitespace-pre-wrap rounded-xl bg-zinc-900 px-4 py-3 font-mono text-[12px] leading-5 text-zinc-100'>
+                    {`cd ${folder}\nnpm run dev           # build and preview locally\nspaces app push       # upload it here`}
+                  </pre>
+                </div>
+                <Button
+                  variant='secondary'
+                  className='self-start'
+                  onClick={() => void refetch()}
+                  data-track-category='AskAI'
+                  data-track-name='ArtifactAppEmptyRefresh'
+                >
+                  I&apos;ve pushed it, refresh
+                </Button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className='flex h-full flex-col'>
+      {header}
 
       {error && <p className='px-4 py-2 text-xs text-destructive'>{error}</p>}
 

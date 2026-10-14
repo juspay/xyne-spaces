@@ -184,10 +184,48 @@ export const findAgentsTool: ToolDefinition = {
   execute: AUTH_EXECUTED_STUB,
 };
 
+export const getFleetStatsTool: ToolDefinition = {
+  slug: "get_fleet_stats",
+  name: "get_fleet_stats",
+  description:
+    "Fleet-wide health of every agent in this organization over a recent window, from the run ledger " +
+    "(agent_runs), compared with a baseline of the preceding days. One call returns: overall runs, " +
+    "failure %, p50/p95 run duration and where run time goes (LLM wait, LLM generation, tools, other); " +
+    "a per-agent table (runs, failed, cancelled, failure %, p50/p95, LLM wait, time to first token, tool " +
+    "time, turns, retries, tokens, ratings, change vs baseline); the slowest agents with the dominant " +
+    "cause of their run time and top retry reasons; the top normalised error messages with counts, " +
+    "affected agents, first/last seen and example session ids; the most-used tools (runs using each, and " +
+    "which agents); and per provider/model failure %, retries, time to first token " +
+    "and tokens/sec. Use it for daily fleet reports and \"which agents are failing or slow and why\". " +
+    "Restricted to claw admins. Read-only.",
+  source: "custom:agent-introspect",
+  inputSchema: {
+    type: "object",
+    properties: {
+      hours: { type: "number", description: "Window length in hours, ending now. Default 24, max 168." },
+      baselineDays: {
+        type: "number",
+        description: "Days before the window used as the comparison baseline. Default 7, max 30.",
+      },
+      agentSlugs: {
+        type: "array",
+        items: { type: "string" },
+        description: "Optional: only these agents. Omit for the whole fleet.",
+      },
+      topErrors: { type: "number", description: "How many error groups to return. Default 15, max 50." },
+      topTools: { type: "number", description: "How many tools to return. Default 15, max 50." },
+      maxAgents: { type: "number", description: "Maximum agents in the per-agent table. Default 60, max 200." },
+    },
+    required: [],
+  },
+  execute: AUTH_EXECUTED_STUB,
+};
+
 export const AGENT_INTROSPECT_TOOL_DEFS: ToolDefinition[] = [
   listAgentsTool,
   getAgentConfigTool,
   searchToolsTool,
   getAgentRunsTool,
   findAgentsTool,
+  getFleetStatsTool,
 ];

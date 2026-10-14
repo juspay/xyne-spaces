@@ -22,6 +22,11 @@
       "import": "./dist/commands.js",
       "default": "./dist/commands.js"
     },
+    "./flow-action-errors": {
+      "types": "./dist/flowActionErrors.d.ts",
+      "import": "./dist/flowActionErrors.js",
+      "default": "./dist/flowActionErrors.js"
+    },
     "./zero": {
       "types": "./dist/zero/index.d.ts",
       "import": "./dist/zero/index.js",

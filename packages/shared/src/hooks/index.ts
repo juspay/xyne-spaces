@@ -58,6 +58,7 @@ export {
   useAllVisibleChannels,
   useVisibleProjects,
   useChannel,
+  useChannelLookup,
   useVisibleChannel,
   useChannelByName,
   useChannelSearch,
@@ -74,7 +75,7 @@ export {
   getChannelConversationsSnapshot,
   useGetLatestConversation,
 } from "./useChannels.js";
-export type { VisibleChannel, VisibleProject } from "./useChannels.js";
+export type { VisibleChannel, VisibleProject, ChannelLookup } from "./useChannels.js";
 
 export {
   usePermissions,

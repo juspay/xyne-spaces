@@ -19,6 +19,7 @@ import { toast } from 'sonner';
 
 import { intentClassifier, type IntentDetection } from '../services/onDeviceIntent';
 import { globalClickTracker } from '../services/Analytics/globalClickTracker';
+import { addIntentCallSuggestion } from '../stores/intentCallSuggestionStore';
 
 /** What a suggestion is allowed to do. One entry per wired destination. */
 export interface IntentSuggestionActions {
@@ -27,12 +28,15 @@ export interface IntentSuggestionActions {
   openAddPeople: () => void;
 }
 
-interface Suggestion {
-  message: string;
-  /** Button label, or undefined when the message itself is the whole answer. */
-  action?: string;
-  run?: (actions: IntentSuggestionActions) => void;
-}
+type Suggestion =
+  | {
+      message: string;
+      action?: string;
+      run?: (actions: IntentSuggestionActions) => void;
+    }
+  | {
+      inline: true;
+    };
 
 /**
  * Copy and destination per detection.
@@ -53,11 +57,7 @@ interface Suggestion {
  * intent wired ahead of its UI, not a blank toast.
  */
 const SUGGESTIONS: Record<string, Suggestion> = {
-  'start-call': {
-    message: 'Looks like you are trying to schedule a call',
-    action: 'Schedule Call',
-    run: actions => actions.openScheduleCall(),
-  },
+  'start-call': { inline: true },
   // How-to questions. These converge with the intents above where the product has
   // the same destination: "can we hop on a call" and "how do I start a call" are
   // different asks that want the same modal.
@@ -114,6 +114,10 @@ export function useIntentSuggestionToast(actions: IntentSuggestionActions): void
     const key = suggestionKey(detection);
     const copy = SUGGESTIONS[key];
     if (!copy) return;
+    if ('inline' in copy) {
+      addIntentCallSuggestion(detection);
+      return;
+    }
 
     const now = Date.now();
     const shownAt = lastShownAt.current.get(key);

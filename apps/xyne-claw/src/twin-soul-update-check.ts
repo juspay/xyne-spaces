@@ -13,16 +13,16 @@
  */
 
 import type { MemoryUpdateCheck, MemoryUpdateVerdict } from "xyne-claw-shared";
-import type { JevAnswer, JevQuestion } from "./jev.js";
-import { collectJudgeExchanges, storableExchange } from "./judge-backend.js";
+import type { XorAnswer, XorQuestion } from "./xor.js";
+import { collectJudgeExchanges, storableExchange } from "./judge-trace.js";
 import { answerProb, round3, runJudgeSite, type JudgeSiteDeps } from "./judge-site.js";
 import { optEnabled } from "./optimizations.js";
 
 const FILE_CHARS = 6_000;
 const FACT_CHARS = 4_000;
 
-function updateCheckQuestions(hasOld: boolean): Record<string, JevQuestion> {
-  const q: Record<string, JevQuestion> = {
+function updateCheckQuestions(hasOld: boolean): Record<string, XorQuestion> {
+  const q: Record<string, XorQuestion> = {
     supported: {
       type: "score",
       instructions: "Is every statement in the NEW file supported by the approved facts or the OLD file?",
@@ -57,7 +57,7 @@ function updateCheckQuestions(hasOld: boolean): Record<string, JevQuestion> {
 }
 
 /** Pure: answers → check. Reject on a clear problem, accept only when every signal is good. */
-export function checkFromAnswers(answers: Record<string, JevAnswer>, ms: number): MemoryUpdateCheck | null {
+export function checkFromAnswers(answers: Record<string, XorAnswer>, ms: number): MemoryUpdateCheck | null {
   const supported = answerProb(answers, "supported");
   const keepsOld = answerProb(answers, "keeps_old");
   const choice = answers["verdict"]?.choice;
@@ -97,7 +97,6 @@ export async function checkMemoryUpdate(
   const { result, exchanges } = await collectJudgeExchanges(() => runJudgeSite<MemoryUpdateCheck>({
     site: "memory-update-check",
     enabled: deps.enabled ?? optEnabled("jev_memory_update_check"),
-    budgetMs: Number(process.env["MEMORY_UPDATE_CHECK_TIMEOUT_MS"] ?? 8_000),
     state,
     questions: updateCheckQuestions(hasOld),
     decide: (answers) => checkFromAnswers(answers, Date.now() - started),

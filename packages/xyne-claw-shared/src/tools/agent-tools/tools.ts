@@ -91,9 +91,15 @@ export const createAgentTool: ToolDefinition = {
       },
       modelId: { type: "string", description: "Optional model id to pin, e.g. 'claude-sonnet-5'. Omit to inherit the workspace default." },
       color: { type: "string", description: "Optional hex accent colour for the agent's avatar, e.g. '#6366f1'." },
-      tools: toolsProperty,
+      tools: {
+        ...toolsProperty,
+        description:
+          `${toolsProperty.description} Required: pass the tools you decided on, or an empty array ` +
+          `if the agent genuinely needs none. An empty array is a valid answer — never add a tool ` +
+          `just to fill this field.`,
+      },
     },
-    required: ["name", "description", "systemPrompt"],
+    required: ["name", "description", "systemPrompt", "tools"],
   },
   execute: queued("create-agent"),
 };

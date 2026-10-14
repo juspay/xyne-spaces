@@ -259,6 +259,7 @@ export const UserList = ({
                           {!disabled && (
                             <Button
                               type='button'
+                              aria-label={`Remove ${user.email} from group`}
                               variant='ghost'
                               size='sm'
                               onClick={() => handleRemoveUser(user)}

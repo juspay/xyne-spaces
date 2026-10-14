@@ -2574,6 +2574,12 @@ export const queries = defineQueries({
       )
       .related('channelStats');
   }),
+  // Point lookup used by `useChannel` when an id is missing from the hydrated
+  // channel sets (e.g. channel created or made visible after the initial load).
+  // Scoped by ChannelsACL like every other `channels` read, so it never widens visibility.
+  getChannelById: defineQuery(z.object({ channelId: z.string() }), ({ args: { channelId } }) => {
+    return zql.channels.where('id', channelId).one();
+  }),
   channelStats: defineQuery(z.object({ channelId: z.string() }), ({ args: { channelId } }) => {
     return zql.channel_stats.where('channelId', channelId).one();
   }),
@@ -2605,6 +2611,7 @@ export const queries = defineQueries({
             ChannelType.APP,
             ChannelType.CALL,
             ChannelType.SOCIAL_MEDIA,
+            ChannelType.CHANNELS,
           ])
           .related('channelStats'),
       );
@@ -2622,6 +2629,7 @@ export const queries = defineQueries({
             ChannelType.APP,
             ChannelType.CALL,
             ChannelType.SOCIAL_MEDIA,
+            ChannelType.CHANNELS,
           ])
           .related('channelStats'),
       );

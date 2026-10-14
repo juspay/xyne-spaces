@@ -91,7 +91,7 @@ describe("renderDebugTraceHtml", () => {
           at: at(1),
           kind: "judge_call",
           data: {
-            backend: "ournormaljev", purpose: "result-sift", questions: 1, ms: 300, ok: true,
+            backend: "xor", purpose: "result-sift", questions: 1, ms: 300, ok: true,
             state: "JEVSTATEBODY with a tool result",
             questionSpec: JSON.stringify({ i0: { type: "noul", instructions: "JEVQUESTIONBODY item text" } }),
             answers: JSON.stringify({ i0: { type: "noul", noul: 0.42 } }),

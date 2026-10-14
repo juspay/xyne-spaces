@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { cn } from '../../../utils/classNames';
+import { APP_NO_DRAG_STYLE } from '../../../utils/electronApp';
 import ThreadMessages from '../../Chat/ThreadPannel';
 import { CallControls } from '../CallControls/CallControls';
 import { CallStateTransition } from '../CallStateTransition/CallStateTransition';
@@ -237,6 +238,7 @@ export function MiniCallView({
   const dragBoundsRef = useRef<HTMLDivElement>(null);
   const [overlayMode, setOverlayMode] = useState<'mini' | 'line'>('mini');
   const [miniLeft, setMiniLeft] = useState(20);
+  const [isDragging, setIsDragging] = useState(false);
 
   // State for resizing
   const [size, setSize] = useState({ width: 380, height: 280 });
@@ -407,6 +409,8 @@ export function MiniCallView({
           dragConstraints={dragBoundsRef}
           whileDrag={{ cursor: 'grabbing' }}
           className='fixed z-50 group/container cursor-grab'
+          onDragStart={() => setIsDragging(true)}
+          onDragEnd={() => setIsDragging(false)}
           style={{
             bottom: `${dockedLineBottom}px`,
             left: `${lineLeft}px`,
@@ -419,6 +423,7 @@ export function MiniCallView({
               'border-white/10 rounded-full',
             )}
             style={{
+              ...(isDragging ? undefined : APP_NO_DRAG_STYLE),
               width: `${lineViewWidth}px`,
               height: `${LINE_VIEW_HEIGHT}px`,
             }}
@@ -528,12 +533,14 @@ export function MiniCallView({
         dragListener={!isResizing}
         whileDrag={{ cursor: 'grabbing' }}
         className='fixed z-50 group/container'
+        onDragStart={() => setIsDragging(true)}
+        onDragEnd={() => setIsDragging(false)}
         style={{
           bottom: '20px',
           left: `${miniLeft}px`,
         }}
       >
-        <div className='flex flex-col relative'>
+        <div className='flex flex-col relative' style={isDragging ? undefined : APP_NO_DRAG_STYLE}>
           {/* Call Window */}
           <div
             ref={containerRef}

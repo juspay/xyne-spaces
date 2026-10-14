@@ -2,6 +2,7 @@ export {
   intentClassifier,
   isEligible,
   type ClassifiableChannel,
+  type IntentSurface,
   type IntentDetection,
   type ModelStatus,
 } from './intentClassifier';

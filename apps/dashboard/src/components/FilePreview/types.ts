@@ -8,6 +8,7 @@ export interface PreviewFile {
   mimetype: string;
   /** In bytes. */
   size: number;
+  streamUrl?: string;
 }
 
 /** What a previewer is handed to draw. */

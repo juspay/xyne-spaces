@@ -1,3 +1,4 @@
+import { runWithToolCall } from "../src/tool-call-context.js";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,7 +8,7 @@ import { promoteIfOversized } from "../src/tool-output.js";
 import { pinRunOptimizations } from "../src/optimizations.js";
 import { pinRunTask } from "../src/run-context.js";
 
-const ENV = ["JEV_API_KEY", "JEV_URL", "JUDGE_BACKEND", "JUDGE_SHADOW", "XYNE_OPT_ALL", "XYNE_OPT_JEV_RESULT_SIFT"];
+const ENV = ["XOR_URL", "XOR_API_KEY", "XOR_BACKEND", "OUR_NORMAL_JEV_URL", "OUR_JEV_API_KEY", "JUDGE_BACKEND", "XYNE_OPT_ALL", "XYNE_OPT_JEV_RESULT_SIFT"];
 
 const hit = (n: number, text: string): string =>
   `${n}. [message] ${text}\n   conversationId: conv-${n} · 12/9/2026, 10:0${n % 10}:00 am\n   ${"context ".repeat(40)}`;
@@ -93,7 +94,8 @@ describe("siftToolResult", () => {
       saved[k] = process.env[k];
       delete process.env[k];
     }
-    process.env["JEV_API_KEY"] = "k";
+    process.env["OUR_NORMAL_JEV_URL"] = "https://ourjev.internal/v1/systemone";
+    process.env["OUR_JEV_API_KEY"] = "k";
     fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
   });
@@ -142,7 +144,8 @@ describe("tool-output seam", () => {
       saved[k] = process.env[k];
       delete process.env[k];
     }
-    process.env["JEV_API_KEY"] = "k";
+    process.env["OUR_NORMAL_JEV_URL"] = "https://ourjev.internal/v1/systemone";
+    process.env["OUR_JEV_API_KEY"] = "k";
     vi.stubGlobal("fetch", vi.fn(jevReplyFor("compaction is dropping")));
     dir = await mkdtemp(join(tmpdir(), "sift-"));
   });
@@ -166,7 +169,9 @@ describe("tool-output seam", () => {
 
   it("filters the result, saves the whole thing first, and tells the model the true total", async () => {
     const full = searchResult([2, 9, 15]);
-    const out = await inRun("none,+jev_result_sift", () => promoteIfOversized(dir, "custom", "spaces-search-v2", full));
+    const out = await inRun("none,+jev_result_sift", () =>
+      runWithToolCall({ tool: "spaces-search-v2", args: {}, sift: true }, () => promoteIfOversized(dir, "custom", "spaces-search-v2", full)),
+    );
     expect(out.length).toBeLessThan(full.length * 0.6);
     expect(out).toContain("of 20 items");
     expect(out).toContain("counts and totals must use 20");
@@ -183,9 +188,14 @@ describe("tool-output seam", () => {
     expect(out).toContain(files[0]!);
   });
 
-  it("changes nothing when the switch is off", async () => {
+  it("changes nothing unless the call asks for sifting", async () => {
     const full = searchResult([2, 9, 15]);
-    expect(await inRun("none", () => promoteIfOversized(dir, "custom", "spaces-search-v2", full))).toBe(full);
+    expect(await inRun("none,+jev_result_sift", () => promoteIfOversized(dir, "custom", "spaces-search-v2", full))).toBe(full);
+    expect(
+      await inRun("none,+jev_result_sift", () =>
+        runWithToolCall({ tool: "spaces-search-v2", args: {}, sift: false }, () => promoteIfOversized(dir, "custom", "spaces-search-v2", full)),
+      ),
+    ).toBe(full);
   });
 
   it("never filters a non-retrieval tool such as read", async () => {

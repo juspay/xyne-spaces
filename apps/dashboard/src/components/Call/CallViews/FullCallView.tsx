@@ -584,7 +584,8 @@ export function FullCallView({
       {/* Floating reactions overlay */}
       <ReactionsOverlay reactions={reactions} />
 
-      {/* Network quality toast — floats top-center, auto-dismisses after 5s */}
+      {/* Network quality toast — floats top-center, shown only after 2s of sustained
+          poor/lost quality, auto-dismisses after 5s */}
       {showQualityToast && (
         <div
           className={cn(

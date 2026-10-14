@@ -341,6 +341,7 @@ export const FlowGroupNode: React.FC<NodeProps<FlowGroupNodeData>> = ({ data, se
               onToggleCollapse();
             }}
             title='Collapse group'
+            aria-label='Collapse group'
             data-track-category='flow_board'
             data-track-name='toggle_group_collapse'
             className='nodrag shrink-0 rounded p-0.5 transition-colors hover:bg-black/5'
@@ -355,6 +356,7 @@ export const FlowGroupNode: React.FC<NodeProps<FlowGroupNodeData>> = ({ data, se
             type='button'
             onClick={onUngroup}
             title='Ungroup steps'
+            aria-label='Ungroup steps'
             data-track-category='flow_plan_editor'
             data-track-name='ungroup'
             className='nodrag shrink-0 rounded p-0.5 opacity-70 transition-opacity hover:opacity-100'

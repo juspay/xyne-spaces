@@ -33,6 +33,7 @@ export const ThreadRecordingButton = ({
         onClick={onStartRecording}
         disabled={hasActiveRecording}
         className='h-7 w-7 rounded-lg text-muted-foreground hover:text-foreground'
+        aria-label='Record this thread'
         data-testid={testId}
         {...(trackCategory && { 'data-track-category': trackCategory })}
         {...(trackName && { 'data-track-name': trackName })}

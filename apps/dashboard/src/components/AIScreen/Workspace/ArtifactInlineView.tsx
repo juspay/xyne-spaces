@@ -25,7 +25,7 @@ function attachmentDownloadUrl(refId: string): string {
 export function artifactInlineActions(artifact: ConversationArtifact): ReactElement | null {
   const url = safeHttpUrl(artifact.openRef.url ?? artifact.url);
 
-  if (artifact.kind === 'FILE' || artifact.kind === 'SPEC') {
+  if (artifact.kind === 'SPEC') {
     return (
       <button
         type='button'
@@ -48,6 +48,10 @@ export function artifactInlineActions(artifact: ConversationArtifact): ReactElem
   }
 
   const linkable = artifact.kind === 'PREVIEW' || artifact.kind === 'DIFF';
+
+  if (linkable && artifact.status === 'STALE') {
+    return <span className='flex-shrink-0 text-xs text-muted-foreground'>Ended</span>;
+  }
 
   if (linkable && !url) {
     return <span className='flex-shrink-0 text-xs text-muted-foreground'>Link unavailable</span>;
@@ -101,7 +105,12 @@ export function ArtifactInlineView({
     case 'FILE':
     case 'UPLOAD':
       return (
-        <FileView url={attachmentDownloadUrl(artifact.openRef.refId)} title={artifact.title} />
+        <FileView
+          url={attachmentDownloadUrl(artifact.openRef.refId)}
+          title={artifact.title}
+          {...(artifact.mimeType ? { mimeType: artifact.mimeType } : {})}
+          {...(artifact.size ? { size: artifact.size } : {})}
+        />
       );
     case 'SPEC':
       return (
@@ -113,6 +122,7 @@ export function ArtifactInlineView({
     case 'DIFF':
       if (isLocalDiffArtifact(artifact))
         return <LocalDiffView artifact={artifact} guide={reviewGuide ?? null} />;
+      if (artifact.status === 'STALE') return <Centered>This sandbox has ended.</Centered>;
       return url ? (
         <SandboxedFrame url={url} title={artifact.title} />
       ) : (

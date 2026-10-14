@@ -4,6 +4,8 @@ import { prisma } from "../db.js";
 import { orgIdForSpacesUser } from "./users-jit.js";
 import { createLogger } from "../logger.js";
 import { signalArtifacts } from "./panel-signals.js";
+import { baseConversationId, checkConversationAccess } from "./conversation-access.js";
+import { isDirectChatConversation } from "./conversation-kind.js";
 
 const log = createLogger("conversation-artifacts");
 
@@ -232,20 +234,35 @@ export async function setArtifactVersionRef(args: {
 export async function listConversationArtifacts(
   conversationId: string,
   userIds: string | string[],
+  spacesUserId?: string,
 ): Promise<ConversationArtifact[]> {
   const ids = Array.isArray(userIds) ? userIds : [userIds];
   if (!conversationId || ids.length === 0 || ids.every((id) => !id)) return [];
-  const owns = await userOwnsConversation(conversationId, ids);
+  const canSeeAll = await canReadConversation(conversationId, ids, spacesUserId);
   return prisma.conversationArtifact.findMany({
     where: {
       conversationId,
       status: { not: "DELETED" },
       // Artifact/ownership rows may be keyed by EITHER id form of the user
       // (canonical Claw id or the raw Spaces alias) — match all.
-      ...(owns ? {} : { createdByUserId: { in: ids } }),
+      ...(canSeeAll ? {} : { createdByUserId: { in: ids } }),
     },
     orderBy: [{ pinned: "desc" }, { createdAt: "desc" }],
   });
+}
+
+// XYNE-66344: anyone Spaces lets into the thread (channel member, or a public
+// channel in their workspace) sees every artifact, not just their own. Direct
+// chats have no Spaces row, and "denied"/"unknown" verdicts never widen access.
+export async function canReadConversation(
+  conversationId: string,
+  userIds: string[],
+  spacesUserId?: string,
+): Promise<boolean> {
+  if (await userOwnsConversation(conversationId, userIds)) return true;
+  const base = baseConversationId(conversationId);
+  if (!base || !spacesUserId || isDirectChatConversation(base)) return false;
+  return (await checkConversationAccess(base, spacesUserId)) === "ok";
 }
 
 export async function userOwnsConversation(conversationId: string, userIds: string | string[]): Promise<boolean> {

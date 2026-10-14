@@ -239,6 +239,13 @@ export interface RoomContext {
   // scoped to one call and clears with the rest of the context on disconnect.
   // Every consumer re-checks the CAC flag before acting on it.
   callUrlOverrides: CallUrlOverrides | null;
+  // Mic/camera picked on the incoming-call card before accepting.
+  joinMediaOverrides: JoinMediaOverrides | null;
+}
+
+export interface JoinMediaOverrides {
+  mic?: boolean;
+  camera?: boolean;
 }
 
 // Events for Room operations
@@ -276,6 +283,7 @@ export type RoomMachineEvent =
       // Set by the invite-link entry points, and only by them: where to send
       // the user if this call turns out not to be theirs to join.
       externalLobbyUrl?: string;
+      joinMediaOverrides?: JoinMediaOverrides;
     }
   | { type: 'TOGGLE_MIC' }
   | { type: 'PUSH_TO_TALK_START' }
@@ -1389,6 +1397,7 @@ export const roomMachine = setup({
       isBackgroundBlurEnabled: () => false,
       hostControls: () => DEFAULT_HOST_CONTROLS,
       callUrlOverrides: () => null,
+      joinMediaOverrides: () => null,
     }),
 
     enableLocalTracks: ({ context }) => {
@@ -1428,16 +1437,20 @@ export const roomMachine = setup({
             //   1. host controls — never overridable by anyone but the host
             //   2. an explicit request from the call URL (e.g. ?mic=on), once the
             //      flag above allows it
-            //   3. the user's saved join preferences + the crowded-room mute threshold
+            //   3. what the user picked on the ringing card before accepting
+            //   4. the user's saved join preferences + the crowded-room mute threshold
             // Applying (2) here rather than toggling after 'connected' is deliberate:
             // this action is the single writer of the initial track state, so there is
             // no window where a post-connect compare-and-toggle could read a value
             // these very awaits are about to overwrite and end up inverted.
+            const mediaOverrides = context.joinMediaOverrides;
             const enableMic =
-              !audioTurnedOffByHost && (urlOverrides?.mic ?? (!joinMuted && !shouldMuteByDefault));
+              !audioTurnedOffByHost &&
+              (urlOverrides?.mic ?? mediaOverrides?.mic ?? (!joinMuted && !shouldMuteByDefault));
 
             const enableCamera =
-              !cameraTurnedOffByHost && (urlOverrides?.camera ?? !joinWithoutVideo);
+              !cameraTurnedOffByHost &&
+              (urlOverrides?.camera ?? mediaOverrides?.camera ?? !joinWithoutVideo);
 
             await context.room!.localParticipant.setMicrophoneEnabled(enableMic);
 
@@ -1595,6 +1608,7 @@ export const roomMachine = setup({
     isBackgroundBlurEnabled: false,
     hostControls: DEFAULT_HOST_CONTROLS,
     callUrlOverrides: null,
+    joinMediaOverrides: null,
   },
   id: 'roomMachine',
   on: {
@@ -1672,6 +1686,8 @@ export const roomMachine = setup({
                 event.type === 'JOIN_CALL' ? (event.callUrlOverrides ?? null) : null,
               externalLobbyUrl: ({ event }) =>
                 event.type === 'JOIN_CALL' ? (event.externalLobbyUrl ?? null) : null,
+              joinMediaOverrides: ({ event }) =>
+                event.type === 'JOIN_CALL' ? (event.joinMediaOverrides ?? null) : null,
               isInitiator: () => false,
             }),
           ],

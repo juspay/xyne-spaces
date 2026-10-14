@@ -66,7 +66,8 @@ export function FilePreview(props: {
 }): ReactElement {
   const { file } = props;
   const previewer = useMemo(() => previewerFor(file), [file]);
-  const tooLarge = previewer?.maxBytes !== undefined && file.size > previewer.maxBytes;
+  const tooLarge =
+    previewer?.maxBytes !== undefined && file.size > 0 && file.size > previewer.maxBytes;
   const { state, retry } = usePreviewContent(file, tooLarge ? null : previewer);
   const [controls, setControls] = useState<HTMLElement | null>(null);
   const [trailing, setTrailing] = useState<HTMLElement | null>(null);
@@ -167,8 +168,12 @@ export function FilePreview(props: {
             className='flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground'
           >
             <span className='shrink-0'>{typeLabel}</span>
-            <span aria-hidden='true'>·</span>
-            <span className='shrink-0 tabular-nums'>{formatFileSize(file.size)}</span>
+            {file.size > 0 && (
+              <>
+                <span aria-hidden='true'>·</span>
+                <span className='shrink-0 tabular-nums'>{formatFileSize(file.size)}</span>
+              </>
+            )}
           </div>
           {/* Where the previewer's own controls go. */}
           <div ref={setControls} className='ml-auto flex shrink-0 items-center gap-1' />
