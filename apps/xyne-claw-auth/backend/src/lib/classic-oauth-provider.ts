@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { prisma } from "../db.js";
 import { encrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
+import { ensureMcpServer } from "./ensure-mcp-server.js";
 import { type OAuthAuthorizeOptions, type OAuthTokenProvider, TokenRefreshError } from "./oauth-token-endpoint.js";
 import { signOAuthState, verifyOAuthState, OAuthStateError } from "./oauth-state.js";
 import { defaultOAuthReturn, resolveOAuthReturn, withOAuthResult } from "./oauth-return.js";
@@ -84,17 +85,13 @@ export function createClassicOAuthProvider(config: ClassicOAuthConfig): ClassicO
   }
 
   async function ensureServer() {
-    const existing = await prisma.mcpServer.findUnique({ where: { type } });
-    if (existing) return existing;
-    return prisma.mcpServer.create({
-      data: {
-        type,
-        name: config.server.name,
-        url: config.server.url,
-        description: config.server.description,
-        isOauth: true,
-        connectorMeta: { scope: "global", mode: "self-serve" },
-      },
+    return ensureMcpServer(type, {
+      type,
+      name: config.server.name,
+      url: config.server.url,
+      description: config.server.description,
+      isOauth: true,
+      connectorMeta: { scope: "global", mode: "self-serve" },
     });
   }
 

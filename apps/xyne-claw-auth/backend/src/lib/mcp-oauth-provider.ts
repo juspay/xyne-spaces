@@ -4,6 +4,7 @@ import { prisma } from "../db.js";
 import { encrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { syncToolsForServer } from "../tool-sync.js";
+import { ensureMcpServer } from "./ensure-mcp-server.js";
 import { evictSession } from "../mcp/runner.js";
 import { type OAuthAuthorizeOptions, type OAuthTokenProvider, TokenRefreshError } from "./oauth-token-endpoint.js";
 import { signOAuthState, verifyOAuthState } from "./oauth-state.js";
@@ -110,20 +111,16 @@ export function createMcpOAuthProvider(config: McpOAuthConfig): McpOAuthProvider
   }
 
   async function ensureServer() {
-    const existing = await prisma.mcpServer.findUnique({ where: { type } });
-    if (existing) return existing;
-    return prisma.mcpServer.create({
-      data: {
-        type,
-        name: config.server.name,
-        url: config.server.url,
-        description: config.server.description,
-        transport: config.server.transport ?? "http",
-        writeToolPolicy: config.server.writeToolPolicy as never,
-        healthcheckSpec: config.server.healthcheckSpec as never,
-        connectorMeta: (config.server.connectorMeta ?? { scope: "global", mode: "self-serve" }) as never,
-        isOauth: true,
-      },
+    return ensureMcpServer(type, {
+      type,
+      name: config.server.name,
+      url: config.server.url,
+      description: config.server.description,
+      transport: config.server.transport ?? "http",
+      writeToolPolicy: config.server.writeToolPolicy as never,
+      healthcheckSpec: config.server.healthcheckSpec as never,
+      connectorMeta: (config.server.connectorMeta ?? { scope: "global", mode: "self-serve" }) as never,
+      isOauth: true,
     });
   }
 
