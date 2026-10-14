@@ -50,6 +50,8 @@ import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
 import { canvasService } from '../../../services/Canvas/canvasService';
 import { usePersistedCanvasPreferences } from '../../../hooks/usePersistedCanvasPreferences';
 import { useCanvasArchiveToggle } from '../useCanvasArchiveToggle';
+import { useCanvasServerDuplicateEnabled } from '../canvasServerDuplicateCacConfig';
+import { getCanvasDuplicateNotice } from '../../../utils/canvasVersioning';
 
 export type CanvasPanelOutletContext = {
   leftHeaderSlot?: ReactElement | null;
@@ -67,6 +69,8 @@ const CanvasPanel = (): ReactElement => {
 
   const canvasPanelRef = useRef<PanelImperativeHandle>(null);
   const deletedCanvasIdsRef = useRef<Set<string>>(new Set());
+  const duplicatingCanvasIdsRef = useRef<Set<string>>(new Set());
+  const isServerDuplicateEnabled = useCanvasServerDuplicateEnabled(user?.email);
   const {
     filter: activeFilter,
     setFilter: setActiveFilter,
@@ -252,10 +256,67 @@ const CanvasPanel = (): ReactElement => {
 
   const handleArchiveToggleCanvas = useCanvasArchiveToggle();
 
+  const duplicateOnServer = useCallback(
+    async (sourceCanvasId: string): Promise<void> => {
+      if (duplicatingCanvasIdsRef.current.has(sourceCanvasId)) return;
+      duplicatingCanvasIdsRef.current.add(sourceCanvasId);
+
+      try {
+        const result = await canvasService.duplicateCanvas(sourceCanvasId);
+        const { canvas } = result;
+        const duplicatedCanvas: Canvas = {
+          id: canvas.id,
+          title: canvas.title,
+          content: [],
+          ...(canvas.channelId ? { channelId: canvas.channelId } : {}),
+          ...(canvas.folderId ? { folderId: canvas.folderId } : {}),
+          ...(canvas.projectId ? { projectId: canvas.projectId } : {}),
+          createdBy: canvas.createdBy,
+          visibility: canvas.visibility,
+          isTemplate: false,
+          isArchived: false,
+          isCollaborative: true,
+          isStarred: false,
+          createdAt: canvas.createdAt,
+          updatedAt: canvas.updatedAt,
+          accessLevel: CanvasRole.OWNER,
+        };
+
+        logger.info(Event.CANVAS_DUPLICATED, {
+          sourceCanvasId,
+          canvasId: canvas.id,
+          skippedAttachmentCount: result.skippedAttachmentCount,
+        });
+        const notice = getCanvasDuplicateNotice(result);
+        toast.success('Success', {
+          description: ['Canvas duplicated successfully.', notice].filter(Boolean).join(' '),
+        });
+        void navigate(`/chat/canvas/${canvas.id}`, { state: { canvas: duplicatedCanvas } });
+      } catch (error) {
+        logger.error(Event.CANVAS_CREATE_FAILED, {
+          sourceCanvasId,
+          operation: 'duplicate',
+          error: error instanceof Error ? error.message : String(error),
+        });
+        toast.error('Error', {
+          description: 'Failed to duplicate canvas. Please try again.',
+        });
+      } finally {
+        duplicatingCanvasIdsRef.current.delete(sourceCanvasId);
+      }
+    },
+    [navigate],
+  );
+
   const handleDuplicateCanvas = useCallback(
     (canvasOrId: Canvas | string, canvasFromList?: Canvas) => {
       const originalCanvas = typeof canvasOrId === 'string' ? canvasFromList : canvasOrId;
       if (!originalCanvas) return;
+
+      if (isServerDuplicateEnabled) {
+        void duplicateOnServer(originalCanvas.id);
+        return;
+      }
 
       try {
         const newCanvasId = uuidv4();
@@ -291,7 +352,7 @@ const CanvasPanel = (): ReactElement => {
         });
       }
     },
-    [z, navigate],
+    [z, navigate, isServerDuplicateEnabled, duplicateOnServer],
   );
 
   const collapseCanvasSidebar = useCallback((): void => {

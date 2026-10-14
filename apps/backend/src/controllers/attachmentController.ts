@@ -5,7 +5,7 @@ import {
   CreateMessageAttachmentInput,
 } from '../database/repositories/messageAttachmentRepository';
 import { ChannelParticipantRepository } from '../database/repositories/channelParticipantRepository';
-import { storageService, getStorageService } from '../services/storage/index';
+import { storageService } from '../services/storage/index';
 import { normalizeStoragePath } from '@xyne/storage';
 import { logger } from '../utils/logger';
 import { setSafeDownloadHeaders } from '../utils/safeAttachmentDownload';
@@ -20,6 +20,7 @@ import {
 } from '@xyne/shared/sdlc';
 import { assertAttachmentAccess as assertAttachmentAccessShared, type AttachmentAccessResult } from '../services/attachmentAccessService';
 import { uploadFiles } from '../services/fileUploadService';
+import { getAttachmentStorage, getAttachmentType } from '../services/attachmentStorage';
 import { fileTrackItemsTx } from '@/bypassAcl/transactions/sdlcTrackItemFiling';
 import { config } from '../config/env';
 import { vespaQueue } from '@/queues/vespaQueue';
@@ -32,17 +33,7 @@ import { pipeline } from 'node:stream/promises';
 
 const db = DatabaseClient.getInstance();
 
-const TRANSCRIPTION_BUCKET_TYPES = new Set(['transcript', 'identified_transcript', 'recording']);
 const NO_CACHE_TYPES = new Set(['transcript', 'identified_transcript']);
-
-const getAttachmentType = (attachment: MessageAttachment): string =>
-  (attachment.metadata as { type?: string } | null)?.type ?? '';
-
-/** Transcripts and call recordings live in the transcription bucket. */
-const getAttachmentStorage = (attachment: MessageAttachment): typeof storageService =>
-  TRANSCRIPTION_BUCKET_TYPES.has(getAttachmentType(attachment))
-    ? getStorageService(config.gcs.transcriptionBucketName)
-    : storageService;
 
 /** Transcripts can be rewritten, so they are never cached; other files are. */
 const setAttachmentCacheHeaders = (res: Response, attachment: MessageAttachment): void => {

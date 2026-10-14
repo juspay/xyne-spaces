@@ -684,6 +684,15 @@ export class GCSService {
   }
 
   /**
+   * Copy a file within the same bucket. GCS copies it server-side, so the
+   * bytes never pass through this process.
+   */
+  async copyFile(sourcePath: string, destinationPath: string): Promise<void> {
+    await this.bucket.file(sourcePath).copy(this.bucket.file(destinationPath));
+    logger.info(`File copied in GCS: ${sourcePath} -> ${destinationPath}`);
+  }
+
+  /**
    * Move a file within the same bucket from one path to another.
    */
   async moveFile(sourcePath: string, destinationPath: string): Promise<void> {
