@@ -168,7 +168,7 @@ export const CallsFab = memo(function CallsFab({
 
   return (
     <Portal name='calls-fab' hostName={TAB_OVERLAY_PORTAL_HOST}>
-      <View pointerEvents='box-none' className='absolute inset-0 z-[1100]'>
+      <View pointerEvents='box-none' className='absolute inset-0 z-50'>
         {isMenuMounted && (
           <>
             <Animated.View
@@ -176,10 +176,7 @@ export const CallsFab = memo(function CallsFab({
               className='absolute inset-0'
               style={scrimStyle}
             >
-              <Pressable
-                onPress={() => setExpanded(false)}
-                className='absolute inset-0 bg-black'
-              />
+              <Pressable onPress={() => setExpanded(false)} className='absolute inset-0 bg-black' />
             </Animated.View>
             <View
               pointerEvents='box-none'

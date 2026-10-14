@@ -34,6 +34,7 @@ import { InternalUsersCard } from '../components/InternalUsersCard';
 import { ChannelSheet } from '../components/ChannelSheet';
 import { PeopleSheet } from '../components/PeopleSheet';
 import { useScheduleCallForm } from '../hooks/useScheduleCallForm';
+import { closeEditSession, getEditSession } from '../editSession';
 import { closePickerSession, openPickerSession } from '../pickerSession';
 
 const UNDERLINE_TIMING = { duration: 200 };
@@ -50,7 +51,12 @@ const timeRangeSummary = (start: Date, end: Date): string =>
 
 export default function ScheduleCallScreen({ onClose }: ScheduleCallScreenProps): ReactElement {
   const router = useRouter();
-  const form = useScheduleCallForm();
+  const [editCall] = useState(getEditSession);
+  const isEditMode = editCall !== null;
+  const form = useScheduleCallForm(editCall);
+  const seriesSwitchLabel = form.participantsOnly
+    ? 'Apply these people to all calls in this series'
+    : 'Apply to all calls in this series';
   const { postUpdates, selectRepeat, participants, setParticipants, guests, setGuests } = form;
   const placeholderColor = useCSSVariable('--color-settings-description') as string;
 
@@ -89,7 +95,13 @@ export default function ScheduleCallScreen({ onClose }: ScheduleCallScreenProps)
   }, []);
 
   // The picker screens read their starting value from this slot (see pickerSession.ts).
-  useEffect(() => (): void => closePickerSession(), []);
+  useEffect(
+    () => (): void => {
+      closePickerSession();
+      closeEditSession();
+    },
+    [],
+  );
 
   const handleClose = useCallback((): void => {
     Keyboard.dismiss();
@@ -104,11 +116,15 @@ export default function ScheduleCallScreen({ onClose }: ScheduleCallScreenProps)
 
   const openRepeatPicker = useCallback((): void => {
     openPickerSession({
-      value: { selectedId: form.repeatOptionId, monthlyLabel: form.monthlyRepeatLabel },
+      value: {
+        selectedId: form.repeatOptionId,
+        monthlyLabel: form.monthlyRepeatLabel,
+        allowNone: !isEditMode,
+      },
       onChange: selectRepeat,
     });
     router.push('/(protected)/schedule-call/repeat');
-  }, [form.monthlyRepeatLabel, form.repeatOptionId, router, selectRepeat]);
+  }, [form.monthlyRepeatLabel, form.repeatOptionId, isEditMode, router, selectRepeat]);
 
   // A sheet exists only while it is open or closing: it mounts on open and unmounts once its close
   // animation ends, so a closed sheet holds no data subscriptions and nothing re-renders it. The
@@ -151,7 +167,7 @@ export default function ScheduleCallScreen({ onClose }: ScheduleCallScreenProps)
     <View className='flex-1 bg-settings-bg'>
       <CollapsingHeader
         scrollY={scrollY}
-        title={form.title.trim() || 'Schedule a call'}
+        title={form.title.trim() || (isEditMode ? 'Edit call' : 'Schedule a call')}
         subtitle={timeRangeSummary(form.startsAt, form.endsAt)}
         onBack={handleClose}
       />
@@ -168,13 +184,16 @@ export default function ScheduleCallScreen({ onClose }: ScheduleCallScreenProps)
         contentContainerClassName='px-4 pb-44'
       >
         <Animated.View className='p-1' style={bigTitleStyle}>
-          <Text className='text-sm text-secondary-foreground'>Schedule a call</Text>
+          <Text className='text-sm text-secondary-foreground'>
+            {isEditMode ? 'Edit call details' : 'Schedule a call'}
+          </Text>
           <TextInput
             value={form.title}
             onChangeText={form.setTitle}
             placeholder='Call title'
             placeholderTextColor={placeholderColor}
             accessibilityLabel='Call title'
+            editable={!form.participantsOnly}
             returnKeyType='next'
             autoCorrect={true}
             spellCheck={true}
@@ -195,91 +214,130 @@ export default function ScheduleCallScreen({ onClose }: ScheduleCallScreenProps)
           ) : null}
         </Animated.View>
 
-        <SectionCard className='mt-3'>
-          <DateTimeRow
-            label='Starts'
-            value={form.startsAt}
-            onDateChange={form.setStartDate}
-            onTimeChange={form.setStartTime}
-            error={form.startsAtError}
-          />
-          <ListRowDivider inset={0} />
-          <DateTimeRow
-            label='Ends'
-            hint={form.durationLabel}
-            value={form.endsAt}
-            onDateChange={form.setEndDate}
-            onTimeChange={form.setEndTime}
-            error={form.endsAtError}
-          />
-          <ListRowDivider inset={0} />
-          <ListRow
-            icon={Repeat}
-            label='Repeat'
-            value={form.repeatLabel}
-            showChevron
-            onPress={openRepeatPicker}
-          />
-        </SectionCard>
+        {form.participantsOnly ? null : (
+          <SectionCard className='mt-3'>
+            <DateTimeRow
+              label='Starts'
+              value={form.startsAt}
+              onDateChange={form.setStartDate}
+              onTimeChange={form.setStartTime}
+              error={form.startsAtError}
+            />
+            <ListRowDivider inset={0} />
+            <DateTimeRow
+              label='Ends'
+              hint={form.durationLabel}
+              value={form.endsAt}
+              onDateChange={form.setEndDate}
+              onTimeChange={form.setEndTime}
+              error={form.endsAtError}
+            />
+            {isEditMode && !form.applyToSeries ? null : (
+              <>
+                <ListRowDivider inset={0} />
+                <ListRow
+                  icon={Repeat}
+                  label='Repeat'
+                  value={form.repeatLabel}
+                  showChevron
+                  onPress={openRepeatPicker}
+                />
+              </>
+            )}
+          </SectionCard>
+        )}
 
         <InternalUsersCard
           participants={participants}
           onChange={setParticipants}
           onOpenPicker={openPeoplePicker}
+          lockedUserIds={form.lockedUserIds}
         />
-        <View
-          onLayout={event => {
-            externalCardY.current = event.nativeEvent.layout.y;
-          }}
-        >
-          <ExternalGuestsCard guests={guests} onChange={setGuests} onAdded={showGuestList} />
-        </View>
+        {form.participantsOnly ? null : (
+          <View
+            onLayout={event => {
+              externalCardY.current = event.nativeEvent.layout.y;
+            }}
+          >
+            <ExternalGuestsCard guests={guests} onChange={setGuests} onAdded={showGuestList} />
+          </View>
+        )}
 
-        <>
+        {editCall?.recurringSeriesId ? (
           <SectionCard className='mt-3'>
             <ListRow
-              icon={Hash}
-              label='Post updates to channel'
+              icon={Repeat}
+              label='Apply to the whole series'
               trailing={
                 <Switch
-                  isSelected={postUpdates.postCallUpdates}
-                  onSelectedChange={togglePostUpdates}
-                  accessibilityLabel='Post updates to channel'
+                  isSelected={form.applyToSeries}
+                  isDisabled={!form.canApplyToSeries}
+                  onSelectedChange={form.setApplyToSeries}
+                  accessibilityLabel={seriesSwitchLabel}
                 />
               }
-              onPress={(): void => togglePostUpdates(!postUpdates.postCallUpdates)}
-            />
-            {/* Grows down from nothing; the row is measured at its natural height. */}
-            <Animated.View
-              className='overflow-hidden'
-              pointerEvents={postUpdates.postCallUpdates ? 'auto' : 'none'}
-              style={channelRowStyle}
+              onPress={
+                form.canApplyToSeries
+                  ? (): void => form.setApplyToSeries(!form.applyToSeries)
+                  : undefined
+              }
             >
-              <View
-                className='absolute inset-x-0 top-0'
-                onLayout={e => channelRowHeight.set(e.nativeEvent.layout.height)}
-              >
-                <ListRowDivider />
-                <ListRow
-                  icon={Hash}
-                  label='Channel'
-                  value={selectedChannel?.name ?? 'Select'}
-                  showChevron
-                  onPress={openChannelPicker}
-                />
-              </View>
-            </Animated.View>
+              <Text className='text-xs' style={{ color: placeholderColor }}>
+                {form.participantsOnly
+                  ? 'These people are added to every call in this series, not just this one.'
+                  : 'Changes are saved to every call in this series, not just this one.'}
+              </Text>
+            </ListRow>
           </SectionCard>
-          <SectionFootnote>
-            {postUpdates.updateChannelError
-              ? 'Select a channel to post call updates.'
-              : 'Off by default. Turn on to post call start, end and recording links to one channel.'}
-          </SectionFootnote>
-        </>
+        ) : null}
+
+        {form.participantsOnly ? null : (
+          <>
+            <SectionCard className='mt-3'>
+              <ListRow
+                icon={Hash}
+                label='Post updates to channel'
+                trailing={
+                  <Switch
+                    isSelected={postUpdates.postCallUpdates}
+                    onSelectedChange={togglePostUpdates}
+                    accessibilityLabel='Post updates to channel'
+                  />
+                }
+                onPress={(): void => togglePostUpdates(!postUpdates.postCallUpdates)}
+              />
+              {/* Grows down from nothing; the row is measured at its natural height. */}
+              <Animated.View
+                className='overflow-hidden'
+                pointerEvents={postUpdates.postCallUpdates ? 'auto' : 'none'}
+                style={channelRowStyle}
+              >
+                <View
+                  className='absolute inset-x-0 top-0'
+                  onLayout={e => channelRowHeight.set(e.nativeEvent.layout.height)}
+                >
+                  <ListRowDivider />
+                  <ListRow
+                    icon={Hash}
+                    label='Channel'
+                    value={selectedChannel?.name ?? 'Select'}
+                    showChevron
+                    onPress={openChannelPicker}
+                  />
+                </View>
+              </Animated.View>
+            </SectionCard>
+            <SectionFootnote>
+              {postUpdates.updateChannelError
+                ? 'Select a channel to post call updates.'
+                : 'Off by default. Turn on to post call start, end and recording links to one channel.'}
+            </SectionFootnote>
+          </>
+        )}
       </KeyboardAwareScrollView>
 
       <BottomAction
-        label='Schedule call'
+        label={isEditMode ? 'Save changes' : 'Schedule call'}
         enabled={form.canSubmit}
         isSubmitting={form.isSubmitting}
         blockers={form.blockers}
@@ -293,6 +351,7 @@ export default function ScheduleCallScreen({ onClose }: ScheduleCallScreenProps)
           onClosed={onPeopleClosed}
           participants={participants}
           onApply={setParticipants}
+          lockedUserIds={form.lockedUserIds}
         />
       )}
       {channelSheet === 'unmounted' ? null : (

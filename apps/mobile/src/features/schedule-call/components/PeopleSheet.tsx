@@ -170,6 +170,8 @@ interface PeopleSheetProps {
   participants: ScheduleCallParticipants;
   /** Called with the draft when Done is tapped. Swiping the sheet away discards the draft. */
   onApply: (participants: ScheduleCallParticipants) => void;
+  /** People who cannot be removed (participants-only edit). Channels are not offered then. */
+  lockedUserIds?: ReadonlySet<string> | undefined;
 }
 
 /**
@@ -182,6 +184,7 @@ export const PeopleSheet = ({
   onClosed,
   participants,
   onApply,
+  lockedUserIds,
 }: PeopleSheetProps): ReactElement => {
   const sheetRef = useRef<AppBottomSheetRef>(null);
   const insets = useSafeAreaInsets();
@@ -231,15 +234,19 @@ export const PeopleSheet = ({
     [],
   );
 
-  const toggleUser = useCallback((user: ScheduleCallUser): void => {
-    setDraft(prev => {
-      const current = prev.channel ? [] : prev.users;
-      const users = current.some(u => u.id === user.id)
-        ? current.filter(u => u.id !== user.id)
-        : [...current, user];
-      return { users, channel: null };
-    });
-  }, []);
+  const toggleUser = useCallback(
+    (user: ScheduleCallUser): void => {
+      if (lockedUserIds?.has(user.id)) return;
+      setDraft(prev => {
+        const current = prev.channel ? [] : prev.users;
+        const users = current.some(u => u.id === user.id)
+          ? current.filter(u => u.id !== user.id)
+          : [...current, user];
+        return { users, channel: null };
+      });
+    },
+    [lockedUserIds],
+  );
 
   const toggleChannel = useCallback((picked: { id: string; name: string }): void => {
     setDraft(prev =>
@@ -279,12 +286,12 @@ export const PeopleSheet = ({
         const allIn = members.length > 0 && members.every(m => have.has(m.id));
         const memberIds = new Set(members.map(m => m.id));
         const users = allIn
-          ? current.filter(u => !memberIds.has(u.id))
+          ? current.filter(u => !memberIds.has(u.id) || lockedUserIds?.has(u.id))
           : [...current, ...members.filter(m => !have.has(m.id))];
         return { users, channel: null };
       });
     },
-    [groupMembers, self?.id, toUser, zero],
+    [groupMembers, lockedUserIds, self?.id, toUser, zero],
   );
 
   const q = query.trim().toLowerCase();
@@ -308,7 +315,7 @@ export const PeopleSheet = ({
         title: user.name,
         subtitle: deactivated ? 'Deactivated' : user.email,
         selected: selectedIds.has(user.id),
-        disabled: deactivated,
+        disabled: deactivated || !!lockedUserIds?.has(user.id),
         leading: <Avatar userIds={[user.id]} size={40} />,
         onPress: () => toggleUser(user),
       }));
@@ -365,6 +372,7 @@ export const PeopleSheet = ({
           title: user.name,
           subtitle: user.email,
           selected: true,
+          disabled: !!lockedUserIds?.has(user.id),
           leading: <Avatar userIds={[user.id]} size={40} />,
           onPress: () => toggleUser(user),
         }));
@@ -395,7 +403,7 @@ export const PeopleSheet = ({
     return [
       ...section('People', peopleRows()),
       ...section('Groups', groupRows()),
-      ...section('Channels', channelRows()),
+      ...(lockedUserIds ? [] : section('Channels', channelRows())),
     ];
   }, [
     allChannels,
@@ -404,6 +412,7 @@ export const PeopleSheet = ({
     draft.users,
     groupMembers,
     iconColor,
+    lockedUserIds,
     pinnedIds,
     q,
     search,
