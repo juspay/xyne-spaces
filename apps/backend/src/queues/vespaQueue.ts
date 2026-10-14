@@ -1,13 +1,10 @@
 import Bull from 'bull';
 import { logger } from '@/utils/logger';
-import { SdlcSearchSyncTarget, VespaJob } from '@/zero/vespa-injection/core/types';
+import { VespaJob } from '@/zero/vespa-injection/core/types';
 import { db } from '@/database/client';
 import { registerVespaBackfillQueueMetrics } from '@/services/otel/vespaMetrics';
-import { fileSchema, sdlcContainerSchema, SubApp } from '@/vespa/src/types';
+import { fileSchema, SubApp } from '@/vespa/src/types';
 import { config } from '@/config/env';
-
-// An SDLC hub sync waits this long, so a burst of changes to one hub collapses into one sync.
-const SDLC_SYNC_DEBOUNCE_MS = 3000;
 
 class VespaQueue {
 	private queues: Map<string, Bull.Queue<VespaJob>> = new Map();
@@ -126,8 +123,9 @@ class VespaQueue {
 	 * Add a job to the appropriate queue(s) based on schema type
 	 * - File schemas go only to vespa-files queue
 	 * - Non-file schemas go to all queues EXCEPT vespa-files (broadcast to vespa-ingestion, vespa-ingestion-kube, etc.)
+	 * - delayMs holds the job back before a worker can pick it (Bull's delay)
 	 */
-	async addJob(vespaJob: VespaJob): Promise<Bull.Job<VespaJob>[]> {
+	async addJob(vespaJob: VespaJob, opts: { delayMs?: number } = {}): Promise<Bull.Job<VespaJob>[]> {
 		if (this.queues.size === 0 || !this.isInitialized) {
 			throw new Error('Vespa queue not initialized Properly');
 		}
@@ -148,7 +146,7 @@ class VespaQueue {
 				: isKbFeed
 					? config.kbIngestion.queuePriority
 					: 5;
-			const jobOpts = { priority: jobType === 'delete' ? 1 : feedPriority };
+			const jobOpts = { priority: jobType === 'delete' ? 1 : feedPriority, ...(opts.delayMs ? { delay: opts.delayMs } : {}) };
 			if (isKbFeed) {
 				logger.info(
 					`[KB_PRIORITY] Prioritizing KB file feed ${schema}/${docId} with queue priority ${jobOpts.priority} (lower = higher)`
@@ -190,40 +188,6 @@ class VespaQueue {
 			);
 			throw error;
 		}
-	}
-
-	/**
-	 * Queue an SDLC hub search sync (see requestSdlcSearchSync below), keyed by `key`.
-	 * Unlike addJob, it goes to one queue only, the first non-file one (vespa-ingestion by
-	 * default): a copy on every queue would run the sync once per consumer, and the sync already
-	 * sends the document jobs it makes to every queue through addJob.
-	 *
-	 * Debounced per key: while a sync for the same key is waiting, it absorbs the request. A
-	 * request that arrives while that sync runs gets one follow-up run, so no change is missed.
-	 */
-	async addSdlcSearchSync(sync: NonNullable<VespaJob['sdlcSync']>, key: string): Promise<void> {
-		if (this.queues.size === 0 || !this.isInitialized) {
-			throw new Error('Vespa queue not initialized Properly');
-		}
-		const fileQueueName = this.fileQueueNameOverride || process.env.VESPA_FILE_QUEUE_NAME || 'vespa-files';
-		const queue = [...this.queues.entries()].find(([name]) => name !== fileQueueName)?.[1];
-		if (!queue) {
-			throw new Error(`No non-file queue for SDLC search sync. Available: ${[...this.queues.keys()].join(', ')}`);
-		}
-
-		const jobKey = `sdlc-sync-${key}`;
-		const existing = await queue.getJob(jobKey);
-		const state = existing ? await existing.getState() : null;
-		if (state === 'waiting' || state === 'delayed') return;
-		if (existing && state !== 'active') await existing.remove();
-		await queue.add('sdlc-search-sync', { schema: sdlcContainerSchema, jobType: 'update', docId: key, sdlcSync: sync }, {
-			jobId: state === 'active' ? `${jobKey}-followup` : jobKey,
-			delay: SDLC_SYNC_DEBOUNCE_MS,
-			priority: 5,
-			// Removed when done, so the next change can reuse the key.
-			removeOnComplete: true,
-			removeOnFail: true,
-		});
 	}
 
 	/**
@@ -539,26 +503,3 @@ const backfillQueueNames = (process.env.VESPA_BACKFILL_QUEUE_NAMES || 'vespa-bac
 	.filter(Boolean);
 const backfillFileQueueName = process.env.VESPA_BACKFILL_FILE_QUEUE_NAME || 'vespa-backfill-file';
 export const vespaBackfillQueue = new VespaQueue(backfillQueueNames, backfillFileQueueName);
-
-function sdlcSyncKey(target: SdlcSearchSyncTarget): string {
-	if ('hubId' in target) return `hub-${target.hubId}`;
-	if ('containerId' in target) return `container-${target.containerId}`;
-	if ('canvasId' in target) return `canvas-${target.canvasId}`;
-	return `repo-${target.repoId}`;
-}
-
-/**
- * Asks for an SDLC hub's search entries to be refreshed after a change in it (see
- * zero/vespa-injection/core/sdlc-sync.ts). The SDLC services call it after their writes; a request names the
- * hub, or an item whose hub the worker resolves. Fire-and-forget: indexing must never fail the
- * write that triggered it.
- */
-export function requestSdlcSearchSync(target: SdlcSearchSyncTarget, reason?: string): void {
-	void (async () => {
-		// Any process that writes SDLC rows can ask; one that has not started the queue starts it.
-		if (!vespaQueue.isReady) await vespaQueue.initialize();
-		await vespaQueue.addSdlcSearchSync({ ...target, ...(reason ? { reason } : {}) }, sdlcSyncKey(target));
-	})().catch(err => {
-		logger.warn(`[SDLC-SEARCH-SYNC] Failed to queue sync ${sdlcSyncKey(target)}:`, err);
-	});
-}

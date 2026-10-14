@@ -1,5 +1,5 @@
 import { transaction } from '../base';
-import { requestSdlcSearchSync } from '@/queues/vespaQueue';
+import { queueSdlcSearchJobs } from '@/zero/vespa-injection/core/sdlc-sync';
 import type { SdlcActor } from '@/sdlc/types';
 import { AppError } from '@/middleware/errorHandler';
 import { sdlcChannelCanvasParticipant } from '@/sdlc/sdlcCanvasAccess';
@@ -284,7 +284,7 @@ export function createTrackTx(self: SdlcHubService, actor: SdlcActor, input: { n
         createdBy: actor.userId,
       },
     });
-    requestSdlcSearchSync({ hubId: channelId }, 'createTrack');
+    queueSdlcSearchJobs(channelId, { containers: [track.id] });
     return track;
   });
 }
@@ -330,10 +330,14 @@ export function moveArtifactFromClawTx(self: SdlcHubService, actor: SdlcActor, c
  */
 export function unlinkContextTx(self: SdlcHubService, actor: SdlcActor, channelId: string, link: { id: string; relationType: string; targetType: string; targetId: string }): Promise<number> {
   return transaction(['SdlcEntityLink'], 'unlinkContext: the link and the folder edges that follow an unfiled item must commit atomically; tx is not ACL-wrapped', self.prisma, async tx => {
+    const row = await tx.sdlcEntityLink.findFirst({
+      where: { id: link.id, channelId, workspaceId: actor.workspaceId },
+      select: { sourceType: true, sourceId: true, targetType: true, targetId: true, relationType: true },
+    });
     const removed = await tx.sdlcEntityLink.deleteMany({
       where: { id: link.id, channelId, workspaceId: actor.workspaceId },
     });
-    if (removed.count > 0) requestSdlcSearchSync({ hubId: channelId }, 'unlinkContext');
+    if (row && removed.count > 0) queueSdlcSearchJobs(channelId, { link: row, removed: true });
     if (removed.count > 0 && link.relationType === SDLC_CONTAINMENT_RELATION && isSdlcTreeItemType(link.targetType)) {
       await refileFolderEdges(
         tx,
@@ -524,7 +528,7 @@ export async function attachRepositoriesToChannel(tx: TransactionClient, actor: 
       })),
       skipDuplicates: true,
     });
-    requestSdlcSearchSync({ hubId: channelId }, 'attachRepositories');
+    queueSdlcSearchJobs(channelId, { hub: true, repositories: repos.map((repo: { id: string }) => repo.id) });
     await ensureHubKnowledgeFolder(tx, actor, channelId);
     await ensureHubWikiFolder(tx, actor, channelId);
     for (const repo of repos) {

@@ -27,7 +27,14 @@ import { RcasSideEffectHandler } from './tables/rcas-handler';
 import { TicketSubTicketMappingsSideEffectHandler } from './tables/ticket-sub-ticket-mappings-handler';
 import { TicketReferenceMappingsSideEffectHandler } from './tables/ticket-reference-mappings-handler';
 import { TicketStageRequestsSideEffectHandler } from './tables/ticket-stage-requests-handler';
-import { SdlcEntityLinksSideEffectHandler } from './tables/sdlc-entity-links-handler';
+import {
+  CanvasFoldersSideEffectHandler,
+  ReposSideEffectHandler,
+  SdlcArtifactsSideEffectHandler,
+  SdlcEntityLinksSideEffectHandler,
+  SdlcFoldersSideEffectHandler,
+  SdlcTracksSideEffectHandler,
+} from './tables/sdlc-handlers';
 
 export class SideEffectHandlerFactory {
 
@@ -87,8 +94,19 @@ export class SideEffectHandlerFactory {
         return new FormEntityValuesSideEffectHandler(ctx);
       case 'ticket_stage_requests':
         return new TicketStageRequestsSideEffectHandler(ctx);
+      // SDLC Hub search: queue the Vespa jobs a hub change affects
       case 'sdlc_entity_links':
         return new SdlcEntityLinksSideEffectHandler(ctx);
+      case 'sdlc_tracks':
+        return new SdlcTracksSideEffectHandler(ctx);
+      case 'sdlc_folders':
+        return new SdlcFoldersSideEffectHandler(ctx);
+      case 'canvas_folders':
+        return new CanvasFoldersSideEffectHandler(ctx);
+      case 'sdlc_artifacts':
+        return new SdlcArtifactsSideEffectHandler(ctx);
+      case 'repos':
+        return new ReposSideEffectHandler(ctx);
 
       default:
         return new BaseSideEffectHandler(ctx);

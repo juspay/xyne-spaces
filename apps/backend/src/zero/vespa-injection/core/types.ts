@@ -31,17 +31,7 @@ export interface VespaJobConfig<S extends keyof SchemaDataMap> {
   // searchable by name in cmd+K within seconds; a second full feed enriches the
   // same docId with content later.
   nameOnly?: boolean;
-  // Not a document job: re-sync the SDLC hub this names (or the hub of the item it names).
-  // schema and docId only route and key it; see requestSdlcSearchSync in queues/vespaQueue.ts.
-  sdlcSync?: SdlcSearchSyncTarget & { reason?: string };
 }
-
-/** What an SDLC search sync is asked for: a hub, or an item whose hub the worker resolves. */
-export type SdlcSearchSyncTarget =
-  | { hubId: string }
-  | { containerId: string }
-  | { canvasId: string }
-  | { repoId: string };
 
 export type VespaQueueHandler = VespaJobConfig<keyof SchemaDataMap>
 export type VespaJob = VespaJobConfig<keyof SchemaDataMap>

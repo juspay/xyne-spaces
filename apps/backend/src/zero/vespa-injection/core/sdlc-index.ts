@@ -67,11 +67,11 @@ export const sdlcContainerRef = (containerId: string): string =>
 const repositoryRef = (repoId: string): string =>
   `id:${NAMESPACE}:${sdlcRepositorySchema}::${repoId}`;
 
-// A hub sync fans out into one Vespa job per item, and each job maps its own document; caching
-// the hub briefly keeps that from rebuilding the whole hub once per item. The jobs can run in
-// other processes (other Vespa worker pods, the file worker), where the sync cannot invalidate
-// this cache, so it must expire faster than the sync debounce (3s, vespaQueue.addSdlcSearchSync):
-// a sync then never reads a hub cached before the change that triggered it.
+// One hub change can queue several Vespa jobs, and each maps its own document; caching the hub
+// briefly keeps that from rebuilding the whole hub once per job. The jobs run in the Vespa
+// workers, where the write that queued them cannot invalidate this cache, so it must expire
+// faster than those jobs are held back (3s, sdlc-sync.ts): a job then never maps from a hub
+// cached before the change that queued it.
 const CACHE_TTL_MS = 2_000;
 const cache = new Map<string, { at: number; index: Promise<SdlcHubIndex | null> }>();
 
@@ -96,7 +96,7 @@ async function buildSdlcHubIndex(hubId: string, prisma: PrismaClient): Promise<S
   if (!hub || hub.type !== ChannelType.SDLC) return null;
 
   // Oldest first, so where several edges could place one item the first one written wins, the
-  // same way on every sync.
+  // same way on every build.
   const links = await prisma.sdlcEntityLink.findMany({
     where: { channelId: hubId },
     orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],

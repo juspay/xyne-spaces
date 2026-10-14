@@ -6,7 +6,7 @@ import {
   type EntityLinkOwner,
 } from '@xyne/shared';
 import { logger } from '@/utils/logger';
-import { requestSdlcSearchSync } from '@/queues/vespaQueue';
+import { queueSdlcSearchJobs } from '@/zero/vespa-injection/core/sdlc-sync';
 import { isCanvasInChannel, isTrackInChannel } from './sdlcChannelMembership';
 
 type Db = PrismaClient | Prisma.TransactionClient;
@@ -34,9 +34,8 @@ export async function ensureLink(
     data: [{ ...link, workspaceId: actor.workspaceId, createdBy: actor.userId }],
     skipDuplicates: true,
   });
-  // A new edge can place something in the hub's search entries; the sync runs after a short
-  // debounce, so it reads this write even when it is part of a transaction.
-  if (result.count > 0) requestSdlcSearchSync({ hubId: link.channelId }, `link:${link.relationType}`);
+  // A new edge can place or link something in the hub's search entries.
+  if (result.count > 0) queueSdlcSearchJobs(link.channelId, { link });
   return { created: result.count > 0 };
 }
 
@@ -103,8 +102,8 @@ export async function refileFolderEdges(
       skipDuplicates: true,
     });
   }
-  // Called whenever an item is filed, moved or unfiled, so its hub's search entries follow.
-  requestSdlcSearchSync({ hubId: channelId }, 'refile');
+  // Called whenever an item is filed, moved or unfiled, so its search entries follow.
+  queueSdlcSearchJobs(channelId, { moved: item });
 }
 
 /**
