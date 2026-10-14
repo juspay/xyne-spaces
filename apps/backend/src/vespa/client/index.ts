@@ -24,6 +24,4 @@ const vespaService = createVespaService(dependencies)
 export default {
     channelService: vespaService.channelService,
     crudService: vespaService.crudService,
-    // Raw YQL search, used by background jobs that reconcile what is indexed (SDLC hub sync).
-    vespaClient: vespaService.vespaClient,
 }

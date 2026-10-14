@@ -119,8 +119,14 @@ export interface ConversationLabelMappingPreviousValue {
   conversationId: string;
 }
 
+/** A deleted SDLC edge as it was, so its search entries can follow (sdlc-handlers). */
 export interface SdlcEntityLinkPreviousValue {
-  channelId: string | null;
+  channelId: string;
+  sourceType: string;
+  sourceId: string;
+  targetType: string;
+  targetId: string;
+  relationType: string;
 }
 
 export type PreviousValue =
@@ -192,7 +198,12 @@ export const SIDE_EFFECT_OPERATION_CONFIG: SideEffectOperationConfigMap = {
   channel_user_status: ['update'],
   conversation_participants: ['update'],
   ticket_stage_requests: ['insert', 'update', 'upsert'],
-  sdlc_entity_links: ['delete'],
+  sdlc_entity_links: ['insert', 'upsert', 'delete'],
+  sdlc_tracks: ['update', 'upsert'],
+  sdlc_folders: ['update', 'upsert'],
+  canvas_folders: ['update'],
+  sdlc_artifacts: ['update', 'upsert'],
+  repos: ['update'],
 };
 
 export function createSideEffectJobsAccumulator(): SideEffectJobsAccumulator {

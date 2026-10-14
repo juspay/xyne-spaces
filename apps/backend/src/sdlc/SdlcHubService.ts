@@ -42,7 +42,9 @@ import { DatabaseClient } from '@/database/client';
 import { AppError } from '@/middleware/errorHandler';
 import { convertMarkdownToBlockNote } from '@/services/canvasService';
 import { logger } from '@/utils/logger';
-import { requestSdlcSearchSync, vespaQueue } from '@/queues/vespaQueue';
+import { vespaQueue } from '@/queues/vespaQueue';
+import { queueSdlcSearchJobs } from '@/zero/vespa-injection/core/sdlc-sync';
+import { loadSdlcHubIndex } from '@/zero/vespa-injection/core/sdlc-index';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { syncToYSweet } from '@/utils/ysweetUtils';
 import { commitAndSyncCanvasArtifact, readCanvasMarkdown } from './sdlcCanvasSync';
@@ -318,6 +320,10 @@ export class SdlcHubService implements SdlcHub {
         409
       );
     }
+    // The repository's wiki containers in this hub, read while they are still in it.
+    const repoWikiContainers = [...((await loadSdlcHubIndex(channelId))?.containers.values() ?? [])]
+      .filter(container => container.repoRef.endsWith(`::${repoId}`))
+      .map(container => container.docId);
     const removed = await this.prisma.sdlcEntityLink.deleteMany({
       where: {
         channelId,
@@ -329,9 +335,8 @@ export class SdlcHubService implements SdlcHub {
     if (removed.count === 0) {
       throw new AppError('Repository is not part of this hub', 404);
     }
-    // The hub's repository wiki leaves its search entries, and the repository its hubIds.
-    requestSdlcSearchSync({ hubId: channelId }, 'removeChannelRepository');
-    requestSdlcSearchSync({ repoId }, 'removeChannelRepository');
+    // The repository's hubIds drop this hub, and its wiki (read before the detach) leaves search.
+    queueSdlcSearchJobs(channelId, { repositories: [repoId], removedContainers: repoWikiContainers });
   }
 
   /** A Wiki page is an artifact whose placement belongs to the Wiki store, not a type folder. */
@@ -376,7 +381,7 @@ export class SdlcHubService implements SdlcHub {
       where: { artifactId: canvasId },
       data: { artifactStatus: archived ? 'ARCHIVED' : 'ACTIVE' },
     });
-    requestSdlcSearchSync({ hubId: channelId }, 'setArtifactArchived');
+    queueSdlcSearchJobs(channelId, { documents: [canvasId] });
   }
 
   async getChannel(actor: SdlcActor, channelId: string): Promise<SdlcChannel> {
@@ -780,7 +785,8 @@ export class SdlcHubService implements SdlcHub {
       where: { artifactId: input.canvasId },
       data: { artifactStatus: input.archived ? 'ARCHIVED' : 'ACTIVE' },
     });
-    requestSdlcSearchSync({ canvasId: input.canvasId }, 'archiveArtifactFromClaw');
+    const hubId = await this.hubOf('canvas', input.canvasId);
+    if (hubId) queueSdlcSearchJobs(hubId, { documents: [input.canvasId] });
     return { canvasId: input.canvasId, archived: input.archived };
   }
 
@@ -832,7 +838,7 @@ export class SdlcHubService implements SdlcHub {
           createdBy: actor.userId,
         },
       });
-      requestSdlcSearchSync({ hubId: hubChannelId }, `linkContext:${input.relationType}`);
+      queueSdlcSearchJobs(hubChannelId, { link: input });
       // Propagate the source artifact's track onto the ticket so the ticket shows
       // under the same track (same TRACK_ITEM entity link we use for PRDs/Tech Docs).
       if (input.targetType === 'TICKET' && input.sourceType === 'CANVAS') {
@@ -1023,7 +1029,7 @@ export class SdlcHubService implements SdlcHub {
       select: { id: true, name: true },
     });
     // Documents of this type carry its name (sdlcTypeName).
-    requestSdlcSearchSync({ hubId: channelId }, 'renameArtifactType');
+    queueSdlcSearchJobs(channelId, { typeIds: [folderId] });
     return renamed;
   }
 
