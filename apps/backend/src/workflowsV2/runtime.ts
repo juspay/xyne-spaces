@@ -12,6 +12,7 @@ import {
 } from '@xyne/workflow-sdk';
 import { BitbucketConnector } from '@xyne/connector-sdk/bitbucket';
 import { GitHubConnector } from '@xyne/connector-sdk/github';
+import { JenkinsConnector } from '@xyne/connector-sdk/jenkins';
 import { HostAgentStep } from '@xyne/workflow-sdk/agents/host';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
@@ -49,6 +50,9 @@ const connectors = new ConnectorRegistry();
 connectors.register(new XyneSpacesConnector());
 connectors.register(new GitHubConnector());
 connectors.register(new BitbucketConnector({ apiBaseUrl: config.bitbucket.baseUrl }));
+if (config.jenkins.baseUrl) {
+  connectors.register(new JenkinsConnector({ baseUrl: config.jenkins.baseUrl }));
+}
 
 /**
  * RUN_AGENT — runs on xyne-claw. See docs/guidelines/workflows/AGENTS.md.
