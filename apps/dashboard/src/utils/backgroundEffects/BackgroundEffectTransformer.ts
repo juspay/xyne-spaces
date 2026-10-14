@@ -26,10 +26,13 @@ const WASM_FILESET = {
   wasmBinaryPath: `${ASSET_BASE}/wasm/vision_wasm_internal.wasm`,
 };
 
-/** Decode a background image (same-origin path or data: URL from an upload). */
+/**
+ * Decode a background image: a preset served by the API (cookie-authenticated, so
+ * fetched with credentials — and CORS-readable, as WebGL requires) or a data: URL upload.
+ */
 async function loadImage(url: string): Promise<ImageBitmap> {
   const img = new Image();
-  img.crossOrigin = 'anonymous';
+  img.crossOrigin = 'use-credentials';
   img.src = url;
   await img.decode();
   return createImageBitmap(img);

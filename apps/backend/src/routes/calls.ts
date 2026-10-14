@@ -9,6 +9,7 @@ import { workspaceScopedRoute } from '@/database/tenant/context';
 import { summaryTemplateController } from '@/controllers/summaryTemplateController';
 import { recordingSharingController } from '@/controllers/recordingSharingController';
 import { recordingGoogleDocController } from '@/controllers/recordingGoogleDocController';
+import { callBackgroundController } from '@/controllers/callBackgroundController';
 
 const router = Router();
 
@@ -62,6 +63,9 @@ router.patch('/summary-templates/:templateId', summaryTemplateController.update)
 router.delete('/summary-templates/:templateId', summaryTemplateController.delete);
 // Pulse org list proxy (must be before /:callId wildcard)
 router.get('/pulse-orgs', callController.getPulseOrgs);
+// Preset backgrounds for the call background picker (Superposition-driven).
+router.get('/backgrounds', callBackgroundController.list);
+router.get('/backgrounds/:id/image', callBackgroundController.image);
 
 router.post('/summary-prompt/edit', callController.editSummaryPrompt);
 

@@ -1,7 +1,9 @@
 import { useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
+import { useQuery } from '@tanstack/react-query';
 import { Ban, Loader2, Plus, Sparkles, X } from 'lucide-react';
 import { toast } from 'sonner';
+import { callBackgroundsApi } from '../../../api/callBackgroundsApi';
 import { roomActor } from '../../../machines/roomMachine';
 import { supportsBackgroundEffects } from '../../../utils/backgroundEffects';
 import { cn } from '../../../utils/classNames';
@@ -10,9 +12,9 @@ import {
   type CustomBackground,
   MAX_CUSTOM_BACKGROUNDS,
   NO_BACKGROUND_EFFECT,
-  PRESET_BACKGROUNDS,
   imageFileToBackgroundDataUrl,
   isSameEffect,
+  loadCachedPresetBackgrounds,
   loadCustomBackgrounds,
   saveCustomBackgrounds,
 } from '../../../utils/callBackground';
@@ -33,6 +35,14 @@ export function BackgroundPicker({ callId, className }: BackgroundPickerProps): 
   const [customBackgrounds, setCustomBackgrounds] = useState<CustomBackground[]>(() =>
     loadCustomBackgrounds(),
   );
+  // Shows the cached list instantly, then refreshes it. On failure the cached (or no)
+  // presets stay — blur and uploads work regardless.
+  const { data: presets = [] } = useQuery({
+    queryKey: ['call-backgrounds'],
+    queryFn: callBackgroundsApi.listPresets,
+    placeholderData: loadCachedPresetBackgrounds,
+    staleTime: 10 * 60 * 1000,
+  });
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -190,7 +200,7 @@ export function BackgroundPicker({ callId, className }: BackgroundPickerProps): 
             </button>
           </div>
         ))}
-        {PRESET_BACKGROUNDS.map(p => (
+        {presets.map(p => (
           <div key={p.id}>{imageTile(p.id, p.label, p.url, p.thumbUrl)}</div>
         ))}
       </div>
