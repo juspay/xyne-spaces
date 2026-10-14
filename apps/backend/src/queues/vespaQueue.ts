@@ -1,6 +1,6 @@
 import Bull from 'bull';
 import { logger } from '@/utils/logger';
-import { VespaJob } from '@/zero/vespa-injection/core/types';
+import { SdlcSearchSyncTarget, VespaJob } from '@/zero/vespa-injection/core/types';
 import { db } from '@/database/client';
 import { registerVespaBackfillQueueMetrics } from '@/services/otel/vespaMetrics';
 import { fileSchema, sdlcContainerSchema, SubApp } from '@/vespa/src/types';
@@ -193,7 +193,7 @@ class VespaQueue {
 	}
 
 	/**
-	 * Queue an SDLC hub search sync (see sdlc/search/sdlcSearchSync.ts), keyed by `key`.
+	 * Queue an SDLC hub search sync (see requestSdlcSearchSync below), keyed by `key`.
 	 * Unlike addJob, it goes to one queue only, the first non-file one (vespa-ingestion by
 	 * default): a copy on every queue would run the sync once per consumer, and the sync already
 	 * sends the document jobs it makes to every queue through addJob.
@@ -539,3 +539,26 @@ const backfillQueueNames = (process.env.VESPA_BACKFILL_QUEUE_NAMES || 'vespa-bac
 	.filter(Boolean);
 const backfillFileQueueName = process.env.VESPA_BACKFILL_FILE_QUEUE_NAME || 'vespa-backfill-file';
 export const vespaBackfillQueue = new VespaQueue(backfillQueueNames, backfillFileQueueName);
+
+function sdlcSyncKey(target: SdlcSearchSyncTarget): string {
+	if ('hubId' in target) return `hub-${target.hubId}`;
+	if ('containerId' in target) return `container-${target.containerId}`;
+	if ('canvasId' in target) return `canvas-${target.canvasId}`;
+	return `repo-${target.repoId}`;
+}
+
+/**
+ * Asks for an SDLC hub's search entries to be refreshed after a change in it (see
+ * sdlc/search/sdlcHubSync.ts). The SDLC services call it after their writes; a request names the
+ * hub, or an item whose hub the worker resolves. Fire-and-forget: indexing must never fail the
+ * write that triggered it.
+ */
+export function requestSdlcSearchSync(target: SdlcSearchSyncTarget, reason?: string): void {
+	void (async () => {
+		// Any process that writes SDLC rows can ask; one that has not started the queue starts it.
+		if (!vespaQueue.isReady) await vespaQueue.initialize();
+		await vespaQueue.addSdlcSearchSync({ ...target, ...(reason ? { reason } : {}) }, sdlcSyncKey(target));
+	})().catch(err => {
+		logger.warn(`[SDLC-SEARCH-SYNC] Failed to queue sync ${sdlcSyncKey(target)}:`, err);
+	});
+}

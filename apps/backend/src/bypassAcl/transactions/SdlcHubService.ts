@@ -1,4 +1,5 @@
 import { transaction } from '../base';
+import { requestSdlcSearchSync } from '@/queues/vespaQueue';
 import type { SdlcActor } from '@/sdlc/types';
 import { AppError } from '@/middleware/errorHandler';
 import { sdlcCanvasParticipants } from '@/sdlc/sdlcCanvasAccess';
@@ -316,6 +317,7 @@ export function createTrackTx(self: SdlcHubService, actor: SdlcActor, input: { n
         createdBy: actor.userId,
       },
     });
+    requestSdlcSearchSync({ hubId: channelId }, 'createTrack');
     return track;
   });
 }
@@ -389,6 +391,7 @@ export function unlinkContextTx(self: SdlcHubService, actor: SdlcActor, channelI
     const removed = await tx.sdlcEntityLink.deleteMany({
       where: { id: link.id, channelId, workspaceId: actor.workspaceId },
     });
+    if (removed.count > 0) requestSdlcSearchSync({ hubId: channelId }, 'unlinkContext');
     if (removed.count > 0 && link.relationType === SDLC_CONTAINMENT_RELATION && isSdlcTreeItemType(link.targetType)) {
       await refileFolderEdges(
         tx,
@@ -580,6 +583,7 @@ export async function attachRepositoriesToChannel(tx: TransactionClient, actor: 
       })),
       skipDuplicates: true,
     });
+    requestSdlcSearchSync({ hubId: channelId }, 'attachRepositories');
     await ensureHubKnowledgeFolder(tx, actor, channelId);
     await ensureHubWikiFolder(tx, actor, channelId);
     for (const repo of repos) {

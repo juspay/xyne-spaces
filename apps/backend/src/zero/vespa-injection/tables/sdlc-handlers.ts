@@ -1,16 +1,16 @@
 import type { DeleteID, Transaction } from '@rocicorp/zero';
 import type { Schema } from '@xyne/shared';
 import { BaseVespaHandler } from '../core/base-handler';
-import type { TableName, VespaQueueHandler } from '../core/types';
+import type { SdlcSearchSyncTarget, TableName, VespaQueueHandler } from '../core/types';
 import type { QueryContext } from '../../acl/core/types';
 import { sdlcContainerSchema, sdlcRepositorySchema } from '@/vespa/src/types';
-import { requestSdlcSearchSync, type SdlcSearchSyncTarget } from '@/sdlc/search/sdlcSearchSync';
+import { requestSdlcSearchSync } from '@/queues/vespaQueue';
 
 /**
  * SDLC Hub search: hub changes made through Zero mutators (the hub UI) request a debounced
  * hub sync, which recomputes the hub's search entries from Postgres. Server-side writes
- * (agents, the wiki store, uploads, ticket and discussion links) reach the same sync through
- * the Prisma middleware in database/middleware/sdlcSearchSync.ts.
+ * (agents, the wiki store, uploads, ticket and discussion links) request the same sync from
+ * the SDLC services that make them (sdlc/entityLinkService.ts, sdlc/SdlcHubService.ts).
  *
  * A delete carries only the row id, so a deleted track, folder or repository is removed from
  * Vespa here directly; whatever else it leaves stale is reconciled by the hub's next sync.

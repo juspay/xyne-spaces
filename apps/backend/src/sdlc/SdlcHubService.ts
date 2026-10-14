@@ -42,7 +42,7 @@ import { DatabaseClient } from '@/database/client';
 import { AppError } from '@/middleware/errorHandler';
 import { convertMarkdownToBlockNote } from '@/services/canvasService';
 import { logger } from '@/utils/logger';
-import { vespaQueue } from '@/queues/vespaQueue';
+import { requestSdlcSearchSync, vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { syncToYSweet } from '@/utils/ysweetUtils';
 import { commitAndSyncCanvasArtifact, readCanvasMarkdown } from './sdlcCanvasSync';
@@ -329,6 +329,9 @@ export class SdlcHubService implements SdlcHub {
     if (removed.count === 0) {
       throw new AppError('Repository is not part of this hub', 404);
     }
+    // The hub's repository wiki leaves its search entries, and the repository its hubIds.
+    requestSdlcSearchSync({ hubId: channelId }, 'removeChannelRepository');
+    requestSdlcSearchSync({ repoId }, 'removeChannelRepository');
   }
 
   /** A Wiki page is an artifact whose placement belongs to the Wiki store, not a type folder. */
@@ -373,6 +376,7 @@ export class SdlcHubService implements SdlcHub {
       where: { artifactId: canvasId },
       data: { artifactStatus: archived ? 'ARCHIVED' : 'ACTIVE' },
     });
+    requestSdlcSearchSync({ hubId: channelId }, 'setArtifactArchived');
   }
 
   async getChannel(actor: SdlcActor, channelId: string): Promise<SdlcChannel> {
@@ -776,6 +780,7 @@ export class SdlcHubService implements SdlcHub {
       where: { artifactId: input.canvasId },
       data: { artifactStatus: input.archived ? 'ARCHIVED' : 'ACTIVE' },
     });
+    requestSdlcSearchSync({ canvasId: input.canvasId }, 'archiveArtifactFromClaw');
     return { canvasId: input.canvasId, archived: input.archived };
   }
 
@@ -827,6 +832,7 @@ export class SdlcHubService implements SdlcHub {
           createdBy: actor.userId,
         },
       });
+      requestSdlcSearchSync({ hubId: hubChannelId }, `linkContext:${input.relationType}`);
       // Propagate the source artifact's track onto the ticket so the ticket shows
       // under the same track (same TRACK_ITEM entity link we use for PRDs/Tech Docs).
       if (input.targetType === 'TICKET' && input.sourceType === 'CANVAS') {
@@ -1011,11 +1017,14 @@ export class SdlcHubService implements SdlcHub {
       select: { id: true },
     });
     if (clash) throw new AppError('An artifact type with this name already exists', 409);
-    return this.prisma.canvasFolder.update({
+    const renamed = await this.prisma.canvasFolder.update({
       where: { id: folderId },
       data: { name: trimmed },
       select: { id: true, name: true },
     });
+    // Documents of this type carry its name (sdlcTypeName).
+    requestSdlcSearchSync({ hubId: channelId }, 'renameArtifactType');
+    return renamed;
   }
 
   async unlinkContext(actor: SdlcActor, repoId: string, linkId: string): Promise<void> {
