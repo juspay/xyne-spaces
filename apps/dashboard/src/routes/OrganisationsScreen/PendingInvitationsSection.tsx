@@ -28,8 +28,8 @@ interface PendingInvitation {
   invitedByEmail: string | null;
   isOrgApproved: boolean;
   inviteEmailSentAt: string | null;
-  /** Guest invites only: the channel/canvas/project the guest gets access to. */
-  entityType: 'CHANNEL' | 'CANVAS' | 'PROJECT' | null;
+  /** Guest invites only: the channel/canvas the guest gets access to. */
+  entityType: 'CHANNEL' | 'CANVAS' | null;
   entityTitle: string | null;
 }
 

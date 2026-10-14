@@ -8,7 +8,7 @@ import {
 } from './resultTransform';
 import { db } from '@/database/client';
 import { WorkspaceRole } from '@xyne/shared';
-import { getGuestSearchScope } from '@/bypassAcl/guestSearchScope';
+import { getGuestSearchScope } from './guestSearchScope';
 import { repositories } from '@/database/repositories';
 import { VALID_DOC_TYPES } from '@/utils/idValidator';
 import { MatchFeatures, RankProfile, SubApp, VespaDocType, VespaSearchHit, fileSchema } from '@/vespa/src/types';
