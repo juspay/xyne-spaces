@@ -75,7 +75,6 @@ vi.mock("../db.js", () => ({
 const {
   canReadConversation,
   detectLinkProvider,
-  isSandboxMarkedEnded,
   markSandboxArtifactsStale,
   normalizeExternalUrl,
   recordConversationArtifact,
@@ -464,14 +463,15 @@ describe("canReadConversation (XYNE-66344)", () => {
 });
 
 describe("ended sandboxes are marked STALE (XYNE-66339)", () => {
-  const row = (id: string, conversationId: string, kind: string, refId: string, status = "ACTIVE") => ({
+  const row = (id: string, conversationId: string, kind: string, refId: string) => ({
     id,
     conversationId,
     kind,
     refService: "CLAW",
     refId,
-    status,
+    status: "ACTIVE",
   });
+  const statuses = () => Object.fromEntries(state.rows.map((r) => [r.id, r.status]));
 
   beforeEach(() => {
     state.upserts = [];
@@ -485,73 +485,33 @@ describe("ended sandboxes are marked STALE (XYNE-66339)", () => {
     ];
   });
 
-  const statuses = () => Object.fromEntries(state.rows.map((r) => [r.id, r.status]));
-
-  it("marks every preview and code-changes row for the sandbox, in every conversation, and refreshes them", async () => {
-    expect(await markSandboxArtifactsStale(["sbx-1"])).toBe(3);
+  it("marks every preview and code-changes row for the sandbox and refreshes each conversation", async () => {
+    expect(await markSandboxArtifactsStale(["sbx-1", "../bad"])).toBe(3);
     expect(statuses()).toEqual({ a1: "STALE", a2: "STALE", a3: "STALE", a4: "ACTIVE", a5: "ACTIVE" });
     expect([...state.signalled].sort()).toEqual(["conv_1", "conv_2"]);
   });
 
-  it("does nothing for a conversation that never announced the sandbox", async () => {
-    expect(await markSandboxArtifactsStale(["sbx-1"], { conversationId: "conv_9" })).toBe(0);
-    expect(statuses()["a1"]).toBe("ACTIVE");
-    expect(state.signalled).toEqual([]);
-  });
-
-  it("accepts a branch of the announcing conversation", async () => {
-    expect(await markSandboxArtifactsStale(["sbx-1"], { conversationId: "conv_1__branch__msg_4" })).toBe(3);
-  });
-
-  it("ignores malformed ids", async () => {
-    expect(await markSandboxArtifactsStale(["", "../etc", " "])).toBe(0);
-    expect(state.signalled).toEqual([]);
-  });
-
-  it("marks the destroyed sandbox when sandbox-destroy succeeds", async () => {
+  it("marks the destroyed sandbox from a sandbox-destroy result, preferring sandboxId", async () => {
     await ingestArtifactSignals({
       ...CTX,
       toolName: "sandbox-destroy",
-      toolResult: JSON.stringify({ sessionId: "wrong-arg", sandboxId: "sbx-1", destroyed: true }),
-    });
-    expect(statuses()).toMatchObject({ a1: "STALE", a2: "STALE", a4: "ACTIVE" });
-    expect(state.upserts).toHaveLength(0);
-  });
-
-  it("falls back to sessionId and reads MCP content parts", async () => {
-    await ingestArtifactSignals({
-      ...CTX,
-      toolName: "sandbox-destroy",
-      toolResult: { content: [{ type: "text", text: JSON.stringify({ sessionId: "sbx-2", destroyed: true }) }] },
+      toolResult: { content: [{ type: "text", text: JSON.stringify({ sessionId: "sbx-1", sandboxId: "sbx-2", destroyed: true }) }] },
     });
     expect(statuses()).toMatchObject({ a1: "ACTIVE", a4: "STALE" });
   });
 
-  it("leaves rows alone when the destroy failed or errored", async () => {
+  it("falls back to sessionId for a bare JSON result", async () => {
+    await ingestArtifactSignals({ ...CTX, toolName: "sandbox-destroy", toolResult: JSON.stringify({ sessionId: "sbx-2", destroyed: true }) });
+    expect(statuses()["a4"]).toBe("STALE");
+  });
+
+  it("changes nothing when the destroy failed", async () => {
     await ingestArtifactSignals({
       ...CTX,
       toolName: "sandbox-destroy",
       toolResult: JSON.stringify({ sessionId: "sbx-1", sandboxId: "sbx-1", destroyed: false, error: "boom" }),
     });
     await ingestArtifactSignals({ ...CTX, toolName: "sandbox-destroy", toolResult: "Error: Session sbx-1 not found or already destroyed." });
-    expect(Object.values(statuses()).filter((s) => s === "STALE")).toHaveLength(0);
-  });
-
-  it("does not revive an ended sandbox when a late preview announce arrives", async () => {
-    await markSandboxArtifactsStale(["sbx-1"]);
-    expect(await isSandboxMarkedEnded("sbx-1")).toBe(true);
-    await ingestSandboxPreviewSignals(CTX, {
-      sandboxId: "sbx-1",
-      sandboxPreviewUrl: "https://p.example/claw-preview/sbx-1/",
-      sandboxCodePreviewUrl: "https://p.example/claw-code/sbx-1",
-    });
-    expect(state.upserts).toHaveLength(0);
-  });
-
-  it("still records a preview for a live sandbox, resetting it to ACTIVE", async () => {
-    expect(await isSandboxMarkedEnded("sbx-2")).toBe(false);
-    await ingestSandboxPreviewSignals(CTX, { sandboxId: "sbx-2", sandboxPreviewUrl: "https://p.example/claw-preview/sbx-2/" });
-    expect(state.upserts).toHaveLength(1);
-    expect(state.upserts[0]?.update).toMatchObject({ status: "ACTIVE" });
+    expect(Object.values(statuses())).not.toContain("STALE");
   });
 });

@@ -1,7 +1,6 @@
 import { createLogger } from "./../logger.js";
 import {
   detectLinkProvider,
-  isSandboxMarkedEnded,
   markSandboxArtifactsStale,
   normalizeExternalUrl,
   recordConversationArtifact,
@@ -132,31 +131,21 @@ function firstUrl(records: Record<string, unknown>[]): string | null {
   return direct && /^https?:\/\//i.test(direct) ? direct : null;
 }
 
-/** Claw's own sandbox teardown tool (xyne-claw-shared tools/sandbox). */
-const SANDBOX_DESTROY_TOOL = "sandbox-destroy";
-
 /**
- * The id of the sandbox a successful `sandbox-destroy` call ended, or null.
- * The tool returns `{ sessionId, sandboxId, destroyed: true }` as JSON text,
- * either bare or wrapped in MCP content parts. A failed destroy
- * (`destroyed: false`) or an error string returns null, and nothing is marked.
- * `sandboxId` is the session actually destroyed; older builds only send
- * `sessionId`.
+ * XYNE-66339: the sandbox a successful `sandbox-destroy` ended, or null. The
+ * result is JSON text `{ sessionId, sandboxId, destroyed }`, arriving bare or
+ * as MCP content parts. `sandboxId` is the session actually torn down; older
+ * xyne-claw builds only send `sessionId`.
  */
 function destroyedSandboxId(result: unknown): string | null {
-  let record = asRecord(result);
-  if (!record || (record["destroyed"] === undefined && record["content"] !== undefined)) {
-    const parts = Array.isArray(result) ? result : Array.isArray(record?.["content"]) ? (record["content"] as unknown[]) : [];
-    record = null;
-    for (const part of parts) {
-      const text = part && typeof part === "object" ? (part as { text?: unknown }).text : undefined;
-      record = asRecord(text);
-      if (record) break;
-    }
+  const content = asRecord(result)?.["content"] ?? result;
+  for (const part of Array.isArray(content) ? content : [result]) {
+    const record = asRecord(part && typeof part === "object" && "text" in part ? (part as { text: unknown }).text : part);
+    if (record?.["destroyed"] !== true) continue;
+    const id = record["sandboxId"] ?? record["sessionId"];
+    return typeof id === "string" && id.trim() ? id.trim() : null;
   }
-  if (!record || record["destroyed"] !== true) return null;
-  const id = [record["sandboxId"], record["sessionId"]].find((v): v is string => typeof v === "string" && v.trim() !== "");
-  return id ? id.trim() : null;
+  return null;
 }
 
 /**
@@ -187,15 +176,9 @@ export async function ingestArtifactSignals(input: IngestArtifactSignalsInput): 
     const { toolName, toolResult, conversationId, userId } = input;
     if (!conversationId || !userId || !toolName) return;
 
-    // XYNE-66339: the run tore its sandbox down, so its preview has ended.
-    if (toolName === SANDBOX_DESTROY_TOOL) {
+    if (toolName === "sandbox-destroy") {
       const sandboxId = destroyedSandboxId(toolResult);
-      if (!sandboxId) return;
-      try {
-        await markSandboxArtifactsStale([sandboxId], { conversationId });
-      } catch (err) {
-        log.warn(`sandbox-destroy stale marking failed: ${err instanceof Error ? err.message : String(err)}`);
-      }
+      if (sandboxId) await markSandboxArtifactsStale([sandboxId]);
       return;
     }
 
@@ -265,13 +248,6 @@ export async function ingestSandboxPreviewSignals(
   try {
     const sandboxId = typeof payload?.sandboxId === "string" ? payload.sandboxId.trim() : "";
     if (!sandboxId || !ctx.conversationId || !ctx.userId) return { recorded: false, reason: "missing-input" };
-    // XYNE-66339: frames are ingested concurrently, so an announce can land
-    // after the destroy. Recording it would upsert the rows back to ACTIVE.
-    // An ended sandbox never comes back, so skip it.
-    if (await isSandboxMarkedEnded(sandboxId)) {
-      log.info(`skipped preview for ended sandbox ${sandboxId}`);
-      return { recorded: false };
-    }
     const base = {
       conversationId: ctx.conversationId,
       messageId: ctx.messageId ?? null,
