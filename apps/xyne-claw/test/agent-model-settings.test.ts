@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   parseModelSettings,
+  platformModelOverride,
   parseOutputFormat,
   buildSubmitResultTool,
   renderTemplate,
@@ -123,5 +124,19 @@ describe("buildSubmitResultTool", () => {
     const res = await tool.execute("tc5", { markdown: "   " }, undefined as never, undefined as never);
     expect(ref.value).toBeUndefined();
     expect(JSON.stringify(res)).toContain("non-empty string");
+  });
+});
+
+describe("platformModelOverride (XYNE-66321)", () => {
+  it("per-agent / pinned spaces model wins, for interactive and automation runs", () => {
+    expect(platformModelOverride({ model: "open-large" }, false, "auto-m")).toBe("open-large");
+    expect(platformModelOverride({ model: "open-large" }, true, "auto-m")).toBe("open-large");
+  });
+  it("automation runs fall back to the automation model", () => {
+    expect(platformModelOverride(undefined, true, "auto-m")).toBe("auto-m");
+  });
+  it("interactive runs with no override → undefined (caller's platform default)", () => {
+    expect(platformModelOverride(undefined, false, "auto-m")).toBeUndefined();
+    expect(platformModelOverride({}, false, "auto-m")).toBeUndefined();
   });
 });

@@ -76,6 +76,25 @@ function parseSettingsFields(raw: unknown): AgentModelSettings {
   return out;
 }
 
+/**
+ * The model the platform (LiteLLM / "spaces") branch runs when a run has no
+ * provider credential. Single source of truth for BOTH the model runTask
+ * resolves (agent.ts → resolveModel overrides.model) and the model the run
+ * REPORTS (routes/run.ts callback / agent_runs.model) — they drifted before:
+ * a per-agent or per-run pinned spaces model ran but LITELLM.model was
+ * reported (XYNE-66321).
+ *
+ * Precedence: per-agent/per-run modelSettings.model → the automation default
+ * (batch runs only) → undefined (caller's platform default, LITELLM.model).
+ */
+export function platformModelOverride(
+  modelSettings: { model?: string | undefined } | undefined,
+  automationRun: boolean | undefined,
+  automationModel: string | undefined,
+): string | undefined {
+  return modelSettings?.model ?? (automationRun ? automationModel : undefined);
+}
+
 export function parseModelSettings(agentConfig: Record<string, unknown> | undefined): AgentModelSettings | undefined {
   const out = parseSettingsFields(agentConfig?.["modelSettings"]);
   const r = agentConfig?.["modelSettings"];

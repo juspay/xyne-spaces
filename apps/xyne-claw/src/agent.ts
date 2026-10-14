@@ -33,6 +33,7 @@ import type {
 } from "xyne-claw-shared";
 import { getModels, getProviders, type ThinkingLevel } from "@earendil-works/pi-ai";
 import { AGENT, LITELLM, PATHS, SANDBOX_PREVIEW, SERVER } from "./config.js";
+import { platformModelOverride } from "./agent-model-settings.js";
 import {
   hasSession,
   ensureSessionDir,
@@ -2120,7 +2121,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     // the automation default model (batch runs), then LITELLM.model.
     model: effectiveProviderConfig
       ? undefined
-      : modelSettings?.model ?? (opts.automationRun ? LITELLM.automationModel : undefined),
+      : platformModelOverride(modelSettings, opts.automationRun, LITELLM.automationModel),
     maxTokens: modelSettings?.maxTokens,
     litellmApiKey: opts.automationRun ? LITELLM.automationApiKey : undefined,
   });

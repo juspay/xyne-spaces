@@ -64,6 +64,7 @@ import {
 import { buildCallbackBodyFromDone } from "./lib/sse-done-callback.js";
 
 import { createLogger } from "../logger.js";
+import { buildAnsweredBy, modelFallbackFromCallback, type AnsweredBy } from "../lib/run-answered-by.js";
 const log = createLogger("run-stream");
 const SESSION_LOCKED_MESSAGE = "Still finishing your previous answer - try again in a few seconds.";
 
@@ -89,6 +90,8 @@ interface PendingStream {
     followUpSuggestions?: string[] | undefined;
     followUpsPending?: boolean | undefined;
     clawRunOrigin?: Record<string, unknown> | undefined;
+    /** Which provider/model actually answered, incl. fallback (XYNE-66319). */
+    answeredBy?: AnsweredBy | undefined;
     /** The turn as ordered thinking / text / tool parts (null: render from content). */
     parts?: AssistantPart[] | null | undefined;
   }) => void;
@@ -203,6 +206,7 @@ type StreamBusEvent =
       toolInvocations?: unknown;
       followUpSuggestions?: string[];
       followUpsPending?: boolean;
+      answeredBy?: AnsweredBy;
       parts?: AssistantPart[] | null;
     }
   | { kind: "follow_ups"; streamId: string; suggestions: string[] };
@@ -250,6 +254,7 @@ function ensureStreamEventsSubscriber(): void {
       ...(msg.toolInvocations !== undefined ? { toolInvocations: msg.toolInvocations } : {}),
       ...(msg.followUpSuggestions?.length ? { followUpSuggestions: msg.followUpSuggestions } : {}),
       ...(msg.followUpsPending === true ? { followUpsPending: true } : {}),
+      ...(msg.answeredBy ? { answeredBy: msg.answeredBy } : {}),
       ...(msg.parts ? { parts: msg.parts } : {}),
     });
   });
@@ -1359,6 +1364,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       followUpSuggestions?: string[] | undefined;
       followUpsPending?: boolean | undefined;
       clawRunOrigin?: Record<string, unknown> | undefined;
+      answeredBy?: AnsweredBy | undefined;
       parts?: AssistantPart[] | null | undefined;
     }>((resolve, reject) => {
       let closed = false;
@@ -1966,6 +1972,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         ...(result.attachments?.length ? { attachments: result.attachments } : {}),
         ...(result.followUpSuggestions?.length ? { followUpSuggestions: result.followUpSuggestions } : {}),
         ...(result.followUpsPending === true ? { followUpsPending: true } : {}),
+        ...(result.answeredBy ? { answeredBy: result.answeredBy } : {}),
         ...(result.parts ? { parts: result.parts } : {}),
       })}\n\n`);
       if (result.followUpsPending === true) await holdForLateFollowUps(res, streamId, assistantMsg?.id);
@@ -2251,6 +2258,10 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
     const llmCitations = body.llmCitations;
     const provider = typeof body.provider === "string" ? body.provider : undefined;
     const model = typeof body.model === "string" ? body.model : undefined;
+    // Fallback provenance: claw reports the FINISHING attempt as provider/model;
+    // fellBack / requested* say whether that is what was asked for (XYNE-66319).
+    const modelFallback = modelFallbackFromCallback(body as Record<string, unknown>);
+    const answeredBy = buildAnsweredBy(provider, model, modelFallback);
     const sessionId = typeof body.sessionId === "string" ? body.sessionId : undefined;
 
     // Append LLM-provided citations (same logic as agent-chat.ts). For a
@@ -2629,6 +2640,7 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
           ...(assistantMessageId ? { chatMessageId: assistantMessageId } : {}),
           ...(toolInvocations ? { toolInvocations } : {}),
           ...(typeof body["fastMode"] === "boolean" ? { fastMode: body["fastMode"] as boolean } : {}),
+          ...(modelFallback ? { metadataPatch: { modelFallback } } : {}),
         });
       } catch (finalizeErr) {
         log.warn(`[run-stream] Failed to finalize agent run:`, errMsg(finalizeErr));
@@ -2665,6 +2677,7 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
         followUpSuggestions,
         ...(followUpsPending ? { followUpsPending: true } : {}),
         ...(callbackRunOrigin ? { clawRunOrigin: callbackRunOrigin } : {}),
+        ...(answeredBy ? { answeredBy } : {}),
         parts: turn.parts,
       });
     } else if (meta?.conversationId) {
@@ -2685,6 +2698,7 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
         ...(toolInvocations !== undefined ? { toolInvocations } : {}),
         ...(followUpSuggestions?.length ? { followUpSuggestions } : {}),
         ...(followUpsPending ? { followUpsPending: true } : {}),
+        ...(answeredBy ? { answeredBy } : {}),
         ...(turn.parts ? { parts: turn.parts } : {}),
       });
     } else {
