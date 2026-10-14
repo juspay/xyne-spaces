@@ -12,10 +12,10 @@ name: Nix CI
 # Actions): use nix-quick-install-action (NOT the DeterminateSystems installer),
 # because only its store layout is snapshotted by cache-nix-action.
 
-# Disabled — pull_request/push triggers commented out.
+# push trigger still commented out — only manual, PR, and merge-queue runs.
 on:
   workflow_dispatch:
-  # pull_request:
+  pull_request:
   # push:
   #   branches:
   #     - main
