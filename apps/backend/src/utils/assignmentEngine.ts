@@ -97,14 +97,27 @@ function notifyMaxWorkloadReached(
     .catch(err => logger.error(`[Assignment] Failed to send maxWorkload notification for userGroupId ${userGroupId}`, err));
 }
 
+/**
+ * A member is new to the group when they have no workload history in it, or when
+ * all of that history predates their membership — e.g. tickets in the group were
+ * assigned to them by hand before they were added. Without the second case such a
+ * member enters scoring at their tiny pre-join load and wins every assignment until
+ * they catch up with established peers.
+ */
+function isNewToGroup(mapping: UserGroupMapping, workloadRows: UserWorkloadMapping[]): boolean {
+  if (workloadRows.length === 0) return true;
+  const earliestRowAt = Math.min(...workloadRows.map(w => w.createdAt.getTime()));
+  return earliestRowAt < mapping.createdAt.getTime();
+}
+
 async function resolveStartOffsets(
   pool: string[],
   workloadMap: Map<string, number>,
-  hasWorkloadHistory: (userId: string) => boolean,
+  workloadRowsOf: (userId: string) => UserWorkloadMapping[],
   userGroupMappingByUserId: Map<string, UserGroupMapping>,
 ): Promise<Map<string, number>> {
   const offsets = new Map<string, number>();
-  const newcomers: string[] = [];
+  const newcomers = new Set<string>();
 
   for (const userId of pool) {
     const mapping = userGroupMappingByUserId.get(userId);
@@ -113,26 +126,27 @@ async function resolveStartOffsets(
       offsets.set(userId, mapping.startOffset);
       continue;
     }
-    if (hasWorkloadHistory(userId)) continue;
-    newcomers.push(userId);
+    if (isNewToGroup(mapping, workloadRowsOf(userId))) newcomers.add(userId);
   }
 
-  if (newcomers.length === 0) return offsets;
+  if (newcomers.size === 0) return offsets;
 
   // Baseline is the frontier of the virtual schedule, so peers count at their
   // effective position (raw load + the offset they were given), not raw load.
   // Reading raw here would let each newcomer reset the floor below the last one.
   const establishedLoads = pool
-    .filter(id => hasWorkloadHistory(id))
+    .filter(id => !newcomers.has(id) && workloadRowsOf(id).length > 0)
     .map(id => (workloadMap.get(id) ?? 0) + (offsets.get(id) ?? 0));
   const baseline = establishedLoads.length > 0 ? Math.round(Math.min(...establishedLoads)) : 0;
 
   for (const userId of newcomers) {
     const mapping = userGroupMappingByUserId.get(userId)!;
-    offsets.set(userId, baseline);
+    // Lift the newcomer to the baseline, net of any load they carried in from before joining.
+    const offset = Math.max(0, baseline - Math.round(workloadMap.get(userId) ?? 0));
+    offsets.set(userId, offset);
     try {
-      const persisted = await repositories.userGroupMapping.setStartOffsetIfNull(mapping.id, baseline);
-      logger.info(`[Assignment] startOffset resolved for userId ${userId}: ${baseline} (persisted=${persisted})`);
+      const persisted = await repositories.userGroupMapping.setStartOffsetIfNull(mapping.id, offset);
+      logger.info(`[Assignment] startOffset resolved for userId ${userId}: ${offset} (persisted=${persisted})`);
     } catch (err) {
       logger.error(`[Assignment] Failed to persist startOffset for userId ${userId}`, err);
     }
@@ -435,9 +449,13 @@ export async function evaluateAssignmentRule(
     .filter((w: UserWorkloadMapping) => w.boardId === boardId)
     .reduce((sum, w) => sum + (w.activeTasks || 0), 0);
 
-  const workloadHistoryUserIds = new Set(allWorkloadMappings.map((w: UserWorkloadMapping) => w.userId));
-  const hasWorkloadHistory = (userId: string) => workloadHistoryUserIds.has(userId);
-  const offsetMap = await resolveStartOffsets(finalEligibleUserIds, workloadMap, hasWorkloadHistory, userGroupMappingByUserId);
+  const workloadRowsByUserId = new Map<string, UserWorkloadMapping[]>();
+  for (const w of allWorkloadMappings) {
+    if (!workloadRowsByUserId.has(w.userId)) workloadRowsByUserId.set(w.userId, []);
+    workloadRowsByUserId.get(w.userId)!.push(w);
+  }
+  const workloadRowsOf = (userId: string) => workloadRowsByUserId.get(userId) ?? [];
+  const offsetMap = await resolveStartOffsets(finalEligibleUserIds, workloadMap, workloadRowsOf, userGroupMappingByUserId);
 
   for (const userId of finalEligibleUserIds) {
     const weightedActiveTasks = workloadMap.get(userId) || 0;
@@ -569,7 +587,7 @@ export async function evaluateAssignmentRule(
 
     // Calculate scores for fallback candidates
     const fallbackCandidates: AssignmentCandidate[] = [];
-    const fallbackOffsetMap = await resolveStartOffsets(fallbackUserIds, workloadMap, hasWorkloadHistory, userGroupMappingByUserId);
+    const fallbackOffsetMap = await resolveStartOffsets(fallbackUserIds, workloadMap, workloadRowsOf, userGroupMappingByUserId);
     for (const userId of fallbackUserIds) {
       const weightedActiveTasks = workloadMap.get(userId) || 0;
       const startOffset = fallbackOffsetMap.get(userId) ?? 0;
@@ -750,8 +768,8 @@ async function pickBest(
     ? eligible.slice().sort((a, b) => (hasExpertise(b) ? 1 : 0) - (hasExpertise(a) ? 1 : 0))
     : eligible;
 
-  const hasWorkloadHistory = (id: string) => (workloadsByUserId.get(id)?.length ?? 0) > 0;
-  const offsetMap = await resolveStartOffsets(finalEligible, workloadMap, hasWorkloadHistory, userGroupMappingByUserId);
+  const workloadRowsOf = (id: string) => workloadsByUserId.get(id) ?? [];
+  const offsetMap = await resolveStartOffsets(finalEligible, workloadMap, workloadRowsOf, userGroupMappingByUserId);
 
   // Score candidates
   const score = (userId: string): AssignmentCandidate => {
