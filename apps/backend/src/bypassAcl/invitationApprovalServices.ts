@@ -22,7 +22,7 @@ export function getInvitationByIdOrgWide(id: string) {
 
 /** Pending approvals plus approved invites whose email never went out, org-wide. */
 export function listPendingApprovalInvitations(orgId: string) {
-  return asSystem(['Invitation', 'User', 'Channel', 'Canvas', 'Project'], APPROVAL_REASON, async () => {
+  return asSystem(['Invitation', 'User', 'Channel', 'Canvas'], APPROVAL_REASON, async () => {
     const invitations = await DatabaseClient.getInstance().invitation.findMany({
       where: {
         orgId,
@@ -56,20 +56,18 @@ export function listPendingApprovalInvitations(orgId: string) {
         })
       : [];
 
-    // Guest invites are scoped to one channel/canvas/project — name it so the
+    // Guest invites are scoped to one channel/canvas — name it so the
     // approver can see what access they are granting.
     const idsOfType = (type: string): string[] =>
       invitations.filter(i => i.entityType === type && i.entityId).map(i => i.entityId!);
     const db = DatabaseClient.getInstance();
-    const [channels, canvases, projects] = await Promise.all([
+    const [channels, canvases] = await Promise.all([
       db.channel.findMany({ where: { id: { in: idsOfType('CHANNEL') } }, select: { id: true, name: true } }),
       db.canvas.findMany({ where: { id: { in: idsOfType('CANVAS') } }, select: { id: true, title: true } }),
-      db.project.findMany({ where: { id: { in: idsOfType('PROJECT') } }, select: { id: true, name: true } }),
     ]);
     const entityTitleById = new Map<string, string | null>([
       ...channels.map(c => [c.id, c.name] as const),
       ...canvases.map(c => [c.id, c.title] as const),
-      ...projects.map(p => [p.id, p.name] as const),
     ]);
 
     return { invitations, inviterById: new Map(inviters.map(u => [u.id, u])), entityTitleById };
