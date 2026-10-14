@@ -362,6 +362,7 @@ const ProfileView = ({
                 data-track-name='CLEAR_STATUS'
                 className='flex-shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
                 title='Clear status'
+                aria-label='Clear status'
               >
                 <X className='size-3 text-muted-foreground' />
               </Button>
@@ -396,6 +397,7 @@ const ProfileView = ({
                 size='lg'
                 className='flex-shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
                 title='Resume notifications'
+                aria-label='Resume notifications'
                 onClick={handleResumeNotifications}
                 trackId='resume_notifications'
                 data-track-category='PROFILE'

@@ -155,9 +155,18 @@ export const Tooltip = ({
   providerProps: _providerProps,
   ...rootProps
 }: TooltipProps): React.ReactElement => {
+  // A trigger already labelled with the same text would be announced twice.
+  const ownLabel = React.isValidElement<{ 'aria-label'?: string }>(children)
+    ? children.props['aria-label']
+    : undefined;
+  const description =
+    typeof content === 'string' && content.trim().toLowerCase() !== ownLabel?.trim().toLowerCase()
+      ? content
+      : undefined;
+
   return (
     <TooltipPrimitive.Root data-slot='tooltip' delayDuration={delayDuration} {...rootProps}>
-      <TooltipPrimitive.Trigger asChild data-slot='tooltip-trigger'>
+      <TooltipPrimitive.Trigger asChild data-slot='tooltip-trigger' aria-description={description}>
         {children}
       </TooltipPrimitive.Trigger>
       <TooltipPrimitive.Portal>

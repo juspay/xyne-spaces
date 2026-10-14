@@ -1,46 +1,22 @@
-import { useCallback, useState } from 'react';
-import { isAxiosError } from 'axios';
-import { toast } from 'sonner';
+import { useEffect } from 'react';
 import { recheckTicketDuplicates } from '../services/ticketDuplicateService';
 
-interface UseRecheckTicketDuplicatesResult {
-  isRechecking: boolean;
-  recheck: () => void;
-}
+// Wait this long on a ticket before checking, so arrowing through a queue doesn't fire a
+// check for every ticket passed on the way.
+const OPEN_SETTLE_MS = 800;
 
 /**
- * Re-runs duplicate detection for a desk ticket. A match is linked server-side and
- * reaches DuplicateTicketsBanner through Zero, so this only reports the outcome.
+ * Re-runs duplicate detection whenever a desk ticket is opened. A new match is linked
+ * server-side and reaches DuplicateTicketsBanner through Zero; the server reuses the last
+ * result when nothing changed. Silent: a failure (or a 429 because a check for this
+ * ticket is already running) just leaves the banner as it was.
  */
-export const useRecheckTicketDuplicates = (
-  ticketId: string | null | undefined,
-): UseRecheckTicketDuplicatesResult => {
-  const [isRechecking, setIsRechecking] = useState(false);
-
-  const recheck = useCallback(() => {
-    if (!ticketId || isRechecking) return;
-    setIsRechecking(true);
-    recheckTicketDuplicates(ticketId)
-      .then(result => {
-        if (result.isDuplicate) {
-          toast.success('Possible duplicate found');
-        } else {
-          toast.info(
-            result.candidateCount === 0 ? 'No similar tickets found' : 'No duplicates found',
-          );
-        }
-      })
-      .catch(error => {
-        // 429: a check for this ticket is already running (another tab, agent, or the
-        // banner and menu both clicked). Not a failure — that check will report.
-        if (isAxiosError(error) && error.response?.status === 429) {
-          toast.info('A duplicate check is already running for this ticket.');
-          return;
-        }
-        toast.error('Duplicate check failed. Please try again.');
-      })
-      .finally(() => setIsRechecking(false));
-  }, [ticketId, isRechecking]);
-
-  return { isRechecking, recheck };
+export const useRecheckTicketDuplicates = (ticketId: string | null | undefined): void => {
+  useEffect(() => {
+    if (!ticketId) return;
+    const timer = setTimeout((): void => {
+      recheckTicketDuplicates(ticketId).catch(() => {});
+    }, OPEN_SETTLE_MS);
+    return (): void => clearTimeout(timer);
+  }, [ticketId]);
 };

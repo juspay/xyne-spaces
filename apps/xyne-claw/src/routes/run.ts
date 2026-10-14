@@ -163,7 +163,7 @@ import { buildTwinPersonaBlock } from "../twin-persona.js";
 import { buildProposePlanTool, PROPOSE_PLAN_TOOL_NAME, type ProposePlanRef } from "../propose-plan.js";
 import { presentationCatalogDefaultOn, isFreePresentationTool, buildPresentationPrimer } from "../presentation-catalog.js";
 import { buildProposeAgentTool, type ProposeAgentRef } from "../propose-agent.js";
-import { buildDescribeAgentTool, type DescribeAgentRef } from "../describe-agent.js";
+import { buildDescribeAgentTool, describeAgentCardForReply, type DescribeAgentRef } from "../describe-agent.js";
 import { buildSuggestConnectorsTool, SUGGEST_CONNECTORS_TOOL_NAME, type SuggestConnectorsRef } from "../suggest-connectors.js";
 import { buildSuggestProvidersTool, SUGGEST_PROVIDERS_TOOL_NAME, type SuggestProvidersRef } from "../suggest-providers.js";
 import { buildEmitBriefTool, EMIT_BRIEF_TOOL_NAME, type EmitBriefRef } from "../daily-brief.js";
@@ -4824,9 +4824,10 @@ export async function processTask(
         ? { pendingProviderSuggestions: suggestProvidersRef.value }
         : {}),
       ...(blockedConnectors.size > 0 ? { blockedConnectors: [...blockedConnectors] } : {}),
-      ...(proposeAgentRef.value || describeAgentRef.value
-        ? { pendingAgentCard: proposeAgentRef.value ?? describeAgentRef.value }
-        : {}),
+      ...(() => {
+        const card = proposeAgentRef.value ?? describeAgentCardForReply(describeAgentRef.value, dedupedPendingActions);
+        return card ? { pendingAgentCard: card } : {};
+      })(),
       // Daily brief: emit_brief normally aborts (→ catch branch below), but if the
       // run finished cleanly with a brief emitted, carry it here too. claw-auth
       // persists it to GeneratedContent and (on the SSE regenerate path) forwards
@@ -5017,7 +5018,10 @@ export async function processTask(
         pendingResponses: pendingResponsesAtError,
         // A queued capability card must survive the copilot terminal path too,
         // or "what can you do?" silently loses its card on those agents.
-        ...(describeAgentRef.value ? { pendingAgentCard: describeAgentRef.value } : {}),
+        ...(() => {
+          const card = describeAgentCardForReply(describeAgentRef.value, dedupedPendingActionsAtError);
+          return card ? { pendingAgentCard: card } : {};
+        })(),
         ...(suggestConnectorsRef.value
           ? { pendingConnectorSuggestions: suggestConnectorsRef.value }
           : {}),

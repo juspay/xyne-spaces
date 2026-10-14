@@ -249,6 +249,7 @@ export function LibraryFilterMenu({
           const isActive = isActiveIn(main, option);
           return (
             <button
+              aria-current={isActive ? 'true' : undefined}
               key={option.id}
               type='button'
               onClick={() => {

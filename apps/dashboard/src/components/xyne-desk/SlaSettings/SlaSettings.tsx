@@ -244,6 +244,7 @@ export const SlaSettings: React.FC<SlaSettingsProps> = ({ boardId, disabled = fa
                   {/* Toggle */}
                   <button
                     type='button'
+                    aria-label={`${PRIORITY_LABELS[priority]} SLA`}
                     role='switch'
                     aria-checked={isActive}
                     onClick={() => !disabled && handleToggleActive(priority)}
@@ -293,6 +294,7 @@ export const SlaSettings: React.FC<SlaSettingsProps> = ({ boardId, disabled = fa
                   <button
                     type='button'
                     title='Configure'
+                    aria-label='Configure'
                     onClick={() => setExpandedPriority(isExpanded ? null : priority)}
                     className='p-1.5 text-muted-foreground hover:text-foreground rounded-md hover:bg-accent transition-colors'
                     data-track-category='BOARD_SLA_SETTINGS'

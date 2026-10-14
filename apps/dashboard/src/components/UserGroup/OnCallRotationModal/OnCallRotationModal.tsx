@@ -297,6 +297,7 @@ export const OnCallRotationModal = ({
                       onClick={() => handleDeleteSet(set.setNumber)}
                       className='p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-50 rounded transition-colors'
                       title='Delete empty set'
+                      aria-label='Delete empty set'
                       data-track-category='UserGroups'
                       data-track-name='DeleteEmptySet'
                       data-track-metadata={JSON.stringify({ setNumber: set.setNumber })}

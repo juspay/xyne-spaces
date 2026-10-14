@@ -70,7 +70,7 @@ export { FlowBuilder, mdToMrkdwn, buildWriteApprovalFlow, buildWriteResultFlow, 
 export type { FlowDefinition, FlowComponent, FlowAction, SelectOption, TicketArtifact, ChartArtifact } from "./flow/builder.js";
 export { buildPlanFlow, PLAN_COMPONENT_ID } from "./flow/plan-flow.js";
 export { isFlowJsonContent, parseFlowJsonComponents, extractTextFromFlowJson, extractCleanTextFromFlowJson } from "./flow/flow-text.js";
-export { buildAgentCardFlow, buildAgentListFlow, buildAgentSummaryFlow, agentIdentity, AGENT_COMPONENT_ID, AGENT_EDITS_STATE_KEY, MAX_AGENT_LIST_CARDS } from "./flow/agent-card.js";
+export { buildAgentCardFlow, buildAgentListFlow, buildAgentSummaryFlow, buildAgentUpdateApprovalFlow, agentIdentity, AGENT_COMPONENT_ID, AGENT_EDITS_STATE_KEY, MAX_AGENT_LIST_CARDS } from "./flow/agent-card.js";
 export { validateMcpProposal } from "./flow/mcp-proposal.js";
 export type { McpProposal, McpProposalResult } from "./flow/mcp-proposal.js";
 export type {
@@ -87,6 +87,10 @@ export type {
   AgentProviderStatus,
   AgentDraftPhase,
   AgentToolSelection,
+  AgentChange,
+  AgentChangeField,
+  AgentUpdateCardProps,
+  AgentUpdateApprovalAction,
 } from "./flow/agent-card.js";
 export type { Todo, TodoStatus, PlanPhase, PlanTodoInput } from "./flow/plan-flow.js";
 export { buildPrFlow, prScreenId, PR_COMPONENT_ID } from "./flow/pr-flow.js";
@@ -161,6 +165,7 @@ export {
 } from "./logger.js";
 export type { LogContext, Logger } from "./logger.js";
 export { AGENT_INTROSPECT_TOOL_DEFS } from "./tools/agent-introspect/index.js";
+export { AGENT_TOOL_DEFS } from "./tools/agent-tools/index.js";
 export {
   TASK_COMMAND_NAMES,
   IMMEDIATE_TASK_COMMAND_RE,

@@ -178,6 +178,7 @@ const getRedirection = (
         data-track-name='OPEN_ACTIVITY_ITEM'
         className='flex-shrink-0 p-1 hover:bg-accent rounded transition-colors cursor-pointer'
         title={`Go to ${url}`}
+        aria-label={`Go to ${url}`}
       >
         <ExternalLink className='w-4 h-3.5 text-muted-foreground' />
       </button>
@@ -269,6 +270,8 @@ export const UserActivityItem = ({
       >
         {/* Expand/Collapse Chevron */}
         <div
+          aria-label={isExpanded ? 'Collapse activity details' : 'Expand activity details'}
+          aria-expanded={isExpanded}
           onClick={handleToggleExpand}
           data-track-category='XYNE_AI_SIDEBAR'
           data-track-name='TOGGLE_ACTIVITY_DETAILS'
@@ -324,6 +327,7 @@ export const UserActivityItem = ({
             data-track-name='CONFIGURE_ACTIVITY'
             className='rounded'
             title='Configure activity'
+            aria-label='Configure activity'
             type='button'
           >
             <Settings className='w-3.5 h-3.5 text-muted-foreground hover:text-muted-foreground' />

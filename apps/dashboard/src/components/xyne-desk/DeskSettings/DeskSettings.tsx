@@ -75,6 +75,7 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
   const form = useDeskSettingsForm(channelId, userID, open);
   const {
     isEmail,
+    isSocial,
     isCall,
     isDirty,
     saving,
@@ -105,8 +106,8 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
     if (isCall) {
       return tabs.filter(tab => ['assignment', 'Agent', 'history'].includes(tab.id));
     }
-    return isEmail ? tabs : tabs.filter(tab => tab.id !== 'automation');
-  }, [isCall, isEmail, canViewHistory]);
+    return isEmail || isSocial ? tabs : tabs.filter(tab => tab.id !== 'automation');
+  }, [isCall, isEmail, isSocial, canViewHistory]);
 
   useEffect(() => {
     if (!availableTabs.some(tab => tab.id === activeTab)) {
@@ -135,6 +136,7 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
         <div className='relative h-full w-full'>
           <button
             type='button'
+            aria-label='Close desk settings'
             onClick={requestClose}
             className='absolute right-4 top-4 z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-desk-border bg-popover text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground dark:border-border'
             data-track-category='DeskSettings'
@@ -156,6 +158,7 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
                       <React.Fragment key={tab.id}>
                         <button
                           type='button'
+                          aria-current={isActive ? 'true' : undefined}
                           onClick={() => setActiveTab(tab.id)}
                           className={cn(
                             'flex items-center gap-2 px-3 py-2 rounded-[10px] text-sm font-[550] leading-[1.2] tracking-[-0.1px] transition-colors text-left',
