@@ -14,7 +14,12 @@ import { addHHMMDuration } from '@/utils/dateUtils';
 import { findNewEmails, normalizeEmailList } from '@/utils/email';
 import { deriveEndsOnFromRRule } from '@/utils/recurrenceUtils';
 import {
+  type CallChangeEmailParams,
   type CallInvitationParams,
+  formatCallWindow,
+  resolveEmailTimezone,
+  sanitizeForLog,
+  sendCallChangeEmails,
   sendCallInvitationEmail,
   sendCallInvitationReply,
 } from '@/services/callInvitationEmailService';
@@ -64,6 +69,59 @@ export class ScheduleCallController {
         }
       })();
     });
+  }
+
+  private sendCallChangeEmailsInBackground(context: string, params: CallChangeEmailParams): void {
+    setImmediate(() => {
+      void sendCallChangeEmails(params).catch((error) => {
+        logger.error(
+          `[${context}] Failed to send call change email in background | callExternalId=${sanitizeForLog(params.externalId)} kind=${params.kind} error=${sanitizeForLog(error instanceof Error ? error.message : error)}`,
+        );
+      });
+    });
+  }
+
+  /**
+   * Email the people affected by an edit: those still invited hear what changed, newly added
+   * internals get an invitation, and people taken off the call are not told. Newly added externals are left
+   * out; they already receive the invite email.
+   */
+  private emailCallEdit(args: {
+    context: string;
+    call: Pick<
+      CallChangeEmailParams,
+      'externalId' | 'callTitle' | 'startsAt' | 'endsAt' | 'timezone' | 'organizerUserId'
+    >;
+    actorUserId: string;
+    changeLines: string[];
+    previousInternalUserIds: string[];
+    next: { externalEmails: string[]; internalUserIds: string[] };
+    newlyAddedExternalEmails: string[];
+  }): void {
+    const { context, call, actorUserId, changeLines, previousInternalUserIds, next } = args;
+    const common = { ...call, excludeUserIds: [actorUserId] };
+    const previousInternal = new Set(previousInternalUserIds);
+    const addedInternal = next.internalUserIds.filter((id) => !previousInternal.has(id));
+    const stayingExternals = findNewEmails(next.externalEmails, args.newlyAddedExternalEmails);
+
+    if (changeLines.length > 0) {
+      this.sendCallChangeEmailsInBackground(context, {
+        ...common,
+        kind: 'updated',
+        changeLines,
+        externalEmails: stayingExternals,
+        internalUserIds: next.internalUserIds.filter((id) => previousInternal.has(id)),
+      });
+    }
+    if (addedInternal.length > 0) {
+      this.sendCallChangeEmailsInBackground(context, {
+        ...common,
+        kind: 'created',
+        bodyHtml: defaultCallInvitation(call.timezone).bodyHtml,
+        externalEmails: [],
+        internalUserIds: addedInternal,
+      });
+    }
   }
 
   /**
@@ -221,6 +279,7 @@ export class ScheduleCallController {
         endsOn,
         externalInvitees,
         invitation,
+        notifyParticipantsByEmail,
         summaryTemplateId,
       } = RecurringScheduleCallSchema.parse(req.body);
       const normalizedExternalInvitees = normalizeEmailList(externalInvitees);
@@ -280,8 +339,12 @@ export class ScheduleCallController {
         `Recurring series ${seriesId} created by ${userId} — ${createdCallIds.length} instances pre-created`,
       );
 
+      const inviteCall =
+        (normalizedExternalInvitees.length > 0 && invitation) || notifyParticipantsByEmail
+          ? await repositories.scheduledCalls.findFirstUpcomingSeriesInstance({ seriesId })
+          : null;
+
       if (normalizedExternalInvitees.length > 0 && invitation) {
-        const inviteCall = await repositories.scheduledCalls.findFirstUpcomingSeriesInstance({ seriesId });
         if (inviteCall?.startsAt && inviteCall.endsAt) {
           this.sendExternalInvitationInBackground({
             context: 'createRecurringSeries',
@@ -300,6 +363,23 @@ export class ScheduleCallController {
           logger.warn(
             `[createRecurringSeries] Skipping external invite email because no upcoming instance was found | seriesId=${seriesId} invitees=${normalizedExternalInvitees.join(', ')}`,
           );
+        }
+      }
+
+      if (notifyParticipantsByEmail) {
+        if (inviteCall?.startsAt && inviteCall.endsAt) {
+          this.sendCallChangeEmailsInBackground('createRecurringSeries', {
+            kind: 'created',
+            externalId: inviteCall.externalId,
+            callTitle: inviteCall.title ?? title,
+            startsAt: inviteCall.startsAt,
+            endsAt: inviteCall.endsAt,
+            timezone,
+            organizerUserId: userId,
+            externalEmails: [],
+            internalUserIds: recurringParticipantUserIds,
+            bodyHtml: (invitation ?? defaultCallInvitation(timezone)).bodyHtml,
+          });
         }
       }
 
@@ -336,6 +416,7 @@ export class ScheduleCallController {
         externalInvitees,
         externalInviteDelivery,
         invitation,
+        notifyParticipantsByEmail,
         summaryTemplateId,
       } = ScheduleCallSchema.parse(req.body);
 
@@ -413,6 +494,20 @@ export class ScheduleCallController {
             externalInvitees: normalizedExternalInvitees,
             invitation: invitation!,
           },
+        });
+      }
+
+      if (notifyParticipantsByEmail) {
+        this.sendCallChangeEmailsInBackground('scheduleCall', {
+          kind: 'created',
+          externalId,
+          callTitle: title,
+          startsAt: new Date(startsAt),
+          endsAt: new Date(endsAt),
+          organizerUserId: userId,
+          externalEmails: [],
+          internalUserIds: participantUserIds,
+          bodyHtml: (invitation ?? defaultCallInvitation()).bodyHtml,
         });
       }
 
@@ -514,7 +609,7 @@ export class ScheduleCallController {
 
     try {
       const parsedBody = UpdateScheduleCallSchema.parse(req.body);
-      const { title, startsAt, endsAt, targetUserIds, channelId: reqChannelId, callUpdatesChannel: reqCallUpdatesChannel, externalInvitees, summaryTemplateId } = parsedBody;
+      const { title, startsAt, endsAt, targetUserIds, channelId: reqChannelId, callUpdatesChannel: reqCallUpdatesChannel, externalInvitees, summaryTemplateId, notifyParticipantsByEmail } = parsedBody;
       const normalizedExternalInvitees = externalInvitees !== undefined
         ? normalizeEmailList(externalInvitees)
         : undefined;
@@ -634,9 +729,14 @@ export class ScheduleCallController {
         ));
       }
 
+      const emailOnEdit = notifyParticipantsByEmail === true && userId === call.createdByUserId;
       let newlyAddedExternalInvitees: string[] = [];
+      const previousExternalInvitees =
+        normalizedExternalInvitees !== undefined || emailOnEdit
+          ? await repositories.calls.findExternalInviteeEmails(call.id)
+          : [];
       if (normalizedExternalInvitees !== undefined) {
-        const currentExternalInvitees = await repositories.calls.findExternalInviteeEmails(call.id);
+        const currentExternalInvitees = previousExternalInvitees;
         newlyAddedExternalInvitees = findNewEmails(normalizedExternalInvitees, currentExternalInvitees);
         logger.info(
           `[updateScheduledCall] external invitee delta | added=${JSON.stringify(newlyAddedExternalInvitees)} total=${JSON.stringify(normalizedExternalInvitees)}`,
@@ -709,6 +809,46 @@ export class ScheduleCallController {
       // Fetch participants once for both rescheduling and update notifications
       const allParticipants = await repositories.calls.findParticipants(call.id);
       const participantIds = allParticipants.map((p) => p.userId);
+
+      const emailStartsAt = updatedCall.startsAt ?? call.startsAt;
+      const emailEndsAt = updatedCall.endsAt ?? call.endsAt;
+      if (emailOnEdit && emailStartsAt && emailEndsAt) {
+        const emailTimezone = resolveEmailTimezone(updatedCall.timezone ?? call.timezone);
+        const changeLines: string[] = [];
+        if (title !== undefined && title !== call.title) {
+          changeLines.push(`Title: ${call.title ?? ''} → ${title}`);
+        }
+        if (
+          call.startsAt &&
+          call.endsAt &&
+          (emailStartsAt.getTime() !== call.startsAt.getTime() ||
+            emailEndsAt.getTime() !== call.endsAt.getTime())
+        ) {
+          changeLines.push(
+            `Time: ${formatCallWindow(call.startsAt, call.endsAt, emailTimezone)} → ${formatCallWindow(emailStartsAt, emailEndsAt, emailTimezone)}`,
+          );
+        }
+        const addedIds = new Set(addUserIds ?? []);
+        this.emailCallEdit({
+          context: 'updateScheduledCall',
+          call: {
+            externalId,
+            callTitle: updatedCall.title ?? call.title ?? 'Scheduled Call',
+            startsAt: emailStartsAt,
+            endsAt: emailEndsAt,
+            timezone: emailTimezone,
+            organizerUserId: call.createdByUserId,
+          },
+          actorUserId: userId,
+          changeLines,
+          previousInternalUserIds: participantIds.filter((id) => !addedIds.has(id)),
+          next: {
+            externalEmails: normalizedExternalInvitees ?? previousExternalInvitees,
+            internalUserIds: participantIds,
+          },
+          newlyAddedExternalEmails: newlyAddedExternalInvitees,
+        });
+      }
 
       // Reschedule Bull jobs if time changed
       if (startsAt !== undefined) {
@@ -792,7 +932,7 @@ export class ScheduleCallController {
 
     try {
       const parsedBody = UpdateRecurringSeriesSchema.parse(req.body);
-      const { title, recurrenceRule, startTime, endTime, endsOn, timezone, targetUserIds, channelId: reqChannelId, callUpdatesChannel: reqCallUpdatesChannel, externalInvitees, summaryTemplateId } = parsedBody;
+      const { title, recurrenceRule, startTime, endTime, endsOn, timezone, targetUserIds, channelId: reqChannelId, callUpdatesChannel: reqCallUpdatesChannel, externalInvitees, summaryTemplateId, notifyParticipantsByEmail } = parsedBody;
       const normalizedExternalInvitees = externalInvitees !== undefined
         ? normalizeEmailList(externalInvitees)
         : undefined;
@@ -864,10 +1004,17 @@ export class ScheduleCallController {
       // callUpdatesChannel is stored orthogonally. No scopeType inspection.
       const seriesModeChanged = reqChannelId !== undefined || targetUserIds !== undefined || reqCallUpdatesChannel !== undefined;
 
+      const emailOnEdit = notifyParticipantsByEmail === true && userId === series.organizerId;
       let newlyAddedExternalInvitees: string[] = [];
+      const previousExternalInvitees =
+        normalizedExternalInvitees !== undefined || emailOnEdit
+          ? await repositories.recurringCallParticipants.findExternalInviteeEmails(seriesId)
+          : [];
+      const previousInternalUserIds = emailOnEdit
+        ? await repositories.recurringCallParticipants.findInternalParticipantUserIds(seriesId)
+        : [];
       if (normalizedExternalInvitees !== undefined) {
-        const currentExternalInvitees =
-          await repositories.recurringCallParticipants.findExternalInviteeEmails(seriesId);
+        const currentExternalInvitees = previousExternalInvitees;
         newlyAddedExternalInvitees = findNewEmails(normalizedExternalInvitees, currentExternalInvitees);
         logger.info(
           `[updateRecurringSeries] external invitee delta | added=${JSON.stringify(newlyAddedExternalInvitees)} total=${JSON.stringify(normalizedExternalInvitees)}`,
@@ -1128,6 +1275,49 @@ export class ScheduleCallController {
         }
       }
 
+      // One email per change for the whole series, linked to its next upcoming occurrence.
+      const emailInstance = emailOnEdit
+        ? await repositories.scheduledCalls.findFirstUpcomingSeriesInstance({ seriesId })
+        : null;
+      if (emailInstance?.startsAt && emailInstance.endsAt) {
+        const seriesTimezone = timezone ?? series.timezone;
+        const changeLines: string[] = [];
+        if (title !== undefined && title !== series.title) {
+          changeLines.push(`Title: ${series.title} → ${title}`);
+        }
+        const nextStartTime = startTime ?? series.startTime;
+        const nextEndTime = endTime ?? series.endTime;
+        if (
+          nextStartTime !== series.startTime ||
+          nextEndTime !== series.endTime ||
+          seriesTimezone !== series.timezone
+        ) {
+          changeLines.push(
+            `Time: ${series.startTime}–${series.endTime} (${series.timezone}) → ${nextStartTime}–${nextEndTime} (${seriesTimezone})`,
+          );
+        }
+        if (ruleChanged) changeLines.push('The repeat schedule has changed.');
+        this.emailCallEdit({
+          context: 'updateRecurringSeries',
+          call: {
+            externalId: emailInstance.externalId,
+            callTitle: emailInstance.title ?? title ?? series.title,
+            startsAt: emailInstance.startsAt,
+            endsAt: emailInstance.endsAt,
+            timezone: seriesTimezone,
+            organizerUserId: series.organizerId,
+          },
+          actorUserId: userId,
+          changeLines,
+          previousInternalUserIds,
+          next: {
+            externalEmails: normalizedExternalInvitees ?? previousExternalInvitees,
+            internalUserIds: await repositories.recurringCallParticipants.findInternalParticipantUserIds(seriesId),
+          },
+          newlyAddedExternalEmails: newlyAddedExternalInvitees,
+        });
+      }
+
       // updatedSeries.startsOn is the UTC dtstart sent directly by the frontend;
       // use it as the notification start. endsAt is derived by adding the call duration.
       const effectiveStartTime = startTime ?? series.startTime;
@@ -1211,6 +1401,21 @@ export class ScheduleCallController {
 
       await recurringCallService.cancelScheduledCall(call, 'cancelScheduledCall');
 
+      if (req.query.notifyParticipantsByEmail === 'true' && call.startsAt && call.endsAt) {
+        this.sendCallChangeEmailsInBackground('cancelScheduledCall', {
+          kind: 'cancelled',
+          externalId,
+          callTitle: call.title ?? 'Scheduled Call',
+          startsAt: call.startsAt,
+          endsAt: call.endsAt,
+          timezone: call.timezone,
+          organizerUserId: call.createdByUserId,
+          externalEmails: await repositories.calls.findExternalInviteeEmails(call.id),
+          internalUserIds: (await repositories.calls.findParticipants(call.id)).map((p) => p.userId),
+          changeLines: ['This call has been cancelled.'],
+        });
+      }
+
       logger.info(`Call ${externalId} cancelled by organizer ${userId}`);
 
       res.json({ success: true });
@@ -1260,7 +1465,34 @@ export class ScheduleCallController {
         return;
       }
 
+      // Snapshot before cancelling: no SCHEDULED instance is left to link to afterwards.
+      const notifyByEmail = req.query.notifyParticipantsByEmail === 'true';
+      const emailInstance = notifyByEmail
+        ? await repositories.scheduledCalls.findFirstUpcomingSeriesInstance({ seriesId })
+        : null;
+      const emailExternals = notifyByEmail
+        ? await repositories.recurringCallParticipants.findExternalInviteeEmails(seriesId)
+        : [];
+      const emailInternals = notifyByEmail
+        ? await repositories.recurringCallParticipants.findInternalParticipantUserIds(seriesId)
+        : [];
+
       const { cancelledCalls } = await recurringCallService.cancelSeries(seriesId);
+
+      if (emailInstance?.startsAt && emailInstance.endsAt) {
+        this.sendCallChangeEmailsInBackground('cancelRecurringSeries', {
+          kind: 'cancelled',
+          externalId: emailInstance.externalId,
+          callTitle: series.title,
+          startsAt: emailInstance.startsAt,
+          endsAt: emailInstance.endsAt,
+          timezone: series.timezone,
+          organizerUserId: series.organizerId,
+          externalEmails: emailExternals,
+          internalUserIds: emailInternals,
+          changeLines: ['This recurring series has been cancelled.'],
+        });
+      }
 
       logger.info(`Series ${seriesId} cancelled by organizer ${userId}: ${cancelledCalls} future instances cancelled`);
       res.json({ success: true, cancelledCalls });

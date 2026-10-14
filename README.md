@@ -340,6 +340,7 @@ xyne-spaces/
 │   ├── dashboard/          Web client — React 19 + Vite + Zero
 │   ├── dashboard-external/ Externally embeddable dashboard
 │   ├── electron/           Desktop wrapper
+│   ├── mobile/             Mobile app (iOS, Android) — Expo + React Native
 │   ├── public-web/         Public marketing site
 │   ├── site/               Documentation site
 │   ├── xyne-claw/          Agent runtime — the sandbox
@@ -361,6 +362,7 @@ xyne-spaces/
 | Backend | Node 22, TypeScript, Express, Prisma, PostgreSQL, Redis, Bull |
 | Sync | Zero (Rocicorp), ACL-enforced queries and mutators |
 | Dashboard | React 19, Vite, Tailwind, Radix UI, XState, TipTap |
+| Mobile | Expo SDK 57, React Native 0.86, Expo Router, Zero |
 | Search | Vespa |
 | Agents | Xyne Claw + Claw Auth, MCP tooling, LiteLLM for model access |
 | Isolation | Kata Containers with QEMU microVMs, egress closed |

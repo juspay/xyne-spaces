@@ -9,6 +9,7 @@ export interface EmailClassificationJobData {
   groupId: string | null;
   runClassification?: boolean;
   runPriority?: boolean;
+  runAssignment?: boolean;
 }
 
 class EmailClassificationQueue {

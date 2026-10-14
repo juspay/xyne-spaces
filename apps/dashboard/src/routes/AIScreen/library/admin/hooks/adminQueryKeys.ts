@@ -36,8 +36,6 @@ export const auditAgentOptionsKey = (userId: string): unknown[] => [
   userId,
 ];
 
-export const agentDetailKey = (slug: string): unknown[] => ['claw-agent-detail', slug];
-
 export const mcpPublishKey = (): unknown[] => ['claw-admin-mcp-publish'];
 
 export const workflowRequestsKey = (scope: AdminOrgScope): unknown[] => [

@@ -11,6 +11,8 @@ export interface CallInvitationInput {
   orgName?: string;
   joinUrl: string;
   userBodyHtml: string;
+  heading?: string;
+  hideJoin?: boolean;
 }
 
 const FONT_SANS = `'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif`;
@@ -79,7 +81,7 @@ export function renderCallInvitationHtml(i: CallInvitationInput): string {
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
           <tr>
             <td style="vertical-align:middle">
-              <p style="margin:0;font:600 11px/1 ${FONT_SANS};letter-spacing:0.2em;text-transform:uppercase;color:${ACCENT}">Meeting invitation</p>
+              <p style="margin:0;font:600 11px/1 ${FONT_SANS};letter-spacing:0.2em;text-transform:uppercase;color:${ACCENT}">${esc(i.heading ?? 'Meeting invitation')}</p>
             </td>
             <td align="right" style="vertical-align:middle">${orgChip}</td>
           </tr>
@@ -127,7 +129,7 @@ export function renderCallInvitationHtml(i: CallInvitationInput): string {
         ${i.userBodyHtml}
       </td></tr>
 
-      <tr><td style="padding:28px 40px 24px">
+      ${i.hideJoin ? `<tr><td style="padding:0 0 24px">&nbsp;</td></tr>` : `      <tr><td style="padding:28px 40px 24px">
         <table role="presentation" cellpadding="0" cellspacing="0">
           <tr>
             <td style="background:${PRIMARY};border-radius:8px;">
@@ -138,7 +140,7 @@ export function renderCallInvitationHtml(i: CallInvitationInput): string {
             </td>
           </tr>
         </table>
-      </td></tr>
+      </td></tr>`}
 
       <tr><td style="padding:14px 40px;border-top:1px solid ${LINE};background:${CARD_FOOTER};font:500 10px/1.4 ${FONT_SANS};letter-spacing:0.18em;text-transform:uppercase;color:${MUTED}" align="center">
         Sent via Xyne Spaces

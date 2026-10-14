@@ -594,6 +594,11 @@
 }
 
 @layer components {
+  /* Element the summary-template tour is currently pointing at. */
+  [data-tour-active] {
+    @apply rounded-lg ring-2 ring-primary ring-offset-2 ring-offset-background;
+  }
+
   .text-desk-label {
     font-size: 14px;
     font-weight: 500;

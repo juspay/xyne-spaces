@@ -1,10 +1,11 @@
 import { z } from 'zod';
-import { LLMClient, createUserMessage } from '@framework';
+import { LLMClient, createUserMessage, type LLMResponse } from '@framework';
 
 import { AgentsConfig } from '../../../agents/config.js';
 import { logLLMCallStart, logLLMError } from '../../../agents/agentLogger.js';
 import { parseAgentOutput } from '../../../services/agents/utils.js';
 import { logger } from '../../../utils/logger.js';
+import { config as appConfig } from '../../../config/env.js';
 import { orgLLMCredentialService } from '../../../services/orgLLMCredentialService.js';
 import type { CategoryConfig, GeneratedTag } from '../../types.js';
 import { validateGeneratedTags } from '../validate.js';
@@ -12,6 +13,7 @@ import { LlmRawOutputSchema } from './schema.js';
 import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 
 const AGENT_NAME = 'TagGeneratorLLM';
+const MAX_REPLY_LOG_LENGTH = 1000;
 
 function renderCategoryBlock(name: string, category: CategoryConfig): string {
   const instructions = category.prompt ?? 'Use your judgement.';
@@ -92,6 +94,7 @@ export async function generateLlmTags(
       config: {
         apiKey: credential.apiKey,
         baseUrl: credential.baseUrl,
+        timeout: appConfig.tagGenerationLlmTimeoutMs,
       },
     },
     defaultModel: modelName,
@@ -100,18 +103,18 @@ export async function generateLlmTags(
 
   logLLMCallStart(AGENT_NAME, modelName, 'ORG_LITELLM_SERVICE_ACCOUNT');
 
-  let responseContent: string;
+  let response: LLMResponse;
   try {
-    const response = await llmClient.generate({
+    response = await llmClient.generate({
       messages: [createUserMessage(buildUserPrompt(context))],
       systemPrompt: buildSystemPrompt(categories),
+      parameters: { temperature: 0.1, maxTokens: 8192 },
       extraBody: {
         chat_template_kwargs: {
           enable_thinking: false,
         },
       },
     });
-    responseContent = response.content;
   } catch (err) {
     logLLMError(AGENT_NAME, err);
     throw new Error(`LLM tag generation failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -119,8 +122,15 @@ export async function generateLlmTags(
 
   let parsed: z.infer<typeof LlmRawOutputSchema>;
   try {
-    parsed = parseAgentOutput(responseContent, LlmRawOutputSchema);
+    parsed = parseAgentOutput(response.content, LlmRawOutputSchema);
   } catch (err) {
+    // In the message, not metadata: this is the only record of what the model actually returned.
+    logger.warn(
+      `[${AGENT_NAME}] Unparseable reply: requestId=${response.metadata.requestId} ` +
+        `raw=${JSON.stringify(response.metadata.rawResponse)} promptTokens=${response.usage.promptTokens} ` +
+        `completionTokens=${response.usage.completionTokens} thinkingChars=${response.thinking?.length ?? 0} ` +
+        `reply=${JSON.stringify(response.content.slice(0, MAX_REPLY_LOG_LENGTH))}`,
+    );
     throw new Error(`LLM tag output parse failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 

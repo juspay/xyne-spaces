@@ -1,5 +1,6 @@
+import { createHash } from 'crypto';
 import { logger } from '@/utils/logger';
-import { ActivityType, MAX_DUPLICATE_SCOPE_FIELDS, TicketReferenceRelation } from '@xyne/shared';
+import { ActivityType, MAX_DUPLICATE_LOOKBACK_DAYS, MAX_DUPLICATE_SCOPE_FIELDS, TicketReferenceRelation } from '@xyne/shared';
 import {
   resolveBoardTicketFormId,
   resolveFormFieldDefinitionsForForm,
@@ -11,10 +12,11 @@ import { DatabaseClient } from '@/database/client';
 import { TicketsACL } from '@/database/acl/tables/tickets-acl';
 import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
 import { transformVespaResults } from '@/services/vespaSearch/resultTransform';
+import { redisService } from '@/services/redisService';
 import { vespaService } from '@/services/vespaSearch';
 import { RankProfile } from '@/vespa/src/types';
 import { z } from 'zod';
-import type { Prisma } from '@prisma/client';
+import type { EmailChannelPreference, Prisma } from '@prisma/client';
 import { buildFormFields } from '@/zero/vespa-injection/core/form-fields';
 import type {
   TicketDuplicateCandidate,
@@ -43,6 +45,44 @@ const DUPLICATE_RELATIONS = [
 // Set on the analysis when Vespa could not be searched, so an on-demand check can tell
 // "nothing similar" apart from "couldn't look".
 const SEARCH_UNAVAILABLE_ERROR = 'SEARCH_UNAVAILABLE';
+
+// Why a desk-channel check did not run. A skip is NOT an error and NOT "no duplicates":
+// the analysis carries no error marker so callers don't retry or surface a failure.
+const SKIP_REASON_NOT_CONFIGURED =
+  'Duplicate detection is off for this desk — no scope fields configured in desk settings.';
+const SKIP_REASON_MISSING_SCOPE_VALUES =
+  'Duplicate detection skipped — this ticket has no value for a configured scope field.';
+
+const skippedAnalysis = (reason: string): TicketDuplicateCheckAnalysis => ({
+  isDuplicate: false,
+  duplicateTicketId: null,
+  confidence: 0,
+  reason,
+});
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// The recheck-on-open result is cached per ticket against a fingerprint of everything the
+// run depends on. Candidates are only tickets created before the ticket, so an unchanged
+// ticket and desk config give the same search; reopening it reuses the last outcome
+// instead of paying for another search and Jev/LLM call. The TTL bounds how long a
+// candidate indexed late can go unseen.
+const recheckCacheKey = (ticketId: string): string => `ticket:duplicate-recheck-result:${ticketId}`;
+const RECHECK_CACHE_TTL_SECONDS = 24 * 60 * 60;
+
+/**
+ * Earliest createdAt a duplicate candidate may have: the desk's
+ * duplicateScopeConfig.lookbackDays counted back from `asOf` (the ticket's
+ * creation). Undefined/null/0 means no time bound: non-desk tickets pass
+ * undefined (project-wide detection is never time-bounded), and a desk value
+ * of 0/null = all time.
+ */
+const lookbackCutoff = (
+  lookbackDays: number | null | undefined,
+  asOf: number,
+): number | undefined => {
+  return lookbackDays && lookbackDays > 0 ? asOf - lookbackDays * DAY_MS : undefined;
+};
 
 /** What one detection run found, and the ticket it linked as a possible duplicate. */
 export type DuplicateDetectionOutcome = {
@@ -78,6 +118,7 @@ type ResolvedDuplicateScopeField = {
 const duplicateScopeConfigSchema = z.object({
   enabled: z.boolean().optional().default(false),
   scopeFieldGlobalIds: z.array(z.string()).max(MAX_DUPLICATE_SCOPE_FIELDS).optional().default([]),
+  lookbackDays: z.number().int().min(0).max(MAX_DUPLICATE_LOOKBACK_DAYS).nullable().optional(),
 });
 type DuplicateScopeConfig = z.infer<typeof duplicateScopeConfigSchema>;
 
@@ -147,8 +188,9 @@ export const buildDuplicateScopeFieldValues = async (params: {
     return [...valuesByFieldId].map(([fieldId, values]) => ({ fieldId, values }));
   } catch (error) {
     // Scope expansion is best-effort: pass nothing scoped rather than risk a
-    // wrongly-built filter — detection falls back to project-wide behavior.
-    logger.warn('[TicketDuplicateService] Failed to build scope field values, falling back to project-wide detection', {
+    // wrongly-built filter — every configured field then reads missing and the
+    // caller skips detection.
+    logger.warn('[TicketDuplicateService] Failed to build scope field values, skipping duplicate detection', {
       boardId,
       error: error instanceof Error ? error.message : String(error),
     });
@@ -187,19 +229,39 @@ const isDismissal = (value: unknown): boolean => {
 };
 
 class TicketDuplicateService {
-  private async resolveDuplicateScopeConfig(
-    channelId: string | undefined,
-  ): Promise<{ config: DuplicateScopeConfig; boardId: string } | null> {
+  /**
+   * The desk's preference row, or null. For a channel ticket a missing/failed read now
+   * means duplicate detection is skipped entirely — never silently project-wide.
+   */
+  private async findChannelPreference(channelId: string | undefined): Promise<EmailChannelPreference | null> {
     if (!channelId) {
+      return null;
+    }
+    try {
+      return await emailChannelPreferenceRepo.findByChannelId(channelId);
+    } catch (error) {
+      logger.warn('[TicketDuplicateService] Failed to load channel preference, skipping duplicate detection', {
+        channelId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+  }
+
+  /**
+   * The desk's enabled scope config, or null when detection must NOT run for its tickets:
+   * no preference, no/malformed config, disabled, no fields selected, or no board. Desk
+   * duplicate detection is opt-in — null means skip, not project-wide.
+   */
+  private resolveDuplicateScopeConfig(
+    channelId: string | undefined,
+    preference: EmailChannelPreference | null,
+  ): { config: DuplicateScopeConfig; boardId: string } | null {
+    if (!channelId || !preference?.duplicateScopeConfig) {
       return null;
     }
 
     try {
-      const preference = await emailChannelPreferenceRepo.findByChannelId(channelId);
-      if (!preference?.duplicateScopeConfig) {
-        return null;
-      }
-
       let rawConfig: unknown = preference.duplicateScopeConfig;
       if (typeof rawConfig === 'string') {
         try {
@@ -231,7 +293,7 @@ class TicketDuplicateService {
       }
       return { config: parsed.data, boardId: preference.boardId };
     } catch (error) {
-      logger.warn('[TicketDuplicateService] Failed to load duplicateScopeConfig, falling back to project-wide detection', {
+      logger.warn('[TicketDuplicateService] Failed to read duplicateScopeConfig, skipping duplicate detection', {
         channelId,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -240,36 +302,33 @@ class TicketDuplicateService {
   }
 
   /**
-   * Turn the channel config + the caller-supplied raw scope values into Vespa
-   * `fieldId::value` tokens, one per configured global field. YqlBuilder's
+   * Turn the resolved channel scope config + the caller-supplied raw scope values into
+   * Vespa `fieldId::value` tokens, one per configured global field. YqlBuilder's
    * dynamicFieldValues ANDs across distinct fieldIds, which is exactly the
    * "candidate must match every scope field" semantic this feature wants.
    *
    * Returns:
-   *  - null      → no scoping applies (project-wide candidates). This is also the
-   *                FALLBACK when the config is enabled but the new ticket lacks a
-   *                configured value — a missing value must never silently drop
-   *                detection.
+   *  - null      → the ticket lacks a value for a configured scope field (or the board
+   *                form could not be read). The caller SKIPS detection on null — a
+   *                missing value now drops the check rather than widening it to
+   *                project-wide.
    *  - string[]  → tokens to pass as ticket.dynamicFieldValues
    */
   private async buildScopeDynamicFieldValues(input: {
+    scope: { config: DuplicateScopeConfig; boardId: string };
     channelId?: string;
     projectId: string;
     scopeFieldValues?: DuplicateScopeFieldValue[];
     excludeTicketId?: string;
   }): Promise<string[] | null> {
-    const { channelId, projectId, scopeFieldValues, excludeTicketId } = input;
-    const scope = await this.resolveDuplicateScopeConfig(channelId);
-    if (!scope) {
-      return null;
-    }
+    const { scope, channelId, projectId, scopeFieldValues, excludeTicketId } = input;
     const { config: scopeConfig, boardId } = scope;
 
     // providedScopeFieldIds separates "the ticket carried no value for this key" from
     // "this key is not on the board's form at all" — same log line, different fixes.
-    const logProjectWideFallback = (missingScopeFieldIds: string[]): void => {
+    const logDetectionSkipped = (missingScopeFieldIds: string[]): void => {
       logger.info(
-        '[TicketDuplicateService] Channel scope fields missing on new ticket, using project-wide duplicate search',
+        '[TicketDuplicateService] Channel scope fields missing on new ticket, skipping duplicate detection',
         {
           ticketId: excludeTicketId,
           channelId,
@@ -282,7 +341,7 @@ class TicketDuplicateService {
     };
 
     if (!scopeFieldValues || scopeFieldValues.length === 0) {
-      logProjectWideFallback(scopeConfig.scopeFieldGlobalIds);
+      logDetectionSkipped(scopeConfig.scopeFieldGlobalIds);
       return null;
     }
 
@@ -298,7 +357,7 @@ class TicketDuplicateService {
 
     const missing = scopeConfig.scopeFieldGlobalIds.filter(id => !valuesByFieldId.has(id));
     if (missing.length > 0) {
-      logProjectWideFallback(missing);
+      logDetectionSkipped(missing);
       return null;
     }
 
@@ -314,14 +373,15 @@ class TicketDuplicateService {
    * Re-run duplicate detection after AI classification has written form fields.
    *
    * Detection normally runs once, at ticket creation. For an email-created ticket that
-   * means no custom-field values exist yet, so a scoped channel falls back to a
-   * project-wide search. Classification is the only path where a machine writes to the
-   * ticket afterwards, so if it fills a configured scope key, a scoped pass can now find
-   * what the creation-time run could not.
+   * means no custom-field values exist yet, so on a scoped channel the creation-time run
+   * is SKIPPED (a missing scope value never widens to project-wide). Classification is
+   * the only path where a machine writes to the ticket afterwards, so if it fills a
+   * configured scope key, the run below is the first one able to find anything.
    *
-   * APPEND-ONLY: the creation-time result stands. createMany(skipDuplicates) plus the
-   * unique (source, target, relationType) constraint means re-running can add rows but
-   * never duplicates one, and it never removes a link a human may have acted on.
+   * APPEND-ONLY: the creation-time result stands. A pre-insert existence check (either
+   * direction, any duplicate relation type) plus the unique (source, target,
+   * relationType) constraint means re-running can add a row but never duplicates one,
+   * and it never removes a link a human may have acted on.
    *
    * No-ops unless the channel is scoped AND one of the fields classification just wrote
    * is a configured scope key — otherwise the search would be identical to the one that
@@ -338,7 +398,8 @@ class TicketDuplicateService {
       const ticket = await this.findTicketForDetection(ticketId);
       if (!ticket) return;
 
-      const scope = await this.resolveDuplicateScopeConfig(ticket.channelId);
+      const preference = await this.findChannelPreference(ticket.channelId);
+      const scope = this.resolveDuplicateScopeConfig(ticket.channelId, preference);
       if (!scope) return;
       const scopeConfig = scope.config;
 
@@ -364,14 +425,16 @@ class TicketDuplicateService {
   }
 
   /**
-   * Re-run duplicate detection on demand — the desk's "Check for duplicates" action.
-   * Same append-only semantics as the creation-time run: it can link a new possible
-   * duplicate but never removes one. Null when the ticket is gone or the run failed.
+   * Re-run duplicate detection for a saved ticket — the desk runs this whenever a ticket
+   * is opened. Same append-only semantics as the creation-time run: it can link a new
+   * possible duplicate but never removes one. Skipped, returning the last outcome, when
+   * nothing it depends on changed since the last run. Null when the ticket is gone or
+   * the run failed.
    */
   async recheckDuplicatesForTicket(ticketId: string): Promise<DuplicateDetectionOutcome | null> {
     const ticket = await this.findTicketForDetection(ticketId);
     if (!ticket) return null;
-    return this.detectForSavedTicket(ticket);
+    return this.detectForSavedTicket(ticket, undefined, { reuseUnchanged: true });
   }
 
   private findTicketForDetection(ticketId: string) {
@@ -379,7 +442,7 @@ class TicketDuplicateService {
       where: { id: ticketId },
       select: {
         id: true, title: true, description: true,
-        projectId: true, channelId: true, createdBy: true,
+        projectId: true, channelId: true, createdBy: true, createdAt: true,
       },
     });
   }
@@ -387,16 +450,36 @@ class TicketDuplicateService {
   /**
    * Detection for a ticket that already exists, scoped by its saved form values.
    *
-   * Searches as the ticket's creator, like the creation-time run, so the candidate set
-   * doesn't depend on who asked and every link is one its createdBy could have made.
-   * Excludes the ticket's parents (a sub-ticket is not a duplicate of the ticket it
-   * came from) and tickets already linked as duplicates either way — re-finding one of
-   * those would link nothing new.
+   * Searches as the ticket's creator and as of its creation, like the creation-time
+   * run, so the result doesn't depend on who opened it or when: only tickets created
+ * before it, within the desk's window counted back from its creation. Excludes the
+ * ticket's parents (a sub-ticket is not a duplicate of the ticket it came from)
+ * and dismissed candidates.
    */
   private async detectForSavedTicket(
     ticket: NonNullable<Awaited<ReturnType<TicketDuplicateService['findTicketForDetection']>>>,
+    loadedPreference?: EmailChannelPreference | null,
+    { reuseUnchanged = false }: { reuseUnchanged?: boolean } = {},
   ): Promise<DuplicateDetectionOutcome | null> {
-    const [savedValues, parentMappings, duplicateReferences, referenceActivities] = await Promise.all([
+    const preference = loadedPreference !== undefined
+      ? loadedPreference
+      : await this.findChannelPreference(ticket.channelId);
+
+    // Unconfigured desk: skip the whole check — no form-value/exclusion reads, no
+    // Vespa search, no LLM call. Non-desk tickets (no channel) fall through to the
+    // legacy project-wide run below.
+    const scope = ticket.channelId
+      ? this.resolveDuplicateScopeConfig(ticket.channelId, preference)
+      : null;
+    if (ticket.channelId && !scope) {
+      return {
+        analysis: skippedAnalysis(SKIP_REASON_NOT_CONFIGURED),
+        candidateCount: 0,
+        linkedTicketId: null,
+      };
+    }
+
+    const [savedValues, parentMappings, referenceActivities] = await Promise.all([
       prisma.formEntityValues.findMany({
         where: { entityId: ticket.id, entityType: 'TICKET' },
         orderBy: [{ version: 'desc' }, { updatedAt: 'desc' }],
@@ -406,13 +489,6 @@ class TicketDuplicateService {
       prisma.ticketSubTicketMapping.findMany({
         where: { subTicket: { mappedTicketId: ticket.id } },
         select: { ticketId: true },
-      }),
-      prisma.ticketReferenceMapping.findMany({
-        where: {
-          relationType: { in: DUPLICATE_RELATIONS },
-          OR: [{ sourceTicketId: ticket.id }, { targetTicketId: ticket.id }],
-        },
-        select: { sourceTicketId: true, targetTicketId: true },
       }),
       prisma.ticketActivity.findMany({
         where: { ticketId: ticket.id, activityType: ActivityType.REFERENCE_TICKET },
@@ -430,15 +506,34 @@ class TicketDuplicateService {
       .filter(([, value]) => isDismissal(value))
       .map(([counterpart]) => counterpart);
 
-    const excludeTicketIds = [
-      ...parentMappings.map(mapping => mapping.ticketId),
-      ...duplicateReferences.map(reference =>
-        reference.sourceTicketId === ticket.id ? reference.targetTicketId : reference.sourceTicketId,
-      ),
-      ...dismissedTicketIds,
-    ];
+    const parentTicketIds = parentMappings.map(mapping => mapping.ticketId);
+    // Search excludes parents and dismissed candidates only.
+    const excludeTicketIds = [...parentTicketIds, ...dismissedTicketIds];
+    const scopeFieldValues = savedValues.map(v => ({ fieldId: v.fieldId, value: v.actualFieldValue }));
 
-    return this.persistDuplicateReferences({
+    // Linked duplicates are deliberately OUT of the fingerprint: a new link must not
+    // invalidate the cache, or every open would re-run and keep linking the next
+    // candidate — a silently growing chain plus an LLM call per open. Parents and
+    // dismissals stay in: a dismissal means "look again". lookbackDays is already
+    // covered by the scopeConfig string.
+    const fingerprint = createHash('sha256')
+      .update(JSON.stringify({
+        title: ticket.title,
+        description: ticket.description,
+        projectId: ticket.projectId,
+        channelId: ticket.channelId,
+        scopeConfig: preference?.duplicateScopeConfig ?? null,
+        scopeFieldValues: [...scopeFieldValues].sort((a, b) => a.fieldId.localeCompare(b.fieldId)),
+        excludeTicketIds: [...parentTicketIds, ...dismissedTicketIds].sort(),
+      }))
+      .digest('hex');
+
+    if (reuseUnchanged) {
+      const cached = await this.readRecheckCache(ticket.id);
+      if (cached?.fingerprint === fingerprint) return cached.outcome;
+    }
+
+    const outcome = await this.persistDuplicateReferences({
       ticketId: ticket.id,
       ticketCreatedBy: ticket.createdBy,
       title: ticket.title,
@@ -446,9 +541,46 @@ class TicketDuplicateService {
       projectId: ticket.projectId,
       userId: ticket.createdBy,
       channelId: ticket.channelId,
-      scopeFieldValues: savedValues.map(v => ({ fieldId: v.fieldId, value: v.actualFieldValue })),
+      scopeFieldValues,
       excludeTicketIds,
+      preference,
+      asOfTimestamp: ticket.createdAt.getTime(),
     });
+
+    // Only a completed run is reused; a failed search or analysis is retried next open.
+    if (outcome && !outcome.analysis.error) {
+      await this.writeRecheckCache(ticket.id, { fingerprint, outcome });
+    }
+    return outcome;
+  }
+
+  private async readRecheckCache(
+    ticketId: string,
+  ): Promise<{ fingerprint: string; outcome: DuplicateDetectionOutcome } | null> {
+    try {
+      const raw = await redisService.get(recheckCacheKey(ticketId));
+      return raw ? JSON.parse(raw) : null;
+    } catch (error) {
+      logger.warn('[TicketDuplicateService] Recheck cache unavailable, running the check', {
+        ticketId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+  }
+
+  private async writeRecheckCache(
+    ticketId: string,
+    entry: { fingerprint: string; outcome: DuplicateDetectionOutcome },
+  ): Promise<void> {
+    try {
+      await redisService.set(recheckCacheKey(ticketId), JSON.stringify(entry), RECHECK_CACHE_TTL_SECONDS);
+    } catch (error) {
+      logger.warn('[TicketDuplicateService] Failed to cache recheck result', {
+        ticketId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   async checkDuplicates(params: {
@@ -463,8 +595,12 @@ class TicketDuplicateService {
     channelId?: string;
     scopeFieldValues?: DuplicateScopeFieldValue[];
     jevOnly?: boolean;
+    preference?: EmailChannelPreference | null;
+    // Detect as of this epoch-ms instant (a saved ticket's creation): only tickets created
+    // before it, within the desk's window ending at it. Omitted means now.
+    asOfTimestamp?: number;
   }): Promise<{ candidates: TicketDuplicateCandidate[]; analysis: TicketDuplicateCheckAnalysis }> {
-    const { title, description, projectId, userId, limit, excludeTicketId, parentTicketId, excludeTicketIds, channelId, scopeFieldValues, jevOnly } = params;
+    const { title, description, projectId, userId, limit, excludeTicketId, parentTicketId, excludeTicketIds, channelId, scopeFieldValues, jevOnly, asOfTimestamp } = params;
 
     if (jevOnly && !(await isJevScoringEnabled())) {
       return {
@@ -479,12 +615,34 @@ class TicketDuplicateService {
       };
     }
 
-    const scopeDynamicFieldValues = await this.buildScopeDynamicFieldValues({
-      channelId,
-      projectId,
-      scopeFieldValues,
-      excludeTicketId,
-    });
+    const preference = params.preference !== undefined
+      ? params.preference
+      : await this.findChannelPreference(channelId);
+
+    // Desk duplicate detection is opt-in: a channel ticket is checked only when the desk
+    // enabled scope fields AND the ticket carries a value for each of them. Anything
+    // short of that SKIPS the check — the old project-wide fallback is gone. A ticket
+    // with no channel at all (non-desk) keeps the legacy project-wide check.
+    let scopeDynamicFieldValues: string[] | undefined;
+    let deskLookbackDays: number | null | undefined;
+    if (channelId) {
+      const scope = this.resolveDuplicateScopeConfig(channelId, preference);
+      if (!scope) {
+        return { candidates: [], analysis: skippedAnalysis(SKIP_REASON_NOT_CONFIGURED) };
+      }
+      deskLookbackDays = scope.config.lookbackDays ?? undefined;
+      const scopeTokens = await this.buildScopeDynamicFieldValues({
+        scope,
+        channelId,
+        projectId,
+        scopeFieldValues,
+        excludeTicketId,
+      });
+      if (!scopeTokens) {
+        return { candidates: [], analysis: skippedAnalysis(SKIP_REASON_MISSING_SCOPE_VALUES) };
+      }
+      scopeDynamicFieldValues = scopeTokens;
+    }
 
     const { candidates, searchFailed } = await this.getDuplicateCandidates({
       title,
@@ -495,7 +653,9 @@ class TicketDuplicateService {
       excludeTicketId,
       parentTicketId,
       excludeTicketIds,
-      dynamicFieldValues: scopeDynamicFieldValues ?? undefined,
+      dynamicFieldValues: scopeDynamicFieldValues,
+      createdAfterTimestamp: lookbackCutoff(deskLookbackDays, asOfTimestamp ?? Date.now()),
+      createdBeforeTimestamp: asOfTimestamp,
     });
 
     if (searchFailed) {
@@ -638,8 +798,10 @@ class TicketDuplicateService {
     parentTicketId?: string;
     excludeTicketIds?: string[];
     dynamicFieldValues?: string[];
+    createdAfterTimestamp?: number;
+    createdBeforeTimestamp?: number;
   }): Promise<{ candidates: TicketDuplicateCandidate[]; searchFailed: boolean }> {
-    const { title, description, projectId, userId, limit, excludeTicketId, parentTicketId, excludeTicketIds, dynamicFieldValues } = params;
+    const { title, description, projectId, userId, limit, excludeTicketId, parentTicketId, excludeTicketIds, dynamicFieldValues, createdAfterTimestamp, createdBeforeTimestamp } = params;
     const query = buildDuplicateSearchQuery(title, description);
 
     if (!query) {
@@ -679,6 +841,8 @@ class TicketDuplicateService {
             ...(dynamicFieldValues && dynamicFieldValues.length > 0
               ? { dynamicFieldValues }
               : {}),
+            ...(createdAfterTimestamp !== undefined ? { createdAfterTimestamp } : {}),
+            ...(createdBeforeTimestamp !== undefined ? { createdBeforeTimestamp } : {}),
           },
         },
       );
@@ -727,9 +891,11 @@ class TicketDuplicateService {
     excludeTicketIds?: string[];
     channelId?: string;
     scopeFieldValues?: DuplicateScopeFieldValue[];
+    preference?: EmailChannelPreference | null;
+    asOfTimestamp?: number;
   }): Promise<DuplicateDetectionOutcome | null> {
     try {
-      const { ticketId, ticketCreatedBy, title, description, projectId, userId, parentTicketId, excludeTicketIds, channelId, scopeFieldValues } = params;
+      const { ticketId, ticketCreatedBy, title, description, projectId, userId, parentTicketId, excludeTicketIds, channelId, scopeFieldValues, preference, asOfTimestamp } = params;
       const { candidates, analysis } = await this.checkDuplicates({
         title,
         description,
@@ -741,6 +907,8 @@ class TicketDuplicateService {
         excludeTicketIds,
         channelId,
         scopeFieldValues,
+        preference,
+        asOfTimestamp,
       });
 
       const noLink: DuplicateDetectionOutcome = {
@@ -765,32 +933,50 @@ class TicketDuplicateService {
         return noLink;
       }
 
-      const workspaceId = await resolveWorkspaceIdFromModel(prisma, 'project', { id: projectId });
-
-      const referenceRows = [
-        {
-          sourceTicketId: ticketId,
-          targetTicketId: duplicateCandidate.id,
-          workspaceId,
-          relationType: TicketReferenceRelation.DUPLICATE_POSSIBLE,
-          createdBy: ticketCreatedBy,
+      // An existing duplicate link to this counterpart — either direction, possible or
+      // confirmed — is the same duplicate. The unique key includes relationType, so
+      // relying on skipDuplicates alone would stack a POSSIBLE row next to a CONFIRMED
+      // one; check before inserting instead.
+      const existingDuplicateLink = await prisma.ticketReferenceMapping.findFirst({
+        where: {
+          relationType: { in: DUPLICATE_RELATIONS },
+          OR: [
+            { sourceTicketId: ticketId, targetTicketId: duplicateCandidate.id },
+            { sourceTicketId: duplicateCandidate.id, targetTicketId: ticketId },
+          ],
         },
-      ];
-
-      const { count } = await prisma.ticketReferenceMapping.createMany({
-        data: referenceRows,
-        skipDuplicates: true,
+        select: { id: true },
       });
+
+      let createdNow = false;
+      if (!existingDuplicateLink) {
+        const workspaceId = await resolveWorkspaceIdFromModel(prisma, 'project', { id: projectId });
+
+        const { count } = await prisma.ticketReferenceMapping.createMany({
+          data: [
+            {
+              sourceTicketId: ticketId,
+              targetTicketId: duplicateCandidate.id,
+              workspaceId,
+              relationType: TicketReferenceRelation.DUPLICATE_POSSIBLE,
+              createdBy: ticketCreatedBy,
+            },
+          ],
+          skipDuplicates: true,
+        });
+        createdNow = count > 0;
+      }
 
       logger.info('[TicketDuplicateService] Linked possible duplicate', {
         ticketId,
         targetTicketId: duplicateCandidate.id,
         confidence: analysis.confidence,
-        created: count > 0,
+        created: createdNow,
       });
 
-      // skipDuplicates makes an existing link a silent no-op; only report a link made now.
-      return { ...noLink, linkedTicketId: count > 0 ? duplicateCandidate.id : null };
+      // A re-finding of an existing link still means the ticket IS a duplicate of
+      // this candidate — report it regardless of whether the row was created now.
+      return { ...noLink, linkedTicketId: duplicateCandidate.id };
     } catch (error) {
       logger.error('Failed to persist duplicate ticket references', error);
       return null;

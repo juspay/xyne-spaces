@@ -9,7 +9,8 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
   estimateTokens: () => 25_000, // > default keepRecentTokens (20_000) → fresh start
 }));
 
-import { compactionExtension, evaluateCompaction } from "../src/compaction-extension.js";
+import { buildTaskAnchor, compactionExtension, evaluateCompaction, fitTask, summaryContent } from "../src/compaction-extension.js";
+import { pinRunTask } from "../src/run-context.js";
 
 /** Capture the `session_before_compact` handler the factory registers on `pi`. */
 function registerHandler() {
@@ -102,4 +103,49 @@ test("compact() throwing still degrades to pi-native (returns undefined, never t
 
   const handler = registerHandler();
   await expect(handler(freshStartEvent(), ctx)).resolves.toBeUndefined();
+});
+
+test("summary that is only pi's appended file lists is treated as empty → falls back", async () => {
+  compactMock.mockResolvedValue({
+    summary:
+      "\n\n<read-files>\n/app/session-skills/x/account-registry/SKILL.md\n/app/session-skills/x/observability/SKILL.md\n</read-files>",
+    firstKeptEntryId: "__xyne_fresh_start__",
+  });
+
+  const handler = registerHandler();
+  const result = await handler(freshStartEvent(), ctx);
+
+  expect(result).toBeUndefined();
+});
+
+test("summaryContent strips read and modified file lists", () => {
+  expect(summaryContent("<read-files>\na\n</read-files>\n\n<modified-files>\nb\n</modified-files>")).toBe("");
+  expect(summaryContent("## Goal\nRCA the alarm\n\n<read-files>\na\n</read-files>")).toBe("## Goal\nRCA the alarm");
+});
+
+test("fresh-start summary carries the run's original task verbatim", async () => {
+  compactMock.mockResolvedValue({ summary: "## Progress\nAlarm confirmed.", firstKeptEntryId: "__xyne_fresh_start__" });
+  pinRunTask("Read the alert thread and perform a detailed RCA.");
+
+  const handler = registerHandler();
+  const result = await handler(freshStartEvent(), ctx);
+
+  const committed = (result as { compaction: { summary: string } }).compaction;
+  expect(committed.summary.startsWith("## Original Task (verbatim)\nRead the alert thread and perform a detailed RCA.")).toBe(true);
+  expect(committed.summary).toContain("## Progress\nAlarm confirmed.");
+});
+
+test("buildTaskAnchor is empty without a task and keeps a typical long task whole", () => {
+  expect(buildTaskAnchor("  ")).toBe("");
+  const task = `${"rules ".repeat(1_200)}\nC. If the report can't be attached, post it as plain text.`;
+  expect(buildTaskAnchor(task)).toContain(task.trim());
+});
+
+test("fitTask keeps the start and the end of an oversized task", () => {
+  const task = `START ${"x".repeat(40_000)} END-OF-TASK output rules`;
+  const fitted = fitTask(task);
+  expect(fitted.length).toBeLessThan(24_100);
+  expect(fitted.startsWith("START ")).toBe(true);
+  expect(fitted.endsWith("END-OF-TASK output rules")).toBe(true);
+  expect(fitted).toContain("characters of the task omitted");
 });

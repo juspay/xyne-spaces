@@ -97,6 +97,7 @@ import { queries } from '../../zero/queries';
 import { useTicketKeysetWindow } from '../../hooks/useTicketKeysetWindow';
 import { QueryResultType } from '@rocicorp/zero';
 import ThreadMessages from '../../components/Chat/ThreadPannel';
+import { ChannelsDeskSourceThread } from './ChannelsDeskSourceThread';
 import { useChannel, useEmailChannels, useUserChannelStatuses } from '../../hooks/useChannels';
 import { useRefetchExternalSource } from '../../hooks/useRefetchExternalSource';
 import { useChannelFetchSources } from '../../hooks/useChannelFetchSources';
@@ -376,6 +377,8 @@ const COMPOSE_DISABLED_CHANNEL_TYPES: ReadonlySet<ChannelType | undefined> = new
   ChannelType.SLACK,
   ChannelType.APP,
   ChannelType.SOCIAL_MEDIA,
+  // Channels desk threads start in their own channels, not from the desk.
+  ChannelType.CHANNELS,
 ]);
 
 const COMPOSE_INSTANCES_KEY_PREFIX = 'xyne:composeInstances:';
@@ -2644,7 +2647,7 @@ const SupportScreen = (): ReactElement => {
   const createChannelMutation = useMutation({
     mutationFn: async (
       data: CreateChannelFormData & {
-        channelType?: 'EMAIL' | 'SLACK' | 'APP' | 'CALL' | undefined;
+        channelType?: 'EMAIL' | 'SLACK' | 'APP' | 'CALL' | 'CHANNELS' | undefined;
         emailDeskOpts?: EmailDeskOpts;
       },
     ) => {
@@ -2672,9 +2675,9 @@ const SupportScreen = (): ReactElement => {
   const handleCreateEmailChannel = (
     data: CreateChannelFormData & {
       connector?: 'google' | 'microsoft' | null;
-      channelType?: 'EMAIL' | 'SLACK' | 'APP' | 'CALL' | 'SOCIAL_MEDIA' | undefined;
+      channelType?: 'EMAIL' | 'SLACK' | 'APP' | 'CALL' | 'SOCIAL_MEDIA' | 'CHANNELS' | undefined;
       assigneeUserGroupId?: string;
-      deskType?: 'EMAIL' | 'DL' | 'SLACK' | 'APP' | 'CALL' | 'SOCIAL_MEDIA';
+      deskType?: 'EMAIL' | 'DL' | 'SLACK' | 'APP' | 'CALL' | 'SOCIAL_MEDIA' | 'CHANNELS';
       callSource?: 'OZONETEL';
       dlEmail?: string;
       slackChannelId?: string;
@@ -2834,6 +2837,19 @@ const SupportScreen = (): ReactElement => {
         ...rest,
         channelType: 'APP',
         emailDeskOpts: { deskType: DeskType.APP, installedAppId },
+      });
+      return;
+    }
+
+    if (deskType === 'CHANNELS') {
+      if (!installedAppId) {
+        toast.error('Please select an app');
+        return;
+      }
+      createChannelMutation.mutate({
+        ...rest,
+        channelType: 'CHANNELS',
+        emailDeskOpts: { deskType: DeskType.CHANNELS, installedAppId },
       });
       return;
     }
@@ -3112,17 +3128,22 @@ const SupportScreen = (): ReactElement => {
                   label: 'Call',
                   className: 'bg-lime-100 text-lime-700 dark:bg-lime-500/20 dark:text-lime-200',
                 }
-              : {
-                  label: 'Mailbox',
-                  className: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-200',
-                };
+              : c.type === ChannelType.CHANNELS
+                ? {
+                    label: 'Channels',
+                    className: 'bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-200',
+                  }
+                : {
+                    label: 'Mailbox',
+                    className: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-200',
+                  };
     const isJoined = joinedChannelIds.has(c.id);
-    // Labels apply to email and app desks; mailbox folders come in two forms — the
-    // full email set and a single "All items" entry for app desk channel
-    // type. Folders and labels share this one expandable subtree.
+    // Labels apply to every desk type; mailbox folders come in two forms — the full email
+    // set for email desks and a single "All items" entry for Slack, App, Call and social
+    // desks. Folders and labels share this one expandable subtree.
     const hasMailboxFolders = c.type === ChannelType.EMAIL;
-    const hasBasicFolders = !hasMailboxFolders && c.type === ChannelType.APP;
-    const canExpandDesk = isJoined && (hasMailboxFolders || hasBasicFolders);
+    const hasBasicFolders = !hasMailboxFolders;
+    const canExpandDesk = isJoined;
     const isExpanded = canExpandDesk && expandedDeskIds.has(c.id);
     const isActive = selectedChannelId === c.id;
     const status = statusByChannelId.get(c.id);
@@ -5765,7 +5786,6 @@ export const SupportTicketDetail = ({
       threadScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
     });
   };
-
   const composerOverlayRef = useRef<HTMLDivElement>(null);
   const [composerOverlayHeight, setComposerOverlayHeight] = useState<number>(96);
   useEffect(() => {
@@ -5919,8 +5939,7 @@ export const SupportTicketDetail = ({
   const [isScheduleCallModalOpen, setIsScheduleCallModalOpen] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [labelPickerOpen, setLabelPickerOpen] = useState(false);
-  const { isRechecking: isRecheckingDuplicates, recheck: recheckDuplicates } =
-    useRecheckTicketDuplicates(ticket?.id);
+  useRecheckTicketDuplicates(ticket && !ticket.isArchived ? ticket.id : null);
   if (!ticketIdParam) {
     return (
       <div className='h-full flex items-center justify-center'>
@@ -6203,22 +6222,6 @@ export const SupportTicketDetail = ({
                         <LinkIcon size={14} className='shrink-0' />
                         Copy link
                       </DropdownMenuItem>
-                      {ticket?.id && !ticket.isArchived && (
-                        <DropdownMenuItem
-                          onSelect={recheckDuplicates}
-                          disabled={isRecheckingDuplicates}
-                          data-track-category='Support'
-                          data-track-name='RecheckDuplicates'
-                          data-track-metadata={JSON.stringify({ surface: 'more_menu' })}
-                        >
-                          {isRecheckingDuplicates ? (
-                            <Loader2 size={14} className='animate-spin shrink-0' />
-                          ) : (
-                            <RefreshCw size={14} className='shrink-0' />
-                          )}
-                          Check for duplicates
-                        </DropdownMenuItem>
-                      )}
                       {emails.length > 0 &&
                         channel?.type !== ChannelType.SLACK &&
                         channel?.type !== ChannelType.APP && (
@@ -6426,9 +6429,18 @@ export const SupportTicketDetail = ({
                 )}
               </div>
             </div>
+            {/* A Channels desk ticket opens the merchant's thread in the regular thread view, composer included. */}
+            {channel?.type === ChannelType.CHANNELS && emails[0]?.externalThreadId && (
+              <div className='flex-1 min-h-0 flex flex-col'>
+                <ChannelsDeskSourceThread sourceConversationId={emails[0].externalThreadId} />
+              </div>
+            )}
             <div
               ref={threadScrollRef}
-              className='flex-1 overflow-y-auto no-scrollbar px-6 py-4'
+              className={cn(
+                'flex-1 overflow-y-auto no-scrollbar px-6 py-4',
+                channel?.type === ChannelType.CHANNELS && 'hidden',
+              )}
               style={{
                 paddingBottom: composerOverlayHeight + 12,
                 transition: 'padding-bottom 280ms cubic-bezier(0.22, 1, 0.36, 1)',
@@ -6622,7 +6634,7 @@ export const SupportTicketDetail = ({
                     </div>
                   </div>
                 )}
-              {emails && emails.length > 0 && (
+              {channel?.type !== ChannelType.CHANNELS && emails && emails.length > 0 && (
                 <div className='mb-6'>
                   {isAppSourcedTicket ||
                   isSlackSourcedTicket ||
@@ -6669,7 +6681,8 @@ export const SupportTicketDetail = ({
               ref={composerOverlayRef}
             >
               <DuplicateTicketsBanner ticketId={mailboxTicketId} />
-              {isAppSourcedTicket ? (
+              {/* Channels desk tickets reply in the thread view above. */}
+              {channel?.type === ChannelType.CHANNELS ? null : isAppSourcedTicket ? (
                 conversationId ? (
                   <SlackComposer
                     conversationId={conversationId}

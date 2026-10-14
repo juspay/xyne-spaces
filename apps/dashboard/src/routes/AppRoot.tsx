@@ -1816,7 +1816,7 @@ export const router = createBrowserRouter(
                 {
                   path: 'support',
                   element: (
-                    <ResourceProtectedRoute resourceName='SUPPORT'>
+                    <ResourceProtectedRoute resourceName='SUPPORT' minAccess='READ'>
                       <SupportListRestore>
                         <SaveRoute
                           keyword='support'

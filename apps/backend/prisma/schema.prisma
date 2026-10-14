@@ -1007,6 +1007,7 @@ model UserPreference {
   enterSendsMessage        Boolean  @default(true) // true: Enter sends, false: Shift+Enter sends
   allowThreadBroadcastMentions Boolean @default(false) // Allow @channel/@here in thread replies
   showThreadTags           Boolean  @default(false) // Render thread classification chips in chat; opt-in
+  recordingDefaultSummaryTemplateId String? // Recording summaries: used instead of the LLM pick ('default' = code-backed default; null = auto-pick)
 
   // Global notification settings
   globalDesktopNotificationLevel  String?            // Default level for all channels (desktop)

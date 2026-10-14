@@ -8,19 +8,22 @@ name: RCA-check
 #   * `merge_group` — a body-based check cannot report on a merge queue entry, so the
 #     job short-circuits there instead of leaving the queue blocked forever.
 
+# Disabled — triggers commented out.
+# on:
+#   pull_request:
+#     types:
+#       [
+#         opened,
+#         edited,
+#         reopened,
+#         synchronize,
+#         ready_for_review,
+#         labeled,
+#         unlabeled,
+#       ]
+#   merge_group:
 on:
-  pull_request:
-    types:
-      [
-        opened,
-        edited,
-        reopened,
-        synchronize,
-        ready_for_review,
-        labeled,
-        unlabeled,
-      ]
-  merge_group:
+  workflow_dispatch:
 
 permissions:
   contents: read

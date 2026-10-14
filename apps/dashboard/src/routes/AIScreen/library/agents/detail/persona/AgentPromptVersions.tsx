@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState, type ReactElement } from 'react';
-import { diffLines, type Change } from 'diff';
 import { ChevronRight, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/utils/classNames';
+import { computeLineDiff, lineDiffStats } from '@/utils/lineDiff';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useClawPromptVersions } from '@/hooks/useClawPromptVersions';
 import { clawErrorText } from '@/services/claw/clawRequest';
@@ -17,22 +17,6 @@ import { Pill } from '../../../shared/primitives/Pill';
 
 const PROMPT_PREVIEW_HEIGHT = 220;
 const DIFF_HEIGHT = 280;
-
-interface DiffRow {
-  type: 'eq' | 'add' | 'del';
-  text: string;
-}
-
-function computeDiff(before: string, after: string): DiffRow[] {
-  const rows: DiffRow[] = [];
-  for (const change of diffLines(before, after) as Change[]) {
-    const type: DiffRow['type'] = change.added ? 'add' : change.removed ? 'del' : 'eq';
-    const lines = change.value.split('\n');
-    if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
-    for (const text of lines) rows.push({ type, text });
-  }
-  return rows;
-}
 
 function formatStamp(value: string): string {
   const parsed = new Date(value);
@@ -103,16 +87,10 @@ export function AgentPromptVersions({
     const before = versions.find(entry => entry.version === baseVersion);
     const after = versions.find(entry => entry.version === targetVersion);
     if (!before || !after) return null;
-    return computeDiff(before.systemPrompt, after.systemPrompt);
+    return computeLineDiff(before.systemPrompt, after.systemPrompt);
   }, [comparing, baseVersion, targetVersion, versions]);
 
-  const diffStats = useMemo(() => {
-    if (!diff) return null;
-    return {
-      added: diff.filter(row => row.type === 'add').length,
-      removed: diff.filter(row => row.type === 'del').length,
-    };
-  }, [diff]);
+  const diffStats = useMemo(() => (diff ? lineDiffStats(diff) : null), [diff]);
 
   const restore = async (version: number): Promise<void> => {
     try {
