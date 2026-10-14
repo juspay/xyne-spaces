@@ -58,7 +58,7 @@ vi.mock("./conversation-artifacts.js", () => ({
   }),
 }));
 
-import { callSurfaceTool } from "./surface-calls.js";
+import { callSurfaceTool, panelReachable } from "./surface-calls.js";
 
 const online = () => [{ id: "dev-1", orgId: "org-1", deviceName: "mac", lastSeenAt: new Date(), focusedAt: new Date() }];
 const capable = () => state.kv.set("claw:device-capabilities:dev-1", JSON.stringify(["page-tools", "open-url"]));
@@ -130,5 +130,55 @@ describe("browser tools over the device push channel", () => {
     const result = await callSurfaceTool({ userId: "u1", sessionId: "run-thread", toolName: "app-navigate", args: { target: "chat" } });
     expect(result).toEqual({ ok: true, content: "Opened" });
     expect(state.calls[0]).toMatchObject({ toolName: "app-navigate", args: { target: "chat" } });
+  });
+});
+
+describe("panelReachable", () => {
+  beforeEach(() => {
+    state.runs.clear();
+    state.kv.clear();
+    state.devices = [];
+  });
+
+  const chatRun = () =>
+    state.runs.set("run-chat", { userId: "u1", triggerSource: "chat", conversationId: "conv-1", orgId: "org-1" });
+
+  it("is true when the Xyne AI screen for the run has its browser panel open", async () => {
+    chatRun();
+    state.kv.set("claw:page-panel:presence:run-chat", "u1|1");
+    expect(await panelReachable("u1", "run-chat")).toBe(true);
+  });
+
+  it("is true when the user's desktop app is online with page-tools", async () => {
+    chatRun();
+    state.devices = online();
+    capable();
+    expect(await panelReachable("u1", "run-chat")).toBe(true);
+  });
+
+  it("is false for a chat run with no open panel and no capable device", async () => {
+    chatRun();
+    state.kv.set("claw:page-panel:presence:run-chat", "u1|0");
+    state.devices = online();
+    expect(await panelReachable("u1", "run-chat")).toBe(false);
+  });
+
+  it("is false for a run that is not the user's Xyne AI screen run, even with a capable device", async () => {
+    state.runs.set("run-thread", { userId: "u1", triggerSource: "spaces", conversationId: "t-1", orgId: "org-1" });
+    state.devices = online();
+    capable();
+    expect(await panelReachable("u1", "run-thread")).toBe(false);
+    expect(await panelReachable("u2", "run-chat")).toBe(false);
+  });
+
+  it("is false without a user or a run", async () => {
+    expect(await panelReachable(undefined, "run-chat")).toBe(false);
+    expect(await panelReachable("u1", null)).toBe(false);
+  });
+
+  it("ignores another user's panel presence", async () => {
+    chatRun();
+    state.kv.set("claw:page-panel:presence:run-chat", "u2|1");
+    expect(await panelReachable("u1", "run-chat")).toBe(false);
   });
 });

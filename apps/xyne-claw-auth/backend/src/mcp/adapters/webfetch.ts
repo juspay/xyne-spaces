@@ -17,7 +17,9 @@
  */
 
 import { Readability } from "@mozilla/readability";
+import { isLoginUrl } from "xyne-claw-shared";
 import { errMsg } from "../../lib/errors.js";
+import { panelReachable } from "../../lib/surface-calls.js";
 import { parseHTML } from "linkedom";
 import TurndownService from "turndown";
 import type { McpToolInfo } from "../types.js";
@@ -130,9 +132,22 @@ async function readBodyCapped(response: Response, maxBytes: number): Promise<{ t
   return { text: new TextDecoder("utf-8", { fatal: false }).decode(buf), hitCap };
 }
 
+/**
+ * What the agent sees when a page is behind the user's sign-in. When the run can
+ * reach the user's desktop browser panel it is told to continue there; otherwise
+ * it is told to say so, never to retry in a logged-out browser.
+ */
+export function authRequiredMessage(url: string, panelReachable: boolean): string {
+  return panelReachable
+    ? `AUTH_REQUIRED: ${url} needs the user's sign-in. Open it with open-url in the user's browser panel, ` +
+        "ask them to sign in there, then call wait-for-sign-in with the same url."
+    : `AUTH_REQUIRED: ${url} needs the user's sign-in and this run cannot reach their browser. Tell the user, ` +
+        "and suggest opening this chat in the Xyne desktop app or connecting the service under Claw → Connectors.";
+}
+
 export async function handleWebfetch(
   params: Record<string, unknown>,
-  opts?: { highLimit?: boolean },
+  opts?: { highLimit?: boolean; userId?: string | null; sessionId?: string | null },
 ): Promise<string> {
   const highLimit = opts?.highLimit === true;
   const maxOutputChars = highLimit ? HIGH_LIMIT_MAX_OUTPUT_CHARS : MAX_OUTPUT_CHARS;
@@ -180,6 +195,7 @@ export async function handleWebfetch(
     let currentUrl = url;
     let redirectCount = 0;
     let response: Response;
+    let hitLogin = false;
     for (;;) {
       await assertSafeOutboundUrl(currentUrl);
       response = await fetch(currentUrl, {
@@ -202,9 +218,21 @@ export async function handleWebfetch(
         }
         await response.body?.cancel().catch(() => undefined);
         currentUrl = new URL(location, currentUrl).toString();
+        // A redirect to a sign-in page: the content is behind the user's login.
+        // Stop here rather than fetching the login page itself.
+        if (isLoginUrl(currentUrl)) {
+          hitLogin = true;
+          break;
+        }
         continue;
       }
       break;
+    }
+
+    if (hitLogin || response.status === 401 || response.status === 403) {
+      const reachable = await panelReachable(opts?.userId, opts?.sessionId);
+      log.info(`[webfetch] AUTH_REQUIRED url=${url.slice(0, 200)} status=${response.status} login=${hitLogin} panel=${reachable}`);
+      return authRequiredMessage(url, reachable);
     }
 
     if (!response.ok) {

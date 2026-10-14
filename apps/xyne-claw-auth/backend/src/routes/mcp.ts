@@ -1856,7 +1856,11 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
                 ...(spacesAppId ? { spacesAppId } : {}),
                 ...(sessionAgentOrgId ? { orgId: sessionAgentOrgId } : {}),
               })
-            : await handleWebfetch(params ?? {}, { highLimit: tool === "webfetch_high_limit" });
+            : await handleWebfetch(params ?? {}, {
+                highLimit: tool === "webfetch_high_limit",
+                userId,
+                sessionId: req.params.sessionId,
+              });
         res.json({ success: true, data: { content } });
       } catch (err) {
         log.error(`[mcp/call] built-in tool error (${tool}):`, err);

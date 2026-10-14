@@ -219,6 +219,13 @@ export async function callPagePanelTool(input: {
   return { ok: false, content: `The browser panel did not answer ${toolName} in time.` };
 }
 
+/** Whether this user's Xyne AI screen for the run is showing, with its browser panel open, right now. */
+export async function pagePanelOpen(userId: string, runId: string): Promise<boolean> {
+  const raw = await redisService.getConnection().get(presenceKey(runId)).catch(() => null);
+  const presence = parsePresence(raw);
+  return presence?.userId === userId && presence.panelOpen;
+}
+
 function parsePresence(raw: string | null): { userId: string; panelOpen: boolean } | null {
   if (!raw) return null;
   const [userId, panel] = raw.split("|");

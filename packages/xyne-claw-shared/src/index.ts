@@ -175,6 +175,7 @@ export {
   parseLocalSandboxCommand,
 } from "./task-command-names.js";
 export type { TaskCommandName, LocalSandboxCommandName } from "./task-command-names.js";
+export { isLoginUrl } from "./auth-wall.js";
 export {
   matchesAttachmentType,
   isSupportedInboundAttachment,

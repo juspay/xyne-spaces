@@ -5,6 +5,7 @@ import {
   callPagePanelTool,
   isPagePanelTool,
   pagePanelDeadlineMs,
+  pagePanelOpen,
   recordOpenUrlPage,
 } from "./page-panel-calls.js";
 import { deviceCapabilities, wakeDevice } from "./device-push.js";
@@ -74,6 +75,35 @@ function tooBig(args: Record<string, unknown>): boolean {
     return JSON.stringify(args).length > MAX_ARG_CHARS;
   } catch {
     return true;
+  }
+}
+
+/**
+ * Whether a run can reach the user's signed-in desktop browser: it is the user's
+ * own Xyne AI screen run, and either that screen's browser panel is open or one
+ * of their desktop apps is online with page-tools support. Deliberately not
+ * "does the agent have open-url": a server run can hold that tool and still only
+ * reach the logged-out sandbox browser.
+ */
+export async function panelReachable(
+  userId: string | null | undefined,
+  sessionId: string | null | undefined,
+): Promise<boolean> {
+  if (!userId || !sessionId) return false;
+  try {
+    const access = await browserAccessForRun(userId, sessionId);
+    if (access?.surface !== "xyne-ai") return false;
+    if (await pagePanelOpen(userId, sessionId)) return true;
+    const devices = await prisma.localHarnessDevice.findMany({
+      where: { userId, revokedAt: null },
+      select: { id: true, orgId: true, deviceName: true, lastSeenAt: true, focusedAt: true },
+    });
+    const picked = pickDevice(devices);
+    if (!picked.device) return false;
+    return (await deviceCapabilities(picked.device.id)).has("page-tools");
+  } catch (err) {
+    log.warn(`[surface-calls] panelReachable failed run=${sessionId}: ${err instanceof Error ? err.message : String(err)}`);
+    return false;
   }
 }
 
