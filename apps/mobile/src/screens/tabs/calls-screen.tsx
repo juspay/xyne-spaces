@@ -13,6 +13,7 @@ import { useRegisterTabScrollToTop } from '@/src/hooks/useRegisterTabScrollToTop
 import { useTabHeaderScrollY } from '@/src/components/tab-pager/tab-pager-context';
 import { useTabPageFocusEffect, useTabPageIsFocused } from '@/src/hooks/useTabPageFocus';
 import { CallsFab } from '@/src/components/call/calls-fab';
+import { useMountWhileOpen } from '@/src/features/global-search/hooks/use-mount-while-open';
 import { PeopleSheet } from '@/src/features/schedule-call/components/PeopleSheet';
 import {
   NO_PARTICIPANTS,
@@ -247,12 +248,16 @@ const CallsScreen = (): ReactElement => {
 
   const [selectedCall, setSelectedCall] = useState<CallDisplayData | null>(null);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
-  const [instantCall, setInstantCall] = useState<'unmounted' | 'open' | 'closed'>('unmounted');
+  const [isInstantCallOpen, setIsInstantCallOpen] = useState(false);
   const router = useRouter();
   // The Instant Call sheet exists only while it is open or closing. Left mounted it keeps a full
   // fullscreen sheet (its user list and channel subscriptions) alive under the call list,
   // re-rendering it on every user/channel update and republishing it to the portal host on every
   // render of this screen, which is what made this list laggy.
+  const instantCallSheet = useMountWhileOpen(
+    isInstantCallOpen,
+    useCallback((): void => setIsInstantCallOpen(false), []),
+  );
   const { startCall } = useInstantCall();
   // Who Start call was tapped for; the call begins once the sheet has finished closing.
   const pendingInstantCall = useRef<ScheduleCallParticipants | null>(null);
@@ -289,28 +294,21 @@ const CallsScreen = (): ReactElement => {
 
   // Row press: open the call details sheet
   // Stable refs so the memoised CallsFab (and its Portal push) skips live-data re-renders.
-  const openInstantCall = useCallback(() => setInstantCall('open'), []);
-  const onInstantCallOpenChange = useCallback(
-    (open: boolean) => setInstantCall(open ? 'open' : 'closed'),
-    [],
-  );
+  const openInstantCall = useCallback(() => setIsInstantCallOpen(true), []);
   const applyInstantCall = useCallback((picked: ScheduleCallParticipants) => {
     pendingInstantCall.current = picked;
   }, []);
-  // Once the close animation has finished: start the call if one was confirmed, then unmount
-  // unless the sheet was reopened in the meantime.
-  const onInstantCallClosed = useCallback(() => {
+  // Once the close animation has finished: unmount, then start the call if one was confirmed.
+  const { onDismiss: dismissInstantCall } = instantCallSheet.sheetProps;
+  const onInstantCallDismiss = useCallback(() => {
+    dismissInstantCall();
     const picked = pendingInstantCall.current;
     pendingInstantCall.current = null;
     if (picked) {
       startCall(picked);
       router.push('/(protected)/native-call');
     }
-    // An updater, not a ref read: a swipe-away reports "open changed" and "closed" in one tick,
-    // before this screen re-renders, so a ref would still say open and the sheet would stay mounted
-    // (and reopen with the previous picks).
-    setInstantCall(state => (state === 'closed' ? 'unmounted' : state));
-  }, [router, startCall]);
+  }, [dismissInstantCall, router, startCall]);
   const openScheduleCall = useCallback(() => router.push('/(protected)/schedule-call'), [router]);
 
   const handleCallPress = useCallback((call: CallDisplayData) => {
@@ -461,15 +459,14 @@ const CallsScreen = (): ReactElement => {
         <CallsFab
           onStartCall={openInstantCall}
           onScheduleCall={openScheduleCall}
-          isHidden={instantCall === 'open' || isDetailsOpen}
+          isHidden={isInstantCallOpen || isDetailsOpen}
         />
       )}
 
-      {instantCall !== 'unmounted' && (
+      {instantCallSheet.shouldRender && (
         <PeopleSheet
-          isOpen={instantCall === 'open'}
-          onOpenChange={onInstantCallOpenChange}
-          onClosed={onInstantCallClosed}
+          {...instantCallSheet.sheetProps}
+          onDismiss={onInstantCallDismiss}
           participants={NO_PARTICIPANTS}
           onApply={applyInstantCall}
           title='Start an instant call'

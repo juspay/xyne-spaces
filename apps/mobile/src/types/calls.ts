@@ -26,7 +26,6 @@ export interface CallDisplayData {
   }> | null;
   organizerId?: string | null;
   callUpdatesChannel?: string | null;
-  rawParticipantCount?: number | null;
   metadata: Record<string, unknown> | null;
   createdAt: number;
   channel: {

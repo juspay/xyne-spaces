@@ -15,8 +15,8 @@ import { OptionRow, Tile } from './PeopleSheet';
 interface ChannelSheetProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Fired once the sheet has finished closing; the form unmounts it then (see the screen). */
-  onClosed: () => void;
+  /** Fired once the sheet has finished closing; the owner unmounts it then (useMountWhileOpen). */
+  onDismiss: () => void;
   selected: PostCallUpdatesChannel | null;
   onSelect: (channel: PostCallUpdatesChannel) => void;
 }
@@ -25,7 +25,7 @@ interface ChannelSheetProps {
 export const ChannelSheet = ({
   isOpen,
   onOpenChange,
-  onClosed,
+  onDismiss,
   selected,
   onSelect,
 }: ChannelSheetProps): ReactElement => {
@@ -63,7 +63,7 @@ export const ChannelSheet = ({
       ref={sheetRef}
       isOpen={isOpen}
       onOpenChange={onOpenChange}
-      onClose={onClosed}
+      onDismiss={onDismiss}
       mode='fullscreen'
       keyboardBehavior='extend'
       backdropOpacity={0.4}

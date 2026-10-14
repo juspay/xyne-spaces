@@ -11,7 +11,6 @@ export interface PostCallUpdatesChannel {
 }
 
 interface UsePostCallUpdatesParams {
-  participantCount: number;
   initialChannel?: PostCallUpdatesChannel | null;
 }
 
@@ -20,13 +19,11 @@ export interface PostCallUpdates {
   setPostCallUpdates: (value: boolean) => void;
   selectedChannel: PostCallUpdatesChannel | null;
   selectChannel: (channel: PostCallUpdatesChannel) => void;
-  showPostCallUpdates: boolean;
   /** True when the toggle is on but no channel is picked. */
   updateChannelError: boolean;
 }
 
 export function usePostCallUpdates({
-  participantCount,
   initialChannel = null,
 }: UsePostCallUpdatesParams): PostCallUpdates {
   const [postCallUpdates, setPostCallUpdates] = useState(initialChannel !== null);
@@ -35,14 +32,12 @@ export function usePostCallUpdates({
   );
 
   const updateChannelError = postCallUpdates && !selectedChannel;
-  const showPostCallUpdates = participantCount > 0 || postCallUpdates;
 
   return {
     postCallUpdates,
     setPostCallUpdates,
     selectedChannel,
     selectChannel: setSelectedChannel,
-    showPostCallUpdates,
     updateChannelError,
   };
 }

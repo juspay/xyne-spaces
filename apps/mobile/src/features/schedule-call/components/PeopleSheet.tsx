@@ -164,8 +164,8 @@ const TabChip = ({
 interface PeopleSheetProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Fired once the sheet has finished closing; the form unmounts it then (see the screen). */
-  onClosed: () => void;
+  /** Fired once the sheet has finished closing; the owner unmounts it then (useMountWhileOpen). */
+  onDismiss: () => void;
   /** What the form holds now; the sheet edits a draft of it. */
   participants: ScheduleCallParticipants;
   /** Called with the draft when Done is tapped. Swiping the sheet away discards the draft. */
@@ -185,7 +185,7 @@ interface PeopleSheetProps {
 export const PeopleSheet = ({
   isOpen,
   onOpenChange,
-  onClosed,
+  onDismiss,
   participants,
   onApply,
   lockedUserIds,
@@ -490,7 +490,7 @@ export const PeopleSheet = ({
       ref={sheetRef}
       isOpen={isOpen}
       onOpenChange={onOpenChange}
-      onClose={onClosed}
+      onDismiss={onDismiss}
       mode='fullscreen'
       footerComponent={renderFooter}
       keyboardBehavior='extend'

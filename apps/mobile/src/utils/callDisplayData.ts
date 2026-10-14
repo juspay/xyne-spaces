@@ -220,7 +220,6 @@ export function toCallDisplayData(
     participants: call.participants as unknown as CallDisplayData['participants'],
     organizerId: call.organizerId ?? null,
     callUpdatesChannel: call.callUpdatesChannel ?? null,
-    rawParticipantCount: call.participantCount ?? null,
     metadata: call.metadata as Record<string, unknown> | null,
     createdAt: call.createdAt,
     channel,
@@ -242,39 +241,6 @@ export function toCallDisplayData(
     channelVisibility,
   };
 }
-
-/** Previously emitted rows by `kind:id`, so an unchanged call keeps its object identity. */
-export type CallRowCache = Map<string, CallDisplayData>;
-
-const areAvatarsEqual = (
-  a: CallDisplayData['participantAvatars'],
-  b: CallDisplayData['participantAvatars'],
-): boolean =>
-  a.length === b.length &&
-  a.every((x, i) => x.id === b[i]?.id && x.name === b[i]?.name && x.picture === b[i]?.picture);
-
-/**
- * Returns the previously emitted row when nothing visible changed, so a row keeps its identity
- * across updates and `memo` on the list cell bails out (the same idea as reconcileDmRow).
- * Every field is compared by reference except the avatars, which toCallDisplayData rebuilds.
- */
-export const reconcileCallRow = (
-  cache: CallRowCache,
-  key: string,
-  next: CallDisplayData,
-): CallDisplayData => {
-  const previous = cache.get(key);
-  const unchanged =
-    previous !== undefined &&
-    (Object.keys(next) as (keyof CallDisplayData)[]).every(field =>
-      field === 'participantAvatars'
-        ? areAvatarsEqual(previous.participantAvatars, next.participantAvatars)
-        : previous[field] === next[field],
-    );
-  const row = unchanged ? previous : next;
-  cache.set(key, row);
-  return row;
-};
 
 export function getScheduledCallsForDisplay(
   allScheduledCalls: ReadonlyArray<ScheduledRawCall>,

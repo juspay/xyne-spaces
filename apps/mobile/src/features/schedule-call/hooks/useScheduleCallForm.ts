@@ -169,10 +169,7 @@ export const useScheduleCallForm = (editCall: EditCallData | null = null): Sched
   const recurringStartTime = toHHMM(startsAt);
   const recurringEndTime = toHHMM(endsAt);
 
-  const postUpdates = usePostCallUpdates({
-    participantCount,
-    initialChannel: prefill?.callUpdatesChannel ?? null,
-  });
+  const postUpdates = usePostCallUpdates({ initialChannel: prefill?.callUpdatesChannel ?? null });
   const selectedChannelId = postUpdates.selectedChannel?.id;
 
   // ── Dates and times ───────────────────────────────────────────────────────
