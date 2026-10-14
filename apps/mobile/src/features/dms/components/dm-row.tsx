@@ -86,6 +86,9 @@ function AvatarSlot(): ReactElement {
     <Avatar
       userIds={userIds ?? NO_USER_IDS}
       fallbackUsers={identities ?? NO_FALLBACK_USERS}
+      // `participantUserIds` leaves the current user out, so the group bubble
+      // would read one short of the conversation's head count.
+      memberCount={(userIds?.length ?? 0) + 1}
       size={DM_AVATAR_SIZE}
     />
   );

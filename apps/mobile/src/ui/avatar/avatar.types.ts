@@ -14,6 +14,12 @@ export type AvatarProps = {
   userIds: readonly string[];
   /** Cold-start identities, for while the global user list is still hydrating. */
   fallbackUsers?: readonly AvatarFallbackUser[];
+  /**
+   * How many people the group bubble counts, for a caller whose `userIds`
+   * leaves someone out — the DM list's omits the current user, so a group of
+   * three arrives as two ids. Defaults to `userIds.length`.
+   */
+  memberCount?: number;
   /** Outer slot size in px. Default 40, the DM row. */
   size?: number;
   /**

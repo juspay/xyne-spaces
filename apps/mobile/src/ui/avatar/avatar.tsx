@@ -19,12 +19,14 @@ const DEFAULT_RING_CLASS = 'border-spaces-background';
  * of it. What it does not take is `rounded`: the new design has one shape, and
  * a circle option would be a way to draw something the design does not have.
  *
- * `userIds` is already everyone but the current user (see
- * `getDmAvatarUserIds`), so its length is what the group bubble counts.
+ * The bubble counts `memberCount`, falling back to `userIds.length`. The DM
+ * list's `userIds` are everyone but the current user (see
+ * `getDmAvatarUserIds`), so it passes the real head count itself.
  */
 export const Avatar = memo(function Avatar({
   userIds,
   fallbackUsers = [],
+  memberCount,
   size = DEFAULT_AVATAR_SIZE,
   ringClassName = DEFAULT_RING_CLASS,
   style,
@@ -59,7 +61,7 @@ export const Avatar = memo(function Avatar({
         key={`${first}:${second}`}
         userIds={[first, second]}
         fallbackUsers={fallbackUsers}
-        memberCount={validUserIds.length}
+        memberCount={memberCount ?? validUserIds.length}
         size={size}
         ringClassName={ringClassName}
       />
