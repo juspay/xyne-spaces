@@ -100,6 +100,17 @@ export class SendMessageStep extends BaseActionStep<
     const workspaceId = context.automation.workspaceId;
     const automationId = context.automation.id;
     const content = config.content ?? '';
+    // Content authored in the workflow builder is TipTap HTML (block tags with
+    // {{ref}} placeholders), and this step delivers it with isMarkdown: true.
+    // Inside a raw HTML block the renderer (rehype-raw) treats newline
+    // characters as insignificant whitespace, so line breaks coming from
+    // substituted payload values collapse to spaces and markdown break syntax
+    // (\n, two trailing spaces) has no effect there. Convert bare newlines to
+    // <br> for HTML-authored templates only; pure-markdown content keeps its
+    // native break semantics (\n\n paragraph, fenced code blocks, ...).
+    const finalContent = /^<(p|div|h[1-6]|ul|ol|blockquote|table)[\s>]/i.test(content)
+      ? content.replace(/\r?\n/g, '<br>')
+      : content;
     let preparedFiles: Awaited<ReturnType<typeof prepareRenderedAutomationFiles>> = [];
     const channelId = config.channelId;
     const requestedUserIdsRaw = config.userIds ?? [];
@@ -148,7 +159,7 @@ export class SendMessageStep extends BaseActionStep<
         result = await conversationService.createConversationWithMessage({
           channelId,
           userId: senderId,
-          content,
+          content: finalContent,
           msgType,
           isBot,
           isMarkdown: true,
