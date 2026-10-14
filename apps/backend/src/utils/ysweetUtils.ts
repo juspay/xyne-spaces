@@ -389,22 +389,12 @@ export async function readFromYSweetStrict(
   canvasId: string,
   userId: string
 ): Promise<BlockNoteBlock[]> {
-  const ysweetUrl = config.ysweet.url;
-  if (!ysweetUrl) {
+  if (!config.ysweet.url) {
     logger.warn('[YSweetUtils] Y-Sweet URL not configured, returning empty content');
     return [];
   }
 
-  // Get a client token with read-only authorization
-  const clientToken = await ysweetGetClientToken(canvasId, {
-    authorization: 'read-only',
-    userId,
-  });
-
-  // Override URLs to use direct Y-Sweet URL instead of proxy URL
-  overrideTokenUrls(clientToken, ysweetUrl, clientToken.baseUrl);
-
-  const existingUpdate = await ysweetGetAsUpdate(clientToken);
+  const existingUpdate = await readYSweetUpdateStrict(canvasId, userId);
 
   if (!existingUpdate || existingUpdate.length === 0) {
     logger.debug(`[YSweetUtils] No existing Y-Sweet state for canvas ${canvasId}`);
@@ -423,6 +413,57 @@ export async function readFromYSweetStrict(
     `[YSweetUtils] Successfully read ${blocks.length} blocks from Y-Sweet for canvas ${canvasId}`
   );
   return blocks as BlockNoteBlock[];
+}
+
+/**
+ * The canvas's Y-Sweet document exactly as stored, for copying it without a
+ * round trip through blocks, which would drop anything the server schema does
+ * not know. Throws on any failure, including a YSweetHttpError 404 when the
+ * document was never created.
+ */
+export async function readYSweetUpdateStrict(canvasId: string, userId: string): Promise<Uint8Array> {
+  const ysweetUrl = config.ysweet.url;
+  if (!ysweetUrl) {
+    throw new Error('Y-Sweet URL not configured');
+  }
+
+  const clientToken = await ysweetGetClientToken(canvasId, {
+    authorization: 'read-only',
+    userId,
+  });
+  // Override URLs to use direct Y-Sweet URL instead of proxy URL
+  overrideTokenUrls(clientToken, ysweetUrl, clientToken.baseUrl);
+  return ysweetGetAsUpdate(clientToken);
+}
+
+/** Apply a Yjs update to a canvas's Y-Sweet document, creating it if needed. Throws on failure. */
+export async function writeYSweetUpdateStrict(
+  canvasId: string,
+  update: Uint8Array,
+  userId: string
+): Promise<void> {
+  const ysweetUrl = config.ysweet.url;
+  if (!ysweetUrl) {
+    throw new Error('Y-Sweet URL not configured');
+  }
+
+  const clientToken = await ysweetGetOrCreateDocAndToken(canvasId, {
+    authorization: 'full',
+    userId,
+  });
+  overrideTokenUrls(clientToken, ysweetUrl, clientToken.baseUrl);
+  await ysweetUpdateDoc(clientToken, update);
+}
+
+/**
+ * BlockNote blocks as a Y.Doc laid out the way the collaborative editor reads
+ * it. Throws on a block type the server schema does not know.
+ */
+export function blocksToYSweetDoc(blocks: BlockNoteBlock[]): Y.Doc {
+  return getServerEditor().blocksToYDoc(
+    blocks as Parameters<ServerEditor['blocksToYDoc']>[0],
+    YSWEET_XML_FRAGMENT
+  );
 }
 
 /** The same read, with a failure reported as an empty canvas. */

@@ -325,11 +325,11 @@ export class AzureBlobStorageService implements StorageService {
   }
 
   /**
-   * Copy then delete. The copy streams through this process rather than using
-   * the server-side copy, which needs a separately authorised source URL and
-   * has different limits per auth mode; the callers move small objects.
+   * The copy streams through this process rather than using the server-side
+   * copy, which needs a separately authorised source URL and has different
+   * limits per auth mode.
    */
-  async moveFile(sourcePath: string, destinationPath: string): Promise<void> {
+  async copyFile(sourcePath: string, destinationPath: string): Promise<void> {
     const source = this.container.getBlobClient(sourcePath);
     const props = await source.getProperties();
     const download = await source.download();
@@ -344,6 +344,12 @@ export class AzureBlobStorageService implements StorageService {
       props.metadata,
       props.cacheControl
     );
+  }
+
+  /** Copy then delete; see copyFile. */
+  async moveFile(sourcePath: string, destinationPath: string): Promise<void> {
+    await this.copyFile(sourcePath, destinationPath);
+    const source = this.container.getBlobClient(sourcePath);
 
     try {
       await source.delete();

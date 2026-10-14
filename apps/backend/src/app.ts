@@ -125,6 +125,7 @@ import aiRoutes from '@/routes/aiRoutes';
 // import adminBackfillRoutes from '@/routes/adminBackfill';
 import ysweetRoutes, { ysweetValidateRouter } from '@/routes/ysweet';
 import canvasRoutes from '@/routes/canvas';
+import canvasDuplicateRoutes from '@/routes/canvasDuplicate';
 import internalCanvasRoutes from '@/routes/internalCanvas';
 import { dashboardRouter, dashboardCrudRouter } from '@/routes/dashboard';
 import pythonQueryRoutes from '@/routes/pythonQuery';
@@ -774,8 +775,9 @@ export class App {
     // Generic query route (auth required)
     this.app.use('/api/analytics-query', authMiddleware.authenticate, queryRoutes);
 
-    // Canvas file upload routes (auth required)
-    this.app.use('/api/canvas', authMiddleware.authenticate, canvasRoutes);
+    // Canvas file upload routes (auth required). Duplication is mounted only
+    // here, for user sessions, never on the /api/canvas/claw app mount.
+    this.app.use('/api/canvas', authMiddleware.authenticate, canvasRoutes, canvasDuplicateRoutes);
 
     this.app.use('/api/dashboard', authMiddleware.authenticate, dashboardRouter);
 

@@ -354,12 +354,16 @@ export class S3StorageService implements StorageService {
     return out;
   }
 
-  async moveFile(sourcePath: string, destinationPath: string): Promise<void> {
+  async copyFile(sourcePath: string, destinationPath: string): Promise<void> {
     await this.client.send(new CopyObjectCommand({
       Bucket: this.bucketName,
       CopySource: `${this.bucketName}/${sourcePath}`,
       Key: destinationPath,
     }));
+  }
+
+  async moveFile(sourcePath: string, destinationPath: string): Promise<void> {
+    await this.copyFile(sourcePath, destinationPath);
 
     try {
       await this.client.send(new DeleteObjectCommand({ Bucket: this.bucketName, Key: sourcePath }));
