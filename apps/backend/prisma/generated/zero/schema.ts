@@ -298,6 +298,8 @@ export const workflowExecutionTable = table("workflow_executions")
     ignoreDuration: number(),
     mode: string(),
     createdBy: string().optional(),
+    entityType: string().optional(),
+    entityId: string().optional(),
   })
   .primaryKey("id");
 

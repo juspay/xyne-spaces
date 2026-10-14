@@ -28,6 +28,7 @@ import {
   GitBranch,
   LinkBrokenSlant as Unlink,
   UserPlus,
+  LightningThunderElectricOn as Zap,
 } from '@xyne/icons';
 import type { QueryResultType } from '@rocicorp/zero';
 import type {
@@ -128,6 +129,8 @@ import {
   trackTicketOutcome,
 } from '../../../services/Analytics/ticketTracking';
 import { readTrackSource } from '../../../services/Analytics/trackSource';
+import { useDebugAutomationsEnabled } from '../../../hooks/useDebugSettings';
+import { openAutomationDebug } from '../../../providers/AutomationDebugProvider';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
 import type { SelectorOption } from '../../ui/EntitySelector/EntitySelector.types';
@@ -809,6 +812,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   // Query all user groups for activity display
   const userGroups = useUserGroups();
   const { user: currentUser } = useAuth();
+  const debugAutomationsEnabled = useDebugAutomationsEnabled();
   const currentUserRoleIds = useCurrentUserRoleIds();
 
   const handleNonFormReviewSubmit = async (): Promise<void> => {
@@ -1896,6 +1900,17 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         void navigate(`${baseRoute}/${ticket.channelId}/${ticket.conversationId}#thread-summary`);
       },
     },
+    ...(debugAutomationsEnabled
+      ? [
+          {
+            label: 'Debug automations',
+            icon: <Zap size={18} className='text-amber-600 dark:text-amber-400' />,
+            trackName: 'DEBUG_AUTOMATIONS',
+            trackMetadata: JSON.stringify({ ticketId }),
+            onSelect: (): void => openAutomationDebug({ type: 'TICKET', id: ticketId }),
+          },
+        ]
+      : []),
   ];
 
   const archiveMenuItem: TicketMenuItem = {

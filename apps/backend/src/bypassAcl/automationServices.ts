@@ -56,8 +56,9 @@ export function createAutomationExecutionForEvent(input: {
   workflowId: string;
   workflowType: string | null;
   initialContext: unknown;
+  entity?: Record<string, string>;
 }) {
-  const { workspaceId, workflowId, workflowType, initialContext } = input;
+  const { workspaceId, workflowId, workflowType, initialContext, entity } = input;
   return asService(
     ['WorkflowExecution', 'WorkflowExecutionState'],
     'event-routed automation: dispatched event has no caller, workspaceId comes from the event',
@@ -72,6 +73,7 @@ export function createAutomationExecutionForEvent(input: {
             status: AutomationRunStatus.PENDING,
             tag: 'root',
             workspaceId,
+            ...entity,
           },
         });
         await tx.workflowExecutionState.create({

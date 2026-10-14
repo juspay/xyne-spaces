@@ -37,6 +37,7 @@ import { crossWorkspaceNavigate } from './hooks/useCrossWorkspaceNavigate';
 import { joinCallSwitchingIfNeeded } from './machines/roomMachine';
 import { detectPlatform } from './hooks/usePlatform';
 import { DEFAULT_WORKSPACE_ID } from './config';
+import { AutomationDebugProvider } from './providers/AutomationDebugProvider';
 import {
   CheckTickCircle,
   AlertCircle,
@@ -199,7 +200,9 @@ const App = (): ReactElement => {
                     <main className='h-screen' style={{ background: 'var(--root-bg)' }}>
                       <Wallpaper />
                       <StableRouterContext.Provider value={stableRouter}>
-                        <RouterProvider router={router}></RouterProvider>
+                        <AutomationDebugProvider>
+                          <RouterProvider router={router}></RouterProvider>
+                        </AutomationDebugProvider>
                       </StableRouterContext.Provider>
                     </main>
                     <SwitchLoadingOverlay />

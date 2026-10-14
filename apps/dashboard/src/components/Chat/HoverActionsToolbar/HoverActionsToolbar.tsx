@@ -25,6 +25,8 @@ import { EditMessageIcon } from '../../../assets/icons';
 import { UnpinIcon } from '../../../assets/icons/UnpinIcon';
 import { XyneAIStar } from '../../icons/xyne-ai';
 import { useCanCreateTicket } from '../../../hooks/usePermissions';
+import { useDebugAutomationsEnabled } from '../../../hooks/useDebugSettings';
+import { openAutomationDebug } from '../../../providers/AutomationDebugProvider';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
 import { ShortcutHint } from '../../ui/ShortcutHint';
 import Button from '../../ui/Button';
@@ -171,6 +173,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
   const compact = layout === 'footer';
   const { applyReaction: toggleEmoji, hasReacted } = useApplyReaction(messageId, reactionsMd);
   const canCreateTicket = useCanCreateTicket();
+  const debugAutomationsEnabled = useDebugAutomationsEnabled();
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
@@ -826,6 +829,27 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                       Delete
                       <ShortcutHint shortcut='message.delete' className='ml-auto pl-6 text-xs' />
                     </DropdownMenuItem>
+                  )}
+
+                  {/* Debug automations (gated by debugAutomations pref) */}
+                  {debugAutomationsEnabled && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        onClick={(): void =>
+                          openAutomationDebug({ type: 'MESSAGE', id: messageId })
+                        }
+                        data-testid='hover-action-debug-automation'
+                        data-track-category='HOVER_ACTIONS_TOOLBAR'
+                        data-track-name='DEBUG_AUTOMATIONS_FROM_MESSAGE'
+                        data-track-metadata={JSON.stringify({ messageId })}
+                      >
+                        <span className='w-4 h-4 mr-2 flex items-center justify-center text-amber-600 dark:text-amber-400'>
+                          <Zap className='w-4 h-4' />
+                        </span>
+                        Debug automations
+                      </DropdownMenuItem>
+                    </>
                   )}
                 </>
               );
