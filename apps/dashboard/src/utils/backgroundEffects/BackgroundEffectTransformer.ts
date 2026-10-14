@@ -56,6 +56,7 @@ export class BackgroundEffectTransformer {
 
   private options: BackgroundEffectOptions;
   private canvas?: OffscreenCanvas | HTMLCanvasElement | undefined;
+  private gl?: WebGL2RenderingContext | undefined;
   private segmenter?: ImageSegmenter | undefined;
   private pipeline?: SegmentationPipeline | undefined;
   private lastTimestamp = 0;
@@ -86,6 +87,10 @@ export class BackgroundEffectTransformer {
       preserveDrawingBuffer: true,
     });
     if (!gl) throw new Error('WebGL2 is not available');
+    // ProcessorWrapper.restart (e.g. camera off/on) hands over a fresh canvas and abandons
+    // the old one, so release the old context here or it lingers until GC.
+    if (this.gl !== gl) this.releaseContext();
+    this.gl = gl;
 
     const segmenter = await ImageSegmenter.createFromOptions(WASM_FILESET, {
       baseOptions: { modelAssetPath: SEGMENTATION_MODEL_URL, delegate: 'GPU' },
@@ -108,14 +113,26 @@ export class BackgroundEffectTransformer {
     await this.init(options);
   }
 
-  destroy(_options?: TrackTransformerDestroyOptions): Promise<void> {
+  destroy(options?: TrackTransformerDestroyOptions): Promise<void> {
     this.destroyed = true;
     this.pipeline?.dispose();
     this.pipeline = undefined;
     this.segmenter?.close();
     this.segmenter = undefined;
     this.canvas = undefined;
+    // A restart may re-init on the same canvas, and a lost context can't be recreated on
+    // it; init() releases it instead if the restart brings a new canvas.
+    if (!options?.willProcessorRestart) this.releaseContext();
     return Promise.resolve();
+  }
+
+  /**
+   * Free the GPU context now rather than at GC: Chrome caps live WebGL contexts per page
+   * (16) and evicts the oldest past that, which would freeze the active effect.
+   */
+  private releaseContext(): void {
+    this.gl?.getExtension('WEBGL_lose_context')?.loseContext();
+    this.gl = undefined;
   }
 
   async update(options: BackgroundEffectOptions): Promise<void> {
