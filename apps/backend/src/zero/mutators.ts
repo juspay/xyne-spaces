@@ -1,4 +1,4 @@
-import { ReadonlyJSONValue, Transaction, defineMutator, defineMutators, ApplicationError, mustGetQuery, type AnyCustomQuery } from '@rocicorp/zero';
+import { ReadonlyJSONValue, Transaction, defineMutator, defineMutators, ApplicationError } from '@rocicorp/zero';
 import { AutomationStatus } from '../automations/types/status';
 import {
   ChannelRole,
@@ -219,7 +219,7 @@ import {
 
 import { z } from 'zod';
 import { generateKeyBetween } from 'fractional-indexing';
-import { queries, zql } from './queries';
+import { readableSummaryTemplates, zql } from './queries';
 import { hasGuestChannelAccess } from './acl/core/guest-access';
 import { hasProjectAdminAccess } from './acl/core/admin-access';
 import vespaClient from '@/vespa/client';
@@ -16890,16 +16890,11 @@ export function createMutators(
         }),
         async ({ tx, ctx, args: { id, recordingDefaultSummaryTemplateId, timestamp } }) => {
           // The default must be a template the user can read today (or the
-          // code-backed 'default'): the same registered query the template dropdown
-          // runs, so "can be set as default" is exactly "shows up in the list".
+          // code-backed 'default'), by the same zql rule the template list uses.
           // Access is re-checked at generation time in case it is revoked later.
           if (recordingDefaultSummaryTemplateId && recordingDefaultSummaryTemplateId !== 'default') {
-            const summaryTemplates = mustGetQuery(queries as never, 'summaryTemplates') as AnyCustomQuery;
             const template = await tx.run(
-              summaryTemplates
-                .fn({ ctx, args: {} })
-                .where('id', recordingDefaultSummaryTemplateId)
-                .one(),
+              readableSummaryTemplates(ctx).where('id', recordingDefaultSummaryTemplateId).one(),
             );
             if (!template) {
               throw new Error('Summary template not found or not accessible');

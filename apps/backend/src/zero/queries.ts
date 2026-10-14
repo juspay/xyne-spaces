@@ -19,7 +19,9 @@ import {
   FormContextType,
   FormEntityType,
   LookupType,
-  ShareableEntityType, SummaryTemplateVisibility, UserResponsibility } from '@xyne/shared';
+  ShareableEntityType, SummaryTemplateVisibility, UserResponsibility,
+  type Context,
+} from '@xyne/shared';
 import { z } from 'zod';
 import {
   CanvasVisibility,
@@ -63,6 +65,55 @@ import {
 } from '@xyne/shared';
 
 export const zql = createBuilder(schema);
+
+/**
+ * Summary templates the viewer may read: their own, public ones, pending ones they
+ * review as a Scribe admin, and ones shared with them. One zql builder shared by the
+ * `summaryTemplates` list query and the default-template mutator, so they cannot drift.
+ */
+export const readableSummaryTemplates = (ctx: Context) =>
+  zql.summary_templates
+    .where('workspaceId', ctx.workspaceId)
+    .where(({ or, and, cmp, exists }) =>
+      or(
+        cmp('createdBy', ctx.userID),
+        cmp('visibility', SummaryTemplateVisibility.PUBLIC),
+        and(
+          cmp('visibility', SummaryTemplateVisibility.WAITING_FOR_APPROVAL),
+          exists('workspaceResourceAccess', access =>
+            access
+              .where('accessType', AccessType.ADMIN)
+              .where(({ or: accessOr, cmp: accessCmp, exists: accessExists }) =>
+                accessOr(
+                  accessCmp('userId', ctx.userID),
+                  accessExists('userGroup', group =>
+                    group.whereExists('userGroupMappings', membership =>
+                      membership.where('userId', ctx.userID),
+                    ),
+                  ),
+                ),
+              )
+              .whereExists('resource', resource => resource.where('name', 'SCRIBE')),
+          ),
+        ),
+        exists('shares', share =>
+          share
+            .where('workspaceId', ctx.workspaceId)
+            .where('shareableEntityType', ShareableEntityType.SUMMARY_TEMPLATE)
+            .where('entityUserAccess', '!=', EntityUserAccess.REVOKED)
+            .where(({ or: shareOr, cmp: shareCmp, exists: shareExists }) =>
+              shareOr(
+                shareCmp('userId', ctx.userID),
+                shareExists('userGroupMemberships', membership =>
+                  membership.where('userId', ctx.userID),
+                ),
+                shareExists('channelMembers', member => member.where('userId', ctx.userID)),
+              ),
+            ),
+        ),
+      ),
+    );
+
 
 const kanbanTicketPageFiltersSchema = z.object({
   priority: z.array(z.nativeEnum(TicketPriority)).optional(),
@@ -3787,47 +3838,7 @@ export const queries: AnyQueryRegistry = defineQueries({
   summaryTemplates: defineQuery(
     z.object({}),
     ({ ctx }) =>
-      zql.summary_templates
-        .where('workspaceId', ctx.workspaceId)
-        .where(({ or, and, cmp, exists }) =>
-          or(
-            cmp('createdBy', ctx.userID),
-            cmp('visibility', SummaryTemplateVisibility.PUBLIC),
-            and(
-              cmp('visibility', SummaryTemplateVisibility.WAITING_FOR_APPROVAL),
-              exists('workspaceResourceAccess', access =>
-                access
-                  .where('accessType', AccessType.ADMIN)
-                  .where(({ or: accessOr, cmp: accessCmp, exists: accessExists }) =>
-                    accessOr(
-                      accessCmp('userId', ctx.userID),
-                      accessExists('userGroup', group =>
-                        group.whereExists('userGroupMappings', membership =>
-                          membership.where('userId', ctx.userID),
-                        ),
-                      ),
-                    ),
-                  )
-                  .whereExists('resource', resource => resource.where('name', 'SCRIBE')),
-              ),
-            ),
-            exists('shares', share =>
-              share
-                .where('workspaceId', ctx.workspaceId)
-                .where('shareableEntityType', ShareableEntityType.SUMMARY_TEMPLATE)
-                .where('entityUserAccess', '!=', EntityUserAccess.REVOKED)
-                .where(({ or: shareOr, cmp: shareCmp, exists: shareExists }) =>
-                  shareOr(
-                    shareCmp('userId', ctx.userID),
-                    shareExists('userGroupMemberships', membership =>
-                      membership.where('userId', ctx.userID),
-                    ),
-                    shareExists('channelMembers', member => member.where('userId', ctx.userID)),
-                  ),
-                ),
-            ),
-          ),
-        )
+      readableSummaryTemplates(ctx)
         // Only the viewer's own shares: Zero does not ACL-filter `related()`.
         .related('shares', shares =>
           shares
