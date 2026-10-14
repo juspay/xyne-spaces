@@ -1,6 +1,7 @@
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
-import { isAllowlistedPrivateOrigin } from "../../lib/safe-fetch.js";
+import { isBlockedIpAddress } from "xyne-claw-shared";
+import { isAllowlistedPrivateOrigin, outboundDispatcher } from "../../lib/safe-fetch.js";
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -46,154 +47,6 @@ export class HttpRequestError extends Error {
     if (params.statusText !== undefined) this.statusText = params.statusText;
     if (params.responseBody !== undefined) this.responseBody = params.responseBody;
   }
-}
-
-function ipv4ToInt(ip: string): number {
-  const parts = ip.split(".").map((segment) => Number.parseInt(segment, 10));
-  return ((parts[0] ?? 0) << 24) + ((parts[1] ?? 0) << 16) + ((parts[2] ?? 0) << 8) + (parts[3] ?? 0);
-}
-
-function isIpv4InCidr(ip: string, baseIp: string, prefix: number): boolean {
-  const ipInt = ipv4ToInt(ip) >>> 0;
-  const baseInt = ipv4ToInt(baseIp) >>> 0;
-  const mask = prefix === 0 ? 0 : ((0xffffffff << (32 - prefix)) >>> 0);
-  return (ipInt & mask) === (baseInt & mask);
-}
-
-function isBlockedIpv4(ip: string): boolean {
-  const blockedCidrs: Array<{ base: string; prefix: number }> = [
-    { base: "0.0.0.0", prefix: 8 },
-    { base: "10.0.0.0", prefix: 8 },
-    { base: "100.64.0.0", prefix: 10 },
-    { base: "127.0.0.0", prefix: 8 },
-    { base: "169.254.0.0", prefix: 16 },
-    { base: "172.16.0.0", prefix: 12 },
-    { base: "192.0.0.0", prefix: 24 },
-    { base: "192.0.2.0", prefix: 24 },
-    { base: "192.168.0.0", prefix: 16 },
-    { base: "198.18.0.0", prefix: 15 },
-    { base: "198.51.100.0", prefix: 24 },
-    { base: "203.0.113.0", prefix: 24 },
-    { base: "224.0.0.0", prefix: 4 },
-    { base: "240.0.0.0", prefix: 4 },
-  ];
-
-  return blockedCidrs.some(({ base, prefix }) => isIpv4InCidr(ip, base, prefix));
-}
-
-function parseIpv6ToBytes(ip: string): Uint8Array | null {
-  const normalized = ip.toLowerCase();
-  const zoneIdx = normalized.indexOf("%");
-  const noZone = zoneIdx >= 0 ? normalized.slice(0, zoneIdx) : normalized;
-
-  const embeddedIpv4Idx = noZone.lastIndexOf(":");
-  let working = noZone;
-  let ipv4Tail: number[] | null = null;
-  if (working.includes(".") && embeddedIpv4Idx !== -1) {
-    const ipv4 = working.slice(embeddedIpv4Idx + 1);
-    const parts = ipv4.split(".").map((segment) => Number.parseInt(segment, 10));
-    if (parts.length !== 4 || parts.some((n) => Number.isNaN(n) || n < 0 || n > 255)) {
-      return null;
-    }
-    const p0 = parts[0] ?? 0;
-    const p1 = parts[1] ?? 0;
-    const p2 = parts[2] ?? 0;
-    const p3 = parts[3] ?? 0;
-    ipv4Tail = [(p0 << 8) | p1, (p2 << 8) | p3];
-    working = `${working.slice(0, embeddedIpv4Idx)}:__ipv4__`;
-  }
-
-  const hasCompression = working.includes("::");
-  const [leftRaw, rightRaw] = hasCompression ? working.split("::") : [working, ""];
-  const left = leftRaw ? leftRaw.split(":").filter(Boolean) : [];
-  const right = rightRaw ? rightRaw.split(":").filter(Boolean) : [];
-
-  const leftParts = left.map((part) => (part === "__ipv4__" ? -1 : Number.parseInt(part, 16)));
-  const rightParts = right.map((part) => (part === "__ipv4__" ? -1 : Number.parseInt(part, 16)));
-  if ([...leftParts, ...rightParts].some((n) => n !== -1 && (Number.isNaN(n) || n < 0 || n > 0xffff))) {
-    return null;
-  }
-
-  const totalProvided = leftParts.length + rightParts.length + (ipv4Tail ? 2 : 0);
-  if ((!hasCompression && totalProvided !== 8) || (hasCompression && totalProvided > 8)) {
-    return null;
-  }
-
-  const fillCount = hasCompression ? 8 - totalProvided : 0;
-  const groups: number[] = [];
-  for (const n of leftParts) {
-    if (n === -1) {
-      if (!ipv4Tail) return null;
-      groups.push(...ipv4Tail);
-    } else {
-      groups.push(n);
-    }
-  }
-  for (let i = 0; i < fillCount; i++) groups.push(0);
-  for (const n of rightParts) {
-    if (n === -1) {
-      if (!ipv4Tail) return null;
-      groups.push(...ipv4Tail);
-    } else {
-      groups.push(n);
-    }
-  }
-
-  if (groups.length !== 8) return null;
-  const bytes = new Uint8Array(16);
-  groups.forEach((group, idx) => {
-    bytes[idx * 2] = (group >> 8) & 0xff;
-    bytes[idx * 2 + 1] = group & 0xff;
-  });
-  return bytes;
-}
-
-function isIpv6PrefixMatch(ip: string, prefixBytes: Uint8Array, prefixLength: number): boolean {
-  const bytes = parseIpv6ToBytes(ip);
-  if (!bytes) return false;
-
-  const fullBytes = Math.floor(prefixLength / 8);
-  const remBits = prefixLength % 8;
-  for (let i = 0; i < fullBytes; i++) {
-    if (bytes[i] !== prefixBytes[i]) return false;
-  }
-  if (remBits > 0) {
-    const mask = (0xff << (8 - remBits)) & 0xff;
-    const ipByte = bytes[fullBytes] ?? 0;
-    const prefixByte = prefixBytes[fullBytes] ?? 0;
-    if ((ipByte & mask) !== (prefixByte & mask)) return false;
-  }
-  return true;
-}
-
-function isBlockedIpv6(ip: string): boolean {
-  const blockedPrefixes: Array<{ prefix: string; length: number }> = [
-    { prefix: "::", length: 128 },
-    { prefix: "::1", length: 128 },
-    { prefix: "fe80::", length: 10 },
-    { prefix: "fc00::", length: 7 },
-    { prefix: "ff00::", length: 8 },
-    { prefix: "2001:db8::", length: 32 },
-  ];
-
-  const mappedV4 = parseIpv6ToBytes(ip);
-  if (mappedV4 && mappedV4.slice(0, 10).every((b) => b === 0) && mappedV4[10] === 0xff && mappedV4[11] === 0xff) {
-    const v4 = `${mappedV4[12]}.${mappedV4[13]}.${mappedV4[14]}.${mappedV4[15]}`;
-    return isBlockedIpv4(v4);
-  }
-
-  for (const { prefix, length } of blockedPrefixes) {
-    const prefixBytes = parseIpv6ToBytes(prefix);
-    if (prefixBytes && isIpv6PrefixMatch(ip, prefixBytes, length)) return true;
-  }
-  return false;
-}
-
-function isBlockedIpAddress(ip: string): boolean {
-  const version = isIP(ip);
-  if (version === 4) return isBlockedIpv4(ip);
-  if (version === 6) return isBlockedIpv6(ip);
-  return true;
 }
 
 async function validatePublicDestination(rawUrl: string, method: HttpMethod): Promise<void> {
@@ -356,12 +209,14 @@ export async function httpRequest<T = unknown>(opts: HttpRequestOptions): Promis
   while (true) {
     await validatePublicDestination(url, requestMethod as HttpMethod);
 
+    const dispatcher = outboundDispatcher(url);
     const requestInit: RequestInit = {
       method: requestMethod,
       redirect: "manual",
     };
-    // NOTE: URL destination is validated before each fetch, but DNS may still
-    // be resolved again by the underlying runtime at connect-time.
+    // validatePublicDestination resolves DNS once; the dispatcher re-checks
+    // the address actually dialled so a rebinding name cannot slip through.
+    if (dispatcher) (requestInit as { dispatcher?: unknown }).dispatcher = dispatcher;
     if (redirectedHeaders) requestInit.headers = redirectedHeaders;
     if (requestBody !== undefined) requestInit.body = requestBody;
     if (timeoutMs) requestInit.signal = AbortSignal.timeout(timeoutMs);

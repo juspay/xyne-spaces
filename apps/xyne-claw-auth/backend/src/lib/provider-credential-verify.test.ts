@@ -6,9 +6,10 @@ import {
   verifyProviderCredential,
 } from "./provider-credential-verify.js";
 
-vi.mock("../mcpgateway/services/http-client.js", () => ({
-  assertSafeOutboundUrl: vi.fn().mockResolvedValue(undefined),
-}));
+// Destination policy is covered by provider-base-url.test.ts; these tests use
+// placeholder hosts that do not resolve, so stub the DNS-backed check.
+const baseUrlError = vi.hoisted(() => vi.fn<(url: string) => Promise<string | null>>().mockResolvedValue(null));
+vi.mock("./provider-base-url.js", () => ({ providerBaseUrlError: baseUrlError }));
 
 const LITELLM_BASE = "https://grid.example.com";
 
@@ -187,5 +188,18 @@ describe("extractProviderMessage", () => {
   it("says nothing rather than dumping JSON it cannot read", () => {
     expect(extractProviderMessage(JSON.stringify({ weird: { shape: 1 } }))).toBe("");
     expect(extractProviderMessage("")).toBe("");
+  });
+});
+
+describe("verifyProviderCredential destination policy", () => {
+  it("refuses a base URL the policy rejects, without calling out", async () => {
+    baseUrlError.mockResolvedValueOnce("must be a public https endpoint");
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const result = await verifyProviderCredential({ provider: "litellm", apiKey: "sk-test", baseUrl: "https://rebind.example/" }, LITELLM_BASE);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.kind).toBe("rejected");
+    expect(fetchSpy).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
   });
 });

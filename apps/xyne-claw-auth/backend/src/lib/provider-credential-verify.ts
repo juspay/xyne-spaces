@@ -1,4 +1,5 @@
-import { assertSafeOutboundUrl } from "../mcpgateway/services/http-client.js";
+import { publicOnlyAgent } from "./safe-fetch.js";
+import { providerBaseUrlError } from "./provider-base-url.js";
 import { errMsg } from "./errors.js";
 import { createLogger } from "../logger.js";
 
@@ -118,13 +119,18 @@ async function getJson(
   url: string,
   headers: Record<string, string>,
 ): Promise<{ payload: unknown } | ProviderVerification> {
-  try {
-    await assertSafeOutboundUrl(url);
-  } catch {
+  if (await providerBaseUrlError(url)) {
     return { ok: false, kind: "rejected", message: "The base URL must be a public https endpoint." };
   }
   try {
-    const res = await fetch(url, { headers, signal: AbortSignal.timeout(VERIFY_TIMEOUT_MS) });
+    // redirect:"error" — a provider API never needs to redirect, and following
+    // one would carry the user's key to an unvalidated host.
+    const res = await fetch(url, {
+      headers,
+      redirect: "error",
+      dispatcher: publicOnlyAgent,
+      signal: AbortSignal.timeout(VERIFY_TIMEOUT_MS),
+    } as unknown as RequestInit);
     if (!res.ok) {
       const text = await res.text().catch(() => "");
       return classify(provider, res.status, text);

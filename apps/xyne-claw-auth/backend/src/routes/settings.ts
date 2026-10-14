@@ -23,7 +23,7 @@ import {
   providerNeedsKey,
   verifyProviderCredential,
 } from "../lib/provider-credential-verify.js";
-import { assertSafeOutboundUrl } from "../mcpgateway/services/http-client.js";
+import { providerBaseUrlError } from "../lib/provider-base-url.js";
 import { safeFetch } from "../lib/safe-fetch.js";
 import { createLogger } from "../logger.js";
 
@@ -90,11 +90,8 @@ router.put("/provider-credentials/:provider", asyncHandler(async (req: Request<{
   }
 
   if (baseUrl) {
-    try {
-      await assertSafeOutboundUrl(baseUrl);
-    } catch {
-      throw badRequest("baseUrl must be a public https endpoint");
-    }
+    const reason = await providerBaseUrlError(baseUrl);
+    if (reason) throw badRequest(`baseUrl ${reason}`);
   }
 
   if (apiKey && providerNeedsKey(provider)) {

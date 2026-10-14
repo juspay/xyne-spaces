@@ -190,3 +190,4 @@ export {
 export type { AttachmentFamily, InboundAttachmentFamily } from "./attachment-types.js";
 
 export * from "./reply-format/index.js";
+export { isBlockedIpAddress, isLoopbackAddress, createPublicOnlyLookup, blockedAddressError, defaultResolve, type ResolvedAddress, type PublicOnlyLookupOptions, type ConnectLookup, type LookupCallback } from "./net/outbound-policy.js";

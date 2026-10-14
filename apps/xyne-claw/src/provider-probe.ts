@@ -21,6 +21,7 @@ import { LITELLM } from "./config.js";
 import { isQuotaExhaustedError, isTransientProviderError } from "./agent.js";
 import { createHash } from "node:crypto";
 import { createLogger } from "./logger.js";
+import { BlockedBaseUrlError, guardUserBaseUrl, publicOnlyAgent } from "./outbound-guard.js";
 
 const log = createLogger("provider-probe");
 
@@ -68,11 +69,11 @@ function keyFingerprint(apiKey: string): string {
  * platform LiteLLM credentials (automation vs interactive key, matching how the
  * run was dispatched).
  */
-function resolveTarget(input: ProbeInput): { url: string; apiKey: string; model: string } | null {
+function resolveTarget(input: ProbeInput): { url: string; apiKey: string; model: string; userBaseUrl?: string } | null {
   const cfg = input.providerConfig;
   if (cfg?.apiKey && (cfg.baseUrl || cfg.model)) {
     const base = (cfg.baseUrl ?? LITELLM.url).replace(/\/+$/, "");
-    return { url: `${base}/chat/completions`, apiKey: cfg.apiKey, model: input.model || cfg.model };
+    return { url: `${base}/chat/completions`, apiKey: cfg.apiKey, model: input.model || cfg.model, ...(cfg.baseUrl ? { userBaseUrl: cfg.baseUrl } : {}) };
   }
   // Platform default (spaces / litellm): claw's own env key.
   if (input.provider === "litellm" || input.provider === "spaces") {
@@ -125,9 +126,26 @@ export async function probeProvider(input: ProbeInput): Promise<ProbeResult> {
   const now = Date.now();
   if (cached && now - cached.at < PROBE_CACHE_TTL_MS) return cached.result;
 
+  // A user-supplied base URL is dialled with the user's key: refuse an
+  // internal literal up front and connect through the public-only guard so a
+  // rebinding name cannot reach an internal host. Platform targets are trusted.
+  if (target.userBaseUrl) {
+    try {
+      guardUserBaseUrl(target.userBaseUrl);
+    } catch (err) {
+      if (err instanceof BlockedBaseUrlError) return { state: "permanent", detail: err.message };
+      throw err;
+    }
+  }
+  const dispatcher = target.userBaseUrl ? publicOnlyAgent : undefined;
+
   let result: ProbeResult;
   try {
     const res = await fetch(target.url, {
+      ...(dispatcher ? { dispatcher } : {}),
+      // A provider API never needs to redirect; following one would carry the
+      // user's key to a host nobody validated.
+      redirect: "error",
       method: "POST",
       headers: {
         Authorization: `Bearer ${target.apiKey}`,
@@ -142,7 +160,7 @@ export async function probeProvider(input: ProbeInput): Promise<ProbeResult> {
         temperature: 0,
       }),
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
-    });
+    } as unknown as RequestInit);
     const body = res.ok ? "" : (await res.text().catch(() => "")).slice(0, 300);
     result = classify(res.status, body);
   } catch (err) {

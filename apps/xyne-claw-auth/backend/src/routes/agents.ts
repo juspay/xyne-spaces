@@ -1,7 +1,7 @@
 import { Router, type Request, type RequestHandler, type Response } from "express";
 import { errMsg } from "../lib/errors.js";
 import { notifySdlcAgentRegistered } from "../lib/sdlc-repository-context.js";
-import { assertSafeOutboundUrl } from "../mcpgateway/services/http-client.js";
+import { providerBaseUrlError } from "../lib/provider-base-url.js";
 import { safeFetch } from "../lib/safe-fetch.js";
 import {
   extractProviderMessage,
@@ -3346,6 +3346,13 @@ router.post("/:slug/user-config/:userId/github-poll", pinUserIdParam, async (req
 router.post("/:slug/user-config/:userId/claude-models", pinUserIdParam, async (req: Request<{ slug: string; userId: string }>, res: Response) => {
   try {
     const { apiKey, baseUrl, authType } = req.body as { apiKey?: string; baseUrl?: string; authType?: string };
+    if (typeof baseUrl === "string" && baseUrl.trim()) {
+      const reason = await providerBaseUrlError(baseUrl.trim());
+      if (reason) {
+        res.status(400).json({ success: false, error: `baseUrl ${reason}` });
+        return;
+      }
+    }
     const cred = await resolveClaudeModelsCredential({
       // Credentials are stored under Claw's canonical id; the URL param may be
       // the caller's raw Spaces alias, so canonicalize before the lookup.
@@ -4761,10 +4768,9 @@ router.post(
       // runtime; refuse an internal / private / metadata destination at save so
       // one can never be persisted (the probe/runtime paths validate too).
       if (baseUrl) {
-        try {
-          await assertSafeOutboundUrl(baseUrl);
-        } catch {
-          res.status(400).json({ success: false, error: "baseUrl must be a public https(s) endpoint" });
+        const reason = await providerBaseUrlError(baseUrl);
+        if (reason) {
+          res.status(400).json({ success: false, error: `baseUrl ${reason}` });
           return;
         }
       }
