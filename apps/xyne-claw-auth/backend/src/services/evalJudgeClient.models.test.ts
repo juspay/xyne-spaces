@@ -19,15 +19,15 @@ describe("listEvalModels judgeBackends", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () =>
-        modelsReply({ success: true, models: ["open-fast"], defaultModel: "open-fast", judgeBackends: ["jev", "ournormaljev", "ourtrainedjev"], judgeBackendLabels: { jev: "Jev (typed evaluator)", ournormaljev: "Our Jev — normal", ourtrainedjev: "Our Jev — trained", bogus: 7 } }),
+        modelsReply({ success: true, models: ["open-fast"], defaultModel: "open-fast", judgeBackends: ["jev", "xor", "ourtrainedjev"], judgeBackendLabels: { jev: "Jev (typed evaluator)", xor: "Our Jev — normal", ourtrainedjev: "Our Jev — trained", bogus: 7 } }),
       ),
     );
     const out = await listEvalModels();
     expect(out.models).toEqual(["open-fast"]);
-    expect(out.judgeBackends).toEqual(["jev", "ournormaljev", "ourtrainedjev"]);
+    expect(out.judgeBackends).toEqual(["jev", "xor", "ourtrainedjev"]);
     expect(out.judgeBackendLabels).toEqual({
       jev: "Jev (typed evaluator)",
-      ournormaljev: "Our Jev — normal",
+      xor: "Our Jev — normal",
       ourtrainedjev: "Our Jev — trained",
     });
   });

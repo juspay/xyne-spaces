@@ -386,6 +386,7 @@ async def _stream_with_google(
     cfg: Config,
     requested_language: Optional[str],
     extra_hints: Optional[list] = None,
+    audio_format: str = '',
 ):
     """
     Yield (transcript, is_final) tuples from a Google gRPC streaming_recognize call.
@@ -404,6 +405,7 @@ async def _stream_with_google(
         StreamingRecognitionConfig,
         RecognitionConfig,
         AutoDetectDecodingConfig,
+        ExplicitDecodingConfig,
         StreamingRecognitionFeatures,
         SpeechAdaptation,
         PhraseSet,
@@ -462,11 +464,23 @@ async def _stream_with_google(
         f' (hot_words={len(_HOT_WORDS)} + hints={len(extra_hints or [])})'
     )
 
+    # Raw PCM has no container header for auto-detect to read, so describe it explicitly.
+    if audio_format == 'pcm16':
+        decoding_kwargs = {
+            'explicit_decoding_config': ExplicitDecodingConfig(
+                encoding=ExplicitDecodingConfig.AudioEncoding.LINEAR16,
+                sample_rate_hertz=16000,
+                audio_channel_count=1,
+            )
+        }
+    else:
+        decoding_kwargs = {'auto_decoding_config': AutoDetectDecodingConfig()}
+
     # One code only: multi-language recognition exists only in the eu/global/us locations, and
     # the streaming model (chirp_2) lives in a regional one, so a second code is INVALID_ARGUMENT
     # (verified 2026-10-01). The sync Chirp 3 path in `us` sends the full list.
     recognition_config = RecognitionConfig(
-        auto_decoding_config=AutoDetectDecodingConfig(),
+        **decoding_kwargs,
         language_codes=[target_language],
         model=stream_model,
         adaptation=adaptation,
@@ -525,6 +539,7 @@ async def transcribe_stream_ws(request):
         return ws
 
     language = request.rel_url.query.get('language', '')
+    audio_format = request.rel_url.query.get('format', '')
     # Bounded so a client that sends audio faster than Google consumes it applies
     # backpressure (put() blocks) instead of growing memory without limit. At ~250ms
     # chunks this caps in-flight audio at roughly 25s.
@@ -554,6 +569,7 @@ async def transcribe_stream_ws(request):
 
             async for transcript, is_final in _stream_with_google(
                 _audio_chunk_generator(), cfg, language, extra_hints=extra_hints,
+                audio_format=audio_format,
             ):
                 if ws.closed:
                     break

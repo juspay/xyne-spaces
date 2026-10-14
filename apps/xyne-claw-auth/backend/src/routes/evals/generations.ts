@@ -22,32 +22,24 @@ interface AgentSpec {
   genProvider: string | null;
   genModel: string | null;
   optimizations: string | null;
-  judgeBackend: string | null;
 }
 
 const OPTIMIZATIONS_SPEC = /^[a-z0-9_,+\-]{1,400}$/i;
-const JUDGE_BACKEND_SPEC = /^[a-z0-9_]{1,40}$/i;
-
-export function armDisplayModel(spec: Pick<AgentSpec, "genModel" | "optimizations" | "judgeBackend">): string | null {
-  const tags = [
-    spec.optimizations ? `opts:${spec.optimizations}` : "",
-    spec.judgeBackend ? `judge:${spec.judgeBackend}` : "",
-  ].filter(Boolean);
-  if (tags.length === 0) return spec.genModel;
-  return `${spec.genModel ?? "default"} · ${tags.join(" · ")}`;
+export function armDisplayModel(spec: Pick<AgentSpec, "genModel" | "optimizations">): string | null {
+  if (!spec.optimizations) return spec.genModel;
+  return `${spec.genModel ?? "default"} · opts:${spec.optimizations}`;
 }
 
 /** Normalize the request body into 1-3 agent specs. Supports the multi-agent
  *  shape { agents: [{ agentSlug, genProvider?, genModel? }] } and the legacy
- *  single-agent shape { agentSlug, genProvider?, genModel? }. Dedupes by slug + optimization/judge arm, so one agent can be compared against itself. */
+ *  single-agent shape { agentSlug, genProvider?, genModel? }. Dedupes by slug + optimization arm, so one agent can be compared against itself. */
 export function parseAgentSpecs(body: unknown): { specs: AgentSpec[]; legacy: boolean } | { error: string } {
   const b = (body ?? {}) as {
-    agents?: Array<{ agentSlug?: unknown; genProvider?: unknown; genModel?: unknown; optimizations?: unknown; judgeBackend?: unknown }>;
+    agents?: Array<{ agentSlug?: unknown; genProvider?: unknown; genModel?: unknown; optimizations?: unknown }>;
     agentSlug?: unknown;
     genProvider?: unknown;
     genModel?: unknown;
     optimizations?: unknown;
-    judgeBackend?: unknown;
   };
   const str = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null);
   const matching = (v: unknown, shape: RegExp): string | null => {
@@ -65,9 +57,8 @@ export function parseAgentSpecs(body: unknown): { specs: AgentSpec[]; legacy: bo
         genProvider: str(a?.genProvider),
         genModel: str(a?.genModel),
         optimizations: matching(a?.optimizations, OPTIMIZATIONS_SPEC),
-        judgeBackend: matching(a?.judgeBackend, JUDGE_BACKEND_SPEC),
       };
-      const armKey = [spec.agentSlug, spec.optimizations ?? "", spec.judgeBackend ?? ""].join("|");
+      const armKey = [spec.agentSlug, spec.optimizations ?? ""].join("|");
       if (seen.has(armKey)) continue;
       seen.add(armKey);
       specs.push(spec);
@@ -84,7 +75,6 @@ export function parseAgentSpecs(body: unknown): { specs: AgentSpec[]; legacy: bo
         genProvider: str(b.genProvider),
         genModel: str(b.genModel),
         optimizations: matching(b.optimizations, OPTIMIZATIONS_SPEC),
-        judgeBackend: matching(b.judgeBackend, JUDGE_BACKEND_SPEC),
       }],
       legacy: true,
     };
@@ -180,7 +170,6 @@ router.post("/generations/background", async (req: Request, res: Response) => {
         ...(spec.genProvider ? { genProvider: spec.genProvider } : {}),
         ...(spec.genModel ? { genModel: spec.genModel } : {}),
         ...(spec.optimizations ? { optimizations: spec.optimizations } : {}),
-        ...(spec.judgeBackend ? { judgeBackend: spec.judgeBackend } : {}),
       });
 
     // Legacy single-agent callers keep the flat { runId, jobId } shape (no group).

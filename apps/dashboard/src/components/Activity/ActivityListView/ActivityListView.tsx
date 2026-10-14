@@ -98,6 +98,7 @@ const CALL_ACTIVITY_TYPES = [
   'call_updated',
   'meeting_accepted',
   'meeting_declined',
+  'missed_call',
 ] as const;
 
 const isCallActivity = (activity: ActivityWithRelated): boolean =>
@@ -943,6 +944,7 @@ const ActivityListView = (): ReactElement => {
                 id='activity-unread-toggle'
                 checked={showUnreadOnly}
                 onCheckedChange={handleUnreadToggle}
+                aria-label='Show unread only'
                 data-track-category='ACTIVITY'
                 data-track-name='UNREAD_FILTER_TOGGLE'
                 data-track-metadata={JSON.stringify({ filter_value: !showUnreadOnly })}

@@ -1251,6 +1251,7 @@ function OwnerActions({
       )}
       {canDelete && (
         <Button
+          aria-label='Delete migration'
           variant='ghost'
           size='sm'
           disabled={busy}
@@ -1365,6 +1366,7 @@ function AdminActions({
         </Button>
       )}
       <Button
+        aria-label='Delete migration'
         variant='ghost'
         size='sm'
         disabled={busy}

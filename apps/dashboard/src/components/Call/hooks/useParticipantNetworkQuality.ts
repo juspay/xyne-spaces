@@ -43,23 +43,40 @@ export function useParticipantNetworkQuality(
 
 /**
  * Returns true briefly (for `duration` ms) whenever network quality degrades
- * to Poor or Lost, then resets to false. Re-triggers on each degradation.
+ * to Poor or Lost, then resets to false.
+ *
+ * The toast is debounced: it only appears if the connection stays degraded for
+ * `showDelay` ms. LiveKit quality frequently blips to Poor for a single sample,
+ * so showing the toast on the first Poor reading was noisy. If quality recovers
+ * within the delay the toast never shows; if it recovers while visible, the
+ * toast hides immediately. Poor <-> Lost transitions do not restart the timer.
  */
 export function useNetworkQualityToast(
   networkQuality: ConnectionQuality | null,
   duration = 5000,
+  showDelay = 2000,
 ): boolean {
   const [showToast, setShowToast] = useState(false);
+  const isDegraded =
+    networkQuality === ConnectionQuality.Poor || networkQuality === ConnectionQuality.Lost;
 
   useEffect(() => {
-    if (networkQuality === ConnectionQuality.Poor || networkQuality === ConnectionQuality.Lost) {
-      setShowToast(true);
-      const timer = setTimeout(() => setShowToast(false), duration);
-      return (): void => clearTimeout(timer);
+    if (!isDegraded) {
+      setShowToast(false);
+      return undefined;
     }
-    setShowToast(false);
-    return undefined;
-  }, [networkQuality, duration]);
+
+    let hideTimer: ReturnType<typeof setTimeout> | undefined;
+    const showTimer = setTimeout(() => {
+      setShowToast(true);
+      hideTimer = setTimeout(() => setShowToast(false), duration);
+    }, showDelay);
+
+    return (): void => {
+      clearTimeout(showTimer);
+      if (hideTimer) clearTimeout(hideTimer);
+    };
+  }, [isDegraded, duration, showDelay]);
 
   return showToast;
 }

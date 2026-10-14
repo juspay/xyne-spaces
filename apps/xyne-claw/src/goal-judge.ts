@@ -11,7 +11,7 @@
  * — the relooper combines this with max-turn/cost guards so a judge outage
  * never strands a goal in an infinite loop.
  */
-import type { JevAnswer, JevQuestion } from "./jev.js";
+import type { XorAnswer, XorQuestion } from "./xor.js";
 import { runJudgeSite } from "./judge-site.js";
 import { optEnabled } from "./optimizations.js";
 import { LITELLM, litellmEndpoint } from "./config.js";
@@ -112,7 +112,7 @@ const DECIDE_TOOL = {
 const GOAL_DONE_AT = Number(process.env["GOAL_JEV_DONE_AT"] ?? 0.9);
 const GOAL_CONTINUE_AT = Number(process.env["GOAL_JEV_CONTINUE_AT"] ?? 0.8);
 
-export const GOAL_QUESTIONS: Record<string, JevQuestion> = {
+export const GOAL_QUESTIONS: Record<string, XorQuestion> = {
   status: {
     type: "choice",
     instructions: "Given the goal condition and the latest worker output, where does the goal stand?",
@@ -130,7 +130,7 @@ export const GOAL_QUESTIONS: Record<string, JevQuestion> = {
  * common outcomes are decided here: clearly done, clearly still going. Stuck /
  * infeasible need the LLM's reason, so they always go to it.
  */
-export function goalFromJev(answers: Record<string, JevAnswer>): GoalJudgeDecision | null {
+export function goalFromJev(answers: Record<string, XorAnswer>): GoalJudgeDecision | null {
   const a = answers["status"];
   const pick = a?.choice;
   if (!pick) return null;
@@ -151,7 +151,6 @@ export async function judgeGoalProgress(input: GoalJudgeInput): Promise<GoalJudg
   const result = await runJudgeSite<GoalJudgeDecision>({
     site: "goal-judge",
     enabled: optEnabled("jev_goal_prefilter"),
-    budgetMs: 2_500,
     state,
     questions: GOAL_QUESTIONS,
     decide: goalFromJev,

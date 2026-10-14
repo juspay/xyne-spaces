@@ -353,6 +353,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
             </div>
           </div>
           <button
+            aria-label='Close settings'
             onClick={onClose}
             className='p-2 rounded-lg hover:bg-accent transition-colors'
             disabled={isSaving}
@@ -623,6 +624,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                             onClick={() => setPreviewingSkill(skill)}
                             className='p-1.5 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors'
                             title='View'
+                            aria-label='View'
                             data-track-category='XyneAI'
                             data-track-name='PreviewSystemSkill'
                           >
@@ -655,6 +657,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                             onClick={() => handleEditSkill(skill)}
                             className='p-1.5 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors'
                             title='Edit'
+                            aria-label='Edit'
                             data-track-category='XyneAI'
                             data-track-name='EditSkill'
                           >
@@ -667,6 +670,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                             data-ph-capture-attribute-track-id='delete_skill'
                             className='p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors'
                             title='Delete'
+                            aria-label='Delete'
                             data-track-category='XyneAI'
                             data-track-name='DeleteSkill'
                           >

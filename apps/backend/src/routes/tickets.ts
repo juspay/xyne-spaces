@@ -30,6 +30,7 @@ router.post('/kanban/counts', kanbanTicketController.getCounts);
 router.post('/kanban/track-counts', kanbanTicketController.getTrackCounts);
 router.post('/flow-run-export/pdf', flowRunExportController.exportPdf);
 router.get('/my-board-ids', ticketController.getMyTicketBoardIds);
+router.get('/board-fields', ticketController.getBoardTicketFields);
 
 // Create a new ticket
 router.post('/', uploadMultiple, ticketController.createTicket);

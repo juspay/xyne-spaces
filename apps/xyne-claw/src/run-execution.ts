@@ -1,4 +1,4 @@
-import { pinRunJudgeBackend } from "./judge-backend.js";
+import { beginJudgeRun } from "./judge-trace.js";
 import { pinRunOptimizations, tierOptimizationDefaults } from "./optimizations.js";
 import {
   ensureActiveRun,
@@ -119,7 +119,6 @@ export interface InternalRunPayload {
   detached?: boolean;
   fastMode?: boolean;
   resumedFromHandoff?: boolean;
-  judgeBackend?: string;
   optimizations?: unknown;
   memoryBankId?: string;
   /** Digital Twin mention flow: who @mentioned the user, and the channel name.
@@ -225,7 +224,6 @@ export async function executeRunFromPayload(
     isRegenerate,
     fastMode,
     resumedFromHandoff,
-    judgeBackend,
     optimizations,
     memoryBankId,
     senderName,
@@ -249,7 +247,7 @@ export async function executeRunFromPayload(
   const activeRun = ensureActiveRun(sessionId, payload);
   const state: RunExecutionState = hooks ? { hooks } : {};
 
-  pinRunJudgeBackend(judgeBackend);
+  beginJudgeRun();
   pinRunOptimizations(optimizations, agentConfig?.["optimizations"], tierOptimizationDefaults(delegationMode));
 
   try {

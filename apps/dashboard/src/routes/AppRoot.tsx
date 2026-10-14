@@ -64,6 +64,7 @@ import CanvasRedirectPage from './CanvasRedirect/CanvasRedirectPage';
 import { ClawOverlay } from '../components/Claw/ClawOverlay';
 import { ArtifactAppHostRoute } from '../components/ArtifactApp/ArtifactAppHostRoute';
 import AppSidebar from '../components/AppSidebar/AppSidebar';
+import { SiteMap } from '../components/AppSidebar/SiteMap';
 import { ReactElement, ReactNode, useRef, useEffect, useState } from 'react';
 import ZeroProvider from '../providers/ZeroProvider';
 import { EditProvider } from '../providers/EditProvider';
@@ -132,6 +133,7 @@ import { NoteTakerOverlayHost } from './RecordingsV2Screen/components/NoteTakerO
 import FormScreen from './FormScreen/FormScreen';
 import ScheduledMessageScreen from './ScheduledMessageScreen/ScheduledMessageScreen';
 import AppsScreen from './AppsScreen/AppsScreen';
+import AppsMarketplaceScreen from './AppsMarketplaceScreen/AppsMarketplaceScreen';
 import InitialStateLoader from '../providers/InitialStateLoader';
 import { ZeroFallbackProvider } from '../contexts/ZeroFallbackContext';
 import { InstrumentationProvider, type Instrumentation } from '@xyne/shared/hooks';
@@ -930,6 +932,7 @@ const AppRoot = (): ReactElement => {
                                       <EditWarningModal />
                                       <Outlet />
                                     </main>
+                                    <SiteMap />
                                   </div>
                                 </Panel>
                                 <Separator className='w-2 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
@@ -954,6 +957,7 @@ const AppRoot = (): ReactElement => {
                               <EditWarningModal />
                               <Outlet />
                             </main>
+                            <SiteMap />
                           </div>
                         </AppSidebarHost>
                       )}
@@ -2003,6 +2007,14 @@ export const router = createBrowserRouter(
                   element: (
                     <ToolbarProtectedRoute path='/apps'>
                       <AppsScreen />
+                    </ToolbarProtectedRoute>
+                  ),
+                },
+                {
+                  path: 'apps-marketplace',
+                  element: (
+                    <ToolbarProtectedRoute path='/apps-marketplace'>
+                      <AppsMarketplaceScreen />
                     </ToolbarProtectedRoute>
                   ),
                 },

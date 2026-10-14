@@ -4,7 +4,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
-import { webhookLimiter } from '@/middleware/rateLimiters';
+import { ttsLimiter, webhookLimiter } from '@/middleware/rateLimiters';
 import morgan from 'morgan';
 
 import { config } from '@/config/env';
@@ -218,6 +218,8 @@ import sdlcAgentInternalRoutes from '@/routes/sdlcAgentInternal';
 import { createSdkPublicRouter, createSdkRouter } from '@/api/sdk';
 import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
 import sdkSsoRoutes from '@/routes/sdk-sso';
+import { authenticateSdk } from '@/middleware/sdkAuth';
+import channelsDeskRoutes from '@/routes/channelsDesks';
 
 
 export class App {
@@ -384,9 +386,10 @@ export class App {
       // are public, status/approve authenticate the dashboard session themselves.
       this.app.use('/api/sdk/auth/sso', sdkSsoRoutes);
       this.app.use('/api/sdk', createSdkPublicRouter());
-      this.app.use('/api/sdk', authMiddleware.authenticate, createSdkRouter(), sdkErrorHandler);
+      this.app.use('/api/sdk', authenticateSdk, createSdkRouter(), sdkErrorHandler);
       logger.info('Public SDK API mounted at /api/sdk');
     }
+    this.app.use('/api/channels-desks', authMiddleware.authenticate, channelsDeskRoutes);
 
     this.app.use('/api/automation-webhooks', webhookLimiter, automationWebhookRoutes);
 
@@ -549,7 +552,7 @@ export class App {
     this.app.use('/api/calendar/sync', authMiddleware.authenticate, calendarSyncRoutes); // Calendar manual sync
     this.app.use('/api/calendar/watch', authMiddleware.authenticate, calendarWatchRoutes); // Calendar watch setup
     this.app.use('/api/voice-input', authMiddleware.authenticate, voiceInputRoutes); // Low-latency chat voice input
-    this.app.use('/api/tts', authMiddleware.authenticate, ttsRoutes);
+    this.app.use('/api/tts', authMiddleware.authenticate, ttsLimiter, ttsRoutes);
 
     // App routes
     this.app.use('/api/apps', appRoutes);
@@ -965,10 +968,6 @@ export class App {
           logger.info('Initializing email classification queue...');
           await emailClassificationQueue.initialize();
         })(),
-        (async () => {
-          logger.info('Initializing call transcription queue...');
-          callTranscriptionQueue.startConsumer();
-        })(),
       ]);
 
       logger.info('[TEST MODE] All queues initialized');
@@ -1015,11 +1014,8 @@ export class App {
       logger.info('Initializing email classification queue...');
       await emailClassificationQueue.initialize();
 
-      // Ozonetel call-recording transcription (manual "Transcribe" button). The audio
-      // work runs in the Python agent; this consumer only holds the Bull job while it
-      // waits for the agent, then writes the transcript attachment.
-      logger.info('Initializing call transcription queue...');
-      callTranscriptionQueue.startConsumer();
+      // Call transcription is producer-only here (lazy queue on enqueue); the consumer
+      // runs in the worker process — see ENABLE_CALL_TRANSCRIPTION_WORKER.
 
       // Producer only — messages are enqueued here at ingest; the worker (a
       // separate process) drains each thread once its debounce window elapses.

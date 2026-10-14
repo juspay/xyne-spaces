@@ -659,7 +659,13 @@ export async function callTool(
       .join("\n");
 
     if ("isError" in result && result.isError === true) {
-      throw new Error(text || "MCP tool returned an error");
+      const error = new Error(text || "MCP tool returned an error") as Error & { httpStatus?: number };
+      // Tools may report the upstream HTTP status in `_meta.httpStatus`
+      // (see withToolErrors in xyne-spaces-tools.ts); carry it so callers
+      // like /flow-action can classify the failure without parsing text.
+      const httpStatus = (result as { _meta?: { httpStatus?: unknown } })._meta?.httpStatus;
+      if (typeof httpStatus === "number") error.httpStatus = httpStatus;
+      throw error;
     }
 
     // MCP `_meta` is a free-form metadata field. Tools surface structured

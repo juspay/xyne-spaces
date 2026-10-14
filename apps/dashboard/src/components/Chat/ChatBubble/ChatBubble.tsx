@@ -63,6 +63,8 @@ import {
 } from '../ChatList/ChatListUtils';
 import { useUserBookmarks } from '../../../hooks/useUserBookmarks';
 import { useChannel } from '../../../hooks/useChannels';
+import { useIntentCallSuggestion } from '../../../stores/intentCallSuggestionStore';
+import { IntentCallSuggestionCard } from '../IntentCallSuggestion';
 import { useIsDmReadOnly } from '../../../hooks/useIsDmReadOnly';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { logger, Event } from '../../../utils/logger';
@@ -142,6 +144,7 @@ interface ChatBubbleProps {
   /** Tag being inspected from the thread header; messages carrying it show a chip. */
   inspectedTag?: string | null;
   afterTextContent?: React.ReactNode;
+  showIntentSuggestion?: boolean;
 }
 
 export const ChatBubble: React.FC<ChatBubbleProps> = ({
@@ -171,6 +174,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   highlightMessageId,
   inspectedTag = null,
   afterTextContent,
+  showIntentSuggestion = false,
 }) => {
   const { user } = useAuthContext();
   // Off inside hosts that embed chat for one purpose (the related-context popup).
@@ -1017,11 +1021,25 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     showThreadTags && context === 'thread' && !isSystemMessage && !isMessageDeleted ? (
       <MessageTags messageActs={message.messageActs} inspectedTag={inspectedTag} />
     ) : null;
+  const intentCallSuggestion = useIntentCallSuggestion(message.messageId);
+  const intentCallCard =
+    showIntentSuggestion &&
+    intentCallSuggestion &&
+    message.senderId === user?.id &&
+    intentCallSuggestion.detection.surface === context &&
+    !isMessageDeleted ? (
+      <IntentCallSuggestionCard
+        suggestion={intentCallSuggestion}
+        channelId={channelId}
+        conversationId={messageConversationId}
+      />
+    ) : null;
   const textTrailer =
-    afterTextContent !== undefined || messageTags ? (
+    afterTextContent !== undefined || messageTags || intentCallCard ? (
       <>
         {afterTextContent}
         {messageTags}
+        {intentCallCard}
       </>
     ) : undefined;
 

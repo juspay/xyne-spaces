@@ -17,8 +17,8 @@
  */
 
 import type { Citation } from "xyne-claw-shared";
-import type { AnswerAssessment } from "../jev-completeness.js";
-import type { JudgeRunSummary } from "../judge-backend.js";
+import type { AnswerAssessment } from "../xor-completeness.js";
+import type { JudgeRunSummary } from "../judge-trace.js";
 
 // Re-exported so the rest of `debug/` imports it from the contract module
 // like every other type here, rather than reaching into jev-completeness.

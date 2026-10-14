@@ -120,7 +120,7 @@ multipart uploads, search, and identity:
 | `GET /api/sdk/v1/me` | Who the session acts as |
 | `POST /api/sdk/v1/channels` | Create a channel |
 | `POST /api/sdk/v1/channels/check-duplicate` | Name availability |
-| `POST /api/sdk/v1/tickets` | Create a ticket (sequence allocator) |
+| `POST /api/sdk/v1/tickets` | Create a ticket (sequence allocator). A `stageName` must name a stage on `boardId` (which is then required), and is refused on Flow boards; the app's own route would silently use the first stage instead |
 | `POST /api/sdk/v1/channels/:channelId/conversations` | Start a thread with attachments |
 | `POST /api/sdk/v1/attachments` | Upload entity attachments |
 | `POST /api/sdk/v1/draft-attachments` | Upload draft attachments |
@@ -196,6 +196,8 @@ scope apply as they do for the dashboard.
 | `POST /api/sdk/v1/canvases/:canvasId/labels` | `{ names }` → `{ labels }` |
 | `POST /api/sdk/v1/canvases/:canvasId/labels/remove` | `{ labelIds }` → `{}` (POST: the product route is a DELETE with a body) |
 | `PATCH /api/sdk/v1/tickets/:ticketId` | `{ assigneeId?, stage?, groupId?, title?, description?, priority?, status?, eta?, tags?, formFields? }` → `{ updated }`. Requires the `TICKETS` write grant and a ticket the caller can read in their workspace (404 otherwise) |
+| `POST /api/sdk/v1/sub-tickets/link` | `{ ticketId, mappedTicketId, subTicketTitle? }` → `{ subTicketId, mappingId }`. Attaches the existing ticket `mappedTicketId` under `ticketId`, as the app's "Add existing sub-ticket" does: write access to the parent, read access to the child, manual boards only, no cycles, one parent per ticket (otherwise 409) |
+| `POST /api/sdk/v1/sub-tickets/unlink` | `{ mappingId }` → empty `204`. Removes the link and its sub-ticket row; the child ticket itself is kept |
 
 #### Desk metrics and desk report
 
@@ -307,7 +309,7 @@ share a code and differ in `message`.
 Three behaviours worth knowing:
 
 - **5xx messages are replaced** with a generic string, so SQL and connection
-  detail never reach a caller. The cause is logged against the `request_id`.
+  detail never reach a caller. The cause is in the call log, under the `request_id`.
 - **4xx messages pass through verbatim**, and that is the point of routing
   business-rule failures to 400 rather than 500. The mutator catalog raises
   plain `Error`s at ~485 sites carrying genuine user-facing text ("Ticket not
@@ -320,7 +322,33 @@ Three behaviours worth knowing:
   and refused.
 
 `X-Request-Id` is echoed on every response, and a caller-supplied one is honoured
-so a retry chain can be correlated.
+so a retry chain can be correlated. It is the same id the app-wide request logger
+stamps on every log line, so the `request_id` from an error envelope finds the
+whole request in the logs: auth, the call log, and anything the mutator logged.
+
+### The call log
+
+`callLog` in `handler.ts` writes one `[sdk] call` line per request, when the
+response finishes: info for 2xx/3xx, warn for 4xx, error for 5xx (with the
+cause). It is the only error log this API writes.
+
+```jsonc
+{
+  "requestId": "…",          // = X-Request-Id
+  "userId": "…", "workspaceId": "…",
+  "op": "messages.send",     // SDK operation id, or "GET /search" for a path-addressed route
+  "kind": "mutator",         // query | mutator | direct | unknown
+  "method": "POST", "path": "/api/sdk/v1/mutate",
+  "status": 200, "code": null, "durationMs": 84
+}
+```
+
+Every field comes from the server, never from a header a caller can set, and
+bodies are never logged: arguments and results carry message text, emails and
+ticket content. A request rejected before an operation resolves (failed auth,
+unknown path) still gets a line, without `op`; a client that hangs up first is
+logged as `499` with `aborted: true`. Device-flow sign-in (`/api/sdk/auth/sso`)
+is mounted ahead of this router and is not in the call log.
 
 ---
 

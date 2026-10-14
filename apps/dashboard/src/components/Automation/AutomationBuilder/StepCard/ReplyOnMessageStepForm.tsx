@@ -52,7 +52,6 @@ export function ReplyOnMessageStepForm({
           value={cfg.conversationId}
           onChange={next => setField('conversationId', next)}
           variableSources={variableSources}
-          targetEntityKind={EntityKind.CONVERSATION}
           placeholder='Pick a conversation'
         />
       </FieldRow>

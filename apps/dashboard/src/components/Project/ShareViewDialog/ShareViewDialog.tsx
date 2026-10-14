@@ -129,6 +129,7 @@ export const ShareViewDialog = ({
               const isSelected = selectedUserIds.has(u.id);
               return (
                 <button
+                  aria-pressed={isSelected}
                   key={u.id}
                   type='button'
                   onClick={() => toggleUser(u.id)}

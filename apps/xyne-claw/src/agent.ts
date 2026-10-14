@@ -48,13 +48,13 @@ import {
 } from "./session-store.js";
 import { acquireSessionLock, refreshSessionLock, releaseSessionLock, startSessionLockHeartbeat, SessionLockedError } from "./session-lock.js";
 import { kickOffPrReviewRoom, registerLivePrRunContext, unregisterLivePrRunContext } from "./pr-review-room.js";
-import { judgeRunSummary, recordJudgeOutcome, setJudgeDebugSink } from "./judge-backend.js";
+import { judgeRunSummary, recordJudgeOutcome, setJudgeDebugSink } from "./judge-trace.js";
 import { effectiveOptimizations, optEnabled } from "./optimizations.js";
-import { jevThreshold } from "./jev.js";
+import { xorThreshold } from "./xor.js";
 import { attachRunMessages, pinRunTask } from "./run-context.js";
 import { CONTEXT_GATE_NUDGE, checkpointPrecheck, contextGate } from "./answer-gates.js";
 import { runWithToolCall, takeSiftParam, withSiftParam, type ToolCallContext } from "./tool-call-context.js";
-import { assessAnswer, type AnswerAssessment } from "./jev-completeness.js";
+import { assessAnswer, type AnswerAssessment } from "./xor-completeness.js";
 import { gcsUploadDebugRunWithRetries, gcsUploadDebugObject, gcsPutDebugIndex } from "./storage.js";
 import {
   BlobIndex,
@@ -765,7 +765,9 @@ const MODEL_CONTEXT_WINDOWS: ReadonlyMap<string, number> = (() => {
 const MODEL_CONTEXT_WINDOW_OVERRIDES: ReadonlyMap<string, number> = new Map([
   ["claude-opus-4-8", 1_000_000],
   ["claude-opus-5", 1_000_000],
+  ["claude-opus-5-5", 1_000_000],
   ["claude-sonnet-5", 1_000_000],
+  ["claude-sonnet-5-5", 1_000_000],
   ["claude-fable-5", 1_000_000],
   ["claude-fable-5-1", 1_000_000],
   ["gpt-5.6-luna", 272_000],
@@ -1421,6 +1423,7 @@ function maybeEmitPrCard(progressUrl: ProgressDest, sessionId: string, invocatio
 // Send a single tool invocation to the progress endpoint — NOT throttled,
 // fires on every tool_execution_end so the Control Center sees live tool streams.
 export function pushInvocation(progressUrl: ProgressDest, sessionId: string, invocation: unknown): void {
+  flushStreamChunks(progressUrl, sessionId);
   if (!progressUrl) return;
   // Emit a PR card when this invocation is a completed create/merge PR (guards
   // internally; no-op for every other tool). Runs for parent + nested tools.
@@ -1544,6 +1547,56 @@ export function pushSandboxPreview(
 
 // Stream raw text fragments (reasoning deltas, assistant text deltas) to the progress endpoint.
 // These are fired on every pi-ai text_delta / thinking_delta event — high-frequency, keep it lean.
+const STREAM_CHUNK_FLUSH_MS = 200;
+
+type StreamChunkKind = "reasoningDelta" | "textDelta";
+
+interface PendingStreamChunk {
+  url: string;
+  sessionId: string;
+  kind: StreamChunkKind;
+  partId: string | undefined;
+  text: string;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+const pendingStreamChunks = new Map<string, PendingStreamChunk>();
+
+function postStreamChunk(chunk: PendingStreamChunk): void {
+  fetch(chunk.url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(SERVER.s2sKey ? { "x-s2s-key": SERVER.s2sKey } : {}),
+    },
+    body: JSON.stringify({
+      sessionId: chunk.sessionId,
+      [chunk.kind]: chunk.text,
+      ...(chunk.partId !== undefined ? { partId: chunk.partId } : {}),
+    }),
+    signal: AbortSignal.timeout(5_000),
+  }).catch(() => {
+    // Best-effort — don't spam logs on every chunk
+  });
+}
+
+function streamChunkKey(url: string, sessionId: string): string {
+  return `${url}\u0000${sessionId}`;
+}
+
+function flushStreamChunkKey(key: string): void {
+  const chunk = pendingStreamChunks.get(key);
+  if (!chunk) return;
+  clearTimeout(chunk.timer);
+  pendingStreamChunks.delete(key);
+  postStreamChunk(chunk);
+}
+
+export function flushStreamChunks(progressUrl: ProgressDest, sessionId: string): void {
+  if (!progressUrl || isEmitter(progressUrl)) return;
+  flushStreamChunkKey(streamChunkKey(progressUrl, sessionId));
+}
+
 function pushStreamChunk(
   progressUrl: ProgressDest,
   sessionId: string,
@@ -1556,16 +1609,23 @@ function pushStreamChunk(
     }
     return;
   }
-  fetch(progressUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(SERVER.s2sKey ? { "x-s2s-key": SERVER.s2sKey } : {}),
-    },
-    body: JSON.stringify({ sessionId, ...payload }),
-    signal: AbortSignal.timeout(5_000),
-  }).catch(() => {
-    // Best-effort — don't spam logs on every chunk
+  const kind: StreamChunkKind = payload.reasoningDelta !== undefined ? "reasoningDelta" : "textDelta";
+  const text = payload[kind];
+  if (text === undefined) return;
+  const key = streamChunkKey(progressUrl, sessionId);
+  const pending = pendingStreamChunks.get(key);
+  if (pending && pending.kind === kind && pending.partId === payload.partId) {
+    pending.text += text;
+    return;
+  }
+  if (pending) flushStreamChunkKey(key);
+  pendingStreamChunks.set(key, {
+    url: progressUrl,
+    sessionId,
+    kind,
+    partId: payload.partId,
+    text,
+    timer: setTimeout(() => flushStreamChunkKey(key), STREAM_CHUNK_FLUSH_MS),
   });
 }
 
@@ -3267,6 +3327,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       }
     }
     if (event.type === "message_end") {
+      flushStreamChunks(progressUrl, sessionId ?? conversationId ?? "unknown");
       modelActive = false; // turn finished — next turn_start re-arms the watchdog
       const msg = (event as { message?: { role?: string; usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number } } }).message;
       if (msg?.role === "assistant" && msg.usage) {
@@ -4092,7 +4153,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     if (
       optEnabled("auto_continue_strict") &&
       answerAssessment.verdict === "partial" &&
-      answerAssessment.finished >= jevThreshold("JEV_COMPLETENESS_THRESHOLD", 0.5)
+      answerAssessment.finished >= xorThreshold("JEV_COMPLETENESS_THRESHOLD", 0.5)
     ) {
       break;
     }

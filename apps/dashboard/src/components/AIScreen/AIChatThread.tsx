@@ -55,6 +55,7 @@ import { isAssistantMessage } from '../Assistant/turns';
 import { useTranscript } from '../Assistant/useTranscript';
 import type { AssistantActions } from '../Assistant/useAssistantActions';
 import { AIComposer, type AIComposerAttachment, type AIComposerHandle } from './AIComposer';
+import { ASSISTANT_PANEL_ATTR } from '../Assistant/buddy/constants';
 import { ReadonlyContextPills, useSentMentions } from './ReadonlyContextPills';
 import { type ComposerContext, toStreamOverrides, withoutPickedContext } from './composerContext';
 import { AgentByline, AgentRecipient } from './ConversationAgents';
@@ -125,6 +126,8 @@ import {
   processTextForCopy,
 } from '../Chat/XyneAISidebar/components/MessageItem';
 import { TurnTimeline } from '../Chat/XyneAISidebar/components/TurnTimeline';
+import { TurnErrorCard } from '../Chat/XyneAISidebar/components/TurnErrorCard';
+import { isErrorOnlyContent } from '../Chat/XyneAISidebar/components/turnAnswer';
 import { turnDurationLabel, turnFinishedAt } from '../Chat/XyneAISidebar/components/activityShared';
 import { PendingActionBlock } from '../Chat/XyneAISidebar/components/PendingActionBlock';
 import { respondToPendingAction } from '../../services/XyneAI/XyneAIPendingActionService';
@@ -519,6 +522,7 @@ function BranchNavigator({
     <div className='flex items-center gap-0.5 text-xs text-muted-foreground'>
       <button
         type='button'
+        aria-label='Previous version'
         onClick={() => onNavigate('prev')}
         className='rounded p-0.5 transition-colors hover:bg-muted'
         data-track-category='XyneAI'
@@ -531,6 +535,7 @@ function BranchNavigator({
       </span>
       <button
         type='button'
+        aria-label='Next version'
         onClick={() => onNavigate('next')}
         className='rounded p-0.5 transition-colors hover:bg-muted'
         data-track-category='XyneAI'
@@ -1075,6 +1080,11 @@ function ChatMessageBubble({
                     value={editText}
                     onChange={e => setEditText(e.target.value)}
                     onKeyDown={e => {
+                      // CJK IMEs use Enter to commit a candidate and Escape to dismiss
+                      // it; neither should save or cancel the edit mid-composition.
+                      // keyCode 229 covers Safari, which reports isComposing=false
+                      // on the keydown that ends composition.
+                      if (e.nativeEvent.isComposing || e.keyCode === 229) return;
                       if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();
                         if (editText.trim()) {
@@ -1226,13 +1236,21 @@ function ChatMessageBubble({
             renderText={(text, { streaming }) =>
               renderAnswerMarkdown(prepareAnswerText(text, streaming))
             }
-            legacyAnswer={displayContent ? renderAnswerMarkdown(displayContent) : null}
+            legacyAnswer={
+              displayContent && !isErrorOnlyContent(message)
+                ? renderAnswerMarkdown(displayContent)
+                : null
+            }
             plan={
               message.planTodos?.length ? (
                 <PlanCard todos={message.planTodos} title={message.planTitle} />
               ) : undefined
             }
           />
+          {/* A failed turn says why, instead of ending at its step group. */}
+          {message.errorInfo && !message.isStreaming && (
+            <TurnErrorCard errorInfo={message.errorInfo} className='mt-1 rounded-md' />
+          )}
 
           {!isUser &&
             message.uiFlows?.map(flow => (
@@ -1475,6 +1493,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     initialQuery && initialExtras ? withoutPickedContext(initialExtras) : initialExtras,
   );
   const dropZoneRef = useRef<HTMLDivElement | null>(null);
+  const [voiceStageHost, setVoiceStageHost] = useState<HTMLDivElement | null>(null);
   const dragCounterRef = useRef(0);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -1702,6 +1721,12 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
   }, [v2Sessions, conversationId]);
   useEffect(() => {
     if (!isV2 || !conversationId) return;
+    // Only a chat created in this thread can still be waiting for its
+    // generated title. A chat opened from history already has its final
+    // title (or never will get one), and the invalidation below refetches
+    // every loaded page of every cached history list, so polling for it
+    // would just reload the whole history six times.
+    if (mountedWithSessionIdRef.current) return;
     if (generatedTitle) return;
     const timers = [4_000, 10_000, 20_000, 35_000, 60_000, 90_000].map(delay =>
       window.setTimeout(() => invalidateSessions(), delay),
@@ -2016,7 +2041,10 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
               detach: xyneAIStreamManager.attachLiveViewer(
                 threadId,
                 sessionId,
-                effectiveAgentSlugRef.current || 'ask-ai',
+                // Attach as the in-flight turn's agent, not the selected one (XYNE-66346).
+                [...loadedMessages].reverse().find(m => m.agentSlug)?.agentSlug ||
+                  effectiveAgentSlugRef.current ||
+                  'ask-ai',
                 loadedMessages,
               ),
             };
@@ -2524,7 +2552,11 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
           as a sibling of the scroll area rather than inside it — anything
           positioned inside an overflow container scrolls away with the content,
           so the rail has to be anchored to the frame that stays put. */}
-        <div className='relative min-h-0 flex-1'>
+        <div
+          ref={setVoiceStageHost}
+          {...{ [ASSISTANT_PANEL_ATTR]: '' }}
+          className='relative min-h-0 flex-1'
+        >
           <PromptMarkerRail markers={promptMarkers} scrollRef={scrollRef} />
           {/* Messages area — tabIndex enables keyboard scroll (PageUp/Home/ArrowUp)
             which the auto-scroll effect listens for to unstick from bottom. */}
@@ -2622,7 +2654,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
                             detach: xyneAIStreamManager.attachLiveViewer(
                               threadId,
                               conversationId,
-                              effectiveAgentSlug || 'ask-ai',
+                              message.agentSlug || effectiveAgentSlug || 'ask-ai',
                               xyneAIStreamManager.getActiveStream(threadId)?.messages ?? messages,
                             ),
                           };
@@ -2702,7 +2734,10 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
             agrees: once width is tight enough that the cap stops binding — App
             Creation mode — a narrower gutter here would make the composer
             wider than the messages it sits under. */}
-        <div className='relative shrink-0 px-4 pb-2 pt-3 sm:px-6 md:px-10'>
+        <div
+          {...{ [ASSISTANT_PANEL_ATTR]: '' }}
+          className='relative shrink-0 px-4 pb-2 pt-3 sm:px-6 md:px-10'
+        >
           {showJumpPill && (
             <button
               type='button'
@@ -2736,6 +2771,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
               pending={isAnyMessageStreaming || (assistant?.isRouting ?? false)}
               onStop={handleStop}
               assistant={assistant && assistant.actions.length > 0 ? assistant : undefined}
+              voiceStageHost={voiceStageHost}
             />
           </div>
         </div>
