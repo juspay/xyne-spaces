@@ -166,7 +166,6 @@ async function callSpacesAutomations(
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
         ...(sessionId ? { "x-session-id": sessionId } : {}),
-        ...(workspaceId ? { "x-workspace-id": workspaceId } : {}),
         ...(cookieHeader ? { Cookie: cookieHeader } : {}),
       },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),

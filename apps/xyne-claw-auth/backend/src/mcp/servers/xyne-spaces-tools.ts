@@ -5143,17 +5143,14 @@ const spacesReadCanvas: ToolDef = {
     },
     required: ["viewAccessId"],
   },
-  handler: withToolErrors("Read canvas error", async (params, ctx) => {
+  handler: withToolErrors("Read canvas error", async (params) => {
       const viewAccessId = String(params["viewAccessId"] ?? "").trim();
       if (!viewAccessId) return err("viewAccessId is required");
 
       const s2sKey = process.env["INTERNAL_S2S_KEY"] || process.env["XYNE_CLAW_S2S_KEY"] || "";
       const result = (await spacesFetch(
         `/api/internal/canvas/view/${encodeURIComponent(viewAccessId)}`,
-        {
-          method: "GET",
-          headers: { "x-user-id": ctx.userId },
-        },
+        { method: "GET" },
         { s2sKey },
       )) as { title?: string; markdown?: string; url?: string; error?: string };
 
@@ -5191,7 +5188,7 @@ const spacesEditCanvas: ToolDef = {
     },
     required: ["viewAccessId", "content"],
   },
-  handler: withToolErrors("Edit canvas error", async (params, ctx) => {
+  handler: withToolErrors("Edit canvas error", async (params) => {
       const viewAccessId = String(params["viewAccessId"] ?? "").trim();
       const content = String(params["content"] ?? "");
       const title = params["title"] ? String(params["title"]) : undefined;
@@ -5204,7 +5201,6 @@ const spacesEditCanvas: ToolDef = {
         {
           method: "PATCH",
           body: JSON.stringify({ markdown: content, ...(title ? { title } : {}) }),
-          headers: { "x-user-id": ctx.userId },
         },
         { s2sKey },
       )) as {
@@ -6978,7 +6974,6 @@ const spacesUploadToKb: ToolDef = {
       const uploadHeaders: Record<string, string> = {
         Authorization: `Bearer ${token}`,
         ...(sessionId ? { "x-session-id": sessionId } : {}),
-        ...(workspaceId ? { "x-workspace-id": workspaceId } : {}),
         ...(cookieHeader ? { Cookie: cookieHeader } : {}),
       };
       const targetDesc = collectionLabel ? `${collectionLabel} (${collectionId})` : collectionId;
