@@ -14,7 +14,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "postinstall": "pnpm exec playwright install chromium",
+    "postinstall": "[ \"$PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD\" = \"1\" ] || pnpm exec playwright install chromium",
     "test": "vitest run",
     "test:watch": "vitest"
   },
