@@ -74,6 +74,7 @@ export interface ChatNavItem {
   to: string;
   icon: PikaIcon;
   trackName: string;
+  description?: string;
   replace?: boolean;
   requiresRadar?: boolean;
   /** disabled_toolbar_paths entry that hides this item for a workspace. */
@@ -87,6 +88,7 @@ export const CHAT_NAV_ITEMS: ChatNavItem[] = [
     to: '/chat/search?mode=dm',
     icon: ChatPlus,
     trackName: 'NEW_MESSAGE',
+    description: 'Start a direct or group message',
     replace: true,
   },
   {
@@ -95,6 +97,7 @@ export const CHAT_NAV_ITEMS: ChatNavItem[] = [
     to: '/chat/dir/threads',
     icon: Subtask,
     trackName: 'OPEN_THREADS',
+    description: 'Threads you follow and their replies',
   },
   {
     key: 'unreads',
@@ -102,6 +105,7 @@ export const CHAT_NAV_ITEMS: ChatNavItem[] = [
     to: '/chat/dir/unreads',
     icon: ChatTyping,
     trackName: 'OPEN_UNREADS',
+    description: 'Conversations with unread messages',
   },
   {
     key: 'bookmarks',
@@ -109,6 +113,7 @@ export const CHAT_NAV_ITEMS: ChatNavItem[] = [
     to: '/chat/bookmarks',
     icon: BookmarkDefault,
     trackName: 'OPEN_BOOKMARKS',
+    description: 'Messages you saved',
   },
   {
     key: 'drafts-sent',
@@ -116,6 +121,7 @@ export const CHAT_NAV_ITEMS: ChatNavItem[] = [
     to: '/chat/drafts-sent',
     icon: SendPlaneSlant,
     trackName: 'OPEN_DRAFTS_AND_SENT',
+    description: 'Messages you are writing or sent',
   },
   {
     key: 'scheduled-messages',
@@ -123,6 +129,7 @@ export const CHAT_NAV_ITEMS: ChatNavItem[] = [
     to: '/scheduled-messages',
     icon: CalendarTimer,
     trackName: 'OPEN_SCHEDULED_MESSAGES',
+    description: 'Messages set to send later',
     toolbarPath: '/scheduled-messages',
   },
   {
@@ -131,6 +138,7 @@ export const CHAT_NAV_ITEMS: ChatNavItem[] = [
     to: '/chat/dir/recap',
     icon: ListAiGenerated,
     trackName: 'OPEN_RECAP',
+    description: 'AI summary of what you missed',
   },
   {
     key: 'radar',
@@ -138,6 +146,7 @@ export const CHAT_NAV_ITEMS: ChatNavItem[] = [
     to: '/chat/dir/radar',
     icon: RadarNavIcon,
     trackName: 'OPEN_RADAR',
+    description: 'Items that need your attention',
     requiresRadar: true,
   },
 ];
@@ -160,6 +169,11 @@ export const railItemIndexFromEvent = (event: KeyboardEvent): number => {
 export interface NavigationItem {
   path: string;
   label: string;
+  /**
+   * A few nouns for what the page holds and other names for it ("Also called the Desk"); no verbs,
+   * as the assistant understands those itself.
+   */
+  description: string;
   icon: PikaIcon;
   iconSize?: number;
   popout?: boolean;
@@ -183,35 +197,181 @@ const XyneAINavIcon: PikaIcon = ({ size, color }) =>
 // order they should appear in the rail, followed by everything that lives in
 // the "More" menu by default. Toggling is handled per-path by useToolbarItems.
 export const NAVIGATION_ITEMS: NavigationItem[] = [
-  { path: '/ai', label: 'Xyne AI', icon: XyneAINavIcon, popout: true },
-  { path: '/chat/dir', label: 'Chat', icon: Hashtag, popout: true },
-  { path: '/chat/dm', label: 'DMs', icon: ChatDefault, popout: true },
-  { path: '/chat/activity', label: 'Activity', icon: NotificationBellOn, popout: true },
-  { path: '/apps-marketplace', label: 'Apps Marketplace', icon: StoreNavIcon, popout: true },
-  { path: '/streams', label: 'Streams', icon: LayoutGridTwoVertical, popout: true },
-  { path: '/calls', label: 'Calls', icon: PhoneDefault, popout: true },
-  { path: '/recordings', label: 'Recordings', icon: AudioWaveIcon, popout: true },
-  { path: '/projects', label: 'Tickets', icon: TicketToken, popout: true },
-  { path: '/sdlc', label: 'SDLC', icon: Atom, popout: true },
-  { path: '/support', label: 'Support', icon: Troubleshoot, popout: true },
-  { path: '/chat/canvas', label: 'My Canvas', icon: FileText, popout: true },
-  { path: '/automations', label: 'Automations', icon: LightningThunderElectricOn, popout: true },
-  { path: '/workflows', label: 'Workflows', icon: GitBranch, popout: true },
+  {
+    path: '/ai',
+    label: 'Xyne AI',
+    description: 'Also called Ask AI: AI chats, agents and knowledge',
+    icon: XyneAINavIcon,
+    popout: true,
+  },
+  {
+    path: '/chat/dir',
+    label: 'Chat',
+    description: 'The inbox: channels, threads, unreads, bookmarks, drafts and recap',
+    icon: Hashtag,
+    popout: true,
+  },
+  {
+    path: '/chat/dm',
+    label: 'DMs',
+    description: 'Direct and group conversations',
+    icon: ChatDefault,
+    popout: true,
+  },
+  {
+    path: '/chat/activity',
+    label: 'Activity',
+    description: 'Notifications: mentions, replies and reactions',
+    icon: NotificationBellOn,
+    popout: true,
+  },
+  {
+    path: '/apps-marketplace',
+    label: 'Apps Marketplace',
+    description: 'Apps built on Xyne data, and creating your own',
+    icon: StoreNavIcon,
+    popout: true,
+  },
+  {
+    path: '/streams',
+    label: 'Streams',
+    description: 'Xyne pages side by side in columns',
+    icon: LayoutGridTwoVertical,
+    popout: true,
+  },
+  {
+    path: '/calls',
+    label: 'Calls',
+    description: 'Call history and upcoming calls',
+    icon: PhoneDefault,
+    popout: true,
+  },
+  {
+    path: '/recordings',
+    label: 'Recordings',
+    description: 'Also called Xyne Scribe: meeting recordings and transcripts',
+    icon: AudioWaveIcon,
+    popout: true,
+  },
+  {
+    path: '/projects',
+    label: 'Tickets',
+    description: 'Ticket boards, views and my tickets',
+    icon: TicketToken,
+    popout: true,
+  },
+  {
+    path: '/sdlc',
+    label: 'SDLC',
+    description: 'Development hubs: tracks, wikis and repositories',
+    icon: Atom,
+    popout: true,
+  },
+  {
+    path: '/support',
+    label: 'Support',
+    description: 'Also called the Desk or Xyne Desk',
+    icon: Troubleshoot,
+    popout: true,
+  },
+  {
+    path: '/chat/canvas',
+    label: 'My Canvas',
+    description: 'Your canvas documents',
+    icon: FileText,
+    popout: true,
+  },
+  {
+    path: '/automations',
+    label: 'Automations',
+    description: 'Automation rules, runs and approvals',
+    icon: LightningThunderElectricOn,
+    popout: true,
+  },
+  {
+    path: '/workflows',
+    label: 'Workflows',
+    description: 'Workflows, their runs and variables',
+    icon: GitBranch,
+    popout: true,
+  },
   // Administration (the /organisations module) holds Workspace Management,
   // Members (formerly User Management), User Groups, Roles and Organisations.
-  { path: '/organisations', label: 'Administration', icon: BuildingApartmentTwo, popout: true },
-  { path: '/tag-review', label: 'Tag Review', icon: Tag, iconSize: 18, popout: true },
-  { path: '/analytics', label: 'Analytics', icon: GraphTrendLine, popout: true },
-  { path: '/forms', label: 'Forms', icon: ClipboardDefault, popout: true },
-  { path: '/browser', label: 'Browser', icon: Globe, popout: true },
-  { path: '/apps', label: 'Apps', icon: Grid02, popout: true },
-  { path: '/guide', label: 'User Guide', icon: QuestionMarkCircle, popout: true },
-  { path: '/knowledge-base', label: 'Knowledge Base', icon: Notebook, popout: true },
-  { path: '/dashboards', label: 'Dashboards', icon: GridDashboard01, popout: true },
-  { path: '/listProjects', label: 'List Projects', icon: FolderDefault, popout: true },
+  {
+    path: '/organisations',
+    label: 'Administration',
+    description: 'Workspace settings, members, invitations, guest users, user groups and roles',
+    icon: BuildingApartmentTwo,
+    popout: true,
+  },
+  {
+    path: '/tag-review',
+    label: 'Tag Review',
+    description: 'Proposed thread tags awaiting review',
+    icon: Tag,
+    iconSize: 18,
+    popout: true,
+  },
+  {
+    path: '/analytics',
+    label: 'Analytics',
+    description: 'Workspace usage metrics',
+    icon: GraphTrendLine,
+    popout: true,
+  },
+  {
+    path: '/forms',
+    label: 'Forms',
+    description: 'Forms and their responses',
+    icon: ClipboardDefault,
+    popout: true,
+  },
+  {
+    path: '/browser',
+    label: 'Browser',
+    description: 'Web pages in tabs (desktop app only)',
+    icon: Globe,
+    popout: true,
+  },
+  {
+    path: '/apps',
+    label: 'Apps',
+    description: 'Also called Xyne Apps: installed apps, integrations and marketplace',
+    icon: Grid02,
+    popout: true,
+  },
+  {
+    path: '/guide',
+    label: 'User Guide',
+    description: 'Product docs, feature guides and keyboard shortcuts',
+    icon: QuestionMarkCircle,
+    popout: true,
+  },
+  {
+    path: '/knowledge-base',
+    label: 'Knowledge Base',
+    description: 'Files and folders Ask AI can search',
+    icon: Notebook,
+    popout: true,
+  },
+  {
+    path: '/dashboards',
+    label: 'Dashboards',
+    description: 'Charts and reports built from data sources',
+    icon: GridDashboard01,
+    popout: true,
+  },
+  {
+    path: '/listProjects',
+    label: 'List Projects',
+    description: 'Projects and their release tickets',
+    icon: FolderDefault,
+    popout: true,
+  },
   {
     path: '/migrations',
     label: 'Migrations',
+    description: 'Data moved in from Jira, WhatsApp and Slack',
     icon: SwapArrowHorizontal,
     iconSize: 18,
     popout: true,
@@ -219,12 +379,26 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
   {
     path: '/migration/confluence',
     label: 'Confluence Migration',
+    description: 'Confluence spaces moved into channels',
     icon: Notebook,
     iconSize: 18,
     popout: true,
   },
-  { path: '/team-intelligence', label: 'Team Intelligence', icon: Atom, popout: true },
-  { path: '/secrets', label: 'Secrets', icon: KeySlant, iconSize: 18, popout: true },
+  {
+    path: '/team-intelligence',
+    label: 'Team Intelligence',
+    description: 'Also called Founder Brief: team goals and blockers',
+    icon: Atom,
+    popout: true,
+  },
+  {
+    path: '/secrets',
+    label: 'Secrets',
+    description: 'Service-to-service credentials, also called the secrets vault',
+    icon: KeySlant,
+    iconSize: 18,
+    popout: true,
+  },
 ];
 
 // Rail items that were folded into a combined screen. A toolbar pin stored on
@@ -254,8 +428,18 @@ export const TOOLBAR_UNMANAGED_PATHS: ReadonlySet<string> = new Set(['/migration
 // Toolbar-guarded screens that aren't rail items of their own but can still be
 // disabled per workspace, so the admin Toolbar tab keeps listing them.
 export const NON_RAIL_TOOLBAR_ITEMS: NavigationItem[] = [
-  { path: '/migrations/slack', label: 'Slack Migration', icon: SwapArrowHorizontal },
-  { path: '/scheduled-messages', label: 'Scheduled Messages', icon: CalendarTimer },
+  {
+    path: '/migrations/slack',
+    label: 'Slack Migration',
+    description: 'Slack channels and messages moved in',
+    icon: SwapArrowHorizontal,
+  },
+  {
+    path: '/scheduled-messages',
+    label: 'Scheduled Messages',
+    description: 'Messages set to send later',
+    icon: CalendarTimer,
+  },
 ];
 
 // Paths shown in the toolbar by default (before any user customization).

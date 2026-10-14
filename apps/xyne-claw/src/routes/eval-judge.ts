@@ -10,8 +10,7 @@ import { Router, type Request, type Response } from "express";
 import { validateS2SKey } from "../middleware/auth.js";
 import { judgeSemanticMatch, listJudgeModels } from "../eval-judge.js";
 import { LITELLM } from "../config.js";
-import { judgeBackendConfigured } from "../jev.js";
-import { SYSTEM_ONE_BACKEND_NAMES, judgeBackendLabel } from "../judge-backend.js";
+import { xorEnabled } from "../xor.js";
 import { OPTIMIZATIONS, OPTIMIZATION_KEYS } from "../optimizations.js";
 
 const router = Router();
@@ -48,8 +47,8 @@ router.post("/eval-judge", validateS2SKey, async (req: Request, res: Response): 
 
 router.get("/eval-models", validateS2SKey, async (_req: Request, res: Response): Promise<void> => {
   const models = await listJudgeModels();
-  const judgeBackends = SYSTEM_ONE_BACKEND_NAMES.filter((b) => judgeBackendConfigured(b));
-  const judgeBackendLabels = Object.fromEntries(judgeBackends.map((b) => [b, judgeBackendLabel(b)]));
+  const judgeBackends = xorEnabled() ? ["xor"] : [];
+  const judgeBackendLabels: Record<string, string> = xorEnabled() ? { xor: "Xor (our Jev)" } : {};
   // defaultModel = what an empty model resolves to (judge + extraction fallback).
   const optimizations = OPTIMIZATION_KEYS.map((key) => ({
     key,

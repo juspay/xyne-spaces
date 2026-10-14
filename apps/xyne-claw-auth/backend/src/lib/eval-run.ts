@@ -17,15 +17,10 @@ const TERMINAL = new Set(["completed", "failed", "cancelled"]);
 
 export const PLATFORM_DEFAULT_PROVIDER = process.env["EVAL_DEFAULT_PROVIDER"] ?? "litellm";
 
-export const EVAL_JUDGES = ["llm", "xor", "ourtrainedjev"] as const;
-export type EvalJudge = (typeof EVAL_JUDGES)[number];
-
 export interface EvalTarget {
   provider: string;
   model?: string | undefined;
   useOverride: boolean;
-  /** Judge backend for sift/compaction/completeness on this arm. */
-  judge?: EvalJudge | undefined;
   /** Optimization switch spec for this arm, e.g. "none", "all", "all,-jev_compaction". */
   optimizations?: string | undefined;
 }
@@ -36,39 +31,18 @@ export function normalizeOptimizationArms(requested: string[] | undefined): stri
   return [...new Set((requested ?? []).filter((arm) => OPTIMIZATIONS_SPEC.test(arm)))];
 }
 
-export function normalizeJudges(requested: string[] | undefined): EvalJudge[] {
-  if (!requested?.length) return [];
-  if (requested.includes("all")) return [...EVAL_JUDGES];
-  const alias: Record<string, EvalJudge> = {
-    llm: "llm",
-    jev: "xor",
-    ournormaljev: "xor",
-    xor: "xor",
-    ourtrainedjev: "ourtrainedjev",
-    normal: "xor",
-    trained: "ourtrainedjev",
-  };
-  const out: EvalJudge[] = [];
-  for (const raw of requested) {
-    const judge = alias[raw];
-    if (judge && !out.includes(judge)) out.push(judge);
-  }
-  return out;
-}
-
 export function armKey(target: EvalTarget): string {
-  return [target.provider, target.judge, target.optimizations?.replace(/[^a-z0-9]+/gi, "_")]
+  return [target.provider, target.optimizations?.replace(/[^a-z0-9]+/gi, "_")]
     .filter(Boolean)
     .join("-");
 }
 
 export function armLabel(target: {
   provider: string;
-  judge?: string | undefined;
   optimizations?: string | undefined;
 }): string {
   return [
-    target.judge ? `${target.provider} + ${target.judge}` : target.provider,
+    target.provider,
     target.optimizations ? `opts:${target.optimizations}` : "",
   ].filter(Boolean).join(" · ");
 }
@@ -169,7 +143,6 @@ export async function resolveEvalTargets(input: {
   agentRow?: { id?: string; config?: unknown } | null;
   conversationId?: string | undefined;
   requested?: string[];
-  judges?: string[];
   opts?: string[];
   /** Skip credentialed providers the agent has no config for — a pin to one is dropped at dispatch. */
   onlyConfigured?: boolean;
@@ -221,26 +194,22 @@ export async function resolveEvalTargets(input: {
     targets.push({ provider, useOverride: true, ...(model ? { model } : {}) });
   }
 
-  const judges = normalizeJudges(input.judges);
   const optArms = normalizeOptimizationArms(input.opts);
   const byProvider = input.requested?.length
     ? targets.filter((t) => input.requested?.includes(t.provider))
-    : judges.length > 0 || optArms.length > 0
+    : optArms.length > 0
       ? targets.slice(0, 1)
       : targets;
-  const byJudge: EvalTarget[] = judges.length > 0
-    ? byProvider.flatMap((t) => judges.map((judge) => ({ ...t, judge })))
-    : byProvider;
   const wanted: EvalTarget[] = optArms.length > 0
-    ? byJudge.flatMap((t) => optArms.map((optimizations) => ({ ...t, optimizations })))
-    : byJudge;
+    ? byProvider.flatMap((t) => optArms.map((optimizations) => ({ ...t, optimizations })))
+    : byProvider;
   return wanted.slice(0, EVAL_MAX_PROVIDERS);
 }
 
 export function evalReplyPrefix(target: EvalTarget): string {
   // Placeholders, not literals: the delivery path fills them from the run's
   // actual provider/model, so a fallback is visible here too.
-  return `**Provider: {provider}**{model} · _pinned to ${target.provider}_${target.judge ? ` · judge: ${target.judge}` : ""}${target.optimizations ? ` · opts: ${target.optimizations}` : ""}`;
+  return `**Provider: {provider}**{model} · _pinned to ${target.provider}_${target.optimizations ? ` · opts: ${target.optimizations}` : ""}`;
 }
 
 /** Per-arm session key: safe id characters only, so the sandbox store and the
@@ -290,7 +259,6 @@ export async function dispatchEvalRun(args: {
       callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
       progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
       channelId: args.channelId,
-      ...(args.target.judge ? { judgeBackend: args.target.judge } : {}),
       ...(args.target.optimizations ? { optimizations: args.target.optimizations } : {}),
       ...(args.target.useOverride
         ? {
@@ -354,7 +322,6 @@ export async function readEvalResults(dispatches: EvalDispatch[]): Promise<EvalR
     const actual = row?.provider ?? undefined;
     return {
       provider: actual ?? d.provider,
-      judge: d.judge,
       optimizations: d.optimizations,
       requested: actual && actual !== d.provider ? d.provider : undefined,
       useOverride: d.useOverride,

@@ -357,6 +357,7 @@ const CalendarCallPopup = ({
               )}
             </span>
             <button
+              aria-label='Close call details'
               onClick={onClose}
               data-track-category='CALLS'
               data-track-name='calendar-popup-close'

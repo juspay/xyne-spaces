@@ -179,6 +179,7 @@ export function GlobalUploadProgress(): React.ReactElement | null {
         <div className='flex items-center gap-0.5 flex-shrink-0 ml-2'>
           <Tooltip content={isExpanded ? 'Minimize' : 'Expand'} side='top'>
             <button
+              aria-label={isExpanded ? 'Minimize' : 'Expand'}
               onClick={e => {
                 e.stopPropagation();
                 setIsExpanded(v => !v);
@@ -195,6 +196,7 @@ export function GlobalUploadProgress(): React.ReactElement | null {
           {!isUploading && (
             <Tooltip content='Dismiss' side='top'>
               <button
+                aria-label='Dismiss'
                 onClick={e => {
                   e.stopPropagation();
                   handleDismiss();

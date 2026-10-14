@@ -80,6 +80,7 @@ type NavIcon = ComponentType<SVGProps<SVGSVGElement> & { size?: number }>;
 export interface AINavItem {
   key: string;
   label: string;
+  description: string;
   icon: NavIcon;
   to: string;
   /** Prefix for active matching when `to` points at one sub-route of a section. */
@@ -94,30 +95,85 @@ export interface AINavItem {
   dailyBriefOnly?: boolean;
 }
 
+export function useVisibleAINavItems(onDailyBriefRoute = false): AINavItem[] {
+  const { user } = useAuth();
+  const { isAdmin } = useClawAdminAccessQuery(user?.id);
+  const { canManage: canManageOrg } = useClawOrgManageAccess();
+  const isSdlcAdmin = useHasResourceAccess('SDLC');
+  const { enabled: dailyBriefEnabled } = useDailyBriefEnabled();
+  return NAV_ITEMS.filter(
+    item =>
+      (!item.adminOnly || isAdmin) &&
+      (!item.sdlcAdminOnly || isAdmin || isSdlcAdmin) &&
+      (!item.orgManagerOnly || canManageOrg) &&
+      (!item.dailyBriefOnly || dailyBriefEnabled === true || onDailyBriefRoute),
+  );
+}
+
 export const NAV_ITEMS: AINavItem[] = [
-  { key: 'knowledge', label: 'Knowledge', icon: Notebook as NavIcon, to: '/ai/knowledge' },
-  { key: 'agent-hub', label: 'Agent Hub', icon: LayoutGridStackDown as NavIcon, to: '/ai/library' },
+  {
+    key: 'knowledge',
+    label: 'Knowledge',
+    description: 'Documents and memories the AI draws on',
+    icon: Notebook as NavIcon,
+    to: '/ai/knowledge',
+  },
+  {
+    key: 'agent-hub',
+    label: 'Agent Hub',
+    description: 'Agents, also called bots or AI helpers, with their skills and MCP tools',
+    icon: LayoutGridStackDown as NavIcon,
+    to: '/ai/library',
+  },
   {
     key: 'environments',
     label: 'Environments',
+    description: 'Sandbox setups for SDLC repositories',
     icon: Server as NavIcon,
     to: '/ai/environments',
     sdlcAdminOnly: true,
   },
-  { key: 'digital-twin', label: 'Digital twin', icon: UserTwo as NavIcon, to: '/ai/digital-twin' },
+  {
+    key: 'digital-twin',
+    label: 'Digital twin',
+    description: 'Your AI double and what it remembers',
+    icon: UserTwo as NavIcon,
+    to: '/ai/digital-twin',
+  },
   {
     key: 'organization',
     label: 'Organization',
+    description: 'AI setup for the whole organization',
     icon: BuildingApartmentTwo as NavIcon,
     to: '/ai/organization',
     orgManagerOnly: true,
   },
-  { key: 'metrics', label: 'Metrics', icon: Piechart01 as NavIcon, to: '/ai/metrics' },
-  { key: 'settings', label: 'Settings', icon: Settings01 as NavIcon, to: '/ai/settings' },
-  { key: 'admin', label: 'Admin', icon: UserShield as NavIcon, to: '/ai/admin', adminOnly: true },
+  {
+    key: 'metrics',
+    label: 'Metrics',
+    description: 'AI usage metrics',
+    icon: Piechart01 as NavIcon,
+    to: '/ai/metrics',
+  },
+  {
+    key: 'settings',
+    label: 'Settings',
+    description: 'AI preferences and custom instructions',
+    icon: Settings01 as NavIcon,
+    to: '/ai/settings',
+  },
+  {
+    key: 'admin',
+    label: 'Admin',
+    description: 'AI administration and access requests',
+    icon: UserShield as NavIcon,
+    to: '/ai/admin',
+    adminOnly: true,
+  },
   {
     key: 'daily-brief',
     label: 'Morning Brief',
+    description: "Today's AI summary of your work",
     icon: File02Ai as NavIcon,
     to: '/ai/daily-brief/today',
     matchPath: '/ai/daily-brief',
@@ -331,6 +387,7 @@ function SessionHistory({
                   <button
                     type='button'
                     onClick={() => onSelect(session)}
+                    aria-label={`Open chat: ${session.title}`}
                     className={cn(
                       'flex min-w-0 flex-1 items-center self-stretch pr-1 text-left text-sm transition-[padding] group-hover:pr-14',
                       openDropdownId === session.id && 'pr-14',
@@ -550,19 +607,7 @@ export function AISidebar({
 
   const routedActiveItem = NAV_ITEMS.find(item => pathname.includes(item.matchPath ?? item.to));
 
-  const { user } = useAuth();
-  const { isAdmin } = useClawAdminAccessQuery(user?.id);
-  const { canManage: canManageOrg } = useClawOrgManageAccess();
-  const isSdlcAdmin = useHasResourceAccess('SDLC');
-  const { enabled: dailyBriefEnabled } = useDailyBriefEnabled();
-  const onDailyBriefRoute = pathname.includes('/ai/daily-brief');
-  const visibleNavItems = NAV_ITEMS.filter(
-    item =>
-      (!item.adminOnly || isAdmin) &&
-      (!item.sdlcAdminOnly || isAdmin || isSdlcAdmin) &&
-      (!item.orgManagerOnly || canManageOrg) &&
-      (!item.dailyBriefOnly || dailyBriefEnabled === true || onDailyBriefRoute),
-  );
+  const visibleNavItems = useVisibleAINavItems(pathname.includes('/ai/daily-brief'));
   const isNewChatActive = !routedActiveItem && !activeSessionId;
 
   // One history across every agent, newest first, 50 at a time; the filter
@@ -675,13 +720,14 @@ export function AISidebar({
               active={isNewChatActive}
               onClick={onCreateChat}
             />
-            {visibleNavItems.map(({ key, label, icon: Icon, to, trackName }) => {
+            {visibleNavItems.map(({ key, label, description, icon: Icon, to, trackName }) => {
               const isActive = routedActiveItem?.key === key;
               return (
                 <Link
                   key={key}
                   to={prefixWs(to)}
                   aria-current={isActive ? 'page' : undefined}
+                  aria-description={description}
                   {...(trackName
                     ? { 'data-track-category': 'XyneAI', 'data-track-name': trackName }
                     : {})}

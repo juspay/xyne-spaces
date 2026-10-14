@@ -147,6 +147,8 @@ interface CollaborativeCanvasEditorProps {
   currentUserRole?: CanvasRole | null;
   /** Scrolls with the document, above its first block. */
   header?: React.ReactNode;
+  /** Shows the headings as an "On this page" list on the right. */
+  pinnedOutline?: boolean;
 }
 
 export const CollaborativeCanvasEditor = forwardRef<
@@ -175,6 +177,7 @@ export const CollaborativeCanvasEditor = forwardRef<
       canvasCreatedBy,
       currentUserRole,
       header,
+      pinnedOutline = false,
     },
     ref,
   ) => {
@@ -924,7 +927,11 @@ export const CollaborativeCanvasEditor = forwardRef<
         )}
 
         {/* Table of Contents */}
-        <TableOfContents headings={tocHeadings} onHeadingClick={handleHeadingClick} />
+        <TableOfContents
+          headings={tocHeadings}
+          onHeadingClick={handleHeadingClick}
+          pinned={pinnedOutline}
+        />
 
         {/* Search Overlay */}
         {editor && (

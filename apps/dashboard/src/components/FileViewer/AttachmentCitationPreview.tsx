@@ -341,6 +341,7 @@ const AttachmentCitationPreviewInner: React.FC = () => {
                 onClick={handleDownload}
                 className='p-1.5 rounded-md text-gray-500 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors'
                 title='Download'
+                aria-label='Download'
                 data-track-category='CitationPreview'
                 data-track-name='DOWNLOAD_FILE'
               >
@@ -350,6 +351,7 @@ const AttachmentCitationPreviewInner: React.FC = () => {
                 <button
                   className='p-1.5 rounded-md text-gray-500 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors'
                   title='Close'
+                  aria-label='Close'
                 >
                   <X className='h-4 w-4' />
                 </button>

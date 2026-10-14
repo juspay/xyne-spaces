@@ -15,10 +15,11 @@ import {
 } from '@/database/repositories/messageAttachmentRepository';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
+import { keepMentionsWithin } from '@/utils/mentionParser';
 import { ConversationParticipantRepository } from '@/database/repositories/conversationParticipantRepository';
 import { UserRepository } from '@/database/repositories/users';
 import { Conversation, Message } from '@prisma/client';
-import { ConversationParticipation, MessageType, AttachmentEntityType, ChannelScopeType, ChannelRole, VespaInsertionStatus, VespaOperationType, buildInitialMessageMd } from '@xyne/shared';
+import { ConversationParticipation, MessageType, AttachmentEntityType, ChannelScopeType, ChannelRole, VespaInsertionStatus, VespaOperationType, WorkspaceRole, buildInitialMessageMd } from '@xyne/shared';
 import { uploadFiles, UploadedFileResult } from '@/services/fileUploadService';
 import { websocketService } from './websocketService';
 import { redisService } from './redisService';
@@ -347,6 +348,13 @@ export class ConversationService {
    * Create new conversation with initial message
    * EXACT extraction from conversationController.ts lines 82-179
    */
+  /** Guests may only mention people in the channel (see keepMentionsWithin), on every path that saves a message. */
+  private async guestSafeContent(senderRole: string | undefined, channelId: string, content: string): Promise<string> {
+    if (senderRole !== WorkspaceRole.GUEST || !content.includes('data-mention-type')) return content;
+    const participants = await this.channelParticipantRepository.getChannelParticipants(channelId);
+    return keepMentionsWithin(content, new Set(participants.map((p) => p.userId)));
+  }
+
   async createConversationWithMessage(params: CreateConversationWithMessageParams) {
     const {
       channelId,
@@ -408,7 +416,13 @@ export class ConversationService {
       processedFiles.push(...uploadedFiles);
     }
 
-    const messageContent = await replaceEmojisInContent(content?.trim() || '');
+    // Read once: the guest check and the author's participation below both need it.
+    const sender = await this.userRepository.findById(userId);
+    const messageContent = await this.guestSafeContent(
+      sender?.role,
+      channelId,
+      await replaceEmojisInContent(content?.trim() || ''),
+    );
 
     // Both ids are minted here so the conversation can carry a complete
     // initial_message_md on its INSERT. The alternative — insert a placeholder,
@@ -463,7 +477,7 @@ export class ConversationService {
     const conversation = await this.conversationRepository.create(conversationData);
     const message = await this.messageRepository.create(messageData);
 
-    if (await this.userRepository.findById(userId)) {
+    if (sender) {
       await this.conversationParticipantRepository.createOrUpdateConversationParticipant(
         conversation.conversationId,
         userId,
@@ -676,7 +690,13 @@ export class ConversationService {
       processedFiles.push(...uploadedFiles);
     }
 
-    const messageContent = await replaceEmojisInContent(content?.trim() || '');
+    // Read once: the guest check and the author's participation below both need it.
+    const sender = await this.userRepository.findById(userId);
+    const messageContent = await this.guestSafeContent(
+      sender?.role,
+      conversation.channelId,
+      await replaceEmojisInContent(content?.trim() || ''),
+    );
 
     // Create message
     // Generate child conversation ID if replyBroadcast is true
@@ -695,7 +715,7 @@ export class ConversationService {
     };
 
     const message = await this.messageRepository.create(messageData);
-    if (await this.userRepository.findById(userId)) {
+    if (sender) {
       await this.conversationParticipantRepository.createOrUpdateConversationParticipant(
         conversationId,
         userId,

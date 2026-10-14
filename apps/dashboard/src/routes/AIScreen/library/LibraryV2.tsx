@@ -11,6 +11,7 @@ import AppsV2 from './apps/AppsV2';
 import DevelopersV2 from './developers/DevelopersV2';
 import { LibraryToolbarSlotProvider } from './shared/components/LibraryToolbarSlot';
 import { CreateAppDialog } from '@/routes/AppsMarketplaceScreen/CreateAppDialog';
+import { CreateAgentDialog } from './agents/create/CreateAgentDialog';
 
 interface LibraryTab {
   id: string;
@@ -92,6 +93,7 @@ const LibraryV2 = ({ channelId }: { channelId?: string | undefined } = {}): Reac
       : path;
   const TabContent = activeTab.content;
 
+  const [createAgentOpen, setCreateAgentOpen] = useState(false);
   const query = searchParams.get('q') ?? '';
   const [searchOpen, setSearchOpen] = useState(query.length > 0);
 
@@ -141,6 +143,7 @@ const LibraryV2 = ({ channelId }: { channelId?: string | undefined } = {}): Reac
                 const { create } = activeTab;
                 if (!create) return;
                 if ('dialog' in create) setCreateAppOpen(true);
+                else if (activeTab.id === 'agents') setCreateAgentOpen(true);
                 else void navigate(prefixWs(createPath(create.path)));
               }}
               data-track-category='Claw Agents'
@@ -229,6 +232,7 @@ const LibraryV2 = ({ channelId }: { channelId?: string | undefined } = {}): Reac
       </LibraryToolbarSlotProvider>
 
       <CreateAppDialog open={createAppOpen} onOpenChange={setCreateAppOpen} />
+      <CreateAgentDialog open={createAgentOpen} onOpenChange={setCreateAgentOpen} />
     </div>
   );
 };

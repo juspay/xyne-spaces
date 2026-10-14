@@ -223,7 +223,12 @@ export const useXyneAIStream = ({
     const expectedAgentSlug = agentSlug ?? 'ask-ai';
     const unsubscribe = xyneAIStreamManager.subscribe((state: StreamState) => {
       const stateAgentSlug = state.agentSlug ?? 'ask-ai';
-      if (stateAgentSlug !== expectedAgentSlug && stateAgentSlug !== dispatchedAgentSlugRef.current)
+      // Live viewers (`live-*`) follow the conversation's in-flight run, whichever agent owns it.
+      if (
+        stateAgentSlug !== expectedAgentSlug &&
+        stateAgentSlug !== dispatchedAgentSlugRef.current &&
+        !state.streamId.startsWith('live-')
+      )
         return;
       const slotRef = streamSessionKeyRef.current;
       const matchesSlot = state.streamSlotKey === slotRef;

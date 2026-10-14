@@ -238,6 +238,7 @@ export const UserSubmenu = ({
     const isSelected = selectedUsers.includes(UNASSIGNED_FILTER_VALUE);
     return (
       <button
+        aria-pressed={isSelected}
         key='unassigned'
         type='button'
         onClick={() => handleUserToggle(UNASSIGNED_FILTER_VALUE)}
@@ -293,6 +294,7 @@ export const UserSubmenu = ({
     const isDeactivated = isUserDeactivated(user);
     return (
       <button
+        aria-pressed={isSelected}
         key={user.id}
         type='button'
         onClick={() => handleUserToggle(user.id)}

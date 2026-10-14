@@ -130,6 +130,7 @@ export const CallTrigger: React.FC<CallTriggerProps> = ({
         <button
           onClick={handleButtonClick}
           disabled={isAlone || isNotMember}
+          aria-label={tooltipContent}
           data-testid='start-call-button'
           data-track-category='CALLS'
           data-track-name='Call_Trigger'

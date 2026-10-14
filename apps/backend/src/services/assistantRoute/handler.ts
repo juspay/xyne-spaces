@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { routeAssistantMessage, type AssistantRouteAction } from './index';
+import { routeAssistantMessage, type AssistantRouteAction, type AssistantRouteMode } from './index';
 
 // Always 200 once validated: a Jev failure is `{ route: 'unavailable' }`, never a 5xx.
 export const assistantRouteHandler = async (req: Request, res: Response): Promise<void> => {
@@ -19,12 +19,17 @@ export const assistantRouteHandler = async (req: Request, res: Response): Promis
     if (!res.writableFinished) abandoned.abort();
   });
 
-  const { text, actions } = req.body as { text: string; actions: AssistantRouteAction[] };
+  const { text, actions, mode } = req.body as {
+    text: string;
+    actions: AssistantRouteAction[];
+    mode?: AssistantRouteMode;
+  };
   const result = await routeAssistantMessage(
     text,
     actions,
     { userId, workspaceId },
-    abandoned.signal
+    abandoned.signal,
+    mode
   );
   if (abandoned.signal.aborted) return;
   res.json(result);

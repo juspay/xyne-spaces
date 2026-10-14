@@ -1197,6 +1197,7 @@ export const actionRequestSchema = z.object({
     conversationId: z.string().min(1),
     token: z.string().optional(),
   }),
+  applyToDraft: z.boolean().optional(),
 });
 
 // ============================================================================
@@ -1232,6 +1233,8 @@ export const appActionResponseSchema = z.discriminatedUnion('type', [
     type: z.literal('error'),
     message: z.string(),
     code: z.string().optional(),
+    /** True when retrying the same action can succeed (see flowActionErrors.ts). */
+    retryable: z.boolean().optional(),
   }),
 ]);
 

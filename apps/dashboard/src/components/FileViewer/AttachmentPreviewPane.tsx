@@ -7,6 +7,7 @@ interface AttachmentPreviewPaneProps {
   fileName: string;
   mimeType: string;
   fileSize: number;
+  fileUrl?: string;
   /** Fill the space given rather than sitting as a padded, centred card, and
    *  let the viewer drop its own frame with it. For a surface that already
    *  frames the preview — the SDLC file tab, whose tab strip is the frame. */
@@ -21,11 +22,12 @@ export function AttachmentPreviewPane({
   fileName,
   mimeType,
   fileSize,
+  fileUrl,
   flush,
 }: AttachmentPreviewPaneProps): ReactElement {
   const file: FileItem = {
     fileName,
-    fileUrl: `${ATTACHMENT_DOWNLOAD_ROUTE}/${attachmentId}/download`,
+    fileUrl: fileUrl ?? `${ATTACHMENT_DOWNLOAD_ROUTE}/${attachmentId}/download`,
     mimeType,
     fileSize,
     attachmentId,

@@ -41,6 +41,7 @@ export interface KataClientOptions {
    * disable. Default: 10_000 (10s).
    */
   minCreateSpacingMs?: number;
+  k8sClient?: CustomObjectsApi;
 }
 
 export interface SessionConstructorOptions {

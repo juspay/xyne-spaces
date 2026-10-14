@@ -211,7 +211,14 @@ function withToolErrors(
     try {
       return await fn(params, ctx);
     } catch (e) {
-      return err(`${label}: ${errMsg(e)}`);
+      const result = err(`${label}: ${errMsg(e)}`);
+      // Keep the upstream HTTP status out-of-band so approval flows can map it
+      // to a typed error (XYNE-66467) instead of regex-matching the text.
+      // `0` = no response (network failure).
+      // Duck-typed (not instanceof) so a mocked client module still works.
+      const status = (e as { status?: unknown } | null)?.status;
+      if (typeof status === "number" && Number.isFinite(status)) result._meta = { httpStatus: status };
+      return result;
     }
   };
 }

@@ -8,7 +8,7 @@ import { promoteIfOversized } from "../src/tool-output.js";
 import { pinRunOptimizations } from "../src/optimizations.js";
 import { pinRunTask } from "../src/run-context.js";
 
-const ENV = ["JEV_API_KEY", "JEV_URL", "OUR_NORMAL_JEV_URL", "OUR_JEV_API_KEY", "JUDGE_BACKEND", "JUDGE_SHADOW", "XYNE_OPT_ALL", "XYNE_OPT_JEV_RESULT_SIFT"];
+const ENV = ["XOR_URL", "XOR_API_KEY", "XOR_BACKEND", "OUR_NORMAL_JEV_URL", "OUR_JEV_API_KEY", "JUDGE_BACKEND", "XYNE_OPT_ALL", "XYNE_OPT_JEV_RESULT_SIFT"];
 
 const hit = (n: number, text: string): string =>
   `${n}. [message] ${text}\n   conversationId: conv-${n} · 12/9/2026, 10:0${n % 10}:00 am\n   ${"context ".repeat(40)}`;
