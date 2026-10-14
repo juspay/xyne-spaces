@@ -1,10 +1,17 @@
 import { type ReactElement } from 'react';
-import { Text, View } from 'react-native';
+import { View } from 'react-native';
+
+import { QuickActionsFab } from '@/src/features/quick-actions';
+
+import { ActivityHeader } from './activity-header';
+import { ActivityList } from './activity-list';
 
 export function ActivityScreen(): ReactElement {
   return (
-    <View className='flex-1 items-center justify-center bg-spaces-background'>
-      <Text className='text-base font-medium text-spaces-foreground'>Activity Screen</Text>
+    <View className='flex-1 bg-spaces-background'>
+      <ActivityHeader />
+      <ActivityList />
+      <QuickActionsFab tab='activity' />
     </View>
   );
 }
