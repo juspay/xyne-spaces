@@ -1,6 +1,6 @@
 import { createMcpOAuthProvider } from "../lib/mcp-oauth-provider.js";
 
-const { router, callbackRouter, provider } = createMcpOAuthProvider({
+const { router, callbackRouter, provider, ensureServer } = createMcpOAuthProvider({
   type: "notion-remote",
   label: "Notion",
   registerUrl: "https://mcp.notion.com/register",
@@ -42,3 +42,4 @@ const { router, callbackRouter, provider } = createMcpOAuthProvider({
 export const notionRemoteOAuthRouter = router;
 export const notionRemoteCallbackRouter = callbackRouter;
 export const notionRemoteOAuthProvider = provider;
+export const notionRemoteEnsureServer = ensureServer;

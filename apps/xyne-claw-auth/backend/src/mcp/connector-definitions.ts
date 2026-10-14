@@ -168,6 +168,7 @@ function fromStaticAdapter(serverType: string): ResolvedConnectorDefinition | un
     credentialFields: [...adapter.credentialFields],
     healthCheck: adapter.healthCheck,
     writeTools: adapter.writeTools ?? [],
+    ...(adapter.transport === "http" && adapter.writePolicy ? { writePolicy: adapter.writePolicy } : {}),
     staticTools: adapter.staticTools ?? [],
     // Code-defined adapters don't forward files (none return binary today). Add
     // a flag to StdioMcpAdapter if one ever needs it.

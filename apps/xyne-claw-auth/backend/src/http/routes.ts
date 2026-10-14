@@ -67,6 +67,10 @@ import { mailerliteOAuthRouter, mailerliteCallbackRouter } from "../routes/maile
 import { honeycombOAuthRouter, honeycombCallbackRouter } from "../routes/honeycomb-oauth.js";
 import { customerioOAuthRouter, customerioCallbackRouter } from "../routes/customerio-oauth.js";
 import { notionRemoteOAuthRouter, notionRemoteCallbackRouter } from "../routes/notion-remote-oauth.js";
+import { linearOAuthRouter, linearCallbackRouter } from "../routes/linear-oauth.js";
+import { atlassianRemoteOAuthRouter, atlassianRemoteCallbackRouter } from "../routes/atlassian-remote-oauth.js";
+import { githubRemoteOAuthRouter, githubRemoteCallbackRouter } from "../routes/github-remote-oauth.js";
+import { slackRemoteOAuthRouter, slackRemoteCallbackRouter } from "../routes/slack-remote-oauth.js";
 import { oauthTokenRouter } from "../routes/oauth-token.js";
 import { rapidApiLinkedInRouter } from "../routes/rapidapi-linkedin.js";
 import { scheduledJobsRouter } from "../routes/scheduled-jobs.js";
@@ -279,6 +283,14 @@ function mountOAuthProviders(app: Express): void {
   app.use(BASE, customerioCallbackRouter);
   app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, notionRemoteOAuthRouter);
   app.use(BASE, notionRemoteCallbackRouter);
+  app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, linearOAuthRouter);
+  app.use(BASE, linearCallbackRouter);
+  app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, atlassianRemoteOAuthRouter);
+  app.use(BASE, atlassianRemoteCallbackRouter);
+  app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, githubRemoteOAuthRouter);
+  app.use(BASE, githubRemoteCallbackRouter);
+  app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, slackRemoteOAuthRouter);
+  app.use(BASE, slackRemoteCallbackRouter);
   app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, rapidApiLinkedInRouter);
 }
 

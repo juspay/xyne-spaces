@@ -70,3 +70,40 @@ describe("createClassicOAuthProvider — exports + refresh", () => {
     await expect(rotating.provider.refresh({ refreshToken: "x" } as never)).rejects.toMatchObject({ status: 502 });
   });
 });
+
+describe("createClassicOAuthProvider — provider token quirks", () => {
+  it("asks for a JSON token response (GitHub answers form-encoded otherwise)", async () => {
+    mockToken({ access_token: "AT", refresh_token: "RT", expires_in: 3600 });
+    await rotating.provider.refresh({ refreshToken: "RT" } as never);
+    const f = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    expect((f.mock.calls[0]![1] as RequestInit).headers).toMatchObject({ Accept: "application/json" });
+  });
+
+  it("treats a 200 body carrying `error` as a failed refresh", async () => {
+    mockToken({ error: "bad_refresh_token" });
+    await expect(rotating.provider.refresh({ refreshToken: "x" } as never)).rejects.toMatchObject({ status: 502 });
+  });
+
+  it("treats Slack's `ok: false` as a failed refresh", async () => {
+    mockToken({ ok: false, error: "invalid_refresh_token" });
+    await expect(rotating.provider.refresh({ refreshToken: "x" } as never)).rejects.toMatchObject({ status: 502 });
+  });
+
+  it("keeps the previous refresh token when the response omits one", async () => {
+    mockToken({ access_token: "AT", expires_in: 3600 });
+    const out = await rotating.provider.refresh({ refreshToken: "RTold" } as never);
+    expect(out.refreshToken).toBe("RTold");
+  });
+
+  it("treats a token with no expires_in as non-expiring", async () => {
+    mockToken({ access_token: "AT" });
+    const out = await rotating.provider.refresh({ refreshToken: "RTold" } as never);
+    expect(out.expires).toBeGreaterThan(Date.now() + 365 * 24 * 60 * 60 * 1000);
+  });
+
+  it("refuses to refresh a connection that has no refresh token", async () => {
+    mockToken({ access_token: "AT" });
+    await expect(rotating.provider.refresh({ refreshToken: "" } as never)).rejects.toMatchObject({ status: 401 });
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+});

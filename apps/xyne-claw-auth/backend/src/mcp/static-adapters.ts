@@ -44,6 +44,10 @@ import { mongodbAdapter } from "./adapters/mongodb.js";
 import { sentryAdapter } from "./adapters/sentry.js";
 import { notionAdapter } from "./adapters/notion.js";
 import { notionRemoteAdapter } from "./adapters/notion-remote.js";
+import { linearAdapter } from "./adapters/linear.js";
+import { atlassianRemoteAdapter } from "./adapters/atlassian-remote.js";
+import { githubRemoteAdapter } from "./adapters/github-remote.js";
+import { slackRemoteAdapter } from "./adapters/slack-remote.js";
 import { googleAdapter } from "./adapters/google.js";
 import { microsoftAdapter } from "./adapters/microsoft.js";
 import { twitterAdapter } from "./adapters/twitter.js";
@@ -122,6 +126,10 @@ export const STATIC_ADAPTERS: Record<string, McpAdapter> = {
   mongodb: mongodbAdapter,
   notion: notionAdapter,
   "notion-remote": notionRemoteAdapter,
+  linear: linearAdapter,
+  "atlassian-remote": atlassianRemoteAdapter,
+  "github-remote": githubRemoteAdapter,
+  "slack-remote": slackRemoteAdapter,
   sentry: sentryAdapter,
   "sentry-mcp": sentryAdapter,
   twitter: twitterAdapter,

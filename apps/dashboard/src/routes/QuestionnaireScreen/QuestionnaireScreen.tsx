@@ -33,10 +33,17 @@ import {
   type HarnessProvider,
 } from './LocalHarnessStep';
 import { InviteContactsStepPanel, InviteContactsPreview } from './InviteContactsStep';
+import {
+  ConnectAppsPreview,
+  ConnectAppsStepPanel,
+  clearOAuthReturnParams,
+  readOAuthReturnParams,
+  useOnboardingApps,
+} from './ConnectAppsStep';
 import { getUserContacts } from '../../services/clients/userContactsApi';
 import type { UserContact, UserContactsProvider } from '../../services/clients/userContactsApi';
 
-type StepKey = 'name' | 'company' | 'invite' | 'harness';
+type StepKey = 'name' | 'company' | 'apps' | 'invite' | 'harness';
 
 type ContactsStepState =
   | { status: 'loading' }
@@ -82,9 +89,13 @@ const QuestionnaireScreen = (): ReactElement | null => {
   const [role, setRole] = useState('');
   const createdOrgName = getCreatedOrgName(user?.email);
   const hasCompanyStep = createdOrgName !== null;
+  const { apps: onboardingApps, isLoading: isLoadingApps } = useOnboardingApps();
+  const hasAppsStep = onboardingApps.length > 0;
+  // Where the browser lands after an app's OAuth consent; read once, stripped from the URL below
+  const [oauthResults] = useState(readOAuthReturnParams);
   // Steps fetched async (invite, harness) slot in after this index; skip them once the user is past it
   const lastFixedStepIndexRef = useRef(0);
-  lastFixedStepIndexRef.current = hasCompanyStep ? 1 : 0;
+  lastFixedStepIndexRef.current = (hasCompanyStep ? 1 : 0) + (hasAppsStep ? 1 : 0);
   const [companySize, setCompanySize] = useState<TeamSize | ''>('');
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
   const [photoFileName, setPhotoFileName] = useState('');
@@ -111,6 +122,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
   const steps: StepKey[] = [
     'name',
     ...(hasCompanyStep ? (['company'] as StepKey[]) : []),
+    ...(hasAppsStep ? (['apps'] as StepKey[]) : []),
     ...(contactsState.status === 'ready' ? (['invite'] as StepKey[]) : []),
     ...(harnesses.length > 0 ? (['harness'] as StepKey[]) : []),
   ];
@@ -155,6 +167,10 @@ const QuestionnaireScreen = (): ReactElement | null => {
       window.history.replaceState(null, '', hash);
     }
   }, [clampedStep]);
+
+  useEffect(() => {
+    clearOAuthReturnParams();
+  }, []);
 
   useEffect(() => {
     const isNewUserCookie = Cookies.get('is_new_user');
@@ -302,10 +318,12 @@ const QuestionnaireScreen = (): ReactElement | null => {
     }
   };
 
-  // While contacts are loading or Electron is still detecting harnesses, the current last step may
-  // not really be last (invite/harness can still be appended), so hold off completing onboarding.
+  // While the connectable apps or contacts are loading, or Electron is still detecting harnesses, the
+  // current last step may not really be last (apps/invite/harness can still be added), so hold off
+  // completing onboarding.
   const isWaitingForSteps =
-    (contactsState.status === 'loading' || isDetectingHarness) && clampedStep >= steps.length - 1;
+    (contactsState.status === 'loading' || isDetectingHarness || isLoadingApps) &&
+    clampedStep >= steps.length - 1;
 
   const canAdvance = (): boolean => {
     if (isWaitingForSteps) return false;
@@ -504,6 +522,15 @@ const QuestionnaireScreen = (): ReactElement | null => {
           </div>
         )}
 
+        {step === 'apps' && (
+          <ConnectAppsStepPanel
+            apps={onboardingApps}
+            results={oauthResults}
+            onBack={() => setCurrentStep(currentStep - 1)}
+            onNext={handleNext}
+          />
+        )}
+
         {step === 'invite' && contactsState.status === 'ready' && (
           <InviteContactsStepPanel
             contacts={contactsState.contacts}
@@ -614,6 +641,8 @@ const QuestionnaireScreen = (): ReactElement | null => {
             </div>
           </div>
         )}
+
+        {step === 'apps' && <ConnectAppsPreview apps={onboardingApps} />}
 
         {step === 'invite' && contactsState.status === 'ready' && (
           <InviteContactsPreview

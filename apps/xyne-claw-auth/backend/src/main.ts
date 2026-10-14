@@ -9,6 +9,7 @@ import { CONFIG } from "./config.js";
 import { installParsers } from "./http/parsers.js";
 import { mountRoutes } from "./http/routes.js";
 import { bootWorkers, shutdownWorkers } from "./boot/workers.js";
+import { ensureOAuthConnectorServers } from "./boot/oauth-connectors.js";
 import { initializeOpenTelemetry, shutdownOpenTelemetry } from "./otel/telemetry.js";
 import { registerDailyBriefGauges } from "./otel/daily-brief-metrics.js";
 import { redisService } from "./redis.js";
@@ -41,6 +42,7 @@ listen(CONFIG.port, () => {
   log.info(`[xyne-claw-auth] Server listening on port ${CONFIG.port}`);
 
   bootWorkers();
+  void ensureOAuthConnectorServers();
 });
 
 async function shutdown(signal: string): Promise<void> {

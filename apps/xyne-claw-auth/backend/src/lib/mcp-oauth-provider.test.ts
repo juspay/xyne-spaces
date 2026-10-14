@@ -82,3 +82,22 @@ describe("provider.refresh — error path", () => {
     await expect(publicClient.provider.refresh({ clientId: "cid", refreshToken: "RT1" } as never)).rejects.toMatchObject({ status: 502 });
   });
 });
+
+describe("createMcpOAuthProvider — resource indicator", () => {
+  const withResource = createMcpOAuthProvider({
+    type: "res", label: "Res", registerUrl: "https://z/register", authUrl: "https://z/authorize", tokenUrl: "https://z/token",
+    confidential: false, resource: "https://z/mcp", server,
+  });
+
+  it("sends resource on refresh when configured", async () => {
+    mockFetchOnce({ access_token: "AT", refresh_token: "RT", expires_in: 3600 });
+    await withResource.provider.refresh({ clientId: "c", refreshToken: "RT" } as never);
+    expect(lastFetchBody().get("resource")).toBe("https://z/mcp");
+  });
+
+  it("omits resource when not configured", async () => {
+    mockFetchOnce({ access_token: "AT", refresh_token: "RT", expires_in: 3600 });
+    await publicClient.provider.refresh({ clientId: "c", refreshToken: "RT" } as never);
+    expect(lastFetchBody().has("resource")).toBe(false);
+  });
+});

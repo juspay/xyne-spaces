@@ -118,6 +118,7 @@ export interface HttpMcpAdapter {
   readonly healthCheck: PennyDropTool;
   /** Tool names that are write operations — always require user approval */
   readonly writeTools?: readonly string[];
+  readonly writePolicy?: WriteToolPolicy;
   /** Picker-only fallback list; see StdioMcpAdapter.staticTools. */
   readonly staticTools?: readonly string[];
   buildHttpUrl(credentials: Record<string, unknown>): { url: string; headers: Record<string, string> };

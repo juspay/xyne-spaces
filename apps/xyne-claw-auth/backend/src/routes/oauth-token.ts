@@ -27,6 +27,10 @@ import { attioOAuthProvider } from "./attio-oauth.js";
 import { honeycombOAuthProvider } from "./honeycomb-oauth.js";
 import { customerioOAuthProvider } from "./customerio-oauth.js";
 import { notionRemoteOAuthProvider } from "./notion-remote-oauth.js";
+import { linearOAuthProvider } from "./linear-oauth.js";
+import { atlassianRemoteOAuthProvider } from "./atlassian-remote-oauth.js";
+import { githubRemoteOAuthProvider } from "./github-remote-oauth.js";
+import { slackRemoteOAuthProvider } from "./slack-remote-oauth.js";
 
 const ALL_OAUTH_PROVIDERS: OAuthTokenProvider[] = [
   googleOAuthProvider,
@@ -44,6 +48,10 @@ const ALL_OAUTH_PROVIDERS: OAuthTokenProvider[] = [
   honeycombOAuthProvider,
   customerioOAuthProvider,
   notionRemoteOAuthProvider,
+  linearOAuthProvider,
+  atlassianRemoteOAuthProvider,
+  githubRemoteOAuthProvider,
+  slackRemoteOAuthProvider,
 ];
 
 const PROVIDERS_BY_TYPE = new Map(ALL_OAUTH_PROVIDERS.map((p) => [p.serverType, p]));
