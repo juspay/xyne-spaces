@@ -115,20 +115,32 @@ export async function lockTicketStageName(
 /**
  * Relocated from transcriptService: locks the call message row and reads content+metadata, so the
  * title update and the first-chunk Canvas attachment (which both merge into the same metadata
- * object) cannot discard each other's fields. SQL unchanged.
+ * object) cannot discard each other's fields.
+ *
+ * The raw query only takes the FOR UPDATE lock; it deliberately does NOT read `content`.
+ * `messages.content` is encrypted at rest and raw SQL bypasses the Prisma encryption extension,
+ * so reading it here returned `ENC:v1|…` ciphertext that the caller then copied into
+ * `metadata.callEndedText` and the UI rendered verbatim. The row is read through Prisma (inside the
+ * same transaction, after the lock is held) so the extension decrypts it.
  */
 export async function lockMessageContentAndMetadata(
   tx: Prisma.TransactionClient,
   messageId: string,
 ): Promise<{ content: string; metadata: unknown } | undefined> {
-  const rows = await rawQuery(
+  const locked = await rawQuery(
     ['Message'],
     'call title update: FOR UPDATE row lock so concurrent metadata merges do not drop each other\'s keys',
-    () => tx.$queryRaw<Array<{ content: string; metadata: unknown }>>`
-      SELECT "content", "metadata" FROM "messages" WHERE "messageId" = ${messageId} FOR UPDATE
+    () => tx.$queryRaw<Array<{ messageId: string }>>`
+      SELECT "messageId" FROM "messages" WHERE "messageId" = ${messageId} FOR UPDATE
     `,
   );
-  return rows[0];
+  if (locked.length === 0) return undefined;
+
+  const message = await tx.message.findUnique({
+    where: { messageId },
+    select: { content: true, metadata: true },
+  });
+  return message ?? undefined;
 }
 
 /**
