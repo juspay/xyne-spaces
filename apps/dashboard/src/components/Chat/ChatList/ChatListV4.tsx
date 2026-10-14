@@ -25,6 +25,7 @@ import { useAuth } from '../../../hooks/useAuth';
 import { useMessageEdit, withEditSurface } from '../../../providers/EditProvider';
 import { useCombinedMesseges } from './ChatListV2.utils';
 import { usePlatform } from '../../../hooks/usePlatform';
+import { useIsWindowActive } from '../../../hooks/useIsWindowActive';
 import { formatDatePill } from '../../../utils/dateUtils';
 import { standaloneNavigate } from '../../../utils/electronApp';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
@@ -239,6 +240,8 @@ function reconcileConversationWindow(
 
 type CombinedMessage = ReturnType<typeof useCombinedMesseges>['combinedMessages'][number];
 const VISIBLE_CONVERSATION_EPSILON_PX = 1;
+// Same distance the new-message auto-scroll treats as "at the end".
+const AT_END_THRESHOLD_PX = 80;
 /** Breathing room at both edges before a keyboard-selected row counts as visible. */
 const SELECTION_VIEWPORT_PADDING = 8;
 /**
@@ -422,6 +425,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
   const latestConversationsListRef = useRef<Conversation[]>([]);
   const [stickyDate, setStickyDate] = useState<string | null>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
+  const [isScrolledAwayFromEnd, setIsScrolledAwayFromEnd] = useState(false);
   const [keyboardSelectedMessageId, setKeyboardSelectedMessageId] = useState<string | null>(null);
   const [isFirstItemScrolledOff, setIsFirstItemScrolledOff] = useState(false);
 
@@ -1410,11 +1414,24 @@ const ChatListV4: React.FC<ChatListProps> = ({
     };
   }, [channelId]);
 
-  // ── Mark as read once the list has loaded ─────────────────────────────────────
+  // ── Mark as read once the list has loaded, and while a DM stays open ──────────
   // Without this the channel only counts as read on unmount, so the sidebar badge
   // keeps showing unread for a channel the user is looking at. The divider and
   // unread scroll read lastViewedAtOnOpen, so moving lastViewedAt here is safe.
+  //
+  // A DM message that lands after the open mark is counted as unread by the server
+  // again, which would keep the DMs nav dot on until the user leaves. So mark again
+  // whenever that count comes back while the user is looking at the newest messages:
+  // window active, scrolled to the end, nothing held behind the "Latest messages" pill.
+  // One attempt per newest conversation: a mark the server rejects brings the count
+  // straight back, and retrying it would loop.
   const hasMarkedOnOpenRef = useRef(false);
+  const lastMarkedConversationIdRef = useRef<string | undefined>(undefined);
+  const newestConversationId = conversations[conversations.length - 1]?.conversationId;
+  const isWindowActive = useIsWindowActive();
+  const hasDmUnread = isDmScope && (channelParticipation?.unreadCount ?? 0) > 0;
+  const isViewingLatest =
+    isWindowActive && !isScrolledAwayFromEnd && latestConversationsList.length === 0;
   // Created by a remount for a linked target: the channel was already marked when it
   // first opened, and the user may have marked it unread since — don't mark it again.
   const [reopenedForLinkedTarget] = useState(() => !!isReopeningForLinkedTargetRef?.current);
@@ -1423,15 +1440,31 @@ const ChatListV4: React.FC<ChatListProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
-    if (!channelId || !isInitialLoadComplete || hasMarkedOnOpenRef.current) return;
-    if (reopenedForLinkedTarget) return;
+    if (!channelId || !isInitialLoadComplete) return;
     if (skipMarkAsReadRef?.current || activitySkipMarkAsReadChannelRef.current) return;
 
+    const isOpenMark = !hasMarkedOnOpenRef.current && !reopenedForLinkedTarget;
+    const isLiveMark =
+      hasDmUnread &&
+      isViewingLatest &&
+      newestConversationId !== lastMarkedConversationIdRef.current;
+    if (!isOpenMark && !isLiveMark) return;
+
     hasMarkedOnOpenRef.current = true;
+    lastMarkedConversationIdRef.current = newestConversationId;
     // No draft args: the composer may not have loaded the draft yet, and sending
     // '' would delete it. The unmount call above still saves the draft on leave.
     void zero.mutate(mutators.channel.markChannelAsViewed({ channelId, timestamp: Date.now() }));
-  }, [channelId, isInitialLoadComplete, reopenedForLinkedTarget, skipMarkAsReadRef, zero]);
+  }, [
+    channelId,
+    isInitialLoadComplete,
+    reopenedForLinkedTarget,
+    hasDmUnread,
+    isViewingLatest,
+    newestConversationId,
+    skipMarkAsReadRef,
+    zero,
+  ]);
 
   // ── Persist conversations to query cache ──────────────────────────────────────
   useEffect(() => {
@@ -1750,6 +1783,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
     startTransition(() => {
       setIsFirstItemScrolledOff(el.scrollTop > 0);
       setShowScrollButton(latestConversationsListRef.current.length === 0 && !isNearBottom);
+      setIsScrolledAwayFromEnd(distanceFromEnd > AT_END_THRESHOLD_PX);
     });
 
     if (isNearBottom && isInitialLoadComplete) fetchNewerMessages();
