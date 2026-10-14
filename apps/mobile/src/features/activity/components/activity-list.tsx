@@ -3,10 +3,12 @@ import { AnimatedLegendList } from '@legendapp/list/reanimated';
 import { type LegendListRef } from '@legendapp/list/react-native';
 import { useCallback, useMemo, useRef, useState, type ReactElement } from 'react';
 import { View, type LayoutChangeEvent } from 'react-native';
+import { useSharedValue } from 'react-native-reanimated';
 import { useUniwind } from 'uniwind';
 
 import { ActivityLoadingSkeleton } from '@/src/components/activity';
 import { ListEmptyState } from '@/src/components/ui/empty-state';
+import { ScrollToTopButton } from '@/src/components/ui/scroll-to-top-button';
 import { useTabPageIsFocused } from '@/src/hooks/useTabPageFocus';
 import { useFabClearance } from '@/src/features/quick-actions';
 import { useReportTabReady } from '@/src/observability/logging/hooks/navigation/useReportTabReady';
@@ -99,6 +101,13 @@ export function ActivityList(): ReactElement {
 
   const listRef = useRef<LegendListRef>(null);
 
+  // Written by the list on the UI thread; only the button reads it.
+  const scrollOffset = useSharedValue(0);
+  const sharedValues = useMemo(() => ({ scrollOffset }), [scrollOffset]);
+  const scrollToTop = useCallback(() => {
+    listRef.current?.scrollToOffset?.({ offset: 0, animated: true });
+  }, []);
+
   // A new filter is a new list, so it starts at the top.
   useObserve(activityFilter$, () => {
     listRef.current?.scrollToOffset?.({ offset: 0, animated: false });
@@ -133,6 +142,7 @@ export function ActivityList(): ReactElement {
       <ActivityBodyEnvironment>
         <AnimatedLegendList
           ref={listRef}
+          sharedValues={sharedValues}
           data={order}
           renderItem={renderRow}
           keyExtractor={keyExtractor}
@@ -164,6 +174,7 @@ export function ActivityList(): ReactElement {
           }}
         />
       </ActivityBodyEnvironment>
+      <ScrollToTopButton offset={scrollOffset} onPress={scrollToTop} />
     </View>
   );
 }
