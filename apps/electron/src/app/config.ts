@@ -66,15 +66,26 @@ const devConfig: AppConfig = {
   preProdKey: 'preProdFeaturesEnabled'
 };
 
+// Community channel: the public deployment, and the default for any build that
+// names no tenant. One public origin serves the app, its API and its auth, so
+// the MTLS_* fields repeat that origin rather than naming a separate auth host:
+// this channel has no client certificates and no private CA, and enableMtls
+// being false is what keeps the enrollment and root-CA paths out of the build.
+//
+// Internal deployments restate the hostnames they differ on in their own tenant
+// file (apps/electron/tenants/<domain>.json, real ones in the private repo) and
+// are selected with ELECTRON_TENANT at build time. Nothing deployment-specific
+// belongs in this object any more.
 const prodConfig: AppConfig = {
-  BACKEND_URL: 'https://app.spaces.xyne.juspay.net',
-  MTLS_BACKEND_URL: 'https://auth.spaces.xyne.juspay.net',
-  MTLS_FRONTEND_URL: 'https://auth.spaces.xyne.juspay.net',
+  BACKEND_URL: 'https://spaces.xyne.ai',
+  MTLS_BACKEND_URL: 'https://spaces.xyne.ai',
+  MTLS_FRONTEND_URL: 'https://spaces.xyne.ai',
   MTLS_IDENTITY_NAME: 'Web Simulation Client',
+  // Unused while enableMtls is false; no private CA root ships on this channel.
   CA_CERT_FILE: 'ca.cert',
-  UNPROTECTED_URL: 'https://spaces.xyne.juspay.net', // Non-mTLS endpoint only reserved for pre-enrollment logs and metrics
-  FRONTEND_URL: 'https://app.spaces.xyne.juspay.net',
-  CLAW_AUTH_URL: 'https://app.spaces.xyne.juspay.net',
+  UNPROTECTED_URL: 'https://spaces.xyne.ai', // Non-mTLS endpoint only reserved for pre-enrollment logs and metrics
+  FRONTEND_URL: 'https://spaces.xyne.ai',
+  CLAW_AUTH_URL: 'https://spaces.xyne.ai',
   DEEP_LINK_PROTOCOL: 'xyne-spaces',
   USER_DATA_SUFFIX: '',             // Empty — prod keeps original path, no migration needed
   APP_NAME: 'Xyne Spaces',
@@ -85,13 +96,12 @@ const prodConfig: AppConfig = {
     height: 800,
     title: 'Xyne Spaces',
   },
-  enableMtls: true,
+  enableMtls: false,
   useBundledUI: false,
   sendLogs: true,
   enableOtelMetrics: true,
-  loginTempHeader: true,
   RELEASE_CONFIG_URL: 'https://airborne.juspay.in/release/xyne/xyne-mobile',
-  UI_ZIP_URL: 'https://app.spaces.xyne.juspay.net/releases/dashboard.zip',
+  UI_ZIP_URL: 'https://spaces.xyne.ai/releases/dashboard.zip',
   uiUpdateCheckIntervalMs: 15 * 60 * 1000, // 15 minutes for prod
   preProdKey: 'preProdFeaturesEnabled',
 };

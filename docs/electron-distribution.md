@@ -8,7 +8,7 @@ Tenant identity is baked into the binary, so every new domain is a new build, a 
 
 | Concept | Where it was frozen | Owned by | Status |
 |---|---|---|---|
-| Backend/frontend hostnames | `src/app/config.ts` — `APP_ENV` selected one of three literal objects, editing the tree being the only way to add a fourth | Tenant, selected at build time (§3) | **done** |
+| Backend/frontend hostnames | `src/app/config.ts` — `APP_ENV` selected one of three literal objects, editing the tree being the only way to add a fourth | Tenant, selected at build time (§3); the `prod` channel default is now the **community** deployment, and internal domains are tenant files in the private repo | **done** |
 | mTLS trust root | `src/services/mtls.ts` — CA filename derived from `USER_DATA_SUFFIX === '-sandbox'`, so a third CA had no way to be named | Tenant, via `CA_CERT_FILE` (`mtls.ts:123`) | **done** |
 | Bundle identity (appId, productName, scheme) | `build.prod.json` / `build.sbx.json` | Channel — never tenant | by design |
 | UI bundle | `UI_ZIP_URL` + `RELEASE_CONFIG_URL`, already OTA | Tenant | works |
@@ -36,13 +36,27 @@ Two channels by trust model, and the internal channel carries two *delivery path
 | Domain shape | open, like Slack — any tenant under the public origin | tenant-specific, often private DNS | same |
 | TLS | public CA only (ACM / Let's Encrypt) | private CA + client certificates | same |
 | Device identity | App Attest (iOS), Play Integrity (Android), keychain/TPM-bound key + enrollment token (desktop) | existing mTLS client certificate | same |
-| Root CA install | **never** — compiled out | `installRootCA` as today | `installRootCA` as today |
-| macOS artifact | store build | **unsigned `pkg`** — MDM only | notarized `dmg` + `zip`, never `pkg` |
+| Root CA install | **never** — `setupMTLS` returns before it when `enableMtls` is false (`mtls.ts:123`) | `installRootCA` as today | `installRootCA` as today |
+| macOS artifact | notarized `dmg` + `zip` | `pkg` — MDM only | notarized `dmg` + `zip`, never `pkg` |
 | Windows artifact | MSIX | `msi` (`perMachine: true`) | `nsis` (`perMachine: false`) |
-| Signing | store-owned | **none needed** | Developer ID **Application** only |
+| Signing | Developer ID **Application** | Developer ID **Application** | Developer ID **Application** |
 | Updates | store-owned; self-update compiled out (brew/apt excepted) | **MDM-owned** — self-update off | `electron-updater`, self-hosted feed |
 | Distribution | App Store, Play, Microsoft Store, brew cask, apt/yum | MDM push | direct download, org mirror |
-| Bundle id | `com.xyne.spaces` | `com.xyne.spaces.internal` | `com.xyne.spaces.internal` |
+| Bundle id | `com.xyne.spaces` | `com.xyne.spaces` | `com.xyne.spaces` |
+
+**One bundle id for every channel** (`com.xyne.spaces`); only the sandbox flavour differs
+(`com.xyne.spaces.sandbox`, which also carries its own `USER_DATA_SUFFIX`). A per-channel id would
+split one app into several store listings — the thing Apple guideline 4.3(a) rejects — and buy
+nothing, since no machine is expected to run two channels at once.
+
+**Every macOS artifact is signed with the same Developer ID**, the MDM `pkg` included, even though
+an MDM install sets no `com.apple.quarantine` attribute and would accept an unsigned one. With a
+single bundle id, signing uniformity is not cosmetic: the mTLS client identity is imported with
+`-T "/Applications/Xyne Spaces.app"` (`keychain/macKeychainService.ts:143`) and the keychain
+validates that ACL entry against the binary's signature, so replacing a signed install with an
+unsigned one at the same path invalidates it and the user is asked for their password again. Only
+the `pkg` *wrapper* may stay unsigned, which avoids needing a Developer ID **Installer**
+certificate.
 
 Two binaries per platform. Not `N`. The MDM and no-MDM paths are the *same* build with different signing and a different update flag, so they are one pipeline with two publish steps — not two codebases.
 

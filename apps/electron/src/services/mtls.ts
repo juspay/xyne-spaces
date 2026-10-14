@@ -114,7 +114,16 @@ export async function setupMTLS() {
         }
     });
 
-    // Try to install Root CA if it exists
+    // Try to install Root CA if it exists, on the channels that use one.
+    //
+    // keychain.installRootCA() shells out to `security add-trusted-cert`, which
+    // prompts for the user's password. A channel served by a public CA presents
+    // no private root at all, so an ungated install would ask every launch to
+    // trust a root that is never used.
+    if (!config.enableMtls) {
+        log.info('[mTLS] enableMtls is false - skipping root CA install');
+        return;
+    }
 
     try {
         // Which root to trust is a config decision, not a guess from the userData

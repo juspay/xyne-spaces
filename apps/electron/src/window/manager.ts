@@ -149,7 +149,12 @@ function applyWindowPolicy(win: BrowserWindow): void {
         return { action: 'deny' };
       }
 
-      if(currentUrlObj.origin === config.MTLS_FRONTEND_URL) {
+      // The mTLS enrollment page is served by a different origin than the app
+      // and hands every link to the browser. Gated on enableMtls because a
+      // channel with no enrollment host points MTLS_FRONTEND_URL at its own
+      // origin, where this would capture every link from the running app and
+      // bypass the user's open-links preference.
+      if (config.enableMtls && currentUrlObj.origin === config.MTLS_FRONTEND_URL) {
         shell.openExternal(url);
         notifyExternalOpen(url);
         return { action: 'deny' };
@@ -265,7 +270,7 @@ function applyWindowPolicy(win: BrowserWindow): void {
       }
 
       // Mirror the mTLS branch from setWindowOpenHandler
-      if (currentUrlObj?.origin === config.MTLS_FRONTEND_URL) {
+      if (config.enableMtls && currentUrlObj?.origin === config.MTLS_FRONTEND_URL) {
         event.preventDefault();
         shell.openExternal(navUrl);
         notifyExternalOpen(navUrl);
