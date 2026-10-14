@@ -30,6 +30,7 @@ import { BottomAction } from '../components/BottomAction';
 import { CollapsingHeader } from '../components/CollapsingHeader';
 import { DateTimeRow } from '../components/DateTimeRow';
 import { ExternalGuestsCard } from '../components/ExternalGuestsCard';
+import { ChannelMembersSheet } from '../components/ChannelMembersSheet';
 import { InternalUsersCard } from '../components/InternalUsersCard';
 import { ChannelSheet } from '../components/ChannelSheet';
 import { PeopleSheet } from '../components/PeopleSheet';
@@ -139,6 +140,18 @@ export default function ScheduleCallScreen({ onClose }: ScheduleCallScreenProps)
   }, []);
   const onPeopleClosed = useCallback((): void => {
     setPeopleSheet(state => (state === 'closed' ? 'unmounted' : state));
+  }, []);
+
+  const [membersSheet, setMembersSheet] = useState<'unmounted' | 'open' | 'closed'>('unmounted');
+  const openMembersPicker = useCallback((): void => {
+    Keyboard.dismiss();
+    setMembersSheet('open');
+  }, []);
+  const onMembersOpenChange = useCallback((open: boolean): void => {
+    setMembersSheet(open ? 'open' : 'closed');
+  }, []);
+  const onMembersClosed = useCallback((): void => {
+    setMembersSheet(state => (state === 'closed' ? 'unmounted' : state));
   }, []);
 
   const { selectedChannel, selectChannel, setPostCallUpdates } = postUpdates;
@@ -251,6 +264,7 @@ export default function ScheduleCallScreen({ onClose }: ScheduleCallScreenProps)
           participants={participants}
           onChange={setParticipants}
           onOpenPicker={openPeoplePicker}
+          onOpenMembers={openMembersPicker}
           lockedUserIds={form.lockedUserIds}
         />
         {form.participantsOnly ? null : (
@@ -352,6 +366,15 @@ export default function ScheduleCallScreen({ onClose }: ScheduleCallScreenProps)
           participants={participants}
           onApply={setParticipants}
           lockedUserIds={form.lockedUserIds}
+        />
+      )}
+      {membersSheet === 'unmounted' || !participants.channel ? null : (
+        <ChannelMembersSheet
+          isOpen={membersSheet === 'open'}
+          onOpenChange={onMembersOpenChange}
+          onClosed={onMembersClosed}
+          channel={participants.channel}
+          onApply={form.setExcludedMembers}
         />
       )}
       {channelSheet === 'unmounted' ? null : (
