@@ -186,6 +186,9 @@ export class InvitationController {
       const invitationLink =
         await buildInvitationLink({ req, workspaceId, invitationId: invitation.invitationId || invitation.id });
 
+      if (config.env === 'development') {
+        logger.info(`[InvitationController] DEV MODE — skipping email send. Invitation link for ${email}: ${invitationLink}`);
+      } else {
         // Send invitation email
         const emailResult = await invitationService.sendInvitationEmail({
           to: email,
@@ -202,6 +205,7 @@ export class InvitationController {
           invitation = null; // Prevent double-delete in catch block
           throw new Error(`Failed to send invitation email: ${emailResult.error}`);
         }
+      }
 
       // Email is out (or dev-skipped) — stamp delivery so auto-approved invites
       // don't render as "Email failed to send" in the approval list.
