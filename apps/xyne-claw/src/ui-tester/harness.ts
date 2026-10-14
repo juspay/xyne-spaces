@@ -44,6 +44,48 @@ const spec = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 const outDir = spec.outDir || path.join(path.dirname(process.argv[2]), "out");
 fs.mkdirSync(outDir, { recursive: true });
 const base = String(spec.baseUrl || "").replace(/\/$/, "");
+const baseOrigin = (() => { try { return new URL(base).origin; } catch (e) { return ""; } })();
+
+async function stubExternal(page, counter) {
+  if (spec.allowExternal === true || !baseOrigin) return;
+  await page.route((url) => url.origin !== baseOrigin && /^https?:$/.test(url.protocol), (route) => {
+    const req = route.request();
+    counter.count++;
+    const host = new URL(req.url()).host;
+    if (counter.hosts.length < 5 && !counter.hosts.includes(host)) counter.hosts.push(host);
+    const type = req.resourceType();
+    if (type === "stylesheet") return route.fulfill({ status: 200, contentType: "text/css", body: "" }).catch(() => {});
+    if (type === "script") return route.fulfill({ status: 200, contentType: "application/javascript", body: "" }).catch(() => {});
+    return route.abort("blockedbyclient").catch(() => {});
+  });
+}
+
+async function screenshotWithRetry(page, file, fullPage, errors) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await page.screenshot({ path: file, fullPage, timeout: 15000, animations: "disabled", caret: "hide" });
+      return file;
+    } catch (e) {
+      if (attempt === 1) errors.push("screenshot failed twice: " + String(e && e.message || e).slice(0, 160));
+    }
+  }
+  return null;
+}
+
+async function warmUp(browser) {
+  const ctx = await browser.newContext();
+  const page = await ctx.newPage();
+  const counter = { count: 0, hosts: [] };
+  await stubExternal(page, counter);
+  await page.route(spec.apiPattern || "**/api/**", (route) => route.fulfill({ status: 200, contentType: "application/json", body: "{}" }).catch(() => {}));
+  const first = (spec.variations || [])[0];
+  const p = (first && first.path) || "/";
+  const root = base.endsWith(p) && p !== "/" ? base.slice(0, base.length - p.length) : base;
+  const started = Date.now();
+  try { await page.goto(root + p, { waitUntil: "load", timeout: 120000 }); } catch (e) {}
+  await ctx.close().catch(() => {});
+  return Date.now() - started;
+}
 const defaults = spec.defaults || {};
 const fallback = spec.fallback === undefined ? { status: 200, json: { success: true, data: [] } } : spec.fallback;
 
@@ -84,7 +126,9 @@ function matches(rule, req) {
 async function runVariation(browser, v) {
   const viewport = v.viewport || defaults.viewport || { width: 1440, height: 900 };
   const theme = v.theme || defaults.theme;
-  const ctx = await browser.newContext({ viewport, colorScheme: theme === "dark" ? "dark" : "light" });
+  const wantVideo = v.video === true || (spec.video === true && v.video !== false);
+  const videoDir = path.join(outDir, "videos", v.id);
+  const ctx = await browser.newContext({ viewport, colorScheme: theme === "dark" ? "dark" : "light", ...(wantVideo ? { recordVideo: { dir: videoDir, size: viewport } } : {}) });
   const storage = Object.assign({}, defaults.localStorage || {}, v.localStorage || {});
   if (theme && spec.themeStorageKey) storage[spec.themeStorageKey] = theme;
   if (Object.keys(storage).length) await ctx.addInitScript((s) => { for (const k of Object.keys(s)) localStorage.setItem(k, s[k]); }, storage);
@@ -99,6 +143,8 @@ async function runVariation(browser, v) {
   page.on("response", (r) => { if (r.status() >= 400 && failedRequests.length < 10) failedRequests.push(r.status() + " " + new URL(r.url()).pathname); });
   const rules = [].concat(v.mocks || [], defaults.mocks || []);
   const apiPattern = spec.apiPattern || "**/api/**";
+  const external = { count: 0, hosts: [] };
+  await stubExternal(page, external);
   await page.route(apiPattern, async (route) => {
     const req = route.request();
     apiRequests++;
@@ -133,19 +179,30 @@ async function runVariation(browser, v) {
   await page.waitForTimeout(v.shotAfterMs === undefined ? (defaults.shotAfterMs === undefined ? 1200 : defaults.shotAfterMs) : v.shotAfterMs);
   const finalUrl = page.url();
   const shot = path.join(outDir, v.id + ".png");
-  await page.screenshot({ path: shot, fullPage: Boolean(v.fullPage) });
+  const shotPath = await screenshotWithRetry(page, shot, Boolean(v.fullPage), pageErrors);
   let audit = null;
   try { audit = await page.evaluate("(" + AUDIT + ")()"); } catch (e) { audit = { error: String(e).slice(0, 160) }; }
   await page.unrouteAll({ behavior: "ignoreErrors" }).catch(() => {});
+  const video = wantVideo && page.video() ? page.video() : null;
   await ctx.close();
-  return { id: v.id, path: v.path, finalUrl, apiRequests, viewport, theme: theme || "light", screenshot: shot, ms: Date.now() - started, navError, audit, consoleErrors, pageErrors, failedRequests, unmatchedRequests: [...unmatched].slice(0, 20), expect: v.expect || null, checks: v.checks || null };
+  let videoPath = null;
+  if (video) {
+    try {
+      const raw = await video.path();
+      videoPath = path.join(outDir, v.id + ".webm");
+      fs.renameSync(raw, videoPath);
+      fs.rmSync(videoDir, { recursive: true, force: true });
+    } catch (e) { pageErrors.push("video save failed: " + String(e && e.message || e).slice(0, 120)); videoPath = null; }
+  }
+  return { id: v.id, path: v.path, finalUrl, apiRequests, viewport, theme: theme || "light", screenshot: shotPath, video: videoPath, externalStubbed: external.count, externalHosts: external.hosts, ms: Date.now() - started, navError, audit, consoleErrors, pageErrors, failedRequests, unmatchedRequests: [...unmatched].slice(0, 20), expect: v.expect || null, checks: v.checks || null };
 }
 
 (async () => {
   const browser = await playwright.chromium.launch();
+  const warmMs = await warmUp(browser);
   const variations = spec.variations || [];
   const results = new Array(variations.length);
-  const workers = Math.max(1, Math.min(Number(spec.concurrency) || 3, 6, variations.length));
+  const workers = Math.max(1, Math.min(Number(spec.concurrency) || 8, 10, variations.length));
   let next = 0;
   await Promise.all(Array.from({ length: workers }, async () => {
     while (next < variations.length) {
@@ -156,9 +213,10 @@ async function runVariation(browser, v) {
     }
   }));
   await browser.close();
-  const summary = { ok: true, outDir, count: results.length, results };
+  const summary = { ok: true, outDir, count: results.length, warmUpMs: warmMs, results };
   fs.writeFileSync(path.join(outDir, "summary.json"), JSON.stringify(summary, null, 2));
   console.log(JSON.stringify({ ok: true, outDir, summary: path.join(outDir, "summary.json"), variations: results.map((r) => ({ id: r.id, error: r.error || r.navError || null, pageErrors: (r.pageErrors || []).length, unmatched: (r.unmatchedRequests || []).length })) }));
+  process.exit(0);
 })().catch((e) => { console.log(JSON.stringify({ ok: false, error: String(e && e.stack || e).slice(0, 500) })); process.exit(1); });
 `;
 

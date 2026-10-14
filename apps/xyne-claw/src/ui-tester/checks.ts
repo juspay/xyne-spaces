@@ -80,7 +80,10 @@ export interface VariationResult {
   apiRequests?: number;
   viewport?: { width: number; height: number };
   theme?: string;
-  screenshot?: string;
+  screenshot?: string | null;
+  video?: string | null;
+  externalStubbed?: number;
+  externalHosts?: string[];
   error?: string;
   navError?: string | null;
   audit?: VariationAudit | null;
@@ -104,6 +107,7 @@ export interface VariationVerdict {
   findings: Finding[];
   visual: Record<string, { choice: string | null; confidence: number | null }>;
   screenshot?: string;
+  video?: string;
 }
 
 const PROBLEM_WHEN: Partial<Record<StandardKey, string>> = { cut_off: "yes", overlap: "yes", placeholders: "yes", toasts: "several" };
@@ -184,7 +188,7 @@ export function judgeVariation(result: VariationResult, answers: Record<string, 
     }
   }
   const verdict = findings.some((f) => f.severity === "fail") ? "fail" : findings.some((f) => f.severity === "unsure") ? "unsure" : "pass";
-  return { id: result.id, verdict, findings, visual, ...(result.screenshot ? { screenshot: result.screenshot } : {}) };
+  return { id: result.id, verdict, findings, visual, ...(result.screenshot ? { screenshot: result.screenshot } : {}), ...(result.video ? { video: result.video } : {}) };
 }
 
 export function formatReport(verdicts: VariationVerdict[]): string {
@@ -193,7 +197,7 @@ export function formatReport(verdicts: VariationVerdict[]): string {
   const lines = [`UI variations: ${verdicts.length} checked — ${counts.fail} fail, ${counts.unsure} unsure, ${counts.pass} pass.`, ""];
   for (const v of verdicts) {
     const mark = v.verdict === "pass" ? "PASS" : v.verdict === "fail" ? "FAIL" : "UNSURE";
-    lines.push(`- ${mark} ${v.id}${v.screenshot ? ` (${v.screenshot})` : ""}`);
+    lines.push(`- ${mark} ${v.id}${v.screenshot ? ` (${v.screenshot})` : ""}${v.video ? ` video: ${v.video}` : ""}`);
     for (const f of v.findings.filter((x) => x.severity !== "warn" || v.verdict !== "pass").slice(0, 6)) lines.push(`    - [${f.severity}/${f.source}] ${f.message}`);
   }
   return lines.join("\n");

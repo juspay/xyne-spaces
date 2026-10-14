@@ -17,7 +17,7 @@ try {
   hasPlaywright = false;
 }
 
-const PAGE = `<!doctype html><html><body><div id="app">loading</div><script>
+const PAGE = `<!doctype html><html><head><link rel="stylesheet" href="http://10.255.255.1/never-answers.css"><link rel="preconnect" href="https://fonts.gstatic.com"></head><body><div id="app">loading</div><script>
 fetch("/api/v1/items").then(async (r) => {
   const body = await r.json();
   const app = document.getElementById("app");
@@ -37,7 +37,7 @@ describe.skipIf(!hasPlaywright)("ui-tester harness (real browser)", () => {
     writeFileSync(join(dir, "spec.json"), JSON.stringify({
       baseUrl: `http://127.0.0.1:${port}`, outDir: join(dir, "out"),
       variations: [
-        { id: "ok", path: "/", mocks: [{ match: "/api/v1/items", json: { total: 2, items: [{ name: "alpha" }, { name: "beta" }] } }] },
+        { id: "ok", path: "/", video: true, mocks: [{ match: "/api/v1/items", json: { total: 2, items: [{ name: "alpha" }, { name: "beta" }] } }] },
         { id: "broken", path: "/", viewport: { width: 390, height: 700 }, mocks: [{ match: "/api/v1/items", json: { items: [{ name: "a very wide item", wide: true }] } }] },
         { id: "error", path: "/", mocks: [{ match: "/api/v1/items", status: 500, json: { error: "boom" } }] },
         { id: "unmocked", path: "/" },
@@ -58,6 +58,21 @@ describe.skipIf(!hasPlaywright)("ui-tester harness (real browser)", () => {
       expect(byId.unmocked.unmatchedRequests).toEqual(["GET /api/v1/items"]);
       expect(byId.repeat.audit.textLength).toBeGreaterThan(byId.ok.audit.textLength + 200);
       expect(byId.repeat.audit.garbage).toEqual([]);
+      for (const id of ["ok", "broken", "error", "unmocked", "repeat"]) {
+        expect(byId[id].externalStubbed).toBeGreaterThan(0);
+        expect(byId[id].ms).toBeLessThan(15_000);
+      }
+      expect(byId.ok.externalHosts).toContain("10.255.255.1");
+      expect(byId.ok.video).toMatch(/ok\.webm$/);
+      expect(existsSync(byId.ok.video)).toBe(true);
+      expect(byId.broken.video).toBeNull();
+      expect(typeof summary.warmUpMs).toBe("number");
+      for (const id of ["ok", "broken", "error", "unmocked", "repeat"]) {
+        expect(byId[id].externalStubbed).toBeGreaterThan(0);
+        expect(byId[id].ms).toBeLessThan(15_000);
+      }
+      expect(byId.ok.externalHosts).toContain("10.255.255.1");
+      expect(typeof summary.warmUpMs).toBe("number");
     } finally {
       server.close();
     }

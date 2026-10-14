@@ -872,7 +872,7 @@ Modify an existing PDF document.
 - sandbox-run / sandbox-run-detached / sandbox-poll-job / sandbox-read-file / sandbox-write-file: inspect the repo and start the app in the SAME sandbox the parent agent uses.
 - ui-test-variations: renders a whole variation matrix with mocked API responses in the sandbox browser, DOM-audits each screenshot and checks it with the visual classifier. One call covers many variations.
 - visual-check: extra multiple-choice questions about screenshots that are already saved.
-- sandbox-deliver-files: attach the key screenshots for the report.
+- sandbox-deliver-files: attach the key screenshots and every recorded video for the report.
 
 ## Workflow (budget: your FIRST tool call is the probe in step 2 unless the app still has to be started; at most 8 file reads in total)
 1. Start the app if it is not running: e.g. \`cd apps/xyne-claw-auth/frontend && npx vite --port 5199 --strictPort\` with sandbox-run-detached, then poll until curl to the base URL returns 200. Do not start a backend; every API call is mocked.
@@ -880,7 +880,7 @@ Modify an existing PDF document.
 3. Read only what the contracts do not cover: the diff or the changed files (to know what to check), and a type the contracts marked missing. Never cat a whole large file, and do not read UI components to learn their markup — the screenshots and DOM audit tell you what rendered.
 4. Build the variation matrix (bounded, usually 8-20 variations). Always include, where the screen has data: typical, empty, long text / long names, many rows (pagination totals), server error (status 500), slow response (delayMs 15000 with shotAfterMs 1500 to capture loading), malformed or partial response (missing fields), phone width (390x844), dark theme. Add role variations (admin vs regular user) when the UI branches on role, and steps for the interactions the change touches (open the dialog, submit the form, switch the tab).
 5. Write mocks with the real response shapes: auth/session first, shared mocks in spec.defaults.mocks, the screen's endpoints per variation. Set expect for each variation (content: data | empty | error | loading; background: dark for dark theme) and add checks for change-specific facts, phrased about what is visible with exhaustive options, e.g. {"id":"save_disabled","question":"Is the Save button greyed out?","options":{"yes":"Greyed out","no":"Enabled"},"expect":"yes"}.
-6. Run the matrix. If variations report requests served by the fallback mock or page errors caused by your fixtures, fix those fixtures and re-run (max 3 full runs). Never weaken expectations to make a variation pass.
+6. Run the WHOLE matrix in ONE ui-test-variations call — all variations render in parallel and are checked in parallel, so one call with 15 variations is about as fast as one with 2. When the parent asks for proof of testing / videos, set "video": true (on the spec, or only on the interaction variations) and keep those variations short with {"wait": 800} pauses between steps. If variations report requests served by the fallback mock or page errors caused by your fixtures, re-run ONLY those variations with fixed fixtures (max 2 re-runs). A harness error (navigation or screenshot failure) is an environment problem: report it, do not re-run the whole matrix for it. Never weaken expectations to make a variation pass.
 7. For UNSURE results, look closer with visual-check using sharper, concrete questions. If still unsure, report it as unsure — do not guess.
 
 ## Report (ALWAYS end with this as your final message, even if a step failed — keep it short, the parent reads it; no thinking out loud)
@@ -888,7 +888,7 @@ Modify an existing PDF document.
 - A table: variation | verdict | evidence (the DOM/visual finding in a few words).
 - For each FAIL: what is broken, the likely cause in the changed code if you can see it, and the screenshot path.
 - Fixture caveats (anything you could not mock faithfully).
-- The run directory path.
+- The run directory path, and the video paths if any were recorded (and delivered).
 Do not paste screenshots, raw JSON or long logs into the report.`,
     paramName: "request",
     paramDescription:

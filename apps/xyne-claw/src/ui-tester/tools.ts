@@ -30,7 +30,7 @@ export const UI_TESTER_SANDBOX_TOOL_NAMES = new Set([
 
 const MAX_VARIATIONS = 30;
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
-const VISUAL_CONCURRENCY = 4;
+const VISUAL_CONCURRENCY = 8;
 const VISUAL_STATE = "Screenshot of a page in a web application.";
 
 type SandboxSession = NonNullable<ReturnType<typeof getSandboxSession>>;
@@ -134,7 +134,9 @@ const SPEC_DESCRIPTION = [
   "- apiPattern: glob of requests to intercept (default **/api/**). Every intercepted request is answered by the first matching mock; unmatched ones get `fallback`.",
   '- fallback: {status, json} for unmatched API calls (default {status:200, json:{success:true,data:[]}}), or "passthrough" to hit the real backend.',
   "- themeStorageKey: localStorage key the app reads its theme from (e.g. xyne-theme)",
-  "- concurrency: variations rendered in parallel (default 3, max 6)",
+  "- concurrency: variations rendered in parallel (default 8, max 10). All variations of one call run at the same time — put the whole matrix in ONE call instead of calling once per variation.",
+  "- video: true records a .webm per variation (navigation, steps and final state) as proof of test; set it on the spec or per variation. Keep video variations short (a few steps with {wait} pauses). The report lists each video path; deliver them with sandbox-deliver-files.",
+  "- allowExternal: true lets requests to other origins (fonts, CDNs) through. By default they are answered instantly with an empty response so pages never hang on the network.",
   "- defaults: {viewport, theme, localStorage, mocks, shotAfterMs} applied to every variation (variation mocks are tried first)",
   "- variations: [{id, path, viewport?:{width,height}, theme?:'light'|'dark', localStorage?, mocks?:[{match, method?, status?, json?, body?, delayMs?}], steps?:[{click}|{fill:[selector,value]}|{press}|{hover}|{waitFor}|{wait}], shotAfterMs?, fullPage?, expect?:{content?:'data'|'empty'|'error'|'loading'|'blank', errors?:'none'|'banner'|'toast'|'both', background?:'light'|'dark'}, checks?:[{id, question, options:{key:description}, expect?}]}]",
   "- mock.match: substring of pathname+query, or 're:<regex>'.",
