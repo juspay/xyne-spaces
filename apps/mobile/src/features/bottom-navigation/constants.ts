@@ -41,13 +41,7 @@ export const BADGE_PADDING_HORIZONTAL = 4;
  */
 export const BADGE_OFFSET_RIGHT = -6;
 export const BADGE_OFFSET_TOP = -4;
-/**
- * Fixed in both themes rather than following `useBubbleAccent`: the bar carries
- * its own palette, and the accent tracks the chosen chat bubble — green by
- * default — which reads as a different signal from the bar's design.
- */
-export const BADGE_BACKGROUND = '#3B82F6';
-export const BADGE_TEXT = '#FFFFFF';
+
 export const ICON_SPACING = 52;
 /**
  * One weight for every destination icon, in the bar, the menu and the customize

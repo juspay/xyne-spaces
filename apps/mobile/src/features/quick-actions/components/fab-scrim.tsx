@@ -19,19 +19,11 @@ type ScrimProps = { isOpen: SharedValue<boolean> };
 /**
  * The dim behind the menu, and what closes it.
  *
- * Grok's split, for grok's reason: iOS animates a real blur, Android fades a
- * flat scrim because `BlurView` there is unpredictable enough that a list
- * behind it can stutter. The tint follows the theme rather than being fixed
- * dark — the design dims a light screen.
- *
  * `pointerEvents` is animated alongside the fade, and that is not optional.
  * Hit testing ignores opacity: a scrim at `opacity: 0` is still a full-screen
  * touch target, and this one is portalled above the tab bar, so leaving it
  * live swallows every tap on the app — the list, the bar, everything.
  *
- * Grok gets this for free by gating its whole menu container. This menu
- * cannot, because its button lives in that container and has to stay
- * pressable while the menu is shut, so the gate belongs here instead.
  */
 export function FabBackdrop({ isOpen }: ScrimProps): ReactElement {
   const isDark = useIsDark();

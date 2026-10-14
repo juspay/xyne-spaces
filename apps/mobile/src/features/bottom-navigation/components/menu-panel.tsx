@@ -19,8 +19,6 @@ import { entryHref, type TabEntry } from '../model/catalog';
 import { haptics } from '@/src/utils/haptics';
 
 import {
-  BADGE_BACKGROUND,
-  BADGE_TEXT,
   HOVER_FADE,
   MENU_HEADER_HEIGHT,
   NAV_ICON_STROKE_WIDTH,

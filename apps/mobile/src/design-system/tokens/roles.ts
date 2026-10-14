@@ -9,6 +9,12 @@ export const SEMANTIC_ROLES = [
   'muted',
   /** A raised block on the background: the active filter chip. */
   'surface',
+  /**
+   * A surface that floats *above* the screen rather than sitting on it — a
+   * context menu, a popover. Distinct from `surface`, which is a block
+   * within the page; this one has to read as lifted off it.
+   */
+  'surface-raised',
   /** Unread badge, and anything that has to read as "new". */
   'accent',
   'accent-foreground',

@@ -2,19 +2,11 @@ import * as React from 'react';
 import Svg, { Path } from 'react-native-svg';
 
 type ContactCardIconProps = {
-  /** Square side. Named `size` so lucide icons and this one are interchangeable. */
   size?: number;
   color?: string;
   strokeWidth?: number;
 };
 
-/**
- * A contact card: the action that starts a direct message.
- *
- * Takes `size` rather than `width`/`height` so it satisfies the same shape as
- * the lucide icons the FAB's action list is typed against — either can sit in
- * `DMS_FAB_ACTIONS` without the call site caring which it got.
- */
 function ContactCardIcon({
   size = 24,
   color = '#111111',

@@ -1,22 +1,8 @@
 import * as React from 'react';
 import Svg, { Path, type SvgProps } from 'react-native-svg';
 
-/**
- * The gold a starred conversation is marked with.
- *
- * Not a theme role: it means "starred" in both light and dark, the way a
- * warning triangle is yellow everywhere. A role would imply it re-palettes
- * with the theme, which it must not.
- */
 export const STAR_COLOR = '#F5B301';
 
-/**
- * Filled, not outlined.
- *
- * The source drawing is a stroked star. Painting the same path as both fill
- * and stroke keeps the rounded joins the design has while making it solid —
- * a separate filled path would have to re-derive those corners and drift.
- */
 function StarIcon({
   width = 16,
   height = 16,

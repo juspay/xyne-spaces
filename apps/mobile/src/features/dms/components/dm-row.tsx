@@ -8,7 +8,7 @@ import {
   type ReactElement,
   type ReactNode,
 } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import type { Observable } from '@legendapp/state';
 
@@ -16,8 +16,25 @@ import type { DmListItemData, DmListParticipantIdentity } from '@/src/types/dm-l
 import { Avatar } from '@/src/ui';
 import { haptics } from '@/src/utils/haptics';
 import { openBaseChatRoute } from '@/src/utils/openChatRoute';
+import { ContextMenu } from '@/src/ui/context-menu';
 
-import { DM_AVATAR_SIZE, DM_ROW_HEIGHT } from '../constants';
+import { DmRowMenu } from './dm-row-menu';
+
+import {
+  DM_AVATAR_SIZE,
+  DM_BADGE_PADDING_X,
+  DM_BADGE_SIZE,
+  DM_BADGE_TEXT_SIZE,
+  DM_PREVIEW_LINE_HEIGHT,
+  DM_PREVIEW_LINES,
+  DM_PREVIEW_SIZE,
+  DM_ROW_HEIGHT,
+  DM_STAR_SIZE,
+  DM_TIMESTAMP_LINE_HEIGHT,
+  DM_TIMESTAMP_SIZE,
+  DM_TITLE_LINE_HEIGHT,
+  DM_TITLE_SIZE,
+} from '../constants';
 import { StarIcon } from '../icons';
 import { formatDmTimestamp } from '../model/timestamp';
 import { todayStart$ } from '../state/day-clock';
@@ -82,9 +99,10 @@ function Title(): ReactElement {
   return (
     <Text
       numberOfLines={1}
+      style={{ fontSize: DM_TITLE_SIZE, lineHeight: DM_TITLE_LINE_HEIGHT }}
       className={cn(
-        'text-[16px] font-medium text-spaces-foreground',
-        unreadCount && unreadCount > 0 && 'font-semibold',
+        'font-semibold text-spaces-foreground',
+        unreadCount && unreadCount > 0 && 'font-bold',
       )}
     >
       {title ?? ''}
@@ -92,11 +110,17 @@ function Title(): ReactElement {
   );
 }
 
+/** One line, clipped. */
 function Preview(): ReactElement {
   const row$ = useRowNode();
   const text = useValue(() => row$.lastMessage.text.get());
   return (
-    <Text numberOfLines={1} className='text-[14px] text-spaces-muted'>
+    <Text
+      numberOfLines={DM_PREVIEW_LINES}
+      ellipsizeMode='tail'
+      style={{ fontSize: DM_PREVIEW_SIZE, lineHeight: DM_PREVIEW_LINE_HEIGHT }}
+      className='text-spaces-muted'
+    >
       {text ?? ''}
     </Text>
   );
@@ -113,10 +137,19 @@ function Preview(): ReactElement {
 function Timestamp(): ReactElement {
   const row$ = useRowNode();
   const activityAt = useValue(() => row$.lastActivityAtMs.get());
+  const unreadCount = useValue(() => row$.unreadCount.get());
   const todayStart = useValue(todayStart$);
 
+  /*
+   * Unread turns the time into a second badge.
+   */
+  const isUnread = (unreadCount ?? 0) > 0;
+
   return (
-    <Text className='text-[13px] text-spaces-muted'>
+    <Text
+      style={{ fontSize: DM_TIMESTAMP_SIZE, lineHeight: DM_TIMESTAMP_LINE_HEIGHT }}
+      className={cn(isUnread ? 'font-semibold text-spaces-accent' : 'text-spaces-muted')}
+    >
       {formatDmTimestamp(activityAt ?? 0, todayStart)}
     </Text>
   );
@@ -127,7 +160,7 @@ function Starred(): ReactElement | null {
   const row$ = useRowNode();
   const isStarred = useValue(() => row$.isStarred.get());
   if (isStarred !== true) return null;
-  return <StarIcon width={16} height={16} />;
+  return <StarIcon width={DM_STAR_SIZE} height={DM_STAR_SIZE} />;
 }
 
 function UnreadBadge(): ReactElement | null {
@@ -135,8 +168,20 @@ function UnreadBadge(): ReactElement | null {
   const count = useValue(() => row$.unreadCount.get());
   if (!count) return null;
   return (
-    <View className='min-w-[22px] h-[22px] px-1.5 rounded-full bg-spaces-accent items-center justify-center'>
-      <Text className='text-[12px] font-semibold text-spaces-accent-foreground'>{count}</Text>
+    <View
+      className='rounded-full bg-spaces-accent items-center justify-center'
+      style={{
+        minWidth: DM_BADGE_SIZE,
+        height: DM_BADGE_SIZE,
+        paddingHorizontal: DM_BADGE_PADDING_X,
+      }}
+    >
+      <Text
+        style={{ fontSize: DM_BADGE_TEXT_SIZE }}
+        className='font-semibold text-spaces-accent-foreground'
+      >
+        {count}
+      </Text>
     </View>
   );
 }
@@ -176,11 +221,21 @@ function DmRowComponent({ id, children, onSelect }: DmRowProps): ReactElement {
     });
   }, [id, onSelect, row$, router]);
 
+  /*
+   * `ContextMenu.Trigger` replaces the row's own `Pressable` rather than
+   * wrapping it — two nested pressables would compete for the same gesture.
+   *
+   * Closed, the `Root` is a `useState` and a context object. The card, its
+   * backdrop and the actions all mount on the long press.
+   */
   return (
     <DmRowContext.Provider value={row$}>
-      <Pressable onPress={handlePress} style={{ height: DM_ROW_HEIGHT }}>
-        {children}
-      </Pressable>
+      <ContextMenu.Root>
+        <ContextMenu.Trigger onPress={handlePress} style={{ height: DM_ROW_HEIGHT }}>
+          {children}
+        </ContextMenu.Trigger>
+        <DmRowMenu id={id} />
+      </ContextMenu.Root>
     </DmRowContext.Provider>
   );
 }

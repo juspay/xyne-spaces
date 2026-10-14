@@ -37,16 +37,13 @@ type ActionRowProps = {
 };
 
 /**
- * One row's entrance, straight from grok's `AnimatedRow`.
+ * One row's entrance.
  *
  * Two axes. The vertical one is the stagger: a row's closed position is
  * `containerHeight - index * (containerHeight / rows)`, so the top row travels
  * the full height and the bottom row barely moves, and the stack folds down
  * into the button instead of sliding as a block. The horizontal one is a
  * 20pt nudge that keeps the entrance from looking purely vertical.
- *
- * Mirrored for a right-aligned menu: the slide is `+20` and the transform
- * origin is the right edge, so the pills grow out of the button's side.
  */
 function ActionRow({
   isOpen,

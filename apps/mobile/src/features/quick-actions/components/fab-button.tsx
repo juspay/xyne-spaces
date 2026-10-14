@@ -26,10 +26,6 @@ const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
  * corner radius, same inset from the right edge, so the two share a vertical
  * centre line. Nothing lays them out together — the alignment holds because
  * both read the same constants.
- *
- * Unlike grok's trigger, this one does not scale away when the menu opens.
- * The design keeps it in place and turns the plus into a close, so it stays
- * the thing that dismisses what it opened.
  */
 export function FabButton({ isOpen }: { isOpen: SharedValue<boolean> }): ReactElement {
   const barHeight = useSpacesTabBarHeight();

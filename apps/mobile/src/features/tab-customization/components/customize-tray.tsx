@@ -46,7 +46,6 @@ export function CustomizeTrayView(): ReactElement {
   const { theme } = useUniwind();
   const isDark = theme === 'dark';
 
-  const surface = useCSSVariable('--color-card') as string;
   const accent = useCSSVariable('--color-spaces-accent') as string;
   const accentForeground = useCSSVariable('--color-spaces-accent-foreground') as string;
   const foreground = useCSSVariable('--color-foreground') as string;

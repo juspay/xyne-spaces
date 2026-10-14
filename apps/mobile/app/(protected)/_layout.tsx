@@ -1,5 +1,4 @@
 import React, { ReactElement, Suspense, useEffect, useMemo } from 'react';
-import { Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Stack, useLocalSearchParams, usePathname, useSegments } from 'expo-router';
 import { useCSSVariable } from 'uniwind';

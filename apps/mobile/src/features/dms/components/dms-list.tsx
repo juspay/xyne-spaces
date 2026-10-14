@@ -8,7 +8,17 @@ import { useUniwind } from 'uniwind';
 import { useSpacesTabBarHeight } from '@/src/features/bottom-navigation';
 import { useReportTabReady } from '@/src/observability/logging/hooks/navigation/useReportTabReady';
 
-import { DM_ROW_HEIGHT } from '../constants';
+import {
+  DM_AVATAR_GAP,
+  DM_AVATAR_SIZE,
+  DM_BADGE_GAP,
+  DM_META_TOP,
+  DM_PREVIEW_GAP,
+  DM_ROW_HEIGHT,
+  DM_ROW_PADDING_LEFT,
+  DM_ROW_PADDING_RIGHT,
+  DM_TEXT_TOP,
+} from '../constants';
 import { useDmRows } from '../hooks/use-dm-rows';
 import { dmFilter$ } from '../state/filter-store';
 import { dmRowOrder$ } from '../state/rows-store';
@@ -64,17 +74,30 @@ e
   const renderItem = useCallback(
     ({ item }: { item: string }) => (
       <DmRow id={item} onSelect={onChannelSelect}>
-        <View className='flex-row items-center h-full px-4'>
-          <DmRow.Avatar />
-          <View className='flex-1 min-w-0 pr-3 ml-3'>
+        <View
+          className='flex-row h-full'
+          style={{
+            paddingLeft: DM_ROW_PADDING_LEFT,
+            paddingRight: DM_ROW_PADDING_RIGHT,
+          }}
+        >
+          <View style={{ paddingTop: (DM_ROW_HEIGHT - DM_AVATAR_SIZE) / 2 }}>
+            <DmRow.Avatar />
+          </View>
+
+          <View
+            className='flex-1 min-w-0'
+            style={{ marginLeft: DM_AVATAR_GAP, paddingTop: DM_TEXT_TOP }}
+          >
             <DmRow.Title />
-            <View className='mt-0.5'>
+            <View style={{ marginTop: DM_PREVIEW_GAP }}>
               <DmRow.Preview />
             </View>
           </View>
-          <View className='self-start items-end gap-1.5 mt-[2.5px]'>
+
+          <View className='items-end' style={{ paddingLeft: 8, paddingTop: DM_META_TOP }}>
             <DmRow.Timestamp />
-            <View className='flex-row items-center gap-1'>
+            <View className='flex-row items-center gap-1' style={{ marginTop: DM_BADGE_GAP }}>
               <DmRow.Starred />
               <DmRow.UnreadBadge />
             </View>
