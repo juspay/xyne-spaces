@@ -501,6 +501,10 @@ const LinearStageCard = ({
 };
 
 // ─── Main component ───────────────────────────────────────────────────────────
+// When verifySyncedTransitions re-reads a just-synced board. The first read is immediate, as
+// the old post-sync refetch was; the rest give replication time to catch up (≈ 15s total).
+const VERIFY_SYNC_RETRY_DELAYS_MS = [0, 1500, 4000, 10000];
+
 /** One transition exactly as sent to (and persisted by) nonLinear.syncTransitions. */
 type SyncedTransition = {
   id: string;
@@ -973,38 +977,65 @@ const BoardStageConfigScreen = ({
     }
   }, [applyLoadedTransitions, boardId, zero]);
 
-  // Background check that the server agrees with a confirmed sync. It never changes the
-  // screen: a mismatch is logged and flagged so it can be investigated.
+  // Background check that the server agrees with a confirmed sync. It never changes the screen.
+  // A read issued right after the server confirms can still return the pre-sync rows (the
+  // change has not yet replicated to the cache Zero reads from), so the check retries and only
+  // logs a mismatch that persists — it is a diagnostic, not something to show the user.
   const verifySyncedTransitions = useCallback(
     async (synced: SyncedTransition[]): Promise<void> => {
       if (!boardId) return;
+      const toKey = (t: {
+        id: string;
+        fromStageId: string | null;
+        toStageId: string;
+        formId?: string | null;
+        requiresApproval?: boolean | null;
+      }): string =>
+        [t.id, t.fromStageId ?? '', t.toStageId, t.formId ?? '', t.requiresApproval ? 1 : 0].join(
+          '|',
+        );
+      const expected = new Set(synced.map(toKey));
+      let missing: string[] = [];
+      let unexpected: string[] = [];
+      let actualCount = 0;
+      let firstRead: { got: number; missing: number; unexpected: number } | null = null;
+      const startedAt = Date.now();
+
       try {
-        const persisted = await zero.run(queries.getStageTransitionsByBoardId({ boardId }), {
-          type: 'complete',
-        });
-        const toKey = (t: {
-          id: string;
-          fromStageId: string | null;
-          toStageId: string;
-          formId?: string | null;
-          requiresApproval?: boolean | null;
-        }): string =>
-          [t.id, t.fromStageId ?? '', t.toStageId, t.formId ?? '', t.requiresApproval ? 1 : 0].join(
-            '|',
-          );
-        const expected = new Set(synced.map(toKey));
-        const actual = new Set(persisted.map(toKey));
-        const missing = [...expected].filter(key => !actual.has(key));
-        const unexpected = [...actual].filter(key => !expected.has(key));
-        if (missing.length === 0 && unexpected.length === 0) return;
+        for (const [attempt, delayMs] of VERIFY_SYNC_RETRY_DELAYS_MS.entries()) {
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+          const persisted = await zero.run(queries.getStageTransitionsByBoardId({ boardId }), {
+            type: 'complete',
+          });
+          const actual = new Set(persisted.map(toKey));
+          missing = [...expected].filter(key => !actual.has(key));
+          unexpected = [...actual].filter(key => !expected.has(key));
+          actualCount = actual.size;
+          if (missing.length === 0 && unexpected.length === 0) {
+            // The read right after the sync was stale and later caught up: record what it
+            // returned and how long it lagged — this is the refetch that used to blank the map.
+            if (firstRead) {
+              logger.info(LogEvent.FRONTEND_ERROR, {
+                type: 'stage_transition_sync_read_lagged',
+                message: `Board ${boardId}: read after sync matched only on attempt ${attempt + 1} (~${Date.now() - startedAt}ms)`,
+                boardId,
+                expected: expected.size,
+                firstRead,
+              });
+            }
+            return;
+          }
+          firstRead ??= {
+            got: actual.size,
+            missing: missing.length,
+            unexpected: unexpected.length,
+          };
+        }
 
         logger.warn(LogEvent.FRONTEND_ERROR, {
           type: 'stage_transition_sync_verification_mismatch',
-          message: `Board ${boardId}: server transitions differ from the confirmed sync (expected ${expected.size}, got ${actual.size})`,
+          message: `Board ${boardId}: server transitions still differ from the confirmed sync after retries (expected ${expected.size}, got ${actualCount})`,
           error: { boardId, missing, unexpected },
-        });
-        toast.warning('Saved transitions may differ from what is shown', {
-          description: 'Close and reopen this page to see the transitions as saved.',
         });
       } catch (err) {
         logger.error(LogEvent.FRONTEND_ERROR, {
