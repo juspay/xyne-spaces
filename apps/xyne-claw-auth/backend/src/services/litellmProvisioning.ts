@@ -1,11 +1,12 @@
-import { Prisma } from "@prisma/client";
 import { CONFIG } from "../config.js";
 import { encrypt } from "../crypto.js";
-import { prisma } from "../db.js";
+import { prisma, type AppPrismaClient, type AppTransactionClient } from "../db.js";
+import { HttpError } from "../lib/http.js";
+import { resolveClawOrgIdForSpacesOrg } from "../routes/spaces-sync.js";
 
 const LITELLM_PROVIDER = "litellm";
 
-type DbClient = typeof prisma | Prisma.TransactionClient;
+type DbClient = AppPrismaClient | AppTransactionClient;
 
 export class LiteLLMProvisioningError extends Error {
   constructor(
@@ -24,13 +25,36 @@ function alias(value: string, fallback: string): string {
   return (normalized || fallback).slice(0, 180);
 }
 
+/** Spaces org id → Claw org id; NOT_FOUND when unmapped, CONFLICT when ambiguous. */
+async function clawOrgIdForSpacesOrg(endpoint: string, spacesOrgId: string, client: DbClient): Promise<string> {
+  let orgId: string | null;
+  try {
+    orgId = await resolveClawOrgIdForSpacesOrg(spacesOrgId, client);
+  } catch (err) {
+    if (err instanceof HttpError && err.status === 409) {
+      throw new LiteLLMProvisioningError(endpoint, err.message, undefined, "CONFLICT");
+    }
+    throw err;
+  }
+  if (!orgId) {
+    throw new LiteLLMProvisioningError(
+      endpoint,
+      `No Claw org mapped to Spaces org ${spacesOrgId}`,
+      undefined,
+      "NOT_FOUND",
+    );
+  }
+  return orgId;
+}
+
 export async function storeTeamMappingForOrg(
-  orgId: string,
+  spacesOrgId: string,
   teamId: string,
   teamAlias?: string,
   status?: string,
   client: DbClient = prisma,
 ): Promise<{ teamId: string; created: boolean }> {
+  const orgId = await clawOrgIdForSpacesOrg("/team", spacesOrgId, client);
   const existing = await client.orgProviderIntegration.findUnique({
     where: { orgId_provider: { orgId, provider: LITELLM_PROVIDER } },
     select: { externalId: true },
@@ -168,8 +192,7 @@ export async function storeUserCredentialsForUser(
 
 export async function storeOrgCredentialsForOrg(
   input: {
-    orgId: string;
-    spacesOrgId?: string | undefined;
+    spacesOrgId: string;
     teamId?: string | undefined;
     key: string;
     tokenId?: string | undefined;
@@ -179,25 +202,14 @@ export async function storeOrgCredentialsForOrg(
   },
   client: DbClient = prisma,
 ): Promise<{ credentialCreated: boolean; teamId?: string }> {
-  const org = await client.organization.findUnique({
-    where: { id: input.orgId },
-    select: { id: true },
-  });
-  if (!org) {
-    throw new LiteLLMProvisioningError(
-      "/org-key",
-      `Claw org ${input.orgId} not found`,
-      undefined,
-      "NOT_FOUND",
-    );
-  }
+  const orgId = await clawOrgIdForSpacesOrg("/org-key", input.spacesOrgId, client);
 
   const encrypted = encrypt(input.key, CONFIG.encryptionKey);
-  const keyAlias = input.keyAlias ?? alias(`xyne-spaces org ${input.orgId}`, `xyne-spaces org ${input.orgId}`);
+  const keyAlias = input.keyAlias ?? alias(`xyne-spaces org ${orgId}`, `xyne-spaces org ${orgId}`);
   const credentialMetadata = {
     source: "xyne-spaces",
-    clawOrgId: input.orgId,
-    spacesOrgId: input.spacesOrgId ?? null,
+    clawOrgId: orgId,
+    spacesOrgId: input.spacesOrgId,
     changedBy: CONFIG.litellmChangedBy,
     litellmTeamId: input.teamId ?? null,
     keyAlias,
@@ -208,14 +220,14 @@ export async function storeOrgCredentialsForOrg(
   };
 
   const before = await client.orgProviderCredential.findUnique({
-    where: { orgId_provider: { orgId: input.orgId, provider: LITELLM_PROVIDER } },
+    where: { orgId_provider: { orgId, provider: LITELLM_PROVIDER } },
     select: { orgId: true },
   });
 
   await client.orgProviderCredential.upsert({
-    where: { orgId_provider: { orgId: input.orgId, provider: LITELLM_PROVIDER } },
+    where: { orgId_provider: { orgId, provider: LITELLM_PROVIDER } },
     create: {
-      orgId: input.orgId,
+      orgId,
       provider: LITELLM_PROVIDER,
       encryptedKey: encrypted.ciphertext,
       iv: encrypted.iv,

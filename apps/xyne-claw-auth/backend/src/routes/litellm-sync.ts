@@ -12,6 +12,7 @@ const log = createLogger("litellm-sync");
 export const litellmSyncRouter = Router();
 
 litellmSyncRouter.post("/team", async (req: Request, res: Response) => {
+  // `orgId` is the Spaces org id; resolved to the Claw org in the service.
   const { orgId, teamId, teamAlias, status } = req.body as {
     orgId?: string;
     teamId?: string;
@@ -108,6 +109,7 @@ litellmSyncRouter.post("/org-key", async (req: Request, res: Response) => {
     expires?: string;
   };
 
+  // `orgId` is the Spaces org id; resolved to the Claw org in the service.
   if (!body.orgId || !body.key) {
     res.status(400).json({ error: "orgId and key are required" });
     return;
@@ -115,8 +117,7 @@ litellmSyncRouter.post("/org-key", async (req: Request, res: Response) => {
 
   try {
     const result = await storeOrgCredentialsForOrg({
-      orgId: body.orgId,
-      spacesOrgId: body.spacesOrgId,
+      spacesOrgId: body.orgId,
       teamId: body.teamId,
       key: body.key,
       tokenId: body.tokenId,
@@ -127,6 +128,10 @@ litellmSyncRouter.post("/org-key", async (req: Request, res: Response) => {
     res.status(200).json(result);
   } catch (err) {
     if (err instanceof LiteLLMProvisioningError) {
+      if (err.code === "CONFLICT") {
+        res.status(409).json({ error: err.message });
+        return;
+      }
       if (err.code === "NOT_FOUND") {
         res.status(404).json({ error: err.message });
         return;

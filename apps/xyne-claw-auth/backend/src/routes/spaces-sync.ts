@@ -95,6 +95,33 @@ async function ensureSpacesSurface(client: DbClient): Promise<void> {
   });
 }
 
+/**
+ * Read-only Spaces org → Claw org lookup through the org-level
+ * connected_surfaces row (surfaceTenantId ""). Null when the Spaces org is not
+ * mapped yet; throws 409 when it maps to more than one Claw org.
+ */
+export async function resolveClawOrgIdForSpacesOrg(
+  spacesOrgId: string,
+  client: DbClient = prisma,
+): Promise<string | null> {
+  const rows = await client.connectedSurface.findMany({
+    where: {
+      surfaceId: "spaces",
+      surfaceTenantId: "",
+      surfaceOrgId: spacesOrgId,
+    },
+    select: { orgId: true },
+    orderBy: { createdAt: "asc" },
+    take: 2,
+  });
+
+  const orgIds = [...new Set(rows.map((row) => row.orgId))];
+  if (orgIds.length > 1) {
+    throw conflict(`Spaces org ${spacesOrgId} maps to multiple Claw orgs: ${orgIds.join(",")}`);
+  }
+  return orgIds[0] ?? null;
+}
+
 async function ensureOrgMapping(
   client: DbClient,
   input: {
@@ -108,26 +135,11 @@ async function ensureOrgMapping(
 ): Promise<{ orgId: string; created: boolean }> {
   await ensureSpacesSurface(client);
 
-  const rows = await client.connectedSurface.findMany({
-    where: {
-      surfaceId: "spaces",
-      surfaceTenantId: "",
-      surfaceOrgId: input.spacesOrgId,
-    },
-    select: { id: true, orgId: true },
-    orderBy: { createdAt: "asc" },
-    take: 2,
-  });
-
-  const orgIds = [...new Set(rows.map((row) => row.orgId))];
-  if (orgIds.length > 1) {
-    throw conflict(`Spaces org ${input.spacesOrgId} maps to multiple Claw orgs: ${orgIds.join(",")}`);
-  }
-
-  if (rows[0]) {
+  const existingOrgId = await resolveClawOrgIdForSpacesOrg(input.spacesOrgId, client);
+  if (existingOrgId) {
     if (input.name || input.description || input.status) {
       await client.organization.update({
-        where: { id: rows[0].orgId },
+        where: { id: existingOrgId },
         data: {
           ...(input.name ? { name: input.name } : {}),
           ...(input.description !== undefined ? { description: input.description } : {}),
@@ -135,7 +147,7 @@ async function ensureOrgMapping(
         },
       });
     }
-    return { orgId: rows[0].orgId, created: false };
+    return { orgId: existingOrgId, created: false };
   }
 
   if (!input.name) {
