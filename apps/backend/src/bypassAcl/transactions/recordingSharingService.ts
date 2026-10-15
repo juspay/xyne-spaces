@@ -619,7 +619,16 @@ export async function removeLinkedTicket(self: RecordingSharingService, tx: Pris
           conversationId: conversation.conversationId,
           userId: message.senderId,
           participationType: ConversationParticipation.AUTHOR,
+          ticketUpdatesUnsubscribedAt: null,
         },
+      });
+      await tx.conversationParticipant.updateMany({
+        where: {
+          conversationId: conversation.conversationId,
+          userId: message.senderId,
+          participationType: ConversationParticipation.AUTHOR,
+        },
+        data: { isSubscribed: false, participationType: null },
       });
     }
 

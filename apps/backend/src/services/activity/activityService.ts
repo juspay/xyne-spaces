@@ -63,13 +63,13 @@ export class ActivityService {
       }
       return (await excludeTicketOptOuts(activity.ticketId, [activity.userId])).length === 0;
     } catch (error) {
-      logger.error('[ActivityService] Ticket opt-out lookup failed, skipping activity', {
+      logger.error('[ActivityService] Ticket opt-out lookup failed, creating activity anyway', {
         ticketId: activity.ticketId,
         userId: activity.userId,
         actorAction: activity.actorAction,
         error,
       });
-      return true;
+      return false;
     }
   }
 
