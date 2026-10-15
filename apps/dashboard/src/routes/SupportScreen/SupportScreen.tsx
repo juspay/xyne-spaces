@@ -5103,15 +5103,12 @@ const TicketMetaRow = ({
   return (
     <div className='flex items-center flex-wrap gap-y-1 min-h-[24px]'>
       <div className='flex items-center gap-1.5 pr-3 mr-1.5 border-r border-border'>
-        <span className='text-[10px] font-semibold uppercase tracking-wider text-muted-foreground leading-none'>
-          Priority
-        </span>
         <PriorityPicker ticketId={ticket.id} priority={ticket.priority} />
       </div>
-      <div className='flex items-center gap-1.5 pr-3 mr-1.5 border-r border-border'>
-        <span className='text-[10px] font-semibold uppercase tracking-wider text-muted-foreground leading-none'>
-          Assignee
-        </span>
+      <div
+        className='flex items-center gap-1.5 pr-3 mr-1.5 border-r border-border'
+        title='Assignee'
+      >
         <UserSelector
           selectedUserId={assignee.userId}
           assignedGroupId={assignee.groupId}
@@ -5123,9 +5120,6 @@ const TicketMetaRow = ({
       </div>
       {ticket.aiCategory && (
         <div className='flex items-center gap-1.5 pr-3 mr-1.5 border-r border-border'>
-          <span className='text-[10px] font-semibold uppercase tracking-wider text-muted-foreground leading-none'>
-            Type
-          </span>
           <span
             className='inline-flex items-center justify-center h-[18px] px-2 rounded-sm bg-blue-100 dark:bg-blue-950/50 text-[10px] font-medium text-blue-700 dark:text-blue-300 whitespace-nowrap'
             title={`AI Category: ${ticket.aiCategory}`}
@@ -6028,9 +6022,12 @@ export const SupportTicketDetail = ({
                     <ArrowLeft size={18} />
                   </button>
                 )}
-                <span className='bg-border py-[3px] px-3 flex items-center justify-center text-xs text-foreground rounded-md font-mono shrink-0 whitespace-nowrap'>
-                  {ticketIdParam}
-                </span>
+                {/* The open thread panel already carries the ticket ID. */}
+                {!isRightPanelOpen && (
+                  <span className='bg-border py-[3px] px-3 flex items-center justify-center text-xs text-foreground rounded-md font-mono shrink-0 whitespace-nowrap'>
+                    {ticketIdParam}
+                  </span>
+                )}
                 {channel?.type === ChannelType.EMAIL && mailboxTicketId && channelId && (
                   <MailboxActions
                     ticketId={mailboxTicketId}
@@ -6112,7 +6109,10 @@ export const SupportTicketDetail = ({
                   {ticket && channel?.type === ChannelType.APP && <CallButton />}
                   {/* Status pill */}
                   {ticket && (
-                    <div className='border border-border rounded-md overflow-hidden shrink-0'>
+                    <div
+                      className='border border-border rounded-md overflow-hidden shrink-0'
+                      title='Status'
+                    >
                       <StagePicker
                         ticketId={ticket.id}
                         stageName={ticket.stageName}
@@ -6121,6 +6121,27 @@ export const SupportTicketDetail = ({
                         boardId={boardId}
                       />
                     </div>
+                  )}
+
+                  {!isRightPanelOpen && (
+                    <Tooltip content='Open thread' side='bottom'>
+                      <button
+                        type='button'
+                        onClick={() => setIsRightPanelOpen(true)}
+                        className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0'
+                        aria-label='Open thread'
+                        data-track-category='Support'
+                        data-track-name='OpenThreadPanel'
+                        data-track-metadata={JSON.stringify(
+                          deskTicketTrackingMetadata(ticket, {
+                            deskType: channelPreference?.deskType ?? null,
+                            emailCount,
+                          }),
+                        )}
+                      >
+                        <PanelRight size={18} />
+                      </button>
+                    </Tooltip>
                   )}
 
                   {(emails.length > 0 || !!conversationId) && (
@@ -6199,22 +6220,6 @@ export const SupportTicketDetail = ({
                         </>
                       )}
                       <DropdownMenuSeparator />
-                      {!isRightPanelOpen && (
-                        <DropdownMenuItem
-                          onSelect={() => setIsRightPanelOpen(true)}
-                          data-track-category='Support'
-                          data-track-name='OpenThreadPanel'
-                          data-track-metadata={JSON.stringify(
-                            deskTicketTrackingMetadata(ticket, {
-                              deskType: channelPreference?.deskType ?? null,
-                              emailCount,
-                            }),
-                          )}
-                        >
-                          <PanelRight size={14} className='shrink-0' />
-                          Open Thread
-                        </DropdownMenuItem>
-                      )}
                       {emailCollapseState.canToggleAll && (
                         <DropdownMenuItem
                           onSelect={emailCollapseState.toggleAll}
@@ -6432,9 +6437,6 @@ export const SupportTicketDetail = ({
                           : `Initiated by ${initiator.name}`
                       }
                     >
-                      <span className='text-[10px] font-semibold uppercase tracking-wider text-muted-foreground leading-none shrink-0'>
-                        Requester
-                      </span>
                       <div className='inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-muted text-xs text-foreground whitespace-nowrap h-[24px]'>
                         <Mail size={12} className='shrink-0 text-muted-foreground' />
                         <span className='truncate max-w-[160px]'>{initiator.name}</span>
@@ -6443,7 +6445,7 @@ export const SupportTicketDetail = ({
                   )}
 
                   {/* Mailbox chip + label chips.
-                      Only render the VIEW label row when there is at least one visible
+                      Only render the row when there is at least one visible
                       chip: MailboxActions returns null for ARCHIVED state, and
                       ConversationLabels chips returns null when there are no labels. */}
                   {channelId &&
@@ -6458,25 +6460,27 @@ export const SupportTicketDetail = ({
                       if (!hasMailboxChip && !hasLabelChips) return null;
                       return (
                         <div className='flex items-center gap-1.5 flex-wrap min-h-[24px]'>
-                          <span className='text-[10px] font-semibold uppercase tracking-wider text-muted-foreground leading-none shrink-0'>
-                            View
-                          </span>
                           {hasMailboxChip && mailboxTicketId && (
-                            <MailboxActions
-                              ticketId={mailboxTicketId}
-                              channelId={channelId}
-                              slot='chip'
-                              mailboxOverlay={mailboxOverlay}
-                            />
+                            <span className='inline-flex items-center gap-1.5'>
+                              <span className='text-xs text-muted-foreground'>Mailbox:</span>
+                              <MailboxActions
+                                ticketId={mailboxTicketId}
+                                channelId={channelId}
+                                slot='chip'
+                                mailboxOverlay={mailboxOverlay}
+                              />
+                            </span>
                           )}
                           {hasLabelChips && conversationId && (
-                            <ConversationLabels
-                              conversationId={conversationId}
-                              channelId={channelId}
-                              isMember={isMember}
-                              slot='chips'
-                              appliedMappings={conversationLabelMappings ?? []}
-                            />
+                            <span title='Label' className='inline-flex min-w-0'>
+                              <ConversationLabels
+                                conversationId={conversationId}
+                                channelId={channelId}
+                                isMember={isMember}
+                                slot='chips'
+                                appliedMappings={conversationLabelMappings ?? []}
+                              />
+                            </span>
                           )}
                         </div>
                       );
