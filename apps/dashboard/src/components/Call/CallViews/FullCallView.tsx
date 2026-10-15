@@ -20,7 +20,6 @@ import { ScreenShareView } from '../ScreenShareView/ScreenShareView';
 import { ControlRequestDialog } from '../CallModals/ControlRequestDialog';
 import { ParticipantsSidebar } from '../ParticipantsSidebar/ParticipantsSidebar';
 import { ParticipantsPill } from '../ParticipantsPill/ParticipantsPill';
-import { CallNotesPanel } from '../CallNotesPanel/CallNotesPanel';
 import { CallTranscriptPanel } from '../CallTranscriptPanel';
 import { getRingingInvitees, useIsDmCall } from '../ringStatus.utils';
 import { ConnectionStatusIndicators } from '../ConnectionStatusIndicators/ConnectionStatusIndicators';

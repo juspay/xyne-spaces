@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { Captions, X } from 'lucide-react';
 import { useCallMarkedMoments, useCallTranscripts } from '../../../stores/callTranscriptStore';
 import { LiveTranscriptList } from '../../Notetaker/LiveTranscriptList';
@@ -10,13 +9,7 @@ interface CallTranscriptPanelProps {
   onClose: () => void;
 }
 
-/**
- * Live transcript side panel for a normal call. Built as a tab-ready shell: today it renders
- * only the transcript, but `PanelTab` is the seam for a future in-call "Ask AI" tab that will
- * consume the same `callTranscriptStore` via `buildCallTranscriptContext`.
- */
-type PanelTab = 'transcript';
-
+/** Live transcript side panel for a normal call. */
 export function CallTranscriptPanel({
   callId,
   isTranscriptionEnabled,
@@ -24,30 +17,20 @@ export function CallTranscriptPanel({
 }: CallTranscriptPanelProps): React.ReactElement {
   const transcripts = useCallTranscripts();
   const markedMoments = useCallMarkedMoments();
-  // Only one tab for now; the setter is intentionally omitted until Ask AI lands.
-  const [activeTab] = useState<PanelTab>('transcript');
 
   // Capture has stopped, but lines already captured stay on screen and scrollable.
   const transcriptionOffNotice =
     'Transcriptions are off — no new lines will be added until the host turns them back on.';
 
-  const renderBody = (): React.ReactNode => {
-    if (activeTab !== 'transcript') return null;
-
-    // Nothing captured yet — a single centered state.
-    if (transcripts.length === 0) {
-      return (
-        <div className='flex h-full flex-col items-center justify-center gap-2 px-6 text-center'>
-          <p className='text-sm text-muted-foreground'>
-            {isTranscriptionEnabled ? 'Waiting for speech…' : transcriptionOffNotice}
-          </p>
-        </div>
-      );
-    }
-
-    // Keep captured lines visible and scrollable even after transcription is turned off;
-    // a footer notes that no further lines will arrive.
-    return (
+  // Empty: a single centered state. Otherwise the scrollable list, with a footer once capture stops.
+  const body =
+    transcripts.length === 0 ? (
+      <div className='flex h-full flex-col items-center justify-center gap-2 px-6 text-center'>
+        <p className='text-sm text-muted-foreground'>
+          {isTranscriptionEnabled ? 'Waiting for speech…' : transcriptionOffNotice}
+        </p>
+      </div>
+    ) : (
       <div className='flex h-full min-h-0 flex-col'>
         <LiveTranscriptList
           variant='panel'
@@ -64,7 +47,6 @@ export function CallTranscriptPanel({
         )}
       </div>
     );
-  };
 
   return (
     <div className='flex flex-col h-full bg-background text-foreground'>
@@ -86,7 +68,7 @@ export function CallTranscriptPanel({
         </button>
       </div>
 
-      <div className='flex-1 min-h-0 overflow-hidden'>{renderBody()}</div>
+      <div className='flex-1 min-h-0 overflow-hidden'>{body}</div>
     </div>
   );
 }

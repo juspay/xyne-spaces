@@ -7,9 +7,8 @@ import type { MarkedMoment, TranscriptEntry } from './recordingStore';
  * The transcription agent publishes to the `transcriptions` LiveKit data topic for every
  * call, but `recordingStore` only subscribes while a recording is active. This store is
  * fed by `useCallTranscriptSync` (mounted once in the in-call view) so a normal call can
- * render the live transcript without a recording running — and so the same transcript can
- * later be handed to the in-call Ask AI (see `buildCallTranscriptContext`). It reuses
- * `recordingStore`'s `TranscriptEntry` type so entries stay assignable to `LiveTranscriptList`.
+ * render the live transcript without a recording running. It reuses `recordingStore`'s
+ * `TranscriptEntry` type so entries stay assignable to `LiveTranscriptList`.
  */
 
 /** Fields the sync hook parses off the wire; the store owns the monotonic `id`. */
