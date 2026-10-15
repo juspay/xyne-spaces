@@ -35,7 +35,9 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
   node,
   props,
 }) => {
-  const { state, updateFieldValue, executeAction, conversationId } = useFlow();
+  const { state, updateFieldValue, executeAction, conversationId, data } = useFlow();
+  const threadConversationId =
+    data['surface'] === 'xyne-ai' ? undefined : conversationId || undefined;
   const [pending, setPending] = useState<'approve' | 'reject' | null>(null);
   const [expanded, setExpanded] = useState(false);
   // A copy of this card lives inside its own AgentPreview thread panel; hide the
@@ -259,7 +261,7 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
         editor={editor}
         note={props.note}
         statePill={statePill}
-        conversationId={conversationId ?? undefined}
+        conversationId={threadConversationId}
         footer={decided ? decidedFooter : actionControls}
       />
     </CardShell>

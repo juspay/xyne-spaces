@@ -815,6 +815,18 @@ export class CallController {
             logger.info(`[${callExternalId}] reason=room_not_active`);
             return;
           }
+          // The call record is the source of truth for whether the call is over. Once
+          // every human leaves, the webhook marks it ENDED and the agent leaves too, but
+          // the room stays open for emptyTimeout. Someone who joins late lands in that
+          // room alone, which used to look like a missing agent.
+          const callRecord = await db.call.findUnique({
+            where: { externalId: callExternalId! },
+            select: { status: true },
+          });
+          if (callRecord && (callRecord.status === CallStatus.ENDED || callRecord.status === CallStatus.CANCELLED)) {
+            logger.info(`[${callExternalId}] agent_join_check_skipped | reason=call_${callRecord.status.toLowerCase()}`);
+            return;
+          }
           const participants = await livekitService.listParticipants(callExternalId!);
           // A room outlives its last participant (emptyTimeout), so a call that ended
           // inside the 30s shows up here as an active room with nobody in it; that is

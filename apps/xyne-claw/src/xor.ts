@@ -23,7 +23,14 @@ export interface XorRequest {
   state: string;
   questions: Record<string, XorQuestion>;
   purpose: string;
+  images?: string[] | undefined;
   signal?: AbortSignal | undefined;
+}
+
+const IMAGE_DATA_URL = /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$/;
+
+export function isImageDataUrl(value: string): boolean {
+  return IMAGE_DATA_URL.test(value);
 }
 
 export type XorAsk = (req: XorRequest) => Promise<Record<string, XorAnswer> | null>;
@@ -94,13 +101,17 @@ async function post(
   state: string,
   questions: Record<string, XorQuestion>,
   signal: AbortSignal,
+  images: string[],
 ): Promise<Record<string, XorAnswer>> {
-  if (cfg.backend === "llm") return llmJudgePost(state, questions, signal);
+  if (cfg.backend === "llm") {
+    if (images.length > 0) throw new Error("llm backend cannot read images");
+    return llmJudgePost(state, questions, signal);
+  }
   const res = await fetch(cfg.url, {
     method: "POST",
     signal,
     headers: { Authorization: `Bearer ${cfg.key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ state, model: cfg.model, questions }),
+    body: JSON.stringify({ state, model: cfg.model, questions, ...(images.length > 0 ? { images } : {}) }),
   });
   if (!res.ok) throw new Error(`xor ${res.status}`);
   const body = (await res.json()) as { answers?: Record<string, XorAnswer> };
@@ -109,8 +120,13 @@ async function post(
 
 export async function xor(req: XorRequest): Promise<Record<string, XorAnswer> | null> {
   const { state, questions, purpose, signal } = req;
+  const images = req.images ?? [];
   const cfg = xorConfig();
   if (!cfg.url || !cfg.key || !cfg.model || !state.trim() || Object.keys(questions).length === 0) return null;
+  if (images.some((img) => !isImageDataUrl(img))) {
+    log.warn(`[xor] ${purpose} refused: images must be base64 image data URLs`);
+    return null;
+  }
   const count = Object.keys(questions).length;
   const started = Date.now();
   const controller = new AbortController();
@@ -124,16 +140,16 @@ export async function xor(req: XorRequest): Promise<Record<string, XorAnswer> | 
       ms,
       questions: count,
       ok: answers !== null,
-      state,
+      state: images.length > 0 ? `${state}\n[${images.length} image(s) attached]` : state,
       questionSpec: questions,
       answers,
       ...(error ? { error } : {}),
       at: new Date(started).toISOString(),
     });
   try {
-    const answers = await post(cfg, state, questions, controller.signal);
+    const answers = await post(cfg, state, questions, controller.signal, images);
     const elapsed = Date.now() - started;
-    metric.observe("xor_ms", elapsed, { purpose, backend: cfg.backend, result: "ok", questions: count });
+    metric.observe("xor_ms", elapsed, { purpose, backend: cfg.backend, result: "ok", questions: count, images: images.length });
     record(elapsed, answers);
     return answers;
   } catch (err) {

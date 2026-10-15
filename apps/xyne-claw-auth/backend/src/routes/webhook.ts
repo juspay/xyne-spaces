@@ -6591,10 +6591,26 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
   // also check the in-memory Set here in case run-recovery re-delivers.
   if (sandboxPreviewUrl && sandboxId) {
     if (announcedSandboxPreviews.has(sessionId)) return;
+    // Resolve the run context BEFORE marking this run as announced. Claw emits
+    // the preview once per run; if we marked it first and the lookup missed
+    // (sandbox started before the session was registered, Redis blip), a
+    // run-recovery re-delivery would be dropped by the dedup and the preview
+    // lost with no trace (XYNE-66341).
+    const ctx = await resolveSessionContext(sessionId, conversationId, agentSlug).catch((err) => {
+      clog.warn(`[webhook/progress] sandbox preview: session context lookup threw for ${sessionId}: ${errMsg(err)}`);
+      return null;
+    });
+    if (!ctx) {
+      clog.warn(
+        `[webhook/progress] sandbox preview dropped: no session context (sessionId=${sessionId} sandboxId=${sandboxId} conversationId=${conversationId ?? "-"} agentSlug=${agentSlug ?? "-"}); a re-delivery can still announce it`,
+      );
+      return;
+    }
+    // Re-check after the await: a concurrent re-delivery may have won the race.
+    if (announcedSandboxPreviews.has(sessionId)) return;
     rememberAnnouncedPreview(sessionId);
-    const ctx = await resolveSessionContext(sessionId, conversationId, agentSlug).catch(() => null);
-    if (!ctx) return;
-    await ingestSandboxPreviewSignals(
+    const log = createLogger("webhook/progress", ctx.traceId ?? sessionId.slice(0, 8));
+    const ingest = await ingestSandboxPreviewSignals(
       { conversationId: ctx.conversationId, userId: ctx.senderId, orgId: ctx.agentOrgId ?? null, runId: sessionId },
       {
         sandboxId,
@@ -6602,13 +6618,38 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
         ...(sandboxCodePreviewUrl ? { sandboxCodePreviewUrl } : {}),
       },
     );
+    if (!ingest.recorded) {
+      // Without the ownership row the sandbox access check returns 403
+      // unknown-sandbox, so posting the link would hand the user a dead URL.
+      log.error("Sandbox preview ownership row not recorded; not posting preview link", {
+        sessionId,
+        sandboxId,
+        conversationId: ctx.conversationId,
+        reason: ingest.reason ?? "unknown",
+      });
+    }
     if (ctx.responseMode !== "conversation") return;
-    const log = createLogger("webhook/progress", ctx.traceId ?? sessionId.slice(0, 8));
     // Per-agent opt-out (agent.config.hideLivePreview). Only the thread message is
     // suppressed — the ownership row above is still written, because the sandbox
     // router's access check (and the Workspace pane) depend on it.
     if (await isLivePreviewMessageHidden(ctx, log)) {
       log.info(`Sandbox preview message suppressed by agent config (sandboxId=${sandboxId} agentId=${ctx.agentId ?? "-"} agentSlug=${ctx.agentSlug ?? "-"})`);
+      return;
+    }
+    if (!ingest.recorded) {
+      try {
+        await postAgentMessage(
+          { spacesAppUserId: ctx.spacesAppUserId, appToken: ctx.appToken },
+          {
+            channelId: ctx.channelId,
+            conversationId: ctx.conversationId,
+            markdownText: systemNote("Live preview couldn't be attached to this conversation, so it isn't available for this run."),
+            metadata: { contentFormat: "markdown" },
+          },
+        );
+      } catch (err) {
+        log.warn("Failed to post sandbox preview failure note", { error: errMsg(err) });
+      }
       return;
     }
     try {

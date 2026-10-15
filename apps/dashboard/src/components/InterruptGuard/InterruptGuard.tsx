@@ -4,7 +4,7 @@ import { ConnectionState, Room, RoomEvent } from 'livekit-client';
 import { Dialog } from '../ui/Dialog/Dialog';
 import { Button } from '../ui/Button/Button';
 import { recordingStore } from '../../stores/recordingStore';
-import { roomActor } from '../../machines/roomMachine';
+import { isCallHandedToCallWindow, roomActor } from '../../machines/roomMachine';
 import { calculateRecordingElapsedMs, formatElapsedTime } from '../../utils/recordingUtils';
 import {
   getRecordingStatus,
@@ -78,6 +78,10 @@ function isRecordingInterruptible(): boolean {
 
 function isCallInterruptible(): boolean {
   const snapshot = roomActor.getSnapshot();
+  // A call handed to the call window survives this window reloading or
+  // switching workspace (its own requests carry its workspace), so there is
+  // nothing to warn about or tear down.
+  if (isCallHandedToCallWindow(snapshot)) return false;
   return (
     snapshot.matches('initiating') ||
     snapshot.matches('joining') ||

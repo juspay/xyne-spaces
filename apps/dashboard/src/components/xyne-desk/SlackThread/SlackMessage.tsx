@@ -39,7 +39,13 @@ function extractEmail(from: string | null): string | undefined {
   return match?.[1]?.toLowerCase();
 }
 
-const SlackMessage = ({ email }: { email: SlackEmailMessage }): ReactElement => {
+const SlackMessage = ({
+  email,
+  showRecipient = false,
+}: {
+  email: SlackEmailMessage;
+  showRecipient?: boolean;
+}): ReactElement => {
   const allUsers = useUsers();
 
   const senderEmail = useMemo(() => extractEmail(email.from), [email.from]);
@@ -60,7 +66,7 @@ const SlackMessage = ({ email }: { email: SlackEmailMessage }): ReactElement => 
     : '';
   const isOutgoing = email.type === 'REPLY';
   // For incoming DMs show which account received the message (e.g. "@xyne.spaces").
-  const recipientLabel = !isOutgoing && email.to?.length ? email.to[0] : null;
+  const recipientLabel = showRecipient && !isOutgoing && email.to?.length ? email.to[0] : null;
 
   const panelAttachments: PanelAttachmentRow[] = useMemo(
     () =>
