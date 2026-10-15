@@ -589,7 +589,7 @@ export async function attachRepositoriesToChannel(tx: TransactionClient, actor: 
       })),
       skipDuplicates: true,
     });
-    queueSdlcSearchJobs(channelId, { repositories: repos.map((repo: { id: string }) => repo.id) });
+    queueSdlcSearchJobs(channelId, { attachedRepositories: repos.map((repo: { id: string }) => repo.id) });
     await ensureHubKnowledgeFolder(tx, actor, channelId);
     await ensureHubWikiFolder(tx, actor, channelId);
     for (const repo of repos) {

@@ -162,6 +162,11 @@ async function buildSdlcHubIndex(hubId: string, prisma: PrismaClient): Promise<S
     id !== hubWiki && parentOf.get(id) === wikiRoot && id.startsWith(repoWikiPrefix)
       ? id.slice(repoWikiPrefix.length)
       : null;
+  // Detaching a repository leaves its wiki folders linked under the Wiki; they stay out of the
+  // hub's search entries until it is attached again.
+  const attachedRepos = new Set(repoIds);
+  const inDetachedRepoWiki = (scopeIds: string[]): boolean =>
+    scopeIds.some(c => { const repo = repoOfWiki(c); return repo !== null && !attachedRepos.has(repo); });
 
   const names = new Map<string, string>();
   for (const t of tracks) names.set(t.id, t.name);
@@ -179,6 +184,7 @@ async function buildSdlcHubIndex(hubId: string, prisma: PrismaClient): Promise<S
     const chain = chainOf(id);
     if (!chain.length) return null;
     const scopeIds = [...chain, id];
+    if (inDetachedRepoWiki(scopeIds)) return null;
     const branch: SdlcBranch = scopeIds.includes(wikiRoot) ? 'WIKI'
       : scopeIds.includes(knowledgeRoot) ? 'KNOWLEDGE'
       : 'TRACKS';
