@@ -64,6 +64,11 @@ const findIntroText = (components: FlowComponentLike[] | undefined): string => {
 };
 
 export const isWriteApprovalFlow = (flow: FlowDefinitionLike): boolean => {
+  // The ticket proposal card (`buildTicketProposalFlow`) is also a write approval
+  // (`data.actionType = 'write'`) but carries a rich `ticket` component instead of
+  // the generic card body. Let the component renderer own it, otherwise the
+  // generic write-approval parser finds no card body and the message renders empty.
+  if (flow.components?.some(component => component.type === 'ticket')) return false;
   const actionType = flow.data?.['actionType'];
   if (actionType === 'write') return true;
 

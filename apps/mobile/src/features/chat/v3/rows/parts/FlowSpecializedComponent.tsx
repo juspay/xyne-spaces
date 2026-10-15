@@ -8,6 +8,8 @@ import { codeComponentToMarkdown } from '@/src/utils/flowCodeUtils';
 import { createMcpSuggestViewModel } from '@/src/utils/flowMcpSuggestUtils';
 import { createCallScheduleViewModel } from '@/src/utils/flowCallScheduleUtils';
 import { createPrCardViewModel } from '@/src/utils/flowPrUtils';
+import { createTicketCardViewModel } from '@/src/utils/flowTicketUtils';
+import { FlowTicketCard } from '@/src/components/chat/flow-ticket-card';
 import { createUserQuestionViewModel } from '@/src/utils/flowUserQuestionUtils';
 import { showMessageToast } from '@/src/utils/toast';
 import {
@@ -120,6 +122,18 @@ export const renderFlowSpecializedComponent = (
           containerStyle={inheritedContainerStyle}
           recyclingKey={`${model.conversationId}:${componentKey}`}
           renderMarkdown={(markdown, childKey) => renderMarkdown(markdown, childKey)}
+        />
+      </View>
+    ) : null;
+  }
+
+  if (componentType === 'ticket') {
+    return createTicketCardViewModel(component) ? (
+      <View key={componentKey} style={[CARD_WRAPPER_STYLE, renderStyle]}>
+        <FlowTicketCard
+          component={component}
+          containerStyle={inheritedContainerStyle}
+          renderButton={button => renderFlowActionButton(button, context)}
         />
       </View>
     ) : null;
