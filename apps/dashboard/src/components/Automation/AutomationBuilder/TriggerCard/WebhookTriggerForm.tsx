@@ -1,5 +1,7 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { SchemaJsonEditor, type SchemaTree } from '../SchemaForm/SchemaJsonEditor';
+import { Button } from '../../../ui/Button/Button';
+import { schemaFromPayload } from '../AutomationBuilder.utils';
 import type { ValidationIssue } from '../../Automation.types';
 
 interface WebhookTriggerConfigShape {
@@ -40,18 +42,106 @@ export function WebhookTriggerForm({
   const bodySchema = cfg.bodySchema ?? {};
   const headerSchema = cfg.headerSchema ?? {};
 
+  const hasFields = Object.keys(bodySchema).length > 0;
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [pasted, setPasted] = useState('');
+  const [pasteError, setPasteError] = useState<string | null>(null);
+  const showPaste = pasteOpen || !hasFields;
+
+  const closePaste = (): void => {
+    setPasteOpen(false);
+    setPasted('');
+    setPasteError(null);
+  };
+
+  const generateFromPayload = (): void => {
+    try {
+      const parsed: unknown = JSON.parse(pasted);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        setPasteError('Paste a JSON object, e.g. the body of a real webhook delivery.');
+        return;
+      }
+      setField('bodySchema', schemaFromPayload(parsed) as SchemaTree);
+      closePaste();
+    } catch (err) {
+      setPasteError(
+        `Invalid JSON (${err instanceof Error ? err.message : 'parse error'}). Paste the complete body.`,
+      );
+    }
+  };
+
   return (
     <div className='flex flex-col gap-5'>
       <Field
-        label='Example payload'
-        description='Describe the JSON payload this webhook will receive. Use a field name and its type, for example { "ticketId": "string" }. Every field you add is required; requests that do not match return 400.'
+        label='Expected payload'
+        description='Listed fields are required (400 if missing), so keep only those present in every event. Leave empty to accept any JSON. Reach into lists by index, e.g. push.changes.0.new.name.'
         error={issuesAt.get('bodySchema')}
       >
+        {showPaste ? (
+          <div className='flex flex-col gap-2 rounded-md border border-dashed border-border p-3'>
+            <span className='text-xs text-muted-foreground'>
+              Paste a real delivery body from Bitbucket, GitHub or any app. Only field names and
+              types are kept.
+            </span>
+            <textarea
+              value={pasted}
+              onChange={e => {
+                setPasted(e.target.value);
+                setPasteError(null);
+              }}
+              rows={8}
+              spellCheck={false}
+              data-track-category='automation-builder'
+              data-track-name='webhook-payload-paste'
+              placeholder='{ "push": { "changes": [ { "new": { "name": "main" } } ] } }'
+              className={`w-full rounded-md border bg-background p-2 font-mono text-xs ${
+                pasteError ? 'border-red-500/50' : 'border-border'
+              }`}
+            />
+            <div className='flex items-center gap-2'>
+              <Button
+                type='button'
+                size='sm'
+                disabled={pasted.trim().length === 0}
+                onClick={generateFromPayload}
+                data-track-category='automation-builder'
+                data-track-name='GENERATE_WEBHOOK_FROM_PAYLOAD'
+              >
+                Generate fields
+              </Button>
+              {hasFields && (
+                <Button
+                  type='button'
+                  variant='ghost'
+                  size='sm'
+                  onClick={closePaste}
+                  data-track-category='automation-builder'
+                  data-track-name='CANCEL_WEBHOOK_PAYLOAD_PASTE'
+                >
+                  Cancel
+                </Button>
+              )}
+              {pasteError && <span className='text-[11px] text-red-600'>{pasteError}</span>}
+            </div>
+          </div>
+        ) : (
+          <Button
+            type='button'
+            variant='outline'
+            size='sm'
+            className='self-start'
+            onClick={() => setPasteOpen(true)}
+            data-track-category='automation-builder'
+            data-track-name='OPEN_WEBHOOK_PAYLOAD_PASTE'
+          >
+            Replace from a real payload
+          </Button>
+        )}
         <SchemaJsonEditor
           value={bodySchema}
           onChange={next => setField('bodySchema', next)}
           example={{ ticketId: 'string', event: 'string' }}
-          emptyHint='Add the fields your webhook expects, or leave this empty to accept any JSON payload.'
+          emptyHint='No fields declared — any JSON payload is accepted.'
         />
       </Field>
 

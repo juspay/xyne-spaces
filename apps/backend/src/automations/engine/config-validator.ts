@@ -129,6 +129,8 @@ function walkSchemaPath(schema: z.ZodTypeAny, segments: string[]): z.ZodTypeAny 
       const walked = walkSchemaPath(inner, [segment]);
       if (!walked) return null;
       current = walked;
+    } else if (current instanceof z.ZodUnknown || current instanceof z.ZodAny) {
+      continue;
     } else {
       return null;
     }

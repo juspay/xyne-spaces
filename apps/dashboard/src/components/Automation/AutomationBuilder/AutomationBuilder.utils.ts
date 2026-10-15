@@ -12,6 +12,7 @@ import type {
 import { CONDITIONAL_STEP_TYPE, SWITCH_STEP_TYPE } from '../Automation.types';
 import type { VariablePickerSource } from './VariablePicker/VariablePicker.types';
 import { resolveSchema } from './SchemaForm/SchemaForm.utils';
+import type { SchemaNode } from './SchemaForm/SchemaJsonEditor';
 
 export function emptyConfig(): AutomationConfig {
   return {
@@ -191,6 +192,18 @@ function jsonSchemaFromDeclared(declaredRaw: unknown): JsonSchemaT {
     }
   }
   return { type: 'object', properties, additionalProperties: true };
+}
+
+export function schemaFromPayload(value: unknown): SchemaNode {
+  if (Array.isArray(value)) return 'array';
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([k]) => k)
+        .map(([k, v]) => [k, schemaFromPayload(v)]),
+    );
+  }
+  return typeof value === 'number' || typeof value === 'boolean' ? typeof value : 'string';
 }
 
 /** Build the webhook trigger's output schema from its body/header schemas. */
