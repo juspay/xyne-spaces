@@ -64,7 +64,7 @@ export const CONFIG = {
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
-    return fromEnv.length > 0 ? fromEnv : ["ask-ai", "xyne-spaces-architect", "xyne", "call-intelligence"];
+    return fromEnv.length > 0 ? fromEnv : ["ask-ai", "xyne-spaces-architect", "xyne"];
   })(),
   // Name (unique) of the org the default agents are copied from. Unset → the
   // oldest org that has any of them.
