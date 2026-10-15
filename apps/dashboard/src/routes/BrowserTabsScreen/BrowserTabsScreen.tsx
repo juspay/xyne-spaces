@@ -1,78 +1,90 @@
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 import { useSelector } from '@xstate/react';
-import {
-  ArrowLeft,
-  ArrowRight,
-  RotateCw,
-  Plus,
-  X,
-  Globe,
-  Loader2,
-  ExternalLink,
-  Maximize2,
-  Minimize2,
-  ChevronUp,
-  ChevronDown,
-  Eye,
-  EyeOff,
-} from 'lucide-react';
 import { AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
+import {
+  Check,
+  ChevronDown,
+  ExternalLink,
+  Globe,
+  Maximize2,
+  Minimize2,
+  MoreHorizontal,
+  Minus,
+  PanelRightClose,
+  Plus,
+  RotateCcw,
+  Search,
+  Settings,
+  Volume2,
+  VolumeX,
+  ZoomIn,
+} from 'lucide-react';
 import { isElectronApp } from '../../utils/electronApp';
 import { browserPanelActor, type BrowserTab } from '../../machines/browserPanelMachine';
-import { pickWebviewPartition } from '../../utils/browserPanelPartition';
 import { useActivityTracking } from '../../hooks/useActivityTracking';
 import { logger, Event } from '../../utils/logger';
-import { xyneAIActor } from '../../machines/xyneAIMachine';
-import { BrowserSettingsMenu } from '../../components/BrowserPanel/BrowserSettingsMenu';
 import { BrowserHintBar } from '../../components/BrowserPanel/BrowserHintBar';
 import { useLinkOpenHintDismissed } from '../../hooks/useLinkOpenHintDismissed';
 import { usePlatform } from '../../hooks/usePlatform';
+import { useScope, useShortcutById } from '../../shortcuts';
+import { hostOf } from '../../utils/browserAddress';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '../../components/ui/dropdown-menu';
+import { Tooltip } from '../../components/ui/Tooltip';
+import {
+  BrowserToolbar,
+  DownloadsButton,
+  FindBar,
+  LoadError,
+  MostVisited,
+  PageFavicon,
+  StartPage,
+  TabStrip,
+  TabSwitcher,
+  ToolbarButton,
+  ask,
+  desktopHistory,
+  preconnect,
+  useFindInPage,
+  zoomPage,
+  type ZoomStep,
+  type OpenTabSuggestion,
+  type PageKeyCommand,
+} from '../../components/InAppBrowser';
+import { browserPages, usePageLives } from './browserPages';
 
-// Define WebviewTag interface locally since Electron types may not be available in renderer
-interface WebviewTag extends HTMLElement {
-  loadURL(url: string): void;
-  reload(): void;
-  goBack(): void;
-  goForward(): void;
-  canGoBack(): boolean;
-  canGoForward(): boolean;
-  getURL(): string;
-  openDevTools(): void;
-  findInPage(
-    text: string,
-    options?: { findNext?: boolean; forward?: boolean; matchCase?: boolean },
-  ): number;
-  stopFindInPage(action: 'clearSelection' | 'keepSelection' | 'activateSelection'): void;
-  addEventListener(event: string, callback: (e: Event) => void): void;
-  removeEventListener(event: string, callback: (e: Event) => void): void;
-}
-
-// Find in page result
-interface FindInPageResult {
-  requestId: number;
-  activeMatchOrdinal: number;
-  matches: number;
-  selectionArea: {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  };
-}
-
-// Browser context data for Ask AI
-interface BrowserContextData {
-  text: string;
-  url: string;
-  domain: string;
-  title: string;
-}
-
-// IPC message event from webview
-interface WebviewIPCMessageEvent extends Event {
-  channel: string;
-  args: unknown[];
+/** A playing tab's speaker, as Chrome's: click to mute it, again to hear it. */
+function TabSound(props: { tab: BrowserTab }): ReactElement {
+  const { tab } = props;
+  return (
+    <button
+      type='button'
+      tabIndex={-1}
+      // A press here is for the speaker, not the start of dragging the tab.
+      onPointerDown={event => event.stopPropagation()}
+      onClick={event => {
+        event.stopPropagation();
+        browserPanelActor.send({
+          type: 'UPDATE_TAB',
+          tabId: tab.id,
+          patch: { muted: !tab.muted },
+        });
+      }}
+      title={tab.muted ? 'Unmute this tab' : 'Mute this tab'}
+      aria-label={tab.muted ? 'Unmute this tab' : 'Mute this tab'}
+      className='flex size-5 shrink-0 items-center justify-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-foreground/10 hover:text-foreground'
+      data-track-category='BROWSER'
+      data-track-name='TabMuteToggled'
+    >
+      {tab.muted ? <VolumeX className='size-3.5' /> : <Volume2 className='size-3.5' />}
+    </button>
+  );
 }
 
 interface BrowserTabsScreenProps {
@@ -80,508 +92,264 @@ interface BrowserTabsScreenProps {
   pendingUrls?: string[];
 }
 
-interface WebviewTabProps {
-  tab: BrowserTab;
-  isActive: boolean;
-  webviewRefs: React.MutableRefObject<Record<string, WebviewTag | null>>;
-  onUpdate: (tabId: string, patch: Partial<BrowserTab>) => void;
-  onUrlUpdate: (tabId: string, url: string) => void;
-  onFindResults?: (tabId: string, result: FindInPageResult) => void;
-  isPanel: boolean;
-  popupsEnabled: boolean;
-}
+const TRACK = 'BROWSER';
+const newTab = (url = ''): BrowserTab => ({
+  id: crypto.randomUUID(),
+  url,
+  title: url ? hostOf(url) || url : 'New tab',
+  canGoBack: false,
+  canGoForward: false,
+  isLoading: false,
+});
 
-function WebviewTab({
-  tab,
-  isActive,
-  webviewRefs,
-  onUpdate,
-  onUrlUpdate,
-  onFindResults,
-  isPanel,
-}: WebviewTabProps) {
-  const ref = useRef<WebviewTag>(null);
-  const initialUrlRef = useRef(tab.url);
+/** A tab's name: its page's title, else its site, else that it is new. */
+const tabName = (tab: BrowserTab): string =>
+  tab.url
+    ? tab.title && tab.title !== tab.url
+      ? tab.title
+      : hostOf(tab.url) || tab.url
+    : 'New tab';
 
-  useEffect(() => {
-    const wv = ref.current;
-    if (!wv) return;
-    webviewRefs.current[tab.id] = wv;
-
-    // Electron's webview tag puts event payload directly on the event
-    // object (not in `.detail`). Accept both shapes for safety.
-    const onTitle = (e: Event) => {
-      const direct = (e as Event & { title?: string }).title;
-      const detailTitle = (e as CustomEvent<{ title?: string }>).detail?.title;
-      const title = direct || detailTitle;
-      if (title) {
-        onUpdate(tab.id, { title });
-      }
-    };
-    const onFavicon = (e: Event) => {
-      const direct = (e as Event & { favicons?: string[] }).favicons?.[0];
-      const detailFavicon = (e as CustomEvent<{ favicons?: string[] }>).detail?.favicons?.[0];
-      const favicon = direct ?? detailFavicon;
-      if (favicon !== undefined) {
-        onUpdate(tab.id, { favicon: favicon || undefined });
-      }
-    };
-    const onNav = () => {
-      onUpdate(tab.id, {
-        url: wv.getURL(),
-        canGoBack: wv.canGoBack(),
-        canGoForward: wv.canGoForward(),
-      });
-      onUrlUpdate(tab.id, wv.getURL());
-    };
-    const onStart = () => onUpdate(tab.id, { isLoading: true });
-    const onStop = () => onUpdate(tab.id, { isLoading: false });
-
-    // Handle Ask AI requests from webview
-    const onAskAI = (e: Event) => {
-      const ipcEvent = e as WebviewIPCMessageEvent;
-      const channel = ipcEvent.channel;
-      const args = ipcEvent.args || [];
-
-      if (channel !== 'ask-ai-request') return;
-
-      const detail = args[0] as BrowserContextData | undefined;
-      if (!detail) return;
-
-      // Open XyneAI sidebar with browser context
-      xyneAIActor.send({
-        type: 'OPEN',
-        trackSource: 'browser_panel',
-        contextType: 'general',
-      });
-
-      // Store the browser context in session storage for XyneAI to pick up
-      try {
-        const contextPill = {
-          type: 'browser',
-          text: detail.text,
-          url: detail.url,
-          domain: detail.domain,
-          title: detail.title,
-          timestamp: Date.now(),
-        };
-        sessionStorage.setItem('xyne-ai-browser-context', JSON.stringify(contextPill));
-
-        // Dispatch a custom event that XyneAI can listen to
-        window.dispatchEvent(
-          new CustomEvent('xyne-ai-browser-context-ready', { detail: contextPill }),
-        );
-      } catch (error) {
-        logger.error(Event.FRONTEND_ERROR, {
-          type: 'migrated_console_error',
-          message: String('[BrowserTabsScreen] Failed to store browser context:'),
-          error: error,
-        });
-      }
-    };
-
-    // Handle find in page results
-    const onFoundInPage = (e: Event) => {
-      const detail = (e as CustomEvent<FindInPageResult>).detail;
-      onFindResults?.(tab.id, detail);
-    };
-
-    wv.addEventListener('page-title-updated', onTitle);
-    wv.addEventListener('page-favicon-updated', onFavicon);
-    wv.addEventListener('did-navigate', onNav);
-    wv.addEventListener('did-navigate-in-page', onNav);
-    wv.addEventListener('did-start-loading', onStart);
-    wv.addEventListener('did-stop-loading', onStop);
-    wv.addEventListener('ipc-message', onAskAI);
-    wv.addEventListener('found-in-page', onFoundInPage);
-
-    return () => {
-      wv.removeEventListener('page-title-updated', onTitle);
-      wv.removeEventListener('page-favicon-updated', onFavicon);
-      wv.removeEventListener('did-navigate', onNav);
-      wv.removeEventListener('did-navigate-in-page', onNav);
-      wv.removeEventListener('did-start-loading', onStart);
-      wv.removeEventListener('did-stop-loading', onStop);
-      wv.removeEventListener('ipc-message', onAskAI);
-      wv.removeEventListener('found-in-page', onFoundInPage);
-      delete webviewRefs.current[tab.id];
-    };
-  }, [tab.id]);
-
-  // Partition is chosen from the tab's initial URL: Xyne origins load in the
-  // dedicated `persist:xyne-spaces` partition (where auth cookies are synced
-  // from the main session) so the panel inherits the user's sign-in.
-  // Everything else stays in `persist:browser-tabs` — Xyne cookies never
-  // enter that jar, so external sites cannot see them.
-  const partitionRef = useRef(pickWebviewPartition(tab.url));
-
-  const webviewProps: Record<string, unknown> = {
-    ref,
-    src: initialUrlRef.current,
-    partition: partitionRef.current,
-    // Always allow popups so we can intercept them via new-window event
-    // Popup blocking is handled in the new-window event handler
-    allowpopups: '',
-    // Don't set preload here - let will-attach-webview event in main.ts set it automatically
-    // This avoids issues with file paths and ensures the correct absolute path is used
-    style: {
-      position: 'absolute' as const,
-      inset: 0,
-      width: '100%',
-      height: '100%',
-      visibility: isActive ? ('visible' as const) : ('hidden' as const),
-      pointerEvents: isActive ? ('auto' as const) : ('none' as const),
-      minHeight: isPanel ? 200 : 400,
-    },
-  };
-
-  return (
-    // eslint-disable-next-line react/no-unknown-property
-    <webview {...webviewProps} />
-  );
-}
-
+/**
+ * The app's browser, docked beside the app or full screen: tabs as Chrome draws
+ * them — dragged to reorder, kept across a reload — a bar that goes, suggests from
+ * history and finds in the page, and a new tab's start page.
+ *
+ * The pages themselves aren't here: they live in BrowserPageLayer, drawn over the
+ * hole this leaves, so docking or undocking never reloads them.
+ */
 export function BrowserTabsScreen({
   variant = 'fullscreen',
   pendingUrls: externalPendingUrls,
-}: BrowserTabsScreenProps = {}): React.ReactElement {
+}: BrowserTabsScreenProps = {}): ReactElement {
   const tabs = useSelector(browserPanelActor, state => state.context.tabs);
   const activeTabId = useSelector(browserPanelActor, state => state.context.activeTabId);
   const statePendingUrls = useSelector(browserPanelActor, state => state.context.pendingUrls);
-  const browserSettings = useSelector(browserPanelActor, state => state.context.browserSettings);
-  const [urlInput, setUrlInput] = useState('');
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [areControlsVisible, setAreControlsVisible] = useState(false);
-  const [isFindBarOpen, setIsFindBarOpen] = useState(false);
-  const [findQuery, setFindQuery] = useState('');
-  const [findResults, setFindResults] = useState({ activeMatch: 0, matches: 0 });
-  const webviewRefs = useRef<Record<string, WebviewTag | null>>({});
-  const findInputRef = useRef<HTMLInputElement>(null);
-  const urlInputRef = useRef<HTMLInputElement>(null);
-  const { isMobile, isMac } = usePlatform();
+  const canReopen = useSelector(browserPanelActor, state => state.context.closedTabs.length > 0);
+  const popupsAllowed = useSelector(
+    browserPanelActor,
+    state => state.context.browserSettings.popups,
+  );
+  const { isMac } = usePlatform();
   const { hintDismissed, dismissHint } = useLinkOpenHintDismissed();
   const { track } = useActivityTracking();
   const navigate = useNavigate();
 
-  const activeTab = tabs.find(t => t.id === activeTabId);
   const isPanel = variant === 'panel';
-
-  // Use prop if provided (panel mode), otherwise read from state (fullscreen mode)
+  const activeTab = tabs.find(tab => tab.id === activeTabId) ?? null;
   const pendingUrls = externalPendingUrls ?? statePendingUrls;
+  const mod = isMac ? '⌘' : 'Ctrl+';
 
-  // Normalize URL (add https:// if missing)
-  const normalizeUrl = (url: string): string => {
-    let normalized = url.trim();
-    if (!normalized) return '';
+  // Re-rendered as pages load, fail and find.
+  usePageLives();
+  const live = browserPages.live;
+  const addressRef = useRef<HTMLInputElement | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const [tabListOpen, setTabListOpen] = useState(false);
+  // Where the open page shows: given to the page layer while this screen is up.
+  const [hole, setHole] = useState<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!hole) return undefined;
+    browserPages.setHole(hole);
+    return () => browserPages.releaseHole(hole);
+  }, [hole]);
+  const tabsRef = useRef(tabs);
+  tabsRef.current = tabs;
+  const activeRef = useRef(activeTabId);
+  activeRef.current = activeTabId;
 
-    // If it looks like a search query (no dots, has spaces)
-    if (!normalized.includes('.') || normalized.includes(' ')) {
-      return `https://www.google.com/search?q=${encodeURIComponent(normalized)}`;
-    }
+  const view = browserPages.view;
 
-    // Add protocol if missing
-    if (!normalized.startsWith('http://') && !normalized.startsWith('https://')) {
-      normalized = 'https://' + normalized;
-    }
+  // ─── Tabs ───────────────────────────────────────────────────────────────────
+  const openTab = useCallback(
+    (url = '', options: { after?: string; background?: boolean } = {}): void => {
+      browserPanelActor.send({
+        type: 'ADD_TAB',
+        tab: newTab(url),
+        ...(options.after && { after: options.after }),
+        ...(options.background && { background: true }),
+      });
+    },
+    [],
+  );
 
-    return normalized;
+  const switchTab = useCallback((tabId: string): void => {
+    browserPanelActor.send({ type: 'SWITCH_TAB', tabId });
+  }, []);
+
+  const closeTab = (tabId: string): void => {
+    const wasLast = tabs.length === 1 && tabs[0]?.id === tabId;
+    browserPanelActor.send({ type: 'CLOSE_TAB', tabId });
+    if (!wasLast) return;
+    if (isPanel) browserPanelActor.send({ type: 'CLOSE' });
+    else void navigate(-1);
   };
 
-  // Handle pending URLs (both panel and fullscreen mode)
+  /** The tab beside the open one, wrapping round. */
+  const stepTab = useCallback(
+    (by: 1 | -1): void => {
+      const list = tabsRef.current;
+      const index = list.findIndex(tab => tab.id === activeRef.current);
+      const next = list[(index + by + list.length) % list.length];
+      if (next) switchTab(next.id);
+    },
+    [switchTab],
+  );
+
+  // Links from elsewhere in the app: to the tab already on that page, else a new one.
   useEffect(() => {
     if (!pendingUrls || pendingUrls.length === 0 || !isElectronApp()) return;
-
     for (const url of pendingUrls) {
-      const existingTab = tabs.find(tab => tab.url === url);
-      if (existingTab) {
-        browserPanelActor.send({ type: 'SWITCH_TAB', tabId: existingTab.id });
-        setUrlInput(existingTab.url);
-      } else {
-        const id = crypto.randomUUID();
-        browserPanelActor.send({
-          type: 'ADD_TAB',
-          tab: {
-            id,
-            url,
-            title: url,
-            canGoBack: false,
-            canGoForward: false,
-            isLoading: true,
-          },
-        });
-        setUrlInput(url);
-      }
+      const existing = tabsRef.current.find(tab => tab.url === url);
+      if (existing) switchTab(existing.id);
+      else openTab(url);
     }
-
-    // Clear pendingUrls after processing (both panel and fullscreen)
     browserPanelActor.send({ type: 'OPEN_URLS', urls: [] });
-  }, [pendingUrls, isPanel, tabs]);
+  }, [pendingUrls, openTab, switchTab]);
 
-  // Handle Cmd/Ctrl+T and Cmd/Ctrl+F shortcuts sent from the main process
-  // via before-input-event on the webview webContents.  This path works in
-  // packaged builds where the webview preload script may not load.
+  // The browser's settings live in the desktop app, which has the last word on them.
   useEffect(() => {
-    if (!isElectronApp()) return;
-    const api = window.electronAPI;
-
-    const cleanupNewTab = api?.onBrowserNewTab?.(() => {
-      handleCreateNewTab('https://www.google.com');
+    if (!isElectronApp() || !window.electronAPI?.getBrowserSettings) return;
+    void window.electronAPI.getBrowserSettings().then(settings => {
+      browserPanelActor.send({ type: 'UPDATE_SETTINGS', settings });
     });
-
-    const cleanupFindInPage = api?.onBrowserFindInPage?.(() => {
-      setIsFindBarOpen(true);
-      setTimeout(() => {
-        findInputRef.current?.focus();
-        findInputRef.current?.select();
-      }, 50);
-    });
-
-    return () => {
-      cleanupNewTab?.();
-      cleanupFindInPage?.();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Load settings on mount
-  useEffect(() => {
-    if (isElectronApp() && window.electronAPI?.getBrowserSettings) {
-      void window.electronAPI.getBrowserSettings().then(settings => {
-        browserPanelActor.send({ type: 'UPDATE_SETTINGS', settings });
-      });
+  const setPopupsAllowed = (allowed: boolean): void => {
+    browserPanelActor.send({ type: 'UPDATE_SETTINGS', settings: { popups: allowed } });
+    void window.electronAPI?.setBrowserSettings?.({ popups: allowed });
+  };
+
+  // ─── The open page ──────────────────────────────────────────────────────────
+  /** Where the open tab goes: its page if it has one, else it starts one there. */
+  const go = (url: string): void => {
+    const target = view(activeTabId);
+    if (activeTab && activeTab.url && target) {
+      void ask(() => target.loadURL(url), Promise.resolve()).catch(() => undefined);
+      return;
     }
-  }, []);
-
-  useEffect(() => {
-    if (!isFindBarOpen || !activeTabId) return;
-
-    const timeoutId = setTimeout(() => {
-      const wv = webviewRefs.current[activeTabId];
-      if (!wv) return;
-
-      if (findQuery.trim()) {
-        wv.findInPage(findQuery, { findNext: false });
-      } else {
-        wv.stopFindInPage('clearSelection');
-        setFindResults({ activeMatch: 0, matches: 0 });
-      }
-    }, 300); // Wait 300ms after user stops typing
-
-    return () => clearTimeout(timeoutId);
-  }, [findQuery, isFindBarOpen, activeTabId]);
-
-  // Close find bar when switching tabs
-  useEffect(() => {
-    if (isFindBarOpen) {
-      setIsFindBarOpen(false);
-      setFindQuery('');
-      setFindResults({ activeMatch: 0, matches: 0 });
-      const wv = activeTabId ? webviewRefs.current[activeTabId] : null;
-      wv?.stopFindInPage('clearSelection');
-    }
-  }, [activeTabId]);
-
-  // Update URL input when active tab changes
-  useEffect(() => {
     if (activeTab) {
-      setUrlInput(activeTab.url);
+      browserPanelActor.send({
+        type: 'UPDATE_TAB',
+        tabId: activeTab.id,
+        patch: { url, title: hostOf(url) || url },
+      });
     } else {
-      setUrlInput('');
+      openTab(url);
     }
-  }, [activeTabId, activeTab?.url]);
+  };
 
+  const find = useFindInPage(
+    {
+      // Electron's findNext begins a new search; ours is a step in this one.
+      find: (key, text, forward, step) =>
+        ask(() => view(key)?.findInPage(text, { forward, findNext: !step }), 0),
+      stop: key => {
+        ask(() => view(key)?.stopFindInPage('clearSelection'), undefined);
+        browserPages.setLive(key, { find: null });
+      },
+    },
+    activeTabId ?? '',
+  );
+
+  /** Takes the keyboard back from a page, so the bar or a list can have it. */
+  const takeFocusBack = (): void => {
+    void window.electronAPI?.focusHostWebContents?.();
+  };
+  const focusAddress = useCallback((): void => {
+    requestAnimationFrame(() => addressRef.current?.focus());
+  }, []);
+
+  const runCommand = (command: PageKeyCommand): void => {
+    const page = view(activeRef.current);
+    if (command === 'back') ask(() => page?.canGoBack() && page.goBack(), undefined);
+    else if (command === 'forward') ask(() => page?.canGoForward() && page.goForward(), undefined);
+    else if (command === 'nextTab') stepTab(1);
+    else if (command === 'previousTab') stepTab(-1);
+    else {
+      takeFocusBack();
+      if (command === 'focusAddress') focusAddress();
+      else setTabListOpen(true);
+    }
+  };
+  const runCommandRef = useRef(runCommand);
+  runCommandRef.current = runCommand;
+  const findRef = useRef(find);
+  findRef.current = find;
+
+  // What a page asks of the screen around it — the address bar, the tab list, find —
+  // pressed inside it, which the page layer passes on.
+  useEffect(
+    () =>
+      browserPages.onCommand(command => {
+        if (command === 'find') findRef.current.open();
+        else runCommandRef.current(command);
+      }),
+    [],
+  );
+
+  // The browser's own keys, while it has the keyboard — full screen, it always has.
+  const [hasKeyboard, setHasKeyboard] = useState(false);
   useEffect(() => {
-    if (isMobile || !activeTabId || !areControlsVisible) return;
-    const rafId = requestAnimationFrame(() => {
-      urlInputRef.current?.focus();
+    const update = (): void =>
+      setHasKeyboard(Boolean(rootRef.current?.contains(document.activeElement)));
+    const later = (): void => {
+      requestAnimationFrame(update);
+    };
+    document.addEventListener('focusin', update);
+    document.addEventListener('focusout', later);
+    update();
+    return () => {
+      document.removeEventListener('focusin', update);
+      document.removeEventListener('focusout', later);
+    };
+  }, []);
+  useScope('in-app-browser', hasKeyboard || !isPanel);
+  const inScope = { scope: 'in-app-browser' };
+  useShortcutById('browser.newTab', () => openTab(), inScope);
+  useShortcutById('browser.tabs', () => setTabListOpen(open => !open), inScope);
+  useShortcutById('browser.find', () => find.open(), inScope);
+  useShortcutById('browser.focusAddress', focusAddress, inScope);
+  useShortcutById(
+    'browser.reload',
+    () => ask(() => view(activeRef.current)?.reload(), undefined),
+    inScope,
+  );
+  useShortcutById('browser.back', () => runCommandRef.current('back'), inScope);
+  useShortcutById('browser.forward', () => runCommandRef.current('forward'), inScope);
+  useShortcutById('browser.nextTab', () => stepTab(1), inScope);
+  useShortcutById('browser.previousTab', () => stepTab(-1), inScope);
+  useShortcutById(
+    'browser.reopenTab',
+    () => browserPanelActor.send({ type: 'REOPEN_TAB' }),
+    inScope,
+  );
+  const zoom = (step: ZoomStep): void => {
+    const tabId = activeRef.current;
+    const page = view(tabId);
+    if (page && tabId) browserPages.setLive(tabId, { zoom: zoomPage(page, step) });
+  };
+  // The View menu's zoom (⌘+, ⌘-, ⌘0) is the open page's while the browser has the
+  // keyboard — full screen, it always has.
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+  const takesZoom = hasKeyboard || !isPanel;
+  useEffect(() => {
+    if (!takesZoom) return undefined;
+    browserPages.setPageZoomer(step => {
+      if (!view(activeRef.current)) return false;
+      zoomRef.current(step);
+      return true;
     });
-    return () => cancelAnimationFrame(rafId);
-  }, [activeTabId, isMobile, areControlsVisible]);
-
-  const handleCreateTab = (url?: string) => {
-    const targetUrl = url || normalizeUrl(urlInput);
-    if (!targetUrl) return;
-
-    const existingTab = tabs.find(tab => tab.url === targetUrl);
-    if (existingTab) {
-      browserPanelActor.send({ type: 'SWITCH_TAB', tabId: existingTab.id });
-      setUrlInput(existingTab.url);
-      return;
-    }
-
-    const id = crypto.randomUUID();
-    browserPanelActor.send({
-      type: 'ADD_TAB',
-      tab: {
-        id,
-        url: targetUrl,
-        title: targetUrl,
-        canGoBack: false,
-        canGoForward: false,
-        isLoading: true,
-      },
-    });
-    setUrlInput(targetUrl);
-  };
-
-  // Always creates a new tab (no deduplication check) - used for keyboard shortcuts
-  const handleCreateNewTab = (url: string = 'https://www.google.com') => {
-    const id = crypto.randomUUID();
-    browserPanelActor.send({
-      type: 'ADD_TAB',
-      tab: {
-        id,
-        url,
-        title: url,
-        canGoBack: false,
-        canGoForward: false,
-        isLoading: true,
-      },
-    });
-    setUrlInput(url);
-  };
-
-  const handleSwitchTab = (tabId: string) => {
-    browserPanelActor.send({ type: 'SWITCH_TAB', tabId });
-  };
-
-  const handleCloseTab = (tabId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    delete webviewRefs.current[tabId];
-    const wasLastTab = tabs.length === 1 && tabs[0]?.id === tabId;
-    browserPanelActor.send({ type: 'CLOSE_TAB', tabId });
-    if (wasLastTab) {
-      if (isPanel) {
-        browserPanelActor.send({ type: 'CLOSE' });
-      } else {
-        void navigate(-1);
-      }
-    }
-  };
-
-  const handleNavigate = (e: React.FormEvent) => {
-    e.preventDefault();
-    const wv = activeTabId ? webviewRefs.current[activeTabId] : null;
-    if (!wv) {
-      handleCreateTab();
-      return;
-    }
-    const url = normalizeUrl(urlInput);
-    if (url) {
-      wv.loadURL(url);
-    }
-  };
-
-  const handleGoBack = () => {
-    const wv = activeTabId ? webviewRefs.current[activeTabId] : null;
-    if (wv?.canGoBack()) wv.goBack();
-  };
-
-  const handleGoForward = () => {
-    const wv = activeTabId ? webviewRefs.current[activeTabId] : null;
-    if (wv?.canGoForward()) wv.goForward();
-  };
-
-  const handleReload = () => {
-    const wv = activeTabId ? webviewRefs.current[activeTabId] : null;
-    wv?.reload();
-  };
-
-  const handleClosePanel = () => {
-    if (isPanel) {
-      logger.info(Event.BROWSER_PANEL_CLOSED, {
-        url: activeTab?.url,
-        tabCount: tabs.length,
-      });
-      browserPanelActor.send({ type: 'CLOSE' });
-    }
-  };
-
-  const handleOpenExternal = () => {
-    if (activeTab?.url) {
-      void (
-        window.electronAPI?.openExternal?.(activeTab.url) ?? window.open(activeTab.url, '_blank')
-      );
-    }
-  };
-
-  const handleOpenFullscreen = () => {
-    void navigate('/browser');
-    if (isPanel) {
-      browserPanelActor.send({ type: 'CLOSE' });
-    }
-  };
-
-  const handleMinimizeToPanel = () => {
-    // Navigate back to previous page
-    void navigate(-1);
-    browserPanelActor.send({ type: 'OPEN' });
-    track({
-      eventCategory: 'BROWSER',
-      eventName: 'MinimizeToDocked',
-      eventLabel: 'Minimize from fullscreen to panel',
-      contextMetadata: {
-        tabs: tabs.map(t => ({ id: t.id, url: t.url })),
-      },
-    });
-  };
-
-  const handleUpdateTab = (tabId: string, patch: Partial<BrowserTab>) => {
-    browserPanelActor.send({ type: 'UPDATE_TAB', tabId, patch });
-  };
-
-  const handleUrlUpdate = (tabId: string, url: string) => {
-    if (tabId === activeTabId) {
-      setUrlInput(url);
-      track({
-        eventCategory: 'BROWSER',
-        eventName: 'INTERNAL_NAVIGATION',
-        eventLabel: url,
-        contextMetadata: {
-          tabId,
-          url,
-        },
-      });
-    }
-  };
-
-  const handleFindNext = () => {
-    if (!activeTabId || !findQuery.trim()) return;
-    const wv = webviewRefs.current[activeTabId];
-    wv?.findInPage(findQuery, { findNext: true, forward: true });
-  };
-
-  const handleFindPrevious = () => {
-    if (!activeTabId || !findQuery.trim()) return;
-    const wv = webviewRefs.current[activeTabId];
-    wv?.findInPage(findQuery, { findNext: true, forward: false });
-  };
-
-  const handleCloseFindBar = () => {
-    setIsFindBarOpen(false);
-    setFindQuery('');
-    setFindResults({ activeMatch: 0, matches: 0 });
-    if (activeTabId) {
-      const wv = webviewRefs.current[activeTabId];
-      wv?.stopFindInPage('clearSelection');
-    }
-  };
-
-  const handleFindKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Escape') {
-      handleCloseFindBar();
-    } else if (e.key === 'Enter') {
-      if (e.shiftKey) {
-        handleFindPrevious();
-      } else {
-        handleFindNext();
-      }
-    }
-  };
+    return () => browserPages.setPageZoomer(null);
+  }, [takesZoom]);
+  useShortcutById('browser.zoomIn', () => zoom('in'), inScope);
+  useShortcutById('browser.zoomOut', () => zoom('out'), inScope);
+  useShortcutById('browser.zoomReset', () => zoom('reset'), inScope);
 
   if (!isElectronApp()) {
     return (
-      <div className='flex items-center justify-center h-full bg-background'>
+      <div className='flex h-full items-center justify-center bg-background'>
         <div className='text-center text-muted-foreground'>
           <Globe size={48} className='mx-auto mb-4 opacity-50' />
           <p>Browser tabs are only available in the desktop app.</p>
@@ -590,255 +358,287 @@ export function BrowserTabsScreen({
     );
   }
 
-  return (
-    <div className='flex flex-col h-full bg-background md:rounded-2xl overflow-hidden shadow-md'>
-      {/* Header with close button (panel mode only) — gated by the Eye toggle
-          next to the + button so the user can collapse the chrome down to just
-          the tab strip. */}
-      {areControlsVisible &&
-        (isPanel ? (
-          <div className='flex items-center justify-between px-3 py-2 bg-muted border-b border-border'>
-            <div className='flex items-center gap-2'>
-              <Globe size={16} className='text-muted-foreground' />
-              <span className='text-sm font-medium text-foreground'>Browser</span>
-            </div>
-            <div className='flex items-center gap-1'>
-              <BrowserSettingsMenu isOpen={isSettingsOpen} setIsOpen={setIsSettingsOpen} />
-              {activeTab && (
-                <button
-                  onClick={handleOpenExternal}
-                  className='p-1.5 rounded-md hover:bg-border text-muted-foreground'
-                  title='Open in system browser'
-                  data-track-category='BROWSER'
-                  data-track-name='OpenInSystemBrowser'
-                  data-track-metadata={JSON.stringify({ url: activeTab.url })}
-                >
-                  <ExternalLink size={14} />
-                </button>
-              )}
-              <button
-                onClick={handleClosePanel}
-                className='p-1.5 rounded-md hover:bg-border text-muted-foreground'
-                title='Close browser panel'
-                data-track-category='BROWSER'
-                data-track-name='CloseBrowserPanel'
-                data-track-metadata={JSON.stringify({ urls: tabs.map(t => t.url) })}
-              >
-                <X size={16} />
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className='flex items-center justify-between px-3 py-2 bg-muted border-b border-border'>
-            <div className='flex items-center gap-2'>
-              <Globe size={18} className='text-muted-foreground' />
-              <span className='text-base font-medium text-foreground'>Browser</span>
-            </div>
-            <div className='flex items-center gap-1'>
-              <BrowserSettingsMenu isOpen={isSettingsOpen} setIsOpen={setIsSettingsOpen} />
-              {activeTab && (
-                <button
-                  onClick={handleOpenExternal}
-                  className='p-1.5 rounded-md hover:bg-border text-muted-foreground'
-                  title='Open in system browser'
-                  data-track-category='BROWSER'
-                  data-track-name='OpenInSystemBrowser'
-                  data-track-metadata={JSON.stringify({ url: activeTab.url })}
-                >
-                  <ExternalLink size={16} />
-                </button>
-              )}
-            </div>
-          </div>
-        ))}
+  const activeLive = live(activeTabId);
+  const activeUrl = activeTab?.url ?? '';
+  const web = /^https?:/.test(activeUrl);
+  const openTabs: OpenTabSuggestion[] = tabs
+    .filter(tab => tab.id !== activeTabId && tab.url)
+    .map(tab => ({ key: tab.id, url: tab.url, title: tabName(tab), favicon: tab.favicon ?? '' }));
 
-      {/* Tab Bar */}
-      <div className='flex items-center bg-muted border-b border-border px-2 py-0.5 gap-2'>
-        <div className='flex-1 flex items-center gap-0.5 overflow-x-auto no-scrollbar'>
-          {tabs.map((tab, index) => {
-            const isActive = tab.id === activeTabId;
-            const prevTab = tabs[index - 1];
-            const isPrevActive = !!prevTab && prevTab.id === activeTabId;
-            // Browser-style vertical divider between adjacent non-active
-            // tabs; suppressed when either side is the active pill.
-            const showDivider = index > 0 && !isActive && !isPrevActive;
-            return (
-              <Fragment key={tab.id}>
-                {showDivider && (
-                  <div
-                    aria-hidden='true'
-                    className='w-px h-4 bg-border/70 self-center flex-shrink-0'
-                  />
-                )}
-                <button
-                  onClick={() => handleSwitchTab(tab.id)}
-                  className={`flex items-center gap-2 rounded-sm group transition-colors ${
-                    isPanel
-                      ? 'px-3 py-2 text-xs max-w-[200px] min-w-[120px]'
-                      : 'px-4 py-2.5 text-sm max-w-[240px] min-w-[160px]'
-                  } ${
-                    isActive
-                      ? 'bg-background shadow-sm text-foreground'
-                      : 'text-muted-foreground hover:bg-background/50'
-                  }`}
-                  data-track-category='BROWSER'
-                  data-track-name='SwitchTab'
-                  data-track-metadata={JSON.stringify({ tabId: tab.id, url: tab.url })}
-                >
-                  {tab.isLoading ? (
-                    <Loader2
-                      size={isPanel ? 14 : 16}
-                      className='animate-spin flex-shrink-0 text-muted-foreground'
-                    />
-                  ) : tab.favicon ? (
-                    <img
-                      src={tab.favicon}
-                      alt=''
-                      className={isPanel ? 'w-4 h-4 flex-shrink-0' : 'w-5 h-5 flex-shrink-0'}
-                      onError={e => {
-                        (e.target as HTMLImageElement).style.display = 'none';
-                      }}
-                    />
-                  ) : (
-                    <Globe
-                      size={isPanel ? 14 : 16}
-                      className='flex-shrink-0 text-muted-foreground'
-                    />
-                  )}
-                  <span className='truncate flex-1 text-left font-medium'>{tab.title}</span>
-                  <button
-                    onClick={e => handleCloseTab(tab.id, e)}
-                    className='p-0.5 hover:bg-muted-foreground/20 rounded transition-colors flex-shrink-0'
-                    data-track-category='BROWSER'
-                    data-track-name='CloseTab'
-                    data-track-metadata={JSON.stringify({ tabId: tab.id, url: tab.url })}
-                  >
-                    <X size={isPanel ? 12 : 14} />
-                  </button>
-                </button>
-              </Fragment>
-            );
-          })}
-        </div>
-        <button
-          onClick={() => handleCreateTab('https://www.google.com')}
-          className='p-1.5 rounded-md hover:bg-border text-muted-foreground'
-          title='New tab'
-          data-track-category='BROWSER'
-          data-track-name='CreateNewTab'
-          data-track-metadata={JSON.stringify({ url: 'https://www.google.com' })}
-        >
-          <Plus size={isPanel ? 14 : 16} />
-        </button>
-        <button
-          onClick={isPanel ? handleOpenFullscreen : handleMinimizeToPanel}
-          className='p-1.5 rounded-md hover:bg-border text-muted-foreground'
-          title={isPanel ? 'Open in fullscreen browser' : 'Minimize to docked panel'}
-          data-track-category='BROWSER'
-          data-track-name={isPanel ? 'OpenFullscreenBrowser' : 'MinimizeToDocked'}
-          data-track-metadata={JSON.stringify({ urls: tabs.map(t => t.url) })}
-        >
-          {isPanel ? <Maximize2 size={14} /> : <Minimize2 size={isPanel ? 14 : 16} />}
-        </button>
-        <button
-          onClick={() => setAreControlsVisible(v => !v)}
-          className={`p-1.5 rounded-md hover:bg-border ${
-            areControlsVisible ? 'text-foreground' : 'text-muted-foreground'
-          }`}
-          title={areControlsVisible ? 'Hide browser controls' : 'Show browser controls'}
-          aria-pressed={areControlsVisible}
-          data-track-category='BROWSER'
-          data-track-name='ToggleBrowserControls'
-        >
-          {areControlsVisible ? (
-            <EyeOff size={isPanel ? 14 : 16} />
-          ) : (
-            <Eye size={isPanel ? 14 : 16} />
-          )}
-        </button>
-        {/* Keep the close button reachable when the header is collapsed so
-            the user can still dismiss the browser panel. In the expanded
-            state the header already has its own close button. */}
-        {isPanel && !areControlsVisible && (
-          <button
-            onClick={handleClosePanel}
-            className='p-1.5 rounded-md hover:bg-border text-muted-foreground'
-            title='Close browser panel'
-            data-track-category='BROWSER'
-            data-track-name='CloseBrowserPanel'
-            data-track-metadata={JSON.stringify({ urls: tabs.map(t => t.url) })}
+  const closePanel = (): void => {
+    logger.info(Event.BROWSER_PANEL_CLOSED, { url: activeTab?.url, tabCount: tabs.length });
+    browserPanelActor.send({ type: 'CLOSE' });
+  };
+  const toggleFullScreen = (): void => {
+    if (isPanel) {
+      void navigate('/browser');
+      browserPanelActor.send({ type: 'CLOSE' });
+      return;
+    }
+    void navigate(-1);
+    browserPanelActor.send({ type: 'OPEN' });
+    track({
+      eventCategory: TRACK,
+      eventName: 'MinimizeToDocked',
+      eventLabel: 'Minimize from fullscreen to panel',
+      contextMetadata: { tabs: tabs.map(tab => ({ id: tab.id, url: tab.url })) },
+    });
+  };
+
+  const menuItem = 'gap-2.5 rounded-md px-2.5 py-1.5 text-[13px]';
+  const menuIcon = 'size-4 text-muted-foreground';
+
+  return (
+    <div
+      ref={rootRef}
+      className='flex h-full flex-col overflow-hidden bg-background shadow-md md:rounded-2xl'
+    >
+      {/* The tabs, as Chrome draws them: + follows the last; the list of every tab
+          and closing the panel sit at the far end. */}
+      {/* Taking the keyboard back from a page as the pointer arrives: while a page
+          has it, the first click on anything here would only hand it back. */}
+      <div onPointerEnter={takeFocusBack} className='flex h-10 shrink-0 items-stretch bg-muted/70'>
+        <TabStrip
+          variant='chrome'
+          tabs={tabs.map(tab => ({
+            key: tab.id,
+            name: tabName(tab),
+            tooltip: tab.url ? `${tabName(tab)}\n${tab.url}` : 'New tab',
+            icon: <PageFavicon favicon={tab.favicon} loading={live(tab.id).loading} />,
+            ...((live(tab.id).playing || tab.muted) && { badge: <TabSound tab={tab} /> }),
+          }))}
+          activeKey={activeTabId}
+          onSelect={switchTab}
+          onClose={closeTab}
+          onReorder={(from, to) => browserPanelActor.send({ type: 'MOVE_TAB', from, to })}
+          label='Open tabs'
+          trackCategory={TRACK}
+          trackNames={{ select: 'SwitchTab', close: 'CloseTab' }}
+        />
+        <div className='flex shrink-0 items-center pl-1 pt-1.5'>
+          <ToolbarButton
+            label={`New tab (${mod}T)`}
+            onClick={() => openTab()}
+            trackCategory={TRACK}
+            trackName='CreateNewTab'
           >
-            <X size={isPanel ? 14 : 16} />
-          </button>
-        )}
+            <Plus className='size-4' />
+          </ToolbarButton>
+        </div>
+        <div className='ml-auto flex shrink-0 items-center gap-0.5 pl-2 pr-1.5 pt-1.5'>
+          <Tooltip content={`All open tabs (${mod}P)`} delayDuration={600}>
+            <ToolbarButton
+              label='All open tabs'
+              onClick={() => setTabListOpen(true)}
+              pressed={tabListOpen}
+              trackCategory={TRACK}
+              trackName='OpenTabList'
+            >
+              <ChevronDown className='size-4' />
+            </ToolbarButton>
+          </Tooltip>
+        </div>
       </div>
 
-      {/* URL Bar */}
-      {areControlsVisible && (
-        <div
-          className={`flex items-center bg-muted border-b border-border ${
-            isPanel ? 'gap-1.5 px-2 py-1.5' : 'gap-2 px-3 py-2'
-          }`}
-        >
-          <button
-            onClick={handleGoBack}
-            disabled={!activeTab?.canGoBack}
-            className='p-1 rounded-md hover:bg-border disabled:opacity-30 disabled:cursor-not-allowed'
-            title='Go back'
-            data-track-category='BROWSER'
-            data-track-name='GoBack'
-            data-track-metadata={JSON.stringify({ url: activeTab?.url })}
-          >
-            <ArrowLeft size={isPanel ? 14 : 16} />
-          </button>
-          <button
-            onClick={handleGoForward}
-            disabled={!activeTab?.canGoForward}
-            className='p-1 rounded-md hover:bg-border disabled:opacity-30 disabled:cursor-not-allowed'
-            title='Go forward'
-            data-track-category='BROWSER'
-            data-track-name='GoForward'
-            data-track-metadata={JSON.stringify({ url: activeTab?.url })}
-          >
-            <ArrowRight size={isPanel ? 14 : 16} />
-          </button>
-          <button
-            onClick={handleReload}
-            disabled={!activeTabId}
-            className='p-1 rounded-md hover:bg-border disabled:opacity-30 disabled:cursor-not-allowed'
-            title='Reload'
-            data-track-category='BROWSER'
-            data-track-name='ReloadPage'
-            data-track-metadata={JSON.stringify({ url: activeTab?.url })}
-          >
-            {activeTab?.isLoading ? (
-              <Loader2 size={isPanel ? 14 : 16} className='animate-spin' />
-            ) : (
-              <RotateCw size={isPanel ? 14 : 16} />
-            )}
-          </button>
-
-          <form onSubmit={handleNavigate} className='flex-1'>
-            <input
-              ref={urlInputRef}
-              type='text'
-              value={urlInput}
-              onChange={e => setUrlInput(e.target.value)}
-              placeholder='Enter a URL or search...'
-              className={`w-full bg-background border border-input rounded-md focus:outline-none focus:border-transparent ${
-                isPanel
-                  ? 'px-2 py-1 text-xs focus:ring-1 focus:ring-blue-500'
-                  : 'px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500'
-              }`}
-              data-track-category='BROWSER'
-              data-track-name='EditUrlBar'
+      <BrowserToolbar
+        url={activeUrl}
+        loading={activeLive.loading}
+        canGoBack={activeTab?.canGoBack ?? false}
+        canGoForward={activeTab?.canGoForward ?? false}
+        onBack={() => runCommand('back')}
+        onForward={() => runCommand('forward')}
+        onReload={() => ask(() => view(activeTabId)?.reload(), undefined)}
+        onStop={() => ask(() => view(activeTabId)?.stop(), undefined)}
+        onGo={go}
+        addressRef={addressRef}
+        history={desktopHistory}
+        openTabs={openTabs}
+        onSwitchTab={switchTab}
+        preconnect={preconnect}
+        addressTrailing={
+          web && activeLive.zoom !== 1 ? (
+            // Zoomed, as Chrome's bar says: a click puts it back to 100%.
+            <button
+              type='button'
+              onClick={() => zoom('reset')}
+              title='Reset zoom to 100%'
+              className='shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-muted-foreground outline-none transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:bg-foreground/10'
+              data-track-category={TRACK}
+              data-track-name='BrowserZoomReset'
+            >
+              {Math.round(activeLive.zoom * 100)}%
+            </button>
+          ) : null
+        }
+        find={
+          find.text !== null && (
+            <FindBar
+              text={find.text}
+              result={activeLive.find}
+              onChange={find.setText}
+              onStep={find.step}
+              onClose={find.close}
+              inputRef={find.inputRef}
+              trackCategory={TRACK}
             />
-          </form>
-        </div>
-      )}
+          )
+        }
+        trailing={
+          <>
+            <DownloadsButton />
+            <DropdownMenu modal={false}>
+              <DropdownMenuTrigger asChild>
+                <ToolbarButton label='More' trackCategory={TRACK} trackName='BrowserMenuOpened'>
+                  <MoreHorizontal className='size-4' />
+                </ToolbarButton>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align='end' className='w-60'>
+                <DropdownMenuItem
+                  className={menuItem}
+                  onSelect={() => openTab()}
+                  data-track-category={TRACK}
+                  data-track-name='BrowserMenuNewTab'
+                >
+                  <Plus className={menuIcon} />
+                  New tab
+                  <span className='ml-auto text-xs text-muted-foreground'>{mod}T</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className={menuItem}
+                  disabled={!canReopen}
+                  onSelect={() => browserPanelActor.send({ type: 'REOPEN_TAB' })}
+                  data-track-category={TRACK}
+                  data-track-name='BrowserMenuReopenTab'
+                >
+                  <RotateCcw className={menuIcon} />
+                  Reopen closed tab
+                  <span className='ml-auto text-xs text-muted-foreground'>{mod}⇧T</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className={menuItem}
+                  disabled={!web}
+                  onSelect={() => find.open()}
+                  data-track-category={TRACK}
+                  data-track-name='BrowserMenuFind'
+                >
+                  <Search className={menuIcon} />
+                  Find in page
+                  <span className='ml-auto text-xs text-muted-foreground'>{mod}F</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className={menuItem}
+                  disabled={!web}
+                  onSelect={() => window.electronAPI?.openExternal(activeUrl)}
+                  data-track-category={TRACK}
+                  data-track-name='OpenInSystemBrowser'
+                >
+                  <ExternalLink className={menuIcon} />
+                  Open in your browser
+                </DropdownMenuItem>
+                {/* Zoom, as Chrome's menu has it: a step out, the page's size — back to
+                  100% when pressed — and a step in. It stays open while used. */}
+                <div className='flex items-center gap-2.5 px-2.5 py-1 text-[13px]'>
+                  <ZoomIn className={menuIcon} />
+                  <span className={web ? 'text-foreground' : 'text-muted-foreground'}>Zoom</span>
+                  <div className='ml-auto flex items-center gap-0.5'>
+                    <ToolbarButton
+                      label={`Zoom out (${mod}-)`}
+                      disabled={!web}
+                      onClick={() => zoom('out')}
+                      trackCategory={TRACK}
+                      trackName='BrowserMenuZoomOut'
+                    >
+                      <Minus className='size-3.5' />
+                    </ToolbarButton>
+                    <button
+                      type='button'
+                      disabled={!web}
+                      onClick={() => zoom('reset')}
+                      title='Reset to 100%'
+                      className='min-w-[3.25rem] rounded-md px-1 py-1 text-center text-[12px] tabular-nums text-foreground outline-none transition-colors hover:bg-foreground/[0.08] focus-visible:bg-foreground/[0.08] disabled:text-muted-foreground'
+                      data-track-category={TRACK}
+                      data-track-name='BrowserMenuZoomReset'
+                    >
+                      {Math.round(activeLive.zoom * 100)}%
+                    </button>
+                    <ToolbarButton
+                      label={`Zoom in (${mod}+)`}
+                      disabled={!web}
+                      onClick={() => zoom('in')}
+                      trackCategory={TRACK}
+                      trackName='BrowserMenuZoomIn'
+                    >
+                      <Plus className='size-3.5' />
+                    </ToolbarButton>
+                  </div>
+                </div>
+                <DropdownMenuItem
+                  className={menuItem}
+                  onSelect={toggleFullScreen}
+                  data-track-category={TRACK}
+                  data-track-name={isPanel ? 'OpenFullscreenBrowser' : 'MinimizeToDocked'}
+                >
+                  {isPanel ? (
+                    <Maximize2 className={menuIcon} />
+                  ) : (
+                    <Minimize2 className={menuIcon} />
+                  )}
+                  {isPanel ? 'Open full screen' : 'Dock on the right'}
+                  <span className='ml-auto text-xs text-muted-foreground'>{mod}⇧F</span>
+                </DropdownMenuItem>
+                {isPanel && (
+                  // Hidden, not closed: its tabs and pages stay, and ⌘⇧B brings it back.
+                  <DropdownMenuItem
+                    className={menuItem}
+                    onSelect={closePanel}
+                    data-track-category={TRACK}
+                    data-track-name='CloseBrowserPanel'
+                  >
+                    <PanelRightClose className={menuIcon} />
+                    Hide browser
+                    <span className='ml-auto text-xs text-muted-foreground'>{mod}⇧B</span>
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className={menuItem}
+                  // Stays open, as a switch does.
+                  onSelect={event => {
+                    event.preventDefault();
+                    setPopupsAllowed(!popupsAllowed);
+                  }}
+                  data-track-category={TRACK}
+                  data-track-name='BrowserPopupsToggled'
+                >
+                  <span className='flex size-4 items-center justify-center'>
+                    {popupsAllowed && <Check className='size-4' />}
+                  </span>
+                  Allow pop-ups
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className={menuItem}
+                  onSelect={() =>
+                    window.dispatchEvent(
+                      new CustomEvent('xyne-open-preferences', { detail: { section: 'browser' } }),
+                    )
+                  }
+                  data-track-category={TRACK}
+                  data-track-name='OpenBrowserPreferences'
+                >
+                  <Settings className={menuIcon} />
+                  Browser settings…
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </>
+        }
+        pageKey={activeTabId ?? ''}
+        onPointerEnter={takeFocusBack}
+        trackCategory={TRACK}
+      />
 
       <AnimatePresence>
-        {isElectronApp() && !hintDismissed && (
+        {!hintDismissed && (
           <BrowserHintBar
             key='browser-hint-bar'
             isMac={isMac}
@@ -853,118 +653,62 @@ export function BrowserTabsScreen({
         )}
       </AnimatePresence>
 
-      {/* Browser Content Area - webview elements render as real DOM */}
-      <div className='flex-1 bg-muted relative overflow-hidden'>
-        {tabs.map(tab => (
-          <WebviewTab
-            key={tab.id}
-            tab={tab}
-            isActive={tab.id === activeTabId}
-            webviewRefs={webviewRefs}
-            onUpdate={handleUpdateTab}
-            onUrlUpdate={handleUrlUpdate}
-            onFindResults={(tabId, result) => {
-              if (tabId === activeTabId) {
-                setFindResults({
-                  activeMatch: result.activeMatchOrdinal,
-                  matches: result.matches,
-                });
-              }
+      {/* The hole the page layer draws the open page over. */}
+      <div ref={setHole} className='relative min-h-0 flex-1 overflow-hidden bg-background'>
+        {activeLive.error && activeTab && (
+          <LoadError
+            error={activeLive.error}
+            onRetry={() => {
+              const page = view(activeTab.id);
+              const url = activeLive.error?.url || activeTab.url;
+              if (page) void ask(() => page.loadURL(url), Promise.resolve()).catch(() => undefined);
             }}
-            isPanel={isPanel}
-            popupsEnabled={browserSettings.popups}
+            trackCategory={TRACK}
           />
-        ))}
-
-        {/* Find in Page Bar */}
-        {isFindBarOpen && (
-          <div className='absolute top-2 right-2 bg-background border border-border rounded-lg shadow-lg p-2 flex items-center gap-2 z-50 min-w-[300px]'>
-            <input
-              ref={findInputRef}
-              type='text'
-              value={findQuery}
-              onChange={e => setFindQuery(e.target.value)}
-              onKeyDown={handleFindKeyDown}
-              placeholder='Find in page...'
-              className='flex-1 bg-muted px-3 py-1.5 text-sm rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
-              data-track-category='BROWSER'
-              data-track-name='FIND_IN_PAGE_INPUT'
-            />
-            {findResults.matches > 0 && (
-              <span className='text-xs text-muted-foreground whitespace-nowrap'>
-                {findResults.activeMatch}/{findResults.matches}
-              </span>
-            )}
-            <button
-              onClick={handleFindPrevious}
-              disabled={findResults.matches === 0}
-              className='p-1.5 rounded-md hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed'
-              title='Previous match (Shift+Enter)'
-              data-track-category='BROWSER'
-              data-track-name='FIND_PREVIOUS_MATCH'
-            >
-              <ChevronUp size={16} />
-            </button>
-            <button
-              onClick={handleFindNext}
-              disabled={findResults.matches === 0}
-              className='p-1.5 rounded-md hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed'
-              title='Next match (Enter)'
-              data-track-category='BROWSER'
-              data-track-name='FIND_NEXT_MATCH'
-            >
-              <ChevronDown size={16} />
-            </button>
-            <button
-              onClick={handleCloseFindBar}
-              className='p-1.5 rounded-md hover:bg-muted text-muted-foreground'
-              title='Close (Esc)'
-              data-track-category='BROWSER'
-              data-track-name='CLOSE_FIND_BAR'
-            >
-              <X size={16} />
-            </button>
-          </div>
         )}
 
-        {tabs.length === 0 && (
-          <div
-            className={`absolute inset-0 flex flex-col items-center justify-center text-muted-foreground ${
-              isPanel ? 'p-4' : ''
-            }`}
-          >
-            <Globe size={isPanel ? 40 : 64} className='mb-4 opacity-30' />
-            {!isPanel && <h2 className='text-xl font-medium mb-2'>Welcome to Browser</h2>}
-            <p className={`text-center mb-4 ${isPanel ? 'text-xs' : 'text-sm mb-6'}`}>
-              {isPanel
-                ? 'Enter a URL above or click + to open a new tab'
-                : 'Enter a URL above or click the + button to open a new tab'}
-            </p>
-            <div className='flex gap-2'>
-              <button
-                onClick={() => handleCreateTab('https://www.google.com')}
-                className={`bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors ${
-                  isPanel ? 'px-3 py-1.5 text-xs' : 'px-4 py-2'
-                }`}
-                data-track-category='BROWSER'
-                data-track-name='OpenGoogle'
-              >
-                {isPanel ? 'Google' : 'Open Google'}
-              </button>
-              <button
-                onClick={() => handleCreateTab('https://github.com')}
-                className={`bg-gray-700 text-white rounded-md hover:bg-gray-800 transition-colors ${
-                  isPanel ? 'px-3 py-1.5 text-xs' : 'px-4 py-2'
-                }`}
-                data-track-category='BROWSER'
-                data-track-name='OpenGitHub'
-              >
-                {isPanel ? 'GitHub' : 'Open GitHub'}
-              </button>
-            </div>
+        {(!activeTab || !activeTab.url) && (
+          <div className='absolute inset-0'>
+            <StartPage
+              onGo={go}
+              history={desktopHistory}
+              openTabs={openTabs}
+              onSwitchTab={switchTab}
+              preconnect={preconnect}
+              keys={[
+                { keys: `${mod}T`, label: 'New tab' },
+                { keys: `${mod}L`, label: 'Address' },
+                { keys: `${mod}F`, label: 'Find in page' },
+                { keys: `${mod}P`, label: 'All tabs' },
+              ]}
+              trackCategory={TRACK}
+            >
+              <MostVisited history={desktopHistory} onGo={go} trackCategory={TRACK} />
+            </StartPage>
           </div>
         )}
       </div>
+
+      <TabSwitcher
+        open={tabListOpen}
+        onOpenChange={setTabListOpen}
+        entries={tabs.map(tab => ({
+          key: tab.id,
+          name: tabName(tab),
+          detail: tab.url ? hostOf(tab.url) : 'New tab',
+          icon: <PageFavicon favicon={tab.favicon} loading={live(tab.id).loading} />,
+          current: tab.id === activeTabId,
+        }))}
+        onOpen={switchTab}
+        onClose={closeTab}
+        onCloseAll={() => {
+          for (const tab of tabs) browserPanelActor.send({ type: 'CLOSE_TAB', tabId: tab.id });
+          if (isPanel) browserPanelActor.send({ type: 'CLOSE' });
+          else void navigate(-1);
+        }}
+        where='anywhere in the browser'
+        trackCategory={TRACK}
+      />
     </div>
   );
 }

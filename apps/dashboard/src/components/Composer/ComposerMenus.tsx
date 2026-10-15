@@ -11,7 +11,7 @@ import {
   type ReactNode,
 } from 'react';
 import { Command } from 'cmdk';
-import { LayoutGrid, Loader2, X } from 'lucide-react';
+import { AppWindow, LayoutGrid, Loader2, X } from 'lucide-react';
 import {
   ChatDefault,
   File02Text,
@@ -55,6 +55,7 @@ import type { VisibleChannel } from '../../machines/stateMachine';
 import type { DisplaySearchResult } from '../../types/search';
 import type { PickedContext } from './Composer.types';
 import { pickFromChannel, pickFromResult, refKey } from './Composer.utils';
+import { useArtifactAppOptions } from './useArtifactAppOptions';
 
 /** Lets the editor drive a menu it doesn't own focus for. */
 export interface ComposerMenuHandle {
@@ -128,16 +129,25 @@ const EmptyRow = ({ children }: { children: ReactNode }): ReactElement => (
 
 // ── @ — context picker ──────────────────────────────────────────────────────
 
-const PICKER_TABS: Array<{ tab: TabType; label: string; Icon: ComponentType<{ size?: number }> }> =
-  [
-    { tab: TabType.ALL, label: 'All', Icon: LayoutGrid },
-    { tab: TabType.USERS, label: 'People', Icon: UserTwo },
-    { tab: TabType.MESSAGES, label: 'Messages', Icon: ChatDefault },
-    { tab: TabType.CHANNELS, label: 'Channels', Icon: Hashtag },
-    { tab: TabType.ATTACHMENTS, label: 'Files', Icon: FolderDefault },
-    { tab: TabType.CANVAS, label: 'Canvas', Icon: File02Text },
-    { tab: TabType.TICKETS, label: 'Tickets', Icon: TicketToken },
-  ];
+/** Artifact apps are not in the search index, so their tab is the picker's
+ *  own rather than one of the search hook's tabs. */
+const APPS_TAB = 'apps';
+type PickerTab = TabType | typeof APPS_TAB;
+
+const PICKER_TABS: Array<{
+  tab: PickerTab;
+  label: string;
+  Icon: ComponentType<{ size?: number }>;
+}> = [
+  { tab: TabType.ALL, label: 'All', Icon: LayoutGrid },
+  { tab: TabType.USERS, label: 'People', Icon: UserTwo },
+  { tab: TabType.MESSAGES, label: 'Messages', Icon: ChatDefault },
+  { tab: TabType.CHANNELS, label: 'Channels', Icon: Hashtag },
+  { tab: TabType.ATTACHMENTS, label: 'Files', Icon: FolderDefault },
+  { tab: TabType.CANVAS, label: 'Canvas', Icon: File02Text },
+  { tab: TabType.TICKETS, label: 'Tickets', Icon: TicketToken },
+  { tab: APPS_TAB, label: 'Artifact apps', Icon: AppWindow },
+];
 
 /** The tab "@" opens on: people are what a message is most often about. */
 const DEFAULT_TAB = TabType.USERS;
@@ -267,10 +277,19 @@ export const MentionPicker = forwardRef<
   }, [setActiveTab]);
   /** A tab the user picked is never changed under them. */
   const tabChosenRef = useRef(false);
-  const chooseTab = (tab: TabType): void => {
+  // The apps tab sits beside the search hook's `activeTab` rather than in it.
+  const [appsOpen, setAppsOpen] = useState(false);
+  const currentTab: PickerTab = appsOpen ? APPS_TAB : activeTab;
+  const chooseTab = (tab: PickerTab): void => {
     tabChosenRef.current = true;
+    if (tab === APPS_TAB) {
+      setAppsOpen(true);
+      return;
+    }
+    setAppsOpen(false);
     setActiveTab(tab);
   };
+  const apps = useArtifactAppOptions(query, appsOpen);
 
   useEffect(() => {
     setText(query);
@@ -281,13 +300,14 @@ export const MentionPicker = forwardRef<
     () => ({
       cycleTab: (backwards: boolean): void => {
         const order = PICKER_TABS.map(t => t.tab);
-        const index = order.indexOf(activeTab);
-        const next = (index + (backwards ? -1 : 1) + order.length) % order.length;
+        const index = order.indexOf(appsOpen ? APPS_TAB : activeTab);
+        const next = order[(index + (backwards ? -1 : 1) + order.length) % order.length]!;
         tabChosenRef.current = true;
-        setActiveTab(order[next]!);
+        setAppsOpen(next === APPS_TAB);
+        if (next !== APPS_TAB) setActiveTab(next);
       },
     }),
-    [activeTab, setActiveTab],
+    [activeTab, appsOpen, setActiveTab],
   );
 
   const tabsRef = useRef<HTMLDivElement>(null);
@@ -367,16 +387,21 @@ export const MentionPicker = forwardRef<
   // "@barclays" names no one: rather than a dead end on People, the search
   // widens to everything (channels, messages, files) once it has settled.
   const noOneMatches =
-    activeTab === TabType.USERS && hasQuery && !isSearching && indexed.length === 0;
+    !appsOpen && activeTab === TabType.USERS && hasQuery && !isSearching && indexed.length === 0;
   useEffect(() => {
     if (noOneMatches && !tabChosenRef.current) setActiveTab(TabType.ALL);
   }, [noOneMatches, setActiveTab]);
 
   const messages = isAll ? indexed.filter(r => r.result.type === 'conversation') : [];
   const rest = isAll ? indexed.filter(r => r.result.type !== 'conversation') : indexed;
-  const total = people.length + channels.length + indexed.length;
-  const resetKey = `${activeTab}|${query}|${people.length}|${channels.length}|${indexed.length}`;
-  const label = isAll ? undefined : PICKER_TABS.find(t => t.tab === activeTab)?.label.toLowerCase();
+  const total = appsOpen ? apps.options.length : people.length + channels.length + indexed.length;
+  const resetKey = appsOpen
+    ? `${APPS_TAB}|${query}|${apps.options.length}`
+    : `${activeTab}|${query}|${people.length}|${channels.length}|${indexed.length}`;
+  const label =
+    isAll && !appsOpen
+      ? undefined
+      : PICKER_TABS.find(t => t.tab === currentTab)?.label.toLowerCase();
 
   const renderResult = ({
     result,
@@ -401,7 +426,7 @@ export const MentionPicker = forwardRef<
       >
         {PICKER_TABS.map(item => {
           const { tab, label: tabLabel } = item;
-          const active = activeTab === tab;
+          const active = currentTab === tab;
           return (
             <button
               key={tab}
@@ -444,7 +469,9 @@ export const MentionPicker = forwardRef<
   );
 
   const empty =
-    total > 0 ? null : isSearching ? (
+    total > 0 ? null : appsOpen && apps.isError ? (
+      <EmptyRow>Could not load apps</EmptyRow>
+    ) : (appsOpen ? apps.isLoading : isSearching) ? (
       <div className='flex items-center justify-center gap-2 px-3 py-6 text-sm text-muted-foreground'>
         <Loader2 className='h-4 w-4 animate-spin' aria-hidden />
         Searching…
@@ -455,7 +482,7 @@ export const MentionPicker = forwardRef<
           <>
             No {label ?? 'results'} match “{query}”
             {/* Opening on People shouldn't strand a search for a channel or a message. */}
-            {!isAll && (
+            {!isAll && !appsOpen && (
               <button
                 type='button'
                 onClick={() => chooseTab(TabType.ALL)}
@@ -467,6 +494,8 @@ export const MentionPicker = forwardRef<
               </button>
             )}
           </>
+        ) : appsOpen ? (
+          'No apps yet'
         ) : (
           `Type to search ${label ?? 'messages, people, files and more'}`
         )}
@@ -505,21 +534,49 @@ export const MentionPicker = forwardRef<
       }}
     >
       <MenuList header={header} footer={footer} resetKey={resetKey} empty={empty}>
-        {messages.map(renderResult)}
-        {people.map(renderResult)}
-        {channels.map(({ channel }) => (
-          <ChannelCommandItem
-            key={channel.id}
-            channel={channel}
-            currentUserID={currentUserID}
-            unreadCount={unreadCounts[channel.id] ?? 0}
-            onSelect={displayName => addPick(pickFromChannel(channel, displayName))}
-            getChannelIcon={getChannelIcon}
-            isSelected={pickedRefs.has(refKey({ kind: 'channel', id: channel.id }))}
-          />
-        ))}
-        {rest.map(renderResult)}
-        {!isAll &&
+        {appsOpen &&
+          apps.options.map(({ app, subtitle }) => {
+            const pick: PickedContext = {
+              kind: 'app',
+              id: app.id,
+              label: app.title,
+              mention: app.title,
+            };
+            return (
+              <Command.Item
+                key={app.id}
+                value={`app-${app.id}`}
+                onSelect={() => addPick(pick)}
+                className={MENU_ROW_CLASS}
+                data-track-category='XyneAI'
+                data-track-name='COMPOSER_APP_PICK'
+              >
+                <span className='grid size-5 shrink-0 place-items-center text-muted-foreground'>
+                  <AppWindow size={14} aria-hidden />
+                </span>
+                <span className='min-w-0 flex-1 truncate'>{app.title}</span>
+                <span className='shrink-0 truncate text-xs text-muted-foreground'>{subtitle}</span>
+                {pickedRefs.has(refKey(pick)) && <PickedTick />}
+              </Command.Item>
+            );
+          })}
+        {!appsOpen && messages.map(renderResult)}
+        {!appsOpen && people.map(renderResult)}
+        {!appsOpen &&
+          channels.map(({ channel }) => (
+            <ChannelCommandItem
+              key={channel.id}
+              channel={channel}
+              currentUserID={currentUserID}
+              unreadCount={unreadCounts[channel.id] ?? 0}
+              onSelect={displayName => addPick(pickFromChannel(channel, displayName))}
+              getChannelIcon={getChannelIcon}
+              isSelected={pickedRefs.has(refKey({ kind: 'channel', id: channel.id }))}
+            />
+          ))}
+        {!appsOpen && rest.map(renderResult)}
+        {!appsOpen &&
+          !isAll &&
           !showRecentPeople &&
           paginationState[activeTab]?.hasMore &&
           indexed.length > 0 && (

@@ -45,9 +45,29 @@ interface SandboxPwCacheEntry {
   transport: StdioClientTransport;
   sessionId: string;
   cdpPort: number;
+  lastUsedAt: number;
 }
 
 const CACHE = new Map<string, SandboxPwCacheEntry>();
+const INFLIGHT = new Map<string, Promise<SandboxPwClientResult>>();
+
+const IDLE_TTL_MS = Number(process.env["SANDBOX_PW_IDLE_TTL_MS"]) > 0 ? Number(process.env["SANDBOX_PW_IDLE_TTL_MS"]) : 15 * 60_000;
+const SWEEP_INTERVAL_MS = 60_000;
+
+let sweeperStarted = false;
+function startIdleSweeperOnce(): void {
+  if (sweeperStarted) return;
+  sweeperStarted = true;
+  setInterval(() => {
+    const cutoff = Date.now() - IDLE_TTL_MS;
+    for (const [storeKey, entry] of CACHE) {
+      if (entry.lastUsedAt < cutoff) {
+        log.info(`[sandbox-pw:${entry.sessionId.slice(0, 8)}] closing idle playwright-mcp for ${storeKey}`);
+        evict(storeKey);
+      }
+    }
+  }, SWEEP_INTERVAL_MS).unref();
+}
 
 let signalHandlersInstalled = false;
 function installSignalHandlersOnce(): void {
@@ -87,6 +107,19 @@ export async function getOrSpawnSandboxPwClient(
   routerUrl: string,
 ): Promise<SandboxPwClientResult> {
   installSignalHandlersOnce();
+  startIdleSweeperOnce();
+
+  const inflight = INFLIGHT.get(storeKey);
+  if (inflight) return inflight;
+  const pending = spawnSandboxPwClient(storeKey, routerUrl).finally(() => INFLIGHT.delete(storeKey));
+  INFLIGHT.set(storeKey, pending);
+  return pending;
+}
+
+async function spawnSandboxPwClient(
+  storeKey: string,
+  routerUrl: string,
+): Promise<SandboxPwClientResult> {
 
   const session = getSandboxSession(storeKey);
   if (!session) {
@@ -95,6 +128,7 @@ export async function getOrSpawnSandboxPwClient(
 
   const cached = CACHE.get(storeKey);
   if (cached && cached.sessionId === session.id) {
+    cached.lastUsedAt = Date.now();
     return { ok: true, client: cached.client, sessionId: session.id };
   }
   if (cached) {
@@ -166,6 +200,7 @@ export async function getOrSpawnSandboxPwClient(
     transport,
     sessionId: session.id,
     cdpPort,
+    lastUsedAt: Date.now(),
   });
   return { ok: true, client, sessionId: session.id };
 }

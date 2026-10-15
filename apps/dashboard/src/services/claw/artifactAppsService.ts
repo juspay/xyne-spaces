@@ -87,6 +87,18 @@ export async function saveArtifactApp(input: {
   return clawRequest(BASE, { method: 'POST', body: JSON.stringify(input) });
 }
 
+/**
+ * Create an app with a name and nothing built yet, so its id can go into the
+ * `spaces app init --app-id` command. The first `spaces app push` adds v1.
+ */
+export async function createBlankArtifactApp(input: {
+  title: string;
+  description: string;
+  icon?: string;
+}): Promise<{ app: ArtifactAppDetail }> {
+  return clawRequest(`${BASE}/blank`, { method: 'POST', body: JSON.stringify(input) });
+}
+
 /** Append a regenerated build. Byte-identical content is deduped server-side. */
 export async function addArtifactAppVersion(
   appId: string,

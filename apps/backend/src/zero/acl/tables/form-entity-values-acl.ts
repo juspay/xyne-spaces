@@ -3,7 +3,7 @@ import {
   MutationACLError,
   type TableSchema,
 } from '../core/types';
-import { ChannelVisibility, FormEntityType, Schema } from '@xyne/shared';
+import { ChannelRole, ChannelVisibility, FormEntityType, Schema, WorkspaceRole } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
 
@@ -58,7 +58,26 @@ export class FormEntityValuesACL extends BaseACL<'form_entity_values'> {
       }
       return;
     }
-    // Non-ticket entity types are not channel-gated here.
+    // A channel's fields describe the channel itself: its admins (or workspace admins) set them.
+    if (entityType === FormEntityType.CHANNEL) {
+      const channel = await tx.run(zql.channels.where('id', entityId).one());
+      if (!channel || channel.workspaceId !== this.ctx.workspaceId) {
+        throw new MutationACLError('Form entity value failed: you do not have access to the referenced channel', 'form_entity_values');
+      }
+      if (this.ctx.role === WorkspaceRole.ADMIN || this.ctx.role === WorkspaceRole.OWNER) return;
+      const admin = await tx.run(
+        zql.channel_participants
+          .where('channelId', entityId)
+          .where('userId', this.ctx.userID)
+          .where('role', ChannelRole.ADMIN)
+          .one(),
+      );
+      if (!admin) {
+        throw new MutationACLError("Form entity value failed: only the channel's admins can set its fields", 'form_entity_values');
+      }
+      return;
+    }
+    // Other non-ticket entity types are not channel-gated here.
   }
 
   async canInsert(args: InsertValue<TableSchema<'form_entity_values'>>, tx: Transaction<Schema>): Promise<void> {

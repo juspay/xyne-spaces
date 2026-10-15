@@ -10,7 +10,7 @@ import {
 } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Activity, BookOpen, FileText, FolderGit2, Paperclip } from 'lucide-react';
+import { Activity, AppWindow, BookOpen, FileText, FolderGit2, Paperclip } from 'lucide-react';
 import {
   ChatDefault,
   File02Default,
@@ -290,6 +290,8 @@ function iconFor(item: AttachedContextItem): ReactElement {
       return <FileText className={ICON} aria-hidden />;
     case 'local-folder':
       return <FolderGit2 className={ICON} aria-hidden />;
+    case 'app':
+      return <AppWindow className={ICON} aria-hidden />;
     default:
       return <Activity className={ICON} aria-hidden />;
   }

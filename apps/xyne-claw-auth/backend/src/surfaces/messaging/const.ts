@@ -20,8 +20,15 @@ export const SWEEP_MS = 15_000;
 /** Redis TTL of the login artifact (QR string / device code). WhatsApp
  *  rotates QRs every ~20s; 60s keeps the latest one readable by any pod. */
 export const LOGIN_ARTIFACT_TTL_S = 60;
-/** Inbound message-id dedup window. */
-export const DEDUP_TTL_S = 600;
+/** Inbound message-id dedup window. A day, not minutes: a linked device is
+ *  handed its recent messages again whenever the connection is re-established,
+ *  and a window shorter than that backlog re-runs every request and command
+ *  (/new included) the person sent before it. */
+export const DEDUP_TTL_S = 24 * 60 * 60;
+/** A message older than this on arrival is a re-delivery or a backlog from an
+ *  outage, not something the person is waiting on. Acting on it now — running
+ *  an old request, honouring an old /new — is worse than staying quiet. */
+export const MAX_INBOUND_AGE_S = 15 * 60;
 /** Outbox items survive this long waiting for a pod to own the account. */
 export const OUTBOX_TTL_S = 6 * 60 * 60;
 /** Blocking pop timeout of the outbox drain loop (seconds). */
@@ -50,6 +57,10 @@ export const TYPING_COUNT_TTL_S = 20 * 60;
 export const MAX_INBOUND_BYTES = 12 * 1024 * 1024;
 
 export const REDIS_PREFIX = "claw:channel";
+
+/** `ScheduledJob.replyMode` of a job set up from a WhatsApp chat: its results
+ *  are texted back to that person instead of posted into Spaces. */
+export const WHATSAPP_REPLY_MODE = "whatsapp";
 export const CONTROL_CHANNEL = `${REDIS_PREFIX}:control`;
 
 /** `/slug task` at the start of a message picks an agent. Not `@slug`: a

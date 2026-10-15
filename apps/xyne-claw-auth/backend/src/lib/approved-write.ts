@@ -33,9 +33,10 @@ import { isOAuthProvider, prepareOAuthCustomTool } from "./oauth-custom-tool.js"
 
 const log = createLogger("approved-write");
 
-/** A pending write exactly as claw minted it. The signature covers only the
- *  four fields of the base shape (routes/mcp.ts signAction); the two optional
- *  ones ride along so a re-signed card can be verified in either form. */
+/** A pending write exactly as claw minted it. The signature covers the base
+ *  shape (routes/mcp.ts writeActionPayload, which includes `subagentId` when
+ *  one was bound); the two optional fields here ride along so a re-signed card
+ *  can be verified in either form. */
 export interface SignedWriteAction extends BaseWriteAction {
   agentSlug?: string;
   spacesAppId?: string;
@@ -76,10 +77,10 @@ export async function executeApprovedWrite(input: {
     return { ok: false, reason: "signature", message: "This approval isn't yours to give." };
   }
 
-  const { verifyActionSignatureAny } = await import("../routes/mcp.js");
-  // Claw signs the bare four-field shape; accept the agent-bound shape too so
-  // a re-signed card (webhook.ts mints one for Spaces) still verifies.
-  const bare = { serverType, tool, params, userId };
+  const { verifyActionSignatureAny, writeActionPayload } = await import("../routes/mcp.js");
+  // Claw signs the bare shape; accept the agent-bound shape too so a re-signed
+  // card (webhook.ts mints one for Spaces) still verifies.
+  const bare = writeActionPayload(action);
   const bound = { ...bare, agentSlug: action.agentSlug ?? "", spacesAppId: action.spacesAppId ?? "" };
   if (!verifyActionSignatureAny([bare, bound], signature)) {
     log.error(`[approved-write] HMAC verification failed tool=${tool} user=${userId}`);
@@ -154,18 +155,33 @@ export async function executeApprovedWrite(input: {
 
   const { callTool } = await import("../mcp/runner.js");
   const { hasConnectorDefinition } = await import("../mcp/connector-definitions.js");
-  const { loadEffectiveCredentials } = await import("./credentials-loader.js");
+  const { loadApprovedWriteCredentials } = await import("./credentials-loader.js");
 
   if (!(await hasConnectorDefinition(serverType))) {
     return { ok: false, reason: "unsupported", message: `No adapter for ${serverType}.` };
   }
-  const effective = await loadEffectiveCredentials(userId, serverType, action.agentSlug);
+  const effective = await loadApprovedWriteCredentials({
+    userId,
+    serverType,
+    agentSlug: action.agentSlug,
+    spacesAppId: action.spacesAppId,
+    subagentId: bare.subagentId,
+  });
   if (!effective) {
     return { ok: false, reason: "no-connection", message: `Your ${serverType} connection is missing — reconnect it in Xyne Spaces.` };
   }
 
   try {
-    const result = await callTool(userId, serverType, effective.credentials, tool, params);
+    const result = await callTool(
+      userId,
+      serverType,
+      effective.credentials,
+      tool,
+      params,
+      action.agentSlug,
+      undefined,
+      effective.instance,
+    );
     log.info(`[approved-write] executed tool=${tool} user=${userId} → ${result.content.slice(0, 100)}`);
     return { ok: true, message: `Done — ${tool} ran.`, resultText: result.content };
   } catch (err) {

@@ -61,6 +61,20 @@ export const chatMessageRepository = {
     });
   },
 
+  /** The pending action exactly as the run stored it, found by signature. */
+  findPendingAction: async (conversationId: string, signature: string): Promise<Record<string, unknown> | null> => {
+    const row = await prisma.chatMessage.findFirst({
+      where: { conversationId, pendingActions: { array_contains: [{ signature }] } },
+      select: { pendingActions: true },
+      orderBy: { createdAt: "desc" },
+    });
+    if (!row || !Array.isArray(row.pendingActions)) return null;
+    const match = (row.pendingActions as Array<Record<string, unknown>>).find(
+      (action) => action && typeof action === "object" && action["signature"] === signature,
+    );
+    return match ?? null;
+  },
+
   resolvePendingAction: async (
     conversationId: string,
     signature: string,

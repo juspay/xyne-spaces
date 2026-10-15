@@ -124,6 +124,7 @@ import {
 } from '../utils/channel.js';
 import {
   ChannelPublishedEntityType,
+  MAX_DUPLICATE_LOOKBACK_DAYS,
   MAX_DUPLICATE_SCOPE_FIELDS,
   MAX_PUBLISHED_APPS,
 } from './types.js';
@@ -10717,6 +10718,44 @@ export const mutators = defineMutators({
         }
       },
     ),
+    setRecordingDefaultSummaryTemplate: defineMutator(
+      z.object({
+        id: z.string(),
+        // `null` clears the default so recordings go back to the automatic pick.
+        recordingDefaultSummaryTemplateId: z.string().min(1).nullable(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, recordingDefaultSummaryTemplateId, timestamp } }) => {
+        const existing = await tx.run(
+          zql.user_preferences.where('userId', ctx.userID).one(),
+        );
+        if (existing) {
+          await tx.mutate.user_preferences.update({
+            id: existing.id,
+            recordingDefaultSummaryTemplateId,
+            updatedAt: timestamp,
+          });
+        } else {
+          await tx.mutate.user_preferences.insert({
+            workspaceId: ctx.workspaceId,
+            id,
+            userId: ctx.userID,
+            channelSortOrder: ChannelSortOrder.RECENCY,
+            enterSendsMessage: true,
+            allowThreadBroadcastMentions: false,
+            globalDesktopNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+            globalMobileNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+            threadReplyNotificationsEnabled: true,
+            channelWideMentionsEnabled: true,
+            notificationKeywords: '[]',
+            showThreadTags: false,
+            recordingDefaultSummaryTemplateId,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+        }
+      },
+    ),
   },
 
   emailChannelPreference: {
@@ -10744,6 +10783,7 @@ export const mutators = defineMutators({
           .object({
             enabled: z.boolean(),
             scopeFieldGlobalIds: z.array(z.string()).max(MAX_DUPLICATE_SCOPE_FIELDS),
+            lookbackDays: z.number().int().min(0).max(MAX_DUPLICATE_LOOKBACK_DAYS).nullable().optional(),
           })
           .nullable()
           .optional(),
@@ -13055,6 +13095,15 @@ export const mutators = defineMutators({
           ...(isPrivate !== undefined && { isPrivate }),
           updatedAt: timestamp,
         });
+        // Folders carry their own copy of isPrivate and Zero's ACL reads each row's own copy,
+        // so a visibility change must reach every folder under this root or they keep syncing
+        // to the whole workspace after the root goes private.
+        if (isPrivate !== undefined && !collection.parentId) {
+          const folders = await tx.run(zql.collections.where('rootCollectionId', id));
+          for (const folder of folders) {
+            await tx.mutate.collections.update({ id: folder.id, isPrivate, updatedAt: timestamp });
+          }
+        }
       },
     ),
 

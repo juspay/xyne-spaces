@@ -10,6 +10,7 @@ import { userMemoryRouter } from "./routes/user-memory.js";
 import { failureCuratorRouter } from "./routes/failure-curator.js";
 import { usagePatternCuratorRouter } from "./routes/usage-pattern-curator.js";
 import { goalJudgeRouter } from "./routes/goal-judge.js";
+import { inboxRouter } from "./routes/inbox.js";
 import { debugRouter } from "./routes/debug.js";
 import { taskCommandsInternalRouter } from "./routes/task-commands-internal.js";
 import { evalJudgeRouter } from "./routes/eval-judge.js";
@@ -20,13 +21,18 @@ import { attachmentsRouter } from "./routes/attachments.js";
 import { litellmModelsRouter } from "./routes/litellm-models.js";
 import { startSessionCleanup, flushAllActiveSessions } from "./session-store.js";
 import { beginDraining, isDraining } from "./drain.js";
-import { markRunQueueDrainPaused, startRunQueueWorker } from "./run-queue-worker.js";
+import { RUN_EXECUTION_QUEUE_NAME, markRunQueueDrainPaused, runQueueConcurrency, runQueueConnectionOptions, startRunQueueWorker } from "./run-queue-worker.js";
 import { startLoopWatchdog, stopLoopWatchdog } from "./loop-watchdog.js";
+import { startPressureMetrics } from "./pressure.js";
+import { startTelemetry, stopTelemetry } from "./telemetry.js";
 import { stopRunControlSubscriber } from "./run-control.js";
 import { createLogger } from "./logger.js";
 import { installSandboxRepoConfigLoader } from "./sandbox-repo-configs.js";
 import { startPodAddressPublisher } from "./run-ownership.js";
+import { installGlobalHttpDispatcher } from "./http-dispatcher.js";
 const log = createLogger("main");
+
+log.info(`[startup] global HTTP dispatcher capped at ${installGlobalHttpDispatcher()} connections per origin`);
 
 const DRAIN_TIMEOUT_MS = Number(process.env["DRAIN_TIMEOUT"] ?? 900) * 1_000;
 const FATAL_FLUSH_TIMEOUT_MS = Number(process.env["FATAL_FLUSH_TIMEOUT_MS"] ?? 30_000);
@@ -54,6 +60,13 @@ if (!DATA_DIR_IS_EXPLICIT && process.env["NODE_ENV"] === "production") {
 
 
 startLoopWatchdog();
+startPressureMetrics(getActiveRunCount);
+const runQueueConnection = runQueueConnectionOptions();
+startTelemetry({
+  activeRuns: getActiveRunCount,
+  runCapacity: runQueueConcurrency(),
+  runQueue: runQueueConnection ? { name: RUN_EXECUTION_QUEUE_NAME, connection: runQueueConnection } : null,
+});
 initStore();
 installSandboxRepoConfigLoader();
 startSessionCleanup();
@@ -80,6 +93,7 @@ app.use(userMemoryRouter);
 app.use(failureCuratorRouter);
 app.use(usagePatternCuratorRouter);
 app.use(goalJudgeRouter);
+app.use(inboxRouter);
 app.use(debugRouter);
 app.use(taskCommandsInternalRouter);
 app.use(evalJudgeRouter);
@@ -145,6 +159,7 @@ async function shutdown(signal: string): Promise<void> {
   await stopRunControlSubscriber().catch((err) => {
     log.error("[xyne-claw] run control subscriber close failed:", err);
   });
+  await stopTelemetry();
   stopLoopWatchdog();
   server.close(() => process.exit(0));
 }

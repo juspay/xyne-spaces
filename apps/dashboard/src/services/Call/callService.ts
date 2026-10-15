@@ -72,6 +72,7 @@ export interface ScheduleCallRequest {
     /** IANA timezone used to format start/end times in the email body. */
     timezone?: string;
   };
+  notifyParticipantsByEmail?: boolean;
 }
 
 export interface ScheduleCallResponse {
@@ -95,6 +96,7 @@ export interface CreateRecurringSeriesRequest {
   endsOn?: number; // epoch ms — omit for indefinite series
   externalInvitees?: string[];
   invitation?: ScheduleCallRequest['invitation'];
+  notifyParticipantsByEmail?: boolean;
 }
 
 export interface CreateRecurringSeriesResponse {
@@ -111,6 +113,7 @@ export interface UpdateScheduleCallRequest {
   channelId?: string;
   callUpdatesChannel?: string;
   externalInvitees?: string[];
+  notifyParticipantsByEmail?: boolean;
 }
 
 export interface UpdateRecurringSeriesRequest {
@@ -125,6 +128,7 @@ export interface UpdateRecurringSeriesRequest {
   channelId?: string;
   callUpdatesChannel?: string;
   externalInvitees?: string[];
+  notifyParticipantsByEmail?: boolean;
 }
 
 export interface ApiErrorResponse {
@@ -582,6 +586,7 @@ export class CallService {
             externalInviteDelivery: data.externalInviteDelivery,
             invitation: data.invitation,
           }),
+        ...(data.notifyParticipantsByEmail && { notifyParticipantsByEmail: true }),
       });
 
       return response.data;
@@ -626,6 +631,7 @@ export class CallService {
         endsOn: data.endsOn,
         externalInvitees: data.externalInvitees,
         invitation: data.invitation,
+        ...(data.notifyParticipantsByEmail && { notifyParticipantsByEmail: true }),
       });
 
       return response.data;
@@ -685,9 +691,11 @@ export class CallService {
    * Cancel a single scheduled call instance.
    * Marks the instance as CANCELLED and triggers buffer replenishment for recurring series.
    */
-  async cancelScheduledCall(callId: string): Promise<void> {
+  async cancelScheduledCall(callId: string, notifyParticipantsByEmail = false): Promise<void> {
     try {
-      await apiInstance.delete(`/calls/${callId}`);
+      await apiInstance.delete(`/calls/${callId}`, {
+        ...(notifyParticipantsByEmail && { params: { notifyParticipantsByEmail: true } }),
+      });
     } catch (error) {
       if (error instanceof AxiosError && error.response?.data) {
         const errorData = error.response.data as unknown;
@@ -707,9 +715,11 @@ export class CallService {
    * Cancel an entire recurring call series.
    * Marks all future instances as CANCELLED and removes their Bull jobs.
    */
-  async cancelRecurringSeries(seriesId: string): Promise<void> {
+  async cancelRecurringSeries(seriesId: string, notifyParticipantsByEmail = false): Promise<void> {
     try {
-      await apiInstance.delete(`/calls/series/${seriesId}`);
+      await apiInstance.delete(`/calls/series/${seriesId}`, {
+        ...(notifyParticipantsByEmail && { params: { notifyParticipantsByEmail: true } }),
+      });
     } catch (error) {
       if (error instanceof AxiosError && error.response?.data) {
         const errorData = error.response.data as unknown;

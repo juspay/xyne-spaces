@@ -1,7 +1,14 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react';
-import { Minus, Plus, RotateCw } from 'lucide-react';
+import { ImageOff, Minus, Plus, RotateCw } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
-import { PreviewButton, PreviewControls, PreviewMeta, PreviewSkeletonView } from '../chrome';
+import {
+  PreviewButton,
+  PreviewControls,
+  PreviewMessage,
+  PreviewMeta,
+  PreviewSkeletonView,
+  usePreviewDownload,
+} from '../chrome';
 import type { PreviewerProps } from '../types';
 import { AmbientImage } from './media/Ambient';
 
@@ -21,7 +28,9 @@ type Zoom = 'fit' | number;
  */
 export default function ImagePreview(props: PreviewerProps): ReactElement {
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const download = usePreviewDownload();
   const [url, setUrl] = useState<string | null>(null);
+  const [undecodable, setUndecodable] = useState(false);
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
   const [pane, setPane] = useState({ width: 0, height: 0 });
   const [zoom, setZoom] = useState<Zoom>('fit');
@@ -33,6 +42,7 @@ export default function ImagePreview(props: PreviewerProps): ReactElement {
     if (!props.content) return;
     const objectUrl = URL.createObjectURL(props.content);
     setUrl(objectUrl);
+    setUndecodable(false);
     setNatural(null);
     setZoom('fit');
     setTurns(0);
@@ -88,6 +98,19 @@ export default function ImagePreview(props: PreviewerProps): ReactElement {
 
   if (!url) return <PreviewSkeletonView shape='media' />;
 
+  if (undecodable) {
+    return (
+      <PreviewMessage
+        icon={<ImageOff className='size-10 text-muted-foreground' />}
+        title='Cannot draw this image'
+        body='Your browser has no decoder for it. Download it to open it in an app that has.'
+        actions={[
+          { label: 'Download', onClick: download, primary: true, trackName: 'PreviewDownloaded' },
+        ]}
+      />
+    );
+  }
+
   const box = shown
     ? { width: Math.round(shown.width * scale), height: Math.round(shown.height * scale) }
     : null;
@@ -113,7 +136,7 @@ export default function ImagePreview(props: PreviewerProps): ReactElement {
           type='button'
           title={zoom === 'fit' ? 'Actual size' : 'Fit to the pane'}
           onClick={() => setZoom(zoom === 'fit' ? 1 : 'fit')}
-          className='h-7 min-w-[52px] rounded-md px-1.5 text-xs tabular-nums text-muted-foreground transition-colors hover:bg-foreground/[0.08] hover:text-foreground'
+          className='outline-none h-7 min-w-[52px] rounded-md px-1.5 text-xs tabular-nums text-muted-foreground transition-colors hover:bg-foreground/[0.08] focus-visible:bg-foreground/[0.08] hover:text-foreground focus-visible:text-foreground'
           data-track-category='FilePreview'
           data-track-name='PreviewZoomReset'
         >
@@ -196,6 +219,7 @@ export default function ImagePreview(props: PreviewerProps): ReactElement {
                     height: event.currentTarget.naturalHeight,
                   })
                 }
+                onError={() => setUndecodable(true)}
                 className='absolute left-1/2 top-1/2 max-w-none select-none'
                 style={{
                   width: natural ? natural.width * scale : 'auto',

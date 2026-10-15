@@ -32,6 +32,7 @@ import {
   Target,
   X,
   Zap,
+  AppWindow,
 } from 'lucide-react';
 import {
   ChatDefault,
@@ -405,6 +406,9 @@ export function selectionTrayItems(
           ? (): void => open.recording?.(r)
           : undefined,
       ),
+    ),
+    ...(s.apps ?? []).map(a =>
+      pill({ kind: 'app', id: a.id }, a.title, <AppWindow className={PILL_ICON} aria-hidden />),
     ),
     ...s.localFolders.map(f => ({
       key: `local-${f.path}`,

@@ -1,5 +1,4 @@
 import {
-  Fragment,
   memo,
   useCallback,
   useEffect,
@@ -24,6 +23,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowRight,
   BookOpen,
+  Bot,
   Boxes,
   Check,
   ChevronDown,
@@ -45,6 +45,7 @@ import {
   Plus,
   Rocket,
   Search,
+  Server,
   ShieldCheck,
   Sparkles,
   SquareArrowOutUpRight,
@@ -55,8 +56,8 @@ import {
 import { EntitySelector } from '../../components/ui/EntitySelector/EntitySelector';
 import { Tabs } from '../../components/ui/Tabs';
 import NotFoundScreen from '../NotFoundScreen/NotFoundScreen';
-import { SdlcArchiveMenu } from './SdlcArchiveMenu';
 import { SdlcHubDialog } from './SdlcHubDialog';
+import { SdlcKnowledgeSection } from './SdlcKnowledgeSection';
 import { SdlcHubRepositoriesDialog } from './SdlcHubRepositoriesDialog';
 import {
   SdlcExplorerHeader,
@@ -77,7 +78,6 @@ import { isSdlcDocumentWindow } from './useSdlcFrameBridge';
 import { toast } from 'sonner';
 import AppNavigator from '../../components/AppNavigator/AppNavigator';
 import { Button } from '../../components/ui/Button';
-import { Checkbox } from '../../components/ui/Checkbox/Checkbox';
 import { XyneAIStar } from '../../components/icons/xyne-ai';
 import { FolderDefault, PhoneDefault, TicketToken } from '@xyne/icons';
 import { IconPicker } from '../../components/AppIcon/IconPicker';
@@ -120,13 +120,22 @@ import {
   buildSdlcArtifactCreationPrompt,
   buildSdlcWikiPageCreationPrompt,
 } from './artifactCreationPrompt';
-import { SdlcWikiSection } from './SdlcWikiSection';
+import {
+  SdlcWikiEmpty,
+  SdlcWikiExplorer,
+  SdlcWikiHome,
+  readWikiViews,
+  recordWikiView,
+  wikiLandingPage,
+} from './SdlcWikiSection';
 import { useSdlcWikiData } from './useSdlcWikiData';
 import SdlcWorkflowsSection from './SdlcWorkflowsSection';
 import { SdlcReleases } from './SdlcReleases/SdlcReleases';
 import { SdlcReleaseBreadcrumb, SdlcReleaseThread } from './SdlcReleases/SdlcReleaseDetail';
 import { useReleaseThreadAccess } from './SdlcReleases/useSdlcReleases';
 import { ThreadNavigationContext } from '../../components/Chat/ThreadNavigationContext';
+import LibraryV2 from '../AIScreen/library/LibraryV2';
+import { EnvironmentsView } from '../AIScreen/environments/EnvironmentsView';
 import { SdlcActivityPreview } from './SdlcActivityPreview';
 import { EntityLinkContext, type EntityLinkScope } from '../../contexts/EntityLinkContext';
 import { useScope, useShortcutById } from '../../shortcuts';
@@ -151,7 +160,6 @@ import { formatRelativeTime } from '../../utils/dateUtils';
 import Avatar from '../../components/ui/Avatar/Avatar';
 import { useUser } from '../../hooks/useUsers';
 import { Popover } from '../../components/ui/Popover';
-import { Tooltip } from '../../components/ui/Tooltip';
 import { fileKind } from './fileKind';
 import { FileTypeIcon } from './FileTypeIcon';
 import { getLastSdlcLocation, sdlcHubIdOf } from './lastSdlcLocation';
@@ -231,7 +239,12 @@ import {
   type SdlcSourceLink,
   type SdlcTrackItem,
 } from './sdlcItems';
-import { type HubWorkflow, type HubWorkflowPhase, useHubWorkflow } from './hubWorkflowRunPolicy';
+import {
+  type HubWorkflow,
+  type HubWorkflowPhase,
+  useHubWorkflow,
+  useHubWorkflowFinishedToast,
+} from './hubWorkflowRunPolicy';
 
 type Section =
   | 'overview'
@@ -242,7 +255,9 @@ type Section =
   | 'calls'
   | 'releases'
   | 'artifacts'
-  | 'workflows';
+  | 'workflows'
+  | 'agents'
+  | 'environments';
 
 const StableCanvasScreen = memo(CanvasScreen);
 
@@ -254,6 +269,8 @@ const SECTIONS: Array<{ id: Exclude<Section, 'artifacts'>; label: string; icon: 
   { id: 'calls', label: 'Calls', icon: Phone },
   { id: 'releases', label: 'Releases', icon: Rocket },
   { id: 'workflows', label: 'Workflows', icon: Workflow },
+  { id: 'agents', label: 'Agents', icon: Bot },
+  { id: 'environments', label: 'Environments', icon: Server },
 ];
 
 function sizeNameFieldToText(input: HTMLInputElement): void {
@@ -313,19 +330,14 @@ type SdlcDocumentKind = 'artifact' | 'knowledge' | 'wiki';
 
 const HUB_DOCUMENT_HINT: Record<SdlcDocumentKind, string> = {
   artifact: 'Adding to this hub',
-  knowledge: 'Read by SDLC Assistant in every chat in this hub',
+  knowledge:
+    'Agents in this hub see it by name. Pin it for everyone to have every run read it in full.',
   wiki: 'Adding to the Wiki you are viewing',
 };
 
 function AddItemHeaderIcon({ kind }: { kind: SdlcDocumentKind }): ReactElement {
   const Icon = kind === 'knowledge' ? ShieldCheck : kind === 'wiki' ? BookOpen : FileText;
   return <Icon className='size-5 shrink-0 text-primary/70' />;
-}
-
-function updatedAtLabel(value?: number): string {
-  if (typeof value !== 'number') return 'Not updated yet';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? 'Update time unavailable' : date.toLocaleString();
 }
 
 function actionErrorMessage(error: unknown): string {
@@ -342,7 +354,8 @@ function setFolderTabParams(search: URLSearchParams, tab: FolderTab | null): voi
   if (tab?.kind === 'CANVAS') search.set('canvas', tab.id);
   if (tab?.kind === 'ATTACHMENT') search.set('file', tab.id);
   if (tab?.kind === 'LINK') search.set('link', tab.id);
-  if (tab?.kind === 'BROWSER') search.set('browse', '1');
+  // Which browsing tab, as there can be several; `1` named the one there used to be.
+  if (tab?.kind === 'BROWSER') search.set('browse', tab.id === SCRATCH_TAB_ID ? '1' : tab.id);
 }
 
 export default function SdlcScreen(): ReactElement {
@@ -449,7 +462,9 @@ export default function SdlcScreen(): ReactElement {
   );
   const [deriveTypeId, setDeriveTypeId] = useState<string | null>(null);
   const [hubDialog, setHubDialog] = useState<'create' | 'manage' | null>(null);
-  const [showArchivedKnowledge, setShowArchivedKnowledge] = useState(false);
+  const showArchivedKnowledge = useUserPreference('sdlcShowArchivedKnowledge');
+  const setShowArchivedKnowledge = (show: boolean): void =>
+    setUserPreference('sdlcShowArchivedKnowledge', show);
   const [typeDialogOpen, setTypeDialogOpen] = useState(false);
   const [typeName, setTypeName] = useState('');
   const [renameTypeId, setRenameTypeId] = useState<string | null>(null);
@@ -586,6 +601,7 @@ export default function SdlcScreen(): ReactElement {
   const [trackDescription, setTrackDescription] = useState('');
   const [artifactTrack, setArtifactTrack] = useState<{ id: string; name: string } | null>(null);
   const [artifactTitle, setArtifactTitle] = useState('');
+  const [artifactSubmitTried, setArtifactSubmitTried] = useState(false);
   const [artifactAiPrompt, setArtifactAiPrompt] = useState('');
   // Tech Doc dialog opened from a PRD card: track + parent PRD are fixed by that
   // context, so both fields are pre-filled and locked.
@@ -691,7 +707,7 @@ export default function SdlcScreen(): ReactElement {
   // The hub's artifacts load a folder at a time, with the page that shows them. Hub
   // Knowledge's load on its own page and the Overview, which counts those ready.
   const knowledgeShown = section === 'knowledge' || section === 'overview';
-  const [knowledgeRows] = useCachedQuery(
+  const [knowledgeRows, knowledgeDetails] = useCachedQuery(
     queries.getSdlcFolderCanvases({
       channelId: channelId || '',
       folderId: knowledgeFolderId || '',
@@ -762,13 +778,28 @@ export default function SdlcScreen(): ReactElement {
       ),
     [channel, auth.userID],
   );
-  const archiveArtifact = (canvasId: string, archived: boolean): void => {
-    void call(
-      `archive-${canvasId}`,
-      () =>
-        apiInstance.post(`/sdlc/channels/${channelId}/artifacts/${canvasId}/archive`, { archived }),
-      archived ? 'Archived' : 'Restored',
-    );
+  // Archiving takes one click, so the toast names what went and offers the way back.
+  const archiveArtifact = (canvasId: string, archived: boolean, title?: string): void => {
+    void apiInstance
+      .post(
+        // Both ids come from the URL, so they are encoded before they go into a path.
+        `/sdlc/channels/${encodeURIComponent(channelId ?? '')}/artifacts/${encodeURIComponent(canvasId)}/archive`,
+        { archived },
+      )
+      .then(
+        () =>
+          toast.success(
+            `${title ? `"${title}"` : 'Document'} ${archived ? 'archived' : 'restored'}`,
+            {
+              className: 'hub-inline-action',
+              action: {
+                label: 'Undo',
+                onClick: () => archiveArtifact(canvasId, !archived, title),
+              },
+            },
+          ),
+        (error: unknown) => toast.error(actionErrorMessage(error)),
+      );
   };
   const [trackRows] = useCachedQuery(queries.getSdlcTracks({ channelId: channelId || '' }), {
     enabled: Boolean(channelId),
@@ -844,7 +875,13 @@ export default function SdlcScreen(): ReactElement {
   // an upload, a save — and must not act on the render it began in.
   const routeNow = useRef({ openFolderId, search: routeSearchParams.toString() });
   routeNow.current = { openFolderId, search: routeSearchParams.toString() };
-  const browsingScratchTab = routeSearchParams.get('browse') === '1';
+  const browseParam = routeSearchParams.get('browse');
+  const browsingTabId =
+    browseParam === '1'
+      ? SCRATCH_TAB_ID
+      : browseParam && /^[\w-]{1,64}$/.test(browseParam)
+        ? browseParam
+        : null;
   const openFileId = routeSearchParams.get('file');
   const openLinkId = routeSearchParams.get('link');
   const selectedTrack = tracks.find(track => track.id === selectedTrackId);
@@ -863,6 +900,8 @@ export default function SdlcScreen(): ReactElement {
   const {
     scopes: wikiScopeList,
     pageCounts: wikiPageCounts,
+    allPages: wikiAllPages,
+    loaded: wikiLoaded,
     scope: wikiScope,
     scopeRepo: wikiScopeRepo,
     pages: wikiPages,
@@ -889,11 +928,14 @@ export default function SdlcScreen(): ReactElement {
   const knowledgeDocs = useMemo(
     () =>
       knowledgeFolderId
-        ? canvases.filter(
-            canvas =>
-              canvas.folderId === knowledgeFolderId &&
-              (showArchivedKnowledge || canvas.sdlcArtifact?.artifactStatus !== 'ARCHIVED'),
-          )
+        ? canvases
+            .filter(
+              canvas =>
+                canvas.folderId === knowledgeFolderId &&
+                (showArchivedKnowledge || canvas.sdlcArtifact?.artifactStatus !== 'ARCHIVED'),
+            )
+            // Newest first, the order the "Updated" line on each row suggests.
+            .sort((a, b) => (b.lastEditedAt ?? b.updatedAt) - (a.lastEditedAt ?? a.updatedAt))
         : [],
     [canvases, knowledgeFolderId, showArchivedKnowledge],
   );
@@ -1242,6 +1284,8 @@ export default function SdlcScreen(): ReactElement {
   const hubWorkflowId = knowledgeWorkflowShown ? (hubWorkflowLink?.workflow?.id ?? null) : null;
   const state = useHubWorkflow(hubWorkflowId);
   const knowledgeRunning = state.phase === 'RUNNING';
+  useHubWorkflowFinishedToast('Hub Knowledge', state);
+  useHubWorkflowFinishedToast('Wiki', wikiState);
 
   const readyCount = knowledgeDocs.filter(
     canvas => canvas.sdlcArtifact?.artifactStatus === 'ACTIVE',
@@ -1456,8 +1500,8 @@ export default function SdlcScreen(): ReactElement {
         ? { kind: 'ATTACHMENT', id: openFileId }
         : openLinkId
           ? { kind: 'LINK', id: openLinkId }
-          : browsingScratchTab
-            ? { kind: 'BROWSER', id: SCRATCH_TAB_ID }
+          : browsingTabId
+            ? { kind: 'BROWSER', id: browsingTabId }
             : null
     : null;
 
@@ -1808,13 +1852,49 @@ export default function SdlcScreen(): ReactElement {
     );
   };
 
-  const openWikiPage = (canvasId: string): void => {
+  const openWikiPage = (
+    canvasId: string,
+    scopeFolderId = wikiScope?.folderId,
+    replace = false,
+  ): void => {
     if (!channelId) return;
     setRelatedSourceId(null);
     const search = new URLSearchParams({ canvas: canvasId });
-    if (wikiScope) search.set('wiki', wikiScope.folderId);
-    navigateWithinSdlc(`/sdlc/${channelId}/wiki`, `?${search.toString()}`);
+    if (scopeFolderId) search.set('wiki', scopeFolderId);
+    // A Wiki page opens for reading: Discussions stays shut unless the reader has it
+    // open on the page they come from.
+    const keepDiscussion = section === 'wiki' && Boolean(selectedCanvasId) && rightPanelOpen;
+    search.set('discussion', keepDiscussion ? '1' : '0');
+    if (keepDiscussion) search.set('chat', 'conversations');
+    void navigate(
+      `/sdlc/${channelId}/wiki?${search.toString()}`,
+      replace ? { replace: true } : undefined,
+    );
   };
+  /** A Wiki has no list page: it opens on a page, or on its empty state. */
+  const openWikiScope = (folderId: string, replace = false): void => {
+    if (!channelId) return;
+    const landing = wikiLandingPage(
+      wikiAllPages.filter(page => page.scopeFolderId === folderId),
+      readWikiViews(channelId),
+    );
+    if (landing) openWikiPage(landing.canvasId, folderId, replace);
+    else if (!replace) {
+      navigateWithinSdlc(`/sdlc/${channelId}/wiki`, `?wiki=${encodeURIComponent(folderId)}`);
+    }
+  };
+  const wikiScopeId = wikiScope?.folderId;
+  const wikiLandingNeeded = section === 'wiki' && Boolean(wikiScopeId) && !selectedCanvasId;
+  const openWikiScopeRef = useRef(openWikiScope);
+  openWikiScopeRef.current = openWikiScope;
+  // A link to a Wiki without a page, and the moment its first pages arrive.
+  useEffect(() => {
+    if (wikiLandingNeeded && wikiScopeId) openWikiScopeRef.current(wikiScopeId, true);
+  }, [wikiLandingNeeded, wikiScopeId, wikiAllPages]);
+  const viewedWikiPageId = selectedWikiPage?.canvasId;
+  useEffect(() => {
+    if (channelId && viewedWikiPageId) recordWikiView(channelId, viewedWikiPageId);
+  }, [channelId, viewedWikiPageId]);
 
   const closeCanvas = (): void => {
     if (!channelId) return;
@@ -1831,11 +1911,20 @@ export default function SdlcScreen(): ReactElement {
       );
       return;
     }
-    navigateWithinSdlc(
-      `/sdlc/${channelId}/${section}`,
-      section === 'wiki' && wikiScope ? `?wiki=${encodeURIComponent(wikiScope.folderId)}` : '',
-    );
+    // The Wiki has no list to go back to: its way out is the repositories.
+    navigateWithinSdlc(`/sdlc/${channelId}/${section}`);
   };
+
+  // The same function for as long as the screen lives: the canvas screen is memoised.
+  const closeCanvasRef = useRef(closeCanvas);
+  closeCanvasRef.current = closeCanvas;
+  const closeOpenCanvas = useCallback((): void => closeCanvasRef.current(), []);
+  const hubDocumentNoun =
+    section === 'wiki' ? 'Wiki page' : section === 'knowledge' ? 'Knowledge File' : 'Document';
+  const openArtifactArchived =
+    Boolean(selectedWikiPage?.archived) ||
+    canvases.find(canvas => canvas.id === selectedCanvasId)?.sdlcArtifact?.artifactStatus ===
+      'ARCHIVED';
 
   const setDiscussionUrl = useCallback(
     (input: {
@@ -2056,16 +2145,43 @@ export default function SdlcScreen(): ReactElement {
     });
   }, [askSdlcAssistant]);
 
-  const renderWorkflowControls = (label: string, workflow: HubWorkflow): ReactElement => {
+  /** A workflow's status and its run button, for the caller to lay out. */
+  const workflowParts = (
+    label: string,
+    workflow: HubWorkflow,
+    startLabel = 'Start',
+    /** Outline where the page has its own primary action beside it. */
+    startVariant: 'default' | 'outline' = 'default',
+    cancelLabel = 'Cancel',
+  ): { status: ReactElement; button: ReactElement } => {
     const running = workflow.phase === 'RUNNING';
     const busyKey = `hub-workflow:${label}`;
-    return (
-      <div className='flex shrink-0 items-center gap-1.5'>
-        <WorkflowStatusIcon workflow={workflow} />
-        {workflow.workflowId ? (
+    const { runId } = workflow;
+    const status = (
+      <>
+        <WorkflowStatus workflow={workflow} />
+        {runId && (
+          // The run page has the steps, the logs and the reason a run failed.
+          <button
+            type='button'
+            onClick={() => navigateWithinSdlc(`/sdlc/${channelId}/workflows/runs/${runId}`)}
+            className='rounded text-xs font-medium text-foreground underline underline-offset-2 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+            data-track-category='SdlcHub'
+            data-track-name='HubWorkflowRunOpened'
+            data-track-metadata={JSON.stringify({ label })}
+          >
+            View run
+          </button>
+        )}
+      </>
+    );
+    const button = (
+      <>
+        {/* Hidden only: the workflow trigger API has no hub admin check yet. Move the rule there once workflow auth is decided. */}
+        {workflow.workflowId && isHubAdmin ? (
           <Button
             size='sm'
-            variant={running ? 'outline' : 'default'}
+            variant={running ? 'outline' : startVariant}
             loading={busy === busyKey}
             disabled={busy === busyKey}
             onClick={() =>
@@ -2079,18 +2195,31 @@ export default function SdlcScreen(): ReactElement {
             data-track-name={running ? 'HubWorkflowRunCancelled' : 'HubWorkflowRunStarted'}
             data-track-metadata={JSON.stringify({ label })}
           >
-            {running ? 'Cancel' : 'Start'}
+            {running ? cancelLabel : startLabel}
           </Button>
         ) : null}
+      </>
+    );
+    return { status, button };
+  };
+  const renderWorkflowControls = (...parts: Parameters<typeof workflowParts>): ReactElement => {
+    const { status, button } = workflowParts(...parts);
+    return (
+      <div className='flex shrink-0 flex-wrap items-center justify-end gap-x-2 gap-y-1'>
+        {status}
+        {button}
       </div>
     );
   };
+  const wikiEmptyRun = workflowParts('Wiki', wikiState, 'Generate Wiki', 'default', 'Cancel run');
 
   const renderWorkflowHeader = (input: {
     icon: typeof Boxes;
     title: string;
     description: string;
-    workflow: HubWorkflow;
+    /** Either the workflow the page runs, or its own actions. */
+    workflow?: HubWorkflow;
+    actions?: ReactNode;
   }): ReactElement => {
     const Icon = input.icon;
     return (
@@ -2104,7 +2233,7 @@ export default function SdlcScreen(): ReactElement {
             <p className='mt-0.5 text-sm text-muted-foreground'>{input.description}</p>
           </div>
         </div>
-        {renderWorkflowControls(input.title, input.workflow)}
+        {input.actions ?? (input.workflow && renderWorkflowControls(input.title, input.workflow))}
       </div>
     );
   };
@@ -2138,8 +2267,20 @@ export default function SdlcScreen(): ReactElement {
     setArtifactFolderPath('');
   };
 
+  // What was typed into a hub document dialog dismissed by Escape or a click outside,
+  // given back when the same dialog opens again. Cancel and the X discard it.
+  const dismissedHubDraft = useRef<{
+    kind: SdlcDocumentKind;
+    id: string;
+    title: string;
+    prompt: string;
+    folderPath: string;
+  } | null>(null);
+  const artifactTitleRef = useRef<HTMLInputElement>(null);
+
   const resetArtifactDialog = (): void => {
     setArtifactDialog(null);
+    setArtifactSubmitTried(false);
     clearArtifactDialogFields();
     setPendingArtifactFolder(null);
   };
@@ -2419,11 +2560,18 @@ export default function SdlcScreen(): ReactElement {
 
   const openHubDocumentCreate = (kind: 'knowledge' | 'wiki'): void => {
     clearArtifactDialogFields();
-    setArtifactDialog(
+    const target =
       kind === 'knowledge'
-        ? { id: knowledgeFolderId ?? '', name: 'Hub Knowledge document', kind }
-        : { id: wikiScope?.folderId ?? '', name: 'Wiki page', kind },
-    );
+        ? { id: knowledgeFolderId ?? '', name: 'Knowledge File', kind }
+        : { id: wikiScope?.folderId ?? '', name: 'Wiki page', kind };
+    const draft = dismissedHubDraft.current;
+    dismissedHubDraft.current = null;
+    if (draft && draft.kind === kind && draft.id === target.id) {
+      setArtifactTitle(draft.title);
+      setArtifactAiPrompt(draft.prompt);
+      setArtifactFolderPath(draft.folderPath);
+    }
+    setArtifactDialog(target);
   };
 
   const openArtifactCreateFrom = (
@@ -2497,7 +2645,9 @@ export default function SdlcScreen(): ReactElement {
   const isDocumentWindow = isSdlcDocumentWindow();
   // A folder's page is open: its explorer takes the hub sidebar's place. A window of
   // its own has no sidebar, and keeps the explorer beside the page.
-  const explorerShown = Boolean(openFolder && channel) && !isDocumentWindow;
+  // A Wiki takes the sidebar for its page tree, as a folder page does for its explorer.
+  const wikiExplorerShown = section === 'wiki' && Boolean(wikiScope) && !isDocumentWindow;
+  const explorerShown = (Boolean(openFolder && channel) && !isDocumentWindow) || wikiExplorerShown;
 
   const setTrackStatusAction = async (trackId: string, status: string): Promise<void> => {
     await runTrackMutation(
@@ -2787,15 +2937,29 @@ export default function SdlcScreen(): ReactElement {
   const canSubmitArtifactDialog =
     Boolean(artifactTitle.trim()) && (artifactDialogKind !== 'artifact' || Boolean(artifactTrack));
 
+  const artifactTitleMissing = artifactSubmitTried && !artifactTitle.trim();
+  const artifactTrackMissing =
+    artifactSubmitTried && artifactDialogKind === 'artifact' && !artifactTrack;
+  // The buttons stay enabled: a press says what is missing and goes to it.
+  const artifactSubmitBlocked = (): boolean => {
+    if (canSubmitArtifactDialog) return false;
+    setArtifactSubmitTried(true);
+    if (!artifactTitle.trim()) artifactTitleRef.current?.focus();
+    return true;
+  };
+
   const artifactDetailsStep = (
     <form
       className='flex flex-1 flex-col'
+      noValidate
+      // Enter takes the plain path: an Ask AI run is never started by a keystroke.
       onSubmit={event => {
         event.preventDefault();
+        if (artifactSubmitBlocked()) return;
         void call(
-          'artifact',
-          () => Promise.resolve(createArtifact()),
-          'Creation request sent to Ask AI',
+          'artifact-blank',
+          createBlankArtifact,
+          `${artifactDialog?.name ?? 'Artifact'} created`,
         );
       }}
     >
@@ -2806,14 +2970,22 @@ export default function SdlcScreen(): ReactElement {
           </label>
           <Input
             id='sdlc-artifact-title'
+            ref={artifactTitleRef}
             autoFocus
             value={artifactTitle}
             onChange={event => setArtifactTitle(event.target.value)}
             className='h-[38px] text-[13.5px]'
             placeholder='Clear, outcome-focused title'
+            aria-invalid={artifactTitleMissing}
+            aria-describedby={artifactTitleMissing ? 'sdlc-artifact-title-error' : undefined}
             data-track-category='SdlcHub'
             data-track-name='ArtifactTitleChanged'
           />
+          {artifactTitleMissing && (
+            <span id='sdlc-artifact-title-error' role='alert' className='text-xs text-destructive'>
+              Add a title.
+            </span>
+          )}
         </div>
 
         {artifactDialogKind === 'wiki' && (
@@ -2865,6 +3037,11 @@ export default function SdlcScreen(): ReactElement {
                 matchTriggerWidth
               />
             </div>
+            {artifactTrackMissing && (
+              <span role='alert' className='text-xs text-destructive'>
+                Choose a track.
+              </span>
+            )}
           </div>
         ) : (
           <p className='rounded-lg border border-dashed p-3 text-sm text-muted-foreground'>
@@ -3043,30 +3220,32 @@ export default function SdlcScreen(): ReactElement {
             type='button'
             variant='outline'
             className='h-[34px]'
-            loading={busy === 'artifact-blank'}
-            disabled={!canSubmitArtifactDialog}
-            title='Create an empty document with just the title — no AI'
-            onClick={() =>
+            loading={busy === 'artifact'}
+            onClick={() => {
+              if (artifactSubmitBlocked()) return;
               void call(
-                'artifact-blank',
-                createBlankArtifact,
-                `${artifactDialog?.name ?? 'Artifact'} created`,
-              )
-            }
+                'artifact',
+                () => Promise.resolve(createArtifact()),
+                'Creation request sent to Ask AI',
+              );
+            }}
+            data-track-category='SdlcHub'
+            data-track-name='ArtifactAskAiCreated'
+          >
+            <Sparkles />
+            Ask AI to create
+          </Button>
+          {/* The primary action in every hub create dialog: AI is the opt-in. */}
+          <Button
+            type='submit'
+            className='h-[34px]'
+            loading={busy === 'artifact-blank'}
+            title='Create an empty document with just the title — no AI'
             data-track-category='SdlcHub'
             data-track-name='BlankArtifactCreated'
           >
             <Pencil />
             Write it myself
-          </Button>
-          <Button
-            type='submit'
-            className='h-[34px]'
-            loading={busy === 'artifact'}
-            disabled={!canSubmitArtifactDialog}
-          >
-            <Sparkles />
-            Ask AI to create
           </Button>
         </div>
       </div>
@@ -3695,11 +3874,33 @@ export default function SdlcScreen(): ReactElement {
               <SdlcExplorerHeader
                 open={railOpen}
                 collapsed={railCollapsed}
-                trackName={selectedTrack?.name ?? 'Track'}
+                trackName={wikiExplorerShown ? 'Wiki' : (selectedTrack?.name ?? 'Track')}
                 onToggleRail={toggleRail}
-                onBack={closeFolderPage}
+                onBack={
+                  wikiExplorerShown
+                    ? () => navigateWithinSdlc(`/sdlc/${channelId}/wiki`)
+                    : closeFolderPage
+                }
               />
-              {railOpen && (
+              {railOpen && wikiExplorerShown && wikiScope && (
+                <SdlcWikiExplorer
+                  key={wikiScope.folderId}
+                  scopes={wikiScopeList}
+                  scope={wikiScope}
+                  pages={wikiPages}
+                  activeCanvasId={selectedCanvasId}
+                  showArchived={showArchivedWiki}
+                  canManage={isHubAdmin}
+                  onSelectScope={folderId => openWikiScope(folderId)}
+                  onShowArchivedChange={setShowArchivedWiki}
+                  onOpen={page => openWikiPage(page.canvasId)}
+                  onCreatePage={() => openHubDocumentCreate('wiki')}
+                  onArchivePage={(page, archived) =>
+                    archiveArtifact(page.canvasId, archived, page.title)
+                  }
+                />
+              )}
+              {railOpen && !wikiExplorerShown && (
                 // Titled as the hub sidebar's groups are.
                 <div className='flex h-8 shrink-0 items-center pl-3 text-[13px] font-semibold text-sidebar-foreground/70'>
                   Explorer
@@ -3708,7 +3909,10 @@ export default function SdlcScreen(): ReactElement {
               {/* Kept in the page while the rail is folded, so the tree keeps its place. */}
               <div
                 ref={setExplorerSlot}
-                className={cn('-mx-1 flex min-h-0 flex-1 flex-col', !railOpen && 'hidden')}
+                className={cn(
+                  '-mx-1 flex min-h-0 flex-1 flex-col',
+                  (!railOpen || wikiExplorerShown) && 'hidden',
+                )}
               />
             </div>
           </div>
@@ -3763,20 +3967,6 @@ export default function SdlcScreen(): ReactElement {
               )}
             >
               <div className='flex min-w-0 flex-1 items-center gap-2'>
-                {section === 'wiki' && wikiScope ? (
-                  <>
-                    <button
-                      type='button'
-                      onClick={() => navigateWithinSdlc(`/sdlc/${channelId}/wiki`)}
-                      className='shrink-0 text-sm text-muted-foreground transition-colors hover:text-foreground'
-                      data-track-category='SdlcHub'
-                      data-track-name='WikiRepositoriesOpened'
-                    >
-                      Wiki
-                    </button>
-                    <ChevronRight size={15} className='shrink-0 text-muted-foreground' />
-                  </>
-                ) : null}
                 {section === 'tracks' && openFolder ? (
                   <>
                     {/* The way back to the track is the explorer's, in the sidebar — but
@@ -3809,38 +3999,40 @@ export default function SdlcScreen(): ReactElement {
                   />
                 ) : selectedCanvasId ? (
                   <>
-                    <button
-                      type='button'
-                      onClick={closeCanvas}
-                      className='shrink-0 text-sm text-muted-foreground transition-colors hover:text-foreground'
-                      data-track-category='SdlcHub'
-                      data-track-name='CanvasClosedInline'
-                      data-track-metadata={JSON.stringify({ canvasId: selectedCanvasId })}
-                    >
-                      {section === 'wiki' && wikiScope
-                        ? wikiScope.name
-                        : (selectedCanvasTypeFolder?.name ??
+                    {/* No crumbs in a Wiki: the side panel has the way back, the Wiki switcher
+                        and the tree. The bar only names the Wiki that is open. */}
+                    {section === 'wiki' && wikiScope ? (
+                      <h1 className='min-w-0 truncate font-semibold' title={wikiScope.name}>
+                        {wikiScope.name}
+                      </h1>
+                    ) : (
+                      <button
+                        type='button'
+                        onClick={closeCanvas}
+                        className='min-w-10 max-w-[14rem] truncate text-sm text-muted-foreground transition-colors hover:text-foreground'
+                        data-track-category='SdlcHub'
+                        data-track-name='CanvasClosedInline'
+                        data-track-metadata={JSON.stringify({ canvasId: selectedCanvasId })}
+                      >
+                        {selectedCanvasTypeFolder?.name ??
                           (section === 'artifacts'
                             ? (activeTypeFolder?.name ?? 'Artifacts')
-                            : (SECTIONS.find(item => item.id === section)?.label ?? 'Overview')))}
-                    </button>
-                    <ChevronRight size={15} className='shrink-0 text-muted-foreground' />
-                    {section === 'wiki'
-                      ? selectedWikiPage?.folderPath
-                          .split('/')
-                          .filter(Boolean)
-                          .map((folder, index) => (
-                            <Fragment key={index}>
-                              <span className='truncate text-sm text-muted-foreground'>
-                                {folder}
-                              </span>
-                              <ChevronRight size={15} className='shrink-0 text-muted-foreground' />
-                            </Fragment>
-                          ))
-                      : null}
-                    <h1 className='truncate font-semibold'>
-                      {selectedCanvas?.title ?? selectedWikiPage?.title ?? 'Canvas'}
-                    </h1>
+                            : (SECTIONS.find(item => item.id === section)?.label ?? 'Overview'))}
+                      </button>
+                    )}
+                    {/* A Wiki page's title is the line right under this bar, and the marked row
+                        in the tree, so it is not repeated here. */}
+                    {section === 'wiki' && wikiScope ? null : (
+                      <>
+                        <ChevronRight size={15} className='shrink-0 text-muted-foreground' />
+                        <h1
+                          className='min-w-20 truncate font-semibold'
+                          title={selectedCanvas?.title}
+                        >
+                          {selectedCanvas?.title ?? hubDocumentNoun}
+                        </h1>
+                      </>
+                    )}
                   </>
                 ) : section === 'tracks' && selectedTrack ? (
                   // A track's page starts with its name, and its status beside it: the
@@ -3978,12 +4170,47 @@ export default function SdlcScreen(): ReactElement {
                   )}
                 />
               ) : selectedCanvasId ? (
-                <div className='min-h-0 flex-1 overflow-hidden bg-background'>
-                  <StableCanvasScreen
-                    key={selectedCanvasId}
-                    canvasId={selectedCanvasId}
-                    showAskAiAction={false}
-                  />
+                <div className='flex min-h-0 flex-1 flex-col overflow-hidden bg-background'>
+                  {openArtifactArchived && (
+                    <div
+                      role='status'
+                      className='flex shrink-0 items-center gap-3 border-b bg-muted/40 px-5 py-2 text-sm'
+                    >
+                      <CircleAlert className='size-4 shrink-0 text-muted-foreground' />
+                      <span className='min-w-0 flex-1'>
+                        Archived. It stays out of the list unless Show archived is on.
+                      </span>
+                      {isHubAdmin && (
+                        <Button
+                          size='sm'
+                          variant='outline'
+                          onClick={() =>
+                            archiveArtifact(
+                              selectedCanvasId,
+                              false,
+                              selectedCanvas?.title ?? selectedWikiPage?.title,
+                            )
+                          }
+                          data-track-category='SdlcHub'
+                          data-track-name='ArchivedArtifactRestoredFromPage'
+                        >
+                          Restore
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                  <div className='min-h-0 flex-1 overflow-hidden'>
+                    <StableCanvasScreen
+                      key={selectedCanvasId}
+                      canvasId={selectedCanvasId}
+                      showAskAiAction={false}
+                      showViewOnly
+                      pinnedOutline={section === 'wiki' && !showRightPanel}
+                      notFoundNoun={hubDocumentNoun}
+                      notFoundBackLabel={`Back to ${section === 'wiki' ? 'the Wiki' : (SECTIONS.find(item => item.id === section)?.label ?? 'the hub')}`}
+                      onNotFoundBack={closeOpenCanvas}
+                    />
+                  </div>
                 </div>
               ) : section === 'workflows' ? (
                 <div className='min-h-0 flex-1 overflow-hidden bg-background'>
@@ -3999,6 +4226,19 @@ export default function SdlcScreen(): ReactElement {
                   onOpenCanvas={openReleaseCanvas}
                   onConnectRepository={() => setHubDialog('manage')}
                 />
+              ) : section === 'agents' ? (
+                <div className='min-h-0 flex-1 overflow-auto bg-background'>
+                  <LibraryV2 channelId={channelId} />
+                </div>
+              ) : section === 'environments' ? (
+                <div className='min-h-0 flex-1 overflow-hidden bg-background'>
+                  <EnvironmentsView
+                    key={channelId}
+                    channelId={channelId}
+                    hubRepoIds={channelRepos.map(repo => repo.id)}
+                    onAddRepository={() => setHubDialog('manage')}
+                  />
+                </div>
               ) : (
                 <>
                   {onTrackPage && selectedTrack && (
@@ -4072,152 +4312,116 @@ export default function SdlcScreen(): ReactElement {
                     {section === 'tracks' && renderTrack()}
 
                     {section === 'knowledge' && (
-                      <section className='mx-auto max-w-5xl'>
-                        {renderWorkflowHeader({
-                          icon: ShieldCheck,
-                          title: 'Hub Knowledge',
-                          description:
-                            'Given to SDLC Assistant in every chat. Admins edit; members read.',
-                          workflow: state,
-                        })}
-                        <div className='mb-4 flex items-center justify-between gap-3'>
-                          <Checkbox
-                            size='sm'
-                            label='Show archived'
-                            checked={showArchivedKnowledge}
-                            onChange={setShowArchivedKnowledge}
-                            data-track-category='SdlcHub'
-                            data-track-name='HubKnowledgeArchivedToggled'
-                          />
-                          {isHubAdmin && knowledgeFolderId && (
-                            <Button
-                              type='button'
-                              size='sm'
-                              onClick={() => openHubDocumentCreate('knowledge')}
-                              data-track-category='SdlcHub'
-                              data-track-name='HubKnowledgeDocCreateOpened'
-                            >
-                              <Plus size={15} />
-                              New document
-                            </Button>
+                      <section className='mx-auto max-w-6xl'>
+                        <SdlcKnowledgeSection
+                          renderHeader={actions =>
+                            renderWorkflowHeader({
+                              icon: ShieldCheck,
+                              title: 'Hub Knowledge',
+                              description: 'What agents know in this hub.',
+                              actions,
+                            })
+                          }
+                          generateControl={renderWorkflowControls(
+                            'Hub Knowledge',
+                            state,
+                            // Names what it writes, as the Wiki run button does. Files written by hand are not a run.
+                            state.runId ? 'Update Knowledge Files' : 'Generate Knowledge Files',
+                            'outline',
                           )}
-                        </div>
-                        <div className='grid grid-cols-2 gap-4'>
-                          {knowledgeDocs.map(canvas => {
-                            const generating = canvas.sdlcArtifact?.artifactStatus === 'DRAFT';
-                            const archived = canvas.sdlcArtifact?.artifactStatus === 'ARCHIVED';
-                            return (
-                              <div
-                                key={canvas.id}
-                                role='button'
-                                tabIndex={0}
-                                onClick={() => openCanvas(canvas.id)}
-                                data-track-category='SdlcHub'
-                                data-track-name='HubKnowledgeCanvasOpened'
-                                data-track-metadata={JSON.stringify({ canvasId: canvas.id })}
-                                onKeyDown={event => {
-                                  // The archive menu lives inside this card.
-                                  if (event.target !== event.currentTarget) return;
-                                  if (event.key === 'Enter' || event.key === ' ') {
-                                    event.preventDefault();
-                                    openCanvas(canvas.id);
-                                  }
-                                }}
-                                className={cn(
-                                  'group cursor-pointer rounded-xl border bg-background p-5 transition-colors hover:border-primary/35 hover:bg-muted/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                                  archived && 'opacity-60',
-                                )}
-                              >
-                                <div className='flex items-start justify-between gap-2'>
-                                  <div className='grid size-9 place-items-center rounded-lg bg-primary/10 text-primary'>
-                                    <BookOpen size={18} />
-                                  </div>
-                                  <div className='flex items-start gap-1'>
-                                    {archived ? (
-                                      <span className='rounded-full bg-muted px-2 py-1 text-xs font-medium text-muted-foreground'>
-                                        Archived
-                                      </span>
-                                    ) : generating ? (
-                                      <span className='rounded-full bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-700'>
-                                        Generating
-                                      </span>
-                                    ) : (
-                                      <span className='flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-300'>
-                                        <Check size={12} />
-                                        Ready
-                                      </span>
-                                    )}
-                                    {isHubAdmin && (
-                                      <SdlcArchiveMenu
-                                        title={canvas.title}
-                                        archived={archived}
-                                        trackingScope='HubKnowledge'
-                                        className='-mr-1'
-                                        onToggle={next => archiveArtifact(canvas.id, next)}
-                                      />
-                                    )}
-                                  </div>
-                                </div>
-                                <h3 className='mt-4 font-semibold'>{canvas.title}</h3>
-                                <p className='mt-1 text-xs text-muted-foreground'>
-                                  Updated {updatedAtLabel(canvas.lastEditedAt ?? canvas.updatedAt)}
-                                  {' · '}
-                                  {typeof canvas.sdlcArtifact?.generationCommit === 'string'
-                                    ? canvas.sdlcArtifact.generationCommit.slice(0, 8)
-                                    : 'repository HEAD'}
-                                </p>
-                                <div className='mt-5 flex items-center justify-between gap-3'>
-                                  <span className='text-xs font-medium text-muted-foreground transition-colors group-hover:text-foreground'>
-                                    Open document
-                                  </span>
-                                </div>
-                              </div>
+                          channelId={channel.id}
+                          isHubAdmin={isHubAdmin}
+                          files={knowledgeDocs.map(canvas => ({
+                            id: canvas.id,
+                            title: canvas.title,
+                            status:
+                              canvas.sdlcArtifact?.artifactStatus === 'ARCHIVED'
+                                ? 'archived'
+                                : canvas.sdlcArtifact?.artifactStatus === 'DRAFT'
+                                  ? 'generating'
+                                  : 'ready',
+                          }))}
+                          showArchived={showArchivedKnowledge}
+                          onShowArchivedChange={setShowArchivedKnowledge}
+                          emptyFilesText={
+                            knowledgeRunning
+                              ? 'Hub Knowledge generation is in progress.'
+                              : isHubAdmin
+                                ? 'No Knowledge Files yet. Press Generate Knowledge Files above to write them from the repositories, or use Add to write one.'
+                                : 'No Knowledge Files yet. A hub admin can generate or add them.'
+                          }
+                          filesLoaded={
+                            knowledgeDocs.length > 0 ||
+                            // No folder counts as none only once the hub itself has arrived in full.
+                            (knowledgeFolderId ? knowledgeDetails : repoQueryDetails).type ===
+                              'complete'
+                          }
+                          // A Knowledge File opens for reading, as a Wiki page does: Discussions
+                          // opens from its button. Not through openCanvas, which carries the panel over.
+                          onOpenFile={canvasId => {
+                            setRelatedSourceId(null);
+                            void navigate(
+                              `/sdlc/${channel.id}/knowledge?${new URLSearchParams({ canvas: canvasId, discussion: '0' }).toString()}`,
                             );
-                          })}
-                          {knowledgeDocs.length === 0 && (
-                            <EmptyCard
-                              text={
-                                knowledgeRunning
-                                  ? 'Hub Knowledge generation is in progress.'
-                                  : isHubAdmin
-                                    ? 'Start the Hub Knowledge workflow, or add a document yourself.'
-                                    : 'Start the Hub Knowledge workflow to generate these documents.'
-                              }
-                            />
-                          )}
-                        </div>
+                          }}
+                          onArchiveFile={(canvasId, archived) =>
+                            archiveArtifact(
+                              canvasId,
+                              archived,
+                              knowledgeDocs.find(canvas => canvas.id === canvasId)?.title,
+                            )
+                          }
+                          onNewFile={() => openHubDocumentCreate('knowledge')}
+                          onCreateWithAi={draft => {
+                            const asFile = `a Knowledge File through the spaces-sdlc-write-artifact create call with artifactTypeId ${JSON.stringify(knowledgeFolderId ?? '')}`;
+                            const saveAs = {
+                              file: `Save it as ${asFile}.`,
+                              skill: 'Save it as a skill: call create-skill.',
+                              auto: `Save it as ${asFile}, or as a skill through create-skill when it is a generic procedure.`,
+                            }[draft.kind];
+                            askSdlcAssistant(
+                              `Add this to this hub's Hub Knowledge now. Do not ask me anything first, write the full content yourself.\n` +
+                                `Name: ${draft.name}\nWhat it covers: ${draft.description}\n${saveAs}`,
+                              undefined,
+                              true,
+                            );
+                          }}
+                        />
                       </section>
                     )}
 
-                    {section === 'wiki' && (
-                      <SdlcWikiSection
-                        key={wikiScope?.folderId ?? 'repositories'}
-                        header={renderWorkflowHeader({
-                          icon: BookOpen,
-                          title: 'Wiki',
-                          description:
-                            'A Wiki for each repository, plus Relationships for how they connect.',
-                          workflow: wikiState,
-                        })}
-                        scopes={wikiScopeList}
-                        scope={wikiScope}
-                        pageCounts={wikiPageCounts}
-                        pages={wikiPages}
-                        showArchived={showArchivedWiki}
-                        onSelectScope={folderId =>
-                          navigateWithinSdlc(
-                            `/sdlc/${channelId}/wiki`,
-                            `?wiki=${encodeURIComponent(folderId)}`,
-                          )
-                        }
-                        onAddRepository={() => setHubDialog('manage')}
-                        onShowArchivedChange={setShowArchivedWiki}
-                        onOpen={page => openWikiPage(page.canvasId)}
-                        canManage={isHubAdmin}
-                        onCreatePage={() => openHubDocumentCreate('wiki')}
-                        onArchivePage={(page, archived) => archiveArtifact(page.canvasId, archived)}
-                      />
-                    )}
+                    {section === 'wiki' &&
+                      (wikiScope ? (
+                        // Pages open over this; what is left is a Wiki with nothing to open.
+                        wikiLoaded &&
+                        !wikiAllPages.some(page => page.scopeFolderId === wikiScope.folderId) && (
+                          <SdlcWikiEmpty
+                            canManage={isHubAdmin}
+                            repositoryName={wikiScope.hub ? null : wikiScope.name}
+                            running={wikiState.phase === 'RUNNING'}
+                            runStatus={wikiEmptyRun.status}
+                            runButton={wikiEmptyRun.button}
+                            onCreatePage={() => openHubDocumentCreate('wiki')}
+                          />
+                        )
+                      ) : (
+                        <SdlcWikiHome
+                          channelId={channel.id}
+                          scopes={wikiScopeList}
+                          pageCounts={wikiPageCounts}
+                          allPages={wikiAllPages}
+                          repoUrls={new Map(channelRepos.map(repo => [repo.id, repo.url]))}
+                          canManage={isHubAdmin}
+                          runControl={renderWorkflowControls(
+                            'Wiki',
+                            wikiState,
+                            wikiAllPages.length > 0 ? 'Update Wiki' : 'Generate Wiki',
+                          )}
+                          onSelectScope={folderId => openWikiScope(folderId)}
+                          onAddRepository={() => setHubDialog('manage')}
+                          onOpenPage={page => openWikiPage(page.canvasId, page.scopeFolderId)}
+                        />
+                      ))}
 
                     {section === 'artifacts' &&
                       (activeTypeFolder ? (
@@ -4583,6 +4787,7 @@ export default function SdlcScreen(): ReactElement {
         onOpenChange={open => setHubDialog(open ? 'manage' : null)}
         channelId={channel.id}
         projectId={channel.projectId}
+        canManage={isHubAdmin}
         repositories={channelRepos.map(item => ({
           id: item.id,
           name: item.name,
@@ -4646,7 +4851,23 @@ export default function SdlcScreen(): ReactElement {
       <Dialog
         open={addItemParent !== null || artifactDialog !== null}
         onOpenChange={open => {
-          if (!open) closeAddItemDialog();
+          if (open) return;
+          if (artifactDialog && artifactDialog.kind !== 'artifact') {
+            dismissedHubDraft.current = {
+              kind: artifactDialog.kind,
+              id: artifactDialog.id,
+              title: artifactTitle,
+              prompt: artifactAiPrompt,
+              folderPath: artifactFolderPath,
+            };
+          }
+          closeAddItemDialog();
+        }}
+        // Radix would focus the first control, the close button.
+        onOpenAutoFocus={event => {
+          if (!artifactTitleRef.current) return;
+          event.preventDefault();
+          artifactTitleRef.current.focus();
         }}
         title={addItemParent ? 'Add to folder' : `New ${artifactDialog?.name ?? 'document'}`}
         className='max-w-[860px]'
@@ -4668,9 +4889,11 @@ export default function SdlcScreen(): ReactElement {
                     ? addItemParent.name
                     : (selectedTrack?.name ?? 'Track')}
               </h2>
-              <p className='truncate text-[11.5px] text-muted-foreground'>
+              <p className='text-[11.5px] text-muted-foreground'>
                 {!addItemParent
-                  ? HUB_DOCUMENT_HINT[artifactDialogKind]
+                  ? artifactDialogKind === 'wiki' && wikiScope
+                    ? `Adding to the ${wikiScope.name} Wiki`
+                    : HUB_DOCUMENT_HINT[artifactDialogKind]
                   : addItemParent.type === 'FOLDER'
                     ? `Adding to this folder in ${selectedTrack?.name ?? 'the track'}`
                     : 'Adding to this track'}
@@ -5255,7 +5478,8 @@ const WORKFLOW_PHASE_LABEL: Record<HubWorkflowPhase, string> = {
   CANCELLED: 'Cancelled',
 };
 
-function WorkflowStatusIcon({
+/** The run's state as text on the page: a tooltip is out of reach of keyboard and touch. */
+function WorkflowStatus({
   workflow,
 }: {
   workflow: Pick<HubWorkflow, 'phase' | 'updatedAt'>;
@@ -5274,24 +5498,26 @@ function WorkflowStatusIcon({
       ? `${WORKFLOW_PHASE_LABEL[phase]} · ${formatRelativeTime(updatedAt)}`
       : WORKFLOW_PHASE_LABEL[phase];
   return (
-    <Tooltip content={label}>
-      <span
-        role='img'
-        aria-label={label}
+    <span
+      role='status'
+      className='inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-normal text-muted-foreground'
+    >
+      <Icon
+        size={14}
+        aria-hidden
         className={cn(
-          'grid size-8 place-items-center rounded-full',
+          'shrink-0',
           phase === 'RUNNING'
-            ? 'text-amber-600'
+            ? 'animate-spin text-amber-600'
             : phase === 'READY'
               ? 'text-emerald-600'
               : phase === 'FAILED'
                 ? 'text-destructive'
                 : 'text-muted-foreground',
         )}
-      >
-        <Icon size={16} className={cn(phase === 'RUNNING' && 'animate-spin')} />
-      </span>
-    </Tooltip>
+      />
+      <span className={cn(phase === 'FAILED' && 'font-medium text-destructive')}>{label}</span>
+    </span>
   );
 }
 

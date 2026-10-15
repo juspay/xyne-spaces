@@ -17,6 +17,31 @@ export interface ErrorReportRecordingInfo {
   elapsedSeconds?: number;
 }
 
+/** A page from the in-app browsers' history. */
+export interface BrowserHistoryPage {
+  url: string;
+  title: string;
+  favicon: string;
+}
+
+/** A browser installed on this computer, found without opening any of its data. */
+export interface BrowserImportBrowser {
+  browser: string;
+  browserName: string;
+  /** The browser's own app icon, as a PNG data URL; null when its app isn't found. */
+  icon: string | null;
+}
+
+/** One of a browser's profiles, read once macOS lets Xyne into its data. */
+export interface BrowserImportProfile {
+  /** `browser:profile`, as an import asks for it. */
+  id: string;
+  /** The profile's own name: "Person 1", "Work". */
+  profile: string;
+  /** The account the profile is signed in to its browser with, when it is. */
+  account: string | null;
+}
+
 export interface ElectronAPI {
   openExternal: (url: string) => void;
   getWebviewPreloadPath?: () => string;
@@ -65,11 +90,58 @@ export interface ElectronAPI {
   onNavigateTo: (callback: (url: string, workspaceId?: string) => void) => () => void;
   onBrowserNewTab: (callback: () => void) => () => void;
   onBrowserFindInPage: (callback: () => void) => () => void;
+  /** Browser keys pressed inside a page — back, forward, the address, the tab list,
+   *  moving between tabs. Listening is what has the desktop app take them from the
+   *  page; absent from a desktop app from before it could. */
+  onBrowserCommand?: (callback: (command: string) => void) => () => void;
+  /** The in-app browsers' history as suggestions for what is typed; absent from a
+   *  desktop app that keeps none. */
+  browserHistorySuggest?: (
+    typed: string,
+    limit?: number,
+  ) => Promise<{ searches: string[]; pages: BrowserHistoryPage[] }>;
+  /** The sites visited most, one page each. */
+  browserHistoryTop?: (limit?: number) => Promise<BrowserHistoryPage[]>;
+  clearBrowserHistory?: () => Promise<{ success: boolean }>;
+  /** Freezes a page of the in-app browsers out of sight, or wakes it; absent from a
+   *  desktop app that can't, whose hidden pages run on. */
+  setBrowserPageFrozen?: (pageId: number, frozen: boolean) => Promise<{ success: boolean }>;
+  /** Whether the computer runs on battery; absent from a desktop app that can't say. */
+  getPowerState?: () => Promise<{ onBattery: boolean }>;
+  onPowerChange?: (callback: (state: { onBattery: boolean }) => void) => () => void;
+  /** The in-app browsers' pages use too much memory: let go of hidden ones. */
+  onBrowserMemoryPressure?: (callback: () => void) => () => void;
+  /** Connects ahead to where the address bar is about to go. */
+  preconnectBrowserPage?: (url: string) => Promise<void>;
+  /** The in-app browser's open tabs or per-site zoom, kept encrypted by the desktop
+   *  app; absent from one that can't. */
+  /** Whether the browser's state is kept encrypted across restarts. */
+  isBrowserStateSecure?: () => Promise<boolean>;
+  getBrowserState?: (key: 'tabs' | 'zoom') => Promise<unknown>;
+  setBrowserState?: (key: 'tabs' | 'zoom', value: unknown) => Promise<{ success: boolean }>;
+  /** ⌘-scroll over a page of the in-app browsers, asking to zoom it, by the page's id. */
+  onBrowserPageZoom?: (callback: (pageId: number, direction: 'in' | 'out') => void) => () => void;
+  /** The View menu's zoom (⌘+, ⌘-, ⌘0), for the app to take: its browser's page while
+   *  the browser has the keyboard, else the app itself, through zoomApp. Absent from a
+   *  desktop app whose menu zooms by itself. */
+  onAppZoomRequest?: (callback: (step: 'in' | 'out' | 'reset') => void) => () => void;
+  zoomApp?: (step: 'in' | 'out' | 'reset') => void;
+  /** Brings this window, and the app, to the front: a floating video's "back to tab". */
+  bringAppToFront?: () => void;
+  /** The in-app browsers' downloads, as they come in. Listening has the desktop app
+   *  save them to Downloads; absent from one that can't. */
+  onBrowserDownload?: (callback: (download: unknown) => void) => () => void;
+  browserDownloadAction?: (
+    id: string,
+    action: 'open' | 'show' | 'cancel' | 'pause' | 'resume',
+  ) => Promise<{ success: boolean }>;
   onNavigateToTicketThread: (callback: (data: { ticketId: string }) => void) => () => void;
   onAppWindowLimitReached: (callback: (limit: number) => void) => () => void;
   focusHostWebContents?: () => Promise<void>;
   onOpenInBrowserPanel: (
-    callback: (url: string, sourceWebContentsId?: number) => void,
+    /** `disposition`: how the page asked — `background-tab` for a ⌘-click or middle
+     *  click; absent from a desktop app from before it said. */
+    callback: (url: string, sourceWebContentsId?: number, disposition?: string) => void,
   ) => () => void;
   // Optional: absent on Electron builds older than the one that added it.
   onLinkOpenedExternal?: (callback: (url: string) => void) => () => void;
@@ -119,6 +191,27 @@ export interface ElectronAPI {
     hosts?: number;
     error?: string;
   }>;
+  /** The browsers on this computer, found without opening their data; unsupported
+   *  where importing isn't possible. */
+  browserImportBrowsers?: () => Promise<{ supported: boolean; browsers: BrowserImportBrowser[] }>;
+  /** One browser's profiles, read from its data: where macOS may ask for access. */
+  browserImportProfiles?: (browser: string) => Promise<{
+    success: boolean;
+    profiles?: BrowserImportProfile[];
+    error?: string;
+  }>;
+  /** Imports one profile's sign-ins (its cookies) into the in-app browsers. */
+  browserImport?: (sourceId: string) => Promise<{
+    success: boolean;
+    imported?: number;
+    skipped?: number;
+    hosts?: number;
+    error?: string;
+  }>;
+  /** Opens System Settings at Full Disk Access, which Safari's cookies need. */
+  /** System Settings where Xyne is let into a browser's data: Files & Folders for
+   *  most, Full Disk Access for Safari. */
+  openBrowserAccessSettings?: (access: 'app-data' | 'full-disk') => Promise<{ success: boolean }>;
   exportCanvasMarkdown?: (
     fileName: string,
     content: string,
@@ -309,6 +402,8 @@ export interface ElectronWebviewElement extends HTMLElement {
   getWebContentsId?: () => number;
   isLoading(): boolean;
   executeJavaScript(code: string, userGesture?: boolean): Promise<unknown>;
+  /** The page's zoom: 1 at 100%. */
+  getZoomFactor?(): number;
   sendInputEvent(event: Record<string, unknown>): Promise<void> | void;
   capturePage(): Promise<{
     toDataURL(): string;

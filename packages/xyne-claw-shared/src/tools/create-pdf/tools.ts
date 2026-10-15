@@ -15,6 +15,7 @@ import type { ToolDefinition, ToolExecutionContext } from "../types.js";
 import { PDF_DESIGNER_SYSTEM_PROMPT } from "./prompt.js";
 
 import { createLogger } from "../../logger.js";
+import { buildHtmlDocument, sanitizeHtmlBody } from "../create-report/template.js";
 const log = createLogger("tools");
 
 // ─── HTTP helper ─────────────────────────────────────────────────────────────
@@ -435,7 +436,8 @@ async function convertHtmlToPdf(html: string): Promise<Buffer> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const playwright = (await import("playwright" as unknown as string)) as any;
     const { chromium } = playwright;
-    browser = await chromium.launch({ headless: true });
+    const executablePath = process.env["CHROMIUM_PATH"];
+    browser = await chromium.launch({ headless: true, ...(executablePath ? { executablePath } : {}) });
     const page = await browser.newPage();
     
     // Set content and wait for it to render
@@ -479,21 +481,39 @@ function formatAttachmentResponse(
   );
 }
 
+async function renderMarkdownPdf(markdown: string, title: string): Promise<Buffer> {
+  const { marked } = await import("marked");
+  const body = sanitizeHtmlBody(String(await Promise.resolve(marked.parse(markdown))));
+  return convertHtmlToPdf(buildHtmlDocument({ title, body }));
+}
+
+function markdownPdfResponse(buffer: Buffer, title: string): string {
+  const fileName = `${title.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 40) || "document"}.pdf`;
+  return `[ATTACHMENT:${fileName}:${PDF_MIME}]\n${buffer.toString("base64")}\n\nRendered ${fileName}; it is attached to your reply.`;
+}
+
 // ─── create-pdf ──────────────────────────────────────────────────────────────
 
 export const createPdfTool: ToolDefinition = {
   slug: "create-pdf",
   name: "Create PDF Document",
   description:
-    "Generate a PDF document from a content brief. The tool calls an LLM to design document JSON, " +
-    "renders it as a styled PDF, and returns both the file attachment and the underlying document JSON. " +
-    "Pass the JSON back to edit-pdf if the user wants changes. " +
-    "Provide a rich brief (title, purpose, sections, content details, formatting preferences) and the target page count (1–50).",
+    "Generate a PDF document. Either pass `content` (markdown you have already written) and an optional `title` " +
+    "to render it exactly as written, or pass a content brief as `query` with a target page count (1–50) and the " +
+    "tool calls an LLM to design the document and returns its JSON for edit-pdf. The PDF is attached to your reply.",
   source: "custom:create-ppt",
   configSchema: CREATE_PDF_CONFIG_SCHEMA,
   inputSchema: {
     type: "object",
     properties: {
+      content: {
+        type: "string",
+        description: "Markdown to render as the PDF, exactly as written. When set, query and pages are ignored.",
+      },
+      title: {
+        type: "string",
+        description: "Document title used with content.",
+      },
       query: {
         type: "string",
         description:
@@ -507,10 +527,24 @@ export const createPdfTool: ToolDefinition = {
         description: "Target number of pages (typically 2–10; default 5).",
       },
     },
-    required: ["query", "pages"],
+    required: [],
   },
 
   async execute(params, context) {
+    const content = typeof params["content"] === "string" ? params["content"].trim() : "";
+    if (content) {
+      const title = (typeof params["title"] === "string" && params["title"].trim()) || "Full answer";
+      try {
+        const buffer = await renderMarkdownPdf(content, title);
+        log.info(`[create-pdf] rendered content (${(buffer.length / 1024).toFixed(0)}KB)`);
+        return markdownPdfResponse(buffer, title);
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : "Unknown error";
+        log.error(`[create-pdf] content render error: ${msg}`);
+        return `Error creating PDF: ${msg}`;
+      }
+    }
+
     const query = (params["query"] as string | undefined)?.trim();
     const numPages = params["pages"] as number | undefined;
 

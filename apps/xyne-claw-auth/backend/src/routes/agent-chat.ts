@@ -1,4 +1,5 @@
 import { s2sKeyMatches } from "../middleware/require-auth.js";
+import type { DraftAgentSpec } from "../lib/agent-card.js";
 import { isAgentOwnedRun } from "../lib/agent-owned-runs.js";
 import { applyAiScreenCommand } from "../lib/ai-screen-commands.js";
 import { labelModel, modelDisplayName } from "../lib/model-catalog.js";
@@ -1245,16 +1246,9 @@ router.get("/:slug/litellm-models", async (req: Request<{ slug: string }>, res: 
 
 // POST /agents/:slug/chat — send a message, stream progress via SSE, return result
 
-function evalRunSwitches(
-  req: Request,
-  optimizations: unknown,
-  judgeBackend: unknown,
-): { optimizations?: string; judgeBackend?: string } {
+function evalRunSwitches(req: Request, optimizations: unknown): { optimizations?: string } {
   if (!s2sKeyMatches(req.headers["x-s2s-key"])) return {};
-  return {
-    ...(typeof optimizations === "string" && /^[a-z0-9_,+\-]{1,400}$/i.test(optimizations) ? { optimizations } : {}),
-    ...(typeof judgeBackend === "string" && /^[a-z0-9_]{1,40}$/i.test(judgeBackend) ? { judgeBackend } : {}),
-  };
+  return typeof optimizations === "string" && /^[a-z0-9_,+\-]{1,400}$/i.test(optimizations) ? { optimizations } : {};
 }
 
 router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response) => {
@@ -1273,7 +1267,6 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       attachedContext,
       providerOverride,
       optimizations: requestedOptimizations,
-      judgeBackend: requestedJudgeBackend,
       isRegenerate,
       isEditUserMessage,
       parentUserMessageId,
@@ -1295,7 +1288,6 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       attachedContext?: unknown;
       providerOverride?: { provider?: string; model?: string };
       optimizations?: unknown;
-      judgeBackend?: unknown;
       /** Branching: regenerate the assistant reply for `parentUserMessageId` as
        *  a sibling of the existing assistant. */
       isRegenerate?: boolean;
@@ -1893,7 +1885,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
           ? agentCredRefreshTarget(agent.id, "claude", credRow as { sharedCredentialId?: string | null })
           : userCredRefreshTarget(userId, "claude", credRow as { sharedCredentialId?: string | null });
         try {
-          claudeCfg.apiKey = await getValidClaudeBearer(target.credKey, credRow, target.persist);
+          claudeCfg.apiKey = await getValidClaudeBearer(target.credKey, credRow, target.persist, target.reload);
         } catch (err) {
           log.warn("[agent-chat] Claude OAuth refresh failed — credential likely needs reconnect:", err instanceof Error ? err.message : err);
         }
@@ -2051,7 +2043,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       fastMode: fastModeEnabled,
       // /compact shrinks the session before answering, not just summarises it.
       ...(studioMode !== "design" && aiScreenCommand.compactBeforeRun ? { compactBeforeRun: true } : {}),
-      ...evalRunSwitches(req, requestedOptimizations, requestedJudgeBackend),
+      ...evalRunSwitches(req, requestedOptimizations),
     };
 
     const forwardedTask = typeof forwardBody["task"] === "string" ? forwardBody["task"] as string : "";
@@ -2794,7 +2786,52 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
     pendingConnectorSuggestions?: { serverTypes: string[]; listAll?: boolean; title?: string };
     pendingProviderSuggestions?: { providers: string[]; listAll?: boolean; title?: string };
     blockedConnectors?: unknown;
+    pendingAgentCard?: { variant?: string; agent?: DraftAgentSpec };
   };
+
+  // A draft proposed in a continuation (the run after a question card) finalizes
+  // here, not on run-stream, so #2794's branch never saw it and the turn came
+  // back as paste-this-yourself markdown. Same producer as the other two
+  // surfaces — a third copy is how they drifted apart before.
+  // claw retries callbacks, and prepareAgentDraftCard WRITES an AgentRequest —
+  // a second pass would mint a second row and, because the screenId carries the
+  // requestId, append a second card next to the first. persistedFlag is already
+  // the "this callback wrote the row, not a retry" signal, so reuse it rather
+  // than add a second guard key.
+  const draftCard = callbackBody.pendingAgentCard;
+  if (persistedFlag && finalStatus === "completed" && draftCard?.variant === "draft" && draftCard.agent) {
+    try {
+      const { resolveXyneAiCardTarget, postFlowCard } = await import("../lib/flow-card-delivery.js");
+      const target = await resolveXyneAiCardTarget({
+        assistantMessageId: chatMessageId,
+        conversationId: req.params.convId,
+        agentSlug: req.params.slug,
+      });
+      if (target) {
+        const { prepareAgentDraftCard } = await import("../lib/agent-card-render.js");
+        const prepared = await prepareAgentDraftCard(draftCard.agent, {
+          agentSlug: target.agentSlug,
+          orgId: target.orgId,
+          userId: target.userId,
+          conversationId: target.conversationId,
+          channelId: "",
+          spacesAppId: target.spacesAppId,
+        });
+        if (prepared.ok) {
+          const flow = await postFlowCard(prepared.flow, target);
+          if (callbackId) {
+            const localStream = pendingStreams.get(callbackId);
+            if (localStream) localStream.sendEvent("ui-flow", { flow });
+            else publishChatEvent({ kind: "progress", callbackId, events: [{ event: "ui-flow", data: { flow } }] });
+          }
+        } else {
+          log.info(`[agent-card] continuation draft not delivered (${prepared.reason}) conv=${target.conversationId}`);
+        }
+      }
+    } catch (err) {
+      log.warn(`[agent-card] continuation draft card failed: ${errMsg(err)}`);
+    }
+  }
   if (finalStatus === "completed" && callbackBody.pendingConnectorSuggestions) {
     try {
       const { resolveXyneAiCardTarget } = await import("../lib/flow-card-delivery.js");
@@ -3367,6 +3404,17 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
     // that's already been generated, before the first live `delta` arrives.
     const runningMsg = visible.find((m) => m.role === "assistant" && m.status === "running");
 
+    // The caller's OWN in-flight run, so a reattached tab can Stop it
+    // (XYNE-66347). Prefer the run linked to the streaming placeholder, else
+    // the newest not-yet-linked run on this agent. Never another user's run.
+    const ownRunning = agentRuns.filter(
+      (r) => r.status === "running" && !r.completedAt && liveUserAliases.includes(r.userId),
+    );
+    const runSessionId = (
+      ownRunning.find((r) => runningMsg && r.chatMessageId === runningMsg.id) ??
+      ownRunning.find((r) => !r.chatMessageId && r.agentSlug === slug)
+    )?.sessionId;
+
     // Redis pub/sub has no replay, so a mid-run joiner would otherwise miss
     // every card emitted before it connected.
     const uiFlowsByMsgId: Record<string, unknown[]> = {};
@@ -3381,6 +3429,7 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
         agentSlug: slug,
         invocationsByMsgId,
         inProgress,
+        ...(runSessionId ? { runSessionId } : {}),
         ...(Object.keys(uiFlowsByMsgId).length > 0 ? { uiFlowsByMsgId } : {}),
         ...(runningMsg
           ? {
@@ -4073,7 +4122,7 @@ router.get("/:slug/conversations", async (req: Request<{ slug: string }>, res: R
 /**
  * POST /agents/:slug/chat/approve-action
  * User clicked "Approve" on a write-tool card inside the chat UI.
- * Body: { pendingAction: { serverType, tool, params, userId, signature } }
+ * Body: { pendingAction: { serverType, tool, params, userId, signature, subagentId? } }
  * Returns the tool's execution result so the UI can render it inline.
  */
 router.post("/:slug/chat/approve-action", async (req: Request<{ slug: string }>, res: Response) => {
@@ -4092,6 +4141,7 @@ router.post("/:slug/chat/approve-action", async (req: Request<{ slug: string }>,
 
     const action = pendingAction as {
       serverType?: string; tool?: string; params?: Record<string, unknown>; userId?: string; signature?: string;
+      subagentId?: unknown;
     };
     if (!action.serverType || !action.tool || !action.userId || !action.signature) {
       res.status(400).json({ success: false, error: "pendingAction must include serverType, tool, userId, signature" });
@@ -4139,6 +4189,23 @@ router.post("/:slug/chat/approve-action", async (req: Request<{ slug: string }>,
       return;
     }
 
+    // Signed in when a subagent's credential queued the write. Clients that
+    // rebuild the action from its four base fields (the Xyne AI sidebar, via
+    // Spaces) drop it, so fall back to the copy this run stored. That is safe
+    // without an ownership check: the HMAC below rejects any id the action
+    // was not signed with.
+    let subagentId = typeof action.subagentId === "string" && action.subagentId ? action.subagentId : undefined;
+    if (!subagentId && approvedConversationId) {
+      const stored = await chatMessageRepository
+        .findPendingAction(approvedConversationId, action.signature)
+        .catch((err: unknown) => {
+          log.warn(`[agent-chat] stored pending action lookup failed: ${errMsg(err)}`);
+          return null;
+        });
+      const storedSubagentId = stored?.["subagentId"];
+      if (typeof storedSubagentId === "string" && storedSubagentId) subagentId = storedSubagentId;
+    }
+
     const { executeWriteAction } = await import("../lib/write-actions.js");
     const result = await executeWriteAction({
       serverType: action.serverType,
@@ -4146,6 +4213,7 @@ router.post("/:slug/chat/approve-action", async (req: Request<{ slug: string }>,
       params: action.params ?? {},
       userId: action.userId,
       signature: action.signature,
+      ...(subagentId ? { subagentId } : {}),
     });
 
     if (!result.ok) {
@@ -4155,6 +4223,18 @@ router.post("/:slug/chat/approve-action", async (req: Request<{ slug: string }>,
     }
 
     persistResolution("approved");
+    // The sign route puts the hub into the signed params when the skill is proposed in a hub run.
+    const hubChannelId = action.params?.["sdlcChannelId"];
+    if (result.createdSkillId && typeof hubChannelId === "string") {
+      const { linkSdlcHubSkill } = await import("../lib/sdlc-repository-context.js");
+      // Detached: the skill exists by now, so a failed link must not fail the approval.
+      // The session's own Spaces id names the right workspace for a user who is in two.
+      const spacesCallerId = req.headers["x-spaces-user-id"];
+      const linkUserId = typeof spacesCallerId === "string" && spacesCallerId ? spacesCallerId : callerUserId;
+      void linkSdlcHubSkill(hubChannelId, linkUserId, result.createdSkillId).catch((err: unknown) =>
+        log.warn(`[agent-chat] create-skill hub link failed: ${errMsg(err)}`),
+      );
+    }
     if (approvedConversationId && conversationOwned) {
       const { ingestArtifactSignals } = await import("../lib/conversation-artifact-signals.js");
       {

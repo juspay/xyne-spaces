@@ -200,6 +200,57 @@ const uploadCreateMeta = z.object({
   description: z.string().trim().max(MAX_DESCRIPTION).optional(),
 });
 
+const blankCreateBody = z.object({
+  title: z.string().trim().min(1).max(MAX_TITLE),
+  description: z.string().trim().min(5).max(MAX_DESCRIPTION),
+  icon: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .refine((n) => ICON_NAMES.has(n), { message: "Not a Xyne icon id" })
+    .optional(),
+});
+
+/**
+ * POST /blank — create an app with a name and nothing built yet.
+ *
+ * The Apps screen's "Create app" starts here: the app exists, with its name and
+ * icon, before any code does, so its id can go into the `spaces app init
+ * --app-id` command the screen hands out. The first `spaces app push` from that
+ * project adds version 1. Until then the app has no head version, which every
+ * route here already allows for: the list shows it with no manifest, and its
+ * payload is a 404 until something is pushed. Private, like every new app.
+ */
+artifactAppsRouter.post("/blank", async (req: Request, res: Response): Promise<void> => {
+  const requesterId = getRequesterId(req);
+  if (!requesterId) {
+    res.status(401).json({ success: false, error: "Unauthorized" });
+    return;
+  }
+
+  const parsed = blankCreateBody.safeParse(req.body);
+  if (!parsed.success) return badRequest(res, parsed);
+
+  const workspaceId = await getWorkspaceIdForUser(requesterId, "artifact-apps", requestWorkspaceHint(req));
+  if (!workspaceId) {
+    res.status(409).json({ success: false, error: "No Spaces workspace for this user" });
+    return;
+  }
+
+  const app = await prisma.artifactApp.create({
+    data: {
+      workspaceId,
+      ownerUserId: requesterId,
+      title: parsed.data.title,
+      description: parsed.data.description,
+      ...(parsed.data.icon ? { icon: parsed.data.icon } : {}),
+      visibility: VISIBILITY_PRIVATE,
+    },
+  });
+
+  res.status(201).json({ success: true, app: { ...app, versions: [] } });
+});
+
 /**
  * POST /upload — create an app (version 1) from raw files, no chat attachment.
  *

@@ -1,0 +1,30 @@
+export {
+  stateMachine,
+  stateMachineActor,
+  initialMetricsState,
+  setupPresenceListeners,
+  cleanupPresenceListeners,
+  updateMyStatus,
+  getHasOverlay,
+  useHasOverlay,
+  useOverlayEffect,
+} from '@xyne/shared/machines';
+
+export type {
+  DraftMessage,
+  DraftMessages,
+  User,
+  Bookmarks,
+  VisibleChannel,
+  UserGroup,
+  UserPermission,
+  UserChannelStatus,
+  Conversation,
+  DraftMessageDB,
+  PeriodMetrics,
+  MetricsState,
+  UnreadCounts,
+  PresenceStatus,
+  OnlineUser,
+  UserStatusUpdatedEvent,
+} from '@xyne/shared/machines';

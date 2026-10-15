@@ -41,6 +41,7 @@ import type {
   SelectedMessage,
   SelectedPerson,
   SelectedSharedFile,
+  SelectedApp,
   ContextSelections,
 } from './ContextPickerPanel';
 import { Composer } from '../../../Composer/Composer';
@@ -79,6 +80,7 @@ const EMPTY_RECORDINGS: SelectedRecording[] = [];
 const EMPTY_MESSAGES: SelectedMessage[] = [];
 const EMPTY_PEOPLE: SelectedPerson[] = [];
 const EMPTY_SHARED_FILES: SelectedSharedFile[] = [];
+const EMPTY_APPS: SelectedApp[] = [];
 const EMPTY_ACTIVITIES: UserActivity[] = [];
 const EMPTY_SCOPES: { id: string; name: string }[] = [];
 
@@ -130,6 +132,7 @@ export interface XyneAIInputBoxProps {
   selectedMessages?: SelectedMessage[];
   selectedPeople?: SelectedPerson[];
   selectedSharedFiles?: SelectedSharedFile[];
+  selectedApps?: SelectedApp[];
   selectedActivities?: UserActivity[];
   onActivitiesChange?: (activities: UserActivity[]) => void;
   isStreaming?: boolean;
@@ -236,6 +239,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       selectedMessages = EMPTY_MESSAGES,
       selectedPeople = EMPTY_PEOPLE,
       selectedSharedFiles = EMPTY_SHARED_FILES,
+      selectedApps = EMPTY_APPS,
       selectedActivities = EMPTY_ACTIVITIES,
       onActivitiesChange,
       isStreaming = false,
@@ -799,6 +803,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
         messages: selectedMessages,
         people: selectedPeople,
         sharedFiles: selectedSharedFiles,
+        apps: selectedApps,
         localFolders: [],
       }),
       [
@@ -810,6 +815,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
         selectedMessages,
         selectedPeople,
         selectedSharedFiles,
+        selectedApps,
       ],
     );
     const selectionsRef = useRef(currentSelections);

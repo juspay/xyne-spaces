@@ -3,6 +3,7 @@ import Input from '../../../ui/Input/Input';
 import { Checkbox } from '../../../ui/Checkbox/Checkbox';
 import { WORKING_HOUR_END, WORKING_HOUR_START } from '../../../../config';
 import type { BusinessHours } from '../../../../api/automationsApi';
+import { HolidaysField } from './HolidaysField';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const DAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
@@ -90,6 +91,11 @@ export function BusinessHoursFields({
             />
             <span className='text-xs text-muted-foreground'>IST</span>
           </div>
+          <HolidaysField
+            days={hours.days}
+            holidays={hours.holidays ?? []}
+            onChange={holidays => setHours({ ...hours, holidays })}
+          />
         </>
       )}
     </div>

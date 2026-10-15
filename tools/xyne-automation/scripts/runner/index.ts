@@ -440,7 +440,7 @@ async function main(): Promise<void> {
     const resolvedParallel =
       cliArgs.parallel ??
       (envParallelValid ? envParallel : undefined) ??
-      (mode === 'local' ? 3 : undefined);
+      (mode === 'local' ? 5 : undefined);
     await runStep(() =>
       runTests(dockerOpts, commitHash, testTargets, resolvedParallel, artifactDir, renderer)
     );

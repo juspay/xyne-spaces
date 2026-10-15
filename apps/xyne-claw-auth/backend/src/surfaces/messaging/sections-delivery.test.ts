@@ -3,12 +3,11 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("../../redis.js", () => ({ redisService: { getConnection: () => ({}) } }));
 vi.mock("../../logger.js", () => ({ createLogger: () => ({ error: vi.fn(), warn: vi.fn(), info: vi.fn() }) }));
 vi.mock("../../config.js", () => ({ CONFIG: { internalUrl: "http://localhost", xyneClawS2sKey: "" } }));
-vi.mock("../../lib/result-html.js", () => ({ renderMarkdownToHtml: async (md: string) => Buffer.from(`<html>${md}</html>`) }));
 
 const { sendOutbound } = await import("./delivery.js");
 type OutboxItem = Parameters<typeof sendOutbound>[2];
 
-const resultSections = { maxWords: 100, maxSections: 5, fileMimeType: "text/plain" };
+const resultSections = { maxWords: 100, maxSections: 5 };
 
 function plugin(sections: boolean) {
   const sendText = vi.fn().mockResolvedValue({ chatId: "c", messageId: "t" });
@@ -26,17 +25,13 @@ const longAnswer = Array.from({ length: 7 }, (_, i) => `## Part ${i + 1}\n${Arra
 const result = (text: string): OutboxItem => ({ kind: "result", chatId: "c", status: "completed", result: text });
 
 describe("sectioned result delivery", () => {
-  it("sends at most 5 section messages and attaches the full answer as answer.html", async () => {
+  it("sends an answer that still does not fit as one message per section, with nothing cut", async () => {
     const { p, sendText, sendMedia } = plugin(true);
     await sendOutbound(p, {}, result(longAnswer));
-    expect(sendText).toHaveBeenCalledTimes(5);
+    expect(sendText).toHaveBeenCalledTimes(7);
     expect(sendText.mock.calls[0]?.[2]).toContain("## Part 1");
-    expect(sendText.mock.calls[4]?.[2]).toContain("Full answer in the attached file");
-    expect(sendMedia).toHaveBeenCalledTimes(1);
-    const file = sendMedia.mock.calls[0]?.[2] as { fileName: string; mimeType: string; data: Buffer };
-    expect(file.fileName).toBe("answer.html");
-    expect(file.mimeType).toBe("text/plain");
-    expect(file.data.toString()).toContain("## Part 7");
+    expect(sendText.mock.calls[6]?.[2]).toContain("## Part 7");
+    expect(sendMedia).not.toHaveBeenCalled();
   });
 
   it("sends a short answer as-is with no file", async () => {
@@ -64,7 +59,7 @@ describe("sectioned result delivery", () => {
   it("resumes after the sections that already landed", async () => {
     const { p, sendText } = plugin(true);
     await sendOutbound(p, {}, result(longAnswer), { chunks: 3, attachments: 0 });
-    expect(sendText).toHaveBeenCalledTimes(2);
+    expect(sendText).toHaveBeenCalledTimes(4);
     expect(sendText.mock.calls[0]?.[2]).toContain("## Part 4");
   });
 });

@@ -8,6 +8,7 @@ import { enqueueMessage, type QueuedMessage } from "../lib/message-queue.js";
 
 import { systemNote } from "../lib/notice-format.js";
 import { createLogger } from "../logger.js";
+import { isRunWaitingInQueue } from "./run-execution-queue.js";
 const log = createLogger("run-recovery-worker");
 
 const RECOVERY_PREFIX = "run-recovery:";
@@ -91,6 +92,13 @@ export interface RecoverySessionContext {
   channelName: string;
   conversationId: string;
   task: string;
+  /** Agent identity. MUST be carried here: xyne-claw can mint its own
+   *  sessionId (e.g. when the dispatch id is not a valid internal id), so
+   *  callbacks like /webhook/progress resolve ctx from THIS recovery context
+   *  rather than the Redis session. Without agentId, per-agent config reads
+   *  (e.g. `hideLivePreview`) silently fall back to defaults. */
+  agentId?: string;
+  agentOrgId?: string | null;
   agentSlug?: string | undefined;
   agentName?: string | undefined;
   responseMode: "conversation" | "approval";
@@ -669,6 +677,8 @@ async function dispatchRetry(rootSessionId: string, reason: string): Promise<voi
   }
 }
 
+const QUEUED_RECHECK_MS = 60_000;
+
 async function processRecoveryJob(job: Job<RunRecoveryJobData>): Promise<void> {
   const data = job.data;
 
@@ -685,6 +695,12 @@ async function processRecoveryJob(job: Job<RunRecoveryJobData>): Promise<void> {
   const age = Date.now() - state.lastHeartbeatAt;
   if (age < state.timeoutMs) {
     await scheduleWatchdog(state.rootSessionId, state.activeSessionId, state.timeoutMs - age);
+    return;
+  }
+
+  if (await isRunWaitingInQueue(state.activeSessionId).catch(() => false)) {
+    log.info(`[run-recovery] root=${state.rootSessionId} session=${state.activeSessionId} is still waiting in the run queue — not retrying`);
+    await scheduleWatchdog(state.rootSessionId, state.activeSessionId, QUEUED_RECHECK_MS);
     return;
   }
 

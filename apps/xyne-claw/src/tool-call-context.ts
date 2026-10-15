@@ -11,7 +11,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 export interface ToolCallContext {
   tool: string;
   args: unknown;
-  /** The model's per-call choice; undefined = use the agent's default. */
+  /** The model's per-call choice; undefined = no sifting. */
   sift?: boolean;
   /** Set once the result has been sifted, so a second pass leaves it alone. */
   sifted?: boolean;
@@ -34,7 +34,7 @@ export const SIFT_PARAM_SCHEMA = {
   type: "boolean",
   description:
     "Optional. Relevance filter for a large list result: true = return only the items relevant to this conversation, " +
-    "false = return the raw, unfiltered result. Omit to use the agent's default. The full result is always saved to a file.",
+    "false or omitted = return the raw, unfiltered result. The full result is always saved to a file.",
 } as const;
 
 /**

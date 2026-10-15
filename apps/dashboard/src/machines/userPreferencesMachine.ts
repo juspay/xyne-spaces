@@ -10,13 +10,40 @@ export interface UserPreferences {
    *  of someone else's working set. */
   sdlcFolderTabs: Record<
     string,
-    Array<{ kind: 'CANVAS' | 'LINK' | 'ATTACHMENT' | 'BROWSER'; id: string }>
+    Array<{
+      kind: 'CANVAS' | 'LINK' | 'ATTACHMENT' | 'BROWSER';
+      id: string;
+      /** A browsing tab's page, title and icon, so it reopens where it was. */
+      url?: string;
+      title?: string;
+      favicon?: string;
+    }>
   >;
   sdlcFolderTreeExpanded: Record<string, boolean>;
+  /** Where a folder's browser opens when it has nowhere else to be: the tab Xyne AI
+   *  asks for when it browses for you. Set on the browsing start page. */
+  sdlcBrowserHomePage: string;
+  /** The browser panel's tabs, in order, and the one that was open: kept so a reload
+   *  or a restart finds them as they were. */
+  browserTabs: {
+    tabs: Array<{ id: string; url: string; title: string; favicon?: string }>;
+    activeTabId: string | null;
+  };
+  /** Each site's zoom in the in-app browsers, by host, as Chrome remembers it; only
+   *  sites not at 100%. */
+  browserZoom: Record<string, number>;
+  /** A playing video floats in its own window when its tab is left. */
+  browserAutoPictureInPicture: boolean;
+  /** When each browser profile's sign-ins were last imported, and from how many sites:
+   *  shown in Preferences → Browser. By source id. */
+  browserImports: Record<string, { at: number; sites: number }>;
   /** The folder page's explorer, folded away to give the page its full width. */
   sdlcExplorerCollapsed: boolean;
   sdlcSidebarSectionsCollapsed: Record<string, boolean>;
   sdlcShowClosedTracks: boolean;
+  sdlcShowArchivedKnowledge: boolean;
+  /** The Wiki pages this reader opened, per hub, newest first. */
+  sdlcWikiViews: Record<string, Array<{ canvasId: string; at: number }>>;
   // TODO: move relatedContextEnabled and relatedContextDebounceMs to the server-side
   // user_preferences table (with the other Messaging preferences) once the
   // related-context feature is confirmed; kept per device while it is on trial.
@@ -28,6 +55,13 @@ export interface UserPreferences {
   relatedContextEnabled: boolean;
   /** How long after the last keystroke to look them up, in ms. Never below 1000. */
   relatedContextDebounceMs: number;
+  aiWorkspaceAutoOpen: boolean;
+  /**
+   * Auto in Xyne AI also opens pages and presses buttons on screen for a typed or spoken
+   * request. Beta: off until turned on in Preferences → Developer.
+   * TODO: on by default, and then the switch removed, once tried with prod users.
+   */
+  screenActionsEnabled: boolean;
 }
 
 export const DEFAULT_USER_PREFERENCES: UserPreferences = {
@@ -35,11 +69,20 @@ export const DEFAULT_USER_PREFERENCES: UserPreferences = {
   sdlcSidebarWidth: 280,
   sdlcFolderTabs: {},
   sdlcFolderTreeExpanded: {},
+  sdlcBrowserHomePage: 'https://www.google.com',
+  browserImports: {},
+  browserTabs: { tabs: [], activeTabId: null },
+  browserZoom: {},
+  browserAutoPictureInPicture: true,
   sdlcExplorerCollapsed: false,
   sdlcSidebarSectionsCollapsed: {},
   sdlcShowClosedTracks: false,
+  sdlcShowArchivedKnowledge: false,
+  sdlcWikiViews: {},
   relatedContextEnabled: false,
   relatedContextDebounceMs: 1000,
+  aiWorkspaceAutoOpen: true,
+  screenActionsEnabled: false,
 };
 
 export interface UserPreferencesContext {

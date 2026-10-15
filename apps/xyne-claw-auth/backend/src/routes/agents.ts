@@ -1,5 +1,6 @@
 import { Router, type Request, type RequestHandler, type Response } from "express";
 import { errMsg } from "../lib/errors.js";
+import { notifySdlcAgentRegistered } from "../lib/sdlc-repository-context.js";
 import { assertSafeOutboundUrl } from "../mcpgateway/services/http-client.js";
 import { safeFetch } from "../lib/safe-fetch.js";
 import {
@@ -18,6 +19,7 @@ import { spacesAppFetch } from "../lib/spaces-api.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { LOCAL_HARNESS_PROVIDERS } from "../lib/local-harness.js";
 import { prisma } from "../db.js";
+import { DEFAULT_NEW_AGENT_TOOL_SOURCES, mergeNewAgentToolDefaults } from "../lib/new-agent-tool-defaults.js";
 import { CONFIG } from "../config.js";
 import { encrypt, decrypt } from "../crypto.js";
 import { checkHealth } from "../health.js";
@@ -149,6 +151,14 @@ function readConfigToolSelection(config: unknown): string[] {
     for (const item of configArray(tools[key])) out.push(`${key}:${item}`);
   }
   return out;
+}
+
+async function applyNewAgentToolDefaults(config: Record<string, unknown> | undefined): Promise<Record<string, unknown>> {
+  const rows = await prisma.tool.findMany({
+    where: { source: { in: [...DEFAULT_NEW_AGENT_TOOL_SOURCES] } },
+    select: { slug: true },
+  });
+  return mergeNewAgentToolDefaults(config, rows.map((r) => r.slug));
 }
 
 function readTopLevelGatewaySelection(config: unknown): string[] {
@@ -476,7 +486,11 @@ router.get("/", asyncHandler(async (req: Request, res: Response) => {
   const view = req.query["view"] === "full" ? "full" : "light";
   const sanitized = agents.map((a: typeof agents[number]) => {
     if (view === "light") {
-      return lightAgentProjection(a as unknown as Record<string, unknown>, adminScope.allOrgs ? orgNames : undefined);
+      return {
+        ...lightAgentProjection(a as unknown as Record<string, unknown>, adminScope.allOrgs ? orgNames : undefined),
+        // ownerUserId is the canonical Claw id, which a Spaces caller cannot compare with its own id.
+        ...(scopeUserId ? { ownedByScopeUser: !!a.ownerUserId && visibilityUserIds.includes(a.ownerUserId) } : {}),
+      };
     }
     const row = sanitizeAgent(a as unknown as Record<string, unknown>);
     return adminScope.allOrgs ? { ...row, ...withOrgLabel({ orgId: a.orgId }, orgNames) } : row;
@@ -562,7 +576,7 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
     kbScope?: string;
   };
 
-  const normalizedConfig = await normalizeGatewayServicesInConfig(config);
+  const normalizedConfig = await applyNewAgentToolDefaults(await normalizeGatewayServicesInConfig(config));
 
   if (!slug || typeof slug !== "string" || slug.trim().length === 0) {
     throw badRequest("slug is required");
@@ -615,6 +629,11 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
     throw badRequest("orgId is required");
   }
 
+  const slugCollision = await agentRepository.findBySlug(slug.trim(), createOrgId);
+  if (slugCollision) {
+    throw conflict(`Handle "${slug.trim()}" is already taken.`, "SLUG_TAKEN");
+  }
+
   const data: Prisma.AgentCreateInput = {
     slug: slug.trim(),
     name: name.trim(),
@@ -630,7 +649,15 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
   if (effectiveOwner) {
     data.owner = { connect: { id: effectiveOwner } };
   }
-  const agent = await agentRepository.create(data);
+  let agent;
+  try {
+    agent = await agentRepository.create(data);
+  } catch (e) {
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+      throw conflict(`Handle "${data.slug}" is already taken.`, "SLUG_TAKEN");
+    }
+    throw e;
+  }
 
   // Attach skills by ID if provided
   if (skills && Array.isArray(skills) && skills.length > 0) {
@@ -2814,6 +2841,12 @@ router.post("/:slug/install-app", requireAgentOwnerOrAdmin, async (req: Request<
     });
 
     log.info(`[agents] Installed Spaces App ${agent.spacesAppId} for ${req.params.slug} (botUser=${appUserId})`);
+    // The hub's Agents page also promotes on read, so a failed notice only delays the join.
+    if (appUserId) {
+      notifySdlcAgentRegistered(agent.id, appUserId).catch((err) =>
+        log.warn(`[agents] install-app: SDLC hub notice failed for ${req.params.slug} — ${errMsg(err)}`),
+      );
+    }
     res.json({ success: true, data: { spacesAppUserId: appUserId } });
   } catch (err) {
     log.error("[agents] install-app error:", err);

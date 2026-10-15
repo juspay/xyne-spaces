@@ -78,6 +78,7 @@ const LayoutCard = ({
 }): ReactElement => (
   <button
     type='button'
+    aria-current={selected ? 'true' : undefined}
     onClick={onClick}
     className={cn(
       'flex flex-1 flex-col gap-[7px] rounded-[10px] border p-[9px] text-left transition-colors hover:border-muted-foreground/40',
@@ -392,6 +393,7 @@ export const CustomiseViewPopover = (props: CustomiseViewPopoverProps): ReactEle
                           <button
                             type='button'
                             title='Delete saved filter'
+                            aria-label='Delete saved filter'
                             onClick={() => props.savedFilters?.onDelete(item)}
                             className='ml-1 hidden size-5 items-center justify-center rounded text-muted-foreground/60 hover:bg-foreground/10 hover:text-foreground group-hover:flex'
                             data-track-category='saved-views'
@@ -412,6 +414,7 @@ export const CustomiseViewPopover = (props: CustomiseViewPopoverProps): ReactEle
                 <button
                   type='button'
                   title='Back'
+                  aria-label='Back'
                   onClick={() => setStep('main')}
                   className='flex size-6 items-center justify-center rounded-md text-foreground/80 hover:bg-muted hover:text-foreground'
                   data-track-category='Tickets'

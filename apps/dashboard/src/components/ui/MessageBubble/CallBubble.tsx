@@ -64,6 +64,7 @@ export const GeneratePRDButton: React.FC<{
         disabled={isLoading}
         className='p-2 hover:bg-accent rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-muted-foreground hover:text-foreground'
         title={isCanvasCreated ? 'Generate Another PRD' : 'Generate PRD'}
+        aria-label={isCanvasCreated ? 'Generate Another PRD' : 'Generate PRD'}
       >
         {isLoading ? (
           <Loader2 className='h-4 w-4 animate-spin' />
@@ -115,6 +116,7 @@ const GenerateSummaryButton: React.FC<{
         disabled={isLoading}
         className='p-2 hover:bg-accent rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-muted-foreground hover:text-foreground'
         title={isCanvasCreated ? 'Generate Another Summary' : 'Generate Summary'}
+        aria-label={isCanvasCreated ? 'Generate Another Summary' : 'Generate Summary'}
       >
         {isLoading ? (
           <Loader2 className='h-4 w-4 animate-spin' />

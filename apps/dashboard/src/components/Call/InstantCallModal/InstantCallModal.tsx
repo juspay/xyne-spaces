@@ -202,6 +202,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
               Start an Instant Call
             </h2>
             <Button
+              aria-label='Close instant call dialog'
               variant='outline'
               size='icon'
               tabIndex={-1}

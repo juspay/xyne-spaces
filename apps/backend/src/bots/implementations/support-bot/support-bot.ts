@@ -14,6 +14,7 @@ import { db } from '@/database/client'
 import * as yaml from 'js-yaml'
 import jwt from "jsonwebtoken";
 import { getStorageService, type FileMetadata } from '@/services/storage'
+import { escapeHtml } from '@/utils/htmlEscape'
 
 const CAC_KEYS = {
   support_group_name: 'support_group_name',
@@ -185,7 +186,9 @@ export class SupportBot extends UnifiedBaseBot<SupportBotInput, SupportBotOutput
 
       if (params.isEscalation) {
         // Fetch team members
-        messageContent = `This issue is now escalated to <span data-mention="${supportGroup?.name}" data-mention-type="group" data-group-id="${supportGroup?.id}" data-group-name="${supportGroup?.name}" class="chat-input-group-mention" data-member-count="${supportGroup?.memberCount}">@${supportGroup?.name}</span> (${supportGroup?.memberCount} members)\nYou can reach out to any group member directly or continue the conversation here.`
+        // Escaped: a raw '<' or '"' in the name would break the tag, and the mention with it.
+        const groupName = escapeHtml(supportGroup?.name ?? '')
+        messageContent = `This issue is now escalated to <span data-mention="${groupName}" data-mention-type="group" data-group-id="${escapeHtml(supportGroup?.id ?? '')}" data-group-name="${groupName}" class="chat-input-group-mention" data-member-count="${supportGroup?.memberCount}">@${groupName}</span> (${supportGroup?.memberCount} members)\nYou can reach out to any group member directly or continue the conversation here.`
       } else {
         // Initial response message - full details
         messageContent = params.responseText || ''

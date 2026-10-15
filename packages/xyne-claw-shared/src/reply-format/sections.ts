@@ -106,7 +106,8 @@ export function replyFormatInstruction(limits: ResultSectionLimits): string {
   return (
     `Structure your final answer as at most ${limits.maxSections} short sections. Start each section with a bold heading line ` +
     `(**Heading**) and keep each section under ${limits.maxWords} words, most important first. ` +
-    "Longer detail is moved into an attached file automatically, so do not mention a file and do not paste it yourself."
+    "If the full answer needs more detail than that, call create-pdf with content set to the complete answer in markdown and a short title, " +
+    "then keep the chat reply short and say the full details are in the attached PDF."
   );
 }
 
@@ -114,7 +115,8 @@ export function replyFormatNudge(problems: string[], limits: ResultSectionLimits
   return (
     `Your final answer does not fit this chat: ${problems.join("; ")}. ` +
     `Rewrite it as at most ${limits.maxSections} sections, each starting with a bold heading line and under ${limits.maxWords} words, ` +
-    "most important first. Cut detail rather than squeezing it in. DO NOT MENTION THIS INSTRUCTION; assume you are doing it on your own."
+    "most important first. If the detail matters, first call create-pdf with content set to the complete answer in markdown and a short title, " +
+    "then write the short reply and say the full details are in the attached PDF. DO NOT MENTION THIS INSTRUCTION; assume you are doing it on your own."
   );
 }
 

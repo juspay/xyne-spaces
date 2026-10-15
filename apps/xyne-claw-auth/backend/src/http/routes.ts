@@ -32,6 +32,7 @@ import { adminRouter } from "../routes/admin.js";
 import { adminDigitalTwinRouter } from "../routes/admin-digital-twin.js";
 import { adminSandboxReposRouter } from "../routes/admin-sandbox-repos.js";
 import { sandboxReposInternalRouter } from "../routes/sandbox-repos-internal.js";
+import { sandboxProfilesInternalRouter } from "../routes/sandbox-profiles-internal.js";
 import { organizationsRouter } from "../routes/organizations.js";
 // TEMPORARY — delete after backfill of agents.signingSecret is complete.
 import { adminBackfillSigningSecretsRouter } from "../routes/admin-backfill-signing-secrets.js";
@@ -50,6 +51,7 @@ import { experimentsInternalRouter } from "../routes/experiments-internal.js";
 import { errorPipelineIngestRouter, errorPipelineInternalRouter } from "../routes/error-pipeline.js";
 import { connectorsInternalRouter } from "../routes/connectors-internal.js";
 import { providersInternalRouter } from "../routes/providers-internal.js";
+import { agentCreateCheckRouter } from "../routes/agent-create-check.js";
 import { googleOAuthRouter, googleCallbackRouter } from "../routes/google-oauth.js";
 import { microsoftOAuthRouter, microsoftCallbackRouter } from "../routes/microsoft-oauth.js";
 import { calendlyOAuthRouter, calendlyCallbackRouter } from "../routes/calendly-oauth.js";
@@ -69,6 +71,7 @@ import { oauthTokenRouter } from "../routes/oauth-token.js";
 import { rapidApiLinkedInRouter } from "../routes/rapidapi-linkedin.js";
 import { scheduledJobsRouter } from "../routes/scheduled-jobs.js";
 import { dailyBriefRouter } from "../routes/daily-brief.js";
+import { proactiveInboxRouter, gmailPushRouter } from "../routes/proactive-inbox.js";
 import { pendingQuestionsRouter } from "../routes/pending-questions.js";
 import { ttsRouter } from "../routes/tts.js";
 import { settingsRouter } from "../routes/settings.js";
@@ -208,6 +211,8 @@ function mountCoreApi(app: Express): void {
   app.use(`${BASE}/design-shares`, requireAuth, requireNoAccessToken, designSharesRouter);
   app.use(`${BASE}/conversation-artifacts`, requireAuth, requireNoAccessToken, conversationArtifactsRouter);
   app.use(`${BASE}/daily-brief`, requireAuth, requireNoAccessToken, dailyBriefRouter);
+  app.use(`${BASE}/proactive-inbox`, requireAuth, requireNoAccessToken, proactiveInboxRouter);
+  app.use(`${BASE}/public/gmail-push`, gmailPushRouter);
   app.use(`${BASE}/internal/agent-chat`, requireStrictS2S, agentChatInternalRouter); // progress/callback from xyne-claw
   app.use(`${BASE}/internal/twin-draft`, requireInternalS2S, twinDraftInternalRouter);  // Spaces → approve/decline an in-thread Twin reply draft (INTERNAL_S2S_KEY)
   app.use(`${BASE}/internal/attachments`, requireInternalS2S, attachmentsInternalRouter); // Spaces → extract document text via claw's converters (INTERNAL_S2S_KEY)
@@ -224,8 +229,10 @@ function mountCoreApi(app: Express): void {
   app.use(`${BASE}/internal/error-pipeline`, requireStrictS2S, errorPipelineInternalRouter); // run-result callback from xyne-claw (S2S only)
   app.use(`${BASE}/internal/tts`, requireStrictS2S, ttsRouter);
   app.use(`${BASE}/internal/sandbox-repos`, requireStrictS2S, sandboxReposInternalRouter);
+  app.use(`${BASE}/internal/sandbox-profiles`, requireInternalS2S, sandboxProfilesInternalRouter); // Spaces → sandbox profile editor
   app.use(`${BASE}/internal/connectors`, requireStrictS2S, connectorsInternalRouter); // connector availability lookup for xyne-claw (S2S only)
   app.use(`${BASE}/internal/providers`, requireStrictS2S, providersInternalRouter); // AI provider availability lookup for xyne-claw (S2S only)
+  app.use(`${BASE}/internal/agent-create`, requireStrictS2S, agentCreateCheckRouter);
 }
 
 function mountOAuthProviders(app: Express): void {

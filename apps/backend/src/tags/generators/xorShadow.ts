@@ -8,6 +8,7 @@ import {
   type JevFailure,
 } from '@/services/queryIntent/jevClient';
 import type { CategoryConfig, GeneratedTag } from '../types';
+import { validateGeneratedTags } from './validate';
 
 /**
  * Asks Jev the same tag categories the LLM was just asked and logs both answers side
@@ -25,13 +26,13 @@ const SHADOW_TIMEOUT_MS = 30_000;
  * Jev's `criteria` wants a description per option, but CategoryConfig only carries the
  * names, so each option describes itself — Jev works from less guidance than the LLM.
  */
-function buildQuestions(
+export function buildQuestions(
   categories: Record<string, CategoryConfig>,
 ): Record<string, JevChoiceQuestion> {
   const questions: Record<string, JevChoiceQuestion> = {};
 
   for (const [name, category] of Object.entries(categories)) {
-    const options = category.tags ?? [];
+    const options = (category.tags ?? []).filter((tag) => !category.blacklist?.includes(tag));
     if (category.method !== 'llm' || options.length < 2) continue;
 
     questions[name] = {
@@ -42,6 +43,22 @@ function buildQuestions(
   }
 
   return questions;
+}
+
+/** Jev's choices as tags (one per category); null when Jev gave nothing usable. */
+export async function generateJevTags(
+  context: string,
+  categories: Record<string, CategoryConfig>,
+): Promise<GeneratedTag[] | null> {
+  const questions = buildQuestions(categories);
+  if (Object.keys(questions).length === 0) return [];
+
+  const answers = await askJev(context, questions, SHADOW_TIMEOUT_MS, undefined, { partial: true });
+  if (!answers) return null;
+  const raw = Object.entries(answers).flatMap(([category, a]) =>
+    a.type === 'choice' ? [{ category, tag: a.choice, reason: 'Chosen by Jev' }] : [],
+  );
+  return validateGeneratedTags(raw, categories);
 }
 
 export async function runShadowTagGeneration(

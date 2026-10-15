@@ -133,6 +133,7 @@ export async function runTests(
   const testCommand = buildTestCommand(targets);
   const envArgs = ['-e', `COMMIT_HASH=${commitHash}`];
   if (parallel) envArgs.push('-e', `PARALLEL=${parallel}`);
+  if (process.env.RECORD_VIDEO) envArgs.push('-e', `RECORD_VIDEO=${process.env.RECORD_VIDEO}`);
 
   const result = await exec(
     'docker',

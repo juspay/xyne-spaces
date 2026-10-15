@@ -128,7 +128,7 @@ export async function findAccountOnNumberForSender(input: {
 }
 
 const AGENT_FOR_DISPATCH = {
-  select: { id: true, slug: true, name: true, orgId: true, config: true, enabled: true },
+  select: { id: true, slug: true, name: true, orgId: true, config: true, enabled: true, delegationTier: true },
 } as const;
 
 export interface BoundAgent {
@@ -138,6 +138,8 @@ export interface BoundAgent {
   orgId: string;
   config: unknown;
   enabled: boolean;
+  /** "orchestrator" agents with no tools selection are unrestricted. */
+  delegationTier: string;
 }
 
 /** An agent by slug within one org (slugs are unique per org, not globally). */

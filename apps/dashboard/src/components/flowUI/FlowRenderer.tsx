@@ -1,7 +1,12 @@
 import { logger, Event as LogEvent } from '../../utils/logger';
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { ChevronDown } from 'lucide-react';
-import { FlowContext, FlowContextValue, type FlowMessageContext } from './FlowContext';
+import {
+  FlowContext,
+  FlowContextValue,
+  useFlowDraftScope,
+  type FlowMessageContext,
+} from './FlowContext';
 import { NodeRegistry } from './nodes/NodeRegistry';
 import type {
   FlowComponent,
@@ -14,6 +19,11 @@ import type {
 import { validateFlowDefinition, formatValidationErrors } from '@xyne/shared';
 import { flowActionService } from '@/services/flowActionService';
 import { toast } from 'sonner';
+import {
+  presentFlowActionError,
+  presentThrownFlowActionError,
+  type PresentedFlowActionError,
+} from './flowActionErrorPresenter';
 
 interface FlowRendererProps {
   flow: FlowDefinition;
@@ -42,9 +52,19 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
   const bodyRef = useRef<HTMLDivElement>(null);
   const [hasMoreBelow, setHasMoreBelow] = useState(false);
 
-  const [validationError, setValidationError] = useState<string | null>(null);
-  const [validatedFlow, setValidatedFlow] = useState<FlowDefinition | null>(null);
-  const [state, setState] = useState<FlowState>(flow.state);
+  // Validate during render, not in an effect: an effect leaves the first render
+  // with no validated flow, which paints a 128px placeholder and then the real
+  // card a frame later. In a virtualized chat list that is two height changes per
+  // card, and each one shifts every row below it.
+  const validation = useMemo(() => validateFlowDefinition(flow), [flow]);
+  const validatedFlow = validation.success ? (validation.data as FlowDefinition) : null;
+  const validationError = useMemo(
+    () => (validation.success ? null : formatValidationErrors(validation).join('; ')),
+    [validation],
+  );
+  // submitting=false from the first render (the card now paints immediately); the
+  // effect below applies the same reset whenever a genuinely new screen arrives.
+  const [state, setState] = useState<FlowState>(() => ({ ...flow.state, submitting: false }));
 
   // Always-current ref so executeAction closures never read stale values.
   // Synced synchronously inside updateFieldValue (not via useEffect) so debounced
@@ -56,24 +76,16 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
   // we must NOT reset form values in that case, only update the flow definition.
   const initializedScreenIdRef = useRef<string | null>(null);
 
-  // Validate flow whenever the prop changes
+  // Reset form state when a genuinely new screen arrives (update_screen_data
+  // patches keep the same screenId and must not wipe entered values).
   useEffect(() => {
-    const result = validateFlowDefinition(flow);
-    if (!result.success) {
-      const errors = formatValidationErrors(result);
-      setValidationError(errors.join('; '));
-      setValidatedFlow(null);
-    } else {
-      setValidationError(null);
-      setValidatedFlow(result.data as FlowDefinition);
-      // Only reset form state when this is genuinely a new screen
-      if (initializedScreenIdRef.current !== result.data.screenId) {
-        initializedScreenIdRef.current = result.data.screenId;
-        // Always start with submitting=false so a remounted screen isn't frozen
-        setState({ ...result.data.state, submitting: false });
-      }
+    if (!validation.success) return;
+    if (initializedScreenIdRef.current !== validation.data.screenId) {
+      initializedScreenIdRef.current = validation.data.screenId;
+      // Always start with submitting=false so a remounted screen isn't frozen
+      setState({ ...validation.data.state, submitting: false });
     }
-  }, [flow]);
+  }, [validation]);
 
   useEffect(() => {
     onStateChange?.(state);
@@ -165,6 +177,31 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
     return isValid;
   }, [validatedFlow, state.values]);
 
+  const draftScope = useFlowDraftScope();
+  const draftClaimsFlow = validatedFlow !== null && (draftScope?.claims(validatedFlow) ?? false);
+
+  // Lets an error toast's Retry button re-run the same action without making
+  // executeAction depend on itself.
+  const executeActionRef = useRef<((action: FlowAction) => Promise<boolean>) | null>(null);
+  const showFlowActionError = useCallback(
+    (presented: PresentedFlowActionError, action: FlowAction) => {
+      toast.error(
+        presented.text,
+        presented.retryable
+          ? {
+              action: {
+                label: 'Retry',
+                onClick: () => {
+                  void executeActionRef.current?.(action);
+                },
+              },
+            }
+          : undefined,
+      );
+    },
+    [],
+  );
+
   const executeAction = useCallback(
     async (action: FlowAction): Promise<boolean> => {
       if (!validatedFlow) {
@@ -253,6 +290,7 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
           flowJSON: validatedFlow,
           messageId,
           conversationId,
+          ...(draftClaimsFlow ? { applyToDraft: true } : {}),
         });
 
         logger.info(LogEvent.INFO, {
@@ -262,8 +300,11 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
         });
 
         if (response.type === 'error') {
-          toast.error(response.message);
+          showFlowActionError(presentFlowActionError(response), action);
           return false;
+        }
+        if (draftClaimsFlow && action.type === 'submit') {
+          draftScope?.onApplied(action.actionId, validatedFlow);
         }
         onAppAction(response);
         return true;
@@ -275,11 +316,11 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
           error: message,
         });
         if (!isInputChange) {
-          toast.error(
+          const authorMessage =
             action.type === 'submit'
-              ? ((action as { errorMessage?: string }).errorMessage ?? message)
-              : message,
-          );
+              ? (action as { errorMessage?: string }).errorMessage
+              : undefined;
+          showFlowActionError(presentThrownFlowActionError(error, authorMessage), action);
         }
         return false;
       } finally {
@@ -292,8 +333,17 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
         }
       }
     },
-    [validatedFlow, messageId, conversationId, onAppAction],
+    [
+      validatedFlow,
+      messageId,
+      conversationId,
+      onAppAction,
+      draftScope,
+      draftClaimsFlow,
+      showFlowActionError,
+    ],
   );
+  executeActionRef.current = executeAction;
 
   const isVisible = (component: FlowComponent): boolean => {
     if (component.hidden === undefined) return true;

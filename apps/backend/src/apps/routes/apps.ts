@@ -11,6 +11,7 @@ import fileRoutes from './files';
 import ticketRoutes from './ticket';
 import userRoutes from './user';
 import channelRoutes from './channel';
+import guestRoutes from './guests';
 import userGroupRoutes from './usergroups';
 import emailRoutes from './email';
 import callRoutes from './calls';
@@ -104,6 +105,8 @@ router.use("/ticket", authenticateApp, ticketRoutes);
 
 // User routes
 router.use("/user", authenticateApp, userRoutes);
+// Guest routes (the app's own guest users and their SDK tokens)
+router.use("/guests", authenticateApp, guestRoutes);
 
 // User Group routes
 router.use("/usergroups", authenticateApp, userGroupRoutes);

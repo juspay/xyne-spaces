@@ -91,6 +91,12 @@ export interface SelectedSharedFile {
   channelId?: string;
 }
 
+/** An artifact app the user owns or that is published to their workspace. */
+export interface SelectedApp {
+  id: string;
+  title: string;
+}
+
 export interface SelectedLocalFolder {
   path: string;
   name: string;
@@ -115,6 +121,8 @@ export interface ContextSelections {
   folders?: { id: string; name: string }[];
   /** KB root collections scoped from the composer's collection picker. */
   collections?: { id: string; name: string }[];
+  /** Artifact apps, picked from the composer's @ menu ("Artifact apps" tab). */
+  apps?: SelectedApp[];
   localFolders: SelectedLocalFolder[];
 }
 
@@ -128,6 +136,7 @@ export interface AttachedContextItem {
     | 'ticket'
     | 'canvas'
     | 'call'
+    | 'app'
     | 'activity'
     | 'collection'
     | 'folder'
@@ -239,6 +248,12 @@ export function toAttachedContext(selections: ContextSelections): AttachedContex
     });
   }
 
+  // Resolved by claw-auth against the user's access; the agent reads the app
+  // with read-app-file and may update it only if the user owns it.
+  for (const app of selections.apps ?? []) {
+    items.push({ type: 'app', id: app.id, title: app.title });
+  }
+
   for (const message of selections.messages ?? []) {
     items.push({
       type: 'message',
@@ -310,6 +325,7 @@ export function attachedContextToSelections(items: AttachedContextItem[]): Reusa
     messages: [],
     people: [],
     sharedFiles: [],
+    apps: [],
     localFolders: [],
     collections: [],
     fileScopes: [],
@@ -387,6 +403,9 @@ export function attachedContextToSelections(items: AttachedContextItem[]): Reusa
       }
       case 'user':
         result.people?.push({ id: item.id, name: item.title });
+        break;
+      case 'app':
+        result.apps?.push({ id: item.id, title: item.title });
         break;
       case 'attachment': {
         const channelId = metadataString(item, 'channelId');

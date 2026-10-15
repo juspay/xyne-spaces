@@ -3,6 +3,24 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const state = vi.hoisted(() => ({
   upserts: [] as Array<{ where: unknown; create: Record<string, unknown>; update: Record<string, unknown> }>,
   fallbackOrgId: "org_from_user" as string | undefined,
+  signalled: [] as string[],
+  postedBy: [] as string[],
+  accessVerdict: "denied" as "ok" | "denied" | "unknown",
+  accessChecks: [] as Array<{ conversationId: string; userId: string }>,
+}));
+
+vi.mock("./conversation-access.js", () => ({
+  baseConversationId: (id: string | null | undefined) => (id ? id.split("__branch__")[0] : undefined),
+  checkConversationAccess: vi.fn(async (conversationId: string, userId: string) => {
+    state.accessChecks.push({ conversationId, userId });
+    return state.accessVerdict;
+  }),
+}));
+
+vi.mock("./panel-signals.js", () => ({
+  signalArtifacts: vi.fn((conversationId: string) => {
+    state.signalled.push(conversationId);
+  }),
 }));
 
 vi.mock("./users-jit.js", () => ({
@@ -17,10 +35,16 @@ vi.mock("../db.js", () => ({
         return { id: "art_1", ...args.create };
       }),
     },
+    chatMessage: {
+      findFirst: vi.fn(async (args: { where: { userId: { in: string[] } | string } }) => {
+        const ids = typeof args.where.userId === "string" ? [args.where.userId] : args.where.userId.in;
+        return ids.some((id) => state.postedBy.includes(id)) ? { id: "msg_1" } : null;
+      }),
+    },
   },
 }));
 
-const { detectLinkProvider, normalizeExternalUrl, recordConversationArtifact, toOpenRef } = await import(
+const { canReadConversation, detectLinkProvider, normalizeExternalUrl, recordConversationArtifact, toOpenRef } = await import(
   "./conversation-artifacts.js"
 );
 const { ingestArtifactSignals, ingestSandboxPreviewSignals } = await import("./conversation-artifact-signals.js");
@@ -89,6 +113,7 @@ describe("toOpenRef", () => {
 describe("recordConversationArtifact caps", () => {
   beforeEach(() => {
     state.upserts = [];
+    state.signalled = [];
   });
 
   const base = {
@@ -146,6 +171,13 @@ describe("recordConversationArtifact caps", () => {
   it("does not send an updatedAt of its own on update", async () => {
     await recordConversationArtifact({ ...base, refId: "https://a.example/x", title: "t" });
     expect(state.upserts[0]?.update).not.toHaveProperty("updatedAt");
+  });
+
+  it("tells a screen showing the conversation once the row is written, and not for a skipped one", async () => {
+    await recordConversationArtifact({ ...base, refId: "https://a.example/x", title: "t" });
+    expect(state.signalled).toEqual(["conv_1"]);
+    await recordConversationArtifact({ ...base, kind: "FILE", refService: "CLAW", refId: "f".repeat(1001), title: "big" });
+    expect(state.signalled).toEqual(["conv_1"]);
   });
 });
 
@@ -321,7 +353,76 @@ describe("ingestArtifactSignals", () => {
   });
 
   it("skips sandbox previews with no sandbox id", async () => {
-    await ingestSandboxPreviewSignals(CTX, { sandboxPreviewUrl: "https://p.example/x" });
+    const result = await ingestSandboxPreviewSignals(CTX, { sandboxPreviewUrl: "https://p.example/x" });
     expect(state.upserts).toHaveLength(0);
+    expect(result).toEqual({ recorded: false, reason: "missing-input" });
+  });
+
+  it("reports recorded when the ownership row is written (XYNE-66341)", async () => {
+    const result = await ingestSandboxPreviewSignals(CTX, {
+      sandboxId: "sbx_4",
+      sandboxPreviewUrl: "https://p.example/claw-preview/sbx_4/",
+    });
+    expect(result).toEqual({ recorded: true });
+  });
+
+  it("reports record-failed when no row is written without throwing (XYNE-66341)", async () => {
+    const prev = state.fallbackOrgId;
+    state.fallbackOrgId = undefined;
+    try {
+      const result = await ingestSandboxPreviewSignals(
+        { ...CTX, orgId: null },
+        { sandboxId: "sbx_5", sandboxPreviewUrl: "https://p.example/claw-preview/sbx_5/" },
+      );
+      expect(state.upserts).toHaveLength(0);
+      expect(result).toEqual({ recorded: false, reason: "record-failed" });
+    } finally {
+      state.fallbackOrgId = prev;
+    }
+  });
+
+  it("reports record-failed when the upsert throws (XYNE-66341)", async () => {
+    const { prisma } = await import("../db.js");
+    vi.mocked(prisma.conversationArtifact.upsert).mockRejectedValueOnce(new Error("db down"));
+    const result = await ingestSandboxPreviewSignals(CTX, {
+      sandboxId: "sbx_6",
+      sandboxPreviewUrl: "https://p.example/claw-preview/sbx_6/",
+    });
+    expect(result).toEqual({ recorded: false, reason: "record-failed" });
+  });
+});
+
+describe("canReadConversation (XYNE-66344)", () => {
+  beforeEach(() => {
+    state.postedBy = [];
+    state.accessVerdict = "denied";
+    state.accessChecks = [];
+  });
+
+  it("grants a poster without asking Spaces", async () => {
+    state.postedBy = ["claw_d"];
+    expect(await canReadConversation("thread_1", ["claw_d", "spaces_d"], "spaces_d")).toBe(true);
+    expect(state.accessChecks).toEqual([]);
+  });
+
+  it("grants a non-poster Spaces says can access the thread, checked by base id and Spaces id", async () => {
+    state.accessVerdict = "ok";
+    expect(
+      await canReadConversation("thread_1__branch__msg_9", ["claw_d", "spaces_d"], "spaces_d"),
+    ).toBe(true);
+    expect(state.accessChecks).toEqual([{ conversationId: "thread_1", userId: "spaces_d" }]);
+  });
+
+  it("does not widen access on a denied or unknown verdict", async () => {
+    expect(await canReadConversation("thread_1", ["claw_d"], "spaces_d")).toBe(false);
+    state.accessVerdict = "unknown";
+    expect(await canReadConversation("thread_1", ["claw_d"], "spaces_d")).toBe(false);
+  });
+
+  it("never consults Spaces for direct chats or callers without a Spaces id", async () => {
+    state.accessVerdict = "ok";
+    expect(await canReadConversation("chat-abc", ["claw_d"], "spaces_d")).toBe(false);
+    expect(await canReadConversation("thread_1", ["claw_d"])).toBe(false);
+    expect(state.accessChecks).toEqual([]);
   });
 });

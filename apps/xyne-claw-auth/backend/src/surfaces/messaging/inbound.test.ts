@@ -57,10 +57,42 @@ vi.mock("./store.js", () => ({
   findOrgAgentBySlug: async () => null,
   listOrgAgents: async () => [],
 }));
-vi.mock("xyne-claw-shared", () => ({ isAgentInvocableBy: () => true }));
+vi.mock("xyne-claw-shared", () => ({
+  isAgentInvocableBy: () => true,
+  IMMEDIATE_TASK_COMMAND_RE: /^\/(?:explainer|record-skill|design|dashboard|spec|review|learn)(?:\s|$)/i,
+}));
 vi.mock("./shared-number.js", () => ({ accountForSender: async (ctx: { account: unknown }) => ctx.account }));
+type Outcome = { kind: "next" } | { kind: "done"; task: string; agentSlug?: string } | { kind: "stale" };
+const pendingQuestion = vi.fn(async (..._args: unknown[]) => null as Record<string, unknown> | null);
+const answerPendingQuestion = vi.fn(async (..._args: unknown[]): Promise<Outcome> => ({ kind: "next" }));
+const answerFromFormReply = vi.fn(async (..._args: unknown[]): Promise<Outcome> => ({ kind: "stale" }));
+const clearPendingQuestion = vi.fn(async (..._args: unknown[]) => undefined);
+vi.mock("./questions.js", () => ({
+  pendingQuestion,
+  answerPendingQuestion,
+  answerFromFormReply,
+  clearPendingQuestion,
+  interpretTypedAnswer: (_q: unknown, text: string) => `typed:${text}`,
+}));
+// The shared slash-command layer (lib/webhook-commands) is exercised in its
+// own tests; here only "did the chat hand the command to it" matters.
+type CommandOutcome =
+  | { kind: "handled" }
+  | { kind: "dispatch"; task: string; compactBeforeRun: boolean; explicitQueueOnly: boolean; pendingGoalStart: { condition: string } | null };
+const runChatSlashCommand = vi.fn(async (input: { text: string; account: { id: string }; target: { chatId: string } }): Promise<CommandOutcome> => {
+  await enqueueOutbound(input.account.id, { kind: "text", chatId: input.target.chatId, text: `handled ${input.text}` });
+  return { kind: "handled" };
+});
+vi.mock("./commands.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./commands.js")>()),
+  runChatSlashCommand,
+}));
+vi.mock("../../services/goalRelooper.js", () => ({ persistGoalStart: vi.fn(async () => undefined) }));
+// The connector half pulls the whole MCP catalogue in at import.
+const sendConnectorLink = vi.fn(async (..._args: unknown[]) => undefined);
+vi.mock("./widgets.js", () => ({ sendConnectorLink }));
 
-const { handleInbound } = await import("./inbound.js");
+const { handleInbound, menuChoiceOf } = await import("./inbound.js");
 
 const account = {
   id: "acc-1",
@@ -98,6 +130,22 @@ async function settle(): Promise<void> {
   await vi.advanceTimersByTimeAsync(0);
 }
 
+// Regression: "/ask-ai 1" was read as a new request for the agent, so the
+// approval was never redeemed and the model reported it as done.
+describe("menuChoiceOf", () => {
+  it("reads a choice sent bare or behind the agent's name", () => {
+    expect(menuChoiceOf("1")).toBe(1);
+    expect(menuChoiceOf("/ask-ai 1")).toBe(1);
+    expect(menuChoiceOf(" /ask-ai  2. ")).toBe(2);
+  });
+
+  it("leaves anything wordier as a message", () => {
+    expect(menuChoiceOf("/ask-ai check")).toBeNull();
+    expect(menuChoiceOf("/ask-ai 1 more thing")).toBeNull();
+    expect(menuChoiceOf("/ask-ai")).toBeNull();
+  });
+});
+
 describe("handleInbound", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -106,12 +154,75 @@ describe("handleInbound", () => {
     dispatchChannelRun.mockClear();
     resolveIdentity.mockClear();
     resolveIdentity.mockResolvedValue("user-1");
+    pendingQuestion.mockReset();
+    pendingQuestion.mockResolvedValue(null);
+    answerPendingQuestion.mockReset();
+    answerFromFormReply.mockReset();
+    clearPendingQuestion.mockClear();
+    sendConnectorLink.mockClear();
+    runChatSlashCommand.mockClear();
+  });
+
+  describe("with a question waiting", () => {
+    const asked = { questionId: "qs", index: 0, formToken: undefined, questions: [{ id: "q1", question: "Which env?", type: "single_choice" }] };
+
+    it("reads a typed reply as the answer and only dispatches once the set is done", async () => {
+      pendingQuestion.mockResolvedValue(asked);
+      answerPendingQuestion.mockResolvedValueOnce({ kind: "next" });
+      await handleInbound(ctx, msg({ text: "2" }));
+      await settle();
+      expect(answerPendingQuestion).toHaveBeenCalledWith(asked, "typed:2");
+      expect(dispatchChannelRun).not.toHaveBeenCalled();
+
+      answerPendingQuestion.mockResolvedValueOnce({ kind: "done", task: "The user answered your questions." });
+      await handleInbound(ctx, msg({ text: "prod" }));
+      await settle();
+      expect(dispatchChannelRun.mock.calls[0]?.[0]).toMatchObject({ task: "The user answered your questions." });
+    });
+
+    it("lets a /slug request and control commands through, clearing the questions on /new", async () => {
+      pendingQuestion.mockResolvedValue(asked);
+      await handleInbound(ctx, msg({ text: "/new" }));
+      await settle();
+      expect(clearPendingQuestion).toHaveBeenCalledWith("acc-1", "919@s.whatsapp.net", "919");
+      expect(answerPendingQuestion).not.toHaveBeenCalled();
+    });
+
+    it("answers the whole set from a submitted form", async () => {
+      pendingQuestion.mockResolvedValue({ ...asked, formToken: "tok" });
+      answerFromFormReply.mockResolvedValueOnce({ kind: "done", task: "answers" });
+      await handleInbound(ctx, msg({ text: "", formReply: { token: "tok", fields: { q0_one: "1" } } }));
+      await settle();
+      expect(dispatchChannelRun.mock.calls[0]?.[0]).toMatchObject({ task: "answers" });
+    });
+
+    it("drops a form submission nothing is waiting on", async () => {
+      await handleInbound(ctx, msg({ text: "", formReply: { token: "old", fields: {} } }));
+      await settle();
+      expect(dispatchChannelRun).not.toHaveBeenCalled();
+    });
   });
 
   it("dispatches without waiting", async () => {
     await handleInbound(ctx, msg({ text: "what is the deploy status" }));
     // Deliberately no timer advance: the message must be on its way already.
     await vi.advanceTimersByTimeAsync(0);
+    expect(dispatchChannelRun).toHaveBeenCalledTimes(1);
+  });
+
+  // Regression: a linked device is handed its backlog again on reconnect, and
+  // every old request and command was run a second time.
+  it("ignores a message that is already old when it arrives", async () => {
+    const sentAt = Math.floor(Date.now() / 1000) - 20 * 60;
+    await handleInbound(ctx, msg({ text: "what is the deploy status", timestamp: sentAt }));
+    await settle();
+    expect(dispatchChannelRun).not.toHaveBeenCalled();
+  });
+
+  it("still handles a message that arrives a little late", async () => {
+    const sentAt = Math.floor(Date.now() / 1000) - 2 * 60;
+    await handleInbound(ctx, msg({ text: "what is the deploy status", timestamp: sentAt }));
+    await settle();
     expect(dispatchChannelRun).toHaveBeenCalledTimes(1);
   });
 
@@ -225,8 +336,38 @@ describe("handleInbound", () => {
     await handleInbound(ctx, msg({ text: "/status" }));
     await settle();
     expect(dispatchChannelRun).not.toHaveBeenCalled();
-    const texts = enqueueOutbound.mock.calls.map((c) => (c[1] as { text?: string } | undefined)?.text);
-    expect(texts.some((t) => t?.includes("Nothing running"))).toBe(true);
+    expect(runChatSlashCommand).toHaveBeenCalledWith(expect.objectContaining({ text: "/status" }));
+  });
+
+  it("hands Spaces slash commands to the shared layer instead of reading them as agent names", async () => {
+    for (const text of ["/debug", "/debug all", "/help", "/stop", "/cancel", "/queue", "/goal status", "/experiment status", "/fast"]) {
+      runChatSlashCommand.mockClear();
+      await handleInbound(ctx, msg({ text }));
+      await settle();
+      expect(runChatSlashCommand, text).toHaveBeenCalledTimes(1);
+    }
+    expect(dispatchChannelRun).not.toHaveBeenCalled();
+    const texts = enqueueOutbound.mock.calls.map((c) => (c[1] as { text?: string } | undefined)?.text ?? "");
+    expect(texts.some((t) => t.includes("I don't know an agent called"))).toBe(false);
+  });
+
+  it("runs a command's task verbatim on the chat's agent, with its flags", async () => {
+    runChatSlashCommand.mockResolvedValueOnce({ kind: "dispatch", task: "/design a landing page", compactBeforeRun: false, explicitQueueOnly: false, pendingGoalStart: null });
+    await handleInbound(ctx, msg({ text: "/design a landing page" }));
+    await settle();
+    expect(dispatchChannelRun.mock.calls[0]?.[0]).toMatchObject({ task: "/design a landing page" });
+    expect((dispatchChannelRun.mock.calls[0]?.[0] as { agent: { slug: string } }).agent.slug).toBe("assistant");
+
+    runChatSlashCommand.mockResolvedValueOnce({ kind: "dispatch", task: "summarize", compactBeforeRun: true, explicitQueueOnly: false, pendingGoalStart: null });
+    await handleInbound(ctx, msg({ text: "/compact" }));
+    await settle();
+    expect(dispatchChannelRun.mock.calls[1]?.[0]).toMatchObject({ task: "summarize", compactBeforeRun: true });
+  });
+
+  it("still routes /slug messages to that agent", async () => {
+    await handleInbound(ctx, msg({ text: "/someone do a thing" }));
+    await settle();
+    expect(runChatSlashCommand).not.toHaveBeenCalledWith(expect.objectContaining({ text: "/someone do a thing" }));
   });
 
   it("does not make a control command wait out the debounce", async () => {

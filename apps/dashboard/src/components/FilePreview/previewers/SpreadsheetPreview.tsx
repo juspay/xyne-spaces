@@ -98,10 +98,10 @@ export default function SpreadsheetPreview(props: PreviewerProps): ReactElement 
               aria-selected={isActive}
               onClick={() => setSheetIndex(index)}
               className={cn(
-                'mb-1 h-7 shrink-0 rounded-md px-3 text-xs transition-colors',
+                'outline-none mb-1 h-7 shrink-0 rounded-md px-3 text-xs transition-colors',
                 isActive
                   ? 'bg-background font-medium text-foreground shadow-sm ring-1 ring-border'
-                  : 'text-muted-foreground hover:bg-background/60 hover:text-foreground',
+                  : 'text-muted-foreground hover:bg-background/60 focus-visible:bg-background/60 hover:text-foreground focus-visible:text-foreground',
               )}
               data-track-category='FilePreview'
               data-track-name='PreviewSheetChanged'
