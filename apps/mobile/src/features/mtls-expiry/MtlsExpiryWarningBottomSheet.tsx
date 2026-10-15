@@ -33,7 +33,6 @@ export function MtlsExpiryWarningBottomSheet({
   const insets = useSafeAreaInsets();
   const sheetBackground = useCSSVariable('--color-card') as string;
   const handleColor = useCSSVariable('--color-muted') as string;
-  const guideBackground = useCSSVariable('--color-muted') as string;
 
   useEffect(() => {
     if (open && !isPresentedRef.current) {
@@ -86,17 +85,10 @@ export function MtlsExpiryWarningBottomSheet({
 
           <Text className='mt-2.5 text-[15px] leading-6 text-secondary-foreground'>{message}</Text>
 
-          <View
-            className='mb-7 mt-4 rounded-2xl border border-border px-4 py-3'
-            style={{ backgroundColor: guideBackground }}
-          >
-            <Text className='mb-1 text-xs font-semibold uppercase tracking-wide text-foreground'>
-              How to re-enroll
-            </Text>
-            <Text className='text-[15px] font-medium leading-6 text-foreground'>
-              {reEnrollGuide}
-            </Text>
-          </View>
+          <Text className='mb-7 mt-3 text-[15px] leading-6 text-foreground'>
+            How to re-enroll{'\n'}
+            {reEnrollGuide}
+          </Text>
 
           <Pressable
             onPress={onDismiss}
