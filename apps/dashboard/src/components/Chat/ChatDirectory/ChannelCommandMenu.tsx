@@ -32,7 +32,13 @@ import {
 } from '@xyne/icons';
 import * as Tabs from '@radix-ui/react-tabs';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
-import { Channel, ChannelVisibility, isDeskChannelType, TicketPriority } from '@xyne/shared';
+import {
+  Channel,
+  ChannelVisibility,
+  isDeskChannelType,
+  TicketPriority,
+  WorkspaceRole,
+} from '@xyne/shared';
 import { ChannelChipIcon, resolveChipName, PRIORITY_ICON_COLOR } from './FilterChipNode';
 import {
   isDMChannel,
@@ -46,7 +52,7 @@ import {
 } from './ChatDirectory.utils';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
-import { useAuthContextValues } from '../../../hooks/useAuth';
+import { useAuth, useAuthContextValues } from '../../../hooks/useAuth';
 import Avatar from '../../ui/Avatar/Avatar';
 import ChannelIcon from '../ChannelIcon/ChannelIcon';
 import Badge from '../../ui/Badge';
@@ -711,6 +717,7 @@ const ChannelCommandMenuContent = ({
   const profileFallbackAnchorChannelId =
     currentChannelIdFromRoute ?? generalChannelForProfileFallback?.id ?? null;
   const { workspaceId } = useAuthContextValues(); // Per-user, per-workspace key for recents
+  const isGuest = useAuth().user?.role === WorkspaceRole.GUEST;
   const commandRef = useRef<HTMLDivElement | null>(null);
   // MutationObserver (owned by attachCommandRef) that recomputes the ⌥↵ hint when cmdk adds/removes rows.
   const rowListObserverRef = useRef<MutationObserver | null>(null);
@@ -1273,13 +1280,19 @@ const ChannelCommandMenuContent = ({
    * else is reachable by typing its prefix (see CHIP_PREFIXES).
    */
   const SEARCH_MODE_TOGGLES = [
-    {
-      id: 'myChannels',
-      label: '@Ch',
-      tooltip: 'Only my channels',
-      isOn: onlyMyChannels,
-      toggle: () => setOnlyMyChannels(v => !v),
-    },
+    // A guest's search is always scoped to their own channels server-side, so the pill
+    // would be a switch that does nothing.
+    ...(isGuest
+      ? []
+      : [
+          {
+            id: 'myChannels',
+            label: '@Ch',
+            tooltip: 'Only my channels',
+            isOn: onlyMyChannels,
+            toggle: (): void => setOnlyMyChannels(v => !v),
+          },
+        ]),
     {
       id: 'bot',
       label: 'Bot',
