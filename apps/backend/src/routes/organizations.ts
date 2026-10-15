@@ -1,11 +1,13 @@
 import { Router } from 'express';
 import { OrganizationController } from '../controllers/organizationController';
+import { authMiddleware } from '../middleware/auth';
 
 const router = Router();
 const organizationController = new OrganizationController();
 
 // Organization Management Routes
-router.post('/', organizationController.createOrganization);
+// Platform-provisioning: mints an org OWNER and claims a domain from the body, so admin-only.
+router.post('/', authMiddleware.requireAdmin, organizationController.createOrganization);
 router.get('/', organizationController.getUserOrganizations);
 router.get('/:orgId', organizationController.getOrganizationDetails);
 
