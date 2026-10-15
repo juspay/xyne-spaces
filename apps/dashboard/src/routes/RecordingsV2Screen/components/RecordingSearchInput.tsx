@@ -1,5 +1,5 @@
 import * as Popover from '@radix-ui/react-popover';
-import { useCallback, useMemo, useRef, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import Avatar from '../../../components/ui/Avatar/Avatar';
 import { LexicalSearchInput } from '../../../components/Chat/ChatDirectory/LexicalSearchInput';
 import { ChipType } from '../../../components/Chat/ChatDirectory/ChannelCommandMenu.types';
@@ -45,6 +45,7 @@ export function RecordingSearchInput({
   const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [hasNavigated, setHasNavigated] = useState(false);
+  const [rawText, setRawText] = useState('');
   const insertMentionRef = useRef<InsertMention | null>(null);
 
   const userResults = useActiveUserSearch(ownerQuery ?? '', OWNER_SUGGESTION_LIMIT);
@@ -100,14 +101,25 @@ export function RecordingSearchInput({
         .map(mention => mention.id);
       setSelectedOwnerIds(ownerIds);
       setSelectedLabels(labels);
-      // An `@name` or `#label` still being typed is a lookup, not search text.
-      onChange(text.replace(/(^|\s)[@#]\S*$/, '$1'), ownerIds, labels);
+      setRawText(text);
     },
-    [onChange],
+    [],
   );
 
   const mentionSearchType =
     ownerQuery !== null ? ChipType.USER : labelQuery !== null ? ChipType.CHANNEL : null;
+  const isLookupOpen = mentionSearchType !== null;
+
+  // An `@name` or `#label` being typed into an open lookup is not search text; once the
+  // lookup closes, a trailing `#4521` is searched as typed. An effect, so it also re-runs
+  // when the lookup closes without the text changing.
+  useEffect(() => {
+    onChange(
+      isLookupOpen ? rawText.replace(/(^|\s)[@#]\S*$/, '$1') : rawText,
+      selectedOwnerIds,
+      selectedLabels,
+    );
+  }, [onChange, isLookupOpen, rawText, selectedOwnerIds, selectedLabels]);
   const hasChips = selectedOwnerIds.length > 0 || selectedLabels.length > 0;
 
   const suggestionClassName = (index: number): string =>

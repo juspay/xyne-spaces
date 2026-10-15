@@ -10,8 +10,6 @@ import {
   CanvasVisibility,
   ChannelScopeType,
   ChannelVisibility,
-  EntityUserAccess,
-  ShareableEntityType,
   TagMethod,
   TicketStatus,
   TicketStatusV2,
@@ -22,6 +20,9 @@ import {
 import { indexableTagNames, parseAppliedTags } from '@xyne/shared';
 import { VespaJobType, VespaPayload } from './types';
 import { db } from '@/database/client';
+import { repositories } from '@/database/repositories';
+import { expandSharePrincipals } from '@/utils/sharePrincipals';
+import { shareEntityTypeFor } from '@/utils/callTypeUtils';
 import { resolveFieldDefinitionsByIds } from '@/utils/fieldDefinition';
 import {
   Channel,
@@ -901,74 +902,33 @@ export const mapCollection = async (
  * ownerId/isPrivate). Kept fresh by re-feeding on share changes and by field-scoped
  * updates when channel/group membership changes (see the side-effect fan-out).
  */
-export const computeCanvasPermissions = async (canvasId: string): Promise<string[]> => {
-  const participants = await db.canvasParticipant.findMany({ where: { canvasId } });
-
-  const directUserIds = participants.map(p => p.userId).filter((id): id is string => Boolean(id));
-  const channelIds = participants.map(p => p.channelId).filter((id): id is string => Boolean(id));
-  const groupIds = participants.map(p => p.userGroupId).filter((id): id is string => Boolean(id));
-
-  const [channelMembers, groupMembers] = await Promise.all([
-    channelIds.length
-      ? db.channelParticipant.findMany({ where: { channelId: { in: channelIds } }, select: { userId: true } })
-      : Promise.resolve([] as { userId: string }[]),
-    groupIds.length
-      ? db.userGroupMapping.findMany({ where: { userGroupId: { in: groupIds } }, select: { userId: true } })
-      : Promise.resolve([] as { userId: string }[]),
-  ]);
-
-  return Array.from(new Set([
-    ...directUserIds,
-    ...channelMembers.map(m => m.userId),
-    ...groupMembers.map(m => m.userId),
-  ].filter((id): id is string => Boolean(id))));
-};
+export const computeCanvasPermissions = async (canvasId: string): Promise<string[]> =>
+  expandSharePrincipals(await db.canvasParticipant.findMany({ where: { canvasId } }));
 
 /**
- * Everyone a recording's live NOTE_TAKER shares reach: direct users plus the members of
- * every group/channel it is shared to. Mirrors CallShareService.listActiveGrants, so
- * Vespa's view of who may find a recording matches who may open it.
+ * Everyone a recording's live shares reach: direct users plus the members of every
+ * group/channel it is shared to — the same active grants the share service checks access with.
  */
-export const computeRecordingPermissions = async (callId: string): Promise<string[]> => {
-  const shares = await db.entityAccess.findMany({
-    where: {
-      shareableEntityType: ShareableEntityType.NOTE_TAKER,
-      entityId: callId,
-      entityUserAccess: { not: EntityUserAccess.REVOKED },
-    },
-    select: { userId: true, userGroupId: true, channelId: true },
-  });
-
-  const directUserIds = shares.map(s => s.userId).filter((id): id is string => Boolean(id));
-  const channelIds = shares.map(s => s.channelId).filter((id): id is string => Boolean(id));
-  const groupIds = shares.map(s => s.userGroupId).filter((id): id is string => Boolean(id));
-
-  const [channelMembers, groupMembers] = await Promise.all([
-    channelIds.length
-      ? db.channelParticipant.findMany({ where: { channelId: { in: channelIds } }, select: { userId: true } })
-      : Promise.resolve([] as { userId: string }[]),
-    groupIds.length
-      ? db.userGroupMapping.findMany({ where: { userGroupId: { in: groupIds } }, select: { userId: true } })
-      : Promise.resolve([] as { userId: string }[]),
-  ]);
-
-  return Array.from(new Set([
-    ...directUserIds,
-    ...channelMembers.map(m => m.userId),
-    ...groupMembers.map(m => m.userId),
-  ].filter((id): id is string => Boolean(id))));
-};
+export const computeRecordingPermissions = async (
+  call: { id: string; workspaceId: string | null; callType: string },
+): Promise<string[]> =>
+  expandSharePrincipals(
+    await repositories.entityAccess.listActiveForEntity({
+      workspaceId: call.workspaceId,
+      shareableEntityType: shareEntityTypeFor(call.callType),
+      entityId: call.id,
+    }),
+  );
 
 /**
  * A recording's confirmed labels as slugs. `Call.labels` holds Tag ids, and every recording
  * has its own Tag rows, so search filters on the slug. AI suggestions (LLM/AUTOMATED) only
  * count once confirmed, matching the label chips the recordings list shows.
  */
-export const computeRecordingLabels = async (callId: string): Promise<string[]> => {
-  const call = await db.call.findUnique({ where: { id: callId }, select: { labels: true } });
-  if (!call?.labels.length) return [];
+export const computeRecordingLabels = async (tagIds: readonly string[]): Promise<string[]> => {
+  if (!tagIds.length) return [];
   const tags = await db.tag.findMany({
-    where: { id: { in: call.labels }, method: TagMethod.MANUAL, isDeleted: false },
+    where: { id: { in: [...tagIds] }, method: TagMethod.MANUAL, isDeleted: false },
     select: { tag: true },
   });
   return Array.from(new Set(tags.map(t => t.tag)));
@@ -1116,9 +1076,9 @@ export const mapTranscript = async (args: InsertValue<TranscriptsSchema>, worksp
   // the share recipients; a regular call's transcript stays with its participants.
   const isRecordingCall = args.callType === CallType.HEADLESS;
   const permissions = isRecordingCall
-    ? await computeRecordingPermissions(args.id)
+    ? await computeRecordingPermissions({ id: args.id, workspaceId: args.workspaceId ?? null, callType: args.callType })
     : (await db.callParticipant.findMany({ where: { callId: args.id, isExternal: false } })).map(p => p.userId);
-  const labels = isRecordingCall ? await computeRecordingLabels(args.id) : [];
+  const labels = isRecordingCall ? await computeRecordingLabels(args.labels ?? []) : [];
 
   return {
     docId: args.id,

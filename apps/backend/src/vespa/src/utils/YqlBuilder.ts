@@ -13,6 +13,7 @@ import {
   appSchema,
   callSchema,
 } from '../types';
+import { CallType } from '@xyne/shared';
 import { parseDateToTimestamp, parseTimeKeyword } from './dateParser';
 
 type AppName = 'chat' | 'ticket' | 'user' | 'file' | 'collection' | 'transcript' | 'mail' | 'xyneapp' | 'call';
@@ -781,17 +782,18 @@ export class YqlBuilder {
       );
     }
 
-    // Chat/Ticket attachments: require owner/channelPermissions/isPrivate check
+    // Chat/Ticket attachments and transcripts: owner/channelPermissions/isPrivate check
+    const channelAccess = `ownerId contains ${accessUser} or channelPermissions contains ${accessUser} or isPrivate contains "false"`;
     if (subApps.some((s) => s === 'CHAT_ATTACHMENT' || s === 'TICKET_ATTACHMENT')) {
       subAppConditions.push(
-        `((subApp contains "CHAT_ATTACHMENT" or subApp contains "TICKET_ATTACHMENT") and (ownerId contains ${accessUser} or channelPermissions contains ${accessUser} or isPrivate contains "false"))`
+        `((subApp contains "CHAT_ATTACHMENT" or subApp contains "TICKET_ATTACHMENT") and (${channelAccess}))`
       );
     }
 
-    // Transcripts: same check, plus a recording's share recipients (its `permissions`)
+    // Transcripts: plus a recording's share recipients (its `permissions`)
     if (subApps.some((s) => s === 'TRANSCRIPT')) {
       subAppConditions.push(
-        `((subApp contains "TRANSCRIPT") and (ownerId contains ${accessUser} or channelPermissions contains ${accessUser} or isPrivate contains "false" or (callType contains "HEADLESS" and permissions contains ${accessUser})))`
+        `((subApp contains "TRANSCRIPT") and (${channelAccess} or (callType contains "${CallType.HEADLESS}" and permissions contains ${accessUser})))`
       );
     }
 

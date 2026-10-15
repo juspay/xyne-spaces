@@ -3,6 +3,7 @@ import { db } from '@/database/client';
 import { withWorkspaceScope } from '@/database/tenant/context';
 import { queueTranscriptFieldsUpdate, type TranscriptDocField } from '@/services/callVespaQueue';
 import { logger } from '@/utils/logger';
+import { mapWithConcurrency } from '@/utils/concurrency';
 
 /**
  * A recording's ACL is denormalized into its Vespa transcript doc: `permissions` holds
@@ -40,13 +41,10 @@ async function refreshForShares(
   if (recordings.length === 0) return;
 
   logger.info(`[recordingTranscriptPermissionSync] refreshing ${recordings.length} recording ACL(s) for ${label}`);
-  for (let i = 0; i < recordings.length; i += ENQUEUE_CONCURRENCY) {
-    const chunk = recordings.slice(i, i + ENQUEUE_CONCURRENCY);
-    // queueTranscriptFieldsUpdate logs its own failures and never throws.
-    await Promise.all(
-      chunk.map(call => queueTranscriptFieldsUpdate(call, RECORDING_ACL_FIELDS)),
-    );
-  }
+  // queueTranscriptFieldsUpdate logs its own failures and never throws.
+  await mapWithConcurrency(recordings, ENQUEUE_CONCURRENCY, call =>
+    queueTranscriptFieldsUpdate(call, RECORDING_ACL_FIELDS),
+  );
 }
 
 /** Refresh every recording shared to a channel, after a member joins or leaves it. */

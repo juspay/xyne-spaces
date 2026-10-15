@@ -21,12 +21,14 @@ export class ChannelParticipantsSideEffectHandler extends BaseSideEffectHandler 
       logger.warn(`[ChannelParticipantsHandler] No previousValue for deleted participant ID: ${job.entityId}`);
       return;
     }
-    await refreshCanvasPermissionsForChannel(previousValue.channelId).catch(err =>
-      logger.error(`[ChannelParticipantsHandler] canvas ACL refresh failed for channel ${previousValue.channelId}: ${err}`),
-    );
-    await refreshRecordingTranscriptPermissionsForChannel(previousValue.channelId).catch(err =>
-      logger.error(`[ChannelParticipantsHandler] recording ACL refresh failed for channel ${previousValue.channelId}: ${err}`),
-    );
+    await Promise.all([
+      refreshCanvasPermissionsForChannel(previousValue.channelId).catch(err =>
+        logger.error(`[ChannelParticipantsHandler] canvas ACL refresh failed for channel ${previousValue.channelId}: ${err}`),
+      ),
+      refreshRecordingTranscriptPermissionsForChannel(previousValue.channelId).catch(err =>
+        logger.error(`[ChannelParticipantsHandler] recording ACL refresh failed for channel ${previousValue.channelId}: ${err}`),
+      ),
+    ]);
   }
 
   async onInsert(job: SideEffectJobConfig): Promise<void> {
@@ -50,10 +52,12 @@ export class ChannelParticipantsSideEffectHandler extends BaseSideEffectHandler 
       const { channelId, userId } = participant;
 
       // Member joined → refresh canvases shared to this channel (regardless of notification).
-      await refreshCanvasPermissionsForChannel(channelId).catch(err =>
-        logger.error(`[ChannelParticipantsHandler] canvas ACL refresh failed for channel ${channelId}: ${err}`));
-      await refreshRecordingTranscriptPermissionsForChannel(channelId).catch(err =>
-        logger.error(`[ChannelParticipantsHandler] recording ACL refresh failed for channel ${channelId}: ${err}`));
+      await Promise.all([
+        refreshCanvasPermissionsForChannel(channelId).catch(err =>
+          logger.error(`[ChannelParticipantsHandler] canvas ACL refresh failed for channel ${channelId}: ${err}`)),
+        refreshRecordingTranscriptPermissionsForChannel(channelId).catch(err =>
+          logger.error(`[ChannelParticipantsHandler] recording ACL refresh failed for channel ${channelId}: ${err}`)),
+      ]);
 
 
       if (this.ctx.userID === userId) {

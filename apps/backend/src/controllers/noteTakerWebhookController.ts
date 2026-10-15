@@ -12,6 +12,7 @@ import { livekitService } from '@/services/liveKitService';
 import { emitCallStarted, emitCallEnded } from '@/automations/triggers/call.trigger';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
 import { isRecordingType } from '@/utils/callTypeUtils';
+import type { Call } from '@prisma/client';
 
 // Deferred the same way as the conversation-based flow's fallback reconcile —
 // see livekitWebhookController's former room_finished comment for the full
@@ -354,7 +355,7 @@ class NoteTakerWebhookController {
    * Make the recording searchable now that it has ended — its transcript may be minutes
    * away or never arrive. Both end paths call this; the feed is idempotent.
    */
-  private indexEndedRecording(call: { id: string; callType: string; createdByUserId: string; workspaceId: string | null }): void {
+  private indexEndedRecording(call: Pick<Call, 'id' | 'callType' | 'createdByUserId' | 'workspaceId'>): void {
     if (call.callType !== CallType.HEADLESS) return;
     void queueRecordingTranscriptFeed(call);
   }

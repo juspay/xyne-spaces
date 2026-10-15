@@ -161,7 +161,8 @@ export class RecordingSharingService {
     const result = await this.run(callId, actor, command);
     // Every command can change who reaches the recording (a linked ticket is a share
     // to its channel), so re-derive the search ACL rather than track which ones did.
-    await queueRecordingTranscriptRefresh({ externalId: callId }, ['permissions', 'isPrivate']);
+    // Never throws, so it doesn't hold up the request.
+    void queueRecordingTranscriptRefresh({ externalId: callId }, ['permissions', 'isPrivate']);
     return result;
   }
 
