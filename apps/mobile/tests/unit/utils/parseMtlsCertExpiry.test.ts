@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { parseX509NotAfterFromPem } from '@/src/utils/x509NotAfter';
+import { parseMtlsCertExpiryFromPem } from '@/src/utils/parseMtlsCertExpiry';
 import {
   evaluateMtlsExpiryWarning,
   MTLS_EXPIRY_WARN_WINDOW_MS,
 } from '@/src/services/mtlsCertExpiryPolicy';
 
-/** EC P-256 self-signed cert; notAfter = 2026-10-20T08:21:52.000Z */
+/** EC P-256 self-signed cert; expiry = 2026-10-20T08:21:52.000Z */
 const FIXTURE_PEM = `-----BEGIN CERTIFICATE-----
 MIIBfDCCASOgAwIBAgIURGmkwsftuYrM9EHbPU4Pq4g+XHkwCgYIKoZIzj0EAwIw
 FDESMBAGA1UEAwwJbXRscy10ZXN0MB4XDTI2MTAxNTA4MjE1MloXDTI2MTAyMDA4
@@ -19,13 +19,13 @@ EwEB/wQFMAMBAf8wCgYIKoZIzj0EAwIDRwAwRAIgLJT9H+5KEu6mtpFm+xvPU34u
 FwQqoSuSLrIez7C2AQcCIDlZqRLYzeeG1VS91cP5ACNh2d+XRQJ7PEnaqOHqifkJ
 -----END CERTIFICATE-----`;
 
-describe('parseX509NotAfterFromPem', () => {
-  it('reads notAfter from a PEM certificate', () => {
-    assert.equal(parseX509NotAfterFromPem(FIXTURE_PEM), '2026-10-20T08:21:52.000Z');
+describe('parseMtlsCertExpiryFromPem', () => {
+  it('reads expiry from a PEM certificate', () => {
+    assert.equal(parseMtlsCertExpiryFromPem(FIXTURE_PEM), '2026-10-20T08:21:52.000Z');
   });
 
   it('returns null for garbage input', () => {
-    assert.equal(parseX509NotAfterFromPem('not a cert'), null);
+    assert.equal(parseMtlsCertExpiryFromPem('not a cert'), null);
   });
 });
 

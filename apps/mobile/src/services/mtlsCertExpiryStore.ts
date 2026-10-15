@@ -5,7 +5,7 @@
 
 import { deleteKeys, getString, setString } from '@/src/services/localStorage';
 import NativeCertificateModule from '@/src/modules/certificate/NativeCertificateModule';
-import { parseX509NotAfterFromPem } from '@/src/utils/x509NotAfter';
+import { parseMtlsCertExpiryFromPem } from '@/src/utils/parseMtlsCertExpiry';
 import {
   evaluateMtlsExpiryWarning,
   type MtlsExpiryWarningState,
@@ -42,7 +42,7 @@ export function clearMtlsCertExpiryCache(): void {
 
 /** Persist `notAfter` from a PEM just stored during enrollment. */
 export function cacheNotAfterFromPem(certificatePem: string): void {
-  const notAfter = parseX509NotAfterFromPem(certificatePem);
+  const notAfter = parseMtlsCertExpiryFromPem(certificatePem);
   if (notAfter) {
     cacheCertNotAfter(notAfter);
     deleteKeys([MTLS_CERT_EXPIRY_WARNED_FOR_KEY]);
@@ -83,7 +83,7 @@ export async function resolveCertNotAfter(): Promise<string | null> {
   try {
     const pem = await NativeCertificateModule.getCertificate();
     if (!pem) return null;
-    const fromPem = parseX509NotAfterFromPem(pem);
+    const fromPem = parseMtlsCertExpiryFromPem(pem);
     if (fromPem) {
       cacheCertNotAfter(fromPem);
     }

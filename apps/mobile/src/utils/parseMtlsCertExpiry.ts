@@ -1,6 +1,6 @@
 /**
- * Extract X.509 `notAfter` from a PEM certificate without a crypto dependency.
- * Walks DER: Certificate → TBSCertificate → Validity → notAfter (UTCTime / GeneralizedTime).
+ * Read the mTLS client certificate expiry date from a PEM string
+ * (no crypto library). Walks DER validity → expiry (UTCTime / GeneralizedTime).
  */
 
 const PEM_BODY = /-----BEGIN CERTIFICATE-----([A-Za-z0-9+/=\s]+)-----END CERTIFICATE-----/;
@@ -87,9 +87,9 @@ function parseAsn1Time(buf: Uint8Array, offset: number, length: number, tag: num
 }
 
 /**
- * Returns ISO-8601 UTC `notAfter`, or null if the PEM cannot be parsed.
+ * Returns the certificate expiry as ISO-8601 UTC, or null if the PEM cannot be parsed.
  */
-export function parseX509NotAfterFromPem(pem: string): string | null {
+export function parseMtlsCertExpiryFromPem(pem: string): string | null {
   const der = decodePemToDer(pem);
   if (!der) return null;
 
@@ -126,7 +126,7 @@ export function parseX509NotAfterFromPem(pem: string): string | null {
   const notBefore = readTlv(der, validity.valueOffset);
   if (!notBefore) return null;
 
-  // notAfter
+  // notAfter (expiry)
   const notAfter = readTlv(der, notBefore.nextOffset);
   if (!notAfter) return null;
   if (notAfter.tag !== 0x17 && notAfter.tag !== 0x18) return null;

@@ -57,9 +57,9 @@ import {
   executeChatOpenIntent,
 } from '@/src/features/chat/navigation/chatOpenIntent';
 import { useAppActivityTracking } from '@/src/hooks/useAppActivityTracking';
-import { useMtlsExpiryWarning } from '@/src/hooks/useMtlsExpiryWarning';
 import { useScreenDwellTracker } from '@/src/hooks/useScreenDwellTracker';
 import { ensureForegroundListSyncProbeListener } from '@/src/hooks/useForegroundListSyncProbe';
+import { MtlsExpiryWarningGate } from '@/src/features/mtls-expiry';
 import { startupTimings } from '@/src/utils/startupTimings';
 import { markTelemetryReady } from '@/src/services/metrics/metricsQueue';
 import { StartupPhaseProvider, useStartupPhase } from '@/src/providers/StartupPhaseProvider';
@@ -463,9 +463,6 @@ function RootLayoutNav(): ReactElement {
   // Track app foreground/background transitions
   useAppActivityTracking();
 
-  // Soft mTLS expiry warning (2 days before) — once per cert, dismissible
-  useMtlsExpiryWarning(isEnrolled === true && !isEnrollmentLoading);
-
   const didMarkAuthLoadingStartRef = useRef(false);
   useEffect(() => {
     if (didMarkAuthLoadingStartRef.current) return;
@@ -810,6 +807,8 @@ function RootLayoutNav(): ReactElement {
         <WorkspaceSwitchOverlay workspaceName={switchingToWorkspaceName} />
       ) : null}
       <StatusBar barStyle={theme === 'dark' ? 'light-content' : 'dark-content'} />
+      {/* Soft mTLS expiry warning — same bottom-sheet pattern as app-update / Airborne */}
+      <MtlsExpiryWarningGate />
     </>
   );
 }
