@@ -1,5 +1,6 @@
 const {
   withPlugins,
+  withAppDelegate,
   withDangerousMod,
   withEntitlementsPlist,
   withXcodeProject,
@@ -8,6 +9,27 @@ const {
 const fs = require('fs');
 const { readFileIfExists } = require('../utils/fs.cjs');
 const path = require('path');
+
+/** Native sources copied from `plugins/ios-modules` and compiled into the app target. */
+const NATIVE_FILES = [
+  'CertificateModule.swift',
+  'CertificateModule.m',
+  'MtlsTransportPolicy.swift',
+  'PKCS10Builder.swift',
+  'MtlsWebViewModule.swift',
+  'MtlsWebViewModule.m',
+  'MtlsSocketModule.swift',
+  'MtlsSocketModule.m',
+  'MtlsHTTPRequestHandler.swift',
+  'MtlsHTTPRequestHandler.m',
+  'MtlsDependencyProvider.swift',
+  'MtlsProxyServer.swift',
+  'MtlsProxyModule.swift',
+  'MtlsProxyModule.m',
+];
+
+const DEFAULT_DEPENDENCY_PROVIDER = 'RCTAppDependencyProvider()';
+const MTLS_DEPENDENCY_PROVIDER = 'MtlsDependencyProvider()';
 
 /**
  * Copy certificate module files to iOS project
@@ -30,25 +52,7 @@ const withCertificateModuleFiles = config => {
         fs.mkdirSync(targetDir, { recursive: true });
       }
 
-      // Files to copy
-      const files = [
-        'CertificateModule.swift',
-        'CertificateModule.m',
-        'MtlsTransportPolicy.swift',
-        'PKCS10Builder.swift',
-        'MtlsWebViewModule.swift',
-        'MtlsWebViewModule.m',
-        'MtlsSocketModule.swift',
-        'MtlsSocketModule.m',
-        'MtlsHTTPRequestHandler.swift',
-        'MtlsHTTPRequestHandler.m',
-        'MtlsProxyServer.swift',
-        'MtlsProxyModule.swift',
-        'MtlsProxyModule.m',
-      ];
-
-      // Copy files
-      for (const file of files) {
+      for (const file of NATIVE_FILES) {
         const sourcePath = path.join(sourceDir, file);
         const targetPath = path.join(targetDir, file);
 
@@ -73,22 +77,6 @@ const withCertificateModuleXcode = config => {
     const { modResults: project } = config;
     // const { platformProjectRoot } = modRequest;
 
-    const files = [
-      'CertificateModule.swift',
-      'CertificateModule.m',
-      'MtlsTransportPolicy.swift',
-      'PKCS10Builder.swift',
-      'MtlsWebViewModule.swift',
-      'MtlsWebViewModule.m',
-      'MtlsSocketModule.swift',
-      'MtlsSocketModule.m',
-      'MtlsHTTPRequestHandler.swift',
-      'MtlsHTTPRequestHandler.m',
-      'MtlsProxyServer.swift',
-      'MtlsProxyModule.swift',
-      'MtlsProxyModule.m',
-    ];
-
     // Derive app name from config (removes spaces, matches Expo's behavior)
     const appName = config.name?.replace(/\s+/g, '') || 'lotus';
 
@@ -102,7 +90,7 @@ const withCertificateModuleXcode = config => {
       );
     }
 
-    for (const file of files) {
+    for (const file of NATIVE_FILES) {
       const filePath = path.join(appName, file);
 
       // Check if file already exists in project
@@ -122,6 +110,29 @@ const withCertificateModuleXcode = config => {
       console.log(`[with-certificate-module-ios] Added ${file} to Xcode project`);
     }
 
+    return config;
+  });
+};
+
+/**
+ * Use MtlsDependencyProvider wherever the AppDelegate creates the React Native dependency
+ * provider, so MtlsHTTPRequestHandler serves fetch/XHR requests to the API. Fails the
+ * prebuild if the template changes, rather than silently dropping the client certificate.
+ */
+const withMtlsDependencyProvider = config => {
+  return withAppDelegate(config, config => {
+    const { contents } = config.modResults;
+    if (contents.includes(DEFAULT_DEPENDENCY_PROVIDER)) {
+      config.modResults.contents = contents.replaceAll(
+        DEFAULT_DEPENDENCY_PROVIDER,
+        MTLS_DEPENDENCY_PROVIDER,
+      );
+    } else if (!contents.includes(MTLS_DEPENDENCY_PROVIDER)) {
+      throw new Error(
+        `[with-certificate-module-ios] AppDelegate does not create ${DEFAULT_DEPENDENCY_PROVIDER}; ` +
+          `set the dependency provider to ${MTLS_DEPENDENCY_PROVIDER} so API requests keep the client certificate.`,
+      );
+    }
     return config;
   });
 };
@@ -253,6 +264,7 @@ module.exports = config => {
   return withPlugins(config, [
     withCertificateModuleFiles,
     withCertificateModuleXcode,
+    withMtlsDependencyProvider,
     withWebViewBridgeHeaderImport,
     withKeychainEntitlements,
     withLocalhostATSExceptions,

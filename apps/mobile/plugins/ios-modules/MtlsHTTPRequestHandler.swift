@@ -3,7 +3,7 @@
 //  Lotus
 //
 //  RCTURLRequestHandler that uses mTLS (client certificate) for HTTPS requests
-//  to the protected host (app.spaces.xyne.juspay.net).
+//  to the configured API origin (see MtlsTransportPolicy).
 //  Higher priority than RCTHTTPRequestHandler so it handles these requests first.
 //
 
@@ -11,28 +11,7 @@ import Foundation
 import React
 import Security
 
-private let kProtectedHost = "app.spaces.xyne.juspay.net"
 private let kIdentityTag = "ClientIdentity"
-
-private let kServerCaPemProd = """
------BEGIN CERTIFICATE-----
-MIICrjCCAjOgAwIBAgITZxdzXXsS5keda9UdiTUtHHK4NjAKBggqhkjOPQQDAzCB
-hTELMAkGA1UEBhMCSU4xEjAQBgNVBAgTCUthcm5hdGFrYTESMBAGA1UEBxMJQmVu
-Z2FsdXJ1MSYwJAYDVQQKEx1KdXNwYXkgVGVjaG5vbG9naWVzIFB2dC4gTHRkLjEN
-MAsGA1UECxMEWHluZTEXMBUGA1UEAxMOcjAxLmp1c3BheS5uZXQwHhcNMjUxMjA5
-MTMyMDQyWhcNMzUxMjA3MTMyMDQxWjCBhTELMAkGA1UEBhMCSU4xEjAQBgNVBAgT
-CUthcm5hdGFrYTESMBAGA1UEBxMJQmVuZ2FsdXJ1MSYwJAYDVQQKEx1KdXNwYXkg
-VGVjaG5vbG9naWVzIFB2dC4gTHRkLjENMAsGA1UECxMEWHluZTEXMBUGA1UEAxMO
-cjAxLmp1c3BheS5uZXQwdjAQBgcqhkjOPQIBBgUrgQQAIgNiAATBlHoBIf4D/JBR
-HgHEjU+0X2OQb4HytqHAxC1e5gN1NIMPZsvwDAShtbAgyWhrOJRYuv2clPn14pF7
-OLRqXe00oySpRDiJVy97OsmWUEN2XD3HnjaG6sRlQG9VcfPFtVqjYzBhMA4GA1Ud
-DwEB/wQEAwIBBjAPBgNVHRMBAf8EBTADAQH/MB0GA1UdDgQWBBSiaksd1ABgrQoc
-4a698TXSCeYtXjAfBgNVHSMEGDAWgBSiaksd1ABgrQoc4a698TXSCeYtXjAKBggq
-hkjOPQQDAwNpADBmAjEA6mkvk1NFhNuMb5rdFro3Ein1qmzPLS01B+AyDXvqYzWd
-wvUGnScnS10DpdnOqSdgAjEArtfIK2DX2deS9hcaM6PREiZJpdQSvWJqfdSFp7ok
-xYl9zN4KS7S4UNSH946JKfhn
------END CERTIFICATE-----
-"""
 
 @objc(MtlsHTTPRequestHandler)
 class MtlsHTTPRequestHandler: NSObject, RCTURLRequestHandler, RCTInvalidating {
@@ -48,9 +27,7 @@ class MtlsHTTPRequestHandler: NSObject, RCTURLRequestHandler, RCTInvalidating {
 
   func canHandle(_ request: URLRequest) -> Bool {
     guard let url = request.url else { return false }
-    guard url.scheme?.lowercased() == "https" else { return false }
-    guard let host = url.host?.lowercased(), host == kProtectedHost else { return false }
-    return Self.getCertificateIdentity() != nil
+    return MtlsTransportPolicy.isApiHTTPSURL(url) && Self.getCertificateIdentity() != nil
   }
 
   func handlerPriority() -> Float {
@@ -83,7 +60,7 @@ class MtlsHTTPRequestHandler: NSObject, RCTURLRequestHandler, RCTInvalidating {
     let mtlsDelegate = MtlsHTTPDelegate(
       identity: identity,
       certificate: certificate,
-      caCertificate: Self.loadServerCaCertificate(),
+      caCertificate: CertificateModule.loadServerCaCertificate(),
       rctDelegate: delegate
     )
 
@@ -116,10 +93,6 @@ class MtlsHTTPRequestHandler: NSObject, RCTURLRequestHandler, RCTInvalidating {
     return unsafeBitCast(item, to: SecIdentity.self)
   }
 
-  private static func loadServerCaCertificate() -> SecCertificate? {
-    guard let data = kServerCaPemProd.data(using: .utf8) else { return nil }
-    return SecCertificateCreateWithData(nil, data as CFData)
-  }
 }
 
 private class MtlsHTTPDelegate: NSObject, URLSessionDataDelegate {
