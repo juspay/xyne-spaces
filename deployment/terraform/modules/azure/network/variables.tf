@@ -95,6 +95,18 @@ variable "aks_inbound_ports" {
   default = ["80", "443"]
 }
 
+variable "aks_inbound_public" {
+  description = "Admit aks_inbound_ports to the AKS subnet from the Internet. Only needed when the ingress gateway's LoadBalancer Service has a public IP (ingress_mode = gateway). Ignored when aks_inbound_cidrs is set."
+  type        = bool
+  default     = false
+}
+
+variable "aks_inbound_cidrs" {
+  description = "Source CIDRs admitted to aks_inbound_ports on the AKS subnet. Empty means the Application Gateway subnet (or the Internet when aks_inbound_public is true)."
+  type        = list(string)
+  default     = []
+}
+
 variable "livekit_port_range_start" {
   type    = number
   default = 50000
