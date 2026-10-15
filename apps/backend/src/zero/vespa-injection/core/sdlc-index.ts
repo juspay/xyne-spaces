@@ -75,10 +75,6 @@ const repositoryRef = (repoId: string): string =>
 const CACHE_TTL_MS = 2_000;
 const cache = new Map<string, { at: number; index: Promise<SdlcHubIndex | null> }>();
 
-export function invalidateSdlcHubIndex(hubId: string): void {
-  cache.delete(hubId);
-}
-
 export function loadSdlcHubIndex(hubId: string, prisma: PrismaClient = db): Promise<SdlcHubIndex | null> {
   const hit = cache.get(hubId);
   if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.index;
