@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { z } from 'zod';
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
-import { deskThreadCanvasService, CanvasGenerationInProgressError } from '@/services/deskThreadCanvasService';
+import { deskThreadCanvasService } from '@/services/deskThreadCanvasService';
 import { ClawAgentNotAvailableError } from '@/services/clawAgentService';
 import { assertChannelMembership } from '@/utils/channelMembership';
 
@@ -10,13 +10,11 @@ const prisma = DatabaseClient.getInstance();
 
 const CreateDeskThreadCanvasSchema = z.object({
   scope: z.enum(['chat', 'email', 'both']),
-  // Bounded: these reach the agent's prompt (see buildTask).
-  labels: z.array(z.string().max(64)).max(10).default([]),
   includeMerged: z.boolean().default(false),
 });
 
 export class DeskThreadCanvasController {
-  /** Dispatches the agent and returns immediately with the created-or-reused
+  /** Dispatches the agent and returns immediately with the new
    *  canvas; it fills in when the agent's callback lands. */
   createCanvasFromThread = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -34,7 +32,9 @@ export class DeskThreadCanvasController {
         return;
       }
 
-      const ticket = await prisma.ticket.findFirst({ where: { id: ticketId, workspaceId, isArchived: false } });
+      const ticket = await prisma.ticket.findFirst({
+        where: { id: ticketId, workspaceId, isArchived: false },
+      });
       if (!ticket) {
         res.status(404).json({ error: 'Ticket not found' });
         return;
@@ -47,23 +47,25 @@ export class DeskThreadCanvasController {
         return;
       }
 
-      const { scope, labels, includeMerged } = parsed.data;
+      const { scope, includeMerged } = parsed.data;
       const result = await deskThreadCanvasService.dispatch({
         ticket,
-        user: { id: userId, name: user.name ?? user.displayName ?? null, email: user.email, workspaceId },
+        user: {
+          id: userId,
+          name: user.name ?? user.displayName ?? null,
+          email: user.email,
+          workspaceId,
+        },
         scope,
-        labels,
         includeMerged,
         cookie: req.headers.cookie,
       });
       res.json(result);
     } catch (error) {
-      if (error instanceof CanvasGenerationInProgressError) {
-        res.status(409).json({ error: 'Canvas generation already in progress for this ticket' });
-        return;
-      }
       if (error instanceof ClawAgentNotAvailableError) {
-        res.status(409).json({ error: `Canvas generation agent isn't available in this workspace` });
+        res
+          .status(409)
+          .json({ error: `Canvas generation agent isn't available in this workspace` });
         return;
       }
       logger.error('[DeskThreadCanvas] dispatch failed:', error);

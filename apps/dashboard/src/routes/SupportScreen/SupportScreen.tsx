@@ -2270,10 +2270,13 @@ const SupportScreen = (): ReactElement => {
     void navigate(qs ? `${path}?${qs}` : path, { replace });
   };
 
-  const goCanvases = (sub: string): void => {
+  const canvasesPath = (sub: string): string => {
     const qs = searchParams.toString();
     const path = `${supportBase}/${selectedChannelId}${sub && `/${sub}`}`;
-    void navigate(qs ? `${path}?${qs}` : path);
+    return qs ? `${path}?${qs}` : path;
+  };
+  const goCanvases = (sub: string): void => {
+    void navigate(canvasesPath(sub));
   };
 
   // Manual fetch for the selected desk. Social-media desks fetch every review
@@ -4646,7 +4649,7 @@ const SupportScreen = (): ReactElement => {
                 <DeskCanvasesPanel
                   channelId={selectedChannelId}
                   canvasId={routeCanvasId}
-                  onOpen={id => goCanvases(`canvases/${id}`)}
+                  getCanvasRoute={id => canvasesPath(`canvases/${id}`)}
                   onBack={() => goCanvases(routeCanvasId ? 'canvases' : '')}
                 />
               ) : selectedChannelId && openDeskAppId ? (

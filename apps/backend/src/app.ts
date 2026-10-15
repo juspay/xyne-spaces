@@ -709,7 +709,7 @@ export class App {
       handleClawCallAiCallback,
     );
     this.app.post(
-      '/api/internal/desk-canvas/callback/:canvasId/:sessionId',
+      '/api/internal/desk-canvas/callback/:canvasId',
       validateS2SKey,
       handleDeskThreadCanvasCallback,
     );
