@@ -43,7 +43,6 @@ import { convertMarkdownToBlockNote } from '@/services/canvasService';
 import { logger } from '@/utils/logger';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { queueSdlcSearchJobs } from '@/zero/vespa-injection/core/sdlc-sync';
-import { loadSdlcHubIndex } from '@/zero/vespa-injection/core/sdlc-index';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { syncToYSweet } from '@/utils/ysweetUtils';
 import { commitAndSyncCanvasArtifact, readCanvasMarkdown } from './sdlcCanvasSync';
@@ -318,10 +317,6 @@ export class SdlcHubService implements SdlcHub {
         409
       );
     }
-    // The repository's wiki containers in this hub, read while they are still in it.
-    const repoWikiContainers = [...((await loadSdlcHubIndex(channelId))?.containers.values() ?? [])]
-      .filter(container => container.repoRef.endsWith(`::${repoId}`))
-      .map(container => container.docId);
     const removed = await this.prisma.sdlcEntityLink.deleteMany({
       where: {
         channelId,
@@ -333,8 +328,8 @@ export class SdlcHubService implements SdlcHub {
     if (removed.count === 0) {
       throw new AppError('Repository is not part of this hub', 404);
     }
-    // The repository's hubIds drop this hub, and its wiki (read before the detach) leaves search.
-    queueSdlcSearchJobs(channelId, { repositories: [repoId], removedContainers: repoWikiContainers });
+    // The repository's hubIds drop this hub, and its wiki leaves the hub's search.
+    queueSdlcSearchJobs(channelId, { detachedRepositories: [repoId] });
   }
 
   /** A Wiki page is an artifact whose placement belongs to the Wiki store, not a type folder. */

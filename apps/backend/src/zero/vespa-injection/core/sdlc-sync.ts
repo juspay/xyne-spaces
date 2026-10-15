@@ -4,6 +4,7 @@ import {
   SDLC_MEMBERSHIP_RELATION,
   SDLC_TRACK_MEMBERSHIP_RELATION,
   sdlcRepositoryWikiFolderId,
+  ChannelType,
 } from '@xyne/shared';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
@@ -21,7 +22,6 @@ import {
   ticketSchema,
 } from '@/vespa/src/types';
 import type { VespaJob } from './types';
-import { invalidateSdlcHubIndex, loadSdlcHubIndex } from './sdlc-index';
 
 /**
  * Keeps SDLC Hub search in step with the writes that change it: each SDLC write names what it
@@ -59,16 +59,16 @@ export interface SdlcSearchChange {
   moved?: { type: string; id: string };
   /** Tracks or folders whose own values changed (created, renamed, status); those under them follow. */
   containers?: string[];
-  /** Tracks or folders that left the hub. */
-  removedContainers?: string[];
   /** Canvases whose own SDLC values changed (archived or restored). */
   documents?: string[];
   /** Artifact types (canvas folders) renamed: every document of the type carries its name. */
   typeIds?: string[];
-  /** Repositories whose own entry changed (renamed, detached). */
+  /** Repositories whose own entry changed (renamed). */
   repositories?: string[];
   /** Repositories attached to the hub: their entries, and their wikis' folders. */
   attachedRepositories?: string[];
+  /** Repositories detached from the hub: their entries, and their wikis' folders leave search. */
+  detachedRepositories?: string[];
   /** The hub's own channel entry (containers import its id and members). */
   hub?: boolean;
 }
@@ -103,43 +103,53 @@ export function queueSdlcSearchJobs(hubId: string, change: SdlcSearchChange): vo
 
 async function jobsFor(hubId: string, change: SdlcSearchChange): Promise<VespaJob[]> {
   const jobs = new Map<string, VespaJob>();
-  let base: { workspaceId?: string } = {};
+  // A channel that is not an SDLC hub has no SDLC entries. One that does not exist yet is a hub
+  // being created in this transaction: queue what the change names.
+  const hub = await db.channel.findUnique({ where: { id: hubId }, select: { type: true, workspaceId: true } });
+  if (hub && hub.type !== ChannelType.SDLC) return [];
+  const base = hub?.workspaceId ? { workspaceId: hub.workspaceId } : {};
   const add = (job: VespaJob) => jobs.set(`${job.schema}:${job.docId}`, { ...job, ...base });
-  const repository = async (id: string) => {
-    const exists = await db.repo.findUnique({ where: { id }, select: { id: true } });
-    add({ schema: sdlcRepositorySchema, jobType: exists ? 'feed' : 'delete', docId: id });
-  };
 
-  // The hub's own entry and its repositories need no hub tree, so they are queued even from the
-  // transaction that creates the hub, before the hub can be read.
-  if (change.hub) add({ schema: channelSchema, jobType: 'feed', docId: hubId });
-  for (const id of change.repositories ?? []) await repository(id);
+  // Which entries a change affects is read from the hub's links, a few rows at a time; the values
+  // of each entry are worked out when its job runs (the mapper, sdlc-index.ts).
 
-  invalidateSdlcHubIndex(hubId); // read the hub as it is now, not as cached before this write
-  let index = await loadSdlcHubIndex(hubId);
-  if (!index) {
-    // A channel that is not an SDLC hub has no SDLC entries. One that does not exist yet is a hub
-    // being created in this transaction: queue what the change names, with nothing under it yet.
-    if (await db.channel.findUnique({ where: { id: hubId }, select: { id: true } })) return [...jobs.values()];
-    index = {
-      hubId, projectId: '', workspaceId: '', containers: new Map(), canvases: new Map(),
-      attachments: new Map(), tickets: new Map(), conversations: new Map(), repoIds: [],
-    };
-  }
-  if (index.workspaceId) base = { workspaceId: index.workspaceId };
-
-  // A track or folder, and every container under it (their paths and scope ids include it).
-  const container = (id: string, removed = false) => {
-    if (!index.containers.has(id)) {
-      if (removed) add({ schema: sdlcContainerSchema, jobType: 'delete', docId: id });
-      // Not in the hub yet: written in this transaction, so feed it once it commits.
-      else add({ schema: sdlcContainerSchema, jobType: 'feed', docId: id });
-      return;
+  /** `id` and every track or folder placed under it. */
+  const subtree = async (id: string): Promise<string[]> => {
+    const ids = [id];
+    for (let i = 0; i < ids.length; i++) {
+      const children = await db.sdlcEntityLink.findMany({
+        where: {
+          channelId: hubId,
+          sourceId: ids[i],
+          sourceType: { in: ['TRACK', 'FOLDER'] },
+          targetType: 'FOLDER',
+          relationType: { in: [SDLC_CONTAINMENT_RELATION, SDLC_HUB_ITEM_RELATION] },
+        },
+        select: { targetId: true },
+      });
+      for (const child of children) if (!ids.includes(child.targetId)) ids.push(child.targetId);
     }
-    for (const [containerId, entry] of index.containers) {
-      if (containerId === id || entry.scopeIds.includes(id)) {
-        add({ schema: sdlcContainerSchema, jobType: 'feed', docId: containerId });
-      }
+    return ids;
+  };
+  /** Whether a track or folder is still placed in the hub. */
+  const placed = async (id: string): Promise<boolean> =>
+    Boolean(await db.sdlcEntityLink.findFirst({
+      where: {
+        channelId: hubId,
+        targetId: id,
+        OR: [
+          { targetType: 'TRACK', relationType: SDLC_TRACK_MEMBERSHIP_RELATION },
+          { targetType: 'FOLDER', relationType: { in: [SDLC_CONTAINMENT_RELATION, SDLC_HUB_ITEM_RELATION] } },
+        ],
+      },
+      select: { id: true },
+    }));
+  // A track or folder and every container under it (their paths and scope ids include it): fed,
+  // or deleted when it has left the hub.
+  const container = async (id: string, removed = false) => {
+    const gone = removed && !(await placed(id));
+    for (const containerId of await subtree(id)) {
+      add({ schema: sdlcContainerSchema, jobType: gone ? 'delete' : 'feed', docId: containerId });
     }
   };
   const ticket = (id: string) =>
@@ -156,31 +166,33 @@ async function jobsFor(hubId: string, change: SdlcSearchChange): Promise<VespaJo
     const app = type === 'ATTACHMENT' ? SubApp.CHAT_ATTACHMENT : SubApp.CANVAS;
     add({ schema: fileSchema, jobType: 'update', docId: id, app, fields: [...SDLC_FILE_FIELDS] });
     if (!withDependents) return;
-    for (const [ticketId, fields] of index.tickets) {
-      if (fields.sdlcDocumentIds.includes(id)) ticket(ticketId);
-    }
-    for (const [conversationId, fields] of index.conversations) {
-      if (fields.sdlcDocumentId === id) await conversation(conversationId);
-    }
+    const ticketLinks = await db.sdlcEntityLink.findMany({
+      where: {
+        channelId: hubId,
+        OR: [
+          { sourceId: id, targetType: 'TICKET', relationType: { in: ['TICKET', 'CONTEXT'] } },
+          { targetId: id, sourceType: 'TICKET', relationType: 'CONTEXT' },
+        ],
+      },
+      select: { sourceType: true, sourceId: true, targetId: true },
+    });
+    for (const l of ticketLinks) ticket(l.sourceType === 'TICKET' ? l.sourceId : l.targetId);
+    const discussions = await db.sdlcEntityLink.findMany({
+      where: { channelId: hubId, sourceId: id, targetType: 'CONVERSATION', relationType: 'DISCUSSION' },
+      select: { targetId: true },
+    });
+    for (const d of discussions) await conversation(d.targetId);
   };
-  // A repository's wiki folders in this hub, read from the links that hold them (still there
-  // after a detach, which removes only the repository's membership).
-  const repoWikiFolders = async (repoId: string): Promise<string[]> => {
-    const folders = [sdlcRepositoryWikiFolderId(hubId, repoId)];
-    for (let i = 0; i < folders.length; i++) {
-      const children = await db.sdlcEntityLink.findMany({
-        where: { channelId: hubId, sourceType: 'FOLDER', sourceId: folders[i], targetType: 'FOLDER', relationType: SDLC_HUB_ITEM_RELATION },
-        select: { targetId: true },
-      });
-      folders.push(...children.map(child => child.targetId));
-    }
-    return folders;
+  const repository = async (id: string) => {
+    const exists = await db.repo.findUnique({ where: { id }, select: { id: true } });
+    add({ schema: sdlcRepositorySchema, jobType: exists ? 'feed' : 'delete', docId: id });
   };
-  // A repository's wiki joins or leaves the hub with it: its folders are fed when it is attached
-  // (those that exist; a new one is fed as it is created) and deleted when it is detached.
-  const repositoryWiki = async (repoId: string, removed: boolean) => {
-    for (const folderId of await repoWikiFolders(repoId)) {
-      if (removed) container(folderId, true);
+  // A repository's wiki joins or leaves the hub with it. Its folders stay linked after a detach
+  // (which removes only the membership), so they are found through those links: fed when it is
+  // attached (those that exist; a new one is fed as it is created), deleted when it is detached.
+  const repositoryWiki = async (repoId: string, detached: boolean) => {
+    for (const folderId of await subtree(sdlcRepositoryWikiFolderId(hubId, repoId))) {
+      if (detached) add({ schema: sdlcContainerSchema, jobType: 'delete', docId: folderId });
       else if (await db.sdlcFolder.findUnique({ where: { id: folderId }, select: { id: true } })) {
         add({ schema: sdlcContainerSchema, jobType: 'feed', docId: folderId });
       }
@@ -190,7 +202,7 @@ async function jobsFor(hubId: string, change: SdlcSearchChange): Promise<VespaJo
   const item = async (type: string, id: string, relation: string, removed: boolean) => {
     const placing = PLACING_RELATIONS.has(relation);
     if (type === 'TRACK' || type === 'FOLDER') {
-      if (placing) container(id, removed);
+      if (placing) await container(id, removed);
     } else if (type === 'CANVAS' || type === 'ATTACHMENT') {
       if (placing || relation === 'CONTEXT') await document(type, id, placing);
     } else if (type === 'TICKET') {
@@ -203,6 +215,7 @@ async function jobsFor(hubId: string, change: SdlcSearchChange): Promise<VespaJo
     }
   };
 
+  if (change.hub) add({ schema: channelSchema, jobType: 'feed', docId: hubId });
   if (change.link) {
     const { link } = change;
     await item(link.targetType, link.targetId, link.relationType, Boolean(change.removed));
@@ -212,24 +225,26 @@ async function jobsFor(hubId: string, change: SdlcSearchChange): Promise<VespaJo
   }
   if (change.moved) {
     const { type, id } = change.moved;
-    if (type === 'TRACK' || type === 'FOLDER') container(id);
+    if (type === 'TRACK' || type === 'FOLDER') await container(id);
     else if (type === 'CANVAS' || type === 'ATTACHMENT') await document(type, id, true);
   }
-  for (const id of change.attachedRepositories ?? []) {
-    await repository(id);
-    await repositoryWiki(id, false);
-  }
-  for (const id of change.containers ?? []) container(id);
-  for (const id of change.removedContainers ?? []) container(id, true);
+  for (const id of change.containers ?? []) await container(id);
   for (const id of change.documents ?? []) await document('CANVAS', id, false);
   if (change.typeIds?.length) {
     const canvases = await db.canvas.findMany({
       where: { channelId: hubId, folderId: { in: change.typeIds } },
       select: { id: true },
     });
-    for (const canvas of canvases) {
-      if (index.canvases.has(canvas.id)) await document('CANVAS', canvas.id, false);
-    }
+    for (const canvas of canvases) await document('CANVAS', canvas.id, false);
+  }
+  for (const id of change.repositories ?? []) await repository(id);
+  for (const id of change.attachedRepositories ?? []) {
+    await repository(id);
+    await repositoryWiki(id, false);
+  }
+  for (const id of change.detachedRepositories ?? []) {
+    await repository(id);
+    await repositoryWiki(id, true);
   }
   return [...jobs.values()];
 }
