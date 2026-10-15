@@ -271,12 +271,28 @@ class FcmPushService {
       select: {
         id: true,
         deviceId: true,
+        status: true,
+        refreshTokenExpiry: true,
       },
     });
 
     if (!sessionEntry) {
       logger.warn('[FCM] registerToken step=session_not_found', {
         userId,
+        fcmTokenPreview,
+        voipTokenPreview,
+      });
+      return;
+    }
+
+    // hasActiveTokens never pushes to a dead row, and writing here would also clear this token from the user's live sessions.
+    const isSessionLive =
+      sessionEntry.status === SessionStatus.ACTIVE && sessionEntry.refreshTokenExpiry > new Date();
+    if (!isSessionLive) {
+      logger.warn('[FCM] registerToken step=session_not_live', {
+        userId,
+        sessionStatus: sessionEntry.status,
+        refreshTokenExpiry: sessionEntry.refreshTokenExpiry.toISOString(),
         fcmTokenPreview,
         voipTokenPreview,
       });

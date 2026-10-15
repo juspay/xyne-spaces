@@ -227,14 +227,17 @@ class AuthV2Middleware {
       });
 
       // Generate new token - role is fetched fresh from DB, not stored in JWT
-      const customToken = jwtService.generateToken({
-        sub: session.user.id,
-        email: session.user.email,
-        name: session.user.name,
-        picture: session.user.picture,
-        workspaceId: session.user.workspaceId,
-        memberId: session.user.orgMemberId,
-      });
+      const customToken = jwtService.generateToken(
+        {
+          sub: session.user.id,
+          email: session.user.email,
+          name: session.user.name,
+          picture: session.user.picture,
+          workspaceId: session.user.workspaceId,
+          memberId: session.user.orgMemberId,
+        },
+        session.refreshTokenExpiry
+      );
 
       const tokenPreview = `${customToken.slice(0, 8)}...${customToken.slice(-6)}`;
 
