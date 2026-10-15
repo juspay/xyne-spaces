@@ -1,14 +1,24 @@
 import { vespaQueue } from '@/queues/vespaQueue';
 import { mailSchema, ticketSchema } from '@/vespa/src/types';
 import { db } from '@/database/client';
+import { queueRecordingTranscriptRefresh } from '@/services/callVespaQueue';
 import { logger } from '@/utils/logger';
 import { DESK_EMAIL_SOURCE_TYPE } from './deskEmail';
+
+// Recording labels are Tag rows with this sourceType (see callLabelService).
+const CALL_SOURCE_TYPE = 'CALL';
 
 /**
  * Re-feed an email + its ticket to Vespa so `generatedTags` reflects the Tag table.
  * Fire-and-forget: callers use `void enqueueTagVespaRefeed(...)`.
  */
 export async function enqueueTagVespaRefeed(sourceType: string, sourceId: string): Promise<void> {
+  // A recording's transcript doc carries its confirmed label slugs, so confirming, renaming
+  // or deleting one of its Tags refreshes them. sourceId is the Call id (the doc id).
+  if (sourceType === CALL_SOURCE_TYPE) {
+    await queueRecordingTranscriptRefresh({ id: sourceId }, ['labels']);
+    return;
+  }
   if (sourceType !== DESK_EMAIL_SOURCE_TYPE) return;
 
   try {

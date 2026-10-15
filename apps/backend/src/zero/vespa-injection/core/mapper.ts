@@ -5,9 +5,14 @@ import { appSchema, callSchema, channelSchema, InsertDocument, mailSchema, messa
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import type { InsertValue } from '@rocicorp/zero';
 import {
+  CallType,
+  CallVisibility,
   CanvasVisibility,
   ChannelScopeType,
   ChannelVisibility,
+  EntityUserAccess,
+  ShareableEntityType,
+  TagMethod,
   TicketStatus,
   TicketStatusV2,
   type Schema,
@@ -919,6 +924,56 @@ export const computeCanvasPermissions = async (canvasId: string): Promise<string
   ].filter((id): id is string => Boolean(id))));
 };
 
+/**
+ * Everyone a recording's live NOTE_TAKER shares reach: direct users plus the members of
+ * every group/channel it is shared to. Mirrors CallShareService.listActiveGrants, so
+ * Vespa's view of who may find a recording matches who may open it.
+ */
+export const computeRecordingPermissions = async (callId: string): Promise<string[]> => {
+  const shares = await db.entityAccess.findMany({
+    where: {
+      shareableEntityType: ShareableEntityType.NOTE_TAKER,
+      entityId: callId,
+      entityUserAccess: { not: EntityUserAccess.REVOKED },
+    },
+    select: { userId: true, userGroupId: true, channelId: true },
+  });
+
+  const directUserIds = shares.map(s => s.userId).filter((id): id is string => Boolean(id));
+  const channelIds = shares.map(s => s.channelId).filter((id): id is string => Boolean(id));
+  const groupIds = shares.map(s => s.userGroupId).filter((id): id is string => Boolean(id));
+
+  const [channelMembers, groupMembers] = await Promise.all([
+    channelIds.length
+      ? db.channelParticipant.findMany({ where: { channelId: { in: channelIds } }, select: { userId: true } })
+      : Promise.resolve([] as { userId: string }[]),
+    groupIds.length
+      ? db.userGroupMapping.findMany({ where: { userGroupId: { in: groupIds } }, select: { userId: true } })
+      : Promise.resolve([] as { userId: string }[]),
+  ]);
+
+  return Array.from(new Set([
+    ...directUserIds,
+    ...channelMembers.map(m => m.userId),
+    ...groupMembers.map(m => m.userId),
+  ].filter((id): id is string => Boolean(id))));
+};
+
+/**
+ * A recording's confirmed labels as slugs. `Call.labels` holds Tag ids, and every recording
+ * has its own Tag rows, so search filters on the slug. AI suggestions (LLM/AUTOMATED) only
+ * count once confirmed, matching the label chips the recordings list shows.
+ */
+export const computeRecordingLabels = async (callId: string): Promise<string[]> => {
+  const call = await db.call.findUnique({ where: { id: callId }, select: { labels: true } });
+  if (!call?.labels.length) return [];
+  const tags = await db.tag.findMany({
+    where: { id: { in: call.labels }, method: TagMethod.MANUAL, isDeleted: false },
+    select: { tag: true },
+  });
+  return Array.from(new Set(tags.map(t => t.tag)));
+};
+
 export const mapCanvas = async (args: InsertValue<CanvasesSchema>, workspaceId?: string, orgId?: string): Promise<VespaFileDocument> => {
   // Get channel info if channelId exists
   let channelRef: string | undefined;
@@ -997,7 +1052,9 @@ export const mapCanvas = async (args: InsertValue<CanvasesSchema>, workspaceId?:
   };
 };
 
-export const mapTranscript = async (args: InsertValue<TranscriptsSchema>, workspaceId?: string, orgId?: string): Promise<VespaFileDocument> => {
+// `metadataOnly` skips the transcript download + chunking (chunks stay empty), like mapFile's:
+// for field-scoped updates that never send the content.
+export const mapTranscript = async (args: InsertValue<TranscriptsSchema>, workspaceId?: string, orgId?: string, metadataOnly?: boolean): Promise<VespaFileDocument> => {
   // Get conversation and channel info from call data
   let channelRef: string | undefined;
   let conversationId: string | undefined;
@@ -1029,7 +1086,7 @@ export const mapTranscript = async (args: InsertValue<TranscriptsSchema>, worksp
   let chunks: string[] = [];
   let fileSize = 0;
   try {
-    if (args.transcript) {
+    if (args.transcript && !metadataOnly) {
       // Extract GCS path from URL (gs://bucket/path or just path)
       let gcsPath = args.transcript;
       if (gcsPath.startsWith('gs://')) {
@@ -1055,12 +1112,13 @@ export const mapTranscript = async (args: InsertValue<TranscriptsSchema>, worksp
     // Continue with empty chunks - don't fail the entire operation
   }
 
-  // Get call participants for permissions using call ID
-  let permissions: string[] = [];
-  const callParticipants = await db.callParticipant.findMany({
-    where: { callId: args.id, isExternal: false }
-  });
-  permissions = callParticipants.map(p => p.userId);
+  // A recording is opened through its shares, never by having been in it, so its ACL is
+  // the share recipients; a regular call's transcript stays with its participants.
+  const isRecordingCall = args.callType === CallType.HEADLESS;
+  const permissions = isRecordingCall
+    ? await computeRecordingPermissions(args.id)
+    : (await db.callParticipant.findMany({ where: { callId: args.id, isExternal: false } })).map(p => p.userId);
+  const labels = isRecordingCall ? await computeRecordingLabels(args.id) : [];
 
   return {
     docId: args.id,
@@ -1084,10 +1142,12 @@ export const mapTranscript = async (args: InsertValue<TranscriptsSchema>, worksp
     updatedAt: toTimestamp(args.updatedAt),
     ownerId: args.createdByUserId,
     permissions: permissions,
+    labels,
     urlInternal: args.transcript || '',
     urlOriginal: args.transcript || '',
     fileSize: fileSize,
-    isPrivate: true,
+    // A public recording link opens it to the whole workspace.
+    isPrivate: !(isRecordingCall && args.visibility === CallVisibility.PUBLIC),
     mimeType: 'text/plain',
     subApp: SubApp.TRANSCRIPT,
     channelRef,
@@ -1542,8 +1602,8 @@ export const mapBySchema = async (
   app?: SubApp,
   workspaceId?: string,
   orgId?: string,
-  // Forwarded to mapFile for chat/ticket attachments: insert metadata only,
-  // skipping content extraction (used by the name-only feed).
+  // Forwarded to mapFile (chat/ticket attachments) and mapTranscript: map metadata only,
+  // skipping content extraction (the name-only feed, field-scoped transcript updates).
   metadataOnly?: boolean,
 ): Promise<InsertDocument | Partial<InsertDocument>> => {
   const docType = schemaToDocType[schemaName];
@@ -1571,7 +1631,7 @@ export const mapBySchema = async (
           case SubApp.CANVAS:
             return mapCanvas(args as InsertValue<CanvasesSchema>, workspaceId, orgId);
           case SubApp.TRANSCRIPT:
-            return mapTranscript(args as InsertValue<TranscriptsSchema>, workspaceId, orgId);
+            return mapTranscript(args as InsertValue<TranscriptsSchema>, workspaceId, orgId, metadataOnly);
           case SubApp.RCA:
             return mapRCA(args as RCAWithRelations, workspaceId, orgId);
           case SubApp.COLLECTIONS:

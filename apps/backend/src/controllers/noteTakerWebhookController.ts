@@ -7,6 +7,7 @@ import { repositories } from '@/database/repositories';
 import { noteTakerCallRepository } from '@/database/repositories/noteTakerCallRepository';
 import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
 import { callRecordingService } from '@/services/callRecordingService';
+import { queueRecordingTranscriptFeed } from '@/services/callVespaQueue';
 import { livekitService } from '@/services/liveKitService';
 import { emitCallStarted, emitCallEnded } from '@/automations/triggers/call.trigger';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
@@ -294,6 +295,7 @@ class NoteTakerWebhookController {
       // no need to wait for the post-call AI summary pipeline. Best-effort
       // — a failure here must not block ending the call.
       await noteTakerTranscriptService.shareThreadRecordingIfLinked(result.call);
+      this.indexEndedRecording(result.call);
 
       await this.emitCallEndedAutomation(result.call, now);
     }
@@ -335,6 +337,7 @@ class NoteTakerWebhookController {
       logger.info(`[NoteTaker Webhook] Marked call ${roomName} as ENDED (room_finished)`);
 
       await noteTakerTranscriptService.shareThreadRecordingIfLinked(result.call);
+      this.indexEndedRecording(result.call);
       await this.emitCallEndedAutomation(result.call, now);
     }
 
@@ -345,6 +348,15 @@ class NoteTakerWebhookController {
         logger.error(`[NoteTaker Webhook] Deferred reconcile failed for ${roomName}:`, err);
       });
     }, RECONCILE_GRACE_MS);
+  }
+
+  /**
+   * Make the recording searchable now that it has ended — its transcript may be minutes
+   * away or never arrive. Both end paths call this; the feed is idempotent.
+   */
+  private indexEndedRecording(call: { id: string; callType: string; createdByUserId: string; workspaceId: string | null }): void {
+    if (call.callType !== CallType.HEADLESS) return;
+    void queueRecordingTranscriptFeed(call);
   }
 
   private async emitCallEndedAutomation(

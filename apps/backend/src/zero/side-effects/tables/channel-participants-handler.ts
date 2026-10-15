@@ -5,6 +5,7 @@ import { notificationService } from '@/services/notificationService';
 import { logger } from '@/utils/logger';
 import { ChannelScopeType } from '@xyne/shared';
 import { refreshCanvasPermissionsForChannel } from '@/services/canvasPermissionSync';
+import { refreshRecordingTranscriptPermissionsForChannel } from '@/services/recordingTranscriptPermissionSync';
 
 export class ChannelParticipantsSideEffectHandler extends BaseSideEffectHandler {
 
@@ -22,6 +23,9 @@ export class ChannelParticipantsSideEffectHandler extends BaseSideEffectHandler 
     }
     await refreshCanvasPermissionsForChannel(previousValue.channelId).catch(err =>
       logger.error(`[ChannelParticipantsHandler] canvas ACL refresh failed for channel ${previousValue.channelId}: ${err}`),
+    );
+    await refreshRecordingTranscriptPermissionsForChannel(previousValue.channelId).catch(err =>
+      logger.error(`[ChannelParticipantsHandler] recording ACL refresh failed for channel ${previousValue.channelId}: ${err}`),
     );
   }
 
@@ -48,6 +52,8 @@ export class ChannelParticipantsSideEffectHandler extends BaseSideEffectHandler 
       // Member joined → refresh canvases shared to this channel (regardless of notification).
       await refreshCanvasPermissionsForChannel(channelId).catch(err =>
         logger.error(`[ChannelParticipantsHandler] canvas ACL refresh failed for channel ${channelId}: ${err}`));
+      await refreshRecordingTranscriptPermissionsForChannel(channelId).catch(err =>
+        logger.error(`[ChannelParticipantsHandler] recording ACL refresh failed for channel ${channelId}: ${err}`));
 
 
       if (this.ctx.userID === userId) {

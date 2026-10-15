@@ -215,6 +215,7 @@ export interface TicketFilters {
 export interface FileFilters {
   subApp?: string[];
   callType?: string[];
+  labels?: string[]; // Recording label slugs (OR-ed), from the shared `tags` filter
   docType?: string[];
   createdBy?: string[];
   createdBefore?: string;
@@ -780,14 +781,17 @@ export class YqlBuilder {
       );
     }
 
-    // Chat/Ticket/Transcript attachments: require owner/channelPermissions/isPrivate check
-    if (
-      subApps.some(
-        (s) => s === 'CHAT_ATTACHMENT' || s === 'TICKET_ATTACHMENT' || s === 'TRANSCRIPT'
-      )
-    ) {
+    // Chat/Ticket attachments: require owner/channelPermissions/isPrivate check
+    if (subApps.some((s) => s === 'CHAT_ATTACHMENT' || s === 'TICKET_ATTACHMENT')) {
       subAppConditions.push(
-        `((subApp contains "CHAT_ATTACHMENT" or subApp contains "TICKET_ATTACHMENT" or subApp contains "TRANSCRIPT") and (ownerId contains ${accessUser} or channelPermissions contains ${accessUser} or isPrivate contains "false"))`
+        `((subApp contains "CHAT_ATTACHMENT" or subApp contains "TICKET_ATTACHMENT") and (ownerId contains ${accessUser} or channelPermissions contains ${accessUser} or isPrivate contains "false"))`
+      );
+    }
+
+    // Transcripts: same check, plus a recording's share recipients (its `permissions`)
+    if (subApps.some((s) => s === 'TRANSCRIPT')) {
+      subAppConditions.push(
+        `((subApp contains "TRANSCRIPT") and (ownerId contains ${accessUser} or channelPermissions contains ${accessUser} or isPrivate contains "false" or (callType contains "HEADLESS" and permissions contains ${accessUser})))`
       );
     }
 
@@ -832,6 +836,14 @@ export class YqlBuilder {
         .map((callType) => `callType contains ${params.bind('callType', callType.trim())}`)
         .join(' or ');
       conditions.push(`(${types})`);
+    }
+
+    // labels filter (recording transcripts' confirmed label slugs) — OR-ed like ticket tags
+    if (filters.labels && filters.labels.length > 0) {
+      const labels = filters.labels
+        .map((label) => `labels contains ${params.bind('labels', label.trim())}`)
+        .join(' or ');
+      conditions.push(`(${labels})`);
     }
 
     // createdBy filter (for from: functionality - files uploaded by specific user)

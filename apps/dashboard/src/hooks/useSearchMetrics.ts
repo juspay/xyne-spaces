@@ -1798,6 +1798,11 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         } else if (activeTab === TabType.DESK) {
           searchFilters.type = SearchableTypes.EMAILS;
           searchFilters.apps = VespaApps.MAIL;
+        } else if (activeTab === TabType.RECORDING) {
+          searchFilters.type = VespaDocTypes.FILES;
+          searchFilters.apps = VespaApps.FILE;
+          searchFilters.subApp = 'transcript';
+          searchFilters.callType = 'HEADLESS';
         }
 
         // Add assignee filter for Tickets/ALL (force ticket-only search)

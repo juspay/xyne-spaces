@@ -3,6 +3,7 @@ import type { SideEffectJobConfig, UserGroupMappingPreviousValue } from '../type
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { refreshCanvasPermissionsForGroup } from '@/services/canvasPermissionSync';
+import { refreshRecordingTranscriptPermissionsForGroup } from '@/services/recordingTranscriptPermissionSync';
 
 /**
  * Side-effect handler for user_group_mappings (group membership).
@@ -18,6 +19,9 @@ export class UserGroupMappingsSideEffectHandler extends BaseSideEffectHandler {
     if (!userGroupId) return;
     await refreshCanvasPermissionsForGroup(userGroupId).catch(err =>
       logger.error(`[UserGroupMappingsHandler] canvas ACL refresh failed for group ${userGroupId}: ${err}`),
+    );
+    await refreshRecordingTranscriptPermissionsForGroup(userGroupId).catch(err =>
+      logger.error(`[UserGroupMappingsHandler] recording ACL refresh failed for group ${userGroupId}: ${err}`),
     );
   }
 

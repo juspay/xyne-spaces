@@ -51,7 +51,7 @@ import {
   ORIGINAL_TRANSCRIPT_LANGUAGE,
 } from '@xyne/shared';
 import { storageService } from '@/services/storage';
-import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
+import { CallVespaFeedSource, queueCallVespaFeed, queueRecordingTranscriptDelete, queueTranscriptFieldsUpdate } from '@/services/callVespaQueue';
 import { callShareService } from '@/services/callShareService';
 import { callNotesCanvasService } from '@/services/callNotesCanvasService';
 import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
@@ -1723,8 +1723,14 @@ export class CallController {
           : {}),
       });
 
+      void queueTranscriptFieldsUpdate(call, [
+        ...(input.title ? (['fileName'] as const) : []),
+        ...(resolvedLabels ? (['labels'] as const) : []),
+      ]);
+
       // For headless recordings, update the system message content
       if (input.title) {
+
         try {
           // Find the message associated with this call using repository method
           const callMessage = await repositories.messages.findHeadMessageByCallId(callId);
@@ -3371,6 +3377,8 @@ export class CallController {
 
     // Delete the call record
     await repositories.calls.delete(call.id);
+    // That drops the call doc; the recording's transcript doc goes separately.
+    void queueRecordingTranscriptDelete(call);
   };
 
 
