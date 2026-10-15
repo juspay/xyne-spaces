@@ -89,11 +89,6 @@ export interface SdlcReleaseBreadcrumbProps {
   onOpenRelease: () => void;
 }
 
-export interface SdlcReleaseThreadProps {
-  releaseId: string;
-  onClose: () => void;
-}
-
 export interface ReleaseTicketQa {
   artIds: string[];
   testedBy: string | null;

@@ -1,5 +1,5 @@
 import { logger, Event as LogEvent } from '../../../utils/logger';
-import React, { useMemo, useState, useRef, useEffect, useCallback } from 'react';
+import React, { useMemo, useState, useRef, useEffect, useCallback, useContext } from 'react';
 import { useZero } from '../../../hooks/useZero';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
@@ -166,6 +166,7 @@ import {
   type LeftoverFieldValue,
 } from '../../../utils/board/boardFormEntityValues';
 import { resolveDisplayFormFields } from '../../../utils/board/resolveDisplayFormFields';
+import { ThreadNavigationContext } from '../../Chat/ThreadNavigationContext';
 
 type SubTicketTreeMapping = QueryResultType<typeof queries.subTicketMappingsForTickets>[number];
 type SubTicketTreeSubTicket = NonNullable<SubTicketTreeMapping['subTicket']>;
@@ -596,6 +597,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
 }) => {
   const zero = useZero();
   const navigate = useNavigate();
+  const { openRelatedTicket } = useContext(ThreadNavigationContext);
+  const navigateToTicket = onNavigateToTicket ?? openRelatedTicket;
   const shareableOrigin = useShareableOrigin();
   const location = useLocation();
   const navigationType = useNavigationType();
@@ -3419,10 +3422,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         </span>
 
         {link ? (
-          onNavigateToTicket ? (
+          navigateToTicket ? (
             <button
               type='button'
-              onClick={() => onNavigateToTicket(relatedTicket!.id!)}
+              onClick={() => navigateToTicket(relatedTicket!.id!)}
               className='min-w-0 flex-1 truncate text-left text-[13.5px] font-semibold text-foreground hover:underline'
               data-track-category='Tickets'
               data-track-name='NavigateToRelatedTicket'
@@ -3518,8 +3521,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       }
     }
 
-    if (onNavigateToTicket) {
-      onNavigateToTicket(mappedTicketId);
+    if (navigateToTicket) {
+      navigateToTicket(mappedTicketId);
     } else {
       setMappedTicketId(mappedTicketId);
     }
@@ -3552,6 +3555,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
 
     const handleRowClick = (): void => {
       if (mappedTicketId) {
+        if (openRelatedTicket) {
+          openRelatedTicket(mappedTicketId);
+          return;
+        }
         if (mappedTicket) {
           const channelType = channelTypeMap.get(mappedTicket.channelId);
           if (isDeskChannelType(channelType) && mappedTicket.xyneId) {
@@ -3732,6 +3739,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     const assigneeId = parentTicket.assignedTo?.replace(/^(user:|group:)/, '') || '';
 
     const navigateToParentTicket = (): void => {
+      if (openRelatedTicket) {
+        openRelatedTicket(parentTicket.id);
+        return;
+      }
       const channelType = channelTypeMap.get(parentTicket.channelId);
       if (isDeskChannelType(channelType) && parentTicket.xyneId) {
         const pathParts = location.pathname.split('/');
@@ -3753,8 +3764,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     };
 
     const openParentTicket = (): void => {
-      if (onNavigateToTicket) {
-        onNavigateToTicket(parentTicket.id);
+      if (navigateToTicket) {
+        navigateToTicket(parentTicket.id);
       } else {
         setMappedTicketId(parentTicket.id);
       }
