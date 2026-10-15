@@ -84,7 +84,9 @@ export class BackgroundEffectTransformer {
       depth: false,
       stencil: false,
       premultipliedAlpha: false,
-      preserveDrawingBuffer: true,
+      // preserveDrawingBuffer left at its default (false): the output VideoFrame is captured
+      // in the same task as render(), before the buffer is presented and cleared, so the
+      // per-frame buffer copy it would force isn't needed.
     });
     if (!gl) throw new Error('WebGL2 is not available');
     // ProcessorWrapper.restart (e.g. camera off/on) hands over a fresh canvas and abandons

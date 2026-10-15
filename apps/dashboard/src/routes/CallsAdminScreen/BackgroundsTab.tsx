@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { useCopyButton } from '@/hooks/useCopyButton';
 import { callBackgroundImageUrl, callBackgroundsApi } from '@/api/callBackgroundsApi';
+import { getApiErrorMessage } from '@/utils/apiError';
 import { imageFileToPresetJpegs } from '@/utils/callBackground';
 import { CALLS_ADMIN_TRACK } from './CallsAdminScreen.utils';
 
@@ -62,7 +63,7 @@ export function BackgroundsTab(): ReactElement {
       setLabel('');
       toast.success('Background uploaded');
     },
-    onError: () => toast.error('Could not upload background'),
+    onError: error => toast.error(getApiErrorMessage(error, 'Could not upload background')),
   });
 
   const canUpload = !!file && label.trim().length > 0 && !upload.isPending;

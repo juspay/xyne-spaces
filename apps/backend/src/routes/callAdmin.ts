@@ -1,7 +1,8 @@
-import { Router } from 'express';
+import { RequestHandler, Router } from 'express';
 import multer from 'multer';
 import { callAdminController } from '@/controllers/callAdminController';
 import { workspaceScopedRoute } from '@/database/tenant/context';
+import { normalizeMulterError } from '@/middleware/upload';
 import {
   MAX_BACKGROUND_BYTES,
   callBackgroundController,
@@ -27,13 +28,18 @@ router.post('/calls/:callId/regenerate-summary', callAdminController.regenerateS
 router.post('/calls/:callId/owner', callAdminController.changeOwner);
 
 // Call background images (preset list itself is edited in Superposition).
-const backgroundUpload = multer({
+const parseBackgroundUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_BACKGROUND_BYTES, files: 2 },
 }).fields([
   { name: 'image', maxCount: 1 },
   { name: 'thumb', maxCount: 1 },
 ]);
+// Map multer limit errors to 400/413 instead of letting them surface as a 500.
+const backgroundUpload: RequestHandler = (req, res, next) =>
+  parseBackgroundUpload(req, res, (err?: unknown) =>
+    err ? next(normalizeMulterError(err, MAX_BACKGROUND_BYTES)) : next()
+  );
 router.post('/backgrounds', backgroundUpload, callBackgroundController.upload);
 
 export default router;

@@ -857,7 +857,7 @@ const formatFileSize = (bytes: number): string => {
   return `${bytes}B`;
 };
 
-const normalizeMulterError = (err: any, maxFileSizeBytes: number): Error => {
+export const normalizeMulterError = (err: any, maxFileSizeBytes: number): Error => {
   if (err instanceof multer.MulterError) {
     if (err.code === 'LIMIT_FILE_SIZE') {
       return new AppError(`File too large (max ${formatFileSize(maxFileSizeBytes)})`, 413);

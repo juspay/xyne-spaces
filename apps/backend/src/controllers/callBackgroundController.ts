@@ -5,6 +5,7 @@ import { superpositionClient } from '@/services/superpositionClient';
 import { storageService } from '@/services/storage';
 import { callAdminAccessService } from '@/services/callAdminAccessService';
 import { setSafeInlineImageHeaders } from '@/utils/safeAttachmentDownload';
+import { jpegDimensions } from '@/utils/jpegDimensions';
 import { logger } from '@/utils/logger';
 
 /**
@@ -28,8 +29,24 @@ const backgroundEntrySchema = z.object({
   label: z.string().trim().min(1).max(40),
 });
 
+/** Pixel bounds the client resizes to; anything larger was not produced by the admin tab. */
+const MAX_IMAGE_SIZE = { width: 1280, height: 720 };
+const MAX_THUMB_SIZE = { width: 320, height: 180 };
+
 const isJpeg = (buffer: Buffer): boolean =>
   buffer.length > 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+
+/** A small file can still declare huge dimensions, which every client would decode into a texture. */
+const fitsWithin = (buffer: Buffer, max: { width: number; height: number }): boolean => {
+  const size = jpegDimensions(buffer);
+  return (
+    !!size &&
+    size.width > 0 &&
+    size.height > 0 &&
+    size.width <= max.width &&
+    size.height <= max.height
+  );
+};
 
 export const callBackgroundController = {
   /**
@@ -64,7 +81,7 @@ export const callBackgroundController = {
   /**
    * GET /api/calls/backgrounds/:id/image[?variant=thumb]
    * Streams a background from storage. Content never changes for an id, so it is
-   * cached as immutable. Cross-origin readable because the camera pipeline uploads it
+   * cached as immutable — privately, since the response is cookie-authenticated. Cross-origin readable because the camera pipeline uploads it
    * into WebGL (the global CORS middleware supplies the allow-origin headers).
    */
   image: async (req: Request, res: Response): Promise<void> => {
@@ -77,7 +94,7 @@ export const callBackgroundController = {
     try {
       const stream = await storageService.createReadStream(path);
       setSafeInlineImageHeaders(res, 'image/jpeg');
-      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
       res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
       stream.on('error', (error) => {
         logger.warn(`[CallBackgrounds] Failed to stream ${path}:`, error);
@@ -117,6 +134,12 @@ export const callBackgroundController = {
       !isJpeg(thumb.buffer)
     ) {
       res.status(400).json({ error: 'Expected a JPEG image and thumbnail' });
+      return;
+    }
+    if (!fitsWithin(image.buffer, MAX_IMAGE_SIZE) || !fitsWithin(thumb.buffer, MAX_THUMB_SIZE)) {
+      res.status(400).json({
+        error: `Image must be at most ${MAX_IMAGE_SIZE.width}×${MAX_IMAGE_SIZE.height} and thumbnail at most ${MAX_THUMB_SIZE.width}×${MAX_THUMB_SIZE.height}`,
+      });
       return;
     }
 

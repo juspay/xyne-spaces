@@ -19,7 +19,11 @@ import {
   LocalVideoTrack,
   VideoPresets,
 } from 'livekit-client';
-import { BackgroundEffectProcessor, supportsBackgroundEffects } from '../utils/backgroundEffects';
+import {
+  BackgroundEffectProcessor,
+  backgroundEffectsRenderer,
+  supportsBackgroundEffects,
+} from '../utils/backgroundEffects';
 import type { Zero } from '@rocicorp/zero';
 import { DEFAULT_HOST_CONTROLS, type Call, type HostControls } from '@xyne/shared';
 import {
@@ -193,6 +197,7 @@ function syncBackgroundEffect(
       logger.error(Event.LIVEKIT_ROOM_EVENT, {
         eventName: 'background_effect_failed',
         effect: target.mode,
+        renderer: backgroundEffectsRenderer(),
         error: error instanceof Error ? error.message : String(error),
       });
       // Only a failed "on" leaves a lying state to correct.

@@ -42,13 +42,50 @@ function supportsWasmSimd(): boolean {
   }
 }
 
+interface BackgroundEffectsSupport {
+  supported: boolean;
+  /** GPU renderer string, e.g. to tell hardware from SwiftShader in failure logs. */
+  renderer?: string | undefined;
+}
+
+let cachedSupport: BackgroundEffectsSupport | undefined;
+
+/**
+ * Probed once: each probe creates a WebGL context and compiles a Wasm module, and this is
+ * read on every picker render. The probe context is released straight away so it never
+ * counts against Chrome's live-context cap (which would evict the active effect's context).
+ */
+function probeBackgroundEffects(): BackgroundEffectsSupport {
+  if (cachedSupport) return cachedSupport;
+  if (typeof document === 'undefined' || typeof VideoFrame === 'undefined') {
+    return (cachedSupport = { supported: false });
+  }
+  if (!ProcessorWrapper.isSupported || !supportsWasmSimd()) {
+    return (cachedSupport = { supported: false });
+  }
+  try {
+    const gl = document.createElement('canvas').getContext('webgl2');
+    if (!gl) return (cachedSupport = { supported: false });
+    const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+    const renderer: unknown = gl.getParameter(
+      debugInfo ? debugInfo.UNMASKED_RENDERER_WEBGL : gl.RENDERER,
+    );
+    gl.getExtension('WEBGL_lose_context')?.loseContext();
+    return (cachedSupport = {
+      supported: true,
+      renderer: typeof renderer === 'string' ? renderer : undefined,
+    });
+  } catch {
+    return (cachedSupport = { supported: false });
+  }
+}
+
 /** Whether this browser can run background effects (WebGL2, Wasm SIMD, a frame-processing path). */
 export function supportsBackgroundEffects(): boolean {
-  if (typeof document === 'undefined' || typeof VideoFrame === 'undefined') return false;
-  if (!ProcessorWrapper.isSupported || !supportsWasmSimd()) return false;
-  try {
-    return !!document.createElement('canvas').getContext('webgl2');
-  } catch {
-    return false;
-  }
+  return probeBackgroundEffects().supported;
+}
+
+/** The WebGL renderer the effect runs on, when known. */
+export function backgroundEffectsRenderer(): string | undefined {
+  return probeBackgroundEffects().renderer;
 }

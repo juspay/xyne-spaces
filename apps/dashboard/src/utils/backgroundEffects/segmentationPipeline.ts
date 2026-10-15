@@ -43,7 +43,7 @@ export const BLUR_SIGMA = { light: 3, strong: 7 } as const;
 const BLUR_DOWNSCALE = 4;
 
 type Background =
-  | { kind: 'blur'; sigma: number }
+  | { kind: 'blur'; sigma: number; kernel: GaussianKernel }
   | { kind: 'image'; texture: WebGLTexture; width: number; height: number };
 
 interface Target {
@@ -71,7 +71,13 @@ function compile(gl: WebGL2RenderingContext, type: number, source: string): WebG
   return shader;
 }
 
-function gaussianWeights(sigma: number): { weights: Float32Array; taps: number } {
+interface GaussianKernel {
+  weights: Float32Array;
+  taps: number;
+}
+
+/** Built when the blur strength changes, not per frame. */
+function gaussianWeights(sigma: number): GaussianKernel {
   const taps = Math.min(GAUSSIAN_MAX_TAPS, Math.ceil(sigma * 3) + 1);
   const weights = new Float32Array(GAUSSIAN_MAX_TAPS);
   let total = 0;
@@ -118,7 +124,11 @@ export class SegmentationPipeline {
   private current: 0 | 1 = 0;
   private hasHistory = false;
 
-  private background: Background = { kind: 'blur', sigma: BLUR_SIGMA.light };
+  private background: Background = {
+    kind: 'blur',
+    sigma: BLUR_SIGMA.light,
+    kernel: gaussianWeights(BLUR_SIGMA.light),
+  };
   private readonly tuning: PipelineTuning = DEFAULT_TUNING;
 
   constructor(gl: WebGL2RenderingContext) {
@@ -149,7 +159,11 @@ export class SegmentationPipeline {
 
   setBlur(sigma: number): void {
     this.releaseBackgroundImage();
-    this.background = { kind: 'blur', sigma };
+    const kernel =
+      this.background.kind === 'blur' && this.background.sigma === sigma
+        ? this.background.kernel
+        : gaussianWeights(sigma);
+    this.background = { kind: 'blur', sigma, kernel };
   }
 
   setBackgroundImage(image: ImageBitmap): void {
@@ -245,7 +259,7 @@ export class SegmentationPipeline {
     let bgOffset: [number, number] = [0, 0];
     if (this.background.kind === 'blur') {
       const blur = this.blur!;
-      const { weights, taps } = gaussianWeights(this.background.sigma);
+      const { weights, taps } = this.background.kernel;
       const gaussianUniforms = (stepX: number, stepY: number) => (program: Program) => {
         this.uniform2f(program, 'u_step', stepX, stepY);
         gl.uniform1fv(program.uniforms.get('u_weights[0]') ?? null, weights);
