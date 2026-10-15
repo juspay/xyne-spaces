@@ -1,6 +1,7 @@
 import type { Prisma, SummaryTemplate } from '@prisma/client';
 import { SUMMARY_TEMPLATE_SELECTION_MAX_TRANSCRIPT_CHARS } from '@xyne/shared';
 import { getEnabledSummaryTemplateSections } from './summaryTemplateSections';
+import { askJev, isPrivateJevConfigured } from './queryIntent/jevClient';
 
 const MAX_STRUCTURE_CHARS = 2_000;
 const MAX_SYSTEM_PROMPT_CHARS = 1_000;
@@ -129,6 +130,50 @@ function toSelectionCandidates(templates: SummaryTemplateCandidate[]): Array<{
     ),
     generationInstructions: truncate(template.systemPrompt, MAX_SYSTEM_PROMPT_CHARS),
   }));
+}
+
+const XOR_TIMEOUT_MS = 10_000;
+const XOR_MAX_OPTIONS = 255;
+const MAX_XOR_CRITERIA_CHARS = 500;
+
+/**
+ * XOR picks one template id, or null when it can't answer (the caller then asks the LLM).
+ * Same title-first rule as the LLM prompt. Needs a private XOR endpoint.
+ */
+export async function pickSummaryTemplateWithXor(
+  transcript: string,
+  templates: SummaryTemplateCandidate[],
+  meetingTitle?: string | null
+): Promise<string | null> {
+  if (!isPrivateJevConfigured() || templates.length < 2 || templates.length > XOR_MAX_OPTIONS) {
+    return null;
+  }
+
+  const title = meetingTitle?.trim();
+  const answers = await askJev(
+    {
+      ...(title ? { meeting_title: truncate(title, MAX_MEETING_TITLE_CHARS) } : {}),
+      transcript: truncate(transcript, SUMMARY_TEMPLATE_SELECTION_MAX_TRANSCRIPT_CHARS),
+    },
+    {
+      template: {
+        type: 'choice',
+        instructions: title
+          ? 'Which summary template fits this meeting best? When `meeting_title` clearly matches a template, pick it; otherwise decide from `transcript`.'
+          : 'Which summary template fits the meeting in `transcript` best?',
+        criteria: Object.fromEntries(
+          templates.map((template) => {
+            const criteria =
+              template.autoTriggerPrompt?.trim() || formatSummaryTemplateSections(template.sections);
+            return [template.id, truncate(`${template.name}: ${criteria}`, MAX_XOR_CRITERIA_CHARS)];
+          })
+        ),
+      },
+    },
+    XOR_TIMEOUT_MS
+  );
+  const answer = answers?.template;
+  return answer?.type === 'choice' ? answer.choice : null;
 }
 
 export function parseSelectedSummaryTemplate(
