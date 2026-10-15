@@ -10,7 +10,6 @@ import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { afterCommit } from '@/bypassAcl/base';
 import {
   channelSchema,
   fileSchema,
@@ -84,32 +83,50 @@ const PLACING_RELATIONS = new Set<string>([
   SDLC_TRACK_MEMBERSHIP_RELATION,
 ]);
 
-// Canvases created by the transaction running in this scope (withNewSdlcCanvases).
-const newCanvases = new AsyncLocalStorage<Set<string>>();
+/** The SDLC changes a write made, held until its transaction commits (withSdlcSearchSync). */
+interface SdlcWriteScope {
+  changes: Array<{ hubId: string; change: SdlcSearchChange }>;
+  newCanvases: Set<string>;
+  done: boolean;
+}
+const writeScope = new AsyncLocalStorage<SdlcWriteScope>();
 
 /**
- * Runs `fn`, a transaction that creates canvases, in a scope where markNewSdlcCanvas records them.
- * A new canvas gets no SDLC file update from its own transaction's triggers: its content reaches
- * Y-Sweet only after the commit, so an update mapped at once would fail, and the feed its creator
- * queues after that already carries its SDLC fields (the mapper adds them).
+ * Runs `fn`, a transaction that writes SDLC rows, and queues the Vespa jobs of its changes once
+ * it resolves: after the commit, so a worker that picks a job at once maps the committed rows.
+ * If `fn` throws (the transaction rolled back), nothing is queued. Inside another scope, `fn`
+ * joins it and the outer one queues.
  */
-export function withNewSdlcCanvases<T>(fn: () => Promise<T>): Promise<T> {
-  return newCanvases.run(new Set(), fn);
+export async function withSdlcSearchSync<T>(fn: () => Promise<T>): Promise<T> {
+  const outer = writeScope.getStore();
+  if (outer && !outer.done) return fn();
+  const scope: SdlcWriteScope = { changes: [], newCanvases: new Set(), done: false };
+  const result = await writeScope.run(scope, fn);
+  // Work the transaction left running that reports a change later queues it at once.
+  scope.done = true;
+  for (const { hubId, change } of scope.changes) void queueNow(hubId, change, scope.newCanvases);
+  return result;
 }
 
-/** Records a canvas the running withNewSdlcCanvases transaction just created. */
+/**
+ * Records a canvas the running withSdlcSearchSync transaction created. It gets no SDLC file
+ * update from that transaction's changes: its content reaches Y-Sweet only after the commit, so
+ * an update mapped at once would fail, and the feed its creator queues after that already
+ * carries its SDLC fields (the mapper adds them).
+ */
 export function markNewSdlcCanvas(canvasId: string): void {
-  newCanvases.getStore()?.add(canvasId);
+  writeScope.getStore()?.newCanvases.add(canvasId);
 }
 
 /**
  * Queues the Vespa jobs an SDLC write affects. Fire-and-forget: indexing must never fail the
- * write. Called from inside a write's transaction, it waits for the commit (afterCommit), so it
- * reads the committed links and a worker that picks a job at once maps the change itself.
+ * write. Inside withSdlcSearchSync it waits for the commit; elsewhere (Zero side effects, which
+ * run after the commit, and writes made outside a transaction) it queues at once.
  */
 export function queueSdlcSearchJobs(hubId: string, change: SdlcSearchChange): void {
-  const created = new Set(newCanvases.getStore() ?? []);
-  afterCommit(() => void queueNow(hubId, change, created));
+  const scope = writeScope.getStore();
+  if (scope && !scope.done) scope.changes.push({ hubId, change });
+  else void queueNow(hubId, change, new Set());
 }
 
 async function queueNow(hubId: string, change: SdlcSearchChange, created: ReadonlySet<string>): Promise<void> {
