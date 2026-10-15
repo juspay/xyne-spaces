@@ -20,7 +20,7 @@ import { CommitAnalysisController } from '@/controllers/commitAnalysisController
 import { unifiedBotUserService } from '@/bots/unified/index.js';
 import { parseBitbucketRepoUrl, parseGitHubRepoUrl } from '@/utils/repoUrlParser';
 
-// Canonical, lowercased {key, slug} of an Application.repoUrl for the given
+// Canonical, lowercased {key, slug} of a registered repository's URL for the given
 // provider (owner/repo for GitHub, projectKey/repoSlug for Bitbucket) — the
 // stable identity to match against a webhook, since the raw URL forms differ
 // (GitHub clone_url vs Bitbucket web/SSH paths). null if the URL doesn't parse.
@@ -38,7 +38,7 @@ export interface ReleaseMergeSyncParams {
   // The VCS provider of the webhook, matched against Board.vcsProvider.
   provider: VCSProviderType;
   // Repo identity from the webhook payload: owner + name (GitHub) or
-  // projectKey + slug (Bitbucket). Matched against parsed Application.repoUrl.
+  // projectKey + slug (Bitbucket). Resolved to the workspace's registered repository.
   projectKey: string;
   repoSlug: string;
   // PR base branch (the branch that was merged into).
@@ -51,7 +51,9 @@ export interface ReleaseMergeSyncParams {
 }
 
 /**
- * On a PR merge, sync the most-recent active release ticket for this repo+branch.
+ * On a PR merge, sync the most-recent active release ticket for this repo+branch,
+ * once per release config (main release board): two hubs can each release the same
+ * repository from the same branch, and both releases ship the merged work.
  *
  * - If the merge advances the branch past the release's frozen `newCommitId`,
  *   the delta `(newCommitId → mergeCommitSha]` is analyzed as a HOTFIX: its
@@ -67,31 +69,45 @@ export async function syncReleaseOnPRMerge(params: ReleaseMergeSyncParams): Prom
   // workspaces, so the workspace filter prevents cross-workspace syncs).
   const { workspaceId, provider, projectKey, repoSlug, baseBranch, mergeCommitSha, source } = params;
   const repoLabel = `${projectKey}/${repoSlug}`;
+  // The legacy /webhooks/github route carries no workspace; an unscoped sync would
+  // match repositories and releases in every workspace.
+  if (!workspaceId) {
+    logger.warn(
+      `[${source}] Release sync skipped for ${repoLabel}: webhook has no workspace (register it as /webhooks/<provider>/:workspaceId)`,
+    );
+    return;
+  }
 
   try {
-    // 1. COMMIT_RANGE boards on this provider whose configured app repo matches
-    //    the webhook's repo identity.
-    const boards = await db.board.findMany({
-      where: { releaseTrackingMode: ReleaseTrackingMode.COMMIT_RANGE, vcsProvider: provider },
-      select: { id: true },
-    });
-    if (boards.length === 0) return;
-
+    // 1. The webhook's repository among the workspace's registered repositories.
     const want = { key: projectKey.toLowerCase(), slug: repoSlug.toLowerCase() };
-    const apps = await db.application.findMany({
-      where: { mainReleaseBoardId: { in: boards.map((b) => b.id) } },
-      select: { repoUrl: true, mainReleaseBoardId: true },
+    const registeredRepos = await db.repo.findMany({
+      where: { workspaceId },
+      select: { id: true, url: true, canonicalUrl: true },
     });
-    const boardIds = [
-      ...new Set(
-        apps
-          .filter((a) => {
-            const id = a.repoUrl ? repoIdentity(a.repoUrl, provider) : null;
-            return id?.key === want.key && id?.slug === want.slug;
-          })
-          .map((a) => a.mainReleaseBoardId as string),
-      ),
-    ];
+    const repoIds = registeredRepos
+      .filter((r) => {
+        const id = repoIdentity(r.canonicalUrl || r.url, provider);
+        return id?.key === want.key && id?.slug === want.slug;
+      })
+      .map((r) => r.id);
+    if (repoIds.length === 0) {
+      logger.info(`[${source}] Repo ${repoLabel} is not registered in workspace "${workspaceId}"; skipping`);
+      return;
+    }
+
+    // 2. COMMIT_RANGE release configs on this provider that release that repository.
+    const apps = await db.application.findMany({
+      where: {
+        repoId: { in: repoIds },
+        mainReleaseBoard: {
+          releaseTrackingMode: ReleaseTrackingMode.COMMIT_RANGE,
+          vcsProvider: provider,
+        },
+      },
+      select: { mainReleaseBoardId: true },
+    });
+    const boardIds = [...new Set(apps.map((a) => a.mainReleaseBoardId as string))];
     if (boardIds.length === 0) {
       logger.info(`[${source}] No COMMIT_RANGE/${provider} release board for repo ${repoLabel}; skipping`);
       return;
@@ -101,10 +117,12 @@ export async function syncReleaseOnPRMerge(params: ReleaseMergeSyncParams): Prom
     // non-primary repo reaches its release via release_repositories, not boardId.
     const repoRows = await db.releaseRepository.findMany({
       where: { mainReleaseBoardId: { in: boardIds } },
-      select: { releaseId: true, branch: true, deployedCommit: true, newCommit: true },
+      select: { releaseId: true, mainReleaseBoardId: true, branch: true, deployedCommit: true, newCommit: true },
     });
-    const repoRowByReleaseId = new Map(repoRows.map((r) => [r.releaseId, r]));
-    const releaseIdsForRepo = [...repoRowByReleaseId.keys()];
+    const repoRowByReleaseBoard = new Map(
+      repoRows.map((r) => [`${r.releaseId}:${r.mainReleaseBoardId}`, r]),
+    );
+    const releaseIdsForRepo = [...new Set(repoRows.map((r) => r.releaseId))];
 
     // Candidate release/hotfix tickets, newest first, scoped to the webhook's workspace.
     const ticketWhere = {
@@ -122,6 +140,7 @@ export async function syncReleaseOnPRMerge(params: ReleaseMergeSyncParams): Prom
         id: true,
         title: true,
         xyneId: true,
+        boardId: true,
         conversationId: true,
         channelId: true,
         workspaceId: true,
@@ -145,14 +164,46 @@ export async function syncReleaseOnPRMerge(params: ReleaseMergeSyncParams): Prom
       return;
     }
 
-    // 3. First (most recent) ticket whose release branch is the PR's base branch.
+    // The matched release boards a ticket covers: its own board and the repos it
+    // releases through release_repositories.
+    const coveredBoardIds = (ticket: (typeof tickets)[number]): string[] =>
+      boardIds.filter(
+        (boardId) => ticket.boardId === boardId || repoRowByReleaseBoard.has(`${ticket.id}:${boardId}`),
+      );
+
+    // 3. Per release config (main release board): the most recent ticket whose release
+    //    branch is the PR's base branch. Each ticket is synced once, for exactly the
+    //    boards it is the current release of, so a merge never lands in an older release
+    //    that a newer one has superseded. A ticket that can't be synced hands its boards
+    //    to the next older candidate.
     const formsRepo = new FormsRepository();
-    for (const ticket of tickets) {
-      if (ticket.title.trim() !== baseBranch) continue;
+    const failedTicketIds = new Set<string>();
+    const pendingBoardIds = new Set(boardIds);
+    let syncedAny = false;
+    while (pendingBoardIds.size > 0) {
+      const boardsByTicketId = new Map<string, string[]>();
+      for (const pendingBoardId of [...pendingBoardIds]) {
+        const current = tickets.find(
+          (candidate) =>
+            !failedTicketIds.has(candidate.id) &&
+            candidate.title.trim() === baseBranch &&
+            coveredBoardIds(candidate).includes(pendingBoardId),
+        );
+        if (!current) {
+          pendingBoardIds.delete(pendingBoardId);
+          continue;
+        }
+        boardsByTicketId.set(current.id, [...(boardsByTicketId.get(current.id) ?? []), pendingBoardId]);
+      }
+      // Newest ticket first; the rest are reconsidered next round.
+      const ticket = tickets.find((candidate) => boardsByTicketId.has(candidate.id));
+      if (!ticket) break;
+      const ticketBoardIds = boardsByTicketId.get(ticket.id)!;
+      const boardId = ticketBoardIds[0]!;
 
       // Prefer this repo's release_repositories row (the ticket's scalar form
       // values describe only the primary repo); fall back for legacy single-repo.
-      const repoRow = repoRowByReleaseId.get(ticket.id);
+      const repoRow = repoRowByReleaseBoard.get(`${ticket.id}:${boardId}`);
       let branch: string;
       let deployedCommitId: string;
       let newCommitId: string;
@@ -169,8 +220,9 @@ export async function syncReleaseOnPRMerge(params: ReleaseMergeSyncParams): Prom
 
       if (!deployedCommitId || !newCommitId) {
         // No analyzed range yet (e.g. a just-created release ticket); try the
-        // next candidate rather than abandoning the whole sync.
+        // next candidate rather than abandoning this board's sync.
         logger.warn(`[${source}] Release ticket ${ticket.xyneId} matches branch but has no commit range yet; trying next candidate`);
+        failedTicketIds.add(ticket.id);
         continue;
       }
 
@@ -200,7 +252,11 @@ export async function syncReleaseOnPRMerge(params: ReleaseMergeSyncParams): Prom
           userName: bot?.name || 'System',
           workspaceId: ticket.workspaceId,
           hotfixSync: true,
-          hotfixOverride: { boardIds, mergeCommitSha: mergeCommitSha!, branch: baseBranch },
+          hotfixOverride: {
+            boardIds: ticketBoardIds,
+            mergeCommitSha: mergeCommitSha!,
+            branch: baseBranch,
+          },
         });
         if (result.success) {
           logger.info(`[${source}] Synced hotfix (${newCommitId.slice(0, 8)}...${mergeCommitSha!.slice(0, 8)}) for ${ticket.xyneId}`);
@@ -224,12 +280,16 @@ export async function syncReleaseOnPRMerge(params: ReleaseMergeSyncParams): Prom
       }
 
       if (result.success) {
-        return; // most-recent-active only
+        syncedAny = true;
+        for (const syncedBoardId of ticketBoardIds) pendingBoardIds.delete(syncedBoardId);
+        continue;
       }
       // A failed candidate must not shadow an older ticket that is the real release.
+      failedTicketIds.add(ticket.id);
       logger.warn(`[${source}] Sync candidate ${ticket.xyneId} failed (${result.error ?? 'unknown error'}); trying next candidate`);
     }
 
+    if (syncedAny) return;
     logger.info(`[${source}] No active release ticket tracks branch "${baseBranch}" for ${repoLabel}`);
   } catch (error) {
     logger.error(`[${source}] Release sync failed:`, error);
