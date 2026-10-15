@@ -16,6 +16,7 @@ import {
   Filter,
   ArrowDownUp,
   ArrowLeft,
+  Check,
 } from 'lucide-react-native';
 import { cn } from '@/src/utils/cn';
 
@@ -230,7 +231,8 @@ function SectionOptionsSheetContent({
                 accessibilityRole='button'
                 accessibilityLabel='Back to section options'
                 onPress={() => setPage('menu')}
-                className='mr-2 h-11 w-11 items-center justify-center active:opacity-60'
+                hitSlop={10}
+                className='mr-2 h-6 w-6 items-center justify-center active:opacity-60'
               >
                 <ArrowLeft size={22} color={foregroundColor} />
               </Pressable>
@@ -377,6 +379,8 @@ function OptionRow({
   selected,
   isLast,
 }: OptionRowProps): ReactElement {
+  const foregroundColor = useCSSVariable('--color-foreground') as string;
+
   return (
     <>
       <Pressable
@@ -395,7 +399,7 @@ function OptionRow({
         >
           {label}
         </Text>
-        {selected && <Text className='text-foreground'>✓</Text>}
+        {selected && <Check size={20} strokeWidth={2.5} color={foregroundColor} />}
         {trailing ? (
           <Text className='text-[13px] text-bottomsheet-text-muted'>{trailing}</Text>
         ) : null}
