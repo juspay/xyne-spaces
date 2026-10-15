@@ -4,7 +4,6 @@ import { v4 as uuidv4 } from 'uuid';
 import { BoardType, ReleaseTrackingMode, resolveTicketDescription } from '@xyne/shared';
 import { buildStagesByBoard } from '../../../components/Release/releaseChanges.utils';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
-import { useChannelParticipation } from '../../../hooks/useChannels';
 import { useUsersById } from '../../../hooks/useUsers';
 import { resolveStageStatus } from '../../../utils/board/stageStatusIcon';
 import { useZero } from '../../../hooks/useZero';
@@ -309,14 +308,6 @@ export function useAssignReleaseQa(): (artIds: readonly string[], userId: string
     },
     [zero],
   );
-}
-
-export function useReleaseThreadAccess(releaseId: string | null): boolean {
-  const [release] = useCachedQuery(queries.ticketRowById({ ticketId: releaseId ?? '' }), {
-    enabled: !!releaseId,
-  });
-  const participation = useChannelParticipation(releaseId ? (release?.channelId ?? '') : '');
-  return !!releaseId && !!participation;
 }
 
 /** release_repositories is not synced through Zero, so it comes over REST along with the

@@ -3046,14 +3046,18 @@ export const queries: AnyQueryRegistry = defineQueries({
       .where('workflowType', 'Automations')
       .one();
   }),
-  subTicketsForTicket: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) => {
-    return zql.ticket_sub_ticket_mappings
-      .where('ticketId', ticketId)
-      .related('subTicket', (subTicketQuery) =>
-        subTicketQuery.related('conversation').related('mappedTicket')
-      )
-      .orderBy('id', 'asc');
-  }),
+  subTicketsForTicket: defineQuery(
+    z.object({ ticketId: z.string(), limit: z.number().int().positive().optional() }),
+    ({ args: { ticketId, limit } }) => {
+      const query = zql.ticket_sub_ticket_mappings
+        .where('ticketId', ticketId)
+        .related('subTicket', (subTicketQuery) =>
+          subTicketQuery.related('conversation').related('mappedTicket')
+        )
+        .orderBy('id', 'asc');
+      return limit ? query.limit(limit) : query;
+    }
+  ),
   subTicketMappingsForTickets: defineQuery(
     z.object({ ticketIds: z.array(z.string()) }),
     ({ args: { ticketIds } }) => {
