@@ -6404,6 +6404,23 @@ async function downloadSmallAttachmentFromSignedUrl(
   return buffer;
 }
 
+/**
+ * Attachment entity types that must never surface as "thread attachments".
+ * The composer uploads a file the moment it is dropped in (draft.createAttachments
+ * stores it as entityType=DRAFT with the thread's conversationId set), and
+ * scheduled messages hold theirs as DELAYED_MESSAGE. Neither has been posted, so
+ * listing them would leak unsent filenames to anyone in the thread who invokes an
+ * agent and let the agent act on content the author never sent.
+ */
+export const UNPOSTED_ATTACHMENT_ENTITY_TYPES = ["DRAFT", "DELAYED_MESSAGE"] as const;
+
+function isUnpostedAttachment(row: { entityType?: string }): boolean {
+  return (
+    !!row.entityType &&
+    (UNPOSTED_ATTACHMENT_ENTITY_TYPES as readonly string[]).includes(row.entityType)
+  );
+}
+
 const spacesThreadAttachments: ToolDef = {
   name: "spaces-thread-attachments",
   description:
@@ -6490,11 +6507,18 @@ const spacesThreadAttachments: ToolDef = {
       // hides them client-side, so surfacing them here would show files the user
       // already removed. MessageAttachment DOES define `isDeleted Boolean`
       // (schema.prisma), so the equals filter is safe on both queries.
+      //
+      // Also exclude DRAFT / DELAYED_MESSAGE rows: they carry the thread's
+      // conversationId but were never posted (see UNPOSTED_ATTACHMENT_ENTITY_TYPES).
       const fetchCap = Math.max(limit, 200);
       const byConversation = (await interact({
         model: "messageAttachment",
         operation: "findMany",
-        where: { conversationId: { equals: conversationId }, isDeleted: { equals: false } },
+        where: {
+          conversationId: { equals: conversationId },
+          isDeleted: { equals: false },
+          entityType: { notIn: [...UNPOSTED_ATTACHMENT_ENTITY_TYPES] },
+        },
         orderBy: [{ createdAt: "asc" }],
         take: fetchCap,
       })) as MessageAttachmentRow[];
@@ -6510,15 +6534,21 @@ const spacesThreadAttachments: ToolDef = {
           ? ((await interact({
               model: "messageAttachment",
               operation: "findMany",
-              where: { entityId: { in: entityIds }, isDeleted: { equals: false } },
+              where: {
+                entityId: { in: entityIds },
+                isDeleted: { equals: false },
+                entityType: { notIn: [...UNPOSTED_ATTACHMENT_ENTITY_TYPES] },
+              },
               orderBy: [{ createdAt: "asc" }],
               take: fetchCap,
             })) as MessageAttachmentRow[])
           : [];
 
-      const rowsRaw = [...(byConversation ?? []), ...(byEntity ?? [])].sort(
-        (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
-      );
+      // Belt-and-braces: drop unposted (draft / scheduled) rows even if the
+      // query gateway ever ignores the entityType filter above.
+      const rowsRaw = [...(byConversation ?? []), ...(byEntity ?? [])]
+        .filter((r) => !isUnpostedAttachment(r))
+        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 
       // De-dupe by id, then page the requested window (offset → offset+limit).
       const seen = new Set<string>();
