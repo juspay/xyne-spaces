@@ -83,56 +83,38 @@ const PLACING_RELATIONS = new Set<string>([
   SDLC_TRACK_MEMBERSHIP_RELATION,
 ]);
 
-/** The SDLC changes a write made, held until its transaction commits (withSdlcSearchSync). */
-interface SdlcWriteScope {
-  changes: Array<{ hubId: string; change: SdlcSearchChange }>;
-  newCanvases: Set<string>;
-  done: boolean;
-}
-const writeScope = new AsyncLocalStorage<SdlcWriteScope>();
+// Changes reported while a withSdlcSearchSync write runs; it queues them once the write is done.
+const pending = new AsyncLocalStorage<{ changes: Array<{ hubId: string; change: SdlcSearchChange }>; done: boolean }>();
 
 /**
- * Runs `fn`, a transaction that writes SDLC rows, and queues the Vespa jobs of its changes once
- * it resolves: after the commit, so a worker that picks a job at once maps the committed rows.
- * If `fn` throws (the transaction rolled back), nothing is queued. Inside another scope, `fn`
- * joins it and the outer one queues.
+ * Runs an SDLC write (a transaction, plus anything that must land before its entries are mapped,
+ * like a new canvas's Y-Sweet content) and calls queueSdlcSearchJobs for the changes reported
+ * during it once it is done: after the commit, so a worker that picks a job at once maps the
+ * committed rows. If the write throws (the transaction rolled back), nothing is queued.
  */
-export async function withSdlcSearchSync<T>(fn: () => Promise<T>): Promise<T> {
-  const outer = writeScope.getStore();
-  if (outer && !outer.done) return fn();
-  const scope: SdlcWriteScope = { changes: [], newCanvases: new Set(), done: false };
-  const result = await writeScope.run(scope, fn);
-  // Work the transaction left running that reports a change later queues it at once.
+export async function withSdlcSearchSync<T>(write: () => Promise<T>): Promise<T> {
+  const outer = pending.getStore();
+  if (outer && !outer.done) return write(); // inside another write: that one queues
+  const scope = { changes: [] as Array<{ hubId: string; change: SdlcSearchChange }>, done: false };
+  const result = await pending.run(scope, write);
   scope.done = true;
-  for (const { hubId, change } of scope.changes) void queueNow(hubId, change, scope.newCanvases);
+  for (const { hubId, change } of scope.changes) queueSdlcSearchJobs(hubId, change);
   return result;
 }
 
 /**
- * Records a canvas the running withSdlcSearchSync transaction created. It gets no SDLC file
- * update from that transaction's changes: its content reaches Y-Sweet only after the commit, so
- * an update mapped at once would fail, and the feed its creator queues after that already
- * carries its SDLC fields (the mapper adds them).
- */
-export function markNewSdlcCanvas(canvasId: string): void {
-  writeScope.getStore()?.newCanvases.add(canvasId);
-}
-
-/**
  * Queues the Vespa jobs an SDLC write affects. Fire-and-forget: indexing must never fail the
- * write. Inside withSdlcSearchSync it waits for the commit; elsewhere (Zero side effects, which
- * run after the commit, and writes made outside a transaction) it queues at once.
+ * write. During a withSdlcSearchSync write it only notes the change, and that write queues it
+ * when done; elsewhere (Zero side effects, which run after the commit) it queues at once.
  */
 export function queueSdlcSearchJobs(hubId: string, change: SdlcSearchChange): void {
-  const scope = writeScope.getStore();
-  if (scope && !scope.done) scope.changes.push({ hubId, change });
-  else void queueNow(hubId, change, new Set());
-}
-
-async function queueNow(hubId: string, change: SdlcSearchChange, created: ReadonlySet<string>): Promise<void> {
-  await (async () => {
-    const jobs = (await jobsFor(hubId, change))
-      .filter(job => !(job.schema === fileSchema && job.app === SubApp.CANVAS && created.has(job.docId)));
+  const scope = pending.getStore();
+  if (scope && !scope.done) {
+    scope.changes.push({ hubId, change });
+    return;
+  }
+  void (async () => {
+    const jobs = await jobsFor(hubId, change);
     if (!jobs.length) return;
     // Any process that writes SDLC rows can queue; one that has not started the queue starts it.
     if (!vespaQueue.isReady) await vespaQueue.initialize();
