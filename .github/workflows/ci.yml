@@ -18,12 +18,57 @@ env:
   PNPM_FLAGS: "--frozen-lockfile --prod=false"
 
 jobs:
+  # Skips the web/backend jobs for PRs that only touch apps/mobile, and runs the
+  # mobile job only when mobile or what it depends on changes. Fails open.
+  changes:
+    name: Detect changed areas
+    runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-mini' || 'ubuntu-latest' }}
+    outputs:
+      core: ${{ steps.diff.outputs.core }}
+      mobile: ${{ steps.diff.outputs.mobile }}
+    steps:
+      # On pull_request this is the merge commit, so HEAD^1 is the base.
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
+
+      - name: Diff against base
+        id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.merge_group.base_sha || github.event.before }}
+        run: |
+          set -uo pipefail
+          run_all() { printf 'core=true\nmobile=true\n' >> "$GITHUB_OUTPUT"; exit 0; }
+          case "$EVENT" in
+            pull_request) files=$(git diff --name-only HEAD^1 HEAD) || run_all ;;
+            merge_group | push)
+              git fetch --no-tags --depth=1 origin "$BASE" || run_all
+              files=$(git diff --name-only "$BASE" HEAD) || run_all ;;
+            *) run_all ;;
+          esac
+          [ -n "$files" ] || run_all
+          echo "$files"
+
+          core=true
+          if [ "$EVENT" != push ] && ! grep -qv '^apps/mobile/' <<<"$files"; then
+            core=false
+            echo "::notice::Only apps/mobile changed — skipping the backend/dashboard/framework/xyne-claw jobs"
+          fi
+          mobile=false
+          if grep -qE '^(apps/mobile/|packages/shared/|pnpm-lock\.yaml$|\.github/workflows/ci\.yml$)' <<<"$files"; then
+            mobile=true
+          fi
+          printf 'core=%s\nmobile=%s\n' "$core" "$mobile" >> "$GITHUB_OUTPUT"
+
   # ---------------------------------------------------------------------------
   # Backend: depends on @xyne/shared and agentic-framework, which are workspace
   # packages consumed from their built dist/ — so they are compiled first.
   # ---------------------------------------------------------------------------
   backend:
     name: Backend typecheck + build
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.core != 'false' }}
     runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-mini' || 'ubuntu-latest' }}
     # tsc over backend's type surface (incl. generated Prisma/Zero schemas)
     # exceeds Node's ~2GB default heap on the runner.
@@ -94,6 +139,8 @@ jobs:
   # ---------------------------------------------------------------------------
   dashboard:
     name: Dashboard
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.core != 'false' }}
     # TEST: merged from 3 matrix legs (lint/typecheck/build) into one job.
     # Each leg used to run its own Install dependencies in parallel — 3
     # concurrent installs against the mirror per PR. Trades wall-clock time
@@ -169,9 +216,12 @@ jobs:
   test:
     name: Automation tests
     # Runs only in the merge queue, not on every PR; RUN_TEST_CASE is the kill switch.
+    needs: changes
     if: >-
       github.event_name == 'merge_group'
       && vars.RUN_TEST_CASE == 'true'
+      && !cancelled()
+      && needs.changes.outputs.core != 'false'
     runs-on: ci-cluster-github-runners
     env:
       TEST_ENV: test
@@ -262,6 +312,8 @@ jobs:
   # Framework lint — self-contained (no workspace deps).
   framework-lint:
     name: Framework lint
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.core != 'false' }}
     runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-mini' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v5
@@ -303,6 +355,8 @@ jobs:
   # ---------------------------------------------------------------------------
   xyne-claw:
     name: xyne-claw typecheck
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.core != 'false' }}
     runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-mini' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v5
@@ -342,6 +396,67 @@ jobs:
 
       - name: Typecheck xyne-claw
         run: pnpm --filter xyne-claw run typecheck
+
+  # apps/mobile has its own lockfile; @xyne/shared is linked, so build it first.
+  mobile:
+    name: Mobile checks
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.mobile != 'false' }}
+    runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-mini' || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        if: vars.USE_SELF_HOSTED_CI != 'true'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            apps/mobile/pnpm-lock.yaml
+
+      # apps/mobile is its own workspace root, so it needs its own .npmrc token.
+      - name: Authenticate to GCP (npm mirror)
+        id: gcp-auth
+        if: vars.USE_SELF_HOSTED_CI == 'true'
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.NPM_MIRROR_SA_KEY }}
+          token_format: access_token
+
+      - name: Configure pnpm for Artifact Registry npm mirror
+        if: vars.USE_SELF_HOSTED_CI == 'true'
+        run: |
+          pnpm config set registry "https://asia-south1-npm.pkg.dev/xyne-infra-external/npm-mirror/"
+          for f in .npmrc apps/mobile/.npmrc; do
+            echo "//asia-south1-npm.pkg.dev/xyne-infra-external/npm-mirror/:_authToken=${{ steps.gcp-auth.outputs.access_token }}" >> "$f"
+          done
+
+      - name: Install + build @xyne/shared
+        run: >-
+          pnpm install ${{ env.PNPM_FLAGS }}
+          ${{ vars.USE_SELF_HOSTED_CI == 'true' && '--network-concurrency 64' || '' }}
+          --filter @xyne/shared...
+
+      - name: Install dependencies
+        run: >-
+          pnpm install ${{ env.PNPM_FLAGS }}
+          ${{ vars.USE_SELF_HOSTED_CI == 'true' && '--network-concurrency 64' || '' }}
+          --dir apps/mobile
+
+      - name: Typecheck
+        run: pnpm --dir apps/mobile run typecheck
+
+      - name: Lint (errors only)
+        run: pnpm --dir apps/mobile run lint:errors-only
+
+      - name: Format check
+        run: pnpm --dir apps/mobile run format:check
+
+      - name: Tests
+        run: pnpm --dir apps/mobile run test
 
   # ---------------------------------------------------------------------------
   # Secret scan (gitleaks). Scans the working tree with the committed
