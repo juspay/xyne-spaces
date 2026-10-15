@@ -202,15 +202,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToo
         if (!dm.channelId) {
           throw new Error("Spaces app API returned no channelId for bot DM");
         }
-        await spacesAppFetch("/chat/postMessage", { channelId: dm.channelId, text: content });
+        // Post as markdown so newlines/lists/headings render in the thread —
+        // plain `text` falls back to the HTML path and collapses into one clump.
+        await spacesAppFetch("/chat/postMessage", {
+          channelId: dm.channelId,
+          markdownText: content,
+          metadata: { contentFormat: "markdown" },
+        });
         return { content: [{ type: "text", text: `Message sent to DM with ${targetUserId}` }] };
       }
 
       if (!targetChannelId) {
         // Simple send: conversationId → reply in thread, channelId → post in channel
         const body = conversationId
-          ? { conversationId, text: content }
-          : { channelId, text: content };
+          ? { conversationId, markdownText: content, metadata: { contentFormat: "markdown" } }
+          : { channelId, markdownText: content, metadata: { contentFormat: "markdown" } };
         await spacesAppFetch("/chat/postMessage", body);
         return { content: [{ type: "text", text: `Message sent to ${conversationId ?? channelId}` }] };
       }
@@ -225,7 +231,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToo
         if (errText.includes("private")) {
           const failMsg = `I need to be added to #${targetChannelId} (private channel) to post there. Please add me and try again.`;
           if (sourceConversationId) {
-            await spacesAppFetch("/chat/postMessage", { conversationId: sourceConversationId, text: failMsg }).catch(() => {});
+            await spacesAppFetch("/chat/postMessage", { conversationId: sourceConversationId, markdownText: failMsg, metadata: { contentFormat: "markdown" } }).catch(() => {});
           }
           return { content: [{ type: "text", text: failMsg }], isError: true };
         }
@@ -233,11 +239,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToo
         console.error("[apps-send-message] join failed (will still attempt post):", e);
       }
 
-      await spacesAppFetch("/chat/postMessage", { channelId: targetChannelId, text: content });
+      await spacesAppFetch("/chat/postMessage", {
+        channelId: targetChannelId,
+        markdownText: content,
+        metadata: { contentFormat: "markdown" },
+      });
 
       const confirmMsg = `Posted in #${channelName}`;
       if (sourceConversationId) {
-        await spacesAppFetch("/chat/postMessage", { conversationId: sourceConversationId, text: confirmMsg }).catch(() => {});
+        await spacesAppFetch("/chat/postMessage", { conversationId: sourceConversationId, markdownText: confirmMsg, metadata: { contentFormat: "markdown" } }).catch(() => {});
       }
 
       return { content: [{ type: "text", text: confirmMsg }] };
