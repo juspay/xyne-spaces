@@ -34,7 +34,11 @@ let pendingQueries: PendingFallbackQuery[] = [];
 let flushScheduled = false;
 
 /** Resolve one caller from its slot in the batch response. */
-function settle(pending: PendingFallbackQuery, index: number, response: FallbackQueryResponse): void {
+function settle(
+  pending: PendingFallbackQuery,
+  index: number,
+  response: FallbackQueryResponse,
+): void {
   // The server answers in request order; the name match covers a short or
   // reordered response.
   const result =
