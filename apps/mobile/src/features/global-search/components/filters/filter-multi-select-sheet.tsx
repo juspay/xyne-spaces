@@ -17,6 +17,7 @@ type FilterMultiSelectSheetProps = {
   onOpenChange: (open: boolean) => void;
   onDismiss: () => void;
   title: string;
+  applyLabel?: string;
   searchPlaceholder: string;
   query: string;
   onQueryChange: (query: string) => void;
@@ -43,6 +44,7 @@ export function FilterMultiSelectSheet({
   onOpenChange,
   onDismiss,
   title,
+  applyLabel,
   searchPlaceholder,
   query,
   onQueryChange,
@@ -99,7 +101,12 @@ export function FilterMultiSelectSheet({
       keyboardBehavior='extend'
       backdropOpacity={0.4}
     >
-      <FilterSheetHeader title={title} onCancel={dismissSheet} onApply={handleApply} />
+      <FilterSheetHeader
+        title={title}
+        {...(applyLabel ? { applyLabel } : {})}
+        onCancel={dismissSheet}
+        onApply={handleApply}
+      />
 
       <View className='mt-3 flex-1 px-4' style={{ minHeight: 0 }}>
         <InputV2

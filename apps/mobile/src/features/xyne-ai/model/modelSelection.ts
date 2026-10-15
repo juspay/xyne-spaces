@@ -13,7 +13,7 @@ export const THINKING_OPTIONS: { value: ThinkingLevel | undefined; label: string
 export const AUTO_MODEL_DESCRIPTION = 'Balanced quality and speed recommended for most tasks';
 
 /** Model ids end in a release stamp (`-20250514`) that only adds noise in a pill. */
-export const formatModelLabel = (id: string): string => id.replace(/-\d{8}$/, '');
+const formatModelLabel = (id: string): string => id.replace(/-\d{8}$/, '');
 
 export const modelLabel = ({ id, name }: XyneAIModel): string => name ?? formatModelLabel(id);
 
@@ -27,11 +27,3 @@ export const modelSummary = (selected: XyneAIModel | undefined): string =>
 
 export const autoModelDescription = (defaultModelName: string | undefined): string =>
   defaultModelName ? `Uses ${defaultModelName} by default` : AUTO_MODEL_DESCRIPTION;
-
-export function filterModels(models: XyneAIModel[], query: string): XyneAIModel[] {
-  const needle = query.trim().toLowerCase();
-  return models.filter(
-    model =>
-      model.id.toLowerCase().includes(needle) || modelLabel(model).toLowerCase().includes(needle),
-  );
-}

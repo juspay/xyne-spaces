@@ -9,6 +9,7 @@ import {
   MessagesSquare,
   Mic,
   Presentation,
+  Sparkles,
   Sunrise,
   type LucideProps,
 } from 'lucide-react-native';
@@ -84,6 +85,18 @@ type MoreRowDefinition = {
  * these hides the tab bar and the target screen draws its own back button.
  */
 const MORE_ROWS: readonly MoreRowDefinition[] = [
+  // Not released yet: only development builds can open it.
+  ...(__DEV__
+    ? [
+        {
+          id: 'xyne-ai',
+          icon: Sparkles,
+          label: 'Xyne AI',
+          description: 'Ask anything about your workspace',
+          navigate: (router: ReturnType<typeof useRouter>): void => router.push('/xyne-ai'),
+        },
+      ]
+    : []),
   {
     id: 'morning-brief',
     icon: Sunrise,
