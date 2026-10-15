@@ -30,6 +30,10 @@ const AI_FORM_FIELD_SKIP_KEYS = new Set(['summary', 'parse_reason', 'priority', 
 
 const XOR_TIMEOUT_MS = 10_000;
 const XOR_OTHER_OPTION = 'other';
+/** The email is XOR's state, so prompt placeholders point at it instead of repeating it. */
+const XOR_EMAIL_PLACEHOLDER = '(the email)';
+const XOR_CATEGORY_QUESTION = 'Which category does this support email belong to?';
+const XOR_PRIORITY_QUESTION = 'How urgent is this support email?';
 /** Lowest first, as XOR's score question wants. */
 const XOR_PRIORITY_LEVELS: { priority: TicketPriority; description: string }[] = [
   { priority: TicketPriority.LOW, description: 'Routine question or request; nothing is blocked' },
@@ -554,11 +558,14 @@ export class EmailClassificationService {
   ): Promise<{ rawOutput?: ClassificationRawOutput; priority?: PriorityClassificationResult }> {
     if (!isPrivateJevConfigured()) return {};
 
+    // Same prompts the LLM gets, so XOR works from the desk's own definitions; the question goes last.
     const questions: Record<string, JevQuestion> = {};
     if (config.classificationEnabled && cacConfig.classificationXorEnabled && config.mappings.length > 0) {
       questions.category = {
         type: 'choice',
-        instructions: 'Which category does this support email belong to?',
+        instructions: config.classificationPrompt.trim()
+          ? `${config.classificationPrompt.trim()}\n\n${XOR_CATEGORY_QUESTION}`
+          : XOR_CATEGORY_QUESTION,
         criteria: {
           ...Object.fromEntries(
             config.mappings.map(m => [m.id, m.subCategory ? `${m.category}: ${m.subCategory}` : m.category]),
@@ -570,7 +577,11 @@ export class EmailClassificationService {
     if (config.priorityClassificationEnabled && cacConfig.priorityClassificationXorEnabled) {
       questions.priority = {
         type: 'score',
-        instructions: 'How urgent is this support email?',
+        instructions: `${this.prepareCustomPrompt(
+          config.priorityClassificationPrompt?.trim() || DEFAULT_PRIORITY_PROMPT,
+          XOR_EMAIL_PLACEHOLDER,
+          XOR_EMAIL_PLACEHOLDER,
+        )}\n\n${XOR_PRIORITY_QUESTION}`,
         criteria: XOR_PRIORITY_LEVELS.map(l => `${l.priority}: ${l.description}`),
       };
     }
