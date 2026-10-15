@@ -9,16 +9,6 @@ const directGuestAccessExists = (ctx: Context, entityType: GuestEntity) => (exis
     mapping.where('userId', '=', ctx.userID).where('accessibleEntityType', '=', entityType),
   );
 
-const nonDmParticipantChannelExists = (ctx: Context) => (exists: any) =>
-  exists('channels', (channel: any) =>
-    channel
-      .where('scopeType', '!=', ChannelScopeType.DM)
-      .where('scopeType', '!=', ChannelScopeType.GROUP_DM)
-      .whereExists('participants', (participant: any) =>
-        participant.where('userId', '=', ctx.userID),
-      ),
-  );
-
 export const isGuestContext = (ctx: Context): boolean => ctx.role === WorkspaceRole.GUEST;
 
 export const denyGuestSelect = <
@@ -48,21 +38,30 @@ export const guestChannelAccessWhere = (ctx: Context): GuestPredicate => ({
     ),
   );
 
-export const guestProjectAccessWhere = (ctx: Context): GuestPredicate => ({ or, exists }: any) =>
-  or(
-    exists('channels', (channel: any) =>
-      channel.whereExists('guestAccess', (mapping: any) =>
-        mapping
-          .where('userId', '=', ctx.userID)
-          .where('accessibleEntityType', '=', GuestEntity.CHANNEL),
-      ),
-    ),
-    nonDmParticipantChannelExists(ctx)(exists),
+// A board is visible to a guest when one of its mapped channels (channel_board_mappings) is
+// accessible to them.
+export const guestBoardAccessWhere = (ctx: Context): GuestPredicate => ({ exists }: any) =>
+  exists('channelMappings', (mapping: any) =>
+    mapping
+      .where('workspaceId', '=', ctx.workspaceId)
+      .whereExists('channel', (channel: any) => channel.where(guestChannelAccessWhere(ctx))),
   );
+
+// A project is visible to a guest when any of its boards is.
+export const guestProjectAccessWhere = (ctx: Context): GuestPredicate => ({ exists }: any) =>
+  exists('boards', (board: any) => board.where(guestBoardAccessWhere(ctx)));
 
 export const guestTicketAccessWhere = (ctx: Context): GuestPredicate => ({ or, exists }: any) =>
   or(
     exists('channel', (channel: any) => channel.where(guestChannelAccessWhere(ctx))),
+  );
+
+export const guestSubTicketAccessWhere = (ctx: Context): GuestPredicate => ({ or, exists }: any) =>
+  or(
+    exists('mappedTicket', (t: any) => t.where(guestTicketAccessWhere(ctx))),
+    exists('conversation', (c: any) =>
+      c.whereExists('channel', (ch: any) => ch.where(guestChannelAccessWhere(ctx))),
+    ),
   );
 
 export const guestCanvasAccessWhere = (ctx: Context): GuestPredicate => ({

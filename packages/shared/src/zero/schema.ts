@@ -4768,6 +4768,18 @@ export const formEntityValuesTableRelationships = relationships(formEntityValues
     destField: ['id'],
     destSchema: channelTable,
   }),
+  // The ticket a TICKET row describes (entityId = tickets.id); other rows match none.
+  ticket: one({
+    sourceField: ['entityId'],
+    destField: ['id'],
+    destSchema: ticketTable,
+  }),
+  // The sub-ticket a SUB_TICKET row describes (entityId = sub_tickets.id); other rows match none.
+  subTicket: one({
+    sourceField: ['entityId'],
+    destField: ['id'],
+    destSchema: subTicketTable,
+  }),
 }));
 
 export const ticketStageRequestTableRelationships = relationships(ticketStageRequestTable, ({ one }) => ({
