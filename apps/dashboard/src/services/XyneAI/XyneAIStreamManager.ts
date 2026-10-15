@@ -68,6 +68,12 @@ import { resolveMessagePendingAction } from '../../components/Claw/claw.utils';
 // cover the generator's 60s timeout plus callback persistence latency.
 const FOLLOW_UP_RETRY_DELAYS_MS = [500, 1_000, 2_000, 4_000, 8_000, 16_000, 32_000] as const;
 
+/** The run-on-my-machine pin the server understands (see claw-auth local-harness-override.ts). */
+export interface LocalHarnessOverride {
+  provider: 'local-harness';
+  model: 'local-harness:claude-code' | 'local-harness:codex-cli';
+}
+
 export interface StreamState {
   streamId: string;
   threadId: string;
@@ -133,6 +139,9 @@ export interface StreamRequest {
   researchContext?: ResearchContext | null | undefined;
   attachments: MessageAttachment[];
   sandboxMode?: 'remote' | 'local' | 'container' | undefined;
+  /** Run on the user's own machine with this CLI. Only the two local-harness values are accepted
+   *  by the server; anything else is rejected with a 400. */
+  providerOverride?: LocalHarnessOverride | undefined;
   studioMode?: 'design' | undefined;
   designArtifactAttachmentId?: string | undefined;
   designSelection?: DesignSelectionPayload | undefined;
@@ -1301,6 +1310,7 @@ class XyneAIStreamManager {
           }),
           ...(request.sandboxMode &&
             request.sandboxMode !== 'remote' && { sandboxMode: request.sandboxMode }),
+          ...(request.providerOverride && { providerOverride: request.providerOverride }),
           ...(request.studioMode && { studioMode: request.studioMode }),
           ...(request.designArtifactAttachmentId && {
             designArtifactAttachmentId: request.designArtifactAttachmentId,

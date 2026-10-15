@@ -16,6 +16,7 @@ import { awaitTurnHandoff, isTurnControlCommand } from "../lib/run-turn-handoff.
 import { dispatchLocalHarnessRun, localHarnessProviderLabel, pinnedModelForProvider, resolveLocalHarnessTarget, resolveLocalHarnessTargetForProvider, resolveLocalSandbox } from "../lib/local-harness.js";
 import { isLocalHarnessProvider, IMMEDIATE_TASK_COMMAND_RE, parseLocalSandboxCommand } from "xyne-claw-shared";
 import { parseLocalHarnessOverride } from "../lib/local-harness-override.js";
+import { harnessEligibility } from "../lib/harness-eligibility.js";
 import { planServerContinuation } from "../lib/local-harness-continuation.js";
 import { buildAgentHandoff, conversationPath, handoffMessagesFrom } from "../lib/multi-agent-chat.js";
 import { isDirectChatConversation } from "../lib/conversation-kind.js";
@@ -1698,18 +1699,19 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       !(Array.isArray(forwardedAttachedContext) && forwardedAttachedContext.length > 0) ||
       Boolean(attachedContextPrefix) ||
       attachedContextFiles.length > 0;
-    const harnessEligible =
-      workspaceRun ||
-      ((!isTaskCommandRun || localSandboxRequested) &&
-        contextResolved &&
-        !(Array.isArray(contextFiles) && contextFiles.length > 0) &&
-        (attachmentsClear || harnessAttachments.length > 0));
-    if (CONFIG.localHarnessEnabled && isTaskCommandRun && !localSandboxRequested) {
+    const eligibility = harnessEligibility({
+      isTaskCommandRun,
+      localSandboxRequested,
+      workspaceRun,
+      unresolvedContext: !contextResolved,
+      hasContextFiles: Array.isArray(contextFiles) && contextFiles.length > 0,
+      attachmentsBlocked: !(attachmentsClear || harnessAttachments.length > 0),
+    });
+    const harnessEligible = eligibility.eligible;
+    if (CONFIG.localHarnessEnabled && !eligibility.eligible) {
       log.info(
-        `[run-stream] local-harness skipped for conv=${convId}: task command (sandboxMode=${sandboxMode ?? "remote"})`,
+        `[run-stream] local-harness skipped for conv=${convId}: reason=${eligibility.reason} (sandboxMode=${sandboxMode ?? "remote"})`,
       );
-    } else if (CONFIG.localHarnessEnabled && !harnessEligible) {
-      log.info(`[run-stream] local-harness skipped for conv=${convId}: run carries attached context`);
     } else if (CONFIG.localHarnessEnabled && localSandboxRequested) {
       log.info(`[run-stream] local sandbox requested for conv=${convId}: command=/${sandboxCommand}`);
     }

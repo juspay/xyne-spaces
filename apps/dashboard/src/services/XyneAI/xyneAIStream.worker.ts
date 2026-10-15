@@ -68,6 +68,10 @@ export interface WorkerStartStreamMessage {
         filename: string;
       }>;
       sandboxMode?: 'remote' | 'local' | 'container';
+      providerOverride?: {
+        provider: 'local-harness';
+        model: 'local-harness:claude-code' | 'local-harness:codex-cli';
+      };
       studioMode?: 'design';
       designArtifactAttachmentId?: string;
       designSelection?: DesignSelectionPayload;
@@ -234,6 +238,7 @@ async function executeStream(
           }),
         ...(requestBody.sandboxMode &&
           requestBody.sandboxMode !== 'remote' && { sandboxMode: requestBody.sandboxMode }),
+        ...(requestBody.providerOverride && { providerOverride: requestBody.providerOverride }),
         ...(requestBody.studioMode && { studioMode: requestBody.studioMode }),
         ...(requestBody.designArtifactAttachmentId && {
           designArtifactAttachmentId: requestBody.designArtifactAttachmentId,

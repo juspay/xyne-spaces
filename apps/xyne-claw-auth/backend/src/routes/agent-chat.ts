@@ -58,6 +58,7 @@ import { KNOWN_PROVIDERS, buildProviderConfig, agentCredRefreshTarget, userCredR
 import { awaitTurnHandoff, isTurnControlCommand } from "../lib/run-turn-handoff.js";
 import { dispatchLocalHarnessRun, isLocalHarnessProvider, localHarnessProviderLabel, pinnedModelForProvider, resolveLocalHarnessTarget, resolveLocalHarnessTargetForProvider, resolveLocalSandbox } from "../lib/local-harness.js";
 import { parseLocalHarnessOverride } from "../lib/local-harness-override.js";
+import { harnessEligibility } from "../lib/harness-eligibility.js";
 
 import { planServerContinuation } from "../lib/local-harness-continuation.js";
 import { authenticatedProviders, localHarnessRepository } from "../repositories/localHarnessRepository.js";
@@ -2067,9 +2068,21 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     const localFolderWorkspace = localFolderItem ? toLocalFolderWorkspace(localFolderItem) : null;
     const workspaceRun = Boolean(localFolderWorkspace) && (!isTaskCommandRun || deviceSandboxMode);
 
-    const harnessBlockedByCommand = isTaskCommandRun && !localSandboxRequested && !workspaceRun;
-    if (harnessBlockedByCommand) {
-      log.info(`[agent-chat] local-harness skipped for conv=${conversationId}: task command (sandboxMode=${sandboxMode ?? "remote"})`);
+    // Same rule as run-stream.ts. Uploaded files ride along in the envelope
+    // (uploadedAttachmentMeta) and the context prompt block does too, but
+    // context FILES do not, so a turn with them stays on the server.
+    const eligibility = harnessEligibility({
+      isTaskCommandRun,
+      localSandboxRequested,
+      workspaceRun,
+      unresolvedContext:
+        attachedContextItems.length > 0 && !resolvedContext.promptPrefix && resolvedContext.contextFiles.length === 0,
+      hasContextFiles: resolvedContext.contextFiles.length > 0,
+      attachmentsBlocked: false,
+    });
+    const harnessBlockedByCommand = !eligibility.eligible;
+    if (!eligibility.eligible) {
+      log.info(`[agent-chat] local-harness skipped for conv=${conversationId}: reason=${eligibility.reason} (sandboxMode=${sandboxMode ?? "remote"})`);
     } else if (localSandboxRequested) {
       log.info(`[agent-chat] local sandbox requested for conv=${conversationId}: command=/${sandboxCommand}`);
     }
