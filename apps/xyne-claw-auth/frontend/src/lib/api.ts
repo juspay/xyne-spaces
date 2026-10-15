@@ -3309,9 +3309,14 @@ export async function listEvalAgentModels(slug: string): Promise<EvalAgentModel[
 export async function listChatLitellmModels(
   slug: string,
   userId: string,
+  /** The composer's per-chat speed. Omitted ⇒ the agent's default speed, the
+   *  same speed run-stream uses when the turn sends none — so the default
+   *  label names the model the run will actually start on (XYNE-66323). */
+  speed?: "standard" | "fast",
 ): Promise<{ models: Array<{ id: string; name: string }>; defaultModel: string | null; pinProvider: string | null }> {
+  const query = speed ? `?speed=${encodeURIComponent(speed)}` : "";
   const res = await fetch(
-    `${AUTH_API_URL}/api/v1/agent-chat/${encodeURIComponent(slug)}/litellm-models`,
+    `${AUTH_API_URL}/api/v1/agent-chat/${encodeURIComponent(slug)}/litellm-models${query}`,
     { credentials: "include", headers: { "x-user-id": userId } },
   );
   if (!res.ok) throw new Error(`HTTP ${res.status}`);

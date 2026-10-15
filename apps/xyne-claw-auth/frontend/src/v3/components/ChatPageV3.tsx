@@ -5437,13 +5437,21 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
       setThinkingLevel(null);
       setFastMode(readStoredFastMode(activeAgentSlug));
     }
+  }, [activeAgentSlug, userId]);
+
+  /* The list + "Recommended (X)" default follow the fast toggle: a fast-mode
+   * profile can run a different provider/model, and the label must name what
+   * the next turn will start on (XYNE-66323). Kept separate from the reset
+   * above so flipping fast mode does not clear the model pick. Only an
+   * explicit ON is sent — same rule as speedOverride on send. */
+  useEffect(() => {
     if (!activeAgentSlug || !userId) {
       setLitellmModels([]);
       setLitellmDefaultModel(null);
       return;
     }
     let cancelled = false;
-    listChatLitellmModels(activeAgentSlug, userId)
+    listChatLitellmModels(activeAgentSlug, userId, fastMode ? "fast" : undefined)
       .then(({ models, defaultModel }) => {
         if (cancelled) return;
         setLitellmModels(models);
@@ -5455,7 +5463,7 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
         setLitellmDefaultModel(null);
       });
     return () => { cancelled = true; };
-  }, [activeAgentSlug, userId]);
+  }, [activeAgentSlug, userId, fastMode]);
 
   /* Load conversations when agent changes (specific agent) or on mount (all agents) */
   useEffect(() => {
