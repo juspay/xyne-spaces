@@ -70,6 +70,7 @@ function EmbedActions({ url, onUnembed, onDelete, editable }: EmbedActionsProps)
       <button
         type='button'
         title='Open in new tab'
+        aria-label='Open in new tab'
         className={buttonClass}
         onMouseDown={action(() => openInNewTab(url))}
       >
@@ -78,6 +79,7 @@ function EmbedActions({ url, onUnembed, onDelete, editable }: EmbedActionsProps)
       <button
         type='button'
         title='Copy link'
+        aria-label='Copy link'
         className={buttonClass}
         onMouseDown={action(() => {
           void copy(url);
@@ -91,6 +93,7 @@ function EmbedActions({ url, onUnembed, onDelete, editable }: EmbedActionsProps)
           <button
             type='button'
             title='Convert back to link'
+            aria-label='Convert back to link'
             className={buttonClass}
             onMouseDown={action(onUnembed)}
           >
@@ -99,6 +102,7 @@ function EmbedActions({ url, onUnembed, onDelete, editable }: EmbedActionsProps)
           <button
             type='button'
             title='Delete'
+            aria-label='Delete'
             className={buttonClass}
             onMouseDown={action(onDelete)}
           >

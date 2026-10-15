@@ -140,6 +140,7 @@ export const TagEditorContent = ({
                   const wouldExceedMax = !isActive && atMax;
                   return (
                     <button
+                      aria-pressed={isActive}
                       key={allowedTag}
                       type='button'
                       disabled={isMutating || wouldExceedMax}

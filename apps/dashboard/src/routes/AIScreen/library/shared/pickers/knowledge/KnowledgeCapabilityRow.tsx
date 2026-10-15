@@ -1,12 +1,9 @@
 import { useMemo, useState, type ReactElement } from 'react';
-import { InformationCircle, MultipleCrossCancelDefault, PlusDefault } from '@xyne/icons';
-import { Tooltip } from '@/components/ui/Tooltip/Tooltip';
+import { MultipleCrossCancelDefault, PlusDefault } from '@xyne/icons';
 import { useClawKnowledgeBaseTree } from '@/hooks/useClawKnowledgeBaseTree';
 import type { KbSelection } from '@/services/claw/clawKnowledgeBaseTypes';
 import { BrowseKnowledgeDialog } from './BrowseKnowledgeDialog';
 import { buildKbIndex, describeGrants, removeGrant, type KbScope } from './knowledgeCatalog';
-
-const CAPTION = 'Give your agent trusted information to reference.';
 
 interface KnowledgeCapabilityRowProps {
   scope: KbScope;
@@ -34,22 +31,17 @@ export function KnowledgeCapabilityRow({
       <div className='flex w-full items-center justify-between gap-4'>
         <div className='flex min-w-0 items-center gap-4'>
           <div className='flex shrink-0 items-center gap-2'>
-            <span className='text-sm font-medium leading-[1.2] tracking-[-0.1px] text-foreground'>
+            <span className='text-sm leading-[1.2] tracking-[-0.1px] text-foreground'>
               Knowledge
             </span>
-            <Tooltip side='top' content={CAPTION}>
-              <span className='inline-flex'>
-                <InformationCircle className='size-4 text-muted-foreground' aria-hidden />
-              </span>
-            </Tooltip>
           </div>
-          <span className='truncate text-xs leading-5 tracking-[-0.24px] text-muted-foreground'>
-            {scope === 'USER'
-              ? 'Matches the running user’s access'
-              : grants.length > 0
-                ? `${grants.length} grant${grants.length === 1 ? '' : 's'} attached`
-                : 'No collections attached'}
-          </span>
+          {(scope === 'USER' || grants.length > 0) && (
+            <span className='truncate text-xs leading-5 tracking-[-0.24px] text-muted-foreground'>
+              {scope === 'USER'
+                ? 'Matches the running user’s access'
+                : `${grants.length} grant${grants.length === 1 ? '' : 's'} attached`}
+            </span>
+          )}
         </div>
 
         <button
@@ -63,8 +55,6 @@ export function KnowledgeCapabilityRow({
           <PlusDefault className='size-4' aria-hidden />
         </button>
       </div>
-
-      <p className='text-sm leading-5 text-muted-foreground'>{CAPTION}</p>
 
       {scope === 'COLLECTIONS' && labels.length > 0 && (
         <div className='flex flex-wrap items-start gap-2 pt-1'>

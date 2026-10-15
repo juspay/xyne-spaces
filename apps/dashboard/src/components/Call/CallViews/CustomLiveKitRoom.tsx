@@ -12,14 +12,13 @@ import { useTranscriptionToggleNotice } from '../hooks/useTranscriptionToggleNot
 import { useTranscriptionHostToast } from '../hooks/useTranscriptionHostToast';
 import { useTranscriptionPendingTimeout } from '../hooks/useTranscriptionPendingTimeout';
 import { usePlatform } from '../../../hooks/usePlatform';
-import { AIInviteDialog } from '../CallModals/AIInviteDialog';
-import { CreateTicketModal } from '../../Tickets/CreateTicketModal/CreateTicketModal';
 import { useChannel } from '../../../hooks/useChannels';
 import { useAuth } from '../../../hooks/useAuth';
 import { EndCallModal } from '../EndCallModal/EndCallModal';
 import { TranscriptDispositionModal } from '../EndCallModal/TranscriptDispositionModal';
 import { AFKWarningModal } from '../AFKWarningModal/AFKWarningModal';
 import {
+  useActiveCall,
   useIsCallHost,
   useIsOnlyParticipant,
   useCallParticipants,
@@ -35,8 +34,18 @@ import { playAudio } from '../../../utils/audioPlayer';
 
 import { isParticipantScreenShareEnabled } from '../../../utils/livekitScreenShare';
 import { logger, Logger } from '../../../utils/logger';
-import { CallWhiteboardSync } from '../CallWhiteboard';
+// Straight from its file: the CallWhiteboard index also re-exports the
+// whiteboard itself (Excalidraw), which loads only when opened (lazyPanels).
+import { CallWhiteboardSync } from '../CallWhiteboard/CallWhiteboardSync';
+import {
+  LazyAIInviteDialog,
+  LazyCreateTicketModal,
+  MountOnceOpen,
+  preloadCallPanels,
+} from '../lazyPanels';
 import { callService } from '../../../services/Call/callService';
+import { isCallWindowRoute } from '../../../utils/callWindow';
+import { markCallWindowUserLeft, setCallWindowLeaveHandler } from '../../../utils/callWindowHost';
 import {
   createCallWhiteboardPngBlobs,
   getCallWhiteboardState,
@@ -129,6 +138,15 @@ export function CustomLiveKitRoom({
         )
     : false;
 
+  const isInCallWindow = isCallWindowRoute();
+
+  // The call is up: warm the on-demand panels (chat, notes, whiteboard,
+  // dialogs) in the background so opening one is immediate.
+  const isConnected = snapshot.matches('connected');
+  useEffect(() => {
+    if (isConnected) preloadCallPanels();
+  }, [isConnected]);
+
   // Determine simple machine state string for child components
   // Handle nested states like { connected: 'nativeMode' }
   const machineState = snapshot.matches('connected')
@@ -209,7 +227,16 @@ export function CustomLiveKitRoom({
   const [dispositionSubmitting, setDispositionSubmitting] = useState(false);
   const [dispositionError, setDispositionError] = useState<string | null>(null);
 
-  const isHost = useIsCallHost(externalId, user?.id);
+  const hasCallRow = !!useActiveCall(externalId);
+  const isHostByCallRow = useIsCallHost(externalId, user?.id);
+  // The call window shows the call before Zero has the call row. Until it
+  // lands, go by the handoff (the initiator, or the host the main window saw),
+  // so a host hanging up early still gets the end-for-all choice.
+  const callHostUserIdHint = useSelector(roomActor, state => state.context.callHostUserIdHint);
+  const isInitiator = useSelector(roomActor, state => state.context.isInitiator);
+  const isHost = hasCallRow
+    ? isHostByCallRow
+    : isCallWindowRoute() && !!user?.id && (isInitiator || callHostUserIdHint === user.id);
   // Host's own "Transcription off … Undo" toast when they stop the agent.
   useTranscriptionHostToast(isTranscriptionEnabled, isHost);
   // Peers see "the host stopped transcription" (host skipped — they get the toast above).
@@ -247,10 +274,13 @@ export function CustomLiveKitRoom({
     [isHost, callParticipants],
   );
 
-  // Toast notification when new lobby request arrives
-  const prevLobbyCountRef = useRef(lobbyRequests.length);
+  // Toast notification when new lobby request arrives. Counted from when the
+  // call row has loaded, so requests already pending then are not announced
+  // as new (the call window shows the call before the row syncs).
+  const prevLobbyCountRef = useRef<number | null>(hasCallRow ? lobbyRequests.length : null);
   useEffect(() => {
-    if (lobbyRequests.length > prevLobbyCountRef.current) {
+    if (!hasCallRow) return;
+    if (prevLobbyCountRef.current !== null && lobbyRequests.length > prevLobbyCountRef.current) {
       const newest = lobbyRequests[lobbyRequests.length - 1];
       if (newest) {
         // Resolve name: external → displayName, internal → look up from users
@@ -268,7 +298,7 @@ export function CustomLiveKitRoom({
       }
     }
     prevLobbyCountRef.current = lobbyRequests.length;
-  }, [lobbyRequests, allUsers]);
+  }, [lobbyRequests, allUsers, hasCallRow]);
 
   // Lobby approval handlers
   const handleApproveLobbyRequest = useCallback(
@@ -334,6 +364,7 @@ export function CustomLiveKitRoom({
         if (isChatOpen) {
           roomActor.send({ type: 'TOGGLE_CHAT' });
         }
+        if (isCallWindowRoute()) markCallWindowUserLeft();
         roomActor.send({ type: 'DISCONNECT', endForAll });
         setShowEndCallModal(false);
       })();
@@ -355,6 +386,14 @@ export function CustomLiveKitRoom({
     }
     handleDisconnect();
   }, [isHost, isOnlyParticipant, isTranscriptionEnabled, handleDisconnect]);
+
+  // Closing the call window leaves through this same flow (whiteboard save,
+  // end-call and transcript choices), not a bare disconnect.
+  useEffect(() => {
+    if (!isCallWindowRoute()) return undefined;
+    setCallWindowLeaveHandler(handleDisconnectClick);
+    return (): void => setCallWindowLeaveHandler(null);
+  }, [handleDisconnectClick]);
 
   // Apply the delete/keep choice (only when transcription is OFF) then end the call.
   // Delete is awaited/blocking so nothing the host chose to delete is generated or indexed.
@@ -507,8 +546,9 @@ export function CustomLiveKitRoom({
     return <></>;
   }
 
-  // Route to appropriate view based on viewMode
-  if (machineViewMode === 'mini') {
+  // Route to appropriate view based on viewMode. The desktop call window is
+  // the whole call, always full size; the OS window controls minimize it.
+  if (machineViewMode === 'mini' && !isInCallWindow) {
     // Mobile call UI is in AppRoot; keep whiteboard sync alive. Desktop shows mini view.
     if (isMobile) {
       return <CallWhiteboardSync room={room} />;
@@ -579,30 +619,34 @@ export function CustomLiveKitRoom({
           onStay={handleAFKStay}
           onLeave={handleAFKLeave}
         />
-        <AIInviteDialog
-          isOpen={inviteDialogOpen}
-          onClose={handleCloseInviteDialog}
-          onSend={handleSendInvite}
-          callId={callId}
-          users={inviteUsers}
-          suggestedMessage={inviteSuggestedMessage}
-          roomLink={roomLink || undefined}
-        />
-        {channelId && currentChannel?.projectId && (
-          <CreateTicketModal
-            isOpen={ticketDialogOpen}
-            onClose={handleCloseTicketDialog}
-            channelId={channelId}
-            projectId={currentChannel.projectId}
-            selectedBoardId={ticketBoardId}
-            trackSource='call'
-            initialTitle={ticketTitle}
-            initialDescription={ticketDescription}
-            initialAssignee={initialTicketAssignee}
-            initialEta={initialTicketEta}
-            isFromAI={true}
-            onTicketCreated={handleTicketCreated}
+        <MountOnceOpen open={inviteDialogOpen}>
+          <LazyAIInviteDialog
+            isOpen={inviteDialogOpen}
+            onClose={handleCloseInviteDialog}
+            onSend={handleSendInvite}
+            callId={callId}
+            users={inviteUsers}
+            suggestedMessage={inviteSuggestedMessage}
+            roomLink={roomLink || undefined}
           />
+        </MountOnceOpen>
+        {channelId && currentChannel?.projectId && (
+          <MountOnceOpen open={ticketDialogOpen}>
+            <LazyCreateTicketModal
+              isOpen={ticketDialogOpen}
+              onClose={handleCloseTicketDialog}
+              channelId={channelId}
+              projectId={currentChannel.projectId}
+              selectedBoardId={ticketBoardId}
+              trackSource='call'
+              initialTitle={ticketTitle}
+              initialDescription={ticketDescription}
+              initialAssignee={initialTicketAssignee}
+              initialEta={initialTicketEta}
+              isFromAI={true}
+              onTicketCreated={handleTicketCreated}
+            />
+          </MountOnceOpen>
         )}
       </>
     );
@@ -633,6 +677,7 @@ export function CustomLiveKitRoom({
         onToggleScreenShare={toggleScreenShare}
         onDisconnect={handleDisconnectClick}
         onMinimize={() => roomActor.send({ type: 'TOGGLE_VIEW' })}
+        hideMinimize={isInCallWindow}
         onToggleThread={handleToggleThread}
         onRequestControl={handleRequestControl}
         requestedAiController={isAiControlRequested}
@@ -677,30 +722,34 @@ export function CustomLiveKitRoom({
         onStay={handleAFKStay}
         onLeave={handleAFKLeave}
       />
-      <AIInviteDialog
-        isOpen={inviteDialogOpen}
-        onClose={handleCloseInviteDialog}
-        onSend={handleSendInvite}
-        callId={callId}
-        users={inviteUsers}
-        suggestedMessage={inviteSuggestedMessage}
-        roomLink={roomLink || undefined}
-      />
-      {channelId && currentChannel?.projectId && (
-        <CreateTicketModal
-          isOpen={ticketDialogOpen}
-          onClose={handleCloseTicketDialog}
-          channelId={channelId}
-          projectId={currentChannel.projectId}
-          selectedBoardId={ticketBoardId}
-          trackSource='call'
-          initialTitle={ticketTitle}
-          initialDescription={ticketDescription}
-          initialAssignee={initialTicketAssignee}
-          initialEta={initialTicketEta}
-          isFromAI={true}
-          onTicketCreated={handleTicketCreated}
+      <MountOnceOpen open={inviteDialogOpen}>
+        <LazyAIInviteDialog
+          isOpen={inviteDialogOpen}
+          onClose={handleCloseInviteDialog}
+          onSend={handleSendInvite}
+          callId={callId}
+          users={inviteUsers}
+          suggestedMessage={inviteSuggestedMessage}
+          roomLink={roomLink || undefined}
         />
+      </MountOnceOpen>
+      {channelId && currentChannel?.projectId && (
+        <MountOnceOpen open={ticketDialogOpen}>
+          <LazyCreateTicketModal
+            isOpen={ticketDialogOpen}
+            onClose={handleCloseTicketDialog}
+            channelId={channelId}
+            projectId={currentChannel.projectId}
+            selectedBoardId={ticketBoardId}
+            trackSource='call'
+            initialTitle={ticketTitle}
+            initialDescription={ticketDescription}
+            initialAssignee={initialTicketAssignee}
+            initialEta={initialTicketEta}
+            isFromAI={true}
+            onTicketCreated={handleTicketCreated}
+          />
+        </MountOnceOpen>
       )}
     </>
   );

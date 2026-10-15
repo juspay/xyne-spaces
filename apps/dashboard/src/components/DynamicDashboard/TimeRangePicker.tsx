@@ -250,6 +250,7 @@ interface PresetItemProps {
 }
 const PresetItem = ({ label, selected, onClick }: PresetItemProps): ReactElement => (
   <button
+    aria-current={selected ? 'true' : undefined}
     onClick={onClick}
     className={`flex items-center justify-between w-full px-2 py-1.5 rounded text-sm transition-colors ${
       selected ? 'bg-accent text-foreground' : 'text-foreground hover:bg-accent/60'

@@ -19,7 +19,7 @@ const OrganisationsTabBar = ({
       aria-label={`${group.label} sections`}
       className='mt-4 flex items-center gap-0.5 overflow-x-auto no-scrollbar'
     >
-      {group.sections.map(({ key, label, icon: SectionIcon }) => {
+      {group.sections.map(({ key, label, description, icon: SectionIcon }) => {
         const to = `${base}/${key}`;
         const isActive = pathname === to || pathname.startsWith(`${to}/`);
         return (
@@ -27,6 +27,7 @@ const OrganisationsTabBar = ({
             key={key}
             to={to}
             aria-current={isActive ? 'page' : undefined}
+            aria-description={description}
             data-testid={`organisations-tab-${key}`}
             data-track-category='organisations'
             data-track-name={`OPEN_${key.toUpperCase().replace(/-/g, '_')}`}

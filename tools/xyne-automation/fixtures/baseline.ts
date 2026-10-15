@@ -26,6 +26,7 @@ import {
 import {
   ensureBrowserSession,
   resetAllBrowserSessionsForReuse,
+  saveRecordedVideos,
 } from '@/tests/shared/support/browser-manager';
 import {
   assertValidChannelAlias,
@@ -793,6 +794,7 @@ export async function bootstrapBaselineFixture(): Promise<void> {
 
   writeBaselineContextSnapshot('before');
   const consoleErrors: string[] = [];
+  let bootstrapFailed = false;
   try {
     await ensureBrowserSession(1280, 720, config.browser);
     testContext.activePage.on('pageerror', (e) =>
@@ -857,9 +859,11 @@ export async function bootstrapBaselineFixture(): Promise<void> {
     } catch (_snapErr) {
       // best-effort diagnostics only
     }
+    bootstrapFailed = true;
     throw bootstrapError;
   } finally {
     await resetAllBrowserSessionsForReuse();
+    await saveRecordedVideos('baseline-setup', bootstrapFailed);
     testContext.resetScenarioState();
   }
 }

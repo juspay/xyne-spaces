@@ -130,14 +130,26 @@ function firstUrl(records: Record<string, unknown>[]): string | null {
   return direct && /^https?:\/\//i.test(direct) ? direct : null;
 }
 
+/**
+ * Best-effort artifact write. Never throws, but reports whether a row was
+ * actually written: `recordConversationArtifact` can also return `null`
+ * without throwing (no org for the user, bad kind, oversized refId), and
+ * callers that gate user-visible output on the row existing must see that.
+ */
 async function safeRecord(
   label: string,
   input: Parameters<typeof recordConversationArtifact>[0],
-): Promise<void> {
+): Promise<boolean> {
   try {
-    await recordConversationArtifact(input);
+    const recorded = await recordConversationArtifact(input);
+    if (!recorded) {
+      log.warn(`${label} ingestion skipped: no row written (conversationId=${input.conversationId} refId=${input.refId})`);
+      return false;
+    }
+    return true;
   } catch (err) {
     log.warn(`${label} ingestion failed: ${err instanceof Error ? err.message : String(err)}`);
+    return false;
   }
 }
 
@@ -195,13 +207,23 @@ export async function ingestArtifactSignals(input: IngestArtifactSignalsInput): 
   }
 }
 
+export interface SandboxPreviewIngestResult {
+  /**
+   * True when at least one CLAW ownership row for the sandbox was written.
+   * The sandbox access check (routes/sandbox-access.ts) authorizes on any
+   * CLAW row for the sandboxId, so without one the preview URL returns 403.
+   */
+  recorded: boolean;
+  reason?: "missing-input" | "record-failed" | "threw";
+}
+
 export async function ingestSandboxPreviewSignals(
   ctx: ArtifactSignalContext,
   payload: { sandboxId?: string; sandboxPreviewUrl?: string; sandboxCodePreviewUrl?: string },
-): Promise<void> {
+): Promise<SandboxPreviewIngestResult> {
   try {
     const sandboxId = typeof payload?.sandboxId === "string" ? payload.sandboxId.trim() : "";
-    if (!sandboxId || !ctx.conversationId || !ctx.userId) return;
+    if (!sandboxId || !ctx.conversationId || !ctx.userId) return { recorded: false, reason: "missing-input" };
     const base = {
       conversationId: ctx.conversationId,
       messageId: ctx.messageId ?? null,
@@ -211,25 +233,31 @@ export async function ingestSandboxPreviewSignals(
       refService: "CLAW" as ArtifactRefService,
       refId: sandboxId,
     };
+    let recorded = false;
     if (payload.sandboxCodePreviewUrl) {
-      await safeRecord("diff", {
-        ...base,
-        kind: "DIFF",
-        url: payload.sandboxCodePreviewUrl,
-        title: "Code changes",
-        latestVersionRef: ctx.runId ?? null,
-      });
+      recorded =
+        (await safeRecord("diff", {
+          ...base,
+          kind: "DIFF",
+          url: payload.sandboxCodePreviewUrl,
+          title: "Code changes",
+          latestVersionRef: ctx.runId ?? null,
+        })) || recorded;
     }
     if (payload.sandboxPreviewUrl) {
-      await safeRecord("preview", {
-        ...base,
-        kind: "PREVIEW",
-        url: payload.sandboxPreviewUrl,
-        title: "Live preview",
-      });
+      recorded =
+        (await safeRecord("preview", {
+          ...base,
+          kind: "PREVIEW",
+          url: payload.sandboxPreviewUrl,
+          title: "Live preview",
+        })) || recorded;
     }
+    if (!payload.sandboxCodePreviewUrl && !payload.sandboxPreviewUrl) return { recorded: false, reason: "missing-input" };
+    return recorded ? { recorded: true } : { recorded: false, reason: "record-failed" };
   } catch (err) {
     log.warn(`ingestSandboxPreviewSignals threw: ${err instanceof Error ? err.message : String(err)}`);
+    return { recorded: false, reason: "threw" };
   }
 }
 

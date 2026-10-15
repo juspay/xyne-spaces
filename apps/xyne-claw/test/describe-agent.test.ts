@@ -1,6 +1,7 @@
 import { test, expect } from "vitest";
 import {
   buildDescribeAgentTool,
+  describeAgentCardForReply,
   DESCRIBE_AGENT_TOOL_NAME,
   type DescribeAgentRef,
 } from "../src/describe-agent.js";
@@ -59,4 +60,31 @@ test("does not end the turn — the card accompanies the reply", async () => {
   const res = await callTool(ref, {});
   expect(res.content[0]!.text).toMatch(/do NOT repeat that list/i);
   expect(buildDescribeAgentTool(ref).description).not.toMatch(/STOP/);
+});
+
+test("tells the model when not to show a card", () => {
+  const description = buildDescribeAgentTool({}).description;
+
+  expect(description).toContain("Do NOT call it when");
+  expect(description).toContain("MODEL or provider you run on");
+  expect(description).toContain("returns NOTHING to you");
+  expect(description).toContain("create, change or fix an agent");
+});
+
+test("drops the card when the turn queued an agent-authoring action", () => {
+  for (const tool of ["update-agent", "create-agent", "clone-agent", "create-subagent", "update-subagent", "create-mcp"]) {
+    expect(describeAgentCardForReply({ variant: "summary" }, [{ tool, signature: "s" }])).toBeUndefined();
+  }
+});
+
+test("keeps the card alongside unrelated write actions", () => {
+  const card = { variant: "profile" as const, slug: "ticket-triage" };
+
+  expect(describeAgentCardForReply(card, [{ tool: "spaces-create-ticket" }])).toEqual(card);
+  expect(describeAgentCardForReply(card, [])).toEqual(card);
+  expect(describeAgentCardForReply(card, [null, "junk"])).toEqual(card);
+});
+
+test("passes through when no card was queued", () => {
+  expect(describeAgentCardForReply(undefined, [{ tool: "update-agent" }])).toBeUndefined();
 });

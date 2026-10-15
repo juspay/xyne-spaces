@@ -436,6 +436,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                   data-track-name='SAVE_TEAM'
                   className='p-1 text-green-600 hover:bg-green-50 rounded'
                   title='Save'
+                  aria-label='Save'
                 >
                   <Check className='size-4' />
                 </button>
@@ -445,6 +446,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                   data-track-name='CANCEL_EDIT_TEAM'
                   className='p-1 text-muted-foreground hover:bg-accent rounded'
                   title='Cancel'
+                  aria-label='Cancel'
                 >
                   <X className='size-4' />
                 </button>
@@ -461,6 +463,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                   data-track-name='EDIT_TEAM_NAME'
                   className='text-muted-foreground hover:text-muted-foreground'
                   title='Edit team name'
+                  aria-label='Edit team name'
                 >
                   <Edit2 className='size-3' />
                 </button>
@@ -583,6 +586,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                     data-track-name='CLEAR_STATUS'
                     className='flex-shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
                     title='Clear status'
+                    aria-label='Clear status'
                   >
                     <X className='size-3 text-muted-foreground' />
                   </Button>
@@ -714,6 +718,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                   data-track-category='USER_PROFILE'
                   data-track-name='COPY_USER_ID'
                   title='Copy user ID'
+                  aria-label='Copy user ID'
                 >
                   {copiedUserId ? <Check className='size-3' /> : <Copy className='size-3' />}
                 </Button>
@@ -752,6 +757,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                       data-track-name='START_EDIT_DISPLAY_NAME'
                       className='text-muted-foreground hover:text-muted-foreground'
                       title='Edit display name'
+                      aria-label='Edit display name'
                     >
                       <Edit2 className='size-3' />
                     </button>
@@ -779,6 +785,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                         data-track-name='SAVE_DISPLAY_NAME'
                         className='p-1 text-green-600 hover:bg-green-50 rounded'
                         title='Save'
+                        aria-label='Save'
                       >
                         <Check className='size-4' />
                       </button>
@@ -788,6 +795,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                         data-track-name='CANCEL_EDIT_DISPLAY_NAME'
                         className='p-1 text-muted-foreground hover:bg-accent rounded'
                         title='Cancel'
+                        aria-label='Cancel'
                       >
                         <X className='size-4' />
                       </button>
@@ -826,6 +834,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                       data-track-name='START_EDIT_PHONE_NUMBER'
                       className='text-muted-foreground hover:text-muted-foreground'
                       title='Edit phone number'
+                      aria-label='Edit phone number'
                     >
                       <Edit2 className='size-3' />
                     </button>
@@ -853,6 +862,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                         data-track-name='SAVE_PHONE_NUMBER'
                         className='p-1 text-green-600 hover:bg-green-50 rounded'
                         title='Save'
+                        aria-label='Save'
                       >
                         <Check className='size-4' />
                       </button>
@@ -862,6 +872,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                         data-track-name='CANCEL_EDIT_PHONE_NUMBER'
                         className='p-1 text-muted-foreground hover:bg-accent rounded'
                         title='Cancel'
+                        aria-label='Cancel'
                       >
                         <X className='size-4' />
                       </button>
@@ -924,6 +935,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                       data-track-name='START_EDIT_BIRTH_DATE'
                       className='text-muted-foreground hover:text-muted-foreground'
                       title='Edit birth date'
+                      aria-label='Edit birth date'
                     >
                       <Edit2 className='size-3' />
                     </button>
@@ -950,6 +962,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                         data-track-name='SAVE_BIRTH_DATE'
                         className='p-1 text-green-600 hover:bg-green-50 rounded'
                         title='Save'
+                        aria-label='Save'
                       >
                         <Check className='size-4' />
                       </button>
@@ -959,6 +972,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                         data-track-name='CANCEL_EDIT_BIRTH_DATE'
                         className='p-1 text-muted-foreground hover:bg-accent rounded'
                         title='Cancel'
+                        aria-label='Cancel'
                       >
                         <X className='size-4' />
                       </button>

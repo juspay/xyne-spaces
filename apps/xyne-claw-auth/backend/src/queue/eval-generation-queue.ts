@@ -13,7 +13,6 @@ export interface EvalGenerationJobData {
   genProvider?: string;
   genModel?: string;
   optimizations?: string;
-  judgeBackend?: string;
 }
 
 export interface EvalGenerationProgress {

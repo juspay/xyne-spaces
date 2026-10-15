@@ -14,8 +14,8 @@
  */
 
 import type { ClassifierExchange } from "xyne-claw-shared";
-import type { JevAnswer, JevQuestion } from "./jev.js";
-import { collectJudgeExchanges, storableExchange } from "./judge-backend.js";
+import type { XorAnswer, XorQuestion } from "./xor.js";
+import { collectJudgeExchanges, storableExchange } from "./judge-trace.js";
 import { answerProb, band, runJudgeSite } from "./judge-site.js";
 import { parseArgMarkup, parseJsonObject } from "./leaked-tool-call.js";
 import { postChatCompletion, type ChatCompletionResponse } from "./litellm-chat.js";
@@ -202,9 +202,8 @@ export function parseGateDecision(raw: unknown): GateDecision | null {
 // between (and every Jev outage) goes to the LLM gate exactly as before.
 const JEV_RESPOND_AT = Number(process.env["TWIN_GATE_JEV_RESPOND_AT"] ?? 0.7);
 const JEV_SKIP_AT = Number(process.env["TWIN_GATE_JEV_SKIP_AT"] ?? 0.3);
-const JEV_GATE_BUDGET_MS = Number(process.env["TWIN_GATE_JEV_TIMEOUT_MS"] ?? 3_000);
 
-const JEV_GATE_QUESTIONS: Record<string, JevQuestion> = {
+const JEV_GATE_QUESTIONS: Record<string, XorQuestion> = {
   worth: {
     type: "score",
     instructions:
@@ -219,7 +218,7 @@ const JEV_GATE_QUESTIONS: Record<string, JevQuestion> = {
 
 /** Pure: Jev answers → gate decision, or null (unsure → LLM gate). Exported for tests. */
 export function decideFromJev(
-  answers: Record<string, JevAnswer>,
+  answers: Record<string, XorAnswer>,
   high = JEV_RESPOND_AT,
   low = JEV_SKIP_AT,
 ): GateDecision | null {
@@ -246,7 +245,6 @@ async function decideRespondInner(req: RespondGateRequest): Promise<RespondGateR
   return (await runJudgeSite<RespondGateResult>({
     site: "twin-respond-gate",
     enabled: optEnabled("jev_twin_gate"),
-    budgetMs: JEV_GATE_BUDGET_MS,
     state: userPrompt,
     questions: JEV_GATE_QUESTIONS,
     decide: (answers) => {

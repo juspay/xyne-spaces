@@ -23,6 +23,8 @@ export interface Config {
   browser: BrowserType;
   enableBrowserConsoleLogs: boolean;
   parallel: number;
+  // Record a .webm per browser session into <run artifact dir>/videos.
+  recordVideo: boolean;
   testProgressFile?: string;
   desk: DeskConfig;
 }
@@ -140,7 +142,7 @@ function getParallel(env: Environment): number {
   switch (env) {
     case 'local':
     case 'local-test':
-      return 3;
+      return 5;
     case 'test':
       return 1; // Jenkins runs serially — single Gauge worker
     default:
@@ -148,12 +150,8 @@ function getParallel(env: Environment): number {
   }
 }
 
-// Mock Desk addresses must share the backend's DESK_MOCK_DEFAULT_EMAIL_DOMAIN.
-function getDeskConfig(): DeskConfig {
-  return {
-    mockDlEmail: process.env.DESK_MOCK_DL_EMAIL || 'support-dl@desk-mock.xyne.test',
-    mockSharedMailbox: process.env.DESK_MOCK_SHARED_MAILBOX || 'support@desk-mock.xyne.test',
-  };
+function getRecordVideo(): boolean {
+  return process.env.RECORD_VIDEO === 'true';
 }
 
 function getConfigForEnv(env: Environment): Config {
@@ -170,6 +168,7 @@ function getConfigForEnv(env: Environment): Config {
     browser: getBrowser(),
     enableBrowserConsoleLogs: getEnableBrowserConsoleLogs(env),
     parallel: getParallel(env),
+    recordVideo: getRecordVideo(),
     testProgressFile: process.env.XYNE_TEST_PROGRESS_FILE || undefined,
     desk: getDeskConfig(),
   };

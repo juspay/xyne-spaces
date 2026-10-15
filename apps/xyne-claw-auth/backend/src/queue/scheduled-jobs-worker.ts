@@ -239,6 +239,7 @@ async function processJob(job: Job<ScheduledJobData>, token?: string): Promise<v
       channelName: channelId ?? "",
       conversationId: conversationId ?? runConversationId,
       task,
+      ...(agentRow ? { agentId: agentRow.id, agentOrgId: agentRow.orgId ?? null } : {}),
       agentSlug,
       responseMode: "conversation",
       appToken,

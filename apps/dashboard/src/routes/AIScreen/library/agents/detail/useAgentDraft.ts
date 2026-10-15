@@ -40,6 +40,11 @@ export interface AgentDraft {
   save: () => Promise<void>;
 }
 
+function agentVersion(agent: Agent | undefined): string {
+  if (!agent) return '';
+  return `${agent.slug}@${agent.updatedAt ?? ''}`;
+}
+
 export function useAgentDraft(agent: Agent | undefined, canRenameHandle: boolean): AgentDraft {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -48,18 +53,23 @@ export function useAgentDraft(agent: Agent | undefined, canRenameHandle: boolean
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loadedSlug, setLoadedSlug] = useState(agent?.slug ?? '');
+  const [loadedVersion, setLoadedVersion] = useState(() => agentVersion(agent));
   const [name, setName] = useState(agent?.name ?? '');
   const [slug, setSlug] = useState(agent?.slug ?? '');
   const [description, setDescription] = useState(agent?.description ?? '');
   const [systemPrompt, setSystemPrompt] = useState(agent?.systemPrompt ?? '');
 
-  if (agent && loadedSlug !== agent.slug) {
-    setLoadedSlug(agent.slug);
-    setName(agent.name);
-    setSlug(agent.slug);
-    setDescription(agent.description);
-    setSystemPrompt(agent.systemPrompt ?? '');
-    setEditing(false);
+  if (agent && loadedVersion !== agentVersion(agent)) {
+    const switchedAgent = loadedSlug !== agent.slug;
+    if (switchedAgent || !editing) {
+      setLoadedSlug(agent.slug);
+      setLoadedVersion(agentVersion(agent));
+      setName(agent.name);
+      setSlug(agent.slug);
+      setDescription(agent.description);
+      setSystemPrompt(agent.systemPrompt ?? '');
+      if (switchedAgent) setEditing(false);
+    }
   }
 
   const normalizedSlug = slug.trim().toLowerCase();
@@ -111,6 +121,7 @@ export function useAgentDraft(agent: Agent | undefined, canRenameHandle: boolean
         void queryClient.invalidateQueries({ queryKey: clawPromptVersionsKey(updated.slug) });
       }
       setLoadedSlug(updated.slug);
+      setLoadedVersion(agentVersion(updated));
       setName(updated.name);
       setSlug(updated.slug);
       setDescription(updated.description);

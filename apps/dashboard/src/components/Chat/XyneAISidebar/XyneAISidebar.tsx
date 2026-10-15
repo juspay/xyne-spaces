@@ -28,7 +28,10 @@ import { useChannel, useAllVisibleChannels } from '../../../hooks/useChannels';
 import { useXyneAIStream } from '../../../hooks/useXyneAIStream';
 import { ChannelScopeType } from '@xyne/shared';
 import { BASE_URL } from '../../../services/clients/apiClient';
-import type { ConversationHistory as ConversationHistoryType } from './utils/XyneAITypes';
+import type {
+  ConversationHistory as ConversationHistoryType,
+  PendingAction,
+} from './utils/XyneAITypes';
 import { resolveActivePath, getSiblings, BRANCH_ROOT_KEY } from './utils/XyneAIUtils';
 import { useV2SessionInvalidator } from '../../../hooks/useAskAISessionsV2';
 import {
@@ -88,6 +91,7 @@ import type { UserActivity } from '../../../hooks/useUserActivity';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useDefaultAgent, useSelectedAgent } from '../../../hooks/useSelectedAgent';
 import { useAskAIAuto } from '../../../hooks/useAskAIAuto';
+import { useUserPreference } from '../../../machines/userPreferencesMachine';
 import { fetchAccessibleClawAgents } from '../../../services/clawAgentListService';
 import { fetchClawAgentModels } from '../../../services/clawAgentModelsService';
 import { collectionsForAgent } from '../../Composer/ComposerCollections';
@@ -104,8 +108,11 @@ import {
   flattenCanvasContexts,
 } from '../../../machines/xyneAIMachine';
 import { xyneAIStreamManager, type StreamState } from '../../../services/XyneAI';
-import { useVoiceMode } from '../../Voice/useVoiceMode';
-import { VoiceModeBar } from '../../Voice/VoiceModeBar';
+import { useVoiceHost } from '../../Voice/voiceSession';
+import { VoiceStage } from '../../Voice/VoiceStage';
+import { buddy } from '../../Assistant/buddy';
+import { ASSISTANT_PANEL_ATTR } from '../../Assistant/buddy/constants';
+import { tryBuddy } from '../../Assistant/buddy/tryBuddy';
 import { useFlowActionComplete } from '../../../hooks/useFlowActionComplete';
 import {
   buildXyneAIStreamThreadId,
@@ -177,6 +184,10 @@ interface XyneAISidebarProps {
   // Drops the tilted suggestion cards from the empty state, leaving the heading.
   // Set by hosts that embed this in a narrow slot (e.g. a Streams column).
   hideEmptyStateSuggestions?: boolean;
+  hideBackgroundStreamNotice?: boolean;
+  showAgentHeader?: boolean;
+  hideAgentName?: boolean;
+  roomyContent?: boolean;
   // Drops the header row entirely. For hosts whose own chrome already carries a
   // title and a close, where this one is a second bar under the first however
   // little it contains.
@@ -196,6 +207,9 @@ interface XyneAISidebarProps {
   /** Analytics `source` for XYNE_AI_OPENED when this instance is embedded
    *  directly (not opened through xyneAIActor OPEN, which carries its own). */
   trackSource?: string;
+  onInterceptPendingAction?: (action: PendingAction, approved: boolean) => boolean;
+  hiddenContext?: () => string;
+  composerPlaceholder?: string;
 }
 
 const XyneAISidebar = ({
@@ -233,12 +247,23 @@ const XyneAISidebar = ({
   onStreamingChange,
   onFinalResponse,
   hideEmptyStateSuggestions = false,
+  hideBackgroundStreamNotice = false,
+  showAgentHeader = false,
+  hideAgentName = false,
+  roomyContent = false,
   hideHeader = false,
   suppressInputAutoFocus = false,
   trackSource: trackSourceProp,
+  onInterceptPendingAction,
+  hiddenContext,
+  composerPlaceholder,
 }: XyneAISidebarProps): ReactElement => {
   const isFullscreen = variant === 'fullscreen';
   const [inputValue, setInputValue] = useState('');
+  // The walk is awaited, so it must compare against the latest input, not the render that started it.
+  const inputValueRef = useRef(inputValue);
+  inputValueRef.current = inputValue;
+  const [buddyWorking, setBuddyWorking] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [conversationId, setConversationId] = useState<string>('');
   const [streamThreadKey, setStreamThreadKey] = useState<string>(
@@ -868,6 +893,8 @@ const XyneAISidebar = ({
 
   const effectiveAgentSlug = selectedAgentSlug;
   const { isAuto: isAutoStored, setAuto } = useAskAIAuto();
+  // Beta: Auto acts on screen only once turned on in Preferences → Developer.
+  const screenActions = useUserPreference('screenActionsEnabled');
   // An agent restored from an earlier visit wins over Auto.
   const isAuto = isAutoStored && !isAgentForced && selectedAgentSlug === null;
   // Same key the sidebar's own streams register under (see the adopt/attach
@@ -1964,6 +1991,9 @@ const XyneAISidebar = ({
         query = query + contextText;
       }
 
+      const hostContext = hiddenContext?.();
+      if (hostContext) query = `${query}\n\n${hostContext}`;
+
       // Note: Selection text is NOT appended to query here - it's handled internally in useXyneAIStream
       // The user message will show original query + selectionContexts as visual cards
 
@@ -2154,6 +2184,16 @@ const XyneAISidebar = ({
     submit: trigger => void handleSubmit(trigger),
   });
 
+  const handleAbort = (): void => {
+    if (buddyWorking) {
+      buddy.cancel();
+      return;
+    }
+    if (routedSubmit.stop()) return;
+    assistant.cancel();
+    abortCurrentRequest();
+  };
+
   const canRoute =
     isAuto &&
     assistant.actions.length > 0 &&
@@ -2163,12 +2203,44 @@ const XyneAISidebar = ({
     selectedActivities.length === 0 &&
     activeSelectionInfos.length === 0;
 
-  // Not in handleSubmit, so auto-send, suggestion and follow-up sends are never routed.
-  // An explicit "/command" is never re-routed by Auto either (same as the AI screen).
-  const handleComposerSubmit = (trigger?: 'button' | 'enter'): void => {
+  const sendOnward = (trigger?: 'button' | 'enter'): void => {
     const text = inputValue.trim();
     if (canRoute && text !== '' && !text.startsWith('/') && routedSubmit.route(trigger)) return;
     void handleSubmit(trigger);
+  };
+
+  const buddyTyped =
+    screenActions &&
+    isAuto &&
+    !aiOnboarding.isActive &&
+    !editingMessageId &&
+    attachments.length === 0 &&
+    selectedActivities.length === 0 &&
+    activeSelectionInfos.length === 0;
+
+  const runBuddy = async (text: string, trigger?: 'button' | 'enter'): Promise<void> => {
+    setBuddyWorking(true);
+    try {
+      const outcome = await tryBuddy(text);
+      // An edit made during the walk is the user's, so it is neither cleared nor sent.
+      if (inputValueRef.current.trim() !== text) return;
+      if (outcome === 'missed') sendOnward(trigger);
+      else if (outcome === 'done') setInputValue('');
+    } finally {
+      setBuddyWorking(false);
+    }
+  };
+
+  // Not in handleSubmit, so auto-send, suggestion and follow-up sends are never routed.
+  // An explicit "/command" is never re-routed by Auto either (same as the AI screen).
+  const handleComposerSubmit = (trigger?: 'button' | 'enter'): void => {
+    if (buddyWorking) return;
+    const text = inputValue.trim();
+    if (buddyTyped && text !== '' && !text.startsWith('/')) {
+      void runBuddy(text, trigger);
+      return;
+    }
+    sendOnward(trigger);
   };
 
   const [voiceMode, setVoiceMode] = useState(false);
@@ -2177,16 +2249,32 @@ const XyneAISidebar = ({
     setInputValue(text);
     setAutoSendRequest(request => request + 1);
   }, []);
-  const answerTranscript = canRoute ? assistant.answer : undefined;
+  const screenEnabled = screenActions && isAuto && !aiOnboarding.isActive;
+  const answerTranscript = useCallback(
+    async (text: string): Promise<string | null> => {
+      // '' means Buddy was stopped, so the action cards are not asked.
+      const walked = screenEnabled ? await buddy.answer(text) : null;
+      return walked ?? (canRoute ? assistant.answer(text) : null);
+    },
+    [screenEnabled, canRoute, assistant],
+  );
   const ownsStream = useCallback(
     (state: StreamState): boolean => state.streamSlotKey === streamThreadKey,
     [streamThreadKey],
   );
-  const voice = useVoiceMode({
-    enabled: voiceMode,
+  useVoiceHost(voiceMode, {
     submit: submitTranscript,
     ownsStream,
-    ...(answerTranscript && { answer: answerTranscript }),
+    answer: answerTranscript,
+    onStop: () => {
+      buddy.cancel();
+      handleAbort();
+    },
+    cancelAnswer: () => {
+      buddy.cancel();
+      assistant.cancel();
+    },
+    onExit: () => setVoiceMode(false),
   });
 
   const hasBackgroundStreamingElsewhere = useMemo(() => {
@@ -2198,6 +2286,7 @@ const XyneAISidebar = ({
 
   // Shared props for the composer (XyneAIInputBox), at both mount points.
   const sharedInputSectionProps = {
+    ...(composerPlaceholder === undefined ? {} : { placeholder: composerPlaceholder }),
     models: isV2 ? (agentModelsData?.models ?? []) : [],
     modelsLoading: agentModelsLoading,
     defaultModel: agentModelsData?.defaultModel ?? null,
@@ -2214,6 +2303,8 @@ const XyneAISidebar = ({
     onRemoveWorkflowInfo: handleRemoveWorkflowInfo,
     selectionInfos: activeSelectionInfos,
     inputValue,
+    showAgentHeader,
+    hideAgentName,
     onInputChange: setInputValue,
     onSubmit: handleComposerSubmit,
     onThreadInfoChange: setActiveThreadInfo,
@@ -2237,10 +2328,7 @@ const XyneAISidebar = ({
     selectedApps,
     selectedActivities,
     onActivitiesChange: setSelectedActivities,
-    onAbort: () => {
-      if (routedSubmit.stop()) return;
-      abortCurrentRequest();
-    },
+    onAbort: handleAbort,
     webSearchEnabled,
     webSearchAccessible,
     onWebSearchToggle: () => setWebSearchEnabled(!webSearchEnabled),
@@ -2280,6 +2368,7 @@ const XyneAISidebar = ({
 
   return (
     <div
+      {...{ [ASSISTANT_PANEL_ATTR]: '' }}
       className={cn(
         'grid h-full min-h-0 w-full overflow-hidden',
         isMobile && 'border bg-background',
@@ -2386,7 +2475,7 @@ const XyneAISidebar = ({
               />
             )}
 
-            {hasBackgroundStreamingElsewhere ? (
+            {hasBackgroundStreamingElsewhere && !hideBackgroundStreamNotice ? (
               <div className='flex-shrink-0 border-b border-border bg-muted/35 px-3 py-2 text-xs text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-1'>
                 <span>Another chat is still generating.</span>
                 <button
@@ -2429,7 +2518,8 @@ const XyneAISidebar = ({
               </div>
             ) : null}
 
-            <div className='min-h-0 flex-1 overflow-hidden'>
+            {/* Kept mounted in voice mode so the transcript and its scroll position survive. */}
+            <div className={cn('min-h-0 flex-1 overflow-hidden', voiceMode && 'hidden')}>
               <div className='flex h-full min-h-0 flex-col overflow-y-auto overflow-x-hidden'>
                 {isLoadingConversation ? (
                   <div className='px-3 py-4'>
@@ -2504,10 +2594,10 @@ const XyneAISidebar = ({
                       className={cn(
                         'py-4',
                         aiOnboarding.isActive && 'bot-markdown-content',
-                        isFullscreen ? 'w-full max-w-2xl px-4' : 'px-3',
+                        isFullscreen ? 'w-full max-w-2xl px-4' : roomyContent ? 'px-6' : 'px-3',
                       )}
                     >
-                      <div className='max-w-full space-y-4'>
+                      <div className={cn('max-w-full', roomyContent ? 'space-y-8' : 'space-y-4')}>
                         {aiOnboarding.isActive && (
                           <div className='mb-2 flex items-start gap-2'>
                             <div className='mt-0.5 flex-shrink-0'>
@@ -2578,6 +2668,7 @@ const XyneAISidebar = ({
                                     isV2={isV2}
                                     trackContext={messageTrackContext}
                                     {...(flowCards ? { flowCards } : {})}
+                                    onInterceptPendingAction={onInterceptPendingAction}
                                     onRatingChange={handleRatingChange}
                                     onRegenerate={
                                       !isLegacyConversation && isLatestBotMessage
@@ -2669,6 +2760,8 @@ const XyneAISidebar = ({
               </div>
             </div>
 
+            {voiceMode && <VoiceStage />}
+
             {aiOnboarding.isActive && onboardingAnsweredCount >= 3 && (
               <div className='px-3 py-2'>
                 <button
@@ -2683,39 +2776,30 @@ const XyneAISidebar = ({
             )}
 
             {/* composer-container — owns the gutter around the composer */}
-            {!(isFullscreen && messages.length === 0) && (
+            {!voiceMode && !(isFullscreen && messages.length === 0) && (
               <div
                 className={cn(
-                  isFullscreen ? 'flex justify-center px-4 pb-6' : 'px-3',
-                  !isFullscreen && !isMobile && 'pb-3',
+                  isFullscreen ? 'flex justify-center px-4 pb-6' : roomyContent ? 'px-6' : 'px-3',
+                  !isFullscreen && !isMobile && (roomyContent ? 'pb-6' : 'pb-3'),
                 )}
               >
                 <div className={cn(isFullscreen && 'w-full max-w-2xl')}>
-                  {voiceMode ? (
-                    <VoiceModeBar
-                      phase={voice.phase}
-                      onHoldStart={voice.startRecording}
-                      onHoldEnd={voice.stopRecording}
-                      onExit={() => setVoiceMode(false)}
-                    />
-                  ) : (
-                    <XyneAIInputBox
-                      ref={xyneAIInputRef}
-                      isOnboarding={aiOnboarding.isActive}
-                      isStreaming={isActiveSessionStreaming || assistant.isRouting}
-                      selectedAgentSlug={effectiveAgentSlug}
-                      agents={isV2 ? accessibleAgents : []}
-                      {...(isV2 && !isAgentForced ? { onSelectAgent: handleSelectAgent } : {})}
-                      {...(isV2 && !isAgentForced && !isFullscreen
-                        ? { isAuto, onSelectAuto: handleSelectAuto }
-                        : {})}
-                      {...(!isFullscreen && { onEnterVoiceMode: () => setVoiceMode(true) })}
-                      {...sharedInputSectionProps}
-                      kbCollectionId={kbCollectionIdProp}
-                      kbOpenNonce={kbOpenNonce}
-                      onSelectedCollectionsChange={setSelectedCollectionIds}
-                    />
-                  )}
+                  <XyneAIInputBox
+                    ref={xyneAIInputRef}
+                    isOnboarding={aiOnboarding.isActive}
+                    isStreaming={isActiveSessionStreaming || assistant.isRouting || buddyWorking}
+                    selectedAgentSlug={effectiveAgentSlug}
+                    agents={isV2 ? accessibleAgents : []}
+                    {...(isV2 && !isAgentForced ? { onSelectAgent: handleSelectAgent } : {})}
+                    {...(isV2 && !isAgentForced && !isFullscreen
+                      ? { isAuto, onSelectAuto: handleSelectAuto }
+                      : {})}
+                    {...(!isFullscreen && { onEnterVoiceMode: () => setVoiceMode(true) })}
+                    {...sharedInputSectionProps}
+                    kbCollectionId={kbCollectionIdProp}
+                    kbOpenNonce={kbOpenNonce}
+                    onSelectedCollectionsChange={setSelectedCollectionIds}
+                  />
                 </div>
               </div>
             )}

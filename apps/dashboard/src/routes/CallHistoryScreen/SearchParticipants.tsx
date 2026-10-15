@@ -48,6 +48,10 @@ interface SearchParticipantsProps {
    * invites) pass the resolved options for their selected values here.
    */
   prefilledOptions?: ParticipantOptions[];
+  /** Placeholder before anyone is selected. */
+  placeholder?: string;
+  /** Marks the field invalid (red border), e.g. after a submit with nobody added. */
+  hasError?: boolean;
 }
 
 export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
@@ -67,6 +71,8 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
   lockedValues,
   disableClientFiltering = false,
   prefilledOptions,
+  placeholder = 'Search by user, channel, or group name',
+  hasError = false,
 }) => {
   const [selectedOptionsMap, setSelectedOptionsMap] = useState<Map<string, ParticipantOptions>>(
     new Map(),
@@ -339,6 +345,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
       {!lockedValues?.has(option.value) && (
         <button
           type='button'
+          aria-label={`Remove ${option.label}`}
           onClick={e => {
             e.stopPropagation();
             toggleValue(option.value);
@@ -414,6 +421,8 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
                   )}
                   <button
                     type='button'
+                    aria-label={isOpen ? 'Collapse members' : 'Expand members'}
+                    aria-expanded={isOpen}
                     data-track-category='CALLS'
                     data-track-name='toggle-channel-members-expand'
                     onClick={e => {
@@ -432,6 +441,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
               )}
             <button
               type='button'
+              aria-label={`Remove ${selectedGroupOrChannel.label}`}
               onClick={e => {
                 e.stopPropagation();
                 toggleValue(selectedGroupOrChannel.value);
@@ -474,7 +484,10 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
           }}
           role='button'
           tabIndex={0}
-          className='relative flex items-center h-10 border border-border rounded-lg focus-within:border-foreground duration-300 ease-in-out bg-background'
+          className={cn(
+            'relative flex items-center h-10 border rounded-lg focus-within:border-foreground duration-300 ease-in-out bg-background',
+            hasError ? 'border-red-500' : 'border-border',
+          )}
           data-track-category='CALLS'
           data-track-name='search-participants-input'
         >
@@ -486,9 +499,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
               type='text'
               role='combobox'
               ref={inputRef}
-              placeholder={
-                hasUserSelected ? 'Search by user name' : 'Search by user, channel, or group name'
-              }
+              placeholder={hasUserSelected ? 'Search by user name' : placeholder}
               value={searchQuery}
               onKeyDown={handleKeyDown}
               onChange={e => setSearchQuery(e.target.value)}

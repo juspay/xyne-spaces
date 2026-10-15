@@ -6,7 +6,9 @@
 * Logging in user "user-1" on temp browser "user1-browser-1"
 * Logging in user "user-2" on temp browser "user2-browser-1"
 * Ensuring user "admin-1" is logged in
-* navigating via sidebar to "user-groups"
+* navigating via sidebar to "administration"
+* clicking on "[data-testid='organisations-nav-user-groups']"
+* waiting for "[data-testid='create-user-group-btn']" to appear
 * clicking on "[data-testid='create-user-group-btn']"
 * typing "Engineering Team" in "[data-testid='user-group-name-input']"
 * typing "Team Description" in "textarea[placeholder*='Enter user group description']"

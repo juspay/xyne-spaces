@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildAgentCardFlow, agentIdentity, AGENT_COMPONENT_ID } from "./agent-card.js";
+import { buildAgentCardFlow, buildAgentUpdateApprovalFlow, agentIdentity, AGENT_COMPONENT_ID } from "./agent-card.js";
 
 /**
  * Builder-side half of the agent-card contract. The zod half lives in
@@ -151,5 +151,83 @@ describe("agentIdentity — the reuse hinge", () => {
     const fromDraft = agentIdentity({ name: "A", slug: "a", description: "d", systemPrompt: "p" });
     const fromRow = agentIdentity({ name: "A", slug: "a", description: "d", systemPrompt: "p" });
     expect(Object.keys(fromDraft).sort()).toEqual(Object.keys(fromRow).sort());
+  });
+});
+
+describe("buildAgentUpdateApprovalFlow", () => {
+  const action = {
+    serverType: "agent-tools",
+    tool: "update-agent",
+    params: { slug: "ticket-triage", description: "Routes tickets" },
+    userId: "user-1",
+    signature: "sig-1",
+    agentSlug: "architect",
+    conversationId: "conv-1",
+  };
+
+  it("renders the update variant and carries the signed write action", () => {
+    const flow = buildAgentUpdateApprovalFlow(
+      {
+        agent: agentIdentity({ name: "Ticket Triage", slug: "ticket-triage" }),
+        changes: [{ field: "description", label: "Description", before: "Triages", after: "Routes tickets" }],
+        summary: "Narrowing the description",
+      },
+      action,
+    );
+
+    const component = flow.components[0]!;
+    expect(component.id).toBe(AGENT_COMPONENT_ID);
+    expect(Object.keys(component.props as object).sort()).toEqual(["agent", "changes", "summary", "variant"]);
+    expect((component.props as { variant: string }).variant).toBe("update");
+    expect(flow.data).toEqual({
+      actionType: "write",
+      serverType: "agent-tools",
+      tool: "update-agent",
+      params: JSON.stringify(action.params),
+      userId: "user-1",
+      signature: "sig-1",
+      agentSlug: "architect",
+      conversationId: "conv-1",
+    });
+  });
+
+  it("binds the subagent that queued the write into the card data", () => {
+    const flow = buildAgentUpdateApprovalFlow(
+      {
+        agent: agentIdentity({ name: "A", slug: "a" }),
+        changes: [{ field: "description", label: "Description", after: "x" }],
+      },
+      { ...action, subagentId: "sub-a" },
+    );
+
+    expect(flow.data?.["subagentId"]).toBe("sub-a");
+  });
+
+  it("keeps a long summary whole", () => {
+    const summary = "Adding charting and a sandbox. ".repeat(30).trim();
+    const flow = buildAgentUpdateApprovalFlow(
+      {
+        agent: agentIdentity({ name: "A", slug: "a" }),
+        changes: [{ field: "description", label: "Description", after: "x" }],
+        summary,
+      },
+      action,
+    );
+
+    expect((flow.components[0]!.props as { summary: string }).summary).toBe(summary);
+  });
+
+  it("drops blank values and empty tool lists from a change", () => {
+    const flow = buildAgentUpdateApprovalFlow(
+      {
+        agent: agentIdentity({ name: "A", slug: "a" }),
+        changes: [{ field: "tools", label: "Tools", added: ["GitHub", " "], removed: [], before: " " }],
+      },
+      action,
+    );
+
+    expect((flow.components[0]!.props as { changes: unknown[] }).changes).toEqual([
+      { field: "tools", label: "Tools", added: ["GitHub"] },
+    ]);
   });
 });

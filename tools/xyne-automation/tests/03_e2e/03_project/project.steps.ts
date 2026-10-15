@@ -65,53 +65,20 @@ export default class ProjectSteps {
       setAsNewUser: String(setAsNewUser),
     });
 
-    const urlPath = `/auth?${params.toString()}`;
-
     const page = testContext.activePage;
-    // The waiter's clock starts NOW and must cover: goto + JS-bundle load
-    // + button render + click + auth POST round-trip. Default 30s is too
-    // tight under heavy CI load - when goto goes long, this pre-fires and
-    // becomes an unhandled rejection that kills the Gauge runner process
-    // (taking ~22 unrelated scenarios down with it).
-    const responsePromise = page.waitForResponse(
-      (response) =>
-        response.url().includes('/test/auth/login') && response.request().method() === 'POST',
-      { timeout: 60000 }
+    // Hit the test auth endpoint directly instead of clicking "Sign in with
+    // Google": the dashboard only intercepts that button in test mode, so
+    // against a plain dev server it redirects to real Google OAuth. The
+    // session cookie lands in this browser context, same as the UI flow.
+    const response = await page.request.post(
+      `${config.dashboard.baseUrl}/api/test/auth/login?${params.toString()}`,
+      { data: {}, timeout: 60000 }
     );
-
-    await page.goto(`${config.dashboard.baseUrl}${urlPath}`, {
-      waitUntil: 'domcontentloaded',
-      timeout: 60000,
-    });
-
-    if (!setAsNewUser) {
-      // Existing-user scenarios intentionally skip AI onboarding. Seed that
-      // state before authentication so the destination page never mounts the
-      // overlay and the shared skip step does not need to reload the app.
-      await page.evaluate(() => {
-        localStorage.setItem('xyne-ai-onboarding-completed', 'true');
-        localStorage.removeItem('xyne-ai-onboarding-active');
-        sessionStorage.removeItem('xyne-ai-onboarding-pending');
-      });
-    }
-
-    await page.getByRole('button', { name: 'Sign in with Google' }).click();
-
-    let response: Awaited<ReturnType<typeof page.waitForResponse>>;
-    try {
-      response = await responsePromise;
-    } catch (waitError) {
-      const currentUrl = page.url();
-      const buttonCount = await page
-        .getByRole('button', { name: 'Sign in with Google' })
-        .count()
-        .catch(() => -1);
-      throw new Error(
-        `loginAndStoreUser('${userAlias}'): auth response never arrived. ` +
-          `currentUrl=${currentUrl}, signInButtonCount=${buttonCount}, ` +
-          `original=${String(waitError)}`
-      );
-    }
+    assert.equal(
+      response.ok(),
+      true,
+      `loginAndStoreUser('${userAlias}'): test login failed with status ${response.status()}.`
+    );
     const body = (await response.json().catch(() => null)) as AuthResponseBody | null;
     const user = body?.user;
 
@@ -119,6 +86,30 @@ export default class ProjectSteps {
     assertString(user.id, 'auth response user.id');
     assertString(user.email, 'auth response user.email');
     assertString(user.name, 'auth response user.name');
+
+    // Land on a static same-origin file so storage can be seeded before the app mounts.
+    await page.goto(`${config.dashboard.baseUrl}/version.json`, {
+      waitUntil: 'domcontentloaded',
+      timeout: 60000,
+    });
+    await page.evaluate(
+      ({ userId, userEmail, skipOnboarding }) => {
+        localStorage.setItem('user_id', userId);
+        localStorage.setItem('user_email', userEmail);
+        if (skipOnboarding) {
+          // Existing-user scenarios intentionally skip AI onboarding so the
+          // destination page never mounts the overlay.
+          localStorage.setItem('xyne-ai-onboarding-completed', 'true');
+          localStorage.removeItem('xyne-ai-onboarding-active');
+          sessionStorage.removeItem('xyne-ai-onboarding-pending');
+        }
+      },
+      { userId: user.id, userEmail: user.email, skipOnboarding: !setAsNewUser }
+    );
+    await page.goto(`${config.dashboard.baseUrl}/`, {
+      waitUntil: 'domcontentloaded',
+      timeout: 60000,
+    });
 
     const previous = testContext.storedUsers.get(userAlias);
     const storedUser: StoredUser = {

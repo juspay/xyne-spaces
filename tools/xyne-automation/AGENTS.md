@@ -333,8 +333,7 @@ Optional overrides:
 - `HEADLESS` - default: false for `local`, true for all others
 - `BROWSER` - one of `chromium`, `chrome`, `firefox`, `webkit`. Default: `chrome`
 - `ENABLE_BROWSER_CONSOLE_LOGS` - default: true for `test`/`local-test`, false otherwise
-- `PARALLEL` - number of parallel Gauge workers. Default: 3 for `local`/`local-test`, 1 otherwise
-- `DESK_MOCK_DL_EMAIL` / `DESK_MOCK_SHARED_MAILBOX` - mock Desk addresses (`config.desk`). Defaults use the backend's `DESK_MOCK_DEFAULT_EMAIL_DOMAIN` (`desk-mock.xyne.test`)
+- `PARALLEL` - number of parallel Gauge workers. Default: 5 for `local`/`local-test`, 1 otherwise
 
 If config doesn't expose something needed:
 

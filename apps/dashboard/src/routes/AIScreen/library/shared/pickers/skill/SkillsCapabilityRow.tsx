@@ -1,12 +1,9 @@
 import { useMemo, useState, type ReactElement } from 'react';
-import { InformationCircle, PlusDefault } from '@xyne/icons';
-import { Tooltip } from '@/components/ui/Tooltip/Tooltip';
+import { PlusDefault } from '@xyne/icons';
 import { BrowseSkillsDialog } from './BrowseSkillsDialog';
 import { SkillChip } from './SkillChip';
 import { disableSkill, isSkillSelected } from './skillCatalog';
 import { useSkillCatalog } from './useSkillCatalog';
-
-const CAPTION = 'Add reusable instructions for specialized workflows.';
 
 interface SkillsCapabilityRowProps {
   selectedIds: readonly string[];
@@ -31,14 +28,7 @@ export function SkillsCapabilityRow({
       <div className='flex w-full items-center justify-between gap-4'>
         <div className='flex min-w-0 items-center gap-4'>
           <div className='flex shrink-0 items-center gap-2'>
-            <span className='text-sm font-medium leading-[1.2] tracking-[-0.1px] text-foreground'>
-              Skills
-            </span>
-            <Tooltip side='top' content={CAPTION}>
-              <span className='inline-flex'>
-                <InformationCircle className='size-4 text-muted-foreground' aria-hidden />
-              </span>
-            </Tooltip>
+            <span className='text-sm leading-[1.2] tracking-[-0.1px] text-foreground'>Skills</span>
           </div>
           {selectedEntries.length > 0 && (
             <span className='text-xs leading-5 tracking-[-0.24px] text-muted-foreground'>
@@ -61,8 +51,6 @@ export function SkillsCapabilityRow({
           <PlusDefault className='size-4' aria-hidden />
         </button>
       </div>
-
-      <p className='text-sm leading-5 text-muted-foreground'>{CAPTION}</p>
 
       {selectedEntries.length > 0 && (
         <div className='flex flex-wrap items-start gap-2 pt-1'>

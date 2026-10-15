@@ -18,6 +18,7 @@ import { VisibleChannel } from '../../../machines/stateMachine';
 import { Dialog } from '../../ui/Dialog';
 import Button from '../../ui/Button';
 import { Switch } from '../../ui/Switch';
+import { ChannelFields } from '../Info/ChannelFields';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { stateMachineActor } from '../../../machines/stateMachine';
 
@@ -29,6 +30,7 @@ const POLICY_OPTIONS = [
 interface ChannelSettingsProps {
   channel: VisibleChannel;
   isAdmin: boolean;
+  canEditFields: boolean;
   previousChannelId?: string | null | undefined;
   onClose?: () => void;
 }
@@ -85,6 +87,7 @@ const PolicySelect: React.FC<PolicySelectProps> = ({ value, onValueChange, disab
 export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
   channel,
   isAdmin,
+  canEditFields,
   previousChannelId,
   onClose,
 }) => {
@@ -293,6 +296,8 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
             )}
           </div>
         </div>
+
+        <ChannelFields channelId={channel.id} canEdit={canEditFields} />
 
         {canManageTicketVisibility && (
           <div className='bg-card p-[12px] rounded-[12px] border border-border'>

@@ -133,6 +133,7 @@ import { SDLC_HUB_KNOWLEDGE_FOLDER, sdlcIconNameSchema, sdlcTrackStatusSchema } 
 import { isSdlcTreeItemType, refileSdlcFolderEdges } from '@xyne/shared';
 import {
   ChannelPublishedEntityType,
+  MAX_DUPLICATE_LOOKBACK_DAYS,
   MAX_DUPLICATE_SCOPE_FIELDS,
   MAX_PUBLISHED_APP_ID_LENGTH,
   MAX_PUBLISHED_APPS,
@@ -168,9 +169,10 @@ import {
   assertFieldIsCurrentlyActive,
 } from './formsMutatorHelpers';
 import { v4 as uuidv4 } from 'uuid';
-import { extractAllMentions } from '@/utils/mentionParser';
+import { extractAllMentions, keepMentionsWithin } from '@/utils/mentionParser';
 import { detectVcsProvider } from '@/utils/repoUrlParser';
 import { getStorageService } from '@/services/storage';
+import { summaryTemplateService } from '@/services/summaryTemplateService';
 import { repositories } from '@/database/repositories';
 import { db } from '@/database/client';
 import { parseDlAliases, dlAddressesFor } from '@/services/dlResolver';
@@ -201,7 +203,7 @@ import { syncUserWorkload } from '@/utils/workloadUtils';
 import { ticketAssignmentService, primaryUserIdOf } from '@/services/ticketAssignmentService';
 import { calculateETADeadline, calculateWorkingDurationMs } from '@/utils/etaCalculation';
 import { DEFAULT_ROLE_NAME_TO_ENUM } from '@/utils/roleFrameworkUtils';
-import { grantPermissionsForRole, syncResourceAdminAccess, syncOrgResourceAdminAccess } from '@/services/permissionMatrix';
+import { reconcileUserPermissions, syncOrgResourceAdminAccess } from '@/services/permissionMatrix';
 import {
   deleteDraftEntityAttachments,
   deleteDelayedMessageEntityAttachments,
@@ -231,6 +233,7 @@ import {
 } from '@/services/flowCascadeService';
 import { validateFlowDecisionFields } from '@/zero/utils/flowPlanValidation';
 import { getEncryptionProvider } from '@/services/encryption';
+import { escapeHtml } from '@/utils/htmlEscape';
 
 function sortCallParticipantsForPreview<T extends {
   id: string;
@@ -575,6 +578,18 @@ async function resolveCollectionPermissionRole(
     if (!role || COLLECTION_ROLE_RANK[candidate] > COLLECTION_ROLE_RANK[role]) role = candidate;
   }
   return role;
+}
+
+/** Guests may only mention people in the channel (see keepMentionsWithin). */
+async function guestSafeContent(
+  tx: Transaction<Schema>,
+  role: string | undefined,
+  channelId: string,
+  content: string,
+): Promise<string> {
+  if (role !== WorkspaceRole.GUEST || !content.includes('data-mention-type')) return content;
+  const participants = await tx.run(zql.channel_participants.where('channelId', channelId));
+  return keepMentionsWithin(content, new Set(participants.map(participant => participant.userId)));
 }
 
 async function resolveMentionParticipantUserIds(
@@ -974,8 +989,9 @@ async function createNonParticipantSystemMessages(
     logger.info(`📝 [NON-PARTICIPANT] Creating system message for ${nonParticipants.length} non-participants`);
 
     // Generate HTML content with mentions (matching format of regular messages)
+    // Escaped: a raw '<' or '"' in a name would break the tag, and the mention with it.
     const mentionSpans = nonParticipants.map(np =>
-      `<span data-mention="true" data-mention-type="user" data-user-id="${np.userId}" data-username="${np.userName}" class="mention-text">${np.userName}</span>`
+      `<span data-mention="true" data-mention-type="user" data-user-id="${escapeHtml(np.userId)}" data-username="${escapeHtml(np.userName)}" class="mention-text">${escapeHtml(np.userName)}</span>`
     ).join(', ');
 
     const channelStatsForPolicy = channel ? await tx.run(zql.channel_stats.where('channelId', channel.id).one()) : null;
@@ -2716,6 +2732,7 @@ export function createMutators(
           if (content === '') {
             throw new Error('Message content or files are required to start a conversation');
           }
+          content = await guestSafeContent(tx, authData.role, channelId, content);
 
           const user = await tx.run(zql.users.where('id', authData.sub).one());
           const now = timestamp;
@@ -3570,6 +3587,7 @@ export function createMutators(
           if (!conversation) {
             throw new Error("Message doesn't belong to a conversation");
           }
+          content = await guestSafeContent(tx, authData.role, conversation.channelId, content);
           const [channel, participant, channelDrafts] = await Promise.all([
             tx.run(zql.channels.where('id', conversation.channelId).related('project').one()),
             tx.run(zql.channel_participants
@@ -4016,6 +4034,10 @@ export function createMutators(
             if (message.msgType === MessageType.BOT) {
               throw new Error('BOT Messages cannot be edited');
             }
+          }
+          if (content !== undefined && authData.role === WorkspaceRole.GUEST) {
+            const edited = await tx.run(zql.conversations.where('conversationId', message.conversationId).one());
+            content = await guestSafeContent(tx, authData.role, edited?.channelId ?? '', content);
           }
 
           // Only process mention changes if content is being updated
@@ -16292,7 +16314,7 @@ export function createMutators(
           }),
           timestamp: z.number(),
         }),
-        async ({ tx, args: { userId, workspaceId, updates, timestamp } }) => {
+        async ({ tx, args: { userId, updates, timestamp } }) => {
           // ACL check is handled by UsersACL
           await tx.mutate.users.update({
             id: userId,
@@ -16301,25 +16323,9 @@ export function createMutators(
           });
 
           if (updates.role !== undefined) {
-            if (updates.role === WorkspaceRole.ADMIN) {
-              // Promote: grant the full ADMIN permission matrix, same as invite-accept
-              // (grantPermissionsForRole), so "becomes an admin" is consistent regardless
-              // of whether the user was invited straight in as ADMIN or promoted later.
-              const user = await tx.run(zql.users.where('id', userId).one());
-              if (user) {
-                const { email } = user;
-                asyncTasks.push(() =>
-                  grantPermissionsForRole(userId, email, WorkspaceRole.ADMIN, workspaceId),
-                );
-              }
-            } else {
-              // Demote: only revoke WORKSPACE. Deliberately not a full matrix revoke —
-              // avoids stripping resource access that may have been granted independently
-              // via the Roles screen (no provenance tracking exists to tell them apart).
-              asyncTasks.push(() =>
-                syncResourceAdminAccess(userId, 'WORKSPACE', false, authData.sub, workspaceId),
-              );
-            }
+            // Promote or demote: reconcile the full resource set against the new role
+            // (and the user's org role), granting missing and revoking excess ADMIN access.
+            asyncTasks.push(() => reconcileUserPermissions(userId, authData.sub));
           }
         }
       ),
@@ -16402,6 +16408,9 @@ export function createMutators(
             joinedAt: timestamp,
             userId: 'deprecated-placeholder', // Deprecated field, kept for backward compatibility
           });
+
+          const ownerEmail = admin.email;
+          asyncTasks.push(() => syncOrgResourceAdminAccess(orgId, ownerEmail, authData.sub));
         },
       ),
     },
@@ -16558,6 +16567,9 @@ export function createMutators(
               userId: 'deprecated-placeholder', // Deprecated field, kept for backward compatibility
             });
           }
+
+          // The added/reactivated member may already have workspace user rows (matched by email)
+          asyncTasks.push(() => syncOrgResourceAdminAccess(orgId, email, authData.sub));
         },
       ),
       updateRole: defineMutator(
@@ -16576,10 +16588,9 @@ export function createMutators(
           if (updates.role !== undefined) {
             const member = await tx.run(zql.org_members.where('memberId', memberId).one());
             if (member) {
-              const shouldHaveAccess = updates.role === OrgRole.ADMIN || updates.role === OrgRole.OWNER;
               const { orgId, email } = member;
               asyncTasks.push(() =>
-                syncOrgResourceAdminAccess(orgId, email, shouldHaveAccess, authData.sub),
+                syncOrgResourceAdminAccess(orgId, email, authData.sub),
               );
             }
           }
@@ -16881,6 +16892,58 @@ export function createMutators(
           }
         },
       ),
+      setRecordingDefaultSummaryTemplate: defineMutator(
+        z.object({
+          id: z.string(),
+          // `null` clears the default so recordings go back to the automatic pick.
+          recordingDefaultSummaryTemplateId: z.string().min(1).nullable(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, ctx, args: { id, recordingDefaultSummaryTemplateId, timestamp } }) => {
+          // The default must be a template the user can use today: the same service
+          // check generation time relies on, which also covers the code-backed
+          // 'default'. Access is re-checked at generation time in case it is revoked.
+          if (recordingDefaultSummaryTemplateId) {
+            const template = await summaryTemplateService.findAccessibleById(
+              recordingDefaultSummaryTemplateId,
+              ctx.workspaceId,
+              ctx.userID,
+            );
+            if (!template) {
+              throw new ApplicationError('Summary template not found or not accessible');
+            }
+          }
+
+          const existing = await tx.run(
+            zql.user_preferences.where('userId', ctx.userID).one(),
+          );
+          if (existing) {
+            await tx.mutate.user_preferences.update({
+              id: existing.id,
+              recordingDefaultSummaryTemplateId,
+              updatedAt: timestamp,
+            });
+          } else {
+            await tx.mutate.user_preferences.insert({
+              workspaceId: ctx.workspaceId,
+              id,
+              userId: ctx.userID,
+              channelSortOrder: ChannelSortOrder.RECENCY,
+              enterSendsMessage: true,
+              allowThreadBroadcastMentions: false,
+              globalDesktopNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+              globalMobileNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+              threadReplyNotificationsEnabled: true,
+              channelWideMentionsEnabled: true,
+              notificationKeywords: '[]',
+              showThreadTags: false,
+              recordingDefaultSummaryTemplateId,
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            });
+          }
+        },
+      ),
     },
 
     emailChannelPreference: {
@@ -16908,6 +16971,7 @@ export function createMutators(
             .object({
               enabled: z.boolean(),
               scopeFieldGlobalIds: z.array(z.string()).max(MAX_DUPLICATE_SCOPE_FIELDS),
+              lookbackDays: z.number().int().min(0).max(MAX_DUPLICATE_LOOKBACK_DAYS).nullable().optional(),
             })
             .nullable()
             .optional(),

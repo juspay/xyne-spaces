@@ -1246,16 +1246,9 @@ router.get("/:slug/litellm-models", async (req: Request<{ slug: string }>, res: 
 
 // POST /agents/:slug/chat — send a message, stream progress via SSE, return result
 
-function evalRunSwitches(
-  req: Request,
-  optimizations: unknown,
-  judgeBackend: unknown,
-): { optimizations?: string; judgeBackend?: string } {
+function evalRunSwitches(req: Request, optimizations: unknown): { optimizations?: string } {
   if (!s2sKeyMatches(req.headers["x-s2s-key"])) return {};
-  return {
-    ...(typeof optimizations === "string" && /^[a-z0-9_,+\-]{1,400}$/i.test(optimizations) ? { optimizations } : {}),
-    ...(typeof judgeBackend === "string" && /^[a-z0-9_]{1,40}$/i.test(judgeBackend) ? { judgeBackend } : {}),
-  };
+  return typeof optimizations === "string" && /^[a-z0-9_,+\-]{1,400}$/i.test(optimizations) ? { optimizations } : {};
 }
 
 router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response) => {
@@ -1274,7 +1267,6 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       attachedContext,
       providerOverride,
       optimizations: requestedOptimizations,
-      judgeBackend: requestedJudgeBackend,
       isRegenerate,
       isEditUserMessage,
       parentUserMessageId,
@@ -1296,7 +1288,6 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       attachedContext?: unknown;
       providerOverride?: { provider?: string; model?: string };
       optimizations?: unknown;
-      judgeBackend?: unknown;
       /** Branching: regenerate the assistant reply for `parentUserMessageId` as
        *  a sibling of the existing assistant. */
       isRegenerate?: boolean;
@@ -1894,7 +1885,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
           ? agentCredRefreshTarget(agent.id, "claude", credRow as { sharedCredentialId?: string | null })
           : userCredRefreshTarget(userId, "claude", credRow as { sharedCredentialId?: string | null });
         try {
-          claudeCfg.apiKey = await getValidClaudeBearer(target.credKey, credRow, target.persist);
+          claudeCfg.apiKey = await getValidClaudeBearer(target.credKey, credRow, target.persist, target.reload);
         } catch (err) {
           log.warn("[agent-chat] Claude OAuth refresh failed — credential likely needs reconnect:", err instanceof Error ? err.message : err);
         }
@@ -2052,7 +2043,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       fastMode: fastModeEnabled,
       // /compact shrinks the session before answering, not just summarises it.
       ...(studioMode !== "design" && aiScreenCommand.compactBeforeRun ? { compactBeforeRun: true } : {}),
-      ...evalRunSwitches(req, requestedOptimizations, requestedJudgeBackend),
+      ...evalRunSwitches(req, requestedOptimizations),
     };
 
     const forwardedTask = typeof forwardBody["task"] === "string" ? forwardBody["task"] as string : "";
@@ -3413,6 +3404,17 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
     // that's already been generated, before the first live `delta` arrives.
     const runningMsg = visible.find((m) => m.role === "assistant" && m.status === "running");
 
+    // The caller's OWN in-flight run, so a reattached tab can Stop it
+    // (XYNE-66347). Prefer the run linked to the streaming placeholder, else
+    // the newest not-yet-linked run on this agent. Never another user's run.
+    const ownRunning = agentRuns.filter(
+      (r) => r.status === "running" && !r.completedAt && liveUserAliases.includes(r.userId),
+    );
+    const runSessionId = (
+      ownRunning.find((r) => runningMsg && r.chatMessageId === runningMsg.id) ??
+      ownRunning.find((r) => !r.chatMessageId && r.agentSlug === slug)
+    )?.sessionId;
+
     // Redis pub/sub has no replay, so a mid-run joiner would otherwise miss
     // every card emitted before it connected.
     const uiFlowsByMsgId: Record<string, unknown[]> = {};
@@ -3427,6 +3429,7 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
         agentSlug: slug,
         invocationsByMsgId,
         inProgress,
+        ...(runSessionId ? { runSessionId } : {}),
         ...(Object.keys(uiFlowsByMsgId).length > 0 ? { uiFlowsByMsgId } : {}),
         ...(runningMsg
           ? {

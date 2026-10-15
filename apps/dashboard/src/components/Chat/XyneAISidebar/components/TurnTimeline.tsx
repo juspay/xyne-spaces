@@ -11,6 +11,7 @@ import type { Message, ToolInvocation } from '../utils/XyneAITypes';
 import { cn } from '../../../../utils/classNames';
 import { useStableLabel } from '../../../AIScreen/ReasoningLoader';
 import { groupInvocations, InvocationItem, type InvocationTree } from './ToolInvocationList';
+import { needsFallbackAnswer } from './turnAnswer';
 import {
   agentLabel,
   childToolLabel,
@@ -48,8 +49,9 @@ type TurnMessage = Pick<
 interface TurnTimelineProps {
   message: TurnMessage;
   renderText: (text: string, state: TurnTextState) => ReactNode;
-  /** A message saved before ordered parts existed: its answer, rendered as it
-   *  always was, after its thinking and tool calls. */
+  /** The turn's stored answer, rendered after its thinking and tool calls when
+   *  no text part carries it: a message saved before ordered parts existed, or
+   *  a run that failed after a step (error paths write only to `content`). */
   legacyAnswer?: ReactNode;
   /** Lines of live thinking shown under a working group's header. */
   previewLines?: number;
@@ -81,6 +83,12 @@ export function TurnTimeline({
     // A call the user never sees (internal bookkeeping) is not a step.
     return groupTurnParts(parts.filter(part => part.type !== 'tool' || tree.byId.has(part.id)));
   }, [ordered, message.parts, message.reasoning, tree]);
+
+  const showLegacyAnswer = needsFallbackAnswer({
+    ordered,
+    streaming,
+    hasText: segments.some(segment => segment.kind === 'text'),
+  });
 
   // The segment the plan card follows (-1: before them all).
   const planAfter = useMemo((): number => {
@@ -133,7 +141,7 @@ export function TurnTimeline({
           </Fragment>
         );
       })}
-      {!ordered && legacyAnswer}
+      {showLegacyAnswer && legacyAnswer}
     </div>
   );
 }

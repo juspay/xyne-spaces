@@ -582,7 +582,7 @@ const BoardRolesConfigScreen = ({
                       type='button'
                       onClick={() => spMove(index, -1)}
                       disabled={index === 0}
-                      aria-label='Move up'
+                      aria-label={`Move ${stage?.name ?? id} up`}
                       className='w-5 h-5 flex items-center justify-center text-muted-foreground hover:bg-muted rounded disabled:opacity-30'
                       data-track-category='BOARD_ROLE_CONFIG'
                       data-track-name='MOVE_STANDARD_PATH_STAGE_UP'
@@ -593,7 +593,7 @@ const BoardRolesConfigScreen = ({
                       type='button'
                       onClick={() => spMove(index, 1)}
                       disabled={index === standardPathStageIds.length - 1}
-                      aria-label='Move down'
+                      aria-label={`Move ${stage?.name ?? id} down`}
                       className='w-5 h-5 flex items-center justify-center text-muted-foreground hover:bg-muted rounded disabled:opacity-30'
                       data-track-category='BOARD_ROLE_CONFIG'
                       data-track-name='MOVE_STANDARD_PATH_STAGE_DOWN'

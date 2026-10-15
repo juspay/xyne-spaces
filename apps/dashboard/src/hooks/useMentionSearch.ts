@@ -12,7 +12,12 @@ export const useMentionSearch = (
   options: UseMentionSearchOptions = {},
 ): UseMentionSearchResult => {
   const { user } = useAuth();
-  return sharedUseMentionSearch(channelId, user?.id, threadParticipantIds, options);
+  // The backend drops a guest's mentions of anyone outside the channel, so don't offer them.
+  const membersOnly = options.membersOnly ?? user?.role === 'GUEST';
+  return sharedUseMentionSearch(channelId, user?.id, threadParticipantIds, {
+    ...options,
+    membersOnly,
+  });
 };
 
 export type { UseMentionSearchResult, UseMentionSearchOptions };
