@@ -280,8 +280,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/cache
       '@xyne/connector-sdk':
-        specifier: 0.1.3
-        version: 0.1.3(@xyne/workflow-sdk@3.2.51(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(typebox@1.3.8))
+        specifier: file:/tmp/xyne-pkgs/xyne-connector-sdk-0.2.0.tgz
+        version: file:../../../../../tmp/xyne-pkgs/xyne-connector-sdk-0.2.0.tgz(@xyne/workflow-sdk@3.2.51(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(typebox@1.3.8))
       '@xyne/secrets-vault':
         specifier: workspace:*
         version: link:../../packages/secrets-vault
@@ -5642,105 +5642,90 @@ packages:
     engines: {node: '>= 10'}
     cpu: [arm64]
     os: [linux]
-    libc: [glibc]
 
   '@napi-rs/canvas-linux-arm64-gnu@0.1.80':
     resolution: {integrity: sha512-qwA63t8A86bnxhuA/GwOkK3jvb+XTQaTiVML0vAWoHyoZYTjNs7BzoOONDgTnNtr8/yHrq64XXzUoLqDzU+Uuw==}
     engines: {node: '>= 10'}
     cpu: [arm64]
     os: [linux]
-    libc: [glibc]
 
   '@napi-rs/canvas-linux-arm64-gnu@1.0.7':
     resolution: {integrity: sha512-OVW6T1x65BTVfWb//xylCoWxbdII+nzHu3L5T035aerBAnZ5e0nmeTMkMEO9qQrVJq4WcWW8hp+T0dF+JvJPUQ==}
     engines: {node: '>= 10'}
     cpu: [arm64]
     os: [linux]
-    libc: [glibc]
 
   '@napi-rs/canvas-linux-arm64-musl@0.1.100':
     resolution: {integrity: sha512-K3mDW66N+xT2/V439u1alFANiBUjdEx2gLiNYnCmUsva5jZMxWTjafBYwTzYK+EMFMHrUoabuU+T1BIP5CgbYQ==}
     engines: {node: '>= 10'}
     cpu: [arm64]
     os: [linux]
-    libc: [musl]
 
   '@napi-rs/canvas-linux-arm64-musl@0.1.80':
     resolution: {integrity: sha512-1XbCOz/ymhj24lFaIXtWnwv/6eFHXDrjP0jYkc6iHQ9q8oXKzUX1Lc6bu+wuGiLhGh2GS/2JlfORC5ZcXimRcg==}
     engines: {node: '>= 10'}
     cpu: [arm64]
     os: [linux]
-    libc: [musl]
 
   '@napi-rs/canvas-linux-arm64-musl@1.0.7':
     resolution: {integrity: sha512-KX/k1UO61XdKlXxhtIkq1ZUH8uP+NNK4vSrBcM2/4wWUUCZaG93BU5s0KuE9n+TFn0jEoqLSlXOuH1pYuV5dcQ==}
     engines: {node: '>= 10'}
     cpu: [arm64]
     os: [linux]
-    libc: [musl]
 
   '@napi-rs/canvas-linux-riscv64-gnu@0.1.100':
     resolution: {integrity: sha512-mooqUBTIsccZpnoQC4NgrC1v6C1vof39etLNMnBwCY+p0gajWJvAHLGQ6g/gGyS5YrpDW+GefSN4+Cvcr08UWw==}
     engines: {node: '>= 10'}
     cpu: [riscv64]
     os: [linux]
-    libc: [glibc]
 
   '@napi-rs/canvas-linux-riscv64-gnu@0.1.80':
     resolution: {integrity: sha512-XTzR125w5ZMs0lJcxRlS1K3P5RaZ9RmUsPtd1uGt+EfDyYMu4c6SEROYsxyatbbu/2+lPe7MPHOO/0a0x7L/gw==}
     engines: {node: '>= 10'}
     cpu: [riscv64]
     os: [linux]
-    libc: [glibc]
 
   '@napi-rs/canvas-linux-riscv64-gnu@1.0.7':
     resolution: {integrity: sha512-r+0Bg+fK8r2AsrbeT7JwBUAERZSjlyhfAMQfZE/zxYGmbswS92hN0FPjynVWbeuz5fIrLfZ6JA5pH8V6drN6qw==}
     engines: {node: '>= 10'}
     cpu: [riscv64]
     os: [linux]
-    libc: [glibc]
 
   '@napi-rs/canvas-linux-x64-gnu@0.1.100':
     resolution: {integrity: sha512-1eCvkDCazm7FFhsT7DfGOdSaHgZVK3bt/dSBl5EWHOWmnz+I7j8tPseJqqD81NF+MH21jKUK4wQSDjN0mdhnTg==}
     engines: {node: '>= 10'}
     cpu: [x64]
     os: [linux]
-    libc: [glibc]
 
   '@napi-rs/canvas-linux-x64-gnu@0.1.80':
     resolution: {integrity: sha512-BeXAmhKg1kX3UCrJsYbdQd3hIMDH/K6HnP/pG2LuITaXhXBiNdh//TVVVVCBbJzVQaV5gK/4ZOCMrQW9mvuTqA==}
     engines: {node: '>= 10'}
     cpu: [x64]
     os: [linux]
-    libc: [glibc]
 
   '@napi-rs/canvas-linux-x64-gnu@1.0.7':
     resolution: {integrity: sha512-0tT9KzEcTfb6MWdUWIDfy6uq6UNF691r/9NfXxxl8s9+G5QrD7VP1UC+PAwzsCzJTClIKyidNau/grYTL+QmHw==}
     engines: {node: '>= 10'}
     cpu: [x64]
     os: [linux]
-    libc: [glibc]
 
   '@napi-rs/canvas-linux-x64-musl@0.1.100':
     resolution: {integrity: sha512-20arT6lnI19S68qNlii73TSEDbECNgzMz2EpldC1V3mZFuRkeujXkcebRk0LRJe9SEUAooYiLokfMViY8IX7yA==}
     engines: {node: '>= 10'}
     cpu: [x64]
     os: [linux]
-    libc: [musl]
 
   '@napi-rs/canvas-linux-x64-musl@0.1.80':
     resolution: {integrity: sha512-x0XvZWdHbkgdgucJsRxprX/4o4sEed7qo9rCQA9ugiS9qE2QvP0RIiEugtZhfLH3cyI+jIRFJHV4Fuz+1BHHMg==}
     engines: {node: '>= 10'}
     cpu: [x64]
     os: [linux]
-    libc: [musl]
 
   '@napi-rs/canvas-linux-x64-musl@1.0.7':
     resolution: {integrity: sha512-rvT0xo1xA+C7e+U/2ngsxWsl9gC5knHU+z8KTT5VK0Zos4AQbWZvtjvegrmzxm4o2yHE32Lexj6CDEJNvuTczA==}
     engines: {node: '>= 10'}
     cpu: [x64]
     os: [linux]
-    libc: [musl]
 
   '@napi-rs/canvas-win32-arm64-msvc@0.1.100':
     resolution: {integrity: sha512-DZFFT1wIAg37LJw37yhMRFfjATd3vTQzjZ1Yki8u2vhO6Hi5VE6BVaGQ1aaDu7xb4iMErz+9EOwjpS7xcxFeBw==}
@@ -10470,8 +10455,9 @@ packages:
   '@xyflow/system@0.0.79':
     resolution: {integrity: sha512-czLyOh91NF0hIzbNzwi8I6GlqG23BHh2435OddfI6uiaLH3xdrdygO93gqgH1Bv9mhy8XPFQJOBn1FTq4LvEWA==}
 
-  '@xyne/connector-sdk@0.1.3':
-    resolution: {integrity: sha512-tcYWYj0vaK3JSCLzoeFFszNGPc1AjTGi1RL+xhGd9i2mVKCQlwa6bTODL705bv5LBLmXe7UJ3ttXMSi8U/Bn3g==}
+  '@xyne/connector-sdk@file:../../../../../tmp/xyne-pkgs/xyne-connector-sdk-0.2.0.tgz':
+    resolution: {integrity: sha512-9pUdCdxRNadSsQN6sPXJUKOICox43cGcNLYaJArdelJ0wh4Gsr3dvio1HFAsUObnlEdC9EZk+XdPGUKXYTmH/g==, tarball: file:../../../../../tmp/xyne-pkgs/xyne-connector-sdk-0.2.0.tgz}
+    version: 0.2.0
     engines: {node: '>=20.0.0'}
     peerDependencies:
       '@xyne/workflow-sdk': 3.2.39
@@ -28141,7 +28127,7 @@ snapshots:
     dependencies:
       '@redis/client': 5.12.1(@opentelemetry/api@1.9.1)
 
-  '@reduxjs/toolkit@2.12.0(react-redux@9.3.0(@types/react@19.2.17)(react@19.2.3)(redux@5.0.1))(react@19.2.3)':
+  '@reduxjs/toolkit@2.12.0(react-redux@9.3.0(@types/react@19.2.17)(react@19.2.3))(react@19.2.3)':
     dependencies:
       '@standard-schema/spec': 1.1.0
       '@standard-schema/utils': 0.3.0
@@ -30707,7 +30693,7 @@ snapshots:
       d3-selection: 3.0.0
       d3-zoom: 3.0.0
 
-  '@xyne/connector-sdk@0.1.3(@xyne/workflow-sdk@3.2.51(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(typebox@1.3.8))':
+  '@xyne/connector-sdk@file:../../../../../tmp/xyne-pkgs/xyne-connector-sdk-0.2.0.tgz(@xyne/workflow-sdk@3.2.51(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(typebox@1.3.8))':
     dependencies:
       '@xyne/workflow-sdk': 3.2.51(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(typebox@1.3.8)
       zod: 3.25.76
@@ -40253,7 +40239,7 @@ snapshots:
 
   recharts@3.10.1(@types/react@19.2.17)(react-dom@19.2.3(react@19.2.3))(react-is@18.3.1)(react@19.2.3)(redux@5.0.1):
     dependencies:
-      '@reduxjs/toolkit': 2.12.0(react-redux@9.3.0(@types/react@19.2.17)(react@19.2.3)(redux@5.0.1))(react@19.2.3)
+      '@reduxjs/toolkit': 2.12.0(react-redux@9.3.0(@types/react@19.2.17)(react@19.2.3))(react@19.2.3)
       clsx: 2.1.1
       decimal.js-light: 2.5.1
       es-toolkit: 1.50.0

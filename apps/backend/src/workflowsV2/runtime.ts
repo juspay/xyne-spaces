@@ -10,8 +10,15 @@ import {
   type ApprovalConfig,
   type ExecutorLogger,
 } from '@xyne/workflow-sdk';
+import { AmazonSnsConnector } from '@xyne/connector-sdk/amazon-sns';
 import { BitbucketConnector } from '@xyne/connector-sdk/bitbucket';
+import { GcpConnector } from '@xyne/connector-sdk/gcp';
 import { GitHubConnector } from '@xyne/connector-sdk/github';
+import { HubspotConnector } from '@xyne/connector-sdk/hubspot';
+import { PingdomConnector } from '@xyne/connector-sdk/pingdom';
+import { SentinelOneConnector } from '@xyne/connector-sdk/sentinelone';
+import { SlackConnector } from '@xyne/connector-sdk/slack';
+import { blacklistedLabels } from '@/apps/controllers/alertWebhookShared';
 import { HostAgentStep } from '@xyne/workflow-sdk/agents/host';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
@@ -49,6 +56,20 @@ const connectors = new ConnectorRegistry();
 connectors.register(new XyneSpacesConnector());
 connectors.register(new GitHubConnector());
 connectors.register(new BitbucketConnector({ apiBaseUrl: config.bitbucket.baseUrl }));
+
+/**
+ * Alert sources: each starts workflows from its webhook, verified with a token credential, and
+ * outputs the delivery's fields for the workflow's steps (e.g. SEND_MESSAGE). They take the same
+ * settings the app incoming webhooks use: the ALERT_BLACKLISTED_LABELS deny-list, and the
+ * SentinelOne console those webhooks link threats to.
+ */
+const SENTINELONE_CONSOLE_URL = 'https://apso1-1003.sentinelone.net';
+connectors.register(new SlackConnector());
+connectors.register(new SentinelOneConnector({ consoleUrl: SENTINELONE_CONSOLE_URL }));
+connectors.register(new AmazonSnsConnector({ blacklistedLabels: [...blacklistedLabels()] }));
+connectors.register(new PingdomConnector());
+connectors.register(new GcpConnector());
+connectors.register(new HubspotConnector());
 
 /**
  * RUN_AGENT — runs on xyne-claw. See docs/guidelines/workflows/AGENTS.md.
