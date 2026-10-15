@@ -36,6 +36,13 @@ import type { VespaJob } from './types';
  */
 const TAG = '[SDLC-SEARCH]';
 
+// Strip control characters (incl. CR/LF) so request-derived ids can't forge log lines.
+const sanitizeForLog = (value: string): string => value.replace(/[\u0000-\u001f\u007f]+/g, ' ').slice(0, 200);
+
+// Upper bound on the containers walked under one container: far above any real hub, and it ends
+// the walk even if the links ever formed a cycle.
+const MAX_SUBTREE_CONTAINERS = 5000;
+
 // Jobs wait this long before a worker picks them: longer than the transaction that queued them
 // (writers queue from inside it) and than the mapper's hub cache (sdlc-index.ts), so a worker
 // always maps the change itself, never a hub it cached just before it.
@@ -95,7 +102,7 @@ export function queueSdlcSearchJobs(hubId: string, change: SdlcSearchChange): vo
       await vespaQueue.addJob(job, { delayMs: SDLC_JOB_DELAY_MS });
     }
   })().catch(error => {
-    logger.warn(`${TAG} could not queue Vespa jobs for hub ${hubId}`, {
+    logger.warn(`${TAG} could not queue Vespa jobs for hub ${sanitizeForLog(hubId)}`, {
       error: error instanceof Error ? error.message : String(error),
     });
   });
@@ -116,7 +123,8 @@ async function jobsFor(hubId: string, change: SdlcSearchChange): Promise<VespaJo
   /** `id` and every track or folder placed under it. */
   const subtree = async (id: string): Promise<string[]> => {
     const ids = [id];
-    for (let i = 0; i < ids.length; i++) {
+    const seen = new Set(ids);
+    for (let i = 0; i < ids.length && i < MAX_SUBTREE_CONTAINERS; i++) {
       const children = await db.sdlcEntityLink.findMany({
         where: {
           channelId: hubId,
@@ -127,7 +135,12 @@ async function jobsFor(hubId: string, change: SdlcSearchChange): Promise<VespaJo
         },
         select: { targetId: true },
       });
-      for (const child of children) if (!ids.includes(child.targetId)) ids.push(child.targetId);
+      for (const child of children) {
+        if (!seen.has(child.targetId)) {
+          seen.add(child.targetId);
+          ids.push(child.targetId);
+        }
+      }
     }
     return ids;
   };
