@@ -135,7 +135,7 @@ async function sendDigitalTwinApprovalDm(
   // types — the earlier USER_MENTIONED gate already rejected runs where we
   // couldn't resolve the workspaceId, so this should always have a real value.
   const dmResult = (await spacesAppFetch("/channel/openDm", {
-    targetUserId: ctx.mentionedUserId,
+    targetUserId: ctx.mentionedSpacesUserId ?? ctx.mentionedUserId,
     workspaceId: ctx.workspaceId ?? "",
   }, token)) as { channelId: string };
 
@@ -144,9 +144,9 @@ async function sendDigitalTwinApprovalDm(
     ...(ctx.sourceMessageId ? { sourceMessageId: ctx.sourceMessageId } : {}),
     targetChannelId: ctx.channelId,
     targetConversationId: ctx.conversationId,
-    mentionedUserId: ctx.mentionedUserId,
+    mentionedUserId: ctx.mentionedSpacesUserId ?? ctx.mentionedUserId,
     workspaceId: ctx.workspaceId ?? "",
-    senderId: ctx.senderId,
+    senderId: ctx.senderSpacesUserId ?? ctx.senderId,
     senderName: ctx.senderName,
     channelName: ctx.channelName,
     task: ctx.task,
@@ -228,7 +228,7 @@ async function sendTwinReplyDraft(
   const dest = effectiveDelivery.destination;
   const draft = {
     conversationId: ctx.conversationId,
-    ownerUserId: ctx.mentionedUserId,
+    ownerUserId: ctx.mentionedSpacesUserId ?? ctx.mentionedUserId,
     channelId: ctx.channelId,
     action: effectiveDelivery.action,
     ...(effectiveDelivery.message ? { message: effectiveDelivery.message } : {}),
@@ -248,9 +248,9 @@ async function sendTwinReplyDraft(
     ...(dest?.kind === "dm_sender" && ctx.senderName ? { destinationUserName: ctx.senderName } : {}),
     ...(effectiveDelivery.destinationReason ? { destinationReason: effectiveDelivery.destinationReason } : {}),
     ...(ctx.sourceMessageId ? { sourceMessageId: ctx.sourceMessageId } : {}),
-    mentionedUserId: ctx.mentionedUserId,
+    mentionedUserId: ctx.mentionedSpacesUserId ?? ctx.mentionedUserId,
     workspaceId: ctx.workspaceId ?? "",
-    ...(ctx.senderId ? { senderId: ctx.senderId } : {}),
+    ...(ctx.senderId ? { senderId: ctx.senderSpacesUserId ?? ctx.senderId } : {}),
     ...(ctx.senderName ? { senderName: ctx.senderName } : {}),
     ...(ctx.channelName ? { channelName: ctx.channelName } : {}),
     ...(ctx.task ? { incomingTask: ctx.task } : {}),

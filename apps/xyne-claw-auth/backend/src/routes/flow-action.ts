@@ -1289,7 +1289,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       // "agent-tools" is create-skill's CURRENT serverType (it moved groups);
       // "skill" is kept so actions signed before that deploy still apply.
       if (isCreateSkillAction(serverType, tool)) {
-        const outcome = await applyCreateSkill(params, writeUserId);
+        const outcome = await applyCreateSkill(params, writeClawUserId);
         if (outcome.status === "invalid") {
           res.json({ type: "error", message: outcome.error } satisfies AppActionResponse);
           return;
