@@ -26,12 +26,23 @@ const requireAdmin = (service: SlackMigrationService) =>
       .catch(() => next(new HttpError(403, 'FORBIDDEN', 'Admin access required')));
   };
 
+// Only TICKET-MIGRATION admins — the workspace admin role alone isn't enough.
+const requireMigrationResource = (service: SlackMigrationService) =>
+  (req: Request, _res: Response, next: NextFunction): void => {
+    const u = (req as Request & { user?: AuthedUser }).user;
+    if (!u) return next(new HttpError(401, 'UNAUTHORIZED', 'Authentication required'));
+    service.hasMigrationAdminResource(u.id)
+      .then((ok) => (ok ? next() : next(new HttpError(403, 'FORBIDDEN', 'TICKET-MIGRATION access required'))))
+      .catch(() => next(new HttpError(403, 'FORBIDDEN', 'TICKET-MIGRATION access required')));
+  };
+
 const wrap = (fn: (req: Request, res: Response) => Promise<void>) =>
   (req: Request, res: Response, next: NextFunction): void => { fn(req, res).catch(next); };
 
 export function buildRouter(service: SlackMigrationService): Router {
   const router = Router();
   const admin = requireAdmin(service);
+  const migrationResource = requireMigrationResource(service);
   router.use(slackMigrationLimiter); // per-user throttle — this feature runs on one pod
 
 
@@ -59,6 +70,10 @@ export function buildRouter(service: SlackMigrationService): Router {
     res.json(ok(await service.listForAdmin(actorOf(req))));
   }));
   router.get('/migration-jobs/export', admin, wrap(async (req, res) => { res.json(ok(await service.listForAdmin(actorOf(req), 1000))); }));
+  // Submit a DM migration on behalf of a member. Body: { email, token } — the job shows under that member's "My migrations".
+  router.post('/migration-jobs/dm-on-behalf', migrationResource, wrap(async (req, res) => {
+    res.status(202).json(ok(await service.submitDmOnBehalf(actorOf(req), { email: req.body?.email, token: req.body?.token })));
+  }));
 
   // ── Ingestion control — gated by SLACK-MIGRATION-INGEST, not the admin role.
   //    `approve` only stages jobs; these start/stop the worker.

@@ -79,6 +79,19 @@ export class SlackMigrationService {
     return this.persistAndQueue(job);
   }
 
+  /** Admin: submit a DM migration for another member. The job is owned by that member, so it shows on their dashboard;
+   *  the token's Slack email must still match theirs (checked in submitDm). */
+  async submitDmOnBehalf(actor: Actor, input: { email?: string; token?: string }): Promise<MigrationJobView> {
+    const email = input.email?.trim();
+    if (!email) throw new HttpError(400, 'VALIDATION_ERROR', 'email is required');
+    const user = await repositories.users.findByEmailCaseInsensitive(email, actor.workspaceId);
+    if (!user) throw new HttpError(404, 'USER_NOT_FOUND', `No Xyne user with email ${email} in this workspace.`);
+
+    const view = await this.submitDm({ userId: user.id, workspaceId: actor.workspaceId, name: user.name ?? undefined, email: user.email }, input.token ?? '');
+    logger.info('[SlackMigration][audit] DM migration submitted on behalf', { id: view.id, for: user.id, by: actor.userId, name: actor.name, email: actor.email });
+    return view;
+  }
+
   async submitChannel(actor: Actor, input: ChannelInput): Promise<MigrationJobView> {
     this.assertEncryptionReady();
     if (!input.slackChannelId || !input.xyneChannelId) {
