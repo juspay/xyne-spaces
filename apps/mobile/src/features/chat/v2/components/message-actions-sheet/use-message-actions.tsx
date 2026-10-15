@@ -40,6 +40,7 @@ import { composerHtmlHasSendableBody } from '@/src/utils/customEmoji';
 import { composerHtmlToPlainText } from '@/src/components/input-composer/utils/conversation-input.utils';
 import { retryPendingMessageFromV2 } from '@/src/features/chat/v2/pendingRetryTelemetry';
 import { setRichMessageClipboard } from '@/src/utils/richMessageClipboard';
+import { isMarkdownMessageBody, markdownToMessageCopy } from '@/src/utils/markdownMessageCopy';
 import {
   copyImageAttachmentToClipboard,
   getFirstImageAttachment,
@@ -282,10 +283,14 @@ export const useMessageActions = ({
   const handleCopyMessage = useCallback(() => {
     const content = message?.content;
     if (!content) return;
-    const raw =
+    const body =
       context === 'channel' ? (parseForwardedMessageXml(content)?.content ?? content) : content;
+    // Agent/bot responses are stored as markdown; convert so paste keeps formatting.
+    const markdownCopy = isMarkdownMessageBody(body) ? markdownToMessageCopy(body) : null;
+    const raw = markdownCopy?.storedHtml ?? body;
     const plain =
-      context === 'channel' ? channelHtmlToPlainText(raw) : composerHtmlToPlainText(raw);
+      markdownCopy?.plainText ??
+      (context === 'channel' ? channelHtmlToPlainText(body) : composerHtmlToPlainText(body));
     if (!plain) return;
     setRichMessageClipboard({ plainText: plain, storedHtml: raw });
     void Clipboard.setStringAsync(plain);
