@@ -44,6 +44,8 @@ const DEFAULT_RELEASE_AI_MODEL = 'glm-flash-experimental';
 const DEFAULT_TICKET_DUPLICATE_JEV_ENABLED = false;
 const DEFAULT_TICKET_DUPLICATE_JEV_THRESHOLD = 0.75;
 const DEFAULT_SUMMARY_TEMPLATE_SELECTION_XOR_ENABLED = false;
+const DEFAULT_CLASSIFICATION_XOR_ENABLED = false;
+const DEFAULT_PRIORITY_CLASSIFICATION_XOR_ENABLED = false;
 const DEFAULT_SUMMARISER_MODEL = 'glm-flash-experimental';
 const DEFAULT_ATTACHMENT_SUMMARISER_MODEL = 'kimi-latest';
 const DEFAULT_CLASSIFICATION_MODEL = 'glm-flash-experimental';
@@ -92,6 +94,8 @@ const CAC_KEYS = {
   ticketDuplicateJevEnabled: 'ticket_duplicate_jev_enabled',
   ticketDuplicateJevThreshold: 'ticket_duplicate_jev_threshold',
   summaryTemplateSelectionXorEnabled: 'summary_template_selection_xor_enabled',
+  classificationXorEnabled: 'classification_xor_enabled',
+  priorityClassificationXorEnabled: 'priority_classification_xor_enabled',
   ticketBoardModel: 'ticket_board_model_name',
   releaseNotesGeneratorModel: 'release_notes_generator_model_name',
   releaseAiModel: 'release_ai_model_name',
@@ -148,6 +152,10 @@ export class AgentsConfig {
   public readonly ticketDuplicateJevThreshold: number;
   /** XOR picks the call summary template; the LLM only on no answer. Default false. */
   public readonly summaryTemplateSelectionXorEnabled: boolean;
+  /** Desk email category is picked by XOR from the channel's mappings; the LLM only on no answer. Default false. */
+  public readonly classificationXorEnabled: boolean;
+  /** Desk email priority is scored by XOR; the LLM only on no answer. Default false. */
+  public readonly priorityClassificationXorEnabled: boolean;
   public readonly summariserModelName: string;
   public readonly attachmentSummariserModelName: string;
 
@@ -210,6 +218,8 @@ export class AgentsConfig {
     ticketDuplicateJevEnabled: boolean,
     ticketDuplicateJevThreshold: number,
     summaryTemplateSelectionXorEnabled: boolean,
+    classificationXorEnabled: boolean,
+    priorityClassificationXorEnabled: boolean,
   ) {
     this.xyneAiTracingEnabled = xyneAiTracingEnabled;
     this.xyneAiMaskingEnabled = xyneAiMaskingEnabled;
@@ -243,6 +253,8 @@ export class AgentsConfig {
     this.ticketDuplicateJevEnabled = ticketDuplicateJevEnabled;
     this.ticketDuplicateJevThreshold = ticketDuplicateJevThreshold;
     this.summaryTemplateSelectionXorEnabled = summaryTemplateSelectionXorEnabled;
+    this.classificationXorEnabled = classificationXorEnabled;
+    this.priorityClassificationXorEnabled = priorityClassificationXorEnabled;
   }
 
   /**
@@ -296,6 +308,8 @@ export class AgentsConfig {
       const ticketDuplicateJevEnabled = getValue<boolean>(CAC_KEYS.ticketDuplicateJevEnabled, DEFAULT_TICKET_DUPLICATE_JEV_ENABLED);
       const ticketDuplicateJevThreshold = getValue<number>(CAC_KEYS.ticketDuplicateJevThreshold, DEFAULT_TICKET_DUPLICATE_JEV_THRESHOLD);
       const summaryTemplateSelectionXorEnabled = getValue<boolean>(CAC_KEYS.summaryTemplateSelectionXorEnabled, DEFAULT_SUMMARY_TEMPLATE_SELECTION_XOR_ENABLED);
+      const classificationXorEnabled = getValue<boolean>(CAC_KEYS.classificationXorEnabled, DEFAULT_CLASSIFICATION_XOR_ENABLED);
+      const priorityClassificationXorEnabled = getValue<boolean>(CAC_KEYS.priorityClassificationXorEnabled, DEFAULT_PRIORITY_CLASSIFICATION_XOR_ENABLED);
       const summariserModelName = getValue<string>(CAC_KEYS.summariserModel, DEFAULT_SUMMARISER_MODEL);
       const attachmentSummariserModelName = getValue<string>(CAC_KEYS.attachmentSummariserModel, DEFAULT_ATTACHMENT_SUMMARISER_MODEL);
 
@@ -568,6 +582,8 @@ export class AgentsConfig {
         ticketDuplicateJevEnabled,
         ticketDuplicateJevThreshold,
         summaryTemplateSelectionXorEnabled,
+        classificationXorEnabled,
+        priorityClassificationXorEnabled,
       );
     } catch (error) {
       logger.error('[Agents Config] Error fetching CAC config, using DEFAULTS:', error);
@@ -605,6 +621,8 @@ export class AgentsConfig {
         DEFAULT_TICKET_DUPLICATE_JEV_ENABLED,
         DEFAULT_TICKET_DUPLICATE_JEV_THRESHOLD,
         DEFAULT_SUMMARY_TEMPLATE_SELECTION_XOR_ENABLED,
+        DEFAULT_CLASSIFICATION_XOR_ENABLED,
+        DEFAULT_PRIORITY_CLASSIFICATION_XOR_ENABLED,
       );
     }
   }
@@ -643,6 +661,8 @@ export class AgentsConfig {
       DEFAULT_TICKET_DUPLICATE_JEV_ENABLED,
       DEFAULT_TICKET_DUPLICATE_JEV_THRESHOLD,
       DEFAULT_SUMMARY_TEMPLATE_SELECTION_XOR_ENABLED,
+      DEFAULT_CLASSIFICATION_XOR_ENABLED,
+      DEFAULT_PRIORITY_CLASSIFICATION_XOR_ENABLED,
     );
   }
 }

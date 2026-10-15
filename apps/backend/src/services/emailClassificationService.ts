@@ -21,11 +21,22 @@ import type {
 } from '../types/classification.js';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 import { ticketDuplicateService } from '@/services/ticketDuplicateService';
+import { askJev, isPrivateJevConfigured, type JevQuestion } from '@/services/queryIntent/jevClient';
 import { ActivityType, OrgLLMServiceAccountPurpose, TicketPriority, FormContextType, FormEntityType, FormFieldType } from '@xyne/shared';
 
 const AGENT_NAME = 'EmailClassification';
 const PRIORITY_AGENT_NAME = 'EmailPriorityClassification';
 const AI_FORM_FIELD_SKIP_KEYS = new Set(['summary', 'parse_reason', 'priority', 'confidence', 'reasoning']);
+
+const XOR_TIMEOUT_MS = 10_000;
+const XOR_OTHER_OPTION = 'other';
+/** Lowest first, as XOR's score question wants. */
+const XOR_PRIORITY_LEVELS: { priority: TicketPriority; description: string }[] = [
+  { priority: TicketPriority.LOW, description: 'Routine question or request; nothing is blocked' },
+  { priority: TicketPriority.MEDIUM, description: 'Something is not working for one customer, with a workaround or no deadline' },
+  { priority: TicketPriority.HIGH, description: 'A customer is blocked, payments or production are affected, or there is a near deadline' },
+  { priority: TicketPriority.CRITICAL, description: 'Outage, security breach, or many customers affected right now' },
+];
 
 /** Default prompt for priority classification */
 const DEFAULT_PRIORITY_PROMPT = `You are an expert support ticket prioritizer for a customer support desk.
@@ -100,26 +111,32 @@ export class EmailClassificationService {
     const userMessage = `${metadataLines}\n\n${emailBody}`;
 
     try {
-      // Run category and priority classification in PARALLEL
-      const categoryPromise = config.classificationEnabled
-        ? this.runClassificationAgent(
-            config.classificationPrompt,
-            userMessage,
-            modelName,
-            config.ownerUserId,
-          )
-        : Promise.resolve(null);
+      const xor = await this.classifyWithXor(config, cacConfig, userMessage);
 
-      const priorityPromise = config.priorityClassificationEnabled
-        ? this.classifyPriority(
-            channelId,
-            emailSubject,
-            emailBody,
-            config.priorityClassificationPrompt,
-            modelName,
-            config.ownerUserId,
-          )
-        : Promise.resolve(null);
+      // Run category and priority classification in PARALLEL; the LLM only for what XOR didn't answer
+      const categoryPromise = !config.classificationEnabled
+        ? Promise.resolve(null)
+        : xor.rawOutput
+          ? Promise.resolve(xor.rawOutput)
+          : this.runClassificationAgent(
+              config.classificationPrompt,
+              userMessage,
+              modelName,
+              config.ownerUserId,
+            );
+
+      const priorityPromise = !config.priorityClassificationEnabled
+        ? Promise.resolve(null)
+        : xor.priority
+          ? Promise.resolve(xor.priority)
+          : this.classifyPriority(
+              channelId,
+              emailSubject,
+              emailBody,
+              config.priorityClassificationPrompt,
+              modelName,
+              config.ownerUserId,
+            );
 
       const [rawOutput, priorityResult] = await Promise.all([
         categoryPromise,
@@ -524,6 +541,70 @@ export class EmailClassificationService {
   }
 
   // ─── Private helpers ──────────────────────────────────────────────────────
+
+  /**
+   * Category and priority from one XOR request, each behind its own CAC switch. XOR picks a
+   * mapping row (so category and sub-category come from the desk's own list) and scores
+   * priority LOW..CRITICAL. A part left undefined goes to the LLM as before.
+   */
+  private async classifyWithXor(
+    config: NonNullable<Awaited<ReturnType<EmailClassificationRepository['findConfigByChannelId']>>>,
+    cacConfig: AgentsConfig,
+    userMessage: string,
+  ): Promise<{ rawOutput?: ClassificationRawOutput; priority?: PriorityClassificationResult }> {
+    if (!isPrivateJevConfigured()) return {};
+
+    const questions: Record<string, JevQuestion> = {};
+    if (config.classificationEnabled && cacConfig.classificationXorEnabled && config.mappings.length > 0) {
+      questions.category = {
+        type: 'choice',
+        instructions: 'Which category does this support email belong to?',
+        criteria: {
+          ...Object.fromEntries(
+            config.mappings.map(m => [m.id, m.subCategory ? `${m.category}: ${m.subCategory}` : m.category]),
+          ),
+          [XOR_OTHER_OPTION]: 'None of these',
+        },
+      };
+    }
+    if (config.priorityClassificationEnabled && cacConfig.priorityClassificationXorEnabled) {
+      questions.priority = {
+        type: 'score',
+        instructions: 'How urgent is this support email?',
+        criteria: XOR_PRIORITY_LEVELS.map(l => `${l.priority}: ${l.description}`),
+      };
+    }
+    if (Object.keys(questions).length === 0) return {};
+
+    const answers = await askJev(userMessage, questions, XOR_TIMEOUT_MS, undefined, { partial: true });
+    const result: { rawOutput?: ClassificationRawOutput; priority?: PriorityClassificationResult } = {};
+
+    const category = answers?.category;
+    if (category?.type === 'choice') {
+      const mapping = config.mappings.find(m => m.id === category.choice);
+      result.rawOutput = {
+        [config.categoryField]: mapping?.category ?? 'Other',
+        ...(config.subCategoryField && mapping?.subCategory ? { [config.subCategoryField]: mapping.subCategory } : {}),
+      };
+    }
+    const priority = answers?.priority;
+    if (priority?.type === 'score') {
+      result.priority = {
+        priority: XOR_PRIORITY_LEVELS[priority.level].priority,
+        confidence: priority.confidence ?? 0.5,
+        reasoning: 'Scored by XOR',
+      };
+    }
+
+    logger.info('[Classification] XOR answered', {
+      channelId: config.channelId,
+      asked: Object.keys(questions),
+      category: result.rawOutput?.[config.categoryField] ?? null,
+      priority: result.priority?.priority ?? null,
+      priorityConfidence: result.priority?.confidence ?? null,
+    });
+    return result;
+  }
 
   private async runClassificationAgent(
     systemPrompt: string,
