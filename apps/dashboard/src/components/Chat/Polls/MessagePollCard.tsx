@@ -400,6 +400,7 @@ function NonChoicePollAnswer({
             type='button'
             variant={rating === value ? 'default' : 'outline'}
             size='icon'
+            title={`Rate ${value} out of 5`}
             disabled={disabled}
             aria-pressed={rating === value}
             onClick={() => {
