@@ -7,8 +7,6 @@ interface CallTranscriptPanelProps {
   callId: string;
   /** Host transcription kill-switch (roomMachine). When off, no lines are published. */
   isTranscriptionEnabled: boolean;
-  /** Only the host can turn transcription on, so the off-state hint differs by role. */
-  isHost: boolean;
   onClose: () => void;
 }
 
@@ -22,7 +20,6 @@ type PanelTab = 'transcript';
 export function CallTranscriptPanel({
   callId,
   isTranscriptionEnabled,
-  isHost,
   onClose,
 }: CallTranscriptPanelProps): React.ReactElement {
   const transcripts = useCallTranscripts();
@@ -30,8 +27,9 @@ export function CallTranscriptPanel({
   // Only one tab for now; the setter is intentionally omitted until Ask AI lands.
   const [activeTab] = useState<PanelTab>('transcript');
 
-  // Capture has stopped, but lines already captured stay on screen. Host sees an actionable hint.
-  const transcriptionOffNotice = 'Transcriptions are off — no new lines will be added until the host turns them back on.';
+  // Capture has stopped, but lines already captured stay on screen and scrollable.
+  const transcriptionOffNotice =
+    'Transcriptions are off — no new lines will be added until the host turns them back on.';
 
   const renderBody = (): React.ReactNode => {
     if (activeTab !== 'transcript') return null;

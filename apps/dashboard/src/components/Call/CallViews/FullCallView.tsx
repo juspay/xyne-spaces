@@ -591,7 +591,6 @@ export function FullCallView({
           <CallTranscriptPanel
             callId={callId}
             isTranscriptionEnabled={isTranscriptionEnabled}
-            isHost={isHost}
             onClose={handleToggleTranscript}
           />
         );
