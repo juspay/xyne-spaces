@@ -46,6 +46,8 @@ import { notionAdapter } from "./adapters/notion.js";
 import { notionRemoteAdapter } from "./adapters/notion-remote.js";
 import { sentryRemoteAdapter } from "./adapters/sentry-remote.js";
 import { mixpanelRemoteAdapter } from "./adapters/mixpanel-remote.js";
+import { firefliesRemoteAdapter } from "./adapters/fireflies-remote.js";
+import { atlassianRemoteAdapter } from "./adapters/atlassian-remote.js";
 import { googleAdapter } from "./adapters/google.js";
 import { microsoftAdapter } from "./adapters/microsoft.js";
 import { twitterAdapter } from "./adapters/twitter.js";
@@ -126,6 +128,8 @@ export const STATIC_ADAPTERS: Record<string, McpAdapter> = {
   "notion-remote": notionRemoteAdapter,
   "sentry-remote": sentryRemoteAdapter,
   "mixpanel-remote": mixpanelRemoteAdapter,
+  "fireflies-remote": firefliesRemoteAdapter,
+  "atlassian-remote": atlassianRemoteAdapter,
   sentry: sentryAdapter,
   "sentry-mcp": sentryAdapter,
   twitter: twitterAdapter,
