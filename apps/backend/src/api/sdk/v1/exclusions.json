@@ -85,6 +85,12 @@
       "note": "V2 additionally records formId."
     },
     {
+      "name": "getAllTicketEntityMappings",
+      "kind": "query",
+      "reason": "legacy-unused",
+      "note": "Every ticket entity mapping in the workspace, unscoped. It was behind projects.listFieldDefinitions, but the rows are per ticket and carry no project, so that operation is retired; tickets.listFieldValues reads one ticket's mappings."
+    },
+    {
       "name": "getDraftForConversation",
       "kind": "query",
       "reason": "superseded-by:getDraftForConversationV2",
@@ -281,6 +287,12 @@
       "kind": "query",
       "reason": "superseded-by:supportTicketsPageV4",
       "note": "Older version of a covered operation."
+    },
+    {
+      "name": "ticketsForEmailChannelsV2",
+      "kind": "query",
+      "reason": "superseded-by:supportTicketsFiltered",
+      "note": "Takes no arguments, so it could not honour supportTickets.listForEmailChannels' channelId and merchantMid filters."
     },
     {
       "name": "ticketTag.create",
