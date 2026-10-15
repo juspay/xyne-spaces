@@ -123,9 +123,8 @@ class VespaQueue {
 	 * Add a job to the appropriate queue(s) based on schema type
 	 * - File schemas go only to vespa-files queue
 	 * - Non-file schemas go to all queues EXCEPT vespa-files (broadcast to vespa-ingestion, vespa-ingestion-kube, etc.)
-	 * - delayMs holds the job back before a worker can pick it (Bull's delay)
 	 */
-	async addJob(vespaJob: VespaJob, opts: { delayMs?: number } = {}): Promise<Bull.Job<VespaJob>[]> {
+	async addJob(vespaJob: VespaJob): Promise<Bull.Job<VespaJob>[]> {
 		if (this.queues.size === 0 || !this.isInitialized) {
 			throw new Error('Vespa queue not initialized Properly');
 		}
@@ -146,7 +145,7 @@ class VespaQueue {
 				: isKbFeed
 					? config.kbIngestion.queuePriority
 					: 5;
-			const jobOpts = { priority: jobType === 'delete' ? 1 : feedPriority, ...(opts.delayMs ? { delay: opts.delayMs } : {}) };
+			const jobOpts = { priority: jobType === 'delete' ? 1 : feedPriority };
 			if (isKbFeed) {
 				logger.info(
 					`[KB_PRIORITY] Prioritizing KB file feed ${schema}/${docId} with queue priority ${jobOpts.priority} (lower = higher)`

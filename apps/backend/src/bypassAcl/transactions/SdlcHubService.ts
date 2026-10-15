@@ -1,5 +1,5 @@
 import { transaction } from '../base';
-import { queueSdlcSearchJobs } from '@/zero/vespa-injection/core/sdlc-sync';
+import { markNewSdlcCanvas, queueSdlcSearchJobs, withNewSdlcCanvases } from '@/zero/vespa-injection/core/sdlc-sync';
 import type { SdlcActor } from '@/sdlc/types';
 import { AppError } from '@/middleware/errorHandler';
 import { sdlcChannelCanvasParticipant } from '@/sdlc/sdlcCanvasAccess';
@@ -92,7 +92,7 @@ export function addChannelRepositoriesTx(self: SdlcHubService, actor: SdlcActor,
   }));
 }
 export function createArtifactFromClawTx(self: SdlcHubService, actor: SdlcActor, input: { title: string; folderId: string; markdown: string; channelId?: string | undefined; trackId?: string | undefined; trackFolderId?: string | undefined; repoId?: string | undefined; repoIds?: string[] | undefined; relatedCanvasIds?: string[] | undefined; }, content: BlockNoteBlock[], channelId: string, folder: { id: string; name: string }, projectId: string, repo: { id: string } | null, hubKnowledge: boolean, trackFolderId: string | undefined, repoIds: string[]) {
-  return transaction(['Canvas', 'CanvasParticipant', 'SdlcArtifact', 'SdlcEntityLink', 'SdlcFolder', 'ConnectGroup'], 'createArtifactFromClaw: canvas, artifact, track/repo links and hub placement must commit atomically; tx is not ACL-wrapped', self.prisma, async (tx) => {
+  return withNewSdlcCanvases(() => transaction(['Canvas', 'CanvasParticipant', 'SdlcArtifact', 'SdlcEntityLink', 'SdlcFolder', 'ConnectGroup'], 'createArtifactFromClaw: canvas, artifact, track/repo links and hub placement must commit atomically; tx is not ACL-wrapped', self.prisma, async (tx) => {
     const viewAccessId = randomUUID();
     // Slack Connect: a canvas is a shareable entity → its own connectId + a private connect_group row.
     const connectId = newConnectId();
@@ -117,6 +117,8 @@ export function createArtifactFromClawTx(self: SdlcHubService, actor: SdlcActor,
         },
       },
     });
+    // Its own triggers skip it: its feed comes after its content reaches Y-Sweet (sdlc-sync.ts).
+    markNewSdlcCanvas(canvas.id);
     await createConnectGroupForEntity(tx, {
       entityType: ConnectEntityType.CANVAS,
       entityId: canvas.id,
@@ -208,7 +210,7 @@ export function createArtifactFromClawTx(self: SdlcHubService, actor: SdlcActor,
       canvasId: canvas.id,
       content,
     };
-  });
+  }));
 }
 
 export function updateArtifactTitleOrLinksTx(self: SdlcHubService, actor: SdlcActor, channelId: string, existing: { id: string; viewAccessId: string | null; title: string }, input: { title?: string | undefined; relatedCanvasIds?: string[] | undefined }) {

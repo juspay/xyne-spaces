@@ -67,21 +67,12 @@ export const sdlcContainerRef = (containerId: string): string =>
 const repositoryRef = (repoId: string): string =>
   `id:${NAMESPACE}:${sdlcRepositorySchema}::${repoId}`;
 
-// One hub change can queue several Vespa jobs, and each maps its own document; caching the hub
-// briefly keeps that from rebuilding the whole hub once per job. The jobs run in the Vespa
-// workers, where the write that queued them cannot invalidate this cache, so it must expire
-// faster than those jobs are held back (3s, sdlc-sync.ts): a job then never maps from a hub
-// cached before the change that queued it.
-const CACHE_TTL_MS = 2_000;
-const cache = new Map<string, { at: number; index: Promise<SdlcHubIndex | null> }>();
-
+/**
+ * A hub's tree and every item's place in it, read from Postgres each time: a job maps the
+ * hub as it is when the job runs.
+ */
 export function loadSdlcHubIndex(hubId: string, prisma: PrismaClient = db): Promise<SdlcHubIndex | null> {
-  const hit = cache.get(hubId);
-  if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.index;
-  const index = buildSdlcHubIndex(hubId, prisma);
-  cache.set(hubId, { at: Date.now(), index });
-  index.catch(() => cache.delete(hubId));
-  return index;
+  return buildSdlcHubIndex(hubId, prisma);
 }
 
 async function buildSdlcHubIndex(hubId: string, prisma: PrismaClient): Promise<SdlcHubIndex | null> {

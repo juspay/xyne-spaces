@@ -1,4 +1,5 @@
 import { transaction } from '../base';
+import { markNewSdlcCanvas, withNewSdlcCanvases } from '@/zero/vespa-injection/core/sdlc-sync';
 import { placeHubItem } from '@/sdlc/hubFolders';
 import { sdlcChannelCanvasParticipant } from '@/sdlc/sdlcCanvasAccess';
 import { newConnectId, createConnectGroupForEntity, resolveCanvasConnectId, ConnectEntityType } from '@/database/connectGroup';
@@ -48,7 +49,7 @@ export function ensureFolderPathTx(self: SdlcWikiPageStore, parent: string, name
   });
 }
 export function createTx(self: SdlcWikiPageStore, scope: WikiScope, page: { title: string; action: "create"; markdown: string; folderPath?: string | undefined; }, content: BlockNoteBlock[], typeFolderId: string, commitSha: string | undefined, actor: { workspaceId: string; userId: string; }, parentId: string) {
-  return transaction(['Canvas', 'SdlcArtifact', 'ConnectGroup'], 'create wiki page: canvas, SDLC artifact, hub placement and first version must commit together; tx is not ACL-wrapped', self.prisma, async (tx) => {
+  return withNewSdlcCanvases(() => transaction(['Canvas', 'SdlcArtifact', 'ConnectGroup'], 'create wiki page: canvas, SDLC artifact, hub placement and first version must commit together; tx is not ACL-wrapped', self.prisma, async (tx) => {
     // Slack Connect: a canvas is a shareable entity → its own connectId + a private connect_group row.
     const connectId = newConnectId();
     const canvas = await tx.canvas.create({
@@ -73,6 +74,8 @@ export function createTx(self: SdlcWikiPageStore, scope: WikiScope, page: { titl
       },
       select: { id: true },
     });
+    // Its own triggers skip it: its feed comes after its content reaches Y-Sweet (sdlc-sync.ts).
+    markNewSdlcCanvas(canvas.id);
     await createConnectGroupForEntity(tx, {
       entityType: ConnectEntityType.CANVAS,
       entityId: canvas.id,
@@ -98,7 +101,7 @@ export function createTx(self: SdlcWikiPageStore, scope: WikiScope, page: { titl
       targetId: canvas.id,
     });
     return { artifact: canvas.id, canvasId: canvas.id, content };
-  });
+  }));
 }
 export function editTx(self: SdlcWikiPageStore, existing: any, page: PageAction<"update" | "replace_section" | "insert_section" | "remove_section">, content: BlockNoteBlock[], scope: WikiScope, markdown: string, commitSha: string | undefined) {
   return transaction(['Canvas', 'SdlcArtifact'], 'edit wiki page: canvas update, version record and artifact commit sha must commit together; tx is not ACL-wrapped', self.prisma, async (tx) => {
