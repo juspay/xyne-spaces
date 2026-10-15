@@ -21,7 +21,7 @@ import type {
 } from '../types/classification.js';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 import { ticketDuplicateService } from '@/services/ticketDuplicateService';
-import { askJev, isPrivateJevConfigured, type JevQuestion } from '@/services/queryIntent/jevClient';
+import { askJev, isPrivateJevConfigured } from '@/services/queryIntent/jevClient';
 import { ActivityType, OrgLLMServiceAccountPurpose, TicketPriority, FormContextType, FormEntityType, FormFieldType } from '@xyne/shared';
 
 const AGENT_NAME = 'EmailClassification';
@@ -30,17 +30,9 @@ const AI_FORM_FIELD_SKIP_KEYS = new Set(['summary', 'parse_reason', 'priority', 
 
 const XOR_TIMEOUT_MS = 10_000;
 const XOR_OTHER_OPTION = 'other';
-/** The email is XOR's state, so prompt placeholders point at it instead of repeating it. */
-const XOR_EMAIL_PLACEHOLDER = '(the email)';
-const XOR_CATEGORY_QUESTION = 'Which category does this support email belong to?';
-const XOR_PRIORITY_QUESTION = 'How urgent is this support email?';
 /** Lowest first, as XOR's score question wants. */
-const XOR_PRIORITY_LEVELS: { priority: TicketPriority; description: string }[] = [
-  { priority: TicketPriority.LOW, description: 'Routine question or request; nothing is blocked' },
-  { priority: TicketPriority.MEDIUM, description: 'Something is not working for one customer, with a workaround or no deadline' },
-  { priority: TicketPriority.HIGH, description: 'A customer is blocked, payments or production are affected, or there is a near deadline' },
-  { priority: TicketPriority.CRITICAL, description: 'Outage, security breach, or many customers affected right now' },
-];
+const XOR_PRIORITY_LEVELS = [TicketPriority.LOW, TicketPriority.MEDIUM, TicketPriority.HIGH, TicketPriority.CRITICAL];
+const PRIORITY_USER_MESSAGE = 'Analyze email and determine priority.';
 
 /** Default prompt for priority classification */
 const DEFAULT_PRIORITY_PROMPT = `You are an expert support ticket prioritizer for a customer support desk.
@@ -115,7 +107,7 @@ export class EmailClassificationService {
     const userMessage = `${metadataLines}\n\n${emailBody}`;
 
     try {
-      const xor = await this.classifyWithXor(config, cacConfig, userMessage);
+      const xor = await this.classifyWithXor(config, cacConfig, userMessage, emailSubject, emailBody);
 
       // Run category and priority classification in PARALLEL; the LLM only for what XOR didn't answer
       const categoryPromise = !config.classificationEnabled
@@ -193,11 +185,7 @@ export class EmailClassificationService {
       modelName,
     });
 
-    const prompt = customPrompt?.trim() 
-      ? this.prepareCustomPrompt(customPrompt, emailSubject, emailBody)
-      : DEFAULT_PRIORITY_PROMPT
-          .replace('{subject}', emailSubject)
-          .replace('{body}', emailBody);
+    const prompt = this.buildPriorityPrompt(customPrompt, emailSubject, emailBody);
 
     logger.info('[PriorityClassification] Prompt prepared', {
       isCustomPrompt: !!customPrompt?.trim(),
@@ -222,6 +210,15 @@ export class EmailClassificationService {
       });
       return null;
     }
+  }
+
+  /** The priority prompt with the email filled in; the LLM and XOR both get exactly this. */
+  private buildPriorityPrompt(customPrompt: string | null | undefined, emailSubject: string, emailBody: string): string {
+    return customPrompt?.trim()
+      ? this.prepareCustomPrompt(customPrompt, emailSubject, emailBody)
+      : DEFAULT_PRIORITY_PROMPT
+          .replace('{subject}', emailSubject)
+          .replace('{body}', emailBody);
   }
 
   /**
@@ -547,50 +544,47 @@ export class EmailClassificationService {
   // ─── Private helpers ──────────────────────────────────────────────────────
 
   /**
-   * Category and priority from one XOR request, each behind its own CAC switch. XOR picks a
-   * mapping row (so category and sub-category come from the desk's own list) and scores
-   * priority LOW..CRITICAL. A part left undefined goes to the LLM as before.
+   * Category and priority from XOR, each behind its own CAC switch, given exactly what the
+   * LLM gets: the same prompt and the same message. The only addition is the answer list XOR
+   * needs: the desk's mapping rows (plus other) for category, LOW..CRITICAL for priority.
+   * A part left undefined goes to the LLM as before.
    */
   private async classifyWithXor(
     config: NonNullable<Awaited<ReturnType<EmailClassificationRepository['findConfigByChannelId']>>>,
     cacConfig: AgentsConfig,
     userMessage: string,
+    emailSubject: string,
+    emailBody: string,
   ): Promise<{ rawOutput?: ClassificationRawOutput; priority?: PriorityClassificationResult }> {
     if (!isPrivateJevConfigured()) return {};
 
-    // Same prompts the LLM gets, so XOR works from the desk's own definitions; the question goes last.
-    const questions: Record<string, JevQuestion> = {};
-    if (config.classificationEnabled && cacConfig.classificationXorEnabled && config.mappings.length > 0) {
-      questions.category = {
-        type: 'choice',
-        instructions: config.classificationPrompt.trim()
-          ? `${config.classificationPrompt.trim()}\n\n${XOR_CATEGORY_QUESTION}`
-          : XOR_CATEGORY_QUESTION,
-        criteria: {
-          ...Object.fromEntries(
-            config.mappings.map(m => [m.id, m.subCategory ? `${m.category}: ${m.subCategory}` : m.category]),
-          ),
-          [XOR_OTHER_OPTION]: 'None of these',
-        },
-      };
-    }
-    if (config.priorityClassificationEnabled && cacConfig.priorityClassificationXorEnabled) {
-      questions.priority = {
-        type: 'score',
-        instructions: `${this.prepareCustomPrompt(
-          config.priorityClassificationPrompt?.trim() || DEFAULT_PRIORITY_PROMPT,
-          XOR_EMAIL_PLACEHOLDER,
-          XOR_EMAIL_PLACEHOLDER,
-        )}\n\n${XOR_PRIORITY_QUESTION}`,
-        criteria: XOR_PRIORITY_LEVELS.map(l => `${l.priority}: ${l.description}`),
-      };
-    }
-    if (Object.keys(questions).length === 0) return {};
-
-    const answers = await askJev(userMessage, questions, XOR_TIMEOUT_MS, undefined, { partial: true });
+    // LLM: system = the desk's classification prompt, user = the email.
+    const askCategory =
+      config.classificationEnabled && cacConfig.classificationXorEnabled && config.mappings.length > 0 && config.classificationPrompt.trim()
+        ? askJev(userMessage, {
+            category: {
+              type: 'choice',
+              instructions: config.classificationPrompt,
+              criteria: {
+                ...Object.fromEntries(
+                  config.mappings.map(m => [m.id, m.subCategory ? `${m.category}: ${m.subCategory}` : m.category]),
+                ),
+                [XOR_OTHER_OPTION]: 'Other',
+              },
+            },
+          }, XOR_TIMEOUT_MS)
+        : Promise.resolve(null);
+    // LLM: system = the priority prompt with the email filled in, user = PRIORITY_USER_MESSAGE.
+    const askPriority =
+      config.priorityClassificationEnabled && cacConfig.priorityClassificationXorEnabled
+        ? askJev(this.buildPriorityPrompt(config.priorityClassificationPrompt, emailSubject, emailBody), {
+            priority: { type: 'score', instructions: PRIORITY_USER_MESSAGE, criteria: XOR_PRIORITY_LEVELS },
+          }, XOR_TIMEOUT_MS)
+        : Promise.resolve(null);
+    const [categoryAnswers, priorityAnswers] = await Promise.all([askCategory, askPriority]);
     const result: { rawOutput?: ClassificationRawOutput; priority?: PriorityClassificationResult } = {};
 
-    const category = answers?.category;
+    const category = categoryAnswers?.category;
     if (category?.type === 'choice') {
       const mapping = config.mappings.find(m => m.id === category.choice);
       result.rawOutput = {
@@ -598,22 +592,23 @@ export class EmailClassificationService {
         ...(config.subCategoryField && mapping?.subCategory ? { [config.subCategoryField]: mapping.subCategory } : {}),
       };
     }
-    const priority = answers?.priority;
+    const priority = priorityAnswers?.priority;
     if (priority?.type === 'score') {
       result.priority = {
-        priority: XOR_PRIORITY_LEVELS[priority.level].priority,
+        priority: XOR_PRIORITY_LEVELS[priority.level],
         confidence: priority.confidence ?? 0.5,
         reasoning: 'Scored by XOR',
       };
     }
 
-    logger.info('[Classification] XOR answered', {
-      channelId: config.channelId,
-      asked: Object.keys(questions),
-      category: result.rawOutput?.[config.categoryField] ?? null,
-      priority: result.priority?.priority ?? null,
-      priorityConfidence: result.priority?.confidence ?? null,
-    });
+    if (result.rawOutput || result.priority) {
+      logger.info('[Classification] XOR answered', {
+        channelId: config.channelId,
+        category: result.rawOutput?.[config.categoryField] ?? null,
+        priority: result.priority?.priority ?? null,
+        priorityConfidence: result.priority?.confidence ?? null,
+      });
+    }
     return result;
   }
 
@@ -739,7 +734,7 @@ export class EmailClassificationService {
     logLLMCallStart(PRIORITY_AGENT_NAME, modelName, 'ORG_LITELLM_SERVICE_ACCOUNT');
     try {
       const response = await llmClient.generate({
-        messages: [createUserMessage('Analyze email and determine priority.')],
+        messages: [createUserMessage(PRIORITY_USER_MESSAGE)],
         systemPrompt,
         parameters: {
           temperature: 0.1,
