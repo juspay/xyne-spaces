@@ -23,6 +23,7 @@ import {
 
 import { callService } from '@/src/services/Call/callService';
 import { haptics } from '@/src/utils/haptics';
+import { Event, logger } from '@/src/utils/logger';
 import type { CallDisplayData } from '@/src/types/calls';
 import { useQuery } from '@/src/hooks/useQuery';
 import { queries } from '@/src/zero/queries';
@@ -338,7 +339,8 @@ const CallDetailsSheet: React.FC<CallDetailsSheetProps> = ({
         dismissSheetAfter(() => {
           onDeleted?.(call.id);
         });
-      } catch {
+      } catch (error) {
+        logger.error(Event.ERROR, { context: 'call-details delete', error: String(error) });
         Alert.alert('Error', 'Failed to delete call');
       }
     };

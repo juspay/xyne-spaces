@@ -21,7 +21,7 @@ interface RepeatPickerValue {
 
 type RepeatSession = PickerSession<RepeatPickerValue, RepeatChoice>;
 
-// ponytail: "Custom…" (interval, weekdays, end rules) needs its own screen; add it as a last row.
+// TODO: "Custom…" (interval, weekdays, end rules) needs its own screen; add it as a last row.
 const RepeatPicker = ({ session }: { session: RepeatSession }): ReactElement => {
   const router = useRouter();
   const { accentText } = useBubbleAccent();

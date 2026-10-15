@@ -57,6 +57,7 @@ type UseCallsOptions = {
 
 // Same page size and query as the dashboard (usePaginatedCalls).
 const PAGE_SIZE = 35;
+const UPCOMING_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
 /**
  * Dashboard merge (queryCacheMachine.mergeCallHistoryPage): upsert each row by id, then
@@ -87,6 +88,10 @@ export const useCalls = (options: UseCallsOptions = {}) => {
   const isSearching = searchQuery.trim().length > 0;
 
   const didLogInitialSyncRef = useRef(false);
+  // Fixed per mount: a moving arg would change the query hash and re-hydrate on every render.
+  const [upcomingScheduledArgs] = useState(() => ({
+    startsBefore: Date.now() + UPCOMING_WINDOW_MS,
+  }));
 
   const { user } = useAuth();
   const { hasQueryCacheHydrated } = useStartupPhase();
@@ -166,9 +171,10 @@ export const useCalls = (options: UseCallsOptions = {}) => {
     { enabled: liveDataEnabled && isSearching },
   );
 
-  const [allScheduledCalls] = useCachedQuery(queries.userScheduledCalls(), {
-    enabled: liveDataEnabled,
-  });
+  const [allScheduledCalls] = useCachedQuery(
+    queries.userUpcomingScheduledCalls(upcomingScheduledArgs),
+    { enabled: liveDataEnabled },
+  );
 
   const [activeCalls] = useCachedQuery(queries.userActiveCalls(), {
     enabled: liveDataEnabled,
@@ -188,7 +194,7 @@ export const useCalls = (options: UseCallsOptions = {}) => {
       zero.run(queries.userCallHistoryParticipantOnly({ limit: PAGE_SIZE, start: null }), {
         type: 'complete',
       }),
-      zero.run(queries.userScheduledCalls(), { type: 'complete' }),
+      zero.run(queries.userUpcomingScheduledCalls(upcomingScheduledArgs), { type: 'complete' }),
       zero.run(queries.userActiveCalls(), { type: 'complete' }),
     ])
       .then(([historyRows, scheduledRows, activeRows]) => {
@@ -255,7 +261,7 @@ export const useCalls = (options: UseCallsOptions = {}) => {
     return (): void => {
       cancelled = true;
     };
-  }, [activeTab, getVisibleTelemetryRowCount, liveDataEnabled, zero]);
+  }, [activeTab, getVisibleTelemetryRowCount, liveDataEnabled, upcomingScheduledArgs, zero]);
 
   // ── Merge page1 into accumulator ───────────────────────────────────────────
   useEffect(() => {
