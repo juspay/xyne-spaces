@@ -3957,8 +3957,11 @@ export const queries: AnyQueryRegistry = defineQueries({
       isRead: z.boolean().optional(),
       actorTypes: z.array(z.nativeEnum(UserType)).optional(),
       actorId: z.string().optional(),
+      channelIds: z.array(z.string()).optional(),
     }),
-    ({ args: { limit, start, types, classification, isRead, actorTypes, actorId } }) => {
+    ({
+      args: { limit, start, types, classification, isRead, actorTypes, actorId, channelIds },
+    }) => {
       let query = zql.activities;
 
       if (types.length > 0) {
@@ -3975,6 +3978,10 @@ export const queries: AnyQueryRegistry = defineQueries({
 
       if (isRead !== undefined) {
         query = query.where('isRead', isRead);
+      }
+
+      if (channelIds && channelIds.length > 0) {
+        query = query.where('channelId', 'IN', channelIds);
       }
 
       // Actor kind lives on users.userType, not on the activity row, so this has to
