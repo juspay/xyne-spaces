@@ -32,15 +32,6 @@ enum MtlsTransportPolicy {
     return scheme == "https" && sameOrigin(components, expected: configuredApiOrigin)
   }
 
-  /// The configured API origin over HTTPS: the requests that must carry the client certificate.
-  static func isApiHTTPSURL(_ url: URL) -> Bool {
-    guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-          components.scheme?.lowercased() == "https" else {
-      return false
-    }
-    return sameOrigin(components, expected: configuredApiOrigin)
-  }
-
   static func isApprovedWebSocketURL(_ rawURL: String) -> Bool {
     guard let url = URL(string: rawURL),
           let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
