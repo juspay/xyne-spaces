@@ -6,7 +6,8 @@ import { getRequesterId, getOrgId, isClawAdmin, requireClawAdmin, getAgentEditAc
 import { s2sKeyMatches } from "../middleware/require-auth.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
-import { spacesUserIdForClawUser } from "../lib/users-jit.js";
+import { spacesUserIdForClawUser, findUserByAnyId } from "../lib/users-jit.js";
+import { getRequesterAliases, matchesAuthenticatedUserId } from "../middleware/pin-user-id-param.js";
 import { resolveSpacesAppCreds } from "../lib/spaces-agent-install.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
@@ -64,20 +65,58 @@ export function canProposerPostAsAgent<T extends { canEdit: boolean; agent: { sc
 
 // List skills: global + user's own personal skills (admins see ALL)
 router.get("/", asyncHandler(async (req: Request, res: Response) => {
-  const scopeUserId = (req.query["userId"] as string | undefined) ?? undefined;
+  const scopeUserId = (req.query["userId"] as string | undefined)?.trim() || undefined;
   const authedUserId = String(req.headers["x-user-id"] ?? "");
   const admin = authedUserId ? await isClawAdmin(authedUserId, getOrgId(req)) : false;
+
+  // Resolve the raw Spaces user ID from the query param to the canonical claw-auth
+  // user ID — same pattern as GET /agents. The frontend sends the workspace-scoped
+  // Spaces id but Skill.ownerUserId stores the canonical claw-auth id.
+  if (scopeUserId && !admin && !matchesAuthenticatedUserId(req, scopeUserId)) {
+    throw forbidden("userId does not match authenticated session");
+  }
+  const scopedUser = scopeUserId ? await findUserByAnyId(scopeUserId) : null;
+  if (scopeUserId && !scopedUser && !matchesAuthenticatedUserId(req, scopeUserId)) {
+    throw notFound("User not found");
+  }
+  const canonicalScopeUserId = (scopedUser?.id ?? authedUserId) || undefined;
+
+  // Union all alias ids so rows written with the raw Spaces id are also found.
+  const visibilityUserIds = (() => {
+    if (scopedUser && !matchesAuthenticatedUserId(req, scopedUser.id)) {
+      return [scopedUser.id];
+    }
+    const ids = getRequesterAliases(req);
+    if (canonicalScopeUserId && !ids.includes(canonicalScopeUserId)) {
+      ids.push(canonicalScopeUserId);
+    }
+    return ids;
+  })();
+
   // Gate the admin "see ALL (incl. others' private)" bypass behind ?scope=all,
-  // mirroring GET /agents. Without this an admin's normal skill list leaks
-  // every user's private skills (the same regression agents.ts already fixed).
+  // mirroring GET /agents.
   const wantAllSkills = req.query["scope"] === "all";
   const listOrgId = getOrgId(req);
-  const skills = await skillRepository.listVisible({
-    ...(scopeUserId ? { userId: scopeUserId } : {}),
-    ...(listOrgId ? { orgId: listOrgId } : {}),
-    isAdmin: admin && wantAllSkills,
-  });
-  ok(res, skills);
+
+  const allSkills = visibilityUserIds.length > 0
+    ? await Promise.all(
+        visibilityUserIds.map((id) =>
+          skillRepository.listVisible({
+            userId: id,
+            ...(listOrgId ? { orgId: listOrgId } : {}),
+            isAdmin: admin && wantAllSkills,
+          }),
+        ),
+      ).then((results) => {
+        const seen = new Set<string>();
+        return results.flat().filter((s) => !seen.has(s.id) && seen.add(s.id));
+      })
+    : await skillRepository.listVisible({
+        ...(listOrgId ? { orgId: listOrgId } : {}),
+        isAdmin: admin && wantAllSkills,
+      });
+
+  ok(res, allSkills);
 }));
 
 // Get a single skill by slug

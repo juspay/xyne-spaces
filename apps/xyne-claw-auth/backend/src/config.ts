@@ -56,6 +56,19 @@ export const CONFIG = {
     ? Buffer.from(process.env["SPACES_ENCRYPTION_KEY"]!, "hex")
     : Buffer.alloc(0),
   xyneClawUrl: process.env["XYNE_CLAW_URL"] ?? "http://localhost:3002",
+  // Agent slugs copied from the oldest org into every newly provisioned org
+  // (see provision-org-agents.ts). Comma-separated; unset or empty → the three
+  // built-in defaults.
+  defaultAgentSlugs: (() => {
+    const fromEnv = (process.env["DEFAULT_AGENT_SLUGS"] ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    return fromEnv.length > 0 ? fromEnv : ["ask-ai", "xyne-spaces-architect", "xyne"];
+  })(),
+  // Name (unique) of the org the default agents are copied from. Unset → the
+  // oldest org that has any of them.
+  defaultAgentsSourceOrgName: process.env["DEFAULT_AGENTS_SOURCE_ORG_NAME"]?.trim() || undefined,
   // Public base URL of the claw SPA, used for post-OAuth browser redirects.
   // Precedence: explicit FRONTEND_URL override; else in production the SPA is
   // served under /claw/ on the auth service's public host; in development it
