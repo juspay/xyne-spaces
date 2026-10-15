@@ -1,3 +1,10 @@
+## [1.501.0-release-20261015.2](https://github.com/juspay/xyne-spaces/compare/v1.501.0-release-20261015.1...v1.501.0-release-20261015.2) (2026-10-15)
+
+
+### Features
+
+* Syncing sdlc release [feature/sdlc-release-20261015 -> release-20261015] ([#3075](https://github.com/juspay/xyne-spaces/issues/3075)) ([635f9db](https://github.com/juspay/xyne-spaces/commit/635f9db304f36a492d422f30fe110b53d5debf1e))
+
 ## [1.501.0-release-20261015.1](https://github.com/juspay/xyne-spaces/compare/v1.500.0...v1.501.0-release-20261015.1) (2026-10-15)
 
 
