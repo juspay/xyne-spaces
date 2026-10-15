@@ -1,3 +1,23 @@
+## [1.501.0-release-20261015.1](https://github.com/juspay/xyne-spaces/compare/v1.500.0...v1.501.0-release-20261015.1) (2026-10-15)
+
+
+### Features
+
+* call in new window ([#2770](https://github.com/juspay/xyne-spaces/issues/2770)) ([6243ddf](https://github.com/juspay/xyne-spaces/commit/6243ddf139736e5a83e83e4ca3105cd645c5f2e4))
+* get_agent_diagnostics system tool for per-agent root causes ([#3058](https://github.com/juspay/xyne-spaces/issues/3058)) ([588d357](https://github.com/juspay/xyne-spaces/commit/588d357f16fce12a2c8fa14eea26b9c9f767ba45))
+* ui-tester subagent — cheap UI variation testing with xor visual checks ([#3022](https://github.com/juspay/xyne-spaces/issues/3022)) ([b6f0245](https://github.com/juspay/xyne-spaces/commit/b6f02450612d8f214e277dd0b431b78c95273efd))
+
+
+### Bug Fixes
+
+* keep the task when a fresh-start compaction summary comes back empty ([#3030](https://github.com/juspay/xyne-spaces/issues/3030)) ([e1a19d3](https://github.com/juspay/xyne-spaces/commit/e1a19d350231b76318ad7dbc26299a29b482a6a4))
+* never evict fallback-hydrated query cache entries while mounted ([#3056](https://github.com/juspay/xyne-spaces/issues/3056)) ([b88b90c](https://github.com/juspay/xyne-spaces/commit/b88b90c986eb9a2ff092d0ed1e1c8046d253bb63))
+* restrict Azure AKS NSG ingress and justify public LiveKit/App Gateway rules for Trivy AZU-0047 ([#3066](https://github.com/juspay/xyne-spaces/issues/3066)) ([#3074](https://github.com/juspay/xyne-spaces/issues/3074)) ([6a6496a](https://github.com/juspay/xyne-spaces/commit/6a6496a7907b271031654b94a41816db7f4eec19))
+* serve Spaces to automation runs as the agent's bot, not the automation creator ([#3040](https://github.com/juspay/xyne-spaces/issues/3040)) ([c5a5280](https://github.com/juspay/xyne-spaces/commit/c5a52809beec084fa3006c46dba33aa4601df20c))
+* show the desk message recipient label only on social media desks ([#2935](https://github.com/juspay/xyne-spaces/issues/2935)) ([4166ba4](https://github.com/juspay/xyne-spaces/commit/4166ba4aaa7c048acd12211909a37d1fdd4c17bc))
+* surface sandbox preview announce failures instead of dropping them silently ([#3004](https://github.com/juspay/xyne-spaces/issues/3004)) ([54c1a58](https://github.com/juspay/xyne-spaces/commit/54c1a58c86cc6e6d11a0a14ded401d5fd110dfda))
+* ui-tester: POT videos per variation, full-matrix parallelism, no external-request hangs ([#3060](https://github.com/juspay/xyne-spaces/issues/3060)) ([fe4a80b](https://github.com/juspay/xyne-spaces/commit/fe4a80b78d6017e38d0f30f5124e4355fd25341b))
+
 ## [1.500.0](https://github.com/juspay/xyne-spaces/compare/v1.499.0...v1.500.0) (2026-10-14)
 
 
