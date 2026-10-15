@@ -74,6 +74,11 @@ export type GroupedChannelRowsInput = {
   unreadCounts: ReadonlyMap<string, number>;
   isStarredCollapsed: boolean;
   isChannelsCollapsed: boolean;
+  displayChannels?: (
+    channels: readonly VisibleChannel[],
+    section?: ChannelSection,
+    group?: 'starred' | 'channels',
+  ) => readonly VisibleChannel[];
   toChannelRow: (channel: VisibleChannel) => ChannelListChannelRow;
 };
 
@@ -95,6 +100,7 @@ export const buildGroupedChannelRows = ({
   isStarredCollapsed,
   isChannelsCollapsed,
   toChannelRow,
+  displayChannels,
 }: GroupedChannelRowsInput): ChannelListRow[] => {
   const rows: ChannelListRow[] = [];
 
@@ -111,7 +117,7 @@ export const buildGroupedChannelRows = ({
     });
 
     if (!isStarredCollapsed) {
-      rows.push(...starred.map(toChannelRow));
+      rows.push(...(displayChannels?.(starred, undefined, 'starred') ?? starred).map(toChannelRow));
     }
   }
 
@@ -128,7 +134,11 @@ export const buildGroupedChannelRows = ({
     });
 
     if (!bucket.section.isCollapsed) {
-      rows.push(...bucket.channels.map(toChannelRow));
+      rows.push(
+        ...(displayChannels?.(bucket.channels, bucket.section) ?? bucket.channels).map(
+          toChannelRow,
+        ),
+      );
     }
   }
 
@@ -145,7 +155,11 @@ export const buildGroupedChannelRows = ({
     });
 
     if (!isChannelsCollapsed) {
-      rows.push(...sortChannelRowsByUnread(unsectioned.map(toChannelRow)));
+      rows.push(
+        ...(displayChannels
+          ? displayChannels(unsectioned, undefined, 'channels').map(toChannelRow)
+          : sortChannelRowsByUnread(unsectioned.map(toChannelRow))),
+      );
     }
   }
 
