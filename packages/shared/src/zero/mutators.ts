@@ -4792,11 +4792,12 @@ export const mutators = defineMutators({
     // can continue directly into board editing after the server save succeeds.
     saveReleaseBoardConfig: defineMutator(
       z.object({
-        projectId: z.string(),
         mainBoardId: z.string(),
         mainBoardName: z.string(),
         releaseTrackingMode: z.nativeEnum(ReleaseTrackingMode),
         channelId: z.string(),
+        hubChannelId: z.string(),
+        repoId: z.string(),
         applications: z.array(
           z.object({
             id: z.string(),
@@ -4804,27 +4805,20 @@ export const mutators = defineMutators({
             boardName: z.string(),
             name: z.string(),
             regex: z.string(),
-            repoUrl: z.string(),
             ownerTeam: z.string(),
             envPaths: z.array(z.string()),
             migrationPaths: z.array(z.string()),
           }),
         ),
       }),
-      async ({ tx, args: { projectId } }) => {
-        // Validate only against tables that are guaranteed-synced into the
-        // client's Zero replica. `projects` is; `channels` is NOT — the
-        // dashboard loads channels through a managed/fallback-hydrated query
-        // (queries.userAllChannels via InitialStateLoader) into app state for
-        // performance, so they are not reliably present in the replica that
-        // this optimistic mutator reads. A `zql.channels` lookup here would
-        // return undefined for a perfectly valid channel and make the
-        // optimistic mutator throw "Channel not found", blocking the save
-        // before the server ever runs. Channel existence and project ownership
-        // are validated authoritatively in the backend mutator instead.
-        const project = await tx.run(zql.projects.where('id', projectId).one());
-        if (!project) {
-          throw new Error('Project not found');
+      async ({ tx, args: { hubChannelId } }) => {
+        // Reject only what a row in the client replica contradicts. Rows can be missing
+        // there (the hub screen renders from its query cache before Zero syncs), so a
+        // lookup that misses would block a valid save before the server runs. The
+        // backend mutator validates hub, project, repository and channel.
+        const hub = await tx.run(zql.channels.where('id', hubChannelId).one());
+        if (hub && hub.type !== ChannelType.SDLC) {
+          throw new Error('Release configs belong to an SDLC hub');
         }
       },
     ),
