@@ -17,8 +17,17 @@ import { fileSchema, SubApp } from '@/vespa/src/types';
 import { CanvasRole, CanvasVisibility } from '@xyne/shared';
 import { toJsonSafeValue } from './jsonSafe';
 import { readFromYSweetStrict, syncToYSweet } from '@/utils/ysweetUtils';
+import {
+  encodeCanvasAnnotationMarkers,
+  restoreCanvasAnnotationMarkers,
+  type CanvasAnnotationMarkerOptions,
+} from './canvasAnnotationMarkers';
 // Y-Sweet XML fragment name used by the frontend collaborative editor
 export const YSWEET_XML_FRAGMENT = 'document-store';
+
+interface ConvertMarkdownToBlockNoteOptions {
+  restoreCanvasAnnotationMarkers?: boolean;
+}
 
 /**
  * Convert markdown to BlockNote JSON format
@@ -26,10 +35,17 @@ export const YSWEET_XML_FRAGMENT = 'document-store';
 export async function convertMarkdownToBlockNote(
   markdown: string,
   existingBlocks: unknown[] = [],
+  options: ConvertMarkdownToBlockNoteOptions = {},
 ): Promise<BlockNoteBlock[]> {
   try {
     const parsed = await withServerEditor(editor => editor.tryParseMarkdownToBlocks(markdown));
-    const restored = restoreCustomBlocks(parsed as LooseBlock[], existingBlocks as LooseBlock[]);
+    const annotationsRestored = options.restoreCanvasAnnotationMarkers
+      ? restoreCanvasAnnotationMarkers(parsed as LooseBlock[])
+      : (parsed as LooseBlock[]);
+    const restored = restoreCustomBlocks(
+      annotationsRestored,
+      existingBlocks as LooseBlock[],
+    );
     return toJsonSafeValue(restored) as BlockNoteBlock[];
   } catch (error) {
     logger.error('[CanvasService] Error converting markdown to BlockNote:', error);
@@ -409,9 +425,12 @@ function knownStylesOnly(styles: unknown): unknown {
   );
 }
 
-function normalizeInlineContent(content: unknown): unknown {
+function normalizeInlineContent(
+  content: unknown,
+  options: CanvasAnnotationMarkerOptions,
+): unknown {
   if (Array.isArray(content)) {
-    return content.map(normalizeInlineContent);
+    return content.map(part => normalizeInlineContent(part, options));
   }
 
   if (!content || typeof content !== 'object') {
@@ -423,9 +442,13 @@ function normalizeInlineContent(content: unknown): unknown {
     return { type: 'text', text: customInlineToText(inline), styles: {} };
   }
 
+  const markedInline = encodeCanvasAnnotationMarkers(inline, options);
+
   return Object.fromEntries(
-    Object.entries(content).map(([key, value]) =>
-      key === 'styles' ? [key, knownStylesOnly(value)] : [key, normalizeInlineContent(value)],
+    Object.entries(markedInline).map(([key, value]) =>
+      key === 'styles'
+        ? [key, knownStylesOnly(value)]
+        : [key, normalizeInlineContent(value, options)],
     ),
   );
 }
@@ -697,7 +720,10 @@ function restoreCustomBlocks(blocks: LooseBlock[], existing: LooseBlock[] = []):
 }
 
 // Remove citation blocks and replace custom inline nodes before serialization.
-function normalizeBlocksForMarkdown(blocks: LooseBlock[]): LooseBlock[] {
+function normalizeBlocksForMarkdown(
+  blocks: LooseBlock[],
+  options: CanvasAnnotationMarkerOptions,
+): LooseBlock[] {
   return blocks.flatMap(block => {
     if (block.type === 'citation') return [];
 
@@ -712,7 +738,7 @@ function normalizeBlocksForMarkdown(blocks: LooseBlock[]): LooseBlock[] {
       const level = Number(block.props?.['level'] ?? 1);
       const summary = isToggleHeading ? `<h${level}>${text}</h${level}>` : text;
       const children = Array.isArray(block.children)
-        ? normalizeBlocksForMarkdown(block.children)
+        ? normalizeBlocksForMarkdown(block.children, options)
         : [];
       return [
         htmlBlock(`<details><summary>${summary}</summary>`),
@@ -731,11 +757,11 @@ function normalizeBlocksForMarkdown(blocks: LooseBlock[]): LooseBlock[] {
     const next: LooseBlock = { ...supported };
 
     if (supported.content !== undefined) {
-      next.content = normalizeInlineContent(supported.content);
+      next.content = normalizeInlineContent(supported.content, options);
     }
 
     if (Array.isArray(block.children) && block.children.length > 0) {
-      next.children = normalizeBlocksForMarkdown(block.children);
+      next.children = normalizeBlocksForMarkdown(block.children, options);
     }
 
     return [next];
@@ -747,12 +773,15 @@ function normalizeBlocksForMarkdown(blocks: LooseBlock[]): LooseBlock[] {
  * @param blocks - BlockNote JSON blocks (from canvas.content)
  * @returns Markdown string
  */
-export async function convertBlockNoteToMarkdown(blocks: unknown[]): Promise<string> {
+export async function convertBlockNoteToMarkdown(
+  blocks: unknown[],
+  options: CanvasAnnotationMarkerOptions = {},
+): Promise<string> {
   try {
     // Strip custom inline nodes (e.g. mentions) and rewrite custom blocks the
     // default server schema does not know about, otherwise blocksToMarkdownLossy
     // throws "node type <x> not found in schema" and the whole canvas is lost.
-    const normalized = normalizeBlocksForMarkdown((blocks as LooseBlock[]) || []);
+    const normalized = normalizeBlocksForMarkdown((blocks as LooseBlock[]) || [], options);
     // blocksToMarkdownLossy accepts the blocks array directly
     const markdown = await withServerEditor(editor =>
       editor.blocksToMarkdownLossy(normalized as any),

@@ -5132,7 +5132,9 @@ const spacesReadCanvas: ToolDef = {
   description:
     "Read the full markdown content of an existing canvas. " +
     "Pass the viewAccessId (the ID from the canvas URL: /chat/canvas/<viewAccessId>). " +
-    "Returns the canvas title and markdown body.",
+    "Returns the canvas title and markdown body. " +
+    "The body may contain [[xyne-comment-*]] or [[xyne-ticket-*]] annotation markers; " +
+    "keep every marker unchanged and around its associated text when editing the canvas.",
   inputSchema: {
     type: "object",
     properties: {
@@ -5175,6 +5177,8 @@ const spacesEditCanvas: ToolDef = {
   description:
     "Replace the contents of an existing canvas. Requires edit access (owner, editor, or an edit link). " +
     "Pass the viewAccessId (the ID from the canvas URL: /chat/canvas/<viewAccessId>) and the new markdown. " +
+    "Preserve every [[xyne-comment-*]] and [[xyne-ticket-*]] marker from the canvas read result exactly, " +
+    "keeping each start/end pair around the text it annotates. " +
     "Returns the canvas URL on success.",
   inputSchema: {
     type: "object",

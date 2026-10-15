@@ -1099,7 +1099,12 @@ export class CanvasController {
       // Read content from Y-Sweet
       const { readFromYSweet } = await import('../utils/ysweetUtils.js');
       const blocks = await readFromYSweet(canvas.id, userId);
-      const markdown = blocks.length > 0 ? await convertBlockNoteToMarkdown(blocks) : '';
+      const markdown = blocks.length > 0
+        ? await convertBlockNoteToMarkdown(blocks, {
+            preserveCanvasCommentMarkers: true,
+            preserveCanvasTicketMarkers: true,
+          })
+        : '';
 
       res.status(200).json({
         id: canvas.id,
@@ -1164,7 +1169,9 @@ export class CanvasController {
         res.status(503).json({ error: 'Could not read the canvas to update it. Please try again.' });
         return;
       }
-      const blocks = await convertMarkdownToBlockNote(markdown, existingBlocks);
+      const blocks = await convertMarkdownToBlockNote(markdown, existingBlocks, {
+        restoreCanvasAnnotationMarkers: true,
+      });
 
       // Sync content to Y-Sweet for collaborative editing
       const ysweetSynced = await syncToYSweet(canvas.id, blocks, userId);
