@@ -14,7 +14,7 @@ import { BITBUCKET_CUSTOM_TOOLS, handleUploadPrScreenshot, handleGetPrComments, 
 import { GITHUB_CUSTOM_TOOLS, handleUploadPrAttachment } from "../mcp/adapters/github.js";
 import { GITHUB_INSIGHTS_TOOLS, isGithubInsightsTool, handleGithubInsightsTool } from "../mcp/adapters/github-insights.js";
 import { GRAFANA_CUSTOM_TOOLS, handleGrafanaQueryLogs, handleGrafanaListMetrics, handleGrafanaQueryMetrics, handleGrafanaQueryDatabase, buildUpstreamGrafanaCitation, prefixChunk } from "../mcp/adapters/grafana.js";
-import { type Citation } from "xyne-claw-shared";
+import { SDLC_TOOL_NAMES, type Citation } from "xyne-claw-shared";
 import { SLACK_CUSTOM_TOOLS, handleSlackFindChannel } from "../mcp/adapters/slack.js";
 import {
   channelAgentTools,
@@ -2168,6 +2168,11 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
         },
       });
       return;
+    }
+
+    // Filing a personal canvas into a hub widens its audience: only an approved (signed "ask") call may.
+    if (serverType === "xyne-spaces" && tool === SDLC_TOOL_NAMES.writeArtifact) {
+      effectiveParams = { ...effectiveParams, adoptApproved: effectivePermission === "ask" };
     }
 
     if (effectivePermission === "ask") {
