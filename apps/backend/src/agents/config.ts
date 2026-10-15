@@ -46,11 +46,11 @@ const DEFAULT_TICKET_DUPLICATE_JEV_THRESHOLD = 0.75;
 const DEFAULT_SUMMARY_TEMPLATE_SELECTION_XOR_ENABLED = false;
 const DEFAULT_CLASSIFICATION_XOR_ENABLED = false;
 const DEFAULT_PRIORITY_CLASSIFICATION_XOR_ENABLED = false;
-// Activity classification by Jev (services/activity/activityClassificationJev.ts).
-const DEFAULT_ACTIVITY_CLASSIFICATION_JEV_ENABLED = false;
-const DEFAULT_ACTIVITY_CLASSIFICATION_JEV_LOG_ENABLED = false;
-const DEFAULT_ACTIVITY_CLASSIFICATION_JEV_MIN_CONFIDENCE = 0.5;
-const DEFAULT_ACTIVITY_CLASSIFICATION_JEV_SKIP_THRESHOLD = 0.8;
+// Activity classification by Jev (services/activity/activityClassificationXor.ts).
+const DEFAULT_ACTIVITY_CLASSIFICATION_XOR_ENABLED = false;
+const DEFAULT_ACTIVITY_CLASSIFICATION_XOR_LOG_ENABLED = false;
+const DEFAULT_ACTIVITY_CLASSIFICATION_XOR_MIN_CONFIDENCE = 0.5;
+const DEFAULT_ACTIVITY_CLASSIFICATION_XOR_SKIP_THRESHOLD = 0.8;
 const DEFAULT_ACTIVITY_CLASSIFICATION_MAX_AGE_DAYS = 7;
 const DEFAULT_SUMMARISER_MODEL = 'glm-flash-experimental';
 const DEFAULT_ATTACHMENT_SUMMARISER_MODEL = 'kimi-latest';
@@ -102,10 +102,10 @@ const CAC_KEYS = {
   summaryTemplateSelectionXorEnabled: 'summary_template_selection_xor_enabled',
   classificationXorEnabled: 'classification_xor_enabled',
   priorityClassificationXorEnabled: 'priority_classification_xor_enabled',
-  activityClassificationJevEnabled: 'activity_classification_jev_enabled',
-  activityClassificationJevLogEnabled: 'activity_classification_jev_log_enabled',
-  activityClassificationJevMinConfidence: 'activity_classification_jev_min_confidence',
-  activityClassificationJevSkipThreshold: 'activity_classification_jev_skip_threshold',
+  activityClassificationXorEnabled: 'activity_classification_xor_enabled',
+  activityClassificationXorLogEnabled: 'activity_classification_xor_log_enabled',
+  activityClassificationXorMinConfidence: 'activity_classification_xor_min_confidence',
+  activityClassificationXorSkipThreshold: 'activity_classification_xor_skip_threshold',
   activityClassificationMaxAgeDays: 'activity_classification_max_age_days',
   ticketBoardModel: 'ticket_board_model_name',
   releaseNotesGeneratorModel: 'release_notes_generator_model_name',
@@ -168,13 +168,13 @@ export class AgentsConfig {
   /** Desk email priority is scored by XOR; the LLM only on no answer. Default false. */
   public readonly priorityClassificationXorEnabled: boolean;
   /** Whether each Jev activity label is logged. Default false; failures are logged regardless. */
-  public readonly activityClassificationJevLogEnabled: boolean;
+  public readonly activityClassificationXorLogEnabled: boolean;
   /** Whether the worker classifies activities with Jev at all. Default false. */
-  public readonly activityClassificationJevEnabled: boolean;
+  public readonly activityClassificationXorEnabled: boolean;
   /** Below this, Jev's pick is not trusted and the activity is filed as FYI. */
-  public readonly activityClassificationJevMinConfidence: number;
+  public readonly activityClassificationXorMinConfidence: number;
   /** SKIP deletes the activity, so it needs at least this confidence; below it, FYI. */
-  public readonly activityClassificationJevSkipThreshold: number;
+  public readonly activityClassificationXorSkipThreshold: number;
   /** Only PENDING activities newer than this are classified; older ones are left as they are. */
   public readonly activityClassificationMaxAgeDays: number;
   public readonly summariserModelName: string;
@@ -241,10 +241,10 @@ export class AgentsConfig {
     summaryTemplateSelectionXorEnabled: boolean,
     classificationXorEnabled: boolean,
     priorityClassificationXorEnabled: boolean,
-    activityClassificationJevLogEnabled: boolean,
-    activityClassificationJevEnabled: boolean,
-    activityClassificationJevMinConfidence: number,
-    activityClassificationJevSkipThreshold: number,
+    activityClassificationXorLogEnabled: boolean,
+    activityClassificationXorEnabled: boolean,
+    activityClassificationXorMinConfidence: number,
+    activityClassificationXorSkipThreshold: number,
     activityClassificationMaxAgeDays: number,
   ) {
     this.xyneAiTracingEnabled = xyneAiTracingEnabled;
@@ -281,10 +281,10 @@ export class AgentsConfig {
     this.summaryTemplateSelectionXorEnabled = summaryTemplateSelectionXorEnabled;
     this.classificationXorEnabled = classificationXorEnabled;
     this.priorityClassificationXorEnabled = priorityClassificationXorEnabled;
-    this.activityClassificationJevLogEnabled = activityClassificationJevLogEnabled;
-    this.activityClassificationJevEnabled = activityClassificationJevEnabled;
-    this.activityClassificationJevMinConfidence = activityClassificationJevMinConfidence;
-    this.activityClassificationJevSkipThreshold = activityClassificationJevSkipThreshold;
+    this.activityClassificationXorLogEnabled = activityClassificationXorLogEnabled;
+    this.activityClassificationXorEnabled = activityClassificationXorEnabled;
+    this.activityClassificationXorMinConfidence = activityClassificationXorMinConfidence;
+    this.activityClassificationXorSkipThreshold = activityClassificationXorSkipThreshold;
     this.activityClassificationMaxAgeDays = activityClassificationMaxAgeDays;
   }
 
@@ -341,10 +341,10 @@ export class AgentsConfig {
       const summaryTemplateSelectionXorEnabled = getValue<boolean>(CAC_KEYS.summaryTemplateSelectionXorEnabled, DEFAULT_SUMMARY_TEMPLATE_SELECTION_XOR_ENABLED);
       const classificationXorEnabled = getValue<boolean>(CAC_KEYS.classificationXorEnabled, DEFAULT_CLASSIFICATION_XOR_ENABLED);
       const priorityClassificationXorEnabled = getValue<boolean>(CAC_KEYS.priorityClassificationXorEnabled, DEFAULT_PRIORITY_CLASSIFICATION_XOR_ENABLED);
-      const activityClassificationJevLogEnabled = getValue<boolean>(CAC_KEYS.activityClassificationJevLogEnabled, DEFAULT_ACTIVITY_CLASSIFICATION_JEV_LOG_ENABLED);
-      const activityClassificationJevEnabled = getValue<boolean>(CAC_KEYS.activityClassificationJevEnabled, DEFAULT_ACTIVITY_CLASSIFICATION_JEV_ENABLED);
-      const activityClassificationJevMinConfidence = getValue<number>(CAC_KEYS.activityClassificationJevMinConfidence, DEFAULT_ACTIVITY_CLASSIFICATION_JEV_MIN_CONFIDENCE);
-      const activityClassificationJevSkipThreshold = getValue<number>(CAC_KEYS.activityClassificationJevSkipThreshold, DEFAULT_ACTIVITY_CLASSIFICATION_JEV_SKIP_THRESHOLD);
+      const activityClassificationXorLogEnabled = getValue<boolean>(CAC_KEYS.activityClassificationXorLogEnabled, DEFAULT_ACTIVITY_CLASSIFICATION_XOR_LOG_ENABLED);
+      const activityClassificationXorEnabled = getValue<boolean>(CAC_KEYS.activityClassificationXorEnabled, DEFAULT_ACTIVITY_CLASSIFICATION_XOR_ENABLED);
+      const activityClassificationXorMinConfidence = getValue<number>(CAC_KEYS.activityClassificationXorMinConfidence, DEFAULT_ACTIVITY_CLASSIFICATION_XOR_MIN_CONFIDENCE);
+      const activityClassificationXorSkipThreshold = getValue<number>(CAC_KEYS.activityClassificationXorSkipThreshold, DEFAULT_ACTIVITY_CLASSIFICATION_XOR_SKIP_THRESHOLD);
       const activityClassificationMaxAgeDays = getValue<number>(CAC_KEYS.activityClassificationMaxAgeDays, DEFAULT_ACTIVITY_CLASSIFICATION_MAX_AGE_DAYS);
       const summariserModelName = getValue<string>(CAC_KEYS.summariserModel, DEFAULT_SUMMARISER_MODEL);
       const attachmentSummariserModelName = getValue<string>(CAC_KEYS.attachmentSummariserModel, DEFAULT_ATTACHMENT_SUMMARISER_MODEL);
@@ -620,10 +620,10 @@ export class AgentsConfig {
         summaryTemplateSelectionXorEnabled,
         classificationXorEnabled,
         priorityClassificationXorEnabled,
-        activityClassificationJevLogEnabled,
-        activityClassificationJevEnabled,
-        activityClassificationJevMinConfidence,
-        activityClassificationJevSkipThreshold,
+        activityClassificationXorLogEnabled,
+        activityClassificationXorEnabled,
+        activityClassificationXorMinConfidence,
+        activityClassificationXorSkipThreshold,
         activityClassificationMaxAgeDays,
       );
     } catch (error) {
@@ -664,10 +664,10 @@ export class AgentsConfig {
         DEFAULT_SUMMARY_TEMPLATE_SELECTION_XOR_ENABLED,
         DEFAULT_CLASSIFICATION_XOR_ENABLED,
         DEFAULT_PRIORITY_CLASSIFICATION_XOR_ENABLED,
-        DEFAULT_ACTIVITY_CLASSIFICATION_JEV_LOG_ENABLED,
-        DEFAULT_ACTIVITY_CLASSIFICATION_JEV_ENABLED,
-        DEFAULT_ACTIVITY_CLASSIFICATION_JEV_MIN_CONFIDENCE,
-        DEFAULT_ACTIVITY_CLASSIFICATION_JEV_SKIP_THRESHOLD,
+        DEFAULT_ACTIVITY_CLASSIFICATION_XOR_LOG_ENABLED,
+        DEFAULT_ACTIVITY_CLASSIFICATION_XOR_ENABLED,
+        DEFAULT_ACTIVITY_CLASSIFICATION_XOR_MIN_CONFIDENCE,
+        DEFAULT_ACTIVITY_CLASSIFICATION_XOR_SKIP_THRESHOLD,
         DEFAULT_ACTIVITY_CLASSIFICATION_MAX_AGE_DAYS,
       );
     }
@@ -709,10 +709,10 @@ export class AgentsConfig {
       DEFAULT_SUMMARY_TEMPLATE_SELECTION_XOR_ENABLED,
       DEFAULT_CLASSIFICATION_XOR_ENABLED,
       DEFAULT_PRIORITY_CLASSIFICATION_XOR_ENABLED,
-      DEFAULT_ACTIVITY_CLASSIFICATION_JEV_LOG_ENABLED,
-      DEFAULT_ACTIVITY_CLASSIFICATION_JEV_ENABLED,
-      DEFAULT_ACTIVITY_CLASSIFICATION_JEV_MIN_CONFIDENCE,
-      DEFAULT_ACTIVITY_CLASSIFICATION_JEV_SKIP_THRESHOLD,
+      DEFAULT_ACTIVITY_CLASSIFICATION_XOR_LOG_ENABLED,
+      DEFAULT_ACTIVITY_CLASSIFICATION_XOR_ENABLED,
+      DEFAULT_ACTIVITY_CLASSIFICATION_XOR_MIN_CONFIDENCE,
+      DEFAULT_ACTIVITY_CLASSIFICATION_XOR_SKIP_THRESHOLD,
       DEFAULT_ACTIVITY_CLASSIFICATION_MAX_AGE_DAYS,
     );
   }

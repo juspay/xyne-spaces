@@ -6,7 +6,7 @@ import { extractSpecialMentions } from '@/utils/mentionUtils';
 import { generatePlainTextContent } from '@/utils/contentUtils';
 import { logger } from '@/utils/logger';
 import { ActivityClassification } from '@xyne/shared';
-import { classifyActivityWithJev } from '@/services/activity/activityClassificationJev';
+import { classifyActivityWithXor } from '@/services/activity/activityClassificationXor';
 
 const ACTIVITY_CLASSIFICATION_CONTEXT_LIMIT = 0;
 const ACTIVITY_CLASSIFICATION_THREAD_LIMIT = 10;
@@ -145,7 +145,7 @@ export class ActivityClassificationService {
     status: 'classified' | 'pending' | 'error' | 'skipped';
     classification?: ActivityClassification;
     confidence?: number | null;
-    usedJev?: boolean;
+    usedXor?: boolean;
     reason?: string;
   }> {
     logger.debug('[ActivityClassification] Starting classification', { activityId });
@@ -183,7 +183,7 @@ export class ActivityClassificationService {
         status: 'classified',
         classification: ActivityClassification.FYI,
         confidence: null,
-        usedJev: false,
+        usedXor: false,
       };
     }
 
@@ -192,37 +192,37 @@ export class ActivityClassificationService {
     if (!inputPayload) {
       logger.error('[ActivityClassification] Failed to build classification input', { activityId });
       await this.updateClassification(activity.id, ActivityClassification.ERROR, null);
-      return { status: 'error', usedJev: false, reason: 'input_build_failed' };
+      return { status: 'error', usedXor: false, reason: 'input_build_failed' };
     }
 
-    // Jev, on the JSON the LLM prompt used to be filled with. SKIP is only ever valid for DMs.
-    const jev = await classifyActivityWithJev(inputPayload as unknown as Record<string, unknown>, {
+    // XOR, on the JSON the LLM prompt used to be filled with. SKIP is only ever valid for DMs.
+    const xor = await classifyActivityWithXor(inputPayload as unknown as Record<string, unknown>, {
       allowSkip: inputPayload.actorAction === 'direct_message',
       audience: false,
       logId: activityId,
     });
-    if (!jev.ok) {
+    if (!xor.ok) {
       // Left PENDING: the worker retries it, and marks it ERROR once retries run out.
-      logger.warn('[ActivityClassification] Jev had no answer, leaving the activity PENDING', {
+      logger.warn('[ActivityClassification] XOR had no answer, leaving the activity PENDING', {
         activityId,
-        reason: jev.reason,
+        reason: xor.reason,
       });
-      return { status: 'pending', usedJev: true, reason: `jev_${jev.reason}` };
+      return { status: 'pending', usedXor: true, reason: `xor_${xor.reason}` };
     }
 
-    const mappedClassification = this.mapClassification(jev.classification, activity.actorAction);
+    const mappedClassification = this.mapClassification(xor.classification, activity.actorAction);
     logger.info('[ActivityClassification] Classified', {
       activityId,
       classification: mappedClassification,
-      confidence: jev.confidence,
-      jevChoice: jev.jevChoice,
+      confidence: xor.confidence,
+      xorChoice: xor.xorChoice,
     });
-    await this.updateClassification(activity.id, mappedClassification, jev.confidence);
+    await this.updateClassification(activity.id, mappedClassification, xor.confidence);
     return {
       status: 'classified',
       classification: mappedClassification,
-      confidence: jev.confidence,
-      usedJev: true,
+      confidence: xor.confidence,
+      usedXor: true,
     };
   }
 
@@ -235,7 +235,7 @@ export class ActivityClassificationService {
     status: 'classified' | 'pending' | 'error' | 'skipped';
     classification?: ActivityClassification;
     confidence?: number | null;
-    usedJev?: boolean;
+    usedXor?: boolean;
     reason?: string;
   }> {
     const { activityIds, messageId, channelId, recipientUserIds } = params;
@@ -259,36 +259,36 @@ export class ActivityClassificationService {
         channelId,
       });
       await this.updateClassificationAudience(activityIds, ActivityClassification.ERROR, null);
-      return { status: 'error', usedJev: false, reason: 'input_build_failed' };
+      return { status: 'error', usedXor: false, reason: 'input_build_failed' };
     }
 
-    // One Jev call for the whole audience, as the LLM call was. Never SKIP: it is not a DM.
-    const jev = await classifyActivityWithJev(inputPayload as unknown as Record<string, unknown>, {
+    // One XOR call for the whole audience, as the LLM call was. Never SKIP: it is not a DM.
+    const xor = await classifyActivityWithXor(inputPayload as unknown as Record<string, unknown>, {
       allowSkip: false,
       audience: true,
       logId: `${messageId} (${activityIds.length} recipients)`,
     });
-    if (!jev.ok) {
-      logger.warn('[ActivityClassification] Jev had no answer, leaving the audience PENDING', {
+    if (!xor.ok) {
+      logger.warn('[ActivityClassification] XOR had no answer, leaving the audience PENDING', {
         messageId,
-        reason: jev.reason,
+        reason: xor.reason,
       });
-      return { status: 'pending', usedJev: true, reason: `jev_${jev.reason}` };
+      return { status: 'pending', usedXor: true, reason: `xor_${xor.reason}` };
     }
 
-    const mappedClassification = this.mapClassification(jev.classification, inputPayload.actorAction);
+    const mappedClassification = this.mapClassification(xor.classification, inputPayload.actorAction);
     logger.info('[ActivityClassification] Audience classified', {
       messageId,
       classification: mappedClassification,
-      confidence: jev.confidence,
-      jevChoice: jev.jevChoice,
+      confidence: xor.confidence,
+      xorChoice: xor.xorChoice,
     });
-    await this.updateClassificationAudience(activityIds, mappedClassification, jev.confidence);
+    await this.updateClassificationAudience(activityIds, mappedClassification, xor.confidence);
     return {
       status: 'classified',
       classification: mappedClassification,
-      confidence: jev.confidence,
-      usedJev: true,
+      confidence: xor.confidence,
+      usedXor: true,
     };
   }
 

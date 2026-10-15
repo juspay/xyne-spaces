@@ -61,7 +61,7 @@ class ActivityClassificationWorkerService {
     // One CAC read per poll: the on/off switch and the age window both live there, so either
     // can change without a restart.
     const cac = await AgentsConfig.fetch();
-    if (!cac.activityClassificationJevEnabled) {
+    if (!cac.activityClassificationXorEnabled) {
       // Off: claim nothing, so activities stay PENDING exactly as they would with no worker.
       this.currentInterval = MAX_INTERVAL_MS;
       return;

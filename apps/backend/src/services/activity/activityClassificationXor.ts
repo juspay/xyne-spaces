@@ -9,24 +9,24 @@ import {
 } from '@/services/queryIntent/jevClient';
 
 /**
- * Activity classification by Jev.
+ * Activity classification by XOR.
  *
  * The activity feed sorts message activities into ACTIONABLE / FYI (and SKIP, for DMs). That
  * used to be an LLM call driven by Langfuse prompts; it is a closed choice between two or
- * three labels, so it is one Jev choice question over the same input the LLM was sent.
+ * three labels, so it is one XOR choice question over the same input the LLM was sent.
  *
- * Jev answers with a probability per label, and two CAC thresholds decide what is stored:
- *  - activity_classification_jev_min_confidence — below it, Jev's pick is not trusted and the
+ * XOR answers with a probability per label, and two CAC thresholds decide what is stored:
+ *  - activity_classification_xor_min_confidence — below it, XOR's pick is not trusted and the
  *    activity is filed as FYI: an unsure answer must never put work in someone's Actionable
  *    tab, and must never hide anything.
- *  - activity_classification_jev_skip_threshold — SKIP deletes the activity, so it needs more
+ *  - activity_classification_xor_skip_threshold — SKIP deletes the activity, so it needs more
  *    confidence than the other labels; below it the activity is filed as FYI instead.
  *
  * The thresholds are only valid for the JEV_MODEL they were tuned on.
  */
 
-const JEV_TIMEOUT_MS = 10_000;
-const TAG = '[ACTIVITY][JEV]';
+const XOR_TIMEOUT_MS = 10_000;
+const TAG = '[ACTIVITY][XOR]';
 
 type Label = 'ACTIONABLE' | 'FYI' | 'SKIP';
 
@@ -56,14 +56,14 @@ const instructionsFor = (audience: boolean): string =>
   'it says, who it mentions) and `threadContext` when present — whether they personally are ' +
   'expected to act or reply, not whether the message is important in general.';
 
-export type JevActivityResult =
+export type XorActivityResult =
   | {
       ok: true;
       classification: Label;
-      /** Jev's probability for the label it picked — stored as classificationConfidence. */
+      /** XOR's probability for the label it picked — stored as classificationConfidence. */
       confidence: number;
-      /** What Jev picked before the thresholds were applied, for the log. */
-      jevChoice: Label;
+      /** What XOR picked before the thresholds were applied, for the log. */
+      xorChoice: Label;
       probabilities: Record<string, number>;
     }
   | { ok: false; reason: string };
@@ -76,11 +76,11 @@ const describeFailure = (failure: JevFailure | undefined): string =>
  * Never throws: a failure comes back as `ok: false`, and the caller leaves the activity
  * PENDING so the worker retries it.
  */
-export async function classifyActivityWithJev(
+export async function classifyActivityWithXor(
   input: Record<string, unknown>,
   options: { allowSkip: boolean; audience: boolean; logId: string },
-): Promise<JevActivityResult> {
-  if (!isJevConfigured()) return { ok: false, reason: 'jev_not_configured' };
+): Promise<XorActivityResult> {
+  if (!isJevConfigured()) return { ok: false, reason: 'xor_not_configured' };
   try {
     // AgentsConfig.fetch falls back to the defaults rather than throwing.
     const cac = await AgentsConfig.fetch();
@@ -92,7 +92,7 @@ export async function classifyActivityWithJev(
     };
 
     let failure: JevFailure | undefined;
-    const answers = await askJev(input, { classification: question }, JEV_TIMEOUT_MS, undefined, {
+    const answers = await askJev(input, { classification: question }, XOR_TIMEOUT_MS, undefined, {
       onFailure: f => {
         failure = f;
       },
@@ -101,39 +101,39 @@ export async function classifyActivityWithJev(
     if (!answer || answer.type !== 'choice') {
       return { ok: false, reason: describeFailure(failure) };
     }
-    const jevChoice = answer.choice as Label;
-    const confidence = answer.probabilities[jevChoice];
+    const xorChoice = answer.choice as Label;
+    const confidence = answer.probabilities[xorChoice];
     // A pick with no probability cannot be held to the thresholds.
     if (typeof confidence !== 'number') return { ok: false, reason: 'unusable' };
 
-    let classification: Label = jevChoice;
-    if (confidence < cac.activityClassificationJevMinConfidence) classification = 'FYI';
-    else if (jevChoice === 'SKIP' && confidence < cac.activityClassificationJevSkipThreshold) {
+    let classification: Label = xorChoice;
+    if (confidence < cac.activityClassificationXorMinConfidence) classification = 'FYI';
+    else if (xorChoice === 'SKIP' && confidence < cac.activityClassificationXorSkipThreshold) {
       classification = 'FYI';
     }
 
-    if (cac.activityClassificationJevLogEnabled) {
+    if (cac.activityClassificationXorLogEnabled) {
       const scores = labels.map(label => `${label} ${(answer.probabilities[label] ?? 0).toFixed(2)}`).join(' · ');
       logger.info(
-        `${TAG} ${options.logId}  jev decided  [${config.jev.model}]  classification ${classification}` +
-          (classification !== jevChoice ? ` (jev picked ${jevChoice}, below threshold)` : '') +
+        `${TAG} ${options.logId}  xor decided  [${config.jev.model}]  classification ${classification}` +
+          (classification !== xorChoice ? ` (xor picked ${xorChoice}, below threshold)` : '') +
           `  (${scores})`,
         {
           logId: options.logId,
           audience: options.audience,
-          jevChoice,
+          xorChoice,
           classification,
           confidence,
           probabilities: answer.probabilities,
           thresholds: {
-            minConfidence: cac.activityClassificationJevMinConfidence,
-            skip: cac.activityClassificationJevSkipThreshold,
+            minConfidence: cac.activityClassificationXorMinConfidence,
+            skip: cac.activityClassificationXorSkipThreshold,
           },
         },
       );
     }
 
-    return { ok: true, classification, confidence, jevChoice, probabilities: answer.probabilities };
+    return { ok: true, classification, confidence, xorChoice, probabilities: answer.probabilities };
   } catch (error) {
     return { ok: false, reason: error instanceof Error ? error.name : 'unknown' };
   }
