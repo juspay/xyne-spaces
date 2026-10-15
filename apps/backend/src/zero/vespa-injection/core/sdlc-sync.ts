@@ -3,6 +3,7 @@ import {
   SDLC_HUB_ITEM_RELATION,
   SDLC_MEMBERSHIP_RELATION,
   SDLC_TRACK_MEMBERSHIP_RELATION,
+  sdlcRepositoryWikiFolderId,
 } from '@xyne/shared';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
@@ -64,8 +65,10 @@ export interface SdlcSearchChange {
   documents?: string[];
   /** Artifact types (canvas folders) renamed: every document of the type carries its name. */
   typeIds?: string[];
-  /** Repositories attached, detached or changed. */
+  /** Repositories whose own entry changed (renamed, detached). */
   repositories?: string[];
+  /** Repositories attached to the hub: their entries, and their wikis' folders. */
+  attachedRepositories?: string[];
   /** The hub's own channel entry (containers import its id and members). */
   hub?: boolean;
 }
@@ -160,6 +163,29 @@ async function jobsFor(hubId: string, change: SdlcSearchChange): Promise<VespaJo
       if (fields.sdlcDocumentId === id) await conversation(conversationId);
     }
   };
+  // A repository's wiki folders in this hub, read from the links that hold them (still there
+  // after a detach, which removes only the repository's membership).
+  const repoWikiFolders = async (repoId: string): Promise<string[]> => {
+    const folders = [sdlcRepositoryWikiFolderId(hubId, repoId)];
+    for (let i = 0; i < folders.length; i++) {
+      const children = await db.sdlcEntityLink.findMany({
+        where: { channelId: hubId, sourceType: 'FOLDER', sourceId: folders[i], targetType: 'FOLDER', relationType: SDLC_HUB_ITEM_RELATION },
+        select: { targetId: true },
+      });
+      folders.push(...children.map(child => child.targetId));
+    }
+    return folders;
+  };
+  // A repository's wiki joins or leaves the hub with it: its folders are fed when it is attached
+  // (those that exist; a new one is fed as it is created) and deleted when it is detached.
+  const repositoryWiki = async (repoId: string, removed: boolean) => {
+    for (const folderId of await repoWikiFolders(repoId)) {
+      if (removed) container(folderId, true);
+      else if (await db.sdlcFolder.findUnique({ where: { id: folderId }, select: { id: true } })) {
+        add({ schema: sdlcContainerSchema, jobType: 'feed', docId: folderId });
+      }
+    }
+  };
   // What an edge places or links: its target, and for a context link both ends.
   const item = async (type: string, id: string, relation: string, removed: boolean) => {
     const placing = PLACING_RELATIONS.has(relation);
@@ -173,6 +199,7 @@ async function jobsFor(hubId: string, change: SdlcSearchChange): Promise<VespaJo
       await conversation(id);
     } else if (type === 'REPOSITORY' && relation === SDLC_MEMBERSHIP_RELATION) {
       await repository(id);
+      await repositoryWiki(id, removed);
     }
   };
 
@@ -187,6 +214,10 @@ async function jobsFor(hubId: string, change: SdlcSearchChange): Promise<VespaJo
     const { type, id } = change.moved;
     if (type === 'TRACK' || type === 'FOLDER') container(id);
     else if (type === 'CANVAS' || type === 'ATTACHMENT') await document(type, id, true);
+  }
+  for (const id of change.attachedRepositories ?? []) {
+    await repository(id);
+    await repositoryWiki(id, false);
   }
   for (const id of change.containers ?? []) container(id);
   for (const id of change.removedContainers ?? []) container(id, true);
