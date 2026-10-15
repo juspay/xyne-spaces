@@ -2207,7 +2207,7 @@ export async function processTask(
       !fastModeEnabled &&
       (toolsConfigEarly?.subagents ?? []).includes("ui-tester") &&
       uiTesterSandboxTools.some((t) => t.name === "sandbox-run")
-        ? buildUiTesterTools(meta)
+        ? buildUiTesterTools(meta, { deliver: uiTesterSandboxTools.find((t) => t.name === "sandbox-deliver-files") })
         : [];
 
     const { subagentTools: builtSubagentTools, directTools, remainingCustomTools } = fastModeEnabled

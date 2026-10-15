@@ -261,6 +261,17 @@ async function runVariation(browser, v) {
   const shotPath = await screenshotWithRetry(page, shot, Boolean(v.fullPage), pageErrors);
   let audit = null;
   try { audit = await page.evaluate("(" + AUDIT + ")()"); } catch (e) { audit = { error: String(e).slice(0, 160) }; }
+  let textChecks = null;
+  const wantTexts = [].concat(v.expectText || []).map((t) => ({ text: String(t), kind: "expect" })).concat([].concat(v.rejectText || []).map((t) => ({ text: String(t), kind: "reject" })));
+  if (wantTexts.length) {
+    const bodyText = await page.evaluate(() => document.body ? document.body.innerText : "").catch(() => "");
+    const norm = (x) => x.replace(/\s+/g, " ").trim();
+    const hay = norm(bodyText);
+    textChecks = wantTexts.map((w) => {
+      const found = w.text.startsWith("re:") ? new RegExp(w.text.slice(3)).test(hay) : hay.includes(norm(w.text));
+      return { text: w.text, kind: w.kind, ok: w.kind === "expect" ? found : !found };
+    });
+  }
   if (wantVideo) { await caption("■ " + title + " — done"); await page.waitForTimeout(900); }
   await page.unrouteAll({ behavior: "ignoreErrors" }).catch(() => {});
   const video = wantVideo && page.video() ? page.video() : null;
@@ -274,7 +285,7 @@ async function runVariation(browser, v) {
       fs.rmSync(videoDir, { recursive: true, force: true });
     } catch (e) { pageErrors.push("video save failed: " + String(e && e.message || e).slice(0, 120)); videoPath = null; }
   }
-  return { id: v.id, title, path: v.path, finalUrl, themeApplied, apiRequests, viewport, theme: theme || "light", screenshot: shotPath, video: videoPath, externalStubbed: external.count, externalHosts: external.hosts, ms: Date.now() - started, navError, audit, consoleErrors, pageErrors, failedRequests, unmatchedRequests: [...unmatched].slice(0, 20), expect: v.expect || null, checks: v.checks || null };
+  return { id: v.id, title, path: v.path, finalUrl, themeApplied, textChecks, apiRequests, viewport, theme: theme || "light", screenshot: shotPath, video: videoPath, externalStubbed: external.count, externalHosts: external.hosts, ms: Date.now() - started, navError, audit, consoleErrors, pageErrors, failedRequests, unmatchedRequests: [...unmatched].slice(0, 20), expect: v.expect || null, checks: v.checks || null };
 }
 
 (async () => {
