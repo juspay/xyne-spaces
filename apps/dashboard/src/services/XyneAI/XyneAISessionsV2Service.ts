@@ -17,6 +17,7 @@ import type {
 import type { AttachedContextItem } from '../../components/Chat/XyneAISidebar/components/ContextPickerPanel';
 import { registerClawIcons } from '../../components/Chat/XyneAISidebar/utils/clawCitationUrl';
 import { getPendingActionId, getStoredPendingActionResolution } from './XyneAIPendingActionStore';
+import { planFromParts, stopOpenPlanTodos } from './planParts';
 
 // ============================================================================
 // Claw API response types
@@ -312,6 +313,15 @@ export async function fetchV2ConversationMessages(
       return { ...action, id: actionId, ...(resolution && { resolution }) };
     });
 
+    // The plan card's checklist rides in `parts` as a non-timeline element.
+    // A run that died without a final write (pod crash, cancel) can leave a
+    // step `in_progress`; once the row is no longer running, show it stopped.
+    const storedPlan = isUser ? null : planFromParts(msg.parts);
+    const plan =
+      storedPlan && msg.status !== 'running' && msg.status !== 'completed'
+        ? { ...storedPlan, todos: stopOpenPlanTodos(storedPlan.todos) }
+        : storedPlan;
+
     const mappedMessage: Message = {
       id: msg.id,
       type: isUser ? ('user' as const) : ('bot' as const),
@@ -340,6 +350,7 @@ export async function fetchV2ConversationMessages(
       // Read-only context pills for a user turn (persisted per message in claw-auth).
       ...(isUser && msg.attachedContext?.length ? { attachedContext: msg.attachedContext } : {}),
       ...(!isUser && msg.uiFlows?.length ? { uiFlows: msg.uiFlows } : {}),
+      ...(plan ? { planTodos: plan.todos, ...(plan.title ? { planTitle: plan.title } : {}) } : {}),
     };
 
     // Map attachments from claw format to frontend format

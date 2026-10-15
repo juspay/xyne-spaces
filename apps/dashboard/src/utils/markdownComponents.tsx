@@ -210,6 +210,27 @@ const CodeBlock = ({
   );
 };
 
+// ─── Ordered lists ────────────────────────────────────────────────────────────
+
+/**
+ * An ordered list's own number and gutter. The list CSS leaves room for
+ * markers up to "99."; a list that starts at or runs past 100 — an answer that
+ * opens with "120." is one — gets a gutter wide enough for its largest number,
+ * or a bubble's overflow clips the leading digits ("120." reads "20.").
+ */
+export function orderedListProps(
+  node: Element | undefined,
+  start: number | undefined,
+): { start?: number; style?: React.CSSProperties } {
+  const items =
+    node?.children.filter(child => child.type === 'element' && child.tagName === 'li').length ?? 0;
+  const digits = String((start ?? 1) + Math.max(items, 1) - 1).length;
+  return {
+    ...(start !== undefined ? { start } : {}),
+    ...(digits > 2 ? { style: { paddingLeft: `${(digits * 0.65 + 0.8).toFixed(2)}em` } } : {}),
+  };
+}
+
 // ─── createMarkdownComponents ─────────────────────────────────────────────────
 
 /**
@@ -245,6 +266,20 @@ export const createMarkdownComponents = (
     <div className='overflow-x-auto max-w-full'>
       <table {...props}>{children}</table>
     </div>
+  ),
+
+  ol: ({
+    node,
+    start,
+    children,
+    ...props
+  }: React.OlHTMLAttributes<HTMLOListElement> & {
+    node?: Element | undefined;
+    children?: React.ReactNode;
+  }): React.ReactElement => (
+    <ol {...props} {...orderedListProps(node, start)}>
+      {children}
+    </ol>
   ),
 
   a: ({

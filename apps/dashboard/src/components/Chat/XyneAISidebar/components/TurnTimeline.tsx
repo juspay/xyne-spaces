@@ -8,6 +8,7 @@ import {
   type AssistantToolPart,
 } from '@xyne/shared';
 import type { Message, ToolInvocation } from '../utils/XyneAITypes';
+import { isPlanCall } from '../utils/XyneAIUtils';
 import { cn } from '../../../../utils/classNames';
 import { useStableLabel } from '../../../AIScreen/ReasoningLoader';
 import { groupInvocations, InvocationItem, type InvocationTree } from './ToolInvocationList';
@@ -144,12 +145,6 @@ export function TurnTimeline({
       {showLegacyAnswer && legacyAnswer}
     </div>
   );
-}
-
-/** The plan tool: its call marks where the turn's plan was written. */
-function isPlanCall(invocation: ToolInvocation | undefined): boolean {
-  const base = invocation?.toolName.split('__').pop() ?? '';
-  return /^todo[-_]?write$/i.test(base);
 }
 
 /**

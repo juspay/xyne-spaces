@@ -30,6 +30,7 @@ import {
   Clock,
   MoreHorizontal,
   Quote,
+  Square,
 } from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -57,7 +58,12 @@ import type { AssistantActions } from '../Assistant/useAssistantActions';
 import { AIComposer, type AIComposerAttachment, type AIComposerHandle } from './AIComposer';
 import { ASSISTANT_PANEL_ATTR } from '../Assistant/buddy/constants';
 import { ReadonlyContextPills, useSentMentions } from './ReadonlyContextPills';
-import { type ComposerContext, toStreamOverrides, withoutPickedContext } from './composerContext';
+import {
+  type ComposerContext,
+  toStreamOverrides,
+  toTurnStreamOverrides,
+  withoutPickedContext,
+} from './composerContext';
 import { AgentByline, AgentRecipient } from './ConversationAgents';
 import { FollowUpSuggestions } from './FollowUpSuggestions';
 import {
@@ -136,6 +142,7 @@ import {
   resolveActivePath,
   getSiblings,
   BRANCH_ROOT_KEY,
+  turnPlan,
 } from '../Chat/XyneAISidebar/utils/XyneAIUtils';
 
 type FeedbackValue = 'LIKE' | 'DISLIKE' | null;
@@ -570,12 +577,14 @@ const PLAN_STATUS_CLASSES: Record<PlanTodo['status'], string> = {
   in_progress: 'text-primary',
   completed: 'text-emerald-600 dark:text-emerald-400',
   failed: 'text-destructive',
+  stopped: 'text-muted-foreground',
 };
 
 function PlanStatusIcon({ status }: { status: PlanTodo['status'] }): ReactElement {
   if (status === 'completed') return <Check className='h-3.5 w-3.5' aria-hidden='true' />;
   if (status === 'failed') return <X className='h-3.5 w-3.5' aria-hidden='true' />;
   if (status === 'in_progress') return <Clock className='h-3.5 w-3.5' aria-hidden='true' />;
+  if (status === 'stopped') return <Square className='h-3 w-3' aria-hidden='true' />;
   return <MoreHorizontal className='h-3.5 w-3.5' aria-hidden='true' />;
 }
 
@@ -588,12 +597,14 @@ function PlanCard({
 }): ReactElement {
   const done = todos.filter(todo => todo.status === 'completed').length;
   const failed = todos.filter(todo => todo.status === 'failed').length;
+  const stopped = todos.filter(todo => todo.status === 'stopped').length;
   return (
     <div className='w-full max-w-[520px] rounded-lg border border-border bg-card px-3 py-2.5 text-[13px] text-foreground'>
       <div className='mb-2 flex items-center justify-between gap-3'>
         <span className='truncate font-medium'>{title || 'Plan'}</span>
         <span className='shrink-0 text-[11px] text-muted-foreground'>
           {done}/{todos.length} done{failed ? `, ${failed} failed` : ''}
+          {stopped ? `, ${stopped} stopped` : ''}
         </span>
       </div>
       <div className='space-y-1.5'>
@@ -827,6 +838,22 @@ function ChatMessageBubble({
   );
 
   const markdownComponents = useMemo(() => createMarkdownComponents(message.id), [message.id]);
+  // The plan card reads the turn's own plan calls, so it is the same live and
+  // after a reload.
+  const plan = useMemo(
+    () => (message.type === 'bot' ? turnPlan(message) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the fields turnPlan reads
+    [
+      message.type,
+      message.toolInvocations,
+      message.planTodos,
+      message.planTitle,
+      message.isStreaming,
+      message.isAborted,
+      message.errorInfo,
+      message.runStatus,
+    ],
+  );
 
   // Resolve @-mentions to the same avatar+name chip the sidebar uses, so user
   // tagging looks identical on the AIScreen. Only names that map to exactly one
@@ -1241,11 +1268,7 @@ function ChatMessageBubble({
                 ? renderAnswerMarkdown(displayContent)
                 : null
             }
-            plan={
-              message.planTodos?.length ? (
-                <PlanCard todos={message.planTodos} title={message.planTitle} />
-              ) : undefined
-            }
+            plan={plan ? <PlanCard todos={plan.todos} title={plan.title} /> : undefined}
           />
           {/* A failed turn says why, instead of ending at its step group. */}
           {message.errorInfo && !message.isStreaming && (
@@ -1491,6 +1514,16 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
   // once: the composer seeds from it on mount.
   const [composerSeed] = useState(() =>
     initialQuery && initialExtras ? withoutPickedContext(initialExtras) : initialExtras,
+  );
+  // The composer's latest snapshot, so regenerate/edit can re-run a turn with
+  // the toggles (web search, model, …) the user currently has on.
+  const latestComposerContextRef = useRef<ComposerContext | null>(composerSeed ?? null);
+  const handleComposerContextChange = useCallback(
+    (context: ComposerContext): void => {
+      latestComposerContextRef.current = context;
+      onContextChange?.(context);
+    },
+    [onContextChange],
   );
   const dropZoneRef = useRef<HTMLDivElement | null>(null);
   const [voiceStageHost, setVoiceStageHost] = useState<HTMLDivElement | null>(null);
@@ -1829,15 +1862,26 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
       lastUserMessage.attachments ?? [],
       lastUserMessage.selectionContexts,
       lastUserMessage.content,
-      undefined, // userTags
+      lastUserMessage.userTags,
       lastUserMessage.id, // parentMessageId
       true, // isRegenerate
       undefined, // isEditUserMessage
       undefined, // editedUserMessageId
       undefined, // parentAssistantMessageId
-      turnAgentSlug ? { agentSlug: turnAgentSlug } : undefined,
+      // Same context and agent the turn was sent with, plus the current toggles.
+      toTurnStreamOverrides(
+        { attachedContext: lastUserMessage.attachedContext, agentSlug: turnAgentSlug },
+        latestComposerContextRef.current,
+        selectedAgentSlug,
+      ),
     );
-  }, [isActiveSessionStreaming, displayMessages, abortCurrentRequest, submitQuery]);
+  }, [
+    isActiveSessionStreaming,
+    displayMessages,
+    abortCurrentRequest,
+    submitQuery,
+    selectedAgentSlug,
+  ]);
 
   // Edit: fork a sibling branch with new content under the same parent. For v2
   // (claw) we pass `isEditUserMessage` + `editedUserMessageId` so claw-auth
@@ -1859,17 +1903,18 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
         messageToEdit.attachments ?? [],
         messageToEdit.selectionContexts,
         newContent,
-        undefined, // userTags
+        messageToEdit.userTags,
         editedParentAssistant, // parentMessageId → sibling under same parent
         undefined, // isRegenerate
         true, // isEditUserMessage
         messageToEdit.id, // editedUserMessageId
         editedParentAssistant, // parentAssistantMessageId
-        // Editing re-asks that turn, so it goes to the agent it was sent to.
-        messageToEdit.agentSlug ? { agentSlug: messageToEdit.agentSlug } : undefined,
+        // Editing re-asks that turn: same context and agent it was sent with,
+        // plus the current toggles.
+        toTurnStreamOverrides(messageToEdit, latestComposerContextRef.current, selectedAgentSlug),
       );
     },
-    [isActiveSessionStreaming, messages, abortCurrentRequest, submitQuery],
+    [isActiveSessionStreaming, messages, abortCurrentRequest, submitQuery, selectedAgentSlug],
   );
 
   // Navigate between sibling branches at a given message.
@@ -2767,7 +2812,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
               onAgentChange={conversationId ? undefined : onAgentChange}
               showAgentSelector={isV2}
               initialExtras={composerSeed}
-              onContextChange={onContextChange}
+              onContextChange={handleComposerContextChange}
               pending={isAnyMessageStreaming || (assistant?.isRouting ?? false)}
               onStop={handleStop}
               assistant={assistant && assistant.actions.length > 0 ? assistant : undefined}

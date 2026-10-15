@@ -18,7 +18,7 @@ import {
   finalTurnFields,
   normalizeAssistantParts,
   reasoningText,
-  type AssistantPart,
+  type StoredTurnPart,
 } from "../lib/chat-run-record.js";
 import { isDirectChatConversation } from "../lib/conversation-kind.js";
 import {
@@ -85,7 +85,7 @@ import { consumeClawStream } from "../lib/consume-claw-stream.js";
 import { cancelRunSession } from "../lib/experiment.js";
 import { redisService } from "../redis.js";
 import { subscribeLive, publishLiveEvent, type LiveEvent } from "../lib/live-conversation-bus.js";
-import { pushDelta, pushToolPart, endDeltaCoalescer, liveUserIdForSession } from "../lib/live-delta-coalescer.js";
+import { pushDelta, pushToolPart, pushPlanPart, endDeltaCoalescer, liveUserIdForSession } from "../lib/live-delta-coalescer.js";
 import { resolveSdlcRepositoryForUser } from "../lib/sdlc-repository-context.js";
 
 import { attachArtifactToApp, type ArtifactAppTarget } from "../lib/artifact-app-session.js";
@@ -329,7 +329,7 @@ interface PendingStream {
      *  SSE `done` event. */
     persistedAttachments?: PersistedAttachment[];
     /** The turn as ordered thinking / text / tool parts (null: render from content). */
-    parts?: AssistantPart[] | null;
+    parts?: StoredTurnPart[] | null;
   }) => void;
   setClosed: () => void;
   /** Pre-created assistant ChatMessage row for this turn. Branching requires
@@ -433,7 +433,7 @@ type ChatBusEvent =
       pendingActions?: Array<Record<string, unknown>>;
       persisted: boolean;
       persistedAttachments?: PersistedAttachment[];
-      parts?: AssistantPart[] | null;
+      parts?: StoredTurnPart[] | null;
     };
 
 let _chatSubscriberReady = false;
@@ -529,7 +529,7 @@ async function persistAssistantResult(args: {
   assistantMessageId?: string;
   runProvider?: string;
   /** The turn's ordered parts and/or whole reasoning (lib/chat-run-record finalTurnFields). */
-  turn?: { parts: AssistantPart[] | null; reasoning?: string };
+  turn?: { parts: StoredTurnPart[] | null; reasoning?: string };
   /** Verified workspace of the request — forwarded to artifact session-scoping. */
   workspaceId?: string | undefined;
 }): Promise<{ messageId: string; persistedAttachments: PersistedAttachment[] } | null> {
@@ -1754,7 +1754,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       pendingActions?: Array<Record<string, unknown>>;
       persisted?: boolean;
       persistedAttachments?: PersistedAttachment[];
-      parts?: AssistantPart[] | null;
+      parts?: StoredTurnPart[] | null;
     }>((resolve) => {
       let closed = false;
       // This pod now holds a live SSE stream — make sure it's listening on the
@@ -4378,12 +4378,14 @@ async function runAgentChatViaSse(
             onAttachment: (_sid, attachment) => {
               pendingStreams.get(callbackId)?.sendEvent("attachment", { attachment });
             },
-            onPlan: (_sid, todos) => {
+            onPlan: (sid, todos) => {
               pendingStreams.get(callbackId)?.sendEvent("plan", { todos });
+              if (sid) pushPlanPart(sid, conversationId, slug, assistantMessageId, todos, undefined, liveUserId || undefined);
             },
-            onUiWidget: (_sid, widget) => {
+            onUiWidget: (sid, widget) => {
               if (widget.type === "plan") {
                 pendingStreams.get(callbackId)?.sendEvent("plan", { todos: widget.payload.todos });
+                if (sid) pushPlanPart(sid, conversationId, slug, assistantMessageId, widget.payload.todos, undefined, liveUserId || undefined);
                 return;
               }
               void (async () => {

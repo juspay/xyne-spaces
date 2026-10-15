@@ -15,7 +15,7 @@
 // It also folds the run into ordered parts (thinking / text / tool calls, see
 // @xyne/shared assistantParts) so a mid-run reload and live viewers get the
 // turn as a timeline, not one text blob and one reasoning blob.
-import { applyPartDelta, applyToolPart, type AssistantPart } from "./chat-run-record.js";
+import { applyPartDelta, applyToolPart, toPlanPart, type AssistantPart, type AssistantPlanPart, type StoredTurnPart } from "./chat-run-record.js";
 import { publishLiveEvent, type LiveDeltaChunk } from "./live-conversation-bus.js";
 import { chatMessageRepository, agentRunRepository } from "../repositories/index.js";
 
@@ -35,6 +35,8 @@ interface DeltaBuf {
   accText: string; // run total (absolute → idempotent persist)
   /** The run so far as ordered parts (absolute → idempotent persist). */
   parts: AssistantPart[];
+  /** The run's latest plan (todo checklist), stored after the parts. */
+  plan: AssistantPlanPart | null;
   liveTimer: ReturnType<typeof setTimeout> | null;
   persistTimer: ReturnType<typeof setTimeout> | null;
   /** Self-expiry, re-armed on every delta: drops the entry on pods that saw this
@@ -103,9 +105,15 @@ function flushDeltaPersist(sessionId: string): void {
   // "running", so a late/cross-pod partial write matches 0 rows and can never
   // clobber the final content. Accumulated (absolute) → idempotent. Thinking
   // lives in the parts (readers fill `reasoning` from them).
+  const parts = storedParts(buf);
   chatMessageRepository
-    .updatePartialContent(buf.assistantMessageId, { content: buf.accText, ...(buf.parts.length > 0 ? { parts: buf.parts } : {}) })
+    .updatePartialContent(buf.assistantMessageId, { content: buf.accText, ...(parts.length > 0 ? { parts } : {}) })
     .catch(() => {});
+}
+
+/** What the placeholder row's `parts` holds: the timeline, then the plan. */
+function storedParts(buf: DeltaBuf): StoredTurnPart[] {
+  return buf.plan ? [...buf.parts, buf.plan] : buf.parts;
 }
 
 function coalescerFor(
@@ -119,7 +127,7 @@ function coalescerFor(
   if (!buf) {
     buf = {
       convId, slug, assistantMessageId, userId: undefined, userIdPromise: null,
-      batchText: "", batchReasoning: "", batchChunks: [], accText: "", parts: [],
+      batchText: "", batchReasoning: "", batchChunks: [], accText: "", parts: [], plan: null,
       liveTimer: null, persistTimer: null, idleTimer: null,
     };
     // Resolve the userId once. Prefer the caller's already-resolved id (the SSE
@@ -190,6 +198,32 @@ export function pushToolPart(
   if (buf.liveTimer) { clearTimeout(buf.liveTimer); flushDeltaLive(sessionId); }
   buf.parts = next;
   armTimers(sessionId, buf, false);
+}
+
+/** Record the run's latest plan so a reload (and the final write, which reads
+ *  it back from the placeholder) can redraw the plan card. Written at once,
+ *  not debounced: plans change a handful of times per run, and a plan that
+ *  lands just before the terminal callback must already be on the row. Only
+ *  `parts` is written — never `content` — so this is safe even when the live
+ *  delta tap is off and the coalescer has no text. */
+export function pushPlanPart(
+  sessionId: string,
+  convId: string,
+  slug: string,
+  assistantMessageId: string | undefined,
+  todos: unknown,
+  title?: unknown,
+  knownUserId?: string,
+): void {
+  const plan = toPlanPart(todos, title);
+  if (!plan) return;
+  const buf = coalescerFor(sessionId, convId, slug, assistantMessageId, knownUserId);
+  // A plan update without a title keeps the title the plan already had.
+  buf.plan = plan.title || !buf.plan?.title ? plan : { ...plan, title: buf.plan.title };
+  if (buf.idleTimer) clearTimeout(buf.idleTimer);
+  buf.idleTimer = setTimeout(() => endDeltaCoalescer(sessionId), DELTA_IDLE_MS);
+  if (!buf.assistantMessageId) return;
+  chatMessageRepository.updatePartialContent(buf.assistantMessageId, { parts: storedParts(buf) }).catch(() => {});
 }
 
 /** Stop + drop a session's coalescer (terminal callback, or idle self-expiry).

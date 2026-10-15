@@ -250,6 +250,71 @@ export function normalizeAssistantParts(value: unknown): AssistantPart[] | null 
   return parts.length > 0 ? parts : null;
 }
 
+// ── Plan part ───────────────────────────────────────────────────────────────
+//
+// The agent's plan (the todo checklist streamed as `plan` events) is stored in
+// the same ChatMessage.parts array as ONE extra element `{ type: "plan" }`, so a
+// reload can redraw the plan card. It is deliberately NOT a member of the
+// AssistantPart union: normalizeAssistantParts drops it, so every timeline
+// reader (dashboard, live snapshot, fork) keeps behaving exactly as before, and
+// only planPartOf() reads it back. A row whose parts hold ONLY a plan
+// normalizes to null and renders from its answer + reasoning as it always did.
+
+export type PlanTodoStatus = "pending" | "in_progress" | "completed" | "failed" | "stopped";
+
+export interface PlanTodoRecord {
+  id?: string;
+  title: string;
+  status: PlanTodoStatus;
+}
+
+export interface AssistantPlanPart {
+  type: "plan";
+  id: "plan";
+  title?: string;
+  todos: PlanTodoRecord[];
+}
+
+/** What ChatMessage.parts may hold: the timeline parts plus at most one plan. */
+export type StoredTurnPart = AssistantPart | AssistantPlanPart;
+
+const PLAN_TODO_STATUSES = new Set<string>(["pending", "in_progress", "completed", "failed", "stopped"]);
+const MAX_PLAN_TODOS = 200;
+
+/** A well-formed plan part from raw `todos` (+ optional title), or null. */
+export function toPlanPart(todos: unknown, title?: unknown): AssistantPlanPart | null {
+  if (!Array.isArray(todos)) return null;
+  const clean: PlanTodoRecord[] = [];
+  for (const raw of todos.slice(0, MAX_PLAN_TODOS)) {
+    if (!raw || typeof raw !== "object") continue;
+    const todo = raw as Record<string, unknown>;
+    if (typeof todo["title"] !== "string" || !todo["title"]) continue;
+    const status = typeof todo["status"] === "string" && PLAN_TODO_STATUSES.has(todo["status"])
+      ? (todo["status"] as PlanTodoStatus)
+      : "pending";
+    clean.push({ ...(typeof todo["id"] === "string" ? { id: todo["id"] } : {}), title: todo["title"], status });
+  }
+  if (clean.length === 0) return null;
+  return { type: "plan", id: "plan", ...(typeof title === "string" && title ? { title } : {}), todos: clean };
+}
+
+/** The plan stored in a row's raw `parts` value, or null. */
+export function planPartOf(value: unknown): AssistantPlanPart | null {
+  if (!Array.isArray(value)) return null;
+  for (let i = value.length - 1; i >= 0; i--) {
+    const raw = value[i] as Record<string, unknown> | null;
+    if (raw && typeof raw === "object" && raw["type"] === "plan") return toPlanPart(raw["todos"], raw["title"]);
+  }
+  return null;
+}
+
+/** A run that ended without completing (stopped / failed) leaves no item
+ *  "in progress": those become "stopped". Untouched when nothing is open. */
+export function stopOpenPlanTodos(plan: AssistantPlanPart): AssistantPlanPart {
+  if (!plan.todos.some((todo) => todo.status === "in_progress")) return plan;
+  return { ...plan, todos: plan.todos.map((todo) => (todo.status === "in_progress" ? { ...todo, status: "stopped" as const } : todo)) };
+}
+
 /**
  * What a finished turn stores besides its answer.
  *
@@ -269,17 +334,31 @@ export async function finalTurnFields(args: {
   callbackParts: unknown;
   callbackReasoning: unknown;
   assistantMessageId?: string | undefined;
-}): Promise<{ parts: AssistantPart[] | null; reasoning?: string }> {
+}): Promise<{ parts: StoredTurnPart[] | null; reasoning?: string }> {
+  // The placeholder's partial parts: the run's plan lives only there (claw's
+  // callback parts never carry it), and they are the thinking fallback below.
+  let partialRaw: unknown = null;
+  let partialRead = false;
+  const readPartial = async (): Promise<unknown> => {
+    if (!partialRead && args.assistantMessageId) {
+      partialRead = true;
+      partialRaw = await chatMessageRepository.partialParts(args.assistantMessageId).catch(() => null);
+    }
+    return partialRaw;
+  };
+  const storedPlan = args.assistantMessageId ? planPartOf(await readPartial()) : null;
+  const plan = storedPlan && args.status !== "completed" ? stopOpenPlanTodos(storedPlan) : storedPlan;
+
   const parts = args.status === "completed" ? normalizeAssistantParts(args.callbackParts) : null;
   const aligned = parts ? alignPartsWithAnswer(parts, args.modelAnswer, args.storedAnswer) : null;
-  if (aligned) return { parts: aligned };
+  if (aligned) return { parts: plan ? [...aligned, plan] : aligned };
 
   let reasoning = typeof args.callbackReasoning === "string" ? args.callbackReasoning.trim() : "";
-  if (!reasoning && args.assistantMessageId) {
-    const partial = normalizeAssistantParts(
-      await chatMessageRepository.partialParts(args.assistantMessageId).catch(() => null),
-    );
+  if (!reasoning) {
+    const partial = normalizeAssistantParts(await readPartial());
     if (partial) reasoning = reasoningText(partial);
   }
-  return { parts: null, ...(reasoning ? { reasoning } : {}) };
+  // A plan alone normalizes to no parts, so the turn still renders from its
+  // answer + reasoning — the plan card is the only thing it adds.
+  return { parts: plan ? [plan] : null, ...(reasoning ? { reasoning } : {}) };
 }

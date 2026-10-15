@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client";
-import type { AssistantPart } from "../lib/chat-run-record.js";
+import type { StoredTurnPart } from "../lib/chat-run-record.js";
 import { prisma } from "../db.js";
 import { userIdFilter } from "./userIdFilter.js";
 
@@ -22,7 +22,7 @@ export const chatMessageRepository = {
      *  JSON cast is localized here. */
     attachedContext?: unknown;
     /** The assistant turn as ordered parts (see the `parts` column). */
-    parts?: AssistantPart[] | null;
+    parts?: StoredTurnPart[] | null;
   }) => {
     const { attachedContext, pendingActions, parts, ...rest } = data;
     return prisma.chatMessage.create({
@@ -44,7 +44,7 @@ export const chatMessageRepository = {
    *  run completes (branching needs the assistant id reserved up-front). */
   update: (
     id: string,
-    data: { content?: string; status?: string; reasoning?: string | null; parentId?: string | null; pendingActions?: unknown; runProvider?: string | null; parts?: AssistantPart[] | null },
+    data: { content?: string; status?: string; reasoning?: string | null; parentId?: string | null; pendingActions?: unknown; runProvider?: string | null; parts?: StoredTurnPart[] | null },
   ) => {
     const { pendingActions, parts, ...rest } = data;
     return prisma.chatMessage.update({
@@ -130,7 +130,7 @@ export const chatMessageRepository = {
    *  Conditional (updateMany + status guard) so a late/cross-pod debounced write
    *  can never clobber the final content the completion callback wrote (which
    *  flips status off "running"). Returns count of rows updated (0 = ignored). */
-  updatePartialContent: (id: string, data: { content?: string; reasoning?: string | null; parts?: AssistantPart[] }) =>
+  updatePartialContent: (id: string, data: { content?: string; reasoning?: string | null; parts?: StoredTurnPart[] }) =>
     prisma.chatMessage.updateMany({
       where: { id, status: "running" },
       data: { ...data, ...(data.parts ? { parts: data.parts as unknown as Prisma.InputJsonValue } : {}) },

@@ -208,3 +208,43 @@ export function toStreamOverrides(ctx: ComposerContext): StreamOverrides {
     researchContext: ctx.research,
   };
 }
+
+/**
+ * Overrides for re-running a past turn (regenerate, edit). The context comes
+ * from what that turn was actually sent with — its persisted attachedContext
+ * pills — not from whatever the composer holds now. The toggles (web search,
+ * deep research, canvas, instant, model, thinking, sandbox) are not stored
+ * per message, so they come from the composer's current state, the same
+ * values a normal send would use. Without this the run falls back to the
+ * hook's empty defaults and silently drops both. The model pin, thinking
+ * level and instant mode belong to the composer's agent: a turn another agent
+ * answered (a chat can switch agents) runs with that agent's own defaults.
+ */
+export function toTurnStreamOverrides(
+  turn: { attachedContext?: AttachedContextItem[] | undefined; agentSlug?: string | undefined },
+  composer: ComposerContext | null,
+  composerAgentSlug: string | null,
+): StreamOverrides {
+  const items = turn.attachedContext ?? [];
+  const idsOf = (type: AttachedContextItem['type']): string[] =>
+    items.filter(item => item.type === type).map(item => item.id);
+  const current = composer ?? EMPTY_COMPOSER_CONTEXT;
+  const turnAgent = turn.agentSlug === 'ask-ai' ? null : (turn.agentSlug ?? composerAgentSlug);
+  const toggles = toStreamOverrides(
+    withoutPickedContext(
+      turnAgent === composerAgentSlug
+        ? current
+        : { ...current, instant: false, model: null, modelProvider: null, thinkingLevel: null },
+    ),
+  );
+  return {
+    ...toggles,
+    channelIds: idsOf('channel'),
+    ticketIds: idsOf('ticket'),
+    canvasIds: idsOf('canvas'),
+    callIds: idsOf('call'),
+    attachedContext: items,
+    displayAttachedContext: items,
+    ...(turn.agentSlug ? { agentSlug: turn.agentSlug } : {}),
+  };
+}

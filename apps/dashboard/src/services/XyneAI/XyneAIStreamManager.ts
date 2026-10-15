@@ -57,6 +57,7 @@ import type { WorkerIncomingMessage, WorkerOutgoingMessage } from './xyneAIStrea
 import { reactNativeBridge, NativeInboundMessageType } from '../../utils/reactNativeBridge';
 import { fetchV2ConversationMessages } from './XyneAISessionsV2Service';
 import { getAskAIErrorInfo } from '../../utils/askAIErrorMapping';
+import { planFromParts, stopOpenPlanTodos, toPlanTodos } from './planParts';
 import {
   deriveStreamSlotKey,
   getStreamSlotKeyFromThreadId,
@@ -1479,9 +1480,7 @@ class XyneAIStreamManager {
       }
 
       case 'plan': {
-        const todos = Array.isArray(data['todos'])
-          ? (data['todos'] as Message['planTodos'])
-          : undefined;
+        const todos = toPlanTodos(data['todos']);
         if (todos) {
           const planTitle = typeof data['title'] === 'string' ? data['title'] : undefined;
           updateMessages(prev =>
@@ -1992,7 +1991,21 @@ class XyneAIStreamManager {
         // the stored answer); without them, close what streamed.
         const finalParts = normalizeAssistantParts(data['parts']);
         if (finalParts) updatedMsg.parts = finalParts;
-        else if (msg.parts?.length)
+        // The stored plan (if the server sent it) wins; a turn that ended
+        // without completing leaves no step spinning.
+        const finalPlan = planFromParts(data['parts']);
+        if (finalPlan) {
+          updatedMsg.planTodos = finalPlan.todos;
+          if (finalPlan.title) updatedMsg.planTitle = finalPlan.title;
+        }
+        const finalStatus = data['status'];
+        if (
+          updatedMsg.planTodos?.length &&
+          typeof finalStatus === 'string' &&
+          finalStatus !== 'completed'
+        ) {
+          updatedMsg.planTodos = stopOpenPlanTodos(updatedMsg.planTodos);
+        } else if (msg.parts?.length)
           updatedMsg.parts = closeAssistantParts(msg.parts, new Date().toISOString());
         if (traceId) updatedMsg.traceId = traceId;
         return withTurnDuration(updatedMsg);
@@ -2703,7 +2716,8 @@ class XyneAIStreamManager {
             ...(mergedReasoning !== undefined && { reasoning: mergedReasoning }),
             ...(localMsg.pendingActions?.length && { pendingActions: localMsg.pendingActions }),
             // The streamed timeline and plan aren't always in the history
-            // read (plans never are); keep what the stream built.
+            // read (e.g. the refetch raced the final write); keep what the
+            // stream built.
             ...(!finalRefreshed.parts?.length &&
               localMsg.parts?.length && { parts: localMsg.parts }),
             ...(!finalRefreshed.planTodos?.length &&
@@ -2819,6 +2833,7 @@ class XyneAIStreamManager {
         errorInfo,
         isStreaming: false,
         streamingContent: '',
+        ...(msg.planTodos?.length && { planTodos: stopOpenPlanTodos(msg.planTodos) }),
       };
     });
 
@@ -2908,6 +2923,7 @@ class XyneAIStreamManager {
                 isStreaming: false,
                 isAborted: true,
                 streamingContent: '',
+                ...(msg.planTodos?.length && { planTodos: stopOpenPlanTodos(msg.planTodos) }),
               })
             : msg,
         );

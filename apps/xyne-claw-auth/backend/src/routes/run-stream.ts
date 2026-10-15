@@ -51,8 +51,8 @@ import {
   withAiScreenPresentationTools,
   withAiScreenPresentationInstructions,
 } from "../lib/ai-screen-presentation-tools.js";
-import { pushDelta, pushToolPart, endDeltaCoalescer } from "../lib/live-delta-coalescer.js";
-import { finalTurnFields, type AssistantPart } from "../lib/chat-run-record.js";
+import { pushDelta, pushToolPart, pushPlanPart, endDeltaCoalescer } from "../lib/live-delta-coalescer.js";
+import { finalTurnFields, type StoredTurnPart } from "../lib/chat-run-record.js";
 import { redisService } from "../redis.js";
 import {
   branchPiConversationId,
@@ -90,7 +90,7 @@ interface PendingStream {
     followUpsPending?: boolean | undefined;
     clawRunOrigin?: Record<string, unknown> | undefined;
     /** The turn as ordered thinking / text / tool parts (null: render from content). */
-    parts?: AssistantPart[] | null | undefined;
+    parts?: StoredTurnPart[] | null | undefined;
   }) => void;
   reject: (error: Error) => void;
   setClosed: () => void;
@@ -203,7 +203,7 @@ type StreamBusEvent =
       toolInvocations?: unknown;
       followUpSuggestions?: string[];
       followUpsPending?: boolean;
-      parts?: AssistantPart[] | null;
+      parts?: StoredTurnPart[] | null;
     }
   | { kind: "follow_ups"; streamId: string; suggestions: string[] };
 
@@ -373,7 +373,7 @@ export async function persistRunStreamResult(args: {
   assistantMessageId?: string;
   runProvider?: string;
   /** The turn's ordered parts and/or whole reasoning (lib/chat-run-record finalTurnFields). */
-  turn?: { parts: AssistantPart[] | null; reasoning?: string };
+  turn?: { parts: StoredTurnPart[] | null; reasoning?: string };
 }): Promise<{ messageId: string; persistedAttachments: PersistedAttachment[] } | null> {
   const runProviderField = {
     ...(args.runProvider ? { runProvider: args.runProvider } : {}),
@@ -1359,7 +1359,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       followUpSuggestions?: string[] | undefined;
       followUpsPending?: boolean | undefined;
       clawRunOrigin?: Record<string, unknown> | undefined;
-      parts?: AssistantPart[] | null | undefined;
+      parts?: StoredTurnPart[] | null | undefined;
     }>((resolve, reject) => {
       let closed = false;
       pendingStreams.set(streamId, {
@@ -2105,6 +2105,15 @@ internalRouter.post("/:streamId/progress", (req: Request<{ streamId: string }>, 
       events.push({ event: "delta", data: { content: body.textDelta, ...partIdOf(body) } });
     } else if (Array.isArray(body.todos)) {
       events.push({ event: "plan", data: { todos: body.todos, ...(typeof body.planTitle === "string" ? { title: body.planTitle } : {}) } });
+      // Persist the plan onto the assistant placeholder so a reload redraws it.
+      const planMeta = streamMeta.get(streamId);
+      const planAssistantMessageId =
+        (typeof req.query["assistantMessageId"] === "string" && req.query["assistantMessageId"]
+          ? req.query["assistantMessageId"]
+          : undefined) ?? planMeta?.assistantMessageId;
+      if (sessionId && planMeta?.conversationId && planAssistantMessageId) {
+        pushPlanPart(sessionId, planMeta.conversationId, planMeta.agentSlug, planAssistantMessageId, body.todos, body.planTitle, planMeta.userId);
+      }
     } else if (body.kind === "ui-widget" && body.widget) {
       // Async, so it can't join the `events` batch. streamMeta is a same-pod
       // fast path only — a late card needs the identity on the body/URL.
@@ -2871,12 +2880,14 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
       onAttachment: (_sid, attachment) => {
         stream.sendEvent("attachment", attachment);
       },
-      onPlan: (_sid, todos) => {
+      onPlan: (sid, todos) => {
         stream.sendEvent("plan", { todos });
+        if (sid) pushPlanPart(sid, convId, slug, assistantMessageId, todos, undefined, userId);
       },
-      onUiWidget: (_sid, widget) => {
+      onUiWidget: (sid, widget) => {
         if (widget.type === "plan") {
           stream.sendEvent("plan", { todos: widget.payload.todos });
+          if (sid) pushPlanPart(sid, convId, slug, assistantMessageId, widget.payload.todos, undefined, userId);
           return;
         }
         void (async () => {

@@ -6,6 +6,7 @@ import remarkBreaks from 'remark-breaks';
 import type { Components } from 'react-markdown';
 import type { Element } from 'hast';
 import { cn } from '../../../utils/classNames';
+import { orderedListProps } from '../../../utils/markdownComponents';
 import {
   buildClawCitationToolNumbers,
   linkifyAndGroupClawCitations,
@@ -55,8 +56,14 @@ const components: Components = {
   ul: ({ children }: { children?: ReactNode } & ExtraProps): ReactElement => (
     <ul className='mb-2 list-disc space-y-1 pl-5 last:mb-0'>{children}</ul>
   ),
-  ol: ({ children }: { children?: ReactNode } & ExtraProps): ReactElement => (
-    <ol className='mb-2 list-decimal space-y-1 pl-5 last:mb-0'>{children}</ol>
+  ol: ({
+    children,
+    node,
+    start,
+  }: { children?: ReactNode; start?: number | undefined } & ExtraProps): ReactElement => (
+    <ol className='mb-2 list-decimal space-y-1 pl-5 last:mb-0' {...orderedListProps(node, start)}>
+      {children}
+    </ol>
   ),
   li: ({ children }: { children?: ReactNode } & ExtraProps): ReactElement => (
     <li className='leading-relaxed'>{children}</li>

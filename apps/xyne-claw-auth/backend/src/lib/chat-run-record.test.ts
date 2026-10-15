@@ -13,7 +13,10 @@ const {
   applyToolPart,
   finalTurnFields,
   normalizeAssistantParts,
+  planPartOf,
   reasoningText,
+  stopOpenPlanTodos,
+  toPlanPart,
 } = await import("./chat-run-record.js");
 type AssistantPart = import("./chat-run-record.js").AssistantPart;
 
@@ -105,5 +108,46 @@ describe("finalTurnFields", () => {
     partialParts.mockResolvedValueOnce(parts);
     expect(await finalTurnFields({ status: "cancelled", modelAnswer: "", storedAnswer: "", callbackParts: null, callbackReasoning: null, assistantMessageId: "m1" })).toEqual({ parts: null, reasoning: "Think." });
     expect(partialParts).toHaveBeenCalledWith("m1");
+  });
+});
+
+describe("plan part", () => {
+  const todos = [
+    { id: "a", title: "Read", status: "completed" },
+    { id: "b", title: "Write", status: "in_progress" },
+    { id: "c", title: "Ship", status: "pending" },
+  ];
+  const plan = { type: "plan", id: "plan", title: "Do it", todos };
+
+  it("is stored beside the timeline but never read as a timeline part", () => {
+    const stored = [{ type: "text", id: "1:1", text: "Hi." }, plan];
+    expect(normalizeAssistantParts(stored)).toEqual([{ type: "text", id: "1:1", text: "Hi." }]);
+    expect(normalizeAssistantParts([plan])).toBeNull();
+    expect(planPartOf(stored)).toEqual(plan);
+    expect(planPartOf([{ type: "text", id: "1", text: "x" }])).toBeNull();
+  });
+
+  it("toPlanPart drops malformed todos and unknown statuses fall back to pending", () => {
+    expect(toPlanPart([{ title: "x", status: "weird" }, { status: "pending" }, null])).toEqual({
+      type: "plan", id: "plan", todos: [{ title: "x", status: "pending" }],
+    });
+    expect(toPlanPart([])).toBeNull();
+    expect(toPlanPart("nope")).toBeNull();
+  });
+
+  it("stopOpenPlanTodos marks in-progress items stopped and leaves the rest", () => {
+    expect(stopOpenPlanTodos(toPlanPart(todos)!).todos.map((t) => t.status)).toEqual(["completed", "stopped", "pending"]);
+  });
+
+  it("finalTurnFields carries the placeholder's plan — closed when the run did not complete", async () => {
+    const answerParts = [{ type: "text", id: "1:1", text: "Answer." }];
+    partialParts.mockResolvedValueOnce([plan]);
+    expect(await finalTurnFields({ status: "completed", modelAnswer: "Answer.", storedAnswer: "Answer.", callbackParts: answerParts, callbackReasoning: null, assistantMessageId: "m1" }))
+      .toEqual({ parts: [...answerParts, plan] });
+
+    partialParts.mockResolvedValueOnce([{ type: "reasoning", id: "1:0", text: "Think." }, plan]);
+    const cancelled = await finalTurnFields({ status: "cancelled", modelAnswer: "", storedAnswer: "", callbackParts: null, callbackReasoning: null, assistantMessageId: "m2" });
+    expect(cancelled.reasoning).toBe("Think.");
+    expect(cancelled.parts).toEqual([{ ...plan, todos: [todos[0], { ...todos[1], status: "stopped" }, todos[2]] }]);
   });
 });
