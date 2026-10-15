@@ -1,5 +1,6 @@
 import type { Ticket, TicketTag, TicketStatusV2, FormFieldType } from '@xyne/shared';
 import type { BoardSlaPolicy } from '../../hooks/useChannelSlaPolicy';
+import type { SubTicketProgress } from '../../components/Tickets/SubTickets/SubTickets.types';
 
 export interface Stage {
   id: string;
@@ -39,6 +40,7 @@ export interface SortableTicketCardProps {
   showEmailReads?: boolean | undefined;
   /** SLA policies pre-fetched by the parent; forwarded to TicketCard to avoid per-card fetches. */
   slaPolicies?: BoardSlaPolicy[] | undefined;
+  subProgress?: SubTicketProgress | undefined;
 }
 
 export interface DroppableStageProps {

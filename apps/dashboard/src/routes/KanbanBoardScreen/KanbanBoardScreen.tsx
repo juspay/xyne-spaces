@@ -13,7 +13,6 @@ import { useQuery } from '@tanstack/react-query';
 import { logger, Event } from '../../utils/logger';
 import { useAuth } from '../../hooks/useAuth';
 import { useCanCreateTicket, usePermissions } from '../../hooks/usePermissions';
-import { useScrollFade } from '../../hooks/useScrollFade';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useRouteContext } from '../../hooks/useRouteContext';
 import { FileSpreadsheet, Archive } from 'lucide-react';
@@ -63,6 +62,12 @@ import {
 } from '@dnd-kit/core';
 import { TicketCard } from '../../components/Tickets/TicketCard/TicketCard';
 import { TicketsHeader } from '../../components/Tickets/TicketsHeader/TicketsHeader';
+import {
+  DEFAULT_TICKET_NOUN,
+  TicketNounContext,
+  useTicketNoun,
+  type TicketNoun,
+} from '../../contexts/TicketNounContext';
 import { hasAnyFilterChip } from '../../components/Tickets/TicketsHeader/filterChips';
 import type { ProjectsScreenOutletContext } from '../ProjectsScreen/ProjectsScreen';
 import { CreateTicketModal } from '../../components/Tickets/CreateTicketModal/CreateTicketModal';
@@ -347,6 +352,8 @@ interface BoardKanbanScreenProps {
   onOpenTicket?: (ticket: Ticket) => void;
   /** Beside New ticket in the header: a host's own action (a track's Chat). */
   headerEndSlot?: React.ReactNode;
+  /** What this screen calls its tickets; every label under the board uses it. */
+  noun?: TicketNoun;
 }
 
 function isFormFieldGroup(value: unknown): value is FormFieldGroup {
@@ -480,7 +487,7 @@ const availableColumns = [
   { key: 'merchantId', label: 'Merchant ID', icon: <Hashtag className='h-4 w-4' /> },
 ];
 
-const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
+const KanbanBoardScreenContent: React.FC<Omit<BoardKanbanScreenProps, 'noun'>> = ({
   viewMode: viewModeProp,
   channelId,
   workspaceId,
@@ -496,6 +503,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   onOpenTicket,
   headerEndSlot,
 }) => {
+  const noun = useTicketNoun();
   const isTrackView = Boolean(trackId && channelId);
   // Filters, layout and saved state are kept per track, apart from the channel's own
   // Tickets tab, so the two never overwrite each other.
@@ -562,17 +570,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const [kanbanTicketsByColumn, setKanbanTicketsByColumn] = useState<Record<string, Ticket[]>>({});
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [tableScrollElement, setTableScrollElement] = useState<HTMLDivElement | null>(null);
-  // The list view fades at its ends while there are more rows past them, as the
-  // kanban columns do.
-  const tableFade = useScrollFade<HTMLDivElement>('y', 32);
-  const tableFadeRef = tableFade.ref;
-  const setTableScroller = useCallback(
-    (element: HTMLDivElement | null) => {
-      setTableScrollElement(element);
-      tableFadeRef(element);
-    },
-    [tableFadeRef],
-  );
   const [flowSelection, setFlowSelection] = useState<FlowNodeSelection | null>(null);
   const [collapsedFlowGroups, setCollapsedFlowGroups] = useState<Set<string>>(new Set());
   const [flowLegendOpen, setFlowLegendOpen] = useState(false);
@@ -788,7 +785,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       return null;
     }
   }, [layoutStorageKey]);
-  const defaultLayoutView: StorableLayoutView = storedLayoutView ?? 'kanban';
+  // A channel's Tickets tab and an SDLC hub's Issues open as a list; Desk channels,
+  // tracks and project/board/saved views keep kanban. A layout the user picked wins.
+  const fallbackLayoutView: StorableLayoutView =
+    channelId && !isTrackView && !isDeskChannelType(channel?.type) ? 'table' : 'kanban';
+  const defaultLayoutView: StorableLayoutView = storedLayoutView ?? fallbackLayoutView;
   const requestedOrDefaultLayoutView: LayoutView = isLayoutView(requestedLayoutView)
     ? requestedLayoutView
     : defaultLayoutView;
@@ -2612,7 +2613,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
             key: `sub-ticket:${childSubTicket.id}`,
             subTicket: childSubTicket,
             displayId: childSubTicket.id.substring(0, 8).toUpperCase(),
-            title: childSubTicket.title || 'Untitled sub-ticket',
+            title: childSubTicket.title || `Untitled sub-${noun.singular}`,
             depth: depth + 1,
             children: [],
           } satisfies TicketGraphNode;
@@ -2623,7 +2624,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         ticket,
         ...(subTicket ? { subTicket } : {}),
         displayId: ticket.xyneId || ticket.id.substring(0, 8).toUpperCase(),
-        title: ticket.title || 'Untitled Ticket',
+        title: ticket.title || `Untitled ${noun.singularTitle}`,
         statusLabel: ticket.stageName || ticket.statusV2,
         priority: ticket.priority ?? null,
         assignedTo: ticket.assignedTo ?? null,
@@ -2634,7 +2635,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     const rootTickets = graphTickets.filter(ticket => !childTicketIds.has(ticket.id));
     const roots = rootTickets.length > 0 ? rootTickets : graphTickets;
     return roots.map(ticket => toTicketNode(ticket, 0, new Set([ticket.id])));
-  }, [graphSubTicketMappings, graphTickets]);
+  }, [graphSubTicketMappings, graphTickets, noun]);
   useEffect(() => {
     if (!selectedGraphRootTicketId || ticketsDetails.type !== 'complete' || !filtersInitialized) {
       return;
@@ -2697,7 +2698,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       const memberCount = selectedFlowRunModel.descendantMembersOf(groupId).length;
       const accepted = await confirm({
         title: `Move "${group.name || 'Group'}" to backlog?`,
-        description: `This will create any missing tickets and move all ${memberCount} non-terminal steps${selectedFlowRunModel.childGroupsOf(groupId).length > 0 ? ', including nested groups,' : ''} to backlog. Completed, cancelled, and skipped steps stay unchanged.`,
+        description: `This will create any missing ${noun.plural} and move all ${memberCount} non-terminal steps${selectedFlowRunModel.childGroupsOf(groupId).length > 0 ? ', including nested groups,' : ''} to backlog. Completed, cancelled, and skipped steps stay unchanged.`,
         confirmLabel: 'Move to backlog',
       });
       if (!accepted) return;
@@ -2715,7 +2716,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           `${backloggedCount} ${backloggedCount === 1 ? 'step' : 'steps'} moved to backlog`,
           createdCount > 0
             ? {
-                description: `${createdCount} missing ${createdCount === 1 ? 'ticket was' : 'tickets were'} created.`,
+                description: `${createdCount} missing ${createdCount === 1 ? `${noun.singular} was` : `${noun.plural} were`} created.`,
               }
             : undefined,
         );
@@ -2727,7 +2728,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         setFlowGroupBacklogPendingId(null);
       }
     },
-    [confirm, flowGroupBacklogPendingId, selectedFlowRunModel, selectedGraphRootTicketId],
+    [confirm, flowGroupBacklogPendingId, selectedFlowRunModel, selectedGraphRootTicketId, noun],
   );
   const selectedFlowRunBacklogs = useMemo((): FlowNodeSelection[] => {
     if (!selectedFlowRunModel || !selectedGraphRootTicketId) return [];
@@ -2881,7 +2882,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         visibleColumns: tableVisibleColumns,
       });
       if (payload.rows.length === 0) {
-        toast.info('No tickets to export.');
+        toast.info(`No ${noun.plural} to export.`);
         return;
       }
       const isCsv = action.endsWith('csv');
@@ -2908,6 +2909,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       channelNamesById,
       boardNamesById,
       tableVisibleColumns,
+      noun,
     ],
   );
   // The table layout no longer loads the full ticket list, so an export has to
@@ -2942,7 +2944,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       userNamesById,
     });
   }, [allProjectTickets, flowModel, graphTickets, isFlowBoard, userNamesById]);
-  const flowRunExportTitle = `${selectedBoardDetail?.name ?? 'Flow board'} — Ticket Tracker`;
+  const flowRunExportTitle = `${selectedBoardDetail?.name ?? 'Flow board'} — ${noun.singularTitle} Tracker`;
   const selectedRunExportRows = useMemo(() => {
     if (!isFlowBoard || !flowModel || !selectedFlowRunRootTicket) return [];
     return buildFlowRunExportRows({
@@ -2960,7 +2962,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     userNamesById,
   ]);
   const selectedRunExportTitle = selectedFlowRunRootTicket
-    ? `${selectedFlowRunRootTicket.xyneId} ${selectedFlowRunRootTicket.title} — Ticket Tracker`
+    ? `${selectedFlowRunRootTicket.xyneId} ${selectedFlowRunRootTicket.title} — ${noun.singularTitle} Tracker`
     : flowRunExportTitle;
   const flowAskAIThreadInfo = useMemo((): ThreadInfo | null => {
     if (!selectedFlowRunRootTicket?.conversationId) return null;
@@ -3862,7 +3864,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const handleTicketCreated = useCallback(
     (ticket: { id: string; conversationId?: string; channelId?: string }) => {
       const ticketChannelId = ticket.channelId || channel?.id;
-      toast.success('Ticket created successfully', {
+      toast.success(`${noun.singularTitle} created successfully`, {
         action: {
           label: 'View Details',
           onClick: () => {
@@ -3897,7 +3899,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         duration: 5000,
       });
     },
-    [navigate, channel, buildChannelRoute, baseRoute, projectsScreenContext, channelsById],
+    [navigate, channel, buildChannelRoute, baseRoute, projectsScreenContext, channelsById, noun],
   );
 
   // Board context for create ticket modal. When creating from a board route or
@@ -4263,11 +4265,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     (stageId: string) => {
       const stageName = stages.find(stage => stage.id === stageId)?.name ?? 'Column';
       hideColumn(stageId);
-      toast.success(`${stageName} hidden — its tickets left every count.`, {
+      toast.success(`${stageName} hidden — its ${noun.plural} left every count.`, {
         action: { label: 'Undo', onClick: () => unhideColumn(stageId) },
       });
     },
-    [hideColumn, stages, unhideColumn],
+    [hideColumn, stages, unhideColumn, noun],
   );
 
   const filteredAvailableColumns = useMemo(() => {
@@ -4301,12 +4303,12 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const headerTitle = isWorkspaceView
     ? savedViewName || 'New view'
     : isMyTicketsView
-      ? 'My tickets'
+      ? `My ${noun.plural}`
       : channelId
-        ? 'Tickets'
+        ? noun.pluralTitle
         : viewMode === 'board'
           ? (selectedBoardDetail?.name ?? 'Board')
-          : ((headerProject as { name: string } | undefined)?.name ?? 'Tickets');
+          : ((headerProject as { name: string } | undefined)?.name ?? noun.pluralTitle);
   const headerTicketCount = useMemo(
     () =>
       processedGroups.reduce(
@@ -4608,8 +4610,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                     setSelectedGraphRootTicketId(null);
                     setFlowSelection(null);
                   }}
-                  aria-label='Back to main tickets'
-                  title='Back to main tickets'
+                  aria-label={`Back to main ${noun.plural}`}
+                  title={`Back to main ${noun.plural}`}
                   data-track-category='flow_board'
                   data-track-name='back_to_main_tickets'
                   className='flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-muted text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
@@ -4619,7 +4621,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                 <div className='h-6 w-px shrink-0 bg-border' aria-hidden='true' />
                 <div className='flex min-w-0 flex-auto items-center gap-2.5'>
                   <h2 className='truncate text-[15px] font-bold tracking-[-0.01em] text-foreground'>
-                    {selectedFlowRunRootTicket?.title ?? 'Ticket'} run
+                    {selectedFlowRunRootTicket?.title ?? noun.singularTitle} run
                   </h2>
                   <span className='shrink-0 whitespace-nowrap rounded-full bg-muted px-2.5 py-1 text-xs font-semibold text-muted-foreground'>
                     {flowRunGraph.nodes.length} nodes
@@ -4639,7 +4641,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                     onKeyDown={event => {
                       if (event.key === 'Escape') setFlowRunSearchQuery('');
                     }}
-                    placeholder='Search ticket ID or title'
+                    placeholder={`Search ${noun.singular} ID or title`}
                     data-track-category='flow_board'
                     data-track-name='search_flow_run'
                     className='h-9 w-full rounded-[10px] border border-border bg-muted/40 pl-[34px] pr-3 text-sm text-foreground placeholder:text-muted-foreground/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40'
@@ -4693,9 +4695,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               <div className='flex items-center justify-between border-b border-border bg-background px-4 py-3'>
                 <div className='flex items-center gap-2'>
                   <GitBranch className='h-4 w-4 text-muted-foreground' />
-                  <h2 className='text-sm font-semibold text-foreground'>Main Tickets</h2>
+                  <h2 className='text-sm font-semibold text-foreground'>Main {noun.pluralTitle}</h2>
                   <span className='rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground'>
-                    {ticketGraphNodes.length} tickets
+                    {ticketGraphNodes.length} {noun.plural}
                   </span>
                 </div>
                 <div className='flex items-center gap-2'>
@@ -4760,7 +4762,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
             )}
             {ticketsDetails.type !== 'complete' ? (
               <div className='rounded-lg border border-border bg-muted p-4 text-sm text-muted-foreground'>
-                Loading tickets...
+                Loading {noun.plural}...
               </div>
             ) : !selectedGraphRootTicketId ? (
               <div className='min-h-0 flex-1 overflow-y-auto p-4'>
@@ -4995,7 +4997,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                   </div>
                 ) : (
                   <div className='rounded-lg border border-border bg-muted p-4 text-sm text-muted-foreground'>
-                    No tickets match the current filters.
+                    No {noun.plural} match the current filters.
                   </div>
                 )}
               </div>
@@ -5290,16 +5292,14 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               </div>
             ) : (
               <div className='rounded-lg border border-border bg-muted p-4 text-sm text-muted-foreground'>
-                No tickets match the current filters.
+                No {noun.plural} match the current filters.
               </div>
             )}
           </div>
         </div>
       ) : layoutView === 'table' ? (
         <div
-          ref={setTableScroller}
-          onScroll={tableFade.onScroll}
-          style={tableFade.style}
+          ref={setTableScrollElement}
           className='flex-1 overflow-y-auto p-4 space-y-4 bg-background pb-14'
         >
           {isTableEmpty && (
@@ -5309,8 +5309,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               {isWorkspaceViewWithoutBoards
                 ? 'Select at least one board to build your view.'
                 : isTicketsSyncing
-                  ? 'Loading tickets…'
-                  : 'No tickets match the current filters.'}
+                  ? `Loading ${noun.plural}…`
+                  : `No ${noun.plural} match the current filters.`}
             </div>
           )}
           {tableGroups.map(group => {
@@ -5420,7 +5420,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                   </div>
                   <p className='text-base font-semibold text-foreground'>Every column is hidden</p>
                   <p className='max-w-[340px] text-[13.5px] leading-[1.6] text-muted-foreground'>
-                    Hidden columns keep their tickets out of the board and out of every count.
+                    Hidden columns keep their {noun.plural} out of the board and out of every count.
                     Unhide one from the panel on the right.
                   </p>
                   <button
@@ -5538,6 +5538,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                           ticketsByStage={group.columnData}
                           {...(stageCounts ? { stageCounts } : {})}
                           onTicketClick={handleTicketClick}
+                          expandableSubTickets
                           visibleColumns={visibleColumns}
                           availableTags={availableTags || []}
                           onLoadMoreTags={handleLoadMoreTags}
@@ -5710,7 +5711,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                           updatedAt: Date.now(),
                         }),
                       ),
-                      'Failed to move ticket',
+                      `Failed to move ${noun.singular}`,
                     );
 
                     setShowBackwardConfirmDialog(false);
@@ -5838,6 +5839,15 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     </div>
   );
 };
+
+const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
+  noun = DEFAULT_TICKET_NOUN,
+  ...props
+}) => (
+  <TicketNounContext.Provider value={noun}>
+    <KanbanBoardScreenContent {...props} />
+  </TicketNounContext.Provider>
+);
 
 KanbanBoardScreen.displayName = 'KanbanBoardScreen';
 
