@@ -1,5 +1,5 @@
 import { transaction } from '../base';
-import { markNewSdlcCanvas, queueSdlcSearchJobs, withSdlcSearchSync } from '@/zero/vespa-injection/core/sdlc-sync';
+import { queueSdlcSearchJobs, withSdlcSearchSync } from '@/zero/vespa-injection/core/sdlc-sync';
 import type { SdlcActor } from '@/sdlc/types';
 import { AppError } from '@/middleware/errorHandler';
 import { sdlcCanvasParticipants } from '@/sdlc/sdlcCanvasAccess';
@@ -92,7 +92,7 @@ export function addChannelRepositoriesTx(self: SdlcHubService, actor: SdlcActor,
   })));
 }
 export function createArtifactFromClawTx(self: SdlcHubService, actor: SdlcActor, input: { title: string; folderId: string; markdown: string; channelId?: string | undefined; trackId?: string | undefined; trackFolderId?: string | undefined; repoId?: string | undefined; repoIds?: string[] | undefined; relatedCanvasIds?: string[] | undefined; }, content: BlockNoteBlock[], channelId: string, folder: { id: string; name: string }, projectId: string, repo: { id: string } | null, hubKnowledge: boolean, trackFolderId: string | undefined, repoIds: string[]) {
-  return withSdlcSearchSync(() => transaction(['Canvas', 'CanvasParticipant', 'SdlcArtifact', 'SdlcEntityLink', 'SdlcFolder', 'ConnectGroup'], 'createArtifactFromClaw: canvas, artifact, track/repo links and hub placement must commit atomically; tx is not ACL-wrapped', self.prisma, async (tx) => {
+  return transaction(['Canvas', 'CanvasParticipant', 'SdlcArtifact', 'SdlcEntityLink', 'SdlcFolder', 'ConnectGroup'], 'createArtifactFromClaw: canvas, artifact, track/repo links and hub placement must commit atomically; tx is not ACL-wrapped', self.prisma, async (tx) => {
     const viewAccessId = randomUUID();
     // Slack Connect: a canvas is a shareable entity → its own connectId + a private connect_group row.
     const connectId = newConnectId();
@@ -117,8 +117,6 @@ export function createArtifactFromClawTx(self: SdlcHubService, actor: SdlcActor,
         },
       },
     });
-    // Its own triggers skip it: its feed comes after its content reaches Y-Sweet (sdlc-sync.ts).
-    markNewSdlcCanvas(canvas.id);
     await createConnectGroupForEntity(tx, {
       entityType: ConnectEntityType.CANVAS,
       entityId: canvas.id,
@@ -135,7 +133,7 @@ export function createArtifactFromClawTx(self: SdlcHubService, actor: SdlcActor,
       canvasId: canvas.id,
       content,
     };
-  }));
+  });
 }
 
 export function adoptCanvasAsArtifactTx(self: SdlcHubService, actor: SdlcActor, canvas: { id: string; connectId: string | null }, channelId: string, folderId: string, projectId: string, trackId: string | undefined, trackFolderId: string | undefined) {
@@ -259,7 +257,7 @@ export function updateArtifactTitleOrLinksTx(self: SdlcHubService, actor: SdlcAc
 }
 
 export function writeArtifactContentTx(self: SdlcHubService, actor: SdlcActor, channelId: string, canvasId: string, content: BlockNoteBlock[], extra: { title?: string | undefined; repoId?: string | undefined; relatedCanvasIds?: string[] | undefined }) {
-  return withSdlcSearchSync(() => transaction(['Canvas', 'SdlcArtifact', 'SdlcEntityLink'], 'writeArtifactContent: canvas content, artifact upsert and related-canvas links must commit atomically; tx is not ACL-wrapped', self.prisma, async (tx) => {
+  return transaction(['Canvas', 'SdlcArtifact', 'SdlcEntityLink'], 'writeArtifactContent: canvas content, artifact upsert and related-canvas links must commit atomically; tx is not ACL-wrapped', self.prisma, async (tx) => {
     const canvas = await tx.canvas.update({
       where: { id: canvasId },
       data: {
@@ -291,7 +289,7 @@ export function writeArtifactContentTx(self: SdlcHubService, actor: SdlcActor, c
       canvasId: canvas.id,
       content,
     };
-  }));
+  });
 }
 
 export function createTrackTx(self: SdlcHubService, actor: SdlcActor, input: { name: string; channelId: string; description?: string | undefined; repoId?: string | undefined; }, channelId: string) {
