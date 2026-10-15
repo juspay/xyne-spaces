@@ -1470,6 +1470,10 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
       progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
       channelId: payload.channelId,
+      // The mention's workspace: start-run resolves per-workspace app creds,
+      // hub context and the sandbox workspace from it — without it a user with
+      // two Spaces memberships is ambiguous.
+      ...(payload.workspaceId ? { workspaceId: payload.workspaceId } : {}),
       ...(payload.senderName ? { senderName: payload.senderName } : {}),
       ...(payload.channelName ? { channelName: payload.channelName } : {}),
       ...(payload.projectId ? { projectId: payload.projectId } : {}),

@@ -988,7 +988,12 @@ async function loadEffectiveCredentialsWithSpacesFallback(
     if (surface) return surface;
   }
 
-  const effective = await loadEffectiveCredentials(userId, serverType, agentSlug, undefined, agentOrgId, subagentId);
+  // The run's own workspace disambiguates users with several Spaces
+  // memberships, so per-workspace creds (app bot token, live session) come from
+  // the workspace that dispatched the run, not whichever install wrote last.
+  const { getSession } = await import("./webhook.js");
+  const workspaceHint = sessionId ? (await getSession(sessionId).catch(() => null))?.workspaceId ?? null : null;
+  const effective = await loadEffectiveCredentials(userId, serverType, agentSlug, undefined, agentOrgId, subagentId, workspaceHint);
   if (effective) return effective;
 
   if (serverType === "xyne-spaces") {
@@ -1335,7 +1340,7 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
               sessionAgentOrgId,
               req.params.sessionId,
             )
-          : await loadEffectiveCredentials(userId, entry.serverType, agentSlug, undefined, sessionAgentOrgId);
+          : await loadEffectiveCredentials(userId, entry.serverType, agentSlug, undefined, sessionAgentOrgId, undefined, runCtx?.workspaceId ?? null);
         if (!effective) return null;
         const serverTools = await listToolsForUser(
           userId,

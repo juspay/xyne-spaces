@@ -1552,7 +1552,7 @@ export async function prepareRun(
     mergedAgentConfig = toolUsageRank.length > 0 ? { ...agentConfigWithoutRank, toolUsageRank } : agentConfigWithoutRank;
     // Sandbox tools see built-in profiles plus this workspace's own. Set last so a caller can't pick another.
     const { workspaceId: _suppliedWorkspaceId, ...agentConfigWithoutWorkspace } = mergedAgentConfig;
-    const runWorkspaceId = await getWorkspaceIdForUser(resolved.userId, "start-run").catch(() => null);
+    const runWorkspaceId = await getWorkspaceIdForUser(resolved.userId, "start-run", credsWorkspaceId).catch(() => null);
     mergedAgentConfig = runWorkspaceId ? { ...agentConfigWithoutWorkspace, workspaceId: runWorkspaceId } : agentConfigWithoutWorkspace;
 
     const forwardBody = {
