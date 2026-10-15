@@ -17,7 +17,7 @@ import {
   type SelectedMention,
 } from '../components/Chat/ChatDirectory/ChannelCommandMenu.types';
 import { User } from '../machines/stateMachine';
-import { Channel } from '@xyne/shared';
+import { Channel, ChannelScopeType } from '@xyne/shared';
 import { useWorkerUserSearch } from './useWorkerUserSearch';
 import { useWorkerChannelSearch } from './useWorkerChannelSearch';
 import type { MentionHighlightsBuilder } from '../search/mentionHighlights';
@@ -139,6 +139,8 @@ interface UseSearchMetricsOptions {
 const NO_CHANNELS: NonNullable<UseSearchMetricsOptions['allChannels']> = [];
 
 const BACKEND_RESULTS_LIMIT = 25;
+// Local channel ids logged per impression; a short query can match hundreds of channels.
+const LOGGED_LOCAL_CHANNELS_LIMIT = 25;
 const INTENT_DEBOUNCE_MS = 300;
 // Load-more uses a fixed-size window (constant `limit`, advancing `offset`). Vespa caps the
 // query offset at maxOffset (1000), so stop paginating before `offset` would cross it.
@@ -287,7 +289,6 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
 
   const [searchSessionId, setSearchSessionId] = useState<string | null>(null);
   const searchTriggerRef = useRef<SearchTrigger | null>(null);
-  const impressionStartTimeRef = useRef<number>(0);
   const scrollContainerRef = useRef<HTMLElement | null>(null);
   const sessionStartTimeRef = useRef<number>(0);
   const lastImpressionTimeRef = useRef<number>(0);
@@ -318,6 +319,9 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   // Clipboard tracking state
   const querySourceRef = useRef<QuerySource>('KEYBOARD');
   const isModifiedRef = useRef<boolean>(false);
+  // The query a replayed recent ran (text + chips), captured from its first impression; null
+  // until then. Once the query differs from it, the user has moved on and the source is KEYBOARD.
+  const recentReplayKeyRef = useRef<string | null>(null);
 
   // Search Input State
   const [text, setText] = useState('');
@@ -389,20 +393,12 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     category: ChannelCategory;
     searchableNames?: string[];
   }> = useWorkerChannelSearch(options.allChannels ?? NO_CHANNELS, channelQuery);
-
-  const [currentSearchContext, setCurrentSearchContext] = useState<{
-    query: string;
-    activeTab: TabType;
-    localResultsCount: number;
-    facetCounts: Record<string, number>;
-  }>({
-    query: '',
-    activeTab: TabType.ALL,
-    localResultsCount: 0,
-    facetCounts: {},
-  });
-
-  const prevSearchTextLengthRef = useRef(0);
+  // Read when an impression is recorded, not when its search is sent: the worker searches
+  // often answer after the backend request has gone out.
+  const latestLocalUsersRef = useRef(filteredLocalUsers);
+  latestLocalUsersRef.current = filteredLocalUsers;
+  const latestLocalChannelsRef = useRef(filteredLocalChannels);
+  latestLocalChannelsRef.current = filteredLocalChannels;
 
   // Search State
   const [searchResults, setSearchResults] = useState<DisplaySearchResult[]>([]);
@@ -529,10 +525,11 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
 
   /**
    * Handle replay of a saved recent search
-   * Tags query_source as RECENT so this session's impression + session-end carry the origin.
+   * Tags query_source as RECENT until the query changes (see trackImpression).
    */
   const markRecentReplay = useCallback(() => {
     querySourceRef.current = 'RECENT';
+    recentReplayKeyRef.current = null;
   }, []);
 
   /**
@@ -544,7 +541,6 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       if (!searchSessionId) {
         setSearchSessionId(null);
         searchTriggerRef.current = null;
-        impressionStartTimeRef.current = 0;
         return;
       }
 
@@ -601,7 +597,6 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       // Reset state
       setSearchSessionId(null);
       searchTriggerRef.current = null;
-      impressionStartTimeRef.current = 0;
       sessionStartTimeRef.current = 0;
       lastImpressionTimeRef.current = 0;
       impressionCountRef.current = 0;
@@ -616,38 +611,67 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   );
 
   /**
-   * Track search impression (results displayed)
+   * Track search impression: the results committed for a query (see commitResults).
    */
   const trackImpression = useCallback(
-    (params: { queryText: string; totalHits: number; facetCounts: Record<string, number> }) => {
+    (params: {
+      queryText: string;
+      results: DisplaySearchResult[];
+      localChannelIds: string[];
+      latencyMs: number;
+      isLoadMore: boolean;
+      isError: boolean;
+    }) => {
       if (!searchSessionId || !searchTriggerRef.current) {
         return;
       }
 
       const now = Date.now();
-      const latencyMs =
-        impressionStartTimeRef.current > 0 ? now - impressionStartTimeRef.current : 0;
+      const { latencyMs } = params;
 
-      searchMetricsService.trackImpression({
-        searchSessionId,
-        userId: String(context.userID),
-        queryText: params.queryText,
-        totalHits: params.totalHits,
-        latencyMs,
-        facetCounts: params.facetCounts,
-        searchTrigger: searchTriggerRef.current,
-        querySource: querySourceRef.current,
-        isModified: isModifiedRef.current,
-        ...(options.searchLocation && { searchLocation: options.searchLocation }),
-        tab: previousTabRef.current,
+      const facetCounts: Record<string, number> = {};
+      params.results.forEach(result => {
+        facetCounts[result.type] = (facetCounts[result.type] || 0) + 1;
       });
+      const localChannelCount = params.localChannelIds.length;
+      if (localChannelCount > 0) {
+        facetCounts['channel'] = (facetCounts['channel'] || 0) + localChannelCount;
+      }
+      const totalHits = params.results.length + localChannelCount;
+
+      // A replayed recent stays RECENT for its own query (incl. tab switches and load-more);
+      // the first impression for a different query means the user edited it or searched anew.
+      if (querySourceRef.current === 'RECENT') {
+        const queryKey = `${params.queryText}|${selectedMentions.map(m => `${m.type}:${m.id}`).join(',')}`;
+        if (recentReplayKeyRef.current === null) recentReplayKeyRef.current = queryKey;
+        else if (queryKey !== recentReplayKeyRef.current) querySourceRef.current = 'KEYBOARD';
+      }
+
+      // A load-more page is not a new search and a failed search showed no results: both are
+      // kept out of the impression and zero-result counts.
+      const countsAsImpression = !params.isLoadMore && !params.isError;
+      if (countsAsImpression) {
+        searchMetricsService.trackImpression({
+          searchSessionId,
+          userId: String(context.userID),
+          queryText: params.queryText,
+          totalHits,
+          latencyMs,
+          facetCounts,
+          searchTrigger: searchTriggerRef.current,
+          querySource: querySourceRef.current,
+          isModified: isModifiedRef.current,
+          ...(options.searchLocation && { searchLocation: options.searchLocation }),
+          tab: previousTabRef.current,
+        });
+      }
       sudoQueryService.track('search_impression', {
         searchSessionId,
         ...(surfaceRef.current && { surface: surfaceRef.current }),
         queryText: params.queryText,
-        totalHits: params.totalHits,
+        totalHits,
         latencyMs,
-        ...Object.entries(params.facetCounts).reduce(
+        ...Object.entries(facetCounts).reduce(
           (acc, [key, value]) => {
             acc[`facetCount_${key}`] = value;
             return acc;
@@ -659,7 +683,21 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         isModified: isModifiedRef.current,
         ...(options.searchLocation && { searchLocation: options.searchLocation }),
         tab: previousTabRef.current,
+        // Results in display order, then the local channels (matched in the browser, so they can't
+        // be replayed server-side), so a session can be replayed as "query → exactly these results".
+        resultIds: [
+          ...params.results.map(result => `${result.type}:${result.id}`),
+          ...params.localChannelIds
+            .slice(0, LOGGED_LOCAL_CHANNELS_LIMIT)
+            .map(channelId => `channel:${channelId}`),
+        ].join(','),
+        // True for a further page appended to the list; its totalHits counts that page only.
+        isLoadMore: params.isLoadMore,
+        // True when the search failed; its empty results are not a zero-result search.
+        isError: params.isError,
       });
+
+      if (!countsAsImpression) return;
 
       // Update tracking state for dwell time calculation
       lastImpressionTimeRef.current = now;
@@ -699,19 +737,46 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       if (filterBuckets.mentions.length) sessionFiltersRef.current.add('mentions');
       if (filterBuckets.in.length) sessionFiltersRef.current.add('in');
       if (filterBuckets.channelMentions.length) sessionFiltersRef.current.add('channelMentions');
-
-      // Reset for next search
-      impressionStartTimeRef.current = 0;
     },
     [searchSessionId, context.userID, options.searchLocation, selectedMentions],
   );
 
   /**
-   * Mark the start of a search request (for latency tracking)
+   * The only way search results reach state for a query: commits them and records the
+   * impression together, so no path can show results without tracking them. Clearing
+   * results when there is no query (resetSearchState) is the one direct setSearchResults.
    */
-  const markSearchStart = useCallback(() => {
-    impressionStartTimeRef.current = Date.now();
-  }, []);
+  const commitResults = useCallback(
+    (
+      results: DisplaySearchResult[],
+      meta: {
+        queryText: string;
+        localChannelIds?: string[];
+        isLoadMore?: boolean;
+        isError?: boolean;
+        latencyMs?: number;
+      },
+    ) => {
+      setSearchResults(prev => (meta.isLoadMore ? [...prev, ...results] : results));
+      try {
+        trackImpression({
+          queryText: meta.queryText,
+          results,
+          localChannelIds: meta.localChannelIds ?? [],
+          latencyMs: meta.latencyMs ?? 0,
+          isLoadMore: meta.isLoadMore ?? false,
+          isError: meta.isError ?? false,
+        });
+      } catch (error) {
+        // Metrics must never break search.
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'search_impression_tracking_failed',
+          error,
+        });
+      }
+    },
+    [trackImpression],
+  );
 
   /**
    * Calculate scroll depth percentage
@@ -805,13 +870,6 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   }, []);
 
   /**
-   * Reset the previous search text refs
-   */
-  const resetImpressionTracking = useCallback(() => {
-    prevSearchTextLengthRef.current = 0;
-  }, []);
-
-  /**
    * Internal wrapper for startSession
    */
   const onOpen = useCallback(
@@ -834,9 +892,8 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   const onClose = useCallback(
     (reason?: 'click' | 'abandon' | 'clear' | 'blur') => {
       endSession(reason);
-      resetImpressionTracking();
     },
-    [endSession, resetImpressionTracking],
+    [endSession],
   );
 
   /**
@@ -850,8 +907,11 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       resultUrl?: string,
       isPreview?: boolean,
     ) => {
+      // People/channel rows come from the local search over the live input; everything else
+      // was committed with the last impression, so the click reports that impression's query.
+      const isLocalResult = result.type === 'user' || result.type === 'channel';
       trackClick({
-        queryText: currentSearchContext.query,
+        queryText: isLocalResult ? text.trimEnd() : lastQueryTextRef.current,
         clickedDocId: result.id,
         clickedDocType: result.type,
         rankPosition,
@@ -861,67 +921,17 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         isPreview: isPreview ?? false,
       });
     },
-    [trackClick, currentSearchContext.query],
+    [trackClick, text],
   );
-
-  /**
-   * Track search impressions when results are displayed
-   */
-  useEffect(() => {
-    if (!searchSessionId || !text.trim()) {
-      return;
-    }
-
-    const currentLength = text.trim().length;
-    const previousLength = prevSearchTextLengthRef.current;
-
-    // Only track impressions when user is actively typing (adding text)
-    if (currentLength <= previousLength) {
-      prevSearchTextLengthRef.current = currentLength;
-      return;
-    }
-
-    // Calculate facet counts from results (backend results)
-    const facetCounts: Record<string, number> = {};
-    searchResults.forEach(result => {
-      facetCounts[result.type] = (facetCounts[result.type] || 0) + 1;
-    });
-
-    // Add local channels to facet counts
-    if (
-      (currentSearchContext.activeTab === TabType.ALL ||
-        currentSearchContext.activeTab === TabType.CHANNELS) &&
-      currentSearchContext.localResultsCount > 0
-    ) {
-      facetCounts['channel'] =
-        (facetCounts['channel'] || 0) + currentSearchContext.localResultsCount;
-    }
-
-    const totalHits = searchResults.length + currentSearchContext.localResultsCount;
-
-    trackImpression({
-      queryText: text,
-      totalHits,
-      facetCounts,
-    });
-
-    prevSearchTextLengthRef.current = currentLength;
-  }, [searchSessionId, text, searchResults, trackImpression, currentSearchContext]);
 
   /**
    * Reset pagination and results
    */
   const resetSearchState = useCallback(() => {
+    // No query to attribute an impression to, so this bypasses commitResults.
     setSearchResults([]);
     setIsSearching(false);
     setSearchError(null);
-    setCurrentSearchContext({
-      query: '',
-      activeTab: TabType.ALL,
-      localResultsCount: 0,
-      facetCounts: {},
-    });
-    resetImpressionTracking();
     setPaginationState({
       [TabType.ALL]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
       [TabType.USERS]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
@@ -944,7 +954,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     // Re-arm the loader latch: after a clear/close, re-entering a query must show the
     // spinner again rather than a stale "No results".
     setIsSearchPending(false);
-  }, [resetImpressionTracking]);
+  }, []);
 
   /**
    * Perform Search
@@ -956,12 +966,6 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       query: string,
       activeTab: TabType,
       selectedMentions: Array<{ id: string; type: ChipType; prefix?: string; name?: string }>,
-      filteredLocalUsers: User[],
-      filteredLocalChannels: Array<{
-        channel: Channel;
-        category: ChannelCategory;
-        searchableNames?: string[];
-      }>,
       onComplete?: (results: DisplaySearchResult[], query: string) => void,
     ) => {
       // Run identity (seq + abortController) is minted by the caller at dispatch time so the
@@ -991,18 +995,16 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       // isn't a filter (falls through to full-text search).
       const priorityFilter = selectedMentions.find(m => m.type === ChipType.PRIORITY)?.id;
 
-      // Adjust local results count logic for context
-      let localCount = 0;
-      if (activeTab === TabType.ALL || activeTab === TabType.CHANNELS) {
-        localCount = filteredLocalChannels.length;
-      }
-
-      setCurrentSearchContext({
-        query: searchText,
-        activeTab: activeTab,
-        localResultsCount: localCount,
-        facetCounts: {}, // Calculated in effect
-      });
+      // Local channels shown alongside the results, counted and listed in the impression.
+      const getLocalChannelIds = (): string[] =>
+        activeTab === TabType.ALL || activeTab === TabType.CHANNELS
+          ? latestLocalChannelsRef.current
+              // Search hides 1:1 DMs: the other participant's person row stands in for them.
+              .filter(
+                ({ channel }) => !searchText.trim() || channel.scopeType !== ChannelScopeType.DM,
+              )
+              .map(({ channel }) => channel.id)
+          : [];
 
       // Check if any filters are active
       const hasFilters =
@@ -1028,7 +1030,10 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
 
       if (hasLocalType || isIncomplete) {
         // Return empty results - users/channels are shown via filteredLocalUsers/filteredLocalChannels
-        setSearchResults([]);
+        commitResults([], {
+          queryText: query,
+          localChannelIds: getLocalChannelIds(),
+        });
         setPaginationState(prev => ({
           ...prev,
           [activeTab]: {
@@ -1041,7 +1046,10 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         }));
       } else if (typeFilter && getBackendTypes(types).length === 0) {
         // Invalid type filter (e.g., type:foobar) — no valid types to search
-        setSearchResults([]);
+        commitResults([], {
+          queryText: query,
+          localChannelIds: getLocalChannelIds(),
+        });
         setPaginationState(prev => ({
           ...prev,
           [activeTab]: {
@@ -1057,7 +1065,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         return;
       } else if (activeTab === TabType.USERS) {
         const results = [
-          ...filteredLocalUsers.map((user: User) => ({
+          ...latestLocalUsersRef.current.map((user: User) => ({
             id: user.id,
             type: 'user' as const,
             title: user.name,
@@ -1066,7 +1074,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
             metadata: {},
           })),
         ];
-        setSearchResults(results);
+        commitResults(results, { queryText: query });
         setPaginationState(prev => ({
           ...prev,
           [activeTab]: {
@@ -1078,7 +1086,10 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           },
         }));
       } else if (hasActiveMentionFilter(query, selectedMentions)) {
-        setSearchResults([]);
+        commitResults([], {
+          queryText: query,
+          localChannelIds: getLocalChannelIds(),
+        });
         setPaginationState(prev => ({
           ...prev,
           [activeTab]: {
@@ -1095,7 +1106,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       } else if (searchText || hasFilters) {
         setIsSearching(true);
         setSearchError(null);
-        markSearchStart();
+        const searchStartedAt = Date.now();
 
         pendingSearchCountRef.current += 1;
 
@@ -1153,7 +1164,10 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               activeTab !== TabType.TICKETS &&
               activeTab !== TabType.ALL
             ) {
-              setSearchResults([]);
+              commitResults([], {
+                queryText: query,
+                localChannelIds: getLocalChannelIds(),
+              });
               setPaginationState(prev => ({
                 ...prev,
                 [activeTab]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
@@ -1240,7 +1254,10 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               activeTab !== TabType.MESSAGES &&
               activeTab !== TabType.ALL
             ) {
-              setSearchResults([]);
+              commitResults([], {
+                queryText: query,
+                localChannelIds: getLocalChannelIds(),
+              });
               setPaginationState(prev => ({
                 ...prev,
                 [activeTab]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
@@ -1354,7 +1371,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
                 totalCount = vespaResponse.totalCount;
               } else {
                 mergedResults = [
-                  ...filteredLocalUsers.map((user: User) => ({
+                  ...latestLocalUsersRef.current.map((user: User) => ({
                     id: user.id,
                     type: 'user' as const,
                     title: user.name,
@@ -1364,7 +1381,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
                   })),
                   ...vespaResponse.results,
                 ];
-                totalCount = vespaResponse.totalCount + filteredLocalUsers.length;
+                totalCount = vespaResponse.totalCount + latestLocalUsersRef.current.length;
               }
               currentOffset = vespaResponse.results.length;
               // Paginate the ALL tab only in flat mode; grouped responses are capped
@@ -1419,7 +1436,11 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
                 currentOffset + BACKEND_RESULTS_LIMIT <= MAX_BACKEND_OFFSET;
             }
 
-            setSearchResults(mergedResults);
+            commitResults(mergedResults, {
+              queryText: query,
+              localChannelIds: getLocalChannelIds(),
+              latencyMs: Date.now() - searchStartedAt,
+            });
             latestResultsRef.current = mergedResults;
             latestQueryRef.current = searchText;
 
@@ -1439,7 +1460,12 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           // when a newer search aborted this one) — they must not clear fresh results.
           if (!isStale()) {
             setSearchError(searchError instanceof Error ? searchError.message : 'Search failed');
-            setSearchResults([]);
+            commitResults([], {
+              queryText: query,
+              localChannelIds: getLocalChannelIds(),
+              latencyMs: Date.now() - searchStartedAt,
+              isError: true,
+            });
             // Reset to the default (sectioned) mode so a failed search doesn't render
             // stale results in the previous grouped/flat mode.
             setIsGrouped(true);
@@ -1468,7 +1494,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     },
     [
       searchSessionId,
-      markSearchStart,
+      commitResults,
       resetSearchState,
       options.isCallSearchPage,
       includeBotMessages,
@@ -1589,8 +1615,6 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         normalizedText,
         activeTab,
         selectedMentions,
-        filteredLocalUsers,
-        filteredLocalChannels,
         options.onSearchComplete,
       ).finally(() => {
         // Runs on every exit path of performSearch (returns, errors, aborts). Only the
@@ -1707,6 +1731,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
 
     if (activeTab === TabType.USERS) return;
     setIsLoadingMore(true);
+    const loadMoreStartedAt = Date.now();
 
     try {
       {
@@ -1871,7 +1896,11 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
             ticketViewRef.current.zeroQueryArgs,
             currentOffset,
           );
-          setSearchResults(prev => [...prev, ...page.results]);
+          commitResults(page.results, {
+            queryText: text.trimEnd(),
+            isLoadMore: true,
+            latencyMs: Date.now() - loadMoreStartedAt,
+          });
           setPaginationState(prev => ({
             ...prev,
             [activeTab]: {
@@ -1889,7 +1918,11 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           searchId: currentSessionId,
           presentationSummary: 'lean',
         });
-        setSearchResults(prev => [...prev, ...results.results]);
+        commitResults(results.results, {
+          queryText: text.trimEnd(),
+          isLoadMore: true,
+          latencyMs: Date.now() - loadMoreStartedAt,
+        });
 
         const newOffset = currentOffset + results.results.length;
         const hasMore =
@@ -1920,6 +1953,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       setIsLoadingMore(false);
     }
   }, [
+    commitResults,
     options.buildMentionHighlights,
     isLoadingMore,
     paginationState,
@@ -1978,7 +2012,6 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     if (!searchSessionId) {
       return;
     }
-    currentSearchContext.activeTab = activeTab;
     // Track the tab change
     searchMetricsService.trackTabClick({
       searchSessionId,

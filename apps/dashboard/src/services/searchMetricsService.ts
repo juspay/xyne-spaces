@@ -1,8 +1,7 @@
 /**
  * Search Metrics Service
  *
- * Handles tracking search analytics events using OpenTelemetry metrics.
- * Events are now sent directly to OTel metrics instead of batching to backend.
+ * Logs structured search analytics events.
  */
 
 import type {
@@ -14,10 +13,7 @@ import type {
   SearchShowResultsEvent,
   SearchSurface,
 } from '../types/searchEvents';
-import * as otelMetrics from './otel/searchMetrics';
-import { SEARCH_VERSION } from '../config';
 import { logger, Event } from '../utils/logger';
-import { detectPlatform } from '../hooks/usePlatform';
 import { TabType } from '../components/Chat/ChatDirectory/ChannelCommandMenu.types';
 
 /**
@@ -52,17 +48,6 @@ class SearchMetricsService {
       ...(params.surface && { surface: params.surface }),
     };
     logger.info(Event.VESPA_SEARCH_SESSION_START, event as unknown as Record<string, unknown>);
-
-    // Record metrics
-    const platform = detectPlatform();
-    otelMetrics.safeRecordMetric(() => {
-      otelMetrics.searchSessionsStarted.add(1, {
-        version: SEARCH_VERSION,
-        user_id: params.userId,
-        platform: platform,
-        tab: params.tab,
-      });
-    });
   }
 
   /**
@@ -99,25 +84,6 @@ class SearchMetricsService {
       ...(params.searchLocation && { search_location: params.searchLocation }),
     };
     logger.info(Event.VESPA_SEARCH_IMPRESSION, event as unknown as Record<string, unknown>);
-    // Record metrics - increment impressions counter for each doc_type in facet_counts
-    const platform = detectPlatform();
-    Object.entries(params.facetCounts).forEach(([docType, count]) => {
-      const resultStatus = count > 0 ? 'success' : 'zero';
-
-      otelMetrics.safeRecordMetric(() => {
-        otelMetrics.searchImpressions.add(count, {
-          doc_type: docType,
-          result_status: resultStatus,
-          version: SEARCH_VERSION,
-          user_id: params.userId,
-          platform: platform,
-          query_text_length: words,
-          query_source: params.querySource,
-          is_modified: params.isModified ? 'true' : 'false',
-          tab: params.tab,
-        });
-      });
-    });
   }
 
   /**
@@ -157,32 +123,6 @@ class SearchMetricsService {
       ...(params.surface && { surface: params.surface }),
     };
     logger.info(Event.VESPA_SEARCH_CLICK, event as unknown as Record<string, unknown>);
-    // Record metrics - increment click counter
-    const platform = detectPlatform();
-    otelMetrics.safeRecordMetric(() => {
-      otelMetrics.searchClicks.add(1, {
-        doc_type: params.clickedDocType,
-        rank: String(params.rankPosition),
-        version: SEARCH_VERSION,
-        user_id: params.userId,
-        platform: platform,
-        exact_query_text_length: words,
-        tab: params.tab,
-      });
-    });
-
-    // Calculate and increment MRR (Mean Reciprocal Rank) score
-    // MRR = 1 / rank_position
-    // Example: Click at rank 3 = 1/3 = 0.333...
-    const mrrScore = 1 / params.rankPosition;
-    otelMetrics.safeRecordMetric(() => {
-      otelMetrics.searchRankScore.add(mrrScore, {
-        doc_type: params.clickedDocType,
-        version: SEARCH_VERSION,
-        user_id: params.userId,
-        platform: platform,
-      });
-    });
   }
 
   /**
@@ -216,40 +156,6 @@ class SearchMetricsService {
       tab: params.tab,
     };
     logger.info(Event.VESPA_SEARCH_SESSION_END, event as unknown as Record<string, unknown>);
-
-    // Record metrics - increment session end counter
-    const platform = detectPlatform();
-    otelMetrics.safeRecordMetric(() => {
-      otelMetrics.searchSessionsEnded.add(1, {
-        end_reason: params.endReason,
-        version: SEARCH_VERSION,
-        user_id: params.userId,
-        platform: platform,
-        query_text_length: words,
-        query_source: params.querySource,
-        is_modified: params.isModified ? 'true' : 'false',
-        tab: params.tab,
-      });
-    });
-
-    // Record dwell time (time spent viewing results before action)
-    otelMetrics.safeRecordMetric(() => {
-      otelMetrics.searchDwellTime.record(params.dwellTimeMs, {
-        end_reason: params.endReason,
-        version: SEARCH_VERSION,
-        user_id: params.userId,
-        platform: platform,
-      });
-    });
-
-    // Record total session duration
-    otelMetrics.safeRecordMetric(() => {
-      otelMetrics.searchSessionDuration.record(params.totalSessionDurationMs, {
-        version: SEARCH_VERSION,
-        user_id: params.userId,
-        platform: platform,
-      });
-    });
   }
 
   /**
@@ -263,23 +169,11 @@ class SearchMetricsService {
       tab: params.tab,
     };
     logger.info(Event.VESPA_SEARCH_TAB_CLICK, event as unknown as Record<string, unknown>);
-
-    // Record metrics - increment tab click counter with tab labels for individual counts
-    const platform = detectPlatform();
-    otelMetrics.safeRecordMetric(() => {
-      otelMetrics.searchTabClicks.add(1, {
-        version: SEARCH_VERSION,
-        user_id: params.userId,
-        platform: platform,
-        tab: params.tab,
-      });
-    });
   }
 
   /**
    * Track when a user leaves the palette for the full-screen results page via the
-   * "Show results for" row. Log-only by design — the OTel counters carry the search
-   * funnel (impression → click), and this is a navigation signal read from the logs.
+   * "Show results for" row.
    */
   trackShowResults(params: {
     searchSessionId: string;
