@@ -11,6 +11,7 @@ import { InvitationResponse, type RecordingType } from '@xyne/shared';
 import type { ParticipantInfo } from '../../../machines/roomMachine';
 import { roomActor } from '../../../machines/roomMachine';
 import { cn } from '../../../utils/classNames';
+import { APP_NO_DRAG_STYLE } from '../../../utils/electronApp';
 import { CallControls } from '../CallControls/CallControls';
 import { CallStateTransition } from '../CallStateTransition/CallStateTransition';
 import { ParticipantGrid } from '../ParticipantGrid/ParticipantGrid';
@@ -666,9 +667,14 @@ export function FullCallView({
             </span>
           )}
         </div>
-        {/* Meet's "you're presenting" reminder, with a one-click stop */}
+        {/* Meet's "you're presenting" reminder, with a one-click stop. The top strip
+            overlaps Electron drag regions of the page underneath (conversation header
+            etc.), so opt out explicitly or the click starts a window drag instead. */}
         {isScreenSharing && (
-          <div className='absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 items-center gap-3 rounded-full bg-[#333537] py-1 pl-3 pr-1 text-sm text-[#e3e3e3] md:flex'>
+          <div
+            className='absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 items-center gap-3 rounded-full bg-[#333537] py-1 pl-3 pr-1 text-sm text-[#e3e3e3] md:flex'
+            style={APP_NO_DRAG_STYLE}
+          >
             <MonitorUp className='h-4 w-4 text-[#a8c7fa]' />
             <span className='whitespace-nowrap'>You&apos;re presenting to everyone</span>
             <button
@@ -687,7 +693,7 @@ export function FullCallView({
             </button>
           </div>
         )}
-        <div className='flex items-center gap-2 sm:gap-3'>
+        <div className='flex items-center gap-2 sm:gap-3' style={APP_NO_DRAG_STYLE}>
           <ConnectionStatusIndicators room={room} hideWhenHealthy />
           <ParticipantsPill
             participants={participants}
