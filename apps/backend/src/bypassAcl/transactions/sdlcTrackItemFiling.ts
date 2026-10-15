@@ -20,7 +20,7 @@ export function fileTrackItemsTx(
   actor: EntityLinkActor
 ): Promise<void> {
   const { channelId, trackId, parent, items } = input;
-  return withSdlcSearchSync(() => transaction(
+  return withSdlcSearchSync(changes => transaction(
     ['SdlcEntityLink'],
     "fileTrackItems: an item's containment, track and folder edges must commit together; tx is not ACL-wrapped",
     client,
@@ -51,7 +51,7 @@ export function fileTrackItemsTx(
         skipDuplicates: true,
       });
       for (const item of items) {
-        await refileFolderEdges(tx, { channelId, item, parent }, actor);
+        await refileFolderEdges(tx, { channelId, item, parent }, actor, changes);
       }
     }
   ));
