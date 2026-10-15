@@ -55,7 +55,7 @@ export function ChannelsDeskSourceChannel({
   const [conversation, details] = useCachedQuery(
     queries.threadConversationV2({ conversationId: sourceConversationId }),
   );
-  const channel = useChannel(conversation?.channelId);
+  const channel = useChannel(conversation?.channelId ?? '');
   if (conversation?.channelId ? !channel : details.type !== 'complete') return null;
 
   return (
