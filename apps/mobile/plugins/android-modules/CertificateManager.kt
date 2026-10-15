@@ -249,6 +249,25 @@ class CertificateManager private constructor() {
         }
     }
 
+    /** ISO-8601 UTC notAfter of the stored client certificate, or null when missing. */
+    fun getCertificateNotAfter(): String? {
+        if (!BuildConfig.MTLS_ENABLED) {
+            return null
+        }
+
+        try {
+            val keyStore = getKeyStore()
+            val keyEntry = keyStore.getEntry(KEY_ALIAS, null) as? KeyStore.PrivateKeyEntry
+            val cert = keyEntry?.certificate as? X509Certificate ?: return null
+            val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US)
+            sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+            return sdf.format(cert.notAfter)
+        } catch (e: Exception) {
+            Log.e("CertificateManager", "Certificate notAfter error: ${e.message}", e)
+            return null
+        }
+    }
+
     fun clearCertificates(ctx: Context): Boolean {
         try {
             val keyStore = getKeyStore()

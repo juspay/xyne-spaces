@@ -57,6 +57,7 @@ import {
   executeChatOpenIntent,
 } from '@/src/features/chat/navigation/chatOpenIntent';
 import { useAppActivityTracking } from '@/src/hooks/useAppActivityTracking';
+import { useMtlsExpiryWarning } from '@/src/hooks/useMtlsExpiryWarning';
 import { useScreenDwellTracker } from '@/src/hooks/useScreenDwellTracker';
 import { ensureForegroundListSyncProbeListener } from '@/src/hooks/useForegroundListSyncProbe';
 import { startupTimings } from '@/src/utils/startupTimings';
@@ -461,6 +462,9 @@ function RootLayoutNav(): ReactElement {
 
   // Track app foreground/background transitions
   useAppActivityTracking();
+
+  // Soft mTLS expiry warning (2 days before) — once per cert, dismissible
+  useMtlsExpiryWarning(isEnrolled === true && !isEnrollmentLoading);
 
   const didMarkAuthLoadingStartRef = useRef(false);
   useEffect(() => {

@@ -198,6 +198,32 @@ X3Lzm0UE40jWh56ZL+VDzSbZQsxBuweMAM4lZfo=
   }
 
   @objc
+  func getCertificateNotAfter(_ resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+    DispatchQueue.global(qos: .userInitiated).async {
+      guard let certificate = self.getCertificateFromKeychain(tag: Self.kCertificateTag) else {
+        resolve(NSNull())
+        return
+      }
+
+      guard let values = SecCertificateCopyValues(
+        certificate,
+        [kSecOIDX509V1ValidityNotAfter] as CFArray,
+        nil
+      ) as NSDictionary?,
+        let entry = values[kSecOIDX509V1ValidityNotAfter] as? NSDictionary,
+        let date = entry[kSecPropertyKeyValue] as? Date
+      else {
+        resolve(NSNull())
+        return
+      }
+
+      let formatter = ISO8601DateFormatter()
+      formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+      resolve(formatter.string(from: date))
+    }
+  }
+
+  @objc
   func getPrivateKey(_ resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
     DispatchQueue.global(qos: .userInitiated).async {
       guard self.getPrivateKeyFromKeychain() != nil else {

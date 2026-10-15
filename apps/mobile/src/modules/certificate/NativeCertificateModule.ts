@@ -12,6 +12,8 @@ export interface CertificateModuleInterface {
   generateCSR(): Promise<CSRResult>;
   storeCertificate(certificatePem: string, caChainPem?: string | null): Promise<boolean>;
   getCertificate(): Promise<string>;
+  /** ISO-8601 UTC notAfter of the stored client cert, or null when missing. */
+  getCertificateNotAfter(): Promise<string | null>;
   clearCertificates(): Promise<boolean>;
 }
 
@@ -70,6 +72,13 @@ const CertificateModuleProxy: CertificateModuleInterface = {
       );
     }
     return CertificateModule.getCertificate();
+  },
+
+  getCertificateNotAfter: async () => {
+    if (!CertificateModule || typeof CertificateModule.getCertificateNotAfter !== 'function') {
+      return null;
+    }
+    return CertificateModule.getCertificateNotAfter();
   },
 
   clearCertificates: async () => {
