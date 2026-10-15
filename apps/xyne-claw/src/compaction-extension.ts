@@ -28,6 +28,7 @@ import { buildJevCompaction } from "./xor-compaction.js";
 import { recordJudgeOutcome } from "./judge-trace.js";
 import { optEnabled } from "./optimizations.js";
 import { metric } from "./metrics.js";
+import { currentRunTask } from "./run-context.js";
 
 import { createLogger } from "./logger.js";
 const log = createLogger("compaction-extension");
@@ -131,6 +132,30 @@ export function buildResumeAnchor(submitToolName?: string): string {
   return submitToolName ? `${RESUME_ANCHOR}, using the \`${submitToolName}\` tool to submit.` : `${RESUME_ANCHOR}.`;
 }
 
+const FILE_LIST_BLOCK_RE = /<(read|modified)-files>[\s\S]*?<\/\1-files>/g;
+
+export function summaryContent(summary: string): string {
+  return summary.replace(FILE_LIST_BLOCK_RE, "").trim();
+}
+
+const TASK_ANCHOR_MAX_CHARS = 24_000;
+const TASK_ANCHOR_TAIL_CHARS = 8_000;
+
+export function fitTask(task: string): string {
+  const trimmed = task.trim();
+  if (trimmed.length <= TASK_ANCHOR_MAX_CHARS) return trimmed;
+  const head = trimmed.slice(0, TASK_ANCHOR_MAX_CHARS - TASK_ANCHOR_TAIL_CHARS);
+  const tail = trimmed.slice(-TASK_ANCHOR_TAIL_CHARS);
+  const omitted = trimmed.length - head.length - tail.length;
+  return `${head}\n[… ${omitted} characters of the task omitted …]\n${tail}`;
+}
+
+export function buildTaskAnchor(task: string): string {
+  const body = fitTask(task);
+  if (!body) return "";
+  return `## Original Task (verbatim)\n${body}\n\n`;
+}
+
 let requiredSubmitToolName: string | undefined;
 
 export function setCompactionSubmitTool(name: string | undefined): void {
@@ -217,7 +242,7 @@ export const compactionExtension: ExtensionFactory = (pi) => {
         );
         return {
           compaction: {
-            summary: `${jev.summary}\n\n${buildResumeAnchor(requiredSubmitToolName)}`,
+            summary: `${buildTaskAnchor(currentRunTask())}${jev.summary}\n\n${buildResumeAnchor(requiredSubmitToolName)}`,
             firstKeptEntryId: FRESH_START_SENTINEL,
             tokensBefore: preparation.tokensBefore ?? 0,
           } as unknown as NonNullable<Awaited<ReturnType<typeof compact>>>,
@@ -264,7 +289,7 @@ export const compactionExtension: ExtensionFactory = (pi) => {
       // pi-native compaction, which keeps the window intact (safe; at worst we
       // re-compact next turn).
       const summaryText = (result as { summary?: string } | undefined)?.summary?.trim();
-      if (!summaryText) {
+      if (!summaryText || !summaryContent(summaryText)) {
         metric.count("agent_compaction", { kind: "fresh_start_empty" });
         log.error(
           `[compaction] Fresh start produced an EMPTY summary ` +
@@ -279,7 +304,7 @@ export const compactionExtension: ExtensionFactory = (pi) => {
         metric.count("compaction_summary_preamble_trimmed");
         log.info(`[compaction] trimmed ${trimmed} chars of summarizer preamble`);
       }
-      const anchoredSummary = `${cleanedSummary}\n\n${buildResumeAnchor(requiredSubmitToolName)}`;
+      const anchoredSummary = `${buildTaskAnchor(currentRunTask())}${cleanedSummary}\n\n${buildResumeAnchor(requiredSubmitToolName)}`;
       const anchoredResult = { ...result, summary: anchoredSummary };
 
       metric.count("agent_compaction", { kind: "fresh_start" });

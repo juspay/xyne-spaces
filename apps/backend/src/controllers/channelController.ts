@@ -62,7 +62,8 @@ import { NAMESPACE } from '@/vespa/vespaConfig';
 import {logger} from '@/utils/logger';
 import { messageMetadataService } from '@/services/messageMetadataService';
 import { extractAllUsersForNotification, extractSpecialMentions, getChannelParticipantsForMention, getOnlineChannelParticipants } from '@/utils/mentionUtils';
-import { mentionRecipients } from '@/zero/side-effects/tables/mention-delivery';
+import { mentionActivities, mentionRecipients, notifyMentioned } from '@/zero/side-effects/tables/mention-delivery';
+import { formatDmChannelName } from '@/zero/side-effects/tables/messages-handler';
 import { activityService } from '@/services/activity/activityService';
 import { encrypt, decrypt } from '@/services/encryptionService';
 import { canManageApps, findInstalledApp, linkChannelsDesk } from '@/channelsDesk/admin';
@@ -595,8 +596,48 @@ export class ChannelController {
 
       // Send notifications to recipients (skip for self-DMs)
       if (recipientIds.length > 0) {
+        const mentionedIds = new Set<string>();
+        if (channelParticipants.length > 2 && forwardedMessage.optionalMessage) {
+          try {
+            const mentioned = mentionRecipients(
+              await extractAllUsersForNotification(forwardedMessage.optionalMessage, workspaceId),
+              { participantIds: new Set(recipientIds), senderId },
+            );
+            if (mentioned.length > 0) {
+              const members = await db.user.findMany({
+                where: { id: { in: channelParticipants.map(p => p.userId) } },
+                select: { id: true, name: true, displayName: true },
+              });
+              const nameById = new Map(members.map(u => [u.id, u.displayName || u.name]));
+              mentioned.forEach(u => mentionedIds.add(u.userId));
+              await notifyMentioned([...mentionedIds], {
+                workspaceId,
+                messageId: result.createdMessage.messageId,
+                conversationId: result.conversation.conversationId,
+                channelId,
+                channelName: formatDmChannelName(channelParticipants.map(p => nameById.get(p.userId) || 'Unknown')),
+                senderId,
+                senderName: senderInfo.name,
+                senderPicture: senderInfo.picture ?? '',
+                cleanContent,
+                isReply: false,
+                isGroupDM: true,
+              });
+              await activityService.createActivities(
+                mentionActivities(mentioned, {
+                  messageId: result.createdMessage.messageId,
+                  channelId,
+                  senderId,
+                  isThreadActivity: false,
+                }),
+              );
+            }
+          } catch (error) {
+            logger.error('Error delivering mentions for forwarded message:', error);
+          }
+        }
         await notificationService.createDirectMessageNotifications(
-          recipientIds,
+          recipientIds.filter(id => !mentionedIds.has(id)),
           result.createdMessage.messageId,
           result.conversation.conversationId,
           channelId,
