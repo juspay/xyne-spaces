@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Router, type Response } from "express";
-import { currentOwnerPod, isFencedSession } from "../run-ownership.js";
+import { advertiseRunOwner, currentOwnerPod, isFencedSession, withdrawRunOwner } from "../run-ownership.js";
 import {
   decideRunControl,
   publishRunControl,
@@ -787,6 +787,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     hasCallbackUrl: typeof callbackUrl === "string" && !!callbackUrl.trim(),
   };
   activeRuns.set(sessionId, activeRun);
+  const runOwnerToken = await advertiseRunOwner(sessionId);
 
   if (detached === true) {
     clog.info(`[run] detached dispatch accepted (sessionId=${sessionId}, eventType=${eventType ?? ""})`);
@@ -851,6 +852,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       if (activeRun.handoffCapTimer) clearTimeout(activeRun.handoffCapTimer);
       if (activeRun.gracefulInterruptSummaryTimer) clearTimeout(activeRun.gracefulInterruptSummaryTimer);
       activeRuns.delete(sessionId);
+      void withdrawRunOwner(sessionId, runOwnerToken);
     });
     return;
   }
@@ -985,6 +987,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       if (activeRun.handoffCapTimer) clearTimeout(activeRun.handoffCapTimer);
       if (activeRun.gracefulInterruptSummaryTimer) clearTimeout(activeRun.gracefulInterruptSummaryTimer);
       activeRuns.delete(sessionId);
+      void withdrawRunOwner(sessionId, runOwnerToken);
       // Backstop: processTask has several silent-return paths (most notably
       // SessionLockedError — another pod owns this run and suppresses the
       // callback) and any future throw outside its try/catch around
@@ -1030,7 +1033,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
   // scheduled jobs, etc.). It must stay byte-identical until they migrate.
   res.json({ success: true, sessionId });
 
-  void executeRunFromPayload({ ...(req.body as InternalRunPayload), sessionId });
+  void executeRunFromPayload({ ...(req.body as InternalRunPayload), sessionId }).finally(() => withdrawRunOwner(sessionId, runOwnerToken));
 });
 
 // ── SSE producer: in-process emitter that writes ClawStreamEvent frames into
