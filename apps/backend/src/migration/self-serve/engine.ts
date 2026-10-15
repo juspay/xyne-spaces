@@ -37,7 +37,7 @@ import { fetchChannelCanvases, ingestChannelCanvases, type ChannelCanvas } from 
 import { encryptStream, decryptStream, encryptBuffer, decryptBuffer } from './migrationCrypto';
 import { getMigrationRuntimeConfig, MIGRATION_DEFAULTS } from './migrationRuntimeConfig';
 import { getMigrationWorkspaceConfig, FINAL_MESSAGE_LINK_PLACEHOLDER } from '@/migration/slack/migrationWorkspaceConfig';
-import { ChannelInput, MigrationJob, MigrationType } from './types';
+import { ChannelInput, MigrationJob, MigrationType, type ConversationIngestResult } from './types';
 
 const PAGE = 1000;
 const UPLOAD_CHUNK_SIZE = 8 * 1024 * 1024;
@@ -607,7 +607,7 @@ export class SlackMigrationEngine {
     return [base, ...snapshots];
   }
 
-  async loadConversation(job: MigrationJob, conv: CollectedConversation, ref: SlackOfflineReference, onProgress?: () => void): Promise<{ ingested: number; failed: number }> {
+  async loadConversation(job: MigrationJob, conv: CollectedConversation, ref: SlackOfflineReference, onProgress?: () => void): Promise<ConversationIngestResult> {
     const cfg = await getMigrationRuntimeConfig();
     return loadSlackConversation(this, job, conv, ref, cfg, onProgress);
   }
@@ -616,7 +616,7 @@ export class SlackMigrationEngine {
    * Ingests one dumped conversation into Xyne. Runs only under the job's tenant scope — reach it
    * through loadSlackConversation (bypassAcl/migrationServices).
    */
-  async ingestConversation(job: MigrationJob, conv: CollectedConversation, ref: SlackOfflineReference, cfg: Awaited<ReturnType<typeof getMigrationRuntimeConfig>>, onProgress?: () => void): Promise<{ ingested: number; failed: number }> {
+  async ingestConversation(job: MigrationJob, conv: CollectedConversation, ref: SlackOfflineReference, cfg: Awaited<ReturnType<typeof getMigrationRuntimeConfig>>, onProgress?: () => void): Promise<ConversationIngestResult> {
     const userRepo = new UserRepository();
     const channelRepo = new ChannelRepository();
     const participantRepo = new ChannelParticipantRepository();
@@ -644,17 +644,42 @@ export class SlackMigrationEngine {
     // Self-DM ("notes to self") has only the owner as member — no "other" side, so otherIds resolution would wrongly drop it.
     const isSelfDm = !isChannel && conv.members.length > 0 && conv.members.every((m) => m === job.ownerSlackId);
 
+    // Human-readable identity for dropped-conversation labels/issues (real name first, display name fallback).
+    const nameOf = (slackId: string): string => {
+      const u = ref.users.get(slackId) as { profile?: { real_name?: string; display_name?: string } } | undefined;
+      return u?.profile?.real_name || u?.profile?.display_name || slackId;
+    };
+    const issueLabel = (): string => {
+      const others = conv.members.filter((m) => m !== job.ownerSlackId).map(nameOf);
+      return others.length > 0 ? `DM with ${others.join(', ')}` : 'DM with you';
+    };
+
     // DM: resolve both sides up front (bail if we can't). Channel: ingests into the pre-selected Xyne channel (resolved after empty check).
     let dmOwnerId: string | undefined;
     const dmOtherIds: string[] = [];
     if (isChannel) {
-      if (!job.channelInput?.xyneChannelId) return { ingested: 0, failed: 0 };
+      if (!job.channelInput?.xyneChannelId) {
+        logger.warn('[SlackMigration] channel misconfig — no target channel selected, skipping conversation', { convId: conv.id });
+        return { ingested: 0, failed: 0 };
+      }
     } else {
       dmOwnerId = job.ownerSlackId ? await resolve(job.ownerSlackId) : undefined;
-      if (!dmOwnerId) return { ingested: 0, failed: 0 };
+      if (!dmOwnerId) return { ingested: 0, failed: 0, dropped: { label: issueLabel(), reason: "Couldn't match you to a Xyne user from the collected Slack user data (no email found), so this DM wasn't created." } };
       if (!isSelfDm) {
         for (const m of conv.members) if (m !== job.ownerSlackId) { const id = await resolve(m); if (id) dmOtherIds.push(id); }
-        if (dmOtherIds.length === 0) return { ingested: 0, failed: 0 };
+        if (dmOtherIds.length === 0) {
+          // Real bot members never resolve via email — recover the DM by creating the Slack app as a Xyne
+          // app user (same identity /sync uses), instead of silently dropping the conversation.
+          for (const m of conv.members) {
+            if (m === job.ownerSlackId) continue;
+            const u = ref.users.get(m) as { is_bot?: boolean; profile?: { bot_id?: string; real_name?: string; display_name?: string } } | undefined;
+            if (!u?.is_bot || !u.profile?.bot_id) continue;
+            const botName = u.profile.display_name || u.profile.real_name || m;
+            const botUserId = await findOrCreateApp(botName, u.profile.bot_id, cache, m, job.workspaceId).catch(() => undefined);
+            if (botUserId) dmOtherIds.push(botUserId);
+          }
+          if (dmOtherIds.length === 0) return { ingested: 0, failed: 0, dropped: { label: issueLabel(), reason: "None of the other participants could be matched to a Xyne user (no email in the collected Slack user data), so this DM wasn't created." } };
+        }
       }
     }
 
@@ -679,7 +704,7 @@ export class SlackMigrationEngine {
       }
       return out;
     });
-    if (messages.length === 0) return { ingested: 0, failed: 0 };
+    if (messages.length === 0) return { ingested: 0, failed: 0, dropped: { label: issueLabel(), reason: "No migratable messages found in the collected data (everything was a Slack system message), so this DM wasn't created." } };
 
     // Lock the write on the resolved target channel (member-set for DMs, xyneChannelId for channels); the read above is unlocked.
     const lockScope = isChannel

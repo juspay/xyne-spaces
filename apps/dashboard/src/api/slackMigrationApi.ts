@@ -55,7 +55,7 @@ export interface MigrationJobView {
   queueTotal?: number; // jobs waiting in that queue
   issues?: {
     conversationId: string;
-    kind: 'skipped' | 'truncated' | 'ingest-error';
+    kind: 'skipped' | 'truncated' | 'ingest-error' | 'dropped';
     reason: string;
     label?: string; // human-readable conversation identifier (e.g. "DM with Jane Doe" / "#general")
   }[];

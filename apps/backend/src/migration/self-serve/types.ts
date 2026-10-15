@@ -38,9 +38,18 @@ export interface ChannelInput {
 /** A conversation that couldn't be fully collected — surfaced so a partial migration isn't shown as complete. */
 export interface MigrationIssue {
   conversationId: string;
-  kind: 'skipped' | 'truncated' | 'ingest-error';
+  kind: 'skipped' | 'truncated' | 'ingest-error' | 'dropped';
   reason: string;
   label?: string; // human-readable conversation identifier captured at issue time (e.g. "DM with Jane Doe" / "#general")
+}
+
+/** Result of ingesting one conversation. `dropped` is set when the conversation was deliberately not
+ * migrated (e.g. DM participants couldn't be matched to Xyne users) so the UI can surface it instead of
+ * silently folding it into the ingested/failed counts. */
+export interface ConversationIngestResult {
+  ingested: number;
+  failed: number;
+  dropped?: { label: string; reason: string };
 }
 
 export interface MigrationJob {
