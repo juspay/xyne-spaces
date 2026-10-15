@@ -208,6 +208,8 @@ Thumbs.db
 apps/electron/release/
 apps/electron/dist/
 apps/electron/ui-active/
+# Compiled by native/mic-monitor/build.sh during every electron build.
+apps/electron/native/mic-monitor/mic-monitor
 
 # App Specific
 apps/xyne-spaces/.yarn/*
@@ -245,3 +247,6 @@ security-reports/
 
 # Build exports (make export-dashboard-bundle)
 out/
+# Per-domain tenant config baked in by apps/electron/scripts/select-tenant.mjs.
+# Generated per build and holds one deployment's hostnames — never committed.
+apps/electron/src/app/tenant.active.ts

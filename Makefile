@@ -264,4 +264,202 @@ configure-docker:
 revoke-sa:
 	gcloud auth revoke $(SERVICE_ACCOUNT) -q || true
 
-.PHONY: build-backend push-backend clean-backend prisma-generate build-runner push-runner clean-runner build-dashboard push-dashboard clean-dashboard export-dashboard-bundle build-dashboard-edge push-dashboard-edge clean-dashboard-edge build-external-dashboard push-external-dashboard clean-external-dashboard build-lighton-ocr-wrapper push-lighton-ocr-wrapper clean-lighton-ocr-wrapper build-transcription-agent push-transcription-agent clean-transcription-agent build-claw push-claw clean-claw build-claw-auth-backend push-claw-auth-backend clean-claw-auth-backend build-claw-auth-frontend push-claw-auth-frontend clean-claw-auth-frontend build-claw-all push-claw-all clean-claw-all lint-dashboard typecheck run-pr-police build-all push-all clean-all test configure-docker revoke-sa
+# ============================================================================
+# Electron desktop app (apps/electron)
+#
+# Phase 1: produce binaries only. Nothing here signs, notarizes, or publishes.
+# The macOS `pkg` ships via MDM, which sets no com.apple.quarantine attribute,
+# so Gatekeeper's quarantine check never runs and an unsigned pkg installs
+# cleanly. See docs/electron-distribution.md.
+#
+# Platform support:
+#   linux / windows -> built with buildx via apps/electron/Dockerfile.build, so
+#                      the existing Linux CI agent needs nothing beyond Docker
+#                      (the Windows targets need wine, which the image supplies).
+#   mac             -> must run on a macOS host; `pkg` and `dmg` use productbuild
+#                      and hdiutil, which cannot run in a Linux container.
+#
+# Artifacts always land in $(ELECTRON_ARTIFACT_DIR)/<platform>/, whichever route
+# produced them.
+#
+# Every value is overridable with -e and no secret is written here. Phase 1 needs
+# no credentials at all; phase 2 must pass signing material through buildx
+# `--secret` (ELECTRON_BUILD_SECRETS), never `--build-arg`, which would persist
+# it in image history.
+# ============================================================================
+ELECTRON_DIR ?= apps/electron
+DASHBOARD_DIR ?= apps/dashboard
+ELECTRON_BUILD_CONFIG ?= build.prod.json
+ELECTRON_ARTIFACT_DIR ?= out/electron
+ELECTRON_DOCKERFILE ?= $(ELECTRON_DIR)/Dockerfile.build
+# Pin to a digest in CI for reproducibility:
+#   -e ELECTRON_BUILDER_IMAGE=electronuserland/builder@sha256:...
+ELECTRON_BUILDER_IMAGE ?= electronuserland/builder:wine
+# The builder image is amd64-only. Pinned so an arm64 workstation produces the
+# same artifacts as the amd64 CI agent instead of silently switching platform.
+# (Target architectures come from electron-builder's prebuilt Electron
+# downloads, not from the build host, so arm64 artifacts still build here.)
+ELECTRON_BUILD_PLATFORM ?= linux/amd64
+# Empty default: the build uses the version already in $(ELECTRON_DIR)/package.json.
+ELECTRON_VERSION ?=
+PNPM_VERSION ?= 10.15.0
+
+# Deliberately OFF. With no `mac.identity` in the electron-builder config,
+# electron-builder would otherwise auto-discover any Developer ID in the host
+# keychain and silently produce a differently-signed artifact than CI does.
+# Phase 2 sets this to true alongside CSC_LINK.
+CSC_IDENTITY_AUTO_DISCOVERY ?= false
+export CSC_IDENTITY_AUTO_DISCOVERY
+
+# Phase 2 hook: space-separated buildx secret specs, e.g.
+#   -e ELECTRON_BUILD_SECRETS='id=win_cert,env=CSC_LINK id=win_pass,env=CSC_KEY_PASSWORD'
+# Empty in phase 1. Secrets are referenced by id inside the Dockerfile with
+# --mount=type=secret so they never enter a layer or image history.
+ELECTRON_BUILD_SECRETS ?=
+ELECTRON_SECRET_FLAGS := $(foreach spec,$(ELECTRON_BUILD_SECRETS),--secret $(spec))
+
+# Narrow the target list for a platform, e.g. -e ELECTRON_WIN_TARGETS='nsis portable'.
+# Empty default: build every target the electron-builder config lists.
+#
+# NOTE: narrowing the Windows list does NOT make the build runnable on Apple
+# Silicon. EVERY Windows target needs wine - nsis executes the installer it just
+# produced to generate the uninstaller, portable self-extracts, and msi runs WiX
+# candle.exe - and wine inside an emulated amd64 container aborts on the host's
+# 16KB page size ("anon_mmap_fixed: Assertion failed" / "qemu: uncaught target
+# signal 6"). Electron packaging itself completes; only the wine post-steps die.
+# Windows artifacts therefore require a NATIVE amd64 host, which the CI agent is.
+# Leave this empty in CI; it exists to skip a target for other reasons.
+ELECTRON_WIN_TARGETS ?=
+ELECTRON_LINUX_TARGETS ?=
+
+# Bake one internal deployment's config into the build:
+#   -e ELECTRON_TENANT=acme   ->  overlays $(ELECTRON_DIR)/tenants/acme.json
+#
+# Empty default: an untenanted build keeps the channel defaults in
+# src/app/config.ts, which is what the community and sandbox channels want.
+# Real tenant files live in the private repo and arrive through the public
+# overlay; this repo carries only tenants/example.json. An unknown name is a
+# hard error, never a silent fall back to the defaults.
+#
+# Passed as a --build-arg and not a --secret on purpose: hostnames are not
+# secret, and the chosen name belongs in the image history as a record of what
+# the artifact actually points at. The tenant FILES are what stay private.
+ELECTRON_TENANT ?=
+
+ELECTRON_BUILD_ARGS = \
+	--build-arg "BUILDER_IMAGE=$(ELECTRON_BUILDER_IMAGE)" \
+	--build-arg "ELECTRON_BUILD_CONFIG=$(ELECTRON_BUILD_CONFIG)" \
+	--build-arg "ELECTRON_TENANT=$(ELECTRON_TENANT)" \
+	--build-arg "PNPM_VERSION=$(PNPM_VERSION)"
+
+# $(1) = platform name (used for the output directory)
+# $(2) = electron-builder platform flag (--linux / --win)
+define ELECTRON_BUILDX
+	$(info Building electron $(1) artifacts via $(ELECTRON_DOCKERFILE) ($(ELECTRON_BUILDER_IMAGE)))
+	@rm -rf "$(ELECTRON_ARTIFACT_DIR)/$(1)"
+	@mkdir -p "$(ELECTRON_ARTIFACT_DIR)/$(1)"
+	docker buildx build -f $(ELECTRON_DOCKERFILE) \
+		--platform $(ELECTRON_BUILD_PLATFORM) \
+		--target artifacts \
+		$(ELECTRON_BUILD_ARGS) \
+		--build-arg "ELECTRON_PLATFORM=$(2)" \
+		$(ELECTRON_SECRET_FLAGS) \
+		--output "type=local,dest=$(ELECTRON_ARTIFACT_DIR)/$(1)" \
+		.
+endef
+
+# Stamp a CI version into $(ELECTRON_DIR)/package.json. No-op unless
+# ELECTRON_VERSION is set. Edits the working tree only; never commits.
+electron-version:
+ifneq ($(strip $(ELECTRON_VERSION)),)
+	$(info Stamping electron version $(ELECTRON_VERSION))
+	cd $(ELECTRON_DIR) && npm version "$(ELECTRON_VERSION)" --no-git-tag-version --allow-same-version
+else
+	$(info ELECTRON_VERSION unset - using version from $(ELECTRON_DIR)/package.json)
+	@true
+endif
+
+# Stage the dashboard bundle as the app's fallback UI. Required before any
+# platform build: `ui-active` is listed in the electron-builder config's `files`,
+# and getBundledUIPath() reads it on first launch, before the OTA updater runs.
+#
+# Two entry points on purpose:
+#   electron-ui-copy  consumes an ALREADY-BUILT $(DASHBOARD_DIR)/dist. This is the
+#                     CI path, because CI builds the dashboard with
+#                     deployment-specific VITE_* variables that are not available
+#                     here; rebuilding would silently produce a bundle configured
+#                     for the wrong backend.
+#   electron-ui       builds the dashboard first. Local and standalone use.
+electron-ui-copy:
+	@[ -d "$(DASHBOARD_DIR)/dist" ] || { \
+		echo "ERROR: $(DASHBOARD_DIR)/dist not found." >&2; \
+		echo "       Build the dashboard first, or use 'make electron-ui' to build it here." >&2; \
+		exit 1; }
+	$(info Staging $(DASHBOARD_DIR)/dist into $(ELECTRON_DIR)/ui-active)
+	cd $(ELECTRON_DIR) && pnpm run copy-ui
+
+electron-ui:
+	$(info Building dashboard bundle for electron ui-active)
+	cd $(ELECTRON_DIR) && pnpm run build:dashboard
+	$(MAKE) electron-ui-copy
+
+# Select the tenant for a HOST build (macOS). The container route runs the same
+# script inside the image instead, from the copied context. Safe to run with an
+# empty ELECTRON_TENANT: that clears any selection left by a previous build in
+# this workspace, so a default build can never inherit one.
+electron-tenant:
+	$(info Selecting electron tenant: $(if $(strip $(ELECTRON_TENANT)),$(ELECTRON_TENANT),<none - channel defaults>))
+	cd $(ELECTRON_DIR) && node scripts/select-tenant.mjs "$(ELECTRON_TENANT)"
+
+# Install the electron workspace's dependencies on the HOST. Only the macOS
+# build needs this: the Linux and Windows builds install inside the container.
+electron-deps:
+	$(info Installing electron workspace dependencies)
+	pnpm install --frozen-lockfile --prefer-offline --filter xyne-spaces-electron...
+
+# Linux: deb + rpm + AppImage (whatever the config lists).
+electron-build-linux:
+	$(call ELECTRON_BUILDX,linux,--linux $(ELECTRON_LINUX_TARGETS))
+
+# Windows: nsis (x64 + arm64, self-updating) + msi (x64, MDM) + portable.
+electron-build-win:
+	$(call ELECTRON_BUILDX,windows,--win $(ELECTRON_WIN_TARGETS))
+
+# macOS: pkg (MDM) + dmg (download) + zip (update feed). Requires a macOS host.
+electron-build-mac:
+	@[ "$$(uname -s)" = "Darwin" ] || { \
+		echo "ERROR: electron-build-mac requires a macOS host (pkg/dmg use productbuild + hdiutil)." >&2; \
+		echo "       Current host: $$(uname -s). Use electron-build-win / electron-build-linux here." >&2; \
+		exit 1; }
+	$(info Building macOS artifacts with $(ELECTRON_BUILD_CONFIG) (unsigned: CSC_IDENTITY_AUTO_DISCOVERY=$(CSC_IDENTITY_AUTO_DISCOVERY)))
+	$(MAKE) electron-tenant
+	cd $(ELECTRON_DIR) && pnpm run build:prepare \
+		&& pnpm exec electron-builder --config $(ELECTRON_BUILD_CONFIG) --mac
+	@rm -rf "$(ELECTRON_ARTIFACT_DIR)/mac" && mkdir -p "$(ELECTRON_ARTIFACT_DIR)/mac"
+	@find "$(ELECTRON_DIR)/release" -type f \( \
+		-name '*.pkg' -o -name '*.dmg' -o -name '*.zip' \
+		-o -name '*.blockmap' -o -name 'latest*.yml' \
+	\) -exec cp -f {} "$(ELECTRON_ARTIFACT_DIR)/mac/" \;
+
+# Checksum and summarize whatever the platform targets produced. Separate target
+# so CI can archive one directory after running any subset of the builds.
+electron-artifacts:
+	@[ -d "$(ELECTRON_ARTIFACT_DIR)" ] && [ -n "$$(find "$(ELECTRON_ARTIFACT_DIR)" -type f -print -quit)" ] || { \
+		echo "ERROR: no artifacts under $(ELECTRON_ARTIFACT_DIR) - did a build target run?" >&2; \
+		exit 1; }
+	$(info Checksumming artifacts in $(ELECTRON_ARTIFACT_DIR))
+	@printf 'tenant: %s\nversion: %s\nconfig: %s\n' \
+		"$(if $(strip $(ELECTRON_TENANT)),$(ELECTRON_TENANT),none)" \
+		"$$(node -p 'require("./$(ELECTRON_DIR)/package.json").version')" \
+		"$(ELECTRON_BUILD_CONFIG)" > "$(ELECTRON_ARTIFACT_DIR)/BUILD-INFO"
+	@cat "$(ELECTRON_ARTIFACT_DIR)/BUILD-INFO"
+	@cd "$(ELECTRON_ARTIFACT_DIR)" && find . -type f ! -name SHA256SUMS -print0 \
+		| xargs -0 $$(command -v sha256sum || echo shasum -a 256) > SHA256SUMS
+	@cat "$(ELECTRON_ARTIFACT_DIR)/SHA256SUMS"
+	@find "$(ELECTRON_ARTIFACT_DIR)" -type f ! -name SHA256SUMS -exec ls -lh {} \;
+
+electron-clean:
+	cd $(ELECTRON_DIR) && pnpm run clean
+	rm -rf "$(ELECTRON_ARTIFACT_DIR)"
+
+.PHONY: build-backend push-backend clean-backend prisma-generate build-runner push-runner clean-runner build-dashboard push-dashboard clean-dashboard export-dashboard-bundle build-dashboard-edge push-dashboard-edge clean-dashboard-edge build-external-dashboard push-external-dashboard clean-external-dashboard build-lighton-ocr-wrapper push-lighton-ocr-wrapper clean-lighton-ocr-wrapper build-transcription-agent push-transcription-agent clean-transcription-agent build-claw push-claw clean-claw build-claw-auth-backend push-claw-auth-backend clean-claw-auth-backend build-claw-auth-frontend push-claw-auth-frontend clean-claw-auth-frontend build-claw-all push-claw-all clean-claw-all lint-dashboard typecheck run-pr-police build-all push-all clean-all test configure-docker revoke-sa electron-version electron-tenant electron-deps electron-ui electron-ui-copy electron-build-mac electron-build-win electron-build-linux electron-artifacts electron-clean
