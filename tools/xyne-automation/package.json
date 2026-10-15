@@ -15,6 +15,7 @@
     "test:api": "ts-node --project tsconfig.json scripts/run-gauge.ts tests/01_api",
     "test:ui": "ts-node --project tsconfig.json scripts/run-gauge.ts tests/02_ui",
     "test:e2e": "ts-node --project tsconfig.json scripts/run-gauge.ts tests/03_e2e",
+    "test:desk": "ts-node --project tsconfig.json scripts/run-gauge.ts tests/03_e2e/11_xyne-desk",
     "test:push": "bash scripts/push-report-branch.sh",
     "test:integrity": "bash scripts/verify-test-code-integrity.sh",
     "format": "biome format --write .",

@@ -1,6 +1,7 @@
 import express from 'express';
 import { TestAuthController } from '@/controllers/testAuthController';
 import { TestFixturesController } from '@/controllers/testFixturesController';
+import { TestDeskFixturesController } from '@/controllers/testDeskFixturesController';
 
 const router = express.Router();
 
@@ -15,9 +16,13 @@ const router = express.Router();
 
 const testAuthController = new TestAuthController();
 const testFixturesController = new TestFixturesController();
+const testDeskFixturesController = new TestDeskFixturesController();
 
 router.post('/auth/login', testAuthController.testLogin);
 router.post('/auth/logout', testAuthController.testLogout);
 router.post('/fixtures/channel-participants', testFixturesController.addChannelParticipants);
+router.post('/fixtures/desk/channel-mailbox', testDeskFixturesController.connectChannelMailbox);
+router.post('/fixtures/desk/gmail-delivery', testDeskFixturesController.deliverGmailMessages);
+router.get('/fixtures/desk/outbox', testDeskFixturesController.listOutbox);
 
 export default router;

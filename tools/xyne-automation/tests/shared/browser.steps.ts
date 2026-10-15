@@ -197,6 +197,13 @@ export default class BrowserSteps {
     await page.waitForLoadState('domcontentloaded');
   }
 
+  @Step('opening stored user <userAlias> channel <channelAlias> url')
+  public async openStoredChannelUrl(userAlias: string, channelAlias: string): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidChannelAlias(channelAlias);
+    await this.openStoredPath(`${userAlias}.channels.${channelAlias}.url`);
+  }
+
   @Step('opening Xyne-Space at <urlPath>')
   public async openXyneSpace(urlPath: string): Promise<void> {
     const page = testContext.activePage;
@@ -1142,6 +1149,106 @@ export default class BrowserSteps {
     const page = testContext.activePage;
     const card = page.locator('[data-testid^="ticket-card-"]').filter({ hasText: title }).first();
     await card.waitFor({ state: 'visible', timeout: 5000 });
+  }
+
+  @Step('clicking on stored user <userAlias> ticket <ticketAlias> field <fieldName> in <selector>')
+  public async clickOnStoredTicketField(
+    userAlias: string,
+    ticketAlias: string,
+    fieldName: string,
+    selector: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidTicketAlias(ticketAlias);
+    const text = resolveStoredText(`user:${userAlias}.tickets.${ticketAlias}.${fieldName}`);
+    await this.clickOnTextInSelector(text, selector);
+  }
+
+  @Step(
+    'verifying stored user <userAlias> ticket <ticketAlias> field <fieldName> is visible in <selector>'
+  )
+  public async verifyStoredTicketFieldVisible(
+    userAlias: string,
+    ticketAlias: string,
+    fieldName: string,
+    selector: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidTicketAlias(ticketAlias);
+    await this.verifyVisibleTextInSelector(
+      `user:${userAlias}.tickets.${ticketAlias}.${fieldName}`,
+      selector
+    );
+  }
+
+  @Step(
+    'verifying stored user <userAlias> ticket <ticketAlias> field <fieldName> is not visible in <selector>'
+  )
+  public async verifyStoredTicketFieldNotVisible(
+    userAlias: string,
+    ticketAlias: string,
+    fieldName: string,
+    selector: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidTicketAlias(ticketAlias);
+    const text = resolveStoredText(`user:${userAlias}.tickets.${ticketAlias}.${fieldName}`);
+    const container = testContext.activePage.locator(selector).first();
+    await container.waitFor({ state: 'visible' });
+    await expect(container.getByText(text, { exact: false })).toHaveCount(0);
+  }
+
+  // Rows/cards repeat the same controls (checkbox, menu); pick the container that
+  // shows the stored ticket, then click the control inside it.
+  @Step(
+    'clicking on <selector> inside <containerSelector> showing stored user <userAlias> ticket <ticketAlias> field <fieldName>'
+  )
+  public async clickInsideContainerShowingStoredTicketField(
+    selector: string,
+    containerSelector: string,
+    userAlias: string,
+    ticketAlias: string,
+    fieldName: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidTicketAlias(ticketAlias);
+    const text = resolveStoredText(`user:${userAlias}.tickets.${ticketAlias}.${fieldName}`);
+    const container = testContext.activePage
+      .locator(containerSelector)
+      .filter({ hasText: text })
+      .first();
+    await container.waitFor({ state: 'visible' });
+    await container.locator(selector).first().click();
+  }
+
+  // Email and rich-content bodies render inside sandboxed iframes, which plain
+  // getByText does not search; check every iframe under the selector.
+  @Step(
+    'verifying stored user <userAlias> ticket <ticketAlias> field <fieldName> is visible in an iframe inside <selector>'
+  )
+  public async verifyStoredTicketFieldVisibleInIframe(
+    userAlias: string,
+    ticketAlias: string,
+    fieldName: string,
+    selector: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidTicketAlias(ticketAlias);
+    const text = resolveStoredText(`user:${userAlias}.tickets.${ticketAlias}.${fieldName}`);
+    const iframes = testContext.activePage.locator(selector).first().locator('iframe');
+
+    await expect
+      .poll(
+        async () => {
+          for (let index = 0; index < (await iframes.count()); index += 1) {
+            const match = iframes.nth(index).contentFrame().getByText(text, { exact: false });
+            if (await match.first().isVisible()) return true;
+          }
+          return false;
+        },
+        { message: `Expected "${text}" in an iframe inside ${selector}`, timeout: config.timeout }
+      )
+      .toBe(true);
   }
 
   // ===========================================

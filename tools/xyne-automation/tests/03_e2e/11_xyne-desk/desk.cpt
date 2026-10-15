@@ -1,0 +1,82 @@
+# Setting up Desk channel <channelAlias> for user <userAlias>
+* Using browser
+* Ensuring user <userAlias> is logged in
+* ensuring Desk channel <channelAlias> exists in fixture for user <userAlias> in project "project-1"
+
+# Receiving Desk email ticket <ticketAlias> in channel <channelAlias> for user <userAlias>
+* generating Desk email ticket <ticketAlias> in channel <channelAlias> for user <userAlias>
+* delivering Desk email ticket <ticketAlias> for user <userAlias>
+* verifying Desk delivery created "1" tickets and found "0" duplicates
+
+# Receiving Desk email ticket <ticketAlias> with cc in channel <channelAlias> for user <userAlias>
+* generating Desk email ticket <ticketAlias> with cc in channel <channelAlias> for user <userAlias>
+* delivering Desk email ticket <ticketAlias> for user <userAlias>
+* verifying Desk delivery created "1" tickets and found "0" duplicates
+
+# Opening Desk channel <channelAlias> for user <userAlias>
+* opening stored user <userAlias> channel <channelAlias> url
+* waiting up to "60" seconds for "[data-testid='support-page']" to appear
+
+# Opening Desk ticket <ticketAlias> in channel <channelAlias> for user <userAlias>
+* Opening Desk channel <channelAlias> for user <userAlias>
+* clicking on stored user <userAlias> ticket <ticketAlias> field "title" in "[data-testid='support-page']"
+
+# Verifying open Desk ticket <ticketAlias> shows its customer email for user <userAlias>
+* verifying stored user <userAlias> ticket <ticketAlias> field "email.from" is visible in "[data-testid='support-page']"
+* verifying stored user <userAlias> ticket <ticketAlias> field "description" is visible in an iframe inside "[data-testid='support-page']"
+
+# Verifying Desk ticket <ticketAlias> is listed in channel <channelAlias> for user <userAlias>
+* Opening Desk channel <channelAlias> for user <userAlias>
+* verifying stored user <userAlias> ticket <ticketAlias> field "title" is visible in "[data-testid='support-page']"
+
+# Verifying Desk channel <channelAlias> lists <ticketAlias> but not <otherTicketAlias> for user <userAlias>
+* Verifying Desk ticket <ticketAlias> is listed in channel <channelAlias> for user <userAlias>
+* verifying stored user <userAlias> ticket <otherTicketAlias> field "title" is not visible in "[data-testid='support-page']"
+
+# Setting open Desk ticket priority to <priority>
+* clicking on "[aria-label='Change priority']"
+* clicking on text <priority> in "[data-track-name='SelectRowPriority']"
+* waiting for text <priority> to appear in "[aria-label='Change priority']"
+
+# Setting open Desk ticket status to <status>
+* clicking on "[aria-label='Change stage']"
+* clicking on text <status> in "[data-track-name='SelectRowStage']"
+* waiting for text <status> to appear in "[aria-label='Change stage']"
+
+# Changing open Desk ticket priority to <priority> and status to <status>
+* Setting open Desk ticket priority to <priority>
+* Setting open Desk ticket status to <status>
+
+# Filtering Desk tickets by priority <priority>
+* clicking on "[data-testid='desk-filter-priority']"
+* clicking on text <priority> in "[data-testid^='priority-filter-']"
+* pressing "Escape"
+
+# Filtering Desk tickets by status <status>
+* clicking on "[data-testid='desk-filter-status']"
+* clicking on text <status> in "[data-track-name='ToggleStageFilter']"
+* pressing "Escape"
+
+# Clearing Desk filters
+* clicking on "[data-track-name='CLEAR_SUPPORT_FILTERS']"
+
+# Selecting Desk ticket <ticketAlias> in the list for user <userAlias>
+* clicking on "[data-track-name='ToggleTicketSelection'] label" inside "[data-track-name='ClickTicketListRow']" showing stored user <userAlias> ticket <ticketAlias> field "title"
+
+# Merging selected Desk tickets into <ticketAlias> for user <userAlias>
+* clicking on "[data-track-name='MergeTickets']"
+* clicking on stored user <userAlias> ticket <ticketAlias> field "title" in "[data-track-name='SelectMergeParent']"
+* clicking on "[data-track-name='ConfirmMergeTickets']"
+
+# Bulk setting priority of selected Desk tickets to <priority>
+* clicking on "input[placeholder='Priority']"
+* typing <priority> in "input[placeholder='Priority']"
+* clicking on text <priority> in "[role='option']"
+
+# Bulk moving selected Desk tickets to stage <stage>
+* clicking on "input[placeholder='Stage']"
+* typing <stage> in "input[placeholder='Stage']"
+* clicking on text <stage> in "[role='option']"
+
+# Opening Desk mailbox folder <folder>
+* clicking on text <folder> in "[data-track-name='SelectMailboxFolder']"

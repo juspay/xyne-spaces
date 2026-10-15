@@ -15,8 +15,7 @@ interface TestUserData {
   email: string;
   name: string;
   picture: string;
-  // Logical role for test setup (resource grants, workspace role). 'admin' is
-  // persisted as WorkspaceRole.ADMIN; org membership stays OrgRole.MEMBER.
+  // Logical role for test setup (org membership, resource grants). NOT persisted to DB.
   // Optional because fixed/sandbox/dev paths don't carry an explicit role.
   role?: 'admin' | 'user';
 }
@@ -251,9 +250,7 @@ export class TestAuthController {
               picture: testUserData.picture,
               authProvider: AuthProvider.GOOGLE,
               workspace: { connect: { id: TestAuthController.testWorkspaceId! } },
-              // Admin test users must be real workspace admins so suites can
-              // exercise OWNER/ADMIN-gated routes (e.g. workspace Desk mailbox).
-              role: testUserData.role === 'admin' ? WorkspaceRole.ADMIN : WorkspaceRole.MEMBER,
+              role: WorkspaceRole.MEMBER,
               orgMember: { connect: { memberId: orgMember.memberId } },
             },
           });

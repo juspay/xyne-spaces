@@ -30,6 +30,8 @@ export interface StoredMessage {
 
 export interface StoredConversation extends StoredEntity {
   messages: Record<string, StoredMessage>;
+  /** Desk channels only: the fake Gmail mailbox connected to the channel. */
+  mailboxEmail?: string;
 }
 
 export interface StoredProject extends StoredEntity {
@@ -45,6 +47,17 @@ export interface StoredTicket {
   status?: string;
   assigneeId?: string;
   id?: string;
+  /** Desk tickets only: the inbound email that created the ticket. */
+  email?: StoredDeskEmail;
+}
+
+export interface StoredDeskEmail {
+  channelAlias: string;
+  from: string;
+  cc: string[];
+  threadId: string;
+  messageId: string;
+  conversationId?: string;
 }
 
 export interface StoredUser {

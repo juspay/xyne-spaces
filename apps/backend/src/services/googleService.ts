@@ -20,6 +20,11 @@ import { ExternalSourceRepository } from '@/database/repositories/externalSource
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
+import {
+  fakeGmailOutbox,
+  isFakeGmailCredentials,
+  type FakeGmailCredentials,
+} from '@/services/fakeGmailOutbox';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -979,7 +984,12 @@ export class GoogleService {
    * refresh token; the 'tokens' listener persists new tokens back to ExternalSource.
    */
   static createEmailSender(encryptedCredentials: string, sourceId: string) {
-    const credentials = JSON.parse(decrypt(encryptedCredentials)) as GoogleCredentials;
+    const parsedCredentials: unknown = JSON.parse(decrypt(encryptedCredentials));
+    // Test-only: fake sources (DESK_MOCK_ENABLED) send into the in-memory outbox.
+    if (isFakeGmailCredentials(parsedCredentials)) {
+      return GoogleService.createFakeEmailSender(parsedCredentials);
+    }
+    const credentials = parsedCredentials as GoogleCredentials;
     const externalSourceRepo = new ExternalSourceRepository();
 
     const oauth2Client = GoogleService.createOAuth2Client(credentials);
@@ -1062,6 +1072,49 @@ export class GoogleService {
 
         logger.info(`${TAG} Gmail new email sent`, { messageId, threadId, from: fromHeader });
         return { messageId, threadId, fromEmail: fromHeader };
+      },
+    };
+  }
+
+  /** Same shape as the real sender; records into fakeGmailOutbox instead of calling Gmail. */
+  private static createFakeEmailSender(credentials: FakeGmailCredentials) {
+    return {
+      async replyToConversation(params: ReplyParams): Promise<ReplyResult> {
+        const { messageId, threadId } = fakeGmailOutbox.record({
+          kind: 'reply',
+          threadId: params.threadId,
+          from: params.fromEmailAddress || credentials.email,
+          to: params.to,
+          cc: params.cc ?? [],
+          bcc: params.bcc ?? [],
+          subject: ensureReplyPrefix(params.subject),
+          body: params.content,
+          attachmentCount: params.attachments?.length ?? 0,
+        });
+        return { messageId, threadId };
+      },
+
+      async sendNewEmail(params: {
+        subject: string;
+        content: string;
+        to: string[];
+        cc?: string[];
+        bcc?: string[];
+        fromEmailAddress?: string;
+        attachments?: unknown[];
+      }): Promise<{ messageId: string; threadId: string; fromEmail: string }> {
+        const fromEmail = params.fromEmailAddress || credentials.email;
+        const { messageId, threadId } = fakeGmailOutbox.record({
+          kind: 'new',
+          from: fromEmail,
+          to: params.to,
+          cc: params.cc ?? [],
+          bcc: params.bcc ?? [],
+          subject: params.subject,
+          body: params.content,
+          attachmentCount: params.attachments?.length ?? 0,
+        });
+        return { messageId, threadId, fromEmail };
       },
     };
   }

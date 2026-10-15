@@ -78,6 +78,7 @@ npm test
 npm run test:api      # tests/01_api only
 npm run test:ui       # tests/02_ui only
 npm run test:e2e      # tests/03_e2e only
+npm run test:desk     # tests/03_e2e/11_xyne-desk only (Xyne Desk); from repo root, `pnpm run test:desk` runs it in the Docker runner
 
 # Run a single spec file directly via Gauge
 npx gauge run tests/01_api/01_health/01_health.spec
@@ -189,8 +190,6 @@ Tests do **not** use real Google OAuth. Test auth flow:
 
 `setAsNewUser=true` creates fresh user; `setAsNewUser=false` logs in existing user. All test emails follow pattern `test-(user|admin)-email-<N>@xyne-test.local`.
 
-Workspace roles: the first login of a run creates the org, so that user (`user-1` in baseline order) is workspace `OWNER`; `admin-N` users are `ADMIN`; other `user-N` users are `MEMBER`. Use `user-2`+ for non-admin negative checks.
-
 `setAsNewUser` only controls onboarding flow: `true` may trigger onboarding steps, `false` skips them. Test auth endpoint always creates user on backend regardless — not a "create vs login" toggle.
 
 ### Multi-browser login
@@ -249,6 +248,18 @@ Baseline project, channel, and DM = infrastructure. Tests needing mutations must
 **Source**
 
 All baseline logic in `fixtures/baseline.ts`: contract constants, registry read/write, bootstrap, rehydration. Bootstrap runs in parent process (`run-gauge.ts`) before Gauge workers start — no cross-worker locking needed.
+
+**Desk fixture**
+
+Desk needs two things automation cannot drive for real: the Google OAuth mailbox connection and Gmail delivering mail. With `DESK_MOCK_ENABLED=true` (set in `apps/backend/.env.test`) the backend exposes test-only stand-ins under `/api/test/fixtures/desk/*`:
+
+- `channel-mailbox` connects a fake Gmail mailbox to a Desk channel (state the OAuth flow leaves behind).
+- `gmail-delivery` delivers messages through the real ingestion pipeline (`externalSourceCore.ingest` + Google adapter); `failAtMessageId` simulates a crash mid-batch for redelivery tests.
+- `outbox` lists what the product sent through the fake Gmail sender (`GoogleService.createEmailSender` swaps in the fake for fake credentials).
+
+Rules: fixture routes are for setup only. Assert through the UI or real product APIs; the outbox is the only read endpoint, because it is the provider boundary. Desk tickets are `StoredTicket`s with an `email` field (`user:<alias>.tickets.<ticketAlias>.title` etc.), Desk channels are `StoredConversation`s with `mailboxEmail`.
+
+Bootstrap seeds read-only `admin-1.channels.channel-desk-1` with one delivered ticket `admin-1.tickets.ticket-desk-baseline` (with a cc). When the backend runs without `DESK_MOCK_ENABLED`, bootstrap skips it with a warning and Desk specs fail fast. Scenarios that change a Desk ticket or channel must create their own via `ensuring Desk channel ...`.
 
 **Negative-path toggle**
 
@@ -334,6 +345,7 @@ Optional overrides:
 - `BROWSER` - one of `chromium`, `chrome`, `firefox`, `webkit`. Default: `chrome`
 - `ENABLE_BROWSER_CONSOLE_LOGS` - default: true for `test`/`local-test`, false otherwise
 - `PARALLEL` - number of parallel Gauge workers. Default: 5 for `local`/`local-test`, 1 otherwise
+- `SLOW_MO` - milliseconds Playwright pauses before each browser action, for watching headed runs. Default: 0 (off)
 
 If config doesn't expose something needed:
 
@@ -412,7 +424,7 @@ Enforced by `scripts/validation/validate-filename.ts`:
 | `tests/03_e2e/03_project/project.cpt` | `Creating project <projectAlias> for user <userAlias>` |
 | `tests/03_e2e/04_channel/channel.cpt` | `Navigating to channel <channelAlias> for user <userAlias>`, `Creating channel <channelAlias> for user <userAlias>` |
 | `tests/03_e2e/05_messaging/messaging.cpt` | `Creating DM with user <userAlias>`, `Creating group DM with users <userAlias1> and <userAlias2>`, `Sending stored message <messageAlias> in dm <dmAlias> for user <userAlias>`, `Verifying stored message ... in dm/channel ... is visible in current conversation`, `Sending stored message <messageAlias> in channel <channelAlias> for user <userAlias>`, `Navigating to chat`, `Opening DM from user <userAlias>` |
-| `tests/03_e2e/11_xyne-desk/xyne-desk.cpt` | `Creating DL Desk channel <channelAlias> for user <userAlias> in project <projectAlias>` |
+| `tests/03_e2e/11_xyne-desk/desk.cpt` | `Setting up Desk channel <channelAlias> for user <userAlias>`, `Receiving Desk email ticket <ticketAlias> [with cc] in channel <channelAlias> for user <userAlias>` |
 
 ## Step definition file map
 
@@ -426,12 +438,8 @@ Enforced by `scripts/validation/validate-filename.ts`:
 | `tests/03_e2e/e2e-common.steps.ts` | E2E | Ensure not logged in, verify redirect path (supports wildcard `/*` matching) |
 | `tests/03_e2e/03_project/project.steps.ts` | E2E/Project | Login and store user, ensure/generate project and channel fixtures, capture created channel details |
 | `tests/03_e2e/05_messaging/messaging.steps.ts` | E2E/Messaging | Generate message fixtures with unique suffix in DM and channel contexts; navigate to baseline DM via stored URL (`opening baseline DM for user <userAlias>`) |
-| `tests/03_e2e/11_xyne-desk/xyne-desk-channel.steps.ts` | E2E/Desk | Mock shared mailbox, DL/personal/Slack Desk channel creation via API, sent-mail reset, mailbox connect/disconnect, auto-merge setting |
-| `tests/03_e2e/11_xyne-desk/xyne-desk-mail.steps.ts` | E2E/Desk | Generate/inject mock email and Slack messages, ingestion and ticket assertions, ticket update, shared/separate conversations |
-| `tests/03_e2e/11_xyne-desk/xyne-desk-reply-compose.steps.ts` | E2E/Desk | Reply, reply-all, compose, sent-mail assertions, merge/unmerge, compose/filter/AI-rewrite UI controls |
-| `tests/03_e2e/11_xyne-desk/xyne-desk-pubsub.steps.ts` | E2E/Desk | Deterministic Pub/Sub Gmail batches: publish, republish, injected failure, redelivery, ticket counts |
-| `tests/03_e2e/11_xyne-desk/xyne-desk-mock-dl.steps.ts` | E2E/Desk | Mock DL provider reset, DL membership, provider mail send, mock inbox counts |
-| `tests/03_e2e/11_xyne-desk/xyne-desk-{state,api,browser,mock-mail}.ts` | E2E/Desk | Support modules (no steps): scenario state/types/constants, API helpers, browser auth/navigation/composer, mock mail builders |
+| `tests/03_e2e/11_xyne-desk/desk.steps.ts` | E2E/Desk | Ensure Desk channel, generate/deliver Desk email tickets and batches, open channel/ticket, reply/compose through the UI, delivery-count and fake Gmail outbox assertions |
+| `fixtures/desk.ts` | Shared | Desk seeding helpers used by baseline bootstrap and Desk steps (see Desk fixture) |
 
 ## Change checklist
 

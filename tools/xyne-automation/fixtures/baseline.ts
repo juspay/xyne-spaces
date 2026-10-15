@@ -14,12 +14,19 @@ import { readFile, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { config } from '@/config';
 import { baselineLogger } from '@/lib/logger';
+import {
+  createDeskChannel,
+  deliverDeskEmails,
+  generateDeskInboundTicket,
+  isDeskFixtureBackendEnabled,
+} from '@/fixtures/desk';
 import { buildRandomSuffix } from '@/fixtures/fixture-helpers';
 import { getUserCatalogEntry } from '@/fixtures/user-catalog';
 import {
   type StoredConversation,
   type StoredMessage,
   type StoredProject,
+  type StoredTicket,
   type StoredUser,
   testContext,
 } from '@/tests/shared/runtime/test-context';
@@ -45,6 +52,8 @@ export const BASELINE_PROJECT_KEY = 'project-1';
 export const BASELINE_CHANNEL_KEY = 'channel-1';
 export const BASELINE_DM_KEY = 'dm-1';
 export const BASELINE_SEED_MESSAGE_KEY = 'message-baseline';
+export const BASELINE_DESK_CHANNEL_KEY = 'channel-desk-1';
+export const BASELINE_DESK_TICKET_KEY = 'ticket-desk-baseline';
 
 const netNewChannelAliasPattern = /^channel-[a-zA-Z0-9-]+$/;
 
@@ -110,12 +119,19 @@ export interface BaselineDm {
   seedMessage?: BaselineSeedMessage;
 }
 
+export interface BaselineDesk {
+  channel: BaselineChannel & { id: string; mailboxEmail: string };
+  ticket: StoredTicket;
+}
+
 export interface BaselineFixtureData {
   runId: string;
   ownerUserAlias: string;
   project: BaselineProject;
   channel: BaselineChannel;
   dm?: BaselineDm;
+  /** Absent when the backend runs without DESK_MOCK_ENABLED. */
+  desk?: BaselineDesk;
 }
 
 const REGISTRY_FILENAME = 'baseline-fixtures.json';
@@ -225,7 +241,20 @@ export async function loadBaselineFixtureRegistry(): Promise<BaselineFixtureData
       seedMessage: channelSeed,
     },
     ...(dm ? { dm } : {}),
+    ...(isBaselineDesk(data.desk) ? { desk: data.desk } : {}),
   };
+}
+
+function isBaselineDesk(value: unknown): value is BaselineDesk {
+  if (!value || typeof value !== 'object') return false;
+  const { channel, ticket } = value as Record<string, Record<string, unknown> | undefined>;
+  return (
+    typeof channel?.id === 'string' &&
+    typeof channel.name === 'string' &&
+    typeof channel.mailboxEmail === 'string' &&
+    typeof ticket?.title === 'string' &&
+    typeof ticket.email === 'object'
+  );
 }
 
 function parseSeedMessage(value: unknown): BaselineSeedMessage | undefined {
@@ -717,6 +746,42 @@ async function createChannel(adminUser: StoredUser): Promise<BaselineChannel> {
   return { id: channelId, name: channelName, url: channelUrl };
 }
 
+// Seeds one Desk channel with a fake Gmail mailbox and one delivered customer
+// email, so read-only Desk scenarios need no setup of their own.
+async function createBaselineDesk(adminUser: StoredUser): Promise<BaselineDesk | undefined> {
+  if (!(await isDeskFixtureBackendEnabled())) {
+    baselineLogger.warn('Desk baseline skipped: backend runs without DESK_MOCK_ENABLED=true');
+    return undefined;
+  }
+
+  const channel = await createDeskChannel(
+    adminUser,
+    BASELINE_PROJECT_KEY,
+    BASELINE_DESK_CHANNEL_KEY
+  );
+  const ticket = generateDeskInboundTicket(
+    adminUser,
+    BASELINE_DESK_TICKET_KEY,
+    BASELINE_DESK_CHANNEL_KEY,
+    { withCc: true }
+  );
+  const delivery = await deliverDeskEmails(channel, [ticket]);
+  assert.equal(delivery.ok(), true, `Desk baseline delivery failed (${delivery.status()}).`);
+  assertString(channel.id, 'baseline Desk channel id');
+  assertString(channel.mailboxEmail, 'baseline Desk mailbox');
+  baselineLogger.info(`Desk channel seeded: ${channel.name}`);
+
+  return {
+    channel: {
+      id: channel.id,
+      name: channel.name,
+      url: channel.url,
+      mailboxEmail: channel.mailboxEmail,
+    },
+    ticket,
+  };
+}
+
 async function sendSeedChannelMessage(channelId: string): Promise<BaselineSeedMessage> {
   const page = testContext.activePage;
   const baseText = 'baseline-channel-seed';
@@ -815,6 +880,7 @@ export async function bootstrapBaselineFixture(): Promise<void> {
     await addMemberToChannel(adminUser, user);
     await addMemberToChannel(adminUser, partnerUser);
     const channelSeed = await sendSeedChannelMessage(channel.id);
+    const desk = await createBaselineDesk(adminUser);
 
     await loginAsUser(BASELINE_USER_ALIAS);
     baselineLogger.info('[7/8] Re-logged in as baseline user to create DM');
@@ -829,6 +895,7 @@ export async function bootstrapBaselineFixture(): Promise<void> {
       project,
       channel: { ...channel, seedMessage: channelSeed },
       dm,
+      ...(desk ? { desk } : {}),
     });
     testContext.storedUsers.set(BASELINE_OWNER_ALIAS, adminUser);
     testContext.storedUsers.set(BASELINE_USER_ALIAS, user);
@@ -913,9 +980,14 @@ export async function loadBaselineFixtureIntoWorkerContext(): Promise<void> {
         url: registry.channel.url,
         messages: { ...channelMessages },
       },
+      ...(registry.desk && {
+        [BASELINE_DESK_CHANNEL_KEY]: { ...registry.desk.channel, messages: {} },
+      }),
     },
     dms: {},
-    tickets: {},
+    tickets: {
+      ...(registry.desk && { [BASELINE_DESK_TICKET_KEY]: registry.desk.ticket }),
+    },
   };
 
   testContext.registerPersistentStoredUser(ownerUser);

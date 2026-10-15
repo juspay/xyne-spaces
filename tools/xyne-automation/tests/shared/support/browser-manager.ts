@@ -120,6 +120,7 @@ async function acquireBrowserEntry(
 
   const browser: Browser = await browserLauncher.launch({
     headless: config.headless,
+    ...(config.slowMo > 0 && { slowMo: config.slowMo }),
     args: [
       '--disable-crash-reporter',
       '--disable-in-process-stack-traces',

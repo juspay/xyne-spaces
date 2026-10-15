@@ -9,11 +9,6 @@ export interface ServiceConfig {
   baseUrl: string;
 }
 
-export interface DeskConfig {
-  mockDlEmail: string;
-  mockSharedMailbox: string;
-}
-
 export interface Config {
   backend: ServiceConfig;
   dashboard: ServiceConfig;
@@ -25,8 +20,9 @@ export interface Config {
   parallel: number;
   // Record a .webm per browser session into <run artifact dir>/videos.
   recordVideo: boolean;
+  // Milliseconds Playwright pauses before each browser action, to watch headed runs.
+  slowMo: number;
   testProgressFile?: string;
-  desk: DeskConfig;
 }
 
 export function getEnvironment(): Environment {
@@ -154,6 +150,15 @@ function getRecordVideo(): boolean {
   return process.env.RECORD_VIDEO === 'true';
 }
 
+function getSlowMo(): number {
+  if (!process.env.SLOW_MO) {
+    return 0;
+  }
+
+  const parsed = parseInt(process.env.SLOW_MO, 10);
+  return Number.isNaN(parsed) || parsed < 0 ? 0 : parsed;
+}
+
 function getConfigForEnv(env: Environment): Config {
   return {
     backend: {
@@ -169,8 +174,8 @@ function getConfigForEnv(env: Environment): Config {
     enableBrowserConsoleLogs: getEnableBrowserConsoleLogs(env),
     parallel: getParallel(env),
     recordVideo: getRecordVideo(),
+    slowMo: getSlowMo(),
     testProgressFile: process.env.XYNE_TEST_PROGRESS_FILE || undefined,
-    desk: getDeskConfig(),
   };
 }
 
