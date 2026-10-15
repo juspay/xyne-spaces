@@ -221,6 +221,32 @@ export const getFleetStatsTool: ToolDefinition = {
   execute: AUTH_EXECUTED_STUB,
 };
 
+export const getAgentDiagnosticsTool: ToolDefinition = {
+  slug: "get_agent_diagnostics",
+  name: "get_agent_diagnostics",
+  description:
+    "Deep diagnosis of ONE agent over a recent window, from the run ledger: run outcomes (failed, cancelled, " +
+    "stuck, as-subagent, triggers, providers); latency (p50/p95/max, share of time in LLM vs tools, and how " +
+    "many runs have no timing recorded); effort (turns, input-token context size, cache share, tool calls " +
+    "per run, LLM retries and reasons); run errors grouped with a cause category, a fix hint and example " +
+    "sessions; each failing tool with its error kinds (wrong path/branch, bad arguments, unknown tool, " +
+    "missing connection, credentials, permissions, timeout, rate limit, …), a sample error and a fix hint; " +
+    "the slowest tools; rating comments; and the slowest and heaviest-context sessions. Use it after " +
+    "get_fleet_stats to explain what is going wrong with an agent and what to change. Categories and hints " +
+    "are heuristics — confirm with an example session before recommending a fix. Restricted to claw admins. Read-only.",
+  source: "custom:agent-introspect",
+  inputSchema: {
+    type: "object",
+    properties: {
+      agentSlug: { type: "string", description: "The agent to diagnose." },
+      days: { type: "number", description: "Window in days, ending now. Default 7, max 30." },
+      sampleRuns: { type: "number", description: "How many recent runs to scan for tool-level errors. Default 60, max 150." },
+    },
+    required: ["agentSlug"],
+  },
+  execute: AUTH_EXECUTED_STUB,
+};
+
 export const AGENT_INTROSPECT_TOOL_DEFS: ToolDefinition[] = [
   listAgentsTool,
   getAgentConfigTool,
@@ -228,4 +254,5 @@ export const AGENT_INTROSPECT_TOOL_DEFS: ToolDefinition[] = [
   getAgentRunsTool,
   findAgentsTool,
   getFleetStatsTool,
+  getAgentDiagnosticsTool,
 ];

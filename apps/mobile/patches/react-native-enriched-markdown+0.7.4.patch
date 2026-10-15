@@ -1,0 +1,281 @@
+diff --git a/android/src/main/java/com/swmansion/enriched/markdown/MeasurementStore.kt b/android/src/main/java/com/swmansion/enriched/markdown/MeasurementStore.kt
+index 8110ba5..8e097a6 100644
+--- a/android/src/main/java/com/swmansion/enriched/markdown/MeasurementStore.kt
++++ b/android/src/main/java/com/swmansion/enriched/markdown/MeasurementStore.kt
+@@ -84,8 +84,14 @@ object MeasurementStore {
+     )
+   }
+ 
+-  private val measurePaint = TextPaint()
+-  private val measureRenderer = Renderer()
++  // THREAD-SAFETY FIX: measurement runs concurrently on Fabric background
++  // threads and the UI thread. A single shared TextPaint/Renderer is mutated on
++  // every measure pass (reset(), typeface, textSize) while another thread may
++  // be inside StaticLayout.build() with the same native paint object, which
++  // crashes in libminikin (SIGSEGV, use-after-free of the paint's typeface).
++  // ThreadLocal gives each thread its own instances, eliminating the race.
++  private val measurePaint = ThreadLocal.withInitial { TextPaint() }
++  private val measureRenderer = ThreadLocal.withInitial { Renderer() }
+ 
+   @Volatile
+   private var lastKnownFontScale: Float = 1.0f
+@@ -301,13 +307,13 @@ object MeasurementStore {
+     val spannable = tryRenderMarkdown(markdown, styleMap, context, md4cFlags, allowFontScaling, maxFontSizeMultiplier)
+     spannable?.replaceMathSpansWithPlaceholders(context)
+     val textToMeasure = spannable ?: markdown
+-    val (size, _) = measureWithLayout(width, textToMeasure, measurePaint, id)
++    val (size, _) = measureWithLayout(width, textToMeasure, measurePaint.get(), id)
+ 
+     // 3. Calculate Margin
+     val allowTrailingMargin = props.getBooleanOrDefault("allowTrailingMargin", false)
+     val marginBottom =
+       if (allowTrailingMargin && spannable != null) {
+-        PixelUtil.toDIPFromPixel(measureRenderer.getLastElementMarginBottom())
++        PixelUtil.toDIPFromPixel(measureRenderer.get().getLastElementMarginBottom())
+       } else {
+         0f
+       }
+@@ -473,9 +479,10 @@ object MeasurementStore {
+     widthPx: Int,
+     viewId: Int?,
+   ): StaticLayout {
+-    measurePaint.textSize = fontSize
++    val paint = measurePaint.get()
++    paint.textSize = fontSize
+     return StaticLayout.Builder
+-      .obtain(text, 0, text.length, measurePaint, widthPx)
++      .obtain(text, 0, text.length, paint, widthPx)
+       .setIncludePad(false)
+       .setLineSpacing(0f, 1f)
+       .apply {
+@@ -502,8 +509,9 @@ object MeasurementStore {
+     return try {
+       val ast = Parser.shared.parseMarkdown(markdown, md4cFlags) ?: return null
+       val style = StyleConfig(styleMap, context, allowFontScaling, maxFontSizeMultiplier)
+-      measureRenderer.configure(style, context)
+-      measureRenderer.renderDocument(ast, null)
++      val renderer = measureRenderer.get()
++      renderer.configure(style, context)
++      renderer.renderDocument(ast, null)
+     } catch (e: Exception) {
+       Log.w(TAG, "Failed to render markdown for measurement, falling back to raw text", e)
+       null
+@@ -539,10 +547,11 @@ object MeasurementStore {
+     paintParams: PaintParams,
+     viewId: Int?,
+   ): Long {
+-    measurePaint.reset()
+-    measurePaint.typeface = paintParams.typeface
+-    measurePaint.textSize = paintParams.fontSize
+-    return measure(maxWidth, text, measurePaint, viewId)
++    val paint = measurePaint.get()
++    paint.reset()
++    paint.typeface = paintParams.typeface
++    paint.textSize = paintParams.fontSize
++    return measure(maxWidth, text, paint, viewId)
+   }
+ 
+   private fun measure(
+diff --git a/android/src/main/java/com/swmansion/enriched/markdown/renderer/SpanStyleCache.kt b/android/src/main/java/com/swmansion/enriched/markdown/renderer/SpanStyleCache.kt
+index ead3583..adb5b3b 100644
+--- a/android/src/main/java/com/swmansion/enriched/markdown/renderer/SpanStyleCache.kt
++++ b/android/src/main/java/com/swmansion/enriched/markdown/renderer/SpanStyleCache.kt
+@@ -3,6 +3,7 @@ package com.swmansion.enriched.markdown.renderer
+ import android.graphics.Typeface
+ import com.swmansion.enriched.markdown.styles.LinkVariantEntry
+ import com.swmansion.enriched.markdown.styles.StyleConfig
++import java.util.concurrent.ConcurrentHashMap
+ 
+ /** Shared style cache for spans to avoid redundant calculations. */
+ class SpanStyleCache(
+@@ -96,7 +97,14 @@ class SpanStyleCache(
+   }
+ 
+   companion object {
+-    private val typefaceCache = mutableMapOf<String, Typeface>()
++    // THREAD-SAFETY FIX: this process-global cache is read/written from both the
++    // Fabric measure thread pool and the UI thread. A plain LinkedHashMap can
++    // corrupt its bucket table under concurrent insert+resize and publish
++    // half-constructed Typeface entries, which later crashes natively in
++    // libminikin (SIGSEGV while shaping text). ConcurrentHashMap makes the
++    // cache safe for concurrent access; Kotlin's ConcurrentMap.getOrPut is
++    // backed by putIfAbsent, so concurrent misses stay consistent.
++    private val typefaceCache = ConcurrentHashMap<String, Typeface>()
+ 
+     /** Cached typeface for font family + style (BOLD, ITALIC, BOLD_ITALIC) */
+     fun getTypeface(
+diff --git a/android/src/main/java/com/swmansion/enriched/markdown/views/TableContainerView.kt b/android/src/main/java/com/swmansion/enriched/markdown/views/TableContainerView.kt
+index 49811a6..89ad799 100644
+--- a/android/src/main/java/com/swmansion/enriched/markdown/views/TableContainerView.kt
++++ b/android/src/main/java/com/swmansion/enriched/markdown/views/TableContainerView.kt
+@@ -17,9 +17,11 @@ import android.text.style.MetricAffectingSpan
+ import android.view.Gravity
+ import android.view.MotionEvent
+ import android.view.View
++import android.view.ViewConfiguration
+ import android.widget.FrameLayout
+ import android.widget.HorizontalScrollView
+ import androidx.core.view.ViewCompat
++import com.facebook.react.uimanager.events.NativeGestureUtil
+ import com.swmansion.enriched.markdown.accessibility.AccessibilityLabels
+ import com.swmansion.enriched.markdown.parser.MarkdownASTNode
+ import com.swmansion.enriched.markdown.parser.MarkdownASTNode.NodeType
+@@ -65,7 +67,7 @@ class TableContainerView(
+   var copyAsMarkdownLabel: String = ""
+ 
+   private val scrollView =
+-    HorizontalScrollView(context).apply {
++    TableHorizontalScrollView(context).apply {
+       isHorizontalScrollBarEnabled = true
+       overScrollMode = View.OVER_SCROLL_NEVER
+       importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+@@ -470,6 +472,124 @@ class TableContainerView(
+     }
+   }
+ 
++  /**
++   * GESTURE FIX: the table scrolls horizontally with a plain HorizontalScrollView,
++   * which is not enough inside a React Native tree.
++   *
++   * Two ancestors compete for the same touch stream: the chat row's Pressable
++   * (press / long-press) and the message list's ReactScrollView. Worse, every
++   * table cell's TextView calls `reallowParentInterceptIfLinkReleased()` on each
++   * MOVE it sees, and `requestDisallowInterceptTouchEvent(false)` propagates to
++   * every ancestor — so a drag that starts on cell text repeatedly clears the
++   * disallow flag mid-gesture and the list steals the drag. Whether the cell or
++   * this view sees the MOVE first is a race, which is why the scroll used to
++   * work only sometimes.
++   *
++   * So: claim tentatively on DOWN (before any cell can interfere), commit the
++   * claim once the drag is horizontal — cancelling the JS touch the same way the
++   * library does for link and checkbox taps — and yield as soon as the drag is
++   * vertical so the chat list still scrolls. `isClaimActive` lets the cells know
++   * not to undo the claim.
++   */
++  private class TableHorizontalScrollView(
++    context: Context,
++  ) : HorizontalScrollView(context) {
++    private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
++    private var downX = 0f
++    private var downY = 0f
++    private var horizontalClaimCommitted = false
++
++    /** True while this view owns the gesture; cells must not re-allow interception. */
++    var isClaimActive = false
++      private set
++
++    private val canScrollSideways: Boolean
++      get() = canScrollHorizontally(1) || canScrollHorizontally(-1)
++
++    override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
++      when (event.actionMasked) {
++        MotionEvent.ACTION_DOWN -> {
++          downX = event.x
++          downY = event.y
++          horizontalClaimCommitted = false
++          if (canScrollSideways) holdGesture()
++          return super.onInterceptTouchEvent(event)
++        }
++
++        MotionEvent.ACTION_MOVE -> {
++          if (horizontalClaimCommitted) return super.onInterceptTouchEvent(event)
++
++          val fingerDx = event.x - downX
++          val absDx = kotlin.math.abs(fingerDx)
++          val absDy = kotlin.math.abs(event.y - downY)
++          if (absDy > touchSlop && absDy >= absDx) {
++            releaseGesture(event)
++            return false
++          }
++          if (absDx <= touchSlop || absDx <= absDy) {
++            if (canScrollSideways) holdGesture()
++            return super.onInterceptTouchEvent(event)
++          }
++
++          // Finger left moves content toward the end (+1); finger right moves
++          // content toward the start (-1). Do not cancel the row/list gesture
++          // when this drag starts at an edge that cannot move any further.
++          val scrollDirection = if (fingerDx < 0f) 1 else -1
++          if (!canScrollHorizontally(scrollDirection)) {
++            releaseGesture(event)
++            return false
++          }
++
++          // React Native must only be told a native gesture started after the
++          // HorizontalScrollView itself confirms interception.
++          val intercepted = super.onInterceptTouchEvent(event)
++          if (intercepted) commitGesture(event) else holdGesture()
++          return intercepted
++        }
++
++        MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
++          val intercepted = super.onInterceptTouchEvent(event)
++          releaseGesture(event)
++          return intercepted
++        }
++
++        else -> return super.onInterceptTouchEvent(event)
++      }
++    }
++
++    override fun onTouchEvent(event: MotionEvent): Boolean {
++      val handled = super.onTouchEvent(event)
++      if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
++        releaseGesture(event)
++      }
++      return handled
++    }
++
++    /** Tentative: ancestors may not intercept yet, but JS still owns the touch. */
++    private fun holdGesture() {
++      isClaimActive = true
++      parent?.requestDisallowInterceptTouchEvent(true)
++    }
++
++    /** Committed: the drag is horizontal, so cancel the JS touch as well. */
++    private fun commitGesture(event: MotionEvent) {
++      horizontalClaimCommitted = true
++      holdGesture()
++      NativeGestureUtil.notifyNativeGestureStarted(this, event)
++    }
++
++    /** The gesture is vertical or finished — hand it back to the chat list. */
++    private fun releaseGesture(event: MotionEvent) {
++      if (!isClaimActive) return
++      isClaimActive = false
++      parent?.requestDisallowInterceptTouchEvent(false)
++      if (horizontalClaimCommitted) {
++        horizontalClaimCommitted = false
++        NativeGestureUtil.notifyNativeGestureEnded(this, event)
++      }
++    }
++  }
++
+   private class GridContainerView(
+     context: Context,
+   ) : FrameLayout(context) {
+@@ -555,10 +675,23 @@ class TableContainerView(
+       val result = super.onTouchEvent(event)
+       when (event.action) {
+         MotionEvent.ACTION_DOWN -> cancelJSTouchForLinkTap(event)
+-        else -> reallowParentInterceptIfLinkReleased()
++        // GESTURE FIX: `requestDisallowInterceptTouchEvent(false)` propagates to
++        // every ancestor, so doing it here while the table owns the gesture
++        // hands the drag straight back to the chat list mid-scroll.
++        else -> if (!isTableScrollClaimActive()) reallowParentInterceptIfLinkReleased()
+       }
+       return result
+     }
++
++    /** True when an enclosing table scroll view is driving this gesture. */
++    private fun isTableScrollClaimActive(): Boolean {
++      var node: android.view.ViewParent? = parent
++      while (node != null) {
++        if (node is TableHorizontalScrollView) return node.isClaimActive
++        node = node.parent
++      }
++      return false
++    }
+   }
+ 
+   private data class TableCellData(

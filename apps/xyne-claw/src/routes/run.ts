@@ -193,6 +193,7 @@ import {
   resolveTaskCommandMode,
 } from "../task-commands.js";
 import { createLogger } from "../logger.js";
+import { UI_TESTER_SANDBOX_TOOL_NAMES, buildUiTesterTools } from "../ui-tester/tools.js";
 import {
   buildPrefetchBlock,
   prefetchEnabled,
@@ -2196,6 +2197,16 @@ export async function processTask(
      *  loadable on demand and must never be always-active. */
     const paletteAdmittedNames = new Set<string>();
 
+    const uiTesterSandboxTools = customToolDefs.filter(
+      (t) => (t as { source?: string }).source === "custom:sandbox" && UI_TESTER_SANDBOX_TOOL_NAMES.has(t.name),
+    );
+    const uiTesterTools =
+      !fastModeEnabled &&
+      (toolsConfigEarly?.subagents ?? []).includes("ui-tester") &&
+      uiTesterSandboxTools.some((t) => t.name === "sandbox-run")
+        ? buildUiTesterTools(meta)
+        : [];
+
     const { subagentTools: builtSubagentTools, directTools, remainingCustomTools } = fastModeEnabled
       ? {
           subagentTools: [] as ToolDefinition[],
@@ -2207,7 +2218,7 @@ export async function processTask(
         }
       : buildSubagentTools(
           allGroups,
-          customToolDefs,
+          [...customToolDefs, ...uiTesterTools],
           resolvedTriggers.length > 0 ? resolvedTriggers : undefined,
           resolvedSubagentSkills,
           { parentProvider, subagentProviderMode, subagentProviders, providerConfigs },
@@ -2235,7 +2246,7 @@ export async function processTask(
             backgroundRegistry: childTaskRegistry,
             parentDebug: parentDebugHandle,
           },
-          undefined, // bonusToolsBySubagent — removed with the sandbox subagent
+          uiTesterTools.length > 0 ? { "ui-tester": uiTesterSandboxTools } : undefined,
           customSubagents,
           directPickSuffixes,
         );

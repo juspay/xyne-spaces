@@ -131,3 +131,25 @@ describe("subagent_direct_only", () => {
     expect(OPTIMIZATIONS.subagent_direct_only.defaultOn).toBe(false);
   });
 });
+
+describe("delegation-preferred subagents (ui-tester)", () => {
+  const uiTool = (name: string) => Object.assign(tool(name), { source: "custom:ui-tester" }) as ToolDefinition;
+  const uiTester = async (on: boolean): Promise<string> => {
+    pinRunOptimizations({ subagent_read_tools: on });
+    const { subagentTools } = buildSubagentTools([], [uiTool("ui-test-variations"), uiTool("visual-check")]);
+    return String(subagentTools.find((t) => t.name === "ui-tester")?.description ?? "");
+  };
+
+  it("is offered as the cheap path and never told to be skipped", async () => {
+    for (const on of [false, true]) {
+      const d = await uiTester(on);
+      expect(d.startsWith("[Subagent — runs on a cheap model; delegate this work instead of doing it yourself]")).toBe(true);
+      expect(d).not.toContain("call them yourself first");
+    }
+  });
+
+  it("survives subagent_direct_only", () => {
+    const tools = [{ name: "spaces" }, { name: "ui-tester" }, { name: "my-custom-researcher" }] as never[];
+    expect(withoutBuiltinSubagents(tools).map((t: { name: string }) => t.name)).toEqual(["ui-tester", "my-custom-researcher"]);
+  });
+});
