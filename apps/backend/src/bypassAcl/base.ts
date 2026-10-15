@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { logger } from '@/utils/logger';
 import { runAsSystem, runAsServiceActor } from '@/database/tenant/context';
 import type { Prisma } from '@prisma/client';
@@ -41,6 +42,20 @@ export interface TxCapableClient {
   $transaction<R>(fn: TxFn<R>, options?: TxOptions): Promise<R>;
 }
 
+/** Callbacks waiting for the enclosing transaction() to commit. */
+const pendingAfterCommit = new AsyncLocalStorage<Array<() => void>>();
+
+/**
+ * Runs `callback` once the enclosing transaction() commits, and never if it rolls back; outside
+ * a transaction, runs it now. For work that must see the committed rows, e.g. queueing an index
+ * job a worker may pick at once.
+ */
+export function afterCommit(callback: () => void): void {
+  const pending = pendingAfterCommit.getStore();
+  if (pending) pending.push(callback);
+  else callback();
+}
+
 export function transaction<T>(
   tables: TableName[],
   reason: string,
@@ -49,7 +64,23 @@ export function transaction<T>(
   options?: TxOptions,
 ): Promise<T> {
   recordBypass({ kind: 'transaction', tables, reason });
-  return options ? client.$transaction(fn, options) : client.$transaction(fn);
+  const run = () => (options ? client.$transaction(fn, options) : client.$transaction(fn));
+  // A transaction inside another one commits with it: the outer one runs the callbacks.
+  if (pendingAfterCommit.getStore()) return run();
+  const pending: Array<() => void> = [];
+  return pendingAfterCommit.run(pending, async () => {
+    const result = await run();
+    for (const callback of pending) {
+      pendingAfterCommit.exit(() => {
+        try {
+          callback();
+        } catch (error) {
+          logger.warn('[bypassAcl] after-commit callback failed', { error });
+        }
+      });
+    }
+    return result;
+  });
 }
 
 export function rawQuery<T>(tables: TableName[], reason: string, fn: () => Promise<T>): Promise<T> {

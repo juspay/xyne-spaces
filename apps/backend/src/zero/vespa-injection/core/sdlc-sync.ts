@@ -9,6 +9,8 @@ import {
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { vespaQueue } from '@/queues/vespaQueue';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { afterCommit } from '@/bypassAcl/base';
 import {
   channelSchema,
   fileSchema,
@@ -43,10 +45,6 @@ const sanitizeForLog = (value: string): string => value.replace(/[\u0000-\u001f\
 // the walk even if the links ever formed a cycle.
 const MAX_SUBTREE_CONTAINERS = 5000;
 
-// Jobs wait this long before a worker picks them: longer than the transaction that queued them
-// (writers queue from inside it) and than the mapper's hub cache (sdlc-index.ts), so a worker
-// always maps the change itself, never a hub it cached just before it.
-const SDLC_JOB_DELAY_MS = 3000;
 
 /** A hub edge (sdlc_entity_links row), as written or as it was before a delete. */
 export interface SdlcLink {
@@ -86,20 +84,43 @@ const PLACING_RELATIONS = new Set<string>([
   SDLC_TRACK_MEMBERSHIP_RELATION,
 ]);
 
+// Canvases created by the transaction running in this scope (withNewSdlcCanvases).
+const newCanvases = new AsyncLocalStorage<Set<string>>();
+
+/**
+ * Runs `fn`, a transaction that creates canvases, in a scope where markNewSdlcCanvas records them.
+ * A new canvas gets no SDLC file update from its own transaction's triggers: its content reaches
+ * Y-Sweet only after the commit, so an update mapped at once would fail, and the feed its creator
+ * queues after that already carries its SDLC fields (the mapper adds them).
+ */
+export function withNewSdlcCanvases<T>(fn: () => Promise<T>): Promise<T> {
+  return newCanvases.run(new Set(), fn);
+}
+
+/** Records a canvas the running withNewSdlcCanvases transaction just created. */
+export function markNewSdlcCanvas(canvasId: string): void {
+  newCanvases.getStore()?.add(canvasId);
+}
+
 /**
  * Queues the Vespa jobs an SDLC write affects. Fire-and-forget: indexing must never fail the
- * write. Safe to call inside the write's transaction: what it reads (which containers sit under
- * a folder, which tickets and discussions sit on a document) is not what the write changes, and
- * the jobs it queues run only after the delay above.
+ * write. Called from inside a write's transaction, it waits for the commit (afterCommit), so it
+ * reads the committed links and a worker that picks a job at once maps the change itself.
  */
 export function queueSdlcSearchJobs(hubId: string, change: SdlcSearchChange): void {
-  void (async () => {
-    const jobs = await jobsFor(hubId, change);
+  const created = new Set(newCanvases.getStore() ?? []);
+  afterCommit(() => void queueNow(hubId, change, created));
+}
+
+async function queueNow(hubId: string, change: SdlcSearchChange, created: ReadonlySet<string>): Promise<void> {
+  await (async () => {
+    const jobs = (await jobsFor(hubId, change))
+      .filter(job => !(job.schema === fileSchema && job.app === SubApp.CANVAS && created.has(job.docId)));
     if (!jobs.length) return;
     // Any process that writes SDLC rows can queue; one that has not started the queue starts it.
     if (!vespaQueue.isReady) await vespaQueue.initialize();
     for (const job of jobs) {
-      await vespaQueue.addJob(job, { delayMs: SDLC_JOB_DELAY_MS });
+      await vespaQueue.addJob(job);
     }
   })().catch(error => {
     logger.warn(`${TAG} could not queue Vespa jobs for hub ${sanitizeForLog(hubId)}`, {
