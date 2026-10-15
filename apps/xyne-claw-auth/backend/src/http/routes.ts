@@ -67,6 +67,8 @@ import { mailerliteOAuthRouter, mailerliteCallbackRouter } from "../routes/maile
 import { honeycombOAuthRouter, honeycombCallbackRouter } from "../routes/honeycomb-oauth.js";
 import { customerioOAuthRouter, customerioCallbackRouter } from "../routes/customerio-oauth.js";
 import { notionRemoteOAuthRouter, notionRemoteCallbackRouter } from "../routes/notion-remote-oauth.js";
+import { sentryRemoteOAuthRouter, sentryRemoteCallbackRouter } from "../routes/sentry-remote-oauth.js";
+import { mixpanelRemoteOAuthRouter, mixpanelRemoteCallbackRouter } from "../routes/mixpanel-remote-oauth.js";
 import { oauthTokenRouter } from "../routes/oauth-token.js";
 import { rapidApiLinkedInRouter } from "../routes/rapidapi-linkedin.js";
 import { scheduledJobsRouter } from "../routes/scheduled-jobs.js";
@@ -279,6 +281,10 @@ function mountOAuthProviders(app: Express): void {
   app.use(BASE, customerioCallbackRouter);
   app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, notionRemoteOAuthRouter);
   app.use(BASE, notionRemoteCallbackRouter);
+  app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, sentryRemoteOAuthRouter);
+  app.use(BASE, sentryRemoteCallbackRouter);
+  app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, mixpanelRemoteOAuthRouter);
+  app.use(BASE, mixpanelRemoteCallbackRouter);
   app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, rapidApiLinkedInRouter);
 }
 

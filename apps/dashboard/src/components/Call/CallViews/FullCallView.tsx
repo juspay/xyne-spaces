@@ -11,7 +11,7 @@ import { InvitationResponse, type RecordingType } from '@xyne/shared';
 import type { ParticipantInfo } from '../../../machines/roomMachine';
 import { roomActor } from '../../../machines/roomMachine';
 import { cn } from '../../../utils/classNames';
-import ThreadMessages from '../../Chat/ThreadPannel';
+import { APP_NO_DRAG_STYLE } from '../../../utils/electronApp';
 import { CallControls } from '../CallControls/CallControls';
 import { CallStateTransition } from '../CallStateTransition/CallStateTransition';
 import { ParticipantGrid } from '../ParticipantGrid/ParticipantGrid';
@@ -20,14 +20,12 @@ import { ScreenShareView } from '../ScreenShareView/ScreenShareView';
 import { ControlRequestDialog } from '../CallModals/ControlRequestDialog';
 import { ParticipantsSidebar } from '../ParticipantsSidebar/ParticipantsSidebar';
 import { ParticipantsPill } from '../ParticipantsPill/ParticipantsPill';
-import { CallNotesPanel } from '../CallNotesPanel/CallNotesPanel';
 import { getRingingInvitees, useIsDmCall } from '../ringStatus.utils';
 import { ConnectionStatusIndicators } from '../ConnectionStatusIndicators/ConnectionStatusIndicators';
 import { sendDrawEvent } from '../../../hooks/useDrawStore';
 import { useCallWhiteboardStore } from '../../../stores/callWhiteboardStore';
 import { useReactions } from '../hooks/useReactions';
 import { ReactionsOverlay } from '../components/ReactionsOverlay';
-import { CallChatPanel } from '../CallChatPanel/CallChatPanel';
 import { useCallChatNotifications } from '../hooks/useCallChatNotifications';
 import { recordingService } from '../../../services/Recording/recordingService';
 import { useActiveRecording, type ActiveRecording } from '../hooks/useActiveRecording';
@@ -35,11 +33,20 @@ import { RecordingStopDialog } from '../CallControls/RecordingStopDialog';
 import { CallPrivacyIndicator } from '../CallPrivacyIndicator/CallPrivacyIndicator';
 import { isScreenShareActive } from '../../../utils/livekitScreenShare';
 import { hasJoinedExternalParticipant } from '../callParticipant.utils';
-import { CallWhiteboardView } from '../CallWhiteboard';
 import { useAuth } from '../../../hooks/useAuth';
 import { useTelepresenceEnabled } from '../useTelepresenceEnabled';
 import { useAutoPresentationMode } from '../useAutoPresentationMode';
-import { PresentationModeOverlay } from '../PresentationMode/PresentationModeOverlay';
+import {
+  LazyCallChatPanel,
+  LazyCallNotesPanel,
+  LazyCallWhiteboardView,
+  LazyPresentationModeOverlay,
+  LazyThreadMessages,
+  MountOnceOpen,
+  PanelBoundary,
+  PanelLoading,
+  preloadPresentationModeOverlay,
+} from '../lazyPanels';
 import { formatElapsedTime } from '../../../utils/recordingUtils';
 import { logger, Event } from '../../../utils/logger';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -183,6 +190,11 @@ export function FullCallView({
   const { user } = useAuth();
   const { isElectron, isMac } = usePlatform();
   const isTelepresenceEnabled = useTelepresenceEnabled(user?.email);
+  // The present button is shown: fetch the overlay now, so a click on it can
+  // still go full screen (see preloadPresentationModeOverlay).
+  useEffect(() => {
+    if (isTelepresenceEnabled) preloadPresentationModeOverlay();
+  }, [isTelepresenceEnabled]);
 
   // UI state
   const [focusedScreenShareIdentity, setFocusedScreenShareIdentity] = useState<string | null>(null);
@@ -490,14 +502,16 @@ export function FullCallView({
   const renderStage = (): React.ReactElement => {
     if (isWhiteboardOpen) {
       return (
-        <CallWhiteboardView
-          participants={participants}
-          room={room}
-          className='h-full'
-          showSidebar={true}
-          aiController={aiController}
-          requestedAiController={requestedAiController}
-        />
+        <PanelBoundary key='whiteboard' fallback={<PanelLoading />}>
+          <LazyCallWhiteboardView
+            participants={participants}
+            room={room}
+            className='h-full'
+            showSidebar={true}
+            aiController={aiController}
+            requestedAiController={requestedAiController}
+          />
+        </PanelBoundary>
       );
     }
     if (focusedScreenShare) {
@@ -526,6 +540,10 @@ export function FullCallView({
     );
   };
 
+  // Each lazy panel gets its own keyed Suspense boundary. Unkeyed, React would
+  // reuse one boundary across panel switches, and a lazy panel's first render
+  // (which always suspends, even when preloaded) would hide the panel already
+  // showing there — tearing down its editor mid-life.
   const renderPanel = (): React.ReactNode => {
     switch (activePanel) {
       case 'participants':
@@ -550,26 +568,34 @@ export function FullCallView({
           />
         );
       case 'notes':
-        return <CallNotesPanel callId={callId} channelId={channelId} onClose={handleToggleNotes} />;
+        return (
+          <PanelBoundary key='notes' fallback={<PanelLoading />}>
+            <LazyCallNotesPanel callId={callId} channelId={channelId} onClose={handleToggleNotes} />
+          </PanelBoundary>
+        );
       case 'callChat':
         return (
-          <CallChatPanel
-            room={room}
-            externalId={callId}
-            localParticipantId={localParticipantId}
-            onClose={handleToggleCallChat}
-            onNewMessage={onCallChatNewMessage}
-            isExternalUser={isExternalUser}
-          />
+          <PanelBoundary key='callChat' fallback={<PanelLoading />}>
+            <LazyCallChatPanel
+              room={room}
+              externalId={callId}
+              localParticipantId={localParticipantId}
+              onClose={handleToggleCallChat}
+              onNewMessage={onCallChatNewMessage}
+              isExternalUser={isExternalUser}
+            />
+          </PanelBoundary>
         );
       case 'thread':
         return channelId && conversationId ? (
-          <ThreadMessages
-            channelId={channelId}
-            conversationId={conversationId}
-            ticketId={null}
-            onClose={handleToggleThread}
-          />
+          <PanelBoundary key='thread' fallback={<PanelLoading />}>
+            <LazyThreadMessages
+              channelId={channelId}
+              conversationId={conversationId}
+              ticketId={null}
+              onClose={handleToggleThread}
+            />
+          </PanelBoundary>
         ) : null;
       default:
         return null;
@@ -641,9 +667,14 @@ export function FullCallView({
             </span>
           )}
         </div>
-        {/* Meet's "you're presenting" reminder, with a one-click stop */}
+        {/* Meet's "you're presenting" reminder, with a one-click stop. The top strip
+            overlaps Electron drag regions of the page underneath (conversation header
+            etc.), so opt out explicitly or the click starts a window drag instead. */}
         {isScreenSharing && (
-          <div className='absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 items-center gap-3 rounded-full bg-[#333537] py-1 pl-3 pr-1 text-sm text-[#e3e3e3] md:flex'>
+          <div
+            className='absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 items-center gap-3 rounded-full bg-[#333537] py-1 pl-3 pr-1 text-sm text-[#e3e3e3] md:flex'
+            style={APP_NO_DRAG_STYLE}
+          >
             <MonitorUp className='h-4 w-4 text-[#a8c7fa]' />
             <span className='whitespace-nowrap'>You&apos;re presenting to everyone</span>
             <button
@@ -662,7 +693,7 @@ export function FullCallView({
             </button>
           </div>
         )}
-        <div className='flex items-center gap-2 sm:gap-3'>
+        <div className='flex items-center gap-2 sm:gap-3' style={APP_NO_DRAG_STYLE}>
           <ConnectionStatusIndicators room={room} hideWhenHealthy />
           <ParticipantsPill
             participants={participants}
@@ -786,12 +817,14 @@ export function FullCallView({
       )}
 
       {/* Presentation Mode Overlay — handles fullscreen + smooth fade transition */}
-      <PresentationModeOverlay
-        callId={callId}
-        isOpen={isPresentationMode}
-        participant={presentationParticipant ?? null}
-        onExit={() => setIsPresentationMode(false)}
-      />
+      <MountOnceOpen open={isPresentationMode}>
+        <LazyPresentationModeOverlay
+          callId={callId}
+          isOpen={isPresentationMode}
+          participant={presentationParticipant ?? null}
+          onExit={() => setIsPresentationMode(false)}
+        />
+      </MountOnceOpen>
     </div>
   );
 }

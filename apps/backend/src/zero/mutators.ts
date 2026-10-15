@@ -203,7 +203,7 @@ import { syncUserWorkload } from '@/utils/workloadUtils';
 import { ticketAssignmentService, primaryUserIdOf } from '@/services/ticketAssignmentService';
 import { calculateETADeadline, calculateWorkingDurationMs } from '@/utils/etaCalculation';
 import { DEFAULT_ROLE_NAME_TO_ENUM } from '@/utils/roleFrameworkUtils';
-import { grantPermissionsForRole, syncResourceAdminAccess, syncOrgResourceAdminAccess } from '@/services/permissionMatrix';
+import { reconcileUserPermissions, syncOrgResourceAdminAccess } from '@/services/permissionMatrix';
 import {
   deleteDraftEntityAttachments,
   deleteDelayedMessageEntityAttachments,
@@ -16314,7 +16314,7 @@ export function createMutators(
           }),
           timestamp: z.number(),
         }),
-        async ({ tx, args: { userId, workspaceId, updates, timestamp } }) => {
+        async ({ tx, args: { userId, updates, timestamp } }) => {
           // ACL check is handled by UsersACL
           await tx.mutate.users.update({
             id: userId,
@@ -16323,25 +16323,9 @@ export function createMutators(
           });
 
           if (updates.role !== undefined) {
-            if (updates.role === WorkspaceRole.ADMIN) {
-              // Promote: grant the full ADMIN permission matrix, same as invite-accept
-              // (grantPermissionsForRole), so "becomes an admin" is consistent regardless
-              // of whether the user was invited straight in as ADMIN or promoted later.
-              const user = await tx.run(zql.users.where('id', userId).one());
-              if (user) {
-                const { email } = user;
-                asyncTasks.push(() =>
-                  grantPermissionsForRole(userId, email, WorkspaceRole.ADMIN, workspaceId),
-                );
-              }
-            } else {
-              // Demote: only revoke WORKSPACE. Deliberately not a full matrix revoke —
-              // avoids stripping resource access that may have been granted independently
-              // via the Roles screen (no provenance tracking exists to tell them apart).
-              asyncTasks.push(() =>
-                syncResourceAdminAccess(userId, 'WORKSPACE', false, authData.sub, workspaceId),
-              );
-            }
+            // Promote or demote: reconcile the full resource set against the new role
+            // (and the user's org role), granting missing and revoking excess ADMIN access.
+            asyncTasks.push(() => reconcileUserPermissions(userId, authData.sub));
           }
         }
       ),
@@ -16424,6 +16408,9 @@ export function createMutators(
             joinedAt: timestamp,
             userId: 'deprecated-placeholder', // Deprecated field, kept for backward compatibility
           });
+
+          const ownerEmail = admin.email;
+          asyncTasks.push(() => syncOrgResourceAdminAccess(orgId, ownerEmail, authData.sub));
         },
       ),
     },
@@ -16580,6 +16567,9 @@ export function createMutators(
               userId: 'deprecated-placeholder', // Deprecated field, kept for backward compatibility
             });
           }
+
+          // The added/reactivated member may already have workspace user rows (matched by email)
+          asyncTasks.push(() => syncOrgResourceAdminAccess(orgId, email, authData.sub));
         },
       ),
       updateRole: defineMutator(
@@ -16598,10 +16588,9 @@ export function createMutators(
           if (updates.role !== undefined) {
             const member = await tx.run(zql.org_members.where('memberId', memberId).one());
             if (member) {
-              const shouldHaveAccess = updates.role === OrgRole.ADMIN || updates.role === OrgRole.OWNER;
               const { orgId, email } = member;
               asyncTasks.push(() =>
-                syncOrgResourceAdminAccess(orgId, email, shouldHaveAccess, authData.sub),
+                syncOrgResourceAdminAccess(orgId, email, authData.sub),
               );
             }
           }

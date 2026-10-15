@@ -136,45 +136,8 @@ import AppsScreen from './AppsScreen/AppsScreen';
 import AppsMarketplaceScreen from './AppsMarketplaceScreen/AppsMarketplaceScreen';
 import InitialStateLoader from '../providers/InitialStateLoader';
 import { ZeroFallbackProvider } from '../contexts/ZeroFallbackContext';
-import { InstrumentationProvider, type Instrumentation } from '@xyne/shared/hooks';
-import { logger } from '../utils/logger';
-import {
-  zeroQueryLatency,
-  zeroQueryOperations,
-  zeroMutationLatency,
-  zeroMutationOperations,
-  zeroRunLatency,
-  zeroRunOperations,
-  safeRecordMetric,
-} from '../services/otel';
-
-const dashboardInstrumentation: Instrumentation = {
-  logger,
-  metrics: {
-    recordLatency: (name: string, durationMs: number, attributes?: Record<string, string>) => {
-      safeRecordMetric(() => {
-        if (name === 'zero.query.latency') {
-          zeroQueryLatency.record(durationMs, attributes);
-        } else if (name === 'zero.mutation.latency') {
-          zeroMutationLatency.record(durationMs, attributes);
-        } else if (name === 'zero.run.latency') {
-          zeroRunLatency.record(durationMs, attributes);
-        }
-      });
-    },
-    incrementCounter: (name: string, attributes?: Record<string, string>) => {
-      safeRecordMetric(() => {
-        if (name === 'zero.query.operations') {
-          zeroQueryOperations.add(1, attributes);
-        } else if (name === 'zero.mutation.operations') {
-          zeroMutationOperations.add(1, attributes);
-        } else if (name === 'zero.run.operations') {
-          zeroRunOperations.add(1, attributes);
-        }
-      });
-    },
-  },
-};
+import { InstrumentationProvider } from '@xyne/shared/hooks';
+import { dashboardInstrumentation } from '../services/otel/dashboardInstrumentation';
 import { useSwipeBack } from '../hooks/useSwipeBack';
 import DmsPage from '../components/Chat/DirectMessages/DmsPage';
 import { KeyedComposeDmPanel } from '../components/Chat/AddDmForm/ComposeDmPanel';
