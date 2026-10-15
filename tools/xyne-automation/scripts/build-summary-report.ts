@@ -1,31 +1,121 @@
-#!/usr/bin/env node
+/** biome-ignore-all lint/suspicious/noConsole: CLI script intentionally uses console for output */
 // Self-contained HTML summary of a run, built from Gauge's json-report. Failures
 // (step, error, screenshot) up front; passing scenarios collapsed. No external assets,
 // so it can be posted anywhere as a single .html.
 //
-// Usage: node build-summary-report.mjs <artifactDir> [out.html]   (default: <artifactDir>/report.html)
-import fs from 'node:fs';
-import path from 'node:path';
+// Usage: ts-node --project tsconfig.json scripts/build-summary-report.ts <artifactDir> [out.html]
+//        (default out: <artifactDir>/report.html)
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+
+interface StepResult {
+  status?: string;
+  errorMessage?: string;
+  stackTrace?: string;
+  screenshot?: string;
+  ScreenshotFile?: string;
+}
+
+interface ReportItem {
+  itemType?: string;
+  stepText?: string;
+  result?: StepResult;
+  steps?: Array<{ stepText?: string; result?: StepResult }>;
+}
+
+interface Scenario {
+  scenarioHeading: string;
+  executionStatus: string;
+  executionTime: number;
+  retriesCount?: number;
+  contexts?: ReportItem[];
+  items?: ReportItem[];
+  teardowns?: ReportItem[];
+  beforeScenarioHookFailure?: StepResult;
+  afterScenarioHookFailure?: StepResult;
+}
+
+interface Spec {
+  fileName: string;
+  specHeading?: string;
+  executionStatus?: string;
+  executionTime: number;
+  scenarios?: Scenario[];
+}
+
+interface GaugeResult {
+  specResults?: Spec[];
+  beforeSuiteHookFailure?: StepResult;
+  afterSuiteHookFailure?: StepResult;
+  timestamp?: string;
+  tags?: string;
+  executionTime: number;
+  skippedScenariosCount?: number;
+}
+
+interface RunMetadata {
+  commitHash?: string;
+  mode?: string;
+}
+
+interface RetryRecovery {
+  retriedAtEnd: string[];
+  stillFailing: string[];
+}
+
+type Failure = StepResult & { step?: string };
 
 const artifactDir = process.argv[2];
-if (!artifactDir) { console.error('usage: build-summary-report.mjs <artifactDir> [out.html]'); process.exit(2); }
+if (!artifactDir) {
+  console.error('usage: build-summary-report.ts <artifactDir> [out.html]');
+  process.exit(2);
+}
 const outFile = process.argv[3] ?? path.join(artifactDir, 'report.html');
-const result = JSON.parse(fs.readFileSync(path.join(artifactDir, 'json-report', 'result.json'), 'utf8'));
-const meta = readJson(path.join(artifactDir, 'run-metadata.json')) ?? {};
+
+function readJson<T>(p: string): T | null {
+  try {
+    return JSON.parse(fs.readFileSync(p, 'utf8')) as T;
+  } catch {
+    return null;
+  }
+}
+
+const result = JSON.parse(
+  fs.readFileSync(path.join(artifactDir, 'json-report', 'result.json'), 'utf8')
+) as GaugeResult;
+const meta = readJson<RunMetadata>(path.join(artifactDir, 'run-metadata.json')) ?? {};
 // Written by run-gauge.ts: scenarios re-run after the main pass, as "<spec>:<line>". Anything
 // in retriedAtEnd but not stillFailing recovered, and result.json still says "failed" for it.
-const recovery = readJson(path.join(artifactDir, 'retry-recovery.json')) ?? { retriedAtEnd: [], stillFailing: [] };
-const specOf = (item) => item.replace(/:\d+$/, '');
-const inList = (list, spec) => list.map(specOf).some((p) => spec.fileName.endsWith(p));
-const recoveredAtEnd = (spec, sc) => sc.executionStatus === 'failed' && inList(recovery.retriedAtEnd, spec) && !inList(recovery.stillFailing, spec);
+const recovery = readJson<RetryRecovery>(path.join(artifactDir, 'retry-recovery.json')) ?? {
+  retriedAtEnd: [],
+  stillFailing: [],
+};
+const specOf = (item: string): string => item.replace(/:\d+$/, '');
+const inList = (list: string[], spec: Spec): boolean =>
+  list.map(specOf).some((p) => spec.fileName.endsWith(p));
+const recoveredAtEnd = (spec: Spec, sc: Scenario): boolean =>
+  sc.executionStatus === 'failed' &&
+  inList(recovery.retriedAtEnd, spec) &&
+  !inList(recovery.stillFailing, spec);
 
-function readJson(p) { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; } }
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const ms = (n) => (n >= 60000 ? `${Math.floor(n / 60000)}m ${Math.round((n % 60000) / 1000)}s` : n >= 1000 ? `${(n / 1000).toFixed(1)}s` : `${n}ms`);
-const specName = (s) => s.specHeading || path.basename(s.fileName);
+const HTML_ESCAPES: Record<string, string> = {
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+  "'": '&#39;',
+};
+const esc = (s: unknown): string => String(s ?? '').replace(/[&<>"']/g, (c) => HTML_ESCAPES[c]);
+const ms = (n: number): string =>
+  n >= 60000
+    ? `${Math.floor(n / 60000)}m ${Math.round((n % 60000) / 1000)}s`
+    : n >= 1000
+      ? `${(n / 1000).toFixed(1)}s`
+      : `${n}ms`;
+const specName = (s: Spec): string => s.specHeading || path.basename(s.fileName);
 
 // Gauge stores screenshots as files (ScreenshotFile) in html-report/images, or inline base64 (screenshot).
-function screenshotDataUri(r) {
+function screenshotDataUri(r: StepResult): string | null {
   if (r.screenshot) return `data:image/png;base64,${r.screenshot}`;
   if (!r.ScreenshotFile) return null;
   for (const dir of ['html-report/images', 'screenshots', '.gauge/screenshots']) {
@@ -35,52 +125,78 @@ function screenshotDataUri(r) {
   return null;
 }
 
-function failuresOf(scenario) {
-  const out = [];
-  for (const it of [...(scenario.contexts ?? []), ...(scenario.items ?? []), ...(scenario.teardowns ?? [])]) {
-    if (it.itemType === 'step' && it.result?.status === 'failed') out.push({ step: it.stepText, ...it.result });
-    if (it.itemType === 'concept') for (const s of it.steps ?? []) if (s.result?.status === 'failed') out.push({ step: s.stepText, ...s.result });
+function failuresOf(scenario: Scenario): Failure[] {
+  const out: Failure[] = [];
+  for (const it of [
+    ...(scenario.contexts ?? []),
+    ...(scenario.items ?? []),
+    ...(scenario.teardowns ?? []),
+  ]) {
+    if (it.itemType === 'step' && it.result?.status === 'failed')
+      out.push({ step: it.stepText, ...it.result });
+    if (it.itemType === 'concept')
+      for (const s of it.steps ?? [])
+        if (s.result?.status === 'failed') out.push({ step: s.stepText, ...s.result });
   }
-  for (const k of ['beforeScenarioHookFailure', 'afterScenarioHookFailure']) if (scenario[k]) out.push({ step: k, ...scenario[k] });
+  for (const k of ['beforeScenarioHookFailure', 'afterScenarioHookFailure'] as const) {
+    const hookFailure = scenario[k];
+    if (hookFailure) out.push({ step: k, ...hookFailure });
+  }
   return out;
 }
 
 const specs = result.specResults ?? [];
 const allScenarios = specs.flatMap((s) => (s.scenarios ?? []).map((sc) => ({ spec: s, sc })));
 // retriesCount counts attempts: 1 = passed first time.
-const failed = allScenarios.filter(({ spec, sc }) => sc.executionStatus === 'failed' && !recoveredAtEnd(spec, sc));
-const retried = allScenarios.filter(({ spec, sc }) => (sc.retriesCount ?? 1) > 1 || recoveredAtEnd(spec, sc));
-const status = failed.length === 0 && !result.beforeSuiteHookFailure && !result.afterSuiteHookFailure ? 'passed' : 'failed';
-const passedCount = allScenarios.length - failed.length - allScenarios.filter(({ sc }) => sc.executionStatus === 'skipped').length;
-const hookFailures = ['beforeSuiteHookFailure', 'afterSuiteHookFailure'].filter((k) => result[k]).map((k) => ({ where: k, ...result[k] }));
+const failed = allScenarios.filter(
+  ({ spec, sc }) => sc.executionStatus === 'failed' && !recoveredAtEnd(spec, sc)
+);
+const retried = allScenarios.filter(
+  ({ spec, sc }) => (sc.retriesCount ?? 1) > 1 || recoveredAtEnd(spec, sc)
+);
+const status =
+  failed.length === 0 && !result.beforeSuiteHookFailure && !result.afterSuiteHookFailure
+    ? 'passed'
+    : 'failed';
+const passedCount =
+  allScenarios.length -
+  failed.length -
+  allScenarios.filter(({ sc }) => sc.executionStatus === 'skipped').length;
+const hookFailures = (['beforeSuiteHookFailure', 'afterSuiteHookFailure'] as const)
+  .filter((k) => result[k])
+  .map((k) => ({ where: k, ...result[k] }));
 
-const failureBlock = (spec, sc) => failuresOf(sc).map((f) => {
-  const shot = screenshotDataUri(f);
-  return `<div class="fail">
+const failureBlock = (spec: Spec, sc: Scenario): string =>
+  failuresOf(sc)
+    .map((f) => {
+      const shot = screenshotDataUri(f);
+      return `<div class="fail">
     <div class="crumb">${esc(specName(spec))} › <b>${esc(sc.scenarioHeading)}</b></div>
     <div class="step">✗ ${esc(f.step)}</div>
     ${f.errorMessage ? `<pre class="err">${esc(f.errorMessage.trim())}</pre>` : ''}
     ${shot ? `<a href="${shot}" target="_blank"><img class="shot" src="${shot}" alt="screenshot"></a>` : ''}
     ${f.stackTrace ? `<details><summary>stack trace</summary><pre class="stack">${esc(f.stackTrace.trim())}</pre></details>` : ''}
   </div>`;
-}).join('');
+    })
+    .join('');
 
-const scenarioRow = (spec, sc) => {
+const scenarioRow = (spec: Spec, sc: Scenario): string => {
   const st = recoveredAtEnd(spec, sc) ? 'passed' : sc.executionStatus;
   const attempts = (sc.retriesCount ?? 1) - 1 + (recoveredAtEnd(spec, sc) ? 1 : 0);
   return `<li class="${st}">${st === 'passed' ? '✓' : st === 'failed' ? '✗' : '–'} ${esc(sc.scenarioHeading)}<span class="t">${ms(sc.executionTime)}</span>${attempts > 0 ? `<span class="badge warn">retried ×${attempts}</span>` : ''}</li>`;
 };
 
-const specBlock = (spec) => {
-  const scs = spec.scenarios ?? [], total = scs.length;
+const specBlock = (spec: Spec): string => {
+  const scs = spec.scenarios ?? [];
+  const total = scs.length;
   const failing = scs.filter((sc) => sc.executionStatus === 'failed' && !recoveredAtEnd(spec, sc));
-  const fails = failing.length, st = fails > 0 ? 'failed' : spec.executionStatus === 'skipped' ? 'skipped' : 'passed';
+  const fails = failing.length;
+  const st = fails > 0 ? 'failed' : spec.executionStatus === 'skipped' ? 'skipped' : 'passed';
   return `<details class="spec ${st}"${fails > 0 ? ' open' : ''}><summary><span class="dot"></span>${esc(specName(spec))}<span class="counts">${total - fails}/${total} passed</span><span class="t">${ms(spec.executionTime)}</span></summary>
     <ul>${scs.map((sc) => scenarioRow(spec, sc)).join('')}</ul>
     ${failing.map((sc) => failureBlock(spec, sc)).join('')}
   </details>`;
 };
-
 const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Automation report — ${esc(meta.commitHash ?? '')}</title>
 <style>
@@ -117,4 +233,6 @@ ${specs.map(specBlock).join('')}
 </body></html>`;
 
 fs.writeFileSync(outFile, html);
-console.log(`${outFile} (${(html.length / 1024).toFixed(0)} KB, ${failed.length} failed, ${retried.length} retried)`);
+console.log(
+  `${outFile} (${(html.length / 1024).toFixed(0)} KB, ${failed.length} failed, ${retried.length} retried)`
+);
