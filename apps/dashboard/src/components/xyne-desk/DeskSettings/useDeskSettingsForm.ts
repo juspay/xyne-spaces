@@ -25,7 +25,7 @@ import { useVisibleChannel } from '../../../hooks/useChannels';
 import { useChannelClawAgents } from '../../../hooks/useChannelClawAgents';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
-import { DEFAULT_PRIORITY_PROMPT } from './constants';
+import { DEFAULT_DUPLICATE_LOOKBACK_DAYS, DEFAULT_PRIORITY_PROMPT } from './constants';
 import { isGuestVisible } from '../DeskMetrics/guestVisibility';
 import type { SaveMappingPayload, ClassificationMapping } from '../../../types/classification';
 import {
@@ -241,6 +241,7 @@ export function useDeskSettingsForm(
     deskReportRangeDays: emailChannelPreference?.deskReportRangeDays ?? 1,
     duplicateDetectionEnabled: duplicateScopeServer?.enabled ?? false,
     duplicateScopeFieldIds: JSON.stringify(duplicateScopeServer?.scopeFieldGlobalIds ?? []),
+    duplicateLookbackDays: duplicateScopeServer?.lookbackDays ?? DEFAULT_DUPLICATE_LOOKBACK_DAYS,
   });
   const cls = useDraft({
     enabled: classificationConfig?.enabled ?? false,
@@ -274,6 +275,7 @@ export function useDeskSettingsForm(
   const appWebhookDeliveryEnabled = pref.draft.appWebhookDeliveryEnabled;
   const duplicateDetectionEnabled = pref.draft.duplicateDetectionEnabled;
   const duplicateScopeFieldIds = parseDuplicateScopeFieldIds(pref.draft.duplicateScopeFieldIds);
+  const duplicateLookbackDays = pref.draft.duplicateLookbackDays;
   const deskReportEnabled = pref.draft.deskReportEnabled;
   const deskReportAgentSlug = pref.draft.deskReportAgentSlug;
   const deskReportRangeDays = pref.draft.deskReportRangeDays;
@@ -332,6 +334,10 @@ export function useDeskSettingsForm(
       'duplicateScopeFieldIds',
       JSON.stringify(values.slice(0, MAX_DUPLICATE_SCOPE_FIELDS)),
     );
+  };
+  const setDuplicateLookbackDays = (days: number): void => {
+    if (!canManage) return;
+    pref.setField('duplicateLookbackDays', days);
   };
   const setDeskReportEnabled = (checked: boolean) => {
     if (!canManage) return;
@@ -484,11 +490,13 @@ export function useDeskSettingsForm(
       }
       if (
         d.duplicateDetectionEnabled !== s.duplicateDetectionEnabled ||
-        d.duplicateScopeFieldIds !== s.duplicateScopeFieldIds
+        d.duplicateScopeFieldIds !== s.duplicateScopeFieldIds ||
+        d.duplicateLookbackDays !== s.duplicateLookbackDays
       ) {
         patch.duplicateScopeConfig = {
           enabled: d.duplicateDetectionEnabled,
           scopeFieldGlobalIds: parseDuplicateScopeFieldIds(d.duplicateScopeFieldIds),
+          lookbackDays: d.duplicateLookbackDays,
         };
       }
 
@@ -628,6 +636,8 @@ export function useDeskSettingsForm(
     setDuplicateDetectionEnabled,
     duplicateScopeFieldIds,
     setDuplicateScopeFieldIds,
+    duplicateLookbackDays,
+    setDuplicateLookbackDays,
     deskReportEnabled,
     setDeskReportEnabled,
     deskReportAgentSlug,

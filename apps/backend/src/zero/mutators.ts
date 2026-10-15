@@ -133,6 +133,7 @@ import { SDLC_HUB_KNOWLEDGE_FOLDER, sdlcIconNameSchema, sdlcTrackStatusSchema } 
 import { isSdlcTreeItemType, refileSdlcFolderEdges } from '@xyne/shared';
 import {
   ChannelPublishedEntityType,
+  MAX_DUPLICATE_LOOKBACK_DAYS,
   MAX_DUPLICATE_SCOPE_FIELDS,
   MAX_PUBLISHED_APP_ID_LENGTH,
   MAX_PUBLISHED_APPS,
@@ -16908,6 +16909,7 @@ export function createMutators(
             .object({
               enabled: z.boolean(),
               scopeFieldGlobalIds: z.array(z.string()).max(MAX_DUPLICATE_SCOPE_FIELDS),
+              lookbackDays: z.number().int().min(0).max(MAX_DUPLICATE_LOOKBACK_DAYS).nullable().optional(),
             })
             .nullable()
             .optional(),
