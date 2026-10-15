@@ -10,7 +10,8 @@
  * overrides.
  */
 import { randomUUID } from 'crypto';
-import type { StorageAdapter, StorageFile, StorageScope } from '@xyne/workflow-sdk';
+import type { Readable } from 'node:stream';
+import type { StorageAdapter, StorageFile, StorageInfo, StorageScope } from '@xyne/workflow-sdk';
 import type { Attachment } from '@xyne/workflow-sdk/common';
 import { sanitizeFilename } from '@xyne/storage';
 import { getStorageService } from '@/services/storage';
@@ -22,6 +23,9 @@ import { logger } from '@/utils/logger';
  * attachments, recordings, avatars.
  */
 const KEY_PREFIX = 'workflows/attachments';
+
+/** One chunk in flight per upload. A multiple of 256 KiB, as GCS requires. */
+const UPLOAD_CHUNK_BYTES = 8 * 1024 * 1024;
 
 /**
  * Validate an incoming reference before it reaches the object store.
@@ -57,7 +61,7 @@ const workspaceOf = (scope: StorageScope | undefined): string | undefined =>
   (scope as { workspaceId?: string } | undefined)?.workspaceId;
 
 const assertAccessible = (ref: Attachment, scope: StorageScope | undefined, op: string): string => {
-  const { key, workspaceId } = parseOwnedKey(ref.data, op);
+  const { key, workspaceId } = parseOwnedKey(ref.handle, op);
   const caller = workspaceOf(scope);
   if (!caller) {
     throw new Error(
@@ -75,63 +79,80 @@ const assertAccessible = (ref: Attachment, scope: StorageScope | undefined, op: 
 
 export class WorkflowStorageAdapter implements StorageAdapter {
   /**
-   * Persist a file and return its reference.
+   * Stream a file into the bucket and return its reference.
    *
-   * The key carries the workspace so attachments are greppable and lifecycle-manageable
-   * per tenant, and a random segment so keys are unguessable — see the note on `read`
-   * about why that is load-bearing rather than cosmetic.
+   * The key carries the workspace so attachments are greppable and
+   * lifecycle-manageable per tenant, and a random segment so keys are
+   * unguessable.
    */
-  async store(scope: StorageScope, file: StorageFile): Promise<Attachment> {
+  async put(scope: StorageScope, file: StorageFile): Promise<Attachment> {
     const workspaceId = workspaceOf(scope);
     if (!workspaceId) {
       throw new Error(
-        'workflows storage: store has no scope — pass the caller (routes) or ' +
+        'workflows storage: put has no scope — pass the caller (routes) or ' +
           '`ctx.runtime.attributes` (steps)',
       );
     }
     const safeName = sanitizeFilename(file.name);
     const path = `${KEY_PREFIX}/${workspaceId}/${randomUUID()}-${safeName}`;
 
-    await getStorageService().uploadFileV2(Buffer.from(file.bytes), {
+    const result = await getStorageService().uploadStreamToPath(file.stream, {
       path,
+      // `contentType` only — the store serves it back on download. Whose the
+      // file is and what it was called are already in the key and in the
+      // Attachment, and a third copy would be read by nobody.
       contentType: file.mimeType,
-      metadata: { workspaceId, originalName: file.name },
+      // Bounded chunk: one in flight rather than a buffer sized to the upload.
+      resumable: true,
+      chunkSize: UPLOAD_CHUNK_BYTES,
     });
 
     logger.info(
-      `[WORKFLOWS-STORAGE] stored ${String(file.bytes.byteLength)} bytes for workspace ${workspaceId}`,
+      `[WORKFLOWS-STORAGE] streamed ${String(result.size)} bytes for workspace ${workspaceId}`,
     );
 
+    return { name: file.name, mimeType: file.mimeType, handle: path, size: result.size };
+  }
+
+  /**
+   * The object's bytes, to pipe. The scope is required, so a reference owned by
+   * another workspace is refused outright rather than relying on an unguessable
+   * key — which is all the `read` this replaces had.
+   */
+  async stream(ref: Attachment, scope: StorageScope): Promise<Readable> {
+    const key = assertAccessible(ref, scope, 'stream');
+    const body = await getStorageService().createReadStream(key);
+    return body as Readable;
+  }
+
+  /** Size and type from object metadata — null when it is gone. */
+  async info(ref: Attachment, scope: StorageScope): Promise<StorageInfo | null> {
+    const key = assertAccessible(ref, scope, 'info');
+    const head = await getStorageService().headObject(key);
+    if (!head) return null;
     return {
-      name: file.name,
-      mimeType: file.mimeType,
-      data: path,
-      size: file.bytes.byteLength,
+      size: head.size ?? ref.size ?? 0,
+      mimeType: head.contentType ?? ref.mimeType,
     };
   }
 
   /**
-   * Resolve a reference back to bytes.
+   * Remove the object.
    *
-   * NOTE — the contract gives `read` no scope, so this cannot verify the reference belongs
-   * to the *calling* workspace, only that it is a workflow attachment. A step that
-   * fabricated a reference to another tenant's key would be served it.
-   *
-   * What stands between that and a leak is the random segment in every key: references
-   * are only obtainable from workflow context, which the framework populates, and a key is
-   * not derivable from a workspace id. That is defence by unguessability rather than by
-   * authorization, which is worth knowing before this is relied on for anything sensitive.
-   * Closing it properly means either a scope on the contract or a signed reference.
+   * An absent scope means the system reclaiming its own write — a part orphaned
+   * by a later failure, a delivery the engine declined — where there is no
+   * caller to compare against. Structural validation still runs either way, so
+   * it can never reach outside the attachment prefix; only the tenant
+   * comparison is skipped. `stream` and `info` require a scope by signature.
    */
-  async read(ref: Attachment, scope?: StorageScope): Promise<Uint8Array> {
-    const key = assertAccessible(ref, scope, 'read');
-    const buffer = await getStorageService().getFileBuffer(key);
-    return new Uint8Array(buffer);
-  }
-
   async delete(ref: Attachment, scope?: StorageScope): Promise<void> {
-    const key = assertAccessible(ref, scope, 'delete');
+    const key = scope
+      ? assertAccessible(ref, scope, 'delete')
+      : parseOwnedKey(ref.handle, 'delete').key;
     await getStorageService().deleteFile(key);
     logger.info(`[WORKFLOWS-STORAGE] deleted ${key}`);
   }
 }
+
+/** Shared by the runtime and the multipart middleware, so both write the same keys. */
+export const workflowStorage = new WorkflowStorageAdapter();
