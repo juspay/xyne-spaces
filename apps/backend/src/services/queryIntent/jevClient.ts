@@ -13,7 +13,7 @@ import { config as envConfig } from '@/config/env';
  * index.ts must be re-tuned against whichever one is live.
  */
 
-/** A yes/no question. Jev also has `score`; add it when a caller needs one. */
+/** A yes/no question. */
 export interface JevNoulQuestion {
   type: 'noul';
   instructions: string;
@@ -27,7 +27,14 @@ export interface JevChoiceQuestion {
   criteria: Record<string, string>;
 }
 
-export type JevQuestion = JevNoulQuestion | JevChoiceQuestion;
+/** Where the state falls on ordered levels, lowest first (`criteria[0]` is the lowest). */
+export interface JevScoreQuestion {
+  type: 'score';
+  instructions: string;
+  criteria: string[];
+}
+
+export type JevQuestion = JevNoulQuestion | JevChoiceQuestion | JevScoreQuestion;
 
 export type JevAnswer =
   | { type: 'noul'; noul: number }
@@ -37,6 +44,15 @@ export type JevAnswer =
       /** Probability per option id. */
       probabilities: Record<string, number>;
       /** Jev's confidence in `choice`, when it gave one. */
+      confidence?: number;
+    }
+  | {
+      type: 'score';
+      /** 0 at the lowest level, 1 at the highest. */
+      score: number;
+      /** Index into `criteria` of the most likely level. */
+      level: number;
+      /** Jev's confidence in `level`, when it gave one. */
       confidence?: number;
     };
 
@@ -54,6 +70,39 @@ export const isPrivateJevConfigured = (): boolean =>
 
 const isProbability = (p: unknown): p is number => typeof p === 'number' && p >= 0 && p <= 1;
 
+/**
+ * Jev reports a score as the expected level index (0..n-1, e.g. 1.98 with 3 levels). Derived
+ * from the per-level probabilities when all are present, so it is right whichever endpoint
+ * answered; otherwise the index is rescaled.
+ */
+const readScore = (
+  question: JevScoreQuestion,
+  answer: Record<string, unknown>
+): JevAnswer | null => {
+  const top = question.criteria.length - 1;
+  if (top < 1 || typeof answer.score !== 'number' || !Number.isFinite(answer.score)) return null;
+
+  const raw = (answer.probabilities ?? {}) as Record<string, unknown>;
+  const probabilities = question.criteria.map((_, level) => raw[String(level)]);
+  const complete = probabilities.every(isProbability);
+  const total = complete ? probabilities.reduce((sum, p) => sum + p, 0) : 0;
+
+  const index =
+    complete && total > 0
+      ? probabilities.reduce((sum, p, level) => sum + level * p, 0) / total
+      : answer.score;
+  const score = Math.min(1, Math.max(0, index / top));
+  const level = complete
+    ? probabilities.indexOf(Math.max(...probabilities))
+    : Math.round(score * top);
+  const confidence = isProbability(answer.confidence)
+    ? answer.confidence
+    : complete
+      ? probabilities[level]
+      : undefined;
+  return { type: 'score', score, level, ...(confidence !== undefined ? { confidence } : {}) };
+};
+
 /** The answer to `question`, or null when Jev's reply for it is unusable. */
 const readAnswer = (question: JevQuestion, raw: unknown): JevAnswer | null => {
   if (!raw || typeof raw !== 'object') return null;
@@ -62,6 +111,8 @@ const readAnswer = (question: JevQuestion, raw: unknown): JevAnswer | null => {
   if (question.type === 'noul') {
     return isProbability(answer.noul) ? { type: 'noul', noul: answer.noul } : null;
   }
+
+  if (question.type === 'score') return readScore(question, answer);
 
   const choice = answer.choice;
   // Own keys only: `in` would also accept "constructor" and the like.

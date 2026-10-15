@@ -75,6 +75,7 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
   const form = useDeskSettingsForm(channelId, userID, open);
   const {
     isEmail,
+    isSocial,
     isCall,
     isDirty,
     saving,
@@ -105,8 +106,8 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
     if (isCall) {
       return tabs.filter(tab => ['assignment', 'Agent', 'history'].includes(tab.id));
     }
-    return isEmail ? tabs : tabs.filter(tab => tab.id !== 'automation');
-  }, [isCall, isEmail, canViewHistory]);
+    return isEmail || isSocial ? tabs : tabs.filter(tab => tab.id !== 'automation');
+  }, [isCall, isEmail, isSocial, canViewHistory]);
 
   useEffect(() => {
     if (!availableTabs.some(tab => tab.id === activeTab)) {
