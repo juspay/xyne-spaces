@@ -6,7 +6,7 @@ import {
   type EntityLinkOwner,
 } from '@xyne/shared';
 import { logger } from '@/utils/logger';
-import { queueSdlcSearchJobs } from '@/zero/vespa-injection/core/sdlc-sync';
+import type { SdlcSearchChanges } from '@/zero/vespa-injection/core/sdlc-sync';
 import { isCanvasInChannel, isTrackInChannel } from './sdlcChannelMembership';
 
 type Db = PrismaClient | Prisma.TransactionClient;
@@ -25,7 +25,8 @@ export type EnsureLinkInput = {
 export async function ensureLink(
   db: Db,
   link: EnsureLinkInput,
-  actor: EntityLinkActor
+  actor: EntityLinkActor,
+  changes: SdlcSearchChanges
 ): Promise<{ created: boolean }> {
   if (!link.channelId) {
     throw new Error('Entity links require a channelId');
@@ -35,7 +36,7 @@ export async function ensureLink(
     skipDuplicates: true,
   });
   // A new edge can place or link something in the hub's search entries.
-  if (result.count > 0) queueSdlcSearchJobs(link.channelId, { link });
+  if (result.count > 0) changes.push({ hubId: link.channelId, change: { link } });
   return { created: result.count > 0 };
 }
 
@@ -53,7 +54,8 @@ export async function refileFolderEdges(
     /** Where it sits now; null once it no longer sits anywhere. */
     parent: { type: 'TRACK' | 'FOLDER'; id: string } | null;
   },
-  actor: EntityLinkActor
+  actor: EntityLinkActor,
+  changes: SdlcSearchChanges
 ): Promise<void> {
   const { channelId, item, parent } = input;
   const folderEdges = { channelId, relationType: SDLC_FOLDER_FLAT_RELATION };
@@ -103,7 +105,7 @@ export async function refileFolderEdges(
     });
   }
   // Called whenever an item is filed, moved or unfiled, so its search entries follow.
-  queueSdlcSearchJobs(channelId, { moved: item });
+  changes.push({ hubId: channelId, change: { moved: item } });
 }
 
 /**
@@ -182,7 +184,8 @@ export async function linkCreatedEntities(
     conversationId?: string;
     ticketId?: string;
   },
-  actor: EntityLinkActor
+  actor: EntityLinkActor,
+  changes: SdlcSearchChanges
 ): Promise<void> {
   const { owner, channelId, conversationId, ticketId } = input;
 
@@ -217,7 +220,8 @@ export async function linkCreatedEntities(
           targetId: conversationId,
           relationType: 'DISCUSSION',
         },
-        actor
+        actor,
+        changes
       );
     }
   }
@@ -234,7 +238,8 @@ export async function linkCreatedEntities(
           targetId: ticketId,
           relationType: 'TICKET',
         },
-        actor
+        actor,
+        changes
       );
       const trackEdge = await db.sdlcEntityLink.findFirst({
         where: {
@@ -257,7 +262,8 @@ export async function linkCreatedEntities(
             targetId: ticketId,
             relationType: 'TRACK_ITEM',
           },
-          actor
+          actor,
+          changes
         );
       }
     } else {
@@ -274,7 +280,8 @@ export async function linkCreatedEntities(
             targetId: ticketId,
             relationType: 'TICKET',
           },
-          actor
+          actor,
+          changes
         );
       }
       const trackId =
@@ -292,7 +299,8 @@ export async function linkCreatedEntities(
             targetId: ticketId,
             relationType: 'TRACK_ITEM',
           },
-          actor
+          actor,
+          changes
         );
       }
     }

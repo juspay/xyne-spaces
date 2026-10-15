@@ -42,7 +42,7 @@ import { AppError } from '@/middleware/errorHandler';
 import { convertMarkdownToBlockNote } from '@/services/canvasService';
 import { logger } from '@/utils/logger';
 import { vespaQueue } from '@/queues/vespaQueue';
-import { queueSdlcSearchJobs } from '@/zero/vespa-injection/core/sdlc-sync';
+import { queueSdlcSearchJobs, withSdlcSearchSync, type SdlcSearchChanges } from '@/zero/vespa-injection/core/sdlc-sync';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { syncToYSweet } from '@/utils/ysweetUtils';
 import { commitAndSyncCanvasArtifact, readCanvasMarkdown } from './sdlcCanvasSync';
@@ -78,7 +78,8 @@ export async function linkRelatedCanvases(
   actor: SdlcActor,
   channelId: string,
   canvasId: string,
-  relatedCanvasIds: string[] | undefined
+  relatedCanvasIds: string[] | undefined,
+  changes: SdlcSearchChanges
 ): Promise<void> {
   const ids = [...new Set((relatedCanvasIds ?? []).filter(id => id !== canvasId))];
   if (ids.length === 0) return;
@@ -97,7 +98,8 @@ export async function linkRelatedCanvases(
         targetId: canvasId,
         relationType: 'CONTEXT',
       },
-      { workspaceId: actor.workspaceId, userId: actor.userId }
+      { workspaceId: actor.workspaceId, userId: actor.userId },
+      changes
     );
   }
 }
@@ -546,7 +548,7 @@ export class SdlcHubService implements SdlcHub {
     // No file/line verification: code links are free markdown, so a wrong path or range shows up as a broken link, not an error.
     const content = await convertMarkdownToBlockNote(input.markdown);
     const artifact = await commitAndSyncCanvasArtifact(
-      () => createArtifactFromClawTx(this, actor, input, content, channelId, folder, projectId, repo, hubKnowledge, trackFolderId, repoIds),
+      changes => createArtifactFromClawTx(this, actor, input, content, channelId, folder, projectId, repo, hubKnowledge, trackFolderId, repoIds, changes),
       syncToYSweet,
       actor.userId
     );
@@ -622,7 +624,7 @@ export class SdlcHubService implements SdlcHub {
   ): Promise<SdlcArtifact> {
     const content = await convertMarkdownToBlockNote(markdown);
     return commitAndSyncCanvasArtifact(
-      () => writeArtifactContentTx(this, actor, channelId, canvasId, content, extra),
+      changes => writeArtifactContentTx(this, actor, channelId, canvasId, content, extra, changes),
       syncToYSweet,
       actor.userId
     );
@@ -706,44 +708,47 @@ export class SdlcHubService implements SdlcHub {
     await this.requireLinkSource(repoId, hubChannelId, input.sourceType, input.sourceId);
     await this.requireAccessibleEntity(actor, input.targetType, input.targetId);
     try {
-      const link = await this.prisma.sdlcEntityLink.create({
-        data: {
-          ...input,
-          workspaceId: actor.workspaceId,
-          channelId: hubChannelId,
-          createdBy: actor.userId,
-        },
-      });
-      queueSdlcSearchJobs(hubChannelId, { link: input });
-      // Propagate the source artifact's track onto the ticket so the ticket shows
-      // under the same track (same TRACK_ITEM entity link we use for PRDs/Tech Docs).
-      if (input.targetType === 'TICKET' && input.sourceType === 'CANVAS') {
-        const trackLink = await this.prisma.sdlcEntityLink.findFirst({
-          where: {
+      return await withSdlcSearchSync(async changes => {
+        const link = await this.prisma.sdlcEntityLink.create({
+          data: {
+            ...input,
+            workspaceId: actor.workspaceId,
             channelId: hubChannelId,
-            sourceType: 'TRACK',
-            targetType: 'CANVAS',
-            targetId: input.sourceId,
-            relationType: SDLC_TRACK_FLAT_RELATION,
+            createdBy: actor.userId,
           },
-          select: { sourceId: true },
         });
-        if (trackLink) {
-          await ensureLink(
-            this.prisma,
-            {
+        changes.push({ hubId: hubChannelId, change: { link: input } });
+        // Propagate the source artifact's track onto the ticket so the ticket shows
+        // under the same track (same TRACK_ITEM entity link we use for PRDs/Tech Docs).
+        if (input.targetType === 'TICKET' && input.sourceType === 'CANVAS') {
+          const trackLink = await this.prisma.sdlcEntityLink.findFirst({
+            where: {
               channelId: hubChannelId,
               sourceType: 'TRACK',
-              sourceId: trackLink.sourceId,
-              targetType: 'TICKET',
-              targetId: input.targetId,
-              relationType: 'TRACK_ITEM',
+              targetType: 'CANVAS',
+              targetId: input.sourceId,
+              relationType: SDLC_TRACK_FLAT_RELATION,
             },
-            { workspaceId: actor.workspaceId, userId: actor.userId }
-          );
+            select: { sourceId: true },
+          });
+          if (trackLink) {
+            await ensureLink(
+              this.prisma,
+              {
+                channelId: hubChannelId,
+                sourceType: 'TRACK',
+                sourceId: trackLink.sourceId,
+                targetType: 'TICKET',
+                targetId: input.targetId,
+                relationType: 'TRACK_ITEM',
+              },
+              { workspaceId: actor.workspaceId, userId: actor.userId },
+              changes
+            );
+          }
         }
-      }
-      return link;
+        return link;
+      });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         throw new AppError('This SDLC relationship already exists', 409);

@@ -9,7 +9,6 @@ import {
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { vespaQueue } from '@/queues/vespaQueue';
-import { AsyncLocalStorage } from 'node:async_hooks';
 import {
   channelSchema,
   fileSchema,
@@ -83,36 +82,29 @@ const PLACING_RELATIONS = new Set<string>([
   SDLC_TRACK_MEMBERSHIP_RELATION,
 ]);
 
-// Changes reported while a withSdlcSearchSync write runs; it queues them once the write is done.
-const pending = new AsyncLocalStorage<{ changes: Array<{ hubId: string; change: SdlcSearchChange }>; done: boolean }>();
+/** The SDLC changes a write makes, each with the hub it was made in. */
+export type SdlcSearchChanges = Array<{ hubId: string; change: SdlcSearchChange }>;
 
 /**
- * Runs an SDLC write (a transaction, plus anything that must land before its entries are mapped,
- * like a new canvas's Y-Sweet content) and calls queueSdlcSearchJobs for the changes reported
- * during it once it is done: after the commit, so a worker that picks a job at once maps the
- * committed rows. If the write throws (the transaction rolled back), nothing is queued.
+ * Runs an SDLC write and then queues the Vespa jobs of the changes it made. The write gets an
+ * empty list and adds each change to it, itself or through the link helpers it passes the list
+ * to (ensureLink, refileFolderEdges, ...). Once the write is done, its transaction committed,
+ * every change is queued, so a worker that picks a job at once maps the committed rows. If the
+ * write throws, nothing is queued.
  */
-export async function withSdlcSearchSync<T>(write: () => Promise<T>): Promise<T> {
-  const outer = pending.getStore();
-  if (outer && !outer.done) return write(); // inside another write: that one queues
-  const scope = { changes: [] as Array<{ hubId: string; change: SdlcSearchChange }>, done: false };
-  const result = await pending.run(scope, write);
-  scope.done = true;
-  for (const { hubId, change } of scope.changes) queueSdlcSearchJobs(hubId, change);
+export async function withSdlcSearchSync<T>(write: (changes: SdlcSearchChanges) => Promise<T>): Promise<T> {
+  const changes: SdlcSearchChanges = [];
+  const result = await write(changes);
+  for (const { hubId, change } of changes) queueSdlcSearchJobs(hubId, change);
   return result;
 }
 
 /**
- * Queues the Vespa jobs an SDLC write affects. Fire-and-forget: indexing must never fail the
- * write. During a withSdlcSearchSync write it only notes the change, and that write queues it
- * when done; elsewhere (Zero side effects, which run after the commit) it queues at once.
+ * Queues the Vespa jobs of a committed SDLC change. Fire-and-forget: indexing must never fail
+ * the write. Called by withSdlcSearchSync once its write is done, and by the Zero side effects
+ * and other writes that have already committed.
  */
 export function queueSdlcSearchJobs(hubId: string, change: SdlcSearchChange): void {
-  const scope = pending.getStore();
-  if (scope && !scope.done) {
-    scope.changes.push({ hubId, change });
-    return;
-  }
   void (async () => {
     const jobs = await jobsFor(hubId, change);
     if (!jobs.length) return;
