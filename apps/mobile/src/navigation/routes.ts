@@ -23,6 +23,7 @@ export const TAB_NAMES = [
   'channels',
   'dms',
   'calls',
+  'feed',
   'activity',
   'more',
   'search',

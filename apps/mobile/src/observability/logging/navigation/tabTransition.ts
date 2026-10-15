@@ -1,6 +1,8 @@
 import { beginCriticalWindow, endCriticalWindow } from '@/src/utils/interactionCriticalWindow';
 
-export const TAB_SCREEN_NAMES = ['channels', 'dms', 'calls', 'activity', 'more'] as const;
+// Calls remains routable from More and call deep links, but is no longer shown
+// in the bottom bar. Keep it last so the five visible tabs retain their order.
+export const TAB_SCREEN_NAMES = ['channels', 'dms', 'feed', 'activity', 'more', 'calls'] as const;
 
 export type TabName = (typeof TAB_SCREEN_NAMES)[number];
 

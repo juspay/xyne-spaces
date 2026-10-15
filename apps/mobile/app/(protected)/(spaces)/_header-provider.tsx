@@ -8,7 +8,7 @@ import {
 } from '@/src/components/tab-pager/tab-pager-context';
 import type { TabName } from '@/src/observability/logging/navigation/tabTransition';
 
-const TAB_NAMES: readonly TabName[] = ['channels', 'dms', 'calls', 'activity', 'more'];
+const TAB_NAMES: readonly TabName[] = ['channels', 'dms', 'feed', 'calls', 'activity', 'more'];
 
 /**
  * Gives classic screens the pager context they still expect, inside the Spaces
@@ -28,12 +28,13 @@ export function SpacesHeaderProvider({ children }: { children: ReactNode }): Rea
   // so these are explicit rather than generated.
   const channels = useSharedValue(0);
   const dms = useSharedValue(0);
+  const feed = useSharedValue(0);
   const calls = useSharedValue(0);
   const activity = useSharedValue(0);
   const more = useSharedValue(0);
 
   const value = useMemo<TabPagerContextValue>(() => {
-    const headerScrollYs: TabHeaderScrollYs = { channels, dms, calls, activity, more };
+    const headerScrollYs: TabHeaderScrollYs = { channels, dms, feed, calls, activity, more };
     return {
       activeTab: 'dms',
       tabsGroupFocused: true,
@@ -41,7 +42,7 @@ export function SpacesHeaderProvider({ children }: { children: ReactNode }): Rea
       registerScrollToTop: () => () => {},
       headerScrollYs,
     };
-  }, [activity, calls, channels, dms, more]);
+  }, [activity, calls, channels, dms, feed, more]);
 
   return <TabPagerContext.Provider value={value}>{children}</TabPagerContext.Provider>;
 }

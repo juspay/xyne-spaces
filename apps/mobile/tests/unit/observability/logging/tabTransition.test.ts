@@ -7,6 +7,7 @@ import {
   completeTabTransition,
   getPendingTabTransition,
   isTabName,
+  TAB_SCREEN_NAMES,
 } from '@/src/observability/logging/navigation/tabTransition';
 
 describe('tabTransition', () => {
@@ -14,9 +15,13 @@ describe('tabTransition', () => {
     cancelPendingTabTransition();
   });
 
-  it('treats only the five tab routes as tab names', () => {
+  it('recognizes Feed and the Calls overflow route as tab names', () => {
+    assert.deepEqual(TAB_SCREEN_NAMES.slice(0, 5), ['channels', 'dms', 'feed', 'activity', 'more']);
+    assert.equal(TAB_SCREEN_NAMES[5], 'calls');
     assert.equal(isTabName('dms'), true);
     assert.equal(isTabName('channels'), true);
+    assert.equal(isTabName('feed'), true);
+    assert.equal(isTabName('calls'), true);
     assert.equal(isTabName('tabPress'), false);
     assert.equal(isTabName(null), false);
   });

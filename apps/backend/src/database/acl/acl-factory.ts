@@ -135,6 +135,25 @@ import {
 } from './tables'
 import { UserActivityEventsAcl } from './tables/user_activity_acl'
 
+// Feed likes, comments and reports have no workspaceId column; scope them through
+// their parent post. Feed routes write these tables through authenticated REST.
+class FeedPostChildACL extends BaseQueryACL {
+  async getWhereClause(): Promise<Record<string, unknown>> {
+    return { post: { workspaceId: this.ctx.workspaceId } }
+  }
+
+  async getMutateWhere(): Promise<Record<string, unknown>> {
+    return { post: { workspaceId: this.ctx.workspaceId } }
+  }
+
+  async canCreate(data: Record<string, unknown>): Promise<boolean> {
+    if (typeof data.postId !== 'string') return false
+    return (await this.prisma.feedPost.count({
+      where: { id: data.postId, workspaceId: this.ctx.workspaceId, deletedAt: null },
+    })) > 0
+  }
+}
+
 export class ACLFactory {
   static getACL(
     modelName: Uncapitalize<Prisma.ModelName>,
@@ -459,6 +478,13 @@ export class ACLFactory {
       return new EmailDraftsACL(ctx, prisma)
     case 'emailSignature':
       return new EmailSignaturesACL(ctx, prisma)
+    case 'feedPost':
+    case 'feedMedia':
+      return new BaseQueryACL(ctx, prisma)
+    case 'feedLike':
+    case 'feedComment':
+    case 'feedReport':
+      return new FeedPostChildACL(ctx, prisma)
     case 'externalMessage':
       return new BaseQueryACL(ctx, prisma)
     case 'externalSource':

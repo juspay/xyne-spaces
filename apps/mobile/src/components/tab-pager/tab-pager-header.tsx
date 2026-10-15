@@ -27,6 +27,10 @@ const TAB_HEADER: Record<TabName, TabHeaderConfig> = {
       initialTab: 'chats',
     },
   },
+  feed: {
+    title: 'Feed',
+    search: null,
+  },
   calls: {
     title: 'Calls',
     search: {
@@ -55,7 +59,9 @@ type TabPagerHeaderProps = {
  * stay put while lists swipe, and above the native tab chrome so those
  * buttons actually receive taps.
  */
-export function TabPagerHeader({ activeTab, scrollY }: TabPagerHeaderProps): ReactElement {
+export function TabPagerHeader({ activeTab, scrollY }: TabPagerHeaderProps): ReactElement | null {
+  // Feed owns its media-first header and compose action.
+  if (activeTab === 'feed') return null;
   const config = TAB_HEADER[activeTab];
 
   return (
