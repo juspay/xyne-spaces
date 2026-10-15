@@ -1,3 +1,17 @@
+## [1.489.4-release-20261012.2](https://github.com/juspay/xyne-spaces/compare/v1.489.4-release-20261012.1...v1.489.4-release-20261012.2) (2026-10-12)
+
+
+### Bug Fixes
+
+* testing fast build ([#2918](https://github.com/juspay/xyne-spaces/issues/2918)) ([ac5c1bc](https://github.com/juspay/xyne-spaces/commit/ac5c1bcc350848ee63f9112cac2e2d720eb0a399))
+
+## [1.489.4-release-20261012.1](https://github.com/juspay/xyne-spaces/compare/v1.489.3...v1.489.4-release-20261012.1) (2026-10-12)
+
+
+### Bug Fixes
+
+* fixing build because of dockerfile ([#2897](https://github.com/juspay/xyne-spaces/issues/2897)) ([a809a99](https://github.com/juspay/xyne-spaces/commit/a809a99776375373a81ee1b20786d285b516f2e3))
+
 ## [1.489.3](https://github.com/juspay/xyne-spaces/compare/v1.489.2...v1.489.3) (2026-10-11)
 
 
