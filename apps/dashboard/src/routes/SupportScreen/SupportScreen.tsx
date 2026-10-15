@@ -6123,6 +6123,21 @@ export const SupportTicketDetail = ({
                     </div>
                   )}
 
+                  {(emails.length > 0 || !!conversationId) && (
+                    <Tooltip content='Add to canvas' side='bottom'>
+                      <button
+                        type='button'
+                        onClick={() => setShowAddToCanvasDialog(true)}
+                        className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0'
+                        aria-label='Add to canvas'
+                        data-track-category='Support'
+                        data-track-name='AddThreadToCanvas'
+                      >
+                        <File02Plus size={18} />
+                      </button>
+                    </Tooltip>
+                  )}
+
                   {/* ··· overflow menu */}
                   <DropdownMenu
                     open={moreMenuOpen}
@@ -6241,16 +6256,6 @@ export const SupportTicketDetail = ({
                             <Wand2 size={14} className='shrink-0' />
                           )}
                           Summarize thread
-                        </DropdownMenuItem>
-                      )}
-                      {(emails.length > 0 || !!conversationId) && (
-                        <DropdownMenuItem
-                          onSelect={() => setShowAddToCanvasDialog(true)}
-                          data-track-category='Support'
-                          data-track-name='AddThreadToCanvas'
-                        >
-                          <File02Plus size={14} className='shrink-0' />
-                          Add to canvas
                         </DropdownMenuItem>
                       )}
                       <DropdownMenuItem
