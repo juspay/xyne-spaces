@@ -1,4 +1,4 @@
-import { ReplyAll, Split, Wand2, Archive, Plug, MailOpen, MoreHorizontal, Ban } from 'lucide-react';
+import { ReplyAll, Split, Archive, Plug, MailOpen, MoreHorizontal, Ban } from 'lucide-react';
 import {
   ChannelVisibility,
   ChannelType,
@@ -76,7 +76,6 @@ import {
   LinkChainHorizontal as LinkIcon,
   Settings02 as Settings,
   PlusDefault as Plus,
-  Spinner as Loader2,
   AlertCircle,
   UserThree as Users2,
   LockClose as Lock,
@@ -5819,11 +5818,6 @@ export const SupportTicketDetail = ({
   const [showEmailSummary, setShowEmailSummary] = useState(false);
   const emailSummaryAbortRef = useRef<AbortController | null>(null);
   const threadScrollRef = useRef<HTMLDivElement>(null);
-  const scrollThreadToTop = (): void => {
-    requestAnimationFrame(() => {
-      threadScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
-    });
-  };
   const composerOverlayRef = useRef<HTMLDivElement>(null);
   const [composerOverlayHeight, setComposerOverlayHeight] = useState<number>(96);
   useEffect(() => {
@@ -6132,29 +6126,8 @@ export const SupportTicketDetail = ({
                         aria-label='Open thread'
                         data-track-category='Support'
                         data-track-name='OpenThreadPanel'
-                        data-track-metadata={JSON.stringify(
-                          deskTicketTrackingMetadata(ticket, {
-                            deskType: channelPreference?.deskType ?? null,
-                            emailCount,
-                          }),
-                        )}
                       >
                         <PanelRight size={18} />
-                      </button>
-                    </Tooltip>
-                  )}
-
-                  {(emails.length > 0 || !!conversationId) && (
-                    <Tooltip content='Add to canvas' side='bottom'>
-                      <button
-                        type='button'
-                        onClick={() => setShowAddToCanvasDialog(true)}
-                        className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0'
-                        aria-label='Add to canvas'
-                        data-track-category='Support'
-                        data-track-name='AddThreadToCanvas'
-                      >
-                        <File02Plus size={18} />
                       </button>
                     </Tooltip>
                   )}
@@ -6234,33 +6207,6 @@ export const SupportTicketDetail = ({
                             <ChevronsUpDown size={14} className='shrink-0' />
                           )}
                           {emailCollapseState.anyExpanded ? 'Collapse all' : 'Expand all'}
-                        </DropdownMenuItem>
-                      )}
-                      {emails.length > 0 && (
-                        <DropdownMenuItem
-                          onSelect={() => {
-                            if (emailSummaryState === 'idle' || emailSummaryState === 'error') {
-                              setShowEmailSummary(true);
-                              scrollThreadToTop();
-                              void fetchEmailSummary();
-                            } else if (emailSummaryState === 'done') {
-                              setShowEmailSummary(prev => {
-                                const next = !prev;
-                                if (next) scrollThreadToTop();
-                                return next;
-                              });
-                            }
-                          }}
-                          disabled={emailSummaryState === 'loading'}
-                          data-track-category='Support'
-                          data-track-name='SummarizeEmailThread'
-                        >
-                          {emailSummaryState === 'loading' ? (
-                            <Loader2 size={14} className='animate-spin shrink-0' />
-                          ) : (
-                            <Wand2 size={14} className='shrink-0' />
-                          )}
-                          Summarize thread
                         </DropdownMenuItem>
                       )}
                       <DropdownMenuItem
@@ -6515,8 +6461,9 @@ export const SupportTicketDetail = ({
                   emailSummaryState === 'done' ||
                   emailSummaryState === 'error') && (
                   <div
-                    className='mb-4 rounded-2xl p-px'
+                    className='absolute right-6 z-10 w-[26rem] max-w-[calc(100%-3rem)] rounded-2xl p-px shadow-xl'
                     style={{
+                      bottom: composerOverlayHeight + 68,
                       background:
                         emailSummaryState === 'loading'
                           ? 'linear-gradient(135deg, #FFB3B3, #FFCECE, #FFC0C0, #FFB3B3)'
@@ -6589,7 +6536,7 @@ export const SupportTicketDetail = ({
                       </div>
 
                       {/* Content */}
-                      <div className='px-4 pb-3'>
+                      <div className='px-4 pb-3 max-h-[45vh] overflow-y-auto'>
                         {/* Loading state */}
                         {emailSummaryState === 'loading' && (
                           <div className='space-y-3'>
@@ -6698,6 +6645,55 @@ export const SupportTicketDetail = ({
                     </div>
                   </div>
                 )}
+              {emails.length > 0 && (
+                <Tooltip content='Summarize thread' side='left'>
+                  <button
+                    type='button'
+                    aria-label='Summarize thread'
+                    onClick={() => {
+                      if (emailSummaryState === 'idle' || emailSummaryState === 'error') {
+                        setShowEmailSummary(true);
+                        void fetchEmailSummary();
+                      } else {
+                        setShowEmailSummary(prev => !prev);
+                      }
+                    }}
+                    className='absolute right-6 z-10 flex size-11 items-center justify-center rounded-full text-white shadow-lg transition-transform hover:scale-105 active:scale-95'
+                    style={{
+                      bottom: composerOverlayHeight + 12,
+                      background: 'linear-gradient(135deg, #F87171, #FFB3B3)',
+                    }}
+                    data-track-category='Support'
+                    data-track-name='SummarizeEmailThread'
+                  >
+                    {emailSummaryState === 'loading' && (
+                      <span className='absolute inset-0 rounded-full bg-[#F87171] opacity-40 animate-ping' />
+                    )}
+                    <Sparkles
+                      size={20}
+                      className={cn(
+                        'relative',
+                        emailSummaryState !== 'loading' && 'animate-pulse [animation-duration:3s]',
+                      )}
+                    />
+                  </button>
+                </Tooltip>
+              )}
+              {(emails.length > 0 || !!conversationId) && (
+                <Tooltip content='Add to canvas' side='left'>
+                  <button
+                    type='button'
+                    aria-label='Add to canvas'
+                    onClick={() => setShowAddToCanvasDialog(true)}
+                    className='absolute right-20 z-10 flex size-11 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-lg transition-transform hover:scale-105 active:scale-95'
+                    style={{ bottom: composerOverlayHeight + 12 }}
+                    data-track-category='Support'
+                    data-track-name='AddThreadToCanvas'
+                  >
+                    <File02Plus size={20} />
+                  </button>
+                </Tooltip>
+              )}
               {channel?.type !== ChannelType.CHANNELS && emails && emails.length > 0 && (
                 <div className='mb-6'>
                   {isAppSourcedTicket ||

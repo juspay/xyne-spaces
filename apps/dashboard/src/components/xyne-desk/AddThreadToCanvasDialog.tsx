@@ -136,8 +136,7 @@ export const AddThreadToCanvasDialog = ({
     >
       <div className='p-6 flex flex-col gap-5'>
         <p className='text-sm text-muted-foreground'>
-          Generate a canvas from this ticket&apos;s thread in the desk channel. The canvas opens
-          right away and fills in as the agent finishes.
+          Create a knowledge base from this ticket&apos;s thread in the desk channel.
         </p>
 
         <div className='flex flex-col gap-2'>
@@ -158,7 +157,6 @@ export const AddThreadToCanvasDialog = ({
                 )}
                 data-track-category='Support'
                 data-track-name='AddThreadToCanvasScope'
-                data-track-metadata={JSON.stringify({ scope: option.value })}
               >
                 {option.label}
               </button>
@@ -256,11 +254,6 @@ export const AddThreadToCanvasDialog = ({
             loading={isSubmitting}
             data-track-category='Support'
             data-track-name='AddThreadToCanvasGenerate'
-            data-track-metadata={JSON.stringify({
-              scope,
-              labelCount: labels.length,
-              includeMerged: mergedCount > 0 ? includeMerged : undefined,
-            })}
           >
             Generate canvas
           </Button>
