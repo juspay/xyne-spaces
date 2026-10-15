@@ -19,7 +19,7 @@ import {
 const POLL_LIFECYCLE_CONCURRENCY = 3;
 const REMINDER_BATCH_SIZE = 25;
 
-export async function closePoll(pollId: string, now: Date = new Date()): Promise<void> {
+async function closePoll(pollId: string, now: Date = new Date()): Promise<void> {
   await db.poll.updateMany({
     where: { id: pollId, closedAt: null },
     data: { closedAt: now },
@@ -27,7 +27,7 @@ export async function closePoll(pollId: string, now: Date = new Date()): Promise
 }
 
 /** Reminds channel members who have not voted. Runs at most once per poll. */
-export async function remindPollNonVoters(pollId: string): Promise<void> {
+async function remindPollNonVoters(pollId: string): Promise<void> {
   const poll = await db.poll.findUnique({
     where: { id: pollId },
     select: {
@@ -125,7 +125,7 @@ export async function remindPollNonVoters(pollId: string): Promise<void> {
   }
 }
 
-export async function processPollLifecycleJob(data: PollLifecycleJobData): Promise<void> {
+async function processPollLifecycleJob(data: PollLifecycleJobData): Promise<void> {
   if (data.kind !== 'CLOSE' && data.kind !== 'REMIND') {
     throw new Error(`Unsupported poll lifecycle job kind: ${String(data.kind)}`);
   }

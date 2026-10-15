@@ -29,7 +29,7 @@ export interface ScheduledPollDeliveryResult {
   createdPoll: { id: string; closesAt: Date | null; remindAt: Date | null } | null;
 }
 
-export function scheduledPollIds(delayedMessageId: string): {
+function scheduledPollIds(delayedMessageId: string): {
   conversationId: string;
   messageId: string;
 } {

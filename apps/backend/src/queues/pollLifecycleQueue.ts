@@ -19,7 +19,7 @@ export interface PollLifecycleSchedule {
 }
 
 /** One job per poll and kind: Bull ignores an add whose jobId already exists. */
-export function pollLifecycleJobId(kind: PollLifecycleJobKind, pollId: string): string {
+function pollLifecycleJobId(kind: PollLifecycleJobKind, pollId: string): string {
   return `${kind === 'CLOSE' ? 'poll-close' : 'poll-remind'}:${pollId}`;
 }
 

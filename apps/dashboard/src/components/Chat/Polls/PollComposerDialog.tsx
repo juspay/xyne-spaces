@@ -45,7 +45,7 @@ const newQuestion = (): DraftQuestion => ({
   ],
 });
 
-export function resolvePollScheduleTime(
+function resolvePollScheduleTime(
   mode: TimingMode,
   custom: Date | null,
   baseTimestamp: number,
