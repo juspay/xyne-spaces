@@ -78,6 +78,8 @@ vi.mock("../db.js", () => ({
         orgId: "org-token",
       })),
     },
+    // isClawAdmin checks org membership; the token owner is not an admin here.
+    orgMember: { findUnique: vi.fn(async () => null) },
     agent: {
       findUnique: vi.fn(async (args: unknown) => {
         state.agentFindUniqueArgs = args;
@@ -139,6 +141,9 @@ vi.mock("../lib/agent-provider-config.js", () => ({
   // replaces the WHOLE module, so any unmocked import is undefined and the
   // handler 502s on a TypeError.
   resolveSubagentProviderMode: vi.fn(() => "spaces"),
+  // Per-run provisioned LiteLLM keys (user → org); none provisioned here.
+  resolveUserLitellmApiKey: vi.fn(async () => undefined),
+  resolveOrgLitellmApiKey: vi.fn(async () => undefined),
 }));
 
 vi.mock("xyne-claw-shared", async (importOriginal) => ({

@@ -57,7 +57,11 @@ vi.mock("../db.js", () => ({
         return null;
       }),
     },
-    mcpServer: { findUnique: vi.fn(async () => null), findFirst: vi.fn(async () => null) },
+    mcpServer: {
+      findUnique: vi.fn(async () => null),
+      // Org-scoped template lookup (findMcpServer) — the NULL-org global row.
+      findFirst: vi.fn(async (args: any) => ({ id: `srv-${args.where.type}`, type: args.where.type, orgId: null })),
+    },
     agentMcpConnection: {
       findFirst: vi.fn(async (args: any) => state.agentConnBySlug[args.where.slug ?? "default"] ?? null),
     },

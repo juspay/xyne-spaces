@@ -39,6 +39,9 @@ vi.mock("../db.js", () => ({
     userMcpConnection: {
       findFirst: vi.fn(async () => ({ id: "conn-1", encryptedCreds: "e", iv: "i", authTag: "t", mcpServer: {} })),
     },
+    // Org-scoped template lookup (findMcpServer) resolves the caller's org first.
+    user: { findUnique: vi.fn(async () => ({ orgId: "org-1" })) },
+    mcpServer: { findFirst: vi.fn(async (args: any) => ({ id: `srv-${args.where.type}`, type: args.where.type, orgId: null })) },
   },
 }));
 

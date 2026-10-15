@@ -301,6 +301,10 @@ describe("x-spaces-* header trust boundary", () => {
 
   it("keeps the verified S2S contract: a valid key may pin x-spaces-* identity", async () => {
     state.clawUserId = "claw-canonical-1";
+    // A pinned S2S identity must resolve to an org member (requireOrgContext).
+    const { prisma } = await import("../db.js");
+    vi.mocked(prisma.user.findUnique).mockResolvedValueOnce({ orgId: "org-1" } as never);
+    vi.mocked(prisma.orgMember.findUnique).mockResolvedValueOnce({ role: "MEMBER", leftAt: null } as never);
     const { requireAuth } = await import("./require-auth.js");
     const req = {
       headers: {
