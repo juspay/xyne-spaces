@@ -1,5 +1,5 @@
 import { Prisma } from '@prisma/client';
-import { AccessType, WorkspaceRole } from '@xyne/shared';
+import { AccessType, OrgRole, WorkspaceRole } from '@xyne/shared';
 import { logger } from '../utils/logger';
 import { repositories } from '../database/repositories/index';
 import { db } from '../database/client';
@@ -296,45 +296,129 @@ export async function syncResourceAdminAccess(
   }
 }
 
+const ORG_ADMIN_ROLES: readonly string[] = [OrgRole.OWNER, OrgRole.ADMIN];
+
+const MANAGED_RESOURCES: readonly ResourceName[] = [
+  ...new Set<ResourceName>([
+    ...Object.values(PERMISSION_MATRIX).flatMap((entries) => entries.map((e) => e.resourceName)),
+    'ORGANIZATIONS',
+  ]),
+];
+
+/**
+ * Bring a user's resource access in line with their current workspace role and org role.
+ * Workspace ADMIN/OWNER get the full ADMIN matrix (no ORGANIZATIONS); org ADMIN/OWNER
+ * additionally get ORGANIZATIONS. Missing grants are added and ADMIN rows on managed
+ * resources the user no longer qualifies for are revoked (WRITE/READ rows are left alone).
+ * Roles are read from the DB, so call this after the role change has committed.
+ * Error-swallowing, same fire-and-forget contract as syncResourceAdminAccess.
+ */
+export async function reconcileUserPermissions(
+  userId: string,
+  actorUserId: string
+): Promise<void> {
+  const logPrefix = '[reconcileUserPermissions]';
+
+  try {
+    const user = await withWorkspaceScope(() =>
+      db.user.findUnique({
+        where: { id: userId },
+        select: { id: true, email: true, role: true, workspaceId: true },
+      })
+    );
+    if (!user) {
+      logger.warn(`${logPrefix} User ${userId} not found. Skipping.`);
+      return;
+    }
+
+    const role = user.role as WorkspaceRole;
+    if (!(role in PERMISSION_MATRIX)) {
+      logger.warn(`${logPrefix} Unknown role "${user.role}" for user ${userId}. Skipping.`);
+      return;
+    }
+
+    const orgAdmin = await withWorkspaceScope(async () => {
+      const links = await db.workspaceOrganization.findMany({
+        where: { workspaceId: user.workspaceId, leftAt: null },
+        select: { orgId: true },
+      });
+      if (links.length === 0) return false;
+      const member = await db.orgMember.findFirst({
+        where: {
+          orgId: { in: links.map((l) => l.orgId) },
+          email: { equals: user.email, mode: 'insensitive' },
+          leftAt: null,
+        },
+        select: { role: true },
+      });
+      return !!member && ORG_ADMIN_ROLES.includes(member.role);
+    });
+
+    const adminResources = new Set<ResourceName>(
+      PERMISSION_MATRIX[role]
+        .filter((e) => e.accessType === AccessType.ADMIN)
+        .map((e) => e.resourceName)
+    );
+    if (orgAdmin) {
+      PERMISSION_MATRIX.OWNER.forEach((e) => adminResources.add(e.resourceName));
+      adminResources.add('ORGANIZATIONS');
+    }
+
+    await grantPermissionsForRole(user.id, user.email, role, user.workspaceId);
+    if (orgAdmin) {
+      await grantPermissionsForRole(user.id, user.email, WorkspaceRole.OWNER, user.workspaceId);
+    }
+    for (const resourceName of MANAGED_RESOURCES) {
+      await syncResourceAdminAccess(
+        user.id,
+        resourceName,
+        adminResources.has(resourceName),
+        actorUserId,
+        user.workspaceId
+      );
+    }
+  } catch (error) {
+    logger.error(`${logPrefix} Failed to reconcile permissions for user ${userId}:`, error);
+  }
+}
+
 /**
  * Org membership (org_members) has no live FK to `users` — it's matched by email.
  * A promoted/demoted org member may have a `users` row in any workspace linked to
- * their org, so resolve every matching workspace-user row and sync ORGANIZATIONS
- * ADMIN access on each. Error-swallowing, same fire-and-forget contract as its caller.
+ * their org, so resolve every matching workspace-user row and reconcile each one's
+ * resource access against its workspace role and the new org-admin status.
+ * Error-swallowing, same fire-and-forget contract as its caller.
  */
 export async function syncOrgResourceAdminAccess(
   orgId: string,
   email: string,
-  shouldHaveAccess: boolean,
-  actorUserId: string,
+  actorUserId: string
 ): Promise<void> {
   const logPrefix = '[syncOrgResourceAdminAccess]';
 
   try {
     // Org-wide by design: this fans out across every workspace in the org, so it runs
     // above the caller's own workspace scope.
-    await withWorkspaceScope(async () => {
+    const users = await withWorkspaceScope(async () => {
       const links = await db.workspaceOrganization.findMany({
         where: { orgId, leftAt: null },
         select: { workspaceId: true },
       });
-      if (links.length === 0) return;
+      if (links.length === 0) return [];
 
-      const users = await db.user.findMany({
+      return db.user.findMany({
         where: {
-          workspaceId: { in: links.map(l => l.workspaceId) },
+          workspaceId: { in: links.map((l) => l.workspaceId) },
           email: { equals: email, mode: 'insensitive' },
         },
-        select: { id: true, workspaceId: true },
+        select: { id: true },
       });
-
-      // A user may hold rows in several of the org's workspaces, so each grant uses that
-      // row's own workspaceId — already loaded here, rather than re-read per iteration.
-      for (const user of users) {
-        await syncResourceAdminAccess(user.id, 'ORGANIZATIONS', shouldHaveAccess, actorUserId, user.workspaceId);
-      }
     });
+
+    for (const user of users) {
+      await reconcileUserPermissions(user.id, actorUserId);
+    }
   } catch (error) {
-    logger.error(`${logPrefix} Failed to sync ORGANIZATIONS access for org ${orgId}, email ${email}:`, error);
+    logger.error(`${logPrefix} Failed to sync access for org ${orgId}, email ${email}:`, error);
   }
 }
