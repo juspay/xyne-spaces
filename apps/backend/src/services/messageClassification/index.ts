@@ -19,7 +19,7 @@ import { vespaQueue } from '@/queues/vespaQueue';
 import { messageSchema } from '@/vespa/src/types';
 import { buildClassifierPrompt, MAX_SOURCES_PER_TYPE } from './prompt';
 import { getThreadTypeVocabulary } from './vocabulary';
-import { runJevBeforeLlm } from './jev';
+import { runXorBeforeLlm } from './xor';
 
 const TAG = '[MessageClassification]';
 
@@ -595,13 +595,13 @@ async function classifyThread(
   workspaceId: string,
   modelName: string,
   vocabulary: readonly ThreadTypeEntry[],
-  /** For the Jev log only. */
+  /** For the XOR log only. */
   conversationId: string,
 ): Promise<Classification> {
-  // Jev, right before the model and on the very input the model is about to get. In
+  // XOR, right before the model and on the very input the model is about to get. In
   // replace mode its answer stands in for the model's; otherwise it is only compared.
-  const jev = await runJevBeforeLlm(input, vocabulary, { conversationId, workspaceId });
-  if (jev?.answer) return jev.answer;
+  const xor = await runXorBeforeLlm(input, vocabulary, { conversationId, workspaceId });
+  if (xor?.answer) return xor.answer;
 
   const classification = await classifyThreadWithLlm(
     input,
@@ -610,7 +610,7 @@ async function classifyThread(
     modelName,
     vocabulary,
   );
-  jev?.afterLlm(classification);
+  xor?.afterLlm(classification);
   return classification;
 }
 

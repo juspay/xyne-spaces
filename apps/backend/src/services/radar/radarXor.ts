@@ -8,10 +8,10 @@ import {
   type JevNoulQuestion,
 } from '@/services/queryIntent/jevClient';
 import {
-  logJevComparison,
-  logJevDecision,
-  logJevNoAnswer,
-} from '@/services/queryIntent/jevShadowLog';
+  logXorComparison,
+  logXorDecision,
+  logXorNoAnswer,
+} from '@/services/queryIntent/xorShadowLog';
 import type {
   ParsedTransitions,
   ParserInput,
@@ -19,36 +19,36 @@ import type {
 } from '@/services/radar/radarParser';
 
 /**
- * Jev for Radar's two parser calls, behind the radar_jev_* CAC switches (run / log / replace).
+ * XOR for Radar's two parser calls, behind the radar_xor_* CAC switches (run / log / replace).
  *
- * The two calls differ in what Jev can take over:
+ * The two calls differ in what XOR can take over:
  *
- *  - A WINDOW parse writes new items — titles, summaries, owners — and Jev writes no text,
+ *  - A WINDOW parse writes new items — titles, summaries, owners — and XOR writes no text,
  *    so it cannot replace that parse. What it can do is answer whether the window holds
  *    anything trackable at all. Most windows do not: the parser's own prompt calls an empty
  *    answer the normal one. Replacing means skipping the parse on a confident "no".
  *
  *  - A REACTION pass may only resolve, and only one of a short list of open items. That is
- *    a closed choice, so Jev answers it whole and replacing means no parser call at all.
+ *    a closed choice, so XOR answers it whole and replacing means no parser call at all.
  *
  * Called from radarParser.parseWindow right before the model, with the very input the
  * model is about to be sent, so both judge the same pass from the same facts.
  *
  * Where the data goes: the parser's input — messages from DMs and private channels
- * included — is sent to JEV_URL, which is TypeSafe's hosted Jev unless the env points
+ * included — is sent to JEV_URL, which is TypeSafe's hosted XOR unless the env points
  * elsewhere.
  *
- * Jev's yes/no answers are probabilities, so every decision below is a threshold on one.
+ * XOR's yes/no answers are probabilities, so every decision below is a threshold on one.
  * Switches and thresholds all come from CAC, like the desk run's shadow_tag_generation_*,
  * so rollout and tuning need no deploy:
- *   radar_jev_enabled / radar_jev_log_enabled / radar_jev_replace     (run, log, replace)
- *   radar_jev_window_skip_threshold, radar_jev_reaction_completion_threshold,
- *   radar_jev_reaction_item_threshold
+ *   radar_xor_enabled / radar_xor_log_enabled / radar_xor_replace     (run, log, replace)
+ *   radar_xor_window_skip_threshold, radar_xor_reaction_completion_threshold,
+ *   radar_xor_reaction_item_threshold
  * The thresholds are only valid for the JEV_MODEL they were tuned on.
  */
 
 interface Thresholds {
-  /** A window Jev rates at or below this is skipped without a parse. Deliberately low: a
+  /** A window XOR rates at or below this is skipped without a parse. Deliberately low: a
    *  skipped real ask is never tracked, while an unneeded parse only costs a call. */
   windowSkip: number;
   /** The reaction's emoji must assert completion at least this strongly… */
@@ -58,7 +58,7 @@ interface Thresholds {
   reactionItem: number;
 }
 
-const JEV_TIMEOUT_MS = 8_000;
+const XOR_TIMEOUT_MS = 8_000;
 
 /** The option standing for "this reaction settles nothing". Not a possible item id. */
 const NONE = 'none';
@@ -92,7 +92,7 @@ const WINDOW_QUESTION: JevNoulQuestion = {
 async function checkWindow(input: ParserInput, thresholds: Thresholds): Promise<WindowCheck> {
   try {
     let failure: JevFailure | undefined;
-    const answers = await askJev({ ...input }, { trackable: WINDOW_QUESTION }, JEV_TIMEOUT_MS, undefined, {
+    const answers = await askJev({ ...input }, { trackable: WINDOW_QUESTION }, XOR_TIMEOUT_MS, undefined, {
       onFailure: f => {
         failure = f;
       },
@@ -172,7 +172,7 @@ async function checkReaction(input: ParserInput, thresholds: Thresholds): Promis
     };
 
     let failure: JevFailure | undefined;
-    const answers = await askJev({ ...input }, { completion, settles }, JEV_TIMEOUT_MS, undefined, {
+    const answers = await askJev({ ...input }, { completion, settles }, XOR_TIMEOUT_MS, undefined, {
       onFailure: f => {
         failure = f;
       },
@@ -205,7 +205,7 @@ async function checkReaction(input: ParserInput, thresholds: Thresholds): Promis
               op: 'resolve',
               itemId: s.choice,
               sourceMessageId: message.id,
-              reason: `Jev: ${emoji} asserts completion of this item (${scores}).`,
+              reason: `XOR: ${emoji} asserts completion of this item (${scores}).`,
             },
           ]
         : [],
@@ -213,18 +213,18 @@ async function checkReaction(input: ParserInput, thresholds: Thresholds): Promis
       itemId: s.choice,
       itemProbability,
       // The run log's one-line read, so "I reacted and nothing happened" stays answerable
-      // in the debug panel when Jev decided it.
+      // in the debug panel when XOR decided it.
       assessment: resolves
-        ? `Jev: ${emoji} settles an item (${scores}).`
-        : `Jev: ${emoji} settles nothing (${scores}).`,
+        ? `XOR: ${emoji} settles an item (${scores}).`
+        : `XOR: ${emoji} settles nothing (${scores}).`,
     };
   } catch (error) {
     return { ok: false, reason: error instanceof Error ? error.name : 'unknown' };
   }
 }
 
-export interface JevBeforeLlm {
-  /** Replace mode's answer, when Jev gave one: return it instead of calling the model. */
+export interface XorBeforeLlm {
+  /** Replace mode's answer, when XOR gave one: return it instead of calling the model. */
   answer: ParsedTransitions | null;
   /** Hand it the model's answer once the model has run, to log the two side by side. */
   afterLlm(llm: ParsedTransitions): void;
@@ -237,7 +237,7 @@ const resolvedIds = (transitions: ParsedTransitions): string[] =>
 
 interface LogContext {
   meta: Record<string, unknown> & { conversationId: string };
-  /** Size of what Jev was sent, for the log. */
+  /** Size of what XOR was sent, for the log. */
   stateChars: number;
 }
 
@@ -249,10 +249,10 @@ const noAnswer = (
   level: 'info' | 'warn',
   note?: string,
 ): void =>
-  logJevNoAnswer(tag, ctx.meta.conversationId, {
+  logXorNoAnswer(tag, ctx.meta.conversationId, {
     failure: check.failure,
     reason: check.reason,
-    timeoutMs: JEV_TIMEOUT_MS,
+    timeoutMs: XOR_TIMEOUT_MS,
     stateChars: ctx.stateChars,
     categories,
     meta: ctx.meta,
@@ -261,13 +261,13 @@ const noAnswer = (
   });
 
 /**
- * Window: did the parser find work (primary) and would Jev have let it through (shadow)?
+ * Window: did the parser find work (primary) and would XOR have let it through (shadow)?
  * `trackable yes != no (0.05)` is the one that matters — a real ask replace mode would drop.
  */
 function logWindow(tag: string, ctx: LogContext, check: WindowCheck & { ok: true }, llm: ParsedTransitions): void {
   const found = llm.operations.length > 0;
   const verdict = !check.skip ? 'kept' : found ? 'WOULD-MISS' : 'would-skip';
-  logJevComparison(tag, ctx.meta.conversationId, {
+  logXorComparison(tag, ctx.meta.conversationId, {
     primaryModel: config.radar.parserModel,
     shadowModel: config.jev.model,
     stateChars: ctx.stateChars,
@@ -290,11 +290,11 @@ function logWindow(tag: string, ctx: LogContext, check: WindowCheck & { ok: true
   });
 }
 
-/** Reaction: which item the parser resolved (primary) and which Jev would (shadow). */
+/** Reaction: which item the parser resolved (primary) and which XOR would (shadow). */
 function logReaction(tag: string, ctx: LogContext, check: ReactionCheck & { ok: true }, llm: ParsedTransitions): void {
   const parserResolved = resolvedIds(llm);
-  const jevResolved = check.operations.map(op => op.itemId as string);
-  logJevComparison(tag, ctx.meta.conversationId, {
+  const xorResolved = check.operations.map(op => op.itemId as string);
+  logXorComparison(tag, ctx.meta.conversationId, {
     primaryModel: config.radar.parserModel,
     shadowModel: config.jev.model,
     stateChars: ctx.stateChars,
@@ -302,14 +302,14 @@ function logReaction(tag: string, ctx: LogContext, check: ReactionCheck & { ok: 
       {
         category: 'resolves',
         primary: parserResolved,
-        shadow: jevResolved[0] ?? NONE,
+        shadow: xorResolved[0] ?? NONE,
         confidence: check.itemProbability,
         agreed:
-          parserResolved.length === jevResolved.length &&
-          parserResolved.every(id => jevResolved.includes(id)),
+          parserResolved.length === xorResolved.length &&
+          parserResolved.every(id => xorResolved.includes(id)),
       },
     ],
-    meta: { ...ctx.meta, completion: check.completion, jevChoice: check.itemId },
+    meta: { ...ctx.meta, completion: check.completion, xorChoice: check.itemId },
     note: `completion ${check.completion.toFixed(2)}`,
   });
 }
@@ -317,35 +317,35 @@ function logReaction(tag: string, ctx: LogContext, check: ReactionCheck & { ok: 
 // ─── Entry point: the step right before the model ───────────────────────────────
 
 /**
- * Jev's part of one parse, per the radar_jev_* CAC switches. Null when Jev is off, and the caller calls the
+ * XOR's part of one parse, per the radar_xor_* CAC switches. Null when XOR is off, and the caller calls the
  * model as it always has. A reaction pass is the one carrying `input.reaction`.
  *
- *  - shadow (replace off): Jev runs alongside the model and is only logged — started here,
+ *  - shadow (replace off): XOR runs alongside the model and is only logged — started here,
  *    not awaited, so it costs the parse no time beyond the CAC read.
- *  - replace: Jev is awaited. A window it rates as chatter comes back as an empty answer,
+ *  - replace: XOR is awaited. A window it rates as chatter comes back as an empty answer,
  *    which is what the model returns for chatter; a reaction comes back resolved or not.
- *    When Jev has no answer, or the window may hold something, the model runs as usual.
+ *    When XOR has no answer, or the window may hold something, the model runs as usual.
  *
- * Every call is logged (with radar_jev_log_enabled): the comparison when both ran, Jev's
+ * Every call is logged (with radar_xor_log_enabled): the comparison when both ran, XOR's
  * decision when it replaced the model, and NO ANSWER when it gave none. A fallback to the
  * parser is logged as a warning either way.
  */
-export async function runJevBeforeLlm(
+export async function runXorBeforeLlm(
   input: ParserInput,
   conversationId: string,
-): Promise<JevBeforeLlm | null> {
-  // No key, no Jev — and no CAC read for a feature that cannot run.
+): Promise<XorBeforeLlm | null> {
+  // No key, no XOR — and no CAC read for a feature that cannot run.
   if (!isJevConfigured()) return null;
   // One CAC read for the switches and the thresholds. AgentsConfig.fetch falls back to the
   // defaults (everything off) rather than throwing.
   const cac = await AgentsConfig.fetch();
-  if (!cac.radarJevEnabled) return null;
-  const replace = cac.radarJevReplace;
-  const logEnabled = cac.radarJevLogEnabled;
+  if (!cac.radarXorEnabled) return null;
+  const replace = cac.radarXorReplace;
+  const logEnabled = cac.radarXorLogEnabled;
   const thresholds: Thresholds = {
-    windowSkip: cac.radarJevWindowSkipThreshold,
-    reactionCompletion: cac.radarJevReactionCompletionThreshold,
-    reactionItem: cac.radarJevReactionItemThreshold,
+    windowSkip: cac.radarXorWindowSkipThreshold,
+    reactionCompletion: cac.radarXorReactionCompletionThreshold,
+    reactionItem: cac.radarXorReactionItemThreshold,
   };
   const stateChars = JSON.stringify(input).length;
 
@@ -375,7 +375,7 @@ export async function runJevBeforeLlm(
     const check = await pending;
     if (check.ok) {
       if (logEnabled) {
-        logJevDecision(REPLACE_TAG, conversationId, {
+        logXorDecision(REPLACE_TAG, conversationId, {
           shadowModel: config.jev.model,
           stateChars,
           decisions: [
@@ -385,12 +385,12 @@ export async function runJevBeforeLlm(
               confidence: check.itemProbability,
             },
           ],
-          meta: { ...ctx.meta, completion: check.completion, jevChoice: check.itemId },
+          meta: { ...ctx.meta, completion: check.completion, xorChoice: check.itemId },
           note: `completion ${check.completion.toFixed(2)}`,
         });
       }
       return {
-        answer: { operations: check.operations, assessment: check.assessment, decidedBy: 'jev' },
+        answer: { operations: check.operations, assessment: check.assessment, decidedBy: 'xor' },
         afterLlm: () => {},
       };
     }
@@ -421,7 +421,7 @@ export async function runJevBeforeLlm(
   const check = await pending;
   if (check.ok && check.skip) {
     if (logEnabled) {
-      logJevDecision(REPLACE_TAG, conversationId, {
+      logXorDecision(REPLACE_TAG, conversationId, {
         shadowModel: config.jev.model,
         stateChars,
         decisions: [{ category: 'trackable', shadow: 'no', confidence: check.probability }],
@@ -434,9 +434,9 @@ export async function runJevBeforeLlm(
         operations: [],
         // The run log's answer to "why was nothing tracked here".
         assessment:
-          `Jev rated this window ${check.probability.toFixed(2)} likely to hold anything ` +
+          `XOR rated this window ${check.probability.toFixed(2)} likely to hold anything ` +
           'trackable — parse skipped.',
-        decidedBy: 'jev',
+        decidedBy: 'xor',
       },
       afterLlm: () => {},
     };
@@ -445,7 +445,7 @@ export async function runJevBeforeLlm(
     noAnswer(REPLACE_TAG, ctx, check, categories, 'warn', '→ falling back to the parser');
     return { answer: null, afterLlm: () => {} };
   }
-  // Jev let the window through: the parser runs, and the two are compared.
+  // XOR let the window through: the parser runs, and the two are compared.
   return {
     answer: null,
     afterLlm: llm => {

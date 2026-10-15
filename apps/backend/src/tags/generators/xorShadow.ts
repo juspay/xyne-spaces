@@ -7,7 +7,7 @@ import {
   type JevChoiceQuestion,
   type JevFailure,
 } from '@/services/queryIntent/jevClient';
-import { logJevComparison, logJevNoAnswer } from '@/services/queryIntent/jevShadowLog';
+import { logXorComparison, logXorNoAnswer } from '@/services/queryIntent/xorShadowLog';
 import type { CategoryConfig, GeneratedTag } from '../types';
 
 /**
@@ -73,7 +73,7 @@ export async function runShadowTagGeneration(
     if (!shouldLog) return;
 
     if (!answers) {
-      logJevNoAnswer('[TAG][SHADOW]', meta.sourceId, {
+      logXorNoAnswer('[TAG][SHADOW]', meta.sourceId, {
         failure,
         timeoutMs: SHADOW_TIMEOUT_MS,
         stateChars: context.length,
@@ -102,7 +102,7 @@ export async function runShadowTagGeneration(
     });
 
     // Not named emailId: the logger injects its own `emailId` meaning the user's address.
-    logJevComparison('[TAG][SHADOW]', meta.sourceId, {
+    logXorComparison('[TAG][SHADOW]', meta.sourceId, {
       primaryModel: cacConfig.tagGenerationModelName,
       shadowModel: envConfig.jev.model,
       stateChars: context.length,

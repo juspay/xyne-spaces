@@ -2,7 +2,7 @@ import type { ThreadTypeEntry } from '@xyne/shared';
 
 /**
  * Citations kept per type, matching "never cite more than three" in the prompt below.
- * Shared by the LLM path and the Jev path, which cap their citations the same way.
+ * Shared by the LLM path and the XOR path, which cap their citations the same way.
  */
 export const MAX_SOURCES_PER_TYPE = 3;
 

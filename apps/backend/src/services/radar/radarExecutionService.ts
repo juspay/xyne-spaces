@@ -430,8 +430,8 @@ class RadarExecutionService {
             },
             { conversationId: scope.key },
           );
-          // Jev answering in the model's place (CAC radar_jev_replace) means no parse ran.
-          run.parserRan = transitions.decidedBy !== 'jev';
+          // XOR answering in the model's place (CAC radar_xor_replace) means no parse ran.
+          run.parserRan = transitions.decidedBy !== 'xor';
           run.proposedOps = transitions.operations;
           run.assessment = transitions.assessment;
           const { valid, dropped } = validateTransitions(transitions.operations, validationCtx);

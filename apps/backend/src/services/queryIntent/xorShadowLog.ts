@@ -2,35 +2,35 @@ import { logger } from '@/utils/logger';
 import type { JevFailure } from '@/services/queryIntent/jevClient';
 
 /**
- * The one log format for every place Jev runs beside an LLM — desk tags, message tagging,
+ * The one log format for every place XOR runs beside an LLM — desk tags, message tagging,
  * Radar — so a single log query reads all of them and they can be compared the same way:
  *
- *   [TAG][SHADOW] <id>  1/2 agree  [kimi-latest vs jev-latest]  priority low == low (0.94)  |  sentiment positive != neutral (0.45)
+ *   [TAG][SHADOW] <id>  1/2 agree  [kimi-latest vs xor-latest]  priority low == low (0.94)  |  sentiment positive != neutral (0.45)
  *
- * Every line carries names, ids and scores only — never the text Jev was sent, which can
+ * Every line carries names, ids and scores only — never the text XOR was sent, which can
  * come from DMs and private channels.
  */
 
 /** One question, both answers. Callers may add their own fields; they land in the log. */
-export interface JevComparison {
+export interface XorComparison {
   category: string;
   /** What the live model answered; empty when it answered nothing. */
   primary: string[];
-  /** What Jev answered. */
+  /** What XOR answered. */
   shadow: string;
-  /** Jev's confidence in `shadow`, when it gave one. */
+  /** XOR's confidence in `shadow`, when it gave one. */
   confidence?: number;
   agreed: boolean;
 }
 
-/** One question, Jev's answer alone — replace mode, where the live model never ran. */
-export interface JevDecision {
+/** One question, XOR's answer alone — replace mode, where the live model never ran. */
+export interface XorDecision {
   category: string;
   shadow: string;
   confidence?: number;
 }
 
-export const describeJevFailure = (failure: JevFailure | undefined): string =>
+export const describeXorFailure = (failure: JevFailure | undefined): string =>
   failure?.kind === 'status' ? `status ${failure.status}` : (failure?.kind ?? 'unknown');
 
 const confidenceText = (confidence: number | undefined): string =>
@@ -40,14 +40,14 @@ const withNote = (line: string, note: string | undefined): string =>
   note ? `${line}  ${note}` : line;
 
 /** Both answers side by side. Reads as: priority low == low (0.35) — '==' agree, '!=' differ. */
-export function logJevComparison(
+export function logXorComparison(
   tag: string,
   id: string,
   fields: {
     primaryModel: string;
     shadowModel: string;
     stateChars: number;
-    comparison: JevComparison[];
+    comparison: XorComparison[];
     meta: Record<string, unknown>;
     note?: string;
   },
@@ -79,14 +79,14 @@ export function logJevComparison(
   );
 }
 
-/** Jev's answer alone, when it decided in the live model's place. */
-export function logJevDecision(
+/** XOR's answer alone, when it decided in the live model's place. */
+export function logXorDecision(
   tag: string,
   id: string,
   fields: {
     shadowModel: string;
     stateChars: number;
-    decisions: JevDecision[];
+    decisions: XorDecision[];
     meta: Record<string, unknown>;
     note?: string;
   },
@@ -96,7 +96,7 @@ export function logJevDecision(
     .map(d => `${d.category} ${d.shadow} (${confidenceText(d.confidence)})`)
     .join('  |  ');
 
-  logger.info(withNote(`${tag} ${id}  jev decided  [${shadowModel}]  ${perCategory}`, note), {
+  logger.info(withNote(`${tag} ${id}  xor decided  [${shadowModel}]  ${perCategory}`, note), {
     ...meta,
     shadowModel,
     stateChars,
@@ -105,10 +105,10 @@ export function logJevDecision(
 }
 
 /**
- * Jev gave no usable answer. `reason` overrides the text when the caller knows more than
+ * XOR gave no usable answer. `reason` overrides the text when the caller knows more than
  * the transport failure (e.g. which batch, or how many answers were unusable).
  */
-export function logJevNoAnswer(
+export function logXorNoAnswer(
   tag: string,
   id: string,
   fields: {
@@ -125,7 +125,7 @@ export function logJevNoAnswer(
   const { failure, reason, timeoutMs, stateChars, categories, meta, level = 'info', note } = fields;
   logger[level](
     withNote(
-      `${tag} ${id}  NO ANSWER (${reason ?? describeJevFailure(failure)})  ` +
+      `${tag} ${id}  NO ANSWER (${reason ?? describeXorFailure(failure)})  ` +
         `[${stateChars} chars, ${timeoutMs}ms limit]`,
       note,
     ),

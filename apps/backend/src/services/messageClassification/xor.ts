@@ -10,19 +10,19 @@ import {
   type JevNoulQuestion,
 } from '@/services/queryIntent/jevClient';
 import {
-  describeJevFailure,
-  logJevComparison,
-  logJevDecision,
-  logJevNoAnswer,
-  type JevComparison,
-} from '@/services/queryIntent/jevShadowLog';
+  describeXorFailure,
+  logXorComparison,
+  logXorDecision,
+  logXorNoAnswer,
+  type XorComparison,
+} from '@/services/queryIntent/xorShadowLog';
 import type { Classification, ClassifierInput } from './index';
 import { MAX_SOURCES_PER_TYPE } from './prompt';
 
 /**
- * Thread-type classification with Jev instead of the LLM.
+ * Thread-type classification with XOR instead of the LLM.
  *
- * Jev answers questions with probabilities and writes no text, so the LLM's single JSON
+ * XOR answers questions with probabilities and writes no text, so the LLM's single JSON
  * answer is rebuilt from two calls:
  *
  *  1. Thread types — one yes/no question per APPROVED vocabulary entry, worded from the
@@ -35,12 +35,12 @@ import { MAX_SOURCES_PER_TYPE } from './prompt';
  * same code whichever model answered.
  *
  * Where the data goes: the whole thread — DMs and private channels included — is sent to
- * JEV_URL, which is TypeSafe's hosted Jev unless the env points elsewhere.
+ * JEV_URL, which is TypeSafe's hosted XOR unless the env points elsewhere.
  *
  * Switches and thresholds all come from CAC, like the desk run's shadow_tag_generation_*,
  * so rollout and tuning need no deploy:
- *   message_classification_jev_enabled / _log_enabled / _replace   (run, log, replace)
- *   message_classification_jev_type_threshold / _citation_threshold
+ *   message_classification_xor_enabled / _log_enabled / _replace   (run, log, replace)
+ *   message_classification_xor_type_threshold / _citation_threshold
  * The thresholds are only valid for the JEV_MODEL they were tuned on.
  */
 
@@ -52,7 +52,7 @@ interface Thresholds {
 }
 
 /** Per call. Classification runs in a background worker, so this can be generous. */
-const JEV_TIMEOUT_MS = 15_000;
+const XOR_TIMEOUT_MS = 15_000;
 
 /** Each option carries its message's text, so a pasted log dump is cut to this. */
 const OPTION_TEXT_CHARS = 400;
@@ -63,11 +63,11 @@ const NO_EVIDENCE = 'none';
 const SHADOW_TAG = '[MSG-TAG][SHADOW]';
 const REPLACE_TAG = '[MSG-TAG][REPLACE]';
 
-type JevClassificationResult =
+type XorClassificationResult =
   | {
       ok: true;
       classification: Classification;
-      /** Jev's probability for every type it was asked about, for the log. */
+      /** XOR's probability for every type it was asked about, for the log. */
       typeScores: Record<string, number>;
     }
   | { ok: false; reason: string; failure?: JevFailure };
@@ -105,18 +105,18 @@ const unanswered = (
     })
     .map(([key]) => key);
 
-/** The thread as Jev's state: the same object the LLM is sent. */
+/** The thread as XOR's state: the same object the LLM is sent. */
 const toState = (input: ClassifierInput): Record<string, unknown> => ({ ...input });
 
 /**
- * Classify a thread with Jev. Never throws: any failure comes back as `ok: false`, and in
+ * Classify a thread with XOR. Never throws: any failure comes back as `ok: false`, and in
  * that case nothing about the thread should be written from it.
  */
-async function classifyThreadWithJev(
+async function classifyThreadWithXor(
   input: ClassifierInput,
   vocabulary: readonly ThreadTypeEntry[],
   thresholds: Thresholds,
-): Promise<JevClassificationResult> {
+): Promise<XorClassificationResult> {
   try {
     const state = toState(input);
 
@@ -133,13 +133,13 @@ async function classifyThreadWithJev(
     );
 
     let typeFailure: JevFailure | undefined;
-    const typeAnswers = await askJev(state, typeQuestions, JEV_TIMEOUT_MS, undefined, {
+    const typeAnswers = await askJev(state, typeQuestions, XOR_TIMEOUT_MS, undefined, {
       onFailure: failure => {
         typeFailure = failure;
       },
     });
     if (!typeAnswers) {
-      return { ok: false, reason: `types: ${describeJevFailure(typeFailure)}`, failure: typeFailure };
+      return { ok: false, reason: `types: ${describeXorFailure(typeFailure)}`, failure: typeFailure };
     }
     const missingTypes = unanswered(typeQuestions, typeAnswers);
     if (missingTypes.length > 0) {
@@ -171,8 +171,8 @@ async function classifyThreadWithJev(
       };
     }
 
-    // "none" is always an option: Jev requires at least two, so a one-message thread would
-    // otherwise be rejected outright, and it lets Jev say no message is the evidence — a
+    // "none" is always an option: XOR requires at least two, so a one-message thread would
+    // otherwise be rejected outright, and it lets XOR say no message is the evidence — a
     // type that came from the ticket, which the LLM is told to cite nothing for.
     const options = {
       ...Object.fromEntries(
@@ -198,7 +198,7 @@ async function classifyThreadWithJev(
     );
 
     let evidenceFailure: JevFailure | undefined;
-    const evidenceAnswers = await askJev(state, evidenceQuestions, JEV_TIMEOUT_MS, undefined, {
+    const evidenceAnswers = await askJev(state, evidenceQuestions, XOR_TIMEOUT_MS, undefined, {
       onFailure: failure => {
         evidenceFailure = failure;
       },
@@ -208,7 +208,7 @@ async function classifyThreadWithJev(
     if (!evidenceAnswers) {
       return {
         ok: false,
-        reason: `evidence: ${describeJevFailure(evidenceFailure)}`,
+        reason: `evidence: ${describeXorFailure(evidenceFailure)}`,
         failure: evidenceFailure,
       };
     }
@@ -250,30 +250,30 @@ type LogMeta = {
 interface LogContext {
   meta: LogMeta & { thresholds: Thresholds };
   vocabulary: readonly ThreadTypeEntry[];
-  /** Size of what Jev was sent, for the log. */
+  /** Size of what XOR was sent, for the log. */
   stateChars: number;
 }
 
 /**
- * Shadow mode: every type in the vocabulary, the LLM's answer beside Jev's —
+ * Shadow mode: every type in the vocabulary, the LLM's answer beside XOR's —
  * `ISSUE yes == yes (0.91)` — plus which messages each cited as evidence.
  */
-function logComparison(tag: string, ctx: LogContext, jev: JevClassificationResult & { ok: true }, llm: Classification): void {
+function logComparison(tag: string, ctx: LogContext, xor: XorClassificationResult & { ok: true }, llm: Classification): void {
   const llmByName = new Map(llm.threadTypes.map(t => [t.name, t]));
-  const jevByName = new Map(jev.classification.threadTypes.map(t => [t.name, t]));
+  const xorByName = new Map(xor.classification.threadTypes.map(t => [t.name, t]));
 
-  const comparison: Array<JevComparison & { primaryEvidence: string[]; shadowEvidence: string[] }> =
+  const comparison: Array<XorComparison & { primaryEvidence: string[]; shadowEvidence: string[] }> =
     ctx.vocabulary.map(({ name }) => {
       const inLlm = llmByName.has(name);
-      const inJev = jevByName.has(name);
+      const inXor = xorByName.has(name);
       return {
         category: name,
         primary: [inLlm ? 'yes' : 'no'],
-        shadow: inJev ? 'yes' : 'no',
-        confidence: jev.typeScores[name],
-        agreed: inLlm === inJev,
+        shadow: inXor ? 'yes' : 'no',
+        confidence: xor.typeScores[name],
+        agreed: inLlm === inXor,
         primaryEvidence: llmByName.get(name)?.sourceMessageIds ?? [],
-        shadowEvidence: jevByName.get(name)?.sourceMessageIds ?? [],
+        shadowEvidence: xorByName.get(name)?.sourceMessageIds ?? [],
       };
     });
 
@@ -286,7 +286,7 @@ function logComparison(tag: string, ctx: LogContext, jev: JevClassificationResul
       : c.primaryEvidence.some(id => c.shadowEvidence.includes(id)),
   ).length;
 
-  logJevComparison(tag, ctx.meta.conversationId, {
+  logXorComparison(tag, ctx.meta.conversationId, {
     primaryModel: config.messageClassification.model,
     shadowModel: config.jev.model,
     stateChars: ctx.stateChars,
@@ -296,17 +296,17 @@ function logComparison(tag: string, ctx: LogContext, jev: JevClassificationResul
   });
 }
 
-/** Replace mode: Jev's answer for every type, which is what gets written. */
-function logDecision(ctx: LogContext, jev: JevClassificationResult & { ok: true }): void {
-  const jevByName = new Map(jev.classification.threadTypes.map(t => [t.name, t]));
-  logJevDecision(REPLACE_TAG, ctx.meta.conversationId, {
+/** Replace mode: XOR's answer for every type, which is what gets written. */
+function logDecision(ctx: LogContext, xor: XorClassificationResult & { ok: true }): void {
+  const xorByName = new Map(xor.classification.threadTypes.map(t => [t.name, t]));
+  logXorDecision(REPLACE_TAG, ctx.meta.conversationId, {
     shadowModel: config.jev.model,
     stateChars: ctx.stateChars,
     decisions: ctx.vocabulary.map(({ name }) => ({
       category: name,
-      shadow: jevByName.has(name) ? 'yes' : 'no',
-      confidence: jev.typeScores[name],
-      evidence: jevByName.get(name)?.sourceMessageIds ?? [],
+      shadow: xorByName.has(name) ? 'yes' : 'no',
+      confidence: xor.typeScores[name],
+      evidence: xorByName.get(name)?.sourceMessageIds ?? [],
     })),
     meta: ctx.meta,
   });
@@ -315,14 +315,14 @@ function logDecision(ctx: LogContext, jev: JevClassificationResult & { ok: true 
 function logNoAnswer(
   tag: string,
   ctx: LogContext,
-  jev: JevClassificationResult & { ok: false },
+  xor: XorClassificationResult & { ok: false },
   level: 'info' | 'warn',
   note?: string,
 ): void {
-  logJevNoAnswer(tag, ctx.meta.conversationId, {
-    failure: jev.failure,
-    reason: jev.reason,
-    timeoutMs: JEV_TIMEOUT_MS,
+  logXorNoAnswer(tag, ctx.meta.conversationId, {
+    failure: xor.failure,
+    reason: xor.reason,
+    timeoutMs: XOR_TIMEOUT_MS,
     stateChars: ctx.stateChars,
     categories: ctx.vocabulary.map(entry => entry.name),
     meta: ctx.meta,
@@ -333,38 +333,38 @@ function logNoAnswer(
 
 // ─── Entry point: the step right before the model ───────────────────────────────
 
-export interface JevBeforeLlm {
-  /** Replace mode's answer, when Jev gave one: return it instead of calling the model. */
+export interface XorBeforeLlm {
+  /** Replace mode's answer, when XOR gave one: return it instead of calling the model. */
   answer: Classification | null;
   /** Hand it the model's answer once the model has run, to log the two side by side. */
   afterLlm(llm: Classification): void;
 }
 
 /**
- * Jev's part of one classification, per the message_classification_jev_* CAC switches.
- * Null when Jev is off, and the caller calls the model as it always has.
+ * XOR's part of one classification, per the message_classification_xor_* CAC switches.
+ * Null when XOR is off, and the caller calls the model as it always has.
  *
- *  - shadow (replace off): Jev runs alongside the model and is only logged — started here,
+ *  - shadow (replace off): XOR runs alongside the model and is only logged — started here,
  *    not awaited, so it costs the job no time beyond the CAC read.
- *  - replace: Jev is awaited and its answer is the classification. When Jev has no answer
+ *  - replace: XOR is awaited and its answer is the classification. When XOR has no answer
  *    the model runs as usual, so the thread is still classified.
  */
-export async function runJevBeforeLlm(
+export async function runXorBeforeLlm(
   input: ClassifierInput,
   vocabulary: readonly ThreadTypeEntry[],
   meta: LogMeta,
-): Promise<JevBeforeLlm | null> {
-  // No key, no Jev — and no CAC read for a feature that cannot run.
+): Promise<XorBeforeLlm | null> {
+  // No key, no XOR — and no CAC read for a feature that cannot run.
   if (!isJevConfigured()) return null;
   // One CAC read for the switches and the thresholds. AgentsConfig.fetch falls back to the
   // defaults (everything off) rather than throwing.
   const cac = await AgentsConfig.fetch();
-  if (!cac.messageClassificationJevEnabled) return null;
-  const replace = cac.messageClassificationJevReplace;
-  const logEnabled = cac.messageClassificationJevLogEnabled;
+  if (!cac.messageClassificationXorEnabled) return null;
+  const replace = cac.messageClassificationXorReplace;
+  const logEnabled = cac.messageClassificationXorLogEnabled;
   const thresholds: Thresholds = {
-    type: cac.messageClassificationJevTypeThreshold,
-    citation: cac.messageClassificationJevCitationThreshold,
+    type: cac.messageClassificationXorTypeThreshold,
+    citation: cac.messageClassificationXorCitationThreshold,
   };
   // Every line records the thresholds that produced it, so the logs can be re-read against
   // other values when tuning.
@@ -374,25 +374,25 @@ export async function runJevBeforeLlm(
     stateChars: JSON.stringify(input).length,
   };
 
-  const pending = classifyThreadWithJev(input, vocabulary, thresholds);
+  const pending = classifyThreadWithXor(input, vocabulary, thresholds);
   if (!replace) {
     return {
       answer: null,
       afterLlm: llm => {
         if (!logEnabled) return;
-        void pending.then(jev =>
-          jev.ok ? logComparison(SHADOW_TAG, ctx, jev, llm) : logNoAnswer(SHADOW_TAG, ctx, jev, 'info'),
+        void pending.then(xor =>
+          xor.ok ? logComparison(SHADOW_TAG, ctx, xor, llm) : logNoAnswer(SHADOW_TAG, ctx, xor, 'info'),
         );
       },
     };
   }
 
-  const jev = await pending;
-  if (jev.ok) {
-    if (logEnabled) logDecision(ctx, jev);
-    return { answer: jev.classification, afterLlm: () => {} };
+  const xor = await pending;
+  if (xor.ok) {
+    if (logEnabled) logDecision(ctx, xor);
+    return { answer: xor.classification, afterLlm: () => {} };
   }
   // Logged whatever the log switch says: that switch hides comparisons, not breakage.
-  logNoAnswer(REPLACE_TAG, ctx, jev, 'warn', '→ falling back to the LLM');
+  logNoAnswer(REPLACE_TAG, ctx, xor, 'warn', '→ falling back to the LLM');
   return { answer: null, afterLlm: () => {} };
 }

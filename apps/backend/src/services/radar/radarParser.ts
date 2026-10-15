@@ -2,7 +2,7 @@ import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { logLLMCallStart } from '@/agents/agentLogger';
 import { formatErrors, validate } from '@/services/entityExtraction/pipeline';
-import { runJevBeforeLlm } from '@/services/radar/radarJev';
+import { runXorBeforeLlm } from '@/services/radar/radarXor';
 
 const TAG = '[RADAR-PARSER]';
 const AGENT_NAME = 'RadarParser';
@@ -77,8 +77,8 @@ export interface ParsedTransitions {
   /** Set when the caller's semantic check sent the first answer back: what the
    *  model was told, and what it had proposed before being corrected. */
   repair?: { feedback: string; firstAttempt: ParserOperation[] };
-  /** Set when Jev answered in place of the model (CAC radar_jev_replace). */
-  decidedBy?: 'jev';
+  /** Set when XOR answered in place of the model (CAC radar_xor_replace). */
+  decidedBy?: 'xor';
 }
 
 /** Exactly what the parser is sent as the user message. */
@@ -91,7 +91,7 @@ export interface ParserInput {
 }
 
 /**
- * The parser's input, built in one place so anything else judging the same pass — Jev —
+ * The parser's input, built in one place so anything else judging the same pass — XOR —
  * is handed the very object the model sees rather than a copy that can drift from it.
  */
 function buildParserInput(
@@ -361,18 +361,18 @@ class RadarParser {
     contextMessages: ParserWindowMessage[] = [],
     reaction?: { by: string; emoji: string },
     semanticCheck?: SemanticCheck,
-    /** For the Jev log only: which thread this pass belongs to. */
+    /** For the XOR log only: which thread this pass belongs to. */
     logContext?: { conversationId: string },
   ): Promise<ParsedTransitions> {
     const input = buildParserInput(openItems, newMessages, knownUsers, contextMessages, reaction);
 
-    // Jev, right before the model and on the very input the model is about to get. In
+    // XOR, right before the model and on the very input the model is about to get. In
     // replace mode its answer stands in for the model's; otherwise it is only compared.
-    const jev = await runJevBeforeLlm(input, logContext?.conversationId ?? 'unknown');
-    if (jev?.answer) return jev.answer;
+    const xor = await runXorBeforeLlm(input, logContext?.conversationId ?? 'unknown');
+    if (xor?.answer) return xor.answer;
 
     const transitions = await this.parseWithLlm(input, semanticCheck);
-    jev?.afterLlm(transitions);
+    xor?.afterLlm(transitions);
     return transitions;
   }
 
