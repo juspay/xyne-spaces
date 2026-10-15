@@ -20,7 +20,12 @@ export interface CallDisplayData {
     response: string;
     joinedAt: number | null;
     leftAt: number | null;
+    email?: string | null;
+    isExternal?: boolean | null;
+    invitedBy?: string | null;
   }> | null;
+  organizerId?: string | null;
+  callUpdatesChannel?: string | null;
   metadata: Record<string, unknown> | null;
   createdAt: number;
   channel: {

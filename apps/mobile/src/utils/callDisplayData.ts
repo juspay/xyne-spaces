@@ -25,7 +25,7 @@ import type { CallDisplayData } from '@/src/types/calls';
 import { queries } from '@/src/zero/queries';
 
 export type RawCall = QueryResultType<typeof queries.userCallHistory>[number];
-export type ScheduledRawCall = QueryResultType<typeof queries.userScheduledCalls>[number];
+export type ScheduledRawCall = QueryResultType<typeof queries.userUpcomingScheduledCalls>[number];
 export type CallUserLike = {
   id: string;
   name?: string | null;
@@ -218,6 +218,8 @@ export function toCallDisplayData(
       : null,
     recurringSeriesId,
     participants: call.participants as unknown as CallDisplayData['participants'],
+    organizerId: call.organizerId ?? null,
+    callUpdatesChannel: call.callUpdatesChannel ?? null,
     metadata: call.metadata as Record<string, unknown> | null,
     createdAt: call.createdAt,
     channel,
