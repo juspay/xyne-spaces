@@ -38,8 +38,8 @@ import type { VespaJob } from './types';
  */
 const TAG = '[SDLC-SEARCH]';
 
-// Strip control characters (incl. CR/LF) so request-derived ids can't forge log lines.
-const sanitizeForLog = (value: string): string => value.replace(/[\u0000-\u001f\u007f]+/g, ' ').slice(0, 200);
+// Strip CR/LF so request-derived values can't forge log lines.
+const sanitizeForLog = (value: string): string => value.replace(/[\r\n]/g, '');
 
 // Upper bound on the containers walked under one container: far above any real hub, and it ends
 // the walk even if the links ever formed a cycle.
@@ -124,7 +124,7 @@ async function queueNow(hubId: string, change: SdlcSearchChange, created: Readon
     }
   })().catch(error => {
     logger.warn(`${TAG} could not queue Vespa jobs for hub ${sanitizeForLog(hubId)}`, {
-      error: error instanceof Error ? error.message : String(error),
+      error: sanitizeForLog(error instanceof Error ? error.message : String(error)),
     });
   });
 }
