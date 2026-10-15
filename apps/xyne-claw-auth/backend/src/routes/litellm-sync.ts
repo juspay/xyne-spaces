@@ -53,6 +53,7 @@ litellmSyncRouter.post("/user-key", async (req: Request, res: Response) => {
     userId?: string;
     orgId?: string;
     spacesOrgId?: string;
+    spacesWorkspaceId?: string;
     litellmUserId?: string;
     teamId?: string;
     key?: string;
@@ -62,6 +63,8 @@ litellmSyncRouter.post("/user-key", async (req: Request, res: Response) => {
     expires?: string;
   };
 
+  // `orgId` is the Spaces org id and `userId` the Spaces org-member id; both are
+  // resolved to Claw ids in the service.
   if (!body.userId || !body.orgId || !body.key) {
     res.status(400).json({ error: "userId, orgId, and key are required" });
     return;
@@ -69,9 +72,9 @@ litellmSyncRouter.post("/user-key", async (req: Request, res: Response) => {
 
   try {
     const result = await storeUserCredentialsForUser({
-      userId: body.userId,
-      orgId: body.orgId,
-      spacesOrgId: body.spacesOrgId,
+      spacesOrgMemberId: body.userId,
+      spacesOrgId: body.orgId,
+      spacesWorkspaceId: body.spacesWorkspaceId,
       litellmUserId: body.litellmUserId,
       teamId: body.teamId,
       key: body.key,
@@ -83,6 +86,10 @@ litellmSyncRouter.post("/user-key", async (req: Request, res: Response) => {
     res.status(200).json(result);
   } catch (err) {
     if (err instanceof LiteLLMProvisioningError) {
+      if (err.code === "CONFLICT") {
+        res.status(409).json({ error: err.message });
+        return;
+      }
       if (err.code === "NOT_FOUND") {
         res.status(404).json({ error: err.message });
         return;

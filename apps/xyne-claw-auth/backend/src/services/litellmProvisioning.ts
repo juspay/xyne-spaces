@@ -95,11 +95,49 @@ export async function storeTeamMappingForOrg(
   return { teamId, created: true };
 }
 
+/**
+ * Spaces org member → canonical Claw user within the resolved Claw org, via the
+ * identity rows spaces-sync links with `surfaceMemberId` (same member lookup
+ * as resolveSurfacePerson). NOT_FOUND when unlinked, CONFLICT when the member
+ * is linked to more than one Claw user.
+ */
+async function clawUserIdForSpacesMember(orgId: string, spacesOrgMemberId: string, client: DbClient): Promise<string> {
+  const userIds = [...new Set(
+    (await client.userSurfaceIdentity.findMany({
+      where: {
+        surfaceId: "spaces",
+        orgId,
+        surfaceMemberId: spacesOrgMemberId,
+        status: "ACTIVE",
+        userId: { not: null },
+      },
+      select: { userId: true },
+    })).map((row) => row.userId as string),
+  )];
+  if (userIds.length > 1) {
+    throw new LiteLLMProvisioningError(
+      "/user-key",
+      `Spaces org member ${spacesOrgMemberId} is linked to multiple Claw users: ${userIds.join(", ")}`,
+      undefined,
+      "CONFLICT",
+    );
+  }
+  if (!userIds[0]) {
+    throw new LiteLLMProvisioningError(
+      "/user-key",
+      `No Claw user linked to Spaces org member ${spacesOrgMemberId} in org ${orgId}`,
+      undefined,
+      "NOT_FOUND",
+    );
+  }
+  return userIds[0];
+}
+
 export async function storeUserCredentialsForUser(
   input: {
-    userId: string;
-    orgId: string;
-    spacesOrgId?: string | undefined;
+    spacesOrgMemberId: string;
+    spacesOrgId: string;
+    spacesWorkspaceId?: string | undefined;
     litellmUserId?: string | undefined;
     teamId?: string | undefined;
     key: string;
@@ -110,39 +148,31 @@ export async function storeUserCredentialsForUser(
   },
   client: DbClient = prisma,
 ): Promise<{ credentialCreated: boolean; litellmUserId?: string; teamId?: string }> {
-  const user = await client.user.findUnique({
-    where: { id: input.userId },
-    select: { id: true },
-  });
-  if (!user) {
-    throw new LiteLLMProvisioningError(
-      "/user-key",
-      `Claw user ${input.userId} not found`,
-      undefined,
-      "NOT_FOUND",
-    );
-  }
+  const orgId = await clawOrgIdForSpacesOrg("/user-key", input.spacesOrgId, client);
+  const userId = await clawUserIdForSpacesMember(orgId, input.spacesOrgMemberId, client);
 
   const member = await client.orgMember.findUnique({
-    where: { userId_orgId: { userId: input.userId, orgId: input.orgId } },
+    where: { userId_orgId: { userId, orgId } },
     select: { userId: true },
   });
   if (!member) {
     throw new LiteLLMProvisioningError(
       "/user-key",
-      `Claw user ${input.userId} is not a member of org ${input.orgId}`,
+      `Claw user ${userId} is not a member of org ${orgId}`,
       undefined,
       "NOT_FOUND",
     );
   }
 
   const encrypted = encrypt(input.key, CONFIG.encryptionKey);
-  const keyAlias = input.keyAlias ?? alias(`xyne-spaces ${input.userId}`, `xyne-spaces ${input.userId}`);
+  const keyAlias = input.keyAlias ?? alias(`xyne-spaces ${userId}`, `xyne-spaces ${userId}`);
   const credentialMetadata = {
     source: "xyne-spaces",
-    clawOrgId: input.orgId,
-    clawUserId: input.userId,
-    spacesOrgId: input.spacesOrgId ?? null,
+    clawOrgId: orgId,
+    clawUserId: userId,
+    spacesOrgId: input.spacesOrgId,
+    spacesOrgMemberId: input.spacesOrgMemberId,
+    spacesWorkspaceId: input.spacesWorkspaceId ?? null,
     changedBy: CONFIG.litellmChangedBy,
     litellmUserId: input.litellmUserId ?? null,
     litellmTeamId: input.teamId ?? null,
@@ -154,14 +184,14 @@ export async function storeUserCredentialsForUser(
   };
 
   const before = await client.userProviderCredentials.findUnique({
-    where: { userId_provider_managedBy: { userId: input.userId, provider: LITELLM_PROVIDER, managedBy: "SYSTEM" } },
+    where: { userId_provider_managedBy: { userId, provider: LITELLM_PROVIDER, managedBy: "SYSTEM" } },
     select: { userId: true },
   });
 
   await client.userProviderCredentials.upsert({
-    where: { userId_provider_managedBy: { userId: input.userId, provider: LITELLM_PROVIDER, managedBy: "SYSTEM" } },
+    where: { userId_provider_managedBy: { userId, provider: LITELLM_PROVIDER, managedBy: "SYSTEM" } },
     create: {
-      userId: input.userId,
+      userId,
       provider: LITELLM_PROVIDER,
       managedBy: "SYSTEM",
       encryptedKey: encrypted.ciphertext,
