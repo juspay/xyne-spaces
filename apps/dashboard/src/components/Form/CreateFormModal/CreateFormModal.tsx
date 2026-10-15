@@ -1,5 +1,4 @@
 import { ReactElement, useEffect, useMemo, useState } from 'react';
-import { v4 as uuidv4 } from 'uuid';
 import { PencilEditBox, MultipleCrossCancelDefault } from '@xyne/icons';
 import { Form, FormContextType, FormEntityType, type Project } from '@xyne/shared';
 import { toast } from 'sonner';
@@ -16,9 +15,6 @@ import {
 import { Combobox } from '../../ui/Combobox/Combobox';
 import type { DropdownListItemType } from '../../ui/Combobox/Combobox.types';
 import { queries } from '../../../zero/queries';
-import { mutators } from '../../../zero/mutators';
-import { useZero } from '../../../hooks/useZero';
-import { useAuth } from '../../../hooks/useAuth';
 import { FORM_CONTEXT_TYPES, getEntityTypesForContext } from '../../../constants/formConstants';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useFormEditLock } from '../../../hooks/useFormEditLock';
@@ -47,8 +43,6 @@ export const CreateFormModal = ({
   projectId,
   onSuccess,
 }: CreateFormModalProps): ReactElement => {
-  const zero = useZero();
-  const { user } = useAuth();
   const isEditMode = !!form;
   const [isEditing, setIsEditing] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState('');
@@ -76,21 +70,6 @@ export const CreateFormModal = ({
   // A save sends the whole field list and the server deletes whatever is missing from it, so
   // editing only starts once the server has confirmed the list is complete.
   const areFieldsLoaded = formFieldsResult.type === 'complete';
-
-  // A workspace has one channel form: a second would replace it and hide every saved value.
-  const [workspaceForm] = useCachedQuery(
-    queries.getFormMappingByContextId({
-      contextId: user?.workspaceId ?? '',
-      contextType: FormContextType.WORKSPACE,
-      entityType: FormEntityType.CHANNEL,
-    }),
-    {
-      enabled:
-        open && !isEditMode && contextType === FormContextType.WORKSPACE && !!user?.workspaceId,
-    },
-  );
-  const hasWorkspaceFormAlready =
-    !isEditMode && contextType === FormContextType.WORKSPACE && !!workspaceForm;
 
   const [projects] = useCachedQuery(queries.getAllProjectsList(), {
     enabled: open && shouldSelectProject,
@@ -162,25 +141,7 @@ export const CreateFormModal = ({
     [contextType, entityType, effectiveProjectId],
   );
 
-  const handleSaved = async (formId: string): Promise<void> => {
-    // A workspace form applies to the whole workspace, so it is bound as soon as it exists
-    // (boards bind theirs from the board screen).
-    if (!isEditMode && contextType === FormContextType.WORKSPACE && user?.workspaceId) {
-      const mapping = await zero.mutate(
-        mutators.formContextMapping.upsert({
-          contextId: user.workspaceId,
-          contextType: FormContextType.WORKSPACE,
-          entityType,
-          formId,
-          mappingId: uuidv4(),
-        }),
-      ).server;
-      if (mapping.type === 'error') {
-        toast.error('Form created, but it could not be applied to this workspace', {
-          description: mapping.error.message,
-        });
-      }
-    }
+  const handleSaved = (formId: string): void => {
     toast.success(isEditMode ? 'Form updated' : 'Form created');
     onOpenChange(false);
     if (!isEditMode) onSuccess?.(formId);
@@ -377,12 +338,7 @@ export const CreateFormModal = ({
             projectId={effectiveProjectId || undefined}
             persistence={restFormAdapter}
             requestContext={requestContext}
-            onSaved={formId => void handleSaved(formId)}
-            submitDisabledReason={
-              hasWorkspaceFormAlready
-                ? 'This workspace already has a channel form. Edit it to add fields for another use case.'
-                : null
-            }
+            onSaved={handleSaved}
             submitLabel={isEditMode ? 'Update Form' : 'Create Form'}
             readOnly={isReadOnly}
             locked={locked}
