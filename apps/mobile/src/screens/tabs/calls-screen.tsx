@@ -1,5 +1,6 @@
 import { ReactElement, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, ActivityIndicator, Keyboard, InteractionManager } from 'react-native';
+import { useRouter } from 'expo-router';
 import { LegendListRef } from '@legendapp/list/react-native';
 import { AnimatedLegendList } from '@legendapp/list/reanimated';
 import { CallLogItem, CallDetailsSheet } from '@/src/components/call-log';
@@ -211,6 +212,7 @@ const CallsScreen = (): ReactElement => {
     }, [scrollListToTop]),
   );
   const zero = useZero();
+  const router = useRouter();
   const isFocused = useTabPageIsFocused();
   const [hasFirstLayout, setHasFirstLayout] = useState(false);
   const liveDataEnabled = useDeferredLiveData({
@@ -279,19 +281,23 @@ const CallsScreen = (): ReactElement => {
     return (): void => task.cancel();
   }, [isFocused, shouldLoadRemoteAvatars, shouldMountCallSheets]);
 
-  // Row press: open the call details sheet
-  const handleCallPress = useCallback((call: CallDisplayData) => {
-    Keyboard.dismiss();
-    setSelectedCall(call);
-    setIsDetailsOpen(true);
-  }, []);
+  // Row press: a finished call opens the full call detail screen (summary,
+  // timeline, transcript); live and scheduled calls keep the quick-actions sheet.
+  const handleCallPress = useCallback(
+    (call: CallDisplayData) => {
+      Keyboard.dismiss();
+      if (!call.isActive && !call.isScheduled) {
+        router.push({ pathname: '/call-detail/[callId]', params: { callId: call.id } });
+        return;
+      }
+      setSelectedCall(call);
+      setIsDetailsOpen(true);
+    },
+    [router],
+  );
 
-  // Handler for avatar press - opens call details sheet (matches DM pattern)
-  const handleAvatarPress = useCallback((call: CallDisplayData) => {
-    Keyboard.dismiss();
-    setSelectedCall(call);
-    setIsDetailsOpen(true);
-  }, []);
+  // Handler for avatar press - same destination as the row
+  const handleAvatarPress = handleCallPress;
 
   // groupedRows: for ALL tab, prepend upcoming section; for UPCOMING/MISSED, flat date-sectioned list.
   const groupedRows = useMemo<CallListRow[]>(

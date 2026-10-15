@@ -46,10 +46,25 @@ config.resolver.extraNodeModules = {
 // React itself through Lotus so @xyne/shared cannot load its own React copy and
 // create hooks that run under a different dispatcher after login.
 const defaultResolveRequest = config.resolver.resolveRequest;
+// lib0 is yjs's dependency, so pnpm keeps it next to yjs in its store, not at the top level.
+const lib0Dir = path.dirname(
+  require.resolve('lib0/package.json', {
+    paths: [require('fs').realpathSync(path.join(lotusModules, 'yjs'))],
+  }),
+);
 config.resolver.resolveRequest = (context, moduleName, platform) => {
   if (moduleName === 'react' || moduleName.startsWith('react/')) {
     return {
       filePath: require.resolve(moduleName, { paths: [lotusModules] }),
+      type: 'sourceFile',
+    };
+  }
+  // lib0 (via yjs) maps `lib0/webcrypto` to a react-native build that needs the
+  // uninstalled `isomorphic-webcrypto`. Yjs only uses getRandomValues, which
+  // index.js already polyfills globally, so use the plain global-crypto build.
+  if (moduleName === 'lib0/webcrypto') {
+    return {
+      filePath: path.join(lib0Dir, 'webcrypto.js'),
       type: 'sourceFile',
     };
   }
