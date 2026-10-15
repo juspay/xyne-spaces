@@ -10,6 +10,7 @@ import { isOrganizationPolicyError, organizationDomainService } from '@/services
 import { buildInvitationLink } from '@/controllers/invitationController';
 import { getEncryptionProvider } from '@/services/encryption';
 import { createId } from '@paralleldrive/cuid2';
+import { syncOrgResourceAdminAccess } from '@/services/permissionMatrix';
 import { createOrganizationWithWorkspace, createOwnerInvitation } from '@/bypassAcl/orgServices';
 
 // Create OrgMemberRepository interface since we don't have the full file yet
@@ -17,6 +18,7 @@ interface OrgMember {
   memberId: string;
   orgId: string;
   userId: string;
+  email: string;
   role: OrgRole;
   joinedAt: Date;
   invitedBy?: string;
@@ -470,6 +472,9 @@ export class OrganizationController {
 
       // Update member role
       await this.orgMemberRepository.updateMemberRole(orgId, targetUserId, role);
+
+      // Reconcile resource access for the new org role (error-swallowing, so never fails the request)
+      await syncOrgResourceAdminAccess(orgId, targetMembership.email, userId);
 
       res.status(200).json({
         message: 'Member role updated successfully',

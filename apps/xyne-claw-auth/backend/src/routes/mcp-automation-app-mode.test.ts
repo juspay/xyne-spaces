@@ -60,6 +60,15 @@ describe("entry-stage swap", () => {
     expect(swap).toContain("automation app-mode SKIPPED");
   });
 
+  it("checks the app token of the run's agent, not of the run user", () => {
+    const swap = mcpSrc.slice(
+      mcpSrc.indexOf("let automationAppSwap"),
+      mcpSrc.indexOf("Virtual xyne-spaces entry"),
+    );
+    expect(swap).toContain("getAppTokenCredentials(runCtx?.spacesAppUserId || userId)");
+    expect(swap).not.toContain("getAppTokenCredentials(userId)");
+  });
+
   it("suppresses the app-token xyne-spaces fallback listing under the swap", () => {
     // Without this gate the fallback re-lists the user server (with app
     // creds) right after the swap removed it, resurrecting the duplicate.

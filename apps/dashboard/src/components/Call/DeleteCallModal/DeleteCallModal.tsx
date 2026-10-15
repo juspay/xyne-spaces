@@ -3,13 +3,15 @@ import { Trash2, X } from 'lucide-react';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { Button } from '../../ui/Button/Button';
 import { Checkbox } from '../../ui/Checkbox/Checkbox';
+import { MAX_EMAIL_PARTICIPANTS } from '../callEmailNotify';
 
 interface DeleteCallModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onConfirm: (cancelEntireSeries: boolean) => void;
+  onConfirm: (cancelEntireSeries: boolean, notifyParticipantsByEmail: boolean) => void;
   callLabel: string;
   isRecurring?: boolean;
+  participantCount?: number;
 }
 
 export const DeleteCallModal: React.FC<DeleteCallModalProps> = ({
@@ -18,15 +20,20 @@ export const DeleteCallModal: React.FC<DeleteCallModalProps> = ({
   onConfirm,
   callLabel,
   isRecurring = false,
+  participantCount = 0,
 }) => {
   const [cancelEntireSeries, setCancelEntireSeries] = React.useState(false);
+  const [notifyByEmail, setNotifyByEmail] = React.useState(false);
 
   React.useEffect(() => {
-    if (isOpen) setCancelEntireSeries(false);
+    if (isOpen) {
+      setCancelEntireSeries(false);
+      setNotifyByEmail(false);
+    }
   }, [isOpen]);
 
   const handleConfirm = (): void => {
-    onConfirm(cancelEntireSeries);
+    onConfirm(cancelEntireSeries, notifyByEmail);
     onClose();
   };
 
@@ -72,6 +79,16 @@ export const DeleteCallModal: React.FC<DeleteCallModalProps> = ({
               checked={cancelEntireSeries}
               onChange={setCancelEntireSeries}
               label='Cancel the entire recurring series'
+            />
+          )}
+
+          {participantCount <= MAX_EMAIL_PARTICIPANTS && (
+            <Checkbox
+              checked={notifyByEmail}
+              onChange={setNotifyByEmail}
+              label='Email details to all participants'
+              data-track-category='CALLS'
+              data-track-name='delete-call-email-participants'
             />
           )}
 

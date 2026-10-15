@@ -124,6 +124,7 @@ import {
 } from '../utils/channel.js';
 import {
   ChannelPublishedEntityType,
+  MAX_DUPLICATE_LOOKBACK_DAYS,
   MAX_DUPLICATE_SCOPE_FIELDS,
   MAX_PUBLISHED_APPS,
 } from './types.js';
@@ -10782,6 +10783,7 @@ export const mutators = defineMutators({
           .object({
             enabled: z.boolean(),
             scopeFieldGlobalIds: z.array(z.string()).max(MAX_DUPLICATE_SCOPE_FIELDS),
+            lookbackDays: z.number().int().min(0).max(MAX_DUPLICATE_LOOKBACK_DAYS).nullable().optional(),
           })
           .nullable()
           .optional(),

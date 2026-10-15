@@ -861,6 +861,7 @@ const CallHistoryV2Screen = (): ReactElement => {
         isOpen={deleteModalOpen}
         onClose={closeDeleteModal}
         onConfirm={handleDeleteConfirm}
+        participantCount={deleteModalCall?.participantCount ?? 0}
         callLabel={
           deleteModalCall
             ? `${deleteModalCall.title ?? 'Scheduled Call'}${

@@ -163,7 +163,7 @@ import { buildTwinPersonaBlock } from "../twin-persona.js";
 import { buildProposePlanTool, PROPOSE_PLAN_TOOL_NAME, type ProposePlanRef } from "../propose-plan.js";
 import { presentationCatalogDefaultOn, isFreePresentationTool, buildPresentationPrimer } from "../presentation-catalog.js";
 import { buildProposeAgentTool, type ProposeAgentRef } from "../propose-agent.js";
-import { buildDescribeAgentTool, type DescribeAgentRef } from "../describe-agent.js";
+import { buildDescribeAgentTool, describeAgentCardForReply, type DescribeAgentRef } from "../describe-agent.js";
 import { buildSuggestConnectorsTool, SUGGEST_CONNECTORS_TOOL_NAME, type SuggestConnectorsRef } from "../suggest-connectors.js";
 import { buildSuggestProvidersTool, SUGGEST_PROVIDERS_TOOL_NAME, type SuggestProvidersRef } from "../suggest-providers.js";
 import { buildEmitBriefTool, EMIT_BRIEF_TOOL_NAME, type EmitBriefRef } from "../daily-brief.js";
@@ -193,6 +193,7 @@ import {
   resolveTaskCommandMode,
 } from "../task-commands.js";
 import { createLogger } from "../logger.js";
+import { UI_TESTER_SANDBOX_TOOL_NAMES, buildUiTesterTools } from "../ui-tester/tools.js";
 import {
   buildPrefetchBlock,
   prefetchEnabled,
@@ -2196,6 +2197,16 @@ export async function processTask(
      *  loadable on demand and must never be always-active. */
     const paletteAdmittedNames = new Set<string>();
 
+    const uiTesterSandboxTools = customToolDefs.filter(
+      (t) => (t as { source?: string }).source === "custom:sandbox" && UI_TESTER_SANDBOX_TOOL_NAMES.has(t.name),
+    );
+    const uiTesterTools =
+      !fastModeEnabled &&
+      (toolsConfigEarly?.subagents ?? []).includes("ui-tester") &&
+      uiTesterSandboxTools.some((t) => t.name === "sandbox-run")
+        ? buildUiTesterTools(meta)
+        : [];
+
     const { subagentTools: builtSubagentTools, directTools, remainingCustomTools } = fastModeEnabled
       ? {
           subagentTools: [] as ToolDefinition[],
@@ -2207,7 +2218,7 @@ export async function processTask(
         }
       : buildSubagentTools(
           allGroups,
-          customToolDefs,
+          [...customToolDefs, ...uiTesterTools],
           resolvedTriggers.length > 0 ? resolvedTriggers : undefined,
           resolvedSubagentSkills,
           { parentProvider, subagentProviderMode, subagentProviders, providerConfigs },
@@ -2235,7 +2246,7 @@ export async function processTask(
             backgroundRegistry: childTaskRegistry,
             parentDebug: parentDebugHandle,
           },
-          undefined, // bonusToolsBySubagent — removed with the sandbox subagent
+          uiTesterTools.length > 0 ? { "ui-tester": uiTesterSandboxTools } : undefined,
           customSubagents,
           directPickSuffixes,
         );
@@ -4824,9 +4835,10 @@ export async function processTask(
         ? { pendingProviderSuggestions: suggestProvidersRef.value }
         : {}),
       ...(blockedConnectors.size > 0 ? { blockedConnectors: [...blockedConnectors] } : {}),
-      ...(proposeAgentRef.value || describeAgentRef.value
-        ? { pendingAgentCard: proposeAgentRef.value ?? describeAgentRef.value }
-        : {}),
+      ...(() => {
+        const card = proposeAgentRef.value ?? describeAgentCardForReply(describeAgentRef.value, dedupedPendingActions);
+        return card ? { pendingAgentCard: card } : {};
+      })(),
       // Daily brief: emit_brief normally aborts (→ catch branch below), but if the
       // run finished cleanly with a brief emitted, carry it here too. claw-auth
       // persists it to GeneratedContent and (on the SSE regenerate path) forwards
@@ -5017,7 +5029,10 @@ export async function processTask(
         pendingResponses: pendingResponsesAtError,
         // A queued capability card must survive the copilot terminal path too,
         // or "what can you do?" silently loses its card on those agents.
-        ...(describeAgentRef.value ? { pendingAgentCard: describeAgentRef.value } : {}),
+        ...(() => {
+          const card = describeAgentCardForReply(describeAgentRef.value, dedupedPendingActionsAtError);
+          return card ? { pendingAgentCard: card } : {};
+        })(),
         ...(suggestConnectorsRef.value
           ? { pendingConnectorSuggestions: suggestConnectorsRef.value }
           : {}),

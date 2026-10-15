@@ -868,6 +868,14 @@ export enum FormFieldType {
  */
 export const MAX_DUPLICATE_SCOPE_FIELDS = 5;
 
+/**
+ * Largest duplicate-detection window a desk may configure (days, 10 years). Enforced
+ * identically by the duplicate service's config parser, both Zero mutators, and the
+ * desk settings UI — the four must agree or saves validate in one place and reject
+ * in another.
+ */
+export const MAX_DUPLICATE_LOOKBACK_DAYS = 3650;
+
 /** Max apps published to one channel, DM, group DM or desk (channel_published_tabs). */
 export const MAX_PUBLISHED_APPS = 8;
 

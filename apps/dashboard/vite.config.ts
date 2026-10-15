@@ -127,6 +127,18 @@ export default defineConfig(({ command, mode }) => {
     build: {
       manifest: true,
       reportCompressedSize: false,
+      // The desktop call window is its own page with its own small entry, so it
+      // loads only the call, not the whole app. The SDLC surface has no calls.
+      ...(isSdlcSurface
+        ? {}
+        : {
+            rollupOptions: {
+              input: {
+                main: path.resolve(__dirname, 'index.html'),
+                callWindow: path.resolve(__dirname, 'newWindow/call.html'),
+              },
+            },
+          }),
     },
     optimizeDeps: {
       exclude: ['@terrastruct/d2'],

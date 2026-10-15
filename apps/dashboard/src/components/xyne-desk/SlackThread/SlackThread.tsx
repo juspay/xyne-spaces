@@ -6,9 +6,14 @@ import { CallEmailRow, isCallEmailBody } from '../CallThread/CallThread';
 interface SlackThreadProps {
   emails: SlackEmailMessage[];
   ticketId?: string | null | undefined;
+  showRecipient?: boolean;
 }
 
-const SlackThread = ({ emails, ticketId }: SlackThreadProps): ReactElement => {
+const SlackThread = ({
+  emails,
+  ticketId,
+  showRecipient = false,
+}: SlackThreadProps): ReactElement => {
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Sort oldest-first for chat-style display
@@ -42,7 +47,7 @@ const SlackThread = ({ emails, ticketId }: SlackThreadProps): ReactElement => {
             className='px-4 py-3'
           />
         ) : (
-          <SlackMessage key={email.id} email={email} />
+          <SlackMessage key={email.id} email={email} showRecipient={showRecipient} />
         ),
       )}
     </div>
