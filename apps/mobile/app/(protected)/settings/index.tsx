@@ -27,6 +27,7 @@ import { haptics } from '@/src/utils/haptics';
 import { ReactionEmojiDisplay } from '@/src/components/chat/message/reactions/reaction-emoji-display';
 import { IS_COMMUNITY_APP } from '@/src/config';
 import { useAuth } from '@/src/contexts/AuthContext';
+import { useBetaFlags } from '@/src/features/beta-flags';
 import { useClearOwnStatus } from '@/src/hooks/useClearOwnStatus';
 import { useQuery } from '@/src/hooks/useQuery';
 import { useUserPresence } from '@/src/hooks/usePresence';
@@ -126,6 +127,9 @@ export default function AccountSettingsScreen(): ReactElement {
   const statusContent = getActiveUserStatusContent(userData);
   const themeLabel = selectedTheme.charAt(0).toUpperCase() + selectedTheme.slice(1);
   const hapticsEnabled = useSetting('appearance.haptics');
+  // Same CAC list as Settings → Beta. Hide the row when there is nothing to toggle.
+  const { flags: betaFlags, isResolved: betaFlagsResolved } = useBetaFlags();
+  const showBetaSettings = betaFlagsResolved && betaFlags.length > 0;
 
   const handleHapticsToggle = (next: boolean): void => {
     setSetting('appearance.haptics', next);
@@ -247,13 +251,17 @@ export default function AccountSettingsScreen(): ReactElement {
       trailing: <Switch isSelected={hapticsEnabled} onSelectedChange={handleHapticsToggle} />,
       onPress: () => handleHapticsToggle(!hapticsEnabled),
     },
-    {
-      colors,
-      icon: FlaskConical,
-      label: 'Beta',
-      value: 'Try unfinished features',
-      onPress: (): void => router.push('/settings/beta'),
-    },
+    ...(showBetaSettings
+      ? [
+          {
+            colors,
+            icon: FlaskConical,
+            label: 'Beta',
+            value: 'Try unfinished features',
+            onPress: (): void => router.push('/settings/beta'),
+          },
+        ]
+      : []),
     ...(canReviewJoinRequests
       ? [
           {
