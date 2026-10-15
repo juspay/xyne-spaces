@@ -93,6 +93,9 @@ async function endpointContracts(session: SandboxSession, runDir: string, source
     const found = lastJsonLine(res.stdout ?? "") as Record<string, { file?: string; function?: string | null; code?: string; types?: Record<string, string>; found?: boolean; truncated?: boolean }> | null;
     if (!found) return "";
     const parts = ["", "", "Endpoint contracts (requests no mock covered):"];
+    const themeKeys = (found as unknown as { __themeKeys?: string[] }).__themeKeys ?? [];
+    delete (found as Record<string, unknown>)["__themeKeys"];
+    if (themeKeys.length) parts.push(`Theme storage keys found in the source (set spec.themeStorageKey): ${themeKeys.join(", ")}`);
     for (const [ep, e] of Object.entries(found)) {
       if (e.found === false) { parts.push(`### ${ep}\n(not found in ${sourceDir})`); continue; }
       parts.push(`### ${ep} → ${e.function ?? "?"} (${e.file})${e.truncated ? " [omitted: size cap]" : ""}`);
@@ -138,7 +141,8 @@ const SPEC_DESCRIPTION = [
   "- video: true records a .webm per variation (navigation, steps and final state) as proof of test; set it on the spec or per variation. Keep video variations short (a few steps with {wait} pauses). The report lists each video path; deliver them with sandbox-deliver-files.",
   "- allowExternal: true lets requests to other origins (fonts, CDNs) through. By default they are answered instantly with an empty response so pages never hang on the network.",
   "- defaults: {viewport, theme, localStorage, mocks, shotAfterMs} applied to every variation (variation mocks are tried first)",
-  "- variations: [{id, path, viewport?:{width,height}, theme?:'light'|'dark', localStorage?, mocks?:[{match, method?, status?, json?, body?, delayMs?}], steps?:[{click}|{fill:[selector,value]}|{press}|{hover}|{waitFor}|{wait}], shotAfterMs?, fullPage?, expect?:{content?:'data'|'empty'|'error'|'loading'|'blank', errors?:'none'|'banner'|'toast'|'both', background?:'light'|'dark'}, checks?:[{id, question, options:{key:description}, expect?}]}]",
+  "- every variation can have title (shown on the video's opening card and caption, and in the report) and description (one line under the title card) — write them for a human watching the video, e.g. title \"Footer on the last page\", description \"230 runs, Next clicked until disabled\".",
+  "- variations: [{id, title?, description?, path, viewport?:{width,height}, theme?:'light'|'dark', localStorage?, mocks?:[{match, method?, status?, json?, body?, delayMs?}], steps?:[{click}|{fill:[selector,value]}|{press}|{hover}|{waitFor}|{wait}], shotAfterMs?, fullPage?, expect?:{content?:'data'|'empty'|'error'|'loading'|'blank', errors?:'none'|'banner'|'toast'|'both', background?:'light'|'dark'}, checks?:[{id, question, options:{key:description}, expect?}]}]",
   "- mock.match: substring of pathname+query, or 're:<regex>'.",
   "- step selectors are Playwright selectors: CSS, text=Visible label, role=button[name=\"Save\"], [data-id=...]. A failed step is reported as a page error.",
   "- mock.json may contain {\"$repeat\": N, \"$item\": {...}} to generate N items; inside $item, \"{{i}}\" is the index (a number when it is the whole string, e.g. \"{{i+1}}\", \"{{i*37}}\") and is substituted inside longer strings (\"run-{{i}}\").",

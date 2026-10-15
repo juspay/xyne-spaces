@@ -17,7 +17,7 @@ try {
   hasPlaywright = false;
 }
 
-const PAGE = `<!doctype html><html><head><link rel="stylesheet" href="http://10.255.255.1/never-answers.css"><link rel="preconnect" href="https://fonts.gstatic.com"></head><body><div id="app">loading</div><script>
+const PAGE = `<!doctype html><html><head><link rel="stylesheet" href="http://10.255.255.1/never-answers.css"><link rel="preconnect" href="https://fonts.gstatic.com"></head><body><button>Reload</button><div id="app">loading</div><script>
 fetch("/api/v1/items").then(async (r) => {
   const body = await r.json();
   const app = document.getElementById("app");
@@ -37,7 +37,7 @@ describe.skipIf(!hasPlaywright)("ui-tester harness (real browser)", () => {
     writeFileSync(join(dir, "spec.json"), JSON.stringify({
       baseUrl: `http://127.0.0.1:${port}`, outDir: join(dir, "out"),
       variations: [
-        { id: "ok", path: "/", video: true, mocks: [{ match: "/api/v1/items", json: { total: 2, items: [{ name: "alpha" }, { name: "beta" }] } }] },
+        { id: "ok", title: "Two items render", description: "total 2, both names visible", path: "/", video: true, steps: [{ wait: 200 }, { click: "role=button[name=\"Nope\"]" }], mocks: [{ match: "/api/v1/items", json: { total: 2, items: [{ name: "alpha" }, { name: "beta" }] } }] },
         { id: "broken", path: "/", viewport: { width: 390, height: 700 }, mocks: [{ match: "/api/v1/items", json: { items: [{ name: "a very wide item", wide: true }] } }] },
         { id: "error", path: "/", mocks: [{ match: "/api/v1/items", status: 500, json: { error: "boom" } }] },
         { id: "unmocked", path: "/" },
@@ -66,6 +66,9 @@ describe.skipIf(!hasPlaywright)("ui-tester harness (real browser)", () => {
       expect(byId.ok.video).toMatch(/ok\.webm$/);
       expect(existsSync(byId.ok.video)).toBe(true);
       expect(byId.broken.video).toBeNull();
+      expect(byId.ok.title).toBe("Two items render");
+      expect(byId.broken.title).toBe("broken");
+      expect(byId.ok.pageErrors.join(" ")).toMatch(/visible buttons\/links: Reload/);
       expect(typeof summary.warmUpMs).toBe("number");
       for (const id of ["ok", "broken", "error", "unmocked", "repeat"]) {
         expect(byId[id].externalStubbed).toBeGreaterThan(0);

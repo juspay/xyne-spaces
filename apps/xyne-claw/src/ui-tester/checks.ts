@@ -82,6 +82,8 @@ export interface VariationResult {
   theme?: string;
   screenshot?: string | null;
   video?: string | null;
+  title?: string;
+  themeApplied?: boolean | null;
   externalStubbed?: number;
   externalHosts?: string[];
   error?: string;
@@ -103,6 +105,7 @@ export interface Finding {
 
 export interface VariationVerdict {
   id: string;
+  title?: string;
   verdict: "pass" | "fail" | "unsure";
   findings: Finding[];
   visual: Record<string, { choice: string | null; confidence: number | null }>;
@@ -146,6 +149,7 @@ export function judgeVariation(result: VariationResult, answers: Record<string, 
     if (expectedErrors && /status of [45]\d\d/.test(e)) continue;
     add("warn", "runtime", `console error: ${e}`);
   }
+  if (result.theme === "dark" && result.themeApplied === false) add("warn", "fixture", "dark theme was requested but the page rendered light — set spec.themeStorageKey to the key the app reads (the probe's \"Theme storage keys\" line lists the ones found in the source)");
   if (result.apiRequests === 0 && !result.error) add("warn", "fixture", `no API request was intercepted on ${result.finalUrl ?? result.path ?? "the page"} — check baseUrl, path and apiPattern`);
   if ((result.unmatchedRequests?.length ?? 0) > 0) add("warn", "fixture", `requests served by the fallback mock (fixture may be missing): ${result.unmatchedRequests!.slice(0, 6).join(", ")}`);
 
@@ -188,7 +192,7 @@ export function judgeVariation(result: VariationResult, answers: Record<string, 
     }
   }
   const verdict = findings.some((f) => f.severity === "fail") ? "fail" : findings.some((f) => f.severity === "unsure") ? "unsure" : "pass";
-  return { id: result.id, verdict, findings, visual, ...(result.screenshot ? { screenshot: result.screenshot } : {}), ...(result.video ? { video: result.video } : {}) };
+  return { id: result.id, ...(result.title ? { title: result.title } : {}), verdict, findings, visual, ...(result.screenshot ? { screenshot: result.screenshot } : {}), ...(result.video ? { video: result.video } : {}) };
 }
 
 export function formatReport(verdicts: VariationVerdict[]): string {
@@ -197,7 +201,7 @@ export function formatReport(verdicts: VariationVerdict[]): string {
   const lines = [`UI variations: ${verdicts.length} checked — ${counts.fail} fail, ${counts.unsure} unsure, ${counts.pass} pass.`, ""];
   for (const v of verdicts) {
     const mark = v.verdict === "pass" ? "PASS" : v.verdict === "fail" ? "FAIL" : "UNSURE";
-    lines.push(`- ${mark} ${v.id}${v.screenshot ? ` (${v.screenshot})` : ""}${v.video ? ` video: ${v.video}` : ""}`);
+    lines.push(`- ${mark} ${v.id}${v.title && v.title !== v.id ? ` "${v.title}"` : ""}${v.screenshot ? ` (${v.screenshot})` : ""}${v.video ? ` video: ${v.video}` : ""}`);
     for (const f of v.findings.filter((x) => x.severity !== "warn" || v.verdict !== "pass").slice(0, 6)) lines.push(`    - [${f.severity}/${f.source}] ${f.message}`);
   }
   return lines.join("\n");
