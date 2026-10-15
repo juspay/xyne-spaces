@@ -256,7 +256,7 @@ export interface MtlsFetchOptions {
 /** Matches the native URLSession request timeout. */
 export const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
 
-async function prepareHeadersForTransport(
+export async function prepareHeadersForTransport(
   headers: Record<string, string> | undefined,
 ): Promise<Record<string, string>> {
   const nextHeaders: Record<string, string> = { ...(headers ?? {}) };
