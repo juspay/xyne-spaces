@@ -8,7 +8,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useCSSVariable } from 'uniwind';
 import { ChannelFilterMode, ChannelSortOrder, type ChannelSection } from '@xyne/shared';
 import { AppBottomSheet, type AppBottomSheetRef } from '@/src/components/ui/app-bottom-sheet';
-import { Pencil, Plus, Trash2, ListChecks, Filter, ArrowDownUp } from 'lucide-react-native';
+import {
+  Pencil,
+  Plus,
+  Trash2,
+  ListChecks,
+  Filter,
+  ArrowDownUp,
+  ArrowLeft,
+} from 'lucide-react-native';
 import { cn } from '@/src/utils/cn';
 
 /** Left inset of a row's label, so separators line up under the text. */
@@ -217,14 +225,32 @@ function SectionOptionsSheetContent({
       >
         <View className='px-5 pb-4 pt-2'>
           <View className='flex-row items-center'>
-            {section?.emoji ? <Text className='mr-1.5 text-lg'>{section.emoji}</Text> : null}
+            {page !== 'menu' && (
+              <Pressable
+                accessibilityRole='button'
+                accessibilityLabel='Back to section options'
+                onPress={() => setPage('menu')}
+                className='mr-2 h-11 w-11 items-center justify-center active:opacity-60'
+              >
+                <ArrowLeft size={22} color={foregroundColor} />
+              </Pressable>
+            )}
+            {page === 'menu' && section?.emoji ? (
+              <Text className='mr-1.5 text-lg'>{section.emoji}</Text>
+            ) : null}
             <Text className='flex-1 text-lg font-semibold text-foreground' numberOfLines={1}>
-              {section?.name ??
-                target.section?.name ??
-                (group === 'starred' ? 'Starred' : 'Channels')}
+              {page === 'filter'
+                ? 'Filter'
+                : page === 'sort'
+                  ? 'Sort'
+                  : (section?.name ??
+                    target.section?.name ??
+                    (group === 'starred' ? 'Starred' : 'Channels'))}
             </Text>
           </View>
-          <Text className='mt-0.5 text-xs text-bottomsheet-text-muted'>{subtitle}</Text>
+          {page === 'menu' && (
+            <Text className='mt-0.5 text-xs text-bottomsheet-text-muted'>{subtitle}</Text>
+          )}
         </View>
 
         {sectionUnavailable ? (
@@ -233,27 +259,11 @@ function SectionOptionsSheetContent({
           </Text>
         ) : page !== 'menu' ? (
           <>
-            <Pressable
-              accessibilityRole='button'
-              accessibilityLabel='Back to section options'
-              onPress={() => setPage('menu')}
-              className='px-5 py-3'
-            >
-              <Text className='text-foreground'>
-                ‹ Back · {page === 'filter' ? 'Filter' : 'Sort'}
-              </Text>
-            </Pressable>
-            {page === 'filter' && (
-              <Text className='px-5 pb-3 text-xs text-bottomsheet-text-muted'>
-                Active only shows new activity within the last 30 days.
-              </Text>
-            )}
             <OptionGroup>
               {page === 'filter'
                 ? filters.map(option => (
                     <OptionRow
                       key={option.label}
-                      icon={<View />}
                       label={option.label}
                       selected={preference.filterMode === option.value}
                       onPress={() => setFilter(option.value)}
@@ -262,7 +272,6 @@ function SectionOptionsSheetContent({
                 : sorts.map(option => (
                     <OptionRow
                       key={option.label}
-                      icon={<View />}
                       label={option.label}
                       selected={preference.sortOrder === option.value}
                       onPress={() => setSort(option.value)}
@@ -350,7 +359,7 @@ function OptionGroup({
 }
 
 type OptionRowProps = {
-  icon: ReactElement;
+  icon?: ReactElement;
   label: string;
   onPress: () => void;
   trailing?: string | undefined;
@@ -377,7 +386,7 @@ function OptionRow({
         accessibilityLabel={label}
         className='flex-row items-center px-4 py-3.5 active:opacity-60'
       >
-        <View className='w-7'>{icon}</View>
+        {icon ? <View className='w-7'>{icon}</View> : null}
         <Text
           className={cn(
             'flex-1 text-[15px] font-medium',
@@ -391,7 +400,9 @@ function OptionRow({
           <Text className='text-[13px] text-bottomsheet-text-muted'>{trailing}</Text>
         ) : null}
       </Pressable>
-      {!isLast && <View className='h-px bg-border' style={{ marginLeft: ROW_LABEL_INSET }} />}
+      {!isLast && (
+        <View className='h-px bg-border' style={{ marginLeft: icon ? ROW_LABEL_INSET : 16 }} />
+      )}
     </>
   );
 }
