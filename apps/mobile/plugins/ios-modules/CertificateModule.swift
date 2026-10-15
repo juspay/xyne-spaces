@@ -1135,7 +1135,7 @@ X3Lzm0UE40jWh56ZL+VDzSbZQsxBuweMAM4lZfo=
   }
 
   // MARK: - CA Loading
-  private static func loadServerCaCertificate() -> SecCertificate? {
+  static func loadServerCaCertificate() -> SecCertificate? {
     let env = resolveEnv()
     let pem =
       env.contains("sandbox")
