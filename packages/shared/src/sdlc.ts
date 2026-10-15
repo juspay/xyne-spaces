@@ -691,7 +691,12 @@ export type EditSdlcClawArtifactSectionInput = z.infer<
 /** parentId is a folder inside the artifact's track, or the track itself for its root. */
 export const moveSdlcClawArtifactSchema = z.object({
   canvasId: z.string().min(1),
-  parentId: z.string().min(1),
+  // Track or track folder; Hub Knowledge has no track, so it ignores this.
+  parentId: z.string().min(1).optional(),
+  // New artifact type; required to file a canvas that is not an SDLC artifact yet.
+  folderId: z.string().min(1).optional(),
+  // Set by claw-auth only on a human-approved call; filing a personal canvas needs it.
+  adoptApproved: z.boolean().optional(),
 });
 export type MoveSdlcClawArtifactInput = z.infer<typeof moveSdlcClawArtifactSchema>;
 

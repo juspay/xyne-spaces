@@ -21,10 +21,13 @@ export function trustedSdlcToolBindings(sdlcContext: unknown): TrustedMcpToolBin
   const bindings: TrustedMcpToolBindings = Object.fromEntries(
     SDLC_DIRECT_TOOL_NAMES.map((name) => [name, { workspaceId, actorUserId }]),
   );
-  // A wiki workflow run pins the commit its pages describe.
+  // A wiki workflow run pins the commit its pages describe. Always bound so a
+  // chat run cannot supply one: it lets non-admins write Wiki pages.
   const generationCommit = context["generationCommit"];
-  if (typeof generationCommit === "string" && generationCommit) {
-    bindings[SDLC_TOOL_NAMES.writeArtifact] = { workspaceId, actorUserId, generationCommit };
-  }
+  bindings[SDLC_TOOL_NAMES.writeArtifact] = {
+    workspaceId,
+    actorUserId,
+    generationCommit: typeof generationCommit === "string" && generationCommit ? generationCommit : undefined,
+  };
   return bindings;
 }

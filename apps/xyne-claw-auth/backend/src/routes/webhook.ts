@@ -3437,7 +3437,12 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   // is interrupted again. Defer settlement until the empty-result branch asks
   // recovery whether another bounded attempt will run; otherwise the generic
   // apology can be posted before the resumed answer.
+  // Claw ends the run right after a question card, often before any text.
+  const postedQuestion = (payload as { pendingQuestions?: Array<{ purpose?: string }> }).pendingQuestions?.some(
+    (q) => q.purpose !== "follow_up_suggestions"
+  );
   const emptyCompletedResult =
+    !postedQuestion &&
     payload.status === "completed" &&
     !resultWithCitations.trim() &&
     !payload.attachments?.length &&
@@ -4636,7 +4641,8 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     !payload.attachments?.length &&
     !payload.pendingResponses?.length &&
     !postedAgentProfileCard &&
-    !draftCardIsTheReply
+    !draftCardIsTheReply &&
+    !postedQuestion
   ) {
     if (deferCompletedRecoveryForEmptyResult) {
       const recoveryEmptyResult = await handleRunCompletion(sessionId, "failed", "empty_result").catch((err) => {

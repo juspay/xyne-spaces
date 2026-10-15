@@ -23,6 +23,7 @@ export const SDLC_TOOL_NAMES = {
   createTrack: "spaces-sdlc-create-track",
   createTrackFolder: "spaces-sdlc-create-track-folder",
   listArtifactTypes: "spaces-sdlc-list-artifact-types",
+  createArtifactType: "spaces-sdlc-create-artifact-type",
   listRepositories: "spaces-sdlc-list-repositories",
   listEntityLinks: "spaces-sdlc-list-entity-links",
 } as const;
@@ -40,6 +41,7 @@ export const SDLC_TOOL_CAPABILITIES: readonly SdlcToolCapability[] = [
   { name: SDLC_TOOL_NAMES.createTrack, transport: "direct", group: "sdlc", mutation: "write" },
   { name: SDLC_TOOL_NAMES.createTrackFolder, transport: "direct", group: "sdlc", mutation: "write" },
   { name: SDLC_TOOL_NAMES.listArtifactTypes, transport: "direct", group: "sdlc", mutation: "read" },
+  { name: SDLC_TOOL_NAMES.createArtifactType, transport: "direct", group: "sdlc", mutation: "write" },
   { name: SDLC_TOOL_NAMES.listRepositories, transport: "direct", group: "sdlc", mutation: "read" },
   { name: SDLC_TOOL_NAMES.listEntityLinks, transport: "direct", group: "sdlc", mutation: "read" },
 ] as const;
