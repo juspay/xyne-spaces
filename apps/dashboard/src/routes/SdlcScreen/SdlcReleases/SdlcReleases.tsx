@@ -52,6 +52,8 @@ const isActivatableFocused = (): boolean => {
 
 export function SdlcReleases({
   projectId,
+  channelId,
+  channelName,
   repositories,
   openReleaseId,
   onOpenRelease,
@@ -60,7 +62,7 @@ export function SdlcReleases({
   onConnectRepository,
 }: SdlcReleasesProps): ReactElement {
   const [configOpen, setConfigOpen] = useState(false);
-  const { repos, loading } = useSdlcReleaseRepos(repositories, projectId);
+  const { repos, loading } = useSdlcReleaseRepos(repositories, projectId, channelId, channelName);
   const configuredRepos = useMemo(() => repos.filter(repo => repo.config), [repos]);
 
   const renderContent = (): ReactElement | null => {

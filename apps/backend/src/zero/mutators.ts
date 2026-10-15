@@ -98,6 +98,7 @@ import {
   Platform,
   SDLC_MEMBERSHIP_RELATION,
   SDLC_CONTAINMENT_RELATION,
+  SDLC_RELEASE_CONFIG_RELATION,
   SDLC_STRUCTURAL_RELATIONS,
   SDLC_TRACK_FLAT_RELATION,
   SDLC_TRACK_MEMBERSHIP_RELATION,
@@ -1373,8 +1374,12 @@ export function createMutators(
           }
 
           if (projectId) {
+            // Release boards are linked by the hub whose release config owns them.
             const projectBoards = await tx.run(
-              zql.boards.where('projectId', projectId).orderBy('createdAt', 'asc'),
+              zql.boards
+                .where('projectId', projectId)
+                .where('boardType', '!=', BoardType.RELEASE)
+                .orderBy('createdAt', 'asc'),
             );
             const existingMappings = await tx.run(
               zql.channel_board_mappings.where('channelId', channelId),
@@ -2254,6 +2259,18 @@ export function createMutators(
         // Permission and tenancy live in ChannelBoardMappingsACL.canInsert, which the
         // transaction wrapper runs on every insert below — same as every other table.
         async ({ tx, args: { channelId, boards, timestamp } }) => {
+          // Release boards are linked only by the release config of the hub that owns them.
+          const releaseBoard = await tx.run(
+            zql.boards
+              .where('id', 'IN', boards.map(board => board.boardId))
+              .where('boardType', BoardType.RELEASE)
+              .one(),
+          );
+          if (releaseBoard) {
+            throw new Error(
+              `"${releaseBoard.name}" is a release board; it is linked through its SDLC hub's release config`,
+            );
+          }
           const existing = await tx.run(zql.channel_board_mappings.where('channelId', channelId));
           const linkedBoardIds = new Set(existing.map(mapping => mapping.boardId));
           // At most one row per channel may carry isDefault (enforced by a partial
@@ -7805,13 +7822,16 @@ export function createMutators(
       ),
       // Creates or updates one main release board and only the applications
       // explicitly owned by that board through Application.mainReleaseBoardId.
+      // The config belongs to an SDLC hub (hubChannelId) and releases one of the hub's
+      // repositories; release tickets are created in the chosen release channel (channelId).
       saveReleaseBoardConfig: defineMutator(
         z.object({
-          projectId: z.string(),
           mainBoardId: z.string(),
           mainBoardName: z.string(),
           releaseTrackingMode: z.nativeEnum(ReleaseTrackingMode),
           channelId: z.string(),
+          hubChannelId: z.string(),
+          repoId: z.string(),
           applications: z.array(
             z.object({
               id: z.string(),
@@ -7819,7 +7839,6 @@ export function createMutators(
               boardName: z.string(),
               name: z.string(),
               regex: z.string(),
-              repoUrl: z.string(),
               ownerTeam: z.string(),
               envPaths: z.array(z.string()),
               migrationPaths: z.array(z.string()),
@@ -7829,17 +7848,27 @@ export function createMutators(
         async ({
           tx,
           args: {
-            projectId,
             mainBoardId,
             mainBoardName: rawMainBoardName,
             releaseTrackingMode,
             channelId,
+            hubChannelId,
+            repoId,
             applications: rawApplications,
           },
         }) => {
           await assertReleaseManageAccess();
 
-          // Validate project exists
+          const hub = await tx.run(zql.channels.where('id', hubChannelId).one());
+          if (!hub || hub.type !== ChannelType.SDLC) {
+            throw new Error('Release configs belong to an SDLC hub');
+          }
+          // Boards and their tickets live in a project, so the hub's project is the
+          // only one its release boards can be created in.
+          const projectId = hub.projectId;
+          if (!projectId) {
+            throw new Error('This SDLC hub is not linked to a project');
+          }
           const project = await tx.run(zql.projects.where('id', projectId).one());
           if (!project) {
             throw new Error('Project not found');
@@ -7850,6 +7879,24 @@ export function createMutators(
           if (!channel) {
             throw new Error('Channel not found');
           }
+
+          const repo = await tx.run(
+            zql.repos.where('id', repoId).where('workspaceId', authData.workspaceId).one(),
+          );
+          if (!repo) {
+            throw new Error('Repository not found');
+          }
+          const hubRepository = await tx.run(
+            zql.sdlc_entity_links
+              .where('channelId', hubChannelId)
+              .where('relationType', SDLC_MEMBERSHIP_RELATION)
+              .where('targetId', repoId)
+              .one(),
+          );
+          if (!hubRepository) {
+            throw new Error('Add the repository to this SDLC hub before configuring its releases');
+          }
+          const repoUrl = (repo.canonicalUrl || repo.url).trim().replace(/\/+$/, '');
 
           if (rawApplications.length === 0) {
             throw new Error('At least one application is required');
@@ -7880,7 +7927,6 @@ export function createMutators(
               ...app,
               name: trimmedName,
               boardName: app.boardName.trim(),
-              repoUrl: app.repoUrl.trim().replace(/\/+$/, ''),
               regex: trimmedRegex,
               ownerTeam: app.ownerTeam.trim(),
               envPaths: app.envPaths.map(p => p.trim()).filter(Boolean),
@@ -7904,16 +7950,9 @@ export function createMutators(
             throw new Error('Application names must be unique within a release group');
           }
 
-          // One main release board represents one repository. A project can use
-          // multiple repositories by creating multiple main release boards.
-          const normalizedRepoUrls = new Set(
-            applications.map(app => app.repoUrl.trim().replace(/\/+$/, '')),
-          );
-          if (normalizedRepoUrls.has('') || normalizedRepoUrls.size !== 1) {
-            throw new Error('All applications in a release group must use the same repository URL');
-          }
-
-          const vcsProvider = detectVcsProvider([...normalizedRepoUrls][0]);
+          // One main release board represents one repository; every application in
+          // the group is released from the hub repository passed as repoId.
+          const vcsProvider = detectVcsProvider(repoUrl);
           if (!vcsProvider) {
             throw new Error(
               'Unsupported or unrecognized repository URL — provide a GitHub or Bitbucket Server repository URL',
@@ -7946,6 +7985,48 @@ export function createMutators(
           }
           if (new Set(requestedBoardNames).size !== requestedBoardNames.length) {
             throw new Error('Release board names must be unique within the project');
+          }
+          // Board names are unique per project; two hubs releasing the same repository
+          // would otherwise collide on the defaults and fail on the raw constraint. The
+          // config's current boards count as its own: boards of removed services are
+          // deleted before new ones are inserted, so their names can be reused.
+          const currentConfigApps = await tx.run(
+            zql.applications.where('mainReleaseBoardId', mainBoardId),
+          );
+          const ownBoardIds = new Set([
+            mainBoardId,
+            ...appBoardIds,
+            ...currentConfigApps.map(app => app.boardId),
+          ]);
+          const sameNamedBoards = await tx.run(
+            zql.boards.where('projectId', projectId).where('name', 'IN', requestedBoardNames),
+          );
+          const takenBoard = sameNamedBoards.find(board => !ownBoardIds.has(board.id));
+          if (takenBoard) {
+            throw new Error(`A board named "${takenBoard.name}" already exists in this project`);
+          }
+
+          // One release config per hub and repository, and one hub per main release
+          // board. The partial unique indexes enforce the same; checking first gives a
+          // readable error.
+          const hubReleaseConfig = await tx.run(
+            zql.sdlc_entity_links
+              .where('channelId', hubChannelId)
+              .where('relationType', SDLC_RELEASE_CONFIG_RELATION)
+              .where('sourceId', repoId)
+              .one(),
+          );
+          if (hubReleaseConfig && hubReleaseConfig.targetId !== mainBoardId) {
+            throw new Error('This hub already has a release config for this repository');
+          }
+          const boardReleaseConfig = await tx.run(
+            zql.sdlc_entity_links
+              .where('relationType', SDLC_RELEASE_CONFIG_RELATION)
+              .where('targetId', mainBoardId)
+              .one(),
+          );
+          if (boardReleaseConfig && boardReleaseConfig.channelId !== hubChannelId) {
+            throw new Error('This release board belongs to another SDLC hub');
           }
 
           // Seed the GENERIC default stages on each new release board. This is
@@ -8084,6 +8165,13 @@ export function createMutators(
               await tx.mutate.forms_context_mapping.delete({ id: mapping.id });
             }
 
+            const boardChannelMappings = await tx.run(
+              zql.channel_board_mappings.where('boardId', application.boardId),
+            );
+            for (const mapping of boardChannelMappings) {
+              await tx.mutate.channel_board_mappings.delete({ id: mapping.id });
+            }
+
             await tx.mutate.applications.delete({ id: application.id });
             await tx.mutate.boards.delete({ id: application.boardId });
           };
@@ -8129,23 +8217,23 @@ export function createMutators(
             await ensureBoardFormMapping(mainBoardId);
           }
 
-          // Create Release lists the boards linked to the chosen channel, so the release
-          // channel gets its main board linked here. Additive only, and never as the
-          // channel's default: everyday tickets in that channel must not land on it.
-          const channelMappings = await tx.run(
-            zql.channel_board_mappings.where('channelId', channelId),
-          );
-          if (!channelMappings.some(mapping => mapping.boardId === mainBoardId)) {
-            const linkedAt = Date.now();
-            await tx.mutate.channel_board_mappings.insert({
+          // The hub -> repository -> main board edge that owns this config. Links are
+          // never updated, so a board moved to another repository gets a new edge.
+          if (boardReleaseConfig && boardReleaseConfig.sourceId !== repoId) {
+            await tx.mutate.sdlc_entity_links.delete({ id: boardReleaseConfig.id });
+          }
+          if (!boardReleaseConfig || boardReleaseConfig.sourceId !== repoId) {
+            await tx.mutate.sdlc_entity_links.insert({
               id: uuidv4(),
-              channelId,
-              boardId: mainBoardId,
               workspaceId: authData.workspaceId,
-              isDefault: false,
+              channelId: hubChannelId,
+              sourceType: 'REPOSITORY',
+              sourceId: repoId,
+              targetType: 'BOARD',
+              targetId: mainBoardId,
+              relationType: SDLC_RELEASE_CONFIG_RELATION,
               createdBy: authData.sub,
-              createdAt: linkedAt,
-              updatedAt: linkedAt,
+              createdAt: Date.now(),
             });
           }
 
@@ -8212,7 +8300,7 @@ export function createMutators(
                 mainReleaseBoardId: mainBoardId,
                 channelId,
                 regex: appConfig.regex,
-                repoUrl: appConfig.repoUrl.trim().replace(/\/+$/, ''),
+                repoId,
                 ownerTeam: appConfig.ownerTeam,
                 envPaths: appConfig.envPaths,
                 migrationPaths: appConfig.migrationPaths,
@@ -8252,12 +8340,32 @@ export function createMutators(
               mainReleaseBoardId: mainBoardId,
               channelId,
               regex: appConfig.regex,
-              repoUrl: appConfig.repoUrl.trim().replace(/\/+$/, ''),
+              repoId,
               ownerTeam: appConfig.ownerTeam,
               envPaths: appConfig.envPaths,
               migrationPaths: appConfig.migrationPaths,
               createdAt: Date.now(),
               updatedAt: Date.now(),
+            });
+          }
+
+          // Create Release lists the boards linked to the chosen channel, so the release
+          // channel gets its main board linked here. Additive only, and never as the
+          // channel's default: everyday tickets in that channel must not land on it.
+          const channelMappings = await tx.run(
+            zql.channel_board_mappings.where('channelId', channelId),
+          );
+          if (!channelMappings.some(mapping => mapping.boardId === mainBoardId)) {
+            const linkedAt = Date.now();
+            await tx.mutate.channel_board_mappings.insert({
+              id: uuidv4(),
+              channelId,
+              boardId: mainBoardId,
+              workspaceId: authData.workspaceId,
+              isDefault: false,
+              createdBy: authData.sub,
+              createdAt: linkedAt,
+              updatedAt: linkedAt,
             });
           }
         },
@@ -9136,6 +9244,16 @@ export function createMutators(
             throw new Error(
               'Cannot delete a release board while application ownership references it',
             );
+          }
+
+          // The hub's release config edge goes with its main release board.
+          const releaseConfigLinks = await tx.run(
+            zql.sdlc_entity_links
+              .where('relationType', SDLC_RELEASE_CONFIG_RELATION)
+              .where('targetId', boardId),
+          );
+          for (const link of releaseConfigLinks) {
+            await tx.mutate.sdlc_entity_links.delete({ id: link.id });
           }
 
           // Check if board has tickets with terminal statuses (CANCELLED, COMPLETED)
@@ -11880,6 +11998,10 @@ export function createMutators(
           const repo = await tx.run(zql.repos.where('id', id).one());
           if (!repo) {
             throw new Error('Repository not found');
+          }
+          const releaseApplication = await tx.run(zql.applications.where('repoId', id).one());
+          if (releaseApplication) {
+            throw new Error('Repository is used by a release config and cannot be deleted');
           }
           await tx.mutate.repos.delete({ id });
         },
