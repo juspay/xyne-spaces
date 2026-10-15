@@ -15,11 +15,11 @@ import { cn } from '../../../utils/classNames';
 import { useUserSearch, useUsers } from '../../../hooks/useUsers';
 import { useAllChannels, useAllVisibleChannels } from '../../../hooks/useChannels';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
-import { useAuthContextValues } from '../../../hooks/useAuth';
+import { useAuth, useAuthContextValues } from '../../../hooks/useAuth';
 import { isDMChannel, resolveChannelLabel } from '../../Chat/ChatDirectory/ChatDirectory.utils';
 import { type SearchResultsFilters } from '../../../hooks/useSearchResultsScreen';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
-import { type Channel } from '@xyne/shared';
+import { type Channel, WorkspaceRole } from '@xyne/shared';
 import { clearInapplicable, entriesFor } from '../../../search/filterRegistry';
 import {
   hasExactSearchQuotes,
@@ -283,10 +283,17 @@ export function SearchFilterBar({
 
   const knownChannelsForLabels = useAllChannels();
 
+  // A guest's search is always scoped to their own channels server-side, so the
+  // "Only my channels" pill would be a switch that does nothing.
+  const isGuest = useAuth().user?.role === WorkspaceRole.GUEST;
+
   // The mode pills the row ends with, in registry order.
   const toggleEntries = useMemo(
-    () => entriesFor(filters.docType).filter(entry => entry.control?.kind === 'toggle'),
-    [filters.docType],
+    () =>
+      entriesFor(filters.docType).filter(
+        entry => entry.control?.kind === 'toggle' && !(isGuest && entry.id === 'myChannels'),
+      ),
+    [filters.docType, isGuest],
   );
 
   const filteredChannels = useMemo(() => {

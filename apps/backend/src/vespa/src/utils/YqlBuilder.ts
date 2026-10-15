@@ -184,9 +184,6 @@ export interface SlackFilters {
   // When true, scope chat results to channels the user is a member of (drop the
   // public-non-member access branch). Default (undefined/false) includes public channels.
   onlyMyChannels?: boolean;
-  // Workspace GUEST user ids. Their messages never match through the public-channel branch —
-  // only from channels the searcher is a member of (a surface shared with the guest).
-  guestAuthorIds?: string[];
 }
 
 export interface TicketFilters {
@@ -227,17 +224,10 @@ export interface FileFilters {
   collectionId?: string[];
   fileId?: string[]; // Scope to specific file document(s) by docId
   projectId?: string[];
-  // Workspace GUEST user ids. Canvases/attachments they own never match through the public
-  // (isPrivate=false) branch — only when the searcher has explicit access to that surface.
-  guestOwnerIds?: string[];
-  // When true, drop the public branch entirely: only canvases/attachments the searcher owns or
-  // was given access to (a GUEST searcher must not find public surfaces they aren't on).
+  // When true, drop the public (isPrivate=false) branch: only canvases/attachments/collections
+  // the searcher owns or was given access to (a GUEST searcher must not find public surfaces
+  // they aren't on).
   onlyExplicitAccess?: boolean;
-}
-
-export interface UserFilters {
-  // User docIds left out of people-search (guests the searcher shares no channel/canvas with).
-  excludeUserIds?: string[];
 }
 
 export interface MeetingFilters {
@@ -343,7 +333,6 @@ export class YqlBuilder {
     useExactMatch: boolean = false,
     rankProfile?: string,
     userEmail?: string,
-    userFilters: UserFilters = {},
   ): { yql: string; params: Record<string, string> } {
     const schemaNames = schemas.join(', ');
     // `limit` is interpolated raw into non-bindable YQL grammar ({targetHits:N}, max(N)); coerce to
@@ -512,7 +501,7 @@ export class YqlBuilder {
     }
 
     if (apps.some((a) => a.toLowerCase() === 'user')) {
-      openConditions.push(this.buildUserConditions(userFilters, params));
+      openConditions.push(this.buildUserConditions());
     }
 
     if (apps.some((a) => a.toLowerCase() === 'transcript')) {
@@ -579,7 +568,7 @@ export class YqlBuilder {
    * Build YQL condition for user search
    * Applies to user schemas
    */
-  private buildUserConditions(filters: UserFilters, params: VespaQueryParams): string {
+  private buildUserConditions(): string {
     // People-search filters only on `docType contains "user"` today — with two known gaps:
     //  1. transformUserToVespa stamps docType='user' on EVERY user (human/BOT/APP/AGENT alike), so
     //     docType cannot exclude bots/apps/agents. The real discriminator is `userType` (USER/BOT/APP/AGENT
@@ -589,24 +578,7 @@ export class YqlBuilder {
     //     by document key, not identity fields), and pre-middleware users were never ingested —
     //     so those docs won't match this filter. The users schema likely needs a BACKFILL
     //     (partial upsert of docType/userType/workspaceId/name) before people-search is complete.
-    if (filters.excludeUserIds && filters.excludeUserIds.length > 0) {
-      return `(docType contains "user" and !(${this.anyOf('docId', filters.excludeUserIds, params)}))`;
-    }
     return `docType contains "user"`;
-  }
-
-  /** `(field contains @a or field contains @b …)` with every value bound as a parameter. */
-  private anyOf(field: string, values: string[], params: VespaQueryParams): string {
-    return values.map((value) => `${field} contains ${params.bind(field, value)}`).join(' or ');
-  }
-
-  /**
-   * The public (`isPrivate contains "false"`) access branch, minus docs whose `authorField` is a
-   * guest — a guest's content is visible only on surfaces the searcher explicitly shares.
-   */
-  private publicBranch(authorField: string, guestIds: string[] | undefined, params: VespaQueryParams): string {
-    if (!guestIds || guestIds.length === 0) return `isPrivate contains "false"`;
-    return `(isPrivate contains "false" and !(${this.anyOf(authorField, guestIds, params)}))`;
   }
   /**
    * Per-schema field presence used to gate YQL clauses. Vespa rejects a query that
@@ -775,9 +747,7 @@ export class YqlBuilder {
     // The current user's id is checked against ownerId/permissions in the subApp access
     // groups below; bind it once and reuse the placeholder.
     const accessUser = params.bind('permissions', userId);
-    const publicAccess = filters.onlyExplicitAccess
-      ? ''
-      : ` or ${this.publicBranch('ownerId', filters.guestOwnerIds, params)}`;
+    const publicAccess = filters.onlyExplicitAccess ? '' : ` or isPrivate contains "false"`;
 
     // DocType filter
     conditions.push(`docType contains "file"`);
@@ -831,8 +801,7 @@ export class YqlBuilder {
 
     // Collections: require owner/permissions/isPrivate check + project scoping
     if (subApps.some((s) => s === 'collections')) {
-      const collectionPublic = filters.onlyExplicitAccess ? '' : ` or isPrivate contains "false"`;
-      let collectionCondition = `(subApp contains "collections") and (ownerId contains ${accessUser} or permissions contains ${accessUser}${collectionPublic})`;
+      let collectionCondition = `(subApp contains "collections") and (ownerId contains ${accessUser} or permissions contains ${accessUser}${publicAccess})`;
       if (filters.projectId && filters.projectId.length > 0) {
         const projectCondition = filters.projectId
           .map((projectId) => `projectId contains ${params.bind('projectId', projectId)}`)
@@ -1078,9 +1047,7 @@ export class YqlBuilder {
     // pruned to chat_attachment only (else Vespa rejects the field reference).
     const accessClauses: string[] = [`permissions contains ${params.bind('permissions', userId)}`];
     if (!filters.onlyMyChannels && this.schemasHaveField(selectedSchemas, (f) => f.isPrivate)) {
-      // userId (the author) exists on chat_message only — guard like the other field clauses.
-      const guestIds = selectedSchemas.includes(messageSchema) ? filters.guestAuthorIds : undefined;
-      accessClauses.push(this.publicBranch('userId', guestIds, params));
+      accessClauses.push(`isPrivate contains "false"`);
     }
     conditions.push(`(${accessClauses.join(' or ')})`);
     // messageType exists only on chat_message — omit these clauses when the query is
