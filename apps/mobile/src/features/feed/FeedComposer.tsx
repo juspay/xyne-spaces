@@ -1,3 +1,4 @@
+import { useBubbleAccent } from '@/src/theme/useBubbleAccent';
 import { useRef, useState, type ReactElement } from 'react';
 import {
   ActivityIndicator,
@@ -32,6 +33,7 @@ export function Composer({
   onClose: () => void;
   onPublished: () => void;
 }): ReactElement {
+  const { accentText } = useBubbleAccent();
   const [body, setBody] = useState(editing?.body ?? '');
   const [selected, setSelected] = useState<SourceMessage[]>([]);
   const [confirmed, setConfirmed] = useState(false);
@@ -107,13 +109,32 @@ export function Composer({
       ]);
     else onClose();
   };
+  const publishButton = (
+    <Button
+      disabled={
+        publish.isPending ||
+        (!body.trim() && !selection.length && !editing?.excerpts.length) ||
+        (!editing && !confirmed)
+      }
+      onPress={() => publish.mutate()}
+    >
+      {publish.isPending ? 'Publishing media…' : editing ? 'Save changes' : 'Publish post'}
+    </Button>
+  );
   return (
-    <Sheet title={editing ? 'Edit post' : review ? 'New post' : 'Choose messages'} onClose={close}>
+    <Sheet
+      title={editing ? 'Edit post' : review ? 'New post' : 'Choose messages'}
+      onClose={close}
+      action={review ? publishButton : undefined}
+    >
       <ScrollView
         keyboardShouldPersistTaps='handled'
         contentContainerStyle={{ padding: 20, gap: 16 }}
       >
-        <Text className='self-start rounded-full bg-secondary px-4 py-2 text-xs font-semibold text-secondary-foreground'>
+        <Text
+          style={{ color: accentText, borderColor: accentText }}
+          className='self-start rounded-full border px-3 py-1 text-xs font-bold'
+        >
           Sharing with everyone in {source.data?.pages[0]?.workspaceName ?? workspaceName}
         </Text>
         {conversationId && !review ? (
@@ -178,17 +199,6 @@ export function Composer({
           </>
         ) : (
           <>
-            <TextInput
-              value={body}
-              onChangeText={setBody}
-              placeholder='Share a thought. Start a conversation.'
-              placeholderTextColor={color}
-              multiline
-              maxLength={5000}
-              textAlignVertical='top'
-              className='min-h-40 text-lg leading-7 text-foreground'
-              accessibilityLabel='Post commentary'
-            />
             {selection.map(message => (
               <View key={message.id} className='rounded-2xl border border-border p-3'>
                 <FeedMediaStrip media={message.media} workspaceId={workspaceId} source />
@@ -196,6 +206,17 @@ export function Composer({
                 <Text className='mt-2 text-foreground'>{message.text}</Text>
               </View>
             ))}
+            <TextInput
+              value={body}
+              onChangeText={setBody}
+              placeholder='What’s happening?'
+              placeholderTextColor={color}
+              multiline
+              maxLength={5000}
+              textAlignVertical='top'
+              className='min-h-40 text-xl leading-7 text-foreground'
+              accessibilityLabel='Post commentary'
+            />
             {conversationId ? (
               <Button
                 disabled={publish.isPending}
@@ -230,16 +251,6 @@ export function Composer({
                 {feedError(publish.error)}
               </Text>
             ) : null}
-            <Button
-              disabled={
-                publish.isPending ||
-                (!body.trim() && !selection.length && !editing?.excerpts.length) ||
-                (!editing && !confirmed)
-              }
-              onPress={() => publish.mutate()}
-            >
-              {publish.isPending ? 'Publishing media…' : editing ? 'Save changes' : 'Publish post'}
-            </Button>
           </>
         )}
       </ScrollView>

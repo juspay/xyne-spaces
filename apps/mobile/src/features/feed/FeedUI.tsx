@@ -1,7 +1,9 @@
+import { useBubbleAccent } from '@/src/theme/useBubbleAccent';
+import { formatDistanceToNowStrict } from 'date-fns';
 import { type ReactElement, type ReactNode } from 'react';
 import { KeyboardAvoidingView, Modal, Platform, Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { X } from 'lucide-react-native';
+import { ArrowLeft } from 'lucide-react-native';
 import { useCSSVariable } from 'uniwind';
 import { feedError } from './api';
 export function Button({
@@ -13,15 +15,22 @@ export function Button({
   onPress: () => void;
   disabled?: boolean;
 }): ReactElement {
+  const { accentBg, accentFg } = useBubbleAccent();
   return (
     <Pressable
       accessibilityRole='button'
       disabled={disabled}
       onPress={onPress}
-      className='rounded-full bg-brand px-5 py-3'
-      style={({ pressed }) => ({ opacity: disabled ? 0.4 : pressed ? 0.75 : 1, minHeight: 44 })}
+      className='rounded-full px-5 py-3'
+      style={({ pressed }) => ({
+        opacity: disabled ? 0.4 : pressed ? 0.75 : 1,
+        minHeight: 44,
+        backgroundColor: accentBg,
+      })}
     >
-      <Text className='text-center font-semibold text-[#171d29]'>{children}</Text>
+      <Text style={{ color: accentFg }} className='text-center font-bold'>
+        {children}
+      </Text>
     </Pressable>
   );
 }
@@ -33,29 +42,16 @@ export function Notice({ error, retry }: { error: unknown; retry: () => void }):
     </View>
   );
 }
-export function Avatar({ name }: { name: string }): ReactElement {
-  return (
-    <View className='h-10 w-10 items-center justify-center rounded-full bg-accent'>
-      <Text className='font-semibold text-foreground'>
-        {name
-          .trim()
-          .split(/\s+/)
-          .slice(0, 2)
-          .map(part => part[0])
-          .join('')
-          .toUpperCase()}
-      </Text>
-    </View>
-  );
-}
 export function Sheet({
   title,
   children,
   onClose,
+  action,
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
+  action?: ReactNode;
 }): ReactElement {
   const color = useCSSVariable('--color-foreground') as string;
   const background = useCSSVariable('--color-card') as string;
@@ -66,20 +62,31 @@ export function Sheet({
           style={{ flex: 1 }}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
-          <View className='flex-row items-center justify-between border-b border-border px-5 py-4'>
-            <Text className='text-lg font-bold text-foreground'>{title}</Text>
+          <View className='min-h-14 flex-row items-center gap-5 border-b border-border px-3'>
             <Pressable
               accessibilityRole='button'
               accessibilityLabel='Close'
               onPress={onClose}
-              className='rounded-full bg-secondary p-2'
+              className='h-11 w-11 items-center justify-center'
             >
-              <X color={color} size={22} />
+              <ArrowLeft color={color} size={23} />
             </Pressable>
+            <Text className='flex-1 text-xl font-bold text-foreground'>{title}</Text>
+            {action}
           </View>
           {children}
         </KeyboardAvoidingView>
       </SafeAreaView>
     </Modal>
   );
+}
+
+export function feedTime(value: string): string {
+  return formatDistanceToNowStrict(new Date(value))
+    .replace(/ seconds?/, 's')
+    .replace(/ minutes?/, 'm')
+    .replace(/ hours?/, 'h')
+    .replace(/ days?/, 'd')
+    .replace(/ months?/, 'mo')
+    .replace(/ years?/, 'y');
 }

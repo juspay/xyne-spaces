@@ -1,26 +1,35 @@
+import { useBubbleAccent } from '@/src/theme/useBubbleAccent';
+import { FeedAuthor } from './FeedAuthor';
 import { useRef, useState, type ReactElement } from 'react';
 import { ActivityIndicator, Alert, FlatList, Pressable, Text, TextInput, View } from 'react-native';
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowUp, MessageCircle } from 'lucide-react-native';
+import { MessageCircle } from 'lucide-react-native';
 import { useCSSVariable } from 'uniwind';
 import { v4 as uuid } from 'uuid';
 import { feedRequest, feedError } from './api';
-import { Avatar, Notice, Sheet } from './FeedUI';
-import type { FeedComment } from './types';
+import { feedTime, Notice, Sheet } from './FeedUI';
+import { PostCard } from './PostCard';
+import type { FeedComment, FeedPost } from './types';
 export function Comments({
   postId,
+  post,
+  onEditPost,
   workspaceId,
   viewerId,
   canModerate,
   onClose,
 }: {
   postId: string;
+  post: FeedPost | undefined;
+  onEditPost: () => void;
   workspaceId: string;
   viewerId: string;
   canModerate: boolean;
   onClose: () => void;
 }): ReactElement {
+  const { accentBg, accentFg } = useBubbleAccent();
   const client = useQueryClient();
+  const input = useRef<TextInput>(null);
   const [body, setBody] = useState('');
   const [editing, setEditing] = useState<string | null>(null);
   const request = useRef(uuid());
@@ -61,11 +70,30 @@ export function Comments({
     onError: error => Alert.alert('Could not delete comment', feedError(error)),
   });
   return (
-    <Sheet title='Comments' onClose={onClose}>
+    <Sheet title='Post' onClose={onClose}>
       <FlatList
         data={query.data?.pages.flatMap(page => page.comments) ?? []}
         keyExtractor={comment => comment.id}
-        contentContainerStyle={{ padding: 20, gap: 20 }}
+        contentContainerStyle={{ paddingBottom: 20 }}
+        ListHeaderComponent={
+          post ? (
+            <View>
+              <PostCard
+                post={post}
+                workspaceId={workspaceId}
+                viewerId={viewerId}
+                canModerate={canModerate}
+                onComments={() => input.current?.focus()}
+                onNavigate={onClose}
+                onEdit={onEditPost}
+                refresh={refresh}
+              />
+              <Text className='border-b border-border px-4 py-3 text-[15px] font-bold text-foreground'>
+                Replies
+              </Text>
+            </View>
+          ) : null
+        }
         ListEmptyComponent={
           query.isPending ? (
             <ActivityIndicator />
@@ -104,10 +132,15 @@ export function Comments({
           ) : null
         }
         renderItem={({ item }) => (
-          <View className='flex-row gap-3'>
-            <Avatar name={item.authorName} />
+          <View className='flex-row gap-3 border-b border-border px-4 py-3'>
+            <FeedAuthor userId={item.authorId} name={item.authorName} avatar onNavigate={onClose} />
             <View className='flex-1'>
-              <Text className='font-semibold text-foreground'>{item.authorName}</Text>
+              <View className='flex-row items-center gap-1'>
+                <FeedAuthor userId={item.authorId} name={item.authorName} onNavigate={onClose} />
+                <Text className='text-xs text-secondary-foreground'>
+                  · {feedTime(item.createdAt)}
+                </Text>
+              </View>
               <Text className='mt-1 leading-6 text-foreground'>{item.body}</Text>
               <View className='mt-2 flex-row gap-5'>
                 {item.authorId === viewerId ? (
@@ -160,26 +193,29 @@ export function Comments({
         <View className='flex-row items-end gap-3'>
           <TextInput
             accessibilityLabel='Comment'
-            placeholder='Add to the conversation…'
+            ref={input}
+            placeholder='Post your reply'
             placeholderTextColor={color}
             value={body}
             onChangeText={setBody}
             multiline
             maxLength={2000}
-            className='max-h-32 min-h-12 flex-1 rounded-2xl bg-secondary px-4 py-3 text-base text-foreground'
+            className='max-h-32 min-h-12 flex-1 px-1 py-3 text-base text-foreground'
           />
           <Pressable
             accessibilityRole='button'
             accessibilityLabel={editing ? 'Save comment' : 'Send comment'}
             disabled={!body.trim() || send.isPending}
             onPress={() => send.mutate()}
-            className='h-12 w-12 items-center justify-center rounded-full bg-brand'
-            style={{ opacity: !body.trim() || send.isPending ? 0.4 : 1 }}
+            className='min-h-11 items-center justify-center rounded-full px-5'
+            style={{ backgroundColor: accentBg, opacity: !body.trim() || send.isPending ? 0.4 : 1 }}
           >
             {send.isPending ? (
-              <ActivityIndicator color='#171d29' />
+              <ActivityIndicator color={accentFg} />
             ) : (
-              <ArrowUp size={22} color='#171d29' />
+              <Text style={{ color: accentFg }} className='font-bold'>
+                {editing ? 'Save' : 'Reply'}
+              </Text>
             )}
           </Pressable>
         </View>

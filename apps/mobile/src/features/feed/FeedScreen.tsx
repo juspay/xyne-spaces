@@ -1,9 +1,10 @@
+import { useBubbleAccent } from '@/src/theme/useBubbleAccent';
 import { useCallback, useState, type ReactElement } from 'react';
 import { ActivityIndicator, FlatList, Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Plus, MessageSquare, Sparkles, ArrowUpRight } from 'lucide-react-native';
+import { ArrowLeft, Plus, MessageCircle } from 'lucide-react-native';
 import { useCSSVariable } from 'uniwind';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { useTabPageIsFocused } from '@/src/hooks/useTabPageFocus';
@@ -29,6 +30,7 @@ function FeedContent({ workspaceId }: { workspaceId: string }): ReactElement {
   const client = useQueryClient();
   const color = useCSSVariable('--color-foreground') as string;
   const surface = useCSSVariable('--color-card') as string;
+  const { accentBg, accentFg, accentText } = useBubbleAccent();
   const inTab = useOptionalTabPager() !== null;
   const query = useInfiniteQuery({
     queryKey: ['feed', workspaceId, 'posts', mine],
@@ -86,19 +88,11 @@ function FeedContent({ workspaceId }: { workspaceId: string }): ReactElement {
           </Pressable>
         ) : null}
         <View className='flex-1'>
-          <Text className='text-[28px] font-bold tracking-tight text-foreground'>Feed</Text>
+          <Text className='text-xl font-bold text-foreground'>Feed</Text>
           <Text className='text-xs text-secondary-foreground'>
             {metadata?.workspaceName ?? 'Your workspace'}
           </Text>
         </View>
-        <Pressable
-          accessibilityRole='button'
-          accessibilityLabel='Create a post'
-          onPress={() => setCompose(true)}
-          className='rounded-full bg-brand p-3'
-        >
-          <Plus size={22} color='#171d29' />
-        </Pressable>
       </View>
       <View className='flex-row border-b border-border bg-card px-4'>
         {[false, true].map(value => (
@@ -108,7 +102,6 @@ function FeedContent({ workspaceId }: { workspaceId: string }): ReactElement {
             accessibilityState={{ selected: mine === value }}
             onPress={() => setMine(value)}
             className='flex-1 items-center py-3'
-            style={{ borderBottomWidth: mine === value ? 2 : 0, borderColor: '#fe6d36' }}
           >
             <Text
               className={
@@ -117,30 +110,20 @@ function FeedContent({ workspaceId }: { workspaceId: string }): ReactElement {
                   : 'font-medium text-secondary-foreground'
               }
             >
-              {value ? 'My posts' : 'For everyone'}
+              {value ? 'My posts' : 'Workspace'}
             </Text>
+            {mine === value ? (
+              <View
+                style={{ backgroundColor: accentBg }}
+                className='absolute bottom-0 h-1 w-14 rounded-full'
+              />
+            ) : null}
           </Pressable>
         ))}
       </View>
       <FlatList
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 24 }}
-        ListHeaderComponent={
-          <Pressable
-            accessibilityRole='button'
-            accessibilityLabel='Write a new post'
-            onPress={() => setCompose(true)}
-            className='mx-4 my-3 flex-row items-center gap-3 rounded-2xl bg-secondary px-4 py-3'
-          >
-            <View className='h-9 w-9 items-center justify-center rounded-full bg-card'>
-              <MessageSquare size={18} color={color} />
-            </View>
-            <Text className='flex-1 text-sm text-secondary-foreground'>
-              What’s happening in your world?
-            </Text>
-            <ArrowUpRight size={18} color={color} />
-          </Pressable>
-        }
+        contentContainerStyle={{ paddingBottom: 96 }}
         data={query.data?.pages.flatMap(page => page.posts) ?? []}
         keyExtractor={post => post.id}
         refreshing={query.isRefetching && !query.isFetchingNextPage}
@@ -164,7 +147,7 @@ function FeedContent({ workspaceId }: { workspaceId: string }): ReactElement {
           ) : (
             <View className='items-center gap-4 px-8 py-12'>
               <View className='mb-2 h-20 w-20 items-center justify-center rounded-3xl bg-secondary'>
-                <Sparkles size={32} color='#fe6d36' strokeWidth={1.5} />
+                <MessageCircle size={32} color={accentText} strokeWidth={1.5} />
               </View>
               <Text className='text-xs font-bold uppercase tracking-widest text-secondary-foreground'>
                 Your community, connected
@@ -207,6 +190,22 @@ function FeedContent({ workspaceId }: { workspaceId: string }): ReactElement {
           />
         )}
       />
+      <Pressable
+        accessibilityRole='button'
+        accessibilityLabel='Create a post'
+        onPress={() => setCompose(true)}
+        className='absolute bottom-6 right-5 h-14 w-14 items-center justify-center rounded-full'
+        style={{
+          backgroundColor: accentBg,
+          elevation: 5,
+          shadowColor: '#000',
+          shadowOpacity: 0.18,
+          shadowRadius: 6,
+          shadowOffset: { width: 0, height: 3 },
+        }}
+      >
+        <Plus size={28} color={accentFg} />
+      </Pressable>
       {compose ? (
         <Composer
           workspaceId={workspaceId}
@@ -235,6 +234,12 @@ function FeedContent({ workspaceId }: { workspaceId: string }): ReactElement {
         ) : (
           <Comments
             postId={commentPost}
+            post={detail.data?.post}
+            onEditPost={() => {
+              setCommentPost(null);
+              setEditing(detail.data?.post);
+              setCompose(true);
+            }}
             workspaceId={workspaceId}
             viewerId={metadata?.viewerId ?? ''}
             canModerate={metadata?.canModerate ?? false}

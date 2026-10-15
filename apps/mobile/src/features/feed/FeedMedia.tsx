@@ -197,7 +197,10 @@ export function FeedMediaStrip({
   const [active, setActive] = useState(0);
   if (!media.length) return null;
   return (
-    <View className='mb-3' onLayout={event => setWidth(event.nativeEvent.layout.width)}>
+    <View
+      className='mb-2 overflow-hidden rounded-2xl border border-border'
+      onLayout={event => setWidth(event.nativeEvent.layout.width)}
+    >
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -221,19 +224,12 @@ export function FeedMediaStrip({
       </ScrollView>
       {media.length > 1 ? (
         <View
-          className='mt-3 flex-row items-center justify-center gap-1.5'
+          className='absolute right-2 top-2 rounded-full bg-black/60 px-2 py-1'
           accessibilityLabel={`Attachment ${Math.min(active + 1, media.length)} of ${media.length}`}
         >
-          {media.map((item, index) => (
-            <View
-              key={item.id}
-              className={
-                index === active
-                  ? 'h-1.5 w-4 rounded-full bg-brand'
-                  : 'h-1.5 w-1.5 rounded-full bg-border'
-              }
-            />
-          ))}
+          <Text className='text-xs font-semibold text-white'>
+            {Math.min(active + 1, media.length)} / {media.length}
+          </Text>
         </View>
       ) : null}
     </View>
