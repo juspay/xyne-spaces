@@ -250,6 +250,7 @@ const GroupSettingsMenu = ({
 const CHAT_NAV_ROW_DEFAULT_CLASS = 'text-sidebar-foreground hover:text-sidebar-accent-foreground';
 
 const CHAT_NAV_TEST_IDS: Partial<Record<InboxItemKey, string>> = {
+  threads: 'open-threads-button',
   bookmarks: 'open-bookmarks-button',
   'drafts-sent': 'open-drafts-and-sent-button',
   'scheduled-messages': 'open-scheduled-messages-button',

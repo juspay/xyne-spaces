@@ -332,6 +332,7 @@ Optional overrides:
 - `BROWSER` - one of `chromium`, `chrome`, `firefox`, `webkit`. Default: `chrome`
 - `ENABLE_BROWSER_CONSOLE_LOGS` - default: true for `test`/`local-test`, false otherwise
 - `PARALLEL` - number of parallel Gauge workers. Default: 5 for `local`/`local-test`, 1 otherwise
+- `STEP_DELAY` - milliseconds to pause after each Gauge step, so each step's result stays on screen in headed runs. Default: 0 (off)
 
 If config doesn't expose something needed:
 

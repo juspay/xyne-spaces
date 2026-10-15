@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { expect, type Locator, type Page } from '@playwright/test';
 import { Step } from 'gauge-ts';
 import { config } from '@/config';
@@ -17,6 +19,7 @@ import {
   assertValidUrlPath,
   assertValidUserAlias,
 } from '@/tests/shared/support/literal-validation';
+import { clickHoverActionOnMessage as hoverAndClickActionOnMessage } from '@/tests/shared/support/message-hover';
 
 function resolvePathValue(source: unknown, path: string): unknown {
   return path.split('.').reduce<unknown>((currentValue, segment) => {
@@ -47,6 +50,34 @@ function resolveStoredText(text: unknown): string {
     return String(value);
   });
 }
+
+function resolveStoredMessageText(
+  userAlias: string,
+  conversationKind: 'channels' | 'dms',
+  conversationAlias: string,
+  messageAlias: string
+): string {
+  return resolveStoredText(
+    `user:${userAlias}.${conversationKind}.${conversationAlias}.messages.${messageAlias}.text`
+  );
+}
+
+// Every chat message bubble inside the first <selector> match. Scope matters: a thread's
+// root message renders both in the channel list and in the open thread panel.
+function messageBubblesIn(selector: string): Locator {
+  return testContext.activePage.locator(selector).first().locator('[data-testid^="chat-message-"]');
+}
+
+function messageBubbleIn(selector: string, messageText: string): Locator {
+  return testContext.activePage
+    .locator(selector)
+    .first()
+    .locator(`[data-testid^="chat-message-"]:has-text("${messageText}")`)
+    .last();
+}
+
+// Sample uploads (image, video, PDF, ...) checked into the automation package.
+const FIXTURE_FILES_DIR = path.resolve(__dirname, '../../fixtures/files');
 
 const SIDEBAR_NAVIGATION_TIMEOUT_MS = 10000;
 
@@ -304,6 +335,16 @@ export default class BrowserSteps {
     await element.fill(resolvedText);
   }
 
+  // Real keystrokes appended at the caret: unlike `fill`, they fire the editor's
+  // input handlers, so typing "@name" opens the mention picker.
+  @Step('typing <text> key by key in <selector>')
+  public async typeKeyByKeyOnElement(text: string, selector: string): Promise<void> {
+    const resolvedText = resolveStoredText(text);
+    const element = testContext.activePage.locator(selector).first();
+    await element.waitFor({ state: 'visible' });
+    await element.pressSequentially(resolvedText);
+  }
+
   @Step('typing stored user <userAlias> project <projectAlias> field <fieldName> in <selector>')
   public async typeStoredUserProjectField(
     userAlias: string,
@@ -510,6 +551,17 @@ export default class BrowserSteps {
     const page = testContext.activePage;
     try {
       const element = page.locator(selector).filter({ hasText: text }).first();
+      await element.waitFor({ state: 'visible', timeout: 5000 });
+      await element.click();
+    } catch {
+      // Element not visible — skip
+    }
+  }
+
+  @Step('clicking on <selector> if visible')
+  public async clickOnSelectorIfVisible(selector: string): Promise<void> {
+    const element = testContext.activePage.locator(selector).first();
+    try {
       await element.waitFor({ state: 'visible', timeout: 5000 });
       await element.click();
     } catch {
@@ -853,6 +905,117 @@ export default class BrowserSteps {
     );
   }
 
+  @Step(
+    'verifying stored user <userAlias> channel <channelAlias> message <messageAlias> is not visible in <selector>'
+  )
+  public async verifyStoredUserChannelMessageNotVisible(
+    userAlias: string,
+    channelAlias: string,
+    messageAlias: string,
+    selector: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidChannelAlias(channelAlias);
+    assertValidMessageAlias(messageAlias);
+    const messageText = resolveStoredMessageText(userAlias, 'channels', channelAlias, messageAlias);
+    await expect(messageBubblesIn(selector).filter({ hasText: messageText })).toHaveCount(0, {
+      timeout: 15000,
+    });
+  }
+
+  @Step(
+    'verifying stored user <userAlias> dm <dmAlias> message <messageAlias> is not visible in <selector>'
+  )
+  public async verifyStoredUserDmMessageNotVisible(
+    userAlias: string,
+    dmAlias: string,
+    messageAlias: string,
+    selector: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidDmAlias(dmAlias);
+    assertValidMessageAlias(messageAlias);
+    const messageText = resolveStoredMessageText(userAlias, 'dms', dmAlias, messageAlias);
+    await expect(messageBubblesIn(selector).filter({ hasText: messageText })).toHaveCount(0, {
+      timeout: 15000,
+    });
+  }
+
+  @Step(
+    'verifying <elementSelector> is visible on stored user <userAlias> channel <channelAlias> message <messageAlias> in <selector>'
+  )
+  public async verifyElementVisibleOnStoredUserChannelMessage(
+    elementSelector: string,
+    userAlias: string,
+    channelAlias: string,
+    messageAlias: string,
+    selector: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidChannelAlias(channelAlias);
+    assertValidMessageAlias(messageAlias);
+    const messageText = resolveStoredMessageText(userAlias, 'channels', channelAlias, messageAlias);
+    await expect(
+      messageBubbleIn(selector, messageText).locator(elementSelector).first()
+    ).toBeVisible({ timeout: 60000 });
+  }
+
+  @Step(
+    'verifying <elementSelector> is visible on stored user <userAlias> dm <dmAlias> message <messageAlias> in <selector>'
+  )
+  public async verifyElementVisibleOnStoredUserDmMessage(
+    elementSelector: string,
+    userAlias: string,
+    dmAlias: string,
+    messageAlias: string,
+    selector: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidDmAlias(dmAlias);
+    assertValidMessageAlias(messageAlias);
+    const messageText = resolveStoredMessageText(userAlias, 'dms', dmAlias, messageAlias);
+    await expect(
+      messageBubbleIn(selector, messageText).locator(elementSelector).first()
+    ).toBeVisible({ timeout: 60000 });
+  }
+
+  @Step(
+    'verifying stored user <userAlias> channel <channelAlias> message <messageAlias> appears before stored user <laterUserAlias> channel <laterChannelAlias> message <laterMessageAlias> in <selector>'
+  )
+  public async verifyStoredUserChannelMessageOrder(
+    userAlias: string,
+    channelAlias: string,
+    messageAlias: string,
+    laterUserAlias: string,
+    laterChannelAlias: string,
+    laterMessageAlias: string,
+    selector: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidChannelAlias(channelAlias);
+    assertValidMessageAlias(messageAlias);
+    assertValidUserAlias(laterUserAlias);
+    assertValidChannelAlias(laterChannelAlias);
+    assertValidMessageAlias(laterMessageAlias);
+    const earlierText = resolveStoredMessageText(userAlias, 'channels', channelAlias, messageAlias);
+    const laterText = resolveStoredMessageText(
+      laterUserAlias,
+      'channels',
+      laterChannelAlias,
+      laterMessageAlias
+    );
+    await messageBubbleIn(selector, earlierText).waitFor({ state: 'visible', timeout: 60000 });
+    await messageBubbleIn(selector, laterText).waitFor({ state: 'visible', timeout: 60000 });
+
+    const texts = await messageBubblesIn(selector).allTextContents();
+    const earlierIndex = texts.findIndex((text) => text.includes(earlierText));
+    const laterIndex = texts.findIndex((text) => text.includes(laterText));
+    assert.ok(
+      earlierIndex >= 0 && earlierIndex < laterIndex,
+      `Expected "${earlierText}" (index ${earlierIndex}) before "${laterText}" (index ${laterIndex}) in "${selector}".`
+    );
+  }
+
   @Step('waiting for message with text <messageText> to appear in virtuoso list')
   public async waitForMessageInVirtuosoList(messageText: string): Promise<void> {
     const page = testContext.activePage;
@@ -1075,6 +1238,88 @@ export default class BrowserSteps {
     // or move the physical mouse (which would risk triggering mouseleave on
     // the message and unmounting the toolbar between scroll and click).
     await actionButton.click({ force: true });
+  }
+
+  @Step(
+    'clicking hover action <hoverActionSelector> on stored user <userAlias> channel <channelAlias> message <messageAlias> in <selector>'
+  )
+  public async clickHoverActionOnStoredUserChannelMessage(
+    hoverActionSelector: string,
+    userAlias: string,
+    channelAlias: string,
+    messageAlias: string,
+    selector: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidChannelAlias(channelAlias);
+    assertValidMessageAlias(messageAlias);
+    await hoverAndClickActionOnMessage(
+      hoverActionSelector,
+      resolveStoredMessageText(userAlias, 'channels', channelAlias, messageAlias),
+      selector
+    );
+  }
+
+  @Step(
+    'clicking hover action <hoverActionSelector> on stored user <userAlias> dm <dmAlias> message <messageAlias> in <selector>'
+  )
+  public async clickHoverActionOnStoredUserDmMessage(
+    hoverActionSelector: string,
+    userAlias: string,
+    dmAlias: string,
+    messageAlias: string,
+    selector: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidDmAlias(dmAlias);
+    assertValidMessageAlias(messageAlias);
+    await hoverAndClickActionOnMessage(
+      hoverActionSelector,
+      resolveStoredMessageText(userAlias, 'dms', dmAlias, messageAlias),
+      selector
+    );
+  }
+
+  @Step(
+    'clicking on <elementSelector> on stored user <userAlias> channel <channelAlias> message <messageAlias> in <selector>'
+  )
+  public async clickElementOnStoredUserChannelMessage(
+    elementSelector: string,
+    userAlias: string,
+    channelAlias: string,
+    messageAlias: string,
+    selector: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidChannelAlias(channelAlias);
+    assertValidMessageAlias(messageAlias);
+    const message = messageBubbleIn(
+      selector,
+      resolveStoredMessageText(userAlias, 'channels', channelAlias, messageAlias)
+    );
+    await message.scrollIntoViewIfNeeded();
+    await message.locator(elementSelector).first().click();
+  }
+
+  @Step('attaching fixture file <fileName> to <selector>')
+  public async attachFixtureFile(fileName: string, selector: string): Promise<void> {
+    const filePath = path.join(FIXTURE_FILES_DIR, fileName);
+    assert.ok(
+      fs.existsSync(filePath),
+      `Fixture file "${fileName}" not found in ${FIXTURE_FILES_DIR}.`
+    );
+    const input = testContext.activePage.locator(selector).first();
+    await input.waitFor({ state: 'attached' });
+    await input.setInputFiles(filePath);
+  }
+
+  // The composer shows a "Remove attachment <name>" button only once that upload finishes.
+  @Step('waiting for attachment <fileName> to finish uploading')
+  public async waitForAttachmentUpload(fileName: string): Promise<void> {
+    await testContext.activePage
+      .getByRole('button', { name: `Remove attachment ${fileName}`, exact: true })
+      .first()
+      .waitFor({ state: 'visible', timeout: 60000 });
   }
 
   @Step('attaching file to <selector>')
