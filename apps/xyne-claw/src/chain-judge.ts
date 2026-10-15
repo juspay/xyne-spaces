@@ -4,7 +4,7 @@
  */
 
 import { LITELLM, litellmEndpoint } from "./config.js";
-import { jevAsk, jevEnabled, jevThreshold } from "./jev.js";
+import { xor, xorEnabled, xorThreshold } from "./xor.js";
 
 import { createLogger } from "./logger.js";
 const log = createLogger("chain-judge");
@@ -17,7 +17,7 @@ async function judgeViaJev(
   targetAgent: string,
   judgeContext?: string,
 ): Promise<{ action: "continue" | "stop"; reason: string } | null> {
-  if (!jevEnabled()) return null;
+  if (!xorEnabled()) return null;
   const instructions = judgeContext
     ? [
         `An agent chain hands work from "${sourceAgent}" to "${targetAgent}".`,
@@ -32,14 +32,10 @@ async function judgeViaJev(
         `HIGH when the source produced actionable work the target must act on, the task is not yet complete, and the target can proceed with no human input.`,
         `LOW when the request is already complete, the output is an error or empty, or the agent is asking a human or waiting on human input — chains are agent-to-agent only.`,
       ].join("\n");
-  const answers = await jevAsk(
-    state,
-    { continue: { type: "noul", instructions } },
-    { purpose: "chain-continuation" },
-  );
+  const answers = await xor({ state, questions: { continue: { type: "noul", instructions } }, purpose: "chain-continuation" });
   const noul = answers?.["continue"]?.noul;
   if (typeof noul !== "number") return null;
-  const threshold = jevThreshold(JEV_CONTINUE_THRESHOLD_ENV, 0.5);
+  const threshold = xorThreshold(JEV_CONTINUE_THRESHOLD_ENV, 0.5);
   const action: "continue" | "stop" = noul >= threshold ? "continue" : "stop";
   log.info(`[chain-judge] ${sourceAgent} → ${targetAgent}: ${action} via jev (${noul.toFixed(2)} vs ${threshold})`);
   return { action, reason: `jev ${noul.toFixed(2)}≥${threshold}? ${action}` };

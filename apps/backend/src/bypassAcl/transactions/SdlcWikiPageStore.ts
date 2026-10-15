@@ -1,6 +1,7 @@
 import { transaction } from '../base';
 import { placeHubItem } from '@/sdlc/hubFolders';
-import { sdlcChannelCanvasParticipant } from '@/sdlc/sdlcCanvasAccess';
+import { sdlcCanvasParticipants } from '@/sdlc/sdlcCanvasAccess';
+import { newConnectId, createConnectGroupForEntity, resolveCanvasConnectId, ConnectEntityType } from '@/database/connectGroup';
 import { PageAction, SdlcWikiPageStore, WikiScope, versionName } from '@/sdlc/wiki/SdlcWikiPageStore';
 import { Prisma } from '@prisma/client';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
@@ -47,7 +48,9 @@ export function ensureFolderPathTx(self: SdlcWikiPageStore, parent: string, name
   });
 }
 export function createTx(self: SdlcWikiPageStore, scope: WikiScope, page: { title: string; action: "create"; markdown: string; folderPath?: string | undefined; }, content: BlockNoteBlock[], typeFolderId: string, commitSha: string | undefined, actor: { workspaceId: string; userId: string; }, parentId: string) {
-  return transaction(['Canvas', 'SdlcArtifact'], 'create wiki page: canvas, SDLC artifact, hub placement and first version must commit together; tx is not ACL-wrapped', self.prisma, async (tx) => {
+  return transaction(['Canvas', 'SdlcArtifact', 'ConnectGroup'], 'create wiki page: canvas, SDLC artifact, hub placement and first version must commit together; tx is not ACL-wrapped', self.prisma, async (tx) => {
+    // Slack Connect: a canvas is a shareable entity → its own connectId + a private connect_group row.
+    const connectId = newConnectId();
     const canvas = await tx.canvas.create({
       data: {
         workspaceId: scope.workspaceId,
@@ -62,12 +65,19 @@ export function createTx(self: SdlcWikiPageStore, scope: WikiScope, page: { titl
         viewAccessId: randomUUID(),
         visibility: CanvasVisibility.PRIVATE,
         isCollaborative: true,
+        connectId,
         metadata: {} as Prisma.InputJsonValue,
         participants: {
-          create: sdlcChannelCanvasParticipant(scope.workspaceId, scope.channelId),
+          create: sdlcCanvasParticipants(scope.workspaceId, scope.channelId, scope.actorUserId, connectId),
         },
       },
       select: { id: true },
+    });
+    await createConnectGroupForEntity(tx, {
+      entityType: ConnectEntityType.CANVAS,
+      entityId: canvas.id,
+      hostWorkspaceId: scope.workspaceId,
+      connectId,
     });
     await recordVersion(tx, scope, canvas.id, page.markdown, content, 'created', commitSha);
     await tx.sdlcArtifact.create({
@@ -142,6 +152,8 @@ export async function recordVersion(tx: Prisma.TransactionClient, scope: WikiSco
     const contentHash = createHash('sha256')
       .update(`${markdown}\0${commitSha ?? ''}`)
       .digest('hex');
+    // Slack Connect: inherit the parent canvas's connectId (null until backfilled).
+    const connectId = await resolveCanvasConnectId(tx, canvasId);
     await tx.canvasVersion.upsert({
       where: { canvasId_contentHash: { canvasId, contentHash } },
       create: {
@@ -151,6 +163,7 @@ export async function recordVersion(tx: Prisma.TransactionClient, scope: WikiSco
         content: content as unknown as Prisma.InputJsonValue,
         contentHash,
         createdBy: scope.actorUserId,
+        ...(connectId ? { canvasConnectId: connectId } : {}),
       },
       update: { name: versionName(action, commitSha) },
     });

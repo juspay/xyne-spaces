@@ -17,6 +17,9 @@ const setAuto = (next: boolean): void => {
   for (const listener of listeners) listener();
 };
 
+/** For the default-agent resolution, which runs outside a component's own hook. */
+export const setAskAIAuto = setAuto;
+
 export const useAskAIAuto = (): { isAuto: boolean; setAuto: (next: boolean) => void } => {
   const isAuto = useSyncExternalStore(
     subscribe,

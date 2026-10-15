@@ -1,5 +1,5 @@
 import { logger, Event as LogEvent } from '../../../utils/logger';
-import React, { useMemo, useState, useRef, useEffect, useCallback } from 'react';
+import React, { useMemo, useState, useRef, useEffect, useCallback, useContext } from 'react';
 import { useZero } from '../../../hooks/useZero';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
@@ -81,7 +81,7 @@ import { CreateTicketModal } from '../CreateTicketModal/CreateTicketModal';
 import { MappedTicketModal } from '../MappedTicketModal/MappedTicketModal';
 import { EditableFormField } from './EditableFormField';
 import { queries } from '../../../zero/queries';
-import { useChannel, useAllChannels } from '../../../hooks/useChannels';
+import { useChannel, useAllChannels, useChannelParticipation } from '../../../hooks/useChannels';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
 import UserAvatar, { AvatarShape, AvatarSize } from '../../UserAvatar/UserAvatar';
@@ -142,6 +142,7 @@ import { formatETADisplay, getLocalISOString, getStatusBadgeConfig } from '../ut
 import { cn } from '../../../utils/classNames';
 import { getApiErrorMessage } from '../../../utils/apiError';
 import { surfaceMutationError } from '../../../utils/zeroMutationToast';
+import { loadRecentLabels, saveRecentLabels, sortByRecency } from '../../../utils/recentLabels';
 import Button from '../../ui/Button';
 import { Dialog } from '../../ui/Dialog';
 import { FileBubble } from '../../ui/FileBubble/FileBubble';
@@ -165,6 +166,7 @@ import {
   type LeftoverFieldValue,
 } from '../../../utils/board/boardFormEntityValues';
 import { resolveDisplayFormFields } from '../../../utils/board/resolveDisplayFormFields';
+import { ThreadNavigationContext } from '../../Chat/ThreadNavigationContext';
 
 type SubTicketTreeMapping = QueryResultType<typeof queries.subTicketMappingsForTickets>[number];
 type SubTicketTreeSubTicket = NonNullable<SubTicketTreeMapping['subTicket']>;
@@ -595,6 +597,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
 }) => {
   const zero = useZero();
   const navigate = useNavigate();
+  const { openRelatedTicket } = useContext(ThreadNavigationContext);
+  const navigateToTicket = onNavigateToTicket ?? openRelatedTicket;
   const shareableOrigin = useShareableOrigin();
   const location = useLocation();
   const navigationType = useNavigationType();
@@ -1202,6 +1206,17 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   // Query channel if ticket has conversation with channelId
   const channelId = ticket?.conversation?.channelId;
   const channel = useChannel(channelId || '');
+
+  // A release opens in the release view of the SDLC hub that owns its board's release
+  // config. Only hub members can read that config edge, so others get a disabled button.
+  const isRelease = !!ticket && isReleaseTicket(ticket.ticketType as BaseTicketType);
+  const [releaseConfig] = useCachedQuery(
+    queries.releaseConfigByMainBoardId({ boardId: ticket?.boardId ?? '' }),
+    { enabled: isRelease && !!ticket?.boardId },
+  );
+  const releaseHubId = releaseConfig?.channelId ?? '';
+  const releaseHubParticipation = useChannelParticipation(releaseHubId);
+  const canOpenReleaseView = !!releaseHubId && !!releaseHubParticipation;
 
   const allChannels = useAllChannels();
   const channelTypeMap = useMemo(
@@ -1908,19 +1923,23 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   };
 
   const tags = ticket?.tagMappings;
+  const recentTags = useMemo(() => {
+    if (!showTagDropdown || !currentUser?.id || !ticket?.boardId) return [];
+    return loadRecentLabels(currentUser.id, [ticket.boardId]);
+  }, [showTagDropdown, currentUser?.id, ticket?.boardId]);
   // Available tags from project_tags
   const availableTags = useMemo(() => {
     if (!projectTags) return [];
 
-    const tagSet = new Set<string>();
+    const tagSet = new Set<string>(recentTags);
     projectTags.forEach(t => {
       if (t?.name) {
         tagSet.add(t.name);
       }
     });
 
-    return Array.from(tagSet).sort();
-  }, [projectTags]);
+    return sortByRecency(Array.from(tagSet).sort(), recentTags);
+  }, [projectTags, recentTags]);
 
   // Filter available tags based on search query and exclude already assigned tags
   const filteredTags = useMemo(() => {
@@ -3166,6 +3185,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     // Outcome only once the server confirmed, not on the optimistic apply.
     void surfaceMutationError(tagMutation, 'Failed to update labels').then(ok => {
       if (ok) {
+        if (!existingTag && currentUser?.id && ticket.boardId) {
+          saveRecentLabels(currentUser.id, ticket.boardId, [tagName.trim()]);
+        }
         trackTicketOutcome('TICKET_FIELD_UPDATED', ticket, {
           surface: 'details',
           field: 'tags',
@@ -3400,10 +3422,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         </span>
 
         {link ? (
-          onNavigateToTicket ? (
+          navigateToTicket ? (
             <button
               type='button'
-              onClick={() => onNavigateToTicket(relatedTicket!.id!)}
+              onClick={() => navigateToTicket(relatedTicket!.id!)}
               className='min-w-0 flex-1 truncate text-left text-[13.5px] font-semibold text-foreground hover:underline'
               data-track-category='Tickets'
               data-track-name='NavigateToRelatedTicket'
@@ -3499,8 +3521,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       }
     }
 
-    if (onNavigateToTicket) {
-      onNavigateToTicket(mappedTicketId);
+    if (navigateToTicket) {
+      navigateToTicket(mappedTicketId);
     } else {
       setMappedTicketId(mappedTicketId);
     }
@@ -3533,6 +3555,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
 
     const handleRowClick = (): void => {
       if (mappedTicketId) {
+        if (openRelatedTicket) {
+          openRelatedTicket(mappedTicketId);
+          return;
+        }
         if (mappedTicket) {
           const channelType = channelTypeMap.get(mappedTicket.channelId);
           if (isDeskChannelType(channelType) && mappedTicket.xyneId) {
@@ -3713,6 +3739,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     const assigneeId = parentTicket.assignedTo?.replace(/^(user:|group:)/, '') || '';
 
     const navigateToParentTicket = (): void => {
+      if (openRelatedTicket) {
+        openRelatedTicket(parentTicket.id);
+        return;
+      }
       const channelType = channelTypeMap.get(parentTicket.channelId);
       if (isDeskChannelType(channelType) && parentTicket.xyneId) {
         const pathParts = location.pathname.split('/');
@@ -3734,8 +3764,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     };
 
     const openParentTicket = (): void => {
-      if (onNavigateToTicket) {
-        onNavigateToTicket(parentTicket.id);
+      if (navigateToTicket) {
+        navigateToTicket(parentTicket.id);
       } else {
         setMappedTicketId(parentTicket.id);
       }
@@ -5276,7 +5306,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                             })
                                           }
                                           className='text-muted-foreground hover:text-foreground transition-colors border border-input rounded-md p-1.5'
-                                          aria-label='View form'
+                                          aria-label={`View form for ${previousStage?.name || 'Unknown Stage'}`}
                                           data-track-category='Tickets'
                                           data-track-name='ViewStageForm'
                                           data-track-metadata={JSON.stringify({
@@ -5340,7 +5370,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                         })
                                       }
                                       className='text-muted-foreground hover:text-foreground transition-colors border border-input rounded-md p-1.5'
-                                      aria-label='View form'
+                                      aria-label={`View form for ${previousStage?.name || 'Unknown Stage'}`}
                                       data-track-category='Tickets'
                                       data-track-name='ViewApprovedStageForm'
                                       data-track-metadata={JSON.stringify({
@@ -5475,7 +5505,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                     });
                                   }}
                                   className='text-muted-foreground hover:text-foreground transition-colors border border-input rounded-md p-1.5'
-                                  aria-label='View form'
+                                  aria-label={`View form for ${previousStage?.name || 'Unknown Stage'}`}
                                   data-track-category='Tickets'
                                   data-track-name='ViewStageFormNoApprovers'
                                   data-track-metadata={JSON.stringify({
@@ -5497,19 +5527,25 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           </div>
         </DetailSection>
 
-        {ticket && isReleaseTicket(ticket.ticketType as BaseTicketType) && ticket.projectId && (
+        {ticket && isRelease && (
           <div className='mt-4'>
             <button
               type='button'
+              disabled={!canOpenReleaseView}
+              title={
+                canOpenReleaseView
+                  ? undefined
+                  : "Only members of this release's SDLC hub can open the release view"
+              }
               onClick={() =>
-                void navigate(`/listProjects/${ticket.projectId}/releases/${ticket.id}`, {
-                  state: { returnToUrl: location.pathname + location.search },
-                })
+                void navigate(
+                  `/sdlc/${releaseHubId}/releases?${new URLSearchParams({ release: ticket.id, discussion: '1', chat: 'conversations' }).toString()}`,
+                )
               }
               data-track-category='Tickets'
               data-track-name='OpenReleaseViewFromTicket'
               data-testid='open-release-view-button'
-              className='group flex items-center justify-between gap-3 w-full px-4 py-3 rounded-xl border border-border bg-background text-foreground shadow-sm hover:shadow-md hover:border-input transition-all'
+              className='group flex items-center justify-between gap-3 w-full px-4 py-3 rounded-xl border border-border bg-background text-foreground shadow-sm hover:shadow-md hover:border-input transition-all disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:shadow-sm disabled:hover:border-border'
             >
               <span className='inline-flex items-center gap-3'>
                 <span className='flex h-9 w-9 items-center justify-center rounded-full bg-muted text-foreground'>

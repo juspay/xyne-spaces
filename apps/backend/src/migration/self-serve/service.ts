@@ -8,9 +8,10 @@ import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { isMigrationEncryptionConfigured } from './migrationCrypto';
 import { config } from '@/config/env';
 import { getWorkspaceIdByTeamId, getBotConfigByWorkspaceId } from '@/migration/slack/slackMigrationBotConfig';
+import { getMigrationWorkspaceConfig } from '@/migration/slack/migrationWorkspaceConfig';
 import { SlackMigrationEngine } from './engine';
 import { MigrationStore } from './store';
-import { MigrationQueues } from './queues';
+import { MigrationQueues, queueFor } from './queues';
 import {
   ChannelInput,
   MigrationJob,
@@ -177,14 +178,14 @@ export class SlackMigrationService {
       throw new HttpError(409, 'TOKEN_UNAVAILABLE', 'The Slack token is no longer available for this job — re-submit to migrate newer messages.');
     }
     const updated = await this.store.update(id, { status: MigrationStatus.REFRESHING, refreshRequested: true, currentQueue: QueueName.COLLECTION, error: undefined });
-    await this.queues.enqueue(QueueName.COLLECTION, id, 'end');
+    await this.queues.enqueue(queueFor(QueueName.COLLECTION, job.workspaceId), id, 'end');
     return toView(updated);
   }
 
   async stop(id: string, actor: Actor): Promise<MigrationJobView> {
     const job = await this.mustGet(id, actor);
     if (job.status === MigrationStatus.QUEUED) {
-      await this.queues.removeJob(job.currentQueue, id).catch(() => undefined);
+      await this.queues.removeJob(queueFor(job.currentQueue, job.workspaceId), id).catch(() => undefined);
       return toView(await this.store.update(id, { status: MigrationStatus.STOPPED, stopReason: 'admin' }));
     }
     if (![MigrationStatus.COLLECTING, MigrationStatus.INGESTING].includes(job.status)) {
@@ -203,12 +204,46 @@ export class SlackMigrationService {
     // Resuming an ingest-phase job re-enqueues it onto the ingestion queue, so it's gated like the other ingestion
     // actions; a collection-phase resume is unaffected.
     if (job.currentQueue === QueueName.INGESTION) this.assertIngestControlEnabled();
-    // Admin-stopped ⇒ front (resumes next); failed/pod-killed ⇒ end (don't block others). §5.9
+    // Admin-stopped ⇒ front (resumes next); failed ⇒ end (don't block others). A pod kill is re-queued by reconcile. §5.9
     const position = job.status === MigrationStatus.STOPPED ? 'front' : 'end';
-    const updated = await this.store.update(id, { status: MigrationStatus.QUEUED, stopRequested: false, stopReason: undefined });
-    await this.queues.enqueue(job.currentQueue, id, position);
+    const updated = await this.store.update(id, { status: MigrationStatus.QUEUED, stopRequested: false, stopReason: undefined, reclaims: undefined });
+    await this.queues.enqueue(queueFor(job.currentQueue, job.workspaceId), id, position);
     logger.info('[SlackMigration][audit] job resumed', { id, queue: job.currentQueue, by: actor.userId, name: actor.name, email: actor.email });
     return toView(updated);
+  }
+
+  /** Jump a queued job to the front of its queue (collection or ingestion). The store record is updated first, so even
+   *  if the re-enqueue fails the reconcile watchdog re-adds it — the job is never lost. A running job can't be reordered. */
+  async prioritize(id: string, actor: Actor): Promise<MigrationJobView> {
+    const job = await this.mustGet(id, actor);
+    if ([MigrationStatus.COLLECTING, MigrationStatus.REFRESHING, MigrationStatus.INGESTING].includes(job.status)) {
+      throw new HttpError(409, 'INVALID_STATE', `Migration is already running (current: ${job.status}) — it's already next in line.`);
+    }
+    if (![MigrationStatus.SUBMITTED, MigrationStatus.QUEUED].includes(job.status)) {
+      throw new HttpError(409, 'INVALID_STATE', `Only a queued migration can be prioritised (current: ${job.status}).`);
+    }
+    if (job.currentQueue === QueueName.INGESTION) this.assertIngestControlEnabled();
+    const updated = await this.store.update(id, { status: MigrationStatus.QUEUED });
+    await this.queues.enqueue(queueFor(job.currentQueue, job.workspaceId), id, 'front');
+    logger.info('[SlackMigration][audit] job prioritised', { id, queue: job.currentQueue, by: actor.userId, name: actor.name, email: actor.email });
+    return (await this.withPositions([updated]))[0];
+  }
+
+  /** Views annotated with their live queue turn (0 = running, N = Nth waiting); only for SUBMITTED/QUEUED jobs. */
+  private async withPositions(jobs: MigrationJob[]): Promise<MigrationJobView[]> {
+    const orders = new Map<string, ReturnType<MigrationQueues['getQueueOrder']>>(); // one read per queue
+    const orderOf = (queue: string) => {
+      if (!orders.has(queue)) orders.set(queue, this.queues.getQueueOrder(queue));
+      return orders.get(queue)!;
+    };
+    return Promise.all(jobs.map(async (j) => {
+      const v = toView(j);
+      if (j.status !== MigrationStatus.SUBMITTED && j.status !== MigrationStatus.QUEUED) return v;
+      const o = await orderOf(queueFor(j.currentQueue, j.workspaceId));
+      if (o.activeIds.includes(j.id)) return { ...v, queuePosition: 0, queueTotal: o.waitingIds.length };
+      const idx = o.waitingIds.indexOf(j.id);
+      return idx >= 0 ? { ...v, queuePosition: idx + 1, queueTotal: o.waitingIds.length } : v;
+    }));
   }
 
   /**
@@ -249,29 +284,37 @@ export class SlackMigrationService {
     if (job.status !== MigrationStatus.COMPLETED) {
       await this.engine.deletePrefix(job.gcsPrefix); // completed jobs already deleted their data
     }
-    await this.queues.removeJob(QueueName.COLLECTION, id).catch(() => undefined);
+    await this.queues.removeJob(queueFor(QueueName.COLLECTION, job.workspaceId), id).catch(() => undefined);
     await this.queues.removeJob(QueueName.INGESTION, id).catch(() => undefined);
     await this.store.delete(id);
   }
 
   async listForAdmin(actor: Actor, limit = 500): Promise<MigrationJobView[]> {
     // Scope to the caller's workspace — slackmig:index is global, so filter after fetch.
-    return (await this.store.list(limit, 0)).filter((j) => j.workspaceId === actor.workspaceId).map(toView);
+    return this.withPositions((await this.store.list(limit, 0)).filter((j) => j.workspaceId === actor.workspaceId));
   }
 
   async getMineList(actor: Actor): Promise<MigrationJobView[]> {
-    return (await this.store.list(500, 0)).filter((j) => j.submittedByUserId === actor.userId).map(toView);
+    return this.withPositions((await this.store.list(500, 0)).filter((j) => j.submittedByUserId === actor.userId));
   }
 
-  // Generic queue controls are COLLECTION-only; ingestion must use the gated
-  // start/stop so blanket-admin endpoints can't bypass SLACK-MIGRATION-INGEST.
-  pauseQueue(name: QueueName): Promise<void> {
-    this.assertControllableQueue(name);
-    return this.queues.pause(name);
+  /** Free-text notice shown atop the dashboard Slack-migration page, resolved per workspace from
+   *  Superposition (SlackMigrationWorkspaces[ws].dashboard_announcement). Any member may read it;
+   *  empty string means "no banner". */
+  async getAnnouncement(actor: Actor): Promise<{ text: string }> {
+    const { dashboard_announcement } = await getMigrationWorkspaceConfig(actor.workspaceId);
+    return { text: dashboard_announcement?.trim() ? dashboard_announcement : '' };
   }
-  resumeQueue(name: QueueName): Promise<void> {
+
+  // Generic queue controls are COLLECTION-only and act on the caller's workspace lane; ingestion must use the
+  // gated start/stop so blanket-admin endpoints can't bypass SLACK-MIGRATION-INGEST.
+  pauseQueue(actor: Actor, name: QueueName): Promise<void> {
     this.assertControllableQueue(name);
-    return this.queues.resume(name);
+    return this.queues.pause(queueFor(name, actor.workspaceId));
+  }
+  resumeQueue(actor: Actor, name: QueueName): Promise<void> {
+    this.assertControllableQueue(name);
+    return this.queues.resume(queueFor(name, actor.workspaceId));
   }
   // Only the collection queue is controllable here (ingestion is gated separately). An unknown name
   // (the route casts `req.params.queue as QueueName` unvalidated) must be a clean 400, not a raw 500.
@@ -360,7 +403,7 @@ export class SlackMigrationService {
 
   private async persistAndQueue(job: MigrationJob): Promise<MigrationJobView> {
     await this.store.create(job);
-    await this.queues.enqueue(QueueName.COLLECTION, job.id, 'end');
+    await this.queues.enqueue(queueFor(job.currentQueue, job.workspaceId), job.id, 'end');
     return toView(job);
   }
 

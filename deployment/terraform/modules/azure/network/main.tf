@@ -167,8 +167,26 @@ resource "azurerm_subnet_network_security_group_association" "this" {
   network_security_group_id = azurerm_network_security_group.this[each.key].id
 }
 
+# Ingress to the AKS node subnet on var.aks_inbound_ports.
+#
+# Public (source = Internet) only when the cluster's own LoadBalancer Service holds
+# the public IP (ingress_mode = "gateway") and no allowlist is given — the client
+# connects straight to the gateway, so the NSG cannot narrow the source further.
+# Everywhere else the source is restricted: by default to the Application Gateway
+# subnet (ingress_mode = "cloud-lb" puts an internal LB in AKS behind App Gateway),
+# or to var.aks_inbound_cidrs when the operator supplies an allowlist.
+locals {
+  aks_inbound_sources = length(var.aks_inbound_cidrs) > 0 ? var.aks_inbound_cidrs : [var.appgw_subnet_cidr]
+}
+
+# Kept at its original address and rule names so existing gateway-mode deployments
+# plan as a no-op.
+# Justification: gateway mode exposes the Istio ingress gateway on a public Azure LB
+# in the AKS subnet; public web traffic on 80/443 is the purpose of the rule. Set
+# aks_inbound_cidrs (or use ingress_mode = "cloud-lb") to restrict it.
+#trivy:ignore:AZU-0047
 resource "azurerm_network_security_rule" "aks_inbound" {
-  for_each = toset(var.aks_inbound_ports)
+  for_each = var.aks_inbound_public && length(var.aks_inbound_cidrs) == 0 ? toset(var.aks_inbound_ports) : toset([])
 
   name                        = "allow-internet-${each.key}"
   priority                    = 100 + index(var.aks_inbound_ports, each.key)
@@ -178,6 +196,24 @@ resource "azurerm_network_security_rule" "aks_inbound" {
   source_port_range           = "*"
   destination_port_range      = each.key
   source_address_prefix       = "Internet"
+  destination_address_prefix  = var.aks_subnet_cidr
+  resource_group_name         = local.resource_group_name
+  network_security_group_name = azurerm_network_security_group.this["aks"].name
+}
+
+# Different priority band (150+) from aks_inbound so switching modes never collides
+# on priority while Azure replaces the rules.
+resource "azurerm_network_security_rule" "aks_inbound_restricted" {
+  for_each = var.aks_inbound_public && length(var.aks_inbound_cidrs) == 0 ? toset([]) : toset(var.aks_inbound_ports)
+
+  name                        = "allow-restricted-${each.key}"
+  priority                    = 150 + index(var.aks_inbound_ports, each.key)
+  direction                   = "Inbound"
+  access                      = "Allow"
+  protocol                    = "Tcp"
+  source_port_range           = "*"
+  destination_port_range      = each.key
+  source_address_prefixes     = local.aks_inbound_sources
   destination_address_prefix  = var.aks_subnet_cidr
   resource_group_name         = local.resource_group_name
   network_security_group_name = azurerm_network_security_group.this["aks"].name
@@ -267,6 +303,11 @@ resource "azurerm_network_security_rule" "livekit_signal" {
   network_security_group_name = azurerm_network_security_group.this["livekit"].name
 }
 
+# Justification: WebRTC/TURN media must be reachable from any participant's network.
+# LiveKit VMs sit behind a public Standard LB / public IPs that preserve the client
+# address, so the NSG cannot narrow the source beyond "Internet". Only the LiveKit
+# media/TURN ports are opened, and only to the LiveKit subnet.
+#trivy:ignore:AZU-0047
 resource "azurerm_network_security_rule" "livekit_turn_tls" {
   name                        = "allow-turn-tls"
   priority                    = 110
@@ -281,6 +322,11 @@ resource "azurerm_network_security_rule" "livekit_turn_tls" {
   network_security_group_name = azurerm_network_security_group.this["livekit"].name
 }
 
+# Justification: WebRTC/TURN media must be reachable from any participant's network.
+# LiveKit VMs sit behind a public Standard LB / public IPs that preserve the client
+# address, so the NSG cannot narrow the source beyond "Internet". Only the LiveKit
+# media/TURN ports are opened, and only to the LiveKit subnet.
+#trivy:ignore:AZU-0047
 resource "azurerm_network_security_rule" "livekit_rtc_tcp" {
   name                        = "allow-rtc-tcp"
   priority                    = 120
@@ -295,6 +341,11 @@ resource "azurerm_network_security_rule" "livekit_rtc_tcp" {
   network_security_group_name = azurerm_network_security_group.this["livekit"].name
 }
 
+# Justification: WebRTC/TURN media must be reachable from any participant's network.
+# LiveKit VMs sit behind a public Standard LB / public IPs that preserve the client
+# address, so the NSG cannot narrow the source beyond "Internet". Only the LiveKit
+# media/TURN ports are opened, and only to the LiveKit subnet.
+#trivy:ignore:AZU-0047
 resource "azurerm_network_security_rule" "livekit_turn_udp" {
   name                        = "allow-turn-udp"
   priority                    = 130
@@ -309,6 +360,11 @@ resource "azurerm_network_security_rule" "livekit_turn_udp" {
   network_security_group_name = azurerm_network_security_group.this["livekit"].name
 }
 
+# Justification: WebRTC/TURN media must be reachable from any participant's network.
+# LiveKit VMs sit behind a public Standard LB / public IPs that preserve the client
+# address, so the NSG cannot narrow the source beyond "Internet". Only the LiveKit
+# media/TURN ports are opened, and only to the LiveKit subnet.
+#trivy:ignore:AZU-0047
 resource "azurerm_network_security_rule" "livekit_rtc_udp" {
   name                        = "allow-rtc-udp"
   priority                    = 140
@@ -367,6 +423,10 @@ resource "azurerm_network_security_rule" "appgw_manager" {
   network_security_group_name = azurerm_network_security_group.this["appgw"].name
 }
 
+# Justification: the Application Gateway public listener is the internet-facing edge
+# (LiveKit signalling, and the app itself in ingress_mode = "cloud-lb"). Only 80/443
+# are opened, and only to the App Gateway subnet; everything behind it is restricted.
+#trivy:ignore:AZU-0047
 resource "azurerm_network_security_rule" "appgw_internet" {
   name                        = "allow-internet-web"
   priority                    = 110

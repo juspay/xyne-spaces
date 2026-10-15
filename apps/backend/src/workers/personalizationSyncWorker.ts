@@ -3,6 +3,7 @@ import { createVespaService, type VespaDependencies } from '@/vespa/src';
 import config from '@/vespa/src/config';
 import { userSchema } from '@/vespa/src/types';
 import { logger } from '@/utils/logger';
+import { signalDecayFactor } from '@/services/personalization/types';
 
 // Create dependencies
 const dependencies: VespaDependencies = {
@@ -19,8 +20,6 @@ export class PersonalizationSyncWorker {
     private readonly MIN_SIGNAL_THRESHOLD = 0.01;
     private readonly BATCH_SIZE = 100;
     private readonly MAX_SIGNAL_WEIGHT = 100;
-    // Weight halves every 21 days — three working-week cadence to handle monthly-cycle usage patterns.
-    private readonly HALF_LIFE_MS = 21 * 24 * 60 * 60 * 1000;
     private readonly MAX_ELAPSED_MS = 10 * 365 * 24 * 60 * 60 * 1000; // cap at 10 years to guard against overflow
 
     /**
@@ -332,7 +331,7 @@ export class PersonalizationSyncWorker {
         for (const [entityId, weight] of signals) {
             const lastUpdated = timestamps.get(entityId) ?? now;
             const elapsed = Math.min(now - lastUpdated, this.MAX_ELAPSED_MS);
-            const decayFactor = Math.pow(0.5, elapsed / this.HALF_LIFE_MS);
+            const decayFactor = signalDecayFactor(elapsed);
             const decayedWeight = weight * decayFactor;
             if (decayedWeight >= this.MIN_SIGNAL_THRESHOLD) {
                 decayedSignals.set(entityId, decayedWeight);

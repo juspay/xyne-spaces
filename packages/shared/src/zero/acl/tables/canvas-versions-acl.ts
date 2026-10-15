@@ -8,6 +8,7 @@ export class CanvasVersionsACL extends BaseQueryACL<'canvas_versions'> {
   }
 
   canSelect<TReturn>(query: Query<'canvas_versions', Schema, TReturn>): Query<'canvas_versions', Schema, TReturn> {
-    return query.where('workspaceId', '=', this.ctx.workspaceId);
+    // Slack Connect: tenancy (connect_group reach) is applied once by the defineQuery backstop
+    return query;
   }
 }

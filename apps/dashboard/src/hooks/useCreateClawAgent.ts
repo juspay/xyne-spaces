@@ -1,7 +1,9 @@
 import { useMutation, useQueryClient, type UseMutationResult } from '@tanstack/react-query';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
+import { apiInstance } from '@/services/clients/apiClient';
 import { useAuth } from './useAuth';
+import { clawAgentDetailKey } from './useClawAgentDetail';
 import { createAgent, updateAgent } from '../services/claw/clawAgentWizardService';
 import type { Agent } from '../services/claw/clawAuthAgentTypes';
 import type { KbSelection } from '../services/claw/clawKnowledgeBaseTypes';
@@ -56,6 +58,10 @@ export const useCreateClawAgent = (): UseMutationResult<Agent, Error, WizardSubm
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
+  // Set by an SDLC hub's Agents page: link the new agent to that hub as pending and return there.
+  const [searchParams] = useSearchParams();
+  const sdlcChannelId = searchParams.get('sdlcChannelId');
+  const returnTo = searchParams.get('returnTo');
 
   // The library's agent detail screen. Workspace-prefixed, since every claw
   // surface now lives under /:workspaceId/ai.
@@ -85,6 +91,24 @@ export const useCreateClawAgent = (): UseMutationResult<Agent, Error, WizardSubm
         s.tools.gateway.length > 0;
       const hasSkills = s.skillIds.length > 0;
       const hasResearch = hasResearchConfig(s);
+
+      // Before the config attach: a failed attach must not leave the agent out of its hub.
+      if (sdlcChannelId) {
+        try {
+          await apiInstance.post(
+            `/sdlc/channels/${encodeURIComponent(sdlcChannelId)}/agents/pending`,
+            {
+              agentId: agent.id,
+            },
+          );
+          queryClient.setQueryData<{ memberSlugs: string[]; pendingSlugs: string[] }>(
+            ['sdlc-hub-agents', sdlcChannelId],
+            old => (old ? { ...old, pendingSlugs: [...old.pendingSlugs, agent.slug] } : old),
+          );
+        } catch {
+          toast.error('Agent created, but it could not be linked to the hub.');
+        }
+      }
 
       if (hasTools || hasSkills || hasResearch) {
         const config: Record<string, unknown> = {};
@@ -116,9 +140,17 @@ export const useCreateClawAgent = (): UseMutationResult<Agent, Error, WizardSubm
       return agent;
     },
     onSuccess: agent => {
+      // Seed the lists so the hub page shows the new agent on return, before the refetch lands.
+      queryClient.setQueryData<Agent[]>(['claw-auth-agents', userId], old =>
+        old && !old.some(a => a.id === agent.id) ? [...old, agent] : old,
+      );
       void queryClient.invalidateQueries({ queryKey: ['claw-auth-agents', userId] });
+      void queryClient.invalidateQueries({ queryKey: ['sdlc-hub-agents'] });
+      void queryClient.invalidateQueries({ queryKey: clawAgentDetailKey(agent.slug) });
       toast.success('Agent created');
-      void navigate(detailPath(agent.slug), { state: { justCreated: true } });
+      if (sdlcChannelId && returnTo?.startsWith('/') && !returnTo.startsWith('//')) {
+        void navigate(returnTo);
+      } else void navigate(detailPath(agent.slug));
     },
     onError: err => {
       // Agent exists but config failed: land the user on the detail screen so

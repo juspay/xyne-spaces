@@ -23,6 +23,8 @@ export interface LiveTranscriptListProps {
   isScrollSuspended?: boolean;
   /** Analytics category of the host surface. */
   trackCategory: string;
+  /** Renders a speaker name + clock time above each line (in-call transcript panel). */
+  showSpeaker?: boolean;
   className?: string;
 }
 
@@ -31,4 +33,6 @@ export interface MarkedMomentAnchors {
   markedTranscriptIds: Set<number>;
   /** True when a moment was marked before any line arrived, so it renders at the top. */
   hasLeadingMoment: boolean;
+  /** True when a moment is anchored past the last line (marked at the tail), so it renders at the bottom. */
+  hasTrailingMoment: boolean;
 }

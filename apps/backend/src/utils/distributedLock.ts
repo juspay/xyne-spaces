@@ -80,3 +80,48 @@ export async function releaseLock(handle: LockHandle | null): Promise<void> {
     });
   }
 }
+
+// Extend the TTL only while we still own the key — so a lease we already lost (expired + re-taken) isn't refreshed.
+const RENEW_LUA = `
+if redis.call('get', KEYS[1]) == ARGV[1] then
+  return redis.call('pexpire', KEYS[1], ARGV[2])
+else
+  return 0
+end`;
+
+/**
+ * Renew a held lease (leader-election heartbeat). Returns `true` if we still own it, `false` if it's no longer
+ * ours (expired and re-acquired elsewhere) so the caller can step down. A transient Redis error returns `true`
+ * (keep the current role, don't flap) — the TTL still reclaims a genuinely-dead holder.
+ */
+export async function renewLock(handle: LockHandle | null, ttlSeconds: number): Promise<boolean> {
+  if (!handle) return false;
+  try {
+    const r = await redisService.getClient().eval(RENEW_LUA, 1, handle.key, handle.token, String(ttlSeconds * 1000));
+    return r === 1;
+  } catch (err) {
+    logger.warn('[distributedLock] renew_error_keeping_role', {
+      key: handle.key,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return true;
+  }
+}
+
+/**
+ * Leader-election acquire: like {@link acquireLock} but FAILS CLOSED. A Redis error returns `null`
+ * (stay a follower) instead of a handle, so a blip can never elect two leaders. Try-once, no waiting.
+ */
+export async function acquireLeadership(key: string, ttlSeconds: number): Promise<LockHandle | null> {
+  const token = randomUUID();
+  try {
+    const acquired = await redisService.set(key, token, ttlSeconds, true); // EX ttl NX
+    return acquired ? { key, token } : null;
+  } catch (err) {
+    logger.warn('[distributedLock] leadership_acquire_error_failing_closed', {
+      key,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}

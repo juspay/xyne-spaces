@@ -120,9 +120,9 @@ describe("previous agent reply for short follow-ups", () => {
   });
 
   it("sends the previous reply to jev and reports it", async () => {
-    const ask = vi.fn(async () => ({ multiStep: { type: "noul", noul: 0.9 } }));
+    const ask = vi.fn(async (_req: { state: string; purpose: string }) => ({ multiStep: { type: "noul", noul: 0.9 } }));
     const d = await decidePlanTracking("BANGALORE", {}, { enabled: () => true, ask }, "Which city should I pull inactive drivers for?");
     expect(d).toMatchObject({ plan: true, withPreviousReply: true });
-    expect(ask.mock.calls[0]?.[0]).toContain("Which city should I pull inactive drivers for?");
+    expect(ask.mock.calls[0]?.[0].state).toContain("Which city should I pull inactive drivers for?");
   });
 });

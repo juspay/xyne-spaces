@@ -23,6 +23,7 @@ import ChatScreen from './ChatScreen/ChatScreen';
 import ThreadMessages from '../components/Chat/ThreadPannel';
 import TicketView from '../components/Tickets/TicketView/TicketView';
 import { BrowserTabsScreen } from './BrowserTabsScreen';
+import { BrowserPageLayer } from './BrowserTabsScreen/BrowserPageLayer';
 import { getLastActiveWorkspaceId } from '../machines/authMachine';
 import AgentsScreen from './AgentsScreen/AgentScreen';
 // ClawSettingsScreen and ClawMetricsScreen are also mounted at /ai/settings and
@@ -37,6 +38,7 @@ import KnowledgeBaseV2Screen from '../components/knowledgeBaseV2/KnowledgeBaseV2
 import { LegacyKbRedirect } from '../components/knowledgeBaseV2/LegacyKbRedirect';
 import { FileViewerLayout } from '../components/knowledgeBase/layout/FileViewerLayout';
 import AnalyticsScreen from './AnalyticsScreen/AnalyticsScreen';
+import SecretsScreen from './SecretsScreen/SecretsScreen';
 import ProjectsScreen from './ProjectsScreen/ProjectsScreen';
 import UserGroupsScreen from './UserGroupsScreen/UserGroupsScreen';
 import ProjectDetailScreen from './ProjectDetailScreen/ProjectDetailScreen';
@@ -62,6 +64,7 @@ import CanvasRedirectPage from './CanvasRedirect/CanvasRedirectPage';
 import { ClawOverlay } from '../components/Claw/ClawOverlay';
 import { ArtifactAppHostRoute } from '../components/ArtifactApp/ArtifactAppHostRoute';
 import AppSidebar from '../components/AppSidebar/AppSidebar';
+import { SiteMap } from '../components/AppSidebar/SiteMap';
 import { ReactElement, ReactNode, useRef, useEffect, useState } from 'react';
 import ZeroProvider from '../providers/ZeroProvider';
 import { EditProvider } from '../providers/EditProvider';
@@ -114,6 +117,7 @@ import NotFoundScreen from './NotFoundScreen/NotFoundScreen';
 import ChatRedirect from '../components/Chat/ChatRedirect/ChatRedirect';
 import DirectoryRedirect from '../components/Chat/DirectoryRedirect/DirectoryRedirect';
 import CallsRoute from './CallsRoute/CallsRoute';
+import CallsAdminScreen from './CallsAdminScreen/CallsAdminScreen';
 import CallDetailScreen from './CallDetailScreen/CallDetailScreen';
 import RecordingsRoute from './RecordingsRoute/RecordingsRoute';
 import RecordingDetailRoute from './RecordingDetailRoute/RecordingDetailRoute';
@@ -129,47 +133,11 @@ import { NoteTakerOverlayHost } from './RecordingsV2Screen/components/NoteTakerO
 import FormScreen from './FormScreen/FormScreen';
 import ScheduledMessageScreen from './ScheduledMessageScreen/ScheduledMessageScreen';
 import AppsScreen from './AppsScreen/AppsScreen';
+import AppsMarketplaceScreen from './AppsMarketplaceScreen/AppsMarketplaceScreen';
 import InitialStateLoader from '../providers/InitialStateLoader';
 import { ZeroFallbackProvider } from '../contexts/ZeroFallbackContext';
-import { InstrumentationProvider, type Instrumentation } from '@xyne/shared/hooks';
-import { logger } from '../utils/logger';
-import {
-  zeroQueryLatency,
-  zeroQueryOperations,
-  zeroMutationLatency,
-  zeroMutationOperations,
-  zeroRunLatency,
-  zeroRunOperations,
-  safeRecordMetric,
-} from '../services/otel';
-
-const dashboardInstrumentation: Instrumentation = {
-  logger,
-  metrics: {
-    recordLatency: (name: string, durationMs: number, attributes?: Record<string, string>) => {
-      safeRecordMetric(() => {
-        if (name === 'zero.query.latency') {
-          zeroQueryLatency.record(durationMs, attributes);
-        } else if (name === 'zero.mutation.latency') {
-          zeroMutationLatency.record(durationMs, attributes);
-        } else if (name === 'zero.run.latency') {
-          zeroRunLatency.record(durationMs, attributes);
-        }
-      });
-    },
-    incrementCounter: (name: string, attributes?: Record<string, string>) => {
-      safeRecordMetric(() => {
-        if (name === 'zero.query.operations') {
-          zeroQueryOperations.add(1, attributes);
-        } else if (name === 'zero.mutation.operations') {
-          zeroMutationOperations.add(1, attributes);
-        } else if (name === 'zero.run.operations') {
-          zeroRunOperations.add(1, attributes);
-        }
-      });
-    },
-  },
-};
+import { InstrumentationProvider } from '@xyne/shared/hooks';
+import { dashboardInstrumentation } from '../services/otel/dashboardInstrumentation';
 import { useSwipeBack } from '../hooks/useSwipeBack';
 import DmsPage from '../components/Chat/DirectMessages/DmsPage';
 import { KeyedComposeDmPanel } from '../components/Chat/AddDmForm/ComposeDmPanel';
@@ -257,6 +225,8 @@ import type { ScreenSource } from '../types/electron';
 import ConfluenceMigrationScreen from './ConfluenceMigrationScreen/ConfluenceMigrationScreen';
 import AIScreen from './AIScreen/AIScreen';
 import AILibraryScreen from './AIScreen/screens/AILibraryScreen';
+import AIEnvironmentsScreen from './AIScreen/screens/AIEnvironmentsScreen';
+import AISandboxProfileScreen from './AIScreen/screens/AISandboxProfileScreen';
 import AIAdminScreen from './AIScreen/screens/AIAdminScreen';
 import AIAgentCreateScreen from './AIScreen/screens/AIAgentCreateScreen';
 import AISubagentCreateScreen from './AIScreen/screens/AISubagentCreateScreen';
@@ -526,6 +496,10 @@ const AppRoot = (): ReactElement => {
   const xyneAIResearchContext = useSelector(xyneAIActor, state => state.context.researchContext);
   const xyneAIInitialQuery = useSelector(xyneAIActor, state => state.context.initialQuery);
   const xyneAIAutoSendNonce = useSelector(xyneAIActor, state => state.context.autoSendNonce);
+  const xyneAIAutoSendWebSearch = useSelector(
+    xyneAIActor,
+    state => state.context.autoSendWebSearch,
+  );
   const isCalendarOpen = useSelector(xyneCalendarActor, state => state.matches('open'));
   const { isMobile } = usePlatform();
   // No-op outside the SDLC bundle's framed instance.
@@ -648,6 +622,7 @@ const AppRoot = (): ReactElement => {
             researchContext={xyneAIResearchContext}
             initialQuery={xyneAIInitialQuery ?? undefined}
             autoSendNonce={xyneAIAutoSendNonce}
+            autoSendWebSearch={xyneAIAutoSendWebSearch}
             onDebuggerOpenChange={setIsXyneDebuggerOpen}
           />
         </XyneAISidebarZIndexShell>
@@ -878,6 +853,7 @@ const AppRoot = (): ReactElement => {
                                       researchContext={xyneAIResearchContext}
                                       initialQuery={xyneAIInitialQuery ?? undefined}
                                       autoSendNonce={xyneAIAutoSendNonce}
+                                      autoSendWebSearch={xyneAIAutoSendWebSearch}
                                       onDebuggerOpenChange={setIsXyneDebuggerOpen}
                                     />
                                   </XyneAISidebarZIndexShell>
@@ -919,6 +895,7 @@ const AppRoot = (): ReactElement => {
                                       <EditWarningModal />
                                       <Outlet />
                                     </main>
+                                    <SiteMap />
                                   </div>
                                 </Panel>
                                 <Separator className='w-2 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
@@ -943,6 +920,7 @@ const AppRoot = (): ReactElement => {
                               <EditWarningModal />
                               <Outlet />
                             </main>
+                            <SiteMap />
                           </div>
                         </AppSidebarHost>
                       )}
@@ -975,6 +953,9 @@ const AppRoot = (): ReactElement => {
                           <CallFromRecentsHandler />
                           <CloudAgentFloatingHost />
                           <BrowserPanelHandler />
+                          {/* The browser's pages: here, where they never move, so
+                              docking or undocking the browser doesn't reload them. */}
+                          <BrowserPageLayer />
                           <GlobalCommandMenu aiOverview ticketScreenScope />
                           <ShortcutsHelpModal
                             isOpen={isShortcutsModalOpen}
@@ -1025,6 +1006,7 @@ const AppRoot = (): ReactElement => {
                             researchContext={xyneAIResearchContext}
                             initialQuery={xyneAIInitialQuery ?? undefined}
                             autoSendNonce={xyneAIAutoSendNonce}
+                            autoSendWebSearch={xyneAIAutoSendWebSearch}
                             onDebuggerOpenChange={setIsXyneDebuggerOpen}
                             visible={false}
                           />
@@ -1064,6 +1046,7 @@ const AppRoot = (): ReactElement => {
                               researchContext={xyneAIResearchContext}
                               initialQuery={xyneAIInitialQuery ?? undefined}
                               autoSendNonce={xyneAIAutoSendNonce}
+                              autoSendWebSearch={xyneAIAutoSendWebSearch}
                               onDebuggerOpenChange={setIsXyneDebuggerOpen}
                             />
                           </Drawer>
@@ -1172,6 +1155,16 @@ export const router = createBrowserRouter(
                     { path: 'daily-brief', element: <AIDailyBriefScreen /> },
                     { path: 'daily-brief/:briefDate', element: <AIDailyBriefScreen /> },
                     { path: 'library', element: <AILibraryScreen /> },
+                    {
+                      path: 'environments',
+                      element: (
+                        <RequireClawAdmin orSdlcAdmin>
+                          <AIEnvironmentsScreen />
+                        </RequireClawAdmin>
+                      ),
+                    },
+                    { path: 'environments/profile/new', element: <AISandboxProfileScreen /> },
+                    { path: 'environments/profile/:key/edit', element: <AISandboxProfileScreen /> },
                     {
                       path: 'admin',
                       element: (
@@ -1570,9 +1563,17 @@ export const router = createBrowserRouter(
                   ),
                 },
                 {
+                  path: 'secrets',
+                  element: (
+                    <ResourceProtectedRoute resourceName='SECRETS'>
+                      <SecretsScreen />
+                    </ResourceProtectedRoute>
+                  ),
+                },
+                {
                   path: 'projects',
                   element: (
-                    <ResourceProtectedRoute resourceName='PROJECTS'>
+                    <ResourceProtectedRoute resourceName='TICKETS' minAccess='READ'>
                       <ProjectsScreen />
                     </ResourceProtectedRoute>
                   ),
@@ -1712,6 +1713,15 @@ export const router = createBrowserRouter(
                   ],
                 },
                 {
+                  // Deliberately not ResourceProtectedRoute: non-SCRIBE users manage their own calls here.
+                  path: 'calls/admin',
+                  element: (
+                    <ToolbarProtectedRoute path='/calls'>
+                      <CallsAdminScreen />
+                    </ToolbarProtectedRoute>
+                  ),
+                },
+                {
                   path: 'calls/:callId/:callType',
                   element: <CallPage />,
                 },
@@ -1769,7 +1779,7 @@ export const router = createBrowserRouter(
                 {
                   path: 'support',
                   element: (
-                    <ResourceProtectedRoute resourceName='SUPPORT'>
+                    <ResourceProtectedRoute resourceName='SUPPORT' minAccess='READ'>
                       <SupportListRestore>
                         <SaveRoute
                           keyword='support'
@@ -1836,7 +1846,7 @@ export const router = createBrowserRouter(
                       path: 'members',
                       element: (
                         <OrganisationsSectionGuard section='members'>
-                          <OrganisationsPage>
+                          <OrganisationsPage wide>
                             <MembersTab />
                           </OrganisationsPage>
                         </OrganisationsSectionGuard>
@@ -1960,6 +1970,14 @@ export const router = createBrowserRouter(
                   element: (
                     <ToolbarProtectedRoute path='/apps'>
                       <AppsScreen />
+                    </ToolbarProtectedRoute>
+                  ),
+                },
+                {
+                  path: 'apps-marketplace',
+                  element: (
+                    <ToolbarProtectedRoute path='/apps-marketplace'>
+                      <AppsMarketplaceScreen />
                     </ToolbarProtectedRoute>
                   ),
                 },

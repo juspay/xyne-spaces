@@ -1,9 +1,8 @@
 {
   "$comment": [
     "Catalog operations the SDK deliberately does not expose, each with a reason.",
-    "The coverage check (npm run coverage) requires every Zero query and mutator to be",
-    "either referenced by a registry or listed here. A new backend operation therefore",
-    "fails the check until someone decides what to do with it.",
+    "Every Zero query and mutator should be either mapped in mapper.ts or listed here,",
+    "so a new backend operation needs a decision in one of the two.",
     "Reason grammar: superseded-by:<name> | legacy-unused | internal | deferred:<why>"
   ],
   "exclusions": [
@@ -12,18 +11,6 @@
       "kind": "query",
       "reason": "deferred:in-app banner feed",
       "note": "Takes no arguments and is scoped entirely to ctx.userID/workspaceId — it drives the slash-command artifact banner in the product UI. No standalone value for an API client; revisit if artifacts become addressable."
-    },
-    {
-      "name": "activities.markThreadActivitiesAsRead",
-      "kind": "mutator",
-      "reason": "superseded-by:activities.markThreadActivitiesAsReadV2",
-      "note": "V2 adds draft preservation."
-    },
-    {
-      "name": "allTickets",
-      "kind": "query",
-      "reason": "superseded-by:ticketsQueryV2",
-      "note": "Unpaginated full-table read; ticketsQueryV2 covers the same shape with view scoping."
     },
     {
       "name": "channelAndThreadMessages",
@@ -56,12 +43,6 @@
       "note": "Unpaginated variant."
     },
     {
-      "name": "channelLatestMessage",
-      "kind": "query",
-      "reason": "superseded-by:channelLatestMessageV2",
-      "note": "Older version of a covered operation."
-    },
-    {
       "name": "channelLatestMultipleConversations",
       "kind": "query",
       "reason": "superseded-by:channelLatestMultipleConversationsV3",
@@ -72,6 +53,12 @@
       "kind": "query",
       "reason": "superseded-by:channelLatestMultipleConversationsV3",
       "note": "Older version of a covered operation."
+    },
+    {
+      "name": "cleanupStageApprovals",
+      "kind": "mutator",
+      "reason": "internal",
+      "note": "The dashboard's client-side cleanup after a backward stage move: it deletes stage requests past a sequence number. Not an action on its own; SDK callers move tickets with tickets.transitionStage."
     },
     {
       "name": "conversationLabelMappingsByConversationId",
@@ -98,12 +85,6 @@
       "note": "V2 additionally records formId."
     },
     {
-      "name": "getConversationAttachements",
-      "kind": "query",
-      "reason": "superseded-by:getConversationAttachementsV2",
-      "note": "Identical arguments; V2 moves channel-visibility gating onto the table ACL."
-    },
-    {
       "name": "getDraftForConversation",
       "kind": "query",
       "reason": "superseded-by:getDraftForConversationV2",
@@ -128,10 +109,6 @@
       "note": "Older version of a covered operation."
     },
     {
-      "name": "getSdlcRepoById",
-      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
-    },
-    {
       "name": "getSdlcActiveCalls",
       "kind": "query",
       "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight.",
@@ -144,16 +121,51 @@
       "note": "An SDLC hub's or track's calls — live, upcoming or past, paged — for its Calls tab."
     },
     {
+      "name": "getSdlcFolderCanvases",
+      "kind": "query",
+      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight.",
+      "note": "One SDLC hub artifact folder's artifacts, for the page showing it."
+    },
+    {
+      "name": "getSdlcFolderChildren",
+      "kind": "query",
+      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight.",
+      "note": "A track's or folder's children in an SDLC hub's folder tree."
+    },
+    {
       "name": "getSdlcHub",
       "kind": "query",
       "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight.",
       "note": "The SDLC screen's slim hub: channel, type folders, repos and your membership; the SDK keeps getSdlcChannelById."
     },
     {
-      "name": "getSdlcFolderCanvases",
+      "name": "getSdlcHubFolders",
       "kind": "query",
       "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight.",
-      "note": "One SDLC hub artifact folder's artifacts, for the page showing it."
+      "note": "The folders placed in an SDLC hub."
+    },
+    {
+      "name": "getSdlcHubItems",
+      "kind": "query",
+      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight.",
+      "note": "Every Wiki and Hub Knowledge placement edge in an SDLC hub; the tree is built from these."
+    },
+    {
+      "name": "getSdlcHubWorkflow",
+      "kind": "query",
+      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight.",
+      "note": "The workflow linked to an SDLC hub."
+    },
+    {
+      "name": "getSdlcItemComments",
+      "kind": "query",
+      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight.",
+      "note": "Every comment on one SDLC hub entity, oldest first."
+    },
+    {
+      "name": "getSdlcRepoById",
+      "kind": "query",
+      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
     },
     {
       "name": "getSdlcTrackItems",
@@ -162,16 +174,16 @@
       "note": "The SDLC items a page names by id: its open folder, its tabs, its panel's subject."
     },
     {
-      "name": "kanbanTicketsPage",
+      "name": "getSdlcWikiWorkflow",
       "kind": "query",
-      "reason": "superseded-by:kanbanTicketsPageV2",
-      "note": "Older version of a covered operation."
+      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight.",
+      "note": "The wiki workflow linked to an SDLC hub."
     },
     {
-      "name": "kanbanTicketsPageV2",
+      "name": "kanbanTicketsPage",
       "kind": "query",
       "reason": "superseded-by:kanbanTicketsPageV3",
-      "note": "Identical argument schema; V3 reads the isStageOverdue column instead of joining stageEtaEntries."
+      "note": "Same board/project kanban page; V3 adds role-assignment and overdue filters and reads the isStageOverdue column."
     },
     {
       "name": "myChannelParticipations",
@@ -186,42 +198,71 @@
       "note": "V2 takes channelId and isMember alongside ticketId, as an ACL hint. Same row."
     },
     {
+      "name": "sdlc.addSdlcFolderItem",
+      "kind": "mutator",
+      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight.",
+      "note": "Adds an item to an SDLC hub folder."
+    },
+    {
       "name": "sdlc.createLink",
+      "kind": "mutator",
       "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
+    },
+    {
+      "name": "sdlc.createSdlcFolder",
+      "kind": "mutator",
+      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight.",
+      "note": "Creates an SDLC hub folder."
     },
     {
       "name": "sdlc.deleteLink",
+      "kind": "mutator",
       "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
     },
     {
+      "name": "sdlc.moveSdlcItem",
+      "kind": "mutator",
+      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight.",
+      "note": "Moves an item between SDLC hub folders."
+    },
+    {
+      "name": "sdlc.renameSdlcFolder",
+      "kind": "mutator",
+      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight.",
+      "note": "Renames an SDLC hub folder."
+    },
+    {
+      "name": "sdlc.setSdlcFolderIcon",
+      "kind": "mutator",
+      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight.",
+      "note": "Sets an SDLC hub folder's icon."
+    },
+    {
       "name": "sdlcDiscussionConversation",
+      "kind": "query",
       "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
     },
     {
       "name": "sdlcDiscussionConversations",
+      "kind": "query",
       "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
+    },
+    {
+      "name": "sdlcItemComment.add",
+      "kind": "mutator",
+      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight.",
+      "note": "Comments on an SDLC item."
+    },
+    {
+      "name": "sdlcItemComment.setResolved",
+      "kind": "mutator",
+      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight.",
+      "note": "Resolves or reopens an SDLC item comment."
     },
     {
       "name": "sdlcUserActivities",
+      "kind": "query",
       "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
-    },
-    {
-      "name": "supportTicketByXyneId",
-      "kind": "query",
-      "reason": "superseded-by:supportTicketByXyneIdV4",
-      "note": "Older version of a covered operation."
-    },
-    {
-      "name": "supportTicketByXyneIdV2",
-      "kind": "query",
-      "reason": "superseded-by:supportTicketByXyneIdV4",
-      "note": "Older version of a covered operation."
-    },
-    {
-      "name": "supportTicketByXyneIdV3",
-      "kind": "query",
-      "reason": "superseded-by:supportTicketByXyneIdV4",
-      "note": "Older version of a covered operation."
     },
     {
       "name": "supportTicketDetail",
@@ -230,75 +271,15 @@
       "note": "Same arguments; V2 drops the caller-scoped emailDrafts/emailReads and conversation relations, none of which were in the declared result."
     },
     {
-      "name": "supportTicketRow",
+      "name": "supportTicketsFilteredV3",
       "kind": "query",
-      "reason": "superseded-by:supportTicketRowV3",
-      "note": "Older version of a covered operation."
-    },
-    {
-      "name": "supportTicketRowV2",
-      "kind": "query",
-      "reason": "superseded-by:supportTicketRowV3",
-      "note": "Older version of a covered operation."
-    },
-    {
-      "name": "supportTicketsFiltered",
-      "kind": "query",
-      "reason": "superseded-by:supportTicketsFilteredV3",
-      "note": "Older version of a covered operation."
-    },
-    {
-      "name": "supportTicketsFilteredV2",
-      "kind": "query",
-      "reason": "superseded-by:supportTicketsFilteredV3",
-      "note": "Older version of a covered operation."
-    },
-    {
-      "name": "supportTicketsPage",
-      "kind": "query",
-      "reason": "superseded-by:supportTicketsPageV4",
-      "note": "Older version of a covered operation."
-    },
-    {
-      "name": "supportTicketsPageV2",
-      "kind": "query",
-      "reason": "superseded-by:supportTicketsPageV4",
-      "note": "Older version of a covered operation."
+      "reason": "superseded-by:supportTicketsFilteredV4",
+      "note": "Identical arguments and relations; V4 shares its filter builder with supportKanbanTicketsPage."
     },
     {
       "name": "supportTicketsPageV3",
       "kind": "query",
       "reason": "superseded-by:supportTicketsPageV4",
-      "note": "Older version of a covered operation."
-    },
-    {
-      "name": "threadConversation",
-      "kind": "query",
-      "reason": "superseded-by:threadConversationV2",
-      "note": "Older version of a covered operation."
-    },
-    {
-      "name": "ticketById",
-      "kind": "query",
-      "reason": "superseded-by:ticketByIdV2",
-      "note": "Older version of a covered operation."
-    },
-    {
-      "name": "ticketByXyneId",
-      "kind": "query",
-      "reason": "superseded-by:ticketByXyneIdV3",
-      "note": "Older version of a covered operation."
-    },
-    {
-      "name": "ticketByXyneIdV2",
-      "kind": "query",
-      "reason": "superseded-by:ticketByXyneIdV3",
-      "note": "Older version of a covered operation."
-    },
-    {
-      "name": "ticketDetailsById",
-      "kind": "query",
-      "reason": "superseded-by:ticketDetailsByIdV2",
       "note": "Older version of a covered operation."
     },
     {
@@ -312,18 +293,6 @@
       "kind": "mutator",
       "reason": "superseded-by:ticketTagV2.delete",
       "note": "Paired with ticketTagV2.create."
-    },
-    {
-      "name": "ticketsByProject",
-      "kind": "query",
-      "reason": "superseded-by:ticketsByProjectV2",
-      "note": "Older version of a covered operation."
-    },
-    {
-      "name": "ticketsForEmailChannels",
-      "kind": "query",
-      "reason": "superseded-by:ticketsForEmailChannelsV2",
-      "note": "Older version of a covered operation."
     },
     {
       "name": "trackKanbanTicketsPage",
@@ -354,12 +323,6 @@
       "kind": "query",
       "reason": "superseded-by:userCallHistoryV2",
       "note": "Older version of a covered operation."
-    },
-    {
-      "name": "userConversationsPaginated",
-      "kind": "query",
-      "reason": "superseded-by:userConversationsPaginatedV2",
-      "note": "V1 cursor keyed on lastActivityAt; V2 uses lastReplyAt."
     },
     {
       "name": "userScheduledCalls",

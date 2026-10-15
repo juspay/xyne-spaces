@@ -63,7 +63,7 @@ export async function maybeGenerateConversationTitle(args: {
   const key = {
     conversationId: args.conversationId,
     userId: args.userId,
-    agentSlug: args.agentSlug,
+    agentSlug: await chatConversationMetaRepository.metaAgentSlug(args.conversationId, args.agentSlug),
   };
   const existing = await chatConversationMetaRepository.find(key);
   if (existing?.title) return;

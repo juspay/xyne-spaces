@@ -141,6 +141,13 @@ function createPrismaAuditLookup(prisma: PrismaAuditClient): AuditLookup {
         boardIds: [...boardIds],
       }));
     },
+    deskChannelIds: async channelIds => {
+      if (channelIds.length === 0) return [];
+      const rows = (await prisma.emailChannelPreference.findMany({
+        where: { channelId: { in: channelIds } },
+      })) as { channelId: string }[];
+      return rows.map(row => row.channelId);
+    },
   };
 }
 

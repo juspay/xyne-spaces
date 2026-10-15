@@ -222,14 +222,20 @@ async function ensureUsers(workspaceId: string, orgId: string, admin: SeededUser
     //
     // Seeding these as GOOGLE produced users who look right in the UI and cannot
     // sign in at all.
-    await prisma.orgMember.create({
-      data: {
-        memberId,
-        orgId,
-        email,
-        role: OrgRole.MEMBER,
-        passwordHash: await hashPassword(DEMO_USER_PASSWORD),
-      },
+    const demoPasswordHash = await hashPassword(DEMO_USER_PASSWORD);
+    await prisma.$transaction(async (tx) => {
+      await tx.orgMember.create({
+        data: {
+          memberId,
+          orgId,
+          email,
+          role: OrgRole.MEMBER,
+          passwordHash: demoPasswordHash,
+        },
+      });
+      await tx.orgMemberCredential.create({
+        data: { memberId, orgId, passwordHash: demoPasswordHash },
+      });
     });
     const user = await prisma.user.create({
       data: {

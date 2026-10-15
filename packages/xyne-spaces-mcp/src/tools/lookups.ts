@@ -99,15 +99,24 @@ const boardStages: ToolDef = {
 		required: ["project_id"],
 		additionalProperties: false,
 	},
-	// The board listing already returns stages through a relation, so boards and
-	// their stages arrive together rather than needing a call per board.
+	// The board listing returns board columns only, so stages come from one
+	// follow-up call for every matched board, grouped back onto each board.
 	async handler(args, { sdk }) {
 		await users.prime(sdk);
 		const projectId = requiredString(args, "project_id");
 		const rows = (await sdk.boards.listByProject(projectId)) as BoardRow[];
 
 		const filter = optionalString(args, "board_name")?.toLowerCase();
-		const matched = filter ? rows.filter((r) => (r.name ?? "").toLowerCase().includes(filter)) : rows;
+		const filtered = filter ? rows.filter((r) => (r.name ?? "").toLowerCase().includes(filter)) : rows;
+
+		const stageRows = filtered.length > 0 ? await sdk.boards.listStagesForBoards(filtered.map((b) => b.id)) : [];
+		const stagesByBoard = new Map<string, Stage[]>();
+		for (const stage of stageRows) {
+			const list = stagesByBoard.get(stage.boardId) ?? [];
+			list.push(stage);
+			stagesByBoard.set(stage.boardId, list);
+		}
+		const matched: BoardRow[] = filtered.map((b) => ({ ...b, stages: stagesByBoard.get(b.id) ?? [] }));
 
 		const rendered = matched.map((board, i) => {
 			const lines: string[] = [];

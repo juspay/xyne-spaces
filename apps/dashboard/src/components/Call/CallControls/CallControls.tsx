@@ -21,6 +21,7 @@ import {
   ImagePlus,
   Hand,
   NotepadText,
+  Captions,
 } from 'lucide-react';
 import { useMediaDeviceSelect } from '@livekit/components-react';
 import { cn } from '../../../utils/classNames';
@@ -94,6 +95,9 @@ interface CallControlsProps {
   isNotesOpen?: boolean | undefined;
   /** Omit to hide the notes button (e.g. external users) */
   onToggleNotes?: (() => void) | undefined;
+  isTranscriptOpen?: boolean | undefined;
+  /** Omit to hide the live-transcript button */
+  onToggleTranscript?: (() => void) | undefined;
   isAIAssistantEnabled: boolean;
   aiController: { id: string; name: string } | null;
   localParticipantId: string | null;
@@ -148,6 +152,8 @@ export function CallControls({
   isParticipantsSidebarOpen,
   isNotesOpen = false,
   onToggleNotes,
+  isTranscriptOpen = false,
+  onToggleTranscript,
   isAIAssistantEnabled,
   aiController,
   localParticipantId,
@@ -988,6 +994,19 @@ export function CallControls({
             <span>Notes</span>
           </DropdownMenuItem>
         )}
+        {onToggleTranscript && (
+          <DropdownMenuItem
+            onClick={onToggleTranscript}
+            className={menuItemClass}
+            data-track-event='BUTTON_CLICK'
+            data-track-category='CALLS'
+            data-track-name='TOGGLE_CALL_TRANSCRIPT'
+            data-track-metadata={JSON.stringify({ callId, isOpen: isTranscriptOpen })}
+          >
+            {menuIcon(Captions)}
+            <span>{isTranscriptOpen ? 'Hide transcript' : 'View transcript'}</span>
+          </DropdownMenuItem>
+        )}
         {!hideThreadChat && (
           <DropdownMenuItem
             onClick={onToggleChat}
@@ -1016,7 +1035,12 @@ export function CallControls({
   );
 
   return (
-    <div className='flex h-16 w-full items-center justify-center gap-4 px-3 sm:h-20 sm:px-4 lg:grid lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]'>
+    <div
+      className={cn(
+        'flex w-full justify-center gap-4 px-3 sm:px-4 lg:grid lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]',
+        isFullView ? 'h-[72px] items-center pb-4' : 'h-16 items-center sm:h-20',
+      )}
+    >
       <div className='hidden min-w-0 items-center lg:flex'>{infoSlot}</div>
 
       <div className='flex flex-nowrap items-center justify-center gap-2 sm:gap-3'>

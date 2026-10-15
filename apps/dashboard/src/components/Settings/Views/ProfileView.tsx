@@ -30,6 +30,7 @@ import { useSelf } from '../../../hooks/useUsers';
 import { mutators } from '../../../zero/mutators';
 import { v4 as uuidv4 } from 'uuid';
 import { useUserPresence } from '../../../hooks/usePresence';
+import { notificationsArePaused } from '../../../utils/notificationsPause';
 import { SelectedStatusData } from './SetStatusView';
 
 type ViewType = 'default' | 'status-suggestions' | 'status-edit';
@@ -106,9 +107,10 @@ const ProfileView = ({
   }, [isPresenceDropdownOpen]);
 
   const notificationsPausedUntil = user?.notificationsPausedUntil;
-  const isNotificationsPaused = useMemo(() => {
-    return notificationsPausedUntil ? notificationsPausedUntil > Date.now() : false;
-  }, [notificationsPausedUntil]);
+  const isNotificationsPaused = useMemo(
+    () => notificationsArePaused(notificationsPausedUntil),
+    [notificationsPausedUntil],
+  );
 
   const pauseOptions = useMemo(
     () => [
@@ -360,6 +362,7 @@ const ProfileView = ({
                 data-track-name='CLEAR_STATUS'
                 className='flex-shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
                 title='Clear status'
+                aria-label='Clear status'
               >
                 <X className='size-3 text-muted-foreground' />
               </Button>
@@ -394,6 +397,7 @@ const ProfileView = ({
                 size='lg'
                 className='flex-shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
                 title='Resume notifications'
+                aria-label='Resume notifications'
                 onClick={handleResumeNotifications}
                 trackId='resume_notifications'
                 data-track-category='PROFILE'

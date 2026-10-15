@@ -9,7 +9,9 @@
  * manifest small matters because it is the payload replayed on history reload.
  */
 
+import { randomUUID } from "node:crypto";
 import type { ToolDefinition, ToolExecutionContext } from "../types.js";
+import { loadAppForUser, parseAppId } from "./appApi.js";
 import {
   ALLOWED_AST_MODELS,
   ALLOWED_AST_OPERATIONS,
@@ -34,6 +36,10 @@ const ARTIFACT_FILENAME = "artifact.json";
  *  is already persisted. The tool's user-facing name is independent of it. */
 const MANIFEST_START = "REACT_ARTIFACT_START";
 const MANIFEST_END = "REACT_ARTIFACT_END";
+/** Wraps the model-facing "App id: …" line. Must match custom-tools.ts, which
+ *  strips it from the user-visible summary only. */
+const APP_NOTE_START = "APP_NOTE_START";
+const APP_NOTE_END = "APP_NOTE_END";
 
 /** Bumped when the on-disk artifact payload shape changes. */
 const ARTIFACT_VERSION = 1;
@@ -152,7 +158,7 @@ export const REACT_ARTIFACT_CONFIG_SCHEMA = {
     placeholder: "http://localhost:3003",
   },
   XYNE_CLAW_S2S_KEY: {
-    label: "Claw S2S Key (reads the conversation's current app before an update)",
+    label: "Claw S2S Key (reads, updates and publishes apps as the run's user)",
     default: "",
     required: false as const,
     placeholder: "Shared secret between xyne-claw and xyne-claw-auth",
@@ -201,6 +207,16 @@ export interface ReactArtifactManifest {
   invokesAgents?: boolean;
   agents?: string[];
   icon?: string;
+  /**
+   * The app this build belongs to. Stamped by `create-app` (never by the model
+   * directly): a freshly minted id on create, the caller-supplied, ownership-
+   * checked id on update. The host persists the build onto exactly this app —
+   * it is what replaced "one app per conversation".
+   */
+  appId?: string;
+  /** True when `appId` was minted for a create, so the host may create a row
+   *  with it; false means the app must already exist and be the user's. */
+  newApp?: boolean;
 }
 
 /**
@@ -503,7 +519,7 @@ function parseAgents(raw: unknown): string[] {
 }
 
 /**
- * Fold an incremental update onto the project the conversation already has.
+ * Fold an incremental update onto the app's current build.
  *
  * Produces raw params, NOT a payload, so the merged whole then goes through
  * `buildReactArtifact` unchanged. That ordering is the point: a patch must not
@@ -657,96 +673,28 @@ export function buildReactArtifact(params: Record<string, unknown>): BuiltReactA
   return { payload, manifest, summary };
 }
 
-/** How long to wait for claw-auth when reading the current build. Generous:
- *  this is one small GCS-backed read on the internal network, and timing out
- *  early would push the model into a needless full rebuild. */
-const READ_BACK_TIMEOUT_MS = 15_000;
-
-type ReadBackResult =
-  | { ok: true; payload: ReactArtifactPayload; versionNumber: number }
-  | { ok: false; error: string };
-
-/**
- * Fetch the build this conversation is currently on, so an update can be folded
- * onto it.
- *
- * Every failure here returns a RETRYABLE error and never falls back to treating
- * the call as a create. A silent full rebuild is precisely the behaviour Step 2
- * exists to remove: it would discard the user's current app and re-imagine it
- * from conversational memory at the exact moment we know we cannot see it.
- */
-async function readConversationApp(context?: ToolExecutionContext): Promise<ReadBackResult> {
-  const conversationId = context?.meta?.["conversationId"];
-  if (!conversationId) {
-    return {
-      ok: false,
-      error:
-        'Error: `mode: "update"` needs a conversation that already owns an app, and this run has no conversation. Call create-app with `mode: "create"`.',
-    };
-  }
-
-  const authUrl = context?.config?.["XYNE_CLAW_AUTH_URL"] ?? "http://localhost:3003";
-  const s2sKey = context?.config?.["XYNE_CLAW_S2S_KEY"] ?? "";
-  const url = `${authUrl}/claw/api/v1/internal/artifact-apps/by-conversation/${encodeURIComponent(conversationId)}/payload`;
-
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      headers: { ...(s2sKey ? { "x-s2s-key": s2sKey } : {}) },
-      signal: AbortSignal.timeout(READ_BACK_TIMEOUT_MS),
-    });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return {
-      ok: false,
-      error: `Error: could not load the current app (${message}). This is temporary — retry the same update. Do not rebuild the whole project unless the user asks for a fresh one.`,
-    };
-  }
-
-  if (res.status === 404) {
-    return {
-      ok: false,
-      error:
-        'Error: this conversation has no app yet, so there is nothing to update. Call create-app with `mode: "create"`.',
-    };
-  }
-  if (!res.ok) {
-    return {
-      ok: false,
-      error: `Error: could not load the current app (HTTP ${res.status}). This is temporary — retry the same update rather than rebuilding the project.`,
-    };
-  }
-
-  let body: { payload?: unknown; versionNumber?: unknown };
-  try {
-    body = (await res.json()) as { payload?: unknown; versionNumber?: unknown };
-  } catch {
-    return { ok: false, error: "Error: the current app came back unreadable. Retry the same update." };
-  }
-
-  const payload = body.payload as ReactArtifactPayload | undefined;
-  if (!payload || !Array.isArray(payload.files) || payload.files.length === 0) {
-    return {
-      ok: false,
-      error: "Error: the current app has no readable files. Retry, or call create-app with `mode: \"create\"`.",
-    };
-  }
-
-  return {
-    ok: true,
-    payload,
-    versionNumber: typeof body.versionNumber === "number" ? body.versionNumber : 0,
-  };
-}
-
 /** Serialize a built artifact into the marker string the claw runtime parses. */
 export function formatReactArtifactResult(built: BuiltReactArtifact): string {
   const data = Buffer.from(JSON.stringify(built.payload), "utf8").toString("base64");
+  // The app id is for the MODEL, not the user: it is how the next read,
+  // update or publish names this app. custom-tools strips the note from the
+  // user-visible summary but leaves it in the tool result.
+  const appNote = built.manifest.appId
+    ? `${APP_NOTE_START} App id: ${built.manifest.appId} — pass it as \`appId\` to read-app-file, ` +
+      `create-app (mode "update") and publish-app. ${APP_NOTE_END}\n`
+    : "";
   return (
     `[ATTACHMENT:${ARTIFACT_FILENAME}:${ARTIFACT_MIME}]\n${data}\n` +
     `${built.summary}\n` +
+    appNote +
     `${MANIFEST_START} ${JSON.stringify(built.manifest)} ${MANIFEST_END}`
   );
+}
+
+/** Stamp the target app onto a built artifact's manifest. Kept off the payload:
+ *  the bytes are the project, and which app they land on is the host's call. */
+function withAppTarget(built: BuiltReactArtifact, appId: string, newApp: boolean): BuiltReactArtifact {
+  return { ...built, manifest: { ...built.manifest, appId, newApp } };
 }
 
 export const createReactArtifactTool: ToolDefinition = {
@@ -763,11 +711,14 @@ export const createReactArtifactTool: ToolDefinition = {
     "describing a UI in prose. Use it when the answer is better shown than told — a dashboard, a chart, " +
     "a comparison table, an interactive explainer. Write TypeScript React (.tsx) and default-export a " +
     "component from the `entry` file.\n\n" +
-    "ONE APP PER CONVERSATION — this thread has a single app. Your FIRST call creates it; " +
-    "every later call produces a new version of that same app. Do not announce a new app and do " +
-    "not rename it unless asked.\n\n" +
-    "CHANGING AN EXISTING APP — use `mode: \"update\"` and send ONLY the files you changed:\n" +
-    "  1. Call `read-app-file` with no path to list the current files, then with a path to read " +
+    "APPS ARE ADDRESSED BY ID — `mode: \"create\"` builds a NEW app and its result tells you the " +
+    "app's id. Every later change to that app is `mode: \"update\"` with that `appId`, producing a " +
+    "new version of the SAME app. Do not create a second app when the user asked to change one, and " +
+    "do not rename it unless asked. The user may also attach an existing app to their message — its " +
+    "id comes with it. You can read any app the user owns or that is published, but only UPDATE " +
+    "apps the user owns.\n\n" +
+    "CHANGING AN EXISTING APP — use `mode: \"update\"` with its `appId` and send ONLY the files you changed:\n" +
+    "  1. Call `read-app-file` with the `appId` and no path to list the current files, then with a path to read " +
     "each file you intend to change. You cannot edit code you have not read — you do not " +
     "otherwise see the app you built, and guessing at it from memory is how features silently " +
     "disappear.\n" +
@@ -893,7 +844,12 @@ export const createReactArtifactTool: ToolDefinition = {
         type: "string",
         enum: ["create", "update"],
         description:
-          'Defaults to "create". Use "update" to change an app this conversation already built: send ONLY the files you changed and the tool merges them onto the current build. Every other field you omit is inherited.',
+          'Defaults to "create", which builds a NEW app. Use "update" with `appId` to change an existing app the user owns: send ONLY the files you changed and the tool merges them onto the current build. Every other field you omit is inherited.',
+      },
+      appId: {
+        type: "string",
+        description:
+          'Required with mode "update", forbidden with "create". The id of the app to change — returned by the create-app call that built it, or given with an app the user attached.',
       },
       deleteFiles: {
         type: "array",
@@ -1017,16 +973,46 @@ export const createReactArtifactTool: ToolDefinition = {
         return 'Error: `mode` must be "create" or "update".';
       }
 
+      const rawAppId = params["appId"];
+      const hasAppId = typeof rawAppId === "string" && rawAppId.trim().length > 0;
+
       if (mode === "create") {
-        return formatReactArtifactResult(buildReactArtifact(params));
+        if (hasAppId) {
+          return (
+            'Error: `appId` is only for mode "update". To change that app, call create-app with ' +
+            '`mode: "update"`; to build a separate app, omit `appId`.'
+          );
+        }
+        // Minted here, not by the host, so the model can address the app it
+        // just built — later in this same run, before anything is persisted.
+        return formatReactArtifactResult(withAppTarget(buildReactArtifact(params), randomUUID(), true));
       }
 
-      const base = await readConversationApp(context);
-      if (!base.ok) return base.error;
+      const appId = parseAppId(rawAppId);
+      if (!appId) {
+        return (
+          'Error: `mode: "update"` needs the `appId` of the app to change — from an earlier ' +
+          "create-app result, or from an app the user attached. Without one, use `mode: \"create\"`."
+        );
+      }
+
+      const base = await loadAppForUser(appId, context);
+      if (!base.ok) {
+        return (
+          `Error: ${base.error} This is not a reason to rebuild — retry, or confirm the app ` +
+          "with the user. Do not create a new app unless they ask for one."
+        );
+      }
+      if (!base.value.detail.isOwner) {
+        return (
+          `Error: "${base.value.detail.title}" belongs to someone else, so you can read it but not ` +
+          "change it. Offer to build the user their own app based on it with mode \"create\"."
+        );
+      }
 
       // Merge first, then validate the WHOLE — never the fragment.
       return formatReactArtifactResult(
-        buildReactArtifact(mergeArtifactParams(base.payload, params)),
+        withAppTarget(buildReactArtifact(mergeArtifactParams(base.value.payload, params)), appId, false),
       );
     } catch (err) {
       if (err instanceof ValidationError) {

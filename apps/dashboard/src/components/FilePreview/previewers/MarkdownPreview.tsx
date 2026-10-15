@@ -67,7 +67,7 @@ const MARKDOWN: Components = {
   p: ({ node: _node, ...props }) => <p className='mb-4 mt-0' {...props} />,
   a: ({ node: _node, children, ...props }) => (
     <a
-      className='text-[color:var(--link-color)] underline-offset-2 hover:text-[color:var(--link-hover-color)] hover:underline'
+      className='outline-none text-[color:var(--link-color)] underline-offset-2 hover:text-[color:var(--link-hover-color)] focus-visible:text-[color:var(--link-hover-color)] hover:underline focus-visible:underline'
       target='_blank'
       rel='noopener noreferrer'
       {...props}

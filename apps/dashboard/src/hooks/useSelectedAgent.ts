@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
+import { setAskAIAuto } from './useAskAIAuto';
 
 /**
  * Hook to manage the currently selected claw agent (sidebar/standalone scope).
@@ -13,6 +14,33 @@ import { useCallback, useEffect, useSyncExternalStore } from 'react';
  * the others (e.g. the history list re-scopes to the newly-selected agent).
  */
 const STORAGE_KEY = 'xyne-ai-selected-agent';
+/** An explicit "no agent" pick — Auto or Ask AI — which the default must not override. */
+const CHOICE_KEY = 'xyne-ai-agent-choice';
+
+/** The agent a chat starts with when the account has it; Auto otherwise. */
+export const DEFAULT_AGENT_SLUG = 'xyne';
+
+type NoAgentChoice = 'auto' | 'ask-ai';
+
+function readChoice(): NoAgentChoice | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(CHOICE_KEY);
+    return raw === 'auto' || raw === 'ask-ai' ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeChoice(choice: NoAgentChoice | null): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (choice) localStorage.setItem(CHOICE_KEY, choice);
+    else localStorage.removeItem(CHOICE_KEY);
+  } catch {
+    // ignore storage errors
+  }
+}
 
 function readUrlAgent(): string | null {
   if (typeof window === 'undefined') return null;
@@ -57,6 +85,10 @@ function writeUrlAgent(slug: string | null): void {
 // A single shared value + subscriber set. `useSyncExternalStore` wires every
 // hook instance to this, so a change anywhere fans out to all consumers.
 let currentSlug: string | null = readUrlAgent() ?? readStorageAgent() ?? null;
+/** The default agent, once resolved — what "nothing stored" means this load. */
+let defaultSlug: string | null = null;
+
+const resolveSlug = (): string | null => readUrlAgent() ?? readStorageAgent() ?? defaultSlug;
 const listeners = new Set<() => void>();
 
 function emit(): void {
@@ -76,6 +108,10 @@ function getSnapshot(): string | null {
 
 function setSelectedAgentSlugStore(slug: string | null): void {
   const normalized = slug === 'ask-ai' ? null : slug;
+  // Picking an agent forgets an earlier explicit Auto / Ask AI; clearing the
+  // agent is itself a choice, so the default no longer stands in for it.
+  if (normalized !== null) writeChoice(null);
+  else defaultSlug = null;
   if (normalized === currentSlug) return;
   currentSlug = normalized;
   writeStorageAgent(normalized);
@@ -83,10 +119,55 @@ function setSelectedAgentSlugStore(slug: string | null): void {
   emit();
 }
 
+/**
+ * Remember that the user chose Auto or Ask AI themselves, so the next load
+ * keeps it instead of opening the default agent.
+ */
+export function rememberNoAgentChoice(choice: NoAgentChoice): void {
+  writeChoice(choice);
+}
+
+// The default is applied once per load, after the agent list arrives.
+let defaultResolved = false;
+
+/**
+ * Open new chats with the default agent ("xyne") when the account has it,
+ * else Auto. Runs once the accessible-agents list has loaded and only when
+ * nothing else decided: no ?agent= in the URL, no stored pick, no explicit
+ * Auto / Ask AI choice. A stored pick for an agent that no longer exists is
+ * dropped, so the composer never keeps sending a dead slug. The default is
+ * not persisted — it is re-derived each load, so removing the agent later
+ * falls back to Auto on its own.
+ */
+export function useDefaultAgent(agents: ReadonlyArray<{ slug: string }> | undefined): void {
+  useEffect(() => {
+    if (!agents || agents.length === 0 || defaultResolved) return;
+    defaultResolved = true;
+    const known = new Set(agents.map(agent => agent.slug));
+    // Only a stored pick goes stale; an ?agent= link is someone's explicit ask.
+    if (currentSlug !== null && !known.has(currentSlug) && readUrlAgent() === null) {
+      currentSlug = null;
+      writeStorageAgent(null);
+      writeUrlAgent(null);
+      emit();
+    }
+    if (currentSlug !== null) return;
+    const choice = readChoice();
+    if (choice === 'ask-ai') {
+      setAskAIAuto(false);
+      return;
+    }
+    if (choice === 'auto' || !known.has(DEFAULT_AGENT_SLUG)) return;
+    defaultSlug = DEFAULT_AGENT_SLUG;
+    currentSlug = DEFAULT_AGENT_SLUG;
+    emit();
+  }, [agents]);
+}
+
 // Keep the store in sync with browser navigation (back/forward button).
 if (typeof window !== 'undefined') {
   window.addEventListener('popstate', () => {
-    const next = readUrlAgent() ?? readStorageAgent() ?? null;
+    const next = resolveSlug();
     if (next !== currentSlug) {
       currentSlug = next;
       emit();
@@ -103,8 +184,9 @@ export interface UseSelectedAgentReturn {
 
 /**
  * Returns the currently selected agent slug and a setter.
- * Default: `null` (legacy Ask AI tab). Persisted to localStorage and URL, and
- * shared across all consumers via a module-level store.
+ * Default: the default agent once `useDefaultAgent` resolves it, else `null`
+ * (Ask AI / Auto). Persisted to localStorage and URL, and shared across all
+ * consumers via a module-level store.
  */
 export function useSelectedAgent(): UseSelectedAgentReturn {
   const selectedAgentSlug = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
@@ -116,7 +198,7 @@ export function useSelectedAgent(): UseSelectedAgentReturn {
   // On first mount, reconcile the store with the current URL/localStorage in
   // case they changed outside a popstate (e.g. a hard navigation into the page).
   useEffect(() => {
-    const next = readUrlAgent() ?? readStorageAgent() ?? null;
+    const next = resolveSlug();
     if (next !== currentSlug) {
       currentSlug = next;
       emit();

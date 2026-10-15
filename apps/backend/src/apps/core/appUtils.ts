@@ -9,6 +9,7 @@ import { db } from '@/database/client';
 import { withWorkspaceScope } from '@/database/tenant/context';
 import { claimAppSigningSecret } from '@/bypassAcl/appServices';
 import { syncInstalledCommandsTx } from '@/bypassAcl/transactions/appUtils';
+import { isSpacesAppClawAgent } from '@/services/clawAgentService';
 
 /**
  * Install an external app
@@ -96,12 +97,14 @@ export async function installApp(appId: string, workspaceId: string) {
     });
     let appUser = await repositories.users.findByEmail(email, workspaceId);
     if (!appUser) {
+      // AGENT vs APP is set once at creation; a failed lookup throws so the install can be retried.
+      const userType = (await isSpacesAppClawAgent(appId)) ? UserType.AGENT : UserType.APP;
       appUser = await repositories.users.create({
         name: app.name,
         email,
         providerUserId: `xyne-app-${appId}`,
         authProvider: AuthProvider.API_KEY,
-        userType: UserType.APP,
+        userType,
         status: 'ACTIVE',
         workspace: { connect: { id: workspaceId } },
         orgMember: { connect: { memberId: orgMember.memberId } },

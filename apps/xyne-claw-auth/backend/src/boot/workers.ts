@@ -13,6 +13,7 @@ import { initDailyBriefWorker, closeDailyBriefWorker } from "../queue/daily-brie
 import { closeDailyBriefQueue } from "../queue/daily-brief-queue.js";
 import { initDailyBriefCron } from "../services/dailyBriefCron.js";
 import { initRunRecoveryWorker, closeRunRecoveryWorker } from "../queue/run-recovery-worker.js";
+import { initAgentRunQueue, closeAgentRunQueue } from "../lib/agent-run-queue.js";
 import { initProviderRetryWorker, closeProviderRetryWorker } from "../queue/provider-retry-worker.js";
 import { initExperimentSupervisor, closeExperimentSupervisor } from "../queue/experiment-supervisor.js";
 import { initDigitalTwinBackfillWorker } from "../queue/digital-twin-backfill-worker.js";
@@ -32,6 +33,8 @@ import { closeBackfillQueue } from "../queue/digital-twin-backfill-queue.js";
 import { bootstrapCustomTools } from "../bootstrap-tools.js";
 import { beginLocalHarnessDrain } from "../routes/local-harness.js";
 import { initLocalHarnessExpirySweep } from "../services/localHarnessExpiry.js";
+import { initProactiveWorkers, closeProactiveWorkers } from "../queue/proactive-workers.js";
+import { closeProactiveQueues } from "../queue/proactive-queue.js";
 import { initMemoryCron } from "../services/memoryCronService.js";
 import { initSlackConfigTokenCron } from "../surfaces/slack/config-token-cron.js";
 import { initMessagingAccountManager, closeMessagingAccountManager } from "../surfaces/messaging/bootstrap.js";
@@ -59,6 +62,7 @@ const WORKERS: WorkerEntry[] = [
   { name: "eval-sweeper", init: initEvalSweeper, close: closeEvalSweeper },
   { name: "scheduled-jobs-queue", close: closeQueue },
   { name: "run-recovery-worker", init: initRunRecoveryWorker, close: closeRunRecoveryWorker },
+  { name: "agent-run-queue", init: initAgentRunQueue, closeSync: closeAgentRunQueue },
   { name: "provider-retry-worker", init: initProviderRetryWorker, close: closeProviderRetryWorker },
   { name: "experiment-supervisor", init: initExperimentSupervisor, closeSync: closeExperimentSupervisor },
   { name: "digital-twin-backfill-worker", init: initDigitalTwinBackfillWorker },
@@ -99,6 +103,8 @@ const WORKERS: WorkerEntry[] = [
   { name: "awakening-reflex-worker", init: initAwakeningReflexWorker, close: closeAwakeningReflexWorker },
   { name: "awakening-queues", close: closeAwakeningQueues },
   { name: "local-harness-expiry", init: initLocalHarnessExpirySweep },
+  { name: "proactive-workers", init: initProactiveWorkers, close: closeProactiveWorkers },
+  { name: "proactive-queues", close: closeProactiveQueues },
 ];
 
 const SHUTDOWN_SEQUENCE: string[] = [
@@ -123,6 +129,8 @@ const SHUTDOWN_SEQUENCE: string[] = [
   "awakening-window-worker",
   "awakening-reflex-worker",
   "awakening-queues",
+  "proactive-workers",
+  "proactive-queues",
   "scheduled-jobs-queue",
   "daily-brief-worker",
   "daily-brief-queue",

@@ -6,6 +6,7 @@
 
 import crypto from 'crypto';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
+import { disconnectDeskSourceBySystem } from '@/integrations/core/deskSourceDisconnect';
 import { AuthorizationCode } from 'simple-oauth2';
 import { logger } from '../utils/logger';
 import { decrypt, encrypt } from './encryptionService';
@@ -494,6 +495,13 @@ export class MicrosoftDeskService {
     if (!response.ok) {
       const errorBody = await response.text();
       logger.error(`Token refresh failed: ${response.status} ${errorBody}`);
+      // invalid_grant means the refresh token itself is dead (revoked, password change, expired).
+      // Only desk mailboxes refresh with the default scope; other callers pass their own.
+      if (refreshScope === undefined && response.status === 400 && /invalid_grant/.test(errorBody)) {
+        await disconnectDeskSourceBySystem(sourceId, { clearCredentials: false }).catch((error) =>
+          logger.error('Failed to mark Microsoft source disconnected', { sourceId, error }),
+        );
+      }
       throw new Error(`Token refresh failed: ${response.status}`);
     }
 

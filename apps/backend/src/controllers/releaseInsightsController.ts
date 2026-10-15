@@ -85,7 +85,7 @@ export class ReleaseInsightsController {
           devTicketCount: report.summary.devTicketCount,
           environmentVariableCount: report.summary.environmentVariableCount,
           migrationFileCount: report.summary.migrationFileCount,
-          repositoryCount: new Set(apps.map(a => a.repoUrl)).size,
+          repositoryCount: new Set(apps.map(a => a.repoId).filter(Boolean)).size,
           serviceNames: apps.map(a => a.name),
           hotfixCount: notes?.hotfixPRs.length ?? 0,
           qaAssigned: devTickets.filter(t => isAssigned(t.qaOwner)).length,

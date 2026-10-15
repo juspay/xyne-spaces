@@ -1,5 +1,8 @@
 import React, { JSX, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { NavigateFunction } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { getArtifactApp } from '../../../services/claw/artifactAppsService';
+import { AppIcon } from '../../AppIcon/AppIcon';
 import {
   useRouterSelector,
   useStableNavigate,
@@ -131,6 +134,17 @@ export const InternalXyneLink = ({
   const [canvas] = useCachedQuery(queries.getCanvas({ canvasId: parsedLink?.canvasId ?? '' }), {
     enabled: !!parsedLink?.canvasId,
   });
+  // An Agent Hub app: title and icon come from claw-auth, which also decides
+  // whether this viewer may open it. Same query key as ArtifactAppHost, so
+  // opening the app from the chip reuses this fetch.
+  const { data: appData } = useQuery({
+    queryKey: ['artifact-app', parsedLink?.appId ?? ''],
+    queryFn: () => getArtifactApp(parsedLink?.appId ?? ''),
+    enabled: parsedLink?.kind === 'app' && !!parsedLink.appId,
+    retry: false,
+    staleTime: 5 * 60_000,
+  });
+  const linkedApp = appData?.app;
   const [copied, setCopied] = useState(false);
 
   // Call links are left to bubble: the document-level handler in App.tsx routes
@@ -175,8 +189,14 @@ export const InternalXyneLink = ({
     channelLabel,
     getOptionalStringProperty(ticket, 'xyneId'),
     getOptionalStringProperty(canvas, 'title'),
+    linkedApp?.title,
   );
-  const leadingIcon = getInternalLinkIcon(parsedLink.kind);
+  const leadingIcon =
+    parsedLink.kind === 'app' ? (
+      <AppIcon name={linkedApp?.icon ?? null} size={14} aria-hidden='true' />
+    ) : (
+      getInternalLinkIcon(parsedLink.kind)
+    );
 
   if (!shouldReplaceWithSemanticLabel(children, resolvedHref)) {
     return (
@@ -203,6 +223,9 @@ export const InternalXyneLink = ({
     <>
       <span className='shrink-0 text-muted-foreground'>{leadingIcon}</span>
       <span className='truncate'>{linkLabel}</span>
+      {parsedLink.kind === 'app' && (
+        <span className='shrink-0 text-xs text-muted-foreground'>· Agent Hub</span>
+      )}
     </>
   );
 
@@ -224,6 +247,7 @@ export const InternalXyneLink = ({
           href={resolvedHref}
           className={linkClassName}
           onClick={onClick}
+          {...(parsedLink.kind === 'app' ? { title: 'Open this app in Agent Hub' } : {})}
           data-track-category='MESSAGE'
           data-track-name='OPEN_INTERNAL_LINK'
           data-track-metadata={JSON.stringify({ href: resolvedHref, kind: parsedLink.kind })}

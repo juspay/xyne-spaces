@@ -6,6 +6,7 @@ import {
   PauseCircle,
   Mic,
   MessageSquare,
+  Globe,
   Zap,
   Code2,
   Copy,
@@ -58,6 +59,7 @@ import { logger } from '../../../utils/logger';
 import { MeetingDetectionToggle } from '../MeetingDetectionToggle';
 import { MenuBarIconToggle } from '../MenuBarIconToggle';
 import { RecordingPillToggle } from '../RecordingPillToggle';
+import { CallWindowToggle } from '../CallWindowToggle';
 import { ClawOverlayToggle } from '../ClawOverlayToggle';
 import { DailyBriefToggle } from '../DailyBriefToggle';
 import { IntentSuggestionsToggle } from '../IntentSuggestionsToggle';
@@ -68,6 +70,7 @@ import { useNotificationKeywords } from '../../../hooks/useNotificationKeywords'
 import { Badge } from '../../ui/Badge/Badge';
 
 import { usePreferencesState, type PreferencesState } from '../../../hooks/usePreferencesState';
+import { useSummaryTemplates } from '../../../hooks/useSummaryTemplates';
 import {
   CALL_MEDIA_QUALITY_OPTIONS,
   type CallMediaQuality,
@@ -75,13 +78,16 @@ import {
 import { useMaxCameraHeight, filterQualityOptionsByMax } from '../../../hooks/useMaxCameraQuality';
 import { useParams } from 'react-router-dom';
 import { ChannelScopeType } from '@xyne/shared';
+import { useChannelPublishedApps } from '../../../hooks/useChannelPublishedApps';
 import { AI_TOOLBAR_PATH, useAiLaunchPreference } from '../../../hooks/useAiLaunchPreference';
 import {
   toolbarItemsStore,
   inboxItemsStore,
-  getChannelTabsStore,
+  useChannelTabsStore,
+  useEnsureAppSnapshots,
   type BarItemsStore,
 } from '../../../hooks/barItems';
+import { isChannelTabsCustomizable } from '../../Chat/ConversationPannel/ConversationPannel.utils';
 import { useAllVisibleChannels } from '../../../hooks/useChannels';
 import { useLastVisitedChannel } from '../../../hooks/useLastVisitedChannel';
 import ChannelIcon from '../../Chat/ChannelIcon/ChannelIcon';
@@ -93,8 +99,14 @@ import {
   MIN_RELATED_CONTEXT_DEBOUNCE_MS,
   clampDebounceMs,
 } from '../../../hooks/useRelatedContext';
-import { useToolbarBuiltIns, useInboxBuiltIns, useChannelTabBuiltIns } from '../../BarCustomize';
+import {
+  useToolbarBuiltIns,
+  useInboxBuiltIns,
+  useChannelTabBuiltIns,
+  useChannelAppPublishing,
+} from '../../BarCustomize';
 import { BarCustomizer } from './BarCustomizer';
+import { BrowserSection } from './BrowserSection';
 import type { PreferenceSection, PreferencesProps, NavItem } from '.';
 import { disconnectCalendar } from '../../../services/clients/calendarApi';
 import { toast } from 'sonner';
@@ -113,6 +125,7 @@ const NAV_ITEMS: NavItem[] = [
     icon: <MessageSquare className='size-4' />,
     desktopOnly: true,
   },
+  { id: 'browser', label: 'Browser', icon: <Globe className='size-4' />, desktopOnly: true },
   { id: 'launch', label: 'Launch', icon: <Zap className='size-4' />, desktopOnly: true },
   {
     id: 'toolbar',
@@ -498,6 +511,7 @@ const AvailabilitySection: FC<{ state: PreferencesState }> = ({ state }) => (
               size='lg'
               className='flex-shrink-0 p-1 h-auto hover:bg-accent'
               title='Resume assignment'
+              aria-label='Resume assignment'
               onClick={state.resumeAssignment}
               data-track-category='PREFERENCES'
               data-track-name='ResumeAssignment'
@@ -671,6 +685,8 @@ const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => {
         />
       </div>
 
+      <CallWindowToggle />
+
       <MenuBarIconToggle />
 
       <RecordingPillToggle />
@@ -748,8 +764,85 @@ const RecordingsSection: FC<{ state: PreferencesState }> = ({ state }) => (
         <Radio value='thinking'>Thinking &mdash; higher quality, slower</Radio>
       </RadioGroup>
     </div>
+
+    <div className='p-3 rounded-lg border border-border bg-muted/30 space-y-3'>
+      <div>
+        <p className='text-sm font-medium text-foreground'>Default summary template</p>
+        <p className='text-xs text-muted-foreground mt-0.5'>
+          The template every new recording summary uses. Pick automatically lets Xyne match a
+          template to each meeting from its context.
+        </p>
+      </div>
+      <DefaultSummaryTemplateSelect
+        value={state.defaultSummaryTemplateId}
+        onChange={state.setDefaultSummaryTemplateId}
+      />
+    </div>
   </div>
 );
+
+const AUTO_SUMMARY_TEMPLATE_OPTION = { id: null, label: 'Pick automatically' } as const;
+const DEFAULT_SUMMARY_TEMPLATE_OPTION = { id: 'default', label: 'Default summary' } as const;
+
+const DefaultSummaryTemplateSelect: FC<{
+  value: string | null;
+  onChange: (templateId: string | null) => void;
+}> = ({ value, onChange }) => {
+  // Queried here, not in usePreferencesState, so the template list only syncs
+  // while the Recordings section is actually on screen.
+  const { templates, isLoading } = useSummaryTemplates(true);
+  const options: { id: string | null; label: string }[] = [
+    AUTO_SUMMARY_TEMPLATE_OPTION,
+    DEFAULT_SUMMARY_TEMPLATE_OPTION,
+    ...templates
+      .filter(template => template.id !== DEFAULT_SUMMARY_TEMPLATE_OPTION.id)
+      .map(template => ({ id: template.id, label: template.name })),
+  ];
+  // A default the user can no longer read (deleted, or the share was revoked);
+  // not to be confused with the list simply not having arrived yet.
+  const selectedLabel = isLoading
+    ? 'Loading templates…'
+    : (options.find(option => option.id === value)?.label ?? 'Unavailable template');
+  return (
+    <div className='flex items-center justify-between gap-4'>
+      <span id='default-summary-template-label' className='text-sm font-medium text-foreground'>
+        Template
+      </span>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            id='default-summary-template'
+            type='button'
+            disabled={isLoading}
+            aria-labelledby='default-summary-template-label default-summary-template'
+            className='flex h-8 min-w-48 max-w-72 items-center justify-between gap-2 rounded-md border border-border bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring'
+            data-track-category='PREFERENCES'
+            data-track-name='default-summary-template'
+          >
+            <span className='truncate'>{selectedLabel}</span>
+            <ChevronDown className='size-3.5 shrink-0 text-muted-foreground' />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align='end' className='max-h-80 min-w-48 overflow-y-auto'>
+          {options.map(option => (
+            <DropdownMenuItem
+              key={option.id ?? 'auto'}
+              onClick={() => onChange(option.id)}
+              className='flex items-center justify-between gap-3'
+              data-track-category='PREFERENCES'
+              data-track-name={`default-summary-template-${option.id ?? 'auto'}`}
+            >
+              <span className='truncate'>{option.label}</span>
+              {option.id === value && (
+                <Check className='size-3.5 shrink-0 text-primary' aria-hidden />
+              )}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+};
 
 // ─── Messaging ──────────────────────────────────────────────────────────────
 // Section is desktop-only (see NAV_ITEMS), so no isMobile branching needed.
@@ -911,43 +1004,62 @@ const RelatedContextPreference: FC = () => {
 };
 
 // ─── Launch ─────────────────────────────────────────────────────────────────
-const LaunchSection: FC<{ state: PreferencesState }> = ({ state }) => (
-  <div className='space-y-4'>
-    <SectionHeader title='Launch' subtitle='Configure your startup experience' />
-    <div className='p-3 rounded-lg border border-border bg-muted/30'>
-      <div className='flex items-center justify-between gap-4'>
-        <div>
-          <p className='text-sm font-medium text-foreground'>Open AI on launch</p>
-          <p className='text-xs text-muted-foreground mt-0.5'>
-            Start with the Xyne AI landing page instead of chat
-          </p>
-        </div>
-        <Switch
-          id='ai-landing-default'
-          checked={state.aiLandingDefault}
-          onCheckedChange={state.setAiLandingDefault}
-        />
-      </div>
-      <DailyBriefToggle available={state.aiLandingDefault} />
-      <div className='mt-3 border-t border-border pt-3'>
+const LaunchSection: FC<{ state: PreferencesState }> = ({ state }) => {
+  const workspaceAutoOpen = useUserPreference('aiWorkspaceAutoOpen');
+  return (
+    <div className='space-y-4'>
+      <SectionHeader title='Launch' subtitle='Configure your startup experience' />
+      <div className='p-3 rounded-lg border border-border bg-muted/30'>
         <div className='flex items-center justify-between gap-4'>
           <div>
-            <p className='text-sm font-medium text-foreground'>Collapse sidebar for apps</p>
-            <p className='mt-0.5 text-xs text-muted-foreground'>
-              Hide the sidebar when a chat is building an app
+            <p className='text-sm font-medium text-foreground'>Open AI on launch</p>
+            <p className='text-xs text-muted-foreground mt-0.5'>
+              Start with the Xyne AI landing page instead of chat
             </p>
           </div>
           <Switch
-            id='app-mode-collapse-sidebar'
-            checked={state.appModeCollapseSidebar}
-            onCheckedChange={state.setAppModeCollapseSidebar}
+            id='ai-landing-default'
+            checked={state.aiLandingDefault}
+            onCheckedChange={state.setAiLandingDefault}
           />
         </div>
+        <DailyBriefToggle available={state.aiLandingDefault} />
+        <div className='mt-3 border-t border-border pt-3'>
+          <div className='flex items-center justify-between gap-4'>
+            <div>
+              <p className='text-sm font-medium text-foreground'>Collapse sidebar for apps</p>
+              <p className='mt-0.5 text-xs text-muted-foreground'>
+                Hide the sidebar when a chat is building an app
+              </p>
+            </div>
+            <Switch
+              id='app-mode-collapse-sidebar'
+              checked={state.appModeCollapseSidebar}
+              onCheckedChange={state.setAppModeCollapseSidebar}
+            />
+          </div>
+        </div>
+        <div className='mt-3 border-t border-border pt-3'>
+          <div className='flex items-center justify-between gap-4'>
+            <div>
+              <p className='text-sm font-medium text-foreground'>Open workspace automatically</p>
+              <p className='mt-0.5 text-xs text-muted-foreground'>
+                Open the Xyne AI side panel when a chat has artifacts, sources or previews, and each
+                time it makes a new one. With this off, open it yourself from the Workspace button.
+              </p>
+            </div>
+            <Switch
+              id='ai-workspace-auto-open'
+              checked={workspaceAutoOpen}
+              onCheckedChange={value => setUserPreference('aiWorkspaceAutoOpen', value)}
+            />
+          </div>
+        </div>
       </div>
+      <ClawOverlayToggle />
     </div>
-    <ClawOverlayToggle />
-  </div>
-);
+  );
+};
 
 // ─── Calendar ───────────────────────────────────────────────────────────────
 const CalendarSection: FC<{ state: PreferencesState }> = ({ state }) => (
@@ -1028,6 +1140,7 @@ const PasswordSection: FC = () => {
             />
             <button
               type='button'
+              aria-label={showCurrent ? 'Hide current password' : 'Show current password'}
               onClick={() => setShowCurrent(!showCurrent)}
               className='absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground'
               data-track-category='PREFERENCES'
@@ -1049,6 +1162,7 @@ const PasswordSection: FC = () => {
             />
             <button
               type='button'
+              aria-label={showNew ? 'Hide new password' : 'Show new password'}
               onClick={() => setShowNew(!showNew)}
               className='absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground'
               data-track-category='PREFERENCES'
@@ -1070,6 +1184,7 @@ const PasswordSection: FC = () => {
             />
             <button
               type='button'
+              aria-label={showConfirm ? 'Hide password confirmation' : 'Show password confirmation'}
               onClick={() => setShowConfirm(!showConfirm)}
               className='absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground'
               data-track-category='PREFERENCES'
@@ -1099,6 +1214,28 @@ const PasswordSection: FC = () => {
 };
 
 // ─── Developer ──────────────────────────────────────────────────────────────
+/** Kept on this device (userPreferencesMachine) and off while it is tried. */
+const ScreenActionsToggle: FC = () => {
+  const enabled = useUserPreference('screenActionsEnabled');
+  return (
+    <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+      <div>
+        <p className='text-sm font-medium text-foreground'>Screen actions</p>
+        <p className='text-xs text-muted-foreground mt-0.5'>
+          With Auto selected in Xyne AI, opens pages and presses buttons for what you type or say,
+          like &ldquo;open general&rdquo; or &ldquo;create a ticket&rdquo;, and only points at
+          anything that changes data. Off while it is new.
+        </p>
+      </div>
+      <Switch
+        id='screen-actions-enabled'
+        checked={enabled}
+        onCheckedChange={value => setUserPreference('screenActionsEnabled', value)}
+      />
+    </div>
+  );
+};
+
 const DeveloperSection: FC<{ state: PreferencesState }> = ({ state }) => {
   return (
     <div className='space-y-4'>
@@ -1130,6 +1267,8 @@ const DeveloperSection: FC<{ state: PreferencesState }> = ({ state }) => {
             onCheckedChange={state.setShowStreams}
           />
         </div>
+
+        <ScreenActionsToggle />
 
         {detectReactNativeWebView() && (
           <Button
@@ -1298,6 +1437,7 @@ const ChannelSelect: FC<{
                 const isSelected = channel.id === selected.id;
                 return (
                   <button
+                    aria-current={isSelected ? 'true' : undefined}
                     key={channel.id}
                     type='button'
                     onClick={() => {
@@ -1341,7 +1481,14 @@ const ChannelTabsSection: FC<{ state: PreferencesState }> = () => {
   const channels = useMemo(
     () =>
       allChannels
-        .filter(channel => channel.scopeType === ChannelScopeType.DEFAULT && !channel.isArchived)
+        // Channels only. DMs and group DMs are customizable too, but from their own
+        // tab bar: their `name` is a participant id, not something to list here.
+        .filter(
+          channel =>
+            channel.scopeType === ChannelScopeType.DEFAULT &&
+            isChannelTabsCustomizable(channel) &&
+            !channel.isArchived,
+        )
         .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')),
     [allChannels],
   );
@@ -1357,6 +1504,12 @@ const ChannelTabsSection: FC<{ state: PreferencesState }> = () => {
   }, [picked, routeChannelId, lastVisitedChannelId, channels]);
 
   const builtIns = useChannelTabBuiltIns(selected?.scopeType);
+  // Hooks run before the empty-state return below, so they take a placeholder id.
+  const publishedIds = useChannelPublishedApps(selected?.id);
+  const store = useChannelTabsStore(selected?.id ?? 'unknown', publishedIds);
+  const publish = useChannelAppPublishing(selected?.id ?? 'unknown', selected, publishedIds);
+  const publishedSet = useMemo(() => new Set(publishedIds), [publishedIds]);
+  useEnsureAppSnapshots(publishedIds);
 
   if (!selected) {
     return (
@@ -1375,8 +1528,11 @@ const ChannelTabsSection: FC<{ state: PreferencesState }> = () => {
       // flight) carries over from the channel being left.
       key={selected.id}
       title='Channel tabs'
-      subtitle='Tabs are per channel — what you choose here applies to this channel only. DMs always show the standard tabs.'
-      store={getChannelTabsStore(selected.id)}
+      subtitle='Tabs are per channel — what you choose here applies to you, in this channel only. Apps a channel admin published show for everyone; you can still remove them for yourself. DMs and group DMs are customized from their own tab bar (pencil icon).'
+      store={store}
+      resetLabel='Reset to channel layout'
+      publishedAppIds={publishedSet}
+      {...(publish ? { publish } : {})}
       builtIns={builtIns}
       trackCategory='PREFERENCES_CHANNEL_TABS'
       headerSlot={<ChannelSelect channels={channels} selected={selected} onSelect={setPicked} />}
@@ -1393,6 +1549,7 @@ const SECTIONS: Record<PreferenceSection, FC<{ state: PreferencesState }>> = {
   calls: CallsSection,
   recordings: RecordingsSection,
   messaging: MessagingSection,
+  browser: BrowserSection,
   launch: LaunchSection,
   toolbar: ToolbarSection,
   inbox: InboxSection,
@@ -1409,7 +1566,8 @@ const Preferences = ({ open, onClose, initialSection }: PreferencesProps): React
   const { isMobile } = usePlatform();
   const state = usePreferencesState(open);
   const navItems = useMemo(() => {
-    const electronOnly = new Set<PreferenceSection>();
+    // Imports sign-ins through the desktop app, which a browser tab has none of.
+    const electronOnly = new Set<PreferenceSection>(['browser']);
     return NAV_ITEMS.filter(item => {
       if (isMobile && item.desktopOnly) return false;
       if (!isElectronApp() && electronOnly.has(item.id)) return false;
@@ -1479,6 +1637,7 @@ const Preferences = ({ open, onClose, initialSection }: PreferencesProps): React
                 onClick={onClose}
                 className='!p-2 border border-border rounded-md hover:bg-accent'
                 title='Close'
+                aria-label='Close'
                 data-track-category='PREFERENCES'
                 data-track-name='Close'
               >

@@ -14,6 +14,7 @@ import { join } from "node:path";
 
 import { createLogger } from "./logger.js";
 import { SandboxUnavailableError, isSandboxUnavailableDeferEnabled, isSandboxUnavailable } from "./sandbox-unavailable.js";
+import { CREATE_AGENT_TOOL, checkCreateAgent, createAgentDroppedToolsNote, createAgentRefusedText, createAgentUnknownToolsText } from "./create-agent-check.js";
 const log = createLogger("custom-tools");
 
 interface Attachment {
@@ -53,6 +54,10 @@ const SLIDE_JSON_RE = /SLIDE_JSON_START\s*([\s\S]+?)\s*SLIDE_JSON_END/;
 // is also stripped from the text handed back to the model — the model just
 // authored the project and re-reading a listing of it buys nothing.
 const REACT_ARTIFACT_RE = /REACT_ARTIFACT_START\s*([\s\S]+?)\s*REACT_ARTIFACT_END/;
+// create-app's "App id: …" line. Meant for the MODEL — it is how the next
+// read/update/publish names the app — so it stays in the tool result but is
+// stripped from the user-visible summary.
+const APP_NOTE_RE = /\s*APP_NOTE_START\s*([\s\S]*?)\s*APP_NOTE_END/g;
 
 // PLATFORM_ONLY_CONFIG_KEYS is imported from xyne-claw-shared (single source of
 // truth — also enforced at the xyne-claw-auth /run boundary). See that module
@@ -152,6 +157,7 @@ export function loadCustomTools(
 ): CustomToolsResult {
   const agentSlug = meta?.["agentSlug"];
   const userId = meta?.["userId"] ?? "";
+  let createAgentToolsSentBack = false;
   const allCustomTools = getAllCustomTools();
   const config = agentConfig ?? {};
 
@@ -333,12 +339,28 @@ export function loadCustomTools(
                 details: {},
               };
             }
+            let droppedToolsNote = "";
+            if (ct.slug === CREATE_AGENT_TOOL) {
+              const check = await checkCreateAgent(userId, params as Record<string, unknown>);
+              if (check.refusal) {
+                log.info(`[custom-tool] ${ct.slug} refused before queueing: ${check.refusal}`);
+                return { content: [{ type: "text" as const, text: createAgentRefusedText(check.refusal) }], details: {} };
+              }
+              if (check.notGranted.length > 0) {
+                if (!createAgentToolsSentBack) {
+                  createAgentToolsSentBack = true;
+                  log.info(`[custom-tool] ${ct.slug} sent back for unknown tools: ${check.notGranted.join(", ")}`);
+                  return { content: [{ type: "text" as const, text: createAgentUnknownToolsText(check.notGranted) }], details: {} };
+                }
+                droppedToolsNote = createAgentDroppedToolsNote(check.notGranted);
+              }
+            }
             const serverType = ct.source.replace("custom:", "");
             const signedAction = await signWriteAction(sessionId, sessionToken, serverType, ct.slug, params as Record<string, unknown>);
             allPendingActions.push(signedAction);
             log.info(`[custom-tool] ${ct.slug} is a write tool — queued for approval`);
             return {
-              content: [{ type: "text" as const, text: `Action queued for user approval: ${ct.name}. The user will see an Approve/Decline prompt.` }],
+              content: [{ type: "text" as const, text: writeToolQueuedText(ct) + droppedToolsNote }],
               details: {},
             };
           } catch (err) {
@@ -466,12 +488,18 @@ export function loadCustomTools(
           // any SLIDE_JSON block so the fallback text doesn't include
           // metadata the user shouldn't see.
           if (trailingText && trailingText.length > 0) {
-            const visibleSummary = trailingText.replace(SLIDE_JSON_RE, "").replace(REACT_ARTIFACT_RE, "").trim();
+            const visibleSummary = trailingText
+              .replace(SLIDE_JSON_RE, "")
+              .replace(REACT_ARTIFACT_RE, "")
+              .replace(APP_NOTE_RE, "")
+              .trim();
             if (visibleSummary.length > 0) lastAttachmentSummary = visibleSummary;
           }
           // No-op for every existing tool (only create-react-artifact emits the
           // marker), so the model-facing text is unchanged for create-ppt et al.
-          const modelFacingText = trailingText ? trailingText.replace(REACT_ARTIFACT_RE, "").trim() : "";
+          const modelFacingText = trailingText
+            ? trailingText.replace(REACT_ARTIFACT_RE, "").replace(APP_NOTE_RE, "\n$1").trim()
+            : "";
           const responseText = modelFacingText.length > 0
             ? `Rendered and attached ${singleMatch[1]}\n\n${modelFacingText}`
             : `Rendered and attached ${singleMatch[1]}`;
@@ -544,4 +572,8 @@ export function loadCustomTools(
     getPendingResponses: () => allPendingResponses,
     getLastAttachmentSummary: () => lastAttachmentSummary,
   };
+}
+
+export function writeToolQueuedText(tool: { name: string; queuedForApprovalText?: string | undefined }): string {
+  return tool.queuedForApprovalText ?? `Action queued for user approval: ${tool.name}. The user will see an Approve/Decline prompt.`;
 }

@@ -23,6 +23,7 @@ import {
   SUMMARY_TEMPLATES_DIALOG_CLASS,
 } from '../RecordingDetailV2Screen/components/SummaryTemplatesModal';
 import { useLeaveRecording } from '../../hooks/useLeaveRecording';
+import { useUnreadRecordingSummaryCallIds } from '../../hooks/useHasUnreadRecordingSummaries';
 import { useSummaryTemplates } from '../../hooks/useSummaryTemplates';
 import { usePlatform } from '../../hooks/usePlatform';
 import { getRecordingDefaultLayout } from '../../hooks/useRecordingDefaultLayout';
@@ -35,7 +36,6 @@ import { RecordingsEmptyStateIllustration } from './components/RecordingsEmptySt
 import { RecordingDateFilter } from './components/RecordingDateFilter';
 import RecordingControlsOverlay from './components/RecordingControlsOverlay';
 import { RecordingLabelFilter } from './components/RecordingLabelFilter';
-import { RecordingPeopleFilter } from './components/RecordingPeopleFilter';
 import { RecordingSharedWithMeTab } from './components/RecordingSharedWithMeTab';
 import RecordingAskAIModal from './components/RecordingAskAIModal';
 import RecordingsV2Pill, {
@@ -45,6 +45,11 @@ import RecordingsV2Pill, {
 import { RecordingsV2Skeleton } from './components/RecordingsV2Skeleton';
 import { RecordingDeleteDialog } from './components/RecordingDeleteDialog';
 import { useResolvedRecordingLabels } from '../../hooks/useResolvedRecordingLabels';
+import {
+  useAutoLoadFilteredOutSearchPage,
+  useRecordingSearch,
+} from '../../hooks/useRecordingSearch';
+import { RecordingSearchInput } from './components/RecordingSearchInput';
 import {
   filterRecordingsByLabels,
   filterRecordingsByOwnership,
@@ -75,7 +80,6 @@ const RecordingsV2Screen = (): ReactElement => {
   // "Created by me" is the default tab; "All" and "Shared" are explicit `?tab=` values.
   const activeListTab: RecordingOwnershipTab =
     listTabParam === 'all' || listTabParam === 'shared' ? listTabParam : 'created';
-  const [selectedCreatorId, setSelectedCreatorId] = useState<string | null>(null);
   const [selectedDatePreset, setSelectedDatePreset] = useState<RecordingDatePreset>('all-time');
   const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
   const [selectedSharerIds, setSelectedSharerIds] = useState<string[]>([]);
@@ -90,8 +94,11 @@ const RecordingsV2Screen = (): ReactElement => {
     isLoading,
     error,
     refreshRecordings,
-  } = usePaginatedOatsRecordings(activeListTab, selectedCreatorId);
+  } = usePaginatedOatsRecordings(activeListTab, null);
   const currentUser = useSelf();
+  const search = useRecordingSearch(activeListTab);
+  const { isSearchActive } = search;
+  const visibleSourceRecordings = isSearchActive ? search.recordings : recordings;
   const { requestLeave, ConfirmDialog } = useLeaveRecording();
   const users = useUsers();
   const usersById = useMemo(() => new Map(users.map(user => [user.id, user])), [users]);
@@ -102,6 +109,7 @@ const RecordingsV2Screen = (): ReactElement => {
   const recordingPauseStartedAt = useRecordingStore(context => context.pauseStartedAt);
   const recordingAccumulatedPausedMs = useRecordingStore(context => context.accumulatedPausedMs);
   const pendingAutoStart = useRecordingStore(context => context.pendingAutoStart);
+  const unreadSummaryCallIds = useUnreadRecordingSummaryCallIds();
   const handleStartRecording = useCallback((): void => {
     if (recordingStatus !== 'idle' && recordingStatus !== 'error') return;
 
@@ -125,10 +133,10 @@ const RecordingsV2Screen = (): ReactElement => {
 
   const availableLabels = useMemo(
     () =>
-      normalizeRecordingTags(recordings.flatMap(recording => recording.labels)).sort(
-        (left, right) => left.localeCompare(right),
-      ),
-    [recordings],
+      normalizeRecordingTags(
+        [...recordings, ...search.matches].flatMap(recording => recording.labels),
+      ).sort((left, right) => left.localeCompare(right)),
+    [recordings, search.matches],
   );
   // recording.labels stores Tag ids (no FK), not display text — resolve them
   // to their actual value once here so both the filter dropdown and the
@@ -144,15 +152,21 @@ const RecordingsV2Screen = (): ReactElement => {
     () => availableLabels.filter(isResolved).filter(isManualLabel),
     [availableLabels, isResolved, isManualLabel],
   );
+  // `#label` suggestions: the confirmed label slugs seen so far. A label is its own Tag row on
+  // every recording, so the search filters on the slug, never the Tag id.
+  const searchLabelOptions = useMemo(() => {
+    const slugs = new Set(manualLabels.map(resolveLabel));
+    return [...slugs]
+      .sort((left, right) => left.localeCompare(right))
+      .map(slug => ({
+        id: slug,
+        name: slug,
+      }));
+  }, [manualLabels, resolveLabel]);
 
-  /**
-   * The People filter is applied server-side by the recordings query, so only the
-   * tab's shared-by picker still narrows the loaded page — and an explicit pick in
-   * the People filter wins over it.
-   */
   const ownershipFilteredRecordings = useMemo(
-    () => filterRecordingsByOwnership(recordings, selectedCreatorId ? [] : selectedSharerIds),
-    [recordings, selectedCreatorId, selectedSharerIds],
+    () => filterRecordingsByOwnership(visibleSourceRecordings, selectedSharerIds),
+    [visibleSourceRecordings, selectedSharerIds],
   );
 
   const liveRecording = useMemo(() => {
@@ -169,10 +183,8 @@ const RecordingsV2Screen = (): ReactElement => {
   const liveRecordingStartedAt =
     liveRecording?.startedAt ?? (isLocalRecordingActive ? recordingStartTime : null);
   const liveRecordingTitle = liveRecording?.title ?? recordingTitle ?? DEFAULT_RECORDING_TITLE;
-  const isOwnRecordingView =
-    activeListTab !== 'shared' && (!selectedCreatorId || selectedCreatorId === currentUser?.id);
   const showLiveRecording =
-    isOwnRecordingView && liveRecordingStartedAt !== null && isLocalRecordingActive;
+    activeListTab !== 'shared' && liveRecordingStartedAt !== null && isLocalRecordingActive;
   const hiddenLiveRecordingId =
     recordingCallId ?? (recordingStatus === 'starting' ? liveRecording?.externalId : null);
 
@@ -278,16 +290,11 @@ const RecordingsV2Screen = (): ReactElement => {
       if (tab === activeListTab) return;
 
       setActiveListTab(tab);
-      setSelectedCreatorId(null);
       setSelectedLabels([]);
       setSelectedSharerIds([]);
     },
     [activeListTab, setActiveListTab],
   );
-
-  const handleCreatorChange = useCallback((creatorId: string | null): void => {
-    setSelectedCreatorId(creatorId);
-  }, []);
 
   const handleOpenRecording = useCallback(
     (recordingId: string): void => {
@@ -419,6 +426,7 @@ const RecordingsV2Screen = (): ReactElement => {
 
   const handleVisibleRangeChanged = useCallback(
     (startIndex: number): void => {
+      if (isSearchActive) return;
       const firstVisibleRecording = findNearestVisibleItem(rows, startIndex);
       if (!firstVisibleRecording) return;
 
@@ -427,11 +435,25 @@ const RecordingsV2Screen = (): ReactElement => {
         onVisibleRangeChanged(sourceIndex);
       }
     },
-    [onVisibleRangeChanged, rows, sourceIndexByRecordingId],
+    [isSearchActive, onVisibleRangeChanged, rows, sourceIndexByRecordingId],
   );
 
   const isInitialLoading = isLoading && recordings.length === 0;
-  const showInitialSkeleton = isInitialLoading;
+  const isAutoLoadingSearchPage = useAutoLoadFilteredOutSearchPage(
+    search,
+    filteredRecordings.length,
+  );
+  const showInitialSkeleton = isSearchActive
+    ? (search.isSearching && search.matches.length === 0) ||
+      // Nothing to show yet, but another page is loading (or about to be).
+      (filteredRecordings.length === 0 && (search.isLoadingMore || isAutoLoadingSearchPage))
+    : isInitialLoading;
+  const hasMoreVisibleRecordings = isSearchActive ? search.hasMore : hasMoreRecordings;
+  // Only loaded matches are counted, so "+" when more pages match.
+  const searchMatchLabel = `${filteredRecordings.length}${search.hasMore ? '+' : ''} matching ${
+    filteredRecordings.length === 1 && !search.hasMore ? 'recording' : 'recordings'
+  }`;
+  const loadMoreVisibleRecordings = isSearchActive ? search.loadMore : loadMoreRecordings;
 
   return (
     <div
@@ -450,19 +472,34 @@ const RecordingsV2Screen = (): ReactElement => {
       )}
       <div ref={setScrollContainer} className='h-full w-full overflow-y-scroll'>
         <div className='flex min-h-full w-full flex-col items-center px-4'>
-          <header className='max-w-[860px] w-full sticky top-0 bg-background z-20 pt-6 pb-6 sm:pb-3'>
+          <header className='max-w-[852px] w-full sticky top-0 bg-background z-20 pt-6 pb-6 sm:pb-3'>
             <div className='grid grid-cols-[minmax(0,1fr)_auto] items-center gap-y-6'>
               <div className='col-start-1 row-start-1 min-w-0'>
                 <h1 id='xyne-scribe-heading' className='text-3xl font-semibold text-foreground'>
                   Xyne Scribe
                 </h1>
                 <p className='mt-1 text-sm text-muted-foreground/70'>
-                  {ownershipFilteredRecordings.length} recordings · {recordingsCapturedThisWeek}{' '}
-                  captured this week
+                  {isSearchActive ? (
+                    searchMatchLabel
+                  ) : (
+                    <>
+                      {ownershipFilteredRecordings.length} recordings · {recordingsCapturedThisWeek}{' '}
+                      captured this week
+                    </>
+                  )}
                 </p>
               </div>
 
-              <div className='col-span-2 row-start-2 flex min-w-0 flex-wrap items-center gap-2 sm:col-span-1 sm:col-start-1 sm:gap-3'>
+              <div className='col-span-2 row-start-2 w-full sm:w-1/2'>
+                <RecordingSearchInput
+                  onChange={search.onSearchChange}
+                  labelOptions={searchLabelOptions}
+                  isMobile={isMobile}
+                  {...(currentUser?.id ? { currentUserId: currentUser.id } : {})}
+                />
+              </div>
+
+              <div className='col-span-2 row-start-3 flex min-w-0 flex-wrap items-center gap-2 sm:col-span-1 sm:col-start-1 sm:gap-3'>
                 <div
                   className='flex w-full items-center gap-1 rounded-xl bg-muted p-1 sm:w-auto'
                   role='group'
@@ -509,12 +546,6 @@ const RecordingsV2Screen = (): ReactElement => {
 
                 <RecordingDateFilter value={selectedDatePreset} onChange={setSelectedDatePreset} />
 
-                <RecordingPeopleFilter
-                  currentUserId={currentUser?.id}
-                  selectedUserId={selectedCreatorId}
-                  onUserChange={handleCreatorChange}
-                />
-
                 <RecordingLabelFilter
                   labels={manualLabels}
                   selectedLabels={selectedLabels}
@@ -523,7 +554,7 @@ const RecordingsV2Screen = (): ReactElement => {
                 />
               </div>
 
-              <div className='col-start-2 row-start-1 flex items-center gap-2 sm:row-start-2'>
+              <div className='col-start-2 row-start-1 flex items-center gap-2 sm:row-start-3'>
                 {/* Icon-only below `sm`, where this row shares a line with the title. */}
                 <Button
                   type='button'
@@ -556,7 +587,7 @@ const RecordingsV2Screen = (): ReactElement => {
             {showLiveRecording && (
               <motion.div
                 key='live-recording-pill'
-                className='w-full max-w-[860px]'
+                className='w-full max-w-[852px]'
                 initial={shouldReduceMotion ? { opacity: 1 } : { height: 0, opacity: 0 }}
                 animate={shouldReduceMotion ? { opacity: 1 } : { height: 'auto', opacity: 1 }}
                 exit={shouldReduceMotion ? { opacity: 0 } : { height: 0, opacity: 0 }}
@@ -598,10 +629,10 @@ const RecordingsV2Screen = (): ReactElement => {
             )}
           </AnimatePresence>
 
-          <main className='flex w-full max-w-[860px] flex-1 flex-col'>
+          <main className='flex w-full max-w-[852px] flex-1 flex-col'>
             {showInitialSkeleton ? (
               <RecordingsV2Skeleton />
-            ) : error && recordings.length === 0 ? (
+            ) : !isSearchActive && error && recordings.length === 0 ? (
               <div
                 className='flex flex-1 flex-col items-center justify-center px-6 pb-28 text-center'
                 role='alert'
@@ -627,7 +658,7 @@ const RecordingsV2Screen = (): ReactElement => {
               <div className='flex flex-1 flex-col items-center justify-center px-6 pb-28 text-center'>
                 <RecordingsEmptyStateIllustration />
                 <h2 className='text-base font-semibold text-foreground'>
-                  {selectedCreatorId !== null ||
+                  {isSearchActive ||
                   selectedSharerIds.length > 0 ||
                   selectedLabels.length > 0 ||
                   ownershipFilteredRecordings.length > 0
@@ -637,12 +668,14 @@ const RecordingsV2Screen = (): ReactElement => {
                       : 'Start your first recording'}
                 </h2>
                 <p className='mt-1 min-h-10 max-w-sm text-sm text-muted-foreground'>
-                  {selectedLabels.length > 0
-                    ? 'No recordings match the selected labels.'
-                    : ownershipFilteredRecordings.length > 0
-                      ? `No recordings found for ${getRecordingDatePresetLabel(selectedDatePreset).toLowerCase()}.`
-                      : selectedCreatorId
-                        ? 'Try another ownership tab or person.'
+                  {isSearchActive
+                    ? search.error
+                      ? 'Search is unavailable right now. Try again in a moment.'
+                      : 'No recordings match your search.'
+                    : selectedLabels.length > 0
+                      ? 'No recordings match the selected labels.'
+                      : ownershipFilteredRecordings.length > 0
+                        ? `No recordings found for ${getRecordingDatePresetLabel(selectedDatePreset).toLowerCase()}.`
                         : activeListTab === 'shared'
                           ? 'Recordings shared with you by others will appear here.'
                           : 'Capture a conversation and explore it with Ask AI.'}
@@ -654,13 +687,13 @@ const RecordingsV2Screen = (): ReactElement => {
                 data={rows}
                 useWindowScroll={false}
                 atBottomThreshold={100}
-                endReached={loadMoreRecordings}
+                endReached={loadMoreVisibleRecordings}
                 rangeChanged={range => handleVisibleRangeChanged(range.startIndex)}
                 computeItemKey={(_, row) => row.id}
                 components={{
                   Footer: () => (
                     <div className='pb-24'>
-                      {hasMoreRecordings && (
+                      {hasMoreVisibleRecordings && (
                         <div
                           className='flex items-center justify-center py-5 text-muted-foreground'
                           role='status'
@@ -699,6 +732,7 @@ const RecordingsV2Screen = (): ReactElement => {
                           row.item.labels.filter(label => !isResolved(label)).length
                         }
                         resolveLabel={resolveLabel}
+                        hasNewSummary={unreadSummaryCallIds.has(row.item.id)}
                         onOpen={handleOpenRecording}
                         onShare={handleShareRecording}
                         onLeave={recording => void handleLeaveRecording(recording)}

@@ -12,7 +12,18 @@ export const SOCIAL_MEDIA_PLATFORMS: readonly ExternalSourcePlatform[] = [
   ExternalSourcePlatform.GOOGLE_PLAY,
   ExternalSourcePlatform.APP_STORE,
   ExternalSourcePlatform.INSTAGRAM,
+  ExternalSourcePlatform.FACEBOOK,
 ] as const;
+
+/** Meta messaging providers: webhook-driven, 24h reply window, several accounts per desk. */
+export const META_MESSAGING_PLATFORMS: readonly ExternalSourcePlatform[] = [
+  ExternalSourcePlatform.INSTAGRAM,
+  ExternalSourcePlatform.FACEBOOK,
+] as const;
+
+export function isMetaMessagingPlatform(sourceType: string): boolean {
+  return META_MESSAGING_PLATFORMS.includes(sourceType as ExternalSourcePlatform);
+}
 
 export function isSocialMediaPlatform(sourceType: string): boolean {
   return SOCIAL_MEDIA_PLATFORMS.includes(sourceType as ExternalSourcePlatform);

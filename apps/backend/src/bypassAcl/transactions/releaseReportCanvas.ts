@@ -3,10 +3,11 @@ import type { ReleaseReport } from '@xyne/shared';
 import type { User } from '@prisma/client';
 import { Prisma } from '@prisma/client';
 import { db } from '@/database/client';
+import { newConnectId, createConnectGroupForEntity, resolveCanvasConnectId, ConnectEntityType } from '@/database/connectGroup';
 import { CanvasVisibility, CanvasRole } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 export function createOrUpdateTx(existingCanvas: any, title: string, report: ReleaseReport, owner: User, now: Date, metadata: Prisma.InputJsonObject, canvasId: any) {
-  return transaction(['Canvas', 'CanvasParticipant'], 'createOrUpdate: report canvas and owner participant row must commit atomically; tx is not ACL-wrapped', db, async (tx) => {
+  return transaction(['Canvas', 'CanvasParticipant', 'ConnectGroup'], 'createOrUpdate: report canvas and owner participant row must commit atomically; tx is not ACL-wrapped', db, async (tx) => {
     if (existingCanvas) {
       await tx.canvas.update({
         where: { id: existingCanvas.id },
@@ -23,6 +24,7 @@ export function createOrUpdateTx(existingCanvas: any, title: string, report: Rel
           metadata,
         },
       });
+      const existingConnectId = await resolveCanvasConnectId(tx, existingCanvas.id);
       await tx.canvasParticipant.upsert({
         where: {
           canvasId_userId: {
@@ -38,6 +40,7 @@ export function createOrUpdateTx(existingCanvas: any, title: string, report: Rel
           role: CanvasRole.VIEWER,
           joinedAt: now,
           updatedAt: now,
+          ...(existingConnectId ? { canvasConnectId: existingConnectId } : {}),
         },
         update: {
           role: CanvasRole.VIEWER,
@@ -51,6 +54,8 @@ export function createOrUpdateTx(existingCanvas: any, title: string, report: Rel
       };
     }
 
+    // Slack Connect: a canvas is a shareable entity → its own connectId + a private connect_group row.
+    const connectId = newConnectId();
     await tx.canvas.create({
       data: {
         id: canvasId,
@@ -65,8 +70,15 @@ export function createOrUpdateTx(existingCanvas: any, title: string, report: Rel
         isCollaborative: true,
         lastEditedBy: owner.id,
         lastEditedAt: now,
+        connectId,
         metadata,
       },
+    });
+    await createConnectGroupForEntity(tx, {
+      entityType: ConnectEntityType.CANVAS,
+      entityId: canvasId,
+      hostWorkspaceId: report.release.workspaceId,
+      connectId,
     });
     await tx.canvasParticipant.create({
       data: {
@@ -77,6 +89,7 @@ export function createOrUpdateTx(existingCanvas: any, title: string, report: Rel
         role: CanvasRole.VIEWER,
         joinedAt: now,
         updatedAt: now,
+        canvasConnectId: connectId,
       },
     });
 

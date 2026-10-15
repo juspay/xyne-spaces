@@ -25,6 +25,7 @@ import {
   listChannelGroups,
   loginChannelAccount,
   logoutChannelAccount,
+  publishChannelQuestionForm,
   updateChannelAccount,
   type ChannelAccountView,
   type ChannelGroup,
@@ -439,10 +440,35 @@ function PolicyEditor({
   const [groupAllowlist, setGroupAllowlist] = useState(account.groupAllowlist.join("\n"));
   const [requireMention, setRequireMention] = useState(account.requireMention);
   const [groupHistoryLimit, setGroupHistoryLimit] = useState(String(account.groupHistoryLimit));
-  const residue = (account.channelConfig ?? {}) as { selfChat?: boolean; agentActions?: { sendToOtherChats?: boolean; reactions?: boolean; listGroups?: boolean } };
+  const residue = (account.channelConfig ?? {}) as {
+    selfChat?: boolean;
+    agentActions?: { sendToOtherChats?: boolean; reactions?: boolean; listGroups?: boolean };
+    notificationTemplate?: { name: string; language: string };
+    questionFormId?: string;
+  };
   const [selfChat, setSelfChat] = useState(residue.selfChat ?? true);
   const [agentSend, setAgentSend] = useState(residue.agentActions?.sendToOtherChats ?? false);
+  const [templateName, setTemplateName] = useState(residue.notificationTemplate?.name ?? "");
+  const [templateLanguage, setTemplateLanguage] = useState(residue.notificationTemplate?.language ?? "en");
+  const [wabaId, setWabaId] = useState("");
+  const [publishing, setPublishing] = useState(false);
   const [saving, setSaving] = useState(false);
+  // Only the Business API has a reply window and native forms.
+  const businessApi = channel.key === "whatsapp-cloud";
+
+  const publishForm = async () => {
+    setPublishing(true);
+    try {
+      await publishChannelQuestionForm(channel.key, account.id, wabaId.trim());
+      show({ variant: "success", title: "Question form published" });
+      setWabaId("");
+      onChanged();
+    } catch (error) {
+      show({ variant: "error", title: errorMessage(error, "Publish failed") });
+    } finally {
+      setPublishing(false);
+    }
+  };
 
   const save = async () => {
     setSaving(true);
@@ -460,6 +486,14 @@ function PolicyEditor({
             ? {
                 selfChat,
                 agentActions: { ...(residue.agentActions ?? {}), sendToOtherChats: agentSend },
+              }
+            : {}),
+          // null clears it server-side.
+          ...(businessApi
+            ? {
+                notificationTemplate: templateName.trim()
+                  ? { name: templateName.trim(), language: templateLanguage.trim() || "en" }
+                  : null,
               }
             : {}),
         },
@@ -549,11 +583,73 @@ function PolicyEditor({
           </>
         )}
 
+        {businessApi && (
+          <div className="grid gap-3 rounded-md border border-xyne-border-subtle p-3 md:col-span-2 md:grid-cols-2">
+            <div className="md:col-span-2">
+              <p className="text-[12px] font-semibold text-xyne-fg-primary">Messages after 24 hours</p>
+              <p className="mt-0.5 text-[11px] text-xyne-fg-muted">
+                WhatsApp only delivers free-form messages within 24 hours of the person&apos;s last message. A scheduled agent
+                reporting back later goes out through this approved template instead. Its body must be a single {"{{1}}"}
+                parameter. Leave it empty and those messages fail.
+              </p>
+            </div>
+            <TextField
+              label="Template name"
+              value={templateName}
+              placeholder="xyne_update"
+              onChange={(event) => setTemplateName(event.target.value)}
+            />
+            <TextField
+              label="Template language"
+              value={templateLanguage}
+              placeholder="en"
+              onChange={(event) => setTemplateLanguage(event.target.value)}
+            />
+          </div>
+        )}
+
         <div className="md:col-span-2">
           <Button variant="primary" size="sm" disabled={saving} onClick={() => void save()}>
             {saving ? "Saving…" : "Save settings"}
           </Button>
         </div>
+
+        {businessApi && (
+          <div className="grid gap-2 rounded-md border border-xyne-border-subtle p-3 md:col-span-2">
+            <p className="text-[12px] font-semibold text-xyne-fg-primary">Question forms</p>
+            {residue.questionFormId ? (
+              <p className="text-[11px] text-xyne-fg-muted">
+                Published (form {residue.questionFormId}). When the agent asks several things at once, they arrive as one
+                native WhatsApp form.
+              </p>
+            ) : (
+              <>
+                <p className="text-[11px] text-xyne-fg-muted">
+                  Without a form, the agent asks one question at a time with buttons and lists. Publishing one lets several
+                  questions arrive as a single native WhatsApp form. It needs your WhatsApp Business Account ID and a token
+                  allowed to manage it (whatsapp_business_management).
+                </p>
+                <div className="flex flex-wrap items-end gap-2">
+                  <TextField
+                    label="WhatsApp Business Account ID"
+                    value={wabaId}
+                    inputMode="numeric"
+                    placeholder="1234567890"
+                    onChange={(event) => setWabaId(event.target.value)}
+                  />
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={publishing || !/^\d+$/.test(wabaId.trim())}
+                    onClick={() => void publishForm()}
+                  >
+                    {publishing ? "Publishing…" : "Publish question form"}
+                  </Button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

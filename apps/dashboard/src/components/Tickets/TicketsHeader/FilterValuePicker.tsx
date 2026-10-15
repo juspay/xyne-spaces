@@ -186,6 +186,7 @@ export const FilterValuePicker = ({
           onLoadMore={ctx.onLoadMoreTags}
           hasMore={ctx.hasMoreTags}
           onSearch={ctx.onSearchTags}
+          recentBoardIds={ctx.recentLabelsBoardIds}
         />
       );
     case 'stages':

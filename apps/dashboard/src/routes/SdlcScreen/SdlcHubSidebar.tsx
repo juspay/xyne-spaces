@@ -28,11 +28,11 @@ export interface SdlcHubOption {
 /** Chat's sidebar row: 36px, 14px type, 10px radius, the sidebar accent for hover and active. */
 export const sdlcSidebarRowClass = (active: boolean, muted = false): string =>
   cn(
-    'flex h-9 w-full items-center gap-3 rounded-[10px] border border-transparent px-3 text-sm transition-colors',
+    'flex h-9 w-full items-center gap-3 rounded-[10px] border border-transparent px-3 text-sm outline-none transition-colors',
     active
       ? 'border-sidebar-border bg-sidebar-accent font-medium text-sidebar-accent-foreground'
       : cn(
-          'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+          'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:bg-sidebar-accent focus-visible:text-sidebar-accent-foreground',
           muted ? 'text-sidebar-foreground/60' : 'text-sidebar-foreground',
         ),
   );
@@ -111,7 +111,7 @@ export function SdlcSidebarAddRow(props: {
     <button
       type='button'
       onClick={props.onClick}
-      className='flex h-9 w-full items-center gap-3 rounded-[10px] border border-dashed border-transparent px-3 text-sm text-sidebar-foreground/60 transition-colors hover:border-sidebar-border hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+      className='outline-none flex h-9 w-full items-center gap-3 rounded-[10px] border border-dashed border-transparent px-3 text-sm text-sidebar-foreground/60 transition-colors hover:border-sidebar-border focus-visible:border-sidebar-border hover:bg-sidebar-accent focus-visible:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:text-sidebar-accent-foreground'
       data-track-category='SdlcHub'
       data-track-name={props.trackName}
     >
@@ -211,7 +211,7 @@ export function SdlcSidebarGroup(props: {
             onClick={props.action.onClick}
             title={props.action.label}
             aria-label={props.action.label}
-            className='flex shrink-0 items-center justify-center rounded-md p-1 text-sidebar-foreground opacity-0 transition-opacity duration-150 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus:outline-none focus-visible:opacity-100 group-hover:opacity-100'
+            className='flex shrink-0 items-center justify-center rounded-md p-1 text-sidebar-foreground opacity-0 transition-opacity duration-150 hover:bg-sidebar-accent focus-visible:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:text-sidebar-accent-foreground focus:outline-none focus-visible:opacity-100 group-hover:opacity-100'
             data-track-category='SdlcHub'
             data-track-name={props.action.trackName}
           >
@@ -225,7 +225,7 @@ export function SdlcSidebarGroup(props: {
 }
 
 const HEADER_ICON_BUTTON =
-  'flex size-7 shrink-0 items-center justify-center rounded-md text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-accent-ring';
+  'flex size-7 shrink-0 items-center justify-center rounded-md text-sidebar-foreground transition-colors hover:bg-sidebar-accent focus-visible:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:text-sidebar-accent-foreground focus:outline-none';
 
 /**
  * The sidebar's title row, in the place of Chat's "Inbox": the hub's name, which opens
@@ -267,7 +267,7 @@ export function SdlcHubHeader(props: {
         type='button'
         onClick={props.onOpenSwitcher}
         title={`${props.hubName} · Switch hub (⌘J)`}
-        className='flex h-8 min-w-0 flex-1 items-center gap-1 rounded-lg px-1.5 text-left transition-colors hover:bg-sidebar-accent focus:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-accent-ring'
+        className='flex h-8 min-w-0 flex-1 items-center gap-1 rounded-lg px-1.5 text-left transition-colors hover:bg-sidebar-accent focus-visible:bg-sidebar-accent focus:outline-none'
         data-track-category='SdlcHub'
         data-track-name='HubSwitcherOpened'
         data-track-metadata={JSON.stringify({ via: 'title' })}
@@ -331,7 +331,7 @@ export function SdlcExplorerHeader(props: {
         onClick={props.onBack}
         title={`Back to ${props.trackName}`}
         aria-label={`Back to ${props.trackName}`}
-        className='flex h-8 min-w-0 flex-1 items-center gap-1 rounded-lg px-1.5 text-left transition-colors hover:bg-sidebar-accent focus:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-accent-ring'
+        className='flex h-8 min-w-0 flex-1 items-center gap-1 rounded-lg px-1.5 text-left transition-colors hover:bg-sidebar-accent focus-visible:bg-sidebar-accent focus:outline-none'
         data-track-category='SdlcHub'
         data-track-name='ExplorerBack'
       >

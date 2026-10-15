@@ -11,6 +11,7 @@ import {
 } from '@/services/jiraMigrationImportService';
 import { jiraMigrationProgressService } from '@/services/jiraMigrationProgressService';
 import { DatabaseClient } from '@/database/client';
+import { newConnectId } from '@/database/connectGroup';
 import { logger } from '@/utils/logger';
 import { EntitySequenceService } from '@/services/entitySequenceService';
 import { config } from '@/config/env';
@@ -1838,12 +1839,13 @@ export class JiraMigrationController {
       select: { workspaceId: true },
     });
     try {
+      const connectId = newConnectId();
       const blocks = this.buildMigrationReportCanvasBlocks(result) as BlockNoteBlock[];
       const synced = await syncToYSweet(canvasId, blocks, actorUserId);
       if (!synced) {
         throw new Error(`Failed to save Jira migration report canvas ${canvasId} to Y-Sweet`);
       }
-      await createMigrationReportCanvasTx(canvasId, canvasChannel, result, channelId, actorUserId, now, this, participantId);
+      await createMigrationReportCanvasTx(canvasId, canvasChannel, result, channelId, actorUserId, now, this, participantId, connectId);
     } catch (error) {
       logger.error('[JiraMigration] Canvas report create failed', error, {
         jiraProjectKey: result.jiraProjectKey,

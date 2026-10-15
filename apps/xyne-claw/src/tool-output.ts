@@ -35,29 +35,13 @@ import { randomUUID } from "node:crypto";
 import { metric } from "./metrics.js";
 
 import { createLogger } from "./logger.js";
-import { optEnabled } from "./optimizations.js";
 import { siftToolResult } from "./result-sift.js";
 import { currentRunMessages, currentRunTask } from "./run-context.js";
 import { currentToolCall } from "./tool-call-context.js";
 const log = createLogger("tool-output");
 
-// MCP/custom tool results are often structure-heavy JSON, so we use a tighter
-// cap than pi's 50KB bash default — the model skims more tokens per useful fact.
-export const TOOL_RESULT_INLINE_CAP_BYTES = Number(process.env["XYNE_CLAW_TOOL_RESULT_INLINE_CAP_BYTES"] ?? 32 * 1024);
-// Search/retrieval tools (kb-search, spaces-search, spaces-* reads, genius-*,
-// query-codebase, web-search, deep-research, memory-search) return exactly the
-// evidence the model must reason over. Spilling that to a file behind a 2KB
-// preview makes the model answer from the preview alone — the single biggest
-// grounding leak. Give them a MUCH larger inline cap so the full ranked result
-// set stays in context. Bulk/file tools (bash, read, grep, list_resources, …)
-// keep the small cap above. Kept moderate (128KB ≈ ~32K tokens) so several
-// retrieval calls in one turn don't blow a 128K-window model before compaction.
-export const TOOL_RESULT_RETRIEVAL_CAP_BYTES = Number(process.env["XYNE_CLAW_TOOL_RESULT_RETRIEVAL_CAP_BYTES"] ?? 128 * 1024);
-// Preview shown inline before the path, so the model can often answer without
-// reading the file at all. Retrieval tools that DO still exceed their (large)
-// cap get a bigger preview so more top-N ranked hits survive inline.
-const TOOL_RESULT_PREVIEW_BYTES = 2 * 1024;
-const TOOL_RESULT_RETRIEVAL_PREVIEW_BYTES = 16 * 1024;
+export const TOOL_RESULT_INLINE_CAP_BYTES = Number(process.env["XYNE_CLAW_TOOL_RESULT_INLINE_CAP_BYTES"] ?? 128 * 1024);
+const TOOL_RESULT_PREVIEW_BYTES = 16 * 1024;
 
 // Maximum characters allowed on a single physical line in a spilled file.
 // pi-coding-agent's built-in `read` paginates by line and caps a single line at
@@ -66,61 +50,6 @@ const TOOL_RESULT_RETRIEVAL_PREVIEW_BYTES = 16 * 1024;
 // the spilled file is always paginable/greppable. Well under pi's 50KB line cap
 // and large enough that one JSON record almost always fits on one line.
 export const SPILL_MAX_LINE_CHARS = Number(process.env["XYNE_CLAW_SPILL_MAX_LINE_CHARS"] ?? 4 * 1024);
-
-// Tool names (NOT server-prefixed — promoteIfOversized receives the bare
-// mcpTool.name / custom-tool slug) that should get the larger retrieval cap.
-const RETRIEVAL_TOOL_NAMES: ReadonlySet<string> = new Set([
-  "kb-search",
-  // spaces-vespa-search replaced spaces-search as the general search tool
-  // (2026-09-26); corpus-scan and evidence-pack return the same kind of
-  // reason-over-it evidence. Missing from this set they'd take the small
-  // bulk-tool cap and spill behind a 2KB preview — the grounding leak above.
-  "spaces-vespa-search",
-  "spaces-corpus-scan",
-  "spaces-evidence-pack",
-  // Kept so historical results and any not-yet-migrated caller still get the
-  // retrieval cap rather than silently degrading.
-  "spaces-search",
-  "spaces-research",
-  "memory-search",
-  "query-codebase",
-  "web-search",
-  "deep-research",
-  "genius-analytics",
-  "genius-investigation",
-  // File/email content reads — grounding evidence the model reasons over, same
-  // as a retrieval result. They no longer hard-truncate internally; the full
-  // body flows here and spills to a file behind a preview past this larger cap.
-  "google-gmail-read",
-  "google-gmail-attachment",
-  "google-drive-read",
-  "microsoft-onedrive-read",
-  "microsoft-outlook-read",
-]);
-
-/**
- * True when `toolName` is a search/retrieval tool that should keep its full
- * result inline. Matches the explicit set above OR sensible prefixes/substrings
- * so future retrieval tools are covered without editing this list. Bulk/file
- * tools (bash/read/grep/list_resources/fetch-attachment/…) do NOT match.
- */
-export function isRetrievalTool(toolName: string): boolean {
-  const n = toolName.toLowerCase();
-  if (RETRIEVAL_TOOL_NAMES.has(n)) return true;
-  return (
-    n.startsWith("kb-") ||
-    n.startsWith("spaces-") ||
-    n.startsWith("genius-") ||
-    n.startsWith("query-codebase") ||
-    n.includes("search") ||
-    n.includes("research")
-  );
-}
-
-/** Inline byte cap for a given tool: large for retrieval tools, small otherwise. */
-export function inlineCapForTool(toolName: string): number {
-  return isRetrievalTool(toolName) ? TOOL_RESULT_RETRIEVAL_CAP_BYTES : TOOL_RESULT_INLINE_CAP_BYTES;
-}
 
 /** Strip NUL + other C0 control chars (keep tab, newline, carriage-return). */
 export function stripControlChars(text: string): string {
@@ -262,22 +191,20 @@ export async function promoteIfOversized(
   category: string,
   toolName: string,
   rawContent: string,
-  // Optional per-call inline cap. Defaults to the tool-aware resolver so search/
-  // retrieval tools keep their full result inline while bulk/file tools spill at
-  // the small cap. Callers may pass an explicit value to override.
+  // Optional per-call inline cap. Defaults to TOOL_RESULT_INLINE_CAP_BYTES.
   inlineCapBytes?: number,
   // When true, persist the raw result to a file even when it fits inline, and
   // hand the model the path — so it can forward the whole file into a sandbox
   // byte-for-byte (sandbox-copy-in contextPath) instead of retyping it.
   forceFile = false,
 ): Promise<string> {
-  const cap = inlineCapBytes ?? inlineCapForTool(toolName);
+  const cap = inlineCapBytes ?? TOOL_RESULT_INLINE_CAP_BYTES;
   const clean = stripControlChars(rawContent);
-  // Per-call choice (the `sift` tool param) wins over the agent default, which
-  // covers retrieval tools. Only one pass sifts: an MCP result goes through
+  // Sifting happens only when the call asks for it (the `sift` tool param).
+  // Only one pass sifts: an MCP result goes through
   // this function twice (mcp.ts, then the custom-tool wrapper).
   const call = currentToolCall();
-  const siftWanted = call?.sift ?? (optEnabled("jev_result_sift") && isRetrievalTool(toolName));
+  const siftWanted = call?.sift === true;
   if (siftWanted && !call?.sifted) {
     const sifted = await siftIntoContext(outputBaseDir, category, toolName, clean, cap);
     if (sifted) {
@@ -310,11 +237,7 @@ export async function promoteIfOversized(
   // the line-oriented read/grep tools (a minified single-line JSON payload is
   // otherwise unusable — see lineifyForSpill / F1).
   const lined = lineifyForSpill(clean);
-  // Retrieval tools that STILL overflow get a larger preview so more ranked hits
-  // survive inline even after the spill.
-  const previewBytes = isRetrievalTool(toolName)
-    ? TOOL_RESULT_RETRIEVAL_PREVIEW_BYTES
-    : TOOL_RESULT_PREVIEW_BYTES;
+  const previewBytes = TOOL_RESULT_PREVIEW_BYTES;
   const safeCategory = category.replace(/[^a-zA-Z0-9_-]/g, "_");
   const safeTool = toolName.replace(/[^a-zA-Z0-9_-]/g, "_");
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -377,7 +300,8 @@ export async function promoteIfOversized(
   log.info(`[tool-output] ${safeCategory}/${safeTool} result ${clean.length}b → ${absPath} (cap ${cap}b)`);
   return [
     `[Tool returned ${clean.length} chars — full result saved to ${absPath}.`,
-    `Use the read tool on that absolute path (with offset/limit) or grep on it to inspect.`,
+    `Only the first ${previewBytes} of ${clean.length} chars are shown below. Do not answer from this preview alone:`,
+    `read that absolute path (with offset/limit) or grep it for what you need before you answer.`,
     ...(rawRelPath
       ? [`To use the whole result inside a sandbox, forward the byte-identical raw copy with sandbox-copy-in contextPath: "${rawRelPath}" instead of retyping it.`]
       : []),

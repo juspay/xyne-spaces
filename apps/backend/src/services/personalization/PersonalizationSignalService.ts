@@ -8,14 +8,15 @@ import {
   ChannelSignalPayload,
   UserSignalPayload,
   SignalCaptureResult,
-  SignalPayload
+  SignalPayload,
+  signalAgeFactor
 } from './types';
 
 export class PersonalizationSignalService {
   async captureChannelSignal(
     payload: ChannelSignalPayload
   ): Promise<SignalCaptureResult> {
-    const { userId, channelId, signalType, metadata } = payload;
+    const { userId, channelId, signalType, occurredAt, metadata } = payload;
     try {
       // Get signal configuration
       const config = this.getSignalConfig(signalType);
@@ -27,8 +28,8 @@ export class PersonalizationSignalService {
         );
       }
 
-      // Use provided weight or default
-      const finalWeight = config.defaultWeight;
+      // Default weight, decayed by the action's age (imported history counts at its real age)
+      const finalWeight = config.defaultWeight * signalAgeFactor(occurredAt);
 
       // Generate Redis key
       const key = config.redisKeyPattern.replace('{userId}', userId);
@@ -72,7 +73,7 @@ export class PersonalizationSignalService {
   async captureUserSignal(
     payload: UserSignalPayload
   ): Promise<SignalCaptureResult> {
-    const { fromUserId, toUserId, signalType, metadata } = payload;
+    const { fromUserId, toUserId, signalType, occurredAt, metadata } = payload;
 
     try {
       // Get signal configuration
@@ -85,8 +86,8 @@ export class PersonalizationSignalService {
         );
       }
 
-      // Use provided weight or default
-      const finalWeight = config.defaultWeight;
+      // Default weight, decayed by the action's age (imported history counts at its real age)
+      const finalWeight = config.defaultWeight * signalAgeFactor(occurredAt);
 
       // Generate Redis key
       const key = config.redisKeyPattern.replace('{userId}', fromUserId);

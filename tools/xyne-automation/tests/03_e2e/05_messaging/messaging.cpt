@@ -1,5 +1,5 @@
 # Creating DM with user <userAlias>
-* clicking on "[data-testid='nav-chat']"
+* navigating via sidebar to "chat"
 * clicking on "[data-testid='create-new-dm']"
 * waiting for "[data-testid='user-search-input']" to appear
 * typing stored user <userAlias> field "email" in "[data-testid='user-search-input']"
@@ -7,7 +7,7 @@
 * waiting for "[data-testid='message-input']" to appear
 
 # Creating group DM with users <userAlias1> and <userAlias2>
-* clicking on "[data-testid='nav-chat']"
+* navigating via sidebar to "chat"
 * clicking on "[data-testid='create-new-dm']"
 * waiting for "[data-testid='user-search-input']" to appear
 * typing stored user <userAlias1> field "email" in "[data-testid='user-search-input']"
@@ -39,7 +39,7 @@
 * waiting for stored user <userAlias> channel <channelAlias> message <messageAlias> to appear in "[data-testid='virtuoso-item-list']"
 
 # Navigating to chat
-* clicking on "[data-testid='nav-chat']"
+* navigating via sidebar to "chat"
 * waiting for "[data-testid='chat-list-loading']" to disappear fast
 
 # Opening DM from user <userAlias>

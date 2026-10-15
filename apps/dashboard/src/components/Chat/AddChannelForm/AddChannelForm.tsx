@@ -19,6 +19,7 @@ import {
   Mails,
   MessageSquareMore,
   Smartphone,
+  Waypoints,
   Phone,
   Plus,
   Share2,
@@ -102,8 +103,15 @@ const DESK_SOURCES: ReadonlyArray<{
   {
     value: DeskType.SOCIAL_MEDIA,
     label: 'Social media',
-    description: 'Create support tickets from Google Play, App Store reviews, or Instagram DMs',
+    description:
+      'Create support tickets from Google Play, App Store reviews, Instagram DMs, or Facebook Pages',
     icon: Share2,
+  },
+  {
+    value: DeskType.CHANNELS,
+    label: 'Channels',
+    description: 'Create a ticket for every new thread in the channels an installed app is in',
+    icon: Waypoints,
   },
 ];
 
@@ -140,7 +148,11 @@ function areGooglePlayApplicationsValid(applications: GooglePlayApplicationInput
   );
 }
 
-export type SocialProvider = 'GOOGLE_PLAY' | 'APP_STORE' | 'INSTAGRAM';
+export type SocialProvider = 'GOOGLE_PLAY' | 'APP_STORE' | 'INSTAGRAM' | 'FACEBOOK';
+
+/** Providers connected by an OAuth redirect: no extra fields here and the board is optional. */
+export const isOAuthSocialProvider = (provider: SocialProvider | undefined): boolean =>
+  provider === 'INSTAGRAM' || provider === 'FACEBOOK';
 
 export interface AppStoreDeskInput {
   keyId: string;
@@ -176,7 +188,7 @@ interface AddChannelFormProps {
   onSubmit: (
     data: ChannelFormData & {
       connector?: ConnectorType;
-      channelType?: 'EMAIL' | 'SLACK' | 'APP' | 'CALL' | 'SOCIAL_MEDIA' | undefined;
+      channelType?: 'EMAIL' | 'SLACK' | 'APP' | 'CALL' | 'SOCIAL_MEDIA' | 'CHANNELS' | undefined;
       deskType?: DeskType;
       callSource?: CallSource;
       dlEmail?: string;
@@ -217,6 +229,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
   const [dlEmailInput, setDlEmailInput] = useState<string>('');
   const [selectedSlackChannelId, setSelectedSlackChannelId] = useState<string>('');
   const [selectedInstalledAppId, setSelectedInstalledAppId] = useState<string>('');
+  const [selectedChannelsDeskAppId, setSelectedChannelsDeskAppId] = useState<string>('');
   const [googlePlayApplications, setGooglePlayApplications] = useState<GooglePlayApplicationRow[]>([
     createGooglePlayApplication(),
   ]);
@@ -229,7 +242,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
   const [appStorePrivateKey, setAppStorePrivateKey] = useState('');
 
   const isSocialMediaDeskValid = (boardId?: string): boolean => {
-    if (socialProvider === 'INSTAGRAM') return true;
+    if (isOAuthSocialProvider(socialProvider)) return true;
     if (!boardId) return false;
     return socialProvider === 'GOOGLE_PLAY'
       ? Boolean(getServiceAccountEmail(googlePlayServiceAccountKey)) &&
@@ -263,6 +276,13 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
     },
     enabled: requireConnector && deskType === DeskType.APP,
   });
+
+  const [channelsDeskInstalledApps, channelsDeskInstalledAppsDetails] = useCachedQuery(
+    queries.getWorkspaceInstalledApps({ limit: 100, start: null }),
+    { enabled: requireConnector && deskType === DeskType.CHANNELS },
+  );
+  const isLoadingChannelsDeskApps =
+    channelsDeskInstalledAppsDetails.type !== 'complete' && !channelsDeskInstalledApps?.length;
 
   const { data: workspaceMailbox } = useQuery({
     queryKey: ['workspace-shared-mailbox-status'],
@@ -344,6 +364,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
           return;
         if (deskType === DeskType.SLACK && !selectedSlackChannelId) return;
         if (deskType === DeskType.APP && !selectedInstalledAppId) return;
+        if (deskType === DeskType.CHANNELS && !selectedChannelsDeskAppId) return;
         if (deskType === DeskType.SOCIAL_MEDIA && !isSocialMediaDeskValid(value.boardId)) return;
       }
       if (mode === 'promote') {
@@ -374,6 +395,15 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
             channelType: 'APP',
             deskType: DeskType.APP,
             installedAppId: selectedInstalledAppId,
+            assigneeUserGroupId: value.assigneeUserGroupId,
+          });
+        } else if (deskType === DeskType.CHANNELS) {
+          onSubmit?.({
+            ...value,
+            connector: null,
+            channelType: 'CHANNELS',
+            deskType: DeskType.CHANNELS,
+            installedAppId: selectedChannelsDeskAppId,
             assigneeUserGroupId: value.assigneeUserGroupId,
           });
         } else if (deskType === DeskType.SOCIAL_MEDIA) {
@@ -467,6 +497,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       (!workspaceMailbox?.configured || !dlEmailInput || !isValidDlEmail(dlEmailInput))) ||
     (requireConnector && deskType === DeskType.SLACK && !selectedSlackChannelId) ||
     (requireConnector && deskType === DeskType.APP && !selectedInstalledAppId) ||
+    (requireConnector && deskType === DeskType.CHANNELS && !selectedChannelsDeskAppId) ||
     (requireConnector &&
       deskType === DeskType.SOCIAL_MEDIA &&
       !isSocialMediaDeskValid(boardIdValue)) ||
@@ -488,6 +519,8 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       }
       if (deskType === DeskType.SLACK && !selectedSlackChannelId)
         return 'Please select a Slack channel';
+      if (deskType === DeskType.CHANNELS && !selectedChannelsDeskAppId)
+        return 'Please select an app';
       if (deskType === DeskType.SOCIAL_MEDIA && socialProvider === 'GOOGLE_PLAY') {
         if (!getServiceAccountEmail(googlePlayServiceAccountKey))
           return 'Upload the service account JSON key';
@@ -865,6 +898,56 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
         </div>
       )}
 
+      {requireConnector && deskType === DeskType.CHANNELS && (
+        <div className='space-y-2'>
+          <label htmlFor='channels-desk-app-select' className='text-sm font-medium text-foreground'>
+            App <span className='text-muted-foreground'>*</span>
+          </label>
+          {isLoadingChannelsDeskApps ? (
+            <div className='flex items-center gap-2 py-3 text-sm text-muted-foreground'>
+              <div className='h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent' />
+              Loading apps...
+            </div>
+          ) : !channelsDeskInstalledApps?.length ? (
+            <div className='flex items-start gap-2 rounded-lg border border-border bg-muted/50 p-3'>
+              <AlertCircle
+                size={16}
+                className='mt-0.5 flex-shrink-0 text-amber-600 dark:text-amber-400'
+              />
+              <div className='text-sm text-foreground'>
+                <div className='font-medium'>No installed apps</div>
+                <div className='text-xs text-muted-foreground mt-1'>
+                  Install one in <span className='font-medium'>Xyne Apps</span> first.
+                </div>
+              </div>
+            </div>
+          ) : (
+            <>
+              <Select
+                value={selectedChannelsDeskAppId}
+                onValueChange={setSelectedChannelsDeskAppId}
+              >
+                <SelectTrigger id='channels-desk-app-select' className='w-full'>
+                  <SelectValue placeholder='Select an app' />
+                </SelectTrigger>
+                <SelectContent>
+                  {channelsDeskInstalledApps.map(installed => (
+                    <SelectItem key={installed.id} value={installed.id}>
+                      {installed.app?.name ?? installed.id}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className='text-xs text-muted-foreground'>
+                After creating the desk, add the channels this app created in desk settings; new
+                threads in them become tickets here. The conversation stays in its channel; only its
+                members can open it.
+              </p>
+            </>
+          )}
+        </div>
+      )}
+
       {requireConnector && deskType === DeskType.SOCIAL_MEDIA && (
         <div className='space-y-4'>
           <div className='space-y-2'>
@@ -882,6 +965,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                 <SelectItem value='GOOGLE_PLAY'>Google Play reviews</SelectItem>
                 <SelectItem value='APP_STORE'>App Store reviews</SelectItem>
                 <SelectItem value='INSTAGRAM'>Instagram DMs</SelectItem>
+                <SelectItem value='FACEBOOK'>Facebook Page</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -1151,6 +1235,16 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
         </div>
       )}
 
+      {requireConnector && deskType === DeskType.SOCIAL_MEDIA && socialProvider === 'FACEBOOK' && (
+        <div className='space-y-2 rounded-lg border border-border bg-muted/20 p-3'>
+          <p className='text-sm text-foreground font-medium'>Connect via Facebook</p>
+          <p className='text-xs text-muted-foreground'>
+            You&apos;ll be redirected to Facebook to choose the Pages to connect. Messages, comments
+            and mentions on those Pages will create tickets.
+          </p>
+        </div>
+      )}
+
       {/* Connector Selection (for personal mailbox desks) */}
       {requireConnector && deskType === DeskType.EMAIL && (
         <div className='space-y-2'>
@@ -1309,7 +1403,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
             <div className='space-y-1.5'>
               <label htmlFor='board-select' className='text-sm font-medium text-foreground'>
                 Board
-                {deskType === DeskType.SOCIAL_MEDIA && socialProvider !== 'INSTAGRAM' && (
+                {deskType === DeskType.SOCIAL_MEDIA && !isOAuthSocialProvider(socialProvider) && (
                   <span className='text-destructive'> *</span>
                 )}
               </label>

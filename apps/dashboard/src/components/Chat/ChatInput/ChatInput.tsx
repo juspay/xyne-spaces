@@ -150,6 +150,8 @@ interface ChatInputProps {
   threadParticipantIds?: ReadonlySet<string>;
   dockSlot?: React.ReactNode;
   twinEdit?: TwinEditSession | undefined;
+  /** Offers "Send to channel" on thread replies. Off where the reply must stay in the thread (Channels desk). */
+  allowSendToChannel?: boolean;
 }
 
 const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
@@ -171,6 +173,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       threadParticipantIds,
       dockSlot,
       twinEdit,
+      allowSendToChannel = true,
     },
     ref,
   ) => {
@@ -912,12 +915,12 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         // On-device intent classification. Fire-and-forget and never awaited — it must
         // not add a single millisecond to the send path. Gated inside the service on the
         // user preference and public-channel visibility, both fail closed. A detection
-        // raises a local toast; nothing leaves the device. See docs/ON_DEVICE_INTENT.md
         const classifyIntent = (sentMessageId: string): void => {
           intentClassifier.submitForMessage({
             text: _plainText,
             messageId: sentMessageId,
             channel,
+            surface: conversationId ? 'thread' : 'channel',
           });
         };
 
@@ -1374,7 +1377,8 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               preserveThreadRoute={!!conversationId}
               {...(conversationId &&
                 !messageId &&
-                !isSdlcChannel && {
+                !isSdlcChannel &&
+                allowSendToChannel && {
                   onAlsoSendToChannelChange: handleAlsoSendToChannelChange,
                   alsoSendToChannelChecked: alsoSendToChannel,
                   isDMThread: !!isDM,

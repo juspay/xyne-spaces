@@ -157,7 +157,7 @@ export async function assertAttachmentAccess(
       logger.warn('Unauthorized recording attachment access', {
         userId,
         attachmentId: attachment.id,
-        callId: call.id,
+        callId: call.externalId,
       });
       return {
         ok: false,

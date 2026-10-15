@@ -173,11 +173,13 @@ export type CredRow = {
  * rows keep the per-agent key/write-back. Used by every agent-cred refresh
  * site (this file, webhook.ts, agent-chat.ts) so the target logic can't drift.
  */
+type CredBundleRow = { encryptedKey: string | null; iv: string | null; authTag: string | null; authType: string | null };
+
 export function agentCredRefreshTarget(
   agentId: string,
   provider: string,
   row: { sharedCredentialId?: string | null },
-): { credKey: string; persist: (enc: { encryptedKey: string; iv: string; authTag: string }) => Promise<void> } {
+): { credKey: string; persist: (enc: { encryptedKey: string; iv: string; authTag: string }) => Promise<void>; reload: () => Promise<CredBundleRow | null> } {
   const sharedId = row.sharedCredentialId;
   if (sharedId) {
     return {
@@ -185,6 +187,7 @@ export function agentCredRefreshTarget(
       persist: async (enc) => {
         await sharedProviderCredentialRepository.persistBundle(sharedId, enc);
       },
+      reload: () => sharedProviderCredentialRepository.findById(sharedId),
     };
   }
   return {
@@ -192,6 +195,7 @@ export function agentCredRefreshTarget(
     persist: async (enc) => {
       await agentProviderCredentialsRepository.upsert(agentId, provider, enc);
     },
+    reload: () => agentProviderCredentialsRepository.findByAgentAndProvider(agentId, provider),
   };
 }
 
@@ -204,7 +208,7 @@ export function userCredRefreshTarget(
   userId: string,
   provider: string,
   row: { sharedCredentialId?: string | null },
-): { credKey: string; persist: (enc: { encryptedKey: string; iv: string; authTag: string }) => Promise<void> } {
+): { credKey: string; persist: (enc: { encryptedKey: string; iv: string; authTag: string }) => Promise<void>; reload: () => Promise<CredBundleRow | null> } {
   const sharedId = row.sharedCredentialId;
   if (sharedId) {
     return {
@@ -212,6 +216,7 @@ export function userCredRefreshTarget(
       persist: async (enc) => {
         await sharedProviderCredentialRepository.persistBundle(sharedId, enc);
       },
+      reload: () => sharedProviderCredentialRepository.findById(sharedId),
     };
   }
   return {
@@ -219,6 +224,7 @@ export function userCredRefreshTarget(
     persist: async (enc) => {
       await userProviderCredentialsRepository.upsert(userId, provider, enc);
     },
+    reload: () => userProviderCredentialsRepository.findByUserAndProvider(userId, provider),
   };
 }
 
@@ -347,7 +353,7 @@ export async function resolveAgentProviderConfigs(
     if (credRow) {
       const target = agentCredRefreshTarget(agent.id, "claude", credRow);
       try {
-        claudeCfg.apiKey = await getValidClaudeBearer(target.credKey, credRow, target.persist);
+        claudeCfg.apiKey = await getValidClaudeBearer(target.credKey, credRow, target.persist, target.reload);
       } catch (err) {
         log.warn("Claude OAuth refresh failed for agent — credential likely needs reconnect", {
           error: errMsg(err),
@@ -361,7 +367,7 @@ export async function resolveAgentProviderConfigs(
     if (credRow) {
       const target = agentCredRefreshTarget(agent.id, "codex", credRow);
       try {
-        codexCfg.apiKey = await getValidCodexBearer(target.credKey, credRow, target.persist);
+        codexCfg.apiKey = await getValidCodexBearer(target.credKey, credRow, target.persist, target.reload);
       } catch (err) {
         log.warn("Codex OAuth refresh failed for agent — credential likely needs reconnect", {
           error: errMsg(err),

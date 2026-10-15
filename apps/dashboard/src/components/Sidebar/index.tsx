@@ -28,6 +28,7 @@ const Sidebar = (): ReactElement => {
             return (
               <li key={item.path}>
                 <Link
+                  aria-current={isActive ? 'page' : undefined}
                   to={item.path}
                   className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors duration-200 ${
                     isActive

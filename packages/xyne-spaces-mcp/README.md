@@ -4,7 +4,7 @@ An MCP server that lets a coding agent read and write Xyne Spaces — channels, 
 messages, tickets, calls, canvases and search — through
 [`@xyne/spaces-sdk`](https://www.npmjs.com/package/@xyne/spaces-sdk).
 
-34 tools over the Spaces public API. Not 483: the SDK exposes every operation the
+36 tools over the Spaces public API. Not 483: the SDK exposes every operation the
 product itself performs, and this exposes the ones an agent actually reaches for, each
 with an exact schema.
 
@@ -162,7 +162,7 @@ export XYNE_SPACES_READONLY=0   # or false / no; restart the agent afterwards
 ```
 
 Any other value, including leaving it unset, keeps the server read-only: 24 tools instead
-of 34 (`spaces_login` is always there). A tool the model cannot see is a tool it cannot decide to use, which
+of 36 (`spaces_login` is always there). A tool the model cannot see is a tool it cannot decide to use, which
 is more reliable than declining after the fact.
 
 ---
@@ -214,11 +214,13 @@ means they wrote nothing in that window, which repeated searches could never est
 |---|---|---|
 | `spaces_tickets_list` | `view_mode` | Tickets in one scope, in full detail |
 | `spaces_tickets_search` | — | Tickets whose key or title matches. The fastest key → id lookup |
-| `spaces_ticket_get` | `ticket_id` | One ticket with tags, role assignments, related tickets, stage requests, RCA |
+| `spaces_ticket_get` | `ticket_id` | One ticket with tags, role assignments, related tickets, parent and sub-tickets, stage requests, RCA |
 | `spaces_ticket_activities` | `ticket_id` | Change history: who moved what, when |
-| `spaces_ticket_create` | `title`, `description`, `project_id`, `channel_id` | A new ticket. The server allocates the key (`PLAT-1234`) |
+| `spaces_ticket_create` | `title`, `description`, `project_id`, `channel_id` | A new ticket. The server allocates the key (`PLAT-1234`). `stage_name` must exist on `board_id`; `parent_ticket_id` links it as a sub-ticket |
 | `spaces_ticket_update` | `ticket_id` | Changes fields. Reassign with `assigned_to` |
 | `spaces_ticket_transition` | `ticket_id`, `to_stage_name` | Moves a stage, picking the right path for the board |
+| `spaces_ticket_link_sub_ticket` | `parent_ticket_id`, `child_ticket_id` | Makes an existing ticket a sub-ticket (key or id for each) |
+| `spaces_ticket_unlink_sub_ticket` | `parent_ticket_id`, `child_ticket_id` | Detaches a sub-ticket; the ticket itself is kept |
 
 `view_mode` decides the scope and which companion argument is needed: `my-tickets` needs
 none, `project` needs `project_id`, `board` needs `board_id`, `user-tickets` needs

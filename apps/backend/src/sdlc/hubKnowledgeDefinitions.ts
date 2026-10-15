@@ -6,13 +6,12 @@ export interface HubKnowledgeDefinition {
 }
 
 /** Seeded into each step's task, where admins can edit it. */
-const HUB_KNOWLEDGE_POLICY = `This document is Hub Knowledge: standing context the SDLC agent receives, ahead of the
-user's question, on every chat and channel request in this hub. Write for an agent that has not seen the
-code, is about to act on it, and pays for every token you spend.
+const HUB_KNOWLEDGE_POLICY = `This document is a Knowledge File. The SDLC agent sees only its title and opens it when a
+request needs it. Write for an agent that has not seen the code and is about to act on it.
 
 - Cover every repository in the hub. List them with spaces-sdlc-list-repositories first, and say how they
   relate where it matters.
-- Stay under about 800 words.
+- Stay under about 800 words, so opening it stays cheap.
 - Prefer what stays true: module boundaries, entry points, where a kind of thing lives, the conventions a
   change has to follow, the invariants that bite. Leave out line numbers, file counts, version strings and
   progress notes.

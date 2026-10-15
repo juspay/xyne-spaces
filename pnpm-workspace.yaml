@@ -19,6 +19,7 @@ packages:
 
   - packages/shared
   - packages/storage
+  - packages/secrets-vault
   - packages/icons
   - packages/framework
   - packages/kata-sdk

@@ -254,7 +254,7 @@ router.get('/schema/steps/:type', (req: Request, res: Response) => {
       category: impl.category,
       icon: impl.icon,
       configSchema: zodToJsonSchema(impl.configSchema as z.ZodSchema, { name: 'config' }),
-      outputSchema: zodToJsonSchema(impl.outputSchema as z.ZodSchema, { name: 'output' }),
+      outputSchema: zodToJsonSchema(impl.outputSchema as z.ZodSchema, { name: 'output', $refStrategy: 'none' }),
     },
     timestamp: new Date().toISOString(),
   });

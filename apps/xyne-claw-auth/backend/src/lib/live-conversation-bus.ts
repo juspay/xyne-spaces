@@ -28,6 +28,13 @@ const log = createLogger("live-bus");
 const CHANNEL_PREFIX = "claw:live:";
 const channelFor = (conversationId: string) => CHANNEL_PREFIX + conversationId;
 
+/** One thinking/text fragment of a coalesced live `delta`, tagged with its part. */
+export interface LiveDeltaChunk {
+  type: "text" | "reasoning";
+  partId?: string;
+  delta: string;
+}
+
 export type LiveEvent =
   | { type: "label"; conversationId: string; agentSlug?: string | undefined; userId: string; toolLabel: string; ts: number }
   // `triggerSource` rides along so the SSE viewer can apply the SAME redaction
@@ -38,7 +45,9 @@ export type LiveEvent =
   // Coalesced assistant text/reasoning fragments (one event per ~250ms batch) so
   // VIEWERS (reloaded tabs, Spaces) stream the answer live instead of seeing it
   // appear all-at-once on `done`. Either/both fields may be present per batch.
-  | { type: "delta"; conversationId: string; agentSlug?: string | undefined; userId: string; textDelta?: string; reasoningDelta?: string; ts: number }
+  // `chunks` is the same batch split per thinking/text block, in order, so a
+  // viewer can build the turn's step timeline (absent from older pods).
+  | { type: "delta"; conversationId: string; agentSlug?: string | undefined; userId: string; textDelta?: string; reasoningDelta?: string; chunks?: LiveDeltaChunk[]; ts: number }
   | { type: "ui-flow"; conversationId: string; agentSlug?: string | undefined; userId: string; flow: unknown; ts: number }
   | { type: "done"; conversationId: string; agentSlug?: string | undefined; userId: string; status: string; followUpsPending?: boolean; ts: number };
 

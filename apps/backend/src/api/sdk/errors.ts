@@ -44,7 +44,7 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorDefinition>> = {
     status: 401,
     retryable: false,
     description:
-      'The API key is missing, malformed, unverifiable, expired, or revoked. These are deliberately indistinguishable — mint a new key from the dashboard.',
+      'The Spaces session is missing, invalid, or expired. Sign in again with Xyne SSO.',
   },
   forbidden: {
     status: 403,
@@ -91,6 +91,7 @@ export type ErrorDetails = readonly ErrorDetail[] | Readonly<Record<string, unkn
 export interface ApiErrorBody {
   readonly error: {
     readonly code: ErrorCode;
+    readonly reason?: string;
     readonly message: string;
     readonly details?: ErrorDetails;
     readonly request_id: string;
@@ -110,6 +111,7 @@ export class SdkApiError extends Error {
   public readonly status: number;
   public readonly retryable: boolean;
   public readonly details?: ErrorDetails;
+  public readonly reason?: string;
   /** Set when the underlying cause should be logged but never returned to the caller. */
   public readonly cause?: unknown;
 
@@ -118,6 +120,7 @@ export class SdkApiError extends Error {
     message?: string,
     opts: {
       details?: ErrorDetails;
+      reason?: string;
       cause?: unknown;
     } = {},
   ) {
@@ -128,6 +131,7 @@ export class SdkApiError extends Error {
     this.status = definition.status;
     this.retryable = definition.retryable;
     if (opts.details !== undefined) this.details = opts.details;
+    if (opts.reason !== undefined) this.reason = opts.reason;
     if (opts.cause !== undefined) this.cause = opts.cause;
     Error.captureStackTrace(this, SdkApiError);
   }

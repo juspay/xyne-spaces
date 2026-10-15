@@ -2,7 +2,6 @@ import { agentRunRepository } from "../../repositories/agentRunRepository.js";
 import { gcsService } from "../../services/storageService.js";
 import { CONFIG } from "../../config.js";
 import { getSlotOwner } from "../message-queue.js";
-import { postGeneratedMarkdownFile } from "../spaces-generated-file.js";
 import {
   renderDebugTraceHtml,
   renderDebugTraceBundleHtml,
@@ -325,16 +324,7 @@ export async function handleDebug(
 
 async function attach(ctx: WebhookCommandCtx, filename: string, html: string, summary: string): Promise<void> {
   try {
-    await postGeneratedMarkdownFile({
-      channelId: ctx.payload.channelId,
-      conversationId: ctx.payload.conversationId,
-      userId: ctx.agent.spacesAppUserId,
-      appToken: ctx.agent.appToken,
-      filename,
-      markdown: html,
-      mimeType: "text/html",
-      summary,
-    });
+    await ctx.attach({ fileName: filename, mimeType: "text/html", content: html, summary });
   } catch (err) {
     ctx.log.warn("/debug trace upload failed", { error: errMsg(err) });
     await ctx.reply(`${summary}\n\n⚠️ _Couldn't attach ${filename} (upload failed)._`, REPLY_LABEL);

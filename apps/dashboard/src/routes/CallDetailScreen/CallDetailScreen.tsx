@@ -545,7 +545,7 @@ export default function CallDetailScreen(): ReactElement {
             showTranscriptPanel && 'md:pr-[560px]',
           )}
         >
-          <div className='mx-auto w-full max-w-[820px] px-6 pt-6 pb-24 sm:px-8'>
+          <div className='mx-auto w-full max-w-[884px] px-4 pt-6 pb-24'>
             {/* Breadcrumb + Ask AI */}
             <div className='flex items-center gap-[7px] mb-[18px]'>
               <button
@@ -653,6 +653,7 @@ export default function CallDetailScreen(): ReactElement {
             <div className='mt-3.5 flex items-center gap-2.5 border-b border-border pb-3'>
               {canScrollLeft && (
                 <button
+                  aria-label='Scroll tabs left'
                   onClick={() => {
                     tabScrollRef.current?.scrollBy({ left: -120, behavior: 'smooth' });
                     updateScrollButtons();
@@ -700,6 +701,7 @@ export default function CallDetailScreen(): ReactElement {
               </div>
               {canScrollRight && (
                 <button
+                  aria-label='Scroll tabs right'
                   onClick={() => {
                     tabScrollRef.current?.scrollBy({ left: 120, behavior: 'smooth' });
                     updateScrollButtons();

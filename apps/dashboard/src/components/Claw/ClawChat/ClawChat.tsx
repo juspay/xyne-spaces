@@ -23,8 +23,6 @@ function ClawChat({ onRequestClose }: ClawChatProps = {}): ReactElement {
     conversationId,
     selectedAgentSlug,
     agents,
-    sessions,
-    sessionsLoading,
     loadingSessionId,
     submitQuery,
     abortCurrentRequest,
@@ -32,15 +30,10 @@ function ClawChat({ onRequestClose }: ClawChatProps = {}): ReactElement {
     newChat,
     loadConversation,
     deleteConversation,
-    refetchSessions,
   } = useClawConversation();
 
   const [showHistory, setShowHistory] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-
-  useEffect(() => {
-    if (showHistory) refetchSessions();
-  }, [showHistory, refetchSessions]);
 
   const handleRetry = useCallback(() => {
     const lastUserMessage = [...messages].reverse().find(m => m.type === 'user');
@@ -131,21 +124,15 @@ function ClawChat({ onRequestClose }: ClawChatProps = {}): ReactElement {
           <ClawSettings onBack={() => setShowSettings(false)} />
         ) : showHistory ? (
           <ConversationHistory
-            conversations={sessions}
             conversationId={conversationId}
             loadingSessionId={loadingSessionId}
             streamingSessionIds={streamingSessionIds}
-            isLoading={sessionsLoading && sessions.length === 0}
             onBack={() => setShowHistory(false)}
             onClose={() => setShowHistory(false)}
             onLoadConversation={conversation => {
               void handleLoadConversation(conversation);
             }}
             onDeleteConversation={deleteConversation}
-            selectedAgentSlug={selectedAgentSlug}
-            agents={agents}
-            onSelectAgent={selectAgent}
-            agentSelectorDisabled={isStreaming}
           />
         ) : (
           <MessageList messages={messages} onRetry={handleRetry} />

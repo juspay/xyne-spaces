@@ -10,12 +10,14 @@ import React, {
 import { createPortal } from 'react-dom';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Ticket, TicketTag } from '@xyne/shared';
-import { isDeskChannelType, TicketStatusV2 } from '@xyne/shared';
+import { isDeskChannelType } from '@xyne/shared';
 import { useCachedQuery } from '@xyne/shared/hooks';
 import { toast } from 'sonner';
 import { queries } from '../../../zero/queries';
 import { useUserGroups } from '../../../hooks/useUserGroup';
-import { TicketListRow, type SubTicketProgress } from './TicketListRow';
+import { TicketListRow, TicketListRowLine } from './TicketListRow';
+import { SubTicketsTree } from '../SubTickets/SubTickets';
+import { useSubTicketProgress } from '../SubTickets/useSubTickets';
 import { BulkActionToolbar } from './BulkActionToolbar';
 import { ExclusivePickerScope } from './ExclusivePickerScope';
 import {
@@ -32,6 +34,7 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { useAllChannels } from '../../../hooks/useChannels';
 import { useShortcut } from '../../../shortcuts';
+import { useTicketNoun } from '../../../contexts/TicketNounContext';
 
 interface TicketTableProps {
   tickets: Ticket[];
@@ -57,6 +60,8 @@ interface TicketTableProps {
   renderRowExtras?: (ticket: Ticket) => ReactNode;
   /** Renders the bulk-action toolbar here instead of inline, for lists inside a clipped or masked scroller. */
   bulkActionsContainer?: HTMLElement | null;
+  /** A row's sub-ticket count opens its sub-tickets under it. Boards turn it on; the Desk does not. */
+  expandableSubTickets?: boolean;
 }
 
 // The registry already skips editable targets; these guards cover the rest.
@@ -82,6 +87,8 @@ const ROW_HEIGHT_COMPACT = 40;
 const ROW_HEIGHT_COMFORT = 52;
 const TRAILING_ROW_HEIGHT = 44;
 const LOAD_MORE_REMAINING_ROWS = 8;
+// One empty array for every untagged row, so memoised rows don't see a new one each render.
+const NO_TAGS: TicketTag[] = [];
 
 export const TicketTable: React.FC<TicketTableProps> = ({
   tickets,
@@ -103,7 +110,9 @@ export const TicketTable: React.FC<TicketTableProps> = ({
   pageSize = 25,
   renderRowExtras,
   bulkActionsContainer,
+  expandableSubTickets = false,
 }) => {
+  const noun = useTicketNoun();
   const isPagesMode = paginationMode === 'pages';
   const navigate = useNavigate();
   const { isMobile } = usePlatform();
@@ -389,20 +398,7 @@ export const TicketTable: React.FC<TicketTableProps> = ({
     );
   }, [virtualItems, tickets, isPagesMode, pageTickets]);
 
-  const [subTicketMappings] = useCachedQuery(
-    queries.subTicketMappingsForTickets({ ticketIds: visibleTicketIds }),
-    { enabled: visibleTicketIds.length > 0 },
-  );
-  const subProgressByTicketId = useMemo(() => {
-    const map = new Map<string, SubTicketProgress>();
-    subTicketMappings?.forEach(mapping => {
-      const entry = map.get(mapping.ticketId) ?? { done: 0, total: 0 };
-      entry.total += 1;
-      if (mapping.subTicket?.mappedTicket?.statusV2 === TicketStatusV2.COMPLETED) entry.done += 1;
-      map.set(mapping.ticketId, entry);
-    });
-    return map;
-  }, [subTicketMappings]);
+  const subProgressByTicketId = useSubTicketProgress(visibleTicketIds);
 
   const visibleBoardIds = useMemo(() => {
     const ticketsById = new Map(tickets.map(t => [t.id, t]));
@@ -445,6 +441,81 @@ export const TicketTable: React.FC<TicketTableProps> = ({
     if (lastEnd < totalSize) ghostRegions.push({ top: lastEnd, height: totalSize - lastEnd });
   }
 
+  const renderListRow = (ticket: Ticket): ReactNode => (
+    <TicketListRow
+      ticket={ticket}
+      isSelected={selected.has(ticket.id)}
+      onToggleSelect={toggleSelect}
+      tags={ticketTags?.get(ticket.id) ?? NO_TAGS}
+      availableTags={availableTags}
+      visibleColumns={visibleColumns}
+      subProgress={subProgressByTicketId.get(ticket.id)}
+      boardName={boardNameById.get(ticket.boardId)}
+      isComfortView={isComfortView}
+      extras={renderRowExtras?.(ticket)}
+      onOpen={onOpen}
+      expandableSubTickets={expandableSubTickets}
+    />
+  );
+
+  // A virtual row whose sub-tickets opened or grew: measured now, before paint.
+  const remeasureRow = useCallback(
+    (index: number): void => {
+      // resizeItem, not measureElement: called by hand, that returns the cached size.
+      const row = listRef.current?.querySelector<HTMLElement>(`[data-index="${index}"]`);
+      if (row) virtualizer.resizeItem(index, Math.round(row.getBoundingClientRect().height));
+    },
+    [virtualizer],
+  );
+
+  // A ticket's open sub-tickets, as rows under it on the same tree.
+  const renderSubTickets = (ticket: Ticket, virtualIndex?: number): ReactNode => {
+    const progress = subProgressByTicketId.get(ticket.id);
+    if (!expandableSubTickets || !progress) return null;
+    return (
+      <SubTicketsTree
+        ticketId={ticket.id}
+        total={progress.total}
+        layout='list'
+        {...(virtualIndex !== undefined && { onResize: () => remeasureRow(virtualIndex) })}
+        renderItem={(subTicket, connector) => (
+          <div
+            className='border-b border-border hover:bg-muted/60'
+            style={{ height: `${rowHeight}px` }}
+          >
+            <TicketListRow
+              ticket={subTicket}
+              isSelected={selected.has(subTicket.id)}
+              onToggleSelect={toggleSelect}
+              tags={NO_TAGS}
+              availableTags={availableTags}
+              visibleColumns={visibleColumns}
+              boardName={boardNameById.get(subTicket.boardId)}
+              isComfortView={isComfortView}
+              onOpen={onOpen}
+              treeConnector={connector}
+            />
+          </div>
+        )}
+        renderListLine={(content, connector, kind) => (
+          // A sub-ticket not yet linked keeps a row's height; the footer is a short line.
+          <div
+            className='border-b border-border'
+            style={{ height: `${kind === 'item' ? rowHeight : 32}px` }}
+          >
+            <TicketListRowLine
+              visibleColumns={visibleColumns}
+              isComfortView={isComfortView}
+              connector={connector}
+            >
+              {content}
+            </TicketListRowLine>
+          </div>
+        )}
+      />
+    );
+  };
+
   const listBody = (
     <div
       ref={listRef}
@@ -471,38 +542,46 @@ export const TicketTable: React.FC<TicketTableProps> = ({
               style={{ height: `${item.size}px`, transform: `translateY(${start}px)` }}
             >
               {hasMore || isLoadingMore
-                ? 'Loading more tickets…'
+                ? `Loading more ${noun.plural}…`
                 : // A total below the loaded count means the counts service is
                   // still loading or failed — show no misleading number.
                   totalCount !== undefined && totalCount >= tickets.length
-                  ? `End of results — ${totalCount} ticket${totalCount === 1 ? '' : 's'}`
+                  ? `End of results — ${totalCount} ${totalCount === 1 ? noun.singular : noun.plural}`
                   : 'End of results'}
             </div>
           );
         }
         const ticket = tickets[item.index]!;
+        const highlightClass = highlightedIndex === item.index ? 'bg-muted' : '';
+        if (expandableSubTickets) {
+          // Measured, so the row grows by its open sub-tickets.
+          return (
+            <div
+              key={ticket.id}
+              role='listitem'
+              data-index={item.index}
+              ref={virtualizer.measureElement}
+              className='absolute left-0 top-0 w-full'
+              style={{ transform: `translateY(${start}px)` }}
+            >
+              <div
+                className={`border-b border-border hover:bg-muted/60 ${highlightClass}`}
+                style={{ height: `${rowHeight}px` }}
+              >
+                {renderListRow(ticket)}
+              </div>
+              {renderSubTickets(ticket, item.index)}
+            </div>
+          );
+        }
         return (
           <div
             key={ticket.id}
             role='listitem'
-            className={`absolute left-0 top-0 w-full border-b border-border hover:bg-muted/60 ${
-              highlightedIndex === item.index ? 'bg-muted' : ''
-            }`}
+            className={`absolute left-0 top-0 w-full border-b border-border hover:bg-muted/60 ${highlightClass}`}
             style={{ height: `${item.size}px`, transform: `translateY(${start}px)` }}
           >
-            <TicketListRow
-              ticket={ticket}
-              isSelected={selected.has(ticket.id)}
-              onToggleSelect={toggleSelect}
-              tags={ticketTags?.get(ticket.id) || []}
-              availableTags={availableTags}
-              visibleColumns={visibleColumns}
-              subProgress={subProgressByTicketId.get(ticket.id)}
-              boardName={boardNameById.get(ticket.boardId)}
-              isComfortView={isComfortView}
-              extras={renderRowExtras?.(ticket)}
-              onOpen={onOpen}
-            />
+            {renderListRow(ticket)}
           </div>
         );
       })}
@@ -531,34 +610,23 @@ export const TicketTable: React.FC<TicketTableProps> = ({
     <>
       <div role='list'>
         {pageTickets.map((ticket, index) => (
-          <div
-            key={ticket.id}
-            role='listitem'
-            className={`border-b border-border hover:bg-muted/60 ${
-              highlightedIndex === pageIndex * pageSize + index ? 'bg-muted' : ''
-            }`}
-            style={{ height: `${rowHeight}px` }}
-          >
-            <TicketListRow
-              ticket={ticket}
-              isSelected={selected.has(ticket.id)}
-              onToggleSelect={toggleSelect}
-              tags={ticketTags?.get(ticket.id) || []}
-              availableTags={availableTags}
-              visibleColumns={visibleColumns}
-              subProgress={subProgressByTicketId.get(ticket.id)}
-              boardName={boardNameById.get(ticket.boardId)}
-              isComfortView={isComfortView}
-              extras={renderRowExtras?.(ticket)}
-              onOpen={onOpen}
-            />
+          <div key={ticket.id} role='listitem'>
+            <div
+              className={`border-b border-border hover:bg-muted/60 ${
+                highlightedIndex === pageIndex * pageSize + index ? 'bg-muted' : ''
+              }`}
+              style={{ height: `${rowHeight}px` }}
+            >
+              {renderListRow(ticket)}
+            </div>
+            {renderSubTickets(ticket)}
           </div>
         ))}
       </div>
       <div className='flex items-center justify-end gap-4 px-3 py-2 text-xs text-muted-foreground'>
         <span>
           {tickets.length === 0
-            ? '0 tickets'
+            ? `0 ${noun.plural}`
             : `${pageIndex * pageSize + 1} to ${Math.min((pageIndex + 1) * pageSize, tickets.length)} of ${tickets.length}`}
         </span>
         <div className='flex items-center gap-1'>
@@ -603,11 +671,11 @@ export const TicketTable: React.FC<TicketTableProps> = ({
     <ExclusivePickerScope className='flex min-h-0 flex-1 flex-col'>
       {isLoading && tickets.length === 0 ? (
         <div className='flex h-24 items-center justify-center text-sm text-muted-foreground'>
-          Loading tickets…
+          Loading {noun.plural}…
         </div>
       ) : tickets.length === 0 ? (
         <div className='flex h-24 items-center justify-center text-sm text-muted-foreground'>
-          No tickets match the current filters.
+          No {noun.plural} match the current filters.
         </div>
       ) : isPagesMode ? (
         pagesBody

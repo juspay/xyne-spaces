@@ -66,9 +66,11 @@ export function FilePreview(props: {
 }): ReactElement {
   const { file } = props;
   const previewer = useMemo(() => previewerFor(file), [file]);
-  const tooLarge = previewer?.maxBytes !== undefined && file.size > previewer.maxBytes;
+  const tooLarge =
+    previewer?.maxBytes !== undefined && file.size > 0 && file.size > previewer.maxBytes;
   const { state, retry } = usePreviewContent(file, tooLarge ? null : previewer);
   const [controls, setControls] = useState<HTMLElement | null>(null);
+  const [trailing, setTrailing] = useState<HTMLElement | null>(null);
   const [meta, setMeta] = useState<HTMLElement | null>(null);
   // What the view on screen can search, lent by it; none for an image or a video.
   const [finder, setFinder] = useState<FindProvider | null>(null);
@@ -83,8 +85,8 @@ export function FilePreview(props: {
     });
   }, [file.id, file.name]);
   const frame = useMemo(
-    () => ({ controls, meta, download, setFinder, openFind: find.open }),
-    [controls, meta, download, find.open],
+    () => ({ controls, trailing, meta, download, setFinder, openFind: find.open }),
+    [controls, trailing, meta, download, find.open],
   );
 
   const extension = extensionOf(file.name);
@@ -166,8 +168,12 @@ export function FilePreview(props: {
             className='flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground'
           >
             <span className='shrink-0'>{typeLabel}</span>
-            <span aria-hidden='true'>·</span>
-            <span className='shrink-0 tabular-nums'>{formatFileSize(file.size)}</span>
+            {file.size > 0 && (
+              <>
+                <span aria-hidden='true'>·</span>
+                <span className='shrink-0 tabular-nums'>{formatFileSize(file.size)}</span>
+              </>
+            )}
           </div>
           {/* Where the previewer's own controls go. */}
           <div ref={setControls} className='ml-auto flex shrink-0 items-center gap-1' />
@@ -180,6 +186,8 @@ export function FilePreview(props: {
           <PreviewButton title='Download' onClick={download} trackName='PreviewDownloaded'>
             <Download className='size-4' />
           </PreviewButton>
+          {/* The far end, for a previewer's panel toggle; nothing when it has none. */}
+          <div ref={setTrailing} className='flex shrink-0 items-center gap-1 empty:hidden' />
         </div>
         <div className='relative min-h-0 flex-1'>
           {body}

@@ -4,7 +4,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
-import { webhookLimiter } from '@/middleware/rateLimiters';
+import { ttsLimiter, webhookLimiter } from '@/middleware/rateLimiters';
 import morgan from 'morgan';
 
 import { config } from '@/config/env';
@@ -33,6 +33,7 @@ import analyticsRoutes from '@/routes/analytics';
 import apiKeyRoutes from '@/routes/api-keys';
 import userManagementRoutes from '@/routes/userManagement';
 import userActivationRoutes from '@/routes/userActivation';
+import secretsVaultRoutes from '@/routes/secretsVault';
 import channelRoutes from '@/routes/channels';
 import microsoftDeskAuthRoutes from '@/integrations/routes/microsoft-desk-auth';
 import conversationRoutes from '@/routes/conversations';
@@ -71,6 +72,7 @@ import userRoutes from '@/routes/users';
 import notificationRoutes from '@/routes/notifications';
 import draftRoutes from '@/routes/draftAttachments';
 import callRoutes from '@/routes/calls';
+import callAdminRoutes from '@/routes/callAdmin';
 import calendarSyncRoutes from '@/routes/calendarSync';
 import calendarOAuthRoutes from '@/routes/calendarOAuth';
 import driveOAuthRoutes from '@/routes/driveOAuth';
@@ -104,6 +106,7 @@ import auditLogRoutes from '@/routes/auditLogs';
 import recordingPointerBackfillRoutes from '@/routes/recordingPointerBackfill';
 import sdlcRepoCredentialBackfillRoutes from '@/routes/sdlcRepoCredentialBackfill';
 import searchMetricsRoutes from '@/routes/searchMetrics';
+import searchFeedbackRoutes from '@/routes/searchFeedback';
 import knowledgeRoutes from '@/routes/knowledge';
 import vespaSearchRoutes, { relatedContextRouter } from '@/routes/vespaSearch';
 import assistantRouteRoutes from '@/routes/assistantRoute';
@@ -134,6 +137,7 @@ import deskMetricsAggregateRoutes from '@/routes/deskMetricsAggregateRoutes';
 import deskMetricsClawRoutes from '@/routes/deskMetricsClawRoutes';
 import deskReportPanelRoutes from '@/routes/deskReportPanelRoutes';
 import aiRetriggerRoutes from '@/routes/aiRetriggerRoutes';
+import deskAutoAssignRoutes from '@/routes/deskAutoAssignRoutes';
 import testAuthRoutes from '@/routes/testAuth';
 import customInstructionRoutes from '@/routes/customInstruction';
 import dailyBriefRoutes from '@/routes/dailyBrief';
@@ -148,6 +152,8 @@ import sdlcArtifactVersionsInternalRoutes from '@/routes/sdlcArtifactVersionsInt
 import sdlcWikiInternalRoutes from '@/routes/sdlcWikiInternal';
 import { handleAutoDraftCallback } from '@/controllers/autodraftCallback.handler';
 import { handleDeskReportCallback } from '@/controllers/deskReportCallback.handler';
+import { handleClawCallAiCallback } from '@/controllers/clawCallAiCallback.handler';
+import { CLAW_CALL_AI_CALLBACK_PATH } from '@/services/callAi/clawCallAiRunner';
 import automationWebhookRoutes from '@/automations/routes/webhook-trigger.handler';
 import activityLogRoutes from '@/routes/activityLog';
 import userActivityRoutes from '@/routes/userActivity';
@@ -180,6 +186,7 @@ import { boardConfigCopyWorker } from '@/workers/boardConfigCopyWorker';
 import { assignmentReactivationQueue } from '@/queues/assignmentReactivationQueue';
 import { ticketReassignmentQueue } from '@/queues/ticketReassignmentQueue';
 import { onCallRotationQueue } from '@/queues/onCallRotationQueue';
+import { autoAssignSweepQueue } from '@/queues/autoAssignSweepQueue';
 import { scheduledMessageQueue } from '@/queues/scheduledMessageQueue';
 import { conversationIngestQueue } from '@/queues/conversationIngestQueue';
 import { documentIngestQueue } from '@/queues/documentIngestQueue';
@@ -213,6 +220,8 @@ import sdlcAgentInternalRoutes from '@/routes/sdlcAgentInternal';
 import { createSdkPublicRouter, createSdkRouter } from '@/api/sdk';
 import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
 import sdkSsoRoutes from '@/routes/sdk-sso';
+import { authenticateSdk } from '@/middleware/sdkAuth';
+import channelsDeskRoutes from '@/routes/channelsDesks';
 
 
 export class App {
@@ -379,9 +388,10 @@ export class App {
       // are public, status/approve authenticate the dashboard session themselves.
       this.app.use('/api/sdk/auth/sso', sdkSsoRoutes);
       this.app.use('/api/sdk', createSdkPublicRouter());
-      this.app.use('/api/sdk', authMiddleware.authenticate, createSdkRouter(), sdkErrorHandler);
+      this.app.use('/api/sdk', authenticateSdk, createSdkRouter(), sdkErrorHandler);
       logger.info('Public SDK API mounted at /api/sdk');
     }
+    this.app.use('/api/channels-desks', authMiddleware.authenticate, channelsDeskRoutes);
 
     this.app.use('/api/automation-webhooks', webhookLimiter, automationWebhookRoutes);
 
@@ -403,6 +413,7 @@ export class App {
     this.app.use('/api/desk-metrics', authMiddleware.authenticate, deskMetricsAggregateRoutes);
     this.app.use('/api/desk-report', authMiddleware.authenticate, deskReportPanelRoutes);
     this.app.use('/api/channels/:channelId/ai-retrigger', authMiddleware.authenticate, aiRetriggerRoutes);
+    this.app.use('/api/channels/:channelId/desk', authMiddleware.authenticate, deskAutoAssignRoutes);
 
     // Meet callback route (API key auth - called by SAM service)
     this.app.use('/api/meet', meetCallbackRoutes);
@@ -533,6 +544,8 @@ export class App {
 
     this.app.use('/api/messages', authMiddleware.authenticate, reactionRoutes);
 
+    // Calls admin panel — must be before /api/calls, whose /:callId routes would shadow it
+    this.app.use('/api/calls/admin', authMiddleware.authenticate, callAdminRoutes);
     // Claw MCP route (user + app auth) — must be before /api/calls
     this.app.use('/api/calls/claw', authenticateUserOrApp, callRoutes);
     this.app.use('/api/calls', authMiddleware.authenticate, callRoutes); // Calling feature routes
@@ -542,7 +555,7 @@ export class App {
     this.app.use('/api/calendar/sync', authMiddleware.authenticate, calendarSyncRoutes); // Calendar manual sync
     this.app.use('/api/calendar/watch', authMiddleware.authenticate, calendarWatchRoutes); // Calendar watch setup
     this.app.use('/api/voice-input', authMiddleware.authenticate, voiceInputRoutes); // Low-latency chat voice input
-    this.app.use('/api/tts', authMiddleware.authenticate, ttsRoutes);
+    this.app.use('/api/tts', authMiddleware.authenticate, ttsLimiter, ttsRoutes);
 
     // App routes
     this.app.use('/api/apps', appRoutes);
@@ -687,6 +700,13 @@ export class App {
       validateS2SKey,
       handleDeskReportCallback,
     );
+    // Claw's terminal result for a call AI run (CALL_AI_USE_CLAW_AGENT); the
+    // dispatching worker picks it up from Redis.
+    this.app.post(
+      `${CLAW_CALL_AI_CALLBACK_PATH}/:runKey`,
+      validateS2SKey,
+      handleClawCallAiCallback,
+    );
 
     // Internal canvas read/update (S2S-only, used by MCP tools)
     this.app.use('/api/internal/canvas', internalCanvasRoutes);
@@ -704,6 +724,7 @@ export class App {
     this.app.use('/api', authMiddleware.authenticate, draftAttachmentRoutes); // Draft attachment upload routes
     this.app.use('/api/link-preview', authMiddleware.authenticate, linkPreviewRoutes); // Link preview routes
     this.app.use('/api/search-metrics', authMiddleware.authenticate, searchMetricsRoutes); // Search metrics routes (POST /api/search-metrics/...)
+    this.app.use('/api/search-feedback', authMiddleware.authenticate, searchFeedbackRoutes); // Search feedback routes (POST /api/search-feedback)
 
     // API Key management routes (admin only, no ACL needed as it has requireAdmin middleware)
     this.app.use('/api/admin/api-keys', apiKeyRoutes);
@@ -718,6 +739,8 @@ export class App {
 
     // user deactivation from dashboard 
     this.app.use('/api/user-activation', userActivationRoutes);
+
+    this.app.use('/api/secrets-vault', authMiddleware.authenticate, secretsVaultRoutes);
 
     // Project routes (auth and ACL required)
     this.app.use('/api/projects', authMiddleware.authenticate, projectRoutes);
@@ -947,10 +970,9 @@ export class App {
         (async () => {
           logger.info('Initializing email classification queue...');
           await emailClassificationQueue.initialize();
-        })(),
-        (async () => {
-          logger.info('Initializing call transcription queue...');
-          callTranscriptionQueue.startConsumer();
+          // A sweep job does nothing but enqueue classification jobs.
+          logger.info('Initializing auto-assign sweep queue...');
+          await autoAssignSweepQueue.initialize();
         })(),
       ]);
 
@@ -998,11 +1020,11 @@ export class App {
       logger.info('Initializing email classification queue...');
       await emailClassificationQueue.initialize();
 
-      // Ozonetel call-recording transcription (manual "Transcribe" button). The audio
-      // work runs in the Python agent; this consumer only holds the Bull job while it
-      // waits for the agent, then writes the transcript attachment.
-      logger.info('Initializing call transcription queue...');
-      callTranscriptionQueue.startConsumer();
+      logger.info('Initializing auto-assign sweep queue...');
+      await autoAssignSweepQueue.initialize();
+
+      // Call transcription is producer-only here (lazy queue on enqueue); the consumer
+      // runs in the worker process — see ENABLE_CALL_TRANSCRIPTION_WORKER.
 
       // Producer only — messages are enqueued here at ingest; the worker (a
       // separate process) drains each thread once its debounce window elapses.
@@ -1097,11 +1119,15 @@ export class App {
       );
     }
 
-    try {
-      await registerAllExternalSources();
-    } catch (error) {
-      logger.error('Failed to register external sources:', error);
-      logger.warn('Continuing startup without external sources...');
+    if (config.enableExternalSourceRegistration) {
+      try {
+        await registerAllExternalSources();
+      } catch (error) {
+        logger.error('Failed to register external sources:', error);
+        logger.warn('Continuing startup without external sources...');
+      }
+    } else {
+      logger.info('Skipping external-source bot registration (ENABLE_EXTERNAL_SOURCE_REGISTRATION=false)');
     }
 
     // Register workflow definitions
@@ -1231,6 +1257,9 @@ export class App {
 
       // Close on-call rotation queue
       await onCallRotationQueue.close();
+
+      // Close auto-assign sweep queue
+      await autoAssignSweepQueue.close();
 
       // Close scheduled message queue
       await scheduledMessageQueue.close();

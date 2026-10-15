@@ -6,11 +6,20 @@ import {
 } from '@/integrations/core/baseInteractionReplySender';
 import type { NormalizedData } from '@/integrations/core/types';
 import { SOCIAL_MEDIA_INTERACTION_TYPES } from '@/integrations/social-media/constants';
-import { db } from '@/database/client';
 import { decrypt } from '@/services/encryptionService';
 import { metaGraphClient } from './metaGraphClient';
 import type { InstagramCredentials } from './types';
-import { INSTAGRAM_MAX_REPLY_LENGTH, INSTAGRAM_REPLY_WINDOW_MS } from './constants';
+import { INSTAGRAM_MAX_REPLY_LENGTH } from './constants';
+import { getMetaReplyWindowState } from '../shared/metaDmThread';
+import { isMetaTokenRejected } from '../shared/metaTokenRejection';
+import { disconnectAndRejectReply } from '@/integrations/core/deskSourceDisconnect';
+
+const onTokenRejected = (sourceId: string) =>
+  disconnectAndRejectReply(
+    sourceId,
+    isMetaTokenRejected,
+    "Instagram no longer accepts this account's connection, so it has been disconnected. Reconnect the account in desk settings, then try again.",
+  );
 
 export class InstagramReplySender extends BaseInteractionReplySender {
   async sendReply(context: InteractionReplyContext): Promise<NormalizedData> {
@@ -48,7 +57,9 @@ export class InstagramReplySender extends BaseInteractionReplySender {
     // No 24h window restriction; replies go as public Instagram comment replies.
     if (externalThreadId.startsWith('comment:')) {
       const commentId = externalThreadId.slice('comment:'.length);
-      const result = await metaGraphClient.replyToComment(credentials.accessToken, commentId, body);
+      const result = await metaGraphClient
+        .replyToComment(credentials.accessToken, commentId, body)
+        .catch(onTokenRejected(source.id));
       return {
         externalId: `${source.id}:comment-reply:${result.id}`,
         externalThreadId,
@@ -86,18 +97,11 @@ export class InstagramReplySender extends BaseInteractionReplySender {
     }
 
     // DM reply — enforce 24h reply window (Meta hard rule).
-    // Query externalMessage (not email) because externalMessage.createdAt is set to the
-    // Meta event timestamp by core.ts, giving us the real Instagram message time.
-    const lastInbound = await db.externalMessage.findFirst({
-      where: { externalSourceId: source.id, externalThreadId, direction: 'INCOMING' },
-      orderBy: { createdAt: 'desc' },
-      select: { createdAt: true },
-    });
-    if (!lastInbound) {
+    const replyWindow = await getMetaReplyWindowState(source.id, externalThreadId);
+    if (replyWindow === 'no-inbound') {
       throw new InteractionReplyValidationError('No inbound DM found for this thread');
     }
-    const windowExpired = Date.now() - lastInbound.createdAt.getTime() > INSTAGRAM_REPLY_WINDOW_MS;
-    if (windowExpired) {
+    if (replyWindow === 'expired') {
       throw new InteractionReplyValidationError(
         'Instagram reply window expired — you can only reply within 24 hours of the last inbound message'
       );
@@ -107,12 +111,9 @@ export class InstagramReplySender extends BaseInteractionReplySender {
     const recipientIgsid = externalThreadId.split(':')[0];
     // Use credentials.igsid (app-scoped) for the sender path — the real igUserId is rejected by the API.
     const senderIgsid = credentials.igsid ?? credentials.igUserId;
-    const result = await metaGraphClient.sendDM(
-      credentials.accessToken,
-      senderIgsid,
-      recipientIgsid,
-      body
-    );
+    const result = await metaGraphClient
+      .sendDM(credentials.accessToken, senderIgsid, recipientIgsid, body)
+      .catch(onTokenRejected(source.id));
 
     return {
       externalId: `${source.id}:${result.message_id}`,

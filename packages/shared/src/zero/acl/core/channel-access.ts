@@ -1,4 +1,4 @@
-import { ChannelVisibility } from '../../schema';
+import { ChannelScopeType, ChannelVisibility } from '../../schema';
 import type { Context } from '../../schema';
 import type { SelectArgs } from './types';
 
@@ -17,9 +17,13 @@ export function channelAccessArgs(args?: SelectArgs): {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function channelAccessWhere(ctx: Context): (helpers: any) => any {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return ({ or, cmp, exists }: any) =>
+  return ({ or, and, cmp, exists }: any) =>
     or(
-      cmp('visibility', '=', ChannelVisibility.PUBLIC),
+      and(
+        cmp('scopeType', '!=', ChannelScopeType.DM),
+        cmp('scopeType', '!=', ChannelScopeType.GROUP_DM),
+        cmp('visibility', '=', ChannelVisibility.PUBLIC),
+      ),
       exists('participants', (p: any) => p.where('userId', ctx.userID)),
     );
 }
@@ -48,6 +52,8 @@ export function scalarChannelBody(
       ch
         .where('id', channelId)
         .where('workspaceId', '=', ctx.workspaceId)
+        .where('scopeType', '!=', ChannelScopeType.DM)
+        .where('scopeType', '!=', ChannelScopeType.GROUP_DM)
         .where('visibility', ChannelVisibility.PUBLIC);
   }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

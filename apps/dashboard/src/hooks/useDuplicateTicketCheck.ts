@@ -1,8 +1,12 @@
 import type { Dispatch, SetStateAction } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { v4 as uuidv4 } from 'uuid';
 import {
   checkTicketDuplicates,
+  type TicketDuplicateCandidate,
   type TicketDuplicateCheckResponse,
+  type TicketDuplicateRelation,
+  type TicketDuplicateTier,
 } from '../services/ticketDuplicateService';
 import { useDebouncedValue } from './useDebouncedValue';
 import { queries } from '../zero/queries';
@@ -17,14 +21,27 @@ export interface UseDuplicateTicketCheckOptions {
   isOpen: boolean;
   debounceMs?: number;
   minTitleLength?: number;
+  minTitleWords?: number;
   minDescriptionLength?: number;
 }
 
+export interface DuplicateSuggestion {
+  candidate: TicketDuplicateCandidate;
+  tier: TicketDuplicateTier;
+  score: number;
+  relation?: TicketDuplicateRelation;
+  link?: string;
+}
+
 interface UseDuplicateTicketCheckResult {
+  likely: DuplicateSuggestion[];
+  similar: DuplicateSuggestion[];
+  checkId: string | null;
   duplicateCheck: TicketDuplicateCheckResponse | null;
   candidateLinks: Map<string, string>;
   duplicateCheckError: string | null;
   isCheckingDuplicate: boolean;
+  isDuplicateCheckInFlight: boolean;
   isDuplicateReasonExpanded: boolean;
   setIsDuplicateReasonExpanded: Dispatch<SetStateAction<boolean>>;
   triggerDuplicateCheck: () => void;
@@ -60,15 +77,26 @@ export const useDuplicateTicketCheck = (
     projectId,
     boardId,
     isOpen,
-    debounceMs = 2000,
-    minTitleLength = 3,
-    minDescriptionLength = 5,
+    debounceMs = 900,
+    minTitleLength = 15,
+    minTitleWords = 3,
+    minDescriptionLength = 0,
   } = options;
 
   const [duplicateCheck, setDuplicateCheck] = useState<TicketDuplicateCheckResponse | null>(null);
   const [duplicateCheckError, setDuplicateCheckError] = useState<string | null>(null);
   const [isCheckingDuplicate, setIsCheckingDuplicate] = useState(false);
   const [isDuplicateReasonExpanded, setIsDuplicateReasonExpanded] = useState(false);
+  const [checkId, setCheckId] = useState<string | null>(null);
+  const [resultKey, setResultKey] = useState<string | null>(null);
+  const checkIdsRef = useRef(new Map<string, string>());
+  const checkIdFor = useCallback((key: string): string => {
+    const existing = checkIdsRef.current.get(key);
+    if (existing) return existing;
+    const created = uuidv4();
+    checkIdsRef.current.set(key, created);
+    return created;
+  }, []);
 
   // Request lifecycle + caches
   const requestSeqRef = useRef(0);
@@ -85,10 +113,10 @@ export const useDuplicateTicketCheck = (
   const normalizedInput: NormalizedInput = useMemo(() => {
     const trimmedTitle = title.trim();
     const trimmedDescription = description.trim();
+    const titleReady =
+      trimmedTitle.length >= minTitleLength || trimmedTitle.split(/\s+/).length >= minTitleWords;
     const isValid =
-      Boolean(projectId) &&
-      trimmedTitle.length >= minTitleLength &&
-      trimmedDescription.length >= minDescriptionLength;
+      Boolean(projectId) && titleReady && trimmedDescription.length >= minDescriptionLength;
 
     return {
       trimmedTitle,
@@ -96,7 +124,7 @@ export const useDuplicateTicketCheck = (
       isValid,
       cacheKey: isValid ? buildCacheKey(projectId, trimmedTitle, trimmedDescription) : '',
     };
-  }, [title, description, projectId, minTitleLength, minDescriptionLength]);
+  }, [title, description, projectId, minTitleLength, minTitleWords, minDescriptionLength]);
 
   const debouncedInput = useDebouncedValue(normalizedInput, debounceMs);
 
@@ -114,6 +142,8 @@ export const useDuplicateTicketCheck = (
 
   const clearUiState = useCallback(() => {
     setDuplicateCheck(null);
+    setCheckId(null);
+    setResultKey(null);
     setDuplicateCheckError(null);
     setIsCheckingDuplicate(false);
     setIsDuplicateReasonExpanded(false);
@@ -142,6 +172,8 @@ export const useDuplicateTicketCheck = (
         setIsCheckingDuplicate(false);
         setDuplicateCheckError(null);
         setDuplicateCheck(cached);
+        setCheckId(checkIdFor(input.cacheKey));
+        setResultKey(input.cacheKey);
         setIsDuplicateReasonExpanded(false);
         return;
       }
@@ -150,10 +182,8 @@ export const useDuplicateTicketCheck = (
       abortInFlight();
       const requestSeq = ++requestSeqRef.current;
 
-      // UX: clear old result while loading (your existing behavior)
       setIsCheckingDuplicate(true);
       setDuplicateCheckError(null);
-      setDuplicateCheck(null);
       setIsDuplicateReasonExpanded(false);
 
       inFlightKeyRef.current = input.cacheKey;
@@ -174,13 +204,21 @@ export const useDuplicateTicketCheck = (
         if (requestSeq === requestSeqRef.current) {
           cacheRef.current.set(input.cacheKey, result);
           setDuplicateCheck(result);
-          // Impression: candidates were put in front of the user. Once per
+          setCheckId(checkIdFor(input.cacheKey));
+          setResultKey(input.cacheKey);
+          // Impression: suggestions were put in front of the user. Once per
           // distinct input so a re-render or a cache hit doesn't recount it.
-          const candidateCount = result.candidates?.length ?? 0;
-          if (candidateCount > 0 && shownWarningKeyRef.current !== input.cacheKey) {
+          const matches = result.analysis.matches ?? [];
+          if (matches.length > 0 && shownWarningKeyRef.current !== input.cacheKey) {
             shownWarningKeyRef.current = input.cacheKey;
             globalClickTracker.trackManualEvent('Tickets', 'DUPLICATE_WARNING_SHOWN', undefined, {
-              candidateCount,
+              checkId: checkIdFor(input.cacheKey),
+              candidateCount: result.candidates?.length ?? 0,
+              matches: matches.map(match => [
+                match.id,
+                match.tier,
+                Math.round(match.score * 100) / 100,
+              ]),
               projectId,
               ...(boardId && { boardId }),
             });
@@ -199,7 +237,7 @@ export const useDuplicateTicketCheck = (
         if (abortRef.current === controller) abortRef.current = null;
       }
     },
-    [abortInFlight, isOpen, projectId, boardId, resetDuplicateState],
+    [abortInFlight, isOpen, projectId, boardId, resetDuplicateState, checkIdFor],
   );
 
   const triggerDuplicateCheck = useCallback(() => {
@@ -295,11 +333,52 @@ export const useDuplicateTicketCheck = (
     return links;
   }, [duplicateCheck, projectId, boardId, ticketsData]);
 
+  const { likely, similar } = useMemo(() => {
+    const analysis = duplicateCheck?.analysis;
+    const byId = new Map(
+      (duplicateCheck?.candidates ?? []).map(candidate => [candidate.id, candidate]),
+    );
+    const matches =
+      analysis?.matches ??
+      (analysis?.isDuplicate && analysis.duplicateTicketId
+        ? [
+            {
+              id: analysis.duplicateTicketId,
+              tier: 'likely' as const,
+              score: analysis.confidence ?? 0,
+            },
+          ]
+        : []);
+    const suggestions = matches.flatMap((match): DuplicateSuggestion[] => {
+      const candidate = byId.get(match.id);
+      if (!candidate) return [];
+      const link = candidateLinks.get(match.id);
+      return [
+        {
+          candidate,
+          tier: match.tier,
+          score: match.score,
+          ...('relation' in match && match.relation ? { relation: match.relation } : {}),
+          ...(link ? { link } : {}),
+        },
+      ];
+    });
+    return {
+      likely: suggestions.filter(suggestion => suggestion.tier === 'likely'),
+      similar: suggestions.filter(suggestion => suggestion.tier === 'similar'),
+    };
+  }, [duplicateCheck, candidateLinks]);
+
   return {
+    likely,
+    similar,
+    checkId,
     duplicateCheck,
     candidateLinks,
     duplicateCheckError,
-    isCheckingDuplicate,
+    isCheckingDuplicate:
+      isCheckingDuplicate || (resultKey !== null && resultKey !== normalizedInput.cacheKey),
+    isDuplicateCheckInFlight: isCheckingDuplicate,
     isDuplicateReasonExpanded,
     setIsDuplicateReasonExpanded,
     triggerDuplicateCheck,

@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { cn } from '../../../utils/classNames';
-import ThreadMessages from '../../Chat/ThreadPannel';
+import { APP_NO_DRAG_STYLE } from '../../../utils/electronApp';
 import { CallControls } from '../CallControls/CallControls';
 import { CallStateTransition } from '../CallStateTransition/CallStateTransition';
 import { ParticipantGrid } from '../ParticipantGrid/ParticipantGrid';
@@ -30,8 +30,15 @@ import { isTranscriptionAgentIdentity } from '../../../utils/livekitAgent';
 import { useAuth } from '../../../hooks/useAuth';
 import { useTelepresenceEnabled } from '../useTelepresenceEnabled';
 import { useAutoPresentationMode } from '../useAutoPresentationMode';
-import { PresentationModeOverlay } from '../PresentationMode/PresentationModeOverlay';
-import { CallWhiteboardView } from '../CallWhiteboard';
+import {
+  LazyCallWhiteboardView,
+  LazyPresentationModeOverlay,
+  LazyThreadMessages,
+  MountOnceOpen,
+  PanelBoundary,
+  PanelLoading,
+  preloadPresentationModeOverlay,
+} from '../lazyPanels';
 import { useCallWhiteboardStore } from '../../../stores/callWhiteboardStore';
 import Tooltip from '../../ui/Tooltip';
 
@@ -92,6 +99,91 @@ interface MiniCallViewProps {
   onToggleHandRaise?: (() => void) | undefined;
 }
 
+// Declared at module level so React keeps one component identity across renders.
+function HeaderActionButton({
+  callId,
+  label,
+  onClick,
+  children,
+  danger = false,
+  trackName,
+}: {
+  callId: string;
+  label: string;
+  onClick: () => void;
+  children: ReactNode;
+  danger?: boolean;
+  trackName: string;
+}): React.ReactElement {
+  return (
+    <Tooltip content={label} side='bottom'>
+      <button
+        type='button'
+        aria-label={label}
+        title={label}
+        onClick={onClick}
+        onPointerDown={(e): void => e.stopPropagation()}
+        className={cn(
+          'inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors',
+          danger
+            ? 'bg-[#dc362e] text-white hover:bg-[#e3554e]'
+            : 'bg-[#333537] text-[#e3e3e3] hover:bg-[#404245]',
+        )}
+        data-track-category='CALLS'
+        data-track-name={trackName}
+        data-track-metadata={JSON.stringify({ callId })}
+      >
+        {children}
+      </button>
+    </Tooltip>
+  );
+}
+
+function ResizeHandles({
+  showCorner = false,
+  onResizeStart,
+}: {
+  showCorner?: boolean;
+  onResizeStart: (e: React.MouseEvent, edge: 'right' | 'bottom' | 'corner') => void;
+}): React.ReactElement {
+  return (
+    <>
+      <div
+        role='button'
+        tabIndex={0}
+        aria-label='Resize width'
+        className='absolute top-0 right-0 w-1 h-full cursor-ew-resize z-20'
+        onMouseDown={e => onResizeStart(e, 'right')}
+        data-track-category='CALLS'
+        data-track-name='RESIZE_MINI_CALL_WIDTH'
+        onPointerDown={(e): void => e.stopPropagation()}
+        onKeyDown={(e): void => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+          }
+        }}
+      />
+      {showCorner && (
+        <div
+          role='button'
+          tabIndex={0}
+          aria-label='Resize width and height'
+          className='absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize z-30'
+          onMouseDown={e => onResizeStart(e, 'corner')}
+          data-track-category='CALLS'
+          data-track-name='RESIZE_MINI_CALL_CORNER'
+          onPointerDown={(e): void => e.stopPropagation()}
+          onKeyDown={(e): void => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+            }
+          }}
+        />
+      )}
+    </>
+  );
+}
+
 export function MiniCallView({
   participants,
   isMicEnabled,
@@ -128,6 +220,11 @@ export function MiniCallView({
 }: MiniCallViewProps): React.ReactElement {
   const { user } = useAuth();
   const isTelepresenceEnabled = useTelepresenceEnabled(user?.email);
+  // The present button is shown: fetch the overlay now, so a click on it can
+  // still go full screen (see preloadPresentationModeOverlay).
+  useEffect(() => {
+    if (isTelepresenceEnabled) preloadPresentationModeOverlay();
+  }, [isTelepresenceEnabled]);
   const isWhiteboardOpen = useCallWhiteboardStore(s => s.isOpen);
 
   // People only — the Xyne Automatic agent isn't counted.
@@ -149,8 +246,10 @@ export function MiniCallView({
     [isDmCall, callParticipants, participants, currentUserId, user?.id],
   );
   const containerRef = useRef<HTMLDivElement>(null);
+  const dragBoundsRef = useRef<HTMLDivElement>(null);
   const [overlayMode, setOverlayMode] = useState<'mini' | 'line'>('mini');
   const [miniLeft, setMiniLeft] = useState(20);
+  const [isDragging, setIsDragging] = useState(false);
 
   // State for resizing
   const [size, setSize] = useState({ width: 380, height: 280 });
@@ -191,41 +290,6 @@ export function MiniCallView({
 
   const clampMiniLeft = (left: number): number =>
     Math.max(20, Math.min(left, window.innerWidth - size.width - 20));
-
-  const HeaderActionButton = ({
-    label,
-    onClick,
-    children,
-    danger = false,
-    trackName,
-  }: {
-    label: string;
-    onClick: () => void;
-    children: ReactNode;
-    danger?: boolean;
-    trackName: string;
-  }): React.ReactElement => (
-    <Tooltip content={label} side='bottom'>
-      <button
-        type='button'
-        aria-label={label}
-        title={label}
-        onClick={onClick}
-        onPointerDown={(e): void => e.stopPropagation()}
-        className={cn(
-          'inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors',
-          danger
-            ? 'bg-[#dc362e] text-white hover:bg-[#e3554e]'
-            : 'bg-[#333537] text-[#e3e3e3] hover:bg-[#404245]',
-        )}
-        data-track-category='CALLS'
-        data-track-name={trackName}
-        data-track-metadata={JSON.stringify({ callId })}
-      >
-        {children}
-      </button>
-    </Tooltip>
-  );
 
   const handleLineViewChatOpen = (): void => {
     if (!isChatOpen) {
@@ -339,52 +403,12 @@ export function MiniCallView({
     };
   }, [isResizing]);
 
-  // Resize handles component (reusable)
-  const ResizeHandles = ({ showCorner = false }: { showCorner?: boolean }): React.ReactElement => (
-    <>
-      {/* Right edge resize handle */}
-      <div
-        role='button'
-        tabIndex={0}
-        aria-label='Resize width'
-        className='absolute top-0 right-0 w-1 h-full cursor-ew-resize z-20'
-        onMouseDown={e => handleResizeStart(e, 'right')}
-        data-track-category='CALLS'
-        data-track-name='RESIZE_MINI_CALL_WIDTH'
-        onPointerDown={(e): void => e.stopPropagation()}
-        onKeyDown={(e): void => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-          }
-        }}
-      />
-
-      {/* Bottom-right corner resize handle */}
-      {showCorner && (
-        <div
-          role='button'
-          tabIndex={0}
-          aria-label='Resize width and height'
-          className='absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize z-30'
-          onMouseDown={e => handleResizeStart(e, 'corner')}
-          data-track-category='CALLS'
-          data-track-name='RESIZE_MINI_CALL_CORNER'
-          onPointerDown={(e): void => e.stopPropagation()}
-          onKeyDown={(e): void => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault();
-            }
-          }}
-        />
-      )}
-    </>
-  );
-
   if (isLineView) {
     return (
       <>
         {/* Draggable like the mini window: kept 20px inside the viewport on every
             side. The header buttons stop pointerdown, so clicks never start a drag. */}
+        <div ref={dragBoundsRef} className='pointer-events-none fixed inset-5' />
         <motion.div
           // Distinct keys: line and mini views are both motion.divs in the same
           // slot, and without them React reuses one element — carrying this
@@ -393,14 +417,11 @@ export function MiniCallView({
           drag
           dragMomentum={false}
           dragElastic={0}
-          dragConstraints={{
-            top: -(window.innerHeight - LINE_VIEW_HEIGHT - dockedLineBottom - 20),
-            left: 20 - lineLeft,
-            right: window.innerWidth - lineViewWidth - 20 - lineLeft,
-            bottom: 0,
-          }}
+          dragConstraints={dragBoundsRef}
           whileDrag={{ cursor: 'grabbing' }}
           className='fixed z-50 group/container cursor-grab'
+          onDragStart={() => setIsDragging(true)}
+          onDragEnd={() => setIsDragging(false)}
           style={{
             bottom: `${dockedLineBottom}px`,
             left: `${lineLeft}px`,
@@ -409,10 +430,11 @@ export function MiniCallView({
           <div
             ref={containerRef}
             className={cn(
-              'bg-[#1e1f20] shadow-2xl overflow-hidden border backdrop-blur-sm relative',
+              'bg-[#1e1f20] shadow-2xl overflow-hidden border relative',
               'border-white/10 rounded-full',
             )}
             style={{
+              ...(isDragging ? undefined : APP_NO_DRAG_STYLE),
               width: `${lineViewWidth}px`,
               height: `${LINE_VIEW_HEIGHT}px`,
             }}
@@ -439,6 +461,7 @@ export function MiniCallView({
                   </div>
                   <div className='flex items-center gap-1 flex-shrink-0'>
                     <HeaderActionButton
+                      callId={callId}
                       label={isMicEnabled ? 'Mute microphone' : 'Unmute microphone'}
                       onClick={onToggleMic}
                       danger={!isMicEnabled}
@@ -447,6 +470,7 @@ export function MiniCallView({
                       {isMicEnabled ? <Mic className='h-4 w-4' /> : <MicOff className='h-4 w-4' />}
                     </HeaderActionButton>
                     <HeaderActionButton
+                      callId={callId}
                       label='Open chat'
                       onClick={handleLineViewChatOpen}
                       trackName='OPEN_CHAT_FROM_LINE_VIEW'
@@ -454,6 +478,7 @@ export function MiniCallView({
                       <MessageSquare className='h-4 w-4' />
                     </HeaderActionButton>
                     <HeaderActionButton
+                      callId={callId}
                       label='Expand to mini view'
                       onClick={handleExpandToMini}
                       trackName='EXPAND_CALL_TO_MINI_VIEW'
@@ -461,6 +486,7 @@ export function MiniCallView({
                       <ChevronsUp className='h-4 w-4' />
                     </HeaderActionButton>
                     <HeaderActionButton
+                      callId={callId}
                       label='Expand to full call view'
                       onClick={onExpand}
                       trackName='EXPAND_CALL_TO_FULL_VIEW'
@@ -468,6 +494,7 @@ export function MiniCallView({
                       <Maximize2 className='h-4 w-4' />
                     </HeaderActionButton>
                     <HeaderActionButton
+                      callId={callId}
                       label='End call'
                       onClick={onDisconnect}
                       danger={true}
@@ -492,43 +519,46 @@ export function MiniCallView({
         )}
 
         {/* Presentation Mode Overlay — fullscreen + smooth fade, consistent with FullCallView */}
-        <PresentationModeOverlay
-          callId={callId}
-          isOpen={isPresentationMode}
-          participant={presentationParticipant ?? null}
-          onExit={() => setIsPresentationMode(false)}
-        />
+        <MountOnceOpen open={isPresentationMode}>
+          <LazyPresentationModeOverlay
+            callId={callId}
+            isOpen={isPresentationMode}
+            participant={presentationParticipant ?? null}
+            onExit={() => setIsPresentationMode(false)}
+          />
+        </MountOnceOpen>
       </>
     );
   }
 
   return (
     <>
+      <div
+        ref={dragBoundsRef}
+        className='pointer-events-none fixed left-5 right-5 top-5 bottom-0'
+      />
       <motion.div
         key='mini-view'
         drag
         dragMomentum={false}
         dragElastic={0}
-        dragConstraints={{
-          top: -(window.innerHeight - size.height - (isChatOpen ? 410 : 0) - 20),
-          left: 20 - miniLeft,
-          right: window.innerWidth - size.width - 20 - miniLeft,
-          bottom: 20,
-        }}
+        dragConstraints={dragBoundsRef}
         dragListener={!isResizing}
         whileDrag={{ cursor: 'grabbing' }}
         className='fixed z-50 group/container'
+        onDragStart={() => setIsDragging(true)}
+        onDragEnd={() => setIsDragging(false)}
         style={{
           bottom: '20px',
           left: `${miniLeft}px`,
         }}
       >
-        <div className='flex flex-col relative'>
+        <div className='flex flex-col relative' style={isDragging ? undefined : APP_NO_DRAG_STYLE}>
           {/* Call Window */}
           <div
             ref={containerRef}
             className={cn(
-              'bg-[#131314] shadow-2xl overflow-hidden border-2 backdrop-blur-sm relative',
+              'bg-[#131314] shadow-2xl overflow-hidden border-2 relative',
               'border-white/10',
             )}
             style={{
@@ -538,7 +568,7 @@ export function MiniCallView({
             }}
             data-testid='call-window'
           >
-            <ResizeHandles showCorner={!isChatOpen} />
+            <ResizeHandles onResizeStart={handleResizeStart} showCorner={!isChatOpen} />
 
             <CallStateTransition connectionState={connectionState} machineState={machineState}>
               {/* Normal connected state - show call UI */}
@@ -558,6 +588,7 @@ export function MiniCallView({
                   </div>
                   <div className='flex items-center gap-1 flex-shrink-0'>
                     <HeaderActionButton
+                      callId={callId}
                       label='Switch to line view'
                       onClick={handleCollapseToLine}
                       trackName='COLLAPSE_CALL_TO_LINE_VIEW'
@@ -594,16 +625,18 @@ export function MiniCallView({
                 >
                   {isWhiteboardOpen ? (
                     <div className='h-full'>
-                      <CallWhiteboardView
-                        participants={participants}
-                        room={room}
-                        className='h-full'
-                        compact={true}
-                        showSidebar={true}
-                        displayOnly={true}
-                        aiController={aiController}
-                        requestedAiController={requestedAiController}
-                      />
+                      <PanelBoundary fallback={<PanelLoading />}>
+                        <LazyCallWhiteboardView
+                          participants={participants}
+                          room={room}
+                          className='h-full'
+                          compact={true}
+                          showSidebar={true}
+                          displayOnly={true}
+                          aiController={aiController}
+                          requestedAiController={requestedAiController}
+                        />
+                      </PanelBoundary>
                     </div>
                   ) : focusedScreenShare ? (
                     <div className='h-full'>
@@ -692,14 +725,16 @@ export function MiniCallView({
                 borderRadius: '0 0 12px 12px',
               }}
             >
-              <ThreadMessages
-                channelId={channelId}
-                conversationId={conversationId}
-                ticketId={null}
-                onClose={onToggleThread}
-              />
+              <PanelBoundary fallback={<PanelLoading />}>
+                <LazyThreadMessages
+                  channelId={channelId}
+                  conversationId={conversationId}
+                  ticketId={null}
+                  onClose={onToggleThread}
+                />
+              </PanelBoundary>
 
-              <ResizeHandles showCorner={true} />
+              <ResizeHandles onResizeStart={handleResizeStart} showCorner={true} />
             </div>
           )}
 
@@ -720,7 +755,7 @@ export function MiniCallView({
                 raisedHands={raisedHands}
               />
 
-              <ResizeHandles showCorner={true} />
+              <ResizeHandles onResizeStart={handleResizeStart} showCorner={true} />
             </div>
           )}
         </div>
@@ -736,12 +771,14 @@ export function MiniCallView({
       )}
 
       {/* Presentation Mode Overlay — fullscreen + smooth fade, consistent with FullCallView */}
-      <PresentationModeOverlay
-        callId={callId}
-        isOpen={isPresentationMode}
-        participant={presentationParticipant ?? null}
-        onExit={() => setIsPresentationMode(false)}
-      />
+      <MountOnceOpen open={isPresentationMode}>
+        <LazyPresentationModeOverlay
+          callId={callId}
+          isOpen={isPresentationMode}
+          participant={presentationParticipant ?? null}
+          onExit={() => setIsPresentationMode(false)}
+        />
+      </MountOnceOpen>
     </>
   );
 }

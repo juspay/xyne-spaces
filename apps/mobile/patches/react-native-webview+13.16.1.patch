@@ -1,0 +1,277 @@
+diff --git a/android/src/main/java/com/reactnativecommunity/webview/RNCWebChromeClient.java b/android/src/main/java/com/reactnativecommunity/webview/RNCWebChromeClient.java
+index 07f73fd..570d654 100644
+--- a/android/src/main/java/com/reactnativecommunity/webview/RNCWebChromeClient.java
++++ b/android/src/main/java/com/reactnativecommunity/webview/RNCWebChromeClient.java
+@@ -34,9 +34,44 @@ import com.reactnativecommunity.webview.events.TopOpenWindowEvent;
+ 
+ import java.util.ArrayList;
+ import java.util.Collections;
++import java.util.HashSet;
+ import java.util.List;
++import java.util.Set;
+ 
+ public class RNCWebChromeClient extends WebChromeClient implements LifecycleEventListener {
++    private static volatile Set<String> allowedMediaCaptureOrigins = Collections.emptySet();
++
++    public static void setAllowedMediaCaptureOrigins(Set<String> origins) {
++        Set<String> normalized = new HashSet<>();
++        if (origins != null) {
++            for (String rawOrigin : origins) {
++                Uri origin = rawOrigin == null ? null : Uri.parse(rawOrigin);
++                if (origin == null || origin.getScheme() == null ||
++                        origin.getHost() == null || origin.getUserInfo() != null ||
++                        origin.getPath() != null && !origin.getPath().isEmpty() ||
++                        origin.getQuery() != null || origin.getFragment() != null) {
++                    continue;
++                }
++                String scheme = origin.getScheme().toLowerCase(java.util.Locale.ROOT);
++                if (!"https".equals(scheme) && !"http".equals(scheme)) continue;
++                int port = origin.getPort() >= 0 ? origin.getPort() : ("https".equals(scheme) ? 443 : 80);
++                if (port > 0 && port <= 65535) {
++                    normalized.add(scheme + "://" + origin.getHost().toLowerCase(java.util.Locale.ROOT) + ":" + port);
++                }
++            }
++        }
++        allowedMediaCaptureOrigins = Collections.unmodifiableSet(normalized);
++    }
++
++    private static boolean isAllowedMediaCaptureOrigin(Uri origin) {
++        if (origin == null || origin.getScheme() == null || origin.getHost() == null || origin.getUserInfo() != null) {
++            return false;
++        }
++        String scheme = origin.getScheme().toLowerCase(java.util.Locale.ROOT);
++        int port = origin.getPort() >= 0 ? origin.getPort() : ("https".equals(scheme) ? 443 : 80);
++        return allowedMediaCaptureOrigins.contains(scheme + "://" + origin.getHost().toLowerCase(java.util.Locale.ROOT) + ":" + port);
++    }
++
+     protected static final FrameLayout.LayoutParams FULLSCREEN_LAYOUT_PARAMS = new FrameLayout.LayoutParams(
+             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.CENTER);
+ 
+@@ -145,6 +180,11 @@ public class RNCWebChromeClient extends WebChromeClient implements LifecycleEven
+     @Override
+     public void onPermissionRequest(final PermissionRequest request) {
+ 
++        if (!isAllowedMediaCaptureOrigin(request.getOrigin())) {
++            request.deny();
++            return;
++        }
++
+         grantedPermissions = new ArrayList<>();
+ 
+         ArrayList<String> requestedAndroidPermissions = new ArrayList<>();
+diff --git a/android/src/main/java/com/reactnativecommunity/webview/RNCWebView.java b/android/src/main/java/com/reactnativecommunity/webview/RNCWebView.java
+index 80c6803..92f4901 100644
+--- a/android/src/main/java/com/reactnativecommunity/webview/RNCWebView.java
++++ b/android/src/main/java/com/reactnativecommunity/webview/RNCWebView.java
+@@ -49,6 +49,7 @@ import java.util.Map;
+ import java.util.Set;
+ 
+ public class RNCWebView extends WebView implements LifecycleEventListener {
++    private static final String TAG = "RNCWebView";
+     protected @Nullable
+     String injectedJS;
+     protected @Nullable
+@@ -253,6 +254,9 @@ public class RNCWebView extends WebView implements LifecycleEventListener {
+             this.bridgeListener = new WebViewCompat.WebMessageListener() {
+               @Override
+               public void onPostMessage(@NonNull WebView view, @NonNull WebMessageCompat message, @NonNull Uri sourceOrigin, boolean isMainFrame, @NonNull JavaScriptReplyProxy replyProxy) {
++                if (!isMainFrame) {
++                  return;
++                }
+                 RNCWebView.this.onMessage(message.getData(), sourceOrigin.toString());
+               }
+             };
+@@ -264,10 +268,11 @@ public class RNCWebView extends WebView implements LifecycleEventListener {
+             );
+           }
+         } else {
+-          if (fallbackBridge == null) {
+-            fallbackBridge = new RNCWebViewBridge(webView);
+-            addJavascriptInterface(fallbackBridge, JAVASCRIPT_INTERFACE);
+-          }
++          // The legacy JavascriptInterface cannot authenticate the sending
++          // frame: Android reports only the top-level URL for those messages.
++          // Fail closed instead of allowing an iframe to invoke privileged
++          // native bridge actions.
++          FLog.w(TAG, "Web message listener unavailable; privileged WebView bridge disabled");
+         }
+         injectJavascriptObject();
+     }
+diff --git a/android/src/main/java/com/reactnativecommunity/webview/RNCWebViewClient.java b/android/src/main/java/com/reactnativecommunity/webview/RNCWebViewClient.java
+index 0287e1c..b08c2ef 100644
+--- a/android/src/main/java/com/reactnativecommunity/webview/RNCWebViewClient.java
++++ b/android/src/main/java/com/reactnativecommunity/webview/RNCWebViewClient.java
+@@ -2,6 +2,7 @@ package com.reactnativecommunity.webview;
+ 
+ import android.annotation.TargetApi;
+ import android.graphics.Bitmap;
++import android.net.Uri;
+ import android.net.http.SslError;
+ import android.os.Build;
+ import android.os.SystemClock;
+@@ -13,6 +14,14 @@ import android.webkit.WebResourceRequest;
+ import android.webkit.WebResourceResponse;
+ import android.webkit.WebView;
+ import android.webkit.WebViewClient;
++import android.webkit.ClientCertRequest;
++
++import java.security.KeyStore;
++import java.security.PrivateKey;
++import java.security.cert.X509Certificate;
++import java.util.Collections;
++import java.util.HashSet;
++import java.util.Set;
+ 
+ import androidx.annotation.Nullable;
+ import androidx.annotation.RequiresApi;
+@@ -40,6 +49,35 @@ import java.util.concurrent.atomic.AtomicReference;
+ public class RNCWebViewClient extends WebViewClient {
+     private static String TAG = "RNCWebViewClient";
+     protected static final int SHOULD_OVERRIDE_URL_LOADING_TIMEOUT = 250;
++    private static volatile Set<String> allowedClientCertificateOrigins = Collections.emptySet();
++
++    public static void setAllowedClientCertificateOrigins(Set<String> origins) {
++        Set<String> normalized = new HashSet<>();
++        if (origins != null) {
++            for (String rawOrigin : origins) {
++                Uri origin = rawOrigin == null ? null : Uri.parse(rawOrigin);
++                if (origin == null || !"https".equalsIgnoreCase(origin.getScheme()) ||
++                        origin.getHost() == null || origin.getUserInfo() != null ||
++                        origin.getPath() != null && !origin.getPath().isEmpty() ||
++                        origin.getQuery() != null || origin.getFragment() != null) {
++                    continue;
++                }
++                int port = origin.getPort() >= 0 ? origin.getPort() : 443;
++                if (port > 0 && port <= 65535) {
++                    normalized.add(origin.getHost().toLowerCase(java.util.Locale.ROOT) + ":" + port);
++                }
++            }
++        }
++        allowedClientCertificateOrigins = Collections.unmodifiableSet(normalized);
++    }
++
++    private static boolean isAllowedClientCertificateRequest(ClientCertRequest request) {
++        if (request == null || request.getHost() == null || request.getHost().isEmpty()) {
++            return false;
++        }
++        String host = request.getHost().toLowerCase(java.util.Locale.ROOT);
++        return allowedClientCertificateOrigins.contains(host + ":" + request.getPort());
++    }
+ 
+     protected boolean mLastLoadFailed = false;
+     protected RNCWebView.ProgressChangedFilter progressChangedFilter = null;
+@@ -90,6 +128,51 @@ public class RNCWebViewClient extends WebViewClient {
+       reactWebView.callInjectedJavaScriptBeforeContentLoaded();
+     }
+ 
++    @Override
++    public void onReceivedClientCertRequest(WebView view, final ClientCertRequest request) {
++        if (!isAllowedClientCertificateRequest(request)) {
++            Log.w(TAG, "Rejecting client certificate request for unapproved destination");
++            request.cancel();
++            return;
++        }
++        Log.d(TAG, "CLIENT CERT REQUEST for approved destination");
++
++        // Use a background thread to retrieve the certificate from Android KeyStore.
++        new Thread(new Runnable() {
++            @Override
++            public void run() {
++                try {
++                    String alias = "ClientIdentity";
++
++                    KeyStore keyStore = KeyStore.getInstance("AndroidKeyStore");
++                    keyStore.load(null);
++
++                    KeyStore.PrivateKeyEntry keyEntry = (KeyStore.PrivateKeyEntry) keyStore.getEntry(alias, null);
++
++                    if (keyEntry == null) {
++                        Log.e(TAG, "No private key entry found for alias: " + alias);
++                        request.cancel();
++                        return;
++                    }
++
++                    PrivateKey privateKey = keyEntry.getPrivateKey();
++                    X509Certificate[] certChain = (X509Certificate[]) keyEntry.getCertificateChain();
++
++                    if (privateKey != null && certChain != null && certChain.length > 0) {
++                        Log.d(TAG, "Providing client certificate: " + certChain[0].getSubjectDN());
++                        request.proceed(privateKey, certChain);
++                    } else {
++                        Log.e(TAG, "No client certificate found for alias: " + alias);
++                        request.cancel();
++                    }
++                } catch (Exception e) {
++                    Log.e(TAG, "Error retrieving client certificate from AndroidKeyStore", e);
++                    request.cancel();
++                }
++            }
++        }).start();
++    }
++
+     @Override
+     public boolean shouldOverrideUrlLoading(WebView view, String url) {
+         final RNCWebView rncWebView = (RNCWebView) view;
+diff --git a/apple/RNCWebViewImpl.m b/apple/RNCWebViewImpl.m
+index 7f5c24d..7e9dae1 100644
+--- a/apple/RNCWebViewImpl.m
++++ b/apple/RNCWebViewImpl.m
+@@ -23,6 +23,17 @@ static NSString *const MessageHandlerName = @"ReactNativeWebView";
+ static NSURLCredential* clientAuthenticationCredential;
+ static NSDictionary* customCertificatesForHost;
+ 
++static BOOL LotusWebViewOriginMatches(NSString *host, NSInteger port, NSString *infoKey) {
++  NSString *rawOrigin = [[NSBundle mainBundle] objectForInfoDictionaryKey:infoKey];
++  NSURL *origin = rawOrigin.length > 0 ? [NSURL URLWithString:rawOrigin] : nil;
++  if (origin == nil || ![origin.scheme.lowercaseString isEqualToString:@"https"] ||
++      origin.host.length == 0 || host.length == 0) {
++    return NO;
++  }
++  NSInteger expectedPort = origin.port != nil ? origin.port.integerValue : 443;
++  return [origin.host caseInsensitiveCompare:host] == NSOrderedSame && expectedPort == port;
++}
++
+ NSString *const CUSTOM_SELECTOR = @"_CUSTOM_SELECTOR_";
+ 
+ #if TARGET_OS_IOS
+@@ -782,7 +793,7 @@ RCTAutoInsetsProtocol>
+       _onLoadingFinish(event);
+     }
+   } else if ([message.name isEqualToString:MessageHandlerName]) {
+-    if (_onMessage) {
++    if (_onMessage && message.frameInfo.isMainFrame) {
+       NSMutableDictionary<NSString *, id> *event = [self baseEvent];
+       [event addEntriesFromDictionary: @{@"data": message.body}];
+       [event addEntriesFromDictionary: @{@"url": message.frameInfo.request.URL.absoluteString}];
+@@ -1158,6 +1169,14 @@ RCTAutoInsetsProtocol>
+     host = webView.URL.host;
+   }
+   if ([[challenge protectionSpace] authenticationMethod] == NSURLAuthenticationMethodClientCertificate) {
++    NSURLProtectionSpace *protectionSpace = [challenge protectionSpace];
++    NSString *challengeHost = protectionSpace.host;
++    NSInteger challengePort = protectionSpace.port;
++    if (!LotusWebViewOriginMatches(challengeHost, challengePort, @"LotusApiOrigin") &&
++        !LotusWebViewOriginMatches(challengeHost, challengePort, @"LotusDashboardOrigin")) {
++      completionHandler(NSURLSessionAuthChallengeCancelAuthenticationChallenge, nil);
++      return;
++    }
+     completionHandler(NSURLSessionAuthChallengeUseCredential, clientAuthenticationCredential);
+     return;
+   }
+@@ -1295,7 +1314,15 @@ RCTAutoInsetsProtocol>
+                                     type:(WKMediaCaptureType)type
+                          decisionHandler:(void (^)(WKPermissionDecision decision))decisionHandler {
+   if (_mediaCapturePermissionGrantType == RNCWebViewPermissionGrantType_GrantIfSameHost_ElsePrompt || _mediaCapturePermissionGrantType == RNCWebViewPermissionGrantType_GrantIfSameHost_ElseDeny) {
+-    if ([origin.host isEqualToString:webView.URL.host]) {
++    NSURL *pageURL = webView.URL;
++    NSString *pageScheme = pageURL.scheme.lowercaseString;
++    NSString *originScheme = origin.protocol.lowercaseString;
++    NSInteger pagePort = pageURL.port != nil ? pageURL.port.integerValue :
++      ([pageScheme isEqualToString:@"https"] ? 443 : 80);
++    NSInteger originPort = origin.port > 0 ? origin.port :
++      ([originScheme isEqualToString:@"https"] ? 443 : 80);
++    if ([origin.host caseInsensitiveCompare:pageURL.host] == NSOrderedSame &&
++        [originScheme isEqualToString:pageScheme] && pagePort == originPort) {
+       decisionHandler(WKPermissionDecisionGrant);
+     } else {
+       WKPermissionDecision decision = _mediaCapturePermissionGrantType == RNCWebViewPermissionGrantType_GrantIfSameHost_ElsePrompt ? WKPermissionDecisionPrompt : WKPermissionDecisionDeny;

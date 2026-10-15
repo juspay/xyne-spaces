@@ -7,6 +7,14 @@ exec < /dev/tty
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 
+# Linting/type-checking the whole dashboard needs more than Node's default heap and
+# crashes with "JavaScript heap out of memory". Use the same 8 GB cap as CI (ci.yml),
+# keeping any NODE_OPTIONS the developer already set. The cap is a limit, not an allocation.
+case "${NODE_OPTIONS:-}" in
+  *max-old-space-size*) ;;
+  *) export NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--max-old-space-size=8192" ;;
+esac
+
 # --- Secret scanning (fail fast, before expensive build checks) ---------------
 # Scans ONLY staged changes so no secret can be committed by accident.
 # Config + accepted/known findings both live in .gitleaks.toml ([allowlist] paths & regexes)

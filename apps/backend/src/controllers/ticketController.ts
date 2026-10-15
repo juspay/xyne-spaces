@@ -38,6 +38,7 @@ import {
 } from '../services/ticketCustomFieldService';
 import { buildCreationFormFieldChanges } from '../services/ticketCustomFieldService';
 import {
+  resolveBoardTicketFormId,
   resolveFormFieldDefinitionsForForm,
   type ResolvedFormFieldDefinition,
 } from '@/utils/fieldDefinition';
@@ -67,6 +68,8 @@ import { versionReleaseMappingService } from '@/services/release/versionReleaseM
 import { BaseTicketType,
   FormContextType,
   FormEntityType,
+  parseFieldOptionValues,
+  resolveParentOption,
   ReleaseTrackingMode,
   TicketStatusV2,
   TicketPriority,
@@ -94,9 +97,10 @@ import { unifiedBotUserService } from '@/bots/unified';
 import { workflowManager } from '@/workflows/services/workflowManager';
 import { WorkflowType } from '@/workflows/types/workflow-enums';
 import { ticketService } from '@/services/ticketService';
+import { emailService } from '@/services/emailService';
 import { dualWriteTicketTags } from '@/services/ticketTagDualWriteService';
 import { createTicketWithConversationTx } from '@/bypassAcl/transactions/controllersTicketController';
-import { createTicketTx } from '@/bypassAcl/transactions/controllersTicketController';
+import { createTicketTx, TicketCreateAccessError } from '@/bypassAcl/transactions/controllersTicketController';
 import { mergeTicketTx } from '@/bypassAcl/transactions/controllersTicketController';
 import { unmergeTicketTx } from '@/bypassAcl/transactions/controllersTicketController';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
@@ -110,6 +114,27 @@ type MyTicketBoardOption = {
   id: string;
   name: string;
   projectId?: string;
+};
+
+const MAX_DUPLICATE_DECISIONS = 20;
+
+const duplicateDecisionsOf = (raw: unknown): { sameAs: string | null; notSame: string[] } => {
+  let value = raw;
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return { sameAs: null, notSame: [] };
+    }
+  }
+  if (!value || typeof value !== 'object') return { sameAs: null, notSame: [] };
+  const { sameAs, notSame } = value as { sameAs?: unknown; notSame?: unknown };
+  return {
+    sameAs: typeof sameAs === 'string' && sameAs.length > 0 ? sameAs : null,
+    notSame: (Array.isArray(notSame) ? notSame : [])
+      .filter((id): id is string => typeof id === 'string' && id.length > 0)
+      .slice(0, MAX_DUPLICATE_DECISIONS),
+  };
 };
 
 export class TicketController {
@@ -365,8 +390,65 @@ export class TicketController {
     }
   };
 
+  getBoardTicketFields = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const boardId = String(req.query.boardId ?? '').trim();
+      if (!boardId) {
+        res.status(400).json({ error: 'boardId is required' });
+        return;
+      }
+      if (!req.user?.id) {
+        res.status(401).json({ error: 'User not authenticated' });
+        return;
+      }
+
+      // Workspace-scoped by the tenant ACL extension, so a board in another
+      // workspace reads as missing rather than leaking its form.
+      const board = await db.board.findUnique({
+        where: { id: boardId },
+        select: { id: true, name: true },
+      });
+      if (!board) {
+        res.status(404).json({ error: 'Board not found' });
+        return;
+      }
+
+      const formId = await resolveBoardTicketFormId(db, boardId);
+      if (!formId) {
+        res.status(200).json({ boardId, boardName: board.name, formId: null, fields: [] });
+        return;
+      }
+
+      const definitions = await resolveFormFieldDefinitionsForForm(db, formId);
+      const fields = definitions.map(field => {
+        const parent = field.parentOptionId
+          ? resolveParentOption(definitions, field.parentOptionId)
+          : undefined;
+        return {
+          fieldName: field.fieldName,
+          fieldType: field.fieldType,
+          required: !field.isOptional,
+          options: parseFieldOptionValues(field.fieldEnum),
+          ...(parent
+            ? { shownWhen: { fieldName: parent.parentField.fieldName, equals: parent.option.value } }
+            : {}),
+        };
+      });
+
+      res.status(200).json({ boardId, boardName: board.name, formId, fields });
+    } catch (error) {
+      logger.error('[TicketController] Failed to fetch board ticket fields', {
+        boardId: req.query.boardId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      res.status(500).json({ error: 'Failed to fetch board ticket fields' });
+    }
+  };
+
   createTicket = async (req: Request, res: Response): Promise<void> => {
     try {
+      // Set only from server config below; the x-support-ticket header alone never trusts a channel.
+      let supportChannelId: string | undefined;
       // If this is a support/error-report ticket, resolve channel+board from CAC
       if (req.headers['x-support-ticket'] === 'true') {
         const cacConfig = await superpositionClient.getObjectValue(
@@ -389,6 +471,7 @@ export class TicketController {
         const SUPPORT_TAG = 'Support Ticket';
         const existingTags: string[] = Array.isArray(req.body.tags) ? req.body.tags : [];
         req.body.channelId = cacConfig.channelId;
+        supportChannelId = cacConfig.channelId;
         if (cacConfig.boardId) {
           req.body.boardId = cacConfig.boardId;
           const board = await this.boardRepository.findBoardById(cacConfig.boardId);
@@ -434,7 +517,6 @@ export class TicketController {
         excludedChatAttachmentIds,
         draftAttachmentIds,
         tags,
-        merchantId,
         parentTicketId,
         ticketType,
         stageName
@@ -516,6 +598,7 @@ export class TicketController {
       // is sent) — an incomplete repo would otherwise be silently dropped when
       // persisting releaseRepos, quietly covering fewer repos than configured.
       const rawReleaseRepos = dynamicFields?.['releaseRepos'];
+      let releaseRepoBoardIds: string[] = [];
       if (rawReleaseRepos !== undefined) {
         if (!req.user) {
           res.status(401).json({ error: 'Authentication required' });
@@ -589,14 +672,22 @@ export class TicketController {
             });
             return;
           }
+          releaseRepoBoardIds = boardIds;
         }
       }
 
       // Determine the actual channel to check its type
       let actualChannelId = channelId;
-      if (!actualChannelId && sourceConversationId) {
+      if (sourceConversationId) {
         const sourceConv = await this.conversationRepository.findById(sourceConversationId);
         if (sourceConv) {
+          if (channelId && channelId !== sourceConv.channelId) {
+            res.status(400).json({
+              error: 'channelId does not match the channel of sourceConversationId',
+              code: 'CHANNEL_CONVERSATION_MISMATCH',
+            });
+            return;
+          }
           actualChannelId = sourceConv.channelId;
         }
       }
@@ -616,6 +707,27 @@ export class TicketController {
         } else {
           // Non-support channels must provide boardId
           res.status(400).json({ error: 'boardId is required' });
+          return;
+        }
+      }
+
+      // A release config's main board takes tickets only from its release channel. Keyed
+      // on the board, not the requested ticket type, which the client could leave out.
+      {
+        const releaseBoardIds = [
+          ...new Set([boardId, ...releaseRepoBoardIds].filter((id): id is string => !!id)),
+        ];
+        const otherChannelConfig = await db.application.findFirst({
+          where: {
+            mainReleaseBoardId: { in: releaseBoardIds },
+            NOT: { channelId: actualChannelId ?? '' },
+          },
+          select: { id: true },
+        });
+        if (otherChannelConfig) {
+          res.status(403).json({
+            error: "This release board belongs to another release config; create the release from that config's release channel.",
+          });
           return;
         }
       }
@@ -791,8 +903,27 @@ export class TicketController {
         }
       }
 
+      // The one channel this ticket is created in. Everything below (the access check and the
+      // attachment rows written inside the transaction) uses this, never the raw request channelId.
+      const effectiveChannelId = sourceConversationId ? validatedConversation?.channelId : channelId;
+
       // Wrap all database operations in a transaction for data integrity
-      const { ticket } = await createTicketTx(projectId, sourceConversationId, validatedConversation, this, requestedTicketId, title, description, userId, finalAssignedTo, userGroupId, boardId, effectiveStatusV2, priority, eta, metadata, closedAt, closedBy, merchantId, sourceMessageId, effectiveTicketType, effectiveStageName, dynamicFields, formFieldChangesForEmit, channelId, excludedChatAttachmentIds, entityLinkOwner, fromTicketsTab, initialMessageId, board, uploadedFiles, draftAttachmentIds);
+      let ticket: Awaited<ReturnType<typeof createTicketTx>>['ticket'];
+      try {
+        ({ ticket } = await createTicketTx(projectId, sourceConversationId, validatedConversation, this, requestedTicketId, title, description, userId, finalAssignedTo, userGroupId, boardId, effectiveStatusV2, priority, eta, metadata, closedAt, closedBy, sourceMessageId, effectiveTicketType, effectiveStageName, dynamicFields, formFieldChangesForEmit, effectiveChannelId, excludedChatAttachmentIds, entityLinkOwner, fromTicketsTab, initialMessageId, board, uploadedFiles, draftAttachmentIds, (req.user.isApiKeyUser && req.user.role === 'admin') ? undefined : {
+          workspaceId: req.user.workspaceId,
+          channelId: effectiveChannelId,
+          boardId,
+          isGuest: req.user.role === 'GUEST',
+          trustedChannelId: supportChannelId,
+        }));
+      } catch (error) {
+        if (error instanceof TicketCreateAccessError) {
+          res.status(403).json({ error: error.message, code: error.code });
+          return;
+        }
+        throw error;
+      }
 
       // Ticket committed on its initial stage — auto-create the on-entry approval
       // request if that stage's single outgoing transition is configured for it.
@@ -818,6 +949,28 @@ export class TicketController {
             `[createTicket] Skipped last-activity update for channel ${String(ticketChannelId).replace(/[\r\n]/g, '')}: ${(err instanceof Error ? err.message : String(err)).replace(/[\r\n]/g, '')}`,
           );
         }
+
+        // A ticket raised on an email desk from somewhere other than the
+        // mailbox — WhatsApp, a chat message, the ticket form — has nobody
+        // written to yet, so the agent who opens it finds an empty composer.
+        // Draft that first email now, exactly as an inbound email would have.
+        // No-ops unless the channel has auto-draft switched on; fire-and-forget,
+        // because a draft is a convenience and must never fail or delay the
+        // ticket.
+        void emailService
+          .triggerOpeningAutoDraft({
+            ticketId: ticket.id,
+            conversationId: ticket.conversationId,
+            channelId: ticketChannelId,
+            title: ticket.title,
+            description: description ?? '',
+          })
+          .catch(err =>
+            logger.warn('[createTicket] opening auto-draft failed', {
+              ticketId: ticket.id,
+              error: err instanceof Error ? err.message : String(err),
+            }),
+          );
       }
 
       // Create TicketTag records for each tag
@@ -981,22 +1134,26 @@ export class TicketController {
         userName: req.user?.name ?? null,
       });
 
-      ticketDuplicateService.persistDuplicateReferences({
-        ticketId: ticket.id,
-        ticketCreatedBy: ticket.createdBy,
-        title,
-        description,
-        projectId,
-        userId,
-        parentTicketId,
-        channelId: ticket.channelId,
-        scopeFieldValues: duplicateScopeValues,
-      }).catch(error => {
-        logger.error('Failed to persist duplicate references for ticket', {
+      const duplicateDecisions = duplicateDecisionsOf(req.body.duplicateDecisions);
+      if (!duplicateDecisions.sameAs) {
+        ticketDuplicateService.persistDuplicateReferences({
           ticketId: ticket.id,
-          error,
+          ticketCreatedBy: ticket.createdBy,
+          title,
+          description,
+          projectId,
+          userId,
+          parentTicketId,
+          channelId: ticket.channelId,
+          scopeFieldValues: duplicateScopeValues,
+          excludeTicketIds: duplicateDecisions.notSame,
+        }).catch(error => {
+          logger.error('Failed to persist duplicate references for ticket', {
+            ticketId: ticket.id,
+            error,
+          });
         });
-      });
+      }
 
       const response: GetTicketDetailsResponse = {
         id: ticket.id,
@@ -1107,7 +1264,7 @@ export class TicketController {
 
         if (this.commitAnalysisController && releaseTicket && (hasRepoRows || hasScalarRange)) {
           // workspace + repoSlug are now derived inside commitAnalysisController
-          // from Application.repoUrl on the resolved project. We pass empty
+          // from the release config's repository (Application.repoId). We pass empty
           // placeholders to satisfy the existing param shape; the controller
           // ignores them when DB-derived values are available.
           const xyneReleaseBot = await unifiedBotUserService.getBotByBotId('xyne-release-bot', ticket.workspaceId);
@@ -1360,6 +1517,7 @@ export class TicketController {
         projectId,
         userId,
         limit,
+        jevOnly: true,
       });
 
       const response: TicketDuplicateCheckResponse = {

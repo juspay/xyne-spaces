@@ -1,7 +1,7 @@
 import type { ExternalSource } from '@prisma/client';
 import { BaseFlow } from '@/integrations/core/baseFlow';
 import type { TestPayloadResult } from '@/integrations/core/types';
-import { config } from '@/config/env';
+import { verifyMetaWebhookSubscription } from '../shared/metaWebhookVerification';
 import { decrypt } from '@/services/encryptionService';
 import type {
   InstagramCommentValue,
@@ -260,7 +260,7 @@ export class InstagramFlow extends BaseFlow {
               : null;
 
             let commentText = details?.text ?? '';
-            let senderUsername = details?.username ?? '';
+            const senderUsername = details?.username ?? '';
             let ts = details?.timestamp ? new Date(details.timestamp).getTime() : 0;
 
             if (!commentText && accessToken && businessIgsid) {
@@ -421,22 +421,6 @@ export class InstagramFlow extends BaseFlow {
   }
 
   isTestQueryParam(query: Record<string, string | undefined>): TestPayloadResult {
-    if (query['hub.mode'] !== 'subscribe') return { isTest: false };
-
-    const verifyToken = query['hub.verify_token'];
-    const challenge = query['hub.challenge'];
-    const configuredToken = config.META_WEBHOOK_VERIFY_TOKEN as string;
-
-    if (!configuredToken || verifyToken !== configuredToken || !challenge) {
-      return {
-        isTest: true,
-        response: { status: 403, body: 'Forbidden' },
-      };
-    }
-
-    return {
-      isTest: true,
-      response: { status: 200, body: challenge },
-    };
+    return verifyMetaWebhookSubscription(query);
   }
 }

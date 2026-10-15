@@ -8,6 +8,7 @@ import {
   Loader2,
   Mail,
   MessageCircle,
+  MessageSquare,
   Mic,
   Paperclip,
   X,
@@ -50,7 +51,7 @@ import { SearchResultMessageCard } from './SearchResultMessageCard';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
 import { SearchSnippetRenderer } from '../RenderMessageWithHTML/searchSnippetRender';
 import { SearchResultsContext, SearchResultsThread } from './SearchResultsContext';
-import { SearchFilterBar } from './SearchFilterBar';
+import { SearchFilterBar, buildFilterSummary, sortSummary } from './SearchFilterBar';
 import { SearchQueryInput, type QueryToken } from './SearchQueryInput';
 import { parseSearchFilters } from '../../../utils/searchFilterParser';
 import {
@@ -88,6 +89,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { cn } from '../../../utils/classNames';
 import { CompareSelectRow } from './compare/CompareSelectRow';
 import { SearchCompareDialog } from './compare/SearchCompareDialog';
+import { SearchFeedbackPopover, useCanPostSearchFeedback } from '../SearchFeedback';
 import { hasRankingData } from './compare/rankingFeatures';
 import {
   TicketSearchHighlightContext,
@@ -207,6 +209,10 @@ const SearchResults = (): ReactElement => {
   const [filters, setFilters] = useState<SearchResultsFilters>(() =>
     parseFiltersFromParams(searchParams),
   );
+
+  // —— Search feedback popover ——
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const canPostFeedback = useCanPostSearchFeedback();
 
   // —— Compare mode (ranking comparison) ——
   const [compareMode, setCompareMode] = useState(false);
@@ -329,7 +335,11 @@ const SearchResults = (): ReactElement => {
     paginationState,
     filteredLocalUsers,
     filteredLocalChannels,
+    onOpen: onSessionOpen,
+    onClose: onSessionClose,
+    onResultClick,
   } = useSearchMetrics({
+    surface: 'search_screen',
     allChannels: allChannelsWithCategory,
     mentionSearchType: null,
     defaultOnlyMyChannels: filters.onlyMyChannels,
@@ -345,6 +355,16 @@ const SearchResults = (): ReactElement => {
       handleQuerySubmitRef.current(searchedQuery.trim());
     },
   });
+
+  // One search session per visit to this screen, for metrics. Mount-only via a ref (as in
+  // ContextPicker): onClose closes over the session id, so its identity flips after onOpen
+  // and would re-fire the effect if listed as a dep.
+  const sessionRef = useRef({ onSessionOpen, onSessionClose });
+  sessionRef.current = { onSessionOpen, onSessionClose };
+  useEffect(() => {
+    sessionRef.current.onSessionOpen('click');
+    return (): void => sessionRef.current.onSessionClose();
+  }, []);
 
   // The text the on-screen results actually reflect. Results update live as the user
   // types (the hook searches `searchedText`) but the URL `query` only commits on Enter,
@@ -819,11 +839,21 @@ const SearchResults = (): ReactElement => {
     },
     [allChannelsForNav, currentUserId],
   );
+  // Metrics for a result open. `rank` is the card's 1-indexed position within its section,
+  // the same meaning cmdK's rankPosition has. Message cards open through context handlers
+  // rather than openResult, so they call this directly.
+  const trackResultClick = useCallback(
+    (result: DisplaySearchResult, rank: number): void => {
+      onResultClick(result, rank, result.searchContext?.channelId);
+    },
+    [onResultClick],
+  );
   // Single entry point for a result-card click: resolve what it should do, then do it.
   const openResult = useCallback(
-    (result: DisplaySearchResult): void => {
+    (result: DisplaySearchResult, rank: number): void => {
       const action = resolveResultClick(result, allChannelsForNav);
       if (!action) return;
+      trackResultClick(result, rank);
       // Recents capture content searches — opening a person or channel is navigation, not a query to replay.
       if (result.type !== 'user' && result.type !== 'channel') saveCurrentSearchAsRecent();
       switch (action.kind) {
@@ -838,7 +868,7 @@ const SearchResults = (): ReactElement => {
           return;
       }
     },
-    [allChannelsForNav, navigate, openUserDm, saveCurrentSearchAsRecent],
+    [allChannelsForNav, navigate, openUserDm, saveCurrentSearchAsRecent, trackResultClick],
   );
   const handleClosePanel = (): void => {
     setSelectedPanel(null);
@@ -887,6 +917,15 @@ const SearchResults = (): ReactElement => {
     }
     return map;
   }, [results]);
+
+  /** True when the search returned results. Controls the result count and Compare button. */
+  const hasResultsRow = results.length > 0 || (!!query && totalCount > 0);
+
+  // Filter labels sent with feedback.
+  const feedbackFilters = useMemo(
+    () => buildFilterSummary(filters, filterResolvers, query),
+    [filters, filterResolvers, query],
+  );
 
   const resultsColumn = (
     <div className='relative flex flex-col h-full min-h-0'>
@@ -940,26 +979,58 @@ const SearchResults = (): ReactElement => {
             onQueryChange={handleQuerySubmit}
           />
         </div>
-        {(results.length > 0 || (query && totalCount > 0)) && (
+        {/* Shown for any query or active filter so Feedback is available even with no results.
+            The result count and Compare still need results. */}
+        {(hasResultsRow || (canPostFeedback && (!!displayQuery || filtersActive))) && (
           <div className='flex items-center justify-between gap-3 pb-2'>
-            <p className='text-xs text-muted-foreground tabular-nums'>
-              {(totalCount || results.length).toLocaleString()} results
-            </p>
-            <button
-              onClick={() => setCompareMode(v => !v)}
-              title='Compare how results ranked'
-              data-track-category='SEARCH_RESULTS'
-              data-track-name='TOGGLE_COMPARE'
-              className={cn(
-                'inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md active:scale-[0.96] transition',
-                compareMode
-                  ? 'bg-primary text-primary-foreground shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/60 border border-border',
+            {hasResultsRow && (
+              <p className='text-xs text-muted-foreground tabular-nums'>
+                {(totalCount || results.length).toLocaleString()} results
+              </p>
+            )}
+            <div className='flex items-center gap-2 ml-auto'>
+              {canPostFeedback && (
+                <SearchFeedbackPopover
+                  open={feedbackOpen}
+                  onOpenChange={setFeedbackOpen}
+                  query={displayQuery}
+                  filters={feedbackFilters}
+                  sort={sortSummary(filters)}
+                >
+                  <button
+                    title='Tell the search team about these results'
+                    data-track-category='SEARCH_RESULTS'
+                    data-track-name='OPEN_FEEDBACK'
+                    className={cn(
+                      'inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md active:scale-[0.96] transition',
+                      feedbackOpen
+                        ? 'bg-primary text-primary-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/60 border border-border',
+                    )}
+                  >
+                    <MessageSquare size={13} />
+                    Feedback
+                  </button>
+                </SearchFeedbackPopover>
               )}
-            >
-              <GitCompare size={13} />
-              Compare
-            </button>
+              {hasResultsRow && (
+                <button
+                  onClick={() => setCompareMode(v => !v)}
+                  title='Compare how results ranked'
+                  data-track-category='SEARCH_RESULTS'
+                  data-track-name='TOGGLE_COMPARE'
+                  className={cn(
+                    'inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md active:scale-[0.96] transition',
+                    compareMode
+                      ? 'bg-primary text-primary-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-muted/60 border border-border',
+                  )}
+                >
+                  <GitCompare size={13} />
+                  Compare
+                </button>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -986,6 +1057,7 @@ const SearchResults = (): ReactElement => {
             loadMoreRef={loadMoreRef}
             selectedPanel={selectedPanel}
             onOpenResult={openResult}
+            onTrackResultClick={trackResultClick}
             channelData={allChannelsForNav}
             searchableChannels={allChannelsWithCategory}
             usersById={usersById}
@@ -1089,7 +1161,8 @@ interface ResultsBodyProps {
   results: DisplaySearchResult[];
   loadMoreRef: React.RefObject<HTMLDivElement | null>;
   selectedPanel: SidePanelState;
-  onOpenResult: (result: DisplaySearchResult) => void;
+  onOpenResult: (result: DisplaySearchResult, rank: number) => void;
+  onTrackResultClick: (result: DisplaySearchResult, rank: number) => void;
   channelData: ReturnType<typeof useAllChannels>;
   searchableChannels: Array<{
     channel: Channel;
@@ -1235,6 +1308,7 @@ function ResultsBody({
   loadMoreRef,
   selectedPanel,
   onOpenResult,
+  onTrackResultClick,
   channelData,
   searchableChannels,
   usersById,
@@ -1279,15 +1353,19 @@ function ResultsBody({
   };
 
   // Renders a single result card — shared between flat and grouped views
-  // `resultIndex` is the 0-based rank of this card in the result list. It is the
-  // whole search-quality signal — mean click rank and click-through by position
-  // are uncomputable without it — so it rides down to the tracked elements.
-  const renderCard = (result: DisplaySearchResult, resultIndex?: number): ReactElement | null => {
+  // `resultIndex` is the 0-based rank of this card within its section (the whole list in the
+  // flat view). It is the whole search-quality signal — mean click rank and click-through by
+  // position are uncomputable without it — so it rides down to the tracked elements and is the
+  // rank every click reports, matching cmdK's per-section rankPosition.
+  const renderCard = (result: DisplaySearchResult, resultIndex: number): ReactElement | null => {
     const key = `${result.type}-${result.id}`;
+    const rank = resultIndex + 1;
 
     // User card — opens the user's DM chat in the right pane.
     if (result.type === 'user') {
-      return <UserResultCard key={key} result={result} onSelectUser={() => onOpenResult(result)} />;
+      return (
+        <UserResultCard key={key} result={result} onSelectUser={() => onOpenResult(result, rank)} />
+      );
     }
 
     // Channel card
@@ -1298,7 +1376,7 @@ function ResultsBody({
       return (
         <button
           key={key}
-          onClick={() => onOpenResult(result)}
+          onClick={() => onOpenResult(result, rank)}
           className='w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-border bg-card hover:bg-muted transition-colors text-left'
           data-track-category='SEARCH_RESULTS'
           data-track-name={isDeskChannel ? 'OPEN_DESK_CHANNEL' : 'OPEN_CHANNEL'}
@@ -1344,7 +1422,7 @@ function ResultsBody({
       return (
         <button
           key={key}
-          onClick={() => onOpenResult(result)}
+          onClick={() => onOpenResult(result, rank)}
           className='w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-border bg-card hover:bg-muted transition-colors text-left'
           data-track-category='SEARCH_RESULTS'
           data-track-name='OPEN_ATTACHMENT'
@@ -1393,7 +1471,7 @@ function ResultsBody({
       return (
         <button
           key={key}
-          onClick={() => onOpenResult(result)}
+          onClick={() => onOpenResult(result, rank)}
           className='w-full flex items-start gap-3 px-4 py-3 rounded-xl border border-border bg-card hover:bg-muted transition-colors text-left'
           data-track-category='SEARCH_RESULTS'
           data-track-name='OPEN_MAIL'
@@ -1481,7 +1559,7 @@ function ResultsBody({
             ticket={ticketSummary}
             isConversation
             width='max-w-none w-full'
-            onClick={() => onOpenResult(result)}
+            onClick={() => onOpenResult(result, rank)}
           />
         </div>
       );
@@ -1494,7 +1572,8 @@ function ResultsBody({
     return (
       <SearchResultMessageCard
         key={key}
-        {...(resultIndex !== undefined && { resultIndex })}
+        resultIndex={resultIndex}
+        onOpen={() => onTrackResultClick(result, rank)}
         resultCount={results.length}
         channelId={ctx.channelId}
         conversationId={ctx.conversationId}
@@ -1605,8 +1684,8 @@ function ResultsBody({
             {CATEGORY_LABELS[sectionKey]}
           </p>
           <div className='space-y-2'>
-            {displayItems.map(({ channel: c, searchableNames }) =>
-              renderCard(toChannelResult(c, searchableNames)),
+            {displayItems.map(({ channel: c, searchableNames }, i) =>
+              renderCard(toChannelResult(c, searchableNames), i),
             )}
           </div>
           {hasMore && (
@@ -1636,7 +1715,7 @@ function ResultsBody({
           <p className='px-1 pb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide font-mono'>
             Users ({userResults.length})
           </p>
-          <div className='space-y-2'>{displayItems.map(result => renderCard(result))}</div>
+          <div className='space-y-2'>{displayItems.map((result, i) => renderCard(result, i))}</div>
           {hasMore && (
             <button
               onClick={() => toggleExpand('user')}
@@ -1710,7 +1789,7 @@ function ResultsBody({
                   {GROUP_LABELS[gk]} ({grouped.get(gk)!.length})
                 </p>
                 <div className='space-y-2'>
-                  {grouped.get(gk)!.map(result => renderCard(result))}
+                  {grouped.get(gk)!.map((result, i) => renderCard(result, i))}
                 </div>
               </div>
             ))
@@ -1719,7 +1798,9 @@ function ResultsBody({
                 <p className='px-1 pb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide font-mono'>
                   {GROUP_LABELS['others']} ({backendOnly.length})
                 </p>
-                <div className='space-y-2'>{backendOnly.map(result => renderCard(result))}</div>
+                <div className='space-y-2'>
+                  {backendOnly.map((result, i) => renderCard(result, i))}
+                </div>
               </div>
             )}
         {footer}

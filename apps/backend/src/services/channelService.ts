@@ -16,13 +16,16 @@ export class ChannelService {
     this.projectRepository = new ProjectRepository();
   }
 
-  async ensureSelfDmExists(userId: string, workspaceId: string): Promise<string> {
+  /** @param options.indexInVespa - Make sure the self-DM is in Vespa, new or existing (the login-created one may never
+   *  have been indexed). Default false. */
+  async ensureSelfDmExists(userId: string, workspaceId: string, options: { indexInVespa?: boolean } = {}): Promise<string> {
     try {
 
       const existingSelfDm = await this.channelRepository.getDMChannel(userId, userId);
 
       if (existingSelfDm) {
         logger.debug(`[ChannelService] Self-DM already exists for user ${userId}: ${existingSelfDm.id}`);
+        if (options.indexInVespa) await this.channelRepository.queueVespaFeed(existingSelfDm.id, workspaceId);
         return existingSelfDm.id;
       }
 
@@ -45,6 +48,7 @@ export class ChannelService {
       const channel = await this.channelRepository.create(channelData);
 
       await this.channelParticipantRepository.addParticipant(channel.id, userId, ChannelRole.ADMIN);
+      if (options.indexInVespa) await this.channelRepository.queueVespaFeed(channel.id, workspaceId);
 
       logger.info(`[ChannelService] Created self-DM channel for user ${userId}: ${channel.id}`);
 

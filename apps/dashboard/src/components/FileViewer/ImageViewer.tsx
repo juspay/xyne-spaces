@@ -415,6 +415,7 @@ const ImageViewer: React.FC<BaseViewerProps> = ({
               onClick={handleOpenInNewWindow}
               className='inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-background/10 rounded-md transition-colors'
               title='Open in New Window'
+              aria-label='Open in New Window'
               data-track-category='FileViewer'
               data-track-name='OPEN_IMAGE_IN_NEW_WINDOW'
               data-track-metadata={JSON.stringify({ source, fileName })}

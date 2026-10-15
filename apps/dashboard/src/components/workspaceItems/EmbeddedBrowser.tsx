@@ -1,9 +1,24 @@
-import { useCallback, useEffect, useState, type ReactElement, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { isElectronApp } from '../../utils/electronApp';
-import { pickWebviewPartition } from '../../utils/browserPanelPartition';
-import { registerEmbeddedWebview } from '../../utils/embeddedWebviewRegistry';
 import type { ElectronWebviewElement } from '../../types/electron';
 import { SandboxedFrame } from './primitives';
+import { ask } from '../InAppBrowser/ask';
+import { subscribeToPageKeys, type PageKeyCommand } from '../InAppBrowser/pageKeys';
+import { zoomPage } from '../InAppBrowser/zoom';
+import {
+  BrowserWebview,
+  IDLE_PAGE,
+  type PageLive,
+  type WebviewElement,
+} from '../InAppBrowser/BrowserWebview';
+import { LoadError } from '../InAppBrowser/LoadError';
+import { LinkPreview } from '../InAppBrowser/LinkPreview';
+import {
+  PageContextMenu,
+  type PageMenuAction,
+  type PageMenuParams,
+} from '../InAppBrowser/PageContextMenu';
+import { runPageMenuAction } from '../InAppBrowser/pageMenuActions';
 import {
   canHostEmbedPages,
   embedPageOverElement,
@@ -21,6 +36,13 @@ export interface EmbeddedBrowserProps {
   onView?: (view: ElectronWebviewElement | null) => void;
   /** Called on every navigation, with the url the page moved to. */
   onNavigate?: (url: string) => void;
+  /**
+   * On screen. A surface that keeps the page while showing something else says
+   * so: out of sight a while, the page is frozen, and it wakes when shown again.
+   */
+  shown?: boolean;
+  /** Told when the page starts or stops playing a video or a sound. */
+  onPlaying?: (playing: boolean) => void;
 }
 
 /**
@@ -38,6 +60,18 @@ function HostedPage({ url }: { url: string }): ReactElement {
   return <div ref={setElement} className='h-full w-full bg-background' />;
 }
 
+/** A right-click in the page: the menu, where the click was, and the page's own point. */
+interface OpenMenu {
+  at: { x: number; y: number };
+  params: PageMenuParams;
+}
+
+/**
+ * One web page, as Xyne AI's workspace shows it: the in-app browsers' own page —
+ * its error card, right-click menu, link preview, zoom and keys — without tabs or a
+ * bar of its own, which the surface around it provides. A link that wants a new
+ * window opens in this same page.
+ */
 export function EmbeddedBrowser({
   url,
   title,
@@ -45,55 +79,55 @@ export function EmbeddedBrowser({
   overlay,
   onView,
   onNavigate,
+  shown = true,
+  onPlaying,
 }: EmbeddedBrowserProps): ReactElement {
-  const [view, setView] = useState<ElectronWebviewElement | null>(null);
+  const [view, setView] = useState<WebviewElement | null>(null);
+  const viewRef = useRef<WebviewElement | null>(null);
   const [host, setHost] = useState<HTMLDivElement | null>(null);
+  const [live, setLive] = useState<PageLive>(IDLE_PAGE);
+  const [menu, setMenu] = useState<OpenMenu | null>(null);
+  const onViewRef = useRef(onView);
+  onViewRef.current = onView;
+  const onNavigateRef = useRef(onNavigate);
+  onNavigateRef.current = onNavigate;
+  const onPlayingRef = useRef(onPlaying);
+  onPlayingRef.current = onPlaying;
 
   const releaseFocus = useCallback((): void => {
     reclaimHostFocus();
     void window.electronAPI?.focusHostWebContents?.();
   }, []);
 
-  const attach = useCallback(
-    (el: HTMLElement | null) => {
-      const next = el ? (el as ElectronWebviewElement) : null;
-      setView(next);
-      onView?.(next);
-    },
-    [onView],
-  );
+  const register = useCallback((next: WebviewElement | null): void => {
+    viewRef.current = next;
+    setView(next);
+    // The same element, as the surfaces that drive it type it.
+    onViewRef.current?.(next ? (next as unknown as ElectronWebviewElement) : null);
+  }, []);
 
-  useEffect(() => {
-    if (!view) return;
-
-    const navigated = (): void => {
-      try {
-        onNavigate?.(view.getURL());
-      } catch {
-        /* the guest is gone or not ready; the next navigation reports it */
+  /** Back, forward and zoom, from the keyboard while this page has it. */
+  const onKey = useCallback((command: PageKeyCommand): void => {
+    const page = viewRef.current;
+    if (!page) return;
+    ask(() => {
+      if (command === 'back' && page.canGoBack()) page.goBack();
+      else if (command === 'forward' && page.canGoForward()) page.goForward();
+      else if (command === 'zoomIn' || command === 'zoomOut' || command === 'zoomReset') {
+        zoomPage(page, command === 'zoomIn' ? 'in' : command === 'zoomOut' ? 'out' : 'reset');
       }
-    };
-    view.addEventListener('did-navigate', navigated);
-    view.addEventListener('did-navigate-in-page', navigated);
+      return null;
+    }, null);
+  }, []);
 
-    let unregister = (): void => undefined;
-    const claimPopups = (): void => {
-      const id = view.getWebContentsId?.();
-      if (typeof id !== 'number') return;
-      unregister();
-      unregister = registerEmbeddedWebview(id, next => {
-        void view.loadURL(next);
-      });
-    };
-    view.addEventListener('dom-ready', claimPopups);
-
-    return () => {
-      view.removeEventListener('did-navigate', navigated);
-      view.removeEventListener('did-navigate-in-page', navigated);
-      view.removeEventListener('dom-ready', claimPopups);
-      unregister();
-    };
-  }, [view, onNavigate]);
+  // Browser keys pressed in this page, which the desktop app passes on — the View
+  // menu's zoom too. The rest belong to browsers with a bar.
+  useEffect(() => {
+    if (!view) return undefined;
+    return subscribeToPageKeys(command => {
+      if (document.activeElement === view) onKey(command);
+    });
+  }, [view, onKey]);
 
   useEffect(() => {
     if (!host) return;
@@ -125,21 +159,91 @@ export function EmbeddedBrowser({
     return <SandboxedFrame url={url} title={title} />;
   }
 
+  const typedView = view ? (view as unknown as ElectronWebviewElement) : null;
+  const box = host?.getBoundingClientRect();
+
   return (
     <div className='flex h-full min-h-0 flex-col'>
-      {banner?.(view)}
+      {banner?.(typedView)}
       <div ref={setHost} className='relative min-h-0 flex-1' onPointerLeave={releaseFocus}>
-        <webview
-          {...({
-            ref: attach,
-            src: url,
-            allowpopups: '',
-            partition: pickWebviewPartition(url),
-            className: 'h-full w-full border-0 bg-background',
-          } as Record<string, unknown>)}
+        <BrowserWebview
+          src={url}
+          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
+          shown={shown}
+          audible
+          // Xyne AI already sees this page: it takes none of the browser panel's page
+          // script, as a folder's browser doesn't.
+          plain
+          register={register}
+          onLive={change => {
+            setLive(current => ({ ...current, ...change }));
+            if (change.playing !== undefined) onPlayingRef.current?.(change.playing);
+          }}
+          onChanged={() => {
+            const page = viewRef.current;
+            if (page) onNavigateRef.current?.(ask(() => page.getURL(), url));
+          }}
+          onMenu={params => {
+            releaseFocus();
+            // Electron gives the click in the window's coordinates, which place the
+            // menu; copying an image or inspecting there take the page's.
+            const origin = host?.getBoundingClientRect();
+            setMenu({
+              at: { x: params.x, y: params.y },
+              params: {
+                ...params,
+                x: params.x - (origin?.left ?? 0),
+                y: params.y - (origin?.top ?? 0),
+              },
+            });
+          }}
+          onKey={onKey}
+          // A link that wants a window of its own opens here, in the same page.
+          onPopup={next => {
+            const page = viewRef.current;
+            if (page) void ask(() => page.loadURL(next), Promise.resolve()).catch(() => undefined);
+          }}
         />
-        {overlay?.(view)}
+        {live.error && (
+          <LoadError
+            error={live.error}
+            onRetry={() => {
+              const page = viewRef.current;
+              const retry = live.error?.url || url;
+              if (page)
+                void ask(() => page.loadURL(retry), Promise.resolve()).catch(() => undefined);
+            }}
+            trackCategory='Workspace'
+          />
+        )}
+        {overlay?.(typedView)}
+        {shown && box && <LinkPreview url={live.hoverUrl} page={box} />}
       </div>
+      {menu &&
+        view &&
+        (() => {
+          const page = view;
+          return (
+            <PageContextMenu
+              at={menu.at}
+              params={menu.params}
+              page={{
+                canGoBack: ask(() => page.canGoBack(), false),
+                canGoForward: ask(() => page.canGoForward(), false),
+                saveable: false,
+                inspectable: import.meta.env.DEV,
+              }}
+              onAction={(action: PageMenuAction) =>
+                runPageMenuAction(page, action, {
+                  // One page here: a link to a new tab opens in it.
+                  openInTab: next => void ask(() => page.loadURL(next), Promise.resolve()),
+                })
+              }
+              onClose={() => setMenu(null)}
+              trackCategory='Workspace'
+            />
+          );
+        })()}
     </div>
   );
 }

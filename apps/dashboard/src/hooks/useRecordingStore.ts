@@ -83,6 +83,11 @@ export function sendRecordingEvent(event: RecordingStoreEvent): void {
   store.send(event);
 }
 
+/** Read the whole recording context imperatively (e.g. inside an event handler) without subscribing. */
+export function getRecordingContext(): RecordingState {
+  return store.getSnapshot().context;
+}
+
 /** Read the current recording status imperatively (e.g. inside an event handler) without subscribing. */
 export function getRecordingStatus(): RecordingState['status'] {
   return store.getSnapshot().context.status;

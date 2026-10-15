@@ -448,9 +448,27 @@ const EVICTION_RECENCY_PROTECT_MS = 60 * 60 * 1000; // 1 hour
 const EVICTION_CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 const ACCESS_COUNT_DECAY_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
 
+const retainedKeys = new Map<string, number>();
+
+/**
+ * Exempt a cache key from eviction until the returned release function is called.
+ * Retains are counted, so the key stays protected while any holder is active.
+ */
+export function retainCacheKey(hash: string): () => void {
+  retainedKeys.set(hash, (retainedKeys.get(hash) ?? 0) + 1);
+  return () => {
+    const remaining = (retainedKeys.get(hash) ?? 1) - 1;
+    if (remaining > 0) {
+      retainedKeys.set(hash, remaining);
+    } else {
+      retainedKeys.delete(hash);
+    }
+  };
+}
+
 /**
  * Evict cache entries that exceed the max entry limit.
- * Skips entries accessed within the last hour.
+ * Skips retained entries and entries accessed within the last hour.
  * Among eligible entries, evicts the one with highest estimatedSize / (1 + accessCount).
  */
 function runEviction(): void {
@@ -462,6 +480,8 @@ function runEviction(): void {
   let worstScore = -1;
 
   for (const [key, entry] of cache) {
+    if (retainedKeys.has(key)) continue;
+
     const lastAccessed = entry.lastAccessedAt ?? 0;
     if (now - lastAccessed < EVICTION_RECENCY_PROTECT_MS) continue;
 

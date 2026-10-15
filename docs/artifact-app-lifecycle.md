@@ -9,6 +9,16 @@
 > Steps 2–5 remain planned: in-place updates, version restore, collaborative
 > creation, and fork / change-requests.
 
+> **Superseded (2026-10-08): apps are addressed by id, not by conversation.**
+> `create-app` mints an `appId` on create and requires one on update;
+> `read-app-file` and the new `publish-app` take `appId` too. All three call
+> claw-auth's user-facing `/artifact-apps` routes as the run's user (S2S +
+> `x-user-id`), so reads cover owned + published apps and writes are owner-only.
+> `artifact_apps.conversationId` is deprecated (no longer written or read; unique index dropped), and the
+> S2S `by-conversation` read-back route is gone. Users can attach any app they
+> can read from the claw context picker ("Artifact apps" tab, type `app`).
+> The Step 1 text below is kept as history.
+
 ## The problem being fixed
 
 Today **every `create-app` call produces a brand-new, unrelated artifact.**

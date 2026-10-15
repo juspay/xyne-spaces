@@ -98,6 +98,7 @@ import {
   Platform,
   SDLC_MEMBERSHIP_RELATION,
   SDLC_CONTAINMENT_RELATION,
+  SDLC_RELEASE_CONFIG_RELATION,
   SDLC_STRUCTURAL_RELATIONS,
   SDLC_TRACK_FLAT_RELATION,
   SDLC_TRACK_MEMBERSHIP_RELATION,
@@ -128,9 +129,18 @@ import {
   parseSlashCommandArtifactMessage,
   withSlashCommandArtifactClosed,
 } from '@xyne/shared';
+import { ConnectEntityType } from '@xyne/shared';
 import { SDLC_HUB_KNOWLEDGE_FOLDER, sdlcIconNameSchema, sdlcTrackStatusSchema } from '@xyne/shared';
 import { isSdlcTreeItemType, refileSdlcFolderEdges } from '@xyne/shared';
-import { MAX_DESK_APPS, MAX_DUPLICATE_SCOPE_FIELDS, serializeDeskAppIds } from '@xyne/shared';
+import {
+  ChannelPublishedEntityType,
+  MAX_DUPLICATE_LOOKBACK_DAYS,
+  MAX_DUPLICATE_SCOPE_FIELDS,
+  MAX_PUBLISHED_APP_ID_LENGTH,
+  MAX_PUBLISHED_APPS,
+  canPublishAppsTo,
+  type ChannelPublishedTab,
+} from '@xyne/shared';
 import {
   evaluateEta,
   buildEtaActivityIntents,
@@ -160,9 +170,10 @@ import {
   assertFieldIsCurrentlyActive,
 } from './formsMutatorHelpers';
 import { v4 as uuidv4 } from 'uuid';
-import { extractAllMentions } from '@/utils/mentionParser';
+import { extractAllMentions, keepMentionsWithin } from '@/utils/mentionParser';
 import { detectVcsProvider } from '@/utils/repoUrlParser';
 import { getStorageService } from '@/services/storage';
+import { summaryTemplateService } from '@/services/summaryTemplateService';
 import { repositories } from '@/database/repositories';
 import { db } from '@/database/client';
 import { parseDlAliases, dlAddressesFor } from '@/services/dlResolver';
@@ -193,7 +204,7 @@ import { syncUserWorkload } from '@/utils/workloadUtils';
 import { ticketAssignmentService, primaryUserIdOf } from '@/services/ticketAssignmentService';
 import { calculateETADeadline, calculateWorkingDurationMs } from '@/utils/etaCalculation';
 import { DEFAULT_ROLE_NAME_TO_ENUM } from '@/utils/roleFrameworkUtils';
-import { grantPermissionsForRole, syncResourceAdminAccess, syncOrgResourceAdminAccess } from '@/services/permissionMatrix';
+import { reconcileUserPermissions, syncOrgResourceAdminAccess } from '@/services/permissionMatrix';
 import {
   deleteDraftEntityAttachments,
   deleteDelayedMessageEntityAttachments,
@@ -223,6 +234,7 @@ import {
 } from '@/services/flowCascadeService';
 import { validateFlowDecisionFields } from '@/zero/utils/flowPlanValidation';
 import { getEncryptionProvider } from '@/services/encryption';
+import { escapeHtml } from '@/utils/htmlEscape';
 
 function sortCallParticipantsForPreview<T extends {
   id: string;
@@ -284,6 +296,43 @@ const storageService = getStorageService();
 
 const serializeCanvasCommentMentionedUserIds = (mentionedUserIds: string[]): string =>
   JSON.stringify([...new Set(mentionedUserIds)]);
+
+/** Checks the caller may change the channel's published apps; returns its current rows. */
+async function loadChannelForAppPublish(
+  tx: Transaction<Schema>,
+  channelId: string,
+  userId: string,
+): Promise<ChannelPublishedTab[]> {
+  const channel = await tx.run(zql.channels.where('id', channelId).one());
+  if (!channel) {
+    throw new Error("Channel doesn't exist");
+  }
+  if (channel.isArchived) {
+    throw new Error('Cannot publish apps to an archived channel');
+  }
+  const participant = await tx.run(
+    zql.channel_participants.where('channelId', channelId).where('userId', userId).one(),
+  );
+  const isDesk = isDeskChannelType(channel.type);
+  const deskPreference = isDesk
+    ? await tx.run(zql.email_channel_preferences.where('channelId', channelId).one())
+    : undefined;
+  const isDeskOwner = !!deskPreference?.ownerUserId && deskPreference.ownerUserId === userId;
+  if (!canPublishAppsTo(channel, participant?.role, isDeskOwner)) {
+    throw new Error(
+      isDesk
+        ? 'Only the desk owner or a channel admin can change desk apps'
+        : channel.scopeType === ChannelScopeType.DEFAULT
+          ? 'Only channel admins can publish apps to the channel'
+          : 'Apps can only be published to channels, DMs, group DMs and desks',
+    );
+  }
+  return tx.run(
+    zql.channel_published_tabs
+      .where('channelId', channelId)
+      .where('entityType', ChannelPublishedEntityType.APP),
+  );
+}
 
 async function getCanvasThreadCommentCount(
   tx: Transaction<Schema>,
@@ -530,6 +579,18 @@ async function resolveCollectionPermissionRole(
     if (!role || COLLECTION_ROLE_RANK[candidate] > COLLECTION_ROLE_RANK[role]) role = candidate;
   }
   return role;
+}
+
+/** Guests may only mention people in the channel (see keepMentionsWithin). */
+async function guestSafeContent(
+  tx: Transaction<Schema>,
+  role: string | undefined,
+  channelId: string,
+  content: string,
+): Promise<string> {
+  if (role !== WorkspaceRole.GUEST || !content.includes('data-mention-type')) return content;
+  const participants = await tx.run(zql.channel_participants.where('channelId', channelId));
+  return keepMentionsWithin(content, new Set(participants.map(participant => participant.userId)));
 }
 
 async function resolveMentionParticipantUserIds(
@@ -929,8 +990,9 @@ async function createNonParticipantSystemMessages(
     logger.info(`📝 [NON-PARTICIPANT] Creating system message for ${nonParticipants.length} non-participants`);
 
     // Generate HTML content with mentions (matching format of regular messages)
+    // Escaped: a raw '<' or '"' in a name would break the tag, and the mention with it.
     const mentionSpans = nonParticipants.map(np =>
-      `<span data-mention="true" data-mention-type="user" data-user-id="${np.userId}" data-username="${np.userName}" class="mention-text">${np.userName}</span>`
+      `<span data-mention="true" data-mention-type="user" data-user-id="${escapeHtml(np.userId)}" data-username="${escapeHtml(np.userName)}" class="mention-text">${escapeHtml(np.userName)}</span>`
     ).join(', ');
 
     const channelStatsForPolicy = channel ? await tx.run(zql.channel_stats.where('channelId', channel.id).one()) : null;
@@ -1312,8 +1374,12 @@ export function createMutators(
           }
 
           if (projectId) {
+            // Release boards are linked by the hub whose release config owns them.
             const projectBoards = await tx.run(
-              zql.boards.where('projectId', projectId).orderBy('createdAt', 'asc'),
+              zql.boards
+                .where('projectId', projectId)
+                .where('boardType', '!=', BoardType.RELEASE)
+                .orderBy('createdAt', 'asc'),
             );
             const existingMappings = await tx.run(
               zql.channel_board_mappings.where('channelId', channelId),
@@ -1584,6 +1650,40 @@ export function createMutators(
             channelId,
             addUserPolicy: policy,
           });
+        },
+      ),
+      publishApp: defineMutator(
+        z.object({
+          id: z.string().min(1).max(64),
+          channelId: z.string(),
+          appId: z.string().min(1).max(MAX_PUBLISHED_APP_ID_LENGTH),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, channelId, appId, timestamp } }) => {
+          const rows = await loadChannelForAppPublish(tx, channelId, authData.sub);
+          if (rows.some(row => row.entityId === appId)) return;
+          if (rows.length >= MAX_PUBLISHED_APPS) {
+            throw new Error(`Up to ${MAX_PUBLISHED_APPS} apps can be published here`);
+          }
+          await tx.mutate.channel_published_tabs.insert({
+            id,
+            workspaceId: authData.workspaceId,
+            channelId,
+            entityType: ChannelPublishedEntityType.APP,
+            entityId: appId,
+            position: rows.reduce((top, row) => Math.max(top, row.position), -1) + 1,
+            publishedBy: authData.sub,
+            createdAt: timestamp,
+          });
+        },
+      ),
+      unpublishApp: defineMutator(
+        z.object({ channelId: z.string(), appId: z.string().min(1).max(MAX_PUBLISHED_APP_ID_LENGTH) }),
+        async ({ tx, args: { channelId, appId } }) => {
+          const rows = await loadChannelForAppPublish(tx, channelId, authData.sub);
+          const row = rows.find(r => r.entityId === appId);
+          if (!row) return;
+          await tx.mutate.channel_published_tabs.delete({ id: row.id });
         },
       ),
       updateShowTicketsTabTicketsInChat: defineMutator(
@@ -2159,6 +2259,18 @@ export function createMutators(
         // Permission and tenancy live in ChannelBoardMappingsACL.canInsert, which the
         // transaction wrapper runs on every insert below — same as every other table.
         async ({ tx, args: { channelId, boards, timestamp } }) => {
+          // Release boards are linked only by the release config of the hub that owns them.
+          const releaseBoard = await tx.run(
+            zql.boards
+              .where('id', 'IN', boards.map(board => board.boardId))
+              .where('boardType', BoardType.RELEASE)
+              .one(),
+          );
+          if (releaseBoard) {
+            throw new Error(
+              `"${releaseBoard.name}" is a release board; it is linked through its SDLC hub's release config`,
+            );
+          }
           const existing = await tx.run(zql.channel_board_mappings.where('channelId', channelId));
           const linkedBoardIds = new Set(existing.map(mapping => mapping.boardId));
           // At most one row per channel may carry isDefault (enforced by a partial
@@ -2505,9 +2617,10 @@ export function createMutators(
           name: z.string(),
           emoji: z.string().nullable().optional(),
           position: z.string(),
+          filterMode: z.nativeEnum(ChannelFilterMode).nullable().optional(),
           timestamp: z.number(),
         }),
-        async ({ tx, args: { id, name, emoji, position, timestamp } }) => {
+        async ({ tx, args: { id, name, emoji, position, filterMode, timestamp } }) => {
           // Reject a name this user already uses in this workspace (case-insensitive).
           const siblings = await tx.run(
             zql.channel_sections
@@ -2528,6 +2641,7 @@ export function createMutators(
             position,
             isCollapsed: false,
             isDeleted: false,
+            ...(filterMode !== undefined && { filterMode: filterMode ?? null }),
             createdAt: timestamp,
             updatedAt: timestamp,
           });
@@ -2635,6 +2749,7 @@ export function createMutators(
           if (content === '') {
             throw new Error('Message content or files are required to start a conversation');
           }
+          content = await guestSafeContent(tx, authData.role, channelId, content);
 
           const user = await tx.run(zql.users.where('id', authData.sub).one());
           const now = timestamp;
@@ -3489,6 +3604,7 @@ export function createMutators(
           if (!conversation) {
             throw new Error("Message doesn't belong to a conversation");
           }
+          content = await guestSafeContent(tx, authData.role, conversation.channelId, content);
           const [channel, participant, channelDrafts] = await Promise.all([
             tx.run(zql.channels.where('id', conversation.channelId).related('project').one()),
             tx.run(zql.channel_participants
@@ -3935,6 +4051,10 @@ export function createMutators(
             if (message.msgType === MessageType.BOT) {
               throw new Error('BOT Messages cannot be edited');
             }
+          }
+          if (content !== undefined && authData.role === WorkspaceRole.GUEST) {
+            const edited = await tx.run(zql.conversations.where('conversationId', message.conversationId).one());
+            content = await guestSafeContent(tx, authData.role, edited?.channelId ?? '', content);
           }
 
           // Only process mention changes if content is being updated
@@ -5274,8 +5394,9 @@ export function createMutators(
           // Cancelling from the Calls screen goes through this mutator, not a REST
           // route, so the channel pill has to be refreshed from here too.
           const cancelledCallId = call.id;
+          const cancelledCallExternalId = call.externalId;
           asyncTasks.push(async () => {
-            queueScheduledCallPillSync(cancelledCallId, 'mutators.calls.cancel');
+            queueScheduledCallPillSync(cancelledCallId, cancelledCallExternalId, 'mutators.calls.cancel');
           });
           if (cancelEntireSeries && call.recurringSeriesId) {
             await tx.mutate.recurring_call_series.update({
@@ -5450,9 +5571,10 @@ export function createMutators(
         z.object({
           actorAction: z.string().optional(),
           classification: z.nativeEnum(ActivityClassification).optional(),
+          channelIds: z.array(z.string()).optional(),
           timestamp: z.number(),
         }),
-        async ({ tx, args: { actorAction, classification, timestamp } }) => {
+        async ({ tx, args: { actorAction, classification, channelIds, timestamp } }) => {
           let query = zql.activities
             .where('userId', authData.sub)
             .where('isRead', false);
@@ -5462,6 +5584,9 @@ export function createMutators(
           }
           if (classification) {
             query = query.where('classification', classification);
+          }
+          if (channelIds && channelIds.length > 0) {
+            query = query.where('channelId', 'IN', channelIds);
           }
 
           const unreadActivities = await tx.run(query);
@@ -6488,8 +6613,9 @@ export function createMutators(
 
               activities.push({
                 activityType,
-                value: field === 'stageName'
-                  ? { field: 'stageName', oldValue: previousValue, newValue: params[field] }
+                // Both are STATUS activities; `field` tells them apart.
+                value: field === 'stageName' || field === 'statusV2'
+                  ? { field, oldValue: previousValue, newValue: params[field] }
                   : { oldValue: previousValue, newValue: params[field] },
               });
             }
@@ -7702,13 +7828,16 @@ export function createMutators(
       ),
       // Creates or updates one main release board and only the applications
       // explicitly owned by that board through Application.mainReleaseBoardId.
+      // The config belongs to an SDLC hub (hubChannelId) and releases one of the hub's
+      // repositories; release tickets are created in the chosen release channel (channelId).
       saveReleaseBoardConfig: defineMutator(
         z.object({
-          projectId: z.string(),
           mainBoardId: z.string(),
           mainBoardName: z.string(),
           releaseTrackingMode: z.nativeEnum(ReleaseTrackingMode),
           channelId: z.string(),
+          hubChannelId: z.string(),
+          repoId: z.string(),
           applications: z.array(
             z.object({
               id: z.string(),
@@ -7716,7 +7845,6 @@ export function createMutators(
               boardName: z.string(),
               name: z.string(),
               regex: z.string(),
-              repoUrl: z.string(),
               ownerTeam: z.string(),
               envPaths: z.array(z.string()),
               migrationPaths: z.array(z.string()),
@@ -7726,17 +7854,27 @@ export function createMutators(
         async ({
           tx,
           args: {
-            projectId,
             mainBoardId,
             mainBoardName: rawMainBoardName,
             releaseTrackingMode,
             channelId,
+            hubChannelId,
+            repoId,
             applications: rawApplications,
           },
         }) => {
           await assertReleaseManageAccess();
 
-          // Validate project exists
+          const hub = await tx.run(zql.channels.where('id', hubChannelId).one());
+          if (!hub || hub.type !== ChannelType.SDLC) {
+            throw new Error('Release configs belong to an SDLC hub');
+          }
+          // Boards and their tickets live in a project, so the hub's project is the
+          // only one its release boards can be created in.
+          const projectId = hub.projectId;
+          if (!projectId) {
+            throw new Error('This SDLC hub is not linked to a project');
+          }
           const project = await tx.run(zql.projects.where('id', projectId).one());
           if (!project) {
             throw new Error('Project not found');
@@ -7747,6 +7885,24 @@ export function createMutators(
           if (!channel) {
             throw new Error('Channel not found');
           }
+
+          const repo = await tx.run(
+            zql.repos.where('id', repoId).where('workspaceId', authData.workspaceId).one(),
+          );
+          if (!repo) {
+            throw new Error('Repository not found');
+          }
+          const hubRepository = await tx.run(
+            zql.sdlc_entity_links
+              .where('channelId', hubChannelId)
+              .where('relationType', SDLC_MEMBERSHIP_RELATION)
+              .where('targetId', repoId)
+              .one(),
+          );
+          if (!hubRepository) {
+            throw new Error('Add the repository to this SDLC hub before configuring its releases');
+          }
+          const repoUrl = (repo.canonicalUrl || repo.url).trim().replace(/\/+$/, '');
 
           if (rawApplications.length === 0) {
             throw new Error('At least one application is required');
@@ -7777,7 +7933,6 @@ export function createMutators(
               ...app,
               name: trimmedName,
               boardName: app.boardName.trim(),
-              repoUrl: app.repoUrl.trim().replace(/\/+$/, ''),
               regex: trimmedRegex,
               ownerTeam: app.ownerTeam.trim(),
               envPaths: app.envPaths.map(p => p.trim()).filter(Boolean),
@@ -7801,16 +7956,9 @@ export function createMutators(
             throw new Error('Application names must be unique within a release group');
           }
 
-          // One main release board represents one repository. A project can use
-          // multiple repositories by creating multiple main release boards.
-          const normalizedRepoUrls = new Set(
-            applications.map(app => app.repoUrl.trim().replace(/\/+$/, '')),
-          );
-          if (normalizedRepoUrls.has('') || normalizedRepoUrls.size !== 1) {
-            throw new Error('All applications in a release group must use the same repository URL');
-          }
-
-          const vcsProvider = detectVcsProvider([...normalizedRepoUrls][0]);
+          // One main release board represents one repository; every application in
+          // the group is released from the hub repository passed as repoId.
+          const vcsProvider = detectVcsProvider(repoUrl);
           if (!vcsProvider) {
             throw new Error(
               'Unsupported or unrecognized repository URL — provide a GitHub or Bitbucket Server repository URL',
@@ -7843,6 +7991,48 @@ export function createMutators(
           }
           if (new Set(requestedBoardNames).size !== requestedBoardNames.length) {
             throw new Error('Release board names must be unique within the project');
+          }
+          // Board names are unique per project; two hubs releasing the same repository
+          // would otherwise collide on the defaults and fail on the raw constraint. The
+          // config's current boards count as its own: boards of removed services are
+          // deleted before new ones are inserted, so their names can be reused.
+          const currentConfigApps = await tx.run(
+            zql.applications.where('mainReleaseBoardId', mainBoardId),
+          );
+          const ownBoardIds = new Set([
+            mainBoardId,
+            ...appBoardIds,
+            ...currentConfigApps.map(app => app.boardId),
+          ]);
+          const sameNamedBoards = await tx.run(
+            zql.boards.where('projectId', projectId).where('name', 'IN', requestedBoardNames),
+          );
+          const takenBoard = sameNamedBoards.find(board => !ownBoardIds.has(board.id));
+          if (takenBoard) {
+            throw new Error(`A board named "${takenBoard.name}" already exists in this project`);
+          }
+
+          // One release config per hub and repository, and one hub per main release
+          // board. The partial unique indexes enforce the same; checking first gives a
+          // readable error.
+          const hubReleaseConfig = await tx.run(
+            zql.sdlc_entity_links
+              .where('channelId', hubChannelId)
+              .where('relationType', SDLC_RELEASE_CONFIG_RELATION)
+              .where('sourceId', repoId)
+              .one(),
+          );
+          if (hubReleaseConfig && hubReleaseConfig.targetId !== mainBoardId) {
+            throw new Error('This hub already has a release config for this repository');
+          }
+          const boardReleaseConfig = await tx.run(
+            zql.sdlc_entity_links
+              .where('relationType', SDLC_RELEASE_CONFIG_RELATION)
+              .where('targetId', mainBoardId)
+              .one(),
+          );
+          if (boardReleaseConfig && boardReleaseConfig.channelId !== hubChannelId) {
+            throw new Error('This release board belongs to another SDLC hub');
           }
 
           // Seed the GENERIC default stages on each new release board. This is
@@ -7981,6 +8171,13 @@ export function createMutators(
               await tx.mutate.forms_context_mapping.delete({ id: mapping.id });
             }
 
+            const boardChannelMappings = await tx.run(
+              zql.channel_board_mappings.where('boardId', application.boardId),
+            );
+            for (const mapping of boardChannelMappings) {
+              await tx.mutate.channel_board_mappings.delete({ id: mapping.id });
+            }
+
             await tx.mutate.applications.delete({ id: application.id });
             await tx.mutate.boards.delete({ id: application.boardId });
           };
@@ -8026,23 +8223,23 @@ export function createMutators(
             await ensureBoardFormMapping(mainBoardId);
           }
 
-          // Create Release lists the boards linked to the chosen channel, so the release
-          // channel gets its main board linked here. Additive only, and never as the
-          // channel's default: everyday tickets in that channel must not land on it.
-          const channelMappings = await tx.run(
-            zql.channel_board_mappings.where('channelId', channelId),
-          );
-          if (!channelMappings.some(mapping => mapping.boardId === mainBoardId)) {
-            const linkedAt = Date.now();
-            await tx.mutate.channel_board_mappings.insert({
+          // The hub -> repository -> main board edge that owns this config. Links are
+          // never updated, so a board moved to another repository gets a new edge.
+          if (boardReleaseConfig && boardReleaseConfig.sourceId !== repoId) {
+            await tx.mutate.sdlc_entity_links.delete({ id: boardReleaseConfig.id });
+          }
+          if (!boardReleaseConfig || boardReleaseConfig.sourceId !== repoId) {
+            await tx.mutate.sdlc_entity_links.insert({
               id: uuidv4(),
-              channelId,
-              boardId: mainBoardId,
               workspaceId: authData.workspaceId,
-              isDefault: false,
+              channelId: hubChannelId,
+              sourceType: 'REPOSITORY',
+              sourceId: repoId,
+              targetType: 'BOARD',
+              targetId: mainBoardId,
+              relationType: SDLC_RELEASE_CONFIG_RELATION,
               createdBy: authData.sub,
-              createdAt: linkedAt,
-              updatedAt: linkedAt,
+              createdAt: Date.now(),
             });
           }
 
@@ -8109,7 +8306,7 @@ export function createMutators(
                 mainReleaseBoardId: mainBoardId,
                 channelId,
                 regex: appConfig.regex,
-                repoUrl: appConfig.repoUrl.trim().replace(/\/+$/, ''),
+                repoId,
                 ownerTeam: appConfig.ownerTeam,
                 envPaths: appConfig.envPaths,
                 migrationPaths: appConfig.migrationPaths,
@@ -8149,12 +8346,32 @@ export function createMutators(
               mainReleaseBoardId: mainBoardId,
               channelId,
               regex: appConfig.regex,
-              repoUrl: appConfig.repoUrl.trim().replace(/\/+$/, ''),
+              repoId,
               ownerTeam: appConfig.ownerTeam,
               envPaths: appConfig.envPaths,
               migrationPaths: appConfig.migrationPaths,
               createdAt: Date.now(),
               updatedAt: Date.now(),
+            });
+          }
+
+          // Create Release lists the boards linked to the chosen channel, so the release
+          // channel gets its main board linked here. Additive only, and never as the
+          // channel's default: everyday tickets in that channel must not land on it.
+          const channelMappings = await tx.run(
+            zql.channel_board_mappings.where('channelId', channelId),
+          );
+          if (!channelMappings.some(mapping => mapping.boardId === mainBoardId)) {
+            const linkedAt = Date.now();
+            await tx.mutate.channel_board_mappings.insert({
+              id: uuidv4(),
+              channelId,
+              boardId: mainBoardId,
+              workspaceId: authData.workspaceId,
+              isDefault: false,
+              createdBy: authData.sub,
+              createdAt: linkedAt,
+              updatedAt: linkedAt,
             });
           }
         },
@@ -9035,6 +9252,16 @@ export function createMutators(
             );
           }
 
+          // The hub's release config edge goes with its main release board.
+          const releaseConfigLinks = await tx.run(
+            zql.sdlc_entity_links
+              .where('relationType', SDLC_RELEASE_CONFIG_RELATION)
+              .where('targetId', boardId),
+          );
+          for (const link of releaseConfigLinks) {
+            await tx.mutate.sdlc_entity_links.delete({ id: link.id });
+          }
+
           // Check if board has tickets with terminal statuses (CANCELLED, COMPLETED)
           const terminalTickets = await tx.run(zql.tickets
             .where('boardId', boardId)
@@ -9539,13 +9766,15 @@ export function createMutators(
           content: z.any().optional(),
           timestamp: z.number(),
           participantId: z.string(),
+          // Slack Connect: caller-generated connectId (id == connectId for the private row).
+          connectId: z.string().optional(),
           // Legacy fields (pre-XYNE-17290). Accepted so old clients don't get
           // Zod validation errors during a rolling deploy; intentionally
           // ignored — the canonical `id` is the only identity we write.
           viewAccessId: z.string().optional(),
           editAccessId: z.string().optional(),
         }),
-        async ({ tx, args: { id, title, channelId, folderId, projectId, visibility, content, timestamp, participantId } }) => {
+        async ({ tx, args: { id, title, channelId, folderId, projectId, visibility, content, timestamp, participantId, connectId } }) => {
           const now = timestamp;
           const {
             projectId: resolvedProjectId,
@@ -9579,7 +9808,22 @@ export function createMutators(
             createdAt: now,
             updatedAt: now,
             metadata: {},
+            connectId,
           });
+
+          // Slack Connect: create this canvas's private connect_group row (id == connectId).
+          if (connectId) {
+            await tx.mutate.connect_group.insert({
+              id: connectId,
+              entityType: ConnectEntityType.CANVAS,
+              entityId: id,
+              hostWorkspaceId: authData.workspaceId,
+              connectId,
+              status: 'ACTIVE',
+              createdAt: now,
+              updatedAt: now,
+            });
+          }
 
           // Add creator as participant with OWNER role
           await tx.mutate.canvas_participants.insert({
@@ -9590,6 +9834,7 @@ export function createMutators(
             role: CanvasRole.OWNER,
             joinedAt: now,
             updatedAt: now,
+            ...(connectId ? { canvasConnectId: connectId } : {}),
           });
           asyncTasks.push(async () => {
             try {
@@ -9675,6 +9920,7 @@ export function createMutators(
               role: role,
               joinedAt: now,
               updatedAt: now,
+              ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
             });
           }
         },
@@ -9735,6 +9981,7 @@ export function createMutators(
             role,
             joinedAt: timestamp,
             updatedAt: timestamp,
+            ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
           });
         },
       ),
@@ -9801,6 +10048,7 @@ export function createMutators(
             role,
             joinedAt: timestamp,
             updatedAt: timestamp,
+            ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
           });
         },
       ),
@@ -10434,6 +10682,7 @@ export function createMutators(
             isStarred: true,
             createdAt: timestamp,
             updatedAt: timestamp,
+            ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
           });
         },
       ),
@@ -10458,6 +10707,9 @@ export function createMutators(
             authData.workspaceId,
           );
 
+          // Slack Connect: inherit the parent canvas's connectId (null until backfilled).
+          const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+
           await tx.mutate.canvas_comment_threads.insert({
             id: threadId,
             workspaceId: authData.workspaceId,
@@ -10471,6 +10723,7 @@ export function createMutators(
             statusUpdatedAt: null,
             createdBy: authData.sub,
             createdAt: timestamp,
+            ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
           });
 
           await tx.mutate.canvas_comments.insert({
@@ -10485,6 +10738,7 @@ export function createMutators(
             editedAt: null,
             deletedAt: null,
             createdAt: timestamp,
+            ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
           });
         },
       ),
@@ -10515,6 +10769,9 @@ export function createMutators(
             authData.workspaceId,
           );
 
+          // Slack Connect: inherit the parent canvas's connectId (null until backfilled).
+          const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+
           await tx.mutate.canvas_comments.insert({
             id: commentId,
             workspaceId: authData.workspaceId,
@@ -10527,6 +10784,7 @@ export function createMutators(
             editedAt: null,
             deletedAt: null,
             createdAt: timestamp,
+            ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
           });
 
           const commentCount = await getCanvasThreadCommentCount(
@@ -10711,6 +10969,7 @@ export function createMutators(
             createdBy: authData.sub,
             createdAt: timestamp,
             updatedAt: timestamp,
+            ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
           });
         },
       ),
@@ -11419,6 +11678,10 @@ export function createMutators(
             boardId: z.string(),
             weight: z.number(),
             usePercentage: z.boolean(),
+            percentageWindowDays: z.number().int().min(1).max(90).optional(),
+            percentageShareBasis: z.enum(['ALL', 'OPEN']).optional(),
+            // Start of the first share window (ms); null clears it. Omit to keep the current start.
+            percentageWindowStartAt: z.number().nullable().optional(),
           }).optional(),
           expertiseMappings: z.object({
             boardId: z.string(),
@@ -11528,6 +11791,15 @@ export function createMutators(
                 id: existingScore.id,
                 weight: boardWeight.weight,
                 usePercentage: boardWeight.usePercentage,
+                ...(boardWeight.percentageWindowDays !== undefined && {
+                  percentageWindowDays: boardWeight.percentageWindowDays,
+                }),
+                ...(boardWeight.percentageShareBasis !== undefined && {
+                  percentageShareBasis: boardWeight.percentageShareBasis,
+                }),
+                ...(boardWeight.percentageWindowStartAt !== undefined && {
+                  percentageWindowStartAt: boardWeight.percentageWindowStartAt,
+                }),
                 updatedAt: now,
               });
             } else {
@@ -11541,6 +11813,9 @@ export function createMutators(
                 boardId: boardWeight.boardId,
                 weight: boardWeight.weight,
                 usePercentage: boardWeight.usePercentage,
+                percentageWindowDays: boardWeight.percentageWindowDays ?? null,
+                percentageShareBasis: boardWeight.percentageShareBasis ?? null,
+                percentageWindowStartAt: boardWeight.percentageWindowStartAt ?? null,
                 createdBy: authData.sub,
                 createdAt: now,
                 updatedAt: now,
@@ -11729,6 +12004,10 @@ export function createMutators(
           const repo = await tx.run(zql.repos.where('id', id).one());
           if (!repo) {
             throw new Error('Repository not found');
+          }
+          const releaseApplication = await tx.run(zql.applications.where('repoId', id).one());
+          if (releaseApplication) {
+            throw new Error('Repository is used by a release config and cannot be deleted');
           }
           await tx.mutate.repos.delete({ id });
         },
@@ -16169,7 +16448,7 @@ export function createMutators(
           }),
           timestamp: z.number(),
         }),
-        async ({ tx, args: { userId, workspaceId, updates, timestamp } }) => {
+        async ({ tx, args: { userId, updates, timestamp } }) => {
           // ACL check is handled by UsersACL
           await tx.mutate.users.update({
             id: userId,
@@ -16178,25 +16457,9 @@ export function createMutators(
           });
 
           if (updates.role !== undefined) {
-            if (updates.role === WorkspaceRole.ADMIN) {
-              // Promote: grant the full ADMIN permission matrix, same as invite-accept
-              // (grantPermissionsForRole), so "becomes an admin" is consistent regardless
-              // of whether the user was invited straight in as ADMIN or promoted later.
-              const user = await tx.run(zql.users.where('id', userId).one());
-              if (user) {
-                const { email } = user;
-                asyncTasks.push(() =>
-                  grantPermissionsForRole(userId, email, WorkspaceRole.ADMIN, workspaceId),
-                );
-              }
-            } else {
-              // Demote: only revoke WORKSPACE. Deliberately not a full matrix revoke —
-              // avoids stripping resource access that may have been granted independently
-              // via the Roles screen (no provenance tracking exists to tell them apart).
-              asyncTasks.push(() =>
-                syncResourceAdminAccess(userId, 'WORKSPACE', false, authData.sub, workspaceId),
-              );
-            }
+            // Promote or demote: reconcile the full resource set against the new role
+            // (and the user's org role), granting missing and revoking excess ADMIN access.
+            asyncTasks.push(() => reconcileUserPermissions(userId, authData.sub));
           }
         }
       ),
@@ -16279,6 +16542,9 @@ export function createMutators(
             joinedAt: timestamp,
             userId: 'deprecated-placeholder', // Deprecated field, kept for backward compatibility
           });
+
+          const ownerEmail = admin.email;
+          asyncTasks.push(() => syncOrgResourceAdminAccess(orgId, ownerEmail, authData.sub));
         },
       ),
     },
@@ -16435,6 +16701,9 @@ export function createMutators(
               userId: 'deprecated-placeholder', // Deprecated field, kept for backward compatibility
             });
           }
+
+          // The added/reactivated member may already have workspace user rows (matched by email)
+          asyncTasks.push(() => syncOrgResourceAdminAccess(orgId, email, authData.sub));
         },
       ),
       updateRole: defineMutator(
@@ -16453,10 +16722,9 @@ export function createMutators(
           if (updates.role !== undefined) {
             const member = await tx.run(zql.org_members.where('memberId', memberId).one());
             if (member) {
-              const shouldHaveAccess = updates.role === OrgRole.ADMIN || updates.role === OrgRole.OWNER;
               const { orgId, email } = member;
               asyncTasks.push(() =>
-                syncOrgResourceAdminAccess(orgId, email, shouldHaveAccess, authData.sub),
+                syncOrgResourceAdminAccess(orgId, email, authData.sub),
               );
             }
           }
@@ -16758,6 +17026,58 @@ export function createMutators(
           }
         },
       ),
+      setRecordingDefaultSummaryTemplate: defineMutator(
+        z.object({
+          id: z.string(),
+          // `null` clears the default so recordings go back to the automatic pick.
+          recordingDefaultSummaryTemplateId: z.string().min(1).nullable(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, ctx, args: { id, recordingDefaultSummaryTemplateId, timestamp } }) => {
+          // The default must be a template the user can use today: the same service
+          // check generation time relies on, which also covers the code-backed
+          // 'default'. Access is re-checked at generation time in case it is revoked.
+          if (recordingDefaultSummaryTemplateId) {
+            const template = await summaryTemplateService.findAccessibleById(
+              recordingDefaultSummaryTemplateId,
+              ctx.workspaceId,
+              ctx.userID,
+            );
+            if (!template) {
+              throw new ApplicationError('Summary template not found or not accessible');
+            }
+          }
+
+          const existing = await tx.run(
+            zql.user_preferences.where('userId', ctx.userID).one(),
+          );
+          if (existing) {
+            await tx.mutate.user_preferences.update({
+              id: existing.id,
+              recordingDefaultSummaryTemplateId,
+              updatedAt: timestamp,
+            });
+          } else {
+            await tx.mutate.user_preferences.insert({
+              workspaceId: ctx.workspaceId,
+              id,
+              userId: ctx.userID,
+              channelSortOrder: ChannelSortOrder.RECENCY,
+              enterSendsMessage: true,
+              allowThreadBroadcastMentions: false,
+              globalDesktopNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+              globalMobileNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+              threadReplyNotificationsEnabled: true,
+              channelWideMentionsEnabled: true,
+              notificationKeywords: '[]',
+              showThreadTags: false,
+              recordingDefaultSummaryTemplateId,
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            });
+          }
+        },
+      ),
     },
 
     emailChannelPreference: {
@@ -16780,14 +17100,12 @@ export function createMutators(
           deskReportEnabled: z.boolean().optional(),
           deskReportAgentSlug: z.string().optional().nullable(),
           deskReportRangeDays: z.number().optional(),
-          // Artifact apps shown on this desk, in order (see EmailChannelPreference.deskAppIds).
-          // An empty list clears the column.
-          deskAppIds: z.array(z.string().min(1).max(64)).max(MAX_DESK_APPS).nullable().optional(),
           // Scoped duplicate detection config (see EmailChannelPreference.duplicateScopeConfig)
           duplicateScopeConfig: z
             .object({
               enabled: z.boolean(),
               scopeFieldGlobalIds: z.array(z.string()).max(MAX_DUPLICATE_SCOPE_FIELDS),
+              lookbackDays: z.number().int().min(0).max(MAX_DUPLICATE_LOOKBACK_DAYS).nullable().optional(),
             })
             .nullable()
             .optional(),
@@ -16812,7 +17130,6 @@ export function createMutators(
             deskReportEnabled,
             deskReportAgentSlug,
             deskReportRangeDays,
-            deskAppIds,
             duplicateScopeConfig,
           },
         }) => {
@@ -16858,7 +17175,6 @@ export function createMutators(
               ...(deskReportEnabled !== undefined ? { deskReportEnabled } : {}),
               ...(deskReportAgentSlug !== undefined ? { deskReportAgentSlug } : {}),
               ...(deskReportRangeDays !== undefined ? { deskReportRangeDays } : {}),
-              ...(deskAppIds !== undefined ? { deskAppIds: serializeDeskAppIds(deskAppIds) } : {}),
               ...(duplicateScopeConfig !== undefined
                 ? { duplicateScopeConfig: duplicateScopeConfig == null ? null : JSON.stringify(duplicateScopeConfig) }
                 : {}),
@@ -16894,7 +17210,6 @@ export function createMutators(
               deskReportEnabled: deskReportEnabled ?? false,
               deskReportAgentSlug: deskReportAgentSlug ?? null,
               deskReportRangeDays: deskReportRangeDays ?? 1,
-              deskAppIds: serializeDeskAppIds(deskAppIds ?? null),
               duplicateScopeConfig: duplicateScopeConfig ? JSON.stringify(duplicateScopeConfig) : null,
             });
           }
@@ -17196,6 +17511,15 @@ export function createMutators(
             ...(isPrivate !== undefined && { isPrivate }),
             updatedAt: timestamp,
           });
+          // Folders carry their own copy of isPrivate and Zero's ACL reads each row's own copy,
+          // so a visibility change must reach every folder under this root or they keep syncing
+          // to the whole workspace after the root goes private.
+          if (isPrivate !== undefined && !collection.parentId) {
+            const folders = await tx.run(zql.collections.where('rootCollectionId', id));
+            for (const folder of folders) {
+              await tx.mutate.collections.update({ id: folder.id, isPrivate, updatedAt: timestamp });
+            }
+          }
         },
       ),
 

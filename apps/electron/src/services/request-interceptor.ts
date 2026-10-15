@@ -1,5 +1,5 @@
 import log from 'electron-log/main';
-import { session, BrowserWindow, app } from 'electron';
+import { session, BrowserWindow, app, webContents } from 'electron';
 import { config } from '../app/config';
 import { clearAllCookies } from './cookies';
 import path from 'path';
@@ -192,8 +192,27 @@ function isFirstPartyUrl(rawUrl: string | undefined): boolean {
     return false;
   }
 }
-function installMediaPermissionGuard(targetSession: Electron.Session, label: string): void {
+/**
+ * Web pages in the in-app browsers may go full screen — a video, a slide deck — as
+ * they can in any browser; nothing else. Chromium grants it only on the reader's own
+ * click or key press, and Esc leaves it.
+ */
+const isPageFullscreen = (
+  allowed: boolean,
+  webContents: Electron.WebContents | null | undefined,
+  permission: string,
+): boolean => allowed && permission === 'fullscreen' && webContents?.getType() === 'webview';
+
+function installMediaPermissionGuard(
+  targetSession: Electron.Session,
+  label: string,
+  { pageFullscreen = false }: { pageFullscreen?: boolean } = {},
+): void {
   targetSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
+    if (isPageFullscreen(pageFullscreen, webContents, permission)) {
+      callback(true);
+      return;
+    }
     if (RESTRICTED_MEDIA_PERMISSIONS.has(permission)) {
       const allowed =
         isTopLevelMainWindow(webContents) ||
@@ -223,6 +242,7 @@ function installMediaPermissionGuard(targetSession: Electron.Session, label: str
     callback(false);
   });
   targetSession.setPermissionCheckHandler((webContents, permission, requestingOrigin) => {
+    if (isPageFullscreen(pageFullscreen, webContents, permission)) return true;
     if (RESTRICTED_MEDIA_PERMISSIONS.has(permission)) {
       return (
         isTopLevelMainWindow(webContents ?? undefined) ||
@@ -239,7 +259,9 @@ function installMediaPermissionGuard(targetSession: Electron.Session, label: str
 function setupMediaPermissionGuard(): void {
   installMediaPermissionGuard(session.defaultSession, 'default');
   installMediaPermissionGuard(session.fromPartition('persist:xyne-spaces'), 'xyne-spaces');
-  installMediaPermissionGuard(session.fromPartition('persist:browser-tabs'), 'browser-tabs');
+  installMediaPermissionGuard(session.fromPartition('persist:browser-tabs'), 'browser-tabs', {
+    pageFullscreen: true,
+  });
   app.on('session-created', (createdSession) => {
     installMediaPermissionGuard(createdSession, 'dynamic');
   });
@@ -353,12 +375,24 @@ export function setupRequestInterceptor(): void {
   );
 }
 
+// The window that asked for the capture. showScreenPicker uses it only if it
+// hosts a picker (the call window); anything else falls back to the main window.
+function requestingWindow(frame: Electron.WebFrameMain | null): BrowserWindow | null {
+  if (!frame) return null;
+  try {
+    const contents = webContents.fromFrame(frame);
+    return contents ? BrowserWindow.fromWebContents(contents) : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Installs the custom display-media handler that shows the in-app screen picker.
  * Called on startup and re-called after a native OS picker fallback completes.
  */
 function setupDisplayMediaHandler(): void {
-  session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
+  session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
     const safeCallback = (streams: Electron.Streams): void => {
       try {
         callback(streams);
@@ -368,7 +402,7 @@ function setupDisplayMediaHandler(): void {
         Logger.info('[ScreenShare] Cancelled or no stream provided:', String(err));
       }
     };
-    showScreenPicker(safeCallback);
+    showScreenPicker(safeCallback, requestingWindow(request.frame));
   });
 }
 

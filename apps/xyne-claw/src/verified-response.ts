@@ -17,7 +17,7 @@
 import crypto from "node:crypto";
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import type { PendingResponse } from "xyne-claw-shared";
+import { checkReplyFormat, replyFormatNudge, type PendingResponse, type ResultSectionLimits } from "xyne-claw-shared";
 import { verifyResponse, renderRejection } from "./verify-response.js";
 import { metric } from "./metrics.js";
 
@@ -50,6 +50,7 @@ export interface VerifiedResponseToolOpts {
   /** Per-agent delivery criteria (agentConfig.verifyResponseCriteria) — passed
    *  to the verifier on top of its default factual check. */
   criteria?: string | undefined;
+  replyFormat?: ResultSectionLimits | undefined;
 }
 
 const DESCRIPTION = [
@@ -88,6 +89,7 @@ you have the final result ready to deliver.
 export function buildVerifiedResponseTool(opts: VerifiedResponseToolOpts): ToolDefinition {
   const pendingResponses = opts.getPendingResponses();
   let rejections = 0;
+  let formatRejected = false;
 
   const deliver = (message: string): void => {
     // Dedup mirrors respond-to-user: only the first accepted delivery wins.
@@ -121,6 +123,28 @@ export function buildVerifiedResponseTool(opts: VerifiedResponseToolOpts): ToolD
         metric.count("response_verify_exhausted", { agentSlug: opts.agentSlug ?? "" });
         deliver(message);
         return { content: [{ type: "text" as const, text: STOP_TEXT }], details: {} };
+      }
+
+      if (opts.replyFormat && !formatRejected) {
+        const format = checkReplyFormat(message, opts.replyFormat);
+        if (!format.ok) {
+          formatRejected = true;
+          metric.count("response_format_reject", { agentSlug: opts.agentSlug ?? "" });
+          log.info(`[verify-response] draft does not fit the chat format: ${format.problems.join("; ").slice(0, 200)}`);
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify({
+                  delivered: false,
+                  errors: format.problems,
+                  action: `${replyFormatNudge(format.problems, opts.replyFormat)} Resubmit the COMPLETE rewritten message via submit-response.`,
+                }),
+              },
+            ],
+            details: {},
+          };
+        }
       }
 
       const evidenceDigest = (() => {

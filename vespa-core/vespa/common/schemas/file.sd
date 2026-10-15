@@ -194,6 +194,12 @@ schema file {
       match: exact
     }
 
+    field labels type array<string> {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
   }
   # Vector embeddings
   field chunk_embeddings type tensor<bfloat16>(p{}, v[DIMS]) {

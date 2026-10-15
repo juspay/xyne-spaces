@@ -451,6 +451,9 @@ export const boardComplexityScoreTable = table('board_complexity_scores')
     boardId: string(),
     weight: number(),
     usePercentage: boolean(),
+    percentageWindowDays: number().optional(),
+    percentageShareBasis: string().optional(),
+    percentageWindowStartAt: number().optional(),
     createdAt: number(),
     updatedAt: number(),
     createdBy: string(),
@@ -633,6 +636,7 @@ export const userPreferenceTable = table('user_preferences')
     channelWideMentionsEnabled: boolean(),      // Receive @channel and @here notifications
     notificationKeywords: string().optional(), // Stringified JSON array of keywords (max 50, each <= 80 chars)
     showThreadTags: boolean(), // Render thread classification chips in chat; opt-in
+    recordingDefaultSummaryTemplateId: string().optional(), // Recording summaries: used instead of the LLM pick ('default' = code-backed; null = auto-pick)
     createdAt: number(),
     updatedAt: number(),
   })
@@ -790,6 +794,7 @@ export const channelTable = table('channels')
     isArchived: boolean(),
     showTicketsTabTicketsInChat: boolean().optional(),
     callSummaryPrompt: string().optional(), // Per-channel detailed call summary sections override
+    connectId: string().optional(), // Slack Connect: connect_group handle (null until backfilled)
   })
   .primaryKey('id');
 
@@ -803,6 +808,19 @@ export const channelBoardMappingTable = table('channel_board_mappings' /* Channe
     createdBy: string(),
     createdAt: number(),
     updatedAt: number(),
+  })
+  .primaryKey('id');
+
+export const channelPublishedTabTable = table('channel_published_tabs' /* ChannelPublishedTab */)
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    channelId: string(),
+    entityType: string(),
+    entityId: string(),
+    position: number(),
+    publishedBy: string(),
+    createdAt: number(),
   })
   .primaryKey('id');
 
@@ -1346,6 +1364,7 @@ export const canvasTable = table('canvases')
     entryFile: string().optional(),
     quartoDocumentType: string().optional(),
     gcsPath: string().optional(),
+    connectId: string().optional(), // Slack Connect: connect_group handle (null until backfilled)
   })
   .primaryKey('id');
 
@@ -1360,6 +1379,7 @@ export const canvasVersionTable = table('canvas_versions')
     createdBy: string().optional(),
     createdAt: number(),
     updatedAt: number(),
+    canvasConnectId: string().optional(), // Slack Connect: the parent canvas's connectId (null until backfilled)
   })
   .primaryKey('id');
 
@@ -1377,6 +1397,7 @@ export const canvasCommentThreadTable = table('canvas_comment_threads' /* Canvas
     statusUpdatedAt: number().optional(),
     createdBy: string(),
     createdAt: number(),
+    canvasConnectId: string().optional(), // Slack Connect: the parent canvas's connectId (null until backfilled)
   })
   .primaryKey('id');
 
@@ -1393,6 +1414,7 @@ export const canvasCommentTable = table('canvas_comments' /* CanvasComment */)
     editedAt: number().optional(),
     deletedAt: number().optional(),
     createdAt: number(),
+    canvasConnectId: string().optional(), // Slack Connect: the parent canvas's connectId (null until backfilled)
   })
   .primaryKey('id');
 
@@ -1407,6 +1429,7 @@ export const canvasParticipantTable = table('canvas_participants')
     role: enumeration<CanvasRole>(),
     joinedAt: number(),
     updatedAt: number(),
+    canvasConnectId: string().optional(), // Slack Connect: the parent canvas's connectId (null until backfilled)
   })
   .primaryKey('id');
 
@@ -1419,6 +1442,24 @@ export const canvasUserStatusTable = table('canvas_user_status' /* CanvasUserSta
     isStarred: boolean(),
     createdAt: number(),
     updatedAt: number().optional(),
+    canvasConnectId: string().optional(), // Slack Connect: the parent canvas's connectId (null until backfilled)
+  })
+  .primaryKey('id');
+
+// Slack Connect — one row per channel/canvas "connection" (see connect_group in Prisma).
+// Phase 1: always PRIVATE — invitedEntityId / invitedWorkspaceId NULL, status 'ACTIVE'.
+export const connectGroupTable = table('connect_group')
+  .columns({
+    id: string(),
+    entityType: string(), // 'channel' | 'canvas'
+    entityId: string(),
+    hostWorkspaceId: string(),
+    invitedEntityId: string().optional(),
+    invitedWorkspaceId: string().optional(),
+    connectId: string(),
+    status: string(),
+    createdAt: number(),
+    updatedAt: number(),
   })
   .primaryKey('id');
 
@@ -1716,7 +1757,6 @@ export const emailChannelPreferenceTable = table('email_channel_preferences')
     deskReportRangeDays: number().optional(),
     duplicateScopeConfig: string().optional(),
     slackDeskTriggerMode: enumeration<SlackDeskTriggerMode>().optional(),
-    deskAppIds: string().optional(),
   })
   .primaryKey('channelId');
 
@@ -1983,7 +2023,7 @@ export const applicationTable = table('applications')
     mainReleaseBoardId: string().optional(),
     channelId: string().optional(),
     regex: string(),
-    repoUrl: string(),
+    repoId: string().optional(),
     deployedCommit: string().optional(),
     deployedVersion: string().optional(),
     lastDeployedAt: number().optional(),
@@ -3430,6 +3470,11 @@ export const channelTableRelationships = relationships(channelTable, ({ one, man
     destField: ['channelId'],
     destSchema: channelBoardMappingTable,
   }),
+  publishedTabs: many({
+    sourceField: ['id'],
+    destField: ['channelId'],
+    destSchema: channelPublishedTabTable,
+  }),
   ticketDescriptions: many({
     sourceField: ['id'],
     destField: ['channelId'],
@@ -3449,6 +3494,17 @@ export const channelBoardMappingTableRelationships = relationships(
       sourceField: ['boardId'],
       destField: ['id'],
       destSchema: boardTable,
+    }),
+  }),
+);
+
+export const channelPublishedTabTableRelationships = relationships(
+  channelPublishedTabTable,
+  ({ one }) => ({
+    channel: one({
+      sourceField: ['channelId'],
+      destField: ['id'],
+      destSchema: channelTable,
     }),
   }),
 );
@@ -4146,13 +4202,23 @@ export const canvasTableRelationships = relationships(canvasTable, ({ one, many 
     destField: ['accessibleEntityId'],
     destSchema: guestAccessTable,
   }),
+  connectGroup: many({
+    sourceField: ['connectId'],
+    destField: ['connectId'],
+    destSchema: connectGroupTable,
+  }),
 }));
 
-export const canvasVersionTableRelationships = relationships(canvasVersionTable, ({ one }) => ({
+export const canvasVersionTableRelationships = relationships(canvasVersionTable, ({ one, many }) => ({
   canvas: one({
     sourceField: ['canvasId'],
     destField: ['id'],
     destSchema: canvasTable,
+  }),
+  connectGroup: many({
+    sourceField: ['canvasConnectId'],
+    destField: ['connectId'],
+    destSchema: connectGroupTable,
   }),
 }));
 
@@ -4184,12 +4250,17 @@ export const canvasCommentThreadTableRelationships = relationships(
       destField: ['id'],
       destSchema: userTable,
     }),
+    connectGroup: many({
+      sourceField: ['canvasConnectId'],
+      destField: ['connectId'],
+      destSchema: connectGroupTable,
+    }),
   }),
 );
 
 export const canvasCommentTableRelationships = relationships(
   canvasCommentTable,
-  ({ one }) => ({
+  ({ one, many }) => ({
     thread: one({
       sourceField: ['threadId'],
       destField: ['id'],
@@ -4200,10 +4271,15 @@ export const canvasCommentTableRelationships = relationships(
       destField: ['id'],
       destSchema: userTable,
     }),
+    connectGroup: many({
+      sourceField: ['canvasConnectId'],
+      destField: ['connectId'],
+      destSchema: connectGroupTable,
+    }),
   }),
 );
 
-export const canvasParticipantTableRelationships = relationships(canvasParticipantTable, ({ one }) => ({
+export const canvasParticipantTableRelationships = relationships(canvasParticipantTable, ({ one, many }) => ({
   canvas: one({
     sourceField: ['canvasId'],
     destField: ['id'],
@@ -4224,11 +4300,16 @@ export const canvasParticipantTableRelationships = relationships(canvasParticipa
     destField: ['id'],
     destSchema: channelTable,
   }),
+  connectGroup: many({
+    sourceField: ['canvasConnectId'],
+    destField: ['connectId'],
+    destSchema: connectGroupTable,
+  }),
 }));
 
 export const canvasUserStatusTableRelationships = relationships(
   canvasUserStatusTable,
-  ({ one }) => ({
+  ({ one, many }) => ({
     canvas: one({
       sourceField: ['canvasId'],
       destField: ['id'],
@@ -4238,6 +4319,11 @@ export const canvasUserStatusTableRelationships = relationships(
       sourceField: ['userId'],
       destField: ['id'],
       destSchema: userTable,
+    }),
+    connectGroup: many({
+      sourceField: ['canvasConnectId'],
+      destField: ['connectId'],
+      destSchema: connectGroupTable,
     }),
   }),
 );
@@ -4676,6 +4762,12 @@ export const formEntityValuesTableRelationships = relationships(formEntityValues
     destField: ['entityId'],
     destSchema: messageAttachmentTable,
   }),
+  // The channel a CHANNEL row describes (entityId = channels.id); other rows match none.
+  channel: one({
+    sourceField: ['entityId'],
+    destField: ['id'],
+    destSchema: channelTable,
+  }),
 }));
 
 export const ticketStageRequestTableRelationships = relationships(ticketStageRequestTable, ({ one }) => ({
@@ -4749,6 +4841,11 @@ export const applicationTableRelationships = relationships(applicationTable, ({ 
     sourceField: ['mainReleaseBoardId'],
     destField: ['id'],
     destSchema: boardTable,
+  }),
+  repo: one({
+    sourceField: ['repoId'],
+    destField: ['id'],
+    destSchema: repoTable,
   }),
 }));
 
@@ -4985,6 +5082,7 @@ export const schema = createSchema({
     guestAccessTable,
     channelTable,
     channelBoardMappingTable,
+    channelPublishedTabTable,
     channelStatsTable,
     channelParticipantTable,
     channelUserStatusTable,
@@ -5017,6 +5115,7 @@ export const schema = createSchema({
     canvasCommentTable,
     canvasParticipantTable,
     canvasUserStatusTable,
+    connectGroupTable,
     bookmarkTable,
     linkTable,
     linkAccessTable,
@@ -5121,6 +5220,7 @@ export const schema = createSchema({
     conversationParticipantTableRelationships,
     channelTableRelationships,
     channelBoardMappingTableRelationships,
+    channelPublishedTabTableRelationships,
     channelStatsTableRelationships,
     repoTableRelationships,
     sdlcEntityLinkTableRelationships,
@@ -5263,6 +5363,7 @@ export type Invitation = Row<typeof schema.tables.invitations>;
 export type GuestAccess = Row<typeof schema.tables.guest_access>;
 export type Channel = Row<typeof schema.tables.channels>;
 export type ChannelBoardMapping = Row<typeof schema.tables.channel_board_mappings>;
+export type ChannelPublishedTab = Row<typeof schema.tables.channel_published_tabs>;
 export type ChannelStats = Row<typeof schema.tables.channel_stats>;
 export type ChannelParticipant = Row<typeof schema.tables.channel_participants>;
 export type ChannelUserStatus = Row<typeof schema.tables.channel_user_status>;

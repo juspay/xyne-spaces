@@ -33,13 +33,21 @@ export class BaseQueryACL<
    *
    * Tables without a `workspaceId` column cannot inherit this (Prisma rejects the unknown
    * field), which forces them to declare what they scope by.
+   *
+   * `queryWhere` is the caller's own `where` for this read (undefined for `findUnique`). Most ACLs
+   * ignore it; Slack Connect canvas-child ACLs read the query's `connectId`/`canvasId` from it so a
+   * single-entity read can authorize by that one connect group instead of a full reachable set.
    */
-  async getWhereClause(): Promise<TWhereInput | null> {
+  async getWhereClause(_queryWhere?: Record<string, unknown>): Promise<TWhereInput | null> {
     return { workspaceId: this.ctx.workspaceId } as unknown as TWhereInput
   }
 
-  /** WRITE filter — rows `ctx` may update / delete. Same default as reads. */
-  async getMutateWhere(): Promise<TWhereInput | null> {
+  /**
+   * WRITE filter — rows `ctx` may update / delete. Same default as reads. `queryWhere` is the caller's
+   * own `where` for this mutate (undefined for unique-by-id ops); canvas-child ACLs read its
+   * `connectId`/`canvasId` to gate a single-entity write, like reads.
+   */
+  async getMutateWhere(_queryWhere?: Record<string, unknown>): Promise<TWhereInput | null> {
     return { workspaceId: this.ctx.workspaceId } as unknown as TWhereInput
   }
 

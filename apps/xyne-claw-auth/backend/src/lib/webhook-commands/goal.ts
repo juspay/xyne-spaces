@@ -26,6 +26,11 @@ export async function announceGoalStart(
   sessionId: string,
 ): Promise<void> {
   const { agent, payload } = ctx;
+  // A chat has no progress spinner; the line is the only sign the loop began.
+  if (ctx.channelDelivery) {
+    await ctx.reply(replyToUser, "Failed to post /goal start");
+    return;
+  }
   // Show "Starting /goal…" on the ephemeral progress spinner (same surface as
   // tool calls), not as a permanent chat message — the goal loop's meta lines
   // shouldn't clutter the thread. The terminal outcome stays a real message.

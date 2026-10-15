@@ -1,13 +1,16 @@
 import { transaction } from '../base';
 import { config } from '@/config/env';
 import { db } from '@/database/client';
+import { newConnectId, createConnectGroupForEntity, ConnectEntityType } from '@/database/connectGroup';
 import { MicrosoftDeskService, PendingChannelCreate } from '@/services/microsoftDeskService';
 import { logger } from '@/utils/logger';
-import { ChannelScopeType, ChannelType, ChannelRole, EmailMergeMode, DeskType } from '@xyne/shared';
+import { BoardType, ChannelScopeType, ChannelType, ChannelRole, EmailMergeMode, DeskType } from '@xyne/shared';
 
 
 export function createChannelAndSourceTx(channelData: PendingChannelCreate, sourceName: string, credentials: { accessToken: string; refreshToken?: string; email: string; expiresAt?: string; }, encryptedCredentials: string, self: MicrosoftDeskService, webhookUrl: string, clientState: string) {
-  return transaction(['Board', 'Channel', 'ChannelBoardMapping', 'ChannelParticipant', 'ChannelStats', 'ChannelUserStatus', 'Conversation', 'EmailChannelPreference', 'ExternalSource'], 'createChannelAndSource: channel, participant, status, preference, board-mapping and external-source rows must commit atomically; tx is not ACL-wrapped', db, async (tx) => {
+  return transaction(['Board', 'Channel', 'ChannelBoardMapping', 'ChannelParticipant', 'ChannelStats', 'ChannelUserStatus', 'Conversation', 'EmailChannelPreference', 'ExternalSource', 'ConnectGroup'], 'createChannelAndSource: channel, participant, status, preference, board-mapping and external-source rows must commit atomically; tx is not ACL-wrapped', db, async (tx) => {
+    // Slack Connect: the channel is a shareable entity → its own connectId + a private connect_group row.
+    const connectId = newConnectId();
     const channel = await tx.channel.create({
       data: {
         scopeType: ChannelScopeType.DEFAULT,
@@ -18,7 +21,14 @@ export function createChannelAndSourceTx(channelData: PendingChannelCreate, sour
         workspaceId: channelData.workspaceId,
         projectId: channelData.projectId,
         type: ChannelType.EMAIL,
+        connectId,
       },
+    });
+    await createConnectGroupForEntity(tx, {
+      entityType: ConnectEntityType.CHANNEL,
+      entityId: channel.id,
+      hostWorkspaceId: channelData.workspaceId,
+      connectId,
     });
 
     const now = new Date();
@@ -66,7 +76,7 @@ export function createChannelAndSourceTx(channelData: PendingChannelCreate, sour
     // Reuse the project's boards (same pattern as Google) — no per-connection
     // board/stages creation. If the project has no boards yet, the mapping list is empty.
     const boards = await tx.board.findMany({
-      where: { projectId: channelData.projectId },
+      where: { projectId: channelData.projectId, boardType: { not: BoardType.RELEASE } },
       orderBy: { createdAt: 'asc' },
       select: { id: true },
     });

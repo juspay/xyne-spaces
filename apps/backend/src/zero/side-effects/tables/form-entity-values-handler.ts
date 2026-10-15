@@ -2,7 +2,7 @@ import { BaseSideEffectHandler } from '../base-handler';
 import type { FormEntityValuePreviousValue, SideEffectJobConfig } from '../types';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
-import { emitEventToWorkspaceApps } from '@/apps/core/eventSubscriptionUtils';
+import { emitEventToChannelApps } from '@/apps/core/eventSubscriptionUtils';
 import { AppEventType, AdditionalFormFieldUpdatedPayload, BaseAppEvent } from '@/apps/types';
 import { buildKanbanCountsSnapshot } from '@/services/tickets/kanbanCountsSnapshotService';
 import type { KanbanCountsSnapshot } from '@/services/tickets/kanbanCountsSnapshotService';
@@ -25,8 +25,8 @@ const getPreviousFormEntityValue = (
  * Side effect handler for form_entity_values table.
  * 
  * When a form field is created/updated (e.g., user enters merchant_id),
- * this handler emits ADDITIONAL_FORM_FIELD_UPDATED event to all apps
- * installed in the workspace.
+ * this handler emits ADDITIONAL_FORM_FIELD_UPDATED event to the apps that
+ * are participants of the ticket's channel.
  * 
  * Apps (like Genius) can subscribe to this event and handle specific
  * field updates (e.g., trigger RCA investigation when merchant_id is set).
@@ -258,7 +258,7 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
       logger.info(`[FormEntityValuesSideEffectHandler] Emitting ADDITIONAL_FORM_FIELD_UPDATED for field "${fieldName}" on ticket ${ticketId}`);
       
       // Fire and forget - don't block the side effect processing
-      void emitEventToWorkspaceApps(ticket.workspaceId, event);
+      void emitEventToChannelApps(channelId, event);
 
       // Also emit TICKET_UPDATED so automation engine can match formFieldIds conditions
       const prevFormValue = operation === 'update' && previousValue

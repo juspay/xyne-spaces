@@ -18,6 +18,7 @@ import { DatabaseClient } from '@/database/client';
 import { config } from '@/config/env';
 import { emailService } from '@/services/email/factory';
 import { redisService } from '@/services/redisService';
+import { setPasswordHash, getPasswordHash } from '@/services/orgMemberCredentialService';
 import {
   organizationDomainService,
   OrganizationDomainConflictError,
@@ -74,7 +75,7 @@ export class EmailAuthController {
    * Login with email + password
    * POST /v2/auth/email/login
    *
-   * Verifies against orgMember.passwordHash. On success creates a session,
+   * Verifies against the member's stored password hash. On success creates a session,
    * issues JWT + cookies, and returns workspace info identical to OAuth flow.
    */
   login = async (req: Request, res: Response): Promise<void> => {
@@ -159,7 +160,7 @@ export class EmailAuthController {
         where: { email: normalizedEmail },
       });
 
-      const storedHash = orgMember && !orgMember.leftAt ? orgMember.passwordHash : null;
+      const storedHash = orgMember && !orgMember.leftAt ? await getPasswordHash(orgMember.memberId) : null;
 
       // 2. Verify the password. With no account (or no password on it) the check runs
       // against a dummy hash of the same form so the request takes as long as a real
@@ -545,20 +546,21 @@ export class EmailAuthController {
         where: { memberId: user.orgMemberId },
       });
 
-      if (!orgMember || !orgMember.passwordHash) {
+      const currentHash = orgMember ? await getPasswordHash(orgMember.memberId) : null;
+      if (!orgMember || !currentHash) {
         res.status(400).json({ error: 'Password not set. Please use forgot password to set password.' });
         return;
       }
 
       // Verify current password
-      const isValid = await verifyEmailPassword(currentPassword, orgMember.passwordHash);
+      const isValid = await verifyEmailPassword(currentPassword, currentHash);
       if (!isValid) {
         res.status(401).json({ error: 'Current password is incorrect' });
         return;
       }
 
       // Ensure new password is not the same as old
-      const isSameAsOld = await verifyEmailPassword(newPassword, orgMember.passwordHash);
+      const isSameAsOld = await verifyEmailPassword(newPassword, currentHash);
       if (isSameAsOld) {
         res.status(400).json({
           error: 'New password must be different from your current password',
@@ -569,10 +571,7 @@ export class EmailAuthController {
 
       // Hash and store new password
       const newHash = await hashPassword(newPassword);
-      await this.prisma.orgMember.update({
-        where: { memberId: orgMember.memberId },
-        data: { passwordHash: newHash },
-      });
+      await setPasswordHash({ memberId: orgMember.memberId, orgId: orgMember.orgId, passwordHash: newHash });
 
       // Revoke all active sessions for this user — forces re-auth everywhere
       await this.userSessionService.revokeAllUserSessions(userId, 'PASSWORD_CHANGED');
@@ -733,9 +732,10 @@ export class EmailAuthController {
         return;
       }
 
-      if (orgMember.passwordHash) {
+      const existingHash = await getPasswordHash(orgMember.memberId);
+      if (existingHash) {
         // Ensure new password is not the same as old when a password already exists.
-        const isSameAsOld = await verifyEmailPassword(newPassword, orgMember.passwordHash);
+        const isSameAsOld = await verifyEmailPassword(newPassword, existingHash);
         if (isSameAsOld) {
           res.status(400).json({
             error: 'New password must be different from your current password',
@@ -747,10 +747,7 @@ export class EmailAuthController {
 
       // Update password
       const newHash = await hashPassword(newPassword);
-      await this.prisma.orgMember.update({
-        where: { memberId: orgMember.memberId },
-        data: { passwordHash: newHash },
-      });
+      await setPasswordHash({ memberId: orgMember.memberId, orgId: orgMember.orgId, passwordHash: newHash });
 
       // Find all workspace users tied to this orgMember and revoke their sessions
       const affectedUsers = await this.prisma.user.findMany({
@@ -876,12 +873,13 @@ export class EmailAuthController {
       // Check if OrgMember already exists with a password (already registered)
       const existingOrgMember = await this.prisma.orgMember.findUnique({
         where: { email: normalizedEmail },
-        select: { memberId: true, passwordHash: true, leftAt: true },
+        select: { memberId: true, leftAt: true },
       });
 
       const existingIdentity = await this.userService.findAuthIdentityByEmail(normalizedEmail);
 
-      const isAlreadyRegistered = existingOrgMember && existingOrgMember.passwordHash && !existingOrgMember.leftAt;
+      const existingHash = existingOrgMember ? await getPasswordHash(existingOrgMember.memberId) : null;
+      const isAlreadyRegistered = existingOrgMember && existingHash && !existingOrgMember.leftAt;
       const isProviderMismatch = existingIdentity && existingIdentity.authProvider !== AuthProvider.EMAIL;
 
       if (isAlreadyRegistered || isProviderMismatch) {
@@ -1134,6 +1132,7 @@ export class EmailAuthController {
             return;
           }
         }
+        const memberOrgId = orgId && existingOrgMember.orgId !== orgId ? orgId : existingOrgMember.orgId;
         await this.prisma.orgMember.update({
           where: { email: normalizedEmail },
           data: {
@@ -1143,14 +1142,22 @@ export class EmailAuthController {
             ...(invitationOrgRole ? { role: invitationOrgRole } : {}),
           },
         });
+        await this.prisma.orgMemberCredential.upsert({
+          where: { memberId: existingOrgMember.memberId },
+          create: { memberId: existingOrgMember.memberId, orgId: memberOrgId, passwordHash },
+          update: { passwordHash },
+        });
       } else if (orgId) {
-        await this.prisma.orgMember.create({
+        const created = await this.prisma.orgMember.create({
           data: {
             orgId,
             email: normalizedEmail,
             role: invitationOrgRole ?? OrgRole.COMMUNITY_MEMBER,
             passwordHash,
           },
+        });
+        await this.prisma.orgMemberCredential.create({
+          data: { memberId: created.memberId, orgId, passwordHash },
         });
       } else {
         // No orgId and no existing OrgMember — store passwordHash in Redis

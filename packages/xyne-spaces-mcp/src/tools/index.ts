@@ -1,9 +1,7 @@
 /**
  * The tool registry.
  *
- * Separate from `src/index.ts` so it can be imported without starting a server —
- * `scripts/check-operations.mjs` reads this list to verify every backend
- * operation the tools name is still there and still takes what they send.
+ * Separate from `src/index.ts` so it can be imported without starting a server.
  */
 
 import type { ToolDef } from "./shared.js";

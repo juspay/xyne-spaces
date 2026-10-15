@@ -294,15 +294,24 @@ export function buildFindingsMarkdown(
 
 export async function postExperimentNotice(run: { channelId: string; conversationId: string; agentSlug: string; orgId: string | null; finalReport?: string | null }): Promise<void> {
   if (!run.orgId) return;
+  const markdownText = run.finalReport?.trim()
+    ? `**/experiment ended**\n\n${run.finalReport.trim()}`
+    : "**/experiment ended**\n\n(experiment ended without final report)";
+  // Started from a chat: it ends there too.
+  const { chatTargetFor } = await import("../surfaces/messaging/commands.js");
+  const chat = await chatTargetFor(run.conversationId);
+  if (chat) {
+    const { enqueueOutbound } = await import("../surfaces/messaging/delivery.js");
+    await enqueueOutbound(chat.connectedSurfaceId, { kind: "text", chatId: chat.chatId, text: markdownText });
+    return;
+  }
   const agent = await agentRepository.findBySlug(run.agentSlug, run.orgId);
   if (!agent?.spacesAppToken || !agent.spacesAppUserId) return;
   const appToken = decryptStoredField(agent.spacesAppToken);
   await spacesAppFetch("/chat/postMessage", {
     channelId: run.channelId,
     conversationId: run.conversationId,
-    markdownText: run.finalReport?.trim()
-      ? `**/experiment ended**\n\n${run.finalReport.trim()}`
-      : "**/experiment ended**\n\n(experiment ended without final report)",
+    markdownText,
     userId: agent.spacesAppUserId,
     metadata: { contentFormat: "markdown" },
   }, appToken);
@@ -411,10 +420,13 @@ async function dispatchExperimentRun(
     ? await agentRepository.findBySlug(run.agentSlug, run.orgId)
     : null;
   if (!agent) throw new Error(`Experiment dispatch missing agent ${run.agentSlug} org=${run.orgId ?? ""}`);
-  if (!agent.spacesAppToken || !agent.spacesAppId || !agent.spacesAppUserId) {
+  // An experiment started from a chat reports there, and needs no Spaces app.
+  const { chatTargetFor } = await import("../surfaces/messaging/commands.js");
+  const chat = await chatTargetFor(run.conversationId);
+  if (!chat && (!agent.spacesAppToken || !agent.spacesAppId || !agent.spacesAppUserId)) {
     throw new Error(`Experiment dispatch agent ${run.agentSlug} missing Spaces app identity`);
   }
-  const appToken = decryptStoredField(agent.spacesAppToken);
+  const appToken = !chat && agent.spacesAppToken ? decryptStoredField(agent.spacesAppToken) : "";
 
   const dispatchPayload = {
     userId: run.userId,
@@ -458,7 +470,7 @@ async function dispatchExperimentRun(
   }
 
   const sessionContext: SessionContext = {
-    mentionedUserId: agent.spacesAppUserId,
+    mentionedUserId: chat ? run.userId : (agent.spacesAppUserId ?? ""),
     targetUserId: run.userId,
     senderId: run.userId,
     senderName: run.userId,
@@ -471,8 +483,9 @@ async function dispatchExperimentRun(
     agentSlug: run.agentSlug,
     responseMode: "conversation",
     appToken,
-    spacesAppId: agent.spacesAppId,
-    spacesAppUserId: agent.spacesAppUserId,
+    spacesAppId: chat ? "" : (agent.spacesAppId ?? ""),
+    spacesAppUserId: chat ? "" : (agent.spacesAppUserId ?? ""),
+    ...(chat ? { channelDelivery: chat, triggerSource: chat.channel } : {}),
     traceId,
     rootAgentSlug: run.agentSlug,
     // Suppresses the channel agent-chain on every epoch callback (see the field

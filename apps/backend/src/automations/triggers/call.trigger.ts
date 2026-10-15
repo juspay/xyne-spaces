@@ -123,7 +123,7 @@ export async function emitCallEvent(
     });
     if (!channel?.workspaceId) {
       logger.warn('[automations] Cannot emit call event: no workspace found', {
-        callId: call.id,
+        callId: call.externalId,
         channelId: call.channelId,
       });
       return;
@@ -156,7 +156,7 @@ export async function emitCallEvent(
   } catch (err) {
     logger.error('[automations] emitCallEvent failed', {
       callEventType,
-      callId: call.id,
+      callId: call.externalId,
       error: err,
     });
   }
@@ -230,7 +230,7 @@ export async function hydrateCallEventPayload(
     };
   } catch (err) {
     logger.error('[automations] hydrateCallEventPayload failed', {
-      callId,
+      callId: payload.externalId,
       error: err,
     });
     // Return the original payload with an empty participant list so the automation

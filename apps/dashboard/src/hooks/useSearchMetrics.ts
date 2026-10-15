@@ -17,10 +17,11 @@ import {
   type SelectedMention,
 } from '../components/Chat/ChatDirectory/ChannelCommandMenu.types';
 import { User } from '../machines/stateMachine';
-import { Channel } from '@xyne/shared';
+import { CallType, Channel } from '@xyne/shared';
 import { useWorkerUserSearch } from './useWorkerUserSearch';
 import { useWorkerChannelSearch } from './useWorkerChannelSearch';
 import type { MentionHighlightsBuilder } from '../search/mentionHighlights';
+import type { SearchSurface } from '../types/searchEvents';
 import { ChannelCategory } from '../components/Chat/ChatDirectory/ChatDirectory.types';
 import {
   parseSearchFilters,
@@ -99,6 +100,9 @@ function deriveMentionBuckets(selectedMentions: SelectedMention[]): MentionBucke
 
 interface UseSearchMetricsOptions {
   searchLocation?: SearchLocation;
+  // Which search UI is running the session, sent as `surface` on every sudoQuery search event
+  // and on the session-start / click log lines. Surfaces that leave it unset send no `surface`.
+  surface?: SearchSurface;
   allChannels?: Array<{ channel: Channel; category: ChannelCategory; searchableNames?: string[] }>;
   onSearchComplete?: (results: DisplaySearchResult[], query: string) => void;
   mentionSearchType?: ChipType | null;
@@ -265,6 +269,40 @@ function dateFiltersFromChips(mentions: SelectedMention[]): StructuredSearchFilt
   return { ...(after ? { after } : {}), ...(before ? { before } : {}) };
 }
 
+/** Scopes a search to the active tab's doc kind. Shared by the first page and `loadMore`. */
+function applyTabScope(searchFilters: VespaSearchFilters, activeTab: TabType): void {
+  switch (activeTab) {
+    case TabType.MESSAGES:
+      searchFilters.type = VespaDocTypes.MESSAGES;
+      break;
+    case TabType.ATTACHMENTS:
+      searchFilters.type = VespaDocTypes.FILES;
+      break;
+    case TabType.TICKETS:
+      searchFilters.type = VespaDocTypes.TICKETS;
+      break;
+    case TabType.DESK:
+      searchFilters.type = SearchableTypes.EMAILS;
+      searchFilters.apps = VespaApps.MAIL;
+      break;
+    case TabType.CANVAS:
+      searchFilters.type = 'canvas';
+      searchFilters.apps = VespaApps.FILE;
+      break;
+    case TabType.CALL:
+      searchFilters.type = VespaDocTypes.FILES;
+      searchFilters.apps = VespaApps.FILE;
+      searchFilters.subApp = 'transcript';
+      break;
+    case TabType.RECORDING:
+      searchFilters.type = VespaDocTypes.FILES;
+      searchFilters.apps = VespaApps.FILE;
+      searchFilters.subApp = 'transcript';
+      searchFilters.callType = CallType.HEADLESS;
+      break;
+  }
+}
+
 export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   const context = useAuthContextValues();
   const defaultRankProfileFor = useCmdkDefaultRankProfiles();
@@ -291,6 +329,25 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   const lastQueryTextRef = useRef<string>('');
   const maxQueryLengthTextRef = useRef<string>('');
   const previousTabRef = useRef<TabType>(TabType.ALL);
+
+  // The user's starred channel ids, for `starredCount` on session start and `isStarred` on click.
+  // Null when the surface passes no channels (e.g. call history), so those events omit the fields
+  // rather than report a starred count of 0. Read through a ref to keep the session callbacks stable.
+  const starredChannelIds = useMemo(
+    () =>
+      options.allChannels
+        ? new Set(
+            options.allChannels
+              .filter(({ category }) => category === ChannelCategory.STARRED)
+              .map(({ channel }) => channel.id),
+          )
+        : null,
+    [options.allChannels],
+  );
+  const starredChannelIdsRef = useRef(starredChannelIds);
+  starredChannelIdsRef.current = starredChannelIds;
+  const surfaceRef = useRef(options.surface);
+  surfaceRef.current = options.surface;
 
   // Clipboard tracking state
   const querySourceRef = useRef<QuerySource>('KEYBOARD');
@@ -464,15 +521,20 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       // Reset session filters tracking
       sessionFiltersRef.current.clear();
 
-      searchMetricsService.trackSessionStart(
-        newSessionId,
-        String(context.userID),
-        previousTabRef.current,
-      );
+      const starredCount = starredChannelIdsRef.current?.size;
+      searchMetricsService.trackSessionStart({
+        searchSessionId: newSessionId,
+        userId: String(context.userID),
+        tab: previousTabRef.current,
+        ...(starredCount !== undefined && { starredCount }),
+        ...(surfaceRef.current && { surface: surfaceRef.current }),
+      });
       sudoQueryService.track('search_session_start', {
         searchSessionId: newSessionId,
         tab: previousTabRef.current,
         trigger,
+        ...(surfaceRef.current && { surface: surfaceRef.current }),
+        ...(starredCount !== undefined && { starredCount }),
       });
 
       return newSessionId;
@@ -555,6 +617,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         });
         sudoQueryService.track('search_session_end', {
           searchSessionId,
+          ...(surfaceRef.current && { surface: surfaceRef.current }),
           queryText: queryTextForEnd || '',
           totalImpressions: impressionCountRef.current,
           dwellTimeMs,
@@ -614,6 +677,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       });
       sudoQueryService.track('search_impression', {
         searchSessionId,
+        ...(surfaceRef.current && { surface: surfaceRef.current }),
         queryText: params.queryText,
         totalHits: params.totalHits,
         latencyMs,
@@ -723,6 +787,10 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       }
 
       const scrollDepth = calculateScrollDepth();
+      const starredIds = starredChannelIdsRef.current;
+      const isStarred = starredIds
+        ? params.clickedDocType === 'channel' && starredIds.has(params.clickedDocId)
+        : undefined;
 
       searchMetricsService.trackClick({
         searchSessionId,
@@ -735,10 +803,13 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         ...(scrollDepth !== undefined && { scrollDepth }),
         ...(params.resultUrl && { resultUrl: params.resultUrl }),
         ...(params.relevanceScore !== undefined && { relevanceScore: params.relevanceScore }),
+        ...(isStarred !== undefined && { isStarred }),
+        ...(surfaceRef.current && { surface: surfaceRef.current }),
         tab: previousTabRef.current,
       });
       sudoQueryService.track('search_click', {
         searchSessionId,
+        ...(surfaceRef.current && { surface: surfaceRef.current }),
         queryText: params.queryText,
         clickedDocId: params.clickedDocId,
         clickedDocType: params.clickedDocType,
@@ -749,10 +820,13 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         ...(params.relevanceScore !== undefined && { relevanceScore: params.relevanceScore }),
         tab: previousTabRef.current,
         isPreview: params.isPreview ?? false,
+        ...(isStarred !== undefined && { isStarred }),
       });
 
-      // End the session with 'click' reason after tracking the click
-      endSession('click');
+      // End the session with 'click' reason after tracking the click. The full-page results
+      // screen stays open after a click (the result opens beside the list), so its session runs
+      // until the page unmounts and later clicks still land in it.
+      if (surfaceRef.current !== 'search_screen') endSession('click');
     },
     [searchSessionId, context.userID, calculateScrollDepth, endSession],
   );
@@ -780,7 +854,9 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       // in-flight popup → full-screen → back handoff should. Back-navigation restores the
       // palette without calling onOpen, so its cached result survives.
       // debugger;
-      clearVespaSearchCache();
+      // The results screen is the handoff's receiving end: clearing here would make it re-fetch
+      // the search the popup just ran.
+      if (surfaceRef.current !== 'search_screen') clearVespaSearchCache();
       startSession(trigger);
     },
     [startSession],
@@ -1148,27 +1224,8 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
             } else if (options.isCallSearchPage) {
               searchFilters.apps = VespaApps.CALL;
               searchFilters.type = VespaDocTypes.CALLS;
-            } else if (activeTab === TabType.MESSAGES) {
-              searchFilters.type = VespaDocTypes.MESSAGES;
-            } else if (activeTab === TabType.ATTACHMENTS) {
-              searchFilters.type = VespaDocTypes.FILES;
-            } else if (activeTab === TabType.TICKETS) {
-              searchFilters.type = VespaDocTypes.TICKETS;
-            } else if (activeTab === TabType.DESK) {
-              searchFilters.type = SearchableTypes.EMAILS;
-              searchFilters.apps = VespaApps.MAIL;
-            } else if (activeTab === TabType.CANVAS) {
-              searchFilters.type = 'canvas';
-              searchFilters.apps = VespaApps.FILE;
-            } else if (activeTab === TabType.CALL) {
-              searchFilters.type = VespaDocTypes.FILES;
-              searchFilters.apps = VespaApps.FILE;
-              searchFilters.subApp = 'transcript';
-            } else if (activeTab === TabType.RECORDING) {
-              searchFilters.type = VespaDocTypes.FILES;
-              searchFilters.apps = VespaApps.FILE;
-              searchFilters.subApp = 'transcript';
-              searchFilters.callType = 'HEADLESS';
+            } else {
+              applyTabScope(searchFilters, activeTab);
             }
 
             // Add assignee filter for Tickets/ALL (force ticket-only search)
@@ -1747,15 +1804,8 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         } else if (options.isCallSearchPage) {
           searchFilters.apps = VespaApps.CALL;
           searchFilters.type = VespaDocTypes.CALLS;
-        } else if (activeTab === TabType.MESSAGES) {
-          searchFilters.type = VespaDocTypes.MESSAGES;
-        } else if (activeTab === TabType.ATTACHMENTS) {
-          searchFilters.type = VespaDocTypes.FILES;
-        } else if (activeTab === TabType.TICKETS) {
-          searchFilters.type = VespaDocTypes.TICKETS;
-        } else if (activeTab === TabType.DESK) {
-          searchFilters.type = SearchableTypes.EMAILS;
-          searchFilters.apps = VespaApps.MAIL;
+        } else {
+          applyTabScope(searchFilters, activeTab);
         }
 
         // Add assignee filter for Tickets/ALL (force ticket-only search)
@@ -1946,6 +1996,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     sudoQueryService.track('search_tab_click', {
       searchSessionId,
       tab: previousTabRef.current,
+      ...(surfaceRef.current && { surface: surfaceRef.current }),
     });
   }, [searchSessionId, context.userID, activeTab]);
 
