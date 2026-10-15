@@ -20,7 +20,7 @@ import {
 import VespaClient from '../client/vespaClient';
 import { getErrorMessage } from '../utils';
 import config from '../config';
-import { YqlBuilder, type SlackFilters, type TicketFilters, type FileFilters, type MeetingFilters, type MailFilters, type CallFilters, type UserFilters } from '../utils/YqlBuilder';
+import { YqlBuilder, type SlackFilters, type TicketFilters, type FileFilters, type MeetingFilters, type MailFilters, type CallFilters } from '../utils/YqlBuilder';
 import {
   filterByNativeRank,
 } from '../utils/responseProcessor';
@@ -99,7 +99,6 @@ interface SearchOptions {
   meeting?: MeetingFilters;
   mail?: MailFilters;
   call?: CallFilters;
-  user?: UserFilters;
   prefixBoostWeight?: number;
   /** Vespa document-summary class to request. Defaults to `lean` when not set. */
   presentationSummary?: string;
@@ -314,7 +313,6 @@ export class SearchService {
         meeting = {},
         mail = {},
         call = {},
-        user = {},
         presentationSummary = DEFAULT_PRESENTATION_SUMMARY,
         mentionHighlights = [],
         workspaceId,
@@ -465,7 +463,6 @@ export class SearchService {
           isExactMatch,
           rankProfile,
           personalizationUserEmail,
-          user,
         );
 
         const hasQuery = !!(searchQuery && searchQuery.trim());
