@@ -875,8 +875,9 @@ model UserSession {
 // Org-scoped device session: one row per (orgMemberId, deviceKey) login.
 // refreshToken stores the sha256 of the refresh token held by the client in the `xs` cookie
 // (never the raw token).
-// NOTE (hand-written migration): add a partial unique index enforcing one ACTIVE
-// row per device — CREATE UNIQUE INDEX ... ON non_zero.auth_sessions ("orgMemberId", "deviceKey") WHERE status = 'active'
+// A partial unique index `auth_sessions_active_device_key ON auth_sessions ("orgMemberId",
+// "deviceKey") WHERE status = 'active'` is added via raw SQL in the migration (Prisma can't
+// express it) — it enforces one ACTIVE session per device.
 model AuthSession {
   id          String    @id @default(cuid())
   orgMemberId String
@@ -896,9 +897,7 @@ model AuthSession {
 
   workspaceAccess AuthSessionWorkspaceAccess[]
 
-  @@index([orgMemberId, deviceKey, status])
   @@index([deviceKey])
-  @@index([orgId])
   @@map("auth_sessions")
   @@schema("non_zero")
 }
