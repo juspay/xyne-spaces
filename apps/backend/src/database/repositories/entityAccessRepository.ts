@@ -9,6 +9,21 @@ export interface EntityAccessKey {
   userId: string;
 }
 
+// A null workspaceId (legacy rows) skips the filter rather than matching nothing.
+function activeGrantsWhere(params: {
+  workspaceId: string | null;
+  shareableEntityType: string;
+  entityId: string;
+}): Prisma.EntityAccessWhereInput {
+  const { workspaceId, shareableEntityType, entityId } = params;
+  return {
+    ...(workspaceId ? { workspaceId } : {}),
+    shareableEntityType,
+    entityId,
+    entityUserAccess: { not: EntityUserAccess.REVOKED },
+  };
+}
+
 export class EntityAccessRepository {
   private readonly db = DatabaseClient.getInstance();
 
@@ -57,16 +72,25 @@ export class EntityAccessRepository {
     const { workspaceId, shareableEntityType, entityId, userId, userGroupIds, channelIds } = params;
     return (tx ?? this.db).entityAccess.findMany({
       where: {
-        workspaceId,
-        shareableEntityType,
-        entityId,
-        entityUserAccess: { not: EntityUserAccess.REVOKED },
+        ...activeGrantsWhere({ workspaceId, shareableEntityType, entityId }),
         OR: [
           { userId },
           ...(userGroupIds.length ? [{ userGroupId: { in: userGroupIds } }] : []),
           ...(channelIds.length ? [{ channelId: { in: channelIds } }] : []),
         ],
       },
+    });
+  }
+
+  /** Every active grant on an entity, whoever it reaches. */
+  listActiveForEntity(params: {
+    workspaceId: string | null;
+    shareableEntityType: string;
+    entityId: string;
+  }): Promise<Array<Pick<EntityAccess, 'userId' | 'userGroupId' | 'channelId'>>> {
+    return this.db.entityAccess.findMany({
+      where: activeGrantsWhere(params),
+      select: { userId: true, userGroupId: true, channelId: true },
     });
   }
 

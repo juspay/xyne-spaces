@@ -315,7 +315,7 @@ export function SdlcWikiExplorer(props: {
       <Select value={scopeId} onValueChange={props.onSelectScope}>
         <SelectTrigger
           className='h-9 w-full border-transparent bg-transparent px-2 text-sm font-semibold text-sidebar-accent-foreground shadow-none hover:bg-sidebar-accent focus:ring-1 focus:ring-sidebar-accent-ring'
-          aria-label='Wiki'
+          aria-label='Repository'
         >
           <SelectValue />
         </SelectTrigger>
@@ -346,13 +346,13 @@ export function SdlcWikiExplorer(props: {
           onChange={event => setQuery(event.target.value)}
           placeholder='Search pages'
           className='h-8 w-full rounded-lg border border-transparent bg-sidebar-foreground/[0.06] pl-8 pr-2 text-[13px] outline-none placeholder:text-sidebar-foreground/60 focus:border-sidebar-border focus:bg-sidebar-accent'
-          aria-label='Search Wiki pages'
+          aria-label='Search research pages'
           data-track-category='SdlcHub'
           data-track-name='WikiSearched'
         />
       </div>
       <nav
-        aria-label='Wiki pages'
+        aria-label='Research pages'
         className='no-scrollbar mt-1 min-h-0 flex-1 overflow-y-auto pb-2'
       >
         {visiblePages.length === 0 ? (
@@ -524,7 +524,7 @@ export function SdlcWikiHome(props: {
             </span>
             <span className='mt-4 font-medium'>Add repositories</span>
             <span className='mt-1 text-xs text-muted-foreground'>
-              Connect more repositories to this hub. Each Wiki is written on the next run.
+              Connect more repositories. Each one is researched on the next run.
             </span>
           </button>
         )}
@@ -552,7 +552,7 @@ export function SdlcWikiHome(props: {
                 {scope.name}
               </span>
               <span className='mt-1 text-xs text-muted-foreground'>
-                {scope.hub ? 'How the repositories in this hub connect' : 'Repository Wiki'}
+                {scope.hub ? 'How these repositories connect' : 'Deep research on this repository'}
               </span>
               <span className='mt-auto flex items-center justify-between gap-3 pt-4 text-xs text-muted-foreground'>
                 <span className='tabular-nums'>
@@ -618,14 +618,14 @@ export function SdlcWikiEmpty(props: {
           size={28}
         />
         <p className='mt-3 text-lg font-semibold' aria-live='polite'>
-          {props.running ? 'Writing this Wiki' : 'This Wiki has no pages yet'}
+          {props.running ? 'Running deep research' : 'No research pages yet'}
         </p>
         <p className='mt-1.5 text-sm text-muted-foreground'>
           {props.running
             ? `The run reads the code of ${source} and writes its pages. They show up here as they are written, and a large repository takes a while.`
             : props.canManage
               ? `Generate it from the code of ${source}, or write the first page yourself.`
-              : 'Pages appear here once a hub admin generates the Wiki.'}
+              : 'Pages appear here once an admin runs deep research.'}
         </p>
         {/* While it runs, what is happening comes before the way to stop it. */}
         <div

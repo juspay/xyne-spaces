@@ -114,6 +114,65 @@ function expand(value, i) {
   return value;
 }
 
+const CAPTION_INIT = ({ title }) => {
+  const make = () => {
+    if (document.getElementById("__uit_caption")) return;
+    const el = document.createElement("div");
+    el.id = "__uit_caption";
+    el.textContent = "▶ " + title;
+    el.setAttribute("style", "position:fixed;left:50%;top:10px;transform:translateX(-50%);z-index:2147483647;pointer-events:none;max-width:92vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:rgba(17,24,39,.88);color:#fff;font:600 14px/1.3 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;padding:7px 14px;border-radius:999px;box-shadow:0 4px 14px rgba(0,0,0,.25)");
+    (document.body || document.documentElement).appendChild(el);
+  };
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", make); else make();
+};
+const SET_CAPTION = ({ text, hidden }) => {
+  const el = document.getElementById("__uit_caption");
+  if (!el) return;
+  if (text) el.textContent = text;
+  el.style.display = hidden ? "none" : "block";
+};
+const SHOW_TITLE_CARD = ({ title, description, meta }) => {
+  const card = document.createElement("div");
+  card.id = "__uit_card";
+  card.setAttribute("style", "position:fixed;inset:0;z-index:2147483647;pointer-events:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:rgba(17,24,39,.92);color:#fff;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;text-align:center;padding:24px");
+  const t = document.createElement("div"); t.textContent = title; t.setAttribute("style", "font-size:30px;font-weight:700;max-width:90vw");
+  card.appendChild(t);
+  if (description) { const d = document.createElement("div"); d.textContent = description; d.setAttribute("style", "font-size:17px;opacity:.85;max-width:80vw"); card.appendChild(d); }
+  const m = document.createElement("div"); m.textContent = meta; m.setAttribute("style", "font-size:13px;opacity:.6"); card.appendChild(m);
+  const cap = document.getElementById("__uit_caption"); if (cap) cap.style.display = "none";
+  (document.body || document.documentElement).appendChild(card);
+};
+const HIDE_TITLE_CARD = () => { const c = document.getElementById("__uit_card"); if (c) c.remove(); };
+const VISIBLE_CONTROLS = () => {
+  const seen = new Set();
+  const all = [...document.querySelectorAll("button,a,[role=button],[role=tab],[role=link]")];
+  const inChrome = (el) => Boolean(el.closest("nav,aside,header,[role=navigation],[role=banner]"));
+  for (const el of all.filter((e) => !inChrome(e)).concat(all.filter(inChrome))) {
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0 || el.closest("#__uit_caption,#__uit_card")) continue;
+    const name = (el.getAttribute("aria-label") || el.innerText || el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 40);
+    if (name) seen.add(name + (el.disabled || el.getAttribute("aria-disabled") === "true" ? " (disabled)" : ""));
+    if (seen.size >= 30) break;
+  }
+  return [...seen];
+};
+const IS_DARK = () => {
+  if (document.documentElement.classList.contains("dark") || document.body.classList.contains("dark")) return true;
+  const c = getComputedStyle(document.body).backgroundColor.match(/\d+(\.\d+)?/g);
+  if (!c) return null;
+  const [r, g, b] = c.map(Number);
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 < 0.35;
+};
+function describeStep(step) {
+  if (step.click) return "click " + step.click;
+  if (step.fill) return "type into " + step.fill[0];
+  if (step.press) return "press " + step.press;
+  if (step.hover) return "hover " + step.hover;
+  if (step.waitFor) return "wait for " + step.waitFor;
+  if (step.wait) return "pause";
+  return "step";
+}
+
 function matches(rule, req) {
   const u = new URL(req.url());
   const target = u.pathname + u.search;
@@ -132,7 +191,11 @@ async function runVariation(browser, v) {
   const storage = Object.assign({}, defaults.localStorage || {}, v.localStorage || {});
   if (theme && spec.themeStorageKey) storage[spec.themeStorageKey] = theme;
   if (Object.keys(storage).length) await ctx.addInitScript((s) => { for (const k of Object.keys(s)) localStorage.setItem(k, s[k]); }, storage);
+  const title = String(v.title || String(v.id).replace(/[-_]+/g, " ")).slice(0, 120);
+  const description = v.description ? String(v.description).slice(0, 220) : "";
+  if (wantVideo) await ctx.addInitScript(CAPTION_INIT, { title });
   const page = await ctx.newPage();
+  const caption = async (text, hidden) => { if (wantVideo) await page.evaluate(SET_CAPTION, { text, hidden: Boolean(hidden) }).catch(() => {}); };
   const consoleErrors = [];
   const pageErrors = [];
   const failedRequests = [];
@@ -166,7 +229,17 @@ async function runVariation(browser, v) {
     const root = base.endsWith(p) && p !== "/" ? base.slice(0, base.length - p.length) : base;
     await page.goto(root + p, { waitUntil: slow ? "domcontentloaded" : "networkidle", timeout: 30000 });
   } catch (e) { navError = String(e && e.message || e).slice(0, 200); }
-  for (const step of v.steps || []) {
+  if (wantVideo) {
+    const meta = viewport.width + "×" + viewport.height + (theme ? " · " + theme + " theme" : "");
+    await page.evaluate(SHOW_TITLE_CARD, { title, description, meta }).catch(() => {});
+    await page.waitForTimeout(1800);
+    await page.evaluate(HIDE_TITLE_CARD).catch(() => {});
+    await caption("▶ " + title);
+  }
+  const allSteps = v.steps || [];
+  for (let i = 0; i < allSteps.length; i++) {
+    const step = allSteps[i];
+    if (!step.wait) await caption("▶ " + title + " — step " + (i + 1) + "/" + allSteps.length + ": " + describeStep(step));
     try {
       if (step.click) await page.click(step.click, { timeout: 5000 });
       else if (step.fill) await page.fill(step.fill[0], step.fill[1], { timeout: 5000 });
@@ -174,14 +247,21 @@ async function runVariation(browser, v) {
       else if (step.hover) await page.hover(step.hover, { timeout: 5000 });
       else if (step.waitFor) await page.waitForSelector(step.waitFor, { timeout: 8000 });
       else if (step.wait) await page.waitForTimeout(step.wait);
-    } catch (e) { pageErrors.push("step " + JSON.stringify(step) + " failed: " + String(e && e.message || e).slice(0, 160)); }
+    } catch (e) {
+      const controls = await page.evaluate(VISIBLE_CONTROLS).catch(() => []);
+      pageErrors.push("step " + JSON.stringify(step) + " failed: " + String(e && e.message || e).split("\n")[0].slice(0, 140) + (controls.length ? " | visible buttons/links: " + controls.join(", ") : ""));
+    }
   }
+  if (allSteps.length) await caption("▶ " + title + " — final state");
   await page.waitForTimeout(v.shotAfterMs === undefined ? (defaults.shotAfterMs === undefined ? 1200 : defaults.shotAfterMs) : v.shotAfterMs);
   const finalUrl = page.url();
+  const themeApplied = theme === "dark" ? await page.evaluate(IS_DARK).catch(() => null) : null;
+  await caption("", true);
   const shot = path.join(outDir, v.id + ".png");
   const shotPath = await screenshotWithRetry(page, shot, Boolean(v.fullPage), pageErrors);
   let audit = null;
   try { audit = await page.evaluate("(" + AUDIT + ")()"); } catch (e) { audit = { error: String(e).slice(0, 160) }; }
+  if (wantVideo) { await caption("■ " + title + " — done"); await page.waitForTimeout(900); }
   await page.unrouteAll({ behavior: "ignoreErrors" }).catch(() => {});
   const video = wantVideo && page.video() ? page.video() : null;
   await ctx.close();
@@ -194,7 +274,7 @@ async function runVariation(browser, v) {
       fs.rmSync(videoDir, { recursive: true, force: true });
     } catch (e) { pageErrors.push("video save failed: " + String(e && e.message || e).slice(0, 120)); videoPath = null; }
   }
-  return { id: v.id, path: v.path, finalUrl, apiRequests, viewport, theme: theme || "light", screenshot: shotPath, video: videoPath, externalStubbed: external.count, externalHosts: external.hosts, ms: Date.now() - started, navError, audit, consoleErrors, pageErrors, failedRequests, unmatchedRequests: [...unmatched].slice(0, 20), expect: v.expect || null, checks: v.checks || null };
+  return { id: v.id, title, path: v.path, finalUrl, themeApplied, apiRequests, viewport, theme: theme || "light", screenshot: shotPath, video: videoPath, externalStubbed: external.count, externalHosts: external.hosts, ms: Date.now() - started, navError, audit, consoleErrors, pageErrors, failedRequests, unmatchedRequests: [...unmatched].slice(0, 20), expect: v.expect || null, checks: v.checks || null };
 }
 
 (async () => {
@@ -323,5 +403,16 @@ for (const ep of endpoints) {
   total += size;
   out[ep] = entry;
 }
+const themeKeys = new Set();
+for (const f of files) {
+  const t = read(f);
+  if (!/localStorage/.test(t)) continue;
+  const re = /localStorage\.(?:getItem|setItem)\(\s*["'\x60]([^"'\x60]*theme[^"'\x60]*)["'\x60]/gi;
+  let m;
+  while ((m = re.exec(t))) themeKeys.add(m[1]);
+  const c = /(?:STORAGE_KEY|THEME_KEY|themeKey)\s*=\s*["'\x60]([^"'\x60]+)["'\x60]/g;
+  while ((m = c.exec(t))) if (/theme/i.test(m[1]) || /theme/i.test(f)) themeKeys.add(m[1]);
+}
+out.__themeKeys = [...themeKeys].slice(0, 5);
 console.log(JSON.stringify(out));
 `;

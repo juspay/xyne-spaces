@@ -71,6 +71,12 @@ describe("judgeVariation", () => {
     expect(text).toContain("the page rendered blank");
   });
 
+  it("warns when a dark variation rendered light and shows the title in the report", () => {
+    const v = judgeVariation(result({ id: "dark", title: "Dark theme", theme: "dark", themeApplied: false }), answers({ background: ["dark", 0.9] }));
+    expect(v.findings.some((f) => f.message.includes("themeStorageKey"))).toBe(true);
+    expect(formatReport([v])).toContain('- PASS dark "Dark theme"');
+  });
+
   it("flags a theme class that disagrees with the screenshot", () => {
     const v = judgeVariation(result({ audit: { ...clean, dark: true } }), answers({ background: ["light", 0.85] }));
     expect(v.findings.some((f) => f.message.includes("theme class says dark"))).toBe(true);

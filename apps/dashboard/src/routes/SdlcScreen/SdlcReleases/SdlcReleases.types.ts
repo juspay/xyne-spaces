@@ -28,6 +28,9 @@ export interface SdlcReleaseRepo {
   host: string;
   branch: string;
   projectId: string | null;
+  /** The hub that owns this repository's release config. */
+  hubChannelId: string;
+  hubChannelName: string;
   config: ReleaseRepoDraft | null;
 }
 
@@ -62,6 +65,8 @@ export type RepoConfigState = 'configured' | 'notSetUp' | 'unsaved';
 
 export interface SdlcReleasesProps {
   projectId: string | null;
+  channelId: string;
+  channelName: string;
   repositories: readonly SdlcHubRepoInput[];
   openReleaseId: string | null;
   onOpenRelease: (releaseId: string) => void;
@@ -82,11 +87,6 @@ export interface SdlcReleaseBreadcrumbProps {
   canvasId: string | null;
   onBack: () => void;
   onOpenRelease: () => void;
-}
-
-export interface SdlcReleaseThreadProps {
-  releaseId: string;
-  onClose: () => void;
 }
 
 export interface ReleaseTicketQa {
@@ -153,7 +153,7 @@ export interface SdlcReleaseConfigDialogProps {
 
 export interface SdlcReleaseServicesProps {
   repoName: string;
-  repoUrl: string;
+  repoId: string;
   projectId: string | null;
   services: ReleaseServiceDraft[];
   onChange: (services: ReleaseServiceDraft[]) => void;

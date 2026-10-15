@@ -868,13 +868,14 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       options.ticket.boardId = toFilterValues(board, 'board');
     }
 
-    // One `tags` filter, two schemas: a ticket's labels live in `tags`, a message's in
-    // `messageActs`. Callers ask for "tagged X" once; each schema applies it to its own
-    // field, so on a mixed search tagged tickets and tagged messages both come back.
+    // One `tags` filter, three schemas: a ticket's labels live in `tags`, a message's in
+    // `messageActs`, a recording transcript's in `labels`. Callers ask for "tagged X" once;
+    // each schema applies it to its own field, so on a mixed search every tagged kind comes back.
     if (tags) {
       const tagValues = toFilterValues(tags, 'tags');
       options.ticket.tags = tagValues;
       options.slack.messageActs = tagValues;
+      options.file.labels = tagValues;
     }
 
     // Entity filter — same values for both schemas; AND-ed inside YqlBuilder so a doc must

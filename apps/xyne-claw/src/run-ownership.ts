@@ -375,6 +375,19 @@ export function unregisterOwnedSession(sessionId: string): void {
   }
 }
 
+export async function advertiseRunOwner(sessionId: string): Promise<string | null> {
+  const ownerToken = createOwnerToken();
+  if (!(await claimOwnership(sessionId, ownerToken))) return null;
+  registerOwnedSession(sessionId, ownerToken, () => {});
+  return ownerToken;
+}
+
+export async function withdrawRunOwner(sessionId: string, ownerToken: string | null): Promise<void> {
+  if (!ownerToken) return;
+  if (ownedSessions.get(sessionId)?.ownerToken === ownerToken) unregisterOwnedSession(sessionId);
+  await releaseOwnership(sessionId, ownerToken).catch(() => false);
+}
+
 const fencedSessions = new Set<string>();
 
 export function fenceSession(sessionId: string): void {

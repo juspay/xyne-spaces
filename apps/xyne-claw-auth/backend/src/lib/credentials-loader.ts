@@ -34,9 +34,9 @@ import { prisma } from "../db.js";
 import { errMsg } from "./errors.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
-import { getFreshCredentials } from "./credentials-refresh.js";
+import { getFreshCredentials, hasDedicatedRefresh } from "./credentials-refresh.js";
 import { getSpacesAuthForUser, getWorkspaceIdForUser } from "./spaces-db.js";
-import { resolveFreshOAuthCreds, TokenRefreshError } from "./oauth-token-endpoint.js";
+import { resolveFreshOAuthCreds, TokenRefreshError, type OAuthTokenProvider } from "./oauth-token-endpoint.js";
 import { getOAuthProvider } from "../routes/oauth-token.js";
 
 // OAuth connectors whose tools run as claw-auth-hosted stdio MCP servers. Their
@@ -167,6 +167,29 @@ async function liveSpacesCredentials(userId: string, workspaceHint?: string | nu
     },
     isUserOwned: true,
   };
+}
+
+/**
+ * User-row creds for an OAuth connector that has a registered provider but no
+ * hand-written refresh in credentials-refresh.ts (notion-remote, clickup,
+ * mailerlite, sentry-remote, mixpanel-remote, …). Refreshes through the
+ * provider — the same path as GET /oauth/:provider/token — so an expired access
+ * token isn't handed to the MCP server. A failed refresh keeps the stored creds,
+ * like getFreshCredentials: the upstream 401 is what prompts a reconnect.
+ */
+async function freshProviderCredentials(
+  provider: OAuthTokenProvider,
+  userId: string,
+  userConn: { encryptedCreds: string; iv: string; authTag: string },
+): Promise<Record<string, unknown>> {
+  try {
+    const fresh = await resolveFreshOAuthCreds(provider, userId);
+    if (fresh) return fresh;
+  } catch (err) {
+    const detail = err instanceof TokenRefreshError ? err.message : errMsg(err);
+    log.error(`[creds-loader] ${provider.serverType} userId=${userId} → token refresh failed: ${detail}`);
+  }
+  return JSON.parse(decrypt(userConn.encryptedCreds, userConn.iv, userConn.authTag, CONFIG.encryptionKey)) as Record<string, unknown>;
 }
 
 export async function loadEffectiveCredentials(
@@ -477,14 +500,17 @@ export async function loadEffectiveCredentials(
   log.info(`[creds-loader] enter ${serverType} userId=${userId} userConnFound=${!!userConn}`);
 
   if (userConn) {
-    let credentials = await getFreshCredentials(
-      userConn.id,
-      userId,
-      serverType,
-      userConn.encryptedCreds,
-      userConn.iv,
-      userConn.authTag,
-    );
+    const oauthProvider = hasDedicatedRefresh(serverType) ? undefined : getOAuthProvider(serverType);
+    let credentials = oauthProvider
+      ? await freshProviderCredentials(oauthProvider, userId, userConn)
+      : await getFreshCredentials(
+          userConn.id,
+          userId,
+          serverType,
+          userConn.encryptedCreds,
+          userConn.iv,
+          userConn.authTag,
+        );
     if (serverType === "xyne-spaces") {
       credentials = await ensureSpacesWorkspaceCredential(userId, credentials, workspaceHint);
     }
