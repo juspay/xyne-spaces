@@ -406,6 +406,44 @@ export function useDraftAttachments() {
     [zero, draftMessages],
   );
 
+  /**
+   * Persist a new display order for this draft's attachments: the ids are sent in
+   * request order and the backend restamps the stored `position` 0..n-1. Zero then
+   * replicates the new positions and getDroppedFilesForEntity re-sorts. The local
+   * map is not touched here — it re-derives from the synced rows, so a rejected
+   * request simply leaves the current order in place.
+   */
+  const reorderDroppedFiles = useCallback(
+    async (
+      channelId: string,
+      conversationId: string | null,
+      attachmentIds: string[],
+    ): Promise<void> => {
+      if (attachmentIds.length === 0) return;
+
+      try {
+        await apiInstance.post('/drafts/attachments/reorder', {
+          channelId,
+          conversationId,
+          attachmentIds,
+        });
+      } catch (error) {
+        logger.error(Event.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('Failed to reorder attachments:'),
+          error: error,
+        });
+        logger.error(Event.ATTACHMENT_UPLOAD_FAILED, {
+          error: error instanceof Error ? error.message : String(error),
+          channelId,
+          conversationId,
+        });
+        throw error;
+      }
+    },
+    [],
+  );
+
   const getDroppedFilesForEntity = useCallback(
     (channelId: string, conversationId: string | null): Map<string, File | UploadedFile> => {
       // Return empty map if no channelId provided
@@ -424,8 +462,14 @@ export function useDraftAttachments() {
 
       // Build a map of attachmentId -> File | UploadedFile
       const result = new Map<string, File | UploadedFile>();
+      // Display order is the stored `position` (nulls last — a row stamped by the
+      // upload/reorder paths sorts before any legacy row), falling back to the old
+      // createdAt/id comparator for rows created before positions existed.
       const orderedAttachments = [...draftMessage.attachments].sort(
-        (a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id),
+        (a, b) =>
+          (a.position ?? Number.MAX_SAFE_INTEGER) - (b.position ?? Number.MAX_SAFE_INTEGER) ||
+          a.createdAt - b.createdAt ||
+          a.id.localeCompare(b.id),
       );
 
       // Process all attachments in parallel
@@ -472,6 +516,7 @@ export function useDraftAttachments() {
       removeDroppedFiles,
       clearDroppedFiles,
       getDroppedFilesForEntity,
+      reorderDroppedFiles,
     }),
     [
       addDroppedFiles,
@@ -479,6 +524,7 @@ export function useDraftAttachments() {
       removeDroppedFiles,
       clearDroppedFiles,
       getDroppedFilesForEntity,
+      reorderDroppedFiles,
     ],
   );
 }

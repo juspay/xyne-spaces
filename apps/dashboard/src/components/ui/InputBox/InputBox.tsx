@@ -27,7 +27,7 @@ import Placeholder from '@tiptap/extension-placeholder';
 import LinkExtension from '@tiptap/extension-link';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import { all, createLowlight } from 'lowlight';
-import { Plus, Loader2, X, Ticket, FileText, Clock } from 'lucide-react';
+import { Plus, Loader2, X, Ticket, FileText, Clock, ChevronLeft, ChevronRight } from 'lucide-react';
 import { ArrowUp, AtMark, ChevronBigDown, FontAa, Hashtag, PaperclipSlant } from '@xyne/icons';
 import Tooltip from '../Tooltip/Tooltip';
 import { ShortcutHint } from '../ShortcutHint';
@@ -273,7 +273,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         emojiPicker: true,
       },
       blockedExtensions,
-      maxFiles = 10,
+      maxFiles = 15, // keep in sync with MAX_DRAFT_ATTACHMENTS (draftAttachmentController.ts) and multer maxCount (middleware/upload.ts)
       onAlsoSendToChannelChange,
       alsoSendToChannelChecked = false,
       preserveThreadRoute = false,
@@ -308,6 +308,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       removeDroppedFile: providerRemoveDroppedFile,
       clearDroppedFiles: providerClearDroppedFiles,
       getDroppedFilesForEntity,
+      reorderDroppedFiles: providerReorderDroppedFiles,
     } = useDraftAttachments();
     const { enterSendsMessage } = useEnterSendsMessage();
     const { defaultFormattingToolbarOpen } = useDefaultFormattingToolbarOpen();
@@ -1561,6 +1562,31 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       [providerRemoveDroppedFile, disableDraftUpload],
     );
 
+    /**
+     * Move a draft attachment one slot earlier/later and persist the new order.
+     * `allAttachments` is already in display order (position-first), so moving the
+     * entry within that array and letting the backend restamp `position` 0..n-1 in
+     * request order keeps the UI and the stored order in sync. Zero replicates the
+     * new positions back and the load effect re-reads the map.
+     */
+    const moveAttachment = useCallback(
+      (index: number, direction: -1 | 1) => {
+        const target = index + direction;
+        if (target < 0 || target >= allAttachments.length) return;
+        if (!channelId) return;
+
+        const ids = allAttachments.map(a => a.attachmentId);
+        const [moved] = ids.splice(index, 1);
+        if (!moved) return;
+        ids.splice(target, 0, moved);
+
+        void providerReorderDroppedFiles(channelId, conversationId ?? null, ids).catch(() => {
+          toast.error('Failed to reorder attachments');
+        });
+      },
+      [allAttachments, channelId, conversationId, providerReorderDroppedFiles],
+    );
+
     const handlePreview = async (
       file: File | UploadedFile,
       attachmentId?: string,
@@ -1855,13 +1881,43 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                   (features.fileAttachments && allAttachments.length > 0) || attachedCanvas ? (
                     <div className='px-3 pb-2 flex flex-wrap gap-3'>
                       {allAttachments.map(({ attachmentId, file }, index) => (
-                        <AttachmentPreview
+                        <div
                           key={`file-${attachmentId}-${index}`}
-                          file={file}
-                          onRemove={() => void handleRemoveAttachment({ attachmentId, file })}
-                          onPreview={() => void handlePreview(file, attachmentId)}
-                          isUploading={false}
-                        />
+                          className='group/chip relative'
+                        >
+                          <AttachmentPreview
+                            file={file}
+                            onRemove={() => void handleRemoveAttachment({ attachmentId, file })}
+                            onPreview={() => void handlePreview(file, attachmentId)}
+                            isUploading={false}
+                          />
+                          {allAttachments.length > 1 && (
+                            <div className='absolute -top-1.5 -left-1.5 z-10 hidden gap-0.5 group-hover/chip:flex'>
+                              <button
+                                type='button'
+                                aria-label='Move attachment earlier'
+                                data-track-category='CHAT_INPUT'
+                                data-track-name='MOVE_ATTACHMENT_EARLIER'
+                                disabled={index === 0}
+                                onClick={() => moveAttachment(index, -1)}
+                                className='flex size-4 items-center justify-center rounded-full border bg-background shadow-sm text-muted-foreground hover:text-foreground disabled:opacity-30'
+                              >
+                                <ChevronLeft className='size-3' />
+                              </button>
+                              <button
+                                type='button'
+                                aria-label='Move attachment later'
+                                data-track-category='CHAT_INPUT'
+                                data-track-name='MOVE_ATTACHMENT_LATER'
+                                disabled={index === allAttachments.length - 1}
+                                onClick={() => moveAttachment(index, 1)}
+                                className='flex size-4 items-center justify-center rounded-full border bg-background shadow-sm text-muted-foreground hover:text-foreground disabled:opacity-30'
+                              >
+                                <ChevronRight className='size-3' />
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       ))}
                       {attachedCanvas && (
                         <CanvasLinkPreview
@@ -1930,14 +1986,41 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             {/* Desktop: Render attachments after editor content */}
             {!isMobile && features.fileAttachments && allAttachments.length > 0 && (
               <div className='px-3 pb-2 flex flex-wrap gap-3'>
-                {allAttachments.map(({ attachmentId, file }) => (
-                  <AttachmentPreview
-                    key={attachmentId}
-                    file={file}
-                    onRemove={() => void handleRemoveAttachment({ attachmentId, file })}
-                    onPreview={() => void handlePreview(file, attachmentId)}
-                    isUploading={false}
-                  />
+                {allAttachments.map(({ attachmentId, file }, index) => (
+                  <div key={attachmentId} className='group/chip relative'>
+                    <AttachmentPreview
+                      file={file}
+                      onRemove={() => void handleRemoveAttachment({ attachmentId, file })}
+                      onPreview={() => void handlePreview(file, attachmentId)}
+                      isUploading={false}
+                    />
+                    {allAttachments.length > 1 && (
+                      <div className='absolute -top-1.5 -left-1.5 z-10 hidden gap-0.5 group-hover/chip:flex'>
+                        <button
+                          type='button'
+                          aria-label='Move attachment earlier'
+                          data-track-category='CHAT_INPUT'
+                          data-track-name='MOVE_ATTACHMENT_EARLIER'
+                          disabled={index === 0}
+                          onClick={() => moveAttachment(index, -1)}
+                          className='flex size-4 items-center justify-center rounded-full border bg-background shadow-sm text-muted-foreground hover:text-foreground disabled:opacity-30'
+                        >
+                          <ChevronLeft className='size-3' />
+                        </button>
+                        <button
+                          type='button'
+                          aria-label='Move attachment later'
+                          data-track-category='CHAT_INPUT'
+                          data-track-name='MOVE_ATTACHMENT_LATER'
+                          disabled={index === allAttachments.length - 1}
+                          onClick={() => moveAttachment(index, 1)}
+                          className='flex size-4 items-center justify-center rounded-full border bg-background shadow-sm text-muted-foreground hover:text-foreground disabled:opacity-30'
+                        >
+                          <ChevronRight className='size-3' />
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 ))}
               </div>
             )}

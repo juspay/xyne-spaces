@@ -1027,14 +1027,14 @@ export default class InputBoxSteps {
     assert.ok(actual >= num, `Expected at least ${num} attachments, found ${actual}`);
   }
 
-  @Step('attempting to attach 11th file')
-  public async attemptToAttach11thFile(): Promise<void> {
+  @Step('attempting to attach 16th file')
+  public async attemptToAttach16thFile(): Promise<void> {
     const page = testContext.activePage;
     const input = page.locator('input[type="file"]').first();
     await input.setInputFiles({
-      name: 'eleventh-file.txt',
+      name: 'sixteenth-file.txt',
       mimeType: 'text/plain',
-      buffer: Buffer.from('eleventh'),
+      buffer: Buffer.from('sixteenth'),
     });
   }
 

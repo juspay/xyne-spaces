@@ -9,7 +9,7 @@ import { db } from '../database/client';
 import { AttachmentUploadStatus, isHeicBuffer } from '@xyne/shared';
 
 export const MAX_FILE_SIZE_BYTES = 1024 * 1024 * 1024; // 1GB max file size
-const MAX_FILE_FIELDS = 20; // Supports files + thumbnails in one multipart request
+const MAX_FILE_FIELDS = 32; // Supports files + thumbnails in one multipart request (15 files + 15 thumbnails = 30 parts, plus headroom)
 
 /**
  * File types refused at upload: Windows executables and server-side scripts, which are
@@ -836,8 +836,8 @@ export const uploadMultiple = (req: any, res: any, next: any) => {
   logger.info('fixingAttachment 🗂️ [MULTER] Starting multipart stream proxy...');
 
   const multerMiddleware = uploadStreamConfig.fields([
-    { name: 'files', maxCount: 10 },
-    { name: 'thumbnails', maxCount: 10 }
+    { name: 'files', maxCount: 15 },
+    { name: 'thumbnails', maxCount: 15 }
   ]);
 
   multerMiddleware(req, res, (err: any) => {

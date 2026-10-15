@@ -8,6 +8,13 @@ import { Prisma } from '@prisma/client';
 import { AttachmentEntityType, AttachmentUploadStatus } from '@xyne/shared';
 import { config } from '@/config/env';
 
+/**
+ * The composer's per-draft attachment maximum (InputBox `maxFiles` default).
+ * Enforced here as well: the multipart `maxCount` only caps a single request,
+ * while a draft accumulates attachments across requests.
+ */
+export const MAX_DRAFT_ATTACHMENTS = 15;
+
 export class DraftAttachmentController {
   private db = DatabaseClient.getInstance();
   private channelParticipantRepository: ChannelParticipantRepository;
@@ -168,6 +175,38 @@ export class DraftAttachmentController {
         }
       }
 
+      // Per-draft attachment limit, counted server-side. The UI refuses the 16th file
+      // (InputBox addFilesWithLimit) and multer caps one request at 15, but a scripted
+      // client could otherwise accumulate unlimited attachments across requests.
+      // Zero's optimistic mutator may have pre-created this request's rows already, so
+      // the count is read after the draft is resolved and includes them.
+      const existingAttachmentCount = await this.db.messageAttachment.count({
+        where: { entityId: finalDraftMessageId, entityType: AttachmentEntityType.DRAFT },
+      });
+      if (existingAttachmentCount + files.length > MAX_DRAFT_ATTACHMENTS) {
+        logger.warn('Draft attachment limit exceeded', {
+          userId,
+          channelId,
+          conversationId,
+          draftMessageId: finalDraftMessageId,
+          existing: existingAttachmentCount,
+          attempted: files.length,
+          limit: MAX_DRAFT_ATTACHMENTS,
+        });
+        res.status(400).json({
+          error: 'Too many attachments',
+          message: `A draft can have at most ${MAX_DRAFT_ATTACHMENTS} attachments`,
+          limit: MAX_DRAFT_ATTACHMENTS,
+          existing: existingAttachmentCount,
+          attempted: files.length,
+        });
+        return;
+      }
+
+      // New attachments continue after whatever is already on the draft, so the
+      // stored `position` matches the order the composer displays.
+      const assignedPosition = existingAttachmentCount;
+
       logger.info(`Uploading ${files.length} draft attachments using fileUploadService`);
 
       // Fetch workspaceId from channel
@@ -207,6 +246,11 @@ export class DraftAttachmentController {
           // Get metadata for this file
           const metadata = parsedFileMetadata[i] || {};
 
+          // Stored display order (#920 made it a first-class column). Rows the client
+          // mutator pre-created land in the update branch below, so the position is
+          // stamped there too — otherwise the row would never get one.
+          const position = assignedPosition + i;
+
           // Build complete metadata object - merge from uploadFiles result
           const completeMetadata: Record<string, any> = {
             ...uploadedFile.metadata,
@@ -238,7 +282,10 @@ export class DraftAttachmentController {
           try {
             await this.db.messageAttachment.upsert({
               where: { id: attachmentId },
-              update: attachmentData,
+              update: {
+                ...attachmentData,
+                position,
+              },
               create: {
                 id: attachmentId,
                 entityId: finalDraftMessageId,
@@ -248,6 +295,7 @@ export class DraftAttachmentController {
                 conversationId: conversationId || null,
                 channelId,
                 workspaceId: draftWorkspaceId,
+                position,
                 ...attachmentData,
               },
             });
@@ -264,7 +312,10 @@ export class DraftAttachmentController {
             ) {
               await this.db.messageAttachment.update({
                 where: { id: attachmentId },
-                data: attachmentData,
+                data: {
+                  ...attachmentData,
+                  position,
+                },
               });
             } else {
               throw upsertError;
@@ -306,6 +357,110 @@ export class DraftAttachmentController {
       res.status(500).json({
         error: 'Failed to upload attachments',
         message: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  };
+
+  /**
+   * POST /api/drafts/attachments/reorder
+   * Persist a new display order for a draft's attachments by restamping `position`
+   * (0-based, request order). Only the draft owner may reorder it, and every
+   * referenced attachment must be a DRAFT attachment of that exact draft — the ids
+   * are client-supplied, so without the scoping a request could restamp someone
+   * else's rows.
+   */
+  reorderDraftAttachments = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { attachmentIds, channelId, conversationId } = req.body;
+      const userId = req.user?.id;
+
+      if (!userId) {
+        res.status(401).json({ error: 'Unauthorized - user not authenticated' });
+        return;
+      }
+
+      if (!channelId) {
+        res.status(400).json({ error: 'channelId is required' });
+        return;
+      }
+
+      if (!Array.isArray(attachmentIds) || attachmentIds.length === 0) {
+        res.status(400).json({ error: 'attachmentIds must be a non-empty array' });
+        return;
+      }
+
+      if (new Set(attachmentIds).size !== attachmentIds.length) {
+        res.status(400).json({ error: 'attachmentIds must not contain duplicates' });
+        return;
+      }
+
+      const isParticipant = await this.channelParticipantRepository.isParticipant(
+        channelId,
+        userId
+      );
+
+      if (!isParticipant) {
+        logger.warn(`Unauthorized reorder attempt: User ${userId} tried to reorder draft attachments in channel ${channelId}`);
+        res.status(403).json({
+          error: 'Forbidden',
+          message: 'You do not have permission to reorder this draft'
+        });
+        return;
+      }
+
+      const draft = await this.db.draftMessage.findFirst({
+        where: {
+          channelId,
+          conversationId: conversationId || null,
+          userId,
+        },
+        select: { id: true },
+      });
+
+      if (!draft) {
+        res.status(404).json({ error: 'Draft not found' });
+        return;
+      }
+
+      const rows = await this.db.messageAttachment.findMany({
+        where: {
+          id: { in: attachmentIds },
+          entityId: draft.id,
+          entityType: AttachmentEntityType.DRAFT,
+        },
+        select: { id: true, uploadedByUserId: true },
+      });
+
+      const owned = new Set(
+        rows.filter(row => row.uploadedByUserId === userId).map(row => row.id),
+      );
+      const foreign = (attachmentIds as string[]).find(id => !owned.has(id));
+      if (foreign) {
+        logger.warn(
+          `Unauthorized draft attachment reorder: user ${userId} referenced attachment ${foreign} outside their draft`,
+        );
+        res.status(403).json({
+          error: 'Forbidden',
+          message: 'One or more attachment ids do not belong to this draft',
+        });
+        return;
+      }
+
+      await this.db.$transaction(
+        (attachmentIds as string[]).map((id, position) =>
+          this.db.messageAttachment.update({ where: { id }, data: { position } }),
+        ),
+      );
+
+      res.status(200).json({
+        success: true,
+        reorderedCount: attachmentIds.length,
+      });
+    } catch (error) {
+      logger.error('Error reordering draft attachments:', error);
+      res.status(500).json({
+        error: 'Failed to reorder attachments',
+        message: error instanceof Error ? error.message : 'Unknown error',
       });
     }
   };
