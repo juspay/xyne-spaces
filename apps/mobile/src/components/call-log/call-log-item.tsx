@@ -341,7 +341,7 @@ const CallLogItem = memo(
 
     // The ⋮ opens the call details sheet, which holds Copy Link and Delete. It shows when the
     // sheet has one of them to offer: anyone can copy the link, only the organiser deletes.
-    const hasMenu = isScheduled && (Boolean(call.roomLink) || call.isOutgoing);
+    const showQuickActions = isScheduled && (Boolean(call.roomLink) || call.isOutgoing);
     const handleRowPress = useCallback((): void => onPress?.(call), [call, onPress]);
     const handleAvatarPress = useCallback((): void => onAvatarPress?.(call), [call, onAvatarPress]);
 
@@ -436,7 +436,7 @@ const CallLogItem = memo(
             <ScrollTextIcon size={16} color={foregroundColor} />
           </Pressable>
         )}
-        {hasMenu && !isUserInThisDevice ? (
+        {showQuickActions && !isUserInThisDevice ? (
           <Pressable
             onPress={handleJoin}
             className={cn(
@@ -451,7 +451,7 @@ const CallLogItem = memo(
             </Text>
           </Pressable>
         ) : null}
-        {hasMenu ? (
+        {showQuickActions ? (
           <Pressable
             onPress={handleRowPress}
             onPressIn={(): void => {
@@ -466,7 +466,7 @@ const CallLogItem = memo(
         ) : null}
 
         {/* Join / Restart button — hidden if user is already in this call on this device */}
-        {!isUserInThisDevice && !hasMenu && (
+        {!isUserInThisDevice && !showQuickActions && (
           <Pressable
             onPress={isActive || isScheduled ? handleJoin : handleCb}
             className={cn(

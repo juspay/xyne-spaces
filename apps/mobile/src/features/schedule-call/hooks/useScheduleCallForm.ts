@@ -10,6 +10,7 @@ import {
   type CreateRecurringSeriesRequest,
   type ScheduleCallRequest,
 } from '@/src/services/Call/callService';
+import { Event, logger } from '@/src/utils/logger';
 import { mergeTimePart } from '@/src/utils/timeSelection';
 import { showMessageToast } from '@/src/utils/toast';
 
@@ -53,7 +54,7 @@ export const NO_PARTICIPANTS: ScheduleCallParticipants = { users: [], channel: n
 export const countParticipants = ({ users, channel }: ScheduleCallParticipants): number =>
   channel ? 1 : users.length;
 
-// ponytail: presets only. Add 'custom' (and the Custom editor) when that screen exists.
+// TODO: presets only. Add 'custom' (and the Custom editor) when that screen exists.
 export type RepeatChoice = 'none' | 'daily' | 'weekdays' | 'monthly';
 export type RepeatOptionId = RepeatChoice | 'custom';
 
@@ -139,7 +140,7 @@ export const useScheduleCallForm = (editCall: EditCallData | null = null): Sched
   } = recurrence;
 
   const isEditMode = editCall !== null;
-  // ponytail: editing one occurrence only. "Apply to the whole series" needs per-field change
+  // TODO: editing one occurrence only. "Apply to the whole series" needs per-field change
   // tracking (the series endpoint shifts every occurrence from startTime, and replaces the people
   // and guest lists) and must not send the phone's timezone; add it with those in place.
   const isSeriesSubmit = !isEditMode && isRecurring;
@@ -349,7 +350,8 @@ export const useScheduleCallForm = (editCall: EditCallData | null = null): Sched
         );
       }
       return true;
-    } catch {
+    } catch (error) {
+      logger.error(Event.ERROR, { context: 'schedule-call submit', error: String(error) });
       showMessageToast(editCall ? 'Error updating call' : 'Failed to schedule call', 'error');
       return false;
     } finally {

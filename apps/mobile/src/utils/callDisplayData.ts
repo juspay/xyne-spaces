@@ -25,7 +25,7 @@ import type { CallDisplayData } from '@/src/types/calls';
 import { queries } from '@/src/zero/queries';
 
 export type RawCall = QueryResultType<typeof queries.userCallHistory>[number];
-export type ScheduledRawCall = QueryResultType<typeof queries.userScheduledCalls>[number];
+export type ScheduledRawCall = QueryResultType<typeof queries.userUpcomingScheduledCalls>[number];
 export type CallUserLike = {
   id: string;
   name?: string | null;
