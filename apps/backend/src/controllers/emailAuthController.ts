@@ -482,6 +482,7 @@ export class EmailAuthController {
         // Org-scoped device auth session (xs cookie); no-op without x-device-id.
         await authSessionService.issueOnLogin(req, res, {
           orgMemberId: workspaceUser.orgMemberId,
+          workspaceId: workspaceUser.workspaceId ?? undefined,
         });
 
         logger.info(`${tag()} Email login succeeded (outcome=single_workspace, count=1)`);

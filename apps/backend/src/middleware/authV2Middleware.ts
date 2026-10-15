@@ -272,6 +272,7 @@ class AuthV2Middleware {
       await authSessionService.ensureOnRefresh(req, res, {
         orgMemberId: session.user.orgMemberId,
         orgId: session.user.orgMember?.orgId,
+        workspaceId: session.user.workspaceId ?? undefined,
       });
 
       // Attach user to request so downstream handlers work

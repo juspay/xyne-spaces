@@ -1158,6 +1158,7 @@ export class MicrosoftAuthController {
         // Org-scoped device auth session (xs cookie); no-op without x-device-id.
         await authSessionService.issueOnLogin(req, res, {
           orgMemberId: user.orgMemberId,
+          workspaceId: user.workspaceId ?? undefined,
         });
 
         setOnboardingCookie(res, isNewUser, {
@@ -1497,6 +1498,7 @@ export class MicrosoftAuthController {
         // Org-scoped device auth session (xs cookie); no-op without x-device-id.
         await authSessionService.issueOnLogin(req, res, {
           orgMemberId: user.orgMemberId,
+          workspaceId: user.workspaceId ?? undefined,
         });
 
         setOnboardingCookie(res, isNewUser, {

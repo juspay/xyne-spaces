@@ -873,29 +873,52 @@ model UserSession {
 }
 
 // Org-scoped device session: one row per (orgMemberId, deviceKey) login.
-// tokenHash is the sha256 of the refresh token held by the client in the `xs` cookie.
+// refreshToken stores the sha256 of the refresh token held by the client in the `xs` cookie
+// (never the raw token).
 // NOTE (hand-written migration): add a partial unique index enforcing one ACTIVE
 // row per device — CREATE UNIQUE INDEX ... ON non_zero.auth_sessions ("orgMemberId", "deviceKey") WHERE status = 'active'
 model AuthSession {
   id          String    @id @default(cuid())
   orgMemberId String
   orgId       String
-  tokenHash   String    @unique
+  refreshToken String   @unique // sha256 of the raw xs cookie value
   deviceKey   String    // persistent client device key (localStorage `xd` on web, native stores elsewhere)
   status      String    @default("active") // active | revoked
   platform    String    // web | electron | android | ios
-  absExpiry   DateTime  // absolute session expiry; never extended on rotation
+  refreshTokenExpiry DateTime // absolute session expiry; never extended on rotation
   deviceInfo  String?   // JSON: { appVersion, userAgent, acceptLanguage }
   fcmToken    String?
   voipToken   String?
   revokedAt   DateTime?
+  revokeReason String?  // superseded | logout | admin_removed
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
+
+  workspaceAccess AuthSessionWorkspaceAccess[]
 
   @@index([orgMemberId, deviceKey, status])
   @@index([deviceKey])
   @@index([orgId])
   @@map("auth_sessions")
+  @@schema("non_zero")
+}
+
+// Child of AuthSession: one row per workspace the auth session has entered (login landing
+// workspace + every switch). Write-only until workspace-level 2FA reads it; status follows
+// the parent (revoked together with it).
+model AuthSessionWorkspaceAccess {
+  id            String   @id @default(cuid())
+  authSessionId String
+  workspaceId   String
+  status        String   @default("active") // active | revoked
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  authSession AuthSession @relation(fields: [authSessionId], references: [id], onDelete: Cascade)
+
+  @@unique([authSessionId, workspaceId])
+  @@index([workspaceId])
+  @@map("auth_session_workspace_access")
   @@schema("non_zero")
 }
 
