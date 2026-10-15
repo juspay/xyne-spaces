@@ -15,7 +15,8 @@ import {
   resolveClawUserIdForSpacesIdentity,
 } from "../lib/users-jit.js";
 import { getOrgId, getRequesterId } from "../middleware/agent-acl.js";
-import { getWorkspaceIdForUser, requestWorkspaceHint } from "../lib/spaces-db.js";
+import { getSpacesUserWorkspaceId, getWorkspaceIdForUser, requestWorkspaceHint } from "../lib/spaces-db.js";
+import { resolveSpacesAppCreds } from "../lib/spaces-agent-install.js";
 import { getCanonicalRequesterId, matchesAuthenticatedUserId } from "../middleware/pin-user-id-param.js";
 
 import { createLogger } from "../logger.js";
@@ -345,7 +346,11 @@ async function autoConfigureSpaces(clawUserId: string, spacesUserId: string, tok
     if (defaultAgent?.spacesAppToken) {
       const { decrypt } = await import("../crypto.js");
       const { CONFIG: cfg } = await import("../config.js");
-      const parts = defaultAgent.spacesAppToken.split(":");
+      // The bot token for THIS user's workspace (spacesUserId is workspace-scoped);
+      // the inline column holds only the latest install's token.
+      const userWorkspaceId = await getSpacesUserWorkspaceId(spacesUserId).catch(() => null);
+      const creds = await resolveSpacesAppCreds(defaultAgent, userWorkspaceId);
+      const parts = (creds.spacesAppToken ?? defaultAgent.spacesAppToken).split(":");
       if (parts.length === 3 && parts[0] && parts[1] && parts[2]) {
         try {
           decryptedAppToken = decrypt(parts[0], parts[1], parts[2], cfg.encryptionKey);

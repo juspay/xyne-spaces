@@ -7,6 +7,8 @@ import { parseFrontierItems, normalizeFocus } from "./experiment-text.js";
 import { registerRunRecovery } from "../queue/run-recovery-worker.js";
 import { createTraceId, createLogger } from "../logger.js";
 import { decryptStoredField, spacesAppFetch } from "../surfaces/spaces/client.js";
+import { resolveSpacesAppCreds } from "./spaces-agent-install.js";
+import { getWorkspaceIdForUser } from "./spaces-db.js";
 
 const log = createLogger("experiment");
 
@@ -292,7 +294,7 @@ export function buildFindingsMarkdown(
   return lines.join("\n").trimEnd();
 }
 
-export async function postExperimentNotice(run: { channelId: string; conversationId: string; agentSlug: string; orgId: string | null; finalReport?: string | null }): Promise<void> {
+export async function postExperimentNotice(run: { channelId: string; conversationId: string; agentSlug: string; orgId: string | null; userId: string; finalReport?: string | null }): Promise<void> {
   if (!run.orgId) return;
   const markdownText = run.finalReport?.trim()
     ? `**/experiment ended**\n\n${run.finalReport.trim()}`
@@ -307,12 +309,15 @@ export async function postExperimentNotice(run: { channelId: string; conversatio
   }
   const agent = await agentRepository.findBySlug(run.agentSlug, run.orgId);
   if (!agent?.spacesAppToken || !agent.spacesAppUserId) return;
-  const appToken = decryptStoredField(agent.spacesAppToken);
+  // Token+bot-user for the experiment user's workspace (inline = latest only).
+  const endWsId = await getWorkspaceIdForUser(run.userId, "write-action").catch(() => null);
+  const endCreds = await resolveSpacesAppCreds(agent, endWsId);
+  const appToken = decryptStoredField(endCreds.spacesAppToken ?? agent.spacesAppToken);
   await spacesAppFetch("/chat/postMessage", {
     channelId: run.channelId,
     conversationId: run.conversationId,
     markdownText,
-    userId: agent.spacesAppUserId,
+    userId: endCreds.spacesAppUserId ?? agent.spacesAppUserId,
     metadata: { contentFormat: "markdown" },
   }, appToken);
 }
@@ -426,7 +431,12 @@ async function dispatchExperimentRun(
   if (!chat && (!agent.spacesAppToken || !agent.spacesAppId || !agent.spacesAppUserId)) {
     throw new Error(`Experiment dispatch agent ${run.agentSlug} missing Spaces app identity`);
   }
-  const appToken = !chat && agent.spacesAppToken ? decryptStoredField(agent.spacesAppToken) : "";
+  // Token+bot-user for the experiment user's workspace (inline = latest only).
+  const expWsId = chat ? null : await getWorkspaceIdForUser(run.userId, "write-action").catch(() => null);
+  const expCreds = chat ? null : await resolveSpacesAppCreds(agent, expWsId);
+  const expBotUserId = expCreds?.spacesAppUserId ?? agent.spacesAppUserId ?? "";
+  const expToken = expCreds?.spacesAppToken ?? agent.spacesAppToken;
+  const appToken = !chat && expToken ? decryptStoredField(expToken) : "";
 
   const dispatchPayload = {
     userId: run.userId,
@@ -470,7 +480,7 @@ async function dispatchExperimentRun(
   }
 
   const sessionContext: SessionContext = {
-    mentionedUserId: chat ? run.userId : (agent.spacesAppUserId ?? ""),
+    mentionedUserId: chat ? run.userId : expBotUserId,
     targetUserId: run.userId,
     senderId: run.userId,
     senderName: run.userId,
@@ -484,8 +494,9 @@ async function dispatchExperimentRun(
     responseMode: "conversation",
     appToken,
     spacesAppId: chat ? "" : (agent.spacesAppId ?? ""),
-    spacesAppUserId: chat ? "" : (agent.spacesAppUserId ?? ""),
+    spacesAppUserId: chat ? "" : expBotUserId,
     ...(chat ? { channelDelivery: chat, triggerSource: chat.channel } : {}),
+    ...(expWsId ? { workspaceId: expWsId } : {}),
     traceId,
     rootAgentSlug: run.agentSlug,
     // Suppresses the channel agent-chain on every epoch callback (see the field
