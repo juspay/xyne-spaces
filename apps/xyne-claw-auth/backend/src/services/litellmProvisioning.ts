@@ -38,7 +38,7 @@ export async function storeTeamMappingForOrg(
 
   if (existing?.externalId && existing.externalId !== teamId) {
     throw new LiteLLMProvisioningError(
-      "/team/store",
+      "/team",
       `Org ${orgId} already mapped to LiteLLM team ${existing.externalId}; refusing to remap to ${teamId}`,
       undefined,
       "CONFLICT",
@@ -92,7 +92,7 @@ export async function storeUserCredentialsForUser(
   });
   if (!user) {
     throw new LiteLLMProvisioningError(
-      "/user-key/store",
+      "/user-key",
       `Claw user ${input.userId} not found`,
       undefined,
       "NOT_FOUND",
@@ -105,7 +105,7 @@ export async function storeUserCredentialsForUser(
   });
   if (!member) {
     throw new LiteLLMProvisioningError(
-      "/user-key/store",
+      "/user-key",
       `Claw user ${input.userId} is not a member of org ${input.orgId}`,
       undefined,
       "NOT_FOUND",
@@ -185,7 +185,7 @@ export async function storeOrgCredentialsForOrg(
   });
   if (!org) {
     throw new LiteLLMProvisioningError(
-      "/org-key/store",
+      "/org-key",
       `Claw org ${input.orgId} not found`,
       undefined,
       "NOT_FOUND",

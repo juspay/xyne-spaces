@@ -11,7 +11,7 @@ const log = createLogger("litellm-sync");
 
 export const litellmSyncRouter = Router();
 
-litellmSyncRouter.post("/team/store", async (req: Request, res: Response) => {
+litellmSyncRouter.post("/team", async (req: Request, res: Response) => {
   const { orgId, teamId, teamAlias, status } = req.body as {
     orgId?: string;
     teamId?: string;
@@ -42,12 +42,12 @@ litellmSyncRouter.post("/team/store", async (req: Request, res: Response) => {
         return;
       }
     }
-    log.error("litellm-sync /team/store error", { orgId, teamId, err });
+    log.error("litellm-sync /team error", { orgId, teamId, err });
     res.status(500).json({ error: "Internal error storing team mapping" });
   }
 });
 
-litellmSyncRouter.post("/user-key/store", async (req: Request, res: Response) => {
+litellmSyncRouter.post("/user-key", async (req: Request, res: Response) => {
   const body = req.body as {
     userId?: string;
     orgId?: string;
@@ -91,12 +91,12 @@ litellmSyncRouter.post("/user-key/store", async (req: Request, res: Response) =>
         return;
       }
     }
-    log.error("litellm-sync /user-key/store error", { userId: body.userId, orgId: body.orgId, err });
+    log.error("litellm-sync /user-key error", { userId: body.userId, orgId: body.orgId, err });
     res.status(500).json({ error: "Internal error storing user credentials" });
   }
 });
 
-litellmSyncRouter.post("/org-key/store", async (req: Request, res: Response) => {
+litellmSyncRouter.post("/org-key", async (req: Request, res: Response) => {
   const body = req.body as {
     orgId?: string;
     spacesOrgId?: string;
@@ -136,7 +136,7 @@ litellmSyncRouter.post("/org-key/store", async (req: Request, res: Response) => 
         return;
       }
     }
-    log.error("litellm-sync /org-key/store error", { orgId: body.orgId, err });
+    log.error("litellm-sync /org-key error", { orgId: body.orgId, err });
     res.status(500).json({ error: "Internal error storing org credentials" });
   }
 });
