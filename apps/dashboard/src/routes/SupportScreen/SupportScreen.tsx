@@ -97,7 +97,7 @@ import { queries } from '../../zero/queries';
 import { useTicketKeysetWindow } from '../../hooks/useTicketKeysetWindow';
 import { QueryResultType } from '@rocicorp/zero';
 import ThreadMessages from '../../components/Chat/ThreadPannel';
-import { ChannelsDeskSourceThread } from './ChannelsDeskSourceThread';
+import { ChannelsDeskSourceChannel, ChannelsDeskSourceThread } from './ChannelsDeskSourceThread';
 import { useChannel, useEmailChannels, useUserChannelStatuses } from '../../hooks/useChannels';
 import { useRefetchExternalSource } from '../../hooks/useRefetchExternalSource';
 import { useChannelFetchSources } from '../../hooks/useChannelFetchSources';
@@ -6380,6 +6380,9 @@ export const SupportTicketDetail = ({
                         <span className='truncate max-w-[160px]'>{initiator.name}</span>
                       </div>
                     </div>
+                  )}
+                  {channel?.type === ChannelType.CHANNELS && emails[0]?.externalThreadId && (
+                    <ChannelsDeskSourceChannel sourceConversationId={emails[0].externalThreadId} />
                   )}
 
                   {/* Mailbox chip + label chips.
