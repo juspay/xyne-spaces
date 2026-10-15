@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { apiInstance } from '@/services/clients/apiClient';
 import { useAuth } from './useAuth';
+import { clawAgentDetailKey } from './useClawAgentDetail';
 import { createAgent, updateAgent } from '../services/claw/clawAgentWizardService';
 import type { Agent } from '../services/claw/clawAuthAgentTypes';
 import type { KbSelection } from '../services/claw/clawKnowledgeBaseTypes';
@@ -145,10 +146,11 @@ export const useCreateClawAgent = (): UseMutationResult<Agent, Error, WizardSubm
       );
       void queryClient.invalidateQueries({ queryKey: ['claw-auth-agents', userId] });
       void queryClient.invalidateQueries({ queryKey: ['sdlc-hub-agents'] });
+      void queryClient.invalidateQueries({ queryKey: clawAgentDetailKey(agent.slug) });
       toast.success('Agent created');
       if (sdlcChannelId && returnTo?.startsWith('/') && !returnTo.startsWith('//')) {
         void navigate(returnTo);
-      } else void navigate(detailPath(agent.slug), { state: { justCreated: true } });
+      } else void navigate(detailPath(agent.slug));
     },
     onError: err => {
       // Agent exists but config failed: land the user on the detail screen so

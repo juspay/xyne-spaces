@@ -15,6 +15,7 @@ import { resolveSchema } from '../SchemaForm/SchemaForm.utils';
 import type { JsonSchema } from '../../Automation.types';
 import { SchemaForm } from '../SchemaForm/SchemaForm';
 import {
+  buildOutputSchemaFromAskJevConfig,
   buildOutputSchemaFromRunAgentConfig,
   buildOutputSchemaFromWebhookConfig,
 } from '../AutomationBuilder.utils';
@@ -187,7 +188,9 @@ export function StepCard({
                     ? buildOutputSchemaFromRunAgentConfig(step.config)
                     : step.type === 'TRIGGER_WEBHOOK'
                       ? buildOutputSchemaFromWebhookConfig(step.config)
-                      : schema.outputSchema
+                      : step.type === 'ASK_JEV'
+                        ? buildOutputSchemaFromAskJevConfig(step.config)
+                        : schema.outputSchema
                 }
               />
               {step.type === 'TRIGGER_WEBHOOK' ? (

@@ -51,6 +51,7 @@ import { experimentsInternalRouter } from "../routes/experiments-internal.js";
 import { errorPipelineIngestRouter, errorPipelineInternalRouter } from "../routes/error-pipeline.js";
 import { connectorsInternalRouter } from "../routes/connectors-internal.js";
 import { providersInternalRouter } from "../routes/providers-internal.js";
+import { agentCreateCheckRouter } from "../routes/agent-create-check.js";
 import { googleOAuthRouter, googleCallbackRouter } from "../routes/google-oauth.js";
 import { microsoftOAuthRouter, microsoftCallbackRouter } from "../routes/microsoft-oauth.js";
 import { calendlyOAuthRouter, calendlyCallbackRouter } from "../routes/calendly-oauth.js";
@@ -66,6 +67,8 @@ import { mailerliteOAuthRouter, mailerliteCallbackRouter } from "../routes/maile
 import { honeycombOAuthRouter, honeycombCallbackRouter } from "../routes/honeycomb-oauth.js";
 import { customerioOAuthRouter, customerioCallbackRouter } from "../routes/customerio-oauth.js";
 import { notionRemoteOAuthRouter, notionRemoteCallbackRouter } from "../routes/notion-remote-oauth.js";
+import { sentryRemoteOAuthRouter, sentryRemoteCallbackRouter } from "../routes/sentry-remote-oauth.js";
+import { mixpanelRemoteOAuthRouter, mixpanelRemoteCallbackRouter } from "../routes/mixpanel-remote-oauth.js";
 import { oauthTokenRouter } from "../routes/oauth-token.js";
 import { rapidApiLinkedInRouter } from "../routes/rapidapi-linkedin.js";
 import { scheduledJobsRouter } from "../routes/scheduled-jobs.js";
@@ -231,6 +234,7 @@ function mountCoreApi(app: Express): void {
   app.use(`${BASE}/internal/sandbox-profiles`, requireInternalS2S, sandboxProfilesInternalRouter); // Spaces → sandbox profile editor
   app.use(`${BASE}/internal/connectors`, requireStrictS2S, connectorsInternalRouter); // connector availability lookup for xyne-claw (S2S only)
   app.use(`${BASE}/internal/providers`, requireStrictS2S, providersInternalRouter); // AI provider availability lookup for xyne-claw (S2S only)
+  app.use(`${BASE}/internal/agent-create`, requireStrictS2S, agentCreateCheckRouter);
 }
 
 function mountOAuthProviders(app: Express): void {
@@ -277,6 +281,10 @@ function mountOAuthProviders(app: Express): void {
   app.use(BASE, customerioCallbackRouter);
   app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, notionRemoteOAuthRouter);
   app.use(BASE, notionRemoteCallbackRouter);
+  app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, sentryRemoteOAuthRouter);
+  app.use(BASE, sentryRemoteCallbackRouter);
+  app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, mixpanelRemoteOAuthRouter);
+  app.use(BASE, mixpanelRemoteCallbackRouter);
   app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, rapidApiLinkedInRouter);
 }
 

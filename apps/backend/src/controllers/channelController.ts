@@ -62,9 +62,13 @@ import { NAMESPACE } from '@/vespa/vespaConfig';
 import {logger} from '@/utils/logger';
 import { messageMetadataService } from '@/services/messageMetadataService';
 import { extractAllUsersForNotification, extractSpecialMentions, getChannelParticipantsForMention, getOnlineChannelParticipants } from '@/utils/mentionUtils';
-import { mentionRecipients } from '@/zero/side-effects/tables/mention-delivery';
+import { mentionActivities, mentionRecipients, notifyMentioned } from '@/zero/side-effects/tables/mention-delivery';
+import { formatDmChannelName } from '@/zero/side-effects/tables/messages-handler';
 import { activityService } from '@/services/activity/activityService';
 import { encrypt, decrypt } from '@/services/encryptionService';
+import { canManageApps, findInstalledApp, linkChannelsDesk } from '@/channelsDesk/admin';
+import { channelsDeskOf } from '@/channelsDesk/desk';
+
 import { vespaService } from '@/services/vespaSearch';
 import { ChannelEmailAliasService } from '@/services/channelEmailAliasService';
 import { ensureDmConversationAuthorParticipant } from '@/utils/dmConversationParticipants';
@@ -592,8 +596,48 @@ export class ChannelController {
 
       // Send notifications to recipients (skip for self-DMs)
       if (recipientIds.length > 0) {
+        const mentionedIds = new Set<string>();
+        if (channelParticipants.length > 2 && forwardedMessage.optionalMessage) {
+          try {
+            const mentioned = mentionRecipients(
+              await extractAllUsersForNotification(forwardedMessage.optionalMessage, workspaceId),
+              { participantIds: new Set(recipientIds), senderId },
+            );
+            if (mentioned.length > 0) {
+              const members = await db.user.findMany({
+                where: { id: { in: channelParticipants.map(p => p.userId) } },
+                select: { id: true, name: true, displayName: true },
+              });
+              const nameById = new Map(members.map(u => [u.id, u.displayName || u.name]));
+              mentioned.forEach(u => mentionedIds.add(u.userId));
+              await notifyMentioned([...mentionedIds], {
+                workspaceId,
+                messageId: result.createdMessage.messageId,
+                conversationId: result.conversation.conversationId,
+                channelId,
+                channelName: formatDmChannelName(channelParticipants.map(p => nameById.get(p.userId) || 'Unknown')),
+                senderId,
+                senderName: senderInfo.name,
+                senderPicture: senderInfo.picture ?? '',
+                cleanContent,
+                isReply: false,
+                isGroupDM: true,
+              });
+              await activityService.createActivities(
+                mentionActivities(mentioned, {
+                  messageId: result.createdMessage.messageId,
+                  channelId,
+                  senderId,
+                  isThreadActivity: false,
+                }),
+              );
+            }
+          } catch (error) {
+            logger.error('Error delivering mentions for forwarded message:', error);
+          }
+        }
         await notificationService.createDirectMessageNotifications(
-          recipientIds,
+          recipientIds.filter(id => !mentionedIds.has(id)),
           result.createdMessage.messageId,
           result.conversation.conversationId,
           channelId,
@@ -677,7 +721,7 @@ export class ChannelController {
         visibility?: ChannelVisibility;
         projectId?: string;
         participants?: string[];
-        type?: 'DEFAULT' | 'EMAIL' | 'SUPPORT' | 'SLACK' | 'APP' | 'CALL';
+        type?: 'DEFAULT' | 'EMAIL' | 'SUPPORT' | 'SLACK' | 'APP' | 'CALL' | 'CHANNELS';
         assigneeUserGroupId?: string;
         deskType?: DeskType;
         dlEmail?: string;
@@ -835,6 +879,31 @@ export class ChannelController {
           res.status(403).json({ error: 'App must have the desk:write permission to back a desk' });
           return;
         }
+      }
+
+      // Checked before the desk channel is created, so a refused link leaves nothing behind.
+      let channelsDeskAppName = '';
+      if (channelType === 'CHANNELS') {
+        if (!installedAppId) {
+          res.status(400).json({ error: 'installedAppId is required for Channels desks' });
+          return;
+        }
+        const channelsDeskApp = await findInstalledApp(req.user!.workspaceId!, installedAppId);
+        if (!channelsDeskApp) {
+          res.status(404).json({ error: 'Installed app not found in this workspace.' });
+          return;
+        }
+        // The app's channels feed the desk, so only its creator or an app admin may link it.
+        if (channelsDeskApp.createdBy !== userId && !(await canManageApps(userId))) {
+          res.status(403).json({ error: "Only the app's creator or an app admin can link it to a desk." });
+          return;
+        }
+        // An archived desk still holds the app; unarchiving it is how the app gets its desk back.
+        if (await channelsDeskOf(installedAppId, { evenIfArchived: true })) {
+          res.status(409).json({ error: 'This app already has a desk. If it is archived, unarchive it.' });
+          return;
+        }
+        channelsDeskAppName = channelsDeskApp.name;
       }
 
       // For DM channels, ensure scopeId is provided (other user's ID)
@@ -1041,6 +1110,42 @@ export class ChannelController {
             logger.error(`Channel rollback failed for ${channel.id}`, err);
           });
           res.status(500).json({ error: 'Failed to create call desk' });
+          return;
+        }
+      }
+
+      if (channelType === 'CHANNELS') {
+        try {
+          const channelsDeskBoardId =
+            boardId ??
+            (await db.board.findFirst({ where: { projectId }, orderBy: { createdAt: 'asc' }, select: { id: true } }))?.id;
+          if (!channelsDeskBoardId) {
+            await db.channel.delete({ where: { id: channel.id } }).catch(() => {});
+            res.status(409).json({ error: 'Project has no boards configured — cannot create channels desk' });
+            return;
+          }
+          await this.emailChannelPreferenceRepository.create({
+            channelId: channel.id,
+            ownerUserId: userId,
+            deskType: DeskType.CHANNELS,
+            boardId: channelsDeskBoardId,
+            emailMergeMode: EmailMergeMode.DISABLED,
+            ...(assigneeUserGroupId && { assigneeUserGroupId }),
+          });
+          await linkChannelsDesk({
+            workspaceId: req.user!.workspaceId!,
+            installedAppId: installedAppId!,
+            appName: channelsDeskAppName,
+            deskChannelId: channel.id,
+            linkedBy: userId,
+          });
+        } catch (error) {
+          logger.error('Failed to create channels desk, rolling back channel', error);
+          await db.emailChannelPreference.deleteMany({ where: { channelId: channel.id } }).catch(() => {});
+          await db.channel.delete({ where: { id: channel.id } }).catch(err => {
+            logger.error(`Channel rollback failed for ${channel.id}`, err);
+          });
+          res.status(500).json({ error: 'Failed to create channels desk' });
           return;
         }
       }

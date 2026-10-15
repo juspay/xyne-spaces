@@ -26,7 +26,7 @@ export async function replayTurn(
   userId: string,
   providerOverride?: { provider: string; model?: string },
   abortSignal?: AbortSignal,
-  switches: { optimizations?: string | undefined; judgeBackend?: string | undefined } = {},
+  switches: { optimizations?: string | undefined } = {},
 ): Promise<ReplayResult> {
   const url = `${CONFIG.internalUrl.replace(/\/$/, "")}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/chat`;
   const timeout = AbortSignal.timeout(REPLAY_TIMEOUT_MS);
@@ -44,7 +44,6 @@ export async function replayTurn(
       userId,
       ...(providerOverride ? { providerOverride } : {}),
       ...(switches.optimizations ? { optimizations: switches.optimizations } : {}),
-      ...(switches.judgeBackend ? { judgeBackend: switches.judgeBackend } : {}),
     }),
     signal,
   });

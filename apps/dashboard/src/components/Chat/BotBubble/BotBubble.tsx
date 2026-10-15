@@ -71,6 +71,12 @@ const useOpenTicketCard = (
     const resolvedConversationId = ticket.conversationId || fallbackConversationId;
     if (!resolvedChannelId || !resolvedConversationId) return;
 
+    // A host that keeps ticket links on its own surface wins over the desk default below.
+    if (openTicket) {
+      openTicket(ticket.id);
+      return;
+    }
+
     if (isDeskView && resolvedConversationId === fallbackConversationId) {
       const params = new URLSearchParams(location.search);
       params.set('selectedTab', 'details');
@@ -84,11 +90,6 @@ const useOpenTicketCard = (
       const ws = window.location.pathname.split('/').find(s => s.length > 0) ?? '';
       const ticketUrl = `${ws ? `/${ws}` : ''}/chat/dir/${resolvedChannelId}?tab=tickets&ticketId=${ticket.id}&conversationId=${resolvedConversationId}`;
       window.open(ticketUrl, '_blank');
-      return;
-    }
-
-    if (openTicket) {
-      openTicket(ticket.id);
       return;
     }
 

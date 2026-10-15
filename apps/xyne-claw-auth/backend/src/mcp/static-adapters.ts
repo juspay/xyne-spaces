@@ -44,6 +44,8 @@ import { mongodbAdapter } from "./adapters/mongodb.js";
 import { sentryAdapter } from "./adapters/sentry.js";
 import { notionAdapter } from "./adapters/notion.js";
 import { notionRemoteAdapter } from "./adapters/notion-remote.js";
+import { sentryRemoteAdapter } from "./adapters/sentry-remote.js";
+import { mixpanelRemoteAdapter } from "./adapters/mixpanel-remote.js";
 import { googleAdapter } from "./adapters/google.js";
 import { microsoftAdapter } from "./adapters/microsoft.js";
 import { twitterAdapter } from "./adapters/twitter.js";
@@ -122,6 +124,8 @@ export const STATIC_ADAPTERS: Record<string, McpAdapter> = {
   mongodb: mongodbAdapter,
   notion: notionAdapter,
   "notion-remote": notionRemoteAdapter,
+  "sentry-remote": sentryRemoteAdapter,
+  "mixpanel-remote": mixpanelRemoteAdapter,
   sentry: sentryAdapter,
   "sentry-mcp": sentryAdapter,
   twitter: twitterAdapter,

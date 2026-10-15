@@ -69,6 +69,7 @@ export function AudioPlayer({
       {/* Play / Pause / Loading button */}
       <button
         type='button'
+        aria-label={state === 'playing' ? 'Pause audio' : 'Play audio'}
         onClick={e => void handleToggle(e)}
         disabled={state === 'loading'}
         data-track-category={trackCategory}

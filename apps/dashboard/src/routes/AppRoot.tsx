@@ -64,6 +64,7 @@ import CanvasRedirectPage from './CanvasRedirect/CanvasRedirectPage';
 import { ClawOverlay } from '../components/Claw/ClawOverlay';
 import { ArtifactAppHostRoute } from '../components/ArtifactApp/ArtifactAppHostRoute';
 import AppSidebar from '../components/AppSidebar/AppSidebar';
+import { SiteMap } from '../components/AppSidebar/SiteMap';
 import { ReactElement, ReactNode, useRef, useEffect, useState } from 'react';
 import ZeroProvider from '../providers/ZeroProvider';
 import { EditProvider } from '../providers/EditProvider';
@@ -132,47 +133,11 @@ import { NoteTakerOverlayHost } from './RecordingsV2Screen/components/NoteTakerO
 import FormScreen from './FormScreen/FormScreen';
 import ScheduledMessageScreen from './ScheduledMessageScreen/ScheduledMessageScreen';
 import AppsScreen from './AppsScreen/AppsScreen';
+import AppsMarketplaceScreen from './AppsMarketplaceScreen/AppsMarketplaceScreen';
 import InitialStateLoader from '../providers/InitialStateLoader';
 import { ZeroFallbackProvider } from '../contexts/ZeroFallbackContext';
-import { InstrumentationProvider, type Instrumentation } from '@xyne/shared/hooks';
-import { logger } from '../utils/logger';
-import {
-  zeroQueryLatency,
-  zeroQueryOperations,
-  zeroMutationLatency,
-  zeroMutationOperations,
-  zeroRunLatency,
-  zeroRunOperations,
-  safeRecordMetric,
-} from '../services/otel';
-
-const dashboardInstrumentation: Instrumentation = {
-  logger,
-  metrics: {
-    recordLatency: (name: string, durationMs: number, attributes?: Record<string, string>) => {
-      safeRecordMetric(() => {
-        if (name === 'zero.query.latency') {
-          zeroQueryLatency.record(durationMs, attributes);
-        } else if (name === 'zero.mutation.latency') {
-          zeroMutationLatency.record(durationMs, attributes);
-        } else if (name === 'zero.run.latency') {
-          zeroRunLatency.record(durationMs, attributes);
-        }
-      });
-    },
-    incrementCounter: (name: string, attributes?: Record<string, string>) => {
-      safeRecordMetric(() => {
-        if (name === 'zero.query.operations') {
-          zeroQueryOperations.add(1, attributes);
-        } else if (name === 'zero.mutation.operations') {
-          zeroMutationOperations.add(1, attributes);
-        } else if (name === 'zero.run.operations') {
-          zeroRunOperations.add(1, attributes);
-        }
-      });
-    },
-  },
-};
+import { InstrumentationProvider } from '@xyne/shared/hooks';
+import { dashboardInstrumentation } from '../services/otel/dashboardInstrumentation';
 import { useSwipeBack } from '../hooks/useSwipeBack';
 import DmsPage from '../components/Chat/DirectMessages/DmsPage';
 import { KeyedComposeDmPanel } from '../components/Chat/AddDmForm/ComposeDmPanel';
@@ -930,6 +895,7 @@ const AppRoot = (): ReactElement => {
                                       <EditWarningModal />
                                       <Outlet />
                                     </main>
+                                    <SiteMap />
                                   </div>
                                 </Panel>
                                 <Separator className='w-2 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
@@ -954,6 +920,7 @@ const AppRoot = (): ReactElement => {
                               <EditWarningModal />
                               <Outlet />
                             </main>
+                            <SiteMap />
                           </div>
                         </AppSidebarHost>
                       )}
@@ -1812,7 +1779,7 @@ export const router = createBrowserRouter(
                 {
                   path: 'support',
                   element: (
-                    <ResourceProtectedRoute resourceName='SUPPORT'>
+                    <ResourceProtectedRoute resourceName='SUPPORT' minAccess='READ'>
                       <SupportListRestore>
                         <SaveRoute
                           keyword='support'
@@ -2003,6 +1970,14 @@ export const router = createBrowserRouter(
                   element: (
                     <ToolbarProtectedRoute path='/apps'>
                       <AppsScreen />
+                    </ToolbarProtectedRoute>
+                  ),
+                },
+                {
+                  path: 'apps-marketplace',
+                  element: (
+                    <ToolbarProtectedRoute path='/apps-marketplace'>
+                      <AppsMarketplaceScreen />
                     </ToolbarProtectedRoute>
                   ),
                 },

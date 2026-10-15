@@ -1,0 +1,15 @@
+{
+  "expo": true,
+  "js_entry_file": "node_modules/expo-router/entry.js",
+  "hermes_enabled": true,
+  "android": {
+    "organisation": "xyne",
+    "namespace": "xyne-mobile-android",
+    "index_file_path": "index.android.bundle"
+  },
+  "ios": {
+    "organisation": "xyne",
+    "namespace": "xyne-mobile-ios",
+    "index_file_path": "main.jsbundle"
+  }
+}

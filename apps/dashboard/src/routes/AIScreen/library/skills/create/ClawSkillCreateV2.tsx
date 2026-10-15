@@ -12,14 +12,17 @@ import { readSkillPick } from './skillFilePick';
 
 const LABEL = 'text-sm font-medium leading-[1.2] tracking-[-0.1px] text-foreground';
 
-const ClawSkillCreateV2 = (): ReactElement => {
+const ClawSkillCreateV2 = (props: {
+  /** Shown inside a hub page: the skill is linked there, and both buttons hand the page back. */
+  hub?: { channelId: string; onClose: () => void };
+}): ReactElement => {
+  const { hub } = props;
   const navigate = useNavigate();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
   const libraryPath = workspaceId ? `/${workspaceId}/ai/library` : '/ai/library';
-
   const { user } = useAuth();
   const builtBy = user?.name ?? user?.email ?? 'you';
-  const create = useCreateClawSkill();
+  const create = useCreateClawSkill(hub && { channelId: hub.channelId, onCreated: hub.onClose });
 
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
@@ -28,6 +31,7 @@ const ClawSkillCreateV2 = (): ReactElement => {
   const [content, setContent] = useState('');
   const [files, setFiles] = useState<PendingSkillFile[]>([]);
   const [filesError, setFilesError] = useState<string | null>(null);
+  const [tried, setTried] = useState(false);
 
   const effectiveSlug = slugManual ? slug : slugify(name);
   const canCreate = effectiveSlug.length > 0 && content.trim().length > 0;
@@ -53,7 +57,9 @@ const ClawSkillCreateV2 = (): ReactElement => {
   );
 
   const handleCreate = (): void => {
-    if (!canCreate || create.isPending) return;
+    // The button stays enabled: a press says what is missing.
+    if (!canCreate) return setTried(true);
+    if (create.isPending) return;
     create.mutate({
       slug: effectiveSlug,
       name: name.trim(),
@@ -64,11 +70,19 @@ const ClawSkillCreateV2 = (): ReactElement => {
   };
 
   return (
-    <div className='h-full overflow-y-auto no-scrollbar' data-component='ClawSkillCreateV2'>
+    <div
+      className={hub ? undefined : 'h-full overflow-y-auto no-scrollbar'}
+      data-component='ClawSkillCreateV2'
+    >
       <div className='mx-auto flex w-full max-w-[800px] flex-col gap-6 px-6 py-6'>
         <h1 className='text-2xl font-semibold leading-[1.2] tracking-[-0.24px] text-foreground'>
           Create skill
         </h1>
+        {hub && (
+          <p className='-mt-4 text-sm text-muted-foreground'>
+            It is linked to this hub once created.
+          </p>
+        )}
 
         <div className='flex w-full flex-col gap-4'>
           <div className='flex w-full items-start gap-4 py-4'>
@@ -160,11 +174,16 @@ const ClawSkillCreateV2 = (): ReactElement => {
         </div>
 
         {create.error && <p className='text-sm text-destructive'>{create.error.message}</p>}
+        {tried && !canCreate && (
+          <p role='alert' className='text-sm text-destructive'>
+            {effectiveSlug.length === 0 ? 'Add a name.' : 'Add the instructions.'}
+          </p>
+        )}
 
         <div className='flex w-full items-center justify-end gap-3'>
           <Button
             variant='ghost'
-            onClick={() => void navigate(libraryPath)}
+            onClick={() => (hub ? hub.onClose() : void navigate(libraryPath))}
             className='h-auto rounded-xl px-3 py-2.5 text-[15px]'
             data-track-category='Claw Agents'
             data-track-name='Create skill v2: cancel'
@@ -174,7 +193,6 @@ const ClawSkillCreateV2 = (): ReactElement => {
           <Button
             onClick={handleCreate}
             loading={create.isPending}
-            disabled={!canCreate}
             className='h-auto rounded-xl bg-foreground px-3 py-2.5 text-[15px] text-background hover:bg-foreground/90'
             data-track-category='Claw Agents'
             data-track-name='Create skill v2: create'

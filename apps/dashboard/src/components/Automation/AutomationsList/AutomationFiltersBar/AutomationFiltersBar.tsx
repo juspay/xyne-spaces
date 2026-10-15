@@ -128,6 +128,7 @@ function OptionsChecklist<T extends string>({
           const isSelected = selectedValues.includes(option.value);
           return (
             <button
+              aria-pressed={isSelected}
               key={option.value}
               type='button'
               onClick={() =>

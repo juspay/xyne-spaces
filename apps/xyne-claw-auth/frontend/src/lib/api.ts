@@ -6620,7 +6620,6 @@ export interface StartGenerationAgent {
   genProvider?: string;
   genModel?: string;
   optimizations?: string;
-  judgeBackend?: string;
 }
 
 /** Start a comparison of 1-3 agents over the same conversations. Each agent gets

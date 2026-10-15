@@ -37,6 +37,7 @@ const DEFAULT_TITLE_GENERATOR_MODEL = 'glm-flash-experimental';
 const DEFAULT_TAG_GENERATION_MODEL = 'private-large';
 const DEFAULT_SHADOW_TAG_GENERATION_ENABLED = false;
 const DEFAULT_SHADOW_TAG_GENERATION_LOG_ENABLED = false;
+const DEFAULT_TAG_GENERATION_JEV_ENABLED = false;
 const DEFAULT_TICKET_BOARD_MODEL = 'glm-flash-experimental';
 const DEFAULT_RELEASE_NOTES_GENERATOR_MODEL = 'glm-latest';
 const DEFAULT_RELEASE_AI_MODEL = 'glm-flash-experimental';
@@ -86,6 +87,7 @@ const CAC_KEYS = {
   tagGenerationModel: 'tag_generation_model_name',
   shadowTagGenerationEnabled: 'shadow_tag_generation_enabled',
   shadowTagGenerationLogEnabled: 'shadow_tag_generation_log_enabled',
+  tagGenerationJevEnabled: 'tag_generation_jev_enabled',
   ticketDuplicateJevEnabled: 'ticket_duplicate_jev_enabled',
   ticketDuplicateJevThreshold: 'ticket_duplicate_jev_threshold',
   ticketBoardModel: 'ticket_board_model_name',
@@ -135,6 +137,8 @@ export class AgentsConfig {
   public readonly shadowTagGenerationEnabled: boolean;
   /** Whether that run's answers get logged. Default false. Independent of the run gate. */
   public readonly shadowTagGenerationLogEnabled: boolean;
+  /** Jev's answers become the tags and the LLM is not called; needs shadowTagGenerationEnabled. Default false. */
+  public readonly tagGenerationJevEnabled: boolean;
   public readonly ticketBoardModelName: string;
   public readonly releaseNotesGeneratorModelName: string;
   public readonly releaseAiModelName: string;
@@ -198,6 +202,7 @@ export class AgentsConfig {
     releaseAiModelName: string,
     shadowTagGenerationEnabled: boolean,
     shadowTagGenerationLogEnabled: boolean,
+    tagGenerationJevEnabled: boolean,
     ticketDuplicateJevEnabled: boolean,
     ticketDuplicateJevThreshold: number,
   ) {
@@ -229,6 +234,7 @@ export class AgentsConfig {
     this.releaseAiModelName = releaseAiModelName;
     this.shadowTagGenerationEnabled = shadowTagGenerationEnabled;
     this.shadowTagGenerationLogEnabled = shadowTagGenerationLogEnabled;
+    this.tagGenerationJevEnabled = tagGenerationJevEnabled;
     this.ticketDuplicateJevEnabled = ticketDuplicateJevEnabled;
     this.ticketDuplicateJevThreshold = ticketDuplicateJevThreshold;
   }
@@ -277,6 +283,7 @@ export class AgentsConfig {
       const tagGenerationModelName = getValue<string>(CAC_KEYS.tagGenerationModel, DEFAULT_TAG_GENERATION_MODEL);
       const shadowTagGenerationEnabled = getValue<boolean>(CAC_KEYS.shadowTagGenerationEnabled, DEFAULT_SHADOW_TAG_GENERATION_ENABLED);
       const shadowTagGenerationLogEnabled = getValue<boolean>(CAC_KEYS.shadowTagGenerationLogEnabled, DEFAULT_SHADOW_TAG_GENERATION_LOG_ENABLED);
+      const tagGenerationJevEnabled = getValue<boolean>(CAC_KEYS.tagGenerationJevEnabled, DEFAULT_TAG_GENERATION_JEV_ENABLED);
       const ticketBoardModelName = getValue<string>(CAC_KEYS.ticketBoardModel, DEFAULT_TICKET_BOARD_MODEL);
       const releaseNotesGeneratorModelName = getValue<string>(CAC_KEYS.releaseNotesGeneratorModel, DEFAULT_RELEASE_NOTES_GENERATOR_MODEL);
       const releaseAiModelName = getValue<string>(CAC_KEYS.releaseAiModel, DEFAULT_RELEASE_AI_MODEL);
@@ -550,6 +557,7 @@ export class AgentsConfig {
         releaseAiModelName,
         shadowTagGenerationEnabled,
         shadowTagGenerationLogEnabled,
+        tagGenerationJevEnabled,
         ticketDuplicateJevEnabled,
         ticketDuplicateJevThreshold,
       );
@@ -585,6 +593,7 @@ export class AgentsConfig {
         DEFAULT_RELEASE_AI_MODEL,
         DEFAULT_SHADOW_TAG_GENERATION_ENABLED,
         DEFAULT_SHADOW_TAG_GENERATION_LOG_ENABLED,
+        DEFAULT_TAG_GENERATION_JEV_ENABLED,
         DEFAULT_TICKET_DUPLICATE_JEV_ENABLED,
         DEFAULT_TICKET_DUPLICATE_JEV_THRESHOLD,
       );
@@ -621,6 +630,7 @@ export class AgentsConfig {
       DEFAULT_RELEASE_AI_MODEL,
       DEFAULT_SHADOW_TAG_GENERATION_ENABLED,
       DEFAULT_SHADOW_TAG_GENERATION_LOG_ENABLED,
+      DEFAULT_TAG_GENERATION_JEV_ENABLED,
       DEFAULT_TICKET_DUPLICATE_JEV_ENABLED,
       DEFAULT_TICKET_DUPLICATE_JEV_THRESHOLD,
     );

@@ -579,11 +579,14 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
   // from direct MCP tools. The "[Subagent]" marker is what the parent's
   // PARENT_PARALLELISM_PREAMBLE refers to when it says "subagent calls are
   // expensive" — without the tag the rule has no concrete anchor.
-  const directFirst = optEnabled("subagent_read_tools") && tools.length > 0
+  const directFirst = optEnabled("subagent_read_tools") && tools.length > 0 && !def.delegationPreferred
     ? "Slow: this runs a whole nested model. Its tools, writes included, are listed in your tool catalog — load them with load-tools and call them yourself first. Delegate here only for open-ended research that needs many queries. "
     : "";
+  const tag = def.delegationPreferred
+    ? "[Subagent — runs on a cheap model; delegate this work instead of doing it yourself]"
+    : "[Subagent — nested LLM run, expensive]";
   const taggedDescription =
-    `[Subagent — nested LLM run, expensive] ${directFirst}${def.description} ` +
+    `${tag} ${directFirst}${def.description} ` +
     `(If you have multiple independent questions for this subagent, batch them into ONE call with a single combined question; ` +
     `if you must fire it more than once, fire ALL the calls in the SAME assistant turn so they run in parallel.)`;
   const tool: ToolDefinition & { progressLabels?: string[]; subagent?: true } = {
@@ -1756,7 +1759,7 @@ function resolveCustomSubagentTools(
 }
 
 export function withoutBuiltinSubagents(tools: ToolDefinition[]): ToolDefinition[] {
-  const builtin = new Set(SUBAGENT_DEFINITIONS.map((d) => d.name));
+  const builtin = new Set(SUBAGENT_DEFINITIONS.filter((d) => !d.delegationPreferred).map((d) => d.name));
   return tools.filter((tool) => !builtin.has(tool.name));
 }
 

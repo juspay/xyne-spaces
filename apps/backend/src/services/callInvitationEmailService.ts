@@ -4,6 +4,7 @@ import { repositories } from '@/database/repositories';
 import { emailService } from '@/services/emailService';
 import { sanitizeEmailBodyHtml } from '@/utils/contentUtils';
 import { logger } from '@/utils/logger';
+import { normalizeEmailList } from '@/utils/email';
 
 export interface CallInvitationParams {
   externalId: string;
@@ -159,4 +160,133 @@ export async function sendCallInvitationEmail(params: CallInvitationParams): Pro
     );
     throw err;
   }
+}
+
+/** Internal participants are only emailed when the call has at most this many of them. */
+export const MAX_INTERNAL_EMAIL_RECIPIENTS = 100;
+
+/** Single calls are stored as UTC, so their emails are shown in IST. */
+export const resolveEmailTimezone = (stored?: string | null): string =>
+  !stored || stored === 'UTC' ? 'Asia/Kolkata' : stored;
+
+/** Strips line breaks from user-derived values before they go into a log line. */
+export const sanitizeForLog = (value: unknown): string => String(value ?? '').replace(/[\r\n]+/g, ' ');
+
+export type CallChangeEmailKind = 'created' | 'updated' | 'cancelled';
+
+const CHANGE_EMAIL_COPY: Record<CallChangeEmailKind, { heading: string; subject: string }> = {
+  created: { heading: 'Meeting invitation', subject: 'Invitation' },
+  updated: { heading: 'Meeting updated', subject: 'Updated' },
+  cancelled: { heading: 'Meeting cancelled', subject: 'Cancelled' },
+};
+
+export interface CallChangeEmailParams {
+  kind: CallChangeEmailKind;
+  /** Any instance of the call; supplies the join link. */
+  externalId: string;
+  callTitle: string;
+  startsAt: Date;
+  endsAt: Date;
+  timezone?: string | null | undefined;
+  organizerUserId: string;
+  externalEmails: string[];
+  /** Skipped entirely when there are more than MAX_INTERNAL_EMAIL_RECIPIENTS. */
+  internalUserIds: string[];
+  excludeUserIds?: string[];
+  /** Plain-text lines shown in the body (what changed). Escaped here. */
+  changeLines?: string[];
+  bodyHtml?: string;
+}
+
+const escapeHtml = (v: string): string =>
+  v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+/** "Wed, Oct 8, 04:00 PM – 05:00 PM" in the given zone (falls back to UTC on a bad zone). */
+export function formatCallWindow(startsAt: Date, endsAt: Date, timezone?: string | null): string {
+  const fmt = (tz: string) => {
+    const day = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+    }).format(startsAt);
+    const time = (d: Date) =>
+      new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: '2-digit', minute: '2-digit' }).format(d);
+    return `${day}, ${time(startsAt)} – ${time(endsAt)} (${tz})`;
+  };
+  try {
+    return fmt(timezone || 'UTC');
+  } catch {
+    return fmt('UTC');
+  }
+}
+
+/**
+ * Email a call's participants about a create / update / cancel / removal.
+ * Callers invoke this only when the organizer opted in.
+ * Recipients are deduped by address and sent a single email (all in To), like a calendar invite.
+ */
+export async function sendCallChangeEmails(params: CallChangeEmailParams): Promise<void> {
+  const exclude = new Set(params.excludeUserIds ?? []);
+  exclude.add(params.organizerUserId);
+
+  let internalUserIds = [...new Set(params.internalUserIds)].filter((id) => !exclude.has(id));
+  if (internalUserIds.length > MAX_INTERNAL_EMAIL_RECIPIENTS) {
+    logger.warn(
+      `[sendCallChangeEmails] Skipping internal participants, over cap | externalId=${sanitizeForLog(params.externalId)} kind=${params.kind} count=${internalUserIds.length}`,
+    );
+    internalUserIds = [];
+  }
+
+  const [organizer, call, internalUsers] = await Promise.all([
+    repositories.users.findById(params.organizerUserId),
+    repositories.calls.findByExternalId(params.externalId),
+    internalUserIds.length > 0
+      ? repositories.users.getEmailsByIds(internalUserIds)
+      : Promise.resolve([]),
+  ]);
+
+  const organizerEmail = organizer?.email?.toLowerCase();
+  const recipients = normalizeEmailList([
+    ...params.externalEmails,
+    ...internalUsers.map((u) => u.email),
+  ]).filter((email) => email !== organizerEmail);
+  if (recipients.length === 0) return;
+
+  const copy = CHANGE_EMAIL_COPY[params.kind];
+  const timezone = resolveEmailTimezone(params.timezone || call?.timezone);
+  const joinUrl = call?.roomLink ?? '';
+  const lines = params.changeLines ?? [];
+  const userBodyHtml =
+    params.kind === 'created' && params.bodyHtml
+      ? sanitizeEmailBodyHtml(params.bodyHtml)
+      : `<ul style="margin:0;padding-left:20px">${lines.map((l) => `<li>${escapeHtml(l)}</li>`).join('')}</ul>`;
+
+  const html = renderCallInvitationHtml({
+    title: params.callTitle,
+    startsAt: params.startsAt,
+    endsAt: params.endsAt,
+    timezone,
+    organizerName: organizer?.name || organizer?.email || 'A colleague',
+    organizerEmail: organizer?.email ?? '',
+    joinUrl,
+    userBodyHtml,
+    heading: copy.heading,
+    hideJoin: params.kind === 'cancelled' || !joinUrl,
+  });
+
+  const { emailService: genericEmailService } = await import('@/services/email/factory');
+  const result = await genericEmailService.sendEmail({
+    to: recipients,
+    subject: `${copy.subject}: ${params.callTitle}`,
+    html,
+  });
+  if (!result.success) {
+    logger.error(
+      `[sendCallChangeEmails] Failed | externalId=${sanitizeForLog(params.externalId)} kind=${params.kind} recipients=${recipients.length} error=${sanitizeForLog(result.error)}`,
+    );
+  }
+  logger.info(
+    `[sendCallChangeEmails] Done | externalId=${sanitizeForLog(params.externalId)} kind=${params.kind} recipients=${recipients.length}`,
+  );
 }

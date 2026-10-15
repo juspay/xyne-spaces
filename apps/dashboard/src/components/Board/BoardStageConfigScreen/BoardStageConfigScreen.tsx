@@ -242,6 +242,7 @@ const LinearStageCard = ({
       {index === 0 && (
         <div className='absolute left-0 top-[150px] -translate-y-1/2 -translate-x-1/2 z-20'>
           <Button
+            aria-label='Add stage at start'
             onClick={() => handleAddStageAt(0)}
             data-track-category='board_config'
             data-track-name='add_stage_before_first'
@@ -330,6 +331,7 @@ const LinearStageCard = ({
                 </div>
               )}
               <Button
+                aria-label={`Delete stage ${stage.name || index + 1}`}
                 onClick={() => handleDeleteStage(stage.tempId)}
                 variant='ghost'
                 size='iconSm'
@@ -415,6 +417,7 @@ const LinearStageCard = ({
                     </span>
                     <div className='flex items-center gap-0.5'>
                       <Button
+                        aria-label='Edit stage form'
                         onClick={() => void handleOpenEditForm(stage.tempId, stage.formId!)}
                         variant='ghost'
                         size='iconSm'
@@ -425,6 +428,7 @@ const LinearStageCard = ({
                         <Pencil size={10} />
                       </Button>
                       <Button
+                        aria-label='Remove stage form'
                         onClick={() => handleRemoveStageForm(stage.tempId)}
                         variant='ghost'
                         size='iconSm'
@@ -486,6 +490,7 @@ const LinearStageCard = ({
       {/* Add-stage button, after every card */}
       <div className='absolute right-0 top-[150px] -translate-y-1/2 translate-x-1/2 z-20'>
         <Button
+          aria-label={`Add stage after ${stage.name || `stage ${index + 1}`}`}
           onClick={() => handleAddStageAt(index + 1)}
           data-track-category='board_config'
           data-track-name='add_stage_between'
@@ -2350,6 +2355,7 @@ const BoardStageConfigScreen = ({
         <div className='flex items-center justify-between px-[18px] py-4 flex-shrink-0 border-b border-border'>
           <div className='flex items-center gap-2'>
             <Button
+              aria-label='Go back'
               onClick={() => (onBack ? onBack() : onClose())}
               variant='ghost'
               size='iconSm'

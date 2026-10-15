@@ -74,7 +74,7 @@ interface UseCallHistoryReturn {
   handleDeleteClick: (call: ScheduledCall) => void;
   deleteModalOpen: boolean;
   deleteModalCall: ScheduledCall | null;
-  handleDeleteConfirm: (cancelEntireSeries: boolean) => void;
+  handleDeleteConfirm: (cancelEntireSeries: boolean, notifyParticipantsByEmail: boolean) => void;
   closeDeleteModal: () => void;
   /** Hide a call (participant-only, irreversible) */
   handleHideClick: (call: ScheduledCall, options?: { isSeries?: boolean }) => void;
@@ -632,7 +632,10 @@ export function useCallHistory(
     setFullParticipantAction(null);
   }, [actionParticipants, actionParticipantsDetails.type, fullParticipantAction]);
 
-  const handleDeleteConfirm = (cancelEntireSeries: boolean): void => {
+  const handleDeleteConfirm = (
+    cancelEntireSeries: boolean,
+    notifyParticipantsByEmail: boolean,
+  ): void => {
     if (!deleteModalCall) return;
 
     const isCancelSeries = cancelEntireSeries && !!deleteModalCall.recurringSeriesId;
@@ -642,7 +645,7 @@ export function useCallHistory(
       // as CANCELLED and removes their Bull jobs. The Zero mutator only updates two
       // records (the clicked call + the series) and never touches the other future instances.
       void callService
-        .cancelRecurringSeries(deleteModalCall.recurringSeriesId)
+        .cancelRecurringSeries(deleteModalCall.recurringSeriesId, notifyParticipantsByEmail)
         .then(() => {
           toast.success('Recurring series cancelled');
         })
@@ -654,7 +657,7 @@ export function useCallHistory(
       // Cancel a single instance via backend API — this also triggers buffer replenishment
       // so the 60-day buffer is maintained for the recurring series.
       void callService
-        .cancelScheduledCall(deleteModalCall.externalId)
+        .cancelScheduledCall(deleteModalCall.externalId, notifyParticipantsByEmail)
         .then(() => {
           toast.success('Call cancelled successfully');
         })

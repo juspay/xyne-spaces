@@ -270,6 +270,7 @@ const CreateTicketModal = ({
           </p>
         </div>
         <Button
+          aria-label='Close new ticket'
           variant='ghost'
           size='iconSm'
           className='w-[24px] h-[24px] border border-border rounded-[4px]'

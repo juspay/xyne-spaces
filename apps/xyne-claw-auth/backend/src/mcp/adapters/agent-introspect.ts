@@ -18,6 +18,8 @@ import { AGENT_INTROSPECT_TOOL_DEFS } from "xyne-claw-shared";
 import { createLogger } from "../../logger.js";
 import { findAgents, INDEX_KINDS, type IndexKind } from "../../services/agent-index/index.js";
 import { listTools, searchTools } from "../../services/tool-index/index.js";
+import { handleGetFleetStats } from "./fleet-stats.js";
+import { handleGetAgentDiagnostics } from "./agent-diagnostics.js";
 const log = createLogger("agent-introspect");
 
 // Slugs MUST match the `tools` rows seeded by the add_agent_introspect_tools
@@ -486,6 +488,10 @@ export async function handleAgentIntrospect(
       return handleGetAgentRuns(params, contextOrgId, requestingUserId);
     case "find_agents":
       return handleFindAgents(params, contextOrgId);
+    case "get_fleet_stats":
+      return handleGetFleetStats(params, contextOrgId, requestingUserId);
+    case "get_agent_diagnostics":
+      return handleGetAgentDiagnostics(params, contextOrgId, requestingUserId);
     default:
       log.warn(`[agent-introspect] unknown tool ${tool}`);
       throw new Error(`Unknown agent-introspect tool: ${tool}`);

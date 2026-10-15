@@ -305,6 +305,7 @@ function renderCallItem({
             delayDuration={300}
           >
             <div
+              aria-label='Go to call message'
               role='button'
               tabIndex={isUserChannelMember ? 0 : -1}
               onClick={e => {
@@ -339,6 +340,7 @@ function renderCallItem({
             delayDuration={300}
           >
             <div
+              aria-label='Download transcript'
               role='button'
               tabIndex={hasTranscript ? 0 : -1}
               onClick={e => {
