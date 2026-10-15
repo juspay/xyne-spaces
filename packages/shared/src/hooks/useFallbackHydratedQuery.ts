@@ -109,23 +109,33 @@ export function useFallbackHydratedQuery<
       // a native writer (iOS NSE / Android FCM) when a notification just
       // delivered fresh data; consumed on read (deleted from MMKV). Falls
       // back to IDB when no shadow is present.
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment
-      const userID = (zero.context as { userID?: string })?.userID;
-      if (userID) {
-        const shadow = await consumeShadow<TReturn>(userID, query.query.queryName, query.args);
-        if (shadow?.data) {
-          setIdbEntry({
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            data: shadow.data as any,
-            lastUpdatedAt: shadow.lastUpdatedAt ?? 0,
-          } as CacheEntry<TReturn>);
-          setIdbLoaded(true);
-          return;
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment
+        const userID = (zero.context as { userID?: string })?.userID;
+        if (userID) {
+          // Scoped try: a failed shadow read still falls through to the
+          // persisted entry below.
+          try {
+            const shadow = await consumeShadow<TReturn>(userID, query.query.queryName, query.args);
+            if (shadow?.data) {
+              setIdbEntry({
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                data: shadow.data as any,
+                lastUpdatedAt: shadow.lastUpdatedAt ?? 0,
+                fetchedAt: shadow.savedAt ?? Date.now(),
+              } as CacheEntry<TReturn>);
+              return;
+            }
+          } catch {
+            // fall through to the persisted entry
+          }
         }
+        const entry = await loadCacheEntryFromStorage(hash);
+        setIdbEntry((entry as CacheEntry<TReturn> | null) ?? null);
+      } finally {
+        // The freshness verdict below stays 'pending' until this flips.
+        setIdbLoaded(true);
       }
-      const entry = await loadCacheEntryFromStorage(hash);
-      setIdbEntry((entry as CacheEntry<TReturn> | null) ?? null);
-      setIdbLoaded(true);
     })();
   }, [hash, query, zero.context]);
 
@@ -134,20 +144,21 @@ export function useFallbackHydratedQuery<
   const effectiveEntry = cacheEntry ?? idbEntry ?? undefined;
   const cachedData = effectiveEntry?.data?.[0] ?? null;
   const cachedLastUpdatedAt = effectiveEntry?.lastUpdatedAt ?? 0;
+  const cachedFetchedAt = effectiveEntry?.fetchedAt ?? 0;
   const hasCachedData = cachedData !== null && cachedData !== undefined;
 
   // Watermark is set once: either from cache or from fallback fetch result.
   const [watermark, setWatermark] = useState(0);
   const fetchStartedRef = useRef(false);
 
-  // Determine once after hydration whether cache is fresh enough to use.
-  // Also wait for the IDB lookup to finish — otherwise we'd decide 'stale'
-  // before the persisted entry has had a chance to load, and the REST
-  // fallback would fire even when a fresh entry sits in storage.
+  // Decided once, after both hydration and the IDB lookup have settled.
+  // Age comes from `fetchedAt` (last full snapshot), never from
+  // `lastUpdatedAt`, which is the newest row's `updatedAt` and so says nothing
+  // about how old the cached copy is.
   const cacheDecisionRef = useRef<'pending' | 'fresh' | 'stale'>('pending');
   if (cacheDecisionRef.current === 'pending' && isHydrated && idbLoaded) {
     cacheDecisionRef.current =
-      hasCachedData && cachedLastUpdatedAt > 0 && (Date.now() - cachedLastUpdatedAt) < TWELVE_HOURS_MS
+      hasCachedData && cachedFetchedAt > 0 && Date.now() - cachedFetchedAt < TWELVE_HOURS_MS
         ? 'fresh'
         : 'stale';
   }
@@ -156,14 +167,17 @@ export function useFallbackHydratedQuery<
   useEffect(() => {
     if (!isHydrated || watermark > 0) return;
     if (cacheDecisionRef.current === 'fresh') {
-      setWatermark(cachedLastUpdatedAt);
+      // Floor of 1: `watermark > 0` gates the delta subscription, which a
+      // snapshot with no usable `updatedAt` still needs.
+      setWatermark(cachedLastUpdatedAt || 1);
     }
   }, [isHydrated, cachedLastUpdatedAt, watermark]);
 
-  // Phase 1: Fetch from fallback REST if cache is stale or empty
+  // Phase 1: fetch from fallback REST on a settled 'stale' verdict, i.e. the
+  // cache is empty or too old. 'pending' means the lookup is still in flight.
   useEffect(() => {
     if (!enabled || !isHydrated || watermark > 0 || fetchStartedRef.current) return;
-    if (cacheDecisionRef.current === 'fresh') return;
+    if (cacheDecisionRef.current !== 'stale') return;
     if (!executeFallback) return;
 
     fetchStartedRef.current = true;
@@ -179,6 +193,7 @@ export function useFallbackHydratedQuery<
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             data: [result as any, { type: 'complete' as const }],
             lastUpdatedAt: wm,
+            fetchedAt: Date.now(),
           });
         }
         setWatermark(wm || 1); // use 1 as minimum so delta query enables
@@ -187,7 +202,17 @@ export function useFallbackHydratedQuery<
         // Let delta query run without watermark filter as fallback
         setWatermark(1);
       });
-  }, [enabled, isHydrated, watermark, hasCachedData, cachedLastUpdatedAt, hash, query, executeFallback]);
+  }, [
+    enabled,
+    isHydrated,
+    idbLoaded,
+    watermark,
+    hasCachedData,
+    cachedFetchedAt,
+    hash,
+    query,
+    executeFallback,
+  ]);
 
   // Phase 2: Delta subscription — only after watermark is set
   const deltaEnabled = enabled && watermark > 0;
@@ -237,8 +262,20 @@ export function useFallbackHydratedQuery<
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       data: [merged as any, { type: 'complete' as const }],
       lastUpdatedAt: nextLastUpdatedAt,
+      // watermark <= 1 means the delta query ran unfiltered, so `merged` is a
+      // full snapshot. A filtered delta only tops one up and leaves
+      // `fetchedAt` alone.
+      ...(watermark <= 1 ? { fetchedAt: Date.now() } : {}),
     });
-  }, [deltaData, deltaDetails.type, deltaEnabled, hash, cachedData, effectiveEntry?.lastUpdatedAt]);
+  }, [
+    deltaData,
+    deltaDetails.type,
+    deltaEnabled,
+    hash,
+    cachedData,
+    effectiveEntry?.lastUpdatedAt,
+    watermark,
+  ]);
 
   // Return cached data if available (from actor or lazy-loaded IDB entry),
   // otherwise fall through to the live delta query result.

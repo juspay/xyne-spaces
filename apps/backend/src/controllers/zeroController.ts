@@ -10,6 +10,40 @@ import {
 import { redisService } from '../services/redisService.js';
 import { websocketService } from '../services/websocketService.js';
 import { logger } from '@/utils/logger';
+import type { AuthData } from '../zero/mutators.js';
+
+/**
+ * The auth resolved by the Zero auth middleware, which runs before every route
+ * in this controller. API-key callers are not accepted here — Zero queries and
+ * mutations are reachable for them through the SDK surface, which applies their
+ * scopes.
+ *
+ * Responds 401 and returns undefined when there is no usable auth; callers must
+ * stop in that case.
+ */
+function requireAuthData(req: Request, res: Response): AuthData | undefined {
+  const user = req.user;
+
+  if (!user || user.isApiKeyUser) {
+    res.status(401).json({
+      error: 'Authentication required',
+      message: 'This endpoint requires a signed-in user',
+    });
+    return undefined;
+  }
+
+  return {
+    sub: user.id,
+    email: user.email,
+    name: user.name,
+    displayName: user.displayName,
+    workspaceId: user.workspaceId,
+    orgId: '',
+    role: user.role,
+    orgRole: user.orgRole,
+    memberId: user.memberId,
+  };
+}
 
 function handleZeroError(res: Response, error: unknown, rateLimitMessage: string): void {
   if (error instanceof Error && error.message === 'Rate limit exceeded') {
@@ -36,6 +70,9 @@ function handleZeroError(res: Response, error: unknown, rateLimitMessage: string
 
 export const handlePush = async (req: Request, res: Response): Promise<void> => {
     try {
+      const authData = requireAuthData(req, res);
+      if (!authData) return;
+
       // Convert Express request to Web API Request
       const url = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
       const headers = new Headers();
@@ -60,7 +97,7 @@ export const handlePush = async (req: Request, res: Response): Promise<void> => 
         body: JSON.stringify(req.body),
       });
 
-    const result = await handleMutate(webRequest);
+    const result = await handleMutate(webRequest, authData);
 
     res.json(result);
   } catch (error) {
@@ -75,6 +112,9 @@ export const handlePush = async (req: Request, res: Response): Promise<void> => 
 
 export const handleGetQueries = async (req: Request, res: Response): Promise<void> => {
     try {
+      const authData = requireAuthData(req, res);
+      if (!authData) return;
+
       // Convert Express request to Web API Request
       const url = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
       const headers = new Headers();
@@ -99,7 +139,7 @@ export const handleGetQueries = async (req: Request, res: Response): Promise<voi
         body: JSON.stringify(req.body),
       });
 
-    const result = await handleQueries(webRequest);
+    const result = await handleQueries(webRequest, authData);
 
     res.json(result);
   } catch (error) {
@@ -113,6 +153,9 @@ export const handleGetQueries = async (req: Request, res: Response): Promise<voi
 
 export const handleGetQueriesFallback = async (req: Request, res: Response): Promise<void> => {
   try {
+    const authData = requireAuthData(req, res);
+    if (!authData) return;
+
     // Convert Express request to Web API Request
     const url = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
     const headers = new Headers();
@@ -137,7 +180,7 @@ export const handleGetQueriesFallback = async (req: Request, res: Response): Pro
       body: JSON.stringify(req.body),
     });
 
-    const result = await handleQueriesFallback(webRequest);
+    const result = await handleQueriesFallback(webRequest, authData);
 
     res.json(result);
   } catch (error) {
@@ -161,6 +204,9 @@ export const handlePushFallback = async (req: Request, res: Response): Promise<v
       return;
     }
 
+    const authData = requireAuthData(req, res);
+    if (!authData) return;
+
     const url = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
     const headers = new Headers();
 
@@ -184,7 +230,7 @@ export const handlePushFallback = async (req: Request, res: Response): Promise<v
       body: JSON.stringify(req.body),
     });
 
-    const result = await handleMutateFallback(webRequest);
+    const result = await handleMutateFallback(webRequest, authData);
 
     res.json(result);
   } catch (error) {
@@ -198,6 +244,9 @@ export const handlePushFallback = async (req: Request, res: Response): Promise<v
 
 export const handleQueryZqlToSql = async (req: Request, res: Response): Promise<void> => {
   try {
+    const authData = requireAuthData(req, res);
+    if (!authData) return;
+
     // Convert Express request to Web API Request
     const url = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
     const headers = new Headers();
@@ -222,7 +271,7 @@ export const handleQueryZqlToSql = async (req: Request, res: Response): Promise<
       body: JSON.stringify(req.body),
     });
 
-    const result = await handleQueriesZqlToSql(webRequest);
+    const result = await handleQueriesZqlToSql(webRequest, authData);
 
     res.json(result);
   } catch (error) {

@@ -12,7 +12,6 @@ import { Context, schema, setConnectQueryEnabledCanvas, getConnectQueryEnabledCa
 import { AuthData, createMutators } from './mutators';
 import { queries } from './queries';
 import { scopeQueryToTenant } from './tenant-scope';
-import jwt from 'jsonwebtoken';
 import { logger } from '@/utils/logger';
 import { getConnectAclMode, getConnectQueryMode, getZeroMutationLatency, getZeroMutationOperations, getZeroQueryLatency, getZeroQueryOperations } from '@/services/otel';
 import {
@@ -105,80 +104,6 @@ export async function fetchServerSchema(): Promise<any> {
   return serverSchemaCache;
 }
 
-export async function extractAuthDataFromJWT(encodedJWT?: string): Promise<AuthData | undefined> {
-  if (!encodedJWT) {
-    return undefined;
-  }
-
-  try {
-    const secret = process.env['JWT_SECRET'];
-    if (!secret) {
-      throw new Error('JWT_SECRET environment variable is required');
-    }
-
-    const decoded = jwt.verify(encodedJWT, secret, {
-      issuer: 'xyne',
-      audience: 'xyne-user',
-    }) as AuthData & { iat?: number };
-
-    const forceLogoutBefore = config.jwt.forceLogoutBefore;
-    if (forceLogoutBefore && decoded.iat && decoded.iat < forceLogoutBefore) {
-      logger.warn('JWT rejected: issued before force logout timestamp', {
-        iat: decoded.iat,
-        forceLogoutBefore,
-      });
-      return undefined;
-    }
-
-    const [user, orgMember] = await Promise.all([
-      db.user.findUnique({
-        where: { id: decoded.sub },
-        select: { role: true, displayName: true },
-      }),
-      db.orgMember.findUnique({
-        where: { memberId: decoded.memberId },
-        select: { role: true },
-      }),
-    ]);
-  
-    // If JWT is valid but DB records missing, that's a data inconsistency - fail fast
-    if (!user || !orgMember) {
-      logger.error('Auth data inconsistency: JWT valid but DB records missing', {
-        userId: decoded.sub,
-        memberId: decoded.memberId,
-        userExists: !!user,
-        orgMemberExists: !!orgMember,
-      });
-      throw new Error('User authentication data inconsistent');
-    }
-
-    return {
-      sub: decoded.sub,
-      email: decoded.email,
-      name: decoded.name,
-      displayName: user.displayName,
-      workspaceId: decoded.workspaceId,
-      memberId: decoded.memberId,
-      role: user.role,
-      orgRole: orgMember.role,
-    } as AuthData;
-    
-  } catch (error) {
-    logger.error('JWT verification failed:', error);
-    return undefined;
-  }
-}
-
-export async function extractAuthDataFromRequest(request: Request): Promise<AuthData | undefined> {
-  const authHeader = request.headers.get('Authorization');
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return undefined;
-  }
-
-  const token = authHeader.substring(7);
-  return await extractAuthDataFromJWT(token);
-}
-
 function getMutationErrors(result: unknown): Record<string, unknown>[] {
   if (!result || typeof result !== 'object' || !('mutations' in result)) {
     return [];
@@ -211,7 +136,7 @@ function getMutationErrorMessage(errorObj: Record<string, unknown>): unknown {
   return errorObj['message'] || errorObj['details'] || errorObj['error'];
 }
 
-export async function handleMutate(request: Request): Promise<unknown> {
+export async function handleMutate(request: Request, authData: AuthData): Promise<unknown> {
   const startTime = Date.now();
   // Accumulators for post-processing
   const asyncTasks: (() => Promise<void>)[] = [];
@@ -219,12 +144,6 @@ export async function handleMutate(request: Request): Promise<unknown> {
   let vespaJobs: VespaJobsAccumulator = [];
   let sideEffectJobs: SideEffectJobsAccumulator = [];
   let capturedMutatorName: string | null = null;
-
-  const authData = await extractAuthDataFromRequest(request);
-
-  if (!authData) {
-    throw new Error("Unauthorized")
-  }
 
   // Clone the request so the body can be read again by handleMutateRequest
   const clonedRequest = request.clone();
@@ -354,8 +273,8 @@ export async function handleMutate(request: Request): Promise<unknown> {
             schema: job.schema,
             jobType: job.jobType,
             docId: job.docId,
-            userId: authData!.sub,
-            workspaceId: authData!.workspaceId,
+            userId: authData.sub,
+            workspaceId: authData.workspaceId,
             ...(job.app ? { app: job.app } : {}),
             ...(job.jobType === "update" ? { data: job.data } : {})
           });
@@ -370,8 +289,8 @@ export async function handleMutate(request: Request): Promise<unknown> {
                 namespace: NAMESPACE,
                 errorMessage: `Failed to enqueue a job ${JSON.stringify(err)}`,
                 errorDetails: JSON.stringify(err),
-                userId: authData!.sub,
-                workspaceId: authData!.workspaceId,
+                userId: authData.sub,
+                workspaceId: authData.workspaceId,
                 createdAt: new Date(),
               },
             });
@@ -473,14 +392,9 @@ function recordConnectQueryMode(queryName: string, args: unknown): void {
   });
 }
 
-export async function handleQueries(request: Request): Promise<any> {
+export async function handleQueries(request: Request, authData: AuthData): Promise<any> {
   const startTime = Date.now();
   let capturedQueryName: string | null = null;
-
-  const authData = await extractAuthDataFromRequest(request);
-  if (!authData) {
-    throw new Error("Unauthorized")
-  }
 
   const isAllowed = await checkRateLimit("query", authData.sub);
   if (!isAllowed) {
@@ -647,12 +561,7 @@ export async function runCatalogQuery(
   }
 }
 
-export async function handleQueriesFallback(request: Request): Promise<any> {
-  const authData = await extractAuthDataFromRequest(request);
-  if (!authData) {
-    throw new Error("Unauthorized");
-  }
-
+export async function handleQueriesFallback(request: Request, authData: AuthData): Promise<any> {
   const context: Context = { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, memberId: authData.memberId, orgRole: authData.orgRole };
 
   try {
@@ -687,12 +596,7 @@ export async function handleQueriesFallback(request: Request): Promise<any> {
   }
 }
 
-export async function handleQueriesZqlToSql(request: Request): Promise<any> {
-  const authData = await extractAuthDataFromRequest(request);
-  if (!authData) {
-    throw new Error("Unauthorized");
-  }
-
+export async function handleQueriesZqlToSql(request: Request, authData: AuthData): Promise<any> {
   const context: Context = { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, memberId: authData.memberId, orgRole: authData.orgRole };
 
   try {
@@ -886,12 +790,7 @@ export async function runCatalogMutation(
   );
 }
 
-export async function handleMutateFallback(request: Request): Promise<unknown> {
-  const authData = await extractAuthDataFromRequest(request);
-  if (!authData) {
-    throw new Error("Unauthorized");
-  }
-
+export async function handleMutateFallback(request: Request, authData: AuthData): Promise<unknown> {
   try {
     const mutation = await request.json() as {
       name: string;

@@ -39,7 +39,10 @@ export interface RecordingsState {
 
 export interface CacheEntry<T> {
   data: QueryResult<T>;
+  /** Sync watermark: the newest `updatedAt` in `data`. Not a cache age. */
   lastUpdatedAt?: number;
+  /** Wall-clock time the full snapshot in `data` was fetched. */
+  fetchedAt?: number;
   lastAccessedAt?: number;
   accessCount?: number;
   estimatedSize?: number;
@@ -71,6 +74,8 @@ export type QueryCacheEvent =
       //eslint-disable-next-line @typescript-eslint/no-explicit-any
       data: QueryResult<any>;
       lastUpdatedAt?: number;
+      /** Pass only when `data` is a full snapshot, not a merged delta. */
+      fetchedAt?: number;
     }
   | {
       type: 'HYDRATE_CACHE';
@@ -132,6 +137,7 @@ export const queryCacheMachine = setup({
       const newCache = new Map(context.cache);
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       const resolvedLastUpdatedAt = event.lastUpdatedAt ?? existing?.lastUpdatedAt;
+      const resolvedFetchedAt = event.fetchedAt ?? existing?.fetchedAt;
       //eslint-disable-next-line @typescript-eslint/no-explicit-any
       const entry: CacheEntry<any> = {
         data: event.data,
@@ -152,6 +158,10 @@ export const queryCacheMachine = setup({
       if (resolvedLastUpdatedAt !== undefined) {
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         entry.lastUpdatedAt = resolvedLastUpdatedAt;
+      }
+
+      if (resolvedFetchedAt !== undefined) {
+        entry.fetchedAt = resolvedFetchedAt;
       }
 
       newCache.set(event.hash, entry);
@@ -422,6 +432,18 @@ const MAX_CACHED_THREADS = 30;
 
 let _storageAdapter: StorageAdapter | null = null;
 
+// The adapter reference is published synchronously while the underlying store
+// is still opening, and a read in that window throws. Resolves once the open
+// settles, so readers can wait for it.
+let _markStorageReady: (() => void) | null = null;
+const _storageReady: Promise<void> = new Promise<void>(resolve => {
+  _markStorageReady = resolve;
+});
+
+// Past this point a read gives up and reports "no cached entry" rather than
+// holding up boot.
+const STORAGE_READY_TIMEOUT_MS = 3000;
+
 export function setStorageAdapter(storage: StorageAdapter): void {
   _storageAdapter = storage;
 }
@@ -430,10 +452,36 @@ export function getStorageAdapter(): StorageAdapter | null {
   return _storageAdapter;
 }
 
+/** Signal that the storage open has settled (successfully or not). */
+export function markStorageReady(): void {
+  _markStorageReady?.();
+  _markStorageReady = null;
+}
+
+/**
+ * Resolve to an adapter that is actually open, or null if it never got there
+ * within `STORAGE_READY_TIMEOUT_MS`.
+ */
+async function getOpenStorageAdapter(): Promise<StorageAdapter | null> {
+  if (_storageAdapter?.isInitialized()) return _storageAdapter;
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    _storageReady,
+    new Promise<void>(resolve => {
+      timer = setTimeout(resolve, STORAGE_READY_TIMEOUT_MS);
+    }),
+  ]);
+  if (timer !== undefined) clearTimeout(timer);
+
+  return _storageAdapter?.isInitialized() ? _storageAdapter : null;
+}
+
 export async function loadCacheEntryFromStorage(hash: string): Promise<CacheEntry<unknown> | null> {
-  if (!_storageAdapter) return null;
+  const storage = await getOpenStorageAdapter();
+  if (!storage) return null;
   try {
-    const value = await _storageAdapter.loadContextProperty(hash);
+    const value = await storage.loadContextProperty(hash);
     if (!value || value === null) return null;
     return value as CacheEntry<unknown>;
   } catch {
@@ -784,6 +832,7 @@ export const setupQueryCachePersistence = (
   storage
     .init(userId, schemaVersion)
     .then(() => {
+      markStorageReady();
       persistNow = doPersist;
       queryCacheActor.subscribe(() => {
         if (persistTimeout) {
@@ -795,7 +844,9 @@ export const setupQueryCachePersistence = (
         }, PERSIST_DEBOUNCE_MS);
       });
     })
-    .catch(() => {});
+    .catch(() => {
+      markStorageReady();
+    });
 };
 
 /**
@@ -824,7 +875,12 @@ export const hydrateQueryCacheFromStorage = async (
 ): Promise<boolean> => {
   setStorageAdapter(storage);
   try {
-    await storage.init(userId, schemaVersion);
+    try {
+      await storage.init(userId, schemaVersion);
+    } finally {
+      // Releases readers waiting in `loadCacheEntryFromStorage`, open or not.
+      markStorageReady();
+    }
 
     const context = await storage.loadContext();
 
