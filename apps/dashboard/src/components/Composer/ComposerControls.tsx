@@ -13,35 +13,35 @@ import * as Menu from '@radix-ui/react-dropdown-menu';
 import { Command } from 'cmdk';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
-  AtSign,
   AudioLines,
   Bot,
   BookOpen,
   Check,
-  ChevronRight,
   ChevronUp,
-  FileText,
   FolderGit2,
-  Globe,
   Laptop,
   Loader2,
-  Paperclip,
   Plus,
-  Sparkles,
-  SquareSlash,
-  Target,
   X,
   Zap,
   AppWindow,
 } from 'lucide-react';
 import {
+  Ai02,
+  AtMark,
   ChatDefault,
+  ChevronRight,
   File02Default,
   File02Text,
+  FileText,
+  FocusTarget,
   FolderDefault,
+  Globe,
   Hashtag,
   LockClose,
+  PaperclipSlant,
   PhoneDefault,
+  SquareSlash,
   TicketToken,
 } from '@xyne/icons';
 import Avatar from '../ui/Avatar/Avatar';
@@ -70,11 +70,11 @@ import { AUTO_MODEL_DESCRIPTION, fitCount } from './Composer.utils';
 
 /** Menus share one surface so the +, model and agent menus read as one family. */
 export const MENU_SURFACE =
-  'z-[60] rounded-[18px] border border-border/70 bg-popover p-1.5 text-popover-foreground shadow-[0_12px_36px_-12px_rgba(0,0,0,0.22)] outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[side=top]:slide-in-from-bottom-1 data-[side=bottom]:slide-in-from-top-1 data-[side=right]:slide-in-from-left-1 data-[side=left]:slide-in-from-right-1';
+  'z-[60] rounded-2xl border border-border/70 bg-popover p-2 text-popover-foreground shadow-[0_12px_36px_-12px_rgba(0,0,0,0.22)] outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[side=top]:slide-in-from-bottom-1 data-[side=bottom]:slide-in-from-top-1 data-[side=right]:slide-in-from-left-1 data-[side=left]:slide-in-from-right-1';
 export const MENU_ROW =
-  'flex h-9 w-full cursor-pointer select-none items-center gap-3 rounded-[10px] px-2.5 text-left text-sm text-foreground outline-none transition-colors data-[highlighted]:bg-accent data-[state=open]:bg-accent data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50';
-export const MENU_ICON = 'size-[18px] shrink-0 text-muted-foreground';
-export const MENU_SEPARATOR = 'mx-2.5 my-1.5 h-px bg-border/70';
+  'flex h-9 w-full cursor-pointer select-none items-center gap-2.5 rounded-[10px] px-2 text-left text-sm text-foreground outline-none transition-colors data-[highlighted]:bg-accent data-[state=open]:bg-accent data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50';
+export const MENU_ICON = 'size-4 shrink-0 text-muted-foreground';
+export const MENU_SEPARATOR = 'mx-2 my-1.5 h-px bg-border/70';
 
 /** ↓ from a menu's search field moves into its rows (the menu itself only
  *  moves between rows once one has focus). */
@@ -131,14 +131,14 @@ const MenuSwitch = ({ checked }: { checked: boolean }): ReactElement => (
   <span
     aria-hidden
     className={cn(
-      'ml-auto inline-flex h-[18px] w-8 shrink-0 items-center rounded-full p-0.5 transition-colors',
-      checked ? 'bg-foreground/80' : 'bg-muted',
+      'ml-auto inline-flex h-4 w-7 shrink-0 items-center rounded-full p-0.5 transition-colors',
+      checked ? 'bg-foreground/80' : 'bg-foreground/15',
     )}
   >
     <span
       className={cn(
-        'size-3.5 rounded-full bg-background shadow-sm transition-transform',
-        checked && 'translate-x-3.5',
+        'size-3 rounded-full bg-background shadow-sm transition-transform',
+        checked && 'translate-x-3',
       )}
     />
   </span>
@@ -446,7 +446,7 @@ export function knowledgeTrayItems(
     ...files.map(f => ({
       key: `kb-file-${f.id}`,
       label: f.name,
-      icon: <FileText className={PILL_ICON} aria-hidden />,
+      icon: <FileText className={PILL_ICON} />,
       onRemove: () => remove.file(f.id),
     })),
   ];
@@ -458,6 +458,8 @@ export function knowledgeTrayItems(
 const PlusSubmenuContext = createContext<{
   setOpen: (update: (open: string | null) => string | null) => void;
   open: string | null;
+  /** Closes the whole "+" menu, as Escape on it would. */
+  closeMenu: () => void;
 } | null>(null);
 
 /**
@@ -476,10 +478,19 @@ export function usePlusSubmenu(
 }
 
 /**
- * The composer's "+" menu. Search modes first (they stay open on toggle so the
- * switch can be seen moving), then what the message is about, then who
- * answers it, then the keyboard affordances — "Slash commands" and "Add
- * context" type "/" and "@" into the message, exactly as pressing the key would.
+ * Closes the whole "+" menu — for a layer inside it that takes Escape first (a
+ * row's tooltip), so one Escape still dismisses the menu. Null outside one.
+ */
+export function usePlusMenuClose(): (() => void) | null {
+  return useContext(PlusSubmenuContext)?.closeMenu ?? null;
+}
+
+/**
+ * The composer's "+" menu, in groups: how it answers (web search, deep search,
+ * the agent), what it makes (a canvas, a slash command), and what it reads
+ * (collections, files, context), then the host's own rows. Toggles stay open
+ * so the switch can be seen moving; "Slash commands" and "Add context" type
+ * "/" and "@" into the message, exactly as pressing the key would.
  */
 export function PlusMenu({
   plus,
@@ -508,6 +519,10 @@ export function PlusMenu({
     () => ({
       open: openSubmenu,
       setOpen: (update: (open: string | null) => string | null): void => setOpenSubmenu(update),
+      closeMenu: (): void => {
+        setOpenSubmenu(null);
+        setOpen(false);
+      },
     }),
     [openSubmenu],
   );
@@ -518,6 +533,117 @@ export function PlusMenu({
   const later = (action: () => void) => (): void => {
     handoff.current = action;
   };
+
+  const modes: ReactElement[] = [];
+  if (plus.onWebSearchToggle) {
+    modes.push(
+      <Menu.Item
+        key='web'
+        className={MENU_ROW}
+        disabled={!plus.webSearchAccessible}
+        onSelect={e => {
+          e.preventDefault();
+          plus.onWebSearchToggle?.();
+        }}
+        aria-label={plus.webSearchEnabled ? 'Turn off web search' : 'Turn on web search'}
+        data-track-category='XyneAI'
+        data-track-name='TOGGLE_WEB_SEARCH'
+        data-track-metadata={JSON.stringify({ enabled: plus.webSearchEnabled })}
+      >
+        <Globe size={16} className={MENU_ICON} />
+        Web search
+        <MenuSwitch checked={plus.webSearchEnabled} />
+      </Menu.Item>,
+    );
+  }
+  if (plus.onDeepResearchToggle) {
+    modes.push(
+      <Menu.Item
+        key='deep'
+        className={MENU_ROW}
+        disabled={!plus.deepResearchAccessible}
+        onSelect={e => {
+          e.preventDefault();
+          plus.onDeepResearchToggle?.();
+        }}
+        aria-label={plus.deepResearchEnabled ? 'Turn off deep search' : 'Turn on deep search'}
+        data-track-category='XyneAI'
+        data-track-name='TOGGLE_DEEP_RESEARCH'
+        data-track-metadata={JSON.stringify({ enabled: plus.deepResearchEnabled })}
+      >
+        <FocusTarget size={16} className={MENU_ICON} />
+        Deep search
+        <MenuSwitch checked={plus.deepResearchEnabled} />
+      </Menu.Item>,
+    );
+  }
+  if (agents) modes.push(<Fragment key='agents'>{agents}</Fragment>);
+
+  const create: ReactElement[] = [];
+  if (plus.onCreateCanvasToggle) {
+    create.push(
+      <Menu.Item
+        key='canvas'
+        className={MENU_ROW}
+        onSelect={e => {
+          e.preventDefault();
+          plus.onCreateCanvasToggle?.();
+        }}
+        aria-label={plus.createCanvasEnabled ? 'Turn off canvas mode' : 'Turn on canvas mode'}
+        data-track-category='XyneAI'
+        data-track-name='TOGGLE_CREATE_CANVAS'
+        data-track-metadata={JSON.stringify({ enabled: plus.createCanvasEnabled })}
+      >
+        <FileText size={16} className={MENU_ICON} />
+        Create canvas
+        <MenuSwitch checked={plus.createCanvasEnabled} />
+      </Menu.Item>,
+    );
+  }
+  create.push(
+    <Menu.Item
+      key='slash'
+      className={MENU_ROW}
+      onSelect={later(() => onTrigger('/'))}
+      data-track-category='XyneAI'
+      data-track-name='OPEN_SLASH_COMMANDS'
+    >
+      <SquareSlash size={16} className={MENU_ICON} />
+      Slash commands
+    </Menu.Item>,
+  );
+
+  const context: ReactElement[] = [
+    <Fragment key='collections'>{collections}</Fragment>,
+    <Menu.Item
+      key='attach'
+      className={MENU_ROW}
+      onSelect={later(plus.onAttachFiles)}
+      data-track-category='XyneAI'
+      data-track-name='ATTACH_FILES'
+    >
+      <PaperclipSlant size={16} className={MENU_ICON} />
+      Attach files
+    </Menu.Item>,
+    <Menu.Item
+      key='context'
+      className={MENU_ROW}
+      onSelect={later(() => onTrigger('@'))}
+      data-track-category='XyneAI'
+      data-track-name='OPEN_CONTEXT_PICKER'
+    >
+      <AtMark size={16} className={MENU_ICON} />
+      Add context
+    </Menu.Item>,
+  ];
+
+  // Separators only between groups that have rows — never leading or doubled.
+  const groups = [
+    { key: 'modes', rows: modes },
+    { key: 'create', rows: create },
+    { key: 'context', rows: context },
+    { key: 'extra', rows: plus.extra ? [<Fragment key='extra'>{plus.extra}</Fragment>] : [] },
+  ].filter(group => group.rows.length > 0);
 
   return (
     <Menu.Root
@@ -549,7 +675,7 @@ export function PlusMenu({
           align='start'
           sideOffset={8}
           collisionPadding={12}
-          className={cn(MENU_SURFACE, 'w-[256px]')}
+          className={cn(MENU_SURFACE, 'w-[246px]')}
           onCloseAutoFocus={event => {
             event.preventDefault();
             const action = handoff.current ?? returnFocus;
@@ -558,101 +684,12 @@ export function PlusMenu({
           }}
         >
           <PlusSubmenuContext.Provider value={submenus}>
-            {plus.onWebSearchToggle && (
-              <Menu.Item
-                className={MENU_ROW}
-                disabled={!plus.webSearchAccessible}
-                onSelect={e => {
-                  e.preventDefault();
-                  plus.onWebSearchToggle?.();
-                }}
-                aria-label={plus.webSearchEnabled ? 'Turn off web search' : 'Turn on web search'}
-                data-track-category='XyneAI'
-                data-track-name='TOGGLE_WEB_SEARCH'
-                data-track-metadata={JSON.stringify({ enabled: plus.webSearchEnabled })}
-              >
-                <Globe className={MENU_ICON} aria-hidden strokeWidth={1.75} />
-                Web search
-                <MenuSwitch checked={plus.webSearchEnabled} />
-              </Menu.Item>
-            )}
-            {plus.onDeepResearchToggle && (
-              <Menu.Item
-                className={MENU_ROW}
-                disabled={!plus.deepResearchAccessible}
-                onSelect={e => {
-                  e.preventDefault();
-                  plus.onDeepResearchToggle?.();
-                }}
-                aria-label={
-                  plus.deepResearchEnabled ? 'Turn off deep search' : 'Turn on deep search'
-                }
-                data-track-category='XyneAI'
-                data-track-name='TOGGLE_DEEP_RESEARCH'
-                data-track-metadata={JSON.stringify({ enabled: plus.deepResearchEnabled })}
-              >
-                <Target className={MENU_ICON} aria-hidden strokeWidth={1.75} />
-                Deep search
-                <MenuSwitch checked={plus.deepResearchEnabled} />
-              </Menu.Item>
-            )}
-            <Menu.Separator className={MENU_SEPARATOR} />
-            {collections}
-            {plus.onCreateCanvasToggle && (
-              <Menu.Item
-                className={MENU_ROW}
-                onSelect={plus.onCreateCanvasToggle}
-                data-track-category='XyneAI'
-                data-track-name='TOGGLE_CREATE_CANVAS'
-                data-track-metadata={JSON.stringify({ enabled: plus.createCanvasEnabled })}
-              >
-                <FileText className={MENU_ICON} aria-hidden strokeWidth={1.75} />
-                Create canvas
-                {plus.createCanvasEnabled && (
-                  <Check className='ml-auto size-4 text-foreground' aria-hidden />
-                )}
-              </Menu.Item>
-            )}
-            {agents && (
-              <>
-                <Menu.Separator className={MENU_SEPARATOR} />
-                {agents}
-              </>
-            )}
-            <Menu.Separator className={MENU_SEPARATOR} />
-            <Menu.Item
-              className={MENU_ROW}
-              onSelect={later(plus.onAttachFiles)}
-              data-track-category='XyneAI'
-              data-track-name='ATTACH_FILES'
-            >
-              <Paperclip className={MENU_ICON} aria-hidden strokeWidth={1.75} />
-              Attach files
-            </Menu.Item>
-            <Menu.Item
-              className={MENU_ROW}
-              onSelect={later(() => onTrigger('/'))}
-              data-track-category='XyneAI'
-              data-track-name='OPEN_SLASH_COMMANDS'
-            >
-              <SquareSlash className={MENU_ICON} aria-hidden strokeWidth={1.75} />
-              Slash commands
-            </Menu.Item>
-            <Menu.Item
-              className={MENU_ROW}
-              onSelect={later(() => onTrigger('@'))}
-              data-track-category='XyneAI'
-              data-track-name='OPEN_CONTEXT_PICKER'
-            >
-              <AtSign className={MENU_ICON} aria-hidden strokeWidth={1.75} />
-              Add context
-            </Menu.Item>
-            {plus.extra && (
-              <>
-                <Menu.Separator className={MENU_SEPARATOR} />
-                {plus.extra}
-              </>
-            )}
+            {groups.map((group, i) => (
+              <Fragment key={group.key}>
+                {i > 0 && <Menu.Separator className={MENU_SEPARATOR} />}
+                {group.rows}
+              </Fragment>
+            ))}
           </PlusSubmenuContext.Provider>
         </Menu.Content>
       </Menu.Portal>
@@ -694,7 +731,7 @@ export function PlusMenuChoice<T extends string>({
         {icon}
         {label}
         <span className='ml-auto truncate text-muted-foreground'>{current?.label}</span>
-        <ChevronRight className='size-4 shrink-0 text-muted-foreground' aria-hidden />
+        <ChevronRight size={16} className='shrink-0 text-muted-foreground' />
       </Menu.SubTrigger>
       <Menu.Portal>
         <Menu.SubContent
@@ -757,7 +794,7 @@ export function ModeChips({
     plus.deepResearchEnabled && plus.onDeepResearchToggle
       ? {
           key: 'deep',
-          Icon: Target,
+          Icon: FocusTarget,
           label: 'Deep search',
           off: plus.onDeepResearchToggle,
           trackName: 'TOGGLE_DEEP_RESEARCH',
@@ -798,11 +835,7 @@ export function ModeChips({
         >
           <span className='relative grid size-4 place-items-center'>
             {/* A member expression, so no PascalCase binding trips the naming rule. */}
-            <mode.Icon
-              className='size-4 transition-opacity group-hover/mode:opacity-0'
-              aria-hidden
-              strokeWidth={1.75}
-            />
+            <mode.Icon size={16} className='transition-opacity group-hover/mode:opacity-0' />
             <X
               className='absolute size-3.5 opacity-0 transition-opacity group-hover/mode:opacity-100'
               aria-hidden
@@ -1047,7 +1080,7 @@ export function ModelMenu({
               <span className='ml-auto max-w-[110px] truncate text-muted-foreground'>
                 {pillLabel}
               </span>
-              <ChevronRight className='size-4 shrink-0 text-muted-foreground' aria-hidden />
+              <ChevronRight size={16} className='shrink-0 text-muted-foreground' />
             </Menu.SubTrigger>
             <Menu.Portal>
               <Menu.SubContent
@@ -1249,12 +1282,12 @@ export function AgentsSubmenu({ agent }: { agent: ComposerAgentControl }): React
         data-track-category='XyneAI'
         data-track-name='OPEN_AGENT_SELECTOR'
       >
-        <Sparkles className={MENU_ICON} aria-hidden strokeWidth={1.75} />
+        <Ai02 size={16} className={MENU_ICON} />
         Agents
         <span className='ml-auto max-w-[110px] truncate text-muted-foreground'>
           {current.label}
         </span>
-        <ChevronRight className='size-4 shrink-0 text-muted-foreground' aria-hidden />
+        <ChevronRight size={16} className='shrink-0 text-muted-foreground' />
       </Menu.SubTrigger>
       <Menu.Portal>
         <Menu.SubContent
