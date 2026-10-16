@@ -108,8 +108,9 @@ const Assignee = ({ assigneeId }: { assigneeId: string | undefined }): ReactElem
 };
 
 /**
- * Fixed-size action button: equal-width slot in the row, centred label, and the
- * spinner is overlaid on the label instead of pushing it, so tapping never
+ * Action button sized by its label: the text is never scaled down. Buttons grow
+ * to fill their row and wrap to the next row when they don't fit. The spinner is
+ * overlaid on the (hidden) label, so the button keeps its size and tapping never
  * reflows the row.
  */
 const TicketActionButton = ({
@@ -138,14 +139,14 @@ const TicketActionButton = ({
         event.stopPropagation();
         onPress();
       }}
-      className={`items-center justify-center rounded-lg px-2 ${
+      className={`items-center justify-center rounded-lg px-4 ${
         primary ? '' : 'border border-border'
       }`}
       style={({ pressed }) => ({
         flexGrow: 1,
-        flexShrink: 1,
-        flexBasis: 0,
-        minWidth: 0,
+        flexShrink: 0,
+        flexBasis: 'auto',
+        maxWidth: '100%',
         height: BUTTON_HEIGHT,
         backgroundColor: primary ? ACCENT : 'transparent',
         opacity: disabled && !loading ? 0.5 : pressed ? 0.75 : 1,
@@ -153,8 +154,6 @@ const TicketActionButton = ({
     >
       <Text
         numberOfLines={1}
-        adjustsFontSizeToFit
-        minimumFontScale={0.8}
         style={{
           color: textColor,
           fontSize: 14,
@@ -254,7 +253,15 @@ const DraftTicketCard = ({
       </View>
 
       {viewModel.buttons.length > 0 ? (
-        <View style={{ flexDirection: 'row', alignItems: 'stretch', gap: 8, width: '100%' }}>
+        <View
+          style={{
+            flexDirection: 'row',
+            flexWrap: 'wrap',
+            alignItems: 'stretch',
+            gap: 8,
+            width: '100%',
+          }}
+        >
           {viewModel.buttons.map(button => (
             <TicketActionButton
               key={button.key}
