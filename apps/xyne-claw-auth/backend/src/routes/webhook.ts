@@ -6424,13 +6424,12 @@ async function renderUiWidget(
 // We look up the session, then call updateMessage on the progress placeholder.
 
 router.post("/progress", requireStrictS2S, async (req: Request, res: Response) => {
-  const { sessionId, toolLabel, toolInvocation, sandboxPreviewUrl, sandboxCodePreviewUrl, sandboxTermUrl, sandboxId, conversationId, agentSlug } = req.body as {
+  const { sessionId, toolLabel, toolInvocation, sandboxPreviewUrl, sandboxCodePreviewUrl, sandboxId, conversationId, agentSlug } = req.body as {
     sessionId?: string;
     toolLabel?: string;
     toolInvocation?: unknown;
     sandboxPreviewUrl?: string;
     sandboxCodePreviewUrl?: string;
-    sandboxTermUrl?: string;
     sandboxId?: string;
     // Conversation identity claw ships on progress callbacks that need ctx
     // (sandbox-preview announce, label updates), mirroring /result. Lets the
@@ -6664,8 +6663,7 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
             systemNote("This agent is working in a browser you can watch — and take over — from this channel."),
             "",
             systemNote(`Browser: ${sandboxPreviewUrl}`),
-            ...(sandboxCodePreviewUrl ? [systemNote(`Code changes: ${sandboxCodePreviewUrl}/`)] : []),
-            ...(sandboxTermUrl ? [systemNote(`Terminal: ${sandboxTermUrl}`)] : []),
+            ...(sandboxCodePreviewUrl ? [systemNote(`Code changes: ${sandboxCodePreviewUrl}`)] : []),
           ].join("\n"),
           metadata: { contentFormat: "markdown" },
         }

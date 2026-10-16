@@ -102,6 +102,15 @@ spec:
             host: {{ $s.sandboxRouter.host }}
             port:
               number: {{ $s.sandboxRouter.port }}
+    - name: claw-code
+      match:
+        - uri:
+            prefix: /claw-code/
+      route:
+        - destination:
+            host: {{ $s.sandboxRouter.host }}
+            port:
+              number: {{ $s.sandboxRouter.port }}
     {{- end }}
     - name: dashboard
       match:

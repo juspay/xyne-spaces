@@ -43,6 +43,10 @@ service:
 
 env:
   PROXY_TIMEOUT_SECONDS: "300"
+  # Who may open /claw-code/<sandbox> (code-server). Emptying this disables the
+  # check and leaves the editor — file read/write and a shell in the sandbox —
+  # open to anyone holding a sandbox name.
+  CLAW_AUTH_URL: http://xyne-claw-auth:3003
 
 secretEnv: {}
 

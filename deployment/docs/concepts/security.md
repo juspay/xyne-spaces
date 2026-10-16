@@ -143,6 +143,37 @@ alerts were dismissed as "won't fix", because the protection is the boundary
 above, not the code. [claw-and-sandbox](../features/claw-and-sandbox.md#network-isolation)
 has the checks that prove the fence holds.
 
+Two gateway routes reach into a sandbox from outside. `/claw-preview/` is open:
+anyone holding a sandbox name can drive its browser. `/claw-code/` is not,
+because code-server also offers file write and a terminal in a pod that holds
+the workspace's GitHub SSH key — the router asks claw-auth whether the caller's
+Spaces session owns that sandbox, and fails closed when it cannot ask. Clearing
+the router's `CLAW_AUTH_URL` removes the check.
+
+On both routes the caller's `Cookie` and `Authorization` headers stop at the
+router and are never relayed into the sandbox. The access check is their only
+consumer; neither websockify nor code-server (`--auth none`) reads them, and the
+pod on the other side runs agent-written code. In the other direction the router
+drops `Set-Cookie`, `Clear-Site-Data` and `Service-Worker-Allowed`, so a sandbox
+cannot set a cookie on the Spaces origin, sign the viewer out, or claim a
+service-worker scope wider than its own path.
+
+code-server's own cross-origin check compares `Origin` with `Host`, and the
+router rewrites both to the pod's address, so the router does that check
+itself first: a `/claw-code/` request whose `Origin` is not the public host it
+came in on (or an entry in `PUBLIC_ORIGINS`) gets a 403, and so does a
+`/claw-code/` WebSocket upgrade with no `Origin`. Without it, a page on any site
+whose request carried the viewer's cookie could drive the editor.
+
+Both routes still answer on the dashboard's origin, and that is the remaining
+exposure: whatever the agent serves in the sandbox runs there, so it can call
+`/api/*` as whoever opened the link — and for `/claw-code/` that reader can be
+any member of the conversation, not only the person who started the run. That
+holds inside the Xyne AI workspace pane too: its iframe grants
+`allow-same-origin` to `/claw-preview/` and `/claw-code/` URLs. The gate decides
+who gets that far; it does not make the page harmless. Serving the sandbox
+routes from a dedicated preview origin is the real fix (#2993, #3007).
+
 ## Workload hardening
 
 Service charts built on `xyne-common` take a `securityContext` and
