@@ -55,28 +55,16 @@ export class CanvasFoldersSideEffectHandler extends BaseSideEffectHandler {
   }
 }
 
-/** A repository, in every hub it is attached to: its name or URL, or its removal. */
+/** A repository's name or URL, in every hub it is attached to. */
 export class ReposSideEffectHandler extends BaseSideEffectHandler {
-  /** The hubs the repository is attached to (deleting it leaves its membership edges). */
-  private async hubsOf(repoId: string): Promise<string[]> {
+  async onUpdate(job: SideEffectJobConfig): Promise<void> {
+    const repoId = idOf(job);
+    if (!repoId) return;
     const links = await db.sdlcEntityLink.findMany({
       where: { sourceType: 'CHANNEL', targetType: 'REPOSITORY', targetId: repoId, relationType: SDLC_MEMBERSHIP_RELATION },
       select: { channelId: true },
       distinct: ['channelId'],
     });
-    return links.map(l => l.channelId);
-  }
-
-  async onUpdate(job: SideEffectJobConfig): Promise<void> {
-    const repoId = idOf(job);
-    if (!repoId) return;
-    for (const hubId of await this.hubsOf(repoId)) queueSdlcSearchJobs(hubId, { repositories: [repoId] });
-  }
-
-  // Its own entry goes with the row (vespa-injection); its wiki leaves each hub's search, as on a detach.
-  async onDelete(job: SideEffectJobConfig): Promise<void> {
-    const repoId = idOf(job);
-    if (!repoId) return;
-    for (const hubId of await this.hubsOf(repoId)) queueSdlcSearchJobs(hubId, { detachedRepositories: [repoId] });
+    for (const { channelId } of links) queueSdlcSearchJobs(channelId, { repositories: [repoId] });
   }
 }

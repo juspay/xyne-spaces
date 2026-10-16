@@ -202,7 +202,7 @@ export const SIDE_EFFECT_OPERATION_CONFIG: SideEffectOperationConfigMap = {
   sdlc_tracks: ['update'],
   sdlc_folders: ['update'],
   canvas_folders: ['update'],
-  repos: ['update', 'delete'],
+  repos: ['update'],
 };
 
 export function createSideEffectJobsAccumulator(): SideEffectJobsAccumulator {
