@@ -62,8 +62,10 @@ export function buildLastMessagePreviewFromSummary(
     return { variant: 'text', text };
   }
 
-  const raw = summary.content?.trim() || 'Message';
-  const plain = stripHtml(raw);
+  // Attachment-only messages can contain empty rich-text markup, such as <p></p>.
+  // Choose the fallback after stripping HTML so the sender prefix is never left alone.
+  const plain = stripHtml(summary.content ?? '');
+  const text = plain || (summary.hasAttachment ? 'Sent an attachment' : 'Message');
 
   const prefix =
     summary.senderId === currentUserId
@@ -74,7 +76,7 @@ export function buildLastMessagePreviewFromSummary(
 
   return {
     variant: 'text',
-    text: `${prefix}${plain}`,
+    text: `${prefix}${text}`,
   };
 }
 
