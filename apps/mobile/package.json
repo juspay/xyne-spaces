@@ -84,7 +84,7 @@
     "@react-native-google-signin/google-signin": "16.1.4",
     "@react-native-masked-view/masked-view": "^0.3.2",
     "@react-native-menu/menu": "2.0.0",
-    "@rocicorp/zero": "1.6.1",
+    "@rocicorp/zero": "1.9.0",
     "@tanstack/react-query": "^5.90.21",
     "@tanstack/react-table": "^8.21.3",
     "@xstate/react": "^6.0.0",
