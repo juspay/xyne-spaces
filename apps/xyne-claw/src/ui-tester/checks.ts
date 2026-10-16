@@ -2,11 +2,12 @@ import type { XorAnswer, XorQuestion } from "../xor.js";
 
 export const CONFIDENT = 0.7;
 
-export const STANDARD_QUESTIONS: Record<string, Extract<XorQuestion, { type: "choice" }>> = {
+type StandardQuestion = Extract<XorQuestion, { type: "choice" }> | Extract<XorQuestion, { type: "noul" }>;
+
+export const STANDARD_QUESTIONS: Record<string, StandardQuestion> = {
   cut_off: {
-    type: "choice",
+    type: "noul",
     instructions: "Is any text, button or control cut off at the right edge of the screen?",
-    criteria: { no: "No, everything ends inside the screen", yes: "Yes, something is cut off at the right edge" },
   },
   overlap: {
     type: "choice",
@@ -46,8 +47,8 @@ export const STANDARD_QUESTIONS: Record<string, Extract<XorQuestion, { type: "ch
   },
   background: {
     type: "choice",
-    instructions: "What colour is the main page background?",
-    criteria: { light: "White or very light grey", dark: "Black or very dark grey" },
+    instructions: "Which colour theme is the page using?",
+    criteria: { light: "Light theme (light background)", dark: "Dark theme (dark background)" },
   },
 };
 
@@ -126,7 +127,14 @@ export function buildQuestions(result: VariationResult): Record<string, XorQuest
 }
 
 function pick(a: XorAnswer | undefined): { choice: string | null; confidence: number | null } {
+  if (typeof a?.noul === "number" && a.choice === undefined) {
+    return { choice: a.noul >= 0.5 ? "yes" : "no", confidence: Math.round(Math.abs(a.noul - 0.5) * 200) / 100 };
+  }
   return { choice: a?.choice ?? null, confidence: typeof a?.confidence === "number" ? Math.round(a.confidence * 100) / 100 : null };
+}
+
+function optionLabel(q: StandardQuestion, key: string): string {
+  return q.type === "choice" ? q.criteria[key] ?? key : key;
 }
 
 export function judgeVariation(result: VariationResult, answers: Record<string, XorAnswer> | null): VariationVerdict {
@@ -167,7 +175,7 @@ export function judgeVariation(result: VariationResult, answers: Record<string, 
       if (!v || v.choice === null) continue;
       const confident = (v.confidence ?? 0) >= CONFIDENT;
       const q = STANDARD_QUESTIONS[key];
-      if (v.choice === bad && q) add(confident ? "fail" : "unsure", "visual", `${q.instructions} → ${q.criteria[bad] ?? bad} (confidence ${v.confidence})`);
+      if (v.choice === bad && q) add(confident ? "fail" : "unsure", "visual", `${q.instructions} → ${optionLabel(q, bad)} (confidence ${v.confidence})`);
     }
     const blank = visual["content"];
     if (blank?.choice === "blank" && (blank.confidence ?? 0) >= CONFIDENT && result.expect?.content !== "blank") {
