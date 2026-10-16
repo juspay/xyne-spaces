@@ -477,7 +477,7 @@ describe('useXyneAIChat', () => {
       mockFetchMessages.mockResolvedValue(storedAnswered);
 
       act(() => result.current.open(turnsFromMessages(storedQuestion), 's1', true));
-      expect(result.current.turns[0]?.reply.status).toBe('stopped');
+      expect(result.current.turns[0]?.reply.status).toBe('streaming');
 
       await act(async () => lastLive().emit({ events: [text('Wor')], ended: false }));
       await waitFor(() => expect(answerText(result.current.turns[0]!.reply)).toBe('Wor'));
@@ -514,6 +514,9 @@ describe('useXyneAIChat', () => {
       await waitFor(() => expect(mockLive).toHaveLength(1));
       expect(mockFetchMessages).toHaveBeenCalledTimes(1);
       expect(mockCancel).not.toHaveBeenCalled();
+      expect(result.current.turns[0]?.reply.status).toBe('streaming');
+
+      await act(async () => lastLive().emit({ events: [], ended: true, isSnapshot: true }));
       expect(result.current.turns[0]?.reply.status).toBe('stopped');
     });
 

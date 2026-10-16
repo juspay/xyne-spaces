@@ -305,8 +305,15 @@ export function useXyneAIChat(options: XyneAIRequestOptions): XyneAIChat {
       }).catch(() => undefined);
 
       batch.flush();
-      // No run was live, so the stored transcript already matches the screen.
-      if (!isLive) return;
+      if (!isLive) {
+        // Nothing is running, so a question shown as thinking was left unanswered.
+        if (controller.current === abort) {
+          updateReply(turnId, reply =>
+            settleAssistantTurn(reply, { kind: 'stopped' }, reply.startedAt),
+          );
+        }
+        return;
+      }
       const isStopped = abort.signal.aborted && !isDone;
       updateReply(turnId, reply =>
         settleAssistantTurn(reply, { kind: isStopped ? 'stopped' : 'closed' }, Date.now()),
@@ -327,8 +334,18 @@ export function useXyneAIChat(options: XyneAIRequestOptions): XyneAIChat {
 
   const resume = useCallback(
     (stored: ChatTurn[], storedSessionId: string, storedCanBranch: boolean): void => {
-      load(stored, storedSessionId, storedCanBranch);
       const last = activePath(stored, {}).at(-1);
+      // An unanswered question may still be running: it thinks until `/live` says otherwise.
+      const isPending = last !== undefined && last.reply.messageId === undefined;
+      load(
+        isPending
+          ? stored.map(turn =>
+              turn === last ? { ...turn, reply: startAssistantTurn(turn.reply.startedAt) } : turn,
+            )
+          : stored,
+        storedSessionId,
+        storedCanBranch,
+      );
       if (last) void followResumedRun(last.id);
     },
     [load, followResumedRun],
