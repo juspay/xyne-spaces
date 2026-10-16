@@ -1,11 +1,23 @@
+import { useChannelSections } from '@/src/hooks/useChannelSections';
+import { useChannelGroupPreferences } from '@/src/hooks/useChannelGroupPreferences';
+import { DEFAULT_CHANNEL_FILTER } from './channel-group-preferences';
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 import { View, Text, Pressable } from 'react-native';
 import { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useCSSVariable } from 'uniwind';
-import type { ChannelSection } from '@xyne/shared';
+import { ChannelFilterMode, ChannelSortOrder, type ChannelSection } from '@xyne/shared';
 import { AppBottomSheet, type AppBottomSheetRef } from '@/src/components/ui/app-bottom-sheet';
-import { Pencil, Plus, Trash2, ListChecks } from 'lucide-react-native';
+import {
+  Pencil,
+  Plus,
+  Trash2,
+  ListChecks,
+  Filter,
+  ArrowDownUp,
+  ArrowLeft,
+  Check,
+} from 'lucide-react-native';
 import { cn } from '@/src/utils/cn';
 
 /** Left inset of a row's label, so separators line up under the text. */
@@ -13,10 +25,11 @@ const ROW_LABEL_INSET = 52;
 
 /** Everything the sheet shows about the section it was opened from. */
 export type SectionOptionsTarget = {
-  section: ChannelSection;
   channelCount: number;
   unreadCount: number;
-};
+} & (
+  { section: ChannelSection; group?: never } | { group: 'channels' | 'starred'; section?: never }
+);
 
 type SectionOptionsSheetProps = {
   target: SectionOptionsTarget | null;
@@ -79,6 +92,7 @@ export function SectionOptionsSheet({
 
   return (
     <SectionOptionsSheetContent
+      key={target.section?.id ?? target.group}
       target={target}
       isOpen={isOpen}
       onOpenChange={handleOpenChange}
@@ -114,7 +128,45 @@ function SectionOptionsSheetContent({
   const insets = useSafeAreaInsets();
   const foregroundColor = useCSSVariable('--color-foreground') as string;
   const dangerColor = useCSSVariable('--color-status-danger') as string;
-  const { section, channelCount, unreadCount } = target;
+  const { sections, updatePreference } = useChannelSections();
+  const preferences = useChannelGroupPreferences();
+  const section = sections.find(item => item.id === target.section?.id);
+  const group = target.group ?? 'channels';
+  const { channelCount, unreadCount } = target;
+  // A section can disappear while this sheet is open (for example on desktop).
+  // Never present the Channels preferences as though they belong to that section.
+  const sectionUnavailable = Boolean(target.section && !section);
+  const preference = section
+    ? {
+        filterMode: section.filterMode ?? DEFAULT_CHANNEL_FILTER,
+        sortOrder: section.sortOrder ?? null,
+      }
+    : preferences[group];
+  const [page, setPage] = useState<'menu' | 'filter' | 'sort'>('menu');
+  const filters = [
+    { label: 'Active only', value: ChannelFilterMode.ACTIVE },
+    { label: 'Unreads', value: ChannelFilterMode.UNREADS },
+    { label: 'Mentions', value: ChannelFilterMode.MENTIONS },
+    { label: 'All', value: ChannelFilterMode.ALL },
+  ];
+  const sorts = [
+    { label: 'Unread & Activity', value: ChannelSortOrder.UNREAD },
+    { label: 'Recency', value: ChannelSortOrder.RECENCY },
+    { label: 'Alphabetical A-Z', value: ChannelSortOrder.ALPHABETICAL },
+    ...(section ? [{ label: 'Manual order', value: null }] : []),
+  ];
+  const setFilter = (filterMode: ChannelFilterMode): void => {
+    if (target.section && !section) return;
+    if (section) updatePreference(section.id, { filterMode });
+    else preferences.update(group, { filterMode });
+    setPage('menu');
+  };
+  const setSort = (sortOrder: ChannelSortOrder | null): void => {
+    if (target.section && !section) return;
+    if (section) updatePreference(section.id, { sortOrder });
+    else if (sortOrder !== null) preferences.update(group, { sortOrder });
+    setPage('menu');
+  };
 
   const dismiss = useCallback(() => {
     sheetRef.current?.dismiss();
@@ -174,48 +226,121 @@ function SectionOptionsSheetContent({
       >
         <View className='px-5 pb-4 pt-2'>
           <View className='flex-row items-center'>
-            {section.emoji ? <Text className='mr-1.5 text-lg'>{section.emoji}</Text> : null}
+            {page !== 'menu' && (
+              <Pressable
+                accessibilityRole='button'
+                accessibilityLabel='Back to section options'
+                onPress={() => setPage('menu')}
+                hitSlop={10}
+                className='mr-2 h-6 w-6 items-center justify-center active:opacity-60'
+              >
+                <ArrowLeft size={22} color={foregroundColor} />
+              </Pressable>
+            )}
+            {page === 'menu' && section?.emoji ? (
+              <Text className='mr-1.5 text-lg'>{section.emoji}</Text>
+            ) : null}
             <Text className='flex-1 text-lg font-semibold text-foreground' numberOfLines={1}>
-              {section.name}
+              {page === 'filter'
+                ? 'Filter'
+                : page === 'sort'
+                  ? 'Sort'
+                  : (section?.name ??
+                    target.section?.name ??
+                    (group === 'starred' ? 'Starred' : 'Channels'))}
             </Text>
           </View>
-          <Text className='mt-0.5 text-xs text-bottomsheet-text-muted'>{subtitle}</Text>
+          {page === 'menu' && (
+            <Text className='mt-0.5 text-xs text-bottomsheet-text-muted'>{subtitle}</Text>
+          )}
         </View>
 
-        <OptionGroup>
-          <OptionRow
-            icon={<Pencil size={19} color={foregroundColor} />}
-            label='Rename section'
-            onPress={handleRename}
-          />
-          <OptionRow
-            icon={<ListChecks size={19} color={foregroundColor} />}
-            label='Manage channels'
-            trailing={channelCount > 0 ? String(channelCount) : undefined}
-            onPress={handleManageChannels}
-          />
-          {/* Slack's own section menu carries this too: the moment you are
+        {sectionUnavailable ? (
+          <Text className='px-5 py-3 text-bottomsheet-text-muted'>
+            This section is no longer available.
+          </Text>
+        ) : page !== 'menu' ? (
+          <>
+            <OptionGroup>
+              {page === 'filter'
+                ? filters.map(option => (
+                    <OptionRow
+                      key={option.label}
+                      label={option.label}
+                      selected={preference.filterMode === option.value}
+                      onPress={() => setFilter(option.value)}
+                    />
+                  ))
+                : sorts.map(option => (
+                    <OptionRow
+                      key={option.label}
+                      label={option.label}
+                      selected={preference.sortOrder === option.value}
+                      onPress={() => setSort(option.value)}
+                    />
+                  ))}
+            </OptionGroup>
+          </>
+        ) : (
+          <>
+            <Text className='px-5 pb-2 text-sm font-semibold text-foreground'>
+              Section settings
+            </Text>
+            <OptionGroup>
+              <OptionRow
+                icon={<Filter size={19} color={foregroundColor} />}
+                label='Filter'
+                trailing={filters.find(option => option.value === preference.filterMode)?.label}
+                onPress={() => setPage('filter')}
+              />
+              <OptionRow
+                icon={<ArrowDownUp size={19} color={foregroundColor} />}
+                label='Sort'
+                trailing={sorts.find(option => option.value === preference.sortOrder)?.label}
+                onPress={() => setPage('sort')}
+                isLast
+              />
+            </OptionGroup>
+            {section && (
+              <>
+                <OptionGroup className='mt-3'>
+                  <OptionRow
+                    icon={<Pencil size={19} color={foregroundColor} />}
+                    label='Rename section'
+                    onPress={handleRename}
+                  />
+                  <OptionRow
+                    icon={<ListChecks size={19} color={foregroundColor} />}
+                    label='Manage channels'
+                    trailing={channelCount > 0 ? String(channelCount) : undefined}
+                    onPress={handleManageChannels}
+                  />
+                  {/* Slack's own section menu carries this too: the moment you are
               already thinking about how the sidebar is grouped is a fair
               moment to want another group. */}
-          <OptionRow
-            icon={<Plus size={19} color={foregroundColor} />}
-            label='Create section'
-            onPress={handleCreateSection}
-            isLast
-          />
-        </OptionGroup>
+                  <OptionRow
+                    icon={<Plus size={19} color={foregroundColor} />}
+                    label='Create section'
+                    onPress={handleCreateSection}
+                    isLast
+                  />
+                </OptionGroup>
 
-        {/* Delete keeps its own container: detached from the edits above, it is
+                {/* Delete keeps its own container: detached from the edits above, it is
             harder to hit by muscle memory on the way to Manage channels. */}
-        <OptionGroup className='mt-3'>
-          <OptionRow
-            icon={<Trash2 size={19} color={dangerColor} />}
-            label='Delete section'
-            destructive
-            onPress={handleDelete}
-            isLast
-          />
-        </OptionGroup>
+                <OptionGroup className='mt-3'>
+                  <OptionRow
+                    icon={<Trash2 size={19} color={dangerColor} />}
+                    label='Delete section'
+                    destructive
+                    onPress={handleDelete}
+                    isLast
+                  />
+                </OptionGroup>
+              </>
+            )}
+          </>
+        )}
       </BottomSheetScrollView>
     </AppBottomSheet>
   );
@@ -236,10 +361,11 @@ function OptionGroup({
 }
 
 type OptionRowProps = {
-  icon: ReactElement;
+  icon?: ReactElement;
   label: string;
   onPress: () => void;
   trailing?: string | undefined;
+  selected?: boolean;
   destructive?: boolean;
   isLast?: boolean;
 };
@@ -250,17 +376,21 @@ function OptionRow({
   onPress,
   trailing,
   destructive,
+  selected,
   isLast,
 }: OptionRowProps): ReactElement {
+  const foregroundColor = useCSSVariable('--color-foreground') as string;
+
   return (
     <>
       <Pressable
         onPress={onPress}
-        accessibilityRole='button'
+        accessibilityRole={selected === undefined ? 'button' : 'radio'}
+        accessibilityState={selected === undefined ? {} : { checked: selected }}
         accessibilityLabel={label}
         className='flex-row items-center px-4 py-3.5 active:opacity-60'
       >
-        <View className='w-7'>{icon}</View>
+        {icon ? <View className='w-7'>{icon}</View> : null}
         <Text
           className={cn(
             'flex-1 text-[15px] font-medium',
@@ -269,11 +399,14 @@ function OptionRow({
         >
           {label}
         </Text>
+        {selected && <Check size={20} strokeWidth={2.5} color={foregroundColor} />}
         {trailing ? (
           <Text className='text-[13px] text-bottomsheet-text-muted'>{trailing}</Text>
         ) : null}
       </Pressable>
-      {!isLast && <View className='h-px bg-border' style={{ marginLeft: ROW_LABEL_INSET }} />}
+      {!isLast && (
+        <View className='h-px bg-border' style={{ marginLeft: icon ? ROW_LABEL_INSET : 16 }} />
+      )}
     </>
   );
 }

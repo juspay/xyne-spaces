@@ -1,3 +1,9 @@
+import { useChannelGroupPreferences } from './useChannelGroupPreferences';
+import {
+  applyChannelGroupPreference,
+  getGroupMentionChannelIds,
+  DEFAULT_CHANNEL_FILTER,
+} from '@/src/components/chat/channel-list/channel-group-preferences';
 import { useEffect, useMemo } from 'react';
 import {
   ChannelScopeType,
@@ -63,6 +69,7 @@ export function useChannelList(
   const highlightQuery = searchQuery.trim();
   const { unreadActivities } = useActivityBadgeModel();
   const { sections } = useChannelSections();
+  const { channels: channelsPreference, starred: starredPreference } = useChannelGroupPreferences();
   const { isStarredCollapsed, isChannelsCollapsed } = useChannelGroupCollapse();
   const statusByChannelId = useMemo(
     () => new Map(userChannelStatuses.map(status => [status.channelId, status] as const)),
@@ -315,15 +322,16 @@ export function useChannelList(
      * everything }` for a user with no sections, so the grouped layout covers
      * both cases through one path.
      *
-     * Unread-first ordering now applies *within* each group rather than across
-     * the whole list — set by `sortChannelsByUnreadAndActivity` above for
-     * Starred, and by `sortChannelRowsByUnread` inside the builder for Channels.
+     * Keep full membership for headers and badges. Saved filter/sort preferences
+     * transform only expanded rows; search and the standalone pills stay independent.
      */
     const { sectioned, unsectioned } = bucketChannelsBySection(
       filteredChannels,
       userChannelStatuses,
       sections,
     );
+
+    const groupMentionChannelIds = getGroupMentionChannelIds(unreadActivities);
 
     return buildGroupedChannelRows({
       starred: filteredStarred,
@@ -333,10 +341,30 @@ export function useChannelList(
       isStarredCollapsed,
       isChannelsCollapsed,
       toChannelRow,
+      displayChannels: (channels, section, group) =>
+        applyChannelGroupPreference(
+          channels,
+          section
+            ? {
+                filterMode: section.filterMode ?? DEFAULT_CHANNEL_FILTER,
+                sortOrder: section.sortOrder ?? null,
+              }
+            : group === 'starred'
+              ? starredPreference
+              : channelsPreference,
+          {
+            statuses: statusByChannelId,
+            unreadCounts: channelUnreadCounts,
+            mentionedChannelIds: groupMentionChannelIds,
+            now: Date.now(),
+          },
+        ),
     });
   }, [
     isStarredCollapsed,
     isChannelsCollapsed,
+    channelsPreference,
+    starredPreference,
     filterTab,
     groupedWorkspaceChannels,
     channelUnreadCounts,

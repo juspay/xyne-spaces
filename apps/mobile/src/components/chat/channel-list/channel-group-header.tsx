@@ -30,7 +30,7 @@ type ChannelGroupHeaderProps = {
   /** The first header has nothing above it to divide it from, so it draws no rule. */
   isFirstGroup: boolean;
   onToggle: () => void;
-  /** Omitted for the built-in groups, which have nothing to rename or delete. */
+  /** Opens group settings and, for custom sections, management actions. */
   onMorePress?: (() => void) | undefined;
 };
 

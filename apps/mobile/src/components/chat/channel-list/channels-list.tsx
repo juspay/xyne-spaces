@@ -279,8 +279,7 @@ export const ChannelsList = ({ headerTitleScrollY }: ChannelsListProps = {}): Re
           );
         }
 
-        // Starred and Channels are built in — nothing to rename or delete, so
-        // they carry no overflow menu.
+        // Built-in groups expose filter and sort preferences.
         const group = item.group;
         return (
           <ChannelGroupHeader
@@ -291,6 +290,13 @@ export const ChannelsList = ({ headerTitleScrollY }: ChannelsListProps = {}): Re
             isCollapsed={item.isCollapsed}
             isFirstGroup={item.isFirstGroup}
             onToggle={() => toggleGroup(group)}
+            onMorePress={() =>
+              handleMorePress({
+                group,
+                channelCount: item.channelCount,
+                unreadCount: item.unreadCount,
+              })
+            }
           />
         );
       }
