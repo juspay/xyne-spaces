@@ -31,6 +31,9 @@ function isCredentialPath(p: string): boolean {
   return /(^|\/)\.ssh(\/|$)|id_rsa|id_ed25519|\.git-credentials|\.sdlc-git-credential|\/tmp\/ssh-keys|\/tmp\/github-ssh-keys|\/tmp\/attic|\.netrc|\.npmrc|\.docker\/config|known_hosts/.test(s);
 }
 
+const BACKGROUND_SETUP_ENABLED =
+  (process.env["XYNE_SANDBOX_BACKGROUND_SETUP"] ?? "true").toLowerCase() !== "false";
+
 const SESSION_STORE = new Map<string, Session>();
 
 // Single-flight for sandbox-repo-setup, keyed by (user, conversation).
@@ -571,6 +574,136 @@ export async function runReuseSteps(
   }
 }
 
+export const SANDBOX_READY_FILE = "$HOME/.sandbox-ready";
+
+function shSingleQuote(value: string): string {
+  return `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
+export function buildSetupOrchestratorScript(config: RepoSetupConfig): string {
+  const lines: string[] = [];
+  lines.push("#!/usr/bin/env bash");
+  lines.push(`READY_FILE="${SANDBOX_READY_FILE}"`);
+  lines.push(`echo syncing > "$READY_FILE"`);
+  lines.push("fail() {");
+  lines.push(`  printf 'failed:%s\\n' "$1" > "$READY_FILE"`);
+  lines.push("  exit 0");
+  lines.push("}");
+
+  lines.push("PREBAKE_DEADLINE=$(( $(date +%s) + 2700 ))");
+  lines.push("PREBAKE_START=$(date +%s)");
+  lines.push("FATAL_GRACE=90");
+  lines.push("CRASH_GRACE=480");
+  lines.push("PREBAKE_DONE=0");
+  lines.push(`while [ "$(date +%s)" -lt "$PREBAKE_DEADLINE" ]; do`);
+  lines.push("  if [ -f /tmp/prebake-done ]; then PREBAKE_DONE=1; break; fi");
+  lines.push("  WAITED=$(( $(date +%s) - PREBAKE_START ))");
+  lines.push(`  if [ "$WAITED" -gt "$FATAL_GRACE" ] && [ "$WAITED" -le "$CRASH_GRACE" ]; then`);
+  lines.push(`    FATAL=$(grep -iE 'Config validation error|must not be the published|is required' /tmp/prebake-backend-dev.log 2>/dev/null | tail -4)`);
+  lines.push(`    if [ -n "$FATAL" ]; then fail "$FATAL"; fi`);
+  lines.push("  fi");
+  lines.push(`  if [ "$WAITED" -gt "$CRASH_GRACE" ]; then`);
+  lines.push("    if ! nc -z 127.0.0.1 3001 >/dev/null 2>&1; then");
+  lines.push(`      CRASH=$(grep -iE 'Config validation error|is required|Error:|Cannot find|is not a function|EADDRINUSE' /tmp/prebake-backend-dev.log 2>/dev/null | tail -6)`);
+  lines.push(`      if [ -n "$CRASH" ]; then fail "$CRASH"; fi`);
+  lines.push("    fi");
+  lines.push("  fi");
+  lines.push("  sleep 5");
+  lines.push("done");
+
+  let stepIndex = 0;
+  for (const step of config.steps) {
+    stepIndex += 1;
+    const logFile = `/tmp/setup-step-${stepIndex}.log`;
+    if (step.type === "install") {
+      let pkgIndex = 0;
+      for (const pkg of step.packages) {
+        pkgIndex += 1;
+        const installLog = `/tmp/setup-install-${stepIndex}-${pkgIndex}.log`;
+        const inner = step.cmd
+          ? step.cmd
+          : `cd ${config.workDir}/${pkg} && npm ci --prefer-offline --no-audit --no-fund --no-progress --loglevel=error`;
+        lines.push(`if ! bash -c ${shSingleQuote(inner)} > ${installLog} 2>&1; then`);
+        lines.push(`  fail "install ${pkg}: $(tail -20 ${installLog})"`);
+        lines.push("fi");
+      }
+    } else if (step.type === "services") {
+      const servicesLog = `/tmp/services.log`;
+      if (step.markerPath) {
+        lines.push(`if [ -f ${shSingleQuote(step.markerPath)} ]; then`);
+        lines.push(`  :`);
+        lines.push("else");
+        lines.push(`  setsid bash -c ${shSingleQuote(step.cmd)} < /dev/null > ${servicesLog} 2>&1 &`);
+        lines.push("fi");
+      } else {
+        lines.push(`setsid bash -c ${shSingleQuote(step.cmd)} < /dev/null > ${servicesLog} 2>&1 &`);
+      }
+      if (step.healthCheck) {
+        const timeoutSec = Math.ceil(step.healthCheck.timeoutMs / 1000);
+        const intervalSec = Math.max(1, Math.ceil(step.healthCheck.intervalMs / 1000));
+        lines.push(`HC_DEADLINE=$(( $(date +%s) + ${timeoutSec} ))`);
+        lines.push("HC_OK=0");
+        lines.push(`while [ "$(date +%s)" -lt "$HC_DEADLINE" ]; do`);
+        lines.push(`  sleep ${intervalSec}`);
+        lines.push(`  HC_OUT=$(bash -c ${shSingleQuote(step.healthCheck.cmd)} 2>/dev/null)`);
+        if (step.healthCheck.successCondition === "all-up") {
+          lines.push(`  if [ "$HC_OUT" = "all-up" ]; then HC_OK=1; break; fi`);
+        } else {
+          lines.push(`  if [ -n "$HC_OUT" ] && [ -z "$(printf '%s\\n' "$HC_OUT" | grep -vE '^Up|healthy')" ]; then HC_OK=1; break; fi`);
+        }
+        lines.push("done");
+      }
+    } else if (step.type === "devserver") {
+      const devLog = `/tmp/${step.name}.log`;
+      const inner = `cd ${step.cwd} && ${step.cmd}`;
+      if (step.markerPath) {
+        lines.push(`if [ -f ${shSingleQuote(step.markerPath)} ]; then`);
+        lines.push(`  :`);
+        lines.push("else");
+        lines.push(`  setsid bash -c ${shSingleQuote(inner)} < /dev/null > ${devLog} 2>&1 &`);
+        lines.push("fi");
+      } else {
+        lines.push(`setsid bash -c ${shSingleQuote(inner)} < /dev/null > ${devLog} 2>&1 &`);
+      }
+    } else if (step.type === "run") {
+      const cwd = step.cwd || config.workDir;
+      const inner = `cd ${cwd} && ${step.cmd}`;
+      lines.push(`if ! bash -c ${shSingleQuote(inner)} > ${logFile} 2>&1; then`);
+      lines.push(`  fail "${step.label}: $(tail -20 ${logFile})"`);
+      lines.push("fi");
+    }
+  }
+
+  lines.push(`echo ready > "$READY_FILE"`);
+  return lines.join("\n");
+}
+
+type SandboxReadySession = {
+  commands: { run(cmd: string, timeoutMs?: number): Promise<{ stdout?: string | null }> };
+};
+
+export async function waitForSandboxReady(
+  session: SandboxReadySession,
+  timeoutMs = 10 * 60_000,
+): Promise<{ ready: true }> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    let state = "";
+    try {
+      const probe = await session.commands.run(`cat "${SANDBOX_READY_FILE}" 2>/dev/null`, 5_000);
+      state = (probe.stdout ?? "").trim();
+    } catch {
+      state = "";
+    }
+    if (state === "ready") return { ready: true };
+    if (state.startsWith("failed:")) {
+      throw new Error(`sandbox setup failed: ${redactSecrets(state.slice("failed:".length).trim())}`);
+    }
+    await new Promise((r) => setTimeout(r, 3_000));
+  }
+  throw new Error(`sandbox was not ready within ${Math.round(timeoutMs / 1000)}s (status: ${SANDBOX_READY_FILE})`);
+}
+
 // Auxiliary repos baked into a sandbox template alongside the primary
 // repo. Each entry's branch is independently overridable at claim time
 // via the tool's `auxBranches` input. Currently used by the hyperswitch
@@ -882,7 +1015,8 @@ export const sandboxRun: ToolDefinition = {
     "hit the call returns an error, the work is abandoned, and re-running the same command just burns the " +
     "timeout again. For anything that may take more than ~60s use sandbox-run-detached + sandbox-poll-job. " +
     "Auto-detects existing sessions or creates fresh sandboxes as needed. A fresh one-shot sandbox uses the " +
-    "repoUrl profile (pass profile when it has several, see sandbox-list-profiles).",
+    "repoUrl profile (pass profile when it has several, see sandbox-list-profiles). " +
+    "Set waitReady:true to block until background setup (services/dev servers) has finished before running the command.",
   source: "custom:sandbox",
   configSchema: SANDBOX_CONFIG_SCHEMA,
   inputSchema: {
@@ -891,6 +1025,10 @@ export const sandboxRun: ToolDefinition = {
       sessionId: {
         type: "string",
         description: "Optional session ID. If omitted, auto-resolves from conversation context or runs one-shot.",
+      },
+      waitReady: {
+        type: "boolean",
+        description: "Wait for background setup (services/dev servers) to finish before running the command; surfaces the real setup error instead of hanging. Default false.",
       },
       cmd: {
         type: "string",
@@ -919,6 +1057,7 @@ export const sandboxRun: ToolDefinition = {
     if (!cmd?.trim()) return "Error: cmd or command is required.";
     const destructive = destructiveCommandGuard(cmd);
     if (destructive) return destructive;
+    const waitReady = params["waitReady"] === true;
 
     // Try explicit sessionId first
     const explicitSessionId = params["sessionId"] as string | undefined;
@@ -932,6 +1071,13 @@ export const sandboxRun: ToolDefinition = {
       const roExplicit = readOnlyGuard(session, { command: cmd });
       if (roExplicit) return roExplicit;
 
+      if (waitReady) {
+        try {
+          await waitForSandboxReady(session);
+        } catch (err) {
+          return sandboxErr(err);
+        }
+      }
       try {
         const result = await session.commands.run(cmd, timeoutMs);
         return redactAndStringify({ stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode });
@@ -960,6 +1106,13 @@ export const sandboxRun: ToolDefinition = {
         }
         const roStore = readOnlyGuard(session, { command: cmd });
         if (roStore) return roStore;
+        if (waitReady) {
+          try {
+            await waitForSandboxReady(session);
+          } catch (err) {
+            return sandboxErr(err);
+          }
+        }
         try {
           const result = await session.commands.run(cmd, timeoutMs);
           return redactAndStringify({ stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode });
@@ -1021,7 +1174,8 @@ export const sandboxRunDetached: ToolDefinition = {
     "session and returns immediately with a jobId; poll it with sandbox-poll-job. This is the correct tool " +
     "for dependency installs (pnpm/npm/yarn add|install), builds, tsc typechecks, lint, and test suites — " +
     "sandbox-run would time out on these and lose the work, while a detached job keeps running to " +
-    "completion. Prefer starting the job, doing other useful work, then polling.",
+    "completion. Prefer starting the job, doing other useful work, then polling. " +
+    "Set waitReady:true to block until background setup (services/dev servers) has finished before launching the command.",
   source: "custom:sandbox",
   configSchema: SANDBOX_CONFIG_SCHEMA,
   inputSchema: {
@@ -1035,6 +1189,10 @@ export const sandboxRunDetached: ToolDefinition = {
         type: "string",
         description: "Shell command to run in the background",
       },
+      waitReady: {
+        type: "boolean",
+        description: "Wait for background setup (services/dev servers) to finish before launching the command; surfaces the real setup error instead of hanging. Default false.",
+      },
     },
     required: ["sessionId", "cmd"],
   },
@@ -1045,6 +1203,7 @@ export const sandboxRunDetached: ToolDefinition = {
     const cmd = (params["cmd"] ?? params["command"]) as string;
     const destructive = destructiveCommandGuard(cmd);
     if (destructive) return destructive;
+    const waitReady = params["waitReady"] === true;
 
     const session = SESSION_STORE.get(sessionId);
     if (!session) return `Error: Session ${sessionId} not found. Create one with sandbox-create first.`;
@@ -1054,6 +1213,13 @@ export const sandboxRunDetached: ToolDefinition = {
     const roDetached = readOnlyGuard(session, { command: cmd });
     if (roDetached) return roDetached;
 
+    if (waitReady) {
+      try {
+        await waitForSandboxReady(session);
+      } catch (err) {
+        return sandboxErr(err);
+      }
+    }
     try {
       const jobId = await session.commands.runDetached(cmd);
       return JSON.stringify({ jobId });
@@ -2131,6 +2297,7 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
         // connect to backend sandbox" → claw's STALE_PATTERNS fire →
         // claim eviction storm. Instead: 2-sec probes in a JS loop, with
         // sleep on the claw side, so the event loop stays unblocked.
+        if (!BACKGROUND_SETUP_ENABLED) {
         log.push("Waiting for prebake-done marker...");
         // 45-min budget covers the worst-case template cold-start
         // (hyperswitch's prebake gates prebake-done on services-up,
@@ -2217,6 +2384,7 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
         } else {
           log.push("Warning: prebake didn't finish in 45min — proceeding anyway, expect possible npm errors.");
         }
+        }
       } else {
         // Should never happen with the agent-workspace image (entrypoint
         // prebakes the clone), but kept as a safety net for older / bare
@@ -2241,6 +2409,24 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
       // Author every commit as the human who triggered this run, with
       // Xyne Spaces as committer. Runs across primary + aux workdirs.
       await configureGitIdentity(session, allWorkDirs, userEmail, userName, log);
+
+      if (BACKGROUND_SETUP_ENABLED) {
+        await session.commands
+          .run(`echo syncing > "$HOME/.sandbox-ready"`, 5_000)
+          .catch(() => undefined);
+        const orchestratorScript = buildSetupOrchestratorScript(config);
+        await session.commands.runDetached(orchestratorScript);
+        log.push(
+          "Services are starting in the background; preview/test tools will wait for them (status: ~/.sandbox-ready).",
+        );
+        return JSON.stringify({
+          sessionId: session.id,
+          branch: branchName,
+          status: "syncing",
+          ports: config.ports || {},
+          log: log.map(redactSecrets),
+        });
+      }
 
       const jobIds: Record<string, string> = {};
 
