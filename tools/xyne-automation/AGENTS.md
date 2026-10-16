@@ -99,6 +99,10 @@ npm run validate:literals   # browser names, assertion hooks in step defs
 
 `validate` chain: `biome ci` -> `biome format` -> `validate:filename` -> `validate:literals`. All four must pass.
 
+### Release check
+
+`pnpm release:check [--modules=chat,calls] [--allow-dirty]` (repo root or this package) runs the Docker suite on the current checkout and writes `reports/<commit>-runner/release-check-<commit>.html`: branch, commit, who ran it, per-module results. It refuses uncommitted changes to tracked files unless `--allow-dirty` (then listed in the report); untracked files are listed, not blocking. Modules map to test folders in `scripts/release/modules.ts` — when adding a test folder, add it to a module there (unlisted folders still appear in the report under their own name).
+
 ## Execution rules
 
 - Run smallest relevant test scope for changed area.

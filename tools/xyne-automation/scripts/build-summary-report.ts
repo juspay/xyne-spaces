@@ -7,6 +7,7 @@
 //        (default out: <artifactDir>/report.html)
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { moduleLabelForSpec, RELEASE_MODULES } from '@/scripts/release/modules';
 
 interface StepResult {
   status?: string;
@@ -20,7 +21,9 @@ interface ReportItem {
   itemType?: string;
   stepText?: string;
   result?: StepResult;
-  steps?: Array<{ stepText?: string; result?: StepResult }>;
+  // Concepts: their own step text, and their children (steps or nested concepts) under `items`.
+  conceptStep?: { stepText?: string };
+  items?: ReportItem[];
 }
 
 interface Scenario {
@@ -65,6 +68,19 @@ interface RetryRecovery {
 
 type Failure = StepResult & { step?: string };
 
+// Written by release-check.ts next to the Gauge results; absent for plain CI/local runs.
+interface ReleaseCheckInfo {
+  branch: string;
+  commit: string;
+  runBy: string;
+  startedAt: string;
+  finishedAt: string;
+  modules: string[];
+  uncommittedFiles: string[];
+  // Optional: absent in release-check.json files written before it was recorded.
+  untrackedFiles?: string[];
+}
+
 const artifactDir = process.argv[2];
 if (!artifactDir) {
   console.error('usage: build-summary-report.ts <artifactDir> [out.html]');
@@ -84,6 +100,7 @@ const result = JSON.parse(
   fs.readFileSync(path.join(artifactDir, 'json-report', 'result.json'), 'utf8')
 ) as GaugeResult;
 const meta = readJson<RunMetadata>(path.join(artifactDir, 'run-metadata.json')) ?? {};
+const releaseInfo = readJson<ReleaseCheckInfo>(path.join(artifactDir, 'release-check.json'));
 // Written by run-gauge.ts: scenarios re-run after the main pass, as "<spec>:<line>". Anything
 // in retriedAtEnd but not stillFailing recovered, and result.json still says "failed" for it.
 const recovery = readJson<RetryRecovery>(path.join(artifactDir, 'retry-recovery.json')) ?? {
@@ -125,19 +142,23 @@ function screenshotDataUri(r: StepResult): string | null {
   return null;
 }
 
+// Failed steps anywhere in the scenario. Concepts nest steps (and other concepts) under `items`,
+// so walk the whole tree; the label keeps the concept path, e.g. "Logging in › clicking on …".
 function failuresOf(scenario: Scenario): Failure[] {
   const out: Failure[] = [];
-  for (const it of [
-    ...(scenario.contexts ?? []),
-    ...(scenario.items ?? []),
-    ...(scenario.teardowns ?? []),
-  ]) {
-    if (it.itemType === 'step' && it.result?.status === 'failed')
-      out.push({ step: it.stepText, ...it.result });
-    if (it.itemType === 'concept')
-      for (const s of it.steps ?? [])
-        if (s.result?.status === 'failed') out.push({ step: s.stepText, ...s.result });
-  }
+  const walk = (items: ReportItem[], trail: string[]): void => {
+    for (const it of items) {
+      if (it.itemType === 'concept') {
+        walk(it.items ?? [], [...trail, it.conceptStep?.stepText ?? 'concept']);
+      } else if (it.itemType === 'step' && it.result?.status === 'failed') {
+        out.push({ step: [...trail, it.stepText ?? 'step'].join(' › '), ...it.result });
+      }
+    }
+  };
+  walk(
+    [...(scenario.contexts ?? []), ...(scenario.items ?? []), ...(scenario.teardowns ?? [])],
+    []
+  );
   for (const k of ['beforeScenarioHookFailure', 'afterScenarioHookFailure'] as const) {
     const hookFailure = scenario[k];
     if (hookFailure) out.push({ step: k, ...hookFailure });
@@ -165,6 +186,50 @@ const passedCount =
 const hookFailures = (['beforeSuiteHookFailure', 'afterSuiteHookFailure'] as const)
   .filter((k) => result[k])
   .map((k) => ({ where: k, ...result[k] }));
+
+// Per-module totals, in the order modules are declared; folders no module lists come last.
+const moduleOrder = RELEASE_MODULES.map((m) => m.label);
+const moduleStats = new Map<string, { total: number; failed: number; skipped: number }>();
+for (const { spec, sc } of allScenarios) {
+  const label = moduleLabelForSpec(spec.fileName);
+  const stats = moduleStats.get(label) ?? { total: 0, failed: 0, skipped: 0 };
+  stats.total++;
+  if (sc.executionStatus === 'failed' && !recoveredAtEnd(spec, sc)) stats.failed++;
+  else if (sc.executionStatus === 'skipped') stats.skipped++;
+  moduleStats.set(label, stats);
+}
+const rank = (label: string): number => {
+  const i = moduleOrder.indexOf(label);
+  return i === -1 ? moduleOrder.length : i;
+};
+const moduleRows = [...moduleStats.entries()]
+  .sort(([a], [b]) => rank(a) - rank(b) || a.localeCompare(b))
+  .map(([label, st]) => {
+    const passed = st.total - st.failed - st.skipped;
+    const icon = st.failed > 0 ? '❌' : passed === st.total ? '✅' : '⚠️';
+    return `<tr><td>${icon}</td><td>${esc(label)}</td><td>${passed}/${st.total}</td><td>${st.failed || ''}</td><td>${st.skipped || ''}</td></tr>`;
+  })
+  .join('');
+const moduleTable = moduleRows
+  ? `<h2>Modules</h2><table class="mods"><thead><tr><th></th><th>Module</th><th>Passed</th><th>Failed</th><th>Skipped</th></tr></thead><tbody>${moduleRows}</tbody></table>`
+  : '';
+
+const releaseBlock = releaseInfo
+  ? `<div class="release">
+  <div><b>Release check</b> · branch <code>${esc(releaseInfo.branch)}</code> · commit <code>${esc(releaseInfo.commit)}</code></div>
+  <div class="muted">Run by ${esc(releaseInfo.runBy)} · ${esc(releaseInfo.startedAt)} → ${esc(releaseInfo.finishedAt)} · modules: ${esc(releaseInfo.modules.length ? releaseInfo.modules.join(', ') : 'all')}</div>
+  ${
+    releaseInfo.uncommittedFiles.length
+      ? `<div class="warnline">⚠️ Run with uncommitted changes (results may not match the commit): ${esc(releaseInfo.uncommittedFiles.join(', '))}</div>`
+      : '<div class="muted">No uncommitted changes to tracked files: results match the commit above.</div>'
+  }
+  ${
+    releaseInfo.untrackedFiles?.length
+      ? `<details class="muted"><summary>${releaseInfo.untrackedFiles.length} untracked file(s) present (not in the commit)</summary>${esc(releaseInfo.untrackedFiles.join(', '))}</details>`
+      : ''
+  }
+</div>`
+  : '';
 
 const failureBlock = (spec: Spec, sc: Scenario): string =>
   failuresOf(sc)
@@ -214,8 +279,10 @@ const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewp
   pre{white-space:pre-wrap;word-break:break-word;background:#f6f8fa;border-radius:6px;padding:10px;margin:8px 0;font-size:12px}.stack{max-height:280px;overflow:auto}
   .shot{max-width:100%;border:1px solid #d0d7de;border-radius:6px;margin-top:6px}
   details>summary{cursor:pointer}
+  .release{border:1px solid #d0d7de;border-radius:6px;padding:10px 12px;margin:12px 0}.warnline{color:#9a6700;margin-top:4px}
+  table.mods{border-collapse:collapse;margin:4px 0 8px}table.mods th,table.mods td{border:1px solid #d0d7de;padding:4px 10px;text-align:left}table.mods th{background:#f6f8fa}
 </style></head><body>
-<div class="hdr"><h1>Automation report</h1><span class="badge ${status}">${status.toUpperCase()}</span></div>
+<div class="hdr"><h1>${releaseInfo ? `Release check — ${esc(releaseInfo.branch)}` : 'Automation report'}</h1><span class="badge ${status}">${status.toUpperCase()}</span></div>
 <div class="muted">commit <code>${esc(meta.commitHash ?? '')}</code> · ${esc(result.timestamp)} · ${esc(meta.mode ?? '')} · tags <code>${esc(result.tags || '—')}</code></div>
 <div class="chips">
   <div class="chip"><b>${passedCount}</b> / ${allScenarios.length} scenarios passed</div>
@@ -225,6 +292,8 @@ const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewp
   <div class="chip"><b>${retried.length}</b> retried</div>
   <div class="chip"><b>${ms(result.executionTime)}</b> total</div>
 </div>
+${releaseBlock}
+${moduleTable}
 ${hookFailures.length ? `<h2>Suite hook failures</h2>${hookFailures.map((h) => `<div class="fail"><div class="step">${esc(h.where)}</div><pre class="err">${esc(h.errorMessage ?? '')}</pre>${h.stackTrace ? `<details><summary>stack trace</summary><pre class="stack">${esc(h.stackTrace)}</pre></details>` : ''}</div>`).join('')}` : ''}
 ${failed.length ? `<h2>Failures (${failed.length})</h2>${failed.map(({ spec, sc }) => failureBlock(spec, sc)).join('')}` : ''}
 ${retried.length ? `<h2>Passed only after retry (${retried.length})</h2><p class="muted">These flaked — they failed at least once and passed on a later attempt.</p><ul>${retried.map(({ spec, sc }) => scenarioRow(spec, sc)).join('')}</ul>` : ''}
