@@ -4,11 +4,11 @@ import { Session } from "./session.js";
 import type { CreateSessionOptions, ExecResult, KataClientOptions } from "./types.js";
 
 const GROUP = "extensions.agents.x-k8s.io";
-const SANDBOXES_GROUP = "agents.x-k8s.io";
-const VERSION = "v1alpha1";
+export const SANDBOXES_GROUP = "agents.x-k8s.io";
+export const VERSION = "v1alpha1";
 const SANDBOX_CLAIMS_PLURAL = "sandboxclaims";
-const SANDBOXES_PLURAL = "sandboxes";
-const DEFAULT_NAMESPACE = "xyne-apps";
+export const SANDBOXES_PLURAL = "sandboxes";
+export const DEFAULT_NAMESPACE = "xyne-apps";
 const DEFAULT_TEMPLATE = "kata-workspace-template";
 const DEFAULT_SESSION_TIMEOUT_MS = 60 * 60 * 1000;
 const DEFAULT_READY_TIMEOUT_MS = 120 * 1000;
@@ -56,7 +56,7 @@ function randomHex(length: number): string {
   return randomBytes(Math.ceil(length / 2)).toString("hex").slice(0, length);
 }
 
-function createKubeClient(): CustomObjectsApi {
+export function createKubeClient(): CustomObjectsApi {
   const config = new KubeConfig();
 
   // loadFromDefault supports both execution modes: it reads KUBECONFIG or

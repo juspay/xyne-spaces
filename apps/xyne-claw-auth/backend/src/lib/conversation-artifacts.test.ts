@@ -7,7 +7,28 @@ const state = vi.hoisted(() => ({
   postedBy: [] as string[],
   accessVerdict: "denied" as "ok" | "denied" | "unknown",
   accessChecks: [] as Array<{ conversationId: string; userId: string }>,
+  rows: [] as Array<{ id: string; conversationId: string; kind: string; refService: string; refId: string; status: string }>,
 }));
+
+type RowWhere = {
+  id?: { in: string[] };
+  refService?: string;
+  refId?: string | { in: string[] };
+  kind?: { in: string[] };
+  status?: string;
+  conversationId?: { startsWith: string };
+};
+
+function matches(row: (typeof state.rows)[number], where: RowWhere): boolean {
+  if (where.id && !where.id.in.includes(row.id)) return false;
+  if (where.refService && row.refService !== where.refService) return false;
+  if (typeof where.refId === "string" && row.refId !== where.refId) return false;
+  if (where.refId && typeof where.refId === "object" && !where.refId.in.includes(row.refId)) return false;
+  if (where.kind && !where.kind.in.includes(row.kind)) return false;
+  if (where.status && row.status !== where.status) return false;
+  if (where.conversationId && !row.conversationId.startsWith(where.conversationId.startsWith)) return false;
+  return true;
+}
 
 vi.mock("./conversation-access.js", () => ({
   baseConversationId: (id: string | null | undefined) => (id ? id.split("__branch__")[0] : undefined),
@@ -34,6 +55,13 @@ vi.mock("../db.js", () => ({
         state.upserts.push(args);
         return { id: "art_1", ...args.create };
       }),
+      findFirst: vi.fn(async (args: { where: RowWhere }) => state.rows.find((row) => matches(row, args.where)) ?? null),
+      findMany: vi.fn(async (args: { where: RowWhere }) => state.rows.filter((row) => matches(row, args.where))),
+      updateMany: vi.fn(async (args: { where: RowWhere; data: { status: string } }) => {
+        const hit = state.rows.filter((row) => matches(row, args.where));
+        for (const row of hit) row.status = args.data.status;
+        return { count: hit.length };
+      }),
     },
     chatMessage: {
       findFirst: vi.fn(async (args: { where: { userId: { in: string[] } | string } }) => {
@@ -44,7 +72,14 @@ vi.mock("../db.js", () => ({
   },
 }));
 
-const { canReadConversation, detectLinkProvider, normalizeExternalUrl, recordConversationArtifact, toOpenRef } = await import(
+const {
+  canReadConversation,
+  detectLinkProvider,
+  markSandboxArtifactsStale,
+  normalizeExternalUrl,
+  recordConversationArtifact,
+  toOpenRef,
+} = await import(
   "./conversation-artifacts.js"
 );
 const { ingestArtifactSignals, ingestSandboxPreviewSignals } = await import("./conversation-artifact-signals.js");
@@ -424,5 +459,59 @@ describe("canReadConversation (XYNE-66344)", () => {
     expect(await canReadConversation("chat-abc", ["claw_d"], "spaces_d")).toBe(false);
     expect(await canReadConversation("thread_1", ["claw_d"])).toBe(false);
     expect(state.accessChecks).toEqual([]);
+  });
+});
+
+describe("ended sandboxes are marked STALE (XYNE-66339)", () => {
+  const row = (id: string, conversationId: string, kind: string, refId: string) => ({
+    id,
+    conversationId,
+    kind,
+    refService: "CLAW",
+    refId,
+    status: "ACTIVE",
+  });
+  const statuses = () => Object.fromEntries(state.rows.map((r) => [r.id, r.status]));
+
+  beforeEach(() => {
+    state.upserts = [];
+    state.signalled = [];
+    state.rows = [
+      row("a1", "conv_1", "PREVIEW", "sbx-1"),
+      row("a2", "conv_1", "DIFF", "sbx-1"),
+      row("a3", "conv_2", "PREVIEW", "sbx-1"),
+      row("a4", "conv_1", "PREVIEW", "sbx-2"),
+      row("a5", "conv_1", "FILE", "sbx-1"),
+    ];
+  });
+
+  it("marks every preview and code-changes row for the sandbox and refreshes each conversation", async () => {
+    expect(await markSandboxArtifactsStale(["sbx-1", "../bad"])).toBe(3);
+    expect(statuses()).toEqual({ a1: "STALE", a2: "STALE", a3: "STALE", a4: "ACTIVE", a5: "ACTIVE" });
+    expect([...state.signalled].sort()).toEqual(["conv_1", "conv_2"]);
+  });
+
+  it("marks the destroyed sandbox from a sandbox-destroy result, preferring sandboxId", async () => {
+    await ingestArtifactSignals({
+      ...CTX,
+      toolName: "sandbox-destroy",
+      toolResult: { content: [{ type: "text", text: JSON.stringify({ sessionId: "sbx-1", sandboxId: "sbx-2", destroyed: true }) }] },
+    });
+    expect(statuses()).toMatchObject({ a1: "ACTIVE", a4: "STALE" });
+  });
+
+  it("falls back to sessionId for a bare JSON result", async () => {
+    await ingestArtifactSignals({ ...CTX, toolName: "sandbox-destroy", toolResult: JSON.stringify({ sessionId: "sbx-2", destroyed: true }) });
+    expect(statuses()["a4"]).toBe("STALE");
+  });
+
+  it("changes nothing when the destroy failed", async () => {
+    await ingestArtifactSignals({
+      ...CTX,
+      toolName: "sandbox-destroy",
+      toolResult: JSON.stringify({ sessionId: "sbx-1", sandboxId: "sbx-1", destroyed: false, error: "boom" }),
+    });
+    await ingestArtifactSignals({ ...CTX, toolName: "sandbox-destroy", toolResult: "Error: Session sbx-1 not found or already destroyed." });
+    expect(Object.values(statuses())).not.toContain("STALE");
   });
 });
