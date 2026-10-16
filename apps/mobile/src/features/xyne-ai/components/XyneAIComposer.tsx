@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useMemo,
   useState,
   type Dispatch,
   type ReactElement,
@@ -50,6 +51,10 @@ import {
   composerSendOpacity,
 } from '@/src/components/input-composer/composer-input-typography';
 import type { ComposerAttachment } from '@/src/components/input-composer/input-composer.types';
+import type {
+  MentionChannelOption,
+  MentionUserOption,
+} from '@/src/components/input-composer/utils/mentions';
 import { MAX_COMPOSER_ATTACHMENT_COUNT } from '@/src/components/input-composer/utils/attachmentPolicy';
 import {
   pickFromCamera,
@@ -66,11 +71,19 @@ import { haptics } from '@/src/utils/haptics';
 import type { AttachedContextItem, AttachedFile } from '../api/xyneAIRequest';
 import type { ModeState, XyneAISelection } from '../hooks/useXyneAISelection';
 import { MAX_FILES, fileLimitError, withCommand } from '../model/composerInputs';
-import { isCollectionPick } from '../model/contextPicks';
+import {
+  channelPick,
+  isCollectionPick,
+  personPick,
+  pickKey,
+  togglePick,
+} from '../model/contextPicks';
+import { activeMention, insertMention } from '../model/mentionTrigger';
 import { THINKING_OPTIONS, modelPillLabel } from '../model/modelSelection';
 import { AgentDot } from './AgentDot';
 import { CollectionsSheet } from './CollectionsSheet';
 import { ContextPickerSheet, ICONS } from './ContextPickerSheet';
+import { MentionSuggestions } from './MentionSuggestions';
 import {
   AgentSheet,
   ModelSheet,
@@ -312,11 +325,7 @@ const PlusSheet = ({
     >
       <View className='flex-row gap-3'>
         <AttachTile icon={Camera} label='Camera' onPress={attach(pickFromCamera)} />
-        <AttachTile
-          icon={ImageIcon}
-          label='Photos'
-          onPress={attach(pickFromGallery)}
-        />
+        <AttachTile icon={ImageIcon} label='Photos' onPress={attach(pickFromGallery)} />
         <AttachTile icon={FileText} label='Files' onPress={attach(pickFromFiles)} />
       </View>
       <SheetCard>
@@ -504,6 +513,8 @@ export const XyneAIComposer = ({
   const [context, setContext] = useState<AttachedContextItem[]>([]);
   const [attachments, setAttachments] = useState<AttachedFile[]>([]);
   const [sheet, setSheet] = useState<Sheet>();
+  const [cursor, setCursor] = useState(0);
+  const [forcedSelection, setForcedSelection] = useState<{ start: number; end: number }>();
   const { theme } = useUniwind();
   const surfaceColor = useCSSVariable('--color-conversation-input-bg') as string;
   const textColor = useCSSVariable('--color-conversation-input-text') as string;
@@ -557,12 +568,23 @@ export const XyneAIComposer = ({
     setAttachments([]);
   };
 
-  // A fresh "@", or a "/" starting the message, opens its picker instead of being typed.
+  const trigger = useMemo(() => activeMention(text, cursor), [text, cursor]);
+
+  // A "/" starting the message opens the commands picker instead of being typed.
   const handleChangeText = (next: string): void => {
-    const typedAt = next.length === text.length + 1 && next.endsWith('@') && /(^|\s)$/.test(text);
-    if (typedAt) openSheet('context');
-    else if (text === '' && next === '/') openSheet('commands');
+    if (text === '' && next === '/') openSheet('commands');
     else setText(next);
+  };
+
+  const pickMention = (pick: AttachedContextItem, label: string): void => {
+    if (!trigger) return;
+    const inserted = insertMention(text, trigger, cursor, label);
+    setText(inserted.text);
+    setCursor(inserted.cursor);
+    setForcedSelection({ start: inserted.cursor, end: inserted.cursor });
+    setContext(current =>
+      current.some(item => pickKey(item) === pickKey(pick)) ? current : togglePick(current, pick),
+    );
   };
 
   const plusButton = (
@@ -592,107 +614,127 @@ export const XyneAIComposer = ({
   );
 
   return (
-    <View
-      className='overflow-hidden border-border'
-      style={{ borderRadius: COMPOSER_RADIUS, borderWidth: StyleSheet.hairlineWidth }}
-    >
-      <GlassSurface
-        fallbackColor={surfaceColor}
-        colorScheme={theme === 'dark' ? 'dark' : 'light'}
-        style={[StyleSheet.absoluteFill, { borderRadius: COMPOSER_RADIUS }]}
-      />
-      {hasTags ? (
-        <ChipRow className='grow-0 px-3 pt-3'>
-          {editing ? (
-            <Chip
-              label='Editing message'
-              iconColor={iconColor}
-              leading={<Pencil size={13} color={iconColor} />}
-              onPress={editing.onCancel}
-            />
-          ) : null}
-          {channel ? (
-            <Chip
-              label={channel.label}
-              iconColor={iconColor}
-              leading={<Hash size={13} color={iconColor} />}
-              onPress={channel.onRemove}
-            />
-          ) : null}
-          {thread ? (
-            <Chip
-              label={thread.label}
-              iconColor={iconColor}
-              leading={
-                thread.senderId ? (
-                  <Avatar userIds={[thread.senderId]} size={16} />
-                ) : (
-                  <MessageCircleMore size={13} color={iconColor} />
-                )
-              }
-              onPress={thread.onRemove}
-            />
-          ) : null}
-          {agent ? (
-            <Chip
-              label={agent.name}
-              iconColor={iconColor}
-              leading={<AgentDot color={agent.color} />}
-              onPress={(): void => onSelectAgent(undefined)}
-            />
-          ) : null}
-          <ModeChip icon={Globe} label='Web search' mode={modes.webSearch} />
-          <ModeChip icon={Target} label='Deep search' mode={modes.deepResearch} />
-          {context.map(item => {
-            const Icon = ICONS[item.type];
-            return (
-              <Chip
-                key={`${item.type}:${item.id}`}
-                label={item.title}
-                iconColor={iconColor}
-                leading={Icon ? <Icon size={13} color={iconColor} /> : undefined}
-                onPress={(): void => setContext(current => current.filter(other => other !== item))}
-              />
-            );
-          })}
-          {attachments.map((file, index) => (
-            <Chip
-              key={`${index}:${file.filename}`}
-              label={file.filename}
-              iconColor={iconColor}
-              leading={<Paperclip size={13} color={iconColor} />}
-              onPress={(): void =>
-                setAttachments(current => current.filter(other => other !== file))
-              }
-            />
-          ))}
-        </ChipRow>
+    <>
+      {trigger && sheet === undefined ? (
+        <MentionSuggestions
+          trigger={trigger}
+          onPickUser={({ id, name }: MentionUserOption): void =>
+            pickMention(personPick(id, name), name)
+          }
+          onPickChannel={({ id, name }: MentionChannelOption): void =>
+            pickMention(channelPick(id, name), name)
+          }
+        />
       ) : null}
-      <TextInput
-        multiline
-        value={text}
-        onChangeText={handleChangeText}
-        className='px-4 pb-1 pt-3'
-        style={[styles.input, { color: textColor }]}
-      />
-      <View className='flex-row items-center gap-2 px-2 pb-2 pt-1'>
-        {plusButton}
-        <ModelPill selection={selection} onPress={(): void => openSheet('model')} />
-        <View className='flex-1' />
-        {sendButton}
+      <View
+        className='overflow-hidden border-border'
+        style={{ borderRadius: COMPOSER_RADIUS, borderWidth: StyleSheet.hairlineWidth }}
+      >
+        <GlassSurface
+          fallbackColor={surfaceColor}
+          colorScheme={theme === 'dark' ? 'dark' : 'light'}
+          style={[StyleSheet.absoluteFill, { borderRadius: COMPOSER_RADIUS }]}
+        />
+        {hasTags ? (
+          <ChipRow className='grow-0 px-3 pt-3'>
+            {editing ? (
+              <Chip
+                label='Editing message'
+                iconColor={iconColor}
+                leading={<Pencil size={13} color={iconColor} />}
+                onPress={editing.onCancel}
+              />
+            ) : null}
+            {channel ? (
+              <Chip
+                label={channel.label}
+                iconColor={iconColor}
+                leading={<Hash size={13} color={iconColor} />}
+                onPress={channel.onRemove}
+              />
+            ) : null}
+            {thread ? (
+              <Chip
+                label={thread.label}
+                iconColor={iconColor}
+                leading={
+                  thread.senderId ? (
+                    <Avatar userIds={[thread.senderId]} size={16} />
+                  ) : (
+                    <MessageCircleMore size={13} color={iconColor} />
+                  )
+                }
+                onPress={thread.onRemove}
+              />
+            ) : null}
+            {agent ? (
+              <Chip
+                label={agent.name}
+                iconColor={iconColor}
+                leading={<AgentDot color={agent.color} />}
+                onPress={(): void => onSelectAgent(undefined)}
+              />
+            ) : null}
+            <ModeChip icon={Globe} label='Web search' mode={modes.webSearch} />
+            <ModeChip icon={Target} label='Deep search' mode={modes.deepResearch} />
+            {context.map(item => {
+              const Icon = ICONS[item.type];
+              return (
+                <Chip
+                  key={`${item.type}:${item.id}`}
+                  label={item.title}
+                  iconColor={iconColor}
+                  leading={Icon ? <Icon size={13} color={iconColor} /> : undefined}
+                  onPress={(): void =>
+                    setContext(current => current.filter(other => other !== item))
+                  }
+                />
+              );
+            })}
+            {attachments.map((file, index) => (
+              <Chip
+                key={`${index}:${file.filename}`}
+                label={file.filename}
+                iconColor={iconColor}
+                leading={<Paperclip size={13} color={iconColor} />}
+                onPress={(): void =>
+                  setAttachments(current => current.filter(other => other !== file))
+                }
+              />
+            ))}
+          </ChipRow>
+        ) : null}
+        <TextInput
+          multiline
+          value={text}
+          onChangeText={handleChangeText}
+          onSelectionChange={({ nativeEvent }): void => {
+            setCursor(nativeEvent.selection.end);
+            setForcedSelection(undefined);
+          }}
+          selection={forcedSelection}
+          className='px-4 pb-1 pt-3'
+          style={[styles.input, { color: textColor }]}
+        />
+        <View className='flex-row items-center gap-2 px-2 pb-2 pt-1'>
+          {plusButton}
+          <ModelPill selection={selection} onPress={(): void => openSheet('model')} />
+          <View className='flex-1' />
+          {sendButton}
+        </View>
+        <ComposerSheets
+          sheet={sheet}
+          setSheet={setSheet}
+          openSheet={openSheet}
+          selection={selection}
+          onSelectAgent={onSelectAgent}
+          context={context}
+          onContextChange={setContext}
+          onAttach={attach}
+          onCommand={onCommand}
+        />
       </View>
-      <ComposerSheets
-        sheet={sheet}
-        setSheet={setSheet}
-        openSheet={openSheet}
-        selection={selection}
-        onSelectAgent={onSelectAgent}
-        context={context}
-        onContextChange={setContext}
-        onAttach={attach}
-        onCommand={onCommand}
-      />
-    </View>
+    </>
   );
 };
 
