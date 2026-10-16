@@ -127,7 +127,13 @@ async function jobsFor(hubId: string, change: SdlcSearchChange): Promise<VespaJo
   const hub = await db.channel.findUnique({ where: { id: hubId }, select: { type: true, workspaceId: true } });
   if (hub && hub.type !== ChannelType.SDLC) return [];
   const base = hub?.workspaceId ? { workspaceId: hub.workspaceId } : {};
-  const add = (job: VespaJob) => jobs.set(`${job.schema}:${job.docId}`, { ...job, ...base });
+  const add = (job: VespaJob) => {
+    const key = `${job.schema}:${job.docId}`;
+    const queued = jobs.get(key);
+    // Two field-scoped updates of one entry become one, with both sets of fields.
+    const fields = queued?.fields && job.fields ? [...new Set([...queued.fields, ...job.fields])] : job.fields;
+    jobs.set(key, { ...job, ...(fields ? { fields } : {}), ...base });
+  };
 
   // Which entries a change affects is read from the hub's links, a few rows at a time; the values
   // of each entry are worked out when its job runs (the mapper, sdlc-index.ts).
@@ -185,11 +191,12 @@ async function jobsFor(hubId: string, change: SdlcSearchChange): Promise<VespaJo
       add({ schema: messageSchema, jobType: 'update', docId: m.messageId, fields: [...SDLC_DISCUSSION_FIELDS] });
     }
   };
-  // A document or upload; with its dependents when its place changed: the tickets linked to it
-  // and the discussions started on it sit where it sits.
-  const document = async (type: string, id: string, withDependents: boolean) => {
+  // A document or upload, updating only the SDLC fields the change affects; with its dependents
+  // when its place changed: the tickets linked to it and the discussions started on it sit where
+  // it sits. A change of place sends every SDLC field: leaving the hub clears them all.
+  const document = async (type: string, id: string, withDependents: boolean, fields: readonly string[] = SDLC_FILE_FIELDS) => {
     const app = type === 'ATTACHMENT' ? SubApp.CHAT_ATTACHMENT : SubApp.CANVAS;
-    add({ schema: fileSchema, jobType: 'update', docId: id, app, fields: [...SDLC_FILE_FIELDS] });
+    add({ schema: fileSchema, jobType: 'update', docId: id, app, fields: [...fields] });
     if (!withDependents) return;
     const ticketLinks = await db.sdlcEntityLink.findMany({
       where: {
@@ -229,7 +236,8 @@ async function jobsFor(hubId: string, change: SdlcSearchChange): Promise<VespaJo
     if (type === 'TRACK' || type === 'FOLDER') {
       if (placing) await container(id, removed);
     } else if (type === 'CANVAS' || type === 'ATTACHMENT') {
-      if (placing || relation === 'CONTEXT') await document(type, id, placing);
+      if (placing) await document(type, id, true);
+      else if (relation === 'CONTEXT') await document(type, id, false, ['sdlcRelatedDocumentIds']);
     } else if (type === 'TICKET') {
       ticket(id);
     } else if (type === 'CONVERSATION') {
@@ -254,13 +262,13 @@ async function jobsFor(hubId: string, change: SdlcSearchChange): Promise<VespaJo
     else if (type === 'CANVAS' || type === 'ATTACHMENT') await document(type, id, true);
   }
   for (const id of change.containers ?? []) await container(id);
-  for (const id of change.documents ?? []) await document('CANVAS', id, false);
+  for (const id of change.documents ?? []) await document('CANVAS', id, false, ['sdlcStatus']);
   if (change.typeIds?.length) {
     const canvases = await db.canvas.findMany({
       where: { channelId: hubId, folderId: { in: change.typeIds } },
       select: { id: true },
     });
-    for (const canvas of canvases) await document('CANVAS', canvas.id, false);
+    for (const canvas of canvases) await document('CANVAS', canvas.id, false, ['sdlcTypeName']);
   }
   for (const id of change.repositories ?? []) await repository(id);
   for (const id of change.attachedRepositories ?? []) {
