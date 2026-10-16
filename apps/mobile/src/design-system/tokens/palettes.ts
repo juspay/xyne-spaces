@@ -27,7 +27,7 @@ const PALETTES = {
        * nowhere brighter to go and a menu can only be told apart by its
        * shadow.
        */
-      background: neutral[50],
+      background: neutral[0],
       foreground: neutral[900],
       muted: neutral[600],
       surface: neutral[100],

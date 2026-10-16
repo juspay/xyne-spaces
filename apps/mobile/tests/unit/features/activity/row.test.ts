@@ -67,8 +67,45 @@ describe('buildActivityRow', () => {
     assert.equal(row.badge, 'mention');
     assert.equal(row.timeMs, 2_000);
     assert.deepEqual(row.subject, { kind: 'channel', label: 'payments-core' });
-    assert.deepEqual(row.body, { kind: 'message', content: '<p>hi</p>', senderId: 'u1' });
+    assert.deepEqual(row.body, {
+      kind: 'message',
+      content: '<p>hi</p>',
+      senderId: 'u1',
+      conversationId: 'v1',
+      attachments: [],
+    });
     assert.equal(row.target.kind, 'message');
+  });
+
+  it('carries the message attachments, and no more than the grid needs', () => {
+    const row = buildActivityRow(
+      activity({
+        message: {
+          messageId: 'm1',
+          senderId: 'u1',
+          content: '',
+          conversation: { channelId: 'c1', conversationId: 'v1' },
+          attachments: [
+            {
+              id: 'f1',
+              mimetype: 'image/png',
+              originalFilename: 'a.png',
+              size: 10,
+              metadata: null,
+            },
+            { id: 'f2', mimetype: null, originalFilename: null, size: null, metadata: null },
+          ],
+        },
+      }),
+      ctx,
+    );
+    assert.ok(row);
+    assert.equal(row.body.kind, 'message');
+    if (row.body.kind !== 'message') return;
+    assert.deepEqual(row.body.attachments, [
+      { id: 'f1', mimetype: 'image/png', originalFilename: 'a.png', size: 10 },
+      { id: 'f2', mimetype: 'application/octet-stream' },
+    ]);
   });
 
   it('marks read activities as not unread', () => {

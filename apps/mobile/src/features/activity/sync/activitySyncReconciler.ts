@@ -7,6 +7,10 @@ import {
   selectActivitiesForWorkspace,
   selectVisibleActivities,
 } from '@/src/features/activity/domain/activitySelectors';
+import {
+  getActorFilterKey,
+  type ActivityActorFilter,
+} from '@/src/features/activity/domain/activityActorFilter';
 import type { ActivityLike, ActivityTab } from '@/src/features/activity/domain/activityTypes';
 import type { ActivityCursor } from '@/src/utils/activitySnapshotCache';
 import type { ActivityWithRelated } from '@/src/types/activity';
@@ -39,6 +43,7 @@ type ReconcileActivityFirstPageArgs = ReconcileUnreadActivitiesArgs & {
   showUnreadOnly: boolean;
   currentTypes: string[];
   classificationFilter: ActivityClassification[] | undefined;
+  actor?: ActivityActorFilter | undefined;
   pageSize: number;
   resolveDisplayPage: (
     rawPage: ActivityWithRelated[],
@@ -106,6 +111,7 @@ export const reconcileActivityFirstPage = ({
   showUnreadOnly,
   currentTypes,
   classificationFilter,
+  actor,
   pageSize,
   resolveDisplayPage,
 }: ReconcileActivityFirstPageArgs): Promise<ActivityFirstPageReconcileResult> => {
@@ -117,6 +123,7 @@ export const reconcileActivityFirstPage = ({
     showUnreadOnly ? 'unread' : 'all',
     currentTypes.join(','),
     classificationFilter?.join(',') ?? 'none',
+    getActorFilterKey(actor),
   ].join(':');
 
   return withSharedPromise(firstPageInFlight, cacheKey, async () => {
@@ -128,6 +135,7 @@ export const reconcileActivityFirstPage = ({
           types: currentTypes,
           classification: classificationFilter,
           showUnreadOnly,
+          actor,
         }),
         COMPLETE_QUERY_OPTIONS,
       ),
