@@ -17,22 +17,24 @@ export async function clickHoverActionOnMessage(
     .first()
     .locator(`[data-testid^="chat-message-"]:has-text("${messageText}")`)
     .last();
-  await message.waitFor({ state: 'visible' });
-
   const actionButton = page.locator(hoverActionSelector).first();
-  // The toolbar hides whenever the list scrolls (e.g. a new message arrives), and
-  // re-hovering the same point fires no new pointerover, so move the pointer off
-  // the list first to make every attempt a fresh hover.
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    await page.mouse.move(0, 0);
-    await message.scrollIntoViewIfNeeded();
-    await message.hover({ force: true });
+
+  // Each attempt starts over: the row can re-render under us (a just-sent message
+  // is swapped for the saved one, new messages arrive), the toolbar hides whenever
+  // the list scrolls, and re-hovering the same point fires no new pointerover, so
+  // the pointer moves off the list before every hover.
+  const attempts = 5;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
+      await message.waitFor({ state: 'visible', timeout: 15000 });
+      await page.mouse.move(0, 0);
+      await message.scrollIntoViewIfNeeded({ timeout: 5000 });
+      await message.hover({ force: true, timeout: 5000 });
       await actionButton.waitFor({ state: 'visible', timeout: 5000 });
       await actionButton.click({ force: true, timeout: 5000 });
       return;
     } catch (error) {
-      if (attempt === 3) {
+      if (attempt === attempts) {
         throw error;
       }
     }

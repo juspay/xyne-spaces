@@ -1183,61 +1183,14 @@ export default class BrowserSteps {
       });
   }
 
-  /**
-   * Atomic hover-and-click for hover action toolbars.
-   *
-   * Why this exists:
-   * The HoverActionsToolbar in the dashboard is rendered ONLY while the parent
-   * message has hover state (`if (!isVisible && !isDropdownOpen) return null`).
-   * The toolbar is positioned at `-top-7 right-4` - outside the message's
-   * bounding box. When Playwright tries to do separate hover + click steps,
-   * the mouse path from message to button can leave the message's bbox,
-   * triggering `onMouseLeave`, which UNMOUNTS the toolbar mid-click.
-   *
-   * The fix: dispatch synthetic `mouseover`/`mouseenter` events directly on
-   * the message DOM node (this triggers React's onMouseEnter handler, sets
-   * state, mounts the toolbar) and then click the action via JavaScript.
-   * No physical mouse involved = no mouseleave race = bulletproof.
-   */
+  // Real pointer hover with retries (tests/shared/support/message-hover.ts): synthetic
+  // mouseover events no longer reliably open the message hover toolbar.
   @Step('clicking hover action <hoverActionSelector> on message with text <messageText>')
   public async clickHoverActionOnMessage(
     hoverActionSelector: string,
     messageText: string
   ): Promise<void> {
-    const page = testContext.activePage;
-
-    // Locate the message bubble; fall back to last message if text match fails
-    let message = page.locator(`[data-testid^="chat-message-"]:has-text("${messageText}")`).last();
-    if (!(await message.isVisible().catch(() => false))) {
-      message = page.locator('[data-testid^="chat-message-"]').last();
-    }
-    await message.waitFor({ state: 'visible' });
-    await message.scrollIntoViewIfNeeded();
-
-    // Trigger hover programmatically. We dispatch BOTH `mouseover` and
-    // `mouseenter` because React's synthetic event system listens to
-    // mouseover (delegated) but some components also listen to mouseenter.
-    // Using bubbles:true on mouseover ensures it propagates up to the
-    // ChatBubble parent that holds the onMouseEnter handler.
-    // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context
-    // @ts-ignore - Element and MouseEvent exist in browser context
-    await message.evaluate((el) => {
-      // biome-ignore lint/suspicious/noTsIgnore: browser context
-      // @ts-ignore - MouseEvent exists in browser context
-      el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
-      // biome-ignore lint/suspicious/noTsIgnore: browser context
-      // @ts-ignore - MouseEvent exists in browser context
-      el.dispatchEvent(new MouseEvent('mouseenter', { bubbles: false, cancelable: true }));
-    });
-
-    // Wait for the specific action button to mount (React re-render must complete)
-    const actionButton = page.locator(hoverActionSelector).first();
-    await actionButton.waitFor({ state: 'visible', timeout: 10000 });
-
-    // Click the button. Use force:true so Playwright doesn't try to scroll
-    // or move the physical mouse (which would risk triggering mouseleave on
-    // the message and unmounting the toolbar between scroll and click).
-    await actionButton.click({ force: true });
+    await hoverAndClickActionOnMessage(hoverActionSelector, messageText);
   }
 
   @Step(
