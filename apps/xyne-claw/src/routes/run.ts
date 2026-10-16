@@ -58,6 +58,7 @@ import { loadMcpToolsForUser,
 } from "../mcp.js";
 import {
   buildSdlcRunContextSection,
+  SDLC_CONTEXT_UNAVAILABLE_SECTION,
   packSdlcRunMeta,
   SDLC_DIRECT_TOOL_NAMES,
   SDLC_META_KEYS,
@@ -4008,7 +4009,11 @@ export async function processTask(
       : experiment
       ? `\n\n## Experiment mode\nYou are in a time-boxed experiment (epoch ${experiment.epoch}; deadline ${experiment.deadlineAt}; focus ${experiment.focus ?? "unspecified"}). You cannot finish early — end-experiment refuses before the deadline. Loop: read the ledger → declare a hypothesis (experiment-ledger action=hypothesis) → gather PROOF in the sandbox (failing test, benchmark delta, profile) → record the finding with its proof path. Never re-test refuted hypotheses. If your current lead dies, pick a different subsystem. Prose without a recorded finding is wasted time.`
       : "";
-    const authoritativeSdlcContext = trustedSdlcContext ? buildSdlcRunContextSection(trustedSdlcContext) : "";
+    const authoritativeSdlcContext = trustedSdlcContext
+      ? buildSdlcRunContextSection(trustedSdlcContext)
+      : typeof agentConfig?.["sdlcContextError"] === "string"
+        ? SDLC_CONTEXT_UNAVAILABLE_SECTION
+        : "";
     // R4: when tool-result sifting is on, tell the model up front what it will
     // see and how to get the raw result — not only after the fact per result.
     const siftGuide = optEnabled("jev_result_sift") ? RESULT_SIFT_GUIDE : "";
@@ -4138,6 +4143,7 @@ export async function processTask(
         modelSettings,
         ...(structuredOutputActive ? { structuredOutputRef } : {}),
         ...(isTwinMentionFlow ? { twinDeliverRef } : {}),
+        questionPosted: () => getPendingQuestions().some((q) => q.purpose !== "follow_up_suggestions"),
         // Debug telemetry only — agent.ts emits session_tools/mode_switch events.
         ...(isPlanMode ? { mode: "plan" as const } : mode ? { mode } : {}),
         ...(planContinuation ? { planContinuation: true } : {}),
