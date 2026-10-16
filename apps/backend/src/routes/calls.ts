@@ -60,7 +60,7 @@ router.post(
 );
 router.patch('/summary-templates/:templateId', summaryTemplateController.update);
 router.delete('/summary-templates/:templateId', summaryTemplateController.delete);
-// Pulse org list proxy (must be before /:callId wildcard)
+// Pulse org list proxy (must be before /:callId wildcard); requires ?channelId of a Pulse-enabled channel the user belongs to
 router.get('/pulse-orgs', callController.getPulseOrgs);
 
 router.post('/summary-prompt/edit', callController.editSummaryPrompt);

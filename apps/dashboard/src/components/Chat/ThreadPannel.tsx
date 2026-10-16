@@ -1918,11 +1918,7 @@ export const ThreadMessages = ({
                 value='details'
                 className='flex-1 min-h-0 bg-background overflow-hidden data-[state=inactive]:hidden'
               >
-                <TicketDetails
-                  ticketId={derivedTicketId}
-                  hideRelationships
-                  onFillRCA={() => setActiveTab('rca')}
-                />
+                <TicketDetails ticketId={derivedTicketId} onFillRCA={() => setActiveTab('rca')} />
               </Tabs.Content>
             )}
 

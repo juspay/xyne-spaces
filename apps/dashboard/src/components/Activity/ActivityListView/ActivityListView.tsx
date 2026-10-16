@@ -22,6 +22,7 @@ import type { ActivityWithRelated } from '../../../types/activity';
 import { ActivityClassification, UserType } from '@xyne/shared';
 import { Bot, ChevronUp, UserUser02 } from '@xyne/icons';
 import { ActivityActorPicker } from '../ActivityActorPicker';
+import { ActivityChannelPicker } from '../ActivityChannelPicker';
 import { ActivityEmptyIcon } from '../../icons';
 import Avatar from '../../ui/Avatar/Avatar';
 import { useUsersById } from '../../../hooks/useUsers';
@@ -66,6 +67,8 @@ import {
   AlignVerticalCenter,
   SpatialScreen,
   NotificationBellOn,
+  Hashtag,
+  ChevronRight,
 } from '@xyne/icons';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
 
@@ -243,6 +246,11 @@ const ActivityListView = (): ReactElement => {
   });
   const [actorUserId, setActorUserId] = useState<string | null>(null);
   const [actorPickerOpen, setActorPickerOpen] = useState(false);
+  const [channelFilter, setChannelFilter] = useState<string[]>(() => {
+    const stored = window.localStorage.getItem('activity_channel_filter');
+    return stored ? (JSON.parse(stored) as string[]) : [];
+  });
+  const [showChannelMenu, setShowChannelMenu] = useState(false);
   const usersById = useUsersById();
 
   const [showUnreadOnly, setShowUnreadOnly] = useState<boolean>(() => {
@@ -314,6 +322,11 @@ const ActivityListView = (): ReactElement => {
     setActorUserId(null);
     setActorPickerOpen(false);
     window.localStorage.setItem('activity_actor_filter', next);
+  }, []);
+
+  const handleChannelFilterChange = useCallback((next: string[]): void => {
+    setChannelFilter(next);
+    window.localStorage.setItem('activity_channel_filter', JSON.stringify(next));
   }, []);
 
   const handleActionableToggle = useCallback((checked: boolean): void => {
@@ -409,7 +422,7 @@ const ActivityListView = (): ReactElement => {
     setHasMore(true);
     setIsLoading(true);
     activityLoadStartTimeRef.current = Date.now();
-  }, [activeTab, showUnreadOnly, actorFilter, actorUserId]);
+  }, [activeTab, showUnreadOnly, actorFilter, actorUserId, channelFilter]);
 
   const getClassificationFilter = (tab: ActivityTab): ActivityClassification[] | undefined => {
     switch (tab) {
@@ -435,6 +448,7 @@ const ActivityListView = (): ReactElement => {
         ...(showUnreadOnly ? { isRead: false } : {}),
         ...(ACTOR_FILTER_TYPES[actorFilter] ? { actorTypes: ACTOR_FILTER_TYPES[actorFilter] } : {}),
         ...(actorUserId ? { actorId: actorUserId } : {}),
+        ...(channelFilter.length > 0 ? { channelIds: channelFilter } : {}),
       }),
     [
       PAGE_SIZE,
@@ -444,6 +458,7 @@ const ActivityListView = (): ReactElement => {
       showUnreadOnly,
       actorFilter,
       actorUserId,
+      channelFilter,
     ],
   );
 
@@ -702,7 +717,8 @@ const ActivityListView = (): ReactElement => {
     const filters: {
       actorAction?: string;
       classification?: ActivityClassification;
-    } = {};
+      channelIds?: string[];
+    } = channelFilter.length > 0 ? { channelIds: channelFilter } : {};
 
     if (activeTab === 'your_mentions') {
       filters.actorAction = 'mentioned_user';
@@ -712,10 +728,14 @@ const ActivityListView = (): ReactElement => {
       // added to maintain backward compat for now, to be deprecated
       const timestamp = Date.now();
       void zero.mutate(
-        mutators.activities.markAsReadByFilter({ actorAction: 'replied', timestamp }),
+        mutators.activities.markAsReadByFilter({ ...filters, actorAction: 'replied', timestamp }),
       );
       void zero.mutate(
-        mutators.activities.markAsReadByFilter({ actorAction: 'replied_v2', timestamp }),
+        mutators.activities.markAsReadByFilter({
+          ...filters,
+          actorAction: 'replied_v2',
+          timestamp,
+        }),
       );
       return;
     } else if (activeTab === 'actionable') {
@@ -725,19 +745,33 @@ const ActivityListView = (): ReactElement => {
     } else if (activeTab === 'canvas') {
       const timestamp = Date.now();
       void zero.mutate(
-        mutators.activities.markAsReadByFilter({ actorAction: 'canvas_shared', timestamp }),
+        mutators.activities.markAsReadByFilter({
+          ...filters,
+          actorAction: 'canvas_shared',
+          timestamp,
+        }),
       );
       void zero.mutate(
-        mutators.activities.markAsReadByFilter({ actorAction: 'canvas_role_changed', timestamp }),
+        mutators.activities.markAsReadByFilter({
+          ...filters,
+          actorAction: 'canvas_role_changed',
+          timestamp,
+        }),
       );
       void zero.mutate(
-        mutators.activities.markAsReadByFilter({ actorAction: 'canvas_access_revoked', timestamp }),
+        mutators.activities.markAsReadByFilter({
+          ...filters,
+          actorAction: 'canvas_access_revoked',
+          timestamp,
+        }),
       );
       return;
     } else if (activeTab === 'calls') {
       const timestamp = Date.now();
       CALL_ACTIVITY_TYPES.forEach(actorAction => {
-        void zero.mutate(mutators.activities.markAsReadByFilter({ actorAction, timestamp }));
+        void zero.mutate(
+          mutators.activities.markAsReadByFilter({ ...filters, actorAction, timestamp }),
+        );
       });
       return;
     }
@@ -766,6 +800,10 @@ const ActivityListView = (): ReactElement => {
     }
 
     unreadActivities.forEach(activity => {
+      if (channelFilter.length > 0 && !channelFilter.some(id => id === activity.channelId)) {
+        return;
+      }
+
       // 'all' count uses the same predicate as the sidebar badge
       if (isAllVisibleActivity(activity)) {
         counts.all++;
@@ -813,7 +851,7 @@ const ActivityListView = (): ReactElement => {
     });
 
     return counts;
-  }, [unreadActivities]);
+  }, [unreadActivities, channelFilter]);
 
   const renderActivityList = (feedItems: ActivityFeedItem[]): ReactElement => {
     const isExpanded = active === 'detailed';
@@ -1055,18 +1093,42 @@ const ActivityListView = (): ReactElement => {
             {/* 3-dot menu with Actionable Toggle and View Toggle (Desktop & Mobile) */}
             <div className='relative' ref={mobileMenuRef}>
               <button
-                onClick={() => setShowMobileMenu(!showMobileMenu)}
-                className='p-2 flex items-center justify-center rounded-lg border border-transparent transition-colors text-muted-foreground hover:text-foreground hover:bg-accent hover:border-border'
-                aria-label='More options'
+                onClick={() => {
+                  setShowMobileMenu(!showMobileMenu);
+                  setShowChannelMenu(false);
+                }}
+                className='relative p-2 flex items-center justify-center rounded-lg border border-transparent transition-colors text-muted-foreground hover:text-foreground hover:bg-accent hover:border-border'
+                aria-label={
+                  channelFilter.length > 0 ? 'More options, channel filter on' : 'More options'
+                }
                 data-track-category='ACTIVITY'
                 data-track-name='TOGGLE_MOBILE_MENU'
                 data-track-metadata={JSON.stringify({ menuState: !showMobileMenu })}
                 data-testid='activity-more-options-btn'
               >
                 <ThreeDotsMenuVertical size={16} />
+                <span
+                  aria-hidden='true'
+                  className={cn(
+                    'absolute right-1 top-1 size-1.5 rounded-full bg-primary transition-[opacity,transform,filter] duration-300 ease-[cubic-bezier(0.2,0,0,1)]',
+                    channelFilter.length > 0
+                      ? 'scale-100 opacity-100 blur-0'
+                      : 'scale-[0.25] opacity-0 blur-[4px]',
+                  )}
+                />
               </button>
 
-              {showMobileMenu && (
+              {showMobileMenu && showChannelMenu && (
+                <div className='absolute right-0 top-full mt-1 w-[280px] overflow-hidden bg-popover border border-border rounded-lg shadow-lg z-50'>
+                  <ActivityChannelPicker
+                    selectedChannelIds={channelFilter}
+                    onChange={handleChannelFilterChange}
+                    onBack={() => setShowChannelMenu(false)}
+                  />
+                </div>
+              )}
+
+              {showMobileMenu && !showChannelMenu && (
                 <div className='absolute right-0 top-full mt-1 bg-popover border border-border rounded-lg shadow-lg py-1 min-w-[200px] z-50'>
                   {/* Mark as Read */}
                   <button
@@ -1120,6 +1182,28 @@ const ActivityListView = (): ReactElement => {
                       />
                     </Switch.Root>
                   </div>
+
+                  <div className='border-t border-border my-1'></div>
+
+                  <button
+                    onClick={() => setShowChannelMenu(true)}
+                    className='w-full px-4 py-2 flex items-center gap-2 text-sm text-muted-foreground hover:bg-accent transition-colors'
+                    data-track-category='ACTIVITY'
+                    data-track-name='OPEN_CHANNEL_FILTER'
+                    data-track-metadata={JSON.stringify({ selected_count: channelFilter.length })}
+                    data-testid='activity-channel-filter-btn'
+                  >
+                    <Hashtag size={16} />
+                    <span className='flex-1 text-left'>Channels</span>
+                    {channelFilter.length > 0 ? (
+                      <span className='text-[0.625rem] px-1 rounded-md font-bold tabular-nums bg-sidebar-primary text-sidebar-primary-foreground'>
+                        {channelFilter.length}
+                      </span>
+                    ) : (
+                      <span className='text-xs'>All</span>
+                    )}
+                    <ChevronRight size={14} className='-mr-1' />
+                  </button>
 
                   {/* Divider */}
                   <div className='border-t border-border my-1'></div>

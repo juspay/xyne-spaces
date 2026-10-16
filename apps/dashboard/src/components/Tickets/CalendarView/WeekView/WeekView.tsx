@@ -5,12 +5,14 @@ import { CompactTicketBadge } from '../CompactTicketBadge';
 import { groupTicketsByDate } from './utils';
 import { DayTicketsModal } from '../DayTicketsModal';
 import type { WeekViewProps } from './types';
+import { useTicketNoun } from '../../../../contexts/TicketNounContext';
 
 export function WeekView({
   currentDate,
   tickets,
   onTicketClick,
 }: WeekViewProps): React.ReactElement {
+  const noun = useTicketNoun();
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
 
   const startDate = startOfWeek(currentDate);
@@ -85,7 +87,7 @@ export function WeekView({
                     )}
                     {dayTickets.length === 0 && (
                       <div className='flex items-center justify-center h-full min-h-[100px]'>
-                        <span className='text-xs text-muted'>No tickets</span>
+                        <span className='text-xs text-muted'>No {noun.plural}</span>
                       </div>
                     )}
                   </div>

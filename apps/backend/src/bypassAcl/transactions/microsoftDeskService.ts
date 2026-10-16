@@ -4,7 +4,7 @@ import { db } from '@/database/client';
 import { newConnectId, createConnectGroupForEntity, ConnectEntityType } from '@/database/connectGroup';
 import { MicrosoftDeskService, PendingChannelCreate } from '@/services/microsoftDeskService';
 import { logger } from '@/utils/logger';
-import { ChannelScopeType, ChannelType, ChannelRole, EmailMergeMode, DeskType } from '@xyne/shared';
+import { BoardType, ChannelScopeType, ChannelType, ChannelRole, EmailMergeMode, DeskType } from '@xyne/shared';
 
 
 export function createChannelAndSourceTx(channelData: PendingChannelCreate, sourceName: string, credentials: { accessToken: string; refreshToken?: string; email: string; expiresAt?: string; }, encryptedCredentials: string, self: MicrosoftDeskService, webhookUrl: string, clientState: string) {
@@ -76,7 +76,7 @@ export function createChannelAndSourceTx(channelData: PendingChannelCreate, sour
     // Reuse the project's boards (same pattern as Google) — no per-connection
     // board/stages creation. If the project has no boards yet, the mapping list is empty.
     const boards = await tx.board.findMany({
-      where: { projectId: channelData.projectId },
+      where: { projectId: channelData.projectId, boardType: { not: BoardType.RELEASE } },
       orderBy: { createdAt: 'asc' },
       select: { id: true },
     });

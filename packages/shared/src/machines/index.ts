@@ -8,6 +8,7 @@ export {
   setupQueryCachePersistence,
   flushQueryCachePersistence,
   hydrateQueryCacheFromStorage,
+  retainCacheKey,
   FINGERPRINT_FIELD,
   THREAD_FINGERPRINT_FIELD,
   THREAD_CONVERSATIONS_KEY,
