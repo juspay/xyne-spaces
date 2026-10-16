@@ -97,7 +97,7 @@ import { queries } from '../../zero/queries';
 import { useTicketKeysetWindow } from '../../hooks/useTicketKeysetWindow';
 import { QueryResultType } from '@rocicorp/zero';
 import ThreadMessages from '../../components/Chat/ThreadPannel';
-import { ChannelsDeskSourceThread } from './ChannelsDeskSourceThread';
+import { ChannelsDeskSourceChannel, ChannelsDeskSourceThread } from './ChannelsDeskSourceThread';
 import { useChannel, useEmailChannels, useUserChannelStatuses } from '../../hooks/useChannels';
 import { useRefetchExternalSource } from '../../hooks/useRefetchExternalSource';
 import { useChannelFetchSources } from '../../hooks/useChannelFetchSources';
@@ -6381,6 +6381,9 @@ export const SupportTicketDetail = ({
                       </div>
                     </div>
                   )}
+                  {channel?.type === ChannelType.CHANNELS && emails[0]?.externalThreadId && (
+                    <ChannelsDeskSourceChannel sourceConversationId={emails[0].externalThreadId} />
+                  )}
 
                   {/* Mailbox chip + label chips.
                       Only render the VIEW label row when there is at least one visible
@@ -6641,7 +6644,15 @@ export const SupportTicketDetail = ({
                   channel?.type === ChannelType.SLACK ||
                   channel?.type === ChannelType.APP ||
                   channel?.type === ChannelType.SOCIAL_MEDIA ? (
-                    <SlackThread emails={emails} ticketId={ticket?.id} />
+                    <SlackThread
+                      emails={emails}
+                      ticketId={ticket?.id}
+                      showRecipient={
+                        !isAppSourcedTicket &&
+                        !isSlackSourcedTicket &&
+                        channel?.type === ChannelType.SOCIAL_MEDIA
+                      }
+                    />
                   ) : channel?.type === ChannelType.CALL ? (
                     <CallThread emails={emails} ticketId={ticket?.id} />
                   ) : (

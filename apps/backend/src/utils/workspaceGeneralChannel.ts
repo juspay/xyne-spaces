@@ -1,5 +1,5 @@
 import { Prisma, PrismaClient } from '@prisma/client';
-import { sanitizeProjectCode, ProjectType, ChannelRole, ChannelScopeType, ChannelVisibility } from '@xyne/shared';
+import { BoardType, sanitizeProjectCode, ProjectType, ChannelRole, ChannelScopeType, ChannelVisibility } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
 import { newConnectId } from '@/database/connectGroup';
 import { createChannelWithConnectGroupMaybeTx } from '@/bypassAcl/transactions/connectGroupEntities';
@@ -85,7 +85,7 @@ export async function ensureGeneralChannelForWorkspace(
 
     // Dual-write: mirror the channel→project board set into ChannelBoardMapping.
     const boards = await db.board.findMany({
-      where: { projectId: project.id },
+      where: { projectId: project.id, boardType: { not: BoardType.RELEASE } },
       orderBy: { createdAt: 'asc' },
       select: { id: true },
     });

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Router, type Response } from "express";
-import { currentOwnerPod, isFencedSession } from "../run-ownership.js";
+import { advertiseRunOwner, currentOwnerPod, isFencedSession, withdrawRunOwner } from "../run-ownership.js";
 import {
   decideRunControl,
   publishRunControl,
@@ -193,6 +193,7 @@ import {
   resolveTaskCommandMode,
 } from "../task-commands.js";
 import { createLogger } from "../logger.js";
+import { UI_TESTER_SANDBOX_TOOL_NAMES, buildUiTesterTools } from "../ui-tester/tools.js";
 import {
   buildPrefetchBlock,
   prefetchEnabled,
@@ -786,6 +787,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     hasCallbackUrl: typeof callbackUrl === "string" && !!callbackUrl.trim(),
   };
   activeRuns.set(sessionId, activeRun);
+  const runOwnerToken = await advertiseRunOwner(sessionId);
 
   if (detached === true) {
     clog.info(`[run] detached dispatch accepted (sessionId=${sessionId}, eventType=${eventType ?? ""})`);
@@ -850,6 +852,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       if (activeRun.handoffCapTimer) clearTimeout(activeRun.handoffCapTimer);
       if (activeRun.gracefulInterruptSummaryTimer) clearTimeout(activeRun.gracefulInterruptSummaryTimer);
       activeRuns.delete(sessionId);
+      void withdrawRunOwner(sessionId, runOwnerToken);
     });
     return;
   }
@@ -984,6 +987,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       if (activeRun.handoffCapTimer) clearTimeout(activeRun.handoffCapTimer);
       if (activeRun.gracefulInterruptSummaryTimer) clearTimeout(activeRun.gracefulInterruptSummaryTimer);
       activeRuns.delete(sessionId);
+      void withdrawRunOwner(sessionId, runOwnerToken);
       // Backstop: processTask has several silent-return paths (most notably
       // SessionLockedError — another pod owns this run and suppresses the
       // callback) and any future throw outside its try/catch around
@@ -1029,7 +1033,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
   // scheduled jobs, etc.). It must stay byte-identical until they migrate.
   res.json({ success: true, sessionId });
 
-  void executeRunFromPayload({ ...(req.body as InternalRunPayload), sessionId });
+  void executeRunFromPayload({ ...(req.body as InternalRunPayload), sessionId }).finally(() => withdrawRunOwner(sessionId, runOwnerToken));
 });
 
 // ── SSE producer: in-process emitter that writes ClawStreamEvent frames into
@@ -2196,6 +2200,16 @@ export async function processTask(
      *  loadable on demand and must never be always-active. */
     const paletteAdmittedNames = new Set<string>();
 
+    const uiTesterSandboxTools = customToolDefs.filter(
+      (t) => (t as { source?: string }).source === "custom:sandbox" && UI_TESTER_SANDBOX_TOOL_NAMES.has(t.name),
+    );
+    const uiTesterTools =
+      !fastModeEnabled &&
+      (toolsConfigEarly?.subagents ?? []).includes("ui-tester") &&
+      uiTesterSandboxTools.some((t) => t.name === "sandbox-run")
+        ? buildUiTesterTools(meta, { deliver: uiTesterSandboxTools.find((t) => t.name === "sandbox-deliver-files") })
+        : [];
+
     const { subagentTools: builtSubagentTools, directTools, remainingCustomTools } = fastModeEnabled
       ? {
           subagentTools: [] as ToolDefinition[],
@@ -2207,7 +2221,7 @@ export async function processTask(
         }
       : buildSubagentTools(
           allGroups,
-          customToolDefs,
+          [...customToolDefs, ...uiTesterTools],
           resolvedTriggers.length > 0 ? resolvedTriggers : undefined,
           resolvedSubagentSkills,
           { parentProvider, subagentProviderMode, subagentProviders, providerConfigs },
@@ -2235,7 +2249,7 @@ export async function processTask(
             backgroundRegistry: childTaskRegistry,
             parentDebug: parentDebugHandle,
           },
-          undefined, // bonusToolsBySubagent — removed with the sandbox subagent
+          uiTesterTools.length > 0 ? { "ui-tester": uiTesterSandboxTools } : undefined,
           customSubagents,
           directPickSuffixes,
         );

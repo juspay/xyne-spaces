@@ -17,7 +17,7 @@ import {
   type SelectedMention,
 } from '../components/Chat/ChatDirectory/ChannelCommandMenu.types';
 import { User } from '../machines/stateMachine';
-import { Channel } from '@xyne/shared';
+import { CallType, Channel } from '@xyne/shared';
 import { useWorkerUserSearch } from './useWorkerUserSearch';
 import { useWorkerChannelSearch } from './useWorkerChannelSearch';
 import type { MentionHighlightsBuilder } from '../search/mentionHighlights';
@@ -267,6 +267,40 @@ function dateFiltersFromChips(mentions: SelectedMention[]): StructuredSearchFilt
   const after = dates.find(m => m.prefix === 'after:')?.id;
   const before = dates.find(m => m.prefix === 'before:')?.id;
   return { ...(after ? { after } : {}), ...(before ? { before } : {}) };
+}
+
+/** Scopes a search to the active tab's doc kind. Shared by the first page and `loadMore`. */
+function applyTabScope(searchFilters: VespaSearchFilters, activeTab: TabType): void {
+  switch (activeTab) {
+    case TabType.MESSAGES:
+      searchFilters.type = VespaDocTypes.MESSAGES;
+      break;
+    case TabType.ATTACHMENTS:
+      searchFilters.type = VespaDocTypes.FILES;
+      break;
+    case TabType.TICKETS:
+      searchFilters.type = VespaDocTypes.TICKETS;
+      break;
+    case TabType.DESK:
+      searchFilters.type = SearchableTypes.EMAILS;
+      searchFilters.apps = VespaApps.MAIL;
+      break;
+    case TabType.CANVAS:
+      searchFilters.type = 'canvas';
+      searchFilters.apps = VespaApps.FILE;
+      break;
+    case TabType.CALL:
+      searchFilters.type = VespaDocTypes.FILES;
+      searchFilters.apps = VespaApps.FILE;
+      searchFilters.subApp = 'transcript';
+      break;
+    case TabType.RECORDING:
+      searchFilters.type = VespaDocTypes.FILES;
+      searchFilters.apps = VespaApps.FILE;
+      searchFilters.subApp = 'transcript';
+      searchFilters.callType = CallType.HEADLESS;
+      break;
+  }
 }
 
 export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
@@ -1190,27 +1224,8 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
             } else if (options.isCallSearchPage) {
               searchFilters.apps = VespaApps.CALL;
               searchFilters.type = VespaDocTypes.CALLS;
-            } else if (activeTab === TabType.MESSAGES) {
-              searchFilters.type = VespaDocTypes.MESSAGES;
-            } else if (activeTab === TabType.ATTACHMENTS) {
-              searchFilters.type = VespaDocTypes.FILES;
-            } else if (activeTab === TabType.TICKETS) {
-              searchFilters.type = VespaDocTypes.TICKETS;
-            } else if (activeTab === TabType.DESK) {
-              searchFilters.type = SearchableTypes.EMAILS;
-              searchFilters.apps = VespaApps.MAIL;
-            } else if (activeTab === TabType.CANVAS) {
-              searchFilters.type = 'canvas';
-              searchFilters.apps = VespaApps.FILE;
-            } else if (activeTab === TabType.CALL) {
-              searchFilters.type = VespaDocTypes.FILES;
-              searchFilters.apps = VespaApps.FILE;
-              searchFilters.subApp = 'transcript';
-            } else if (activeTab === TabType.RECORDING) {
-              searchFilters.type = VespaDocTypes.FILES;
-              searchFilters.apps = VespaApps.FILE;
-              searchFilters.subApp = 'transcript';
-              searchFilters.callType = 'HEADLESS';
+            } else {
+              applyTabScope(searchFilters, activeTab);
             }
 
             // Add assignee filter for Tickets/ALL (force ticket-only search)
@@ -1789,15 +1804,8 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         } else if (options.isCallSearchPage) {
           searchFilters.apps = VespaApps.CALL;
           searchFilters.type = VespaDocTypes.CALLS;
-        } else if (activeTab === TabType.MESSAGES) {
-          searchFilters.type = VespaDocTypes.MESSAGES;
-        } else if (activeTab === TabType.ATTACHMENTS) {
-          searchFilters.type = VespaDocTypes.FILES;
-        } else if (activeTab === TabType.TICKETS) {
-          searchFilters.type = VespaDocTypes.TICKETS;
-        } else if (activeTab === TabType.DESK) {
-          searchFilters.type = SearchableTypes.EMAILS;
-          searchFilters.apps = VespaApps.MAIL;
+        } else {
+          applyTabScope(searchFilters, activeTab);
         }
 
         // Add assignee filter for Tickets/ALL (force ticket-only search)

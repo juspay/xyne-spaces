@@ -21,6 +21,7 @@ import {
   ImagePlus,
   Hand,
   NotepadText,
+  Captions,
 } from 'lucide-react';
 import { useMediaDeviceSelect } from '@livekit/components-react';
 import { cn } from '../../../utils/classNames';
@@ -94,6 +95,9 @@ interface CallControlsProps {
   isNotesOpen?: boolean | undefined;
   /** Omit to hide the notes button (e.g. external users) */
   onToggleNotes?: (() => void) | undefined;
+  isTranscriptOpen?: boolean | undefined;
+  /** Omit to hide the live-transcript button */
+  onToggleTranscript?: (() => void) | undefined;
   isAIAssistantEnabled: boolean;
   aiController: { id: string; name: string } | null;
   localParticipantId: string | null;
@@ -148,6 +152,8 @@ export function CallControls({
   isParticipantsSidebarOpen,
   isNotesOpen = false,
   onToggleNotes,
+  isTranscriptOpen = false,
+  onToggleTranscript,
   isAIAssistantEnabled,
   aiController,
   localParticipantId,
@@ -986,6 +992,19 @@ export function CallControls({
           >
             {menuIcon(NotepadText, isNotesOpen)}
             <span>Notes</span>
+          </DropdownMenuItem>
+        )}
+        {onToggleTranscript && (
+          <DropdownMenuItem
+            onClick={onToggleTranscript}
+            className={menuItemClass}
+            data-track-event='BUTTON_CLICK'
+            data-track-category='CALLS'
+            data-track-name='TOGGLE_CALL_TRANSCRIPT'
+            data-track-metadata={JSON.stringify({ callId, isOpen: isTranscriptOpen })}
+          >
+            {menuIcon(Captions)}
+            <span>{isTranscriptOpen ? 'Hide transcript' : 'View transcript'}</span>
           </DropdownMenuItem>
         )}
         {!hideThreadChat && (

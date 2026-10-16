@@ -9,6 +9,7 @@ import { useQuery } from '@tanstack/react-query';
 import { canvasService } from '../services/Canvas/canvasService';
 import type { YSweetAuthToken } from '../services/Canvas/canvasService';
 import { canvasPrefetchService } from '../services/Canvas/canvasPrefetchService';
+import { stopYjsProviderPermanently } from '../services/Canvas/yjsProviderTeardown';
 import { logger, Event } from '../utils/logger';
 
 const COLLABORATION_COLORS = [
@@ -66,6 +67,7 @@ export interface CanvasYjsProviderState {
   hasLocalChanges: boolean;
   isReadOnly: boolean;
   connectionFailed: boolean;
+  isReconnecting: boolean;
   reconnect: () => void;
 }
 
@@ -103,6 +105,7 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
   }, [doc]);
 
   const hasConnectedOnceRef = useRef(false);
+  const permanentlyStoppedRef = useRef(false);
   const lastNotificationStatusRef = useRef<string>('');
   const localChangesTimerRef = useRef<NodeJS.Timeout | null>(null);
   const hasLocalChangesRef = useRef(false);
@@ -117,6 +120,7 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
   const [hasLocalChanges, setHasLocalChanges] = useState(false);
   const [isReadOnly, setIsReadOnly] = useState(false);
   const [connectionFailed, setConnectionFailed] = useState(false);
+  const [isReconnecting, setIsReconnecting] = useState(false);
   const [reconnectNonce, setReconnectNonce] = useState(0);
 
   useEffect(() => {
@@ -197,11 +201,14 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
         description: 'Could not authorize collaboration access.',
       });
       if (providerRef.current) {
-        providerRef.current.destroy();
+        stopYjsProviderPermanently(providerRef.current);
         providerRef.current = null;
         setAwareness(null);
       }
       setIsReadOnly(true);
+      setIsReconnecting(false);
+      setConnectionFailed(true);
+      permanentlyStoppedRef.current = true;
     }
   }, [authError]);
 
@@ -228,7 +235,12 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
   // differs from canvasId, and that canvas must still connect.
   const hasAuthToken = authTokenData !== undefined;
   useEffect(() => {
-    if (authTokenData && !providerRef.current && hasConnectedOnceRef.current) {
+    if (
+      authTokenData &&
+      !providerRef.current &&
+      hasConnectedOnceRef.current &&
+      !permanentlyStoppedRef.current
+    ) {
       setReconnectNonce(n => n + 1);
     }
   }, [authTokenData]);
@@ -263,6 +275,7 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
         if (status === 'connected') {
           errorCountRef.current = 0;
           setIsReadOnly(permissionReadOnlyRef.current);
+          setIsReconnecting(false);
           if (!hasConnectedOnceRef.current) {
             hasConnectedOnceRef.current = true;
             lastNotificationStatusRef.current = status;
@@ -277,10 +290,12 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
             fromPrefetch: true,
           });
           if (errorCountRef.current >= 5) {
-            provider.destroy();
+            stopYjsProviderPermanently(provider);
             providerRef.current = null;
             setAwareness(null);
             setConnectionFailed(true);
+            setIsReconnecting(false);
+            permanentlyStoppedRef.current = true;
             prefetchedProviderDestroyedRef.current = true;
           }
           if (lastNotificationStatusRef.current !== 'error') {
@@ -331,7 +346,7 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
           });
         }
 
-        provider.destroy();
+        stopYjsProviderPermanently(provider);
         providerRef.current = null;
         setAwareness(null);
       };
@@ -363,6 +378,7 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
       if (status === 'connected') {
         errorCountRef.current = 0;
         setIsReadOnly(permissionReadOnlyRef.current);
+        setIsReconnecting(false);
         if (!hasConnectedOnceRef.current) {
           hasConnectedOnceRef.current = true;
           lastNotificationStatusRef.current = status;
@@ -377,10 +393,12 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
           fromPrefetch: false,
         });
         if (errorCountRef.current >= 5) {
-          provider.destroy();
+          stopYjsProviderPermanently(provider);
           providerRef.current = null;
           setAwareness(null);
           setConnectionFailed(true);
+          setIsReconnecting(false);
+          permanentlyStoppedRef.current = true;
         }
         if (lastNotificationStatusRef.current !== 'error') {
           lastNotificationStatusRef.current = 'error';
@@ -434,7 +452,7 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
         providerRef.current.off(EVENT_CONNECTION_STATUS, handleConnectionStatus);
         providerRef.current.off(EVENT_LOCAL_CHANGES, handleLocalChanges);
 
-        providerRef.current.destroy();
+        stopYjsProviderPermanently(providerRef.current);
         providerRef.current = null;
       }
 
@@ -443,13 +461,16 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
   }, [doc, canvasId, hasAuthToken, getAuthToken, reconnectNonce]);
 
   const reconnect = useCallback((): void => {
+    if (isReconnecting) return;
     errorCountRef.current = 0;
     lastNotificationStatusRef.current = '';
+    permanentlyStoppedRef.current = false;
     setConnectionFailed(false);
+    setIsReconnecting(true);
     void refetch().then(() => {
       setReconnectNonce(n => n + 1);
     });
-  }, [refetch]);
+  }, [refetch, isReconnecting]);
 
   useEffect(() => {
     const handleDynamicHeadersChanged = (): void => {
@@ -474,6 +495,7 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
     hasLocalChanges,
     isReadOnly,
     connectionFailed,
+    isReconnecting,
     reconnect,
   };
 }

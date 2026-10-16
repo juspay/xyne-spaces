@@ -223,7 +223,7 @@ function getKeywordScanText(content: string): string {
   return flowText ?? getPlainTextNotificationContent(content);
 }
 
-function formatDmChannelName(names: string[], maxVisible: number = 2): string {
+export function formatDmChannelName(names: string[], maxVisible: number = 2): string {
   const visible = names.slice(0, maxVisible);
   const remainder = names.length - visible.length;
   if (remainder === 0) {
@@ -444,7 +444,10 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
 
     // For FlowJSON, scan raw flow text (tokens intact) not the HTML wrapper.
     const flowRawText = getFlowJsonRawTextForMentions(content);
-    const contentForMentions = flowRawText ?? content;
+    const contentForMentions =
+      message.msgType === MessageType.FORWARDED
+        ? parseForwardedMessageXml(content)?.optionalText ?? ''
+        : flowRawText ?? content;
     // Channel-addressing artifacts reach the channel from inside a thread too:
     // an incident is the case the thread-broadcast restriction exists to allow.
     const allowBroadcastExpansion =
@@ -578,7 +581,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
 
     const workspaceId = await channelRepository.getWorkspaceId(channelId);
     // In thread replies, disable @channel/@here expansion by not passing channelId.
-    // contentForMentions is already computed above (flow text for FlowJSON, raw HTML otherwise)
+    // contentForMentions is already computed above (the note for forwards, flow text for FlowJSON, raw HTML otherwise)
     const mentionedUsers = await extractAllUsersForNotification(
       contentForMentions,
       workspaceId,

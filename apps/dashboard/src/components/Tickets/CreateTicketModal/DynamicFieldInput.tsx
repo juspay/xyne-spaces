@@ -9,6 +9,7 @@ import RadioGroup, { Radio } from '../../ui/RadioGroup';
 import { SearchUserV2 } from '../../ui/SearchUser/SearchUserV2';
 import { TicketFieldSelector } from '../TicketFieldSelector/TicketFieldSelector';
 import { Field, FieldError, FieldLabel } from '../../ui/Field/Field';
+import { useTicketNoun } from '../../../contexts/TicketNounContext';
 
 export type DynamicFieldValue = string | string[];
 
@@ -52,6 +53,7 @@ const DynamicFieldInputBase: React.FC<DynamicFieldInputProps> = ({
   isOpen,
   onOpenChange,
 }) => {
+  const noun = useTicketNoun();
   const fieldName = field.fieldName;
   const required = field.isOptional !== true;
   const set = (next: DynamicFieldValue): void => onChange(fieldName, next);
@@ -62,7 +64,13 @@ const DynamicFieldInputBase: React.FC<DynamicFieldInputProps> = ({
     case FormFieldType.STRING:
     case FormFieldType.NUMBER:
       return (
-        <Field label={fieldName} required={required} error={error} className='gap-[5px]'>
+        <Field
+          label={fieldName}
+          required={required}
+          optional={!required}
+          error={error}
+          className='gap-[5px]'
+        >
           <Input
             value={stringValue}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => set(e.target.value)}
@@ -76,7 +84,13 @@ const DynamicFieldInputBase: React.FC<DynamicFieldInputProps> = ({
 
     case FormFieldType.DATE:
       return (
-        <Field label={fieldName} required={required} error={error} className='gap-[5px]'>
+        <Field
+          label={fieldName}
+          required={required}
+          optional={!required}
+          error={error}
+          className='gap-[5px]'
+        >
           <Input
             value={stringValue}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => set(e.target.value ?? '')}
@@ -110,6 +124,7 @@ const DynamicFieldInputBase: React.FC<DynamicFieldInputProps> = ({
         <SingleSelect
           label={fieldName}
           required={required}
+          {...(!required && { subLabel: 'optional' })}
           placeholder={`Select ${fieldName.toLowerCase()}`}
           items={[{ items: toSelectOptions(field.fieldEnum) }]}
           selected={stringValue}
@@ -124,7 +139,7 @@ const DynamicFieldInputBase: React.FC<DynamicFieldInputProps> = ({
 
     case FormFieldType.MULTI_SELECT:
       return (
-        <Field label={fieldName} required={required} className='gap-[5px]'>
+        <Field label={fieldName} required={required} optional={!required} className='gap-[5px]'>
           <MultiSelect
             placeholder={`Select ${fieldName.toLowerCase()}`}
             options={toSelectOptions(field.fieldEnum)}
@@ -137,7 +152,13 @@ const DynamicFieldInputBase: React.FC<DynamicFieldInputProps> = ({
 
     case FormFieldType.USER:
       return (
-        <Field label={fieldName} required={required} error={error} className='gap-[5px]'>
+        <Field
+          label={fieldName}
+          required={required}
+          optional={!required}
+          error={error}
+          className='gap-[5px]'
+        >
           <div className='rounded border border-input'>
             <SearchUserV2
               options={allUsers}
@@ -158,7 +179,13 @@ const DynamicFieldInputBase: React.FC<DynamicFieldInputProps> = ({
 
     case FormFieldType.TICKET:
       return (
-        <Field label={fieldName} required={required} error={error} className='gap-[5px]'>
+        <Field
+          label={fieldName}
+          required={required}
+          optional={!required}
+          error={error}
+          className='gap-[5px]'
+        >
           <div className='rounded border border-input'>
             <TicketFieldSelector
               selectedValue={stringValue || null}
@@ -175,9 +202,11 @@ const DynamicFieldInputBase: React.FC<DynamicFieldInputProps> = ({
     default:
       return (
         <div className='flex flex-col'>
-          <FieldLabel required={required}>{fieldName}</FieldLabel>
+          <FieldLabel required={required} optional={!required}>
+            {fieldName}
+          </FieldLabel>
           <p className='mt-1 text-xs text-muted-foreground'>
-            This field is filled in after the ticket is created.
+            This field is filled in after the {noun.singular} is created.
           </p>
           <FieldError error={error} />
         </div>

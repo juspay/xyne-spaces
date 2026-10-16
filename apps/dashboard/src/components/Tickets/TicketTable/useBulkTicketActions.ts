@@ -9,6 +9,7 @@ import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { queries } from '../../../zero/queries';
 import { trackTicketOutcome } from '../../../services/Analytics/ticketTracking';
+import { useTicketNoun } from '../../../contexts/TicketNounContext';
 
 /**
  * The slice of a selected row the bulk actions actually need. Structural rather
@@ -116,11 +117,16 @@ const mutationError = async (mutation: ZeroMutation, fallback: string): Promise<
  * usual per-mutation toast would stack one toast per selected row. Collapse them
  * into a single message naming how many rows the server turned down.
  */
-const reportBulkErrors = async (pending: ReadonlyArray<Promise<string | null>>): Promise<void> => {
+const reportBulkErrors = async (
+  pending: ReadonlyArray<Promise<string | null>>,
+  plural: string,
+): Promise<void> => {
   const failures = (await Promise.all(pending)).filter((message): message is string => !!message);
   const first = failures[0];
   if (first === undefined) return;
-  toast.error(failures.length === 1 ? first : `${first} (${failures.length} tickets not updated)`);
+  toast.error(
+    failures.length === 1 ? first : `${first} (${failures.length} ${plural} not updated)`,
+  );
 };
 
 /**
@@ -130,10 +136,13 @@ const reportBulkErrors = async (pending: ReadonlyArray<Promise<string | null>>):
  * calling, so rejecting outright would drop the user's rows AND change nothing. The
  * grid caps its own select-all, but a hand-built selection still arrives here uncapped.
  */
-const capSelection = (tickets: readonly BulkActionTicket[]): readonly BulkActionTicket[] => {
+const capSelection = (
+  tickets: readonly BulkActionTicket[],
+  plural: string,
+): readonly BulkActionTicket[] => {
   if (tickets.length <= MAX_BULK_TICKETS) return tickets;
   toast.info(
-    `Bulk actions apply to ${MAX_BULK_TICKETS} tickets at a time — updating the first ${MAX_BULK_TICKETS} of ${tickets.length}.`,
+    `Bulk actions apply to ${MAX_BULK_TICKETS} ${plural} at a time — updating the first ${MAX_BULK_TICKETS} of ${tickets.length}.`,
   );
   return tickets.slice(0, MAX_BULK_TICKETS);
 };
@@ -145,6 +154,7 @@ const capSelection = (tickets: readonly BulkActionTicket[]): readonly BulkAction
  */
 export const useBulkTicketActions = (): BulkTicketActions => {
   const zero = useZero();
+  const noun = useTicketNoun();
 
   // `boardDetailById` pulls a whole board to read one field, so a bulk action passes a
   // cache — one lookup per board, not per ticket. Per-action, so it can't go stale.
@@ -180,7 +190,7 @@ export const useBulkTicketActions = (): BulkTicketActions => {
           'Unable to change stage',
         );
         return message === 'This transition requires a form to be submitted'
-          ? 'Open this ticket on its board to fill the required form for this stage'
+          ? `Open this ${noun.singular} on its board to fill the required form for this stage`
           : message;
       }
       return mutationError(
@@ -195,7 +205,7 @@ export const useBulkTicketActions = (): BulkTicketActions => {
         'Failed to update stage',
       );
     },
-    [zero, boardTypeOf],
+    [zero, boardTypeOf, noun],
   );
 
   const routeStageChange = useCallback(
@@ -228,7 +238,7 @@ export const useBulkTicketActions = (): BulkTicketActions => {
       const hasFields = Object.keys(fields).length > 0;
       const pending: Array<Promise<string | null>> = [];
       const boardTypes = new Map<string, Promise<string | undefined>>();
-      const selection = capSelection(tickets);
+      const selection = capSelection(tickets, noun.plural);
       // One outcome row per bulk action (not per ticket), reported once the fan-out
       // settles so a fully rejected batch counts as nothing.
       const trackBulkOutcome = (results: ReadonlyArray<string | null>): void => {
@@ -267,22 +277,22 @@ export const useBulkTicketActions = (): BulkTicketActions => {
               zero.mutate(
                 mutators.ticket.update({ id: ticket.id, ...fields, updatedAt: Date.now() }),
               ),
-              'Failed to update tickets',
+              `Failed to update ${noun.plural}`,
             ),
           );
         }
       }
-      void reportBulkErrors(pending);
+      void reportBulkErrors(pending, noun.plural);
       void Promise.all(pending).then(trackBulkOutcome);
     },
-    [zero, stageChange],
+    [zero, stageChange, noun],
   );
 
   const applyTags = useCallback(
     (tickets: readonly BulkActionTicket[], tagNames: readonly string[]): void => {
       const pending: Array<Promise<string | null>> = [];
       // Capped once: capSelection toasts about the cap as a side effect.
-      const selection = capSelection(tickets);
+      const selection = capSelection(tickets, noun.plural);
       for (const ticket of selection) {
         if (!ticket.projectId) continue;
         for (const tagName of tagNames) {
@@ -305,7 +315,7 @@ export const useBulkTicketActions = (): BulkTicketActions => {
           );
         }
       }
-      void reportBulkErrors(pending);
+      void reportBulkErrors(pending, noun.plural);
       void Promise.all(pending).then(results => {
         if (results.some(r => r === null)) {
           trackTicketOutcome('TICKET_FIELD_UPDATED', null, {
@@ -317,7 +327,7 @@ export const useBulkTicketActions = (): BulkTicketActions => {
         }
       });
     },
-    [zero],
+    [zero, noun],
   );
 
   return { routeStageChange, applyUpdates, applyTags };
