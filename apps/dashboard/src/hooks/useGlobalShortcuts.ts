@@ -8,6 +8,7 @@ import { useSelector } from '@xstate/react';
 import { roomActor } from '../machines/roomMachine';
 import { browserPanelActor } from '../machines/browserPanelMachine';
 import { subscribeToAppKeys } from '../components/InAppBrowser';
+import { isFullPageSearchPath } from '../components/Chat/ChatDirectory/cmdkFullPage';
 
 interface UseGlobalShortcutsProps {
   leftPanelRef: RefObject<PanelImperativeHandle | null>;
@@ -42,7 +43,9 @@ export const useGlobalShortcuts = ({ leftPanelRef }: UseGlobalShortcutsProps): v
         return;
       }
 
-      // If the top-level panel isn't present (e.g., WebView closed), forward to ChatScreen panel
+      // If the top-level panel isn't present (e.g., WebView closed), forward to ChatScreen panel.
+      // Not from full-page search: the page under it, and its sidebar, are out of sight.
+      if (isFullPageSearchPath(window.location.pathname)) return;
       window.dispatchEvent(
         new CustomEvent('chat-resize-left-panel', {
           detail: {

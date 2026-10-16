@@ -45,6 +45,7 @@ export const BASELINE_PROJECT_KEY = 'project-1';
 export const BASELINE_CHANNEL_KEY = 'channel-1';
 export const BASELINE_DM_KEY = 'dm-1';
 export const BASELINE_SEED_MESSAGE_KEY = 'message-baseline';
+export const BASELINE_USER_GROUP_KEY = 'group-1';
 
 const netNewChannelAliasPattern = /^channel-[a-zA-Z0-9-]+$/;
 
@@ -110,12 +111,20 @@ export interface BaselineDm {
   seedMessage?: BaselineSeedMessage;
 }
 
+/** Mentionable user group whose members are the baseline user and its DM partner. */
+export interface BaselineUserGroup {
+  id: string;
+  name: string;
+  alias: string;
+}
+
 export interface BaselineFixtureData {
   runId: string;
   ownerUserAlias: string;
   project: BaselineProject;
   channel: BaselineChannel;
   dm?: BaselineDm;
+  userGroup?: BaselineUserGroup;
 }
 
 const REGISTRY_FILENAME = 'baseline-fixtures.json';
@@ -225,7 +234,14 @@ export async function loadBaselineFixtureRegistry(): Promise<BaselineFixtureData
       seedMessage: channelSeed,
     },
     ...(dm ? { dm } : {}),
+    ...(isBaselineUserGroup(data.userGroup) ? { userGroup: data.userGroup } : {}),
   };
+}
+
+function isBaselineUserGroup(value: unknown): value is BaselineUserGroup {
+  if (!value || typeof value !== 'object') return false;
+  const { id, name, alias } = value as Record<string, unknown>;
+  return typeof id === 'string' && typeof name === 'string' && typeof alias === 'string';
 }
 
 function parseSeedMessage(value: unknown): BaselineSeedMessage | undefined {
@@ -782,6 +798,36 @@ async function createBaselineDmWithSeedMessage(
   };
 }
 
+async function createBaselineUserGroup(members: StoredUser[]): Promise<BaselineUserGroup> {
+  const page = testContext.activePage;
+  // Lowercase letters, digits and dashes only, so the name is also a valid alias.
+  const name = `baseline-group-${buildRandomSuffix()}`;
+
+  const response = await page.request.post(`${config.dashboard.baseUrl}/api/user-groups`, {
+    data: {
+      name,
+      alias: name,
+      description: 'Baseline user group for mention scenarios',
+      userIds: members.map((member) => member.id),
+    },
+  });
+  assert.equal(
+    response.ok(),
+    true,
+    `Expected baseline user group creation POST to succeed, got status ${response.status()}.`
+  );
+
+  const body = (await response.json().catch(() => null)) as { id?: string } | null;
+  const groupId = body?.id;
+  assert.ok(
+    typeof groupId === 'string' && groupId.length > 0,
+    `Expected user group creation response to contain id, got: ${JSON.stringify(body)}`
+  );
+
+  baselineLogger.info(`User group created: ${name}`);
+  return { id: groupId, name, alias: name };
+}
+
 export async function bootstrapBaselineFixture(): Promise<void> {
   if (process.env.XYNE_SKIP_BASELINE_BOOTSTRAP === 'true') {
     baselineLogger.info('Baseline bootstrap skipped (XYNE_SKIP_BASELINE_BOOTSTRAP=true)');
@@ -811,6 +857,7 @@ export async function bootstrapBaselineFixture(): Promise<void> {
     await addMemberToChannel(adminUser, user);
     await addMemberToChannel(adminUser, partnerUser);
     const channelSeed = await sendSeedChannelMessage(channel.id);
+    const userGroup = await createBaselineUserGroup([user, partnerUser]);
 
     await loginAsUser(BASELINE_USER_ALIAS);
     baselineLogger.info('[7/8] Re-logged in as baseline user to create DM');
@@ -825,6 +872,7 @@ export async function bootstrapBaselineFixture(): Promise<void> {
       project,
       channel: { ...channel, seedMessage: channelSeed },
       dm,
+      userGroup,
     });
     testContext.storedUsers.set(BASELINE_OWNER_ALIAS, adminUser);
     testContext.storedUsers.set(BASELINE_USER_ALIAS, user);
@@ -912,6 +960,9 @@ export async function loadBaselineFixtureIntoWorkerContext(): Promise<void> {
     },
     dms: {},
     tickets: {},
+    userGroups: {
+      ...(registry.userGroup && { [BASELINE_USER_GROUP_KEY]: registry.userGroup }),
+    },
   };
 
   testContext.registerPersistentStoredUser(ownerUser);
@@ -932,7 +983,19 @@ export async function loadBaselineFixtureIntoWorkerContext(): Promise<void> {
         messages: { ...channelMessages },
       },
     },
-    dms: {},
+    // The partner shares the baseline DM, so it gets the same URL. Opening it by URL
+    // avoids clicking the owner's name in the DM list, which also matches group DMs.
+    dms:
+      registry.dm && registry.dm.partnerAlias === BASELINE_SECONDARY_USER_ALIAS
+        ? {
+            [BASELINE_DM_KEY]: {
+              id: registry.dm.id,
+              name: registry.dm.ownerAlias,
+              url: registry.dm.url,
+              messages: {},
+            },
+          }
+        : {},
     tickets: {},
   };
   testContext.registerPersistentStoredUser(secondaryUser);

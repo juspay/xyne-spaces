@@ -374,7 +374,7 @@ const draftsList: ToolDef = {
 	},
 	async handler(args, { sdk }) {
 		const limit = boundedLimit(args, 25, 100);
-		const rows = (await sdk.messages.listDrafts({ limit })) as DraftRow[];
+		const rows = (await sdk.messages.listDrafts()) as DraftRow[];
 		const channelId = optionalString(args, "channel_id");
 		const matched = channelId ? rows.filter((r) => r.channelId === channelId) : rows;
 		matched.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
