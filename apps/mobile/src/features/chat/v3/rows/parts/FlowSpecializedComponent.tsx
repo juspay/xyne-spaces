@@ -16,7 +16,6 @@ import {
   type FlowTextNormalizationOptions,
 } from '@/src/utils/flowJsonMarkdown';
 
-import type { MessageRowModel } from '../../model/chatRow.types';
 import { renderFlowActionButton } from './FlowActionButtonRenderer';
 import { FlowAgentCard } from './FlowAgentCard';
 import { FlowCallScheduleCard } from './FlowCallScheduleCard';
@@ -28,6 +27,7 @@ import { FlowMcpSuggestCard } from './FlowMcpSuggestCard';
 import { FlowPlanCard } from './FlowPlanCard';
 import { FlowPrCard } from './FlowPrCard';
 import { FlowUserQuestionCard } from './FlowUserQuestionCard';
+import type { FlowHost } from './useFlowMessageAction';
 import type { FlowActionContext, RenderMarkdown } from './FlowRendererTypes';
 import { getStringProp, isDisabled, stripMarkdownSyntax } from './flowState';
 
@@ -36,7 +36,7 @@ type SpecializedComponentContext = FlowActionContext & {
   componentKey: string;
   componentType: string;
   activeFlow: FlowDefinitionLike;
-  model: MessageRowModel;
+  model: FlowHost;
   normalizationOptions: FlowTextNormalizationOptions;
   markdownStyle: MarkdownStyle;
   inheritedContainerStyle: StyleProp<ViewStyle>;

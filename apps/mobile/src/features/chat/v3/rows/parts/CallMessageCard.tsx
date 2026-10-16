@@ -3,7 +3,11 @@ import { Headphones } from 'lucide-react-native';
 import { memo, useCallback, type ReactElement } from 'react';
 import { Pressable, Text, View, type GestureResponderEvent } from 'react-native';
 
-import type { MessageRowModel } from '../../model/chatRow.types';
+import { XyneAIStarIcon } from '@/src/components/icons';
+import { channelScopeParams } from '@/src/features/xyne-ai/model/askAIParams';
+import { getChannelById } from '@/src/hooks/useChannels';
+
+import type { MediaItem, MessageRowModel } from '../../model/chatRow.types';
 import { callThreadOpen, type CallThreadView } from '../../screens/callThreadOpen';
 import { useChatRenderTokens } from '../../theme/ChatRenderProvider';
 
@@ -17,6 +21,9 @@ const formatDuration = (durationMs: number): string => {
   return `${Math.floor(durationMs / 60_000)}min`;
 };
 
+const isTranscript = ({ mimetype, originalFilename }: MediaItem): boolean =>
+  mimetype === 'text/plain' || Boolean(originalFilename?.endsWith('.txt'));
+
 export const CallMessageCard = memo(function CallMessageCard({
   model,
 }: {
@@ -25,6 +32,8 @@ export const CallMessageCard = memo(function CallMessageCard({
   const call = model.callPreview;
   const router = useRouter();
   const tokens = useChatRenderTokens();
+  const attachments = model.mediaPreview?.items ?? [];
+  const canAskAI = call?.operation === 'call_ended' && attachments.some(isTranscript);
 
   const openThread = useCallback(
     (view: CallThreadView): void => {
@@ -48,6 +57,22 @@ export const CallMessageCard = memo(function CallMessageCard({
       openThread('transcript');
     },
     [openThread],
+  );
+
+  const onAskAIPress = useCallback(
+    (event: GestureResponderEvent): void => {
+      event.stopPropagation();
+      router.push({
+        pathname: '/xyne-ai',
+        params: {
+          ...channelScopeParams(getChannelById(model.channelId)),
+          conversationId: model.conversationId,
+          previewText: call?.title ?? 'Call Transcript',
+          attachmentIds: attachments.map(({ id }) => id).join(','),
+        },
+      });
+    },
+    [attachments, call?.title, model.channelId, model.conversationId, router],
   );
 
   if (!call) {
@@ -109,6 +134,19 @@ export const CallMessageCard = memo(function CallMessageCard({
             View Transcript
           </Text>
         </Pressable>
+        {canAskAI ? (
+          <>
+            <View className='w-px self-stretch bg-conversation-composer-call-divider' />
+            <Pressable
+              accessibilityRole='button'
+              accessibilityLabel='Ask AI'
+              className='items-center justify-center py-1'
+              onPress={onAskAIPress}
+            >
+              <XyneAIStarIcon size={16} />
+            </Pressable>
+          </>
+        ) : null}
       </View>
     </View>
   );

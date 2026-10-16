@@ -12,9 +12,12 @@ import { useCSSVariable } from 'uniwind';
 import { useHeaderHeight } from '@/src/hooks/useHeaderHeight';
 
 import { HeaderBackButton, HeaderIconButton } from '@/src/components/ui/header-icon-button';
+import { XyneAIStarIcon } from '@/src/components/icons';
 
 type TicketDetailHeaderProps = {
   onBack: () => void;
+  /** Hidden when absent, i.e. the ticket has no conversation to ask about. */
+  onAskAI?: (() => void) | undefined;
   /** Hide when the thread has no emails (dashboard parity). */
   canSummarize?: boolean;
   isSummarizeLoading?: boolean;
@@ -28,6 +31,7 @@ type TicketDetailHeaderProps = {
 
 export const TicketDetailHeader = memo(function TicketDetailHeader({
   onBack,
+  onAskAI,
   canSummarize = true,
   isSummarizeLoading = false,
   onSummarize,
@@ -57,6 +61,11 @@ export const TicketDetailHeader = memo(function TicketDetailHeader({
 
         <View className='flex-1' />
 
+        {onAskAI ? (
+          <HeaderIconButton liquidGlass accessibilityLabel='Ask AI' onPress={onAskAI}>
+            <XyneAIStarIcon />
+          </HeaderIconButton>
+        ) : null}
         {canSummarize ? (
           <HeaderIconButton
             liquidGlass

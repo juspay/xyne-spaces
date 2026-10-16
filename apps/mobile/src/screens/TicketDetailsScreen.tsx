@@ -18,6 +18,8 @@ import { useCSSVariable } from 'uniwind';
 import { ChatThread } from '@/src/features/chat/v2/components/chat/chat-thread';
 import { parseAssigneeRef } from '@/src/features/channel-tickets/utils/parse-assignee-ref';
 import { HeaderBackButton, HeaderIconButton } from '@/src/components/ui/header-icon-button';
+import { XyneAIStarIcon } from '@/src/components/icons';
+import { channelScopeParams } from '@/src/features/xyne-ai/model/askAIParams';
 import { UnreadCountBadge } from '@/src/components/ui/unread-count-badge';
 import { useBoards } from '@/src/hooks/useBoards';
 import { useCachedQuery } from '@/src/hooks/useCachedQuery';
@@ -392,6 +394,15 @@ export function TicketDetailsScreen({
     });
   }, [activeTab, channelId, conversationId, effectiveTicketId]);
 
+  // Same scope as the dashboard's ticket Ask AI: the ticket's channel and conversation.
+  const handleAskAI = useCallback((): void => {
+    if (!conversationId) return;
+    router.push({
+      pathname: '/xyne-ai',
+      params: { ...channelScopeParams(channel), conversationId, previewText: title },
+    });
+  }, [channel, conversationId, router, title]);
+
   const handleCopyTicketLink = useCallback((): void => {
     if (!ticketShareLink) {
       showMessageToast('This ticket does not have a link yet.', 'warning');
@@ -479,6 +490,14 @@ export function TicketDetailsScreen({
             onPress={handleCopyTicketLink}
           >
             <Copy size={20} color={foregroundColor} />
+          </HeaderIconButton>
+          <HeaderIconButton
+            liquidGlass
+            accessibilityLabel='Ask AI'
+            disabled={!conversationId}
+            onPress={handleAskAI}
+          >
+            <XyneAIStarIcon />
           </HeaderIconButton>
         </View>
 

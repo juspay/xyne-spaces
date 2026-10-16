@@ -5,6 +5,7 @@ import { useBubbleAccent } from '@/src/theme/useBubbleAccent';
 
 type FilterSheetHeaderProps = {
   title: string;
+  applyLabel?: string;
   /** Omit for tap-to-select sheets, which have nothing to cancel or commit. */
   onCancel?: () => void;
   onApply?: () => void;
@@ -17,6 +18,7 @@ type FilterSheetHeaderProps = {
  */
 export function FilterSheetHeader({
   title,
+  applyLabel = 'Apply',
   onCancel,
   onApply,
 }: FilterSheetHeaderProps): ReactElement {
@@ -55,7 +57,7 @@ export function FilterSheetHeader({
             className='py-1 active:opacity-60'
           >
             <Text className='text-[15px] font-semibold' style={{ color: accentText }}>
-              Apply
+              {applyLabel}
             </Text>
           </Pressable>
         ) : null}

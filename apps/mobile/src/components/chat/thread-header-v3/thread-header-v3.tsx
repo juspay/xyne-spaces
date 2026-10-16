@@ -8,14 +8,20 @@ import { ChannelScopeType } from '@xyne/shared';
 
 import { ConversationHeaderIcon } from '@/src/components/chat/conversation-header-icon';
 import { ConversationHeaderTitleSkeleton } from '@/src/components/chat/conversation-header-title-skeleton';
+import { XyneAIStarIcon } from '@/src/components/icons';
 import {
   HeaderBackButton,
+  HeaderIconButton,
   HeaderPill,
   HEADER_ICON_BUTTON_SIZE,
 } from '@/src/components/ui/header-icon-button';
+import { channelScopeParams, messageScopeParams } from '@/src/features/xyne-ai/model/askAIParams';
 import { useConversationHeaderData } from '@/src/hooks/useConversationHeaderData';
+import { useQuery } from '@/src/hooks/useQuery';
+import { composerHtmlToPlainText } from '@/src/components/input-composer/utils/conversation-input.utils';
 import { haptics } from '@/src/utils/haptics';
 import { SUPPORTS_LIQUID_GLASS } from '@/src/utils/platform';
+import { queries } from '@/src/zero/queries';
 import type { BaseConversationSurface } from '@/src/features/chat/baseConversationSurface';
 
 import { ThreadHeaderV3Props } from './thread-header-v3.types';
@@ -87,6 +93,24 @@ const ThreadHeaderV3: React.FC<ThreadHeaderV3Props> = ({ channelId, threadId, on
       params: { channelId, surface: baseConversationSurface },
     });
   }, [baseConversationSurface, channelId, router]);
+
+  const [conversation] = useQuery(queries.getConversationById({ conversationId: threadId }), {
+    enabled: Boolean(threadId),
+  });
+  const rootMessage = conversation?.initialMessage;
+
+  const handleAskAI = useCallback(() => {
+    router.push({
+      pathname: '/xyne-ai',
+      params: {
+        ...channelScopeParams(channel),
+        conversationId: threadId,
+        ...(rootMessage
+          ? messageScopeParams(rootMessage, composerHtmlToPlainText)
+          : { previewText: 'Thread' }),
+      },
+    });
+  }, [channel, rootMessage, router, threadId]);
 
   return (
     <View
@@ -176,6 +200,10 @@ const ThreadHeaderV3: React.FC<ThreadHeaderV3Props> = ({ channelId, threadId, on
               )}
             </HeaderPill>
           </Pressable>
+
+          <HeaderIconButton liquidGlass accessibilityLabel='Ask AI' onPress={handleAskAI}>
+            <XyneAIStarIcon />
+          </HeaderIconButton>
 
           <ThreadHeaderOverflowMenu
             channelId={channelId}

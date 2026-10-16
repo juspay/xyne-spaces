@@ -62,7 +62,7 @@ function FromFilterSheetBody({
     const listed = new Set(people.map(person => person.id));
     const missing = draft
       .filter(chip => !listed.has(chip.id))
-      .map(chip => ({ id: chip.id, title: chip.label }));
+      .map(chip => ({ id: chip.id, title: chip.label, name: chip.label }));
     return selectionFirst(people, draftIds, missing);
   }, [draft, draftIds, people, query]);
 

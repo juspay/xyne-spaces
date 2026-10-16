@@ -44,7 +44,9 @@ import {
   copyImageAttachmentToClipboard,
   getFirstImageAttachment,
 } from '@/src/utils/copyImageAttachment';
-import { TurnUpRightIcon } from '@/src/components/icons';
+import { TurnUpRightIcon, XyneAIStarIcon } from '@/src/components/icons';
+import { channelScopeParams, messageScopeParams } from '@/src/features/xyne-ai/model/askAIParams';
+import { useChannel } from '@/src/hooks/useChannels';
 import type { ChatInputEditingMessage } from '@/src/components/input-composer/input-composer.types';
 
 import type { MessageAction, MessageActionsTarget } from './message-actions-target';
@@ -164,6 +166,7 @@ export const useMessageActions = ({
     if (!flags) {
       return {
         replyInThread: false,
+        askAI: false,
         sendToChannel: false,
         editInChat: false,
         copyMessage: false,
@@ -192,6 +195,10 @@ export const useMessageActions = ({
     } = flags;
 
     return {
+      askAI:
+        (!isThread || isFirstInThread || isCallMessage) &&
+        (!isSystemMessage || isCallMessage) &&
+        !isMessageDeleted,
       replyInThread:
         !isThread &&
         repliesEnabled &&
@@ -233,6 +240,26 @@ export const useMessageActions = ({
       });
     });
   }, [closeActionSheet, router, target]);
+
+  const channel = useChannel(target?.channelId ?? '');
+  const handleAskAI = useCallback(() => {
+    if (!target || !message) return;
+    const attachmentIds = (message.attachments ?? []).map(({ id }) => id);
+    closeActionSheet(() => {
+      router.push({
+        pathname: '/xyne-ai',
+        params: {
+          ...channelScopeParams(channel),
+          conversationId: target.conversationId,
+          ...messageScopeParams(
+            message,
+            context === 'channel' ? channelHtmlToPlainText : composerHtmlToPlainText,
+          ),
+          ...(attachmentIds.length > 0 && { attachmentIds: attachmentIds.join(',') }),
+        },
+      });
+    });
+  }, [channel, closeActionSheet, context, message, router, target]);
 
   const handleSendToChannel = useCallback(() => {
     if (!messageId) return;
@@ -458,6 +485,13 @@ export const useMessageActions = ({
 
     const actions: MessageAction[] = [
       {
+        id: 'ask-ai',
+        icon: <XyneAIStarIcon size={20} />,
+        label: 'Ask AI',
+        onPress: handleAskAI,
+        visible: visibility.askAI,
+      },
+      {
         id: 'reply-in-thread',
         icon: <MessageCircleMore size={20} color={foreground} />,
         label: 'Reply in Thread',
@@ -572,6 +606,7 @@ export const useMessageActions = ({
     handleForward,
     handleMarkAsUnread,
     handleOpenReminderOptions,
+    handleAskAI,
     handleReplyInThread,
     handleSendToChannel,
     handleStartCall,

@@ -18,6 +18,8 @@ import {
   Trash2,
 } from 'lucide-react-native';
 
+import { XyneAIStarIcon } from '@/src/components/icons';
+import { channelScopeParams } from '@/src/features/xyne-ai/model/askAIParams';
 import { callService } from '@/src/services/Call/callService';
 import { haptics } from '@/src/utils/haptics';
 import type { CallDisplayData } from '@/src/types/calls';
@@ -235,6 +237,21 @@ const CallDetailsSheet: React.FC<CallDetailsSheetProps> = ({
     });
   }, [call, dismissSheetAfter]);
 
+  const handleAskAI = useCallback(() => {
+    const conversationId = call?.metadata?.['conversationId'];
+    if (typeof conversationId !== 'string') return;
+    dismissSheetAfter(() => {
+      router.push({
+        pathname: '/xyne-ai',
+        params: {
+          ...channelScopeParams(call?.channel ?? undefined),
+          conversationId,
+          previewText: call?.title ?? 'Call',
+        },
+      });
+    });
+  }, [call, dismissSheetAfter]);
+
   const handleCopyLink = useCallback(async () => {
     if (!call?.roomLink) return;
     await Clipboard.setStringAsync(call.roomLink);
@@ -427,6 +444,15 @@ const CallDetailsSheet: React.FC<CallDetailsSheetProps> = ({
                                 <Text className='text-sm font-semibold text-foreground ml-2'>
                                   Transcript
                                 </Text>
+                              </Pressable>
+                            )}
+                            {hasTranscript && (
+                              <Pressable
+                                onPress={handleAskAI}
+                                accessibilityLabel='Ask AI'
+                                className='flex-row items-center justify-center w-12 h-12 rounded-xl bg-secondary active:bg-secondary/80'
+                              >
+                                <XyneAIStarIcon />
                               </Pressable>
                             )}
                             {Boolean(call.transcript) && (

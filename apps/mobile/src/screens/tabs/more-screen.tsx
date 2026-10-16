@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import {
   Bookmark,
   CircleAlert,
+  CircleQuestionMark,
   FileText,
   LifeBuoy,
   MessagesSquare,
@@ -132,6 +133,13 @@ const MORE_ROWS: readonly MoreRowDefinition[] = [
     label: 'Xyne Desks',
     description: 'Browse your desks and tickets',
     navigate: router => router.push('/xyne-desks'),
+  },
+  {
+    id: 'user-guide',
+    icon: CircleQuestionMark,
+    label: 'Help',
+    description: 'Short guides for using the app',
+    navigate: router => router.push('/(protected)/guide'),
   },
   {
     id: 'report-issue',

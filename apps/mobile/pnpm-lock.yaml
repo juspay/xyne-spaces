@@ -391,6 +391,9 @@ importers:
       react-native-worklets:
         specifier: 0.11.1
         version: 0.11.1(@babel/core@7.29.7)(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)
+      remend:
+        specifier: 1.4.0
+        version: 1.4.0
       socket.io-client:
         specifier: ^4.8.3
         version: 4.8.3
@@ -9010,6 +9013,9 @@ packages:
     resolution:
       integrity: sha512-EWV80YgFaVgFrjGCAsV7oybp4GOxbls5RzBg8OB0nKEVXsBJR1JlV8Di1JhCROg3MzTfe1RI8yitIm1eOs68iA==
     hasBin: true
+  remend@1.4.0:
+    resolution:
+      integrity: sha512-mHiYhhwphs1IgIZmkToKLwJn0U99IjPXuutkA2acrNcG0vlEq2G4TGnd2eT0saIHwh2KjaCpvleHcsd5SAz96A==
   require-directory@2.1.1:
     resolution:
       integrity: sha512-fGxEI7+wsG9xrvdjsrlmL22OMTTiHRwAMroiEeMgq8gzoLC/PQr7RsRDSTLUg/bZAZtF+TVIkHc6/4RIKrui+Q==
@@ -18087,6 +18093,7 @@ snapshots:
   regjsparser@0.13.4:
     dependencies:
       jsesc: 3.1.0
+  remend@1.4.0: {}
   require-directory@2.1.1: {}
   require-from-string@2.0.2: {}
   require-in-the-middle@8.0.1:

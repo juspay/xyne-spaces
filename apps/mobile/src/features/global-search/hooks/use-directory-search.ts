@@ -97,24 +97,25 @@ function peopleSearchFor(users: readonly DirectoryUser[]): Search<SearchablePers
 }
 
 /** Includes yourself, so `from:` can filter to your own messages. */
-export function usePeopleSearch(query: string): readonly SearchPersonItem[] {
+export function usePeopleSearch(query: string, limit = PEOPLE_LIMIT): readonly SearchPersonItem[] {
   const { user } = useAuth();
   const currentUserId = user?.user_id ?? '';
   const users = useUsers();
 
   return useMemo(
     () =>
-      peopleSearchFor(users)(query, PEOPLE_LIMIT).map(({ user: match, name, email }) => {
+      peopleSearchFor(users)(query, limit).map(({ user: match, name, email }) => {
         const statusEmoji = getActiveUserStatusEmoji(match);
 
         return {
           id: match.id,
           title: match.id === currentUserId ? `${name} (You)` : name,
+          name,
           ...(email ? { subtitle: email } : {}),
           ...(statusEmoji ? { statusEmoji } : {}),
         };
       }),
-    [currentUserId, query, users],
+    [currentUserId, limit, query, users],
   );
 }
 
@@ -130,7 +131,10 @@ type SearchableChannel = {
   isStarred?: boolean;
 };
 
-export function useChannelsSearch(query: string): readonly SearchChannelItem[] {
+export function useChannelsSearch(
+  query: string,
+  limit = CHANNELS_LIMIT,
+): readonly SearchChannelItem[] {
   const allChannels = useAllChannels();
   const visibleChannels = useSelector(stateMachineActor, selectVisibleChannels);
   const statuses = useSelector(stateMachineActor, selectChannelStatuses);
@@ -184,20 +188,19 @@ export function useChannelsSearch(query: string): readonly SearchChannelItem[] {
   return useMemo(() => {
     // Users often type Slack-style `#engineering`; match against bare names.
     const normalized = query.trim().replace(/^#/, '');
-    const matches = normalized
-      ? search(normalized, CHANNELS_LIMIT)
-      : starredFirst(channels, CHANNELS_LIMIT);
+    const matches = normalized ? search(normalized, limit) : starredFirst(channels, limit);
 
     return matches.map((channel): SearchChannelItem => ({
       id: channel.id,
       title: channel.name.startsWith('#') ? channel.name : `#${channel.name}`,
+      name: channel.name.replace(/^#/, ''),
       ...(channel.visibility ? { visibility: channel.visibility } : {}),
       ...(channel.unreadCount && channel.unreadCount > 0
         ? { unreadCount: channel.unreadCount }
         : {}),
       ...(channel.isStarred ? { isStarred: true } : {}),
     }));
-  }, [channels, query, search]);
+  }, [channels, limit, query, search]);
 }
 
 // ---------------------------------------------------------------------------
