@@ -1,7 +1,7 @@
 import { readFromYSweetStrict } from '@/utils/ysweetUtils';
 import { extractMentionsFromContent } from '@/utils/mentionUtils';
 import { extractChannelMentions, extractGroupMentions } from '@/utils/mentionParser';
-import { appSchema, callSchema, channelSchema, InsertDocument, mailSchema, messageSchema, projectSchema, schemaToDocType, SubApp, ticketSchema, userSchema, VespaAppDocument, VespaCallDocument, VespaChatContainerDocument, VespaChatMessageDocument, VespaDocType, VespaFileDocument, VespaMailDocument, VespaProjectDocument, VespaSchema, VespaTicketDocument, samTranscriptSchema, sdlcContainerSchema, sdlcRepositorySchema, type SdlcFieldValues, type VespaSdlcContainerDocument, type VespaSdlcRepositoryDocument, SDLC_DISCUSSION_FIELDS, SDLC_FILE_FIELDS, SDLC_TICKET_FIELDS } from '@/vespa/src/types';
+import { appSchema, callSchema, channelSchema, InsertDocument, mailSchema, messageSchema, projectSchema, schemaToDocType, SubApp, ticketSchema, userSchema, VespaAppDocument, VespaCallDocument, VespaChatContainerDocument, VespaChatMessageDocument, VespaDocType, VespaFileDocument, VespaMailDocument, VespaProjectDocument, VespaSchema, VespaTicketDocument, samTranscriptSchema, sdlcContainerSchema, sdlcRepositorySchema, type VespaSdlcContainerDocument, type VespaSdlcRepositoryDocument } from '@/vespa/src/types';
 import {
   hubOfContainer,
   sdlcContainerDocument,
@@ -546,7 +546,7 @@ export const mapMessage = async (
     threadSenders: threadInfo.threadSenders,
     messageChannelName: msgChannelName || '',
     messageType: args.msgType || 'USER',
-    ...toVespaSdlcFields(await sdlcFieldsForConversation(args.conversationId), SDLC_DISCUSSION_FIELDS),
+    ...await sdlcFieldsForConversation(args.conversationId),
   }
 }
 
@@ -755,7 +755,7 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
     initialMessageSender: initialMessageSender,
     parentTicketXyneId: parentTicketXyneId,
     childTicketXyneIds: childTicketXyneIds,
-    ...toVespaSdlcFields(await sdlcFieldsForTicket(args.id), SDLC_TICKET_FIELDS),
+    ...await sdlcFieldsForTicket(args.id),
   }
 }
 
@@ -1022,7 +1022,7 @@ export const mapCanvas = async (args: InsertValue<CanvasesSchema>, workspaceId?:
     conversationId: undefined,
     workspaceId: effectiveWorkspaceId,
     orgId: effectiveOrgId,
-    ...toVespaSdlcFields(await sdlcFieldsForCanvas(args), SDLC_FILE_FIELDS),
+    ...await sdlcFieldsForCanvas(args),
   };
 };
 
@@ -1447,7 +1447,7 @@ export const mapFile = async (
     ticketId: args.entityType === 'TICKET' ? args.entityId : undefined,
     workspaceId: effectiveWorkspaceId,
     orgId: effectiveOrgId,
-    ...toVespaSdlcFields(await sdlcFieldsForAttachment(args), SDLC_FILE_FIELDS),
+    ...await sdlcFieldsForAttachment(args),
   };
 };
 
@@ -1574,17 +1574,6 @@ export const mapEmail = async (email: Email, workspaceId?: string, orgId?: strin
     orgId: effectiveOrgId,
   };
 };
-
-/**
- * SDLC fields on a feed: all of them, empty ones as null. A Vespa reference cannot hold '', and
- * null leaves a field unset; sending it rather than leaving it out lets a field-scoped update
- * clear a placement the item no longer has. An item in no hub (null) gets every field null.
- */
-const toVespaSdlcFields = <T extends object>(fields: T | null, names: readonly (keyof T)[]): SdlcFieldValues<T> =>
-  Object.fromEntries(names.map(name => {
-    const value = fields?.[name];
-    return [name, value === undefined || value === '' || (Array.isArray(value) && value.length === 0) ? null : value];
-  })) as SdlcFieldValues<T>;
 
 /** A track or folder row, with the hub it is placed in (fetchDataBySchema). */
 type SdlcContainerRow = { id: string; hubId: string };

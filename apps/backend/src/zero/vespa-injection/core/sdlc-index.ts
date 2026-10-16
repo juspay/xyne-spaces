@@ -18,6 +18,7 @@ import {
   type SdlcBranch,
   type SdlcContainerType,
   type SdlcDiscussionFields,
+  type SdlcFieldValues,
   type SdlcFileFields,
   type SdlcTicketFields,
   type VespaSdlcContainerDocument,
@@ -40,20 +41,19 @@ import {
  * Each entry reads only what it needs: an item's place is found by walking up the edges that
  * place it to the hub, never by loading the whole hub, so a job costs the depth of its item, not
  * the size of its hub. Reads are made when the job runs, so it maps the hub as it is then.
+ *
+ * The sdlcFieldsFor* functions return the SDLC fields as written to Vespa: an empty value is
+ * null (a Vespa reference cannot hold ''), and an item in no hub gets every field null, which
+ * clears a placement it no longer has.
  */
 
 const PLACED_TYPES = new Set(['FOLDER', 'CANVAS', 'ATTACHMENT', 'LINK']);
 const PLACING_RELATIONS = [SDLC_TRACK_MEMBERSHIP_RELATION, SDLC_CONTAINMENT_RELATION, SDLC_HUB_ITEM_RELATION];
 const OLDEST_FIRST = [{ createdAt: 'asc' as const }, { id: 'asc' as const }];
 
-const ms = (d: Date | null | undefined): number => (d ? d.getTime() : 0);
-
 // Vespa document ids are id:<namespace>:<schema>::<id>, the namespace being the deployment's
 // (VESPA_NAMESPACE), as in the mapper's getRef.
-const sdlcContainerRef = (containerId: string): string =>
-  `id:${NAMESPACE}:${sdlcContainerSchema}::${containerId}`;
-const repositoryRef = (repoId: string): string =>
-  `id:${NAMESPACE}:${sdlcRepositorySchema}::${repoId}`;
+const sdlcContainerRef = (containerId: string): string => `id:${NAMESPACE}:${sdlcContainerSchema}::${containerId}`;
 
 /** Caches each key's first lookup, so the entries read together share their reads. */
 function once<K, V>(load: (key: K) => Promise<V>): (key: K) => Promise<V> {
@@ -80,20 +80,6 @@ interface Placement {
   isFolder: boolean;
   /** What it sits in: a track, a folder, or the hub itself; null when nothing places it. */
   parentId: string | null;
-}
-
-/** Where a track or folder sits: everything about it that comes from the containers above it. */
-interface Position {
-  branch: SdlcBranch;
-  parentId: string;
-  /** The hub, every container above it, then itself. */
-  scopeIds: string[];
-  depth: number;
-  /** Names below the hub, joined: "Payments/Design". */
-  path: string;
-  trackId: string;
-  trackStatus: string;
-  repoRef: string;
 }
 
 /**
@@ -146,31 +132,10 @@ function sdlcHub(hubId: string) {
     };
   });
 
-  /** The containers above `id`, hub first; [] when its chain does not reach the hub. */
-  const chainOf = once(async (id: string): Promise<string[]> => {
-    const chain: string[] = [];
-    const seen = new Set<string>([id]);
-    let parent = (await placementOf(id)).parentId;
-    while (parent && !seen.has(parent)) {
-      chain.unshift(parent);
-      if (parent === hubId) return chain;
-      seen.add(parent);
-      parent = (await placementOf(parent)).parentId;
-    }
-    return [];
-  });
-
   const trackRow = once((id: string) => db.sdlcTrack.findUnique({ where: { id } }));
   const folderRow = once((id: string) => db.sdlcFolder.findUnique({ where: { id } }));
 
   const isTrack = async (id: string): Promise<boolean> => id !== hubId && (await placementOf(id)).isTrack;
-
-  const nameOf = async (id: string): Promise<string> => {
-    const placement = await placementOf(id);
-    const folderName = placement.isFolder ? (await folderRow(id))?.name : undefined;
-    const trackName = placement.isTrack ? (await trackRow(id))?.name : undefined;
-    return folderName ?? trackName ?? '';
-  };
 
   /** The repository whose wiki `id` is (sdlc-wiki-<hubId>-<repoId>, under the Wiki root), or null. */
   const repoOfWiki = async (id: string): Promise<string | null> => {
@@ -195,39 +160,6 @@ function sdlcHub(hubId: string) {
     return 'FOLDER';
   };
 
-  /** Where a track or folder sits; null when it does not reach the hub or is in a detached repository's wiki. */
-  const positionOf = async (id: string): Promise<Position | null> => {
-    // 1. Its chain up to the hub.
-    const chain = await chainOf(id);
-    if (!chain.length) return null;
-    const scopeIds = [...chain, id];
-
-    // 2. A repository wiki on the chain: out of search while that repository is detached.
-    const repos = await Promise.all(scopeIds.map(repoOfWiki));
-    for (const repo of repos) {
-      if (repo && !(await isAttached(repo))) return null;
-    }
-    const repoId = repos.find(Boolean);
-
-    // 3. The track on the chain, if any.
-    const tracks = await Promise.all(scopeIds.map(isTrack));
-    const trackId = scopeIds.find((_, i) => tracks[i]) ?? '';
-
-    // 4. The names on the chain, for the path.
-    const names = await Promise.all(scopeIds.slice(1).map(nameOf));
-
-    return {
-      branch: scopeIds.includes(wikiRoot) ? 'WIKI' : scopeIds.includes(knowledgeRoot) ? 'KNOWLEDGE' : 'TRACKS',
-      parentId: chain[chain.length - 1]!,
-      scopeIds,
-      depth: chain.length - 1,
-      path: names.join('/'),
-      trackId,
-      trackStatus: trackId ? String((await trackRow(trackId))?.status ?? '') : '',
-      repoRef: repoId ? repositoryRef(repoId) : '',
-    };
-  };
-
   /** A track or folder's sdlc_container document; null when it is not placed in the hub. */
   const container = once(async (id: string): Promise<VespaSdlcContainerDocument | null> => {
     // 1. The hub.
@@ -238,34 +170,64 @@ function sdlcHub(hubId: string) {
     const placement = await placementOf(id);
     const folder = placement.isFolder ? await folderRow(id) : null;
     const track = !folder && placement.isTrack ? await trackRow(id) : null;
-    if (!folder && !track) return null;
+    const row = folder ?? track;
+    if (!row) return null;
 
-    // 3. Where it sits. A track sits only in the tracks branch.
-    const position = await positionOf(id);
-    if (!position) return null;
-    if (track && position.branch !== 'TRACKS') return null;
+    // 3. The containers above it, up to the hub (hub first); not placed when they never reach it.
+    const chain: string[] = [];
+    const seen = new Set<string>([id]);
+    let parent = placement.parentId;
+    while (parent && parent !== hubId && !seen.has(parent)) {
+      chain.unshift(parent);
+      seen.add(parent);
+      parent = (await placementOf(parent)).parentId;
+    }
+    if (parent !== hubId) return null;
+    chain.unshift(hubId);
+    const scopeIds = [...chain, id];
 
-    const row = (folder ?? track)!;
+    // 4. A repository wiki on the chain: out of search while that repository is detached.
+    const repos = await Promise.all(scopeIds.map(repoOfWiki));
+    for (const repo of repos) {
+      if (repo && !(await isAttached(repo))) return null;
+    }
+    const repoId = repos.find(Boolean);
+
+    // 5. Its branch. A track sits only in the tracks branch.
+    const branch: SdlcBranch = scopeIds.includes(wikiRoot) ? 'WIKI' : scopeIds.includes(knowledgeRoot) ? 'KNOWLEDGE' : 'TRACKS';
+    if (track && branch !== 'TRACKS') return null;
+
+    // 6. The track on the chain, and the names on it for the path.
+    const tracks = await Promise.all(scopeIds.map(isTrack));
+    const trackId = scopeIds.find((_, i) => tracks[i]) ?? '';
+    const names = await Promise.all(scopeIds.slice(1).map(async scopeId => {
+      const scopePlacement = await placementOf(scopeId);
+      const folderName = scopePlacement.isFolder ? (await folderRow(scopeId))?.name : undefined;
+      const trackName = scopePlacement.isTrack ? (await trackRow(scopeId))?.name : undefined;
+      return folderName ?? trackName ?? '';
+    }));
+    const parentId = chain[chain.length - 1]!;
+
     return {
       docId: id,
       docType: VespaDocType.SDLC_CONTAINER,
       channelRef: `id:${NAMESPACE}:${channelSchema}::${hubId}`,
       projectId: channel.projectId ?? '',
-      branch: position.branch,
+      branch,
       containerType: track ? 'TRACK' : await containerTypeOf(id),
       name: row.name,
       description: track?.description ?? '',
-      trackId: position.trackId,
-      trackStatus: position.trackStatus,
-      parentId: position.parentId,
-      parentType: track || position.parentId === hubId ? 'HUB' : await containerTypeOf(position.parentId),
-      repoRef: position.repoRef,
-      scopeIds: position.scopeIds,
-      depth: position.depth,
-      path: position.path,
+      trackId,
+      trackStatus: trackId ? String((await trackRow(trackId))?.status ?? '') : '',
+      parentId,
+      parentType: track || parentId === hubId ? 'HUB' : await containerTypeOf(parentId),
+      repoRef: repoId ? `id:${NAMESPACE}:${sdlcRepositorySchema}::${repoId}` : '',
+      scopeIds,
+      depth: chain.length - 1,
+      path: names.join('/'),
       createdBy: row.createdBy,
-      createdAt: ms(row.createdAt),
-      updatedAt: ms(row.updatedAt),
+      createdAt: row.createdAt.getTime(),
+      updatedAt: row.updatedAt.getTime(),
     };
   });
 
@@ -276,32 +238,32 @@ function sdlcHub(hubId: string) {
     return containerId;
   };
 
-  /** A canvas's own SDLC fields (no related documents yet); null when it is not an SDLC document of the hub. */
-  const canvas = once(async (id: string): Promise<SdlcFileFields | null> => {
-    const row = await db.canvas.findFirst({
+  /** A canvas's SDLC fields, without its related documents; null when it is not an SDLC document of the hub. */
+  const canvasFields = once(async (id: string): Promise<SdlcFieldValues<SdlcFileFields> | null> => {
+    const canvas = await db.canvas.findFirst({
       where: { id, channelId: hubId, sdlcArtifact: { isNot: null } },
       select: { folderId: true, sdlcArtifact: { select: { artifactStatus: true } } },
     });
-    if (!row) return null;
+    if (!canvas) return null;
 
     const containerId = await containerOf('CANVAS', id);
     if (!containerId) return null;
 
     // Its type is its canvas folder ("PRDs", "Tech Docs").
-    const type = row.folderId
-      ? await db.canvasFolder.findFirst({ where: { id: row.folderId, channelId: hubId }, select: { name: true } })
+    const type = canvas.folderId
+      ? await db.canvasFolder.findFirst({ where: { id: canvas.folderId, channelId: hubId }, select: { name: true } })
       : null;
 
     return {
       sdlcContainerRef: sdlcContainerRef(containerId),
-      sdlcTypeName: type?.name || '',
-      sdlcStatus: row.sdlcArtifact?.artifactStatus ?? '',
-      sdlcRelatedDocumentIds: [],
+      sdlcTypeName: type?.name || null,
+      sdlcStatus: canvas.sdlcArtifact?.artifactStatus || null,
+      sdlcRelatedDocumentIds: null,
     };
   });
 
-  /** An upload's own SDLC fields; null when it is not filed in the hub's tracks. */
-  const upload = once(async (id: string): Promise<SdlcFileFields | null> => {
+  /** An upload's SDLC fields, without its related documents; null when it is not filed in the hub's tracks. */
+  const uploadFields = once(async (id: string): Promise<SdlcFieldValues<SdlcFileFields> | null> => {
     const filed = await db.sdlcEntityLink.findFirst({
       where: { channelId: hubId, relationType: SDLC_CONTAINMENT_RELATION, targetType: 'ATTACHMENT', targetId: id },
       select: { id: true },
@@ -313,21 +275,21 @@ function sdlcHub(hubId: string) {
 
     return {
       sdlcContainerRef: sdlcContainerRef(containerId),
-      sdlcTypeName: '',
-      sdlcStatus: '',
-      sdlcRelatedDocumentIds: [],
+      sdlcTypeName: null,
+      sdlcStatus: null,
+      sdlcRelatedDocumentIds: null,
     };
   });
 
-  /** A document's own SDLC fields (a canvas or an upload); null for anything else. */
-  const documentOf = (type: string, id: string): Promise<SdlcFileFields | null> => {
-    if (type === 'CANVAS') return canvas(id);
-    if (type === 'ATTACHMENT') return upload(id);
+  /** A document's SDLC fields (a canvas or an upload), without its related documents; null for anything else. */
+  const documentOf = (type: string, id: string): Promise<SdlcFieldValues<SdlcFileFields> | null> => {
+    if (type === 'CANVAS') return canvasFields(id);
+    if (type === 'ATTACHMENT') return uploadFields(id);
     return Promise.resolve(null);
   };
 
   /** A document's SDLC fields, with the hub documents linked to it as context (both directions). */
-  const document = async (type: string, id: string): Promise<SdlcFileFields | null> => {
+  const document = async (type: string, id: string): Promise<SdlcFieldValues<SdlcFileFields> | null> => {
     // 1. Its own fields.
     const own = await documentOf(type, id);
     if (!own) return null;
@@ -350,7 +312,7 @@ function sdlcHub(hubId: string) {
       sdlcContainerRef: own.sdlcContainerRef,
       sdlcTypeName: own.sdlcTypeName,
       sdlcStatus: own.sdlcStatus,
-      sdlcRelatedDocumentIds: relatedIds,
+      sdlcRelatedDocumentIds: relatedIds.length ? relatedIds : null,
     };
   };
 
@@ -434,23 +396,34 @@ export async function sdlcHubContainerIds(hubId: string): Promise<string[]> {
   return placed;
 }
 
-/** A canvas's SDLC fields; null unless it is an SDLC document filed in a hub. */
-export async function sdlcFieldsForCanvas(canvas: { id: string; channelId?: string | null }): Promise<SdlcFileFields | null> {
-  if (!canvas.channelId) return null;
-  return sdlcHub(canvas.channelId).document('CANVAS', canvas.id);
+/** A canvas's SDLC fields for Vespa; all null unless it is an SDLC document filed in a hub. */
+export async function sdlcFieldsForCanvas(canvas: { id: string; channelId?: string | null }): Promise<SdlcFieldValues<SdlcFileFields>> {
+  const fields = canvas.channelId ? await sdlcHub(canvas.channelId).document('CANVAS', canvas.id) : null;
+  return fields ?? {
+    sdlcContainerRef: null,
+    sdlcTypeName: null,
+    sdlcStatus: null,
+    sdlcRelatedDocumentIds: null,
+  };
 }
 
-/** An uploaded file's SDLC fields; null unless it was uploaded into a hub's track. */
-export async function sdlcFieldsForAttachment(attachment: { id: string; entityType?: string | null; entityId?: string | null }): Promise<SdlcFileFields | null> {
-  if (attachment.entityType !== 'SDLC_HUB' || !attachment.entityId) return null;
-  return sdlcHub(attachment.entityId).document('ATTACHMENT', attachment.id);
+/** An uploaded file's SDLC fields for Vespa; all null unless it was uploaded into a hub's track. */
+export async function sdlcFieldsForAttachment(attachment: { id: string; entityType?: string | null; entityId?: string | null }): Promise<SdlcFieldValues<SdlcFileFields>> {
+  const inHub = attachment.entityType === 'SDLC_HUB' && attachment.entityId;
+  const fields = inHub ? await sdlcHub(attachment.entityId!).document('ATTACHMENT', attachment.id) : null;
+  return fields ?? {
+    sdlcContainerRef: null,
+    sdlcTypeName: null,
+    sdlcStatus: null,
+    sdlcRelatedDocumentIds: null,
+  };
 }
 
 /**
- * A ticket's SDLC fields, across every hub it is linked in: the union of its places there, in
- * the order its links were made. Empty lists outside SDLC.
+ * A ticket's SDLC fields for Vespa, across every hub it is linked in: the union of its places
+ * there, in the order its links were made. All null outside SDLC.
  */
-export async function sdlcFieldsForTicket(ticketId: string): Promise<SdlcTicketFields> {
+export async function sdlcFieldsForTicket(ticketId: string): Promise<SdlcFieldValues<SdlcTicketFields>> {
   // 1. The hubs it is linked in, oldest link first.
   const links = await db.sdlcEntityLink.findMany({
     where: {
@@ -477,18 +450,19 @@ export async function sdlcFieldsForTicket(ticketId: string): Promise<SdlcTicketF
   }
 
   return {
-    sdlcContainerIds: containerIds,
-    sdlcDocumentIds: documentIds,
-    sdlcRepoIds: repoIds,
+    sdlcContainerIds: containerIds.length ? containerIds : null,
+    sdlcDocumentIds: documentIds.length ? documentIds : null,
+    sdlcRepoIds: repoIds.length ? repoIds : null,
   };
 }
 
 /**
- * The SDLC fields of a conversation's messages: the container of the item it was started on,
- * and that item when it is a document. Null when it was not started in an SDLC hub.
+ * The SDLC fields for Vespa of a conversation's messages: the container of the item it was
+ * started on, and that item when it is a document. All null when it was not started in a hub.
  */
-export async function sdlcFieldsForConversation(conversationId: string | null | undefined): Promise<SdlcDiscussionFields | null> {
-  if (!conversationId) return null;
+export async function sdlcFieldsForConversation(conversationId: string | null | undefined): Promise<SdlcFieldValues<SdlcDiscussionFields>> {
+  const notInHub = { sdlcContainerRef: null, sdlcDocumentId: null };
+  if (!conversationId) return notInHub;
 
   // 1. What it was started on: its DISCUSSION edges, oldest first. Its hub is the oldest one's.
   const startedOn = await db.sdlcEntityLink.findMany({
@@ -496,7 +470,7 @@ export async function sdlcFieldsForConversation(conversationId: string | null | 
     orderBy: OLDEST_FIRST,
     select: { channelId: true, sourceType: true, sourceId: true },
   });
-  if (!startedOn.length) return null;
+  if (!startedOn.length) return notInHub;
   const hubId = startedOn[0]!.channelId;
   const hub = sdlcHub(hubId);
 
@@ -508,10 +482,10 @@ export async function sdlcFieldsForConversation(conversationId: string | null | 
 
     return {
       sdlcContainerRef: sdlcContainerRef(containerId),
-      sdlcDocumentId: isDocument ? item.sourceId : '',
+      sdlcDocumentId: isDocument ? item.sourceId : null,
     };
   }
-  return null;
+  return notInHub;
 }
 
 /** The hub a track or folder belongs to, from the edge that places it. */
