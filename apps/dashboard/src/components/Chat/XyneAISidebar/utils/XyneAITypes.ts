@@ -561,6 +561,34 @@ export interface PlanTodo {
   status: 'pending' | 'in_progress' | 'completed' | 'failed';
 }
 
+/**
+ * The run options a user turn was sent with (model pin, thinking, toggles).
+ * Client-only: stamped on the optimistic user message so regenerate / edit
+ * re-run the turn the way it was asked. Not persisted by claw-auth yet, so a
+ * reloaded conversation falls back to the composer's current picks.
+ */
+export interface TurnRunOptions {
+  model: string | null;
+  modelProvider: 'litellm' | 'spaces' | 'local-harness' | null;
+  thinkingLevel: 'off' | 'minimal' | 'low' | 'medium' | 'high' | null;
+  webSearchEnabled: boolean;
+  deepResearchEnabled: boolean;
+  createCanvasEnabled: boolean;
+  sandboxMode?: 'remote' | 'local' | 'container';
+}
+
+/** Where a reply actually ran — claw-auth's `clawRunOrigin` on run/done. */
+export interface ReplyRunOrigin {
+  /** 'local-harness' = the user's own device; 'server' = Xyne's servers. */
+  kind?: string;
+  provider?: string;
+  harnessName?: string;
+  label?: string;
+  ownerName?: string;
+  /** Set on a server run that was meant for the device (claw-auth failover). */
+  fallbackFrom?: { provider?: string; harnessName?: string };
+}
+
 export interface Message {
   /** Agent this turn was sent to / answered by. A chat can switch agents
    *  mid-conversation, so identity is per message. Absent on v1 rows. */
@@ -598,6 +626,14 @@ export interface Message {
    *  message on reload. Set only on user messages. */
   attachedContext?: AttachedContextItem[];
   userTags?: Record<string, UserTag>; // Tag -> {name, userId} for user mentions
+  /** User messages: the run options this turn was sent with (see TurnRunOptions). */
+  runOptions?: TurnRunOptions;
+  /** Bot messages: where the reply ran, from the stream's `clawRunOrigin`. */
+  runOrigin?: ReplyRunOrigin;
+  /** Bot messages: the device harness this turn was expected to run on (a
+   *  `local-harness:<provider>` model id) — a pinned laptop model, or the one
+   *  Auto routes to. Lets the reply say when it ran on the server instead. */
+  expectedLocalHarness?: string;
   participants?: Participant[]; // List of participants for Summarizer responses
   selectionContexts?: SelectionContext[]; // Canvas selection contexts
   pageSelection?: {

@@ -29,6 +29,7 @@ import {
 } from '../../components/Chat/XyneAISidebar/utils/XyneAIUtils';
 import { generateToolInputStatus } from '../../components/Chat/XyneAISidebar/utils/toolInputStatus';
 import type {
+  ReplyRunOrigin,
   Message,
   MessageAttachment,
   Participant,
@@ -254,6 +255,32 @@ function withTurnDuration(msg: Message): Message {
   if (msg.type !== 'bot' || msg.durationMs !== undefined) return msg;
   const ms = Date.now() - new Date(msg.timestamp).getTime();
   return Number.isFinite(ms) && ms >= 0 ? { ...msg, durationMs: ms } : msg;
+}
+
+/** Narrow claw-auth's `clawRunOrigin` payload to the fields the reply shows. */
+function readRunOrigin(raw: unknown): ReplyRunOrigin | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const r = raw as Record<string, unknown>;
+  const str = (v: unknown): string | undefined => (typeof v === 'string' && v ? v : undefined);
+  const fb = r['fallbackFrom'];
+  const fallbackFrom =
+    fb && typeof fb === 'object' && !Array.isArray(fb)
+      ? {
+          ...(str((fb as Record<string, unknown>)['provider'])
+            ? { provider: str((fb as Record<string, unknown>)['provider'])! }
+            : {}),
+          ...(str((fb as Record<string, unknown>)['harnessName'])
+            ? { harnessName: str((fb as Record<string, unknown>)['harnessName'])! }
+            : {}),
+        }
+      : undefined;
+  const origin: ReplyRunOrigin = {};
+  for (const key of ['kind', 'provider', 'harnessName', 'label', 'ownerName'] as const) {
+    const v = str(r[key]);
+    if (v) origin[key] = v;
+  }
+  if (fallbackFrom) origin.fallbackFrom = fallbackFrom;
+  return origin.kind ? origin : undefined;
 }
 
 class XyneAIStreamManager {
@@ -1354,6 +1381,22 @@ class XyneAIStreamManager {
       this.notifySubscribers({ ...currentState });
       void xyneAIStreamStorage.updateMessages(streamId, currentState.messages);
     };
+
+    // Where the reply runs (the user's device vs Xyne's servers). claw-auth
+    // sends it on `run` (→ start) when it routes to a device, and on `done`
+    // (→ complete) with the final answer — which wins, since a device run can
+    // fail over to the server after it was dispatched (XYNE-66324).
+    const runOrigin = readRunOrigin(data['clawRunOrigin']);
+    if (
+      runOrigin &&
+      (data['type'] === 'start' || data['type'] === 'complete' || data['type'] === 'done')
+    ) {
+      updateMessages(prev =>
+        prev.map(msg =>
+          msg.id === botMessageId && msg.type === 'bot' ? { ...msg, runOrigin } : msg,
+        ),
+      );
+    }
 
     switch (data['type']) {
       case 'start':

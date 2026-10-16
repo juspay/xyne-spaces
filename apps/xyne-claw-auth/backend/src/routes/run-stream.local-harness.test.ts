@@ -545,4 +545,34 @@ describe("run/stream local harness", () => {
     expect(done.data["clawRunOrigin"]).toMatchObject({ kind: "local-harness", label: "Ann's Codex CLI" });
     expect(chatMessageRepository.update).toHaveBeenCalled();
   });
+
+  it("labels the reply as a server run when the device run failed over after dispatch", async () => {
+    state.target = { provider: "codex-cli", device: { id: "device-1" } };
+    const { runStreamRouter, runStreamInternalRouter } = await import("./run-stream.js");
+    const { res, capture } = makeResponse();
+    handle(runStreamRouter, makeRequest(runBody), res);
+    await vi.waitFor(() => expect(state.dispatchArgs).toHaveLength(1));
+
+    const callbackUrl = new URL(String(state.dispatchArgs[0]!["callbackUrl"]));
+    const streamId = callbackUrl.pathname.split("/").filter(Boolean).slice(-2)[0]!;
+
+    // failOverToServerRun re-posts the stashed body to claw; claw's callback
+    // carries no `localHarness` attribution.
+    const cbRes = makeResponse();
+    handle(
+      runStreamInternalRouter,
+      makeRequest(
+        { status: "completed", result: "answer from the server", sessionId: "server-session", userId: "user-1" },
+        `/${streamId}/callback`,
+      ),
+      cbRes.res,
+    );
+
+    await vi.waitFor(() => expect(capture.frames.some((f) => f.event === "done")).toBe(true));
+    const done = capture.frames.find((f) => f.event === "done")!;
+    expect(done.data["clawRunOrigin"]).toMatchObject({
+      kind: "server",
+      fallbackFrom: { provider: "codex-cli" },
+    });
+  });
 });

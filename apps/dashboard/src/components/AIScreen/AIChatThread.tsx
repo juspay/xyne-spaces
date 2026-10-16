@@ -57,9 +57,15 @@ import type { AssistantActions } from '../Assistant/useAssistantActions';
 import { AIComposer, type AIComposerAttachment, type AIComposerHandle } from './AIComposer';
 import { ASSISTANT_PANEL_ATTR } from '../Assistant/buddy/constants';
 import { ReadonlyContextPills, useSentMentions } from './ReadonlyContextPills';
-import { type ComposerContext, toStreamOverrides, withoutPickedContext } from './composerContext';
+import {
+  type ComposerContext,
+  toStreamOverrides,
+  turnReplayOverrides,
+  withoutPickedContext,
+} from './composerContext';
 import { AgentByline, AgentRecipient } from './ConversationAgents';
 import { FollowUpSuggestions } from './FollowUpSuggestions';
+import { ReplyRunTarget } from './ReplyRunTarget';
 import {
   anchorFromArgs,
   documentIdFromArgs,
@@ -1227,6 +1233,7 @@ function ChatMessageBubble({
       ) : (
         <div className='flex min-w-0 flex-col gap-2'>
           {isV2 && agentSlug && <AgentByline slug={agentSlug} />}
+          {isV2 && <ReplyRunTarget message={message} />}
           {/* The turn in order — thinking, text, tool calls, … answer — with
               each run of steps folded into one expandable group. Shared with
               the sidebar and the overlay. */}
@@ -1803,6 +1810,27 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     [messages],
   );
 
+  // The composer's picks, as the fallback for a turn whose own run options are
+  // unknown (reloaded conversation). A model pin belongs to one agent's model
+  // list, so it only carries over when the turn's agent is the one picked now.
+  const composerFallbackFor = useCallback(
+    (turnAgentSlug: string | undefined): ComposerContext | null => {
+      const current = composerRef.current?.getContext() ?? null;
+      if (!current) return null;
+      const sameAgent = (turnAgentSlug ?? 'ask-ai') === (effectiveAgentSlugRef.current ?? 'ask-ai');
+      return sameAgent
+        ? current
+        : {
+            ...current,
+            model: null,
+            modelProvider: null,
+            thinkingLevel: null,
+            localHarnessTarget: null,
+          };
+    },
+    [],
+  );
+
   // Regenerate: re-submit the last user query, forking a sibling bot branch.
   const handleRegenerate = useCallback(async (): Promise<void> => {
     if (isActiveSessionStreaming) return;
@@ -1824,20 +1852,31 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     const turnAgentSlug = lastBotMessage?.agentSlug ?? lastUserMessage.agentSlug;
 
     // parentId = the user message itself → the new bot response branches from it.
+    // Re-run the turn as it was asked: its own context, model pin and toggles
+    // (XYNE-66322 / XYNE-66350), not the hook's empty page-level defaults.
     await submitQuery(
       lastUserMessage.content,
       lastUserMessage.attachments ?? [],
       lastUserMessage.selectionContexts,
       lastUserMessage.content,
-      undefined, // userTags
+      lastUserMessage.userTags,
       lastUserMessage.id, // parentMessageId
       true, // isRegenerate
       undefined, // isEditUserMessage
       undefined, // editedUserMessageId
       undefined, // parentAssistantMessageId
-      turnAgentSlug ? { agentSlug: turnAgentSlug } : undefined,
+      {
+        ...turnReplayOverrides(lastUserMessage, composerFallbackFor(turnAgentSlug)),
+        ...(turnAgentSlug ? { agentSlug: turnAgentSlug } : {}),
+      },
     );
-  }, [isActiveSessionStreaming, displayMessages, abortCurrentRequest, submitQuery]);
+  }, [
+    isActiveSessionStreaming,
+    displayMessages,
+    abortCurrentRequest,
+    submitQuery,
+    composerFallbackFor,
+  ]);
 
   // Edit: fork a sibling branch with new content under the same parent. For v2
   // (claw) we pass `isEditUserMessage` + `editedUserMessageId` so claw-auth
@@ -1859,17 +1898,22 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
         messageToEdit.attachments ?? [],
         messageToEdit.selectionContexts,
         newContent,
-        undefined, // userTags
+        messageToEdit.userTags,
         editedParentAssistant, // parentMessageId → sibling under same parent
         undefined, // isRegenerate
         true, // isEditUserMessage
         messageToEdit.id, // editedUserMessageId
         editedParentAssistant, // parentAssistantMessageId
-        // Editing re-asks that turn, so it goes to the agent it was sent to.
-        messageToEdit.agentSlug ? { agentSlug: messageToEdit.agentSlug } : undefined,
+        {
+          // Same context, model pin and toggles as the turn being edited
+          // (XYNE-66322 / XYNE-66350).
+          ...turnReplayOverrides(messageToEdit, composerFallbackFor(messageToEdit.agentSlug)),
+          // Editing re-asks that turn, so it goes to the agent it was sent to.
+          ...(messageToEdit.agentSlug ? { agentSlug: messageToEdit.agentSlug } : {}),
+        },
       );
     },
-    [isActiveSessionStreaming, messages, abortCurrentRequest, submitQuery],
+    [isActiveSessionStreaming, messages, abortCurrentRequest, submitQuery, composerFallbackFor],
   );
 
   // Navigate between sibling branches at a given message.

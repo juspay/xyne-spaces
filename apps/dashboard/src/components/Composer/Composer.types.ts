@@ -100,6 +100,9 @@ export interface ComposerModelControl {
   /** The agent's configured model — what "Auto" runs. */
   defaultModel: string | null;
   defaultModelName: string | null;
+  /** The device harness model (`local-harness:<provider>`) an Auto run lands
+   *  on while that device is online — the models endpoint's recommendedId. */
+  recommendedId?: string | null;
   selectedModel: string | null;
   onSelectModel: (model: string | null) => void;
   thinkingLevel: ThinkingLevel | null;

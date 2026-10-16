@@ -1822,7 +1822,13 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
           content: harnessResult.content,
           status: harnessResult.status,
           conversationId: convId,
-          clawRunOrigin: harnessResult.clawRunOrigin ?? runOrigin,
+          // A device result always carries its attribution (relayResult). None
+          // means claw-auth failed the run over to the server after dispatch
+          // (failOverToServerRun) — so say that, not "ran on your device".
+          clawRunOrigin: harnessResult.clawRunOrigin ?? {
+            kind: "server",
+            fallbackFrom: { provider: runOrigin.provider, harnessName: runOrigin.harnessName },
+          },
           ...(harnessResult.errorCode ? { errorCode: harnessResult.errorCode } : {}),
           ...(assistantMsg ? { id: assistantMsg.id } : {}),
           ...(createdUserMessageId ? { userMessageId: createdUserMessageId } : {}),

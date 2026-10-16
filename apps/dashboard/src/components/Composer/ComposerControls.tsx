@@ -971,11 +971,25 @@ export function ModelMenu({
     () => model.models.find(m => m.id === model.selectedModel) ?? null,
     [model.models, model.selectedModel],
   );
+  // Auto routes to the user's own device when claw-auth recommends one.
+  const autoDevice = useMemo(
+    () =>
+      model.recommendedId
+        ? (model.models.find(m => m.id === model.recommendedId && m.provider === 'local-harness') ??
+          null)
+        : null,
+    [model.models, model.recommendedId],
+  );
+  const onDevice = selected ? selected.provider === 'local-harness' : autoDevice !== null;
   // Names and descriptions come from claw-auth's model catalog.
   const pillLabel = selected ? selected.name : 'Auto';
   const summary = selected
-    ? (selected.description ?? `Every message in this chat runs on ${pillLabel}`)
-    : AUTO_MODEL_DESCRIPTION;
+    ? selected.provider === 'local-harness'
+      ? `Runs on your device with ${selected.name}. If it's offline, Xyne's servers answer instead and the reply says so.`
+      : (selected.description ?? `Every message in this chat runs on ${pillLabel}`)
+    : autoDevice
+      ? `Runs on your device with ${autoDevice.name} while it's online; otherwise on Xyne's servers.`
+      : AUTO_MODEL_DESCRIPTION;
   const defaultName = model.defaultModelName ?? model.defaultModel;
   const q = query.trim().toLowerCase();
   const filtered = model.models.filter(
@@ -1020,7 +1034,15 @@ export function ModelMenu({
           data-track-name='OPEN_MODEL_SELECTOR'
           data-testid='composer-model'
         >
+          {onDevice && (
+            <Laptop
+              className='mr-1.5 size-3.5 shrink-0'
+              aria-hidden
+              data-testid='composer-model-on-device'
+            />
+          )}
           <span className='truncate'>{pillLabel}</span>
+          {onDevice && <span className='sr-only'>, on your device</span>}
         </button>
       </Menu.Trigger>
       <Menu.Portal>
