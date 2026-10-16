@@ -6,6 +6,7 @@ import path from 'path';
 import { existsSync, mkdirSync } from 'fs';
 import Logger from 'electron-log';
 import { EnrollmentEvent } from './logger/enrollment-events';
+import { Logger as appLogger } from './logger/Logger';
 import { showScreenPicker } from './screen-picker';
 import Store from 'electron-store';
 
@@ -340,6 +341,15 @@ export function setupRequestInterceptor(): void {
     },
     (details, callback) => {
       details.requestHeaders['X-Platform'] = 'electron';
+      // The renderer's apiClient attaches x-device-id itself; this covers requests
+      // that bypass axios (fetch, EventSource, media elements) so every backend
+      // call carries the persistent device key.
+      const hasDeviceId = Object.keys(details.requestHeaders).some(
+        (name) => name.toLowerCase() === 'x-device-id',
+      );
+      if (!hasDeviceId) {
+        details.requestHeaders['x-device-id'] = appLogger.getClientSessionId();
+      }
       const preProdEnabled = store.get(config.preProdKey);
       if (preProdEnabled === true) {
         details.requestHeaders['x-route-env'] = 'playground';
