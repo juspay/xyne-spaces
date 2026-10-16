@@ -10,7 +10,7 @@ import type { Agent } from '@/services/claw/clawAuthAgentTypes';
 import { effectiveSlug, type WizardState } from '../../../../ClawAgentsScreen/create/wizardState';
 import { wizardStateFromAgent } from './agentDraft';
 import { buildHiddenContext, buildSeedQuery } from './agentBuilderPrompt';
-import { bareToolSlug, paramsToDraftPatch } from './agentDraftPatch';
+import { bareToolSlug, paramsToDraftPatch, type DraftPatchContext } from './agentDraftPatch';
 import { BUILDER_DRIVER_SLUG } from '../detail/AgentBuilderPanel';
 
 const DRAFT_TOOLS = new Set(['create-agent', 'update-agent']);
@@ -18,6 +18,16 @@ const DRAFT_TOOLS = new Set(['create-agent', 'update-agent']);
 const APPROVE_ACTIONS = new Set(['approve-write', 'approve-continue']);
 
 const AGENT_CARD_APPROVE = 'agent-draft-approve';
+
+const UPDATE_AGENT_TOOL = 'update-agent';
+
+function patchContextFor(tool: string, saved: WizardState | null): DraftPatchContext {
+  if (tool !== UPDATE_AGENT_TOOL) return {};
+  return {
+    toolsIntent: 'merge',
+    ...(saved ? { anchorPrompt: saved.systemPrompt } : {}),
+  };
+}
 
 function agentCardParams(flow: FlowDefinition): Record<string, unknown> | null {
   const props = flow.components.find(component => component.type === 'agent')?.props as
@@ -129,8 +139,13 @@ export function AgentDraftBuilderPanel({
   );
 
   const applyProposal = useCallback(
-    (params: Record<string, unknown>): void => {
-      const { patch, problems } = paramsToDraftPatch(params, draftRef.current, catalogRef.current);
+    (params: Record<string, unknown>, context: DraftPatchContext = {}): void => {
+      const { patch, problems } = paramsToDraftPatch(
+        params,
+        draftRef.current,
+        catalogRef.current,
+        context,
+      );
 
       // Every one of these says something the agent asked for did NOT make it
       // onto the draft, while its own reply usually claims success. They have
@@ -149,8 +164,9 @@ export function AgentDraftBuilderPanel({
 
   const onInterceptPendingAction = useCallback(
     (action: PendingAction, approved: boolean): boolean => {
-      if (!DRAFT_TOOLS.has(bareToolSlug(action.tool))) return false;
-      if (approved) applyProposal(action.params);
+      const tool = bareToolSlug(action.tool);
+      if (!DRAFT_TOOLS.has(tool)) return false;
+      if (approved) applyProposal(action.params, patchContextFor(tool, savedStateRef.current));
       return true;
     },
     [applyProposal],
@@ -213,7 +229,15 @@ export function AgentDraftBuilderPanel({
         }
         if (!APPROVE_ACTIONS.has(actionId)) return;
         const params = parseFlowParams((flow.data ?? {})['params']);
-        if (params) applyProposal(params);
+        if (!params) return;
+        const tool = (flow.data ?? {})['tool'];
+        applyProposal(
+          params,
+          patchContextFor(
+            typeof tool === 'string' ? bareToolSlug(tool) : '',
+            savedStateRef.current,
+          ),
+        );
       },
     }),
     [applyProposal, onAgentCreated],

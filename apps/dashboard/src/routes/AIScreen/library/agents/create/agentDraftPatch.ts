@@ -214,6 +214,11 @@ export interface DraftPatch {
   problems: string[];
 }
 
+export interface DraftPatchContext {
+  toolsIntent?: 'replace' | 'merge';
+  anchorPrompt?: string;
+}
+
 function text(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
 }
@@ -222,6 +227,7 @@ export function paramsToDraftPatch(
   params: Record<string, unknown>,
   draft: WizardState,
   catalog: AvailableTools | undefined,
+  context: DraftPatchContext = {},
 ): DraftPatch {
   const patch: Partial<WizardState> = {};
   const problems: string[] = [];
@@ -244,7 +250,7 @@ export function paramsToDraftPatch(
   const color = text(params['color']);
   if (color !== undefined) patch.color = color;
 
-  const prompt = resolvePromptChange(params, draft.systemPrompt);
+  const prompt = resolvePromptChange(params, context.anchorPrompt ?? draft.systemPrompt);
   if (prompt.error !== undefined) {
     problems.push(`Instructions not applied — ${prompt.error}`);
   } else if (prompt.prompt !== undefined) {
@@ -262,10 +268,8 @@ export function paramsToDraftPatch(
       Array.isArray(value)
         ? value.filter((entry): entry is string => typeof entry === 'string')
         : [];
-    // `tools` names the whole intended set, so it replaces — that is the
-    // contract, and the only way a proposal can drop a capability. `mcps`
-    // alone is an addition: rebuilding from it would strip everything else.
-    const kept = Array.isArray(proposedTools) ? [] : grantedNames(draft.tools);
+    const replaces = context.toolsIntent !== 'merge' && Array.isArray(proposedTools);
+    const kept = replaces ? [] : grantedNames(draft.tools);
     const names = [...kept, ...strings(proposedTools)];
     const resolved = resolveProposedTools(names, catalog, draft.tools, strings(proposedMcps));
 
@@ -273,22 +277,6 @@ export function paramsToDraftPatch(
       problems.push('Tools not applied — the tool catalogue is still loading. Try again.');
     } else if (resolved.status === 'resolved') {
       patch.tools = resolved.tools;
-      if (resolved.unknown.length > 0) {
-        problems.push(`Skipped unrecognised tool(s): ${resolved.unknown.join(', ')}`);
-      }
-      if (resolved.deduped.length > 0) {
-        problems.push(
-          `Skipped tool(s) already covered by a granted subagent: ${resolved.deduped.join(', ')}`,
-        );
-      }
-      if (resolved.trimmedSubagents.length > 0) {
-        problems.push(
-          `Kept the first ${2} subagent(s); skipped: ${resolved.trimmedSubagents.join(', ')}`,
-        );
-      }
-      if (resolved.removed.length > 0) {
-        problems.push(`This proposal drops: ${resolved.removed.join(', ')}`);
-      }
     }
   }
 

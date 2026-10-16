@@ -40,10 +40,6 @@ const AIAgentCreateScreen = (): ReactElement => {
   }, []);
 
   const [instructionsPatchNonce, setInstructionsPatchNonce] = useState(0);
-  const applyAiPatch = useCallback((patch: Partial<WizardState>) => {
-    setDraft(prev => ({ ...prev, ...patch }));
-    if (patch.systemPrompt !== undefined) setInstructionsPatchNonce(n => n + 1);
-  }, []);
 
   const [aiBusy, setAiBusy] = useState(false);
 
@@ -67,6 +63,15 @@ const AIAgentCreateScreen = (): ReactElement => {
     syncedSlugRef.current = createdAgent.slug;
     setDraft(wizardStateFromAgent(createdAgent));
   }, [createdAgent]);
+
+  const createdRef = useRef(false);
+  createdRef.current = createdSlug !== null;
+  const applyAiPatch = useCallback((patch: Partial<WizardState>) => {
+    setDraft(prev => ({ ...prev, ...patch }));
+    if (patch.systemPrompt !== undefined && !createdRef.current) {
+      setInstructionsPatchNonce(n => n + 1);
+    }
+  }, []);
 
   const [collapseSignal, setCollapseSignal] = useState(0);
   const collapsed = useRef(false);
