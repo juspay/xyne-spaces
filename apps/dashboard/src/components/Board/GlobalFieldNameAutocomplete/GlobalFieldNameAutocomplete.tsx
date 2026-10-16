@@ -25,9 +25,11 @@ const toSuggestion = (field: GlobalFieldListResult): GlobalFieldSuggestion => {
   };
 };
 
-// Portaled popover content lives outside containerRef; clicks there are not "outside".
+// The suggestion panel is portaled outside containerRef; clicks there are not "outside".
+// Matched by its own attribute so other popovers and tooltips on the page still count.
+export const GLOBAL_FIELD_SUGGESTIONS_ATTR = 'data-global-field-suggestions';
 const isPopoverClick = (target: EventTarget | null): boolean =>
-  target instanceof Element && !!target.closest('[data-radix-popper-content-wrapper]');
+  target instanceof Element && !!target.closest(`[${GLOBAL_FIELD_SUGGESTIONS_ATTR}]`);
 
 // Bolds the part of the name that matches what the user typed.
 const HighlightedName = ({ name, query }: { name: string; query: string }): ReactElement => {
@@ -166,6 +168,13 @@ export const GlobalFieldNameAutocomplete = ({
           setIsActive(true);
         }}
         onFocus={() => setIsActive(true)}
+        onBlur={e => {
+          // Tabbing away hides the hint; moving focus into the suggestion panel does not.
+          const next = e.relatedTarget;
+          if (next instanceof Node && containerRef.current?.contains(next)) return;
+          if (isPopoverClick(next)) return;
+          setIsActive(false);
+        }}
         onKeyDown={handleInputKeyDown}
         className={className}
         data-track-category='form'
@@ -258,6 +267,7 @@ export const GlobalFieldNameAutocomplete = ({
             >
               <div
                 ref={panelRef}
+                {...{ [GLOBAL_FIELD_SUGGESTIONS_ATTR]: '' }}
                 role='menu'
                 tabIndex={-1}
                 aria-label='Existing fields'

@@ -369,9 +369,23 @@ export const FormBuilder = ({
       rowId,
       current => {
         const { definitionId: _definition, membershipId: _membership, ...rest } = current;
-        // The shared field keeps its name, and a new field with a taken name would be merged
-        // back into it on save, so the copy starts with a distinct one.
-        return { ...rest, fieldName: `${current.fieldName.trim()} (copy)` };
+        // The shared field keeps its name, and a new field whose name + type is already taken
+        // in the project would be merged back into that field on save, so the copy starts with
+        // a name that is free in the project and on this form: "X (copy)", "X (copy 2)", ...
+        const base = current.fieldName.trim();
+        const isTaken = (name: string): boolean =>
+          (existingGlobalFields ?? []).some(
+            global => global.fieldType === current.fieldType && global.fieldName.trim() === name,
+          ) ||
+          fields.some(
+            field =>
+              field.rowId !== rowId && field.fieldName.trim().toLowerCase() === name.toLowerCase(),
+          );
+        let fieldName = `${base} (copy)`;
+        for (let copyNumber = 2; isTaken(fieldName); copyNumber += 1) {
+          fieldName = `${base} (copy ${copyNumber})`;
+        }
+        return { ...rest, fieldName };
       },
       fieldLabel,
     );

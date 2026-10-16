@@ -1014,14 +1014,14 @@ const BoardStageConfigScreen = ({
     [zero],
   );
 
-  // One load at a time: Save, form actions and the open effect can all ask for one.
-  const transitionsLoadRef = useRef<Promise<boolean> | null>(null);
+  // One load at a time per board: Save, form actions and the open effect can all ask for one.
+  const transitionsLoadRef = useRef<{ boardId: string; promise: Promise<boolean> } | null>(null);
 
   const reloadTransitionsFromServer = useCallback((): Promise<boolean> => {
     if (!boardId || !stagesRef.current.some(s => s.id)) {
       return Promise.resolve(false);
     }
-    if (transitionsLoadRef.current) return transitionsLoadRef.current;
+    if (transitionsLoadRef.current?.boardId === boardId) return transitionsLoadRef.current.promise;
 
     // One retry loop covers both a read that throws and a read that comes back empty: an empty
     // result can be a just-synced board whose rows have not arrived yet, and applying it would
@@ -1062,16 +1062,19 @@ const BoardStageConfigScreen = ({
         if (!loaded) return false;
         applyLoadedTransitions(loaded, stagesRef.current);
         transitionsSyncedRef.current = true;
-        snapshotPendingRef.current = { stages: true, transitions: true };
+        // Only transitions: a load can finish after stage edits (made during the load, or
+        // before a Save that restarted it), which must stay unsaved.
+        snapshotPendingRef.current.transitions = true;
         return true;
       } finally {
         setIsTransitionsLoading(false);
-        transitionsLoadRef.current = null;
+        if (transitionsLoadRef.current?.promise === promise) transitionsLoadRef.current = null;
       }
     };
 
-    transitionsLoadRef.current = load();
-    return transitionsLoadRef.current;
+    const promise = load();
+    transitionsLoadRef.current = { boardId, promise };
+    return promise;
   }, [applyLoadedTransitions, boardId, readBoardTransitions]);
 
   // After a confirmed sync the server holds exactly what was sent, so the local maps are
@@ -1262,6 +1265,8 @@ const BoardStageConfigScreen = ({
       }
     });
     setStages(loadedStages);
+    // The stages as loaded from the DB are the saved baseline for the unchanged-save check.
+    snapshotPendingRef.current.stages = true;
     setNextTempId(loadedStages.length + 1);
   }, [board, boardStages, formMap]);
 
@@ -1962,7 +1967,13 @@ const BoardStageConfigScreen = ({
       if (syncRes?.type === 'error') {
         throw new Error(syncRes.error?.message ?? 'Failed to sync stage transitions');
       }
-      lastTransitionsSyncAt.set(boardId, Date.now());
+      // Only a non-empty sync can be followed by a misleadingly empty read; after a sync that
+      // left the board with no transitions, an empty read is the truth and needs no retry.
+      if (transitionsWithIds.length > 0) {
+        lastTransitionsSyncAt.set(boardId, Date.now());
+      } else {
+        lastTransitionsSyncAt.delete(boardId);
+      }
       return transitionsWithIds;
     },
     [
@@ -2490,6 +2501,8 @@ const BoardStageConfigScreen = ({
           applySyncedTransitions(await syncStageTransitions(stageIds));
           snapshotPendingRef.current = { stages: true, transitions: true };
           boardSettingsEditedRef.current = false;
+          // The dragged layout is saved; only a new drag should count as an edit again.
+          graphLayoutRef.current = undefined;
           toast.success('Board stages updated successfully');
           hasInitializedStages.current = false;
           if (onNext) {
