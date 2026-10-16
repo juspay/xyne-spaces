@@ -514,7 +514,9 @@ const BoardEditScreen = ({
       // per run breaks the dedupe below and appends the whole set again (2x bug).
       const newlyClonedSourceIds = new Set<string>();
       if (isDuplicating) {
-        const sourceFormId = activeFormMapping?.formId;
+        // Keyed on the form the fields are read from (mapping, else board metadata), so the
+        // mapping arriving after the metadata does not reset the map and re-append the fields.
+        const sourceFormId = customFieldsFormId;
         if (cloneFieldIdMapRef.current.formId !== sourceFormId) {
           cloneFieldIdMapRef.current = { formId: sourceFormId, map: new Map() };
         }
@@ -587,7 +589,7 @@ const BoardEditScreen = ({
         return [...updatedFields, ...newFields];
       });
     }
-  }, [activeResolvedCustomFields, activeFormMapping?.formId, isDuplicating]);
+  }, [activeResolvedCustomFields, customFieldsFormId, isDuplicating]);
 
   // Apply field order and required from metadata when board loads
   useEffect(() => {

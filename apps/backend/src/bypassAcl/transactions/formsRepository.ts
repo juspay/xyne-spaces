@@ -43,7 +43,7 @@ export function createWithFieldsTx(self: FormsRepository, data: CreateFormWithFi
         })
       : undefined;
 
-    await syncFormFields(tx, form.id, scopedProjectId, normalizedFields);
+    await syncFormFields(tx, form.id, data.workspaceId, scopedProjectId, normalizedFields);
     await assertResolvedFieldNameUniqueness(self, tx, form.id);
     return form;
   });
@@ -83,7 +83,7 @@ export function updateWithFieldsTx(self: FormsRepository, id: string, data: {
         })
       : undefined;
 
-    await syncFormFields(tx, id, scopedProjectId, normalizedFields);
+    await syncFormFields(tx, id, existingForm.workspaceId, scopedProjectId, normalizedFields);
     await assertResolvedFieldNameUniqueness(self, tx, id);
 
     return form;
@@ -94,7 +94,7 @@ export function updateWithFieldsTx(self: FormsRepository, id: string, data: {
    * Reconcile a form's per-form membership rows (form_fields) against the incoming
    * field list. New definitions live in global_fields; legacy rows are kept in place.
    */
-export async function syncFormFields(tx: Prisma.TransactionClient, formId: string, projectId: string | undefined, fields: FormFieldInput[]): Promise<void> {
+export async function syncFormFields(tx: Prisma.TransactionClient, formId: string, workspaceId: string, projectId: string | undefined, fields: FormFieldInput[]): Promise<void> {
     const existingRows = await tx.formFields.findMany({ where: { formId } });
     const existingByGlobalId = new Map<string, FormFields>();
     const existingById = new Map<string, FormFields>();
@@ -157,8 +157,7 @@ export async function syncFormFields(tx: Prisma.TransactionClient, formId: strin
           where: { id: field.fieldId },
         });
         if (reusableGlobal) {
-          const formWorkspaceId = await resolveWorkspaceIdFromModel(tx, 'form', { id: formId });
-          if (reusableGlobal.workspaceId !== formWorkspaceId) {
+          if (reusableGlobal.workspaceId !== workspaceId) {
             throw new Error(`Field ${field.fieldId} does not belong to this workspace`);
           }
           await updateGlobalFieldDefinition(tx, formId, reusableGlobal.id, field);

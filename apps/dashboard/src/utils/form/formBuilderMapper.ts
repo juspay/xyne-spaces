@@ -1,7 +1,7 @@
 import { FormFieldType, parseFieldOptions } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 import type { FormField } from '../../components/Board/CreateFormSlideOut/CreateFormSlideOut.types';
-import type { CreateFormField, FormDetailResponse } from '../../services/Form/formService';
+import type { CreateFormField } from '../../services/Form/formService';
 import type { BuilderField, BuilderFieldOption, FormBuilderData } from './formBuilderTypes';
 import { getStartedFields, isSelectFieldType } from './formBuilderValidation';
 
@@ -46,24 +46,6 @@ export interface ZeroFormFieldRow {
     | undefined;
 }
 
-export interface ZeroFormUpdateField {
-  id: string;
-  membershipId: string;
-  fieldName: string;
-  fieldType: FormFieldType;
-  fieldOptions?: BuilderFieldOption[];
-  isOptional?: boolean;
-  parentOptionId?: string | null;
-}
-
-export interface ZeroFormUpdateArgs {
-  formId: string;
-  projectId?: string;
-  formDescription?: string;
-  fields: ZeroFormUpdateField[];
-  timestamp: number;
-}
-
 const isFormFieldType = (value: unknown): value is FormFieldType =>
   typeof value === 'string' && Object.values(FormFieldType).includes(value as FormFieldType);
 
@@ -97,25 +79,6 @@ export const fromSourceField = (source: SourceFormField): BuilderField => {
     ...(source.parentOptionId ? { parentOptionId: source.parentOptionId } : {}),
   };
 };
-
-export const fromRestDetail = (detail: FormDetailResponse): FormBuilderData => ({
-  formName: detail.formName,
-  formDescription: detail.formDescription ?? '',
-  fields: [...detail.fields]
-    .sort((a, b) => a.sequenceNumber - b.sequenceNumber)
-    .map(field =>
-      fromSourceField({
-        definitionId: field.id,
-        membershipId: field.membershipId ?? field.id,
-        fieldName: field.fieldName,
-        fieldType: field.fieldType,
-        fieldOptions: field.fieldOptions,
-        fieldEnum: field.fieldEnum,
-        isOptional: field.isOptional,
-        parentOptionId: field.parentOptionId,
-      }),
-    ),
-});
 
 export const fromZeroRows = (
   form: { formName: string; formDescription?: string | null | undefined },
@@ -171,34 +134,6 @@ export const toRestPayload = (data: Pick<FormBuilderData, 'fields'>): CreateForm
       ...(field.parentOptionId !== undefined ? { parentOptionId: field.parentOptionId } : {}),
     };
   });
-
-/** Args for the Zero `form.update` mutator, kept ready for a future Zero persistence adapter. */
-export const toZeroUpdateArgs = (
-  data: FormBuilderData,
-  ctx: { formId: string; projectId?: string | undefined; timestamp: number },
-): ZeroFormUpdateArgs => {
-  const formDescription = data.formDescription.trim();
-  return {
-    formId: ctx.formId,
-    timestamp: ctx.timestamp,
-    ...(ctx.projectId ? { projectId: ctx.projectId } : {}),
-    ...(formDescription ? { formDescription } : {}),
-    fields: getStartedFields(data.fields).map(field => {
-      const fieldOptions = isSelectFieldType(field.fieldType)
-        ? normalizeOptions(field.fieldEnum)
-        : undefined;
-      return {
-        id: field.definitionId ?? uuidv4(),
-        membershipId: field.membershipId ?? uuidv4(),
-        fieldName: field.fieldName.trim(),
-        fieldType: field.fieldType,
-        ...(fieldOptions ? { fieldOptions } : {}),
-        isOptional: field.isOptional,
-        ...(field.parentOptionId !== undefined ? { parentOptionId: field.parentOptionId } : {}),
-      };
-    }),
-  };
-};
 
 /** Board parents still speak the CreateFormSlideOut `FormField` shape. */
 export const toLegacyFormFieldArray = (fields: BuilderField[]): FormField[] =>

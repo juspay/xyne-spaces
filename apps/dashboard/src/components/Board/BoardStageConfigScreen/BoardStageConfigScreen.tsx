@@ -506,6 +506,21 @@ const LinearStageCard = ({
 };
 
 // ─── Main component ───────────────────────────────────────────────────────────
+// A read of a board's transitions issued right after a sync was observed returning no rows
+// for ~1.5s before the full set arrived (devqa: 5 sent, first read 0, all 5 on the next read).
+// A load retries on these delays when a read throws, or when it comes back empty within
+// RECENT_SYNC_WINDOW_MS of this client syncing that board (the first read is immediate). An
+// empty result otherwise means the board has no transitions and is accepted at once. If every
+// attempt throws, Save and form actions start a fresh load.
+const TRANSITIONS_LOAD_RETRY_DELAYS_MS = [0, 1000, 2000];
+const RECENT_SYNC_WINDOW_MS = 5_000;
+// boardId -> when this client last synced its transitions. Module-level so it survives the
+// screen unmounting (e.g. Back then Next straight after a save).
+const lastTransitionsSyncAt = new Map<string, number>();
+
+const wait = (ms: number): Promise<void> =>
+  ms > 0 ? new Promise(resolve => setTimeout(resolve, ms)) : Promise.resolve();
+
 /** One transition exactly as sent to (and persisted by) nonLinear.syncTransitions. */
 type SyncedTransition = {
   id: string;
@@ -953,79 +968,75 @@ const BoardStageConfigScreen = ({
     [],
   );
 
-  const reloadTransitionsFromServer = useCallback(async (): Promise<boolean> => {
-    if (!boardId || !stagesRef.current.some(s => s.id)) {
-      return false;
-    }
-
-    setIsTransitionsLoading(true);
-    try {
-      const transitions = await zero.run(queries.getStageTransitionsByBoardId({ boardId }), {
-        type: 'complete',
-      });
-      applyLoadedTransitions(transitions, stagesRef.current);
-      transitionsSyncedRef.current = true;
-      return true;
-    } catch (err) {
-      logger.error(LogEvent.FRONTEND_ERROR, {
-        type: 'migrated_console_error',
-        message: String('Failed to load stage transitions:'),
-        error: err,
-      });
-      return false;
-    } finally {
-      setIsTransitionsLoading(false);
-    }
-  }, [applyLoadedTransitions, boardId, zero]);
-
-  // Background check that the server agrees with a confirmed sync. It never changes the
-  // screen: a mismatch is logged and flagged so it can be investigated.
-  const verifySyncedTransitions = useCallback(
-    async (synced: SyncedTransition[]): Promise<void> => {
-      if (!boardId) return;
-      try {
-        const persisted = await zero.run(queries.getStageTransitionsByBoardId({ boardId }), {
-          type: 'complete',
-        });
-        const toKey = (t: {
-          id: string;
-          fromStageId: string | null;
-          toStageId: string;
-          formId?: string | null;
-          requiresApproval?: boolean | null;
-        }): string =>
-          [t.id, t.fromStageId ?? '', t.toStageId, t.formId ?? '', t.requiresApproval ? 1 : 0].join(
-            '|',
-          );
-        const expected = new Set(synced.map(toKey));
-        const actual = new Set(persisted.map(toKey));
-        const missing = [...expected].filter(key => !actual.has(key));
-        const unexpected = [...actual].filter(key => !expected.has(key));
-        if (missing.length === 0 && unexpected.length === 0) return;
-
-        logger.warn(LogEvent.FRONTEND_ERROR, {
-          type: 'stage_transition_sync_verification_mismatch',
-          message: `Board ${boardId}: server transitions differ from the confirmed sync (expected ${expected.size}, got ${actual.size})`,
-          error: { boardId, missing, unexpected },
-        });
-        toast.warning('Saved transitions may differ from what is shown', {
-          description: 'Close and reopen this page to see the transitions as saved.',
-        });
-      } catch (err) {
-        logger.error(LogEvent.FRONTEND_ERROR, {
-          type: 'stage_transition_sync_verification_failed',
-          message: 'Could not verify stage transitions after sync',
-          error: err,
-        });
-      }
-    },
-    [boardId, zero],
+  const readBoardTransitions = useCallback(
+    (id: string) =>
+      zero.run(queries.getStageTransitionsByBoardId({ boardId: id }), { type: 'complete' }),
+    [zero],
   );
+
+  // One load at a time: Save, form actions and the open effect can all ask for one.
+  const transitionsLoadRef = useRef<Promise<boolean> | null>(null);
+
+  const reloadTransitionsFromServer = useCallback((): Promise<boolean> => {
+    if (!boardId || !stagesRef.current.some(s => s.id)) {
+      return Promise.resolve(false);
+    }
+    if (transitionsLoadRef.current) return transitionsLoadRef.current;
+
+    // One retry loop covers both a read that throws and a read that comes back empty: an empty
+    // result can be a just-synced board whose rows have not arrived yet, and applying it would
+    // blank the editor (and a later save would delete everything). An empty result is only
+    // accepted on the last attempt, as a board that really has no transitions.
+    const load = async (): Promise<boolean> => {
+      // Save stays blocked while this runs (isTransitionsLoading).
+      setIsTransitionsLoading(true);
+      try {
+        let loaded: Awaited<ReturnType<typeof readBoardTransitions>> | null = null;
+        const justSynced =
+          Date.now() - (lastTransitionsSyncAt.get(boardId) ?? 0) < RECENT_SYNC_WINDOW_MS;
+        for (const [attempt, delayMs] of TRANSITIONS_LOAD_RETRY_DELAYS_MS.entries()) {
+          await wait(delayMs);
+          try {
+            loaded = await readBoardTransitions(boardId);
+          } catch (err) {
+            logger.error(LogEvent.FRONTEND_ERROR, {
+              type: 'migrated_console_error',
+              message: String('Failed to load stage transitions:'),
+              error: err,
+            });
+            continue;
+          }
+          if (loaded.length > 0 || !justSynced) {
+            if (loaded.length > 0 && attempt > 0) {
+              logger.info(LogEvent.FRONTEND_ERROR, {
+                type: 'stage_transitions_load_read_lagged',
+                message: `Board ${boardId}: transitions load returned rows only on attempt ${attempt + 1}`,
+                boardId,
+                got: loaded.length,
+              });
+            }
+            break;
+          }
+        }
+        // Every attempt threw: leave the maps untouched; Save and form actions start a new load.
+        if (!loaded) return false;
+        applyLoadedTransitions(loaded, stagesRef.current);
+        transitionsSyncedRef.current = true;
+        return true;
+      } finally {
+        setIsTransitionsLoading(false);
+        transitionsLoadRef.current = null;
+      }
+    };
+
+    transitionsLoadRef.current = load();
+    return transitionsLoadRef.current;
+  }, [applyLoadedTransitions, boardId, readBoardTransitions]);
 
   // After a confirmed sync the server holds exactly what was sent, so the local maps are
   // rebuilt from that payload rather than refetched — a refetch right after a form action was
   // coming back without the board's transitions and blanked the editor even though the save
-  // had persisted. verifySyncedTransitions double-checks in the background.
+  // had persisted.
   const applySyncedTransitions = useCallback(
     (synced: SyncedTransition[]) => {
       applyLoadedTransitions(
@@ -1076,9 +1087,8 @@ const BoardStageConfigScreen = ({
         });
       }
       transitionsSyncedRef.current = true;
-      void verifySyncedTransitions(synced);
     },
-    [applyLoadedTransitions, transitionsByTempId, transitionsMeta, verifySyncedTransitions],
+    [applyLoadedTransitions, transitionsByTempId, transitionsMeta],
   );
 
   useEffect(() => {
@@ -1808,6 +1818,8 @@ const BoardStageConfigScreen = ({
           type: 'transition_sync_skipped_not_loaded',
           message,
         });
+        // A previous load may have failed for good; start another so a retry can succeed.
+        void reloadTransitionsFromServer();
         throw new Error(message);
       }
 
@@ -1908,9 +1920,18 @@ const BoardStageConfigScreen = ({
       if (syncRes?.type === 'error') {
         throw new Error(syncRes.error?.message ?? 'Failed to sync stage transitions');
       }
+      lastTransitionsSyncAt.set(boardId, Date.now());
       return transitionsWithIds;
     },
-    [boardId, stages, transitionsByTempId, transitionsMeta, isTransitionsLoading, zero],
+    [
+      boardId,
+      stages,
+      transitionsByTempId,
+      transitionsMeta,
+      isTransitionsLoading,
+      reloadTransitionsFromServer,
+      zero,
+    ],
   );
 
   const persistEdgeTransitionForm = useCallback(
@@ -2278,6 +2299,8 @@ const BoardStageConfigScreen = ({
         type: 'board_save_blocked_transitions_loading',
         message: 'Save blocked while stage transitions are unloaded or reloading.',
       });
+      // A previous load may have failed for good; start another so the next Save can go through.
+      void reloadTransitionsFromServer();
       setShowTransitionsLoadingNotice(true);
       return;
     }
@@ -2447,6 +2470,7 @@ const BoardStageConfigScreen = ({
     boardType,
     syncStageTransitions,
     applySyncedTransitions,
+    reloadTransitionsFromServer,
     isTransitionsLoading,
     transitionsByTempId,
     confirm,

@@ -27,10 +27,16 @@ const CreateFormSlideOutPanel = ({
   embedded = false,
   submitLabel = 'Save',
 }: CreateFormSlideOutProps): ReactElement => {
-  const [existingForm] = useCachedQuery(queries.getFormById({ formId: formId ?? '' }), {
-    enabled: !!formId,
-  });
+  const [existingForm, existingFormResult] = useCachedQuery(
+    queries.getFormById({ formId: formId ?? '' }),
+    {
+      enabled: !!formId,
+    },
+  );
   const { locked, lockedReason } = useFormEditLock(existingForm?.createdBy);
+  // Until the form row loads, its creator (and so the lock) is unknown: keep the builder inert
+  // rather than let a non-creator type edits that can't be saved.
+  const isLoadingLock = !!formId && !existingForm && existingFormResult.type !== 'complete';
 
   const builderData = useMemo<FormBuilderData | undefined>(
     () =>
@@ -97,6 +103,7 @@ const CreateFormSlideOutPanel = ({
           submitLabel={submitLabel}
           locked={locked}
           lockedReason={lockedReason}
+          disabled={isLoadingLock}
           trackingCategory='board_config'
           className={embedded ? undefined : 'flex-1'}
           contentClassName={embedded ? 'p-[12px]' : 'flex-1 overflow-y-auto p-[16px]'}
