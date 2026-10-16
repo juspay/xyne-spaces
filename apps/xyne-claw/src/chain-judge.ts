@@ -3,7 +3,7 @@
  * Uses structured JSON output to determine if a chain should continue or stop.
  */
 
-import { LITELLM, litellmEndpoint } from "./config.js";
+import { LITELLM, litellmEndpoint, litellmKeyFor } from "./config.js";
 import { xor, xorEnabled, xorThreshold } from "./xor.js";
 
 import { createLogger } from "./logger.js";
@@ -94,6 +94,8 @@ export async function judgeChainContinuation(
   userQuery?: string,
   judgeContext?: string,
   toolInvocations?: ChainJudgeToolInvocation[],
+  /** The chain owner's provisioned LiteLLM key; platform env key when absent. */
+  runLitellmApiKey?: string,
 ): Promise<{ action: "continue" | "stop"; reason: string }> {
   try {
     const contextParts: string[] = [];
@@ -121,7 +123,7 @@ export async function judgeChainContinuation(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${LITELLM.apiKey}`,
+        Authorization: `Bearer ${litellmKeyFor(runLitellmApiKey)}`,
       },
       body: JSON.stringify({
         model: LITELLM.model,

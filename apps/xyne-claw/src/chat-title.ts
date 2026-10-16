@@ -1,4 +1,4 @@
-import { LITELLM, litellmEndpoint } from "./config.js";
+import { LITELLM, litellmEndpoint, litellmKeyFor } from "./config.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("chat-title");
@@ -30,6 +30,8 @@ Title: Webhook retry policy choice`;
 export interface ChatTitleInput {
   firstUserMessage: string;
   assistantReply?: string;
+  /** The user's provisioned LiteLLM key; platform env key when absent. */
+  litellmApiKey?: string | undefined;
 }
 
 const STRUCTURED_ARTIFACT =
@@ -81,7 +83,8 @@ export function parseChatTitlePayload(value: unknown): string | null {
 }
 
 export async function generateChatTitle(input: ChatTitleInput): Promise<string | null> {
-  if (!LITELLM.apiKey) {
+  const apiKey = litellmKeyFor(input.litellmApiKey);
+  if (!apiKey) {
     log.warn("[chat-title] LITELLM_API_KEY is not configured — skipping generation");
     return null;
   }
@@ -91,7 +94,7 @@ export async function generateChatTitle(input: ChatTitleInput): Promise<string |
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${LITELLM.apiKey}`,
+        Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
         model: LITELLM.fastModel,

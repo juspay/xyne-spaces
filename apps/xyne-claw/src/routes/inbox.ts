@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { validateS2SKey } from "../middleware/auth.js";
+import { litellmKeyFromBody } from "../config.js";
 import {
   decideInterrupt,
   extractOpenLoops,
@@ -87,6 +88,8 @@ router.post("/inbox/extract", validateS2SKey, async (req: Request, res: Response
   if (userName) input.userName = userName;
   if (userAddress) input.userAddress = userAddress;
   if (subject) input.subject = subject;
+  const litellmApiKey = litellmKeyFromBody(body);
+  if (litellmApiKey) input.litellmApiKey = litellmApiKey;
   const result = await extractOpenLoops(input);
   if (!result) {
     res.status(503).json({ success: false, error: "extract_unavailable" });

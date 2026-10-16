@@ -83,6 +83,32 @@ export function litellmEndpoint(path: string, base: string = LITELLM.url): strin
   return `${base.replace(/\/v1$/, "")}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
+/**
+ * LiteLLM key for an LLM call made on behalf of a run: the run's provisioned
+ * key (user/org, from claw-auth litellm-sync) when present, else the platform
+ * env key. Empty string when neither is configured.
+ */
+export function litellmKeyFor(runKey?: string | undefined): string {
+  return runKey || LITELLM.apiKey;
+}
+
+/**
+ * The caller's provisioned LiteLLM key from an S2S request body (claw-auth
+ * resolves it for the user and sends it as `litellmApiKey`). Only read this on
+ * routes behind validateS2SKey — an external caller must never pick the key.
+ */
+export function litellmKeyFromBody(body: unknown): string | undefined {
+  const value = (body as { litellmApiKey?: unknown } | null | undefined)?.litellmApiKey;
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+/** Header form of {@link litellmKeyFromBody}, for S2S GET routes. Same S2S-only rule. */
+export const LITELLM_KEY_HEADER = "x-litellm-api-key";
+export function litellmKeyFromHeader(headers: Record<string, string | string[] | undefined>): string | undefined {
+  const value = headers[LITELLM_KEY_HEADER];
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
 export const AGENT = {
   thinkingLevel: process.env["XYNE_CLAW_THINKING"] ?? "medium",
 } as const;

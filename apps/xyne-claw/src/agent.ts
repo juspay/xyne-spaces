@@ -2089,8 +2089,15 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   }
 
   const authStorage = AuthStorage.create();
-  if (LITELLM.apiKey) {
-    authStorage.setRuntimeApiKey("litellm", LITELLM.apiKey);
+  // pi's ModelRegistry reads the AuthStorage runtime key BEFORE the provider's
+  // registered apiKey, so this must carry the same precedence as resolveModel:
+  // per-run provisioned key (user/org) → automation key (batch) → platform key.
+  // Seeding the platform key here would silently override the per-run key.
+  const runLitellmApiKey = opts.litellmApiKey
+    ?? (opts.automationRun ? LITELLM.automationApiKey : undefined)
+    ?? LITELLM.apiKey;
+  if (runLitellmApiKey) {
+    authStorage.setRuntimeApiKey("litellm", runLitellmApiKey);
   }
   // Pi v0.75 made the ModelRegistry constructor private — must use the
   // static factory. `.create(authStorage)` uses the default models.json path

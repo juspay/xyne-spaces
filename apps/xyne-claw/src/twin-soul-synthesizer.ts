@@ -14,10 +14,10 @@
 import type { SynthesizeFileRequest, SynthesizeFileResult, SynthesizeFileTrace } from "xyne-claw-shared";
 import { postChatCompletion, tokenUsage, type ChatCompletionResponse } from "./litellm-chat.js";
 import { createLogger } from "./logger.js";
+import { litellmKeyFor } from "./config.js";
 
 const log = createLogger("twin-soul-synthesizer");
 
-const LITELLM_API_KEY = process.env["LITELLM_API_KEY"] ?? "";
 const SYNTH_MODEL = process.env["LITELLM_MODEL"] ?? "claude-haiku-4-5-20251001";
 const SYNTH_TIMEOUT_MS = Number(process.env["TWIN_SYNTH_TIMEOUT_MS"] ?? 120_000);
 /** Match the claw-auth fetch ceiling. The character budget below remains the
@@ -51,7 +51,12 @@ function selectFactsForPrompt(input: string[]): { facts: string[]; available: nu
   return { facts, available: normalized.length, chars };
 }
 
-export async function synthesizeMemoryFile(req: SynthesizeFileRequest): Promise<SynthesizeFileResult> {
+export async function synthesizeMemoryFile(
+  req: SynthesizeFileRequest,
+  /** The user's provisioned LiteLLM key; platform env key when absent. */
+  runLitellmApiKey?: string,
+): Promise<SynthesizeFileResult> {
+  const apiKey = litellmKeyFor(runLitellmApiKey);
   const startedAt = Date.now();
   const selected = selectFactsForPrompt(req.facts ?? []);
   const facts = selected.facts;
@@ -114,11 +119,11 @@ export async function synthesizeMemoryFile(req: SynthesizeFileRequest): Promise<
     ...extra,
   });
 
-  if (!LITELLM_API_KEY) return { content: null, error: "no-api-key", trace: traced() };
+  if (!apiKey) return { content: null, error: "no-api-key", trace: traced() };
 
   try {
     const res = await postChatCompletion(
-      LITELLM_API_KEY,
+      apiKey,
       {
         model: SYNTH_MODEL,
         messages: [

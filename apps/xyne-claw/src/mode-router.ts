@@ -1,4 +1,4 @@
-import { LITELLM, litellmEndpoint } from "./config.js";
+import { LITELLM, litellmEndpoint, litellmKeyFor } from "./config.js";
 import type { XorAnswer, XorQuestion } from "./xor.js";
 import { runJudgeSite } from "./judge-site.js";
 import { createLogger } from "./logger.js";
@@ -70,12 +70,14 @@ export async function routeTaskMode(
   task: string,
   explicit: TaskCommand | null,
   abortSignal?: AbortSignal,
+  runLitellmApiKey?: string,
 ): Promise<ModeRouteResult> {
   if (explicit) return { command: explicit, source: "explicit" };
+  const apiKey = litellmKeyFor(runLitellmApiKey);
 
   const trimmed = task.trim();
   const commands = routableCommands();
-  if (!LITELLM.apiKey || commands.length === 0) return { command: null, source: "skipped" };
+  if (!apiKey || commands.length === 0) return { command: null, source: "skipped" };
   if (trimmed.length < MIN_TASK_CHARS || trimmed.startsWith("/")) {
     return { command: null, source: "skipped" };
   }
@@ -86,7 +88,7 @@ export async function routeTaskMode(
     state: `## The user's message (data)\n<<<DATA\n${trimmed.slice(0, MAX_TASK_CHARS)}\nDATA>>>`,
     questions: modeQuestion(commands),
     decide: (answers) => routeFromJev(commands, answers),
-    fallback: () => routeTaskModeLlm(trimmed, commands, abortSignal),
+    fallback: () => routeTaskModeLlm(trimmed, commands, apiKey, abortSignal),
     describe: (r) => `${r.command?.command ?? "none"} via ${r.source}`,
     ...(abortSignal ? { signal: abortSignal } : {}),
   });
@@ -96,6 +98,7 @@ export async function routeTaskMode(
 async function routeTaskModeLlm(
   trimmed: string,
   commands: TaskCommand[],
+  apiKey: string,
   abortSignal?: AbortSignal,
 ): Promise<ModeRouteResult> {
   const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
@@ -106,7 +109,7 @@ async function routeTaskModeLlm(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${LITELLM.apiKey}`,
+        Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
         model: LITELLM.fastModel,

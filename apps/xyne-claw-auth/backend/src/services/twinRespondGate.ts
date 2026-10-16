@@ -14,6 +14,7 @@
 
 import type { ClassifierExchange } from "xyne-claw-shared";
 import { DIGITAL_TWIN_BANK_ID, getMemoryProvider } from "xyne-claw-shared";
+import { resolveUserLitellmApiKey } from "../lib/agent-provider-config.js";
 import { errMsg } from "../lib/errors.js";
 import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
@@ -281,12 +282,13 @@ export async function shouldTwinRespond(userId: string, args: RespondGateArgs): 
     // EVERY mention goes through the LLM gate — no deterministic short-circuits.
     // DM + thread-participation are still computed and fed to the LLM as strong
     // "respond" signals (the LLM leans respond for them) rather than hard rails.
-    const [patterns, corrections, relevant, stats, activeInThread] = await Promise.all([
+    const [patterns, corrections, relevant, stats, activeInThread, litellmApiKey] = await Promise.all([
       fetchPatterns(userId),
       fetchCorrections(userId),
       fetchRelevantMemories(userId, args.incoming),
       fetchStats(userId, args),
       args.conversationId ? isThreadParticipant(userId, args.conversationId) : Promise.resolve(false),
+      resolveUserLitellmApiKey(userId).catch(() => undefined),
     ]);
     // Corrections (wrong-silence cases) are the highest-priority guidance.
     const allPatterns = [...corrections, ...patterns];
@@ -304,6 +306,7 @@ export async function shouldTwinRespond(userId: string, args: RespondGateArgs): 
         isDirectMessage: false, // kept for claw's contract; the webhook only gates @mentions
         isThreadParticipant: activeInThread,
         includeTrace: true,
+        ...(litellmApiKey ? { litellmApiKey } : {}),
       }),
       signal: AbortSignal.timeout(GATE_TIMEOUT_MS),
     });

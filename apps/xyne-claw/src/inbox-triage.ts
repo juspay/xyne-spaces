@@ -1,5 +1,5 @@
 import { xor, xorEnabled, type XorAnswer, type XorQuestion } from "./xor.js";
-import { LITELLM, litellmEndpoint } from "./config.js";
+import { LITELLM, litellmEndpoint, litellmKeyFor } from "./config.js";
 import { createLogger } from "./logger.js";
 import { metric } from "./metrics.js";
 
@@ -153,6 +153,8 @@ export interface ExtractInput {
   userAddress?: string;
   subject?: string;
   messages: ExtractMessage[];
+  /** The mailbox owner's provisioned LiteLLM key; platform env key when absent. */
+  litellmApiKey?: string | undefined;
 }
 
 export interface ExtractedLoop {
@@ -266,12 +268,13 @@ export function parseExtractArguments(raw: string): ExtractResult | null {
 }
 
 export async function extractOpenLoops(input: ExtractInput): Promise<ExtractResult | null> {
-  if (!LITELLM.apiKey) return null;
+  const apiKey = litellmKeyFor(input.litellmApiKey);
+  if (!apiKey) return null;
   const started = Date.now();
   try {
     const res = await fetch(litellmEndpoint("/v1/chat/completions"), {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${LITELLM.apiKey}` },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
         model: EXTRACT_MODEL,
         messages: [

@@ -76,14 +76,22 @@ function buildUser(text: string, state: ChatState, tasks: ChatTask[]): string {
  * planner is unreachable or returns nothing usable, so a planning failure
  * never drops the message.
  */
-export async function planInbound(text: string, state: ChatState, tasks: ChatTask[]): Promise<PlanResult> {
+export async function planInbound(
+  text: string,
+  state: ChatState,
+  tasks: ChatTask[],
+  /** The inbound user; their LiteLLM key bills the planner call (env key fallback). */
+  userId?: string,
+): Promise<PlanResult> {
   const fallback: PlanResult = { slots: {}, actions: [{ request: text, label: "request", continueIndex: null }] };
   try {
     // Imported lazily: the entity-llm client runs module-load side effects, so
     // pulling it only when a plan is actually needed keeps it out of the
     // import graph of callers that never reach here.
-    const { entityLlm } = await import("../../../services/entityExtraction/entityLlmClient.js");
-    const result = await entityLlm.completeJson<PlanResult>({
+    const { createEntityLlm } = await import("../../../services/entityExtraction/entityLlmClient.js");
+    const { resolveUserLitellmApiKey } = await import("../../../lib/agent-provider-config.js");
+    const litellmApiKey = userId ? await resolveUserLitellmApiKey(userId).catch(() => undefined) : undefined;
+    const result = await createEntityLlm(litellmApiKey).completeJson<PlanResult>({
       system: SYSTEM,
       user: buildUser(text, state, tasks),
       schema: PLAN_SCHEMA,

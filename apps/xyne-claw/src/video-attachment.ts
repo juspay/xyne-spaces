@@ -31,7 +31,7 @@ import { promisify } from "node:util";
 import { mkdtemp, writeFile, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { LITELLM, litellmEndpoint } from "./config.js";
+import { LITELLM, litellmEndpoint, litellmKeyFor } from "./config.js";
 import { matchesAttachmentType, VIDEO_ATTACHMENT, VIDEO_MIME_PREFIX } from "xyne-claw-shared";
 
 import { createLogger } from "./logger.js";
@@ -153,6 +153,7 @@ async function rollWindow(
   windowFrames: VideoKeyframe[],
   windowIndex: number,
   totalWindows: number,
+  apiKey: string,
 ): Promise<string> {
   const imageBlocks = windowFrames.map((f) => ({
     type: "image_url" as const,
@@ -176,7 +177,7 @@ async function rollWindow(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${LITELLM.apiKey}`,
+      Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
       // Gateway's primary model (LITELLM_MODEL). MUST be vision-capable —
@@ -218,7 +219,12 @@ function pickSpread<T>(items: T[], count: number): T[] {
  * Convert a video buffer into a textual narrative + keyframes. Always
  * resolves; on any failure returns an error-stub narrative and no frames.
  */
-export async function videoBufferToContext(buf: Buffer, fileName: string): Promise<VideoContextResult> {
+export async function videoBufferToContext(
+  buf: Buffer,
+  fileName: string,
+  runLitellmApiKey?: string,
+): Promise<VideoContextResult> {
+  const apiKey = litellmKeyFor(runLitellmApiKey);
   if (buf.length > MAX_VIDEO_BYTES) {
     return errorStub(fileName, `file too large (${Math.round(buf.length / 1024 / 1024)}MB > ${MAX_VIDEO_BYTES / 1024 / 1024}MB cap)`);
   }
@@ -251,7 +257,7 @@ export async function videoBufferToContext(buf: Buffer, fileName: string): Promi
       windows.push(frames.slice(i, i + FRAMES_PER_WINDOW));
     }
     for (let w = 0; w < windows.length; w++) {
-      state = await rollWindow(state, windows[w]!, w + 1, windows.length);
+      state = await rollWindow(state, windows[w]!, w + 1, windows.length, apiKey);
     }
 
     let narrativeBody = state.trim() || "(the model produced no description — the video may have no discernible content)";

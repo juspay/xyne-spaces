@@ -14,7 +14,7 @@
 import type { XorAnswer, XorQuestion } from "./xor.js";
 import { runJudgeSite } from "./judge-site.js";
 import { optEnabled } from "./optimizations.js";
-import { LITELLM, litellmEndpoint } from "./config.js";
+import { LITELLM, litellmEndpoint, litellmKeyFor } from "./config.js";
 
 import { createLogger } from "./logger.js";
 const log = createLogger("goal-judge");
@@ -47,6 +47,8 @@ export interface GoalJudgeInput {
    *  judge so goals like "produce an HTML dashboard" aren't falsely failed
    *  because the judge can only see the text body otherwise. */
   attachmentsThisTurn?: GoalJudgeAttachmentMeta[];
+  /** The goal owner's provisioned LiteLLM key; platform env key when absent. */
+  litellmApiKey?: string | undefined;
 }
 
 export interface GoalJudgeDecision {
@@ -161,7 +163,8 @@ export async function judgeGoalProgress(input: GoalJudgeInput): Promise<GoalJudg
 }
 
 export async function judgeGoalProgressLlm(input: GoalJudgeInput): Promise<GoalJudgeDecision> {
-  if (!LITELLM.apiKey) {
+  const apiKey = litellmKeyFor(input.litellmApiKey);
+  if (!apiKey) {
     return { done: false, reason: "judge_unavailable" };
   }
 
@@ -198,7 +201,7 @@ export async function judgeGoalProgressLlm(input: GoalJudgeInput): Promise<GoalJ
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${LITELLM.apiKey}`,
+        Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
         model: LITELLM.fastModel,

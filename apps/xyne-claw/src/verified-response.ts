@@ -51,6 +51,8 @@ export interface VerifiedResponseToolOpts {
    *  to the verifier on top of its default factual check. */
   criteria?: string | undefined;
   replyFormat?: ResultSectionLimits | undefined;
+  /** The run's provisioned LiteLLM key (user/org) for the verifier call. */
+  litellmApiKey?: string | undefined;
 }
 
 const DESCRIPTION = [
@@ -155,7 +157,13 @@ export function buildVerifiedResponseTool(opts: VerifiedResponseToolOpts): ToolD
         }
       })();
 
-      const verdict = await verifyResponse({ task: opts.task, evidenceDigest, draft: message, criteria: opts.criteria });
+      const verdict = await verifyResponse({
+        task: opts.task,
+        evidenceDigest,
+        draft: message,
+        criteria: opts.criteria,
+        litellmApiKey: opts.litellmApiKey,
+      });
 
       if (verdict.ok) {
         metric.count("response_verify_pass", { agentSlug: opts.agentSlug ?? "", rejections: String(rejections) });

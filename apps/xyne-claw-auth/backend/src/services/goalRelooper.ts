@@ -13,6 +13,7 @@
  * progress signalling) where it already lives.
  */
 
+import { resolveUserLitellmApiKey } from "../lib/agent-provider-config.js";
 import { activeGoalRepository } from "../repositories/activeGoalRepository.js";
 import { judgeGoalViaClaw } from "./goalJudgeClient.js";
 import type { Prisma } from "@prisma/client";
@@ -321,7 +322,9 @@ export async function recordTurnAndDecide(args: {
   }
   // ────────────────────────────────────────────────────────────────────────
 
+  const goalLitellmApiKey = await resolveUserLitellmApiKey(updated.userId).catch(() => undefined);
   const decision = await judgeGoalViaClaw({
+    ...(goalLitellmApiKey ? { litellmApiKey: goalLitellmApiKey } : {}),
     condition: updated.condition,
     lastTurnOutput: lastTurnResult,
     recentTurnsDigest: sessionTraceDigest,

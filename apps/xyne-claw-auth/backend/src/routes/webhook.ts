@@ -339,6 +339,7 @@ async function judgeChainContinuation(
   userQuery?: string,
   judgeContext?: string,
   toolInvocations?: unknown,
+  litellmApiKey?: string,
 ): Promise<"continue" | "stop"> {
   try {
     const invocationSummary = summarizeChainToolInvocations(toolInvocations);
@@ -356,6 +357,7 @@ async function judgeChainContinuation(
         userQuery,
         judgeContext,
         ...(invocationSummary.length > 0 ? { toolInvocations: invocationSummary } : {}),
+        ...(litellmApiKey ? { litellmApiKey } : {}),
       }),
       signal: AbortSignal.timeout(45_000),
     });
@@ -420,16 +422,21 @@ function hasWorkflowCycle(workflow: ChainWorkflowDefinition): boolean {
   return false;
 }
 
-async function selectNextWorkflowEdge(
+export async function selectNextWorkflowEdge(
   workflow: ChainWorkflowDefinition,
   currentAgentSlug: string,
   toolsUsed: string[],
   resultText: string,
   sourceTask: string,
   toolInvocations?: unknown,
+  /** The user who started the chain. A judge edge's LLM call bills that
+   *  user's LiteLLM key (env key fallback); resolved only when a judge runs. */
+  judgeUserId?: string,
 ): Promise<{ edge: ChainWorkflowEdge; nextNode: ChainWorkflowNode } | null> {
   const currentNode = workflow.nodes.find((node) => node.agentSlug === currentAgentSlug);
   if (!currentNode) return null;
+
+  let judgeLitellmApiKey: Promise<string | undefined> | undefined;
 
   const outgoingEdges = workflow.edges.filter((edge) => edge.fromNodeId === currentNode.id);
   for (const edge of outgoingEdges) {
@@ -467,6 +474,9 @@ async function selectNextWorkflowEdge(
       sourceTask,
       edge.judgeContext,
       toolInvocations,
+      await (judgeLitellmApiKey ??= judgeUserId
+        ? resolveUserLitellmApiKey(judgeUserId).catch(() => undefined)
+        : Promise.resolve(undefined)),
     );
     if (decision === "continue") return { edge, nextNode };
   }
@@ -4907,7 +4917,15 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           // hand-off prompt (which `ctx.task` becomes after hop 1). On the first
           // hop ctx.rootTask is unset and ctx.task IS the original request.
           const originalTask = ctx.rootTask ?? ctx.task;
-          const selected = await selectNextWorkflowEdge(workflow, ctx.agentSlug, toolsUsed, resultText, originalTask, payload.toolInvocations);
+          const selected = await selectNextWorkflowEdge(
+            workflow,
+            ctx.agentSlug,
+            toolsUsed,
+            resultText,
+            originalTask,
+            payload.toolInvocations,
+            ctx.senderId,
+          );
 
           if (!selected) {
             log.info(`Chain: no matching edge from ${ctx.agentSlug} in workflow ${binding.workflowId}`);

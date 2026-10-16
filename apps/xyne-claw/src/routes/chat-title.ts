@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { validateS2SKey } from "../middleware/auth.js";
+import { litellmKeyFromBody } from "../config.js";
 import { generateChatTitle, type ChatTitleInput } from "../chat-title.js";
 
 const router = Router();
@@ -18,9 +19,11 @@ router.post(
       return;
     }
 
+    const litellmApiKey = litellmKeyFromBody(body);
     const title = await generateChatTitle({
       firstUserMessage: body.firstUserMessage.slice(0, 4_000),
       ...(body.assistantReply ? { assistantReply: body.assistantReply.slice(0, 4_000) } : {}),
+      ...(litellmApiKey ? { litellmApiKey } : {}),
     });
 
     res.json({ success: true, title });

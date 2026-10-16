@@ -9,6 +9,7 @@
 import { Router } from "express";
 import type { Request, Response } from "express";
 import { validateS2SKey } from "../middleware/auth.js";
+import { litellmKeyFromBody } from "../config.js";
 import { distillUserMemory } from "../user-memory-curator.js";
 import { synthesizeMemoryFile } from "../twin-soul-synthesizer.js";
 import { checkMemoryUpdate } from "../twin-soul-update-check.js";
@@ -119,7 +120,7 @@ userMemoryRouter.post("/internal/user-memory/synthesize-file", validateS2SKey, a
       maxChars: typeof body.maxChars === "number" ? body.maxChars : 20_000,
       ...(currentContent !== undefined ? { currentContent } : {}),
       ...(body.preserveEdits === true ? { preserveEdits: true } : {}),
-    });
+    }, litellmKeyFromBody(body));
     // R10: nightly rewrites (claw-auth sends check:true) are scored before
     // claw-auth writes them; only verdict "accept" replaces the old file.
     const check =
@@ -157,6 +158,7 @@ userMemoryRouter.post("/internal/user-memory/should-respond", validateS2SKey, as
       res.json({ respond: false, confidence: 0, reason: "no incoming text", source: "fail-closed" });
       return;
     }
+    const litellmApiKey = litellmKeyFromBody(body);
     const result = await decideRespond({
       incoming: body.incoming,
       ...(typeof body.channelName === "string" ? { channelName: body.channelName } : {}),
@@ -168,6 +170,7 @@ userMemoryRouter.post("/internal/user-memory/should-respond", validateS2SKey, as
       ...(body.isDirectMessage === true ? { isDirectMessage: true } : {}),
       ...(body.isThreadParticipant === true ? { isThreadParticipant: true } : {}),
       ...(body.includeTrace === true ? { includeTrace: true } : {}),
+      ...(litellmApiKey ? { litellmApiKey } : {}),
     });
     res.json(result);
   } catch (err) {

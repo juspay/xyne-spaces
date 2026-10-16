@@ -26,7 +26,7 @@
  * and a 401 there silently fails the verifier open (no verification at all).
  * The main model is always accessible since the agent itself uses it.
  */
-import { LITELLM, litellmEndpoint } from "./config.js";
+import { LITELLM, litellmEndpoint, litellmKeyFor } from "./config.js";
 
 import { createLogger } from "./logger.js";
 import { metric } from "./metrics.js";
@@ -70,6 +70,8 @@ export interface VerifyResponseInput {
    *  semantics: for these, missing/absent evidence IS a failure (e.g. "must
    *  have posted a POT video"). Empty/undefined → default check only. */
   criteria?: string | undefined;
+  /** The run's provisioned LiteLLM key (user/org); platform env key when absent. */
+  litellmApiKey?: string | undefined;
 }
 
 interface TranscriptMessage {
@@ -249,7 +251,8 @@ export async function verifyResponse(input: VerifyResponseInput, deps: VerifyRes
 }
 
 async function llmVerify(input: VerifyResponseInput): Promise<ResponseVerdict | null> {
-  if (!LITELLM.apiKey) return null;
+  const apiKey = litellmKeyFor(input.litellmApiKey);
+  if (!apiKey) return null;
 
   const systemPrompt = input.criteria?.trim()
     ? SYSTEM_PROMPT + criteriaAppendix(input.criteria)
@@ -270,7 +273,7 @@ async function llmVerify(input: VerifyResponseInput): Promise<ResponseVerdict | 
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${LITELLM.apiKey}`,
+        Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
         model: LITELLM.model,

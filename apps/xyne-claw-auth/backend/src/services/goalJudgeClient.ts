@@ -35,6 +35,8 @@ export interface GoalJudgeRequest {
   /** Metadata for files the worker attached this turn. Forwarded to claw's
    *  judge so artefact goals (HTML reports, CSVs) aren't false-negatived. */
   attachmentsThisTurn?: GoalJudgeAttachmentMeta[];
+  /** The goal owner's LiteLLM key (resolveUserLitellmApiKey); claw falls back to its env key. */
+  litellmApiKey?: string;
 }
 
 export interface GoalJudgeDecision {

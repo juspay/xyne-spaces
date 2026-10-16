@@ -28,7 +28,7 @@
 import type { XorAnswer, XorQuestion } from "./xor.js";
 import { runJudgeSite } from "./judge-site.js";
 import { optEnabled } from "./optimizations.js";
-import { LITELLM, litellmEndpoint } from "./config.js";
+import { LITELLM, litellmEndpoint, litellmKeyFor } from "./config.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("prefetch");
@@ -200,9 +200,10 @@ function asStringList(v: unknown, max = 5): string[] {
  * Never rejects: a failure resolves to null and prefetch degrades to
  * identity-only.
  */
-export function startPrefetchExtraction(task: string): Promise<PrefetchSpec | null> {
-  if (!LITELLM.apiKey || !task.trim()) return Promise.resolve(null);
-  if (!optEnabled("jev_prefetch_gate")) return startPrefetchExtractionLlm(task);
+export function startPrefetchExtraction(task: string, runLitellmApiKey?: string): Promise<PrefetchSpec | null> {
+  const apiKey = litellmKeyFor(runLitellmApiKey);
+  if (!apiKey || !task.trim()) return Promise.resolve(null);
+  if (!optEnabled("jev_prefetch_gate")) return startPrefetchExtractionLlm(task, apiKey);
   return (async (): Promise<PrefetchSpec | null> => {
     const gate = await runJudgeSite<"skip" | "extract">({
       site: "prefetch-gate",
@@ -214,7 +215,7 @@ export function startPrefetchExtraction(task: string): Promise<PrefetchSpec | nu
       describe: (d) => d,
     });
     if (gate.decision === "skip") return { intent: "conversational", entities: [] };
-    return startPrefetchExtractionLlm(task);
+    return startPrefetchExtractionLlm(task, apiKey);
   })();
 }
 
@@ -233,8 +234,8 @@ export function prefetchGateFromJev(answers: Record<string, XorAnswer>): "skip" 
   return p <= 0.2 ? "skip" : "extract";
 }
 
-function startPrefetchExtractionLlm(task: string): Promise<PrefetchSpec | null> {
-  if (!LITELLM.apiKey) return Promise.resolve(null);
+function startPrefetchExtractionLlm(task: string, apiKey: string): Promise<PrefetchSpec | null> {
+  if (!apiKey) return Promise.resolve(null);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), EXTRACT_TIMEOUT_MS);
@@ -243,7 +244,7 @@ function startPrefetchExtractionLlm(task: string): Promise<PrefetchSpec | null> 
     try {
       const res = await fetch(litellmEndpoint("/v1/chat/completions"), {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${LITELLM.apiKey}` },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
         signal: controller.signal,
         body: JSON.stringify({
           model: LITELLM.fastModel,

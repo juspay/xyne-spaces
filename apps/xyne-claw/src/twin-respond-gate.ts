@@ -20,11 +20,11 @@ import { answerProb, band, runJudgeSite } from "./judge-site.js";
 import { parseArgMarkup, parseJsonObject } from "./leaked-tool-call.js";
 import { postChatCompletion, type ChatCompletionResponse } from "./litellm-chat.js";
 import { createLogger } from "./logger.js";
+import { litellmKeyFor } from "./config.js";
 import { optEnabled } from "./optimizations.js";
 
 const log = createLogger("twin-respond-gate");
 
-const LITELLM_API_KEY = process.env["LITELLM_API_KEY"] ?? "";
 // Model for the gate. Defaults to LITELLM_MODEL (the platform default the rest of
 // the twin uses) for consistency, then haiku as a last resort. The gate's latency
 // is dominated by the shared gateway's slow decode (~10-14 tok/s), NOT the model
@@ -61,6 +61,8 @@ export interface RespondGateRequest {
   isThreadParticipant?: boolean;
   /** When true, decideRespond returns the full LLM exchange for the pipeline UI. */
   includeTrace?: boolean;
+  /** The user's provisioned LiteLLM key; platform env key when absent. */
+  litellmApiKey?: string | undefined;
 }
 
 /** Full LLM exchange of one gate decision — surfaced in the pipeline activity UI. */
@@ -271,7 +273,8 @@ async function decideRespondInner(req: RespondGateRequest): Promise<RespondGateR
 
 /** The LLM gate (the only path before Jev). */
 async function decideRespondLlm(req: RespondGateRequest): Promise<RespondGateResult> {
-  if (!LITELLM_API_KEY) return FAIL_CLOSED;
+  const apiKey = litellmKeyFor(req.litellmApiKey);
+  if (!apiKey) return FAIL_CLOSED;
   // No short-circuit on missing patterns — EVERY mention goes through the LLM.
   // With no patterns to judge on, the permissive prompt leans respond=true and
   // lets the Twin take a look (it decides with full context downstream).
@@ -279,7 +282,7 @@ async function decideRespondLlm(req: RespondGateRequest): Promise<RespondGateRes
   const userPrompt = buildUserPrompt(req);
   try {
     const res = await postChatCompletion(
-      LITELLM_API_KEY,
+      apiKey,
       {
         model: GATE_MODEL,
         messages: [

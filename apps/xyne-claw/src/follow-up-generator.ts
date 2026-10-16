@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { LITELLM, litellmEndpoint } from "./config.js";
+import { LITELLM, litellmEndpoint, litellmKeyFor } from "./config.js";
 import { parseArgMarkup } from "./leaked-tool-call.js";
 import { createLogger } from "./logger.js";
 import type { PendingQuestion } from "xyne-claw-shared";
@@ -421,6 +421,8 @@ export interface GenerateFollowUpSuggestionsArgs {
   agentContext?: FollowUpAgentContext | undefined;
   conversationHistory?: FollowUpConversationMessage[] | undefined;
   abortSignal?: AbortSignal | undefined;
+  /** The run's provisioned LiteLLM key (user/org); platform env key when absent. */
+  litellmApiKey?: string | undefined;
 }
 
 export async function generateFollowUpSuggestions({
@@ -429,8 +431,10 @@ export async function generateFollowUpSuggestions({
   agentContext,
   conversationHistory = [],
   abortSignal,
+  litellmApiKey,
 }: GenerateFollowUpSuggestionsArgs): Promise<FollowUpGenerationResult> {
-  if (!LITELLM.apiKey) {
+  const apiKey = litellmKeyFor(litellmApiKey);
+  if (!apiKey) {
     return fallbackResult(task, agentContext, conversationHistory, {
       failureCode: "missing_api_key",
       failureMessage: "LITELLM_API_KEY is not configured",
@@ -442,7 +446,7 @@ export async function generateFollowUpSuggestions({
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${LITELLM.apiKey}`,
+        Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
         model: LITELLM.fastModel,

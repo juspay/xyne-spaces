@@ -85,6 +85,9 @@ export interface IngestAttachmentOptions {
    * running ffmpeg in the xyne-claw pod. Ordinary attachment behavior is
    * unchanged when false/omitted. */
   deferVideoProcessing?: boolean;
+  /** The run's provisioned LiteLLM key (user/org) for video narration;
+   *  platform env key when absent. */
+  litellmApiKey?: string | undefined;
 }
 
 // The image media types every LLM provider (Anthropic/OpenAI/LiteLLM) accepts
@@ -288,7 +291,7 @@ export async function ingestAttachments(
             `This recording is staged for the sandbox-backed \`analyze-skill-recording\` tool.\n`,
         };
       }
-      const { narrative, keyframes } = await videoBufferToContext(buf, a.fileName);
+      const { narrative, keyframes } = await videoBufferToContext(buf, a.fileName, options.litellmApiKey);
       videoKeyframes.push(...keyframes);
       return { path: `${a.fileName}.video.md`, content: narrative };
     }),

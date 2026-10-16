@@ -14,6 +14,7 @@
 import { Router } from "express";
 import type { Request, Response } from "express";
 import { validateS2SKey } from "../middleware/auth.js";
+import { litellmKeyFromBody } from "../config.js";
 import { completeEntityPrompt, parseEntityLlmMessages, EntityLlmError } from "../entity-llm.js";
 
 import { createLogger } from "../logger.js";
@@ -27,7 +28,7 @@ entityLlmRouter.post("/internal/entity-llm/complete", validateS2SKey, async (req
 
   try {
     const messages = parseEntityLlmMessages(body.messages);
-    const content = await completeEntityPrompt(messages, purpose);
+    const content = await completeEntityPrompt(messages, purpose, litellmKeyFromBody(body));
     res.json({ success: true, content });
   } catch (err) {
     const status = err instanceof EntityLlmError ? err.status : 500;

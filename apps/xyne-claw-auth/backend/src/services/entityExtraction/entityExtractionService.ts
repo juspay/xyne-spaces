@@ -21,7 +21,8 @@
 import { CONFIG } from "../../config.js";
 import { prisma } from "../../db.js";
 import { createLogger, createTraceId } from "../../logger.js";
-import { entityLlm } from "./entityLlmClient.js";
+import { createEntityLlm } from "./entityLlmClient.js";
+import { resolveUserLitellmApiKey } from "../../lib/agent-provider-config.js";
 import {
   getChannel,
   getChannelMailThreadIds,
@@ -102,6 +103,12 @@ export async function discoverTypes(runId: string): Promise<void> {
   // Every thread goes through discovery — thread count is already bounded by
   // maxThreadsPerChannel, and type discovery wants full coverage so rare types
   // are not sampled away. discoverTypeCandidates batches by size internally.
+  // Bill the user who triggered the run; claw falls back to its env key.
+  const entityLlm = createEntityLlm(
+    run.triggeredByUserId
+      ? await resolveUserLitellmApiKey(run.triggeredByUserId).catch(() => undefined)
+      : undefined,
+  );
   const candidates = await discoverTypeCandidates(docs, entityLlm, conf, pipelineLogger, context);
 
   // Existing workspace types are passed in so a second channel reuses GATEWAY

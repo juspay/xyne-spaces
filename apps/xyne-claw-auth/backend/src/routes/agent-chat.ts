@@ -1090,10 +1090,11 @@ router.get("/:slug/context/search", async (req: Request<{ slug: string }>, res: 
   }
 });
 
-// Platform fallback for the model picker: list models off claw's platform
-// LiteLLM key (S2S — the key never leaves claw). Fail-soft: any failure yields
-// an empty list so the picker hides instead of erroring the chat page.
-async function listPlatformModels(): Promise<{
+// Platform fallback for the model picker: claw lists the models callable with
+// the key this user's runs use — their provisioned LiteLLM key, sent S2S, else
+// claw's platform key. Fail-soft: any failure yields an empty list so the
+// picker hides instead of erroring the chat page.
+async function listPlatformModels(userId: string): Promise<{
   success: true;
   data: Array<{ id: string; name: string }>;
   defaultModel: string | null;
@@ -1103,8 +1104,12 @@ async function listPlatformModels(): Promise<{
   if (!CONFIG.xyneClawS2sKey) return empty;
   try {
     const url = `${CONFIG.xyneClawUrl.replace(/\/$/, "")}/internal/litellm/models`;
+    const litellmApiKey = await resolveUserLitellmApiKey(userId).catch(() => undefined);
     const upstream = await fetch(url, {
-      headers: { "x-s2s-key": CONFIG.xyneClawS2sKey },
+      headers: {
+        "x-s2s-key": CONFIG.xyneClawS2sKey,
+        ...(litellmApiKey ? { "x-litellm-api-key": litellmApiKey } : {}),
+      },
       signal: AbortSignal.timeout(20_000),
     });
     if (!upstream.ok) {
@@ -1221,7 +1226,7 @@ router.get("/:slug/litellm-models", async (req: Request<{ slug: string }>, res: 
     const recommendedHarness = harnessEntries.find((entry) => entry.recommended);
 
     if (primary === "spaces" || !cred?.encryptedKey || !cred.iv || !cred.authTag) {
-      const platform = await listPlatformModels();
+      const platform = await listPlatformModels(userId);
       const ms = agentCfg["modelSettings"] as Record<string, unknown> | undefined;
       const rawSpacesModel = ms?.["model"];
       const spacesModel = typeof rawSpacesModel === "string" && rawSpacesModel.trim() ? rawSpacesModel.trim() : null;

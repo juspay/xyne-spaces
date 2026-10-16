@@ -1,7 +1,8 @@
 /**
- * Internal platform model listing — called by claw-auth's litellm-models
- * endpoint when an agent has no own-key LiteLLM credential (the normal case:
- * agents on the keyless "spaces" platform provider).
+ * Internal model listing — called by claw-auth's litellm-models endpoint when
+ * an agent has no own-key LiteLLM credential (the normal case: agents on the
+ * keyless "spaces" platform provider). Lists with the requester's provisioned
+ * key when claw-auth sends one, else the platform key.
  *
  * Why on claw, not claw-auth: LITELLM_API_KEY lives on claw (the agent
  * runtime). Listing models here keeps that credential scoped to one pod, same
@@ -22,18 +23,21 @@ import { Router } from "express";
 import type { Request, Response } from "express";
 import { validateS2SKey } from "../middleware/auth.js";
 import { listJudgeModels } from "../eval-judge.js";
-import { LITELLM } from "../config.js";
+import { LITELLM, litellmKeyFor, litellmKeyFromHeader } from "../config.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("litellm-models");
 
 export const litellmModelsRouter = Router();
 
-litellmModelsRouter.get("/internal/litellm/models", validateS2SKey, async (_req: Request, res: Response) => {
+litellmModelsRouter.get("/internal/litellm/models", validateS2SKey, async (req: Request, res: Response) => {
   try {
-    // Empty when LITELLM_API_KEY is unset — the caller's "hide the picker"
-    // contract, not an error.
-    const names = await listJudgeModels();
+    // List with the key the chat's runs will use: the requester's provisioned
+    // key (claw-auth sends it in x-litellm-api-key) or the platform key. A
+    // team-scoped key sees only its team's models, so listing with any other
+    // key would offer models the run can't call. Empty when neither key is
+    // set — the caller's "hide the picker" contract, not an error.
+    const names = await listJudgeModels(litellmKeyFor(litellmKeyFromHeader(req.headers)));
     const models = names.map((id) => ({ id, name: id }));
     res.json({ success: true, data: models, defaultModel: LITELLM.model || null });
   } catch (err) {

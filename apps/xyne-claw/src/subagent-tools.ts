@@ -523,6 +523,10 @@ export interface SubagentProviderResolution {
   subagentProviderMode?: "parent" | "spaces" | "fast-model" | undefined;
   subagentProviders?: Record<string, string> | undefined;
   providerConfigs?: Record<string, { apiKey: string; model: string; baseUrl?: string; authType?: string }> | undefined;
+  /** The parent run's provisioned LiteLLM key (user/org, from claw-auth
+   *  litellm-sync). Subagents on the default LiteLLM branch use it ahead of the
+   *  platform env key, same precedence as the parent run (agent.ts). */
+  litellmApiKey?: string | undefined;
 }
 
 /**
@@ -995,7 +999,16 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         : null;
 
       try {
-        const authStorage = AuthStorage.create();
+        // pi reads the AuthStorage runtime key before the provider's registered
+        // apiKey, so seed it with the parent run's provisioned key first and
+        // the platform env key only as the fallback (same order as agent.ts).
+        const childLitellmApiKey = providerResolution?.litellmApiKey || LITELLM.apiKey;
+        const createChildAuthStorage = () => {
+          const storage = AuthStorage.create();
+          if (childLitellmApiKey) storage.setRuntimeApiKey("litellm", childLitellmApiKey);
+          return storage;
+        };
+        const authStorage = createChildAuthStorage();
         const modelRegistry = ModelRegistry.create(authStorage);
 
         // Apply copilot proxy (no-op for other providers) then register model via the same helper the parent uses
@@ -1004,10 +1017,14 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         const litellmFallbackModel = litellmPick?.model ?? LITELLM.model;
         const model = resolveModel(modelRegistry, resolvedProvider?.provider, effectiveConfig, {
           model: resolvedProvider ? undefined : litellmFallbackModel,
+          litellmApiKey: providerResolution?.litellmApiKey,
         });
         const slowModelFallback =
           useFastModel && litellmFallbackModel !== LITELLM.model
-            ? resolveModel(ModelRegistry.create(AuthStorage.create()), undefined, undefined, { model: LITELLM.model })
+            ? resolveModel(ModelRegistry.create(createChildAuthStorage()), undefined, undefined, {
+                model: LITELLM.model,
+                litellmApiKey: providerResolution?.litellmApiKey,
+              })
             : undefined;
         log.info(`[${def.name}] Using provider=${resolvedProvider?.provider ?? "litellm"} model=${resolvedProvider?.config.model ?? litellmFallbackModel}${litellmPick ? ` arm=${litellmPick.arm}` : ""}`);
 

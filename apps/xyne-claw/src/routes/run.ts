@@ -151,7 +151,7 @@ import {
   isReadOnlyJob as isScheduledOrAutomationRun,
   type SetupStep,
 } from "xyne-claw-shared";
-import { SERVER, PATHS, LITELLM, litellmEndpoint, isAllowedCallbackUrl } from "../config.js";
+import { SERVER, PATHS, LITELLM, litellmEndpoint, litellmKeyFromBody, litellmKeyFor, isAllowedCallbackUrl } from "../config.js";
 import { judgeChainContinuation } from "../chain-judge.js";
 import { buildTaxonomyInjection, listSubsystemTaxonomy } from "../twin-memory-taxonomy.js";
 import { buildMemorySearchTool } from "../memory-search.js";
@@ -1538,7 +1538,7 @@ export async function processTask(
   // Started here so the extractor overlaps session restore + MCP listing;
   // awaited once the tool palette exists. Never rejects (see prefetch.ts).
   const prefetchSpecPromise = prefetchEnabled(agentConfig)
-    ? startPrefetchExtraction(task)
+    ? startPrefetchExtraction(task, litellmApiKey)
     : null;
   let mcpCleanup: (() => Promise<void>) | undefined;
   // Absolute paths of raw recordings staged into a CALLER-OWNED cwd. Ephemeral
@@ -1661,7 +1661,7 @@ export async function processTask(
     // the raw recording for a fixed-command sandbox analyzer rather than
     // spending ffmpeg CPU in the long-lived claw pod.
     const explicitTaskCommand = parseTaskCommand(task);
-    const routedMode = await routeTaskMode(task, explicitTaskCommand, abortSignal);
+    const routedMode = await routeTaskMode(task, explicitTaskCommand, abortSignal, litellmApiKey);
     const taskCommand = routedMode.command;
     if ((routedMode.source === "model" || routedMode.source === "jev") && taskCommand) {
       log(`[task-command] ${taskCommand.command} selected by the mode router (${routedMode.source})`);
@@ -1680,7 +1680,10 @@ export async function processTask(
       pptxAttachments,
       htmlAttachments,
       videoAttachments,
-    } = await ingestAttachments(attachments, log, { deferVideoProcessing: recordSkillCommand });
+    } = await ingestAttachments(attachments, log, {
+      deferVideoProcessing: recordSkillCommand,
+      ...(litellmApiKey ? { litellmApiKey } : {}),
+    });
 
     const mergedContextFiles = [
       ...(contextFiles ?? []),
@@ -2229,7 +2232,7 @@ export async function processTask(
           [...customToolDefs, ...uiTesterTools],
           resolvedTriggers.length > 0 ? resolvedTriggers : undefined,
           resolvedSubagentSkills,
-          { parentProvider, subagentProviderMode, subagentProviders, providerConfigs },
+          { parentProvider, subagentProviderMode, subagentProviders, providerConfigs, ...(litellmApiKey ? { litellmApiKey } : {}) },
           {
             ...(progressUrl ? { progressUrl } : {}),
             parentSessionId: sessionId,
@@ -2432,6 +2435,7 @@ export async function processTask(
             parentProvider: calleeProvider,
             subagentProviders: spec.subagentProviders,
             providerConfigs: spec.providerConfigs,
+            ...(litellmApiKey ? { litellmApiKey } : {}),
           },
           {
             ...(progressUrl ? { progressUrl } : {}),
@@ -2553,6 +2557,9 @@ export async function processTask(
             sessionId: calleeSessionId,
             skills: spec.skills,
             abortSignal: signal,
+            // The delegated agent works for the same user as the parent run, so
+            // it bills the same provisioned key (platform key when none).
+            ...(litellmApiKey ? { litellmApiKey } : {}),
             parentDebug: calleeDebugHandle,
             ...(calleeChildRun ? { childRun: calleeChildRun } : {}),
             progressMeta: {
@@ -3150,6 +3157,7 @@ export async function processTask(
           agentSlug,
           ...(verifyResponseCriteria ? { criteria: verifyResponseCriteria } : {}),
           ...(replyFormat ? { replyFormat } : {}),
+          ...(litellmApiKey ? { litellmApiKey } : {}),
         }),
       );
       log(
@@ -4361,6 +4369,7 @@ export async function processTask(
         agentContext: followUpAgentContext,
         conversationHistory: followUpConversationHistory,
         abortSignal: signal,
+        litellmApiKey,
       }).then((generation) => {
         const settled = { generation, completedAt: new Date().toISOString() };
         pushDebugProgress(
@@ -5496,6 +5505,7 @@ router.post("/chain-judge", validateS2SKey, async (req, res: Response) => {
     userQuery,
     judgeContext,
     Array.isArray(toolInvocations) ? toolInvocations : undefined,
+    litellmKeyFromBody(req.body),
   );
   res.json({ success: true, data: decision });
 });
@@ -5556,7 +5566,7 @@ router.post("/generate-prompt", validateS2SKey, async (req, res: Response) => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${LITELLM.apiKey}`,
+        Authorization: `Bearer ${litellmKeyFor(litellmKeyFromBody(req.body))}`,
       },
       body: JSON.stringify({
         model: LITELLM.model,
@@ -5747,7 +5757,7 @@ router.post(
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${LITELLM.apiKey}`,
+            Authorization: `Bearer ${litellmKeyFor(litellmKeyFromBody(req.body))}`,
           },
           body: JSON.stringify({
             model: LITELLM.model,
@@ -5965,7 +5975,7 @@ router.post("/suggest-tools", validateS2SKey, async (req, res: Response) => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${LITELLM.apiKey}`,
+        Authorization: `Bearer ${litellmKeyFor(litellmKeyFromBody(req.body))}`,
       },
       body: JSON.stringify({
         model: LITELLM.model,

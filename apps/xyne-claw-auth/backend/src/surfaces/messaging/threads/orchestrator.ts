@@ -90,7 +90,7 @@ export async function handleThreaded(args: ThreadedInboundArgs): Promise<{ accep
   // 2. Plan the message into one or more linked tasks and update shared state.
   const state = await loadChatState(accountId, chatId);
   const open = await openTasks(accountId, chatId);
-  const plan = await planInbound(rawTask, state, open);
+  const plan = await planInbound(rawTask, state, open, userId);
   const merged = Object.keys(plan.slots).length ? await mergeChatState(accountId, chatId, plan.slots) : state;
   const stateBlock = renderStateBlock(merged);
 

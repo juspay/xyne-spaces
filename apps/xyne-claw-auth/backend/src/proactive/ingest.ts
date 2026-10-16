@@ -1,5 +1,6 @@
 import type { InboxSource, Prisma, TrackedThread } from "@prisma/client";
 import { prisma } from "../db.js";
+import { resolveUserLitellmApiKey } from "../lib/agent-provider-config.js";
 import { errMsg } from "../lib/errors.js";
 import { resolveFreshOAuthCreds } from "../lib/oauth-token-endpoint.js";
 import { getOAuthProvider } from "../routes/oauth-token.js";
@@ -259,6 +260,9 @@ async function triageAndExtract(
   }
 
   const user = await prisma.user.findUnique({ where: { id: source.userId }, select: { name: true } });
+  const litellmApiKey = hits.length > 0
+    ? await resolveUserLitellmApiKey(source.userId).catch(() => undefined)
+    : undefined;
   let loops = 0;
   for (const c of hits.slice(0, PROACTIVE.maxExtractsPerIngest)) {
     try {
@@ -270,6 +274,7 @@ async function triageAndExtract(
             ...(user?.name ? { userName: user.name } : {}),
             ...(source.address ? { userAddress: source.address } : {}),
             ...(c.message.subject ? { subject: c.message.subject } : {}),
+            ...(litellmApiKey ? { litellmApiKey } : {}),
             messages,
           })
         : null;

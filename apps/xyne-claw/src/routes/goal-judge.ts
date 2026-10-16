@@ -7,6 +7,7 @@
  */
 import { Router, type Request, type Response } from "express";
 import { validateS2SKey } from "../middleware/auth.js";
+import { litellmKeyFromBody } from "../config.js";
 import { judgeGoalProgress, type GoalJudgeInput } from "../goal-judge.js";
 
 const router = Router();
@@ -47,6 +48,7 @@ router.post("/goal-judge", validateS2SKey, async (req: Request, res: Response): 
       sizeBytes: a.sizeBytes,
     }));
 
+  const litellmApiKey = litellmKeyFromBody(body);
   const decision = await judgeGoalProgress({
     condition: body.condition,
     lastTurnOutput: body.lastTurnOutput,
@@ -54,6 +56,7 @@ router.post("/goal-judge", validateS2SKey, async (req: Request, res: Response): 
     maxTurns: body.maxTurns,
     ...(recentTurnsDigest ? { recentTurnsDigest } : {}),
     ...(attachmentsThisTurn.length > 0 ? { attachmentsThisTurn } : {}),
+    ...(litellmApiKey ? { litellmApiKey } : {}),
   });
 
   res.json({ success: true, ...decision });

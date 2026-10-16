@@ -11,6 +11,7 @@
  * `{ score: null, reasoning: "judge_unavailable" }` so a transient LiteLLM
  * outage marks the turn un-judged rather than fabricating a score.
  */
+import { createHash } from "node:crypto";
 import { LITELLM, litellmEndpoint } from "./config.js";
 import { withLlmSlot, pauseLlmGate, retryAfterMs } from "./llm-gate.js";
 import { xor, xorEnabled, type XorQuestion } from "./xor.js";
@@ -273,11 +274,26 @@ export async function judgeSemanticMatch(input: EvalJudgeInput): Promise<EvalJud
  * so we keep only the internal self-hosted (`hosted_vllm`) chat models — the
  * ones with no budget gate. Falls back to `/v1/models` (minus embeddings) if
  * `/model/info` is unavailable. */
-let lastGoodModels: string[] | null = null;
+// Keyed by a hash of the LiteLLM key: a provisioned key is team-scoped and
+// sees its own model set, so one key's list must never be served for another.
+const lastGoodModelsByKey = new Map<string, string[]>();
+const MAX_CACHED_KEYS = 1_000;
 
-export async function listJudgeModels(): Promise<string[]> {
-  if (!LITELLM.apiKey) return [];
-  const headers = { Authorization: `Bearer ${LITELLM.apiKey}` };
+function rememberModels(cacheKey: string, models: string[]): string[] {
+  lastGoodModelsByKey.delete(cacheKey);
+  lastGoodModelsByKey.set(cacheKey, models);
+  if (lastGoodModelsByKey.size > MAX_CACHED_KEYS) {
+    const oldest = lastGoodModelsByKey.keys().next().value;
+    if (oldest !== undefined) lastGoodModelsByKey.delete(oldest);
+  }
+  return models;
+}
+
+/** @param apiKey the key whose models to list — defaults to the platform key. */
+export async function listJudgeModels(apiKey: string = LITELLM.apiKey): Promise<string[]> {
+  if (!apiKey) return [];
+  const cacheKey = createHash("sha256").update(apiKey).digest("hex");
+  const headers = { Authorization: `Bearer ${apiKey}` };
   try {
     const res = await fetch(litellmEndpoint("/model/info"), { headers, signal: AbortSignal.timeout(15_000) });
     if (res.ok) {
@@ -290,10 +306,7 @@ export async function listJudgeModels(): Promise<string[]> {
         const prov = typeof m.litellm_params?.custom_llm_provider === "string" ? m.litellm_params.custom_llm_provider : "";
         if (name && prov === "hosted_vllm" && !/embed/i.test(name)) usable.add(name);
       }
-      if (usable.size > 0) {
-        lastGoodModels = [...usable].sort();
-        return lastGoodModels;
-      }
+      if (usable.size > 0) return rememberModels(cacheKey, [...usable].sort());
     }
   } catch {
     /* fall through */
@@ -302,7 +315,8 @@ export async function listJudgeModels(): Promise<string[]> {
   // the raw /v1/models visibility dump — the raw list contains budget-blocked
   // external models, and falling back to it made different dropdowns (fetched
   // at different moments) show different model sets.
-  if (lastGoodModels) return lastGoodModels;
+  const lastGood = lastGoodModelsByKey.get(cacheKey);
+  if (lastGood) return lastGood;
   // /model/info is now 403-blocked at the gateway, so the provider-metadata
   // filter can't run. Fall back to an env-seeded allowlist of known-usable
   // models, intersected with the live /v1/models visibility list (so removed
@@ -320,8 +334,7 @@ export async function listJudgeModels(): Promise<string[]> {
       (data.data ?? []).map((m) => (typeof m.id === "string" ? m.id : "")).filter(Boolean),
     );
     const usable = allowlist.filter((m) => visible.has(m));
-    lastGoodModels = (usable.length > 0 ? usable : allowlist).sort();
-    return lastGoodModels;
+    return rememberModels(cacheKey, (usable.length > 0 ? usable : allowlist).sort());
   } catch {
     return allowlist.sort();
   }

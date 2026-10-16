@@ -459,6 +459,18 @@ describe("POST /internal/user-memory/should-respond", () => {
     expect(vi.mocked(decideRespond).mock.calls[0]![0]).toStrictEqual({ incoming: "hi", patterns: [], relevantContext: [] });
   });
 
+  it("forwards the caller's LiteLLM key only when it is a non-empty string", async () => {
+    vi.mocked(decideRespond).mockResolvedValue(DECISION);
+    await call(GATE, { incoming: "hi", litellmApiKey: " sk-user " });
+    await call(GATE, { incoming: "hi", litellmApiKey: "" });
+    await call(GATE, { incoming: "hi", litellmApiKey: 42 });
+    expect(vi.mocked(decideRespond).mock.calls[0]![0]).toStrictEqual({
+      incoming: "hi", patterns: [], relevantContext: [], litellmApiKey: "sk-user",
+    });
+    expect(vi.mocked(decideRespond).mock.calls[1]![0]).toStrictEqual({ incoming: "hi", patterns: [], relevantContext: [] });
+    expect(vi.mocked(decideRespond).mock.calls[2]![0]).toStrictEqual({ incoming: "hi", patterns: [], relevantContext: [] });
+  });
+
   it("fails closed with a 200 when the gate throws", async () => {
     vi.mocked(decideRespond).mockRejectedValue(new Error("gate exploded"));
     const r = await call(GATE, { incoming: "hi" });

@@ -22,6 +22,7 @@ import { LOCAL_HARNESS_PROVIDERS } from "../lib/local-harness.js";
 import { prisma } from "../db.js";
 import { DEFAULT_NEW_AGENT_TOOL_SOURCES, mergeNewAgentToolDefaults } from "../lib/new-agent-tool-defaults.js";
 import { CONFIG } from "../config.js";
+import { resolveUserLitellmApiKey } from "../lib/agent-provider-config.js";
 import { encrypt, decrypt } from "../crypto.js";
 import { checkHealth } from "../health.js";
 import { verifyMcpCredentials } from "../lib/mcp-credential-verify.js";
@@ -241,6 +242,20 @@ async function normalizeGatewayServicesInConfig(config: Record<string, unknown> 
 
 // ── Generate prompt (proxy to xyne-claw) ─────────────────────────────
 
+/**
+ * Body for the claw builder proxies: the caller's fields minus any client-sent
+ * `litellmApiKey` (a browser must never pick the key claw bills), plus the
+ * requester's own resolved key. Claw falls back to its env key when absent.
+ */
+async function withRequesterLitellmKey(req: Request, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const { litellmApiKey: _clientKey, ...rest } = body;
+  const requesterId = getRequesterId(req);
+  const litellmApiKey = requesterId
+    ? await resolveUserLitellmApiKey(requesterId).catch(() => undefined)
+    : undefined;
+  return { ...rest, ...(litellmApiKey ? { litellmApiKey } : {}) };
+}
+
 router.post("/generate-prompt", async (req: Request, res: Response) => {
   try {
     const clawRes = await fetch(`${CONFIG.xyneClawUrl}/generate-prompt`, {
@@ -249,7 +264,7 @@ router.post("/generate-prompt", async (req: Request, res: Response) => {
         "Content-Type": "application/json",
         ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
       },
-      body: JSON.stringify(req.body),
+      body: JSON.stringify(await withRequesterLitellmKey(req, (req.body ?? {}) as Record<string, unknown>)),
       signal: AbortSignal.timeout(35_000),
     });
 
@@ -273,7 +288,7 @@ router.post("/generate-output-format", async (req: Request, res: Response) => {
         "Content-Type": "application/json",
         ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
       },
-      body: JSON.stringify(req.body),
+      body: JSON.stringify(await withRequesterLitellmKey(req, (req.body ?? {}) as Record<string, unknown>)),
       signal: AbortSignal.timeout(60_000),
     });
 
@@ -338,7 +353,7 @@ router.post("/suggest-tools", async (req: Request, res: Response) => {
         "Content-Type": "application/json",
         ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
       },
-      body: JSON.stringify({ intent, catalog }),
+      body: JSON.stringify(await withRequesterLitellmKey(req, { intent, catalog })),
       signal: AbortSignal.timeout(50_000),
     });
 

@@ -14,7 +14,7 @@
 
 import { fetchLiteLLMWithRetry } from "@xyne/litellm-client";
 import { withLlmSlot, pauseLlmGate, retryAfterMs } from "./llm-gate.js";
-import { LITELLM } from "./config.js";
+import { LITELLM, litellmKeyFor } from "./config.js";
 
 import { createLogger } from "./logger.js";
 const log = createLogger("entity-llm");
@@ -158,8 +158,11 @@ export class EntityLlmError extends Error {
 export async function completeEntityPrompt(
   messages: EntityLlmMessage[],
   purpose?: string,
+  /** The user's provisioned LiteLLM key; platform env key when absent. */
+  runLitellmApiKey?: string,
 ): Promise<string> {
-  if (!LITELLM.apiKey) {
+  const apiKey = litellmKeyFor(runLitellmApiKey);
+  if (!apiKey) {
     throw new EntityLlmError("LITELLM_API_KEY not set on claw", 503);
   }
 
@@ -175,7 +178,7 @@ export async function completeEntityPrompt(
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${LITELLM.apiKey}`,
+            Authorization: `Bearer ${apiKey}`,
           },
           body: JSON.stringify({
             model: ENTITY_MODEL,

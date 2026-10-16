@@ -22,6 +22,8 @@ export interface ExtractRequest {
   userAddress?: string;
   subject?: string;
   messages: Array<{ from: string; at: string; fromUser: boolean; text: string }>;
+  /** The mailbox owner's LiteLLM key (resolveUserLitellmApiKey); claw falls back to its env key. */
+  litellmApiKey?: string;
 }
 
 export interface ExtractResponse {

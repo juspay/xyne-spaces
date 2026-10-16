@@ -11,6 +11,7 @@
  */
 
 import type { MemoryUpdateCheck, SynthesizeFileRequest, SynthesizeFileTrace } from "xyne-claw-shared";
+import { resolveUserLitellmApiKey } from "../lib/agent-provider-config.js";
 import { errMsg } from "../lib/errors.js";
 import { CONFIG } from "../config.js";
 import { createLogger, createTraceId } from "../logger.js";
@@ -57,6 +58,7 @@ async function fetchApprovedFactsBySubsystem(userId: string): Promise<Map<string
 
 async function synthesizeViaClaw(
   req: SynthesizeFileRequest,
+  litellmApiKey: string | undefined,
 ): Promise<{ content: string | null; error?: string; trace?: SynthesizeFileTrace; check?: MemoryUpdateCheck }> {
   if (!CONFIG.xyneClawS2sKey) return { content: null, error: "no-s2s-key" };
   const url = `${CONFIG.xyneClawUrl.replace(/\/$/, "")}/internal/user-memory/synthesize-file`;
@@ -64,7 +66,7 @@ async function synthesizeViaClaw(
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-s2s-key": CONFIG.xyneClawS2sKey },
-      body: JSON.stringify(req),
+      body: JSON.stringify({ ...req, ...(litellmApiKey ? { litellmApiKey } : {}) }),
       signal: AbortSignal.timeout(SYNTH_TIMEOUT_MS),
     });
     if (!res.ok) return { content: null, error: `http-${res.status}` };
@@ -96,6 +98,7 @@ export async function synthesizeSoulFilesForUser(
   const eventId = await startSynthesisEvent(userId, trigger);
 
   const factsBySub = await fetchApprovedFactsBySubsystem(userId);
+  const litellmApiKey = await resolveUserLitellmApiKey(userId).catch(() => undefined);
   const updated: string[] = [];
   const skipped: string[] = [];
   const fileResults: SynthFileResult[] = [];
@@ -121,7 +124,7 @@ export async function synthesizeSoulFilesForUser(
       ...(userEdited ? { preserveEdits: true } : {}),
       // Only the nightly run is scored; manual re-synthesis writes as before.
       ...(trigger === "daily" ? { check: true } : {}),
-    });
+    }, litellmApiKey);
     const base = { name: spec.name, ...(trace ?? {}), factsUsed: trace?.factsUsed ?? facts.length };
     if (!content) {
       skip({ ...base, action: error ? "error" : "skipped", ...(error ? { error } : {}) });

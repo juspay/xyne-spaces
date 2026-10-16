@@ -1,4 +1,5 @@
 import { CONFIG } from "../config.js";
+import { resolveUserLitellmApiKey } from "../lib/agent-provider-config.js";
 import { isChatConversation } from "../lib/conversation-kind.js";
 import { errMsg } from "../lib/errors.js";
 import { createLogger, createTraceId } from "../logger.js";
@@ -16,6 +17,8 @@ export const MANUAL_CHAT_TITLE_MAX_CHARS = 100;
 export interface ChatTitleRequest {
   firstUserMessage: string;
   assistantReply?: string;
+  /** The user's LiteLLM key (resolveUserLitellmApiKey); claw falls back to its env key. */
+  litellmApiKey?: string;
 }
 
 export async function generateChatTitleViaClaw(req: ChatTitleRequest): Promise<string | null> {
@@ -73,9 +76,11 @@ export async function maybeGenerateConversationTitle(args: {
     messages.find((m) => m.role === "user" && m.userId === args.userId)?.content ?? "";
   if (!firstUserMessage.trim()) return;
 
+  const litellmApiKey = await resolveUserLitellmApiKey(args.userId).catch(() => undefined);
   const title = await generateChatTitleViaClaw({
     firstUserMessage,
     ...(args.assistantReply?.trim() ? { assistantReply: args.assistantReply } : {}),
+    ...(litellmApiKey ? { litellmApiKey } : {}),
   });
   if (!title) return;
 
