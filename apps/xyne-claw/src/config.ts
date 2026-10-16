@@ -128,9 +128,10 @@ function normalizeFakeGcsHost(): string {
 // link into the Spaces channel where the user can watch (and drive) the
 // agent's headed chromium-B over noVNC. Path mode in sandbox-router-ws:
 //   ${baseUrl}/claw-preview/<sandboxId>/  →  redirects to vnc.html?autoconnect=…
-// Empty string disables the announce.
+// Empty string disables the announce. No default: previews must not be served
+// from the dashboard's own host, and only the deployment knows which host to use.
 export const SANDBOX_PREVIEW = {
-  baseUrl: process.env["SANDBOX_PREVIEW_BASE_URL"] ?? "https://app.spaces.xyne.juspay.net",
+  baseUrl: process.env["SANDBOX_PREVIEW_BASE_URL"] ?? "",
 } as const;
 
 // Hindsight long-term memory.

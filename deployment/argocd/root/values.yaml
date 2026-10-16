@@ -294,6 +294,7 @@ addons:
       otelCollector: {}
   sandbox:
     enabled: false
+    previewHost: ""
     kata:
       version: 4.1.0
       imageTag: 4.1.0

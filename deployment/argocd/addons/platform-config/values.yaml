@@ -53,6 +53,9 @@ workflows:
   service: argo-workflows-server
   port: 2746
 
+sandboxPreview:
+  host: ""
+
 routes:
   externalDashboard: false
   clawAuth: false

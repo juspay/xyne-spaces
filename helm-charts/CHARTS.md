@@ -1042,10 +1042,14 @@ capabilities dropped, `runAsNonRoot`.
   `KATA_NAMESPACE`) must send the namespace the sandboxes live in.
 - The `/claw-preview/<sandboxId>/...` path mode (noVNC, no headers) targets port 6080 in the
   namespace from `CLAW_PREVIEW_NAMESPACE` (default `xyne-apps`); the root chart sets it to the
-  install namespace. The root chart also adds a `/claw-preview/` route on the main host to this
-  service (timeout `0s` for the noVNC WebSocket) and sets xyne-claw's `SANDBOX_PREVIEW_BASE_URL` to
-  the public URL, whenever both the sandbox addon and xyne-claw are on. The route has no auth:
-  anyone holding a sandbox id can watch and drive that sandbox's browser.
+  install namespace. Whenever both the sandbox addon and xyne-claw are on, the root chart gives
+  this service a host of its own — `sandbox.<domain>`, or `addons.sandbox.previewHost` — adds it to
+  the gateway and the certificate, routes the whole host here (timeout `0s` for the noVNC
+  WebSocket), 302s `/claw-preview/` on the main host to it, and sets xyne-claw's
+  `SANDBOX_PREVIEW_BASE_URL` to `https://<that host>`. The separate host is load-bearing: the
+  dashboard grants a preview frame `allow-same-origin` only on that origin, and a sandbox runs
+  agent-written code. The route still has no auth: anyone holding a sandbox id can watch and drive
+  that sandbox's browser.
 - The sandbox NetworkPolicy in `deployment/argocd/addons/sandbox` admits pods labelled
   `app: xyne-sandbox-router`. That label is the chart's `fullname`; keep `fullnameOverride` in
   step with the addon's `router.name`.

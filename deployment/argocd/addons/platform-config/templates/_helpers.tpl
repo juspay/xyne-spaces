@@ -5,6 +5,10 @@ app.kubernetes.io/part-of: xyne-spaces
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
 
+{{- define "platform-config.sandboxPreviewHost" -}}
+{{- (.Values.sandboxPreview | default dict).host | default (printf "sandbox.%s" .Values.domain) }}
+{{- end }}
+
 {{- define "platform-config.hosts" -}}
 {{- $hosts := list .Values.domain }}
 {{- if .Values.certManager.wildcard }}

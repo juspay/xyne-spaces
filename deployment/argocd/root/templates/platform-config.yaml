@@ -9,12 +9,17 @@
 {{- $wfExpose := and $wf.enabled $wf.expose.enabled }}
 {{- $wfHost := $wf.expose.host | default (printf "workflows.%s" .Values.global.domain) }}
 {{- $wildcard := or $cm.wildcard (eq $ing.tls "internal") }}
+{{- $clawPreview := and .Values.addons.sandbox.enabled ((index .Values.apps "xyne-claw").enabled | default false) }}
+{{- $sandboxPreviewHost := include "xyne-root.sandboxPreviewHost" . }}
 {{- $extraHosts := list }}
 {{- if and $argo.enabled (not $wildcard) }}
 {{- $extraHosts = append $extraHosts $argoHost }}
 {{- end }}
 {{- if and $wfExpose (not $wildcard) }}
 {{- $extraHosts = append $extraHosts $wfHost }}
+{{- end }}
+{{- if and $clawPreview (not $wildcard) }}
+{{- $extraHosts = append $extraHosts $sandboxPreviewHost }}
 {{- end }}
 {{- $base := dict
   "domain" .Values.global.domain
@@ -24,7 +29,8 @@
   "argocd" (dict "enabled" ($argo.enabled | default false) "host" $argoHost "namespace" .Release.Namespace)
   "workflows" (dict "enabled" $wfExpose "host" $wfHost "namespace" $wf.namespace)
   "peerAuthentication" (dict "enabled" (ne $istio.peerAuthentication "") "mode" ($istio.peerAuthentication | default "STRICT"))
-  "routes" (dict "externalDashboard" ((index .Values.apps "xyne-dashboard-external").enabled | default false) "clawAuth" ((index .Values.apps "xyne-claw-auth").enabled | default false) "clawAuthFrontend" ((index .Values.apps "xyne-claw-auth-frontend").enabled | default false) "clawPreview" (and .Values.addons.sandbox.enabled ((index .Values.apps "xyne-claw").enabled | default false)) "health" $ing.edgeTerminated)
+  "routes" (dict "externalDashboard" ((index .Values.apps "xyne-dashboard-external").enabled | default false) "clawAuth" ((index .Values.apps "xyne-claw-auth").enabled | default false) "clawAuthFrontend" ((index .Values.apps "xyne-claw-auth-frontend").enabled | default false) "clawPreview" $clawPreview "health" $ing.edgeTerminated)
+  "sandboxPreview" (dict "host" $sandboxPreviewHost)
   "storageClass" (dict "enabled" (not (empty (include "xyne-root.awsDefault" (dict "root" $ "value" $sc.enabled)))))
 }}
 {{- $values := include "xyne-root.merge" (dict "base" $base "layers" (list $pc.values)) | fromYaml }}
