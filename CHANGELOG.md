@@ -1,3 +1,10 @@
+## [1.501.0-release-20261015.3](https://github.com/juspay/xyne-spaces/compare/v1.501.0-release-20261015.2...v1.501.0-release-20261015.3) (2026-10-16)
+
+
+### Features
+
+* raise LiveKit room max participants to 500 ([#3117](https://github.com/juspay/xyne-spaces/issues/3117)) ([#3131](https://github.com/juspay/xyne-spaces/issues/3131)) ([37c1890](https://github.com/juspay/xyne-spaces/commit/37c18902cd0e5b076cacc54b63596933c3dabfb7))
+
 ## [1.501.0-release-20261015.2](https://github.com/juspay/xyne-spaces/compare/v1.501.0-release-20261015.1...v1.501.0-release-20261015.2) (2026-10-15)
 
 

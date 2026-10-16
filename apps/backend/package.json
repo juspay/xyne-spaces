@@ -1,6 +1,6 @@
 {
   "name": "xyne-spaces-backend",
-  "version": "1.501.0-release-20261015.2",
+  "version": "1.501.0-release-20261015.3",
   "description": "Backend server for Xyne Spaces application",
   "main": "dist/index.js",
   "type": "module",
