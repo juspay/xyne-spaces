@@ -2,7 +2,7 @@ import type { ChannelUserStatus } from '../zero/schema.js';
 import { ChannelScopeType, ChannelType } from '../zero/types.js';
 import type { VisibleChannel } from '../machines/stateMachine.js';
 import { isDeskChannelType } from './channel.js';
-import { rankChannelsByAffinity, type ChannelWeightLookup } from './channelRanking.js';
+import { rankChannelsByAffinity } from './channelRanking.js';
 import { isDMChannel, parseDMParticipantIds } from './userRanking.js';
 
 /**
@@ -125,7 +125,6 @@ export function buildCmdkChannelGroups(
   channelData: ReadonlyArray<{ id: string }>,
   visibleAllChannels: ReadonlyArray<VisibleChannel>,
   allChannelsUserStatus: ChannelUserStatus[],
-  getChannelWeight: ChannelWeightLookup,
 ): { starred: VisibleChannel[]; channels: VisibleChannel[]; directMessages: VisibleChannel[] } {
   if (!channelData.length) return { starred: [], channels: [], directMessages: [] };
 
@@ -149,12 +148,9 @@ export function buildCmdkChannelGroups(
 
   // Rank each group by personalization weight (desc), tie-break on recency (shared with the
   // `/chat`/`/call` pickers). No weights → 0 ties → pure recency, identical to the previous order.
-  const rankedStarred = rankChannelsByAffinity(grouped.starred, getChannelWeight);
-  const rankedChannels = rankChannelsByAffinity(
-    [...grouped.channels, ...emailChannels],
-    getChannelWeight,
-  );
-  const rankedDirectMessages = rankChannelsByAffinity(grouped.directMessages, getChannelWeight);
+  const rankedStarred = rankChannelsByAffinity(grouped.starred);
+  const rankedChannels = rankChannelsByAffinity([...grouped.channels, ...emailChannels]);
+  const rankedDirectMessages = rankChannelsByAffinity(grouped.directMessages);
 
   return {
     starred: rankedStarred,

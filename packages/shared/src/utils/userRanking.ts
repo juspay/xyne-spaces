@@ -1,17 +1,13 @@
+import { affinityService } from '../services/affinityService.js';
 import { ChannelScopeType, UserStatus } from '../zero/types.js';
 import { matchesAllTokens } from './tokenMatch.js';
 
 /**
  * People search ranking shared by the dashboard (Cmd+K, pickers) and the mobile app's global
  * search. Moved verbatim from the dashboard (`utils/rankingUtils.ts`, `utils/userDisplayName.ts`,
- * the Cmd+K DM-contact map in `ChannelCommandMenu.tsx`) except that MFU affinity is passed in as
- * `getUserWeight`: each app owns its own `AffinityService`.
+ * the Cmd+K DM-contact map in `ChannelCommandMenu.tsx`). MFU affinity comes from the app's
+ * registered `AffinityService` (`registerAffinityService`).
  */
-
-/** MFU (affinity) weight for a user id. 0 when unknown or personalization is off. */
-export type UserWeightLookup = (userId: string) => number;
-
-const NO_WEIGHT: UserWeightLookup = () => 0;
 
 /**
  * Check if a user is deactivated (status is INACTIVE)
@@ -78,12 +74,7 @@ export function rankUsers<
     displayName?: string | null;
     email?: string;
   },
->(
-  users: T[],
-  query: string,
-  dmContactRecency: Map<string, number>,
-  getUserWeight: UserWeightLookup = NO_WEIGHT,
-): T[] {
+>(users: T[], query: string, dmContactRecency: Map<string, number>): T[] {
   const q = query.toLowerCase().trim();
 
   // Relevance tier per user (the outer sort key), mirroring searchUsers' cascade:
@@ -102,7 +93,7 @@ export function rankUsers<
   // MFU (most-frequently-used) weight per user from the personalization pipeline,
   // read once up front since the comparator runs O(n log n) times. 0 when
   // personalization is off or unsynced, which makes the MFU tier below a no-op.
-  const mfuWeight = new Map(users.map(u => [u.id, getUserWeight(u.id)] as const));
+  const mfuWeight = new Map(users.map(u => [u.id, affinityService.getUserWeight(u.id)] as const));
 
   // Stable sort (ES2019+) preserves the incoming `searchUsers` order
   // (alphabetical for non-DM users) when all keys tie.
@@ -158,20 +149,17 @@ export function rankUsersWithMfu<
     displayName?: string | null;
     email?: string;
   },
->(
-  candidates: T[],
-  allUsers: T[],
-  query: string,
-  dmContactRecency: Map<string, number>,
-  getUserWeight: UserWeightLookup = NO_WEIGHT,
-): T[] {
+>(candidates: T[], allUsers: T[], query: string, dmContactRecency: Map<string, number>): T[] {
   const inCandidates = new Set(candidates.map(u => u.id));
   // Recover weighted users the query matches — same matchesUserQuery the pickers use (token-AND on
   // name/displayName so reordered matches like "prasad siva" recover, plus email substring).
   const weightedExtras = allUsers.filter(
-    u => !inCandidates.has(u.id) && getUserWeight(u.id) > 0 && matchesUserQuery(u, query),
+    u =>
+      !inCandidates.has(u.id) &&
+      affinityService.getUserWeight(u.id) > 0 &&
+      matchesUserQuery(u, query),
   );
-  return rankUsers([...candidates, ...weightedExtras], query, dmContactRecency, getUserWeight);
+  return rankUsers([...candidates, ...weightedExtras], query, dmContactRecency);
 }
 
 export const isDMChannel = (scopeType: ChannelScopeType): boolean => {

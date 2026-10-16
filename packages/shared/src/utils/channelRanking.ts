@@ -1,4 +1,5 @@
 import Fuse from 'fuse.js';
+import { affinityService } from '../services/affinityService.js';
 import type { Channel } from '../zero/schema.js';
 import { ChannelScopeType } from '../zero/types.js';
 import { saturateAffinity } from './globalPhase.js';
@@ -6,15 +7,9 @@ import { searchChannelsWithScores } from './search.js';
 
 /**
  * Channel / DM search ranking shared by the dashboard (Cmd+K, `in:` / `#` typeahead, pickers)
- * and the mobile app's global search. Moved verbatim from the dashboard's `utils/rankingUtils.ts`
- * except that channel affinity is passed in as `getChannelWeight`: each app owns its own
- * `AffinityService`.
+ * and the mobile app's global search. Moved verbatim from the dashboard's `utils/rankingUtils.ts`.
+ * Channel affinity comes from the app's registered `AffinityService` (`registerAffinityService`).
  */
-
-/** Affinity (MFU) weight for a channel id. 0 when unknown or personalization is off. */
-export type ChannelWeightLookup = (channelId: string) => number;
-
-const NO_WEIGHT: ChannelWeightLookup = () => 0;
 
 const isDMChannel = (scopeType: ChannelScopeType): boolean => {
   return scopeType === ChannelScopeType.DM || scopeType === ChannelScopeType.GROUP_DM;
@@ -113,8 +108,10 @@ export function rankChannelsByAffinity<
     // `{…} | undefined`, which exactOptionalPropertyTypes rejects for a plain optional field.
     channelStats?: { lastActivityAt?: number | null } | null | undefined;
   },
->(channels: T[], getChannelWeight: ChannelWeightLookup = NO_WEIGHT): T[] {
-  const weightById = new Map(channels.map(c => [c.id, getChannelWeight(c.id)] as const));
+>(channels: T[]): T[] {
+  const weightById = new Map(
+    channels.map(c => [c.id, affinityService.getChannelWeight(c.id)] as const),
+  );
   return [...channels].sort((a, b) => {
     const wa = weightById.get(a.id) ?? 0;
     const wb = weightById.get(b.id) ?? 0;
@@ -145,7 +142,6 @@ export type ChannelSearchItem = {
  * @param options.excludeDMs  Drop DMs/Group DMs entirely — used by the `#`
  *   Slack-style quick switcher which should show only regular channels.
  * @param options.regularFuseMatches  Regular-channel matches already computed in a web worker.
- * @param options.getChannelWeight  Channel affinity (MFU) weight; omitted = no affinity.
  */
 export function filterChannelsBySearchableNames<
   T extends { channel: Channel; searchableNames?: string[]; searchNames?: string[] },
@@ -155,10 +151,8 @@ export function filterChannelsBySearchableNames<
   options: {
     excludeDMs?: boolean;
     regularFuseMatches?: ReadonlyArray<{ id: string; score?: number | undefined }>;
-    getChannelWeight?: ChannelWeightLookup;
   } = {},
 ): T[] {
-  const getChannelWeight = options.getChannelWeight ?? NO_WEIGHT;
   const scoped = options.excludeDMs
     ? items.filter(({ channel }) => !isDMChannel(channel.scopeType))
     : items;
@@ -217,7 +211,7 @@ export function filterChannelsBySearchableNames<
         // division would make negative scores less negative with high affinity, inverting
         // the ranking. Lower finalScore = better rank.
         const fuseScore = totalFuseScore / queryParts.length;
-        const affinity = getChannelWeight(channelId);
+        const affinity = affinityService.getChannelWeight(channelId);
         const finalScore = fuseScore - sat(affinity) * AFFINITY_WEIGHT;
 
         return [{ item, score: finalScore }];
@@ -246,7 +240,7 @@ export function filterChannelsBySearchableNames<
       const item = regularItemsById.get(channel.id);
       if (!item) return [];
 
-      const affinity = getChannelWeight(channel.id);
+      const affinity = affinityService.getChannelWeight(channel.id);
       const finalScore = score - sat(affinity) * REGULAR_CHANNEL_AFFINITY_WEIGHT;
 
       return [{ item, score: finalScore }];

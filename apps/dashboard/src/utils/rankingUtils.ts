@@ -1,15 +1,4 @@
-import type { Channel, ChannelUserStatus } from '@xyne/shared';
-import {
-  buildCmdkChannelGroups as sharedBuildCmdkChannelGroups,
-  filterChannelsBySearchableNames as sharedFilterChannelsBySearchableNames,
-  rankChannelsByAffinity as sharedRankChannelsByAffinity,
-  rankUsers as sharedRankUsers,
-  rankUsersWithMfu as sharedRankUsersWithMfu,
-  tierOf,
-  type ChannelSearchItem,
-  type RankedCandidate,
-} from '@xyne/shared/utils';
-import type { VisibleChannel } from '../machines/stateMachine';
+import { tierOf, type ChannelSearchItem, type RankedCandidate } from '@xyne/shared/utils';
 import { affinityService } from '../services/affinityService';
 import { isDMChannel } from '../components/Chat/ChatDirectory/ChatDirectory.utils';
 import { isUserDeactivated } from './userDisplayName';
@@ -21,78 +10,16 @@ import { isUserDeactivated } from './userDisplayName';
  * Consumed by `useRankedPeopleSearch`, the cmd+K menu, slash pickers, Compose, Forward, and DM search.
  */
 
-// Cmd+K user ranking lives in @xyne/shared so the mobile app's global search orders people
-// the same way. These wrappers bind it to the dashboard's affinity service, keeping the
-// call sites unchanged.
-const getUserWeight = (userId: string): number => affinityService.getUserWeight(userId);
-const getChannelWeight = (channelId: string): number => affinityService.getChannelWeight(channelId);
-
-/** `rankUsers` from @xyne/shared, with the dashboard's MFU weights. */
-export function rankUsers<
-  T extends {
-    id: string;
-    name: string;
-    status?: string | null;
-    displayName?: string | null;
-    email?: string;
-  },
->(users: T[], query: string, dmContactRecency: Map<string, number>): T[] {
-  return sharedRankUsers(users, query, dmContactRecency, getUserWeight);
-}
-
-/** `rankUsersWithMfu` from @xyne/shared, with the dashboard's MFU weights. */
-export function rankUsersWithMfu<
-  T extends {
-    id: string;
-    name: string;
-    status?: string | null;
-    displayName?: string | null;
-    email?: string;
-  },
->(candidates: T[], allUsers: T[], query: string, dmContactRecency: Map<string, number>): T[] {
-  return sharedRankUsersWithMfu(candidates, allUsers, query, dmContactRecency, getUserWeight);
-}
-
-/**
- * Rank channels/DMs by personalization weight (desc), tie-break on recency
- * (`channelStats.lastActivityAt`). Mirrors the empty-browse ordering used by the
- * Cmd+K channel groups so the `/chat`/`/call` pickers surface the same
- * most-used conversations first.
- *
- * Weights are precomputed into a Map up front — never call `getChannelWeight`
- * inside the comparator, since its stale-cache background refetch would re-check
- * on every comparison. No weights → all-0 ties → pure recency, i.e. the incoming
- * order is preserved. `channelStats` is optional so base `Channel` lists (no
- * relation loaded) degrade to weight-only, while `VisibleChannel` lists keep the
- * recency tie-break.
- */
-export function rankChannelsByAffinity<
-  T extends {
-    id: string;
-    // `| undefined` is required: VisibleChannel's channelStats is a Zero `one()` relation typed
-    // `{…} | undefined`, which exactOptionalPropertyTypes rejects for a plain optional field.
-    channelStats?: { lastActivityAt?: number | null } | null | undefined;
-  },
->(channels: T[]): T[] {
-  return sharedRankChannelsByAffinity(channels, getChannelWeight);
-}
-
-/**
- * Cmd+K's channel groups — `buildCmdkChannelGroups` from @xyne/shared (shared with the mobile
- * app's search), with the dashboard's channel affinity.
- */
-export function buildCmdkChannelGroups(
-  channelData: ReadonlyArray<{ id: string }>,
-  visibleAllChannels: ReadonlyArray<VisibleChannel>,
-  allChannelsUserStatus: ChannelUserStatus[],
-): { starred: VisibleChannel[]; channels: VisibleChannel[]; directMessages: VisibleChannel[] } {
-  return sharedBuildCmdkChannelGroups(
-    channelData,
-    visibleAllChannels,
-    allChannelsUserStatus,
-    getChannelWeight,
-  );
-}
+// Cmd+K user/channel ranking lives in @xyne/shared so the mobile app's global search orders
+// results the same way. It reads MFU affinity from the app's registered AffinityService (this
+// app's singleton, registered in services/affinityService).
+export {
+  buildCmdkChannelGroups,
+  filterChannelsBySearchableNames,
+  rankChannelsByAffinity,
+  rankUsers,
+  rankUsersWithMfu,
+} from '@xyne/shared/utils';
 
 /** The shape every Cmd+K channel/DM candidate arrives in. Defined in @xyne/shared. */
 export type { ChannelSearchItem };
@@ -103,29 +30,6 @@ export type { ChannelSearchItem };
  */
 const matchNamesOf = (item: ChannelSearchItem): string[] =>
   item.searchNames ?? item.searchableNames ?? [];
-
-/**
- * Filter channel entries for Cmd+K search — `filterChannelsBySearchableNames` from
- * @xyne/shared (shared with the mobile app's global search), with the dashboard's channel
- * affinity. Used by `filteredLocalChannels` and the `in:` / `#` typeahead in
- * ChannelCommandMenu.
- *
- * @param options.excludeDMs  Drop DMs/Group DMs entirely — used by the `#`
- *   Slack-style quick switcher which should show only regular channels.
- * @param options.regularFuseMatches  Regular-channel matches already computed in a web worker.
- */
-export function filterChannelsBySearchableNames<
-  T extends { channel: Channel; searchableNames?: string[]; searchNames?: string[] },
->(
-  items: T[],
-  query: string,
-  options: {
-    excludeDMs?: boolean;
-    regularFuseMatches?: ReadonlyArray<{ id: string; score?: number | undefined }>;
-  } = {},
-): T[] {
-  return sharedFilterChannelsBySearchableNames(items, query, { ...options, getChannelWeight });
-}
 
 /* ------------------------------------------------------------------------------------
  * Global-phase candidates

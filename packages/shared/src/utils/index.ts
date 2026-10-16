@@ -12,13 +12,11 @@ export {
   rankUsers,
   rankUsersWithMfu,
   buildDmContactRecency,
-  type UserWeightLookup,
 } from './userRanking.js';
 export {
   filterChannelsBySearchableNames,
   rankChannelsByAffinity,
   type ChannelSearchItem,
-  type ChannelWeightLookup,
 } from './channelRanking.js';
 export { groupChannelsByScope, getDMNames, buildCmdkChannelGroups } from './channelGroups.js';
 export {
