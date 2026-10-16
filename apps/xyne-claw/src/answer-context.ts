@@ -74,6 +74,7 @@ export function answerScopeFrom(agentConfig: Record<string, unknown> | undefined
  */
 const ANSWER_RULES = `## How to answer (this overrides any tool-use instructions above)
 You have NO tools in this turn and there is no next turn: the search has already run, and the results below are all the information you will get. The user sees this reply once and cannot respond.
+- Never call any tool, including read, grep, find, ls or write, even if one appears to be available. Reply with text only.
 - Answer the question directly from these results. Do not use outside knowledge for facts about the user's workspace.
 - Be short and precise: at most 7-9 lines in total (short paragraphs or bullets). Lead with the answer itself; no background, no restating the question, no summary line at the end.
 - Name where a fact came from briefly, by its title (channel, ticket, file or document name), and append that hit's [clf-...] token right after the sentence it supports. Copy the token exactly as it appears in the results; never invent one.
@@ -176,17 +177,19 @@ export async function buildAnswerContext(opts: {
     );
   }
 
-  const settled = await Promise.race([
-    Promise.allSettled(jobs),
-    new Promise<PromiseSettledResult<Retrieved>[]>((resolve) => setTimeout(() => resolve([]), RETRIEVE_TIMEOUT_MS)),
+  // Each source lands in its own slot as it finishes; at the deadline the agent answers
+  // from whatever arrived, so one slow source never discards the fast ones.
+  const done: Retrieved[] = new Array(jobs.length);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = await Promise.race([
+    Promise.all(jobs.map((job, i) => job.then((r) => { done[i] = r; }))).then(() => false),
+    new Promise<boolean>((resolve) => { timer = setTimeout(() => resolve(true), RETRIEVE_TIMEOUT_MS); }),
   ]);
-  if (settled.length === 0 && jobs.length > 0) {
-    log.warn(`[answer-context] retrieval exceeded ${RETRIEVE_TIMEOUT_MS}ms — answering with no results`);
+  clearTimeout(timer);
+  const found = done.filter((r): r is Retrieved & { body: string } => Boolean(r?.body));
+  if (timedOut) {
+    log.warn(`[answer-context] retrieval exceeded ${RETRIEVE_TIMEOUT_MS}ms — answering from ${found.length}/${jobs.length} sources`);
   }
-  const found = settled
-    .filter((r): r is PromiseFulfilledResult<Retrieved> => r.status === "fulfilled")
-    .map((r) => r.value)
-    .filter((r): r is Retrieved & { body: string } => Boolean(r.body));
 
   // Register each search as a tool call. The answering turn makes no tool calls of its
   // own, so without this the `[clf-…]` tokens in the results point at nothing and the UI
