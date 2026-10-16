@@ -48,8 +48,8 @@ does not scale. Discoverable products teach themselves.
 
 - Make every action reachable from where its object is shown. If a thing
   can be searched, put the search where the thing is picked.
-- Hover-only controls need a visible fallback (a visible "..." or a
-  right-click menu that matches).
+- Hover-only controls need a visible fallback, such as a "..." button.
+  Where people expect a right-click menu, it offers the same actions.
 - Show that more exists: a cut-off card at the edge, a "+3 more" count, a
   scroll shadow. Collapse empty columns so real ones fit.
 - Replace the upfront tour with a one-time, dismissable hint at the moment

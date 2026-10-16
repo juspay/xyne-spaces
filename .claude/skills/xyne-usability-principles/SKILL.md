@@ -1,6 +1,6 @@
 ---
 name: xyne-usability-principles
-description: Ten UX principles, backed by Nielsen, WCAG and HCI research, for designing and for reviewing. Use this whenever the user wants to design, plan or spec a screen, flow or feature, or wants an existing design reviewed — a mockup, screenshot, Figma frame, prototype, or a live website or web app ("review this page", "what's wrong with this flow", "critique this design", "how should this screen work", "do a UX audit"). Use it even when the user doesn't say "UX" or "principles". Not for choosing visual styles, colour palettes or fonts.
+description: Ten usability principles, backed by Nielsen, WCAG and HCI research, for designing and reviewing what people see and use. Use this whenever the user wants to design, plan or spec a screen, page, flow or user-facing feature, or wants an existing design reviewed — a mockup, screenshot, Figma frame, prototype, or a live website or web app ("review this page", "what's wrong with this flow", "critique this design", "how should this screen work", "do a UX audit"). Use it even when the user doesn't say "UX" or "principles". Not for backend, API or infrastructure work with no user interface, and not for choosing visual styles, colour palettes or fonts.
 ---
 
 # Xyne usability principles
@@ -32,7 +32,7 @@ finding someone can fix.
 ### Flow — `references/2-flow.md`
 
 3. **Judge the whole journey, not the screen.** Make the common path one action and keep the user's place when the view changes.
-   - Count the main task's steps: clicks, fields, page changes, decisions. Every extra choice on the path slows people (Hick's law).
+   - Count the main task's steps: clicks, fields, page changes, decisions. Each one adds time (the keystroke-level model), and a decision with more options takes longer to make (Hick's law).
    - The default is the most common intent; the other options are one click away.
    - Scroll position, selected tab, filters and drafts survive mode changes, navigation and reload.
    - Nothing the user is looking at moves or reorders by itself; leave room for content that loads late.
@@ -53,7 +53,7 @@ finding someone can fix.
 ### Discoverability — `references/4-discoverability.md`
 
 7. **A feature nobody finds doesn't exist.** Put it where the user already is.
-   - Actions sit next to the thing they act on. Hover-only controls have a visible fallback and a matching right-click menu.
+   - Actions sit next to the thing they act on. Hover-only controls have a visible fallback, such as a "..." button; where people expect a right-click menu, it offers the same actions.
    - Off-screen content shows that it exists: a cut-off card, "+3 more", a scroll shadow.
    - Teach at the moment of first use with a short hint that can be dismissed, not an upfront tour.
    - Explain a term or acronym where it first appears.
@@ -70,7 +70,7 @@ finding someone can fix.
 9. **Visual weight should match importance,** and contrast, dark mode, hover behaviour and touch size are requirements to check in every theme, not polish.
    - An indicator is lighter than what it marks. Helper UI (typing indicators, banners, toasts) never covers the content it helps with.
    - Contrast of at least 4.5:1 for text and 3:1 for large text and controls, in every theme, not only the default.
-   - Hover cards wait about 0.5–1 s, stay open while hovered, and close on Escape.
+   - Hover cards appear after a short delay (about 0.5 s) instead of instantly. Once shown they stay open while hovered, close with Escape, and don't vanish on their own (WCAG 1.4.13).
    - Targets are at least 24×24 px, and 44×44 for touch.
 
 ### Trust, control and safety — `references/7-trust.md`

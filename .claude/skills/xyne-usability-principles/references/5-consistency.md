@@ -46,8 +46,8 @@ keyboard shortcuts; non-standard ones make that worse.
 **How to apply**
 
 - Resolve a person's shown name in one shared function (display name,
-  then full name, then account id). Never inline the fallback in a
-  component. Test it on every surface: sidebar, mentions, notifications,
+  then full name, then a readable fallback such as "Unknown user",
+  never a raw account id). Never inline the fallback in a component. Test it on every surface: sidebar, mentions, notifications,
   email, exports.
 - Keep one component per job. Two dropdowns means one dropdown component
   with two configurations.

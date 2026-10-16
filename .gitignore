@@ -73,9 +73,12 @@ project_output
 .xyne/features.json
 .xyne/mprocs.yaml
 
-# Claude Code: personal settings stay local; shared skills are tracked.
-.claude/*
-!.claude/skills/
+# Claude Code: personal files stay local at any depth. Only skill folders
+# committed at the root are tracked; installer symlinks there stay ignored.
+**/.claude/*
+!/.claude/skills/
+/.claude/skills/*
+!/.claude/skills/*/
 venv/
 migration_output/
 

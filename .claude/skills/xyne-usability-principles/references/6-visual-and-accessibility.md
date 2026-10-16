@@ -52,8 +52,10 @@ nothing wrong.
 - Run contrast checks (4.5:1 text, 3:1 components) against each theme, not
   only the default. Chromatic or Storybook "modes" can snapshot every
   theme automatically.
-- Hover cards and tooltips: delay about 0.5 to 1 s before showing, keep
-  them open while hovered, and let Escape dismiss them (WCAG 1.4.13).
+- Hover cards and tooltips: wait a short delay (about 0.5 s) before
+  showing. Once shown, keep them open while hovered, let Escape dismiss
+  them, and don't hide them on a timer (WCAG 1.4.13). The delay is a
+  convention, not a WCAG rule.
 - Interactive targets: at least 24 px with spacing, aim for 44 px on touch.
 - Test in dark mode and on a phone before sign-off, every time.
 

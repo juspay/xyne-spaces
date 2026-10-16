@@ -137,7 +137,7 @@ All links were opened and checked at the time of writing.
 - Norman, D. A. (1983). Design rules based on analyses of human error. Communications of the ACM 26(4). Paywalled. [DOI](https://doi.org/10.1145/2163.358092)
 - Lewis, C., and Norman, D. A. (1986). Designing for error. In Norman and Draper (Eds.), User Centered System Design. Book chapter. [Link](https://www.routledge.com/User-Centered-System-Design-New-Perspectives-on-Human-computer-Interaction/Norman-Draper/p/book/9780898598728)
 - Reason, J. (1990). Human Error. Cambridge University Press. Book. [DOI](https://doi.org/10.1017/CBO9781139062367)
-- Nielsen, J., and Molich, R. (1990). Heuristic evaluation of user interfaces. CHI 1990. [DOI](https://doi.org/10.1145/97243.97281) (course-hosted copy)
+- Nielsen, J., and Molich, R. (1990). Heuristic evaluation of user interfaces. CHI 1990. Paywalled. [DOI](https://doi.org/10.1145/97243.97281)
 - Bargas-Avila, J. A., et al. (2010). Simple but crucial user interfaces in the World Wide Web: introducing 20 guidelines for usable web form design. In User Interfaces (IntechOpen). Open access, CC BY-NC-SA. [Link](https://www.intechopen.com/chapters/10814)
 - Seckler, M., Heinz, S., Bargas-Avila, J. A., Opwis, K., and Tuch, A. N. (2014). Designing usable web forms: empirical evaluation of web form improvement guidelines. CHI 2014. [DOI](https://doi.org/10.1145/2556288.2557265)
 - Bargas-Avila, J. A., et al. (2007). Usable error message presentation in the World Wide Web: do not show errors right away. Interacting with Computers 19(3). Paywalled. [DOI](https://doi.org/10.1016/j.intcom.2007.01.003)

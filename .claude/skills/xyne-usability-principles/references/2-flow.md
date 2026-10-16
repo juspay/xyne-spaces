@@ -20,8 +20,8 @@ sequence: how many clicks, how many decisions, how many times the user has
 to re-find where they were. The keystroke-level model (Card, Moran and
 Newell, 1980) gives you a way to count this: every keystroke, pointer
 move, and mental pause has a cost, and the total is the cost of the flow.
-Hick's law adds that decision time grows with the number of options, so
-each extra choice on the path slows people down. Defaults matter because
+Hick's law covers each single decision: the more options it offers, the
+longer it takes to choose, so keep the choices on the main path few. Defaults matter because
 most users never change them (Nielsen, "The Power of Defaults"): a good
 default makes the common case one action.
 
