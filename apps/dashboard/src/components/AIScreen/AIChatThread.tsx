@@ -1226,7 +1226,7 @@ function ChatMessageBubble({
         </div>
       ) : (
         <div className='flex min-w-0 flex-col gap-2'>
-          {isV2 && agentSlug && <AgentByline slug={agentSlug} />}
+          {isV2 && agentSlug && <AgentByline slug={agentSlug} answeredBy={message.answeredBy} />}
           {/* The turn in order — thinking, text, tool calls, … answer — with
               each run of steps folded into one expandable group. Shared with
               the sidebar and the overlay. */}

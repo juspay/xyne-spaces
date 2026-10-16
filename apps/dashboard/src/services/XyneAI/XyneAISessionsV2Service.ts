@@ -89,6 +89,8 @@ interface ClawChatMessage {
   followUpSuggestions?: string[];
   /** Assistant rows: how long the run took, start to finish. */
   durationMs?: number;
+  /** Assistant rows: provider/model that answered (+ fallback origin). */
+  answeredBy?: unknown;
   attachments?: Array<{
     id: string;
     mimeType: string;
@@ -330,6 +332,9 @@ export async function fetchV2ConversationMessages(
         : {}),
       ...(!isUser && runByMsgId?.[msg.id] ? { debugSessionId: runByMsgId[msg.id] } : {}),
       ...(!isUser && typeof msg.durationMs === 'number' ? { durationMs: msg.durationMs } : {}),
+      ...(!isUser && parseAnsweredBy(msg.answeredBy)
+        ? { answeredBy: parseAnsweredBy(msg.answeredBy)! }
+        : {}),
       // Seed 👍/👎 thumb state from the run's persisted rating (up→1, down→2).
       ...(!isUser && ratingByMsgId?.[msg.id]?.rating
         ? {
