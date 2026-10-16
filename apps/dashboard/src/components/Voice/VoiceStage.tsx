@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactElement } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { Bug, Captions, Sparkles } from 'lucide-react';
 import { cn } from '../../utils/classNames';
 import {
@@ -14,9 +14,15 @@ import { DiagnosePanel } from './DiagnosePanel';
 import { VoiceSettingsPopover } from './VoiceSettingsPopover';
 import { VOICE_DEBUG_ENABLED } from '../../services/VoiceInput/voiceDebug';
 import { useVoiceSession, voiceSession, type VoicePhase } from './voiceSession';
+import { transcriptOf, type TranscriptLine } from './voiceTranscript';
+import type { Message } from '../Chat/XyneAISidebar/utils/XyneAITypes';
 
 interface VoiceStageProps {
   studioMode?: string | null;
+  /** The chat voice mode is in: its messages are the transcript, so earlier turns show too. */
+  messages?: readonly Message[] | undefined;
+  /** Shown as the chat voice mode is in. */
+  chatTitle?: string | undefined;
 }
 
 const PHASE_LABEL: Record<VoicePhase, string> = {
@@ -30,9 +36,16 @@ const PHASE_LABEL: Record<VoicePhase, string> = {
 
 type Panel = 'transcript' | 'diagnose';
 
-export function VoiceStage({ studioMode }: VoiceStageProps): ReactElement {
+export function VoiceStage({ studioMode, messages, chatTitle }: VoiceStageProps): ReactElement {
   const { phase, liveText, turns, playbackBlocked } = useVoiceSession();
-  const [panel, setPanel] = useState<Panel | null>(null);
+  // Without the chat (the AI screen), only what was said since voice mode opened.
+  const lines = useMemo(
+    (): TranscriptLine[] =>
+      messages ? transcriptOf(messages) : turns.map(turn => ({ ...turn, live: false })),
+    [messages, turns],
+  );
+  // The transcript is open from the start, so what is said and answered is always in view.
+  const [panel, setPanel] = useState<Panel | null>('transcript');
   const toggle = (next: Panel): void => setPanel(open => (open === next ? null : next));
   const stageRef = useRef<HTMLElement>(null);
   const stoppable = canStop(phase);
@@ -58,10 +71,12 @@ export function VoiceStage({ studioMode }: VoiceStageProps): ReactElement {
     return (): void => stage.removeEventListener('keydown', onKeyDown);
   }, [stoppable]);
 
+  // Follows the newest line, and a reply as it grows.
   const endRef = useRef<HTMLDivElement>(null);
+  const newest = lines.at(-1);
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: 'nearest' });
-  }, [turns, panel]);
+  }, [lines.length, newest?.text, panel]);
 
   return (
     <section
@@ -70,6 +85,11 @@ export function VoiceStage({ studioMode }: VoiceStageProps): ReactElement {
       aria-label='Voice mode'
       className='flex min-h-0 flex-1 flex-col items-center px-4 pb-3 pt-4 outline-none'
     >
+      {chatTitle && (
+        <p className='w-full truncate text-center text-xs text-muted-foreground'>
+          In: <span className='font-medium text-foreground'>{chatTitle}</span>
+        </p>
+      )}
       <div className='flex min-h-0 w-full flex-[3] flex-col items-center justify-center'>
         <VoiceOrbButton
           phase={phase}
@@ -112,19 +132,31 @@ export function VoiceStage({ studioMode }: VoiceStageProps): ReactElement {
       {panel === 'transcript' && (
         <div
           aria-label='Conversation'
-          className='mt-2 flex min-h-0 w-full flex-[2] flex-col gap-2 overflow-y-auto'
+          // Scrolls without a bar, and lines leaving at the top fade instead of being cut.
+          className='no-scrollbar mt-2 flex min-h-0 w-full flex-[2] flex-col gap-2 overflow-y-auto pt-4 [mask-image:linear-gradient(to_bottom,transparent,black_1.5rem)]'
         >
-          {turns.map(turn => (
+          {lines.length === 0 && (
+            <p className='m-auto text-center text-xs text-muted-foreground'>
+              What you say and Xyne&apos;s replies show here.
+            </p>
+          )}
+          {lines.map(line => (
             <p
-              key={turn.id}
+              key={line.id}
               className={cn(
-                'max-w-[85%] rounded-2xl px-3 py-1.5 text-sm leading-snug',
-                turn.speaker === 'you'
+                // Never squeezed to fit: the list scrolls, long replies with it.
+                'max-w-[85%] shrink-0 rounded-2xl px-3 py-1.5 text-sm leading-snug',
+                line.speaker === 'you'
                   ? 'self-end rounded-br-sm bg-primary text-primary-foreground'
                   : 'self-start rounded-bl-sm bg-secondary text-secondary-foreground',
               )}
             >
-              {turn.text}
+              {line.text ||
+                (line.live && (
+                  <span className='animate-pulse' aria-label='Xyne is replying'>
+                    …
+                  </span>
+                ))}
             </p>
           ))}
           <div ref={endRef} />
