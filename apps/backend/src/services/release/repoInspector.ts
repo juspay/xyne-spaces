@@ -3,6 +3,7 @@
 // provider matches, before the user fills out the Applications form.
 
 import { config } from '@/config/env';
+import { resolveSecret } from '@/config/secretResolver';
 import { parseGitHubRepoUrl, parseBitbucketRepoUrl } from '@/utils/repoUrlParser';
 import { normalizeBitbucketApiBaseUrl } from '@/services/release/buildVcsClient';
 import { GitHubService } from '@/services/githubService';
@@ -37,7 +38,7 @@ export async function testRepoConnection(opts: {
     if (!parsed) {
       return { ok: false, message: `URL doesn't look like a GitHub repo URL` };
     }
-    const token = config.github?.token;
+    const token = await resolveSecret('github-token', config.github?.token);
     const apiUrl = config.github?.apiUrl ?? 'https://api.github.com';
     const headers: Record<string, string> = { Accept: 'application/vnd.github+json' };
     if (token) headers.Authorization = `Bearer ${token}`;
@@ -121,7 +122,10 @@ export async function listGitHubRepoFilePaths(repoUrl: string): Promise<string[]
   if (!conn.ok || !conn.defaultBranch) {
     throw new Error(conn.message);
   }
-  const github = new GitHubService({ token: config.github?.token, apiUrl: config.github?.apiUrl });
+  const github = new GitHubService({
+    token: await resolveSecret('github-token', config.github?.token),
+    apiUrl: config.github?.apiUrl,
+  });
   return github.listRepoTree(parsed.owner, parsed.repo, conn.defaultBranch);
 }
 

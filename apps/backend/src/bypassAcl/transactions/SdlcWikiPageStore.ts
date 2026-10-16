@@ -1,7 +1,7 @@
 import { transaction } from '../base';
 import { withSdlcSearchSync, type SdlcSearchChanges } from '@/zero/vespa-injection/core/sdlc-sync';
 import { placeHubItem } from '@/sdlc/hubFolders';
-import { sdlcChannelCanvasParticipant } from '@/sdlc/sdlcCanvasAccess';
+import { sdlcCanvasParticipants } from '@/sdlc/sdlcCanvasAccess';
 import { newConnectId, createConnectGroupForEntity, resolveCanvasConnectId, ConnectEntityType } from '@/database/connectGroup';
 import { PageAction, SdlcWikiPageStore, WikiScope, versionName } from '@/sdlc/wiki/SdlcWikiPageStore';
 import { Prisma } from '@prisma/client';
@@ -69,7 +69,7 @@ export function createTx(self: SdlcWikiPageStore, scope: WikiScope, page: { titl
         connectId,
         metadata: {} as Prisma.InputJsonValue,
         participants: {
-          create: sdlcChannelCanvasParticipant(scope.workspaceId, scope.channelId, connectId),
+          create: sdlcCanvasParticipants(scope.workspaceId, scope.channelId, scope.actorUserId, connectId),
         },
       },
       select: { id: true },

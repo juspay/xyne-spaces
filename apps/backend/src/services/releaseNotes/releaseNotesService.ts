@@ -87,7 +87,14 @@ export class ReleaseNotesService {
       });
       const provider = (board?.vcsProvider ?? null) as VCSProviderType | null;
       const apps = await this.applicationRepository.findByMainReleaseBoardId(boardId);
-      const repoUrl = apps.map(a => a.repoUrl?.trim()).find(Boolean);
+      const repoId = apps[0]?.repoId;
+      const repo = repoId
+        ? await db.repo.findUnique({
+            where: { id: repoId },
+            select: { url: true, canonicalUrl: true },
+          })
+        : null;
+      const repoUrl = repo ? (repo.canonicalUrl || repo.url).trim() : '';
       if (!repoUrl) return { ...fallback, provider };
       const parsed = provider === VCSProviderType.GITHUB
         ? parseGitHubRepoUrl(repoUrl)
@@ -190,7 +197,7 @@ export class ReleaseNotesService {
         return prs;
       }
 
-      const commitAnalysisService = new CommitAnalysisService(buildVcsClient(provider));
+      const commitAnalysisService = new CommitAnalysisService(await buildVcsClient(provider));
 
       const results = await commitAnalysisService.analyzeCommits({
         deployedCommitId,

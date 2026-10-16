@@ -14,3 +14,14 @@
   outline: none !important;
   background-color: transparent !important;
 }
+
+/* A hub toast keeps its action on the message line. The app-wide setup drops it 2rem,
+ * so this needs the extra selector to win. The right margin clears the close button. */
+[data-sonner-toast].hub-inline-action {
+  align-items: center !important;
+}
+
+[data-sonner-toast].hub-inline-action [data-button] {
+  margin-top: 0 !important;
+  margin-right: 1.75rem !important;
+}

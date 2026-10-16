@@ -1,5 +1,14 @@
 import type { XyneAiSendTrigger } from '../../services/Analytics/xyneAiTracking';
-import { type ReactElement, useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import {
+  type ReactElement,
+  type ReactNode,
+  useState,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useSyncExternalStore,
+} from 'react';
 import { useNavigate, useParams, useLocation, useNavigationType } from 'react-router-dom';
 import { Upload } from 'lucide-react';
 import { SidebarLeftOpen } from '@xyne/icons';
@@ -7,6 +16,7 @@ import { AIShell, type WorkspacePanelControls } from '../../components/AIScreen/
 import { ArtifactAppPane } from '../../components/AIScreen/ReactArtifact/ArtifactAppPane';
 import { AppCreationModeProvider } from '../../components/AIScreen/ReactArtifact/appCreationModeContext';
 import { useAppModeCollapseSidebar } from '../../hooks/useAppModeCollapseSidebar';
+import { useClawAgentDetail } from '../../hooks/useClawAgentDetail';
 import { useAppCreationMode } from '../../components/AIScreen/ReactArtifact/useAppCreationMode';
 import { AIEmptyState } from '../../components/AIScreen/AIEmptyState';
 import {
@@ -24,6 +34,7 @@ import {
   PageSelectionProvider,
 } from '../../components/AIScreen/Workspace';
 import type { ConversationArtifact } from '../../services/XyneAI/XyneAIArtifactsService';
+import { isLocalDiffArtifact } from '../../components/AIScreen/Workspace/LocalDiffView';
 import {
   WorkspacePane,
   useConversationArtifacts,
@@ -35,29 +46,73 @@ import { globalClickTracker } from '../../services/Analytics/globalClickTracker'
 import { readTrackSource } from '../../services/Analytics/trackSource';
 import { useV2SessionInvalidator } from '../../hooks/useAskAISessionsV2';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
+import { ASSISTANT_PANEL_ATTR } from '../../components/Assistant/buddy/constants';
 import { useAssistantActions } from '../../components/Assistant/useAssistantActions';
 import type { AssistantRouting } from '../../components/Assistant/useRoutedSubmit';
+import { useUserPreference } from '../../machines/userPreferencesMachine';
 import { AI_ACTIVE_SESSION_KEY, AI_SHOW_CHAT_VIEW_KEY } from './aiSessionStorage';
 
-function CitationWorkspaceOpener({ onOpenSources }: { onOpenSources: () => void }): null {
+function CitationWorkspaceOpener({
+  onOpenSources,
+  onCloseAll,
+}: {
+  onOpenSources: () => void;
+  onCloseAll: () => void;
+}): null {
   const citations = useCitationDocs();
   const activeId = citations?.activeId ?? null;
+  const docCount = citations?.docs.length ?? 0;
   useEffect(() => {
     if (!activeId) return;
     onOpenSources();
   }, [activeId, onOpenSources]);
+  const hadDocs = useRef(false);
+  useEffect(() => {
+    const had = hadDocs.current;
+    hadDocs.current = docCount > 0;
+    if (had && docCount === 0) onCloseAll();
+  }, [docCount, onCloseAll]);
   return null;
 }
 
+const AUTO_OPEN_SKIPPED_KINDS = new Set<ConversationArtifact['kind']>(['UPLOAD', 'LINK']);
+
+function useSessionStreaming(conversationId: string | null): boolean {
+  const subscribe = useCallback(
+    (onChange: () => void) => xyneAIStreamManager.subscribe(() => onChange()),
+    [],
+  );
+  const getSnapshot = useCallback(
+    () =>
+      conversationId !== null &&
+      xyneAIStreamManager.getStreamingSessionIds().includes(conversationId),
+    [conversationId],
+  );
+  return useSyncExternalStore(subscribe, getSnapshot);
+}
+
 function WorkspaceAutoOpener({
+  conversationKey,
+  conversationId,
   artifacts,
+  loaded,
   onOpen,
 }: {
+  conversationKey: number;
+  conversationId: string | null;
   artifacts: ConversationArtifact[];
+  loaded: boolean;
   onOpen: (tab: WorkspaceOpenRequest['tab'], artifactId?: string) => void;
 }): null {
   const studio = useDesignStudio();
   const messages = studio?.messages ?? [];
+  const streaming = useSessionStreaming(conversationId);
+  const agentSlug = useMemo(
+    () => [...messages].reverse().find(m => m.agentSlug)?.agentSlug,
+    [messages],
+  );
+  const { data: agent } = useClawAgentDetail(agentSlug);
+  const hideLivePreview = agent?.config?.['hideLivePreview'] === true;
   const designRunActive = useMemo(() => {
     const lastUser = [...messages].reverse().find(m => m.type === 'user');
     return /^\s*\/(design|dashboard)\b/i.test(lastUser?.content ?? '');
@@ -67,26 +122,45 @@ function WorkspaceAutoOpener({
     if (!last) return null;
     return hasDesignHtml(last.content || last.streamingContent || '') ? last.id : null;
   }, [messages]);
+
+  const ranIn = useRef<number | null>(null);
+  useEffect(() => {
+    if (streaming) ranIn.current = conversationKey;
+  }, [streaming, conversationKey]);
+
   const openedForDraft = useRef<string | null>(null);
   useEffect(() => {
     if (!draftMessageId || openedForDraft.current === draftMessageId) return;
     openedForDraft.current = draftMessageId;
+    if (ranIn.current !== conversationKey) return;
     onOpen('artifacts');
-  }, [draftMessageId, onOpen]);
+  }, [draftMessageId, onOpen, conversationKey]);
 
-  const seenArtifacts = useRef<Map<string, string> | null>(null);
+  const seenArtifacts = useRef<{ key: number; stamps: Map<string, string> } | null>(null);
   useEffect(() => {
-    const stamps = new Map(artifacts.map(a => [a.id, a.updatedAt] as const));
-    const seen = seenArtifacts.current;
-    seenArtifacts.current = stamps;
-    if (seen === null) return;
+    if (!loaded) return;
+    const previous = seenArtifacts.current;
+    const sameConversation = previous?.key === conversationKey;
+    const stamps = new Map(sameConversation ? previous.stamps : []);
+    for (const a of artifacts) stamps.set(a.id, a.updatedAt);
+    seenArtifacts.current = { key: conversationKey, stamps };
+    if (!sameConversation || ranIn.current !== conversationKey) return;
+    const seen = previous.stamps;
     const designVersionRefs = new Set(
       artifacts
         .filter(a => a.kind === 'DESIGN_HTML' && a.latestVersionRef)
         .map(a => a.latestVersionRef as string),
     );
     const fresh = artifacts.filter(
-      a => seen.get(a.id) !== a.updatedAt && !(a.kind === 'FILE' && designVersionRefs.has(a.refId)),
+      a =>
+        (!seen.has(a.id) || (a.kind === 'PAGE' && seen.get(a.id) !== a.updatedAt)) &&
+        !AUTO_OPEN_SKIPPED_KINDS.has(a.kind) &&
+        !(
+          hideLivePreview &&
+          (a.kind === 'PREVIEW' || a.kind === 'DIFF') &&
+          !isLocalDiffArtifact(a)
+        ) &&
+        !(a.kind === 'FILE' && designVersionRefs.has(a.refId)),
     );
     if (fresh.length === 0) return;
     const rank = (kind: ConversationArtifact['kind']): number =>
@@ -100,9 +174,9 @@ function WorkspaceAutoOpener({
               ? 1
               : kind === 'REACT_APP'
                 ? 2
-                : kind === 'DIFF'
+                : kind === 'PREVIEW'
                   ? 3
-                  : kind === 'PREVIEW'
+                  : kind === 'DIFF'
                     ? 4
                     : kind === 'SPEC'
                       ? 5
@@ -121,7 +195,7 @@ function WorkspaceAutoOpener({
           ? 'preview'
           : 'artifacts';
     onOpen(tab, best.id);
-  }, [artifacts, onOpen, designRunActive]);
+  }, [artifacts, loaded, conversationKey, onOpen, designRunActive, hideLivePreview]);
   return null;
 }
 
@@ -157,6 +231,7 @@ const AIScreen = (): ReactElement => {
   const [isDragging, setIsDragging] = useState(false);
   const dropZoneRef = useRef<HTMLDivElement | null>(null);
   const landingComposerRef = useRef<AIComposerHandle | null>(null);
+  const [landingVoiceHost, setLandingVoiceHost] = useState<HTMLElement | null>(null);
   const chatThreadRef = useRef<AIChatThreadHandle | null>(null);
   const dragCounterRef = useRef(0);
   const showChatViewRef = useRef(showChatView);
@@ -373,8 +448,9 @@ const AIScreen = (): ReactElement => {
   // The thread has fired the landing query — drop it so it can never be
   // auto-submitted twice. Without this the thread's `useRef` guard resets on any
   // remount and the same query is sent again as a NEW conversation.
-  // `initialExtras` is deliberately kept: it seeds the chat composer's context
-  // selections for the whole conversation, not just the first turn.
+  // `initialExtras` is deliberately kept: it seeds the chat composer's
+  // toggles for the whole conversation (its context went out with the first
+  // turn — see AIChatThread's composerSeed).
   const handleInitialQueryConsumed = useCallback((): void => {
     setInitialQuery('');
     setInitialAttachments(undefined);
@@ -451,10 +527,13 @@ const AIScreen = (): ReactElement => {
       setActiveSessionId(sessionId);
       // A new chat just acquired its server sessionId — refresh the recents
       // list so this conversation shows up immediately, without needing a
-      // page reload or a navigate-away-and-back.
-      invalidateV2Sessions(effectiveAgentSlug);
+      // page reload or a navigate-away-and-back. No agent here on purpose:
+      // the history spans every agent, and depending on the picked agent gave
+      // this callback a new identity on every switch, which re-ran the
+      // thread's session loader mid-conversation.
+      invalidateV2Sessions();
     },
-    [effectiveAgentSlug, invalidateV2Sessions],
+    [invalidateV2Sessions],
   );
 
   const handleAccount = useCallback((): void => {
@@ -526,19 +605,24 @@ const AIScreen = (): ReactElement => {
   const { open: openAppMode } = appMode;
   const workspaceControlsRef = useRef<WorkspacePanelControls | null>(null);
   const [shownAppId, setShownAppId] = useState<string | null>(null);
-  const [workspaceOverride, setWorkspaceOverride] = useState<boolean | null>(null);
-  useEffect(() => {
-    setWorkspaceOverride(null);
-  }, [activeSessionId]);
-  const { artifacts: conversationArtifacts } = useConversationArtifacts(activeSessionId || null);
-  const hasArtifacts = conversationArtifacts.length > 0;
+  const chatKeyRef = useRef(chatKey);
+  chatKeyRef.current = chatKey;
+  const activeSessionRef = useRef(activeSessionId);
+  activeSessionRef.current = activeSessionId;
+  const [workspaceShownFor, setWorkspaceShownFor] = useState<number | null>(null);
+  const dismissedWorkspaces = useRef(new Set<string>());
+  const workspaceAutoOpen = useUserPreference('aiWorkspaceAutoOpen');
+  const workspaceAutoOpenRef = useRef(workspaceAutoOpen);
+  workspaceAutoOpenRef.current = workspaceAutoOpen;
+  const { artifacts: conversationArtifacts, isLoading: conversationArtifactsLoading } =
+    useConversationArtifacts(activeSessionId || null);
   const [workspaceRequest, setWorkspaceRequest] = useState<WorkspaceOpenRequest>({
     seq: 0,
     tab: 'artifacts',
   });
   const requestWorkspace = useCallback((request: Omit<WorkspaceOpenRequest, 'seq'>) => {
     setWorkspaceRequest(prev => ({ ...request, seq: prev.seq + 1 }));
-    setWorkspaceOverride(true);
+    setWorkspaceShownFor(chatKeyRef.current);
     workspaceControlsRef.current?.expand();
   }, []);
   const enterForApp = useCallback(
@@ -597,10 +681,26 @@ const AIScreen = (): ReactElement => {
       requestWorkspace({ tab, ...(artifactId ? { openArtifactId: artifactId } : {}) }),
     [requestWorkspace],
   );
-  const collapseWorkspace = useCallback(() => {
-    setWorkspaceOverride(false);
-    workspaceControlsRef.current?.collapse();
+  const autoOpenWorkspace = useCallback(
+    (tab: WorkspaceOpenRequest['tab'], artifactId?: string) => {
+      if (!workspaceAutoOpenRef.current) return;
+      const dismissed = dismissedWorkspaces.current;
+      if (dismissed.has(`chat:${chatKeyRef.current}`)) return;
+      if (activeSessionRef.current && dismissed.has(activeSessionRef.current)) return;
+      openWorkspaceTab(tab, artifactId);
+    },
+    [openWorkspaceTab],
+  );
+  const expandWorkspace = useCallback(() => setWorkspaceShownFor(chatKeyRef.current), []);
+  const closeWorkspace = useCallback(() => {
+    dismissedWorkspaces.current.add(`chat:${chatKeyRef.current}`);
+    if (activeSessionRef.current) dismissedWorkspaces.current.add(activeSessionRef.current);
+    setWorkspaceShownFor(null);
   }, []);
+  const collapseWorkspace = useCallback(() => {
+    closeWorkspace();
+    workspaceControlsRef.current?.collapse();
+  }, [closeWorkspace]);
   const openSourcesInWorkspace = useCallback(
     () => requestWorkspace({ tab: 'sources' }),
     [requestWorkspace],
@@ -616,7 +716,7 @@ const AIScreen = (): ReactElement => {
     [appMode.active, appMode.hasApp, appMode.appId, appMode.open, appMode.exit],
   );
 
-  const workspaceOpen = showChatView && (workspaceOverride ?? hasArtifacts);
+  const workspaceOpen = showChatView && workspaceShownFor === chatKey;
   const workspaceWasOpen = useRef(workspaceOpen);
   useEffect(() => {
     if (workspaceOpen && !workspaceWasOpen.current) {
@@ -642,8 +742,17 @@ const AIScreen = (): ReactElement => {
     <CitationDocsProvider>
       <DesignStudioProvider>
         <PageSelectionProvider submitPrompt={submitPrompt}>
-          <CitationWorkspaceOpener onOpenSources={openSourcesInWorkspace} />
-          <WorkspaceAutoOpener artifacts={conversationArtifacts} onOpen={openWorkspaceTab} />
+          <CitationWorkspaceOpener
+            onOpenSources={openSourcesInWorkspace}
+            onCloseAll={collapseWorkspace}
+          />
+          <WorkspaceAutoOpener
+            conversationKey={chatKey}
+            conversationId={activeSessionId || null}
+            artifacts={conversationArtifacts}
+            loaded={!conversationArtifactsLoading}
+            onOpen={autoOpenWorkspace}
+          />
           <AppCreationModeProvider value={appModeSignal}>
             <AIShell
               activeSessionId={activeSessionId}
@@ -659,8 +768,8 @@ const AIScreen = (): ReactElement => {
               sidebarToggleRef={sidebarToggleRef}
               workspacePanel={workspacePane}
               workspaceOpen={workspaceOpen}
-              onExpandWorkspace={() => setWorkspaceOverride(true)}
-              onCloseWorkspace={() => setWorkspaceOverride(false)}
+              onExpandWorkspace={expandWorkspace}
+              onCloseWorkspace={closeWorkspace}
               workspaceControlsRef={workspaceControlsRef}
             >
               {isDragging && !showChatView && (
@@ -698,8 +807,14 @@ const AIScreen = (): ReactElement => {
                   assistant={assistant}
                 />
               ) : (
-                /* Landing page – centred greeting + composer */
-                <main className='relative flex h-full flex-1 items-center justify-center px-6 py-8'>
+                /* Landing page – centred greeting + composer. Context rises
+                   into the gap between them and a longer message grows the
+                   composer downward (see LandingComposerSlot), so neither
+                   moves the greeting. */
+                <main
+                  ref={setLandingVoiceHost}
+                  className='relative flex h-full flex-1 items-center justify-center px-6 py-8'
+                >
                   {/* The landing page has no header, so without this the
                       sidebar's own collapse button would strand the user with
                       no way to bring it back. */}
@@ -717,9 +832,12 @@ const AIScreen = (): ReactElement => {
                       <SidebarLeftOpen size={16} aria-hidden='true' />
                     </button>
                   )}
-                  <div className='flex w-full max-w-3xl flex-col'>
+                  <div
+                    {...{ [ASSISTANT_PANEL_ATTR]: '' }}
+                    className='flex w-full max-w-3xl flex-col'
+                  >
                     <AIEmptyState />
-                    <div className='mt-6'>
+                    <LandingComposerSlot className='mt-16'>
                       <AIComposer
                         ref={landingComposerRef}
                         autoFocus
@@ -729,9 +847,11 @@ const AIScreen = (): ReactElement => {
                         onAgentChange={handleAgentChange}
                         showAgentSelector={isV2}
                         onContextChange={handleContextChange}
+                        anchor='top'
                         hideDisclaimer
+                        voiceStageHost={landingVoiceHost}
                       />
-                    </div>
+                    </LandingComposerSlot>
                   </div>
                 </main>
               )}
@@ -742,5 +862,48 @@ const AIScreen = (): ReactElement => {
     </CitationDocsProvider>
   );
 };
+
+/**
+ * Keeps the landing composer's resting height in the layout and lets it grow
+ * downward over the page: the greeting and composer stay centred where they
+ * are while a long message makes the box taller.
+ */
+function LandingComposerSlot({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}): ReactElement {
+  const innerRef = useRef<HTMLDivElement>(null);
+  const [restingHeight, setRestingHeight] = useState<number | null>(null);
+  // Measured once, at rest (before anything is typed).
+  useEffect(() => {
+    const el = innerRef.current;
+    if (!el) return undefined;
+    const observer = new ResizeObserver(entries => {
+      const entry = entries[0];
+      const height = entry?.borderBoxSize?.[0]?.blockSize ?? entry?.contentRect.height;
+      if (!height) return;
+      setRestingHeight(height);
+      observer.disconnect();
+    });
+    observer.observe(el);
+    return (): void => observer.disconnect();
+  }, []);
+  return (
+    <div
+      className={['relative', className].filter(Boolean).join(' ')}
+      style={restingHeight === null ? undefined : { height: restingHeight }}
+    >
+      <div
+        ref={innerRef}
+        className={restingHeight === null ? undefined : 'absolute inset-x-0 top-0 z-10'}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
 
 export default AIScreen;

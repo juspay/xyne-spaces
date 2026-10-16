@@ -2,14 +2,15 @@ import type { ExternalSource } from '@prisma/client';
 import { BaseFlow } from '@/integrations/core/baseFlow';
 import type { IngestionOptions, TestPayloadResult } from '@/integrations/core/types';
 import { db } from '@/database/client';
+import { disconnectDeskSourceBySystem } from '@/integrations/core/deskSourceDisconnect';
 import { decrypt } from '@/services/encryptionService';
 import { logger } from '@/utils/logger';
 import { verifyMetaWebhookSubscription } from '../shared/metaWebhookVerification';
+import { isMetaTokenRejected } from '../shared/metaTokenRejection';
 import { FACEBOOK_TEXTLESS_COMMENT, FACEBOOK_UNKNOWN_AUTHOR } from './constants';
 import {
   facebookGraphClient,
   isFacebookRateLimited,
-  isFacebookTokenRejected,
 } from './facebookGraphClient';
 import { fetchFacebookHistory } from './historyFetcher';
 import { commentExternalId, dmExternalId } from './transformer';
@@ -66,11 +67,8 @@ const postLink = (postId: string | undefined): string | undefined =>
  * show it as Disconnected with a Reconnect button. Incoming webhooks are skipped until then.
  */
 export async function disconnectSourceWithDeadToken(sourceId: string): Promise<void> {
-  await db.externalSource.update({
-    where: { id: sourceId },
-    data: { isActive: false, credentials: '' },
-  });
-  logger.warn(`${TAG} Page token rejected by Meta — source marked disconnected`, { sourceId });
+  logger.warn(`${TAG} Page token rejected by Meta — marking source disconnected`, { sourceId });
+  await disconnectDeskSourceBySystem(sourceId, { clearCredentials: true });
 }
 
 export class FacebookFlow extends BaseFlow {
@@ -259,7 +257,7 @@ export class FacebookFlow extends BaseFlow {
     try {
       await facebookGraphClient.subscribePage(creds.pageAccessToken, creds.pageId);
     } catch (error) {
-      if (!isFacebookTokenRejected(error)) return; // already logged by the client; fetch anyway
+      if (!isMetaTokenRejected(error)) return; // already logged by the client; fetch anyway
       await disconnectSourceWithDeadToken(sourceId);
       throw error;
     }
@@ -276,7 +274,7 @@ export class FacebookFlow extends BaseFlow {
     } catch (error) {
       // Every fetch (manual or hourly) reads with the Page token, so this is where a dead one
       // shows up. The fetch still fails; the Page is left ready to reconnect.
-      if (isFacebookTokenRejected(error)) await disconnectSourceWithDeadToken(sourceId);
+      if (isMetaTokenRejected(error)) await disconnectSourceWithDeadToken(sourceId);
       // Throttled part-way through: keep what was read so far so a large fetch still makes
       // progress, and report the read as incomplete.
       if (isFacebookRateLimited(error)) {

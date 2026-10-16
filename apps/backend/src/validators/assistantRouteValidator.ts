@@ -37,4 +37,5 @@ export const assistantRouteBodySchema = Joi.object({
     .messages({
       'array.unique': 'Action ids must be unique',
     }),
+  mode: Joi.string().valid('actions', 'screen', 'check'),
 });

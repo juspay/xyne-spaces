@@ -116,8 +116,19 @@ import {
   MAX_NOTIFICATION_KEYWORD_LENGTH,
   normalizeNotificationKeywords,
 } from '../utils/notificationKeywords.js';
-import { isDeskChannelType, deskTypeForChannelType, serializeDeskAppIds } from '../utils/channel.js';
-import { MAX_DESK_APPS, MAX_DUPLICATE_SCOPE_FIELDS } from './types.js';
+import {
+  isDeskChannelType,
+  deskTypeForChannelType,
+  canPublishAppsTo,
+  MAX_PUBLISHED_APP_ID_LENGTH,
+} from '../utils/channel.js';
+import {
+  ChannelPublishedEntityType,
+  MAX_DUPLICATE_LOOKBACK_DAYS,
+  MAX_DUPLICATE_SCOPE_FIELDS,
+  MAX_PUBLISHED_APPS,
+} from './types.js';
+import type { ChannelPublishedTab } from './schema.js';
 import { DEFAULT_ROLE_NAME_TO_ENUM } from '../utils/roleFrameworkUtils.js';
 import { SUMMARY_PROMPT_MAX_LENGTH } from '../templates/callSummary.js';
 import { z } from 'zod';
@@ -132,6 +143,43 @@ import {
 
 const serializeCanvasCommentMentionedUserIds = (mentionedUserIds: string[]): string =>
   JSON.stringify([...new Set(mentionedUserIds)]);
+
+/** Checks the caller may change the channel's published apps; returns its current rows. */
+async function loadChannelForAppPublish(
+  tx: Transaction<Schema>,
+  channelId: string,
+  userId: string,
+): Promise<ChannelPublishedTab[]> {
+  const channel = await tx.run(zql.channels.where('id', channelId).one());
+  if (!channel) {
+    throw new Error("Channel doesn't exist");
+  }
+  if (channel.isArchived) {
+    throw new Error('Cannot publish apps to an archived channel');
+  }
+  const participant = await tx.run(
+    zql.channel_participants.where('channelId', channelId).where('userId', userId).one(),
+  );
+  const isDesk = isDeskChannelType(channel.type);
+  const deskPreference = isDesk
+    ? await tx.run(zql.email_channel_preferences.where('channelId', channelId).one())
+    : undefined;
+  const isDeskOwner = !!deskPreference?.ownerUserId && deskPreference.ownerUserId === userId;
+  if (!canPublishAppsTo(channel, participant?.role, isDeskOwner)) {
+    throw new Error(
+      isDesk
+        ? 'Only the desk owner or a channel admin can change desk apps'
+        : channel.scopeType === ChannelScopeType.DEFAULT
+          ? 'Only channel admins can publish apps to the channel'
+          : 'Apps can only be published to channels, DMs, group DMs and desks',
+    );
+  }
+  return tx.run(
+    zql.channel_published_tabs
+      .where('channelId', channelId)
+      .where('entityType', ChannelPublishedEntityType.APP),
+  );
+}
 
 async function getCanvasThreadCommentCount(
   tx: Transaction<Schema>,
@@ -911,6 +959,40 @@ export const mutators = defineMutators({
           channelId,
           addUserPolicy: policy,
         });
+      },
+    ),
+    publishApp: defineMutator(
+      z.object({
+        id: z.string().min(1).max(64),
+        channelId: z.string(),
+        appId: z.string().min(1).max(MAX_PUBLISHED_APP_ID_LENGTH),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, channelId, appId, timestamp } }) => {
+        const rows = await loadChannelForAppPublish(tx, channelId, ctx.userID);
+        if (rows.some(row => row.entityId === appId)) return;
+        if (rows.length >= MAX_PUBLISHED_APPS) {
+          throw new Error(`Up to ${MAX_PUBLISHED_APPS} apps can be published here`);
+        }
+        await tx.mutate.channel_published_tabs.insert({
+          id,
+          workspaceId: ctx.workspaceId,
+          channelId,
+          entityType: ChannelPublishedEntityType.APP,
+          entityId: appId,
+          position: rows.reduce((top, row) => Math.max(top, row.position), -1) + 1,
+          publishedBy: ctx.userID,
+          createdAt: timestamp,
+        });
+      },
+    ),
+    unpublishApp: defineMutator(
+      z.object({ channelId: z.string(), appId: z.string().min(1).max(MAX_PUBLISHED_APP_ID_LENGTH) }),
+      async ({ tx, ctx, args: { channelId, appId } }) => {
+        const rows = await loadChannelForAppPublish(tx, channelId, ctx.userID);
+        const row = rows.find(r => r.entityId === appId);
+        if (!row) return;
+        await tx.mutate.channel_published_tabs.delete({ id: row.id });
       },
     ),
     updateShowTicketsTabTicketsInChat: defineMutator(
@@ -3838,9 +3920,10 @@ export const mutators = defineMutators({
       z.object({
         actorAction: z.string().optional(),
         classification: z.nativeEnum(ActivityClassification).optional(),
+        channelIds: z.array(z.string()).optional(),
         timestamp: z.number(),
       }),
-      async ({ tx, ctx, args: { actorAction, classification, timestamp } }) => {
+      async ({ tx, ctx, args: { actorAction, classification, channelIds, timestamp } }) => {
         let query = zql.activities.where('userId', ctx.userID).where('isRead', false);
 
         if (actorAction) {
@@ -3848,6 +3931,9 @@ export const mutators = defineMutators({
         }
         if (classification) {
           query = query.where('classification', classification);
+        }
+        if (channelIds && channelIds.length > 0) {
+          query = query.where('channelId', 'IN', channelIds);
         }
 
         const unreadActivities = await tx.run(query);
@@ -4710,11 +4796,12 @@ export const mutators = defineMutators({
     // can continue directly into board editing after the server save succeeds.
     saveReleaseBoardConfig: defineMutator(
       z.object({
-        projectId: z.string(),
         mainBoardId: z.string(),
         mainBoardName: z.string(),
         releaseTrackingMode: z.nativeEnum(ReleaseTrackingMode),
         channelId: z.string(),
+        hubChannelId: z.string(),
+        repoId: z.string(),
         applications: z.array(
           z.object({
             id: z.string(),
@@ -4722,27 +4809,20 @@ export const mutators = defineMutators({
             boardName: z.string(),
             name: z.string(),
             regex: z.string(),
-            repoUrl: z.string(),
             ownerTeam: z.string(),
             envPaths: z.array(z.string()),
             migrationPaths: z.array(z.string()),
           }),
         ),
       }),
-      async ({ tx, args: { projectId } }) => {
-        // Validate only against tables that are guaranteed-synced into the
-        // client's Zero replica. `projects` is; `channels` is NOT — the
-        // dashboard loads channels through a managed/fallback-hydrated query
-        // (queries.userAllChannels via InitialStateLoader) into app state for
-        // performance, so they are not reliably present in the replica that
-        // this optimistic mutator reads. A `zql.channels` lookup here would
-        // return undefined for a perfectly valid channel and make the
-        // optimistic mutator throw "Channel not found", blocking the save
-        // before the server ever runs. Channel existence and project ownership
-        // are validated authoritatively in the backend mutator instead.
-        const project = await tx.run(zql.projects.where('id', projectId).one());
-        if (!project) {
-          throw new Error('Project not found');
+      async ({ tx, args: { hubChannelId } }) => {
+        // Reject only what a row in the client replica contradicts. Rows can be missing
+        // there (the hub screen renders from its query cache before Zero syncs), so a
+        // lookup that misses would block a valid save before the server runs. The
+        // backend mutator validates hub, project, repository and channel.
+        const hub = await tx.run(zql.channels.where('id', hubChannelId).one());
+        if (hub && hub.type !== ChannelType.SDLC) {
+          throw new Error('Release configs belong to an SDLC hub');
         }
       },
     ),
@@ -10636,6 +10716,44 @@ export const mutators = defineMutators({
         }
       },
     ),
+    setRecordingDefaultSummaryTemplate: defineMutator(
+      z.object({
+        id: z.string(),
+        // `null` clears the default so recordings go back to the automatic pick.
+        recordingDefaultSummaryTemplateId: z.string().min(1).nullable(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, recordingDefaultSummaryTemplateId, timestamp } }) => {
+        const existing = await tx.run(
+          zql.user_preferences.where('userId', ctx.userID).one(),
+        );
+        if (existing) {
+          await tx.mutate.user_preferences.update({
+            id: existing.id,
+            recordingDefaultSummaryTemplateId,
+            updatedAt: timestamp,
+          });
+        } else {
+          await tx.mutate.user_preferences.insert({
+            workspaceId: ctx.workspaceId,
+            id,
+            userId: ctx.userID,
+            channelSortOrder: ChannelSortOrder.RECENCY,
+            enterSendsMessage: true,
+            allowThreadBroadcastMentions: false,
+            globalDesktopNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+            globalMobileNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+            threadReplyNotificationsEnabled: true,
+            channelWideMentionsEnabled: true,
+            notificationKeywords: '[]',
+            showThreadTags: false,
+            recordingDefaultSummaryTemplateId,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+        }
+      },
+    ),
   },
 
   emailChannelPreference: {
@@ -10658,14 +10776,12 @@ export const mutators = defineMutators({
         deskReportEnabled: z.boolean().optional(),
         deskReportAgentSlug: z.string().optional().nullable(),
         deskReportRangeDays: z.number().optional(),
-        // Artifact apps shown on this desk, in order (see EmailChannelPreference.deskAppIds).
-        // An empty list clears the column.
-        deskAppIds: z.array(z.string().min(1).max(64)).max(MAX_DESK_APPS).nullable().optional(),
         // Scoped duplicate detection config (see EmailChannelPreference.duplicateScopeConfig)
         duplicateScopeConfig: z
           .object({
             enabled: z.boolean(),
             scopeFieldGlobalIds: z.array(z.string()).max(MAX_DUPLICATE_SCOPE_FIELDS),
+            lookbackDays: z.number().int().min(0).max(MAX_DUPLICATE_LOOKBACK_DAYS).nullable().optional(),
           })
           .nullable()
           .optional(),
@@ -10691,7 +10807,6 @@ export const mutators = defineMutators({
           deskReportEnabled,
           deskReportAgentSlug,
           deskReportRangeDays,
-          deskAppIds,
           duplicateScopeConfig,
         },
       }) => {
@@ -10717,7 +10832,6 @@ export const mutators = defineMutators({
             ...(deskReportEnabled !== undefined ? { deskReportEnabled } : {}),
             ...(deskReportAgentSlug !== undefined ? { deskReportAgentSlug } : {}),
             ...(deskReportRangeDays !== undefined ? { deskReportRangeDays } : {}),
-            ...(deskAppIds !== undefined ? { deskAppIds: serializeDeskAppIds(deskAppIds) } : {}),
             ...(duplicateScopeConfig !== undefined
               ? { duplicateScopeConfig: duplicateScopeConfig == null ? null : JSON.stringify(duplicateScopeConfig) }
               : {}),
@@ -10752,7 +10866,6 @@ export const mutators = defineMutators({
             deskReportEnabled: deskReportEnabled ?? false,
             deskReportAgentSlug: deskReportAgentSlug ?? null,
             deskReportRangeDays: deskReportRangeDays ?? 1,
-            deskAppIds: serializeDeskAppIds(deskAppIds ?? null),
             duplicateScopeConfig: duplicateScopeConfig ? JSON.stringify(duplicateScopeConfig) : null,
           });
         }
@@ -12980,6 +13093,15 @@ export const mutators = defineMutators({
           ...(isPrivate !== undefined && { isPrivate }),
           updatedAt: timestamp,
         });
+        // Folders carry their own copy of isPrivate and Zero's ACL reads each row's own copy,
+        // so a visibility change must reach every folder under this root or they keep syncing
+        // to the whole workspace after the root goes private.
+        if (isPrivate !== undefined && !collection.parentId) {
+          const folders = await tx.run(zql.collections.where('rootCollectionId', id));
+          for (const folder of folders) {
+            await tx.mutate.collections.update({ id: folder.id, isPrivate, updatedAt: timestamp });
+          }
+        }
       },
     ),
 

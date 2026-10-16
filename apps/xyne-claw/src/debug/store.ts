@@ -26,7 +26,8 @@
 import type { Dirent } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { gunzipSync, gzipSync } from "node:zlib";
+import { promisify } from "node:util";
+import { gunzipSync, gzip } from "node:zlib";
 
 import { PATHS } from "../config.js";
 import { createLogger } from "../logger.js";
@@ -36,6 +37,7 @@ import { compareRunIdsNewestFirst } from "./keys.js";
 import type { CaptureLevel, DebugEventV2, RunHeader } from "./types.js";
 
 const log = createLogger("debug");
+const gzipAsync = promisify(gzip);
 
 const SESSION_FILE = "session.json";
 const SESSION_TMP = "session.json.tmp";
@@ -415,7 +417,7 @@ export async function packRun(runDir: string): Promise<Buffer | null> {
   ];
   const ndjson = lines.map((l) => JSON.stringify(l)).join("\n") + "\n";
   try {
-    return gzipSync(Buffer.from(ndjson, "utf8"));
+    return await gzipAsync(Buffer.from(ndjson, "utf8"));
   } catch (err) {
     log.warn("debug packRun gzip failed", {
       error: err instanceof Error ? err.message : String(err),

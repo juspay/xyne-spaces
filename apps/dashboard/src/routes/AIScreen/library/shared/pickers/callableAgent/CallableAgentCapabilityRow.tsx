@@ -36,9 +36,7 @@ export function CallableAgentCapabilityRow({
       <div className='flex w-full items-center justify-between gap-4'>
         <div className='flex min-w-0 items-center gap-4'>
           <div className='flex shrink-0 items-center gap-2'>
-            <span className='text-sm font-medium leading-[1.2] tracking-[-0.1px] text-foreground'>
-              Agents
-            </span>
+            <span className='text-sm leading-[1.2] tracking-[-0.1px] text-foreground'>Agents</span>
             <Tooltip side='top' content={CAPTION}>
               <span className='inline-flex'>
                 <InformationCircle className='size-4 text-muted-foreground' aria-hidden />
@@ -66,8 +64,6 @@ export function CallableAgentCapabilityRow({
           <PlusDefault className='size-4' aria-hidden />
         </button>
       </div>
-
-      <p className='text-sm leading-5 text-muted-foreground'>{CAPTION}</p>
 
       {addedEntries.length > 0 && (
         <div className='flex flex-wrap items-start gap-2 pt-1'>

@@ -22,6 +22,7 @@ import {
   closeAllBrowserSessions,
   disposeApiRequestContext,
   resetAllBrowserSessionsForReuse,
+  saveRecordedVideos,
 } from '@/tests/shared/support/browser-manager';
 import {
   getHumanRunnerLabel,
@@ -88,17 +89,29 @@ export default class HooksSteps {
       gaugeLogger.info(`Step PASS: ${stepName}`, { durationMs });
       Gauge.writeMessage(`✓ ${stepName} (${durationMs}ms)`);
     }
+
+    // Opt-in (STEP_DELAY) pause so each step's result stays on screen in a headed run.
+    if (config.stepDelay > 0) {
+      await new Promise((resolve) => setTimeout(resolve, config.stepDelay));
+    }
   }
 
   @AfterScenario()
   public async cleanupScenario(context: ExecutionContext): Promise<void> {
     writeAfterScenarioTestContextSnapshot(context);
 
+    const scenario = context.getCurrentScenario();
     await resetAllBrowserSessionsForReuse();
+    const videoPaths = await saveRecordedVideos(
+      scenario?.getName() ?? 'unknown-scenario',
+      scenario?.getIsFailing() ?? false
+    );
+    for (const videoPath of videoPaths) {
+      Gauge.writeMessage(`🎥 Video: ${videoPath}`);
+    }
     testContext.resetScenarioState();
 
     const progressFile = config.testProgressFile;
-    const scenario = context.getCurrentScenario();
     const specification = context.getCurrentSpec();
     const scenarioName = scenario?.getName();
     const specificationFile = specification?.getFileName();
@@ -117,6 +130,8 @@ export default class HooksSteps {
   public async cleanupSuite(context: ExecutionContext): Promise<void> {
     writeAfterSuiteTestContextSnapshot(context);
     await closeAllBrowserSessions();
+    // Pages still open outside a scenario (e.g. suite setup) finish recording here.
+    await saveRecordedVideos('suite', false);
     await disposeApiRequestContext();
     await closeLogger();
   }

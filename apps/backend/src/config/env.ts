@@ -162,6 +162,7 @@ const envSchema = Joi.object({
   TAG_GENERATION_CONCURRENCY: Joi.number().integer().min(1).max(20).default(1),
   TAG_GENERATION_LLM_TIMEOUT_MS: Joi.number().integer().min(1000).default(120000),
   ENABLE_STITCH_WORKER: Joi.boolean().default(false),
+  ENABLE_CALL_TRANSCRIPTION_WORKER: Joi.boolean().default(false),
   ENABLE_AI_PROVISIONING_WORKER: Joi.boolean().default(false),
   ENABLE_USER_AI_PROVISIONING: Joi.boolean().default(false),
   XYNE_CLAW_AUTH_INTERNAL_URL: Joi.string().uri().allow('').default(''),
@@ -282,6 +283,9 @@ const envSchema = Joi.object({
   // Same CALL_LITELLM_API_KEY for both; both fall back to CALL_LITELLM_MODEL.
   CALL_RECORDING_FAST_LITELLM_MODEL: Joi.string().allow('').default(''),
   CALL_RECORDING_THINKING_LITELLM_MODEL: Joi.string().allow('').default(''),
+  // Run call/recording/summary-template LLM tasks on the Claw `call-intelligence`
+  // agent instead of calling LiteLLM directly.
+  CALL_AI_USE_CLAW_AGENT: Joi.boolean().default(false),
   ACTIVITY_CLASSIFICATION_MODEL: Joi.string().default(''),
   // Working Hours Configuration (in IST)
   WORKING_HOUR_START: Joi.number().default(11),
@@ -339,6 +343,13 @@ const envSchema = Joi.object({
   JEV_API_KEY: Joi.string().allow('').default(''),
   JEV_URL: Joi.string().uri().default('https://api.typesafe.ai/v1/systemone'),
   JEV_MODEL: Joi.string().default('jev-1.13.0'),
+  ELEVENLABS_API_KEY: Joi.string().allow('').default(''),
+  ELEVENLABS_API_URL: Joi.string().uri().default('https://api.elevenlabs.io'),
+  ELEVENLABS_STT_MODEL: Joi.string().default('scribe_v2_realtime'),
+  ELEVENLABS_TTS_MODEL: Joi.string().default('eleven_flash_v2_5'),
+  ELEVENLABS_TTS_VOICE_ID: Joi.string().allow('').default(''),
+  VOICE_INPUT_STT_STREAM_PROVIDER: Joi.string().valid('google', 'elevenlabs').default('google'),
+  TTS_PROVIDER: Joi.string().valid('azure', 'elevenlabs').default('azure'),
   // Genius Bot API Configuration
   GENIUS_API_URL: Joi.string().uri().default('http://localhost:8000'),
   GENIUS_API_KEY: Joi.string().allow('').default(''),
@@ -440,6 +451,7 @@ const envSchema = Joi.object({
   JIRA_EULER_BOT_AUTH_TOKEN: Joi.string().allow('').default(''),
   JIRA_MIGRATION_BOT_EMAIL: Joi.string().allow('').default(''),
   JIRA_MIGRATION_BOT_AUTH_TOKEN: Joi.string().allow('').default(''),
+  ENCRYPTION_KEY: Joi.string().allow('').default(''),
   ZERO_CLIENT_ENCRYPTION_ENABLED: Joi.boolean().default(false),
   API_CLIENT_ENCRYPTION_ENABLED: Joi.boolean().default(false),
   ENABLE_DB_ENCRYPTION: Joi.boolean().default(false),
@@ -449,6 +461,7 @@ const envSchema = Joi.object({
   ENCRYPTED_FIELDS_CACHE_TTL_MS: Joi.number().integer().min(1000).default(15 * 60 * 1000),
   ENC_ORG_PROVISION: Joi.boolean().default(false),
   ENC_WORKSPACE_PROVISION: Joi.boolean().default(false),
+  SECRETS_VAULT_CACHE_TTL_MS: Joi.number().integer().min(0).default(5 * 60 * 1000),
   JIRA_MIGRATION_USER_MAP_CSV_LOCATION: Joi.string()
     .allow('')
     .default(''),
@@ -647,6 +660,7 @@ const envSchema = Joi.object({
   PYROSCOPE_SERVER_ADDRESS: Joi.string().allow('').default(''),
   PYROSCOPE_FLUSH_INTERVAL_MS: Joi.number().integer().min(1000).default(60000),
 
+  DEEP_RESEARCH_BASE_URL: Joi.string().allow('').default(''),
 }).unknown();
 
 const { error, value: envVars } = envSchema.validate(process.env);
@@ -770,6 +784,9 @@ export const config = {
     callRecordingThinkingLitellmModel:
       envVars.CALL_RECORDING_THINKING_LITELLM_MODEL || envVars.CALL_LITELLM_MODEL,
   },
+  callAi: {
+    useClawAgent: envVars.CALL_AI_USE_CLAW_AGENT as boolean,
+  },
   activityClassification: {
     litellmApiKey: envVars.ACTIVITY_CLASSIFICATION_LITELLM_API_KEY,
     model: envVars.ACTIVITY_CLASSIFICATION_MODEL,
@@ -872,6 +889,7 @@ export const config = {
   tagGenerationConcurrency: envVars.TAG_GENERATION_CONCURRENCY as number,
   tagGenerationLlmTimeoutMs: envVars.TAG_GENERATION_LLM_TIMEOUT_MS as number,
   enableStitchWorker: envVars.ENABLE_STITCH_WORKER,
+  enableCallTranscriptionWorker: envVars.ENABLE_CALL_TRANSCRIPTION_WORKER,
   enableAiProvisioningWorker: envVars.ENABLE_AI_PROVISIONING_WORKER,
   aiProvisioning: {
     xyneClawAuthInternalUrl: envVars.XYNE_CLAW_AUTH_INTERNAL_URL as string,
@@ -1010,6 +1028,20 @@ export const config = {
     apiKey: envVars.JEV_API_KEY,
     url: envVars.JEV_URL,
     model: envVars.JEV_MODEL,
+  },
+  elevenLabs: {
+    apiKey: envVars.ELEVENLABS_API_KEY as string,
+    apiUrl: (envVars.ELEVENLABS_API_URL as string).replace(/\/+$/, ''),
+    sttUrl: (envVars.ELEVENLABS_API_URL as string).replace(/\/+$/, '').replace(/^http/, 'ws'),
+    sttModel: envVars.ELEVENLABS_STT_MODEL as string,
+    ttsModel: envVars.ELEVENLABS_TTS_MODEL as string,
+    ttsVoiceId: envVars.ELEVENLABS_TTS_VOICE_ID as string,
+  },
+  voiceInputStream: {
+    provider: envVars.VOICE_INPUT_STT_STREAM_PROVIDER as 'google' | 'elevenlabs',
+  },
+  tts: {
+    provider: envVars.TTS_PROVIDER as 'azure' | 'elevenlabs',
   },
   genius: {
     apiUrl: envVars.GENIUS_API_URL,
@@ -1194,6 +1226,10 @@ export const config = {
     orgProvisionEnabled: envVars.ENC_ORG_PROVISION as boolean,
     workspaceProvisionEnabled: envVars.ENC_WORKSPACE_PROVISION as boolean,
   },
+  encryptionKey: envVars.ENCRYPTION_KEY as string,
+  secretsVault: {
+    cacheTtlMs: envVars.SECRETS_VAULT_CACHE_TTL_MS as number,
+  },
   enableFileIndexing: envVars.ENABLE_FILE_INDEXING as boolean,
   enableDriveImportWorker: envVars.ENABLE_DRIVE_IMPORT_WORKER as boolean,
   driveImport: {
@@ -1372,4 +1408,5 @@ export const config = {
     serverAddress: envVars.PYROSCOPE_SERVER_ADDRESS as string,
     flushIntervalMs: envVars.PYROSCOPE_FLUSH_INTERVAL_MS as number,
   },
+  deepResearchBaseUrl: envVars.DEEP_RESEARCH_BASE_URL as string,
 };

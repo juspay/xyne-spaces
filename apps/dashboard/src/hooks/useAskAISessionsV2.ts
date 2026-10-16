@@ -6,17 +6,25 @@
  * so the sidebar can switch between versions seamlessly.
  */
 
-import { useCallback } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { fetchV2Conversations } from '../services/XyneAI/XyneAISessionsV2Service';
+import { useCallback, useMemo } from 'react';
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useQueryClient,
+  type InfiniteData,
+} from '@tanstack/react-query';
+import {
+  fetchV2Conversations,
+  type AgentConversationCount,
+  type V2ConversationPage,
+} from '../services/XyneAI/XyneAISessionsV2Service';
 import type { ConversationHistory } from '../components/Chat/XyneAISidebar/utils/XyneAITypes';
 
 // ============================================================================
 // Query Keys
 // ============================================================================
 
-const V2_SESSIONS_KEY = (agentSlug?: string | null): readonly string[] =>
-  agentSlug ? ['xyne-ai-v2-sessions', agentSlug] : ['xyne-ai-v2-sessions'];
+const V2_SESSIONS_KEY = ['xyne-ai-v2-sessions'] as const;
 const v2SessionMessagesKey = (convId: string, agentSlug?: string | null): readonly string[] =>
   agentSlug
     ? ['xyne-ai-v2-session', convId, 'messages', agentSlug]
@@ -26,32 +34,68 @@ const v2SessionMessagesKey = (convId: string, agentSlug?: string | null): readon
 // Hooks
 // ============================================================================
 
-/**
- * List all conversations for the current user from claw.
- * @param agentSlug - Optional agent slug to filter conversations per-agent.
- */
-export function useV2SessionsList(agentSlug?: string | null, enabled = true) {
-  return useQuery({
-    queryKey: V2_SESSIONS_KEY(agentSlug),
-    queryFn: () => fetchV2Conversations(agentSlug),
-    staleTime: 30_000,
-    enabled,
-  });
+const NO_AGENTS: AgentConversationCount[] = [];
+
+interface V2SessionsListOptions {
+  /** Keep only this agent's conversations (server-side). */
+  agentSlug?: string | null;
+  /** Title search (server-side). */
+  query?: string;
+  enabled?: boolean;
+  /** Refetch whenever the list mounts — for panels the user opens to look. */
+  refetchOnMount?: boolean | 'always';
 }
 
 /**
- * Invalidate v2 session lists (call after new chat, etc.)
- * Passing a prefix key invalidates all variations (with or without agentSlug).
+ * The user's chat history across every agent, newest first, a page of 50 at a
+ * time (every pinned chat comes with the first page). Shared by the AI screen,
+ * the sidebar and the overlay. Filter and search run on the server, so they
+ * reach chats that are not loaded yet; `loadMore` fetches the next page.
+ */
+export function useV2SessionsList({
+  agentSlug = null,
+  query = '',
+  enabled = true,
+  refetchOnMount = true,
+}: V2SessionsListOptions = {}) {
+  const result = useInfiniteQuery({
+    queryKey: [...V2_SESSIONS_KEY, agentSlug ?? '', query],
+    queryFn: ({ pageParam }) => fetchV2Conversations({ agentSlug, q: query, cursor: pageParam }),
+    initialPageParam: null as string | null,
+    getNextPageParam: page => page.nextCursor ?? undefined,
+    // Changing the filter or search keeps the current rows on screen until
+    // the new ones arrive, instead of flashing an empty list.
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
+    refetchOnMount,
+    enabled,
+  });
+  const conversations = useMemo(() => {
+    const seen = new Set<string>();
+    return (result.data?.pages ?? [])
+      .flatMap(page => page.conversations)
+      .filter(row => !seen.has(row.id) && Boolean(seen.add(row.id)));
+  }, [result.data]);
+  return {
+    conversations,
+    agents: result.data?.pages[0]?.agents ?? NO_AGENTS,
+    isLoading: result.isLoading,
+    hasMore: result.hasNextPage,
+    isLoadingMore: result.isFetchingNextPage,
+    loadMore: result.fetchNextPage,
+  };
+}
+
+/**
+ * Invalidate the chat history (call after new chat, etc.) — a turn with any
+ * agent changes it.
  */
 export function useV2SessionInvalidator() {
   const queryClient = useQueryClient();
 
-  const invalidateSessions = useCallback(
-    (agentSlug?: string | null) => {
-      void queryClient.invalidateQueries({ queryKey: V2_SESSIONS_KEY(agentSlug) });
-    },
-    [queryClient],
-  );
+  const invalidateSessions = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: V2_SESSIONS_KEY });
+  }, [queryClient]);
 
   const invalidateMessages = useCallback(
     (convId: string, agentSlug?: string | null) => {
@@ -77,17 +121,26 @@ export function useV2SessionPatcher() {
   const queryClient = useQueryClient();
 
   const patchSession = useCallback(
-    (
-      agentSlug: string | null | undefined,
-      sessionId: string,
-      patch: Partial<ConversationHistory>,
-    ): (() => void) => {
-      const key = V2_SESSIONS_KEY(agentSlug);
-      const previous = queryClient.getQueryData<ConversationHistory[]>(key);
-      queryClient.setQueryData<ConversationHistory[]>(key, rows =>
-        rows?.map(row => (row.sessionId === sessionId ? { ...row, ...patch } : row)),
+    (rowId: string, patch: Partial<ConversationHistory>): (() => void) => {
+      // Every cached view of the list (each filter and search) holds its own
+      // pages; patch the row wherever it is loaded.
+      const previous = queryClient.getQueriesData<InfiniteData<V2ConversationPage>>({
+        queryKey: V2_SESSIONS_KEY,
+      });
+      queryClient.setQueriesData<InfiniteData<V2ConversationPage>>(
+        { queryKey: V2_SESSIONS_KEY },
+        data =>
+          data && {
+            ...data,
+            pages: data.pages.map(page => ({
+              ...page,
+              conversations: page.conversations.map(row =>
+                row.id === rowId ? { ...row, ...patch } : row,
+              ),
+            })),
+          },
       );
-      return () => queryClient.setQueryData<ConversationHistory[]>(key, previous);
+      return () => previous.forEach(([key, data]) => queryClient.setQueryData(key, data));
     },
     [queryClient],
   );

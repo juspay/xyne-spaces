@@ -1,20 +1,13 @@
 # Admin Navigation UI Test
-tags: quarantine
 > Verify admin-only navigation menu items load correct pages
-
-Quarantined (XYNE-63195): admin sidebar navigation is flaky in CI — e.g. `[aria-controls='projects-section']` intermittently never becomes visible after "navigating via sidebar to tickets" (30s timeout, fails on retry too). Re-enable once the sidebar load timing is fixed.
 
 ## Admin navigates to User Management page
 * Using browser
 * Ensuring user "admin-1" is logged in
-* navigating via sidebar to "user-management"
+* navigating via sidebar to "administration"
+* clicking on "[data-testid='organisations-nav-workspace']"
+* clicking on "[data-testid='organisations-tab-members']"
 * waiting for "[data-testid='user-management-page']" to appear
-* verifying "User Management" is visible in "[data-testid='user-management-page']"
-* verifying "User" is visible in "[data-testid='user-management-page']"
-* verifying "Team" is visible in "[data-testid='user-management-page']"
-* verifying "Manager" is visible in "[data-testid='user-management-page']"
-* verifying "Role" is visible in "[data-testid='user-management-page']"
-* verifying "Actions" is visible in "[data-testid='user-management-page']"
 
 ## Admin navigates to Analytics page
 * Using browser
@@ -30,9 +23,10 @@ Quarantined (XYNE-63195): admin sidebar navigation is flaky in CI — e.g. `[ari
 * Using browser
 * Ensuring user "admin-1" is logged in
 * ensuring project "project-1" exists in fixture for user "admin-1"
-* navigating via sidebar to "tickets"
-* clicking on "[aria-controls='projects-section']"
-* clicking on text "user:admin-1.projects.project-1.name" in "[data-testid^='project-item-']"
+* navigating via sidebar to "list-projects"
+* waiting for "[data-testid='project-list']" to appear
+* clicking on text "user:admin-1.projects.project-1.name" in "[data-testid^='project-card-']"
+* clicking on "table tbody tr"
 * waiting for "[data-testid='projects-board-page']" to appear
 
 ## Admin navigates to List Projects view
@@ -51,7 +45,7 @@ Quarantined (XYNE-63195): admin sidebar navigation is flaky in CI — e.g. `[ari
 ## Admin navigates to Support page
 * Using browser
 * Ensuring user "admin-1" is logged in
-* clicking on "[data-testid='nav-support']"
+* navigating via sidebar to "support"
 * waiting for "[data-testid='support-page']" to appear
 * verifying "Desks" is visible in "[data-testid='support-page']"
 * verifying "Select a channel to preview tickets" is visible in "[data-testid='support-page']"
@@ -59,17 +53,27 @@ Quarantined (XYNE-63195): admin sidebar navigation is flaky in CI — e.g. `[ari
 ## Admin navigates to Workspace Management page
 * Using browser
 * Ensuring user "admin-1" is logged in
-* navigating via sidebar to "workspace-management"
-* waiting for "[data-testid='workspace-management-page']" to appear
-* verifying "Workspace Management" is visible in "[data-testid='workspace-management-page']"
-* verifying "General & Members" is visible in "[data-testid='workspace-management-page']"
+* navigating via sidebar to "administration"
+* clicking on "[data-testid='organisations-nav-workspace']"
+* waiting for "[data-testid='organisations-tab-general']" to appear
+* verifying text "General Settings" is visible in "body"
 
 ## Admin navigates to Organisations page
 * Using browser
 * Ensuring user "admin-1" is logged in
-* navigating via sidebar to "organisations"
+* navigating via sidebar to "administration"
+* clicking on "[data-testid='organisations-nav-organisations']"
 * waiting for "[data-testid='organisations-page']" to appear
 * verifying "Organisations" is visible in "[data-testid='organisations-page']"
 * verifying "Manage organisations and their members" is visible in "[data-testid='organisations-page']"
 * verifying "Create New Org" is visible in "[data-testid='organisations-page']"
 * verifying "About Organisations" is visible in "[data-testid='organisations-page']"
+
+## Admin navigates to User Groups page
+* Using browser
+* Ensuring user "admin-1" is logged in
+* navigating via sidebar to "administration"
+* clicking on "[data-testid='organisations-nav-user-groups']"
+* waiting for "[data-testid='create-user-group-btn']" to appear
+* verifying text "User Groups" is visible in "body"
+* verifying text "Manage your organization user groups and teams" is visible in "body"

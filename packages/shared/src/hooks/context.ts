@@ -2,6 +2,7 @@ import { createContext, useContext } from 'react';
 
 export interface SharedAuthContext {
   userID: string;
+  role?: string | null;
 }
 
 const AuthContext = createContext<SharedAuthContext | null>(null);

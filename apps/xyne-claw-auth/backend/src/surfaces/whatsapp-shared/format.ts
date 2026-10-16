@@ -40,3 +40,5 @@ export function formatForWhatsApp(markdown: string): string {
   }
   return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
+
+export const WHATSAPP_RESULT_SECTIONS = { maxWords: 100, maxSections: 5 } as const;

@@ -38,6 +38,7 @@ import { CollaborativeCanvasEditor } from '../../components/Canvas/Collaborative
 import type { Canvas } from '../../components/Canvas/Canvas.types';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { removeRecordingsFromCache } from '../../hooks/usePaginatedRecordings';
+import { useMarkRecordingSummaryReadOnOpen } from '../../hooks/useHasUnreadRecordingSummaries';
 import { RecordingShareModal } from '../RecordingDetailV2Screen/components/RecordingShareModal';
 
 interface RecordingNavState {
@@ -151,6 +152,7 @@ export default function RecordingDetailScreen(): ReactElement {
   const speakerIdentificationEnabled = useSpeakerIdentificationEnabled();
 
   const [recording, setRecording] = useState<RecordingDetail | null>(null);
+  useMarkRecordingSummaryReadOnOpen(recording?.id);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -388,6 +390,7 @@ export default function RecordingDetailScreen(): ReactElement {
                   data-track-name='edit_title_input'
                 />
                 <button
+                  aria-label='Save title'
                   onClick={() => void handleSaveTitle()}
                   className='p-2 text-status-success hover:bg-muted rounded-md'
                   data-track-category='RecordingDetail'
@@ -396,6 +399,7 @@ export default function RecordingDetailScreen(): ReactElement {
                   <Check className='w-5 h-5' />
                 </button>
                 <button
+                  aria-label='Cancel editing title'
                   onClick={() => {
                     setEditedTitle(recording.title);
                     setIsEditingTitle(false);
@@ -411,6 +415,7 @@ export default function RecordingDetailScreen(): ReactElement {
               <>
                 <h1 className='flex-1 text-2xl font-bold text-foreground'>{recording.title}</h1>
                 <button
+                  aria-label='Edit title'
                   onClick={() => setIsEditingTitle(true)}
                   className='p-2 text-muted-foreground hover:bg-muted rounded-md'
                   data-track-category='RecordingDetail'

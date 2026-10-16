@@ -11,7 +11,9 @@ import { agentActionsSchema } from "../messaging/schema.js";
 /** Graph API version the plugin talks. Pinned, not floating: Meta ships
  *  breaking changes per version and deprecates old ones on a schedule. */
 export const GRAPH_VERSION = "v23.0";
-export const GRAPH_ORIGIN = "https://graph.facebook.com";
+/** Overridable ONLY so a local harness can stand in for Meta (see
+ *  scripts/mock-whatsapp-cloud.ts); production never sets it. */
+export const GRAPH_ORIGIN = process.env["WHATSAPP_GRAPH_ORIGIN"]?.trim() || "https://graph.facebook.com";
 
 export const SECRET_PHONE_NUMBER_ID = "phone-number-id";
 export const SECRET_ACCESS_TOKEN = "access-token";
@@ -22,6 +24,24 @@ export const whatsappCloudConfigSchema = z
   .object({
     /** No group support on this transport, so nothing to list. */
     agentActions: agentActionsSchema({ listGroups: false }),
+    /**
+     * An approved template whose body is one `{{1}}` parameter. Meta refuses
+     * free-form text 24 hours after the person last wrote, which is exactly
+     * when a scheduled agent tends to report back; the notification then goes
+     * out through this instead. Without it such a message fails, and says so.
+     */
+    notificationTemplate: z
+      .object({
+        name: z.string().trim().min(1).max(512),
+        language: z.string().trim().min(2).max(15).default("en"),
+      })
+      .optional(),
+    /**
+     * A published WhatsApp Flow built from questionFormFlowJson(). With it, a
+     * multi-part question arrives as one native form; without it, as a
+     * sequence of buttons and lists.
+     */
+    questionFormId: z.string().trim().regex(/^\d+$/).optional(),
   })
   .strict();
 export type WhatsAppCloudConfig = z.infer<typeof whatsappCloudConfigSchema>;

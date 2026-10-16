@@ -6,6 +6,7 @@ import { callShareService } from '@/services/callShareService';
 import { transcriptService } from '@/services/transcriptService';
 import { convertBlockNoteToMarkdown } from '@/services/canvasService';
 import { readFromYSweet } from '@/utils/ysweetUtils';
+import { isTranscriptUnlinked } from '@/utils/transcriptUnlink';
 import { summaryTemplateService } from '@/services/summaryTemplateService';
 import { INITIATED_BY_INSTALLED_APP_ID_KEY } from '@/services/callSummaryAppEventService';
 import { logger } from '@/utils/logger';
@@ -42,12 +43,13 @@ export class AppCallController {
       // created call off the response instead and stamp it here.
       const installedAppId = (req as unknown as { auth?: { installedAppId?: string } }).auth
         ?.installedAppId;
-      const created: { callId: string | null } = { callId: null };
+      const created: { callId: string | null; externalId: string | null } = { callId: null, externalId: null };
       const sendJson = res.json.bind(res);
       res.json = (body: unknown): Response => {
-        const payload = body as { success?: boolean; callId?: unknown } | null;
+        const payload = body as { success?: boolean; callId?: unknown; externalId?: unknown } | null;
         if (payload?.success === true && typeof payload.callId === 'string') {
           created.callId = payload.callId;
+          created.externalId = typeof payload.externalId === 'string' ? payload.externalId : null;
         }
         return sendJson(body);
       };
@@ -55,7 +57,7 @@ export class AppCallController {
       await scheduleCallController.scheduleCall(req, res);
 
       if (created.callId && installedAppId) {
-        await this.stampOwningApp(created.callId, installedAppId);
+        await this.stampOwningApp(created.callId, created.externalId, installedAppId);
       }
     } catch (error) {
       logger.error('[AppCallController] Failed to schedule call:', error);
@@ -75,7 +77,8 @@ export class AppCallController {
 
       const [participants, hasTranscript] = await Promise.all([
         repositories.calls.findParticipantsForApps(call.externalId),
-        transcriptService.transcriptExists(call.externalId),
+        // An admin-unlinked transcript still sits in storage; report it as absent.
+        isTranscriptUnlinked(call) ? false : transcriptService.transcriptExists(call.externalId),
       ]);
 
       const metadata =
@@ -143,7 +146,8 @@ export class AppCallController {
         return;
       }
 
-      const transcript = await transcriptService.getTranscriptContent(call.externalId);
+      // An admin-unlinked transcript still sits in storage; treat it as absent.
+      const transcript = isTranscriptUnlinked(call) ? null : await transcriptService.getTranscriptContent(call.externalId);
       if (transcript === null) {
         res.status(404).json({ success: false, error: 'Transcript not available for this call' });
         return;
@@ -239,6 +243,23 @@ export class AppCallController {
     } catch (error) {
       logger.error(
         `[AppCallController] [${req.params.callId}] Failed to update scheduled call:`,
+        error,
+      );
+      next(error);
+    }
+  };
+
+  /**
+   * DELETE /api/apps/calls/:callId — cancel a SCHEDULED call. Reuses the native
+   * cancel flow: only the organizer (the app's user) may cancel, the record is
+   * kept with status CANCELLED, and the calendar event is withdrawn.
+   */
+  cancelScheduledCall = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      await scheduleCallController.cancelScheduledCall(req, res);
+    } catch (error) {
+      logger.error(
+        `[AppCallController] [${req.params.callId}] Failed to cancel scheduled call:`,
         error,
       );
       next(error);
@@ -352,7 +373,7 @@ export class AppCallController {
   }
 
   /** Merge-writes the owning app id onto Call.metadata. */
-  private async stampOwningApp(callId: string, installedAppId: string): Promise<void> {
+  private async stampOwningApp(callId: string, externalId: string | null, installedAppId: string): Promise<void> {
     try {
       const call = await repositories.calls.findById(callId);
       if (!call) return;
@@ -367,7 +388,7 @@ export class AppCallController {
       // The call itself was created and answered for. Losing the stamp only
       // costs this app its CALL_SUMMARY_READY event, so log loudly and move on.
       logger.error(
-        `[AppCallController] [${callId}] Failed to stamp owning app ${installedAppId}:`,
+        `[AppCallController] [${externalId}] Failed to stamp owning app ${installedAppId}:`,
         error,
       );
     }

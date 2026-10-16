@@ -3,6 +3,7 @@ import type { ActionDefinition, PageId } from './actions/action';
 
 type AccessContext = {
   organisations: Record<OrganisationsSectionKey, boolean>;
+  isGuest: boolean;
 };
 
 type AppPage = {
@@ -47,13 +48,15 @@ export const APP_PAGES: Record<PageId, AppPage> = {
     path: 'chat/search?mode=channels',
     allowed: () => true,
   },
+  // Guests only read channels: the channels ACL refuses them a new one.
   add_channel: {
     path: 'chat/dir?dialog=add_channel',
-    allowed: () => true,
+    allowed: access => !access.isGuest,
   },
+  // Guests are not granted AGENTS.
   ai_agent_create: {
     path: 'ai/library/agent/create',
-    allowed: () => true,
+    allowed: access => !access.isGuest,
   },
 };
 

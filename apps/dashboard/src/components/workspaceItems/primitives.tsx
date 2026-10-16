@@ -1,10 +1,13 @@
-import { useEffect, useState, type ReactElement, type ReactNode } from 'react';
-import { cn } from '../../utils/classNames';
+import { useEffect, useMemo, useState, type ReactElement, type ReactNode } from 'react';
+import { API_BASE_URL } from '../../config';
 import { fetchFile } from '../../services/clients/fileFetchService';
-import { detectFileType } from '../FileViewer/utils';
+import { FilePreview } from '../FilePreview';
 import ReadmeViewer from '../FileViewer/ReadmeViewer';
+import { previewFileFor } from './itemDescriptor';
+import { iframeSandboxFor } from './iframeSandbox';
+import { UnmountWhenCovered } from '../../hooks/usePageCoverage';
 
-export const IFRAME_SANDBOX = 'allow-scripts allow-forms allow-modals allow-popups';
+export { IFRAME_SANDBOX } from './iframeSandbox';
 
 export function Centered({ children }: { children: ReactNode }): ReactElement {
   return (
@@ -55,43 +58,38 @@ export function useRemoteFile(
 }
 
 export function SandboxedFrame({ url, title }: { url: string; title: string }): ReactElement {
+  // Not under full-page search: the page in it runs on there, out of reach, so it goes, as leaving
+  // the page took it, and loads again on return.
   return (
-    <iframe
-      src={url}
-      title={title}
-      sandbox={IFRAME_SANDBOX}
-      className='h-full w-full border-0 bg-background'
-      referrerPolicy='no-referrer'
-    />
+    <UnmountWhenCovered fallback={<div className='h-full w-full bg-background' />}>
+      <iframe
+        src={url}
+        title={title}
+        sandbox={iframeSandboxFor(url)}
+        className='h-full w-full border-0 bg-background'
+        referrerPolicy='no-referrer'
+      />
+    </UnmountWhenCovered>
   );
 }
 
+/** A file, drawn by the app's file previewer. */
 export function FileView({
   url,
   title,
   mimeType,
+  size,
 }: {
   url: string;
   title: string;
   mimeType?: string | undefined;
+  size?: number | undefined;
 }): ReactElement {
-  const fileType = detectFileType(mimeType ?? '', title);
-  const { file, loading, error } = useRemoteFile(
-    url,
-    title,
-    fileType?.type === 'pdf' ? 'application/pdf' : (mimeType ?? 'application/octet-stream'),
+  const file = useMemo(
+    () => previewFileFor({ source: url, name: title, mimeType, size }, API_BASE_URL),
+    [url, title, mimeType, size],
   );
-  const ViewerComponent = fileType?.component;
-
-  if (loading) return <Spinner />;
-  if (error) return <Centered>Could not load this file.</Centered>;
-  if (!file || !ViewerComponent) return <Centered>Preview not available for this file.</Centered>;
-
-  return (
-    <div className={cn(fileType.wrapperClass, 'h-full max-h-full max-w-full bg-background')}>
-      <ViewerComponent source={file} fileName={title} />
-    </div>
-  );
+  return <FilePreview key={url} file={file} />;
 }
 
 export function MarkdownView({ url, title }: { url: string; title: string }): ReactElement {
@@ -141,14 +139,17 @@ export function HtmlDocView({
       : html + inject
     : html;
 
+  // Its scripts stop under full-page search, as leaving the page stopped them.
   return (
-    <iframe
-      title={title}
-      ref={onFrame}
-      srcDoc={source}
-      sandbox='allow-scripts allow-popups'
-      referrerPolicy='no-referrer'
-      className='h-full w-full border-0 bg-background'
-    />
+    <UnmountWhenCovered fallback={<div className='h-full w-full bg-background' />}>
+      <iframe
+        title={title}
+        ref={onFrame}
+        srcDoc={source}
+        sandbox='allow-scripts allow-popups'
+        referrerPolicy='no-referrer'
+        className='h-full w-full border-0 bg-background'
+      />
+    </UnmountWhenCovered>
   );
 }

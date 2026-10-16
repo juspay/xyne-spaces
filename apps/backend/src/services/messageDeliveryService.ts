@@ -188,6 +188,7 @@ export async function deliverServerMessage(
       isBot,
       createdAt: new Date(timestamp),
       uploadedFiles,
+      emitsMessageReceivedViaSideEffects: true,
     });
 
     resolvedConversationId = result.conversation.conversationId;

@@ -1,3 +1,4 @@
+import type { Call } from '@prisma/client';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
@@ -7,6 +8,7 @@ import { activityService } from '@/services/activity/activityService';
 import { callTimeoutWorker } from '@/workers/callTimeoutWorker';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { MessagesSideEffectHandler } from '@/zero/side-effects/tables/messages-handler';
+import { validateCallTx } from '@/bypassAcl/transactions/callValidationWorker';
 import {
   ActivityClassification,
   MessageType,
@@ -273,6 +275,25 @@ class CallSideEffectService {
     }
 
     /**
+     * Ends a call whose LiveKit room is gone (or empty) without anyone having hung up:
+     * marks it ENDED, closes out the call system message in the same transaction, then
+     * emits the Calls-dashboard analytics. Shared by the CallValidationWorker sweep and
+     * the calls admin panel's force-end, so both leave the call in the same state.
+     */
+    async endOrphanedCall(call: Call, reason: string): Promise<void> {
+        const endedAt = new Date();
+
+        await validateCallTx(call.id, endedAt, call.externalId, call.status, reason, call);
+
+        // Emit analytics events (call_ended + per-participant) for the Calls dashboards
+        try {
+            await this.logCallAnalytics({ ...call, callOrigin: call.callOrigin as CallOrigin }, endedAt);
+        } catch (analyticsError) {
+            this.logger.error(`Failed to log call analytics for ${call.externalId}:`, analyticsError);
+        }
+    }
+
+    /**
      * Emit analytics_event logs when a call ends
      * Emits a single `call_ended` event
      */
@@ -406,7 +427,7 @@ class CallSideEffectService {
             });
 
             if (!call) {
-                this.logger.warn(`Call not found for id ${callId} — skipping external chat summary`);
+                this.logger.warn(`Call not found for ${callExternalId} — skipping external chat summary`);
                 return;
             }
 

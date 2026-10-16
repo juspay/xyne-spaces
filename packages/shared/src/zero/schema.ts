@@ -636,6 +636,7 @@ export const userPreferenceTable = table('user_preferences')
     channelWideMentionsEnabled: boolean(),      // Receive @channel and @here notifications
     notificationKeywords: string().optional(), // Stringified JSON array of keywords (max 50, each <= 80 chars)
     showThreadTags: boolean(), // Render thread classification chips in chat; opt-in
+    recordingDefaultSummaryTemplateId: string().optional(), // Recording summaries: used instead of the LLM pick ('default' = code-backed; null = auto-pick)
     createdAt: number(),
     updatedAt: number(),
   })
@@ -807,6 +808,19 @@ export const channelBoardMappingTable = table('channel_board_mappings' /* Channe
     createdBy: string(),
     createdAt: number(),
     updatedAt: number(),
+  })
+  .primaryKey('id');
+
+export const channelPublishedTabTable = table('channel_published_tabs' /* ChannelPublishedTab */)
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    channelId: string(),
+    entityType: string(),
+    entityId: string(),
+    position: number(),
+    publishedBy: string(),
+    createdAt: number(),
   })
   .primaryKey('id');
 
@@ -1743,7 +1757,6 @@ export const emailChannelPreferenceTable = table('email_channel_preferences')
     deskReportRangeDays: number().optional(),
     duplicateScopeConfig: string().optional(),
     slackDeskTriggerMode: enumeration<SlackDeskTriggerMode>().optional(),
-    deskAppIds: string().optional(),
   })
   .primaryKey('channelId');
 
@@ -2010,7 +2023,7 @@ export const applicationTable = table('applications')
     mainReleaseBoardId: string().optional(),
     channelId: string().optional(),
     regex: string(),
-    repoUrl: string(),
+    repoId: string().optional(),
     deployedCommit: string().optional(),
     deployedVersion: string().optional(),
     lastDeployedAt: number().optional(),
@@ -3457,6 +3470,11 @@ export const channelTableRelationships = relationships(channelTable, ({ one, man
     destField: ['channelId'],
     destSchema: channelBoardMappingTable,
   }),
+  publishedTabs: many({
+    sourceField: ['id'],
+    destField: ['channelId'],
+    destSchema: channelPublishedTabTable,
+  }),
   ticketDescriptions: many({
     sourceField: ['id'],
     destField: ['channelId'],
@@ -3476,6 +3494,17 @@ export const channelBoardMappingTableRelationships = relationships(
       sourceField: ['boardId'],
       destField: ['id'],
       destSchema: boardTable,
+    }),
+  }),
+);
+
+export const channelPublishedTabTableRelationships = relationships(
+  channelPublishedTabTable,
+  ({ one }) => ({
+    channel: one({
+      sourceField: ['channelId'],
+      destField: ['id'],
+      destSchema: channelTable,
     }),
   }),
 );
@@ -4733,6 +4762,12 @@ export const formEntityValuesTableRelationships = relationships(formEntityValues
     destField: ['entityId'],
     destSchema: messageAttachmentTable,
   }),
+  // The channel a CHANNEL row describes (entityId = channels.id); other rows match none.
+  channel: one({
+    sourceField: ['entityId'],
+    destField: ['id'],
+    destSchema: channelTable,
+  }),
 }));
 
 export const ticketStageRequestTableRelationships = relationships(ticketStageRequestTable, ({ one }) => ({
@@ -4806,6 +4841,11 @@ export const applicationTableRelationships = relationships(applicationTable, ({ 
     sourceField: ['mainReleaseBoardId'],
     destField: ['id'],
     destSchema: boardTable,
+  }),
+  repo: one({
+    sourceField: ['repoId'],
+    destField: ['id'],
+    destSchema: repoTable,
   }),
 }));
 
@@ -5042,6 +5082,7 @@ export const schema = createSchema({
     guestAccessTable,
     channelTable,
     channelBoardMappingTable,
+    channelPublishedTabTable,
     channelStatsTable,
     channelParticipantTable,
     channelUserStatusTable,
@@ -5179,6 +5220,7 @@ export const schema = createSchema({
     conversationParticipantTableRelationships,
     channelTableRelationships,
     channelBoardMappingTableRelationships,
+    channelPublishedTabTableRelationships,
     channelStatsTableRelationships,
     repoTableRelationships,
     sdlcEntityLinkTableRelationships,
@@ -5321,6 +5363,7 @@ export type Invitation = Row<typeof schema.tables.invitations>;
 export type GuestAccess = Row<typeof schema.tables.guest_access>;
 export type Channel = Row<typeof schema.tables.channels>;
 export type ChannelBoardMapping = Row<typeof schema.tables.channel_board_mappings>;
+export type ChannelPublishedTab = Row<typeof schema.tables.channel_published_tabs>;
 export type ChannelStats = Row<typeof schema.tables.channel_stats>;
 export type ChannelParticipant = Row<typeof schema.tables.channel_participants>;
 export type ChannelUserStatus = Row<typeof schema.tables.channel_user_status>;

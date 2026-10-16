@@ -14,9 +14,14 @@
  *   3. Fill arguments that are required by a schema but meaningless to a caller:
  *      ACL hints like `isMember`, page defaults, `null` placeholders for optional
  *      filters that are nullable rather than omissible.
+ *
+ * Message bodies also get their mention shorthand (`@Name[userId]`) expanded to
+ * the markup that makes a mention notify — see `mentions.ts`.
  */
 
 import { randomUUID } from 'crypto';
+import { SdkApiError } from '../errors';
+import { expandMentions } from './mentions';
 import type { V1Parsed, V1Parser } from './types';
 
 /** Server-side row id, in the same format Zero's own clients generate. */
@@ -349,7 +354,7 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
       userIds: args.userIds,
       role: args.role,
       timestamp: now(),
-      participantIds: args.userIds.map(() => newId()),
+      participantIds: newIdMap(Array.isArray(args.userIds) ? args.userIds : []),
     },
   }),
   'canvases.addGroupParticipant': (args): V1Parsed => ({
@@ -538,6 +543,11 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
       start: args.start ?? null,
     },
   }),
+  'channels.listUserStatuses': (args): V1Parsed => ({
+    args: {},
+    mapResult: (data) =>
+      (data as Array<{ channelId: string }>).filter((row) => row.channelId === args.channelId),
+  }),
   'channels.hasBoards': (args): V1Parsed => ({
     args: { channelId: args.channelId },
     // The query is a one-row probe; the caller asked a yes-or-no question.
@@ -644,7 +654,7 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
   'conversations.create': (args): V1Parsed => ({
     args: {
       channelId: args.channelId,
-      content: args.content,
+      content: expandMentions(args.content),
       type: args.type ?? 'USER',
       conversationId: args.conversationId,
       messageId: args.messageId,
@@ -687,7 +697,7 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
   }),
   'conversations.listForUser': (args): V1Parsed => ({
     args: {
-      userId: args.userId,
+      userId: args.userId ?? '',
       limit: args.limit ?? 50,
       start: args.start ?? null,
     },
@@ -706,7 +716,19 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
     args: { ...args, timestamp: now() },
   }),
   'dashboards.updateLayout': (args): V1Parsed => ({
-    args: { updates: args.updates, timestamp: now() },
+    args: {
+      // A tile's position is stored as its serialized grid cell, keyed by query id.
+      updates: (Array.isArray(args.updates) ? args.updates : []).map(
+        (update: { id: string; position: unknown }) => ({
+          id: update.id,
+          position:
+            update.position && typeof update.position === 'object'
+              ? JSON.stringify(update.position)
+              : update.position,
+        }),
+      ),
+      timestamp: now(),
+    },
   }),
   'dashboards.upsertQuery': (args): V1Parsed => ({
     args: { ...args, timestamp: now() },
@@ -716,6 +738,13 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
   }),
 
   // ----- email -----
+  'email.setChannelPreference': (args): V1Parsed => ({
+    args: {
+      ...args,
+      // Stored as one comma-separated string.
+      ...(Array.isArray(args.defaultCc) ? { defaultCc: args.defaultCc.join(',') } : {}),
+    },
+  }),
   'email.listForConversations': (args): V1Parsed => ({
     args: {
       conversationIds: args.conversationIds,
@@ -847,7 +876,7 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
   'messages.send': (args): V1Parsed => ({
     args: {
       conversationId: args.conversationId,
-      content: args.content,
+      content: expandMentions(args.content),
       type: args.type ?? 'USER',
       messageId: args.messageId,
       timestamp: now(),
@@ -856,6 +885,9 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
         : {}),
       ...(args.attachmentIds ? { attachmentIds: args.attachmentIds } : {}),
     },
+  }),
+  'messages.update': (args): V1Parsed => ({
+    args: { ...args, content: expandMentions(args.content) },
   }),
   'messages.react': (args): V1Parsed => ({
     args: {
@@ -880,9 +912,6 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
   'messages.closeSlashCommandArtifact': (args): V1Parsed => ({
     args: { ...args, timestamp: now() },
   }),
-  'messages.listDrafts': (args): V1Parsed => ({
-    args: { limit: args?.limit ?? 50 },
-  }),
   'messages.editDraft': (args): V1Parsed => ({
     args: { id: args.id, content: args.content, timestamp: now() },
   }),
@@ -893,7 +922,7 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
     args: {
       id: args.id,
       channelId: args.channelId,
-      content: args.content,
+      content: expandMentions(args.content),
       scheduledFor: args.scheduledFor,
       ...(args.conversationId ? { conversationId: args.conversationId } : {}),
       timestamp: now(),
@@ -910,7 +939,7 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
       },
   }),
   'messages.editScheduled': (args): V1Parsed => ({
-    args: { id: args.id, content: args.content, updatedAt: now() },
+    args: { id: args.id, content: expandMentions(args.content), updatedAt: now() },
   }),
   'messages.sendScheduledNow': (args): V1Parsed => ({
     args: { id: args.id, timestamp: now() },
@@ -1049,7 +1078,7 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
       ...args,
       isMember: args.isMember ?? true,
       // Required by the query even when empty.
-      dynamicFieldFilters: [],
+      dynamicFieldFilters: args.dynamicFieldFilters ?? [],
     },
   }),
   'supportTickets.get': (args): V1Parsed => ({
@@ -1077,7 +1106,10 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
     },
   }),
   'supportTickets.listForEmailChannels': (args): V1Parsed => ({
-    args: { ...(args ?? {}) },
+    args: {
+      ...(args.channelId ? { channelId: args.channelId } : {}),
+      ...(args.merchantMid ? { merchantMid: args.merchantMid } : {}),
+    },
   }),
   'supportTickets.listKanban': (args): V1Parsed => ({
     args: {
@@ -1230,10 +1262,8 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
   }),
 
   // ----- userGroups -----
-  // Both retargeted onto the full list, which is one row per group in the
-  // workspace, and narrowed here.
   'userGroups.getMany': (args): V1Parsed => ({
-    args: { userGroupIds: Array.isArray(args.groupIds) ? args.groupIds : [] },
+    args: { groupIds: Array.isArray(args.groupIds) ? args.groupIds : [] },
   }),
   'userGroups.search': (args): V1Parsed => {
     const needle = String(args.query ?? '').trim().toLowerCase();
@@ -1279,9 +1309,20 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
   'workspace.shareLink': (args): V1Parsed => ({
     args: { ...args, createdAt: now() },
   }),
-  'workspace.createSdlcTrack': (args): V1Parsed => ({
-    args: { id: newId(), timestamp: now(), ...args },
-  }),
+  'workspace.createSdlcTrack': (args): V1Parsed => {
+    const trackId = newId();
+    return {
+      args: {
+        id: trackId,
+        linkId: newId(),
+        channelId: args.channelId,
+        name: args.name,
+        ...(args.description !== undefined ? { description: args.description } : {}),
+        timestamp: now(),
+      },
+      generated: { trackId },
+    };
+  },
   'workspace.updateSdlcTrack': (args): V1Parsed => ({
     args: { timestamp: now(), ...args },
   }),
@@ -1301,7 +1342,13 @@ export function parseV1Args(op: string, args: unknown): V1Parsed {
     ? V1_PARSERS[op]
     : undefined;
   if (!parser) return { args: args ?? {} };
-  return parser((args ?? {}) as Record<string, unknown>);
+  try {
+    return parser((args ?? {}) as Record<string, unknown>);
+  } catch (err) {
+    // A parser only throws when an argument it reshapes is missing or the wrong
+    // shape — a caller mistake, not a server fault.
+    throw new SdkApiError('validation_failed', `Invalid arguments for "${op}".`, { cause: err });
+  }
 }
 
 export { newId, newIdMap, now };

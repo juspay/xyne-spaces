@@ -195,6 +195,22 @@ const handlers: ExperimentHandlers = {
       );
     }
     const summary = summaryLines.join("\n");
+    // In a chat: the write-up as a PDF a phone can open, the zip as whatever
+    // the messenger allows (a link on WhatsApp).
+    if (ctx.channelDelivery) {
+      try {
+        const { renderMarkdownToPdf } = await import("../result-pdf.js");
+        const pdf = await renderMarkdownToPdf(markdown, { title: "Experiment findings" });
+        await ctx.attach({ fileName: filename.replace(/\.md$/i, ".pdf"), mimeType: "application/pdf", content: pdf, summary });
+        if (bundle) {
+          await ctx.attach({ fileName: bundle.filename, mimeType: "application/zip", content: bundle.buffer, summary: "The proof bundle (zip)." });
+        }
+      } catch (err) {
+        log.warn("[experiment] findings delivery to chat failed; posting inline fallback", { error: errMsg(err) });
+        await ctx.reply(`${summary}\n\n${markdown}`, REPLY_LABEL);
+      }
+      return;
+    }
     try {
       await postGeneratedMarkdownFile({
         channelId: payload.channelId,

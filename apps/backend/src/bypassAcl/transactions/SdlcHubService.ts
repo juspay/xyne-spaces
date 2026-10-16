@@ -2,13 +2,13 @@ import { transaction } from '../base';
 import { withSdlcSearchSync, type SdlcSearchChanges } from '@/zero/vespa-injection/core/sdlc-sync';
 import type { SdlcActor } from '@/sdlc/types';
 import { AppError } from '@/middleware/errorHandler';
-import { sdlcChannelCanvasParticipant } from '@/sdlc/sdlcCanvasAccess';
+import { sdlcCanvasParticipants } from '@/sdlc/sdlcCanvasAccess';
 import { newConnectId, createConnectGroupForEntity, ConnectEntityType } from '@/database/connectGroup';
 import { ensureHubKnowledgeFolder, placeHubItem, ensureHubWikiFolder, ensureRepositoryWikiFolder } from '@/sdlc/hubFolders';
 import { ensureLink, refileFolderEdges } from '@/sdlc/entityLinkService';
 import { SdlcHubService, SDLC_FOLDERS, channelRepository, linkRelatedCanvases } from '@/sdlc/SdlcHubService';
 import { type ParsedRepository, sdlcVcs } from '@/sdlc/vcs';
-import { CanvasVisibility, isSdlcTreeItemType, SDLC_CONTAINMENT_RELATION, SDLC_TRACK_FLAT_RELATION, SDLC_HUB_KNOWLEDGE_ARTIFACT_TYPE, SDLC_ARTIFACT_REPOSITORY_RELATION, SDLC_TRACK_MEMBERSHIP_RELATION, ChannelAddUserPolicy, ChannelRole, ChannelScopeType, ChannelType, ChannelVisibility, normalizeChannelName, validateChannelName, SDLC_MEMBERSHIP_RELATION } from '@xyne/shared';
+import { BoardType, CanvasVisibility, isSdlcTreeItemType, SDLC_CONTAINMENT_RELATION, SDLC_TRACK_FLAT_RELATION, SDLC_HUB_KNOWLEDGE_ARTIFACT_TYPE, SDLC_ARTIFACT_REPOSITORY_RELATION, SDLC_TRACK_MEMBERSHIP_RELATION, ChannelAddUserPolicy, ChannelRole, ChannelScopeType, ChannelType, ChannelVisibility, normalizeChannelName, validateChannelName, SDLC_MEMBERSHIP_RELATION } from '@xyne/shared';
 import { Prisma } from '@prisma/client';
 import { BlockNoteBlock } from '@/types/blockNoteTypes';
 import { randomUUID } from 'crypto';
@@ -113,7 +113,7 @@ export function createArtifactFromClawTx(self: SdlcHubService, actor: SdlcActor,
         connectId,
         metadata: {} as Prisma.InputJsonValue,
         participants: {
-          create: sdlcChannelCanvasParticipant(actor.workspaceId, channelId, connectId),
+          create: sdlcCanvasParticipants(actor.workspaceId, channelId, actor.userId, connectId),
         },
       },
     });
@@ -468,9 +468,10 @@ export async function createSdlcChannel(tx: TransactionClient, actor: SdlcActor,
 
     // Dual-write: mirror the channel→project board set into ChannelBoardMapping so
     // downstream consumers resolve boards via the mapping, not channel.projectId.
-    // SDLC channels always have a project; default = oldest board.
+    // SDLC channels always have a project; default = oldest board. Release boards
+    // belong to the hub whose release config owns them, which links them itself.
     const boards = await tx.board.findMany({
-      where: { projectId: input.projectId },
+      where: { projectId: input.projectId, boardType: { not: BoardType.RELEASE } },
       orderBy: { createdAt: 'asc' },
       select: { id: true },
     });

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { pinRunOptimizations } from "../src/optimizations.js";
 import { verifyResponse, type ResponseVerdict } from "../src/verify-response.js";
 import { buildPrecheckQuestions, requirementLines, scorePrecheck } from "../src/verify-prefilter.js";
-import type { JevAnswer } from "../src/jev.js";
+import type { XorAnswer } from "../src/xor.js";
 
 const input = {
   task: "How many open PRs are there?",
@@ -10,7 +10,7 @@ const input = {
   draft: "There are 27 open PRs.",
 };
 
-const noul = (v: number): JevAnswer => ({ type: "noul", noul: v });
+const noul = (v: number): XorAnswer => ({ type: "noul", noul: v });
 
 function inRun<T>(opts: string, fn: () => Promise<T>): Promise<T> {
   return new Promise((resolve, reject) => {

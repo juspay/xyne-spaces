@@ -99,7 +99,23 @@ export const useVisibleProjects = (): VisibleProject[] => {
   );
 };
 
-export const useChannel = (channelId: string): Channel | undefined => {
+export interface ChannelLookup {
+  channel: Channel | undefined;
+  /**
+   * True while the channel is absent from the channel sets and the
+   * `getChannelById` fallback has not completed yet. Callers that render an
+   * "Unknown channel" label should wait for this to be false.
+   */
+  isResolving: boolean;
+}
+
+/**
+ * Resolves a channel by id. Reads from the shared `allChannels` / `visibleChannels`
+ * sets first; only when the id is missing from a hydrated set does it fall back to a
+ * `getChannelById` Zero query. `channel` is undefined after resolution only when the
+ * backend has no channel with that id that the user can see.
+ */
+export const useChannelLookup = (channelId: string): ChannelLookup => {
   const channel = useSelector(
     stateMachineActor,
     state => state.context.allChannels.find(c => c.id === channelId),
@@ -124,7 +140,34 @@ export const useChannel = (channelId: string): Channel | undefined => {
       a?.createdAt === b?.createdAt &&
       a?.showTicketsTabTicketsInChat === b?.showTicketsTabTicketsInChat,
   );
-  return channel || visibleChannel;
+  const cachedChannel = channel || visibleChannel;
+
+  // Before the channel sets are hydrated every id is "missing"; firing a point
+  // query per rendered channel chip then would flood Zero on initial load.
+  const channelsHydrated = useSelector(
+    stateMachineActor,
+    state => state.context.allChannels.length > 0 || state.context.visibleChannels.length > 0,
+  );
+
+  const needsFallback = !!channelId && !cachedChannel && channelsHydrated;
+
+  const [fallbackChannel, fallbackDetails] = useQuery(
+    queries.getChannelById({ channelId }),
+    { enabled: needsFallback },
+  );
+
+  if (cachedChannel) return { channel: cachedChannel, isResolving: false };
+  if (!needsFallback) {
+    return { channel: undefined, isResolving: !!channelId && !channelsHydrated };
+  }
+  return {
+    channel: (fallbackChannel as Channel | undefined) ?? undefined,
+    isResolving: !fallbackChannel && fallbackDetails.type !== 'complete',
+  };
+};
+
+export const useChannel = (channelId: string): Channel | undefined => {
+  return useChannelLookup(channelId).channel;
 };
 
 export const useVisibleChannel = (channelId: string): VisibleChannel | undefined => {

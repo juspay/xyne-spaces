@@ -1,6 +1,6 @@
 # `/api/sdk` — the Xyne Spaces public API
 
-The HTTP surface behind [`@xyne/spaces-sdk`](../../../../packages/xyne-spaces-sdk).
+The HTTP surface behind [`@xyne/spaces-sdk`](https://www.npmjs.com/package/@xyne/spaces-sdk).
 It authenticates via session cookies (same as the dashboard), then hands the work
 to code the product itself already runs.
 
@@ -58,7 +58,7 @@ second thing to keep correct.
 | `GET` | `/api/sdk/health` | Read availability. **Unauthenticated** |
 
 Both are mounted *before* the auth middleware on purpose, so a probe can tell
-"the API is misconfigured" from "your key is bad".
+"the API is misconfigured" from "your session is bad".
 
 ### v1
 
@@ -117,10 +117,10 @@ multipart uploads, search, and identity:
 
 | | |
 |---|---|
-| `GET /api/sdk/v1/me` | Who the credential acts as, plus `keyExpiresAt` |
+| `GET /api/sdk/v1/me` | Who the session acts as |
 | `POST /api/sdk/v1/channels` | Create a channel |
 | `POST /api/sdk/v1/channels/check-duplicate` | Name availability |
-| `POST /api/sdk/v1/tickets` | Create a ticket (sequence allocator) |
+| `POST /api/sdk/v1/tickets` | Create a ticket (sequence allocator). A `stageName` must name a stage on `boardId` (which is then required), and is refused on Flow boards; the app's own route would silently use the first stage instead |
 | `POST /api/sdk/v1/channels/:channelId/conversations` | Start a thread with attachments |
 | `POST /api/sdk/v1/attachments` | Upload entity attachments |
 | `POST /api/sdk/v1/draft-attachments` | Upload draft attachments |
@@ -196,6 +196,8 @@ scope apply as they do for the dashboard.
 | `POST /api/sdk/v1/canvases/:canvasId/labels` | `{ names }` → `{ labels }` |
 | `POST /api/sdk/v1/canvases/:canvasId/labels/remove` | `{ labelIds }` → `{}` (POST: the product route is a DELETE with a body) |
 | `PATCH /api/sdk/v1/tickets/:ticketId` | `{ assigneeId?, stage?, groupId?, title?, description?, priority?, status?, eta?, tags?, formFields? }` → `{ updated }`. Requires the `TICKETS` write grant and a ticket the caller can read in their workspace (404 otherwise) |
+| `POST /api/sdk/v1/sub-tickets/link` | `{ ticketId, mappedTicketId, subTicketTitle? }` → `{ subTicketId, mappingId }`. Attaches the existing ticket `mappedTicketId` under `ticketId`, as the app's "Add existing sub-ticket" does: write access to the parent, read access to the child, manual boards only, no cycles, one parent per ticket (otherwise 409) |
+| `POST /api/sdk/v1/sub-tickets/unlink` | `{ mappingId }` → empty `204`. Removes the link and its sub-ticket row; the child ticket itself is kept |
 
 #### Desk metrics and desk report
 
@@ -288,7 +290,7 @@ produce lands on exactly one of them.
 | Code | Status | Retryable | Means |
 |---|---|---|---|
 | `validation_failed` | 400 | | Bad arguments, **or a business rule refused it** |
-| `unauthenticated` | 401 | | Key missing, malformed, expired, or revoked |
+| `unauthenticated` | 401 | | Session missing, invalid, or expired |
 | `forbidden` | 403 | | The Zero ACL said no |
 | `not_found` | 404 | | No such endpoint, operation, or visible resource |
 | `not_connected` | 409 | | The viewer has no usable connection for this connector |
@@ -307,7 +309,7 @@ share a code and differ in `message`.
 Three behaviours worth knowing:
 
 - **5xx messages are replaced** with a generic string, so SQL and connection
-  detail never reach a caller. The cause is logged against the `request_id`.
+  detail never reach a caller. The cause is in the call log, under the `request_id`.
 - **4xx messages pass through verbatim**, and that is the point of routing
   business-rule failures to 400 rather than 500. The mutator catalog raises
   plain `Error`s at ~485 sites carrying genuine user-facing text ("Ticket not
@@ -320,7 +322,33 @@ Three behaviours worth knowing:
   and refused.
 
 `X-Request-Id` is echoed on every response, and a caller-supplied one is honoured
-so a retry chain can be correlated.
+so a retry chain can be correlated. It is the same id the app-wide request logger
+stamps on every log line, so the `request_id` from an error envelope finds the
+whole request in the logs: auth, the call log, and anything the mutator logged.
+
+### The call log
+
+`callLog` in `handler.ts` writes one `[sdk] call` line per request, when the
+response finishes: info for 2xx/3xx, warn for 4xx, error for 5xx (with the
+cause). It is the only error log this API writes.
+
+```jsonc
+{
+  "requestId": "…",          // = X-Request-Id
+  "userId": "…", "workspaceId": "…",
+  "op": "messages.send",     // SDK operation id, or "GET /search" for a path-addressed route
+  "kind": "mutator",         // query | mutator | direct | unknown
+  "method": "POST", "path": "/api/sdk/v1/mutate",
+  "status": 200, "code": null, "durationMs": 84
+}
+```
+
+Every field comes from the server, never from a header a caller can set, and
+bodies are never logged: arguments and results carry message text, emails and
+ticket content. A request rejected before an operation resolves (failed auth,
+unknown path) still gets a line, without `op`; a client that hangs up first is
+logged as `499` with `aborted: true`. Device-flow sign-in (`/api/sdk/auth/sso`)
+is mounted ahead of this router and is not in the call log.
 
 ---
 
@@ -375,7 +403,7 @@ under `/api/sdk` — a URL-keyed ACL, or nothing.
 |---|---|---|
 | `SDK_API_ENABLED` | `false` | Master switch. The router is not mounted when false |
 | `DATABASE_READ_REPLICA_POOL_URL` | — | Where reads go. Required in production; outside it, falls back to the primary pool |
-| `JWT_SECRET` | — | Signs and verifies keys. Already required by the app for session tokens |
+| `JWT_SECRET` | — | Signs and verifies session tokens. Already required by the app |
 
 No dedicated signing key, no client registry, no callback URLs.
 
@@ -400,11 +428,9 @@ spend their own API budget.
 ## Extending it
 
 **A new Zero query or mutator** needs one entry in `v1/mapper.ts` to be
-reachable, plus one in `v1/parser.ts` if its arguments need shaping.
-`pnpm run sdk:coverage` fails until it is either mapped or listed in
-`v1/exclusions.json` with a written reason — and it checks both directions, so a
-mapper entry no SDK method calls is an error too. That gate is what makes
-"complete" verifiable.
+reachable, plus one in `v1/parser.ts` if its arguments need shaping. If it is
+deliberately not exposed, list it in `v1/exclusions.json` with a written reason
+instead. Nothing checks this automatically, so keep the two in step by hand.
 
 `v1/exclusions.json` is the other half of `v1/mapper.ts`: between them they
 partition the catalog, and every operation must be in exactly one. An entry
@@ -423,10 +449,9 @@ the versioned surface is for.
 `controller` (writes an Express response, gets captured) or a `service` (returns a
 value). Never both — the type enforces it.
 
-**Changing the error envelope** means `handler.ts` and `errors.ts` together.
-The SDK's `npm run contract-check` reads `errors.ts` and `schemas/search.ts`
-directly, so a code or a search parameter that changes here without the SDK
-following fails that build.
+**Changing the error envelope** means `handler.ts` and `errors.ts` together,
+and the SDK's `core/errors.ts` by hand: nothing checks that the two agree, so a
+code or a search parameter changed here needs a matching SDK change.
 
 **A breaking change to the surface** is what `v2/` is for. Retargeting an
 existing id onto a different catalog operation is fine and needs no new version;

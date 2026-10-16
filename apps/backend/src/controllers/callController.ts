@@ -30,6 +30,7 @@ import { normalizeStoragePath } from '@xyne/storage';
 import { sdlcCallLinkSchema, type SdlcCallLink } from '@xyne/shared';
 import { callRecordingService } from '@/services/callRecordingService';
 import { isRecording, isRecordingType } from '@/utils/callTypeUtils';
+import { isTranscriptUnlinked } from '@/utils/transcriptUnlink';
 import { config } from '@/config/env';
 import { callDocumentService, numberTranscriptSegments, buildParticipantMap } from '@/services/callDocumentService';
 import {
@@ -50,10 +51,18 @@ import {
   ORIGINAL_TRANSCRIPT_LANGUAGE,
 } from '@xyne/shared';
 import { storageService } from '@/services/storage';
-import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
+import {
+  CallVespaFeedSource,
+  queueCallVespaFeed,
+  queueRecordingTranscriptDelete,
+  queueTranscriptFieldsUpdate,
+  type TranscriptDocField,
+} from '@/services/callVespaQueue';
 import { callShareService } from '@/services/callShareService';
 import { callNotesCanvasService } from '@/services/callNotesCanvasService';
 import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
+import { acquireSummaryGenerationLock } from '@/utils/summaryGenerationLock';
+import { releaseLock } from '@/utils/distributedLock';
 import { summaryTemplateService } from '@/services/summaryTemplateService';
 import { canvasAuthService } from '@/services/canvasAuthService';
 import { validateOwnerInChannel } from '@/sdlc/entityLinkService';
@@ -812,6 +821,18 @@ export class CallController {
             logger.info(`[${callExternalId}] reason=room_not_active`);
             return;
           }
+          // The call record is the source of truth for whether the call is over. Once
+          // every human leaves, the webhook marks it ENDED and the agent leaves too, but
+          // the room stays open for emptyTimeout. Someone who joins late lands in that
+          // room alone, which used to look like a missing agent.
+          const callRecord = await db.call.findUnique({
+            where: { externalId: callExternalId! },
+            select: { status: true },
+          });
+          if (callRecord && (callRecord.status === CallStatus.ENDED || callRecord.status === CallStatus.CANCELLED)) {
+            logger.info(`[${callExternalId}] agent_join_check_skipped | reason=call_${callRecord.status.toLowerCase()}`);
+            return;
+          }
           const participants = await livekitService.listParticipants(callExternalId!);
           // A room outlives its last participant (emptyTimeout), so a call that ended
           // inside the 30s shows up here as an active room with nobody in it; that is
@@ -1406,12 +1427,17 @@ export class CallController {
       let identifiedTranscriptContent: string | null = null;
       let hasTranscript: boolean;
       let hasIdentifiedTranscript: boolean;
+      // Admin unlink keeps the storage files, and every read below goes to storage by
+      // call id, so an unlinked transcript has to be treated as absent here.
+      const transcriptUnlinked = isTranscriptUnlinked(call);
 
       if (scope === 'metadata') {
-        [hasTranscript, hasIdentifiedTranscript] = await Promise.all([
-          transcriptService.transcriptExists(call.externalId),
-          transcriptService.identifiedTranscriptExists(call.externalId),
-        ]);
+        [hasTranscript, hasIdentifiedTranscript] = transcriptUnlinked
+          ? [false, false]
+          : await Promise.all([
+              transcriptService.transcriptExists(call.externalId),
+              transcriptService.identifiedTranscriptExists(call.externalId),
+            ]);
       } else {
         if (call.transcript) {
           try {
@@ -1423,10 +1449,12 @@ export class CallController {
         }
 
         // Fetch real-time identified transcript (written during call by the Python agent)
-        try {
-          identifiedTranscriptContent = await transcriptService.getIdentifiedTranscriptContent(call.externalId);
-        } catch (fetchError) {
-          logger.warn(`Failed to fetch identified transcript: ${fetchError}`);
+        if (!transcriptUnlinked) {
+          try {
+            identifiedTranscriptContent = await transcriptService.getIdentifiedTranscriptContent(call.externalId);
+          } catch (fetchError) {
+            logger.warn(`Failed to fetch identified transcript: ${fetchError}`);
+          }
         }
         hasTranscript = !!transcriptContent;
         hasIdentifiedTranscript = !!identifiedTranscriptContent;
@@ -1701,6 +1729,11 @@ export class CallController {
           : {}),
       });
 
+      const changedFields: TranscriptDocField[] = [];
+      if (input.title) changedFields.push('fileName');
+      if (resolvedLabels) changedFields.push('labels');
+      void queueTranscriptFieldsUpdate(call, changedFields);
+
       // For headless recordings, update the system message content
       if (input.title) {
         try {
@@ -1822,14 +1855,25 @@ export class CallController {
         return;
       }
 
+      // Shared with every other summary entry point (admin panel included): two
+      // overlapping runs would overwrite each other's detailedSummaryStatus.
+      const lockHandle = await acquireSummaryGenerationLock(call.externalId);
+      if (!lockHandle) {
+        res.status(409).json({ success: false, error: 'A summary is already being generated' });
+        return;
+      }
+
       // Fire-and-forget: the service owns every status transition ('pending'
       // at start, 'ready'/'failed' at the end) plus the completion
       // notification, so holding this HTTP request open for a minutes-long
-      // LLM run adds nothing except timeout risk.
+      // LLM run adds nothing except timeout risk. The lock is released when it settles.
       void noteTakerTranscriptService
         .regenerateSummary(call, input.summaryTemplateId, input.modelType)
         .catch(error => {
           logger.error(`[${callId}] Background summary regeneration threw`, error);
+        })
+        .finally(() => {
+          void releaseLock(lockHandle);
         });
 
       res.status(202).json({ success: true, status: 'pending' });
@@ -2017,7 +2061,8 @@ export class CallController {
         return;
       }
 
-      const transcript = await transcriptService.getTranscriptContent(callId);
+      // An admin-unlinked transcript still sits in storage (translations included); treat it as absent.
+      const transcript = isTranscriptUnlinked(call) ? null : await transcriptService.getTranscriptContent(callId);
       if (transcript === null) {
         res.status(404).json({ success: false, error: 'Transcript not available for this call' });
         return;
@@ -2204,7 +2249,9 @@ export class CallController {
       }
 
       // 3. Get transcript content
-      const transcriptContent = await transcriptService.getTranscriptContent(call.externalId);
+      const transcriptContent = isTranscriptUnlinked(call)
+        ? null
+        : await transcriptService.getTranscriptContent(call.externalId);
       if (!transcriptContent) {
         res.status(404).json({ success: false, error: 'Transcript not available for this call' });
         return;
@@ -2308,19 +2355,32 @@ export class CallController {
       }
 
       // 3. Get transcript content
-      const transcriptContent = await transcriptService.getTranscriptContent(call.externalId);
+      const transcriptContent = isTranscriptUnlinked(call)
+        ? null
+        : await transcriptService.getTranscriptContent(call.externalId);
       if (!transcriptContent) {
         res.status(404).json({ success: false, error: 'Transcript not available for this call' });
         return;
       }
 
-      // 4. Generate detailed summary and post to conversation
-      const result = await callDocumentService.generateAndPostDetailedSummary(
-        callId,
-        transcriptContent,
-        callMessage.conversationId,
-        customPrompt
-      );
+      // 4. Generate detailed summary and post to conversation, under the lock every
+      // summary entry point shares so runs can't overlap.
+      const lockHandle = await acquireSummaryGenerationLock(call.externalId);
+      if (!lockHandle) {
+        res.status(409).json({ success: false, error: 'A summary is already being generated' });
+        return;
+      }
+      let result: Awaited<ReturnType<typeof callDocumentService.generateAndPostDetailedSummary>>;
+      try {
+        result = await callDocumentService.generateAndPostDetailedSummary(
+          callId,
+          transcriptContent,
+          callMessage.conversationId,
+          customPrompt
+        );
+      } finally {
+        await releaseLock(lockHandle);
+      }
 
       if (!result.success) {
         res.status(500).json({ success: false, error: result.error || 'Failed to generate detailed summary' });
@@ -3077,7 +3137,7 @@ export class CallController {
 
       // stopRecording clears the room-metadata indicator (every stop path) and the
       // egress_ended webhook finalizes the file + posts it to the thread.
-      await callRecordingService.stopRecording(recording);
+      await callRecordingService.stopRecording(recording, call.externalId);
 
       logger.info(`[CallController] stopCallRecording | callId=${callId}, recordingId=${recording.id}, userId=${userId}`);
       res.json({ success: true, recordingId: recording.id });
@@ -3322,6 +3382,8 @@ export class CallController {
 
     // Delete the call record
     await repositories.calls.delete(call.id);
+    // That drops the call doc; the recording's transcript doc goes separately.
+    void queueRecordingTranscriptDelete(call);
   };
 
 
@@ -3642,12 +3704,37 @@ export class CallController {
   };
 
   /**
-   * GET /api/calls/pulse-orgs
+   * GET /api/calls/pulse-orgs?channelId=...
    * Return the list of Pulse organisations so the frontend can let users
    * reassign a merchant without exposing Pulse credentials to the browser.
+   * Only members of a channel in PULSE_ENABLED_CHANNELS may read the list.
    */
-  getPulseOrgs = async (_req: Request, res: Response): Promise<void> => {
+  getPulseOrgs = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const channelId = typeof req.query['channelId'] === 'string' ? req.query['channelId'].trim() : '';
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    if (!channelId) {
+      res.status(400).json({ success: false, error: 'channelId is required' });
+      return;
+    }
+
+    if (!config.pulse.enabledChannels.includes(channelId)) {
+      res.status(403).json({ success: false, error: 'Pulse is not enabled for this channel' });
+      return;
+    }
+
     try {
+      const isMember = await repositories.channelParticipants.isParticipant(channelId, userId);
+      if (!isMember) {
+        res.status(403).json({ success: false, error: 'Not a member of this channel' });
+        return;
+      }
+
       const { pulseService } = await import('@/services/pulseService');
       const orgs = await pulseService.fetchOrgList();
 

@@ -1,0 +1,1 @@
+export { CallTranscriptPanel } from './CallTranscriptPanel';

@@ -1,5 +1,6 @@
 import { useState, type ReactElement } from "react";
 import {
+  AppWindowIcon,
   HashIcon,
   TicketIcon,
   FileTextIcon,
@@ -21,10 +22,10 @@ export interface ReadonlyContextItem {
   title: string;
 }
 
-/** Icon per attached-context type — mirrors the composer's pill row so a chip
- *  reads the same in the transcript as it did when the user attached it. */
-function iconForType(type: string): ReactElement {
-  const props = { size: 13, weight: "regular" as const, className: "shrink-0 text-xyne-fg-muted" };
+/** Icon per attached-context type — shared with the composer's chip rail so a
+ *  chip reads the same in the transcript as it did when the user attached it. */
+export function iconForType(type: string, size = 13): ReactElement {
+  const props = { size, weight: "regular" as const, className: "shrink-0 text-xyne-fg-muted" };
   switch (type) {
     case "channel":
       return <HashIcon {...props} />;
@@ -34,6 +35,8 @@ function iconForType(type: string): ReactElement {
       return <FileTextIcon {...props} />;
     case "call":
       return <PhoneIcon {...props} />;
+    case "app":
+      return <AppWindowIcon {...props} />;
     case "collection":
       return <BookOpenIcon {...props} />;
     case "folder":

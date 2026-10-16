@@ -29,5 +29,6 @@ router.post(
   callController.regenerateSummary,
 );
 router.patch('/:callId', requirePermission('calls:write'), callController.updateScheduledCall);
+router.delete('/:callId', requirePermission('calls:write'), callController.cancelScheduledCall);
 
 export default router;

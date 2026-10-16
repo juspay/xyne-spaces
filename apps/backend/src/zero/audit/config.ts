@@ -1,7 +1,6 @@
 import {
   AuditEntityType,
   deserializeFlowPlan,
-  parseDeskAppIds,
   stringifyAuditValue,
 } from '@xyne/shared';
 import type { AuditResolution } from './resolution';
@@ -172,6 +171,7 @@ const FRT_EMAIL_REPLY = '__emailReply';
 interface DuplicateScopeConfig {
   enabled?: boolean;
   scopeFieldGlobalIds?: string[];
+  lookbackDays?: number | null;
 }
 
 const duplicateScopeFieldIds = (value: unknown): string[] => {
@@ -182,9 +182,18 @@ const duplicateScopeFieldIds = (value: unknown): string[] => {
 const formatDuplicateScope = (value: unknown, res: AuditResolution): string | null => {
   const scope = parseJsonText(value) as DuplicateScopeConfig | null;
   if (!scope || typeof scope !== 'object') return null;
-  if (!scope.enabled) return 'off';
+  if (!scope.enabled) {
+    // The window persists while detection is off; surface it so a window-only
+    // change doesn't log as "off -> off".
+    return typeof scope.lookbackDays === 'number' && scope.lookbackDays > 0
+      ? `off; window: Last ${scope.lookbackDays} days`
+      : 'off';
+  }
   const fields = formatSet(scope.scopeFieldGlobalIds, id => res.globalFieldName(id));
-  return fields ? `on: ${fields}` : 'on';
+  const window = typeof scope.lookbackDays === 'number' && scope.lookbackDays > 0
+    ? `; window: Last ${scope.lookbackDays} days`
+    : '; window: All time';
+  return (fields ? `on: ${fields}` : 'on') + window;
 };
 
 /** Guest visibility is a { key: visible } map where a missing key means visible. */
@@ -502,11 +511,6 @@ export const AUDIT_TABLE_CONFIG: Record<string, AuditTableConfig> = {
       assigneeUserGroupId: (value, res) => (value ? res.userGroupName(String(value)) : null),
       boardId: (value, res) => (value ? res.boardName(String(value)) : null),
       dlAliases: value => formatSet(parseJsonText(value)),
-      // App titles live in claw-auth, out of reach here; the count still says what changed.
-      deskAppIds: value => {
-        const count = parseDeskAppIds(typeof value === 'string' ? value : null).length;
-        return count === 0 ? 'None' : `${count} app${count === 1 ? '' : 's'}`;
-      },
       // Empty means the default: the first email reply stops the clock.
       frtStageNames: value =>
         formatSet(parseJsonText(value), name => (name === FRT_EMAIL_REPLY ? 'Email reply' : name)) ??
@@ -532,6 +536,14 @@ export const AUDIT_TABLE_CONFIG: Record<string, AuditTableConfig> = {
       deskReportRangeDays: 1,
       frtStageNames: null,
     },
+  },
+
+  channel_published_tabs: {
+    resolveScope: async (row, res) =>
+      (await res.isDeskChannel(rowString(row, 'channelId'))) ? deskScope(row) : null,
+    resolveTargetName: async () => 'Desk apps',
+    ignoreFields: ['channelId', 'entityType', 'position', 'publishedBy'],
+    deleteSummary: { field: 'entityId' },
   },
 
   // Category -> user group routing rules (Agent -> Attribution).

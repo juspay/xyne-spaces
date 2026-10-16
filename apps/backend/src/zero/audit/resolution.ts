@@ -19,6 +19,7 @@ export class AuditResolution {
   private readonly globalFieldNameById = new Map<string, string>();
   private readonly userGroupNameById = new Map<string, string>();
   private readonly boardIdsByFormId = new Map<string, string[]>();
+  private readonly isDeskByChannelId = new Map<string, boolean>();
 
   constructor(private readonly lookup: AuditLookup) {}
 
@@ -205,6 +206,15 @@ export class AuditResolution {
       const binding = bindings.find(candidate => candidate.formId === id);
       this.boardIdsByFormId.set(id, binding?.boardIds ?? []);
     }
+  }
+
+  async isDeskChannel(channelId: string): Promise<boolean> {
+    if (!channelId) return false;
+    const cached = this.isDeskByChannelId.get(channelId);
+    if (cached !== undefined) return cached;
+    const isDesk = (await this.lookup.deskChannelIds([channelId])).includes(channelId);
+    this.isDeskByChannelId.set(channelId, isDesk);
+    return isDesk;
   }
 
   boardIdsForForm(formId: string): string[] {

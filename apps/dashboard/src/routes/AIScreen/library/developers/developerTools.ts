@@ -6,7 +6,7 @@
 
 import { API_BASE_URL } from '@/config';
 
-export type DeveloperToolId = 'mcp' | 'sdk' | 'cli';
+export type DeveloperToolId = 'mcp' | 'sdk' | 'cli' | 'storage';
 
 export interface DeveloperTool {
   id: DeveloperToolId;
@@ -33,6 +33,7 @@ export const DEVELOPER_TOOLS: readonly DeveloperTool[] = [
       'An MCP server that gives your coding agent tools for channels, threads, messages, tickets, ' +
       'calls, canvases and search. It acts as you, so it reaches exactly what you can see in Spaces.',
     badge: 'Read-only by default',
+    npmPackage: '@xyne/spaces-mcp',
   },
   {
     id: 'sdk',
@@ -55,6 +56,16 @@ export const DEVELOPER_TOOLS: readonly DeveloperTool[] = [
       'already wired in, runs it locally, and publishes it to your workspace. No sign-in code: ' +
       'Spaces runs the app as whoever opens it.',
     badge: 'Inside Spaces',
+  },
+  {
+    id: 'storage',
+    name: 'Storage SDK',
+    tagline: 'Save preferences, drafts and shared state from apps built with the Spaces CLI.',
+    summary:
+      'Key-value storage for artifact apps, already wired into every app the Spaces CLI ' +
+      'scaffolds. Keep records private to each person, or share one record with everyone who ' +
+      'uses the app — no database or backend to run.',
+    badge: 'Comes with the CLI',
   },
 ];
 

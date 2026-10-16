@@ -1,7 +1,7 @@
 import { SDLC_MEMBERSHIP_RELATION, VespaInsertionStatus, VespaOperationType } from '@xyne/shared';
 import { BaseRepository } from './base';
 import { Channel } from '@prisma/client';
-import { ChannelScopeType, ChannelVisibility, ChannelType, ProjectType } from '@xyne/shared';
+import { BoardType, ChannelScopeType, ChannelVisibility, ChannelType, ProjectType } from '@xyne/shared';
 import { QueryOptions } from '@/types/database';
 import { logger } from '@/utils/logger';
 import { withWorkspaceScope } from '@/database/tenant/context';
@@ -79,7 +79,7 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
         scopeType: data.scopeType,
         name: data.name,
         description: data.description,
-        visibility: data.visibility || 'PUBLIC',
+        visibility: isDMChannel ? 'PRIVATE' : (data.visibility || 'PUBLIC'),
         createdBy: data.createdBy,
         // '' sentinel for a projectless channel (column stays NOT NULL for prod/pre-prod sync).
         projectId: data.projectId ?? '',
@@ -97,7 +97,7 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     // channel has no project (nothing to map).
     if (data.projectId) {
       const boards = await this.db.board.findMany({
-        where: { projectId: data.projectId },
+        where: { projectId: data.projectId, boardType: { not: BoardType.RELEASE } },
         orderBy: { createdAt: 'asc' },
         select: { id: true },
       });
@@ -432,10 +432,6 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     workspaceId: string,
     options: { indexInVespa?: boolean } = {}
   ): Promise<string> {
-    if (invitedUserIds.length === 0) {
-      throw new Error('No users to invite');
-    }
-
     // Get DM project for this workspace
     const dmProject = await this.db.project.findFirst({
       where: {
@@ -450,6 +446,11 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     }
 
     const projectId = dmProject.id;
+
+    // Nobody else invited (e.g. a guest-only call): back it with the initiator's self-DM.
+    if (invitedUserIds.length === 0) {
+      return this.findOrCreateSelfDm(userId, projectId, channelParticipants, workspaceId, options);
+    }
 
     // Single user - create or find DM channel
     if (invitedUserIds.length === 1) {
@@ -523,6 +524,17 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     // Large group: create nothing — back the group with the initiator's own self-DM
     // (the "Saved messages" DM, keyed on the bare userId). Calls get their access
     // from call_participants, so invitees still see and join without a channel.
+    return this.findOrCreateSelfDm(userId, projectId, channelParticipants, workspaceId, options);
+  }
+
+  /** The user's own "Saved messages" DM, keyed on the bare userId. */
+  private async findOrCreateSelfDm(
+    userId: string,
+    projectId: string,
+    channelParticipants: any,
+    workspaceId: string,
+    options: { indexInVespa?: boolean }
+  ): Promise<string> {
     const selfDm = await this.getDMChannel(userId, userId);
     if (selfDm) {
       if (options.indexInVespa) await this.queueVespaFeed(selfDm.id, workspaceId);

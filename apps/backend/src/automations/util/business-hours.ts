@@ -11,6 +11,8 @@ export const BusinessHoursSchema = z
     days: z.array(z.number().int().min(0).max(6)).min(1),
     startTime: z.string().regex(TIME_REGEX),
     endTime: z.string().regex(TIME_REGEX),
+    /** "MM-DD" dates. No year, so the same date is a holiday every year. */
+    holidays: z.array(z.string().regex(/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/)).optional(),
   })
   .refine((h) => h.endTime > h.startTime, {
     path: ['endTime'],
@@ -33,6 +35,8 @@ function timeMs(time: string): number {
 function businessWindow(istMs: number, hours: BusinessHours): [number, number] | null {
   const dayStart = Math.floor(istMs / DAY_MS) * DAY_MS;
   if (!hours.days.includes(new Date(dayStart).getUTCDay())) return null;
+  // "YYYY-MM-DDT…" → "MM-DD"
+  if (hours.holidays?.includes(new Date(dayStart).toISOString().slice(5, 10))) return null;
   return [dayStart + timeMs(hours.startTime), dayStart + timeMs(hours.endTime)];
 }
 
@@ -40,7 +44,7 @@ function businessWindow(istMs: number, hours: BusinessHours): [number, number] |
 export function addBusinessTime(start: Date, durationMs: number, hours: BusinessHours): Date {
   let cursor = start.getTime() + IST_OFFSET_MS;
   let remaining = durationMs;
-  for (;;) {
+  for (let day = 0; day <= MAX_WAIT_MS / DAY_MS; day++) {
     const window = businessWindow(cursor, hours);
     if (window) {
       const from = Math.max(cursor, window[0]);
@@ -50,6 +54,7 @@ export function addBusinessTime(start: Date, durationMs: number, hours: Business
     }
     cursor = Math.floor(cursor / DAY_MS) * DAY_MS + DAY_MS;
   }
+  throw new Error('with these business hours and holidays the wait exceeds 30 calendar days');
 }
 
 export function isWithinBusinessHours(at: Date, hours: BusinessHours): boolean {
@@ -60,10 +65,15 @@ export function isWithinBusinessHours(at: Date, hours: BusinessHours): boolean {
 
 export function fitsWithinMaxWait(durationMs: number, hours: BusinessHours): boolean {
   if (!Number.isFinite(durationMs) || durationMs > MAX_WAIT_MS) return false;
-  const referenceMonday = Date.UTC(2024, 0, 1) - IST_OFFSET_MS;
-  return hours.days.every((day) => {
-    const windowClose = referenceMonday + ((day + 6) % 7) * DAY_MS + timeMs(hours.endTime);
-    const resumeAt = addBusinessTime(new Date(windowClose), durationMs, hours);
-    return resumeAt.getTime() - windowClose <= MAX_WAIT_MS;
-  });
+  const todayIst = Math.floor((Date.now() + IST_OFFSET_MS) / DAY_MS) * DAY_MS - IST_OFFSET_MS;
+  // Worst case starts as a day's window closes; holidays need every close of the coming year.
+  try {
+    for (let day = 0; day < (hours.holidays?.length ? 366 : 7); day++) {
+      const windowClose = todayIst + day * DAY_MS + timeMs(hours.endTime);
+      addBusinessTime(new Date(windowClose), durationMs, hours);
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }

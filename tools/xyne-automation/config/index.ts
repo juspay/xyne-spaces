@@ -18,6 +18,10 @@ export interface Config {
   browser: BrowserType;
   enableBrowserConsoleLogs: boolean;
   parallel: number;
+  // Record a .webm per browser session into <run artifact dir>/videos.
+  recordVideo: boolean;
+  // Milliseconds to pause after each Gauge step, to follow a headed run step by step.
+  stepDelay: number;
   testProgressFile?: string;
 }
 
@@ -134,12 +138,25 @@ function getParallel(env: Environment): number {
   switch (env) {
     case 'local':
     case 'local-test':
-      return 3;
+      return 5;
     case 'test':
       return 1; // Jenkins runs serially — single Gauge worker
     default:
       return 1;
   }
+}
+
+function getRecordVideo(): boolean {
+  return process.env.RECORD_VIDEO === 'true';
+}
+
+function getStepDelay(): number {
+  if (!process.env.STEP_DELAY) {
+    return 0;
+  }
+
+  const parsed = parseInt(process.env.STEP_DELAY, 10);
+  return Number.isNaN(parsed) || parsed < 0 ? 0 : parsed;
 }
 
 function getConfigForEnv(env: Environment): Config {
@@ -156,6 +173,8 @@ function getConfigForEnv(env: Environment): Config {
     browser: getBrowser(),
     enableBrowserConsoleLogs: getEnableBrowserConsoleLogs(env),
     parallel: getParallel(env),
+    recordVideo: getRecordVideo(),
+    stepDelay: getStepDelay(),
     testProgressFile: process.env.XYNE_TEST_PROGRESS_FILE || undefined,
   };
 }

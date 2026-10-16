@@ -24,11 +24,15 @@ export interface WorkerStartStreamMessage {
           | 'ticket'
           | 'canvas'
           | 'call'
+          | 'app'
           | 'activity'
           | 'collection'
           | 'folder'
           | 'file'
-          | 'local-folder';
+          | 'local-folder'
+          | 'message'
+          | 'user'
+          | 'attachment';
         id: string;
         title: string;
         threadId?: string;

@@ -32,6 +32,9 @@ export interface AccessibleClawAgent {
    *  search/single-answer instant KB path — the composer shows a locked
    *  "Instant" indicator for it instead of the normal per-message toggle. */
   instantAgent?: boolean;
+  /** The agent's Spaces bot user in this workspace — its avatar is the one
+   *  channels show for the agent. Absent for an agent not installed here. */
+  botUserId?: string;
 }
 
 export async function fetchAccessibleClawAgents(): Promise<AccessibleClawAgent[]> {

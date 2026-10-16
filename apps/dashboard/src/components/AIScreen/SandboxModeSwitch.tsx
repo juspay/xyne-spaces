@@ -7,7 +7,7 @@ export type SandboxMode = 'remote' | 'local' | 'container';
 
 export const SANDBOX_MODE_STORAGE_KEY = 'xyne:ai-sandbox-mode';
 
-const SANDBOX_MODE_OPTIONS: Array<{
+export const SANDBOX_MODE_OPTIONS: Array<{
   value: SandboxMode;
   label: string;
   shortLabel: string;
@@ -156,6 +156,7 @@ export function SandboxModeSwitch({
           const selected = option.value === mode;
           return (
             <button
+              aria-pressed={selected}
               key={option.value}
               type='button'
               title={option.description}

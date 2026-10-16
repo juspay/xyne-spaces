@@ -108,6 +108,7 @@ export class ReplyOnMessageStep extends BaseActionStep<
         isBot,
         metadata: { contentFormat: 'markdown' },
         uploadedFiles,
+        emitsMessageReceivedViaSideEffects: true,
       });
     } catch (error) {
       await removeUnclaimedAutomationDeliveryFiles(uploadedFiles);

@@ -150,7 +150,7 @@ describe("/webhook/progress sandbox preview records sandbox ownership", () => {
   const previewBranch = (() => {
     const start = webhook.indexOf("if (sandboxPreviewUrl && sandboxId) {");
     expect(start).toBeGreaterThan(-1);
-    return webhook.slice(start, start + 1500);
+    return webhook.slice(start, start + 6000);
   })();
 
   it("writes the ConversationArtifact owner row the sandbox router's access check reads", () => {
@@ -164,8 +164,83 @@ describe("/webhook/progress sandbox preview records sandbox ownership", () => {
     expect(ingest).toBeLessThan(modeReturn);
   });
 
+  it("honours agent.config.hideLivePreview only after the ownership row is recorded", () => {
+    const ingest = previewBranch.indexOf("ingestSandboxPreviewSignals(");
+    const optOut = previewBranch.indexOf("isLivePreviewMessageHidden(");
+    const post = previewBranch.indexOf("postAgentMessage(");
+    expect(optOut).toBeGreaterThan(ingest);
+    expect(optOut).toBeLessThan(post);
+    expect(webhook).toMatch(/hideLivePreview\?? === true/);
+  });
+
   it("attributes the sandbox to the conversation and the user who started the run", () => {
     expect(previewBranch).toMatch(/conversationId:\s*ctx\.conversationId/);
     expect(previewBranch).toMatch(/userId:\s*ctx\.senderId/);
+  });
+});
+
+describe("hideLivePreview survives a claw-minted sessionId (XYNE-66127)", () => {
+  // Automation dispatch ids (`<exec>:step_N`) fail start-run's internal
+  // sessionId check, so claw mints a UUID. /webhook/progress then misses the
+  // Redis session and resolves ctx from the run-recovery record — which used to
+  // carry no agentId, so the opt-out silently failed open.
+  const recovery = readFileSync(join(SRC, "queue/run-recovery-worker.ts"), "utf8");
+  const scheduler = readFileSync(join(SRC, "queue/scheduled-jobs-worker.ts"), "utf8");
+
+  it("RecoverySessionContext carries the agent identity", () => {
+    const iface = recovery.slice(recovery.indexOf("export interface RecoverySessionContext"));
+    const body = iface.slice(0, iface.indexOf("\n}"));
+    expect(body).toMatch(/\bagentId\?:/);
+    expect(body).toMatch(/\bagentOrgId\?:/);
+  });
+
+  it("the automation route's recovery context sets agentId", () => {
+    const start = webhook.indexOf("const recoveryCtx: RecoverySessionContext = {");
+    expect(start).toBeGreaterThan(-1);
+    const block = webhook.slice(start, webhook.indexOf("await registerRunRecovery(", start));
+    expect(block).toMatch(/agentId:\s*agent\.id/);
+  });
+
+  it("the scheduler's recovery context sets agentId", () => {
+    const start = scheduler.indexOf("const recoveryCtx: RecoverySessionContext = {");
+    const block = scheduler.slice(start, scheduler.indexOf("await registerRunRecovery(", start));
+    expect(block).toMatch(/agentId:\s*agentRow\.id/);
+  });
+
+  it("the opt-out check gets the whole ctx so it can fall back to org+slug", () => {
+    expect(webhook).toContain("isLivePreviewMessageHidden(ctx, log)");
+    expect(webhook).toMatch(/orgId_slug:\s*\{\s*orgId:\s*agentOrgId!/);
+  });
+});
+
+describe("/webhook/progress sandbox preview failures are not silent (XYNE-66341)", () => {
+  const previewBranch = (() => {
+    const start = webhook.indexOf("if (sandboxPreviewUrl && sandboxId) {");
+    expect(start).toBeGreaterThan(-1);
+    return webhook.slice(start, start + 6000);
+  })();
+
+  it("marks the run announced only after the session context resolves", () => {
+    const resolve = previewBranch.indexOf("resolveSessionContext(");
+    const noCtx = previewBranch.indexOf("if (!ctx) {");
+    const remember = previewBranch.indexOf("rememberAnnouncedPreview(sessionId)");
+    expect(resolve).toBeGreaterThan(-1);
+    expect(remember).toBeGreaterThan(noCtx);
+    expect(noCtx).toBeGreaterThan(resolve);
+  });
+
+  it("logs when the session context is missing instead of returning silently", () => {
+    const noCtx = previewBranch.slice(previewBranch.indexOf("if (!ctx) {"));
+    expect(noCtx.slice(0, noCtx.indexOf("return;"))).toMatch(/clog\.warn\(/);
+  });
+
+  it("does not post the preview link when the ownership row was not recorded", () => {
+    const guard = previewBranch.indexOf("if (!ingest.recorded) {");
+    const link = previewBranch.indexOf('systemNote("**Live preview**")');
+    expect(guard).toBeGreaterThan(-1);
+    expect(link).toBeGreaterThan(guard);
+    // the failure branch returns before the link is built
+    const failureBranch = previewBranch.slice(previewBranch.lastIndexOf("if (!ingest.recorded) {", link), link);
+    expect(failureBranch).toContain("return;");
   });
 });

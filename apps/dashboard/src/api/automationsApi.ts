@@ -191,6 +191,7 @@ export interface BusinessHours {
   days: number[];
   startTime: string;
   endTime: string;
+  holidays?: string[];
 }
 
 export type ScheduleConfig =

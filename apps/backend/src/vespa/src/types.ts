@@ -382,6 +382,7 @@ export interface VespaFileDocument extends VespaDocument, SdlcFieldValues<SdlcFi
   updatedAt: number;
   ownerId: string;
   permissions: string[]
+  labels?: string[];
   urlInternal: string,
   urlOriginal: string,
   fileSize: number,

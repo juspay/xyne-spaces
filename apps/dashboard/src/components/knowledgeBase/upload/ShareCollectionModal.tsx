@@ -487,6 +487,7 @@ export const ShareCollectionModal = ({
         <div className='flex items-center justify-between mb-6'>
           <h2 className='text-lg font-semibold text-foreground'>Share Collection</h2>
           <button
+            aria-label='Close share collection dialog'
             onClick={handleClose}
             className='p-1 hover:bg-muted rounded transition-colors'
             disabled={isLoading}

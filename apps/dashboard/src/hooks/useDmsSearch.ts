@@ -62,6 +62,7 @@ export const useDmsSearch = (): UseDmsSearchReturn => {
     for (const channel of allChannels) {
       if (!isOneToOneDMChannel(channel.scopeType)) continue;
       const ids = parseDMParticipantIds(channel);
+      if (!ids.includes(currentUserId)) continue;
       const partnerId =
         ids.find(id => id !== currentUserId) ?? (ids.length > 0 ? currentUserId : undefined);
       if (!partnerId) continue;

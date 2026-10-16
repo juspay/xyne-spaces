@@ -2,9 +2,8 @@
 import crypto from 'node:crypto';
 
 /**
- * Distinguishes a flow token from the SDK keys and session tokens that share
- * `JWT_SECRET` (see API_KEY_AUDIENCE in api/sdk/auth.ts). Without it, one key
- * serving three purposes invites cross-protocol confusion.
+ * Distinguishes a flow token from the session tokens that share `JWT_SECRET`.
+ * Without it, one key serving two purposes invites cross-protocol confusion.
  */
 const AUDIENCE = 'xyne-flow';
 

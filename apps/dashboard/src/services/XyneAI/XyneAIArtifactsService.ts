@@ -37,6 +37,8 @@ export interface ConversationArtifact {
   url?: string | null;
   provider?: string | null;
   latestVersionRef?: string | null;
+  mimeType?: string | null;
+  size?: number | null;
   title: string;
   status: ConversationArtifactStatus;
   pinned: boolean;

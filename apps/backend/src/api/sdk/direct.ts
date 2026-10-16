@@ -18,13 +18,14 @@
 
 import { Router, type NextFunction, type Request, type RequestHandler, type Response } from 'express';
 import { z, type ZodTypeAny } from 'zod';
-import { AccessType, MAX_RULES, NotificationStatus } from '@xyne/shared';
+import { AccessType, BoardType, MAX_RULES, NotificationStatus } from '@xyne/shared';
 import { searchQuerySchema, searchSchemaQuerySchema } from './schemas/search';
 import { db } from '@/database/client';
 import type { AuthData } from '@/zero/mutators';
 import { ChannelController } from '@/controllers/channelController';
 import { ConversationController } from '@/controllers/conversationController';
 import { TicketController } from '@/controllers/ticketController';
+import { SubTicketController } from '@/controllers/subTicketController';
 import { AttachmentController } from '@/controllers/attachmentController';
 import { DraftAttachmentController } from '@/controllers/draftAttachmentController';
 import { callController as callsController } from '@/controllers/callController';
@@ -45,6 +46,7 @@ import { RadarActionError, radarManualActions } from '@/services/radar/radarManu
 import { radarFeedService } from '@/services/radar/radarFeedService';
 import { radarRuleStore } from '@/services/radar/radarRuleStore';
 import { canReadTicket } from '@/services/subTicketLinkService';
+import { channelsDeskTicketsForThreads } from '@/channelsDesk/desk';
 import { cleanConditions, parsePageQuery } from '@/routes/radarExecution';
 import { searchHandler } from '@/services/vespaSearch';
 import { schemaHandler } from '@/services/vespaSearch/schemaHandler';
@@ -74,6 +76,7 @@ import { handle } from './handler';
 const channelController = new ChannelController();
 const conversationController = new ConversationController();
 const ticketController = new TicketController();
+const subTicketController = new SubTicketController();
 const attachmentController = new AttachmentController();
 const draftAttachmentController = new DraftAttachmentController();
 // Constructed the way routes/canvas.ts constructs it.
@@ -298,11 +301,27 @@ const ROUTES: readonly DirectRoute[] = [
     path: '/channels/check-duplicate',
     controller: channelController.checkDuplicate,
   },
+  /**
+   * Channels desk tickets for the caller's own threads: status fields only, and only for threads the caller
+   * can open. Refused if any thread isn't theirs.
+   */
+  {
+    method: 'post',
+    path: '/channels-desk/tickets',
+    body: z.object({ conversationIds: z.array(z.string().min(1)).min(1).max(100) }),
+    service: async (req, authData) => {
+      const { conversationIds } = req.body as { conversationIds: string[] };
+      const tickets = await channelsDeskTicketsForThreads(authData.workspaceId, conversationIds);
+      if (!tickets) throw new SdkApiError('forbidden', 'One or more of these conversations are not yours to read.');
+      return { tickets };
+    },
+  },
   {
     method: 'post',
     path: '/tickets',
     middleware: [uploadMultiple],
     controller: ticketController.createTicket,
+    guards: [ticketStageGuard],
     // Multipart turns every field into a string; these two arrive as JSON.
     mapBody: (body) => reviveJsonFields(body, ['metadata', 'dynamicFields']),
   },
@@ -374,15 +393,11 @@ const ROUTES: readonly DirectRoute[] = [
   },
 
   /**
-   * Who the authenticated user is.
-   *
-   * COOKIE-BASED AUTH: Returns user info from req.user (authData).
-   * API KEY AUTH (COMMENTED OUT): Also returned keyExpiresAt from auth.keyExpiresAt.
+   * Who the authenticated user is, from the session `authMiddleware` verified.
    */
   {
     method: 'get',
     path: '/me',
-    // COOKIE-BASED AUTH (ACTIVE) - uses authData built from req.user
     service: async (_req, authData) => {
       return {
         id: authData.sub,
@@ -394,33 +409,16 @@ const ROUTES: readonly DirectRoute[] = [
         memberId: authData.memberId,
         role: authData.role,
         orgRole: authData.orgRole,
-        // keyExpiresAt is only available with API key auth, omitted for cookie auth
       };
     },
-    // API KEY AUTH (COMMENTED OUT) - used auth.authData and auth.keyExpiresAt
-    // service: async (_req, auth) => {
-    //   const { authData } = auth;
-    //   return {
-    //     id: authData.sub,
-    //     email: authData.email,
-    //     name: authData.name,
-    //     displayName: authData.displayName ?? null,
-    //     workspaceId: authData.workspaceId,
-    //     orgId: authData.orgId,
-    //     memberId: authData.memberId,
-    //     role: authData.role,
-    //     orgRole: authData.orgRole,
-    //     keyExpiresAt: auth.keyExpiresAt.toISOString(),
-    //   };
-    // },
   },
 
   /*
    * Claw runs through Spaces rather than being reached directly.
    *
    * `clawAgentService` already speaks to claw-auth with the deployment's own
-   * service credential, so a caller needs no second login and Claw needs no
-   * knowledge of API keys. The S2S variants are the ones that take an explicit
+   * service credential, so a caller needs no second login and Claw never
+   * sees the caller's session. The S2S variants are the ones that take an explicit
    * identity — `userId`, `userName`, `userEmail`, and the three `spaces*` fields
    * map one-to-one onto `AuthData` — and return a session id that can be polled.
    * The non-S2S `runClawAgent` is the app-mention path: it requires a channel and
@@ -430,14 +428,13 @@ const ROUTES: readonly DirectRoute[] = [
   {
     method: 'get',
     path: '/claw/agents',
-    // COOKIE-BASED AUTH (ACTIVE) - scoped to the acting user, see clawIdentity
+    // Scoped to the acting user; see clawIdentity.
     service: async (req, authData) => listScopedClawAgents(clawIdentity(req, authData)),
   },
   {
     method: 'post',
     path: '/claw/runs',
     body: clawRunBody,
-    // COOKIE-BASED AUTH (ACTIVE) - uses authData built from req.user
     service: async (req, authData) => {
       const input = clawRunBody.parse(req.body);
       const result = await runScopedClawAgent({
@@ -465,7 +462,6 @@ const ROUTES: readonly DirectRoute[] = [
   {
     method: 'get',
     path: '/claw/runs/:sessionId',
-    // COOKIE-BASED AUTH (ACTIVE) - uses authData.sub from req.user
     service: async (req, authData) => {
       const sessionId = req.params['sessionId'];
       if (!sessionId) throw new SdkApiError('validation_failed', 'sessionId is required.');
@@ -484,7 +480,6 @@ const ROUTES: readonly DirectRoute[] = [
   {
     method: 'get',
     path: '/connectors',
-    // COOKIE-BASED AUTH (ACTIVE) - runs as authData.sub
     service: async (_req, authData) => ({ connectors: await listConnectors(authData.sub) }),
   },
   {
@@ -907,6 +902,33 @@ const ROUTES: readonly DirectRoute[] = [
   },
 
   /*
+   * Sub-ticket links: attach an existing ticket under a parent, and detach it.
+   * The same controller as the product's /api/sub-tickets, which is guarded by
+   * session auth alone — every other rule lives in `linkExistingSubTicketTx` and
+   * `unlinkSubTicketTx`: write access to the parent, read access to the child,
+   * manual boards only, no cycles, one parent per ticket, all under a workspace
+   * lock, with the activity, system message and notification committed alongside.
+   * Not the `tickets.createSubTicket` / `updateSubTicket` mutators, which skip
+   * every one of those.
+   */
+  {
+    method: 'post',
+    path: '/sub-tickets/link',
+    controller: subTicketController.linkExisting,
+    body: z.object({
+      ticketId: z.string().min(1),
+      mappedTicketId: z.string().min(1),
+      subTicketTitle: z.string().optional(),
+    }),
+  },
+  {
+    method: 'post',
+    path: '/sub-tickets/unlink',
+    controller: subTicketController.unlink,
+    body: z.object({ mappingId: z.string().min(1) }),
+  },
+
+  /*
    * Desk metrics and the desk report. The controllers enforce access
    * themselves — channel membership, the desk's metricsEnabled preference on
    * the dashboard handlers, and desk owner / channel admin — so nothing is
@@ -978,6 +1000,8 @@ export function createDirectRouter(): Router {
       route.path,
       ...(route.middleware ?? []),
       handle(async (req: Request, res: Response) => {
+        // Reached by operation id, the v1 handler has already named the call.
+        req.sdkCall ??= { op: `${route.method.toUpperCase()} ${route.path}`, kind: 'direct' };
         for (const guard of route.guards ?? []) await guard(req);
 
         if (route.service) {
@@ -1285,6 +1309,44 @@ async function ticketVisibleGuard(req: Request): Promise<void> {
 }
 
 /**
+ * A starting stage the board does not have is refused, not replaced.
+ *
+ * The ticket repository falls back to the board's first stage when `stageName`
+ * matches none of its stages, and Flow boards always start at TODO whatever is
+ * sent. The app only ever sends a name it read from the board, so it never sees
+ * either; an API caller types the name, and would get a ticket in a stage it did
+ * not ask for with nothing to say so. The board is named explicitly for the same
+ * reason: without `boardId` the controller picks a default board, and a stage
+ * name cannot be checked against a board nobody chose.
+ */
+async function ticketStageGuard(req: Request): Promise<void> {
+  const body = (req.body ?? {}) as { stageName?: unknown; boardId?: unknown };
+  const stageName = typeof body.stageName === 'string' ? body.stageName : '';
+  if (!stageName) return;
+
+  const boardId = typeof body.boardId === 'string' ? body.boardId : '';
+  if (!boardId) {
+    throw new SdkApiError('validation_failed', 'stageName needs boardId: a stage is checked against the board it is on.');
+  }
+  const board = await db.board.findUnique({ where: { id: boardId }, select: { boardType: true } });
+  if (!board) throw SdkApiError.notFound('Board');
+  if (board.boardType === BoardType.FLOW) {
+    throw new SdkApiError('validation_failed', 'Tickets on a Flow board always start at TODO; omit stageName.');
+  }
+  const stages = await db.stage.findMany({
+    where: { boardId },
+    select: { name: true },
+    orderBy: { sequenceNumber: 'asc' },
+  });
+  if (!stages.some((stage) => stage.name === stageName)) {
+    throw new SdkApiError(
+      'validation_failed',
+      `Board has no stage "${stageName}". Its stages are: ${stages.map((stage) => stage.name).join(', ')}.`,
+    );
+  }
+}
+
+/**
  * Translate a legacy `{ success, data, error }` envelope into a bare payload.
  *
  * Some paths report failure with HTTP 200 and `success: false`, so this raises
@@ -1328,39 +1390,6 @@ function unwrapDeskReportGenerate(raw: unknown): unknown {
   }
   return { started: true };
 }
-
-// API KEY AUTH (COMMENTED OUT) - principalOf was used to build AuthenticatedUser from authData
-// For cookie-based auth, req.user is already set by authMiddleware
-// function principalOf(authData: {
-//   sub: string;
-//   email: string;
-//   name: string;
-//   displayName?: string | null;
-//   workspaceId: string;
-//   role: string;
-//   orgRole: string;
-//   memberId: string;
-// }): AuthenticatedUser {
-//   return {
-//     id: authData.sub,
-//     // Not an OAuth-provider identity on this path. Controllers read id, email,
-//     // and workspaceId; roles come from the verified principal.
-//     googleId: '',
-//     email: authData.email,
-//     name: authData.name,
-//     displayName: authData.displayName ?? null,
-//     workspaceId: authData.workspaceId,
-//     role: authData.role,
-//     orgRole: authData.orgRole,
-//     memberId: authData.memberId,
-//     // Not the `isApiKeyUser` these controllers mean. That flag marks a key minted
-//     // by `apiKeyService` — the environment key and scoped service keys — and two
-//     // branches read it to skip the ACL check outright for an admin-role holder
-//     // (middleware/acl.ts, middleware/auth.ts). An SDK key is a user acting as
-//     // themselves and must get exactly a session's reach, so it stays false.
-//     isApiKeyUser: false,
-//   };
-// }
 
 function controllerError(status: number, body: unknown): SdkApiError {
   const payload = body as { error?: unknown; message?: unknown } | undefined;

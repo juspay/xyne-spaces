@@ -375,6 +375,7 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
                 <div className='flex items-center gap-2 shrink-0'>
                   <button
                     type='button'
+                    aria-label={`Edit ${name}`}
                     className='text-desk-muted hover:text-foreground'
                     onClick={() => startEdit(name)}
                     disabled={editingName !== null}
@@ -385,6 +386,7 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
                   </button>
                   <button
                     type='button'
+                    aria-label={`Delete ${name}`}
                     data-ph-capture-attribute-track-id='delete_tag_category'
                     className='size-auto p-0 text-desk-muted hover:bg-transparent hover:text-destructive'
                     onClick={() => void handleDelete(name)}

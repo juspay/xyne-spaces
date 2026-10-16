@@ -721,6 +721,7 @@ export enum NotificationType {
   MAX_WORKLOAD_REACHED = "MAX_WORKLOAD_REACHED",
   ASSIGNMENT_PAUSED = "ASSIGNMENT_PAUSED",
   ASSIGNMENT_RESUMED = "ASSIGNMENT_RESUMED",
+  DESK_ACCOUNT_DISCONNECTED = "DESK_ACCOUNT_DISCONNECTED",
 }
 
 // @ts-ignore TS1294
@@ -822,6 +823,8 @@ export enum ChannelType {
   // SDLC repository channel: system-managed, hidden from the chat surfaces
   // the same way SUPPORT channels are (inline type checks).
   SDLC = 'SDLC',
+  // Channels desk: tickets for threads in channels connected to one service account.
+  CHANNELS = 'CHANNELS',
 }
 
 // @ts-ignore TS1294
@@ -832,6 +835,7 @@ export enum DeskType {
   APP = 'APP',
   CALL = 'CALL',
   SOCIAL_MEDIA = 'SOCIAL_MEDIA',
+  CHANNELS = 'CHANNELS',
 }
 
 // @ts-ignore TS1294
@@ -865,16 +869,30 @@ export enum FormFieldType {
 export const MAX_DUPLICATE_SCOPE_FIELDS = 5;
 
 /**
- * Max artifact apps on EmailChannelPreference.deskAppIds. Enforced by both Zero
- * mutators and the desk's app picker; matches the per-bar cap on the other bars.
+ * Largest duplicate-detection window a desk may configure (days, 10 years). Enforced
+ * identically by the duplicate service's config parser, both Zero mutators, and the
+ * desk settings UI — the four must agree or saves validate in one place and reject
+ * in another.
  */
-export const MAX_DESK_APPS = 8;
+export const MAX_DUPLICATE_LOOKBACK_DAYS = 3650;
+
+/** Max apps published to one channel, DM, group DM or desk (channel_published_tabs). */
+export const MAX_PUBLISHED_APPS = 8;
+
+/** channel_published_tabs.entityType — what a published channel tab points at. */
+export const ChannelPublishedEntityType = {
+  APP: 'APP',
+} as const;
+
+export type ChannelPublishedEntityType =
+  typeof ChannelPublishedEntityType[keyof typeof ChannelPublishedEntityType];
 
 // @ts-ignore TS1294
 export enum FormContextType {
   BOARD = 'BOARD',
   RELEASE_CHANGE = 'RELEASE_CHANGE',
   STAGE = 'STAGE',
+  WORKSPACE = 'WORKSPACE',
 }
 
 // @ts-ignore TS1294
@@ -889,6 +907,7 @@ export enum BoardType {
 export enum FormEntityType {
   TICKET = 'TICKET',
   SUB_TICKET = 'SUB_TICKET',
+  CHANNEL = 'CHANNEL',
   RELEASE_MIGRATION_FORM = "RELEASE_MIGRATION_FORM",
   RELEASE_ENV_FORM = "RELEASE_ENV_FORM",
 }

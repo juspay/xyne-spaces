@@ -33,8 +33,6 @@ export interface DeskTrackingContext {
   isMerged?: boolean | null | undefined;
   /** ConversationLabelMapping count. */
   labelCount?: number | null | undefined;
-  /** Ticket.merchantId. */
-  merchantId?: string | null | undefined;
 }
 
 const HOUR_MS = 3_600_000;
@@ -59,7 +57,6 @@ export function emailCountBucket(count: number): '0' | '1' | '2-5' | '6-20' | '2
  *
  * Ids, enums, booleans, counts and buckets only. Subjects, bodies, addresses,
  * recipient names, label names and draft text never enter the event store.
- * `merchantId` is an opaque id (the `mid` column is not sent).
  */
 export function deskTicketTrackingMetadata(
   ticket:
@@ -68,7 +65,6 @@ export function deskTicketTrackingMetadata(
         lastEmailAt?: number | string | Date | null;
         firstRespondedAt?: number | string | Date | null;
         aiSubCategory?: string | null;
-        merchantId?: string | null;
       })
     | null
     | undefined,
@@ -79,7 +75,6 @@ export function deskTicketTrackingMetadata(
   const lastEmailMs = toMs(ctx.lastEmailAt ?? ticket?.lastEmailAt);
   const firstResponded = ctx.firstRespondedAt ?? ticket?.firstRespondedAt;
   const aiSubCategory = ctx.aiSubCategory ?? ticket?.aiSubCategory;
-  const merchantId = ctx.merchantId ?? ticket?.merchantId;
   return {
     ...base,
     ...(ctx.deskType && { deskType: ctx.deskType }),
@@ -101,7 +96,6 @@ export function deskTicketTrackingMetadata(
     ...(typeof ctx.isManualOverride === 'boolean' && { isManualOverride: ctx.isManualOverride }),
     ...(typeof ctx.isMerged === 'boolean' && { isMerged: ctx.isMerged }),
     ...(typeof ctx.labelCount === 'number' && { labelCount: ctx.labelCount }),
-    ...(merchantId && { merchantId }),
   };
 }
 

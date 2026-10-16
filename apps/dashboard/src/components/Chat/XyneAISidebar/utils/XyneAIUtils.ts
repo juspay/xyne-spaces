@@ -3,7 +3,12 @@ import type {
   MetricConfig,
   GroupbyConfig,
 } from '../../../../types/toolOutput';
-import type { Message, StoredMessage, StreamingParsedContent } from './XyneAITypes';
+import type {
+  ConversationHistory,
+  Message,
+  StoredMessage,
+  StreamingParsedContent,
+} from './XyneAITypes';
 
 export function normalizeLoadedMessagesForDisplay(
   messages: Array<Message | StoredMessage>,
@@ -383,4 +388,76 @@ export function getSiblings<T extends { id: string; parentId?: string | null }>(
   const currentIndex = siblings.findIndex(m => m.id === messageId);
 
   return { siblings, currentIndex };
+}
+
+// ============================================================================
+// Chat history across agents
+// ============================================================================
+// Shared by the AI screen, the sidebar and the overlay so the three lists
+// group, filter and label conversations the same way.
+
+/** An agent as the chat UI draws it. Every message carries its own
+ *  `agentSlug`; the agent directory maps it to one of these. */
+export interface AgentIdentity {
+  name: string;
+  color?: string;
+  /** The agent's Spaces bot user, whose avatar channels show for it. */
+  userId?: string;
+}
+
+/** Falls back to the slug for an agent the viewer cannot see any more. */
+export function agentIdentity(directory: Map<string, AgentIdentity>, slug: string): AgentIdentity {
+  return directory.get(slug) ?? { name: slug };
+}
+
+export interface RecencyGroup {
+  label: string;
+  conversations: ConversationHistory[];
+}
+
+const RECENCY_LABELS = ['Today', 'Yesterday', 'Previous 7 days', 'Previous 30 days', 'Older'];
+
+/**
+ * Bucket by LAST activity — Today, Yesterday, Previous 7 days, Previous 30 days,
+ * Older — newest first inside each bucket, empty buckets dropped. The same
+ * chunking the major assistants use, so the list reads without a lookup.
+ */
+export function groupByRecency(
+  conversations: ConversationHistory[],
+  now = new Date(),
+): RecencyGroup[] {
+  const startOfToday = new Date(now);
+  startOfToday.setHours(0, 0, 0, 0);
+  const day = 24 * 60 * 60 * 1000;
+  const bounds = [
+    startOfToday.getTime(),
+    startOfToday.getTime() - day,
+    startOfToday.getTime() - 7 * day,
+    startOfToday.getTime() - 30 * day,
+  ];
+  const buckets: ConversationHistory[][] = RECENCY_LABELS.map(() => []);
+  for (const conversation of conversations) {
+    const time = new Date(conversation.lastUpdated).getTime();
+    const index = bounds.findIndex(bound => time >= bound);
+    buckets[index === -1 ? bounds.length : index]!.push(conversation);
+  }
+  return RECENCY_LABELS.map((label, i) => ({
+    label,
+    conversations: buckets[i]!.sort(
+      (a, b) => new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime(),
+    ),
+  })).filter(group => group.conversations.length > 0);
+}
+
+/** Every agent a conversation involves (the all-agents rows always say). */
+export function conversationAgents(conversation: ConversationHistory): string[] {
+  if (conversation.agentSlugs?.length) return conversation.agentSlugs;
+  return conversation.agentSlug ? [conversation.agentSlug] : [];
+}
+
+/** "Alpha", "Alpha & Beta", "Alpha, Beta +2". */
+export function agentNamesLabel(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? '';
+  if (names.length === 2) return `${names[0]} & ${names[1]}`;
+  return `${names[0]}, ${names[1]} +${names.length - 2}`;
 }

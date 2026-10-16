@@ -6,10 +6,11 @@ describe("applyAiScreenCommand", () => {
     expect(applyAiScreenCommand("  hello world  ").task).toBe("hello world");
   });
 
-  it("rewrites /compact to the compaction task", () => {
-    const { task } = applyAiScreenCommand("/compact");
+  it("rewrites /compact to the compaction task and asks claw to compact first", () => {
+    const { task, compactBeforeRun } = applyAiScreenCommand("/compact");
     expect(task.toLowerCase()).toContain("summary");
     expect(task).not.toMatch(/^\/compact/);
+    expect(compactBeforeRun).toBe(true);
   });
 
   it("carries the focus from /compact <focus> into the task", () => {
@@ -18,6 +19,6 @@ describe("applyAiScreenCommand", () => {
   });
 
   it("does not treat a task-prefix command as compaction", () => {
-    expect(applyAiScreenCommand("/design a landing page").task).toBe("/design a landing page");
+    expect(applyAiScreenCommand("/design a landing page")).toEqual({ task: "/design a landing page" });
   });
 });

@@ -13,7 +13,7 @@ export { OPTIMIZATIONS, OPTIMIZATION_KEYS, OPTIMIZATION_GROUPS, OPTIMIZATION_TIE
 export { PRESENTATION_TOOL_SOURCES, PRESENTATION_CATALOG_SOURCE, isPresentationToolSource } from "./tools/presentation.js";
 export { classifyToolRisk, riskAtOrBelow, TOOL_RISK_LADDER, type ToolRiskLevel } from "./tools/tool-risk.js";
 export { openPaletteMode, openPaletteModeFromTools, openPaletteAdmits, type OpenPaletteMode } from "./tools/open-palette.js";
-export { getSandboxSession, probeSession, cleanupSdlcSandboxCredentialsForContext, buildSandboxStoreKey, sandboxConversationIdFromMeta, sandboxContentType, REPO_CONFIGS, SBX_GIT, type RepoSetupConfig, type SetupStep } from "./tools/sandbox/index.js";
+export { getSandboxSession, probeSession, cleanupSdlcSandboxCredentialsForContext, buildSandboxStoreKey, sandboxConversationIdFromMeta, sandboxContentType, DEFAULT_REPO_CONFIGS, SBX_GIT, type RepoSetupConfig, type SetupStep, buildEffectiveRepoConfigs, getCachedRepoConfigs, getRepoConfig, getRepoConfigs, getRepoConfigsFor, repoConfigsForWorkspace, setRepoConfigLoader, type RepoConfigLoader, type RepoConfigMap, type RepoConfigOverride, findSandboxKeys, normalizeRepoUrl, rotationVariantNames } from "./tools/sandbox/index.js";
 export type { Citation, CitationIconKey } from "./types/citation.js";
 export { citationIconUrl, citationIconKey, iconUrlForKey, toolIconKey, CITATION_ICONS } from "./types/citation.js";
 export type { ClassifierExchange } from "./types/classifier-exchange.js";
@@ -66,11 +66,11 @@ export {
 export type { SkillDiff, SkillForAuthz, ApproverResolution, SkillApprovalAuthz, SkillFileUpdateAuthz } from "./skill-diff/index.js";
 export { createSkillTool, updateSkillTool } from "./tools/skill-management/index.js";
 export { FORK_TO_CONVERSATION_TOOL, forkToConversationTool } from "./tools/conversation-fork/index.js";
-export { FlowBuilder, mdToMrkdwn, buildWriteApprovalFlow, buildWriteResultFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildCapacityRetryFlow, buildGoalSuggestionFlow, buildAgentCallProposalFlow, buildCloneApprovalFlow, buildSkillUpdateApprovalFlow, buildMcpConfigureFlow, buildMcpSuggestFlow, type McpSuggestConnector, buildProviderSuggestFlow, type ProviderSuggestItem, buildCodeFlow, buildDiffFlow, buildTicketFlow, buildTicketProposalFlow, buildChartFlow, buildScheduledJobApprovalFlow, type ScheduledJobApprovalFlowParams, withSpacesAppId } from "./flow/builder.js";
+export { FlowBuilder, mdToMrkdwn, buildWriteApprovalFlow, buildWriteResultFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildCapacityRetryFlow, buildGoalSuggestionFlow, buildAgentCallProposalFlow, buildCloneApprovalFlow, buildSkillUpdateApprovalFlow, buildMcpConfigureFlow, buildMcpSuggestFlow, type McpSuggestConnector, buildProviderSuggestFlow, type ProviderSuggestItem, buildCodeFlow, buildDiffFlow, buildTicketFlow, buildTicketProposalFlow, buildEmailSentFlow, buildChartFlow, buildScheduledJobApprovalFlow, type ScheduledJobApprovalFlowParams, withSpacesAppId } from "./flow/builder.js";
 export type { FlowDefinition, FlowComponent, FlowAction, SelectOption, TicketArtifact, ChartArtifact } from "./flow/builder.js";
 export { buildPlanFlow, PLAN_COMPONENT_ID } from "./flow/plan-flow.js";
 export { isFlowJsonContent, parseFlowJsonComponents, extractTextFromFlowJson, extractCleanTextFromFlowJson } from "./flow/flow-text.js";
-export { buildAgentCardFlow, buildAgentListFlow, buildAgentSummaryFlow, agentIdentity, AGENT_COMPONENT_ID, AGENT_EDITS_STATE_KEY, MAX_AGENT_LIST_CARDS } from "./flow/agent-card.js";
+export { buildAgentCardFlow, buildAgentListFlow, buildAgentSummaryFlow, buildAgentUpdateApprovalFlow, agentIdentity, AGENT_COMPONENT_ID, AGENT_EDITS_STATE_KEY, MAX_AGENT_LIST_CARDS } from "./flow/agent-card.js";
 export { validateMcpProposal } from "./flow/mcp-proposal.js";
 export type { McpProposal, McpProposalResult } from "./flow/mcp-proposal.js";
 export type {
@@ -87,6 +87,10 @@ export type {
   AgentProviderStatus,
   AgentDraftPhase,
   AgentToolSelection,
+  AgentChange,
+  AgentChangeField,
+  AgentUpdateCardProps,
+  AgentUpdateApprovalAction,
 } from "./flow/agent-card.js";
 export type { Todo, TodoStatus, PlanPhase, PlanTodoInput } from "./flow/plan-flow.js";
 export { buildPrFlow, prScreenId, PR_COMPONENT_ID } from "./flow/pr-flow.js";
@@ -161,6 +165,7 @@ export {
 } from "./logger.js";
 export type { LogContext, Logger } from "./logger.js";
 export { AGENT_INTROSPECT_TOOL_DEFS } from "./tools/agent-introspect/index.js";
+export { AGENT_TOOL_DEFS } from "./tools/agent-tools/index.js";
 export {
   TASK_COMMAND_NAMES,
   IMMEDIATE_TASK_COMMAND_RE,
@@ -188,3 +193,5 @@ export {
   videoFileExtension,
 } from "./attachment-types.js";
 export type { AttachmentFamily, InboundAttachmentFamily } from "./attachment-types.js";
+
+export * from "./reply-format/index.js";

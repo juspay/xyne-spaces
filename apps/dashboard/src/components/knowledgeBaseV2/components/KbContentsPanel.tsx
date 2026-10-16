@@ -102,6 +102,7 @@ const OutlineRow: React.FC<OutlineRowProps> = ({
   // nested button and stops propagation so it can still toggle independently
   // without also firing a navigate.
   <div
+    aria-current={isActive ? 'true' : undefined}
     role='button'
     tabIndex={0}
     onClick={onClick}
@@ -153,6 +154,7 @@ const FileLeafRow: React.FC<{
 }> = ({ label, isActive, onClick, highlightQuery }) => (
   <button
     type='button'
+    aria-current={isActive ? 'true' : undefined}
     onClick={onClick}
     data-track-category='knowledge-base'
     data-track-name='kb-contents-open-file'

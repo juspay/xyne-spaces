@@ -1,0 +1,233 @@
+import { StyleSheet, Dimensions } from 'react-native';
+import { callColors } from '../callTheme';
+
+export const styles = StyleSheet.create({
+  overlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+  },
+  keyboardView: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  drawer: {
+    backgroundColor: callColors.surface,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderTopWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    paddingTop: 12,
+    paddingHorizontal: 20,
+    flex: 1,
+    maxHeight: Dimensions.get('window').height * 0.5,
+  },
+  handleContainer: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  handle: {
+    width: 36,
+    height: 4,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 2,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  title: {
+    color: callColors.onColor,
+    fontSize: 17,
+    fontWeight: '600',
+    letterSpacing: -0.3,
+    marginBottom: 3,
+  },
+  subtitle: {
+    color: 'rgba(255,255,255,0.45)',
+    fontSize: 13,
+    fontWeight: '400',
+  },
+  closeButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  divider: {
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    marginBottom: 12,
+  },
+  selectedContainer: {
+    maxHeight: 56,
+    marginBottom: 12,
+  },
+  chipsContent: {
+    gap: 8,
+  },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: callColors.surfaceRaised,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    paddingLeft: 10,
+    paddingRight: 6,
+    paddingVertical: 5,
+    gap: 4,
+  },
+  chipText: {
+    color: callColors.onColor,
+    fontSize: 13,
+    fontWeight: '500',
+    maxWidth: 110,
+  },
+  chipRemove: {
+    padding: 2,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: callColors.surfaceRaised,
+    borderRadius: 12,
+    marginBottom: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+  },
+  searchIcon: {
+    marginRight: 10,
+  },
+  searchInput: {
+    flex: 1,
+    color: callColors.onColor,
+    fontSize: 15,
+    padding: 0,
+  },
+  clearButton: {
+    padding: 4,
+  },
+  errorContainer: {
+    backgroundColor: 'rgba(255,59,48,0.12)',
+    borderRadius: 10,
+    marginBottom: 12,
+    padding: 12,
+  },
+  errorText: {
+    color: '#FF453A',
+    fontSize: 13,
+    textAlign: 'center',
+  },
+  listContainer: {
+    flex: 1,
+  },
+  listCard: {
+    backgroundColor: callColors.surfaceRaised,
+    borderRadius: 14,
+    overflow: 'hidden',
+  },
+  listContent: {
+    paddingBottom: 4,
+  },
+  rowDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    marginLeft: 66,
+  },
+  userItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    gap: 12,
+  },
+  userItemSelected: {
+    backgroundColor: 'rgba(59,130,246,0.1)',
+  },
+  avatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  avatarImage: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    flexShrink: 0,
+  },
+  avatarText: {
+    color: callColors.onColor,
+    fontSize: 15,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+  },
+  userInfo: {
+    flex: 1,
+    gap: 2,
+  },
+  userName: {
+    color: callColors.onColor,
+    fontSize: 15,
+    fontWeight: '500',
+    letterSpacing: -0.2,
+  },
+  userEmail: {
+    color: 'rgba(255,255,255,0.45)',
+    fontSize: 12,
+  },
+  checkmark: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: 'rgba(16,185,129,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  emptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+  },
+  emptyStateText: {
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: 14,
+    marginTop: 12,
+    textAlign: 'center',
+  },
+  footer: {
+    paddingTop: 12,
+    paddingBottom: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.07)',
+  },
+  inviteButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#3B82F6',
+    borderRadius: 14,
+    paddingVertical: 14,
+    gap: 8,
+  },
+  inviteButtonDisabled: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  inviteButtonText: {
+    color: callColors.onColor,
+    fontSize: 15,
+    fontWeight: '600',
+    letterSpacing: -0.2,
+  },
+});

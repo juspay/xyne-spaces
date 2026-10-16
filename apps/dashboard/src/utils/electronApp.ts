@@ -238,7 +238,6 @@ export interface CreateTicketPopoutDraft {
     tags?: string[] | undefined;
     boardId?: string | undefined;
     workflowType?: string | undefined;
-    merchantId?: string | undefined;
     ticketType?: string | undefined;
     dynamicFields?: Record<string, string | string[]> | undefined;
   };

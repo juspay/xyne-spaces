@@ -13,7 +13,7 @@ import {
   type KanbanCountsSnapshot,
 } from '@/services/tickets/kanbanCountsSnapshotService';
 import { websocketService } from '@/services/websocketService';
-import { emitEventToWorkspaceApps } from '@/apps/core/eventSubscriptionUtils';
+import { emitEventToChannelApps } from '@/apps/core/eventSubscriptionUtils';
 import { AppEventType, type AdditionalFormFieldUpdatedPayload, type BaseAppEvent } from '@/apps/types';
 import { normalizeVespaFieldValue } from '@/zero/vespa-injection/core/form-fields';
 import { emitTicketUpdated, type FormFieldChanges } from '@/automations/triggers/ticket-updated.trigger';
@@ -596,7 +596,7 @@ const emitCustomFieldWriteSideEffects = async (
         payload,
         timestamp: new Date().toISOString(),
       };
-      void emitEventToWorkspaceApps(ticket.workspaceId, event);
+      void emitEventToChannelApps(channelId, event);
 
       // Skip no-op writes for the automation trigger so identical re-submits do
       // not spam TICKET_UPDATED automations.

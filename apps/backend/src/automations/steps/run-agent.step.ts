@@ -6,7 +6,11 @@ import type { AutomationContext } from '../types/context';
 import { PauseStep } from '../engine/pause-step';
 import { automationContextStorage } from '../engine/automation-context-storage';
 import { OutputSchemaSchema, assertMatchesSchema } from '../engine/declared-schema';
-import { clawClient } from '../services/claw-client';
+import {
+  clawClient,
+  resolveAgentSpacesAppId,
+  resolveHeadlessIdentityContext,
+} from '../services/claw-client';
 import { parseAgentAttachments } from '../services/agent-attachment.service';
 import { config } from '@/config/env';
 import { db } from '@/database/client';
@@ -70,7 +74,7 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
 
     const agentSlug = cfg.agentSlug as string;
     const prompt = cfg.prompt as string;
-    const spacesAppId = await resolveSpacesAppId(cfg, agentSlug, context.automation.workspaceId);
+    const spacesAppId = await resolveAgentSpacesAppId(agentSlug, context.automation.workspaceId, cfg.spacesAppId);
     const runUserId = await resolveRunUserId(spacesAppId, context.automation.createdById, context.automation.workspaceId);
     const identityContext = await resolveHeadlessIdentityContext(runUserId, context.automation.workspaceId);
     const visibleContext = resolveVisibleConversationContext(context);
@@ -179,7 +183,7 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
       validationError,
       cfg.outputSchema ?? {},
     );
-    const spacesAppId = await resolveSpacesAppId(cfg, agentSlug, context.automation.workspaceId);
+    const spacesAppId = await resolveAgentSpacesAppId(agentSlug, context.automation.workspaceId, cfg.spacesAppId);
     const runUserId = await resolveRunUserId(spacesAppId, context.automation.createdById, context.automation.workspaceId);
     const identityContext = await resolveHeadlessIdentityContext(runUserId, context.automation.workspaceId);
     const callbackUrl = buildCallbackUrl(store.runId, stepName);
@@ -243,75 +247,6 @@ function buildCallbackUrl(executionId: string, stepName: string): string {
   return `${config.xyneClaw.callbackUrl.replace(/\/$/, '')}/api/internal/automations/claw-callback/${encodeURIComponent(executionId)}/${encodeURIComponent(stepName)}`;
 }
 
-const AGENT_LIST_CACHE_TTL_MS = 60_000;
-let agentListCache: { agents: Awaited<ReturnType<typeof clawClient.listAgents>>; fetchedAt: number } | null = null;
-
-async function listAgentsCached(): Promise<Awaited<ReturnType<typeof clawClient.listAgents>>> {
-  if (agentListCache && Date.now() - agentListCache.fetchedAt < AGENT_LIST_CACHE_TTL_MS) {
-    return agentListCache.agents;
-  }
-  const agents = await clawClient.listAgents();
-  agentListCache = { agents, fetchedAt: Date.now() };
-  return agents;
-}
-
-async function resolveSpacesAppId(
-  cfg: z.infer<typeof RunAgentConfigSchema>,
-  agentSlug: string,
-  workspaceId: string,
-): Promise<string> {
-  const configured = (cfg.spacesAppId ?? '').trim();
-  if (configured) {
-    if (await appBelongsToWorkspace(configured, workspaceId)) return configured;
-    throw new Error(
-      `[RUN_AGENT] configured spacesAppId ${configured} for agent "${agentSlug}" does not belong to workspace ${workspaceId} — re-select the agent in the automation builder`,
-    );
-  }
-
-  const agents = await listAgentsCached();
-  const candidates = agents.filter(a => a.slug === agentSlug && a.spacesAppId);
-  if (candidates.length === 0) {
-    throw new Error(
-      `[RUN_AGENT] agent "${agentSlug}" not found in the claw catalog (disabled, deleted, or never published as a Spaces app)`,
-    );
-  }
-  if (candidates.length === 1) return candidates[0].spacesAppId as string;
-
-  const candidateIds = candidates.map(a => a.spacesAppId as string);
-  const apps = await db.apps.findMany({
-    where: { id: { in: candidateIds } },
-    select: { id: true, workspaceId: true, orgId: true },
-  });
-  const inWorkspace = apps.filter(a => a.workspaceId === workspaceId);
-  if (inWorkspace.length === 1) return inWorkspace[0].id;
-
-  const wsOrgs = await db.workspaceOrganization.findMany({
-    where: { workspaceId, leftAt: null },
-    select: { orgId: true },
-  });
-  const orgIds = new Set(wsOrgs.map(w => w.orgId));
-  const inOrg = apps.filter(a => orgIds.has(a.orgId));
-  if (inOrg.length === 1) return inOrg[0].id;
-
-  throw new Error(
-    `[RUN_AGENT] agent slug "${agentSlug}" matches ${candidates.length} agents across orgs and workspace ${workspaceId} does not disambiguate — re-select the agent in the builder so the config pins its spacesAppId`,
-  );
-}
-
-async function appBelongsToWorkspace(appId: string, workspaceId: string): Promise<boolean> {
-  const app = await db.apps.findUnique({
-    where: { id: appId },
-    select: { workspaceId: true, orgId: true },
-  });
-  if (!app) return false;
-  if (app.workspaceId === workspaceId) return true;
-  const member = await db.workspaceOrganization.findFirst({
-    where: { workspaceId, orgId: app.orgId, leftAt: null },
-    select: { id: true },
-  });
-  return Boolean(member);
-}
-
 async function resolveRunUserId(spacesAppId: string, creatorId: string, workspaceId: string): Promise<string> {
   if (creatorId) return creatorId;
   try {
@@ -330,32 +265,6 @@ async function resolveRunUserId(spacesAppId: string, creatorId: string, workspac
     );
   }
   return creatorId;
-}
-
-/**
- * Queue workers do not have a browser cookie. Resolve the workspace context
- * from Spaces itself and send it as optional metadata, preserving the legacy
- * raw userId field for older Claw deployments.
- */
-async function resolveHeadlessIdentityContext(
-  userId: string,
-  workspaceId: string,
-): Promise<{ spacesWorkspaceId: string; spacesOrgId: string; spacesOrgMemberId: string }> {
-  const [workspace, user] = await Promise.all([
-    db.workspace.findUnique({ where: { id: workspaceId }, select: { orgId: true } }),
-    db.user.findUnique({ where: { id: userId }, select: { orgMemberId: true } }),
-  ]);
-  if (!workspace?.orgId) {
-    throw new Error(`[RUN_AGENT] workspace ${workspaceId} has no organization`);
-  }
-  if (!user?.orgMemberId) {
-    throw new Error(`[RUN_AGENT] user ${userId} has no orgMemberId`);
-  }
-  return {
-    spacesWorkspaceId: workspaceId,
-    spacesOrgId: workspace.orgId,
-    spacesOrgMemberId: user.orgMemberId,
-  };
 }
 
 function deriveStepNameFromCtx(context: AutomationContext): string | null {

@@ -62,3 +62,19 @@ describe("parseCloudWebhook media", () => {
     expect(msg?.media).toBeUndefined();
   });
 });
+
+describe("parseCloudWebhook forms", () => {
+  const flowReply = (responseJson: string) =>
+    wrap({ ...base, type: "interactive", interactive: { type: "nfm_reply", nfm_reply: { name: "flow", body: "Sent", response_json: responseJson } } });
+
+  it("carries a submitted form as its token and fields, even with no text", () => {
+    const [msg] = parseCloudWebhook(flowReply(JSON.stringify({ flow_token: "tok-1", q0_one: "1", q1_many: ["0", "2"] })));
+    expect(msg?.text).toBe("");
+    expect(msg?.formReply).toEqual({ token: "tok-1", fields: { q0_one: "1", q1_many: ["0", "2"] } });
+  });
+
+  it("drops a submission it cannot read rather than throwing", () => {
+    expect(parseCloudWebhook(flowReply("not json"))).toEqual([]);
+    expect(parseCloudWebhook(flowReply(JSON.stringify({ q0_one: "1" })))).toEqual([]);
+  });
+});

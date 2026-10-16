@@ -93,7 +93,8 @@ export async function spacesFetch(path: string, init?: RequestInit, auth?: Space
   if (!baseUrl) {
     throw new Error("Spaces base URL is not configured. Set SPACES_BACKEND_URL (preferred) or XYNE_SPACES_URL.");
   }
-  if (!token) {
+  // An internal route is authenticated by the S2S key alone, so it needs no user token.
+  if (!token && !auth?.s2sKey) {
     throw new Error("Spaces auth token is missing for this request.");
   }
 
@@ -119,7 +120,7 @@ export async function spacesFetch(path: string, init?: RequestInit, auth?: Space
   const cookieHeader = cookieParts.join("; ");
 
   const headers: Record<string, string> = {
-    Authorization: `Bearer ${token}`,
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
     "Content-Type": "application/json",
     ...(sessionId ? { "x-session-id": sessionId } : {}),
     ...(workspaceId ? { "x-workspace-id": workspaceId } : {}),

@@ -1,0 +1,101 @@
+diff --git a/android/src/main/java/io/wazo/callkeep/RNCallKeepModule.java b/android/src/main/java/io/wazo/callkeep/RNCallKeepModule.java
+index 025480a..2b26c0c 100644
+--- a/android/src/main/java/io/wazo/callkeep/RNCallKeepModule.java
++++ b/android/src/main/java/io/wazo/callkeep/RNCallKeepModule.java
+@@ -387,7 +387,8 @@ public class RNCallKeepModule extends ReactContextBaseJavaModule implements Life
+         }
+ 
+         if (isConnectionServiceAvailable()) {
+-            this.registerPhoneAccount(options);
++            // PATCH: Skip automatic phone account registration to prevent popup on every app open
++            // this.registerPhoneAccount(options);
+             this.registerEvents();
+             this.startObserving();
+             VoiceConnectionService.setAvailable(true);
+@@ -434,10 +435,10 @@ public class RNCallKeepModule extends ReactContextBaseJavaModule implements Life
+         this.hasListeners = false;
+     }
+ 
+-    @ReactMethod
+-    public void displayIncomingCall(String uuid, String number, String callerName) {
+-        this.displayIncomingCall(uuid, number, callerName, false, null);
+-    }
++    //     @ReactMethod
++//     public void displayIncomingCall(String uuid, String number, String callerName) {
++//         this.displayIncomingCall(uuid, number, callerName, false, null);
++//     }
+ 
+     @ReactMethod
+     public void displayIncomingCall(String uuid, String number, String callerName, boolean hasVideo) {
+@@ -483,10 +484,10 @@ public class RNCallKeepModule extends ReactContextBaseJavaModule implements Life
+         conn.onAnswer();
+     }
+ 
+-    @ReactMethod
+-    public void startCall(String uuid, String number, String callerName) {
+-        this.startCall(uuid, number, callerName, false, null);
+-    }
++    //     @ReactMethod
++//     public void startCall(String uuid, String number, String callerName) {
++//         this.startCall(uuid, number, callerName, false, null);
++//     }
+ 
+     @ReactMethod
+     public void startCall(String uuid, String number, String callerName, boolean hasVideo) {
+@@ -1127,11 +1128,19 @@ public class RNCallKeepModule extends ReactContextBaseJavaModule implements Life
+         }
+         String appName = this.getApplicationName(context);
+ 
++        try {
++            PhoneAccount existing = telecomManager.getPhoneAccount(handle);
++            if (existing != null) {
++                telecomManager.unregisterPhoneAccount(handle);
++            }
++        } catch (Exception e) {
++            Log.w(TAG, "[RNCallKeepModule] Failed to unregister stale phone account", e);
++        }
++
+         PhoneAccount.Builder builder = new PhoneAccount.Builder(handle, appName);
+         if (isSelfManaged()) {
+             builder.setCapabilities(PhoneAccount.CAPABILITY_SELF_MANAGED);
+-        }
+-        else {
++        } else {
+             builder.setCapabilities(PhoneAccount.CAPABILITY_CALL_PROVIDER);
+         }
+ 
+@@ -1195,10 +1204,15 @@ public class RNCallKeepModule extends ReactContextBaseJavaModule implements Life
+         if (isSelfManaged()) {
+             return true;
+         }
++        boolean result = false;
++        try {
++            return isConnectionServiceAvailable() && telecomManager != null &&
++                hasPermissions() && telecomManager.getPhoneAccount(handle) != null &&
++                telecomManager.getPhoneAccount(handle).isEnabled();
++        } catch (Exception ignored) {
++        }
+ 
+-        return isConnectionServiceAvailable() && telecomManager != null &&
+-            hasPermissions() && telecomManager.getPhoneAccount(handle) != null &&
+-            telecomManager.getPhoneAccount(handle).isEnabled();
++        return result;
+     }
+ 
+     protected void registerReceiver() {
+diff --git a/ios/RNCallKeep/RNCallKeep.m b/ios/RNCallKeep/RNCallKeep.m
+index 786045f..9713b9d 100644
+--- a/ios/RNCallKeep/RNCallKeep.m
++++ b/ios/RNCallKeep/RNCallKeep.m
+@@ -1091,6 +1091,11 @@ RCT_EXPORT_METHOD(reportUpdatedCall:(NSString *)uuidString contactIdentifier:(NS
+ #ifdef DEBUG
+     NSLog(@"[RNCallKeep][CXProviderDelegate][provider:performEndCallAction]");
+ #endif
++    // PATCH: tell native observers before the action is fulfilled (the call is still listed by
++    // CXCallObserver), so a decline can reach the server without waiting on the JS runtime.
++    [[NSNotificationCenter defaultCenter] postNotificationName:@"RNCallKeepPerformEndCallActionNotification"
++                                                        object:nil
++                                                      userInfo:@{ @"callUUID": [action.callUUID.UUIDString lowercaseString] }];
+     [self sendEventWithNameWrapper:RNCallKeepPerformEndCallAction body:@{ @"callUUID": [action.callUUID.UUIDString lowercaseString] }];
+     [action fulfill];
+ }

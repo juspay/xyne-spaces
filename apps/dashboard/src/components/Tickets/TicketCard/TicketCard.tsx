@@ -36,6 +36,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { type BoardSlaPolicy } from '../../../hooks/useChannelSlaPolicy';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { SubTicketsToggle } from '../SubTickets/SubTickets';
+import type { SubTicketProgress } from '../SubTickets/SubTickets.types';
 
 const DEFAULT_VISIBLE_COLUMNS = new Set(['assignee', 'dueDate', 'priority', 'tags']);
 
@@ -215,6 +217,8 @@ interface TicketCardProps {
    * When omitted, SLA badges are not shown — no per-card fetch is performed.
    */
   slaPolicies?: BoardSlaPolicy[] | undefined;
+  /** Sub-ticket counts from the column; when given, the compact card can open its sub-tickets. */
+  subProgress?: SubTicketProgress | undefined;
 }
 
 export const TicketCard: React.FC<TicketCardProps> = ({
@@ -232,6 +236,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
   activeTicketId,
   showEmailReads = false,
   slaPolicies: slaPoliciesProp,
+  subProgress,
 }) => {
   const zero = useZero();
   const { userID } = useAuthContextValues();
@@ -984,6 +989,9 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                         </Tooltip>
                       </button>
                     ) : null)}
+                  {isCompact && subProgress && subProgress.total > 0 && (
+                    <SubTicketsToggle ticketId={ticket.id} progress={subProgress} />
+                  )}
                 </div>
                 {/* Priority - mobile */}
                 {!isCompact && showPriority && (

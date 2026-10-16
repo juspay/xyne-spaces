@@ -304,16 +304,39 @@ export class UserAssignmentStateService {
         return Promise.resolve(null);
       });
 
-      await Promise.all(restorePromises);
+      const restoreResults = await Promise.all(restorePromises);
+      const restoredCount = restoreResults.filter(Boolean).length;
+      // An empty backup is the normal record for someone already inactive in every group
+      // when they paused — pausing stores `{}` for them. Only a null backup is missing, so
+      // only that is ambiguous. Treating `{}` as missing left those members paused forever.
+      const hadBackup = stateBackup !== null;
+      const anyCurrentlyActive = [...currentStateMap.values()].some(
+        s => s.onCall || s.isActiveForAssignment,
+      );
 
-      // Clear assignmentUnavailableUntil in UserPresence
-      await this.prisma.userPresence.update({
-        where: { userId },
-        data: {
-          assignmentUnavailableUntil: null,
-          updatedAt: new Date(),
-        } as UpdateUserPresenceInput,
-      });
+      if (restoredCount === 0 && !hadBackup && !anyCurrentlyActive) {
+        logger.warn(
+          `⚠️ [ASSIGNMENT-STATE] No state backup and no active group for user ${userId}; leaving pause marker intact (cannot tell a lost backup from an admin deactivation)`,
+        );
+        return [];
+      }
+
+      // Clear the pause marker in BOTH places. The Zero presence mutator dual-writes it to
+      // users and user_presence, so clearing only user_presence leaves a stale timestamp on
+      // users forever.
+      await Promise.all([
+        this.prisma.userPresence.updateMany({
+          where: { userId },
+          data: {
+            assignmentUnavailableUntil: null,
+            updatedAt: new Date(),
+          } as UpdateUserPresenceInput,
+        }),
+        this.prisma.user.updateMany({
+          where: { id: userId },
+          data: { assignmentUnavailableUntil: null },
+        }),
+      ]);
 
       // Cancel any scheduled restoration job
       await assignmentReactivationQueue.cancelReactivation(userId);

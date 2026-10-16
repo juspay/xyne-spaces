@@ -73,7 +73,7 @@ import { Button } from '../../ui/Button';
 import { Dialog } from '../../ui/Dialog';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
 import { EntityMultiSelector } from '../../ui/EntitySelector/EntityMultiSelector';
-import { repoShortName } from '../../Release/repoVisual';
+import { repoShortName, repoWebUrl } from '../../Release/repoVisual';
 import {
   ReleaseRepositoriesSection,
   type ReleaseRangeKey,
@@ -116,6 +116,7 @@ import {
 } from '../../../utils/board/resolveDisplayFormFields';
 import { BoardFieldsPanel, orderFieldsRequiredFirst } from './BoardFieldsPanel';
 import { FieldError } from '../../ui/Field/Field';
+import { useTicketNoun } from '../../../contexts/TicketNounContext';
 
 interface CreateTicketModalProps {
   isOpen: boolean;
@@ -141,7 +142,6 @@ interface CreateTicketModalProps {
   initialStatus?: TicketStatusV2 | null;
   initialStageName?: string | null;
   initialTags?: string[];
-  initialMerchantId?: string | undefined;
   initialDynamicFields?: Record<string, string | string[]> | undefined;
   initialTicketKind?: 'task' | 'release';
   releaseOnly?: boolean;
@@ -181,7 +181,6 @@ export interface CreateTicketFormData {
   workflowType: string;
   files: File[];
   dynamicFields: Record<string, string | string[]>;
-  merchantId?: string;
   ticketType?: string;
 }
 
@@ -251,7 +250,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   initialStatus = null,
   initialStageName = null,
   initialTags = EMPTY_TAGS,
-  initialMerchantId,
   initialDynamicFields,
   initialTicketKind = 'task',
   releaseOnly = false,
@@ -273,6 +271,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   standaloneSeed,
   enableUrlSync = false,
 }) => {
+  const noun = useTicketNoun();
   const zero = useZero();
   const { user } = useAuth();
   const inheritedEntityLinkScope = useContext(EntityLinkContext);
@@ -519,7 +518,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       workflowType: standaloneSeed?.workflowType ?? '',
       files: [],
       dynamicFields: initialDynamicFields ?? {},
-      merchantId: initialMerchantId ?? '',
       ticketType: BaseTicketType.Fix,
     } as CreateTicketFormData,
     onSubmit: async ({ value }) => {
@@ -557,7 +555,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const isReleaseLine = ticketKind === 'release';
   // Only main release boards are selectable (repos); services show as chips below.
   // Keep the currently-primary board even if it lacks a provider.
-  const releaseBoards = useMemo(
+  const linkedReleaseBoards = useMemo(
     () =>
       (boards ?? [])
         .filter(b => isMainReleaseBoard(b) || b.id === formValues.boardId)
@@ -571,20 +569,21 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   // (deprecated) projectId, but it stays as narrow as the repos on screen.
   const releaseProjectIds = useMemo(() => {
     const ids = new Set<string>();
-    for (const board of releaseBoards) {
+    for (const board of linkedReleaseBoards) {
       if (board.projectId) ids.add(board.projectId);
     }
     return Array.from(ids).sort();
-  }, [releaseBoards]);
+  }, [linkedReleaseBoards]);
 
   // Services grouped by main release board → read-only chips under each repo.
   const [releaseApplications] = useCachedQuery(
     queries.applicationsByProjectIds({ projectIds: releaseProjectIds }),
     { enabled: isReleaseLine && releaseProjectIds.length > 0 },
   );
-  const { servicesByMainBoard, repoUrlByMainBoard } = useMemo(() => {
+  const { servicesByMainBoard, repoUrlByMainBoard, otherHubBoardIds } = useMemo(() => {
     const services = new Map<string, string[]>();
     const repoUrls = new Map<string, string>();
+    const ownedElsewhere = new Set<string>();
     const list =
       !releaseApplications || releaseApplications instanceof Error ? [] : releaseApplications;
     for (const app of list) {
@@ -592,10 +591,43 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       const names = services.get(app.mainReleaseBoardId) ?? [];
       names.push(app.name);
       services.set(app.mainReleaseBoardId, names);
-      if (app.repoUrl) repoUrls.set(app.mainReleaseBoardId, app.repoUrl);
+      const repoUrl = repoWebUrl(app.repo);
+      if (repoUrl) repoUrls.set(app.mainReleaseBoardId, repoUrl);
+      // A release config takes releases only from its own release channel.
+      if (app.channelId && app.channelId !== effectiveChannelId) {
+        ownedElsewhere.add(app.mainReleaseBoardId);
+      }
     }
-    return { servicesByMainBoard: services, repoUrlByMainBoard: repoUrls };
-  }, [releaseApplications]);
+    return {
+      servicesByMainBoard: services,
+      repoUrlByMainBoard: repoUrls,
+      otherHubBoardIds: ownedElsewhere,
+    };
+  }, [releaseApplications, effectiveChannelId]);
+  const releaseBoards = useMemo(
+    () => linkedReleaseBoards.filter(b => !otherHubBoardIds.has(b.id)),
+    [linkedReleaseBoards, otherHubBoardIds],
+  );
+  // A selected board whose release config creates releases in another channel is hidden
+  // above; drop it, primary or extra repo, so submit doesn't target it. Re-runs when the
+  // primary changes, since a prefill can set it after the configs have loaded.
+  useEffect(() => {
+    if (!isReleaseLine) return;
+    if (formValues.boardId && otherHubBoardIds.has(formValues.boardId)) {
+      form.setFieldValue('boardId', '');
+      markAutoApplied({ boardId: '' });
+    }
+    if (selectedRepoBoardIds.some(id => otherHubBoardIds.has(id))) {
+      setSelectedRepoBoardIds(prev => prev.filter(id => !otherHubBoardIds.has(id)));
+    }
+  }, [
+    isReleaseLine,
+    otherHubBoardIds,
+    formValues.boardId,
+    selectedRepoBoardIds,
+    form,
+    markAutoApplied,
+  ]);
 
   const isVersionBoard = (board: { releaseTrackingMode?: string | null } | undefined): boolean =>
     board?.releaseTrackingMode === ReleaseTrackingMode.VERSION;
@@ -614,7 +646,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const showDueDate = ticketFormConfig?.dueDate?.enabled ?? true;
   const showTodo = ticketFormConfig?.todo?.enabled ?? true;
   const showLabels = ticketFormConfig?.labels?.enabled ?? true;
-  const showMerchantId = ticketFormConfig?.merchantId?.enabled ?? false;
   const showTicketType = ticketFormConfig?.ticketType?.enabled ?? true;
 
   // Determine which fields are mandatory
@@ -623,7 +654,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const mandatoryDueDate = ticketFormConfig?.dueDate?.mandatory ?? false;
   const mandatoryTodo = ticketFormConfig?.todo?.mandatory ?? false;
   const mandatoryLabels = ticketFormConfig?.labels?.mandatory ?? false;
-  const mandatoryMerchantId = ticketFormConfig?.merchantId?.mandatory ?? false;
   const mandatoryTicketType = ticketFormConfig?.ticketType?.mandatory ?? false;
 
   // Fetch form mapping for the selected board (TICKET entity type)
@@ -1167,7 +1197,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     if (editingSubTicketIndex === null) return;
     const title = editingSubTicketTitle.trim();
     if (!title) {
-      toast.error('Sub-ticket title cannot be empty');
+      toast.error(`Sub-${noun.singular} title cannot be empty`);
       return;
     }
 
@@ -1238,14 +1268,12 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         showTodo,
         showDueDate,
         showLabels,
-        showMerchantId,
         showTicketType,
         mandatoryUserGroupsOnly,
         mandatoryAssignee,
         mandatoryTodo,
         mandatoryDueDate,
         mandatoryLabels,
-        mandatoryMerchantId,
         mandatoryTicketType,
         isRelease: ticketKind === 'release',
         releaseOnly,
@@ -1260,14 +1288,12 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       showTodo,
       showDueDate,
       showLabels,
-      showMerchantId,
       showTicketType,
       mandatoryUserGroupsOnly,
       mandatoryAssignee,
       mandatoryTodo,
       mandatoryDueDate,
       mandatoryLabels,
-      mandatoryMerchantId,
       mandatoryTicketType,
     ],
   );
@@ -1427,9 +1453,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       ) {
         mandatoryFieldErrors.push('Labels are required');
       }
-      if (showMerchantId && mandatoryMerchantId && !formData.merchantId?.trim()) {
-        mandatoryFieldErrors.push('Merchant ID is required');
-      }
 
       if (mandatoryFieldErrors.length > 0) {
         toast.error('Missing Required Fields', {
@@ -1574,9 +1597,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
             formDataPayload.append('tags[]', tag);
           });
         }
-        if (formData.merchantId) {
-          formDataPayload.append('merchantId', formData.merchantId);
-        }
         if (parentTicketId) {
           formDataPayload.append('parentTicketId', parentTicketId);
         }
@@ -1676,7 +1696,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
             excludedChatAttachmentIds.size > 0 && {
               excludedChatAttachmentIds: Array.from(excludedChatAttachmentIds),
             }),
-          ...(formData.merchantId && { merchantId: formData.merchantId }),
           ...(parentTicketId && { parentTicketId }),
           // Include dynamic fields (pruned of any now-inactive branch field's stale value)
           dynamicFields: submitDynamicFields,
@@ -1708,7 +1727,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                 ...(masterConversationId ? { conversationId: masterConversationId } : {}),
               }),
             ),
-            `Failed to create sub-ticket "${subTicket.title}"`,
+            `Failed to create sub-${noun.singular} "${subTicket.title}"`,
           );
         });
       }
@@ -1724,7 +1743,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
               referenceId: uuidv4(),
             }),
           ),
-          'Failed to link the duplicate ticket',
+          `Failed to link the duplicate ${noun.singular}`,
         );
       }
 
@@ -1740,9 +1759,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         error: error,
       });
 
-      toast.error('Ticket Creation Failed', {
+      toast.error(`${noun.singularTitle} Creation Failed`, {
         description:
-          error instanceof Error ? error.message : 'Failed to create ticket. Please try again.',
+          error instanceof Error
+            ? error.message
+            : `Failed to create ${noun.singular}. Please try again.`,
       });
       trackTicketCreateFailed(error, {
         source: trackSource,
@@ -1848,7 +1869,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         tags: values.tags,
         boardId: values.boardId || selectedBoardId || undefined,
         workflowType: values.workflowType || undefined,
-        merchantId: values.merchantId || undefined,
         ticketType: values.ticketType,
         dynamicFields: values.dynamicFields,
       },
@@ -1886,7 +1906,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       .writeText(link)
       .then(() => {
         toast.success('Link Copied', {
-          description: 'A prefilled create-ticket link was copied to your clipboard.',
+          description: `A prefilled create-${noun.singular} link was copied to your clipboard.`,
           duration: 2000,
         });
       })
@@ -2285,7 +2305,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         !value ||
         (typeof value === 'string' && !value.trim()) ||
         (Array.isArray(value) && value.length === 0);
-      if (empty) missing[field.fieldName] = 'Required to create this ticket';
+      if (empty) missing[field.fieldName] = `Required to create this ${noun.singular}`;
     }
     setDynamicFieldErrors(missing);
 
@@ -2323,7 +2343,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     }
 
     void form.handleSubmit();
-  }, [form, visibleDynamicFields, getMandatoryFieldMessage, releaseGateMessage]);
+  }, [form, visibleDynamicFields, getMandatoryFieldMessage, releaseGateMessage, noun]);
 
   // Field error
 
@@ -2352,10 +2372,10 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       <div className='flex w-full shrink-0 items-center justify-between border-b border-border/60 px-[18px] pb-3.5 pt-[15px]'>
         <h2 className='select-none text-[13.5px] font-medium leading-5 text-foreground/90'>
           {ticketSequence
-            ? `${ticketKind === 'release' ? 'New Release' : 'New Ticket'} (${ticketSequence.current}/${ticketSequence.total})`
+            ? `${ticketKind === 'release' ? 'New Release' : `New ${noun.singularTitle}`} (${ticketSequence.current}/${ticketSequence.total})`
             : ticketKind === 'release'
               ? 'New Release'
-              : 'New Ticket'}
+              : `New ${noun.singularTitle}`}
         </h2>
         <div className='flex items-center gap-1'>
           {enableUrlSync && (
@@ -2389,6 +2409,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
             variant='ghost'
             size='icon'
             title='Attach a file'
+            aria-label='Attach a file'
             disabled={form.state.isSubmitting}
             className='size-6'
             data-testid='ticket-attachment-button'
@@ -2418,6 +2439,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
             </Button>
           )}{' '}
           <Button
+            aria-label='Close create ticket dialog'
             variant='ghost'
             size='icon'
             onClick={requestClose}
@@ -2482,11 +2504,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                           }
                           field.handleChange(e.target.value);
                         }}
-                        aria-label='Ticket Title'
+                        aria-label={`${noun.singularTitle} Title`}
                         placeholder={
                           ticketKind === 'release'
                             ? 'Enter Release Title...'
-                            : 'Enter Ticket Title...'
+                            : `Enter ${noun.singularTitle} Title...`
                         }
                         data-testid='ticket-title-input'
                         data-track-category='Tickets'
@@ -2563,8 +2585,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     id='ticket-description'
                     defaultValue={field.state.value || ''}
                     aria-invalid={field.state.meta.errors.length > 0}
-                    placeholder='Enter Ticket Description...'
-                    aria-label='Ticket Description'
+                    placeholder={`Enter ${noun.singularTitle} Description...`}
+                    aria-label={`${noun.singularTitle} Description`}
                     data-testid='ticket-description-input'
                     data-track-category='Tickets'
                     data-track-name='EDIT_TICKET_DESCRIPTION'
@@ -2627,7 +2649,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                                 <Input
                                   value={editingSubTicketTitle}
                                   onChange={e => setEditingSubTicketTitle(e.target.value)}
-                                  placeholder='Sub-ticket title'
+                                  placeholder={`Sub-${noun.singular} title`}
                                   className='h-auto border-none p-0 text-[14px] font-medium leading-[18px] text-foreground focus-visible:ring-0'
                                 />
                               </div>
@@ -2647,7 +2669,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                             <Textarea
                               value={editingSubTicketDescription}
                               onChange={e => setEditingSubTicketDescription(e.target.value)}
-                              placeholder='Sub-ticket description (optional)'
+                              placeholder={`Sub-${noun.singular} description (optional)`}
                               rows={2}
                               className='min-h-0 resize-none border-none p-0 text-[14px] leading-[18px] text-muted-foreground focus-visible:ring-0'
                             />
@@ -3099,8 +3121,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                       onSelect={(value: string | null) =>
                         field.handleChange(value as CreateTicketFormData['ticketType'])
                       }
-                      searchPlaceholder='ticket type'
-                      placeholder={`ticket type${mandatoryTicketType ? ' *' : ''}`}
+                      searchPlaceholder={`${noun.singular} type`}
+                      placeholder={`${noun.singular} type${mandatoryTicketType ? ' *' : ''}`}
                       inputIcon={<Ticket className='size-3.5' strokeWidth={2.33} />}
                       inputClassName='rounded-md h-7'
                       showClearButton={!isFlowRootTicket}
@@ -3108,21 +3130,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     />
                   );
                 }}
-              </form.Field>
-            )}
-
-            {/* Merchant ID - conditionally rendered */}
-            {showMerchantId && (
-              <form.Field name='merchantId'>
-                {field => (
-                  <Input
-                    type='text'
-                    value={field.state.value || ''}
-                    onChange={e => field.handleChange(e.target.value)}
-                    placeholder={`Merchant ID${mandatoryMerchantId ? ' *' : ''}`}
-                    className='text-sm'
-                  />
-                )}
               </form.Field>
             )}
           </div>
@@ -3150,7 +3157,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                 ? 'Creating...'
                 : ticketKind === 'release'
                   ? 'Create Release'
-                  : 'Create Ticket'}
+                  : `Create ${noun.singularTitle}`}
             </Button>
             {/* Hidden file input */}
             <input
@@ -3171,7 +3178,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           onOpenChange={open => {
             if (!open) setShowDiscardConfirm(false);
           }}
-          title='Discard this ticket?'
+          title={`Discard this ${noun.singular}?`}
           description='The details you have filled in will be lost.'
           zIndexClassName='z-[60]'
           className='max-w-sm rounded-xl border border-border'
@@ -3179,7 +3186,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         >
           <div className='p-5'>
             <h2 className='text-[15px] font-semibold text-foreground mb-1.5'>
-              Discard this ticket?
+              Discard this {noun.singular}?
             </h2>
             <p className='text-[13px] leading-5 text-muted-foreground mb-5'>
               You have unsaved details. Closing now will lose everything you have filled in.
@@ -3233,8 +3240,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         event.preventDefault();
         requestClose();
       }}
-      title='Create Ticket'
-      description='Create and edit ticket details before submitting.'
+      title={`Create ${noun.singularTitle}`}
+      description={`Create and edit ${noun.singular} details before submitting.`}
       {...(!isMobile
         ? { focusRef: focusDescriptionOnOpen ? descriptionTextareaRef : titleInputRef }
         : {})}

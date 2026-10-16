@@ -48,6 +48,8 @@ For multi-part user tasks, mix — do simple parts yourself, farm deep sub-queri
 | "How/why do we…", SOPs, policies, verified facts | `memory-search` **first** |
 | Creating a ticket | `spaces-create-ticket` (write) |
 | Updating a ticket | `spaces-update-ticket` (write) |
+| A board's ticket custom fields (a desk's MID, etc.) | `spaces-board-fields` |
+| Emailing a customer/merchant from a desk ticket | `spaces-send-ticket-email` (write) |
 | Scheduling a meeting | `spaces-schedule-call` (write) |
 | Posting in a different thread/channel as the user | `user-send-message` (write) |
 | Creating a canvas | `spaces-create-canvas` (write) |
@@ -678,9 +680,21 @@ These return `"Action queued for approval"`. That's **normal**, not an error. Te
 
 ---
 
+## spaces-board-fields
+
+The custom (form) fields a board's tickets carry. **Call this before creating or updating a ticket on a desk that has them** — `dynamicFields` / `customFields` are keyed by field NAME, and a name that is not on the board's form is refused, so guessing one wastes a turn (and, before this tool existed, silently wrote nothing).
+
+**Required:** `boardId`.
+
+**Returns:** per field — name, type, required/optional, the allowed values for a dropdown, and `shownWhen` for a field that only applies when its parent field holds a particular value. A board with no ticket form returns no fields.
+
+**Notes:** names are case-sensitive — `MID` is not `mid`. Pass them through verbatim.
+
+---
+
 ## spaces-create-ticket
 
-Create a new ticket. **Requires lookups first** — you need a project, a board, and a channel before this call works. Order: `spaces-projects` → `spaces-boards` → `spaces-channels` → `spaces-users` (for assignee) → `spaces-create-ticket`.
+Create a new ticket. **Requires lookups first** — you need a project, a board, and a channel before this call works. Order: `spaces-projects` → `spaces-boards` → `spaces-channels` → `spaces-users` (for assignee) → `spaces-create-ticket`. Add `spaces-board-fields` to that chain when the ticket needs custom fields.
 
 **Required:** `title`, `description`, `projectId`, `boardId`, `channelId`.
 
@@ -696,11 +710,36 @@ Create a new ticket. **Requires lookups first** — you need a project, a board,
 - **assignedTo** (string) — userID. Use `spaces-users` to resolve a name.
 - **eta** (string) — ISO 8601 due date.
 - **tags** (array of strings).
+- **dynamicFields** (object) — the board's custom field values, keyed by field **name** exactly as `spaces-board-fields` reports it, e.g. `{ "MID": "merchant_1234" }`. A multi-select field takes an array of strings.
 
 **Notes:**
 
 - Attachment transfer is best-effort — if it fails, the ticket still gets created and the failure is surfaced in the response.
 - Returns `ticketId`, `xyneId`, `conversationId`, `status`, `priority`.
+- An unknown `dynamicFields` name is rejected before the approval card, with the board's real field names listed — retry with those rather than dropping the field.
+
+---
+
+## spaces-send-ticket-email
+
+Send an email to a customer or merchant **from a desk ticket**, so the mail and every answer to it live on that ticket's email thread in Xyne Desk.
+
+**Required:** `body`, `to`, and one of `ticketId` / `conversationId`.
+
+**Args:**
+
+- **ticketId** (string) — the ticket's **Internal ID** (from `spaces-tickets`). A Xyne ID like `PROG-412` also resolves, so quoting the human-readable id does not cost a failed approval.
+- **conversationId** (string) — use instead of `ticketId` if that is what you have.
+- **to** / **cc** / **bcc** (array of strings) — recipients, exactly as the person gave them.
+- **subject** (string) — **required for the first email on a ticket** (refused at approval time without one, so the approver always sees what the customer will). Omit it on an existing thread: the reply keeps the thread's own subject, and overriding it splits the thread in the customer's client.
+- **body** (string) — the whole email, plain text with blank lines between paragraphs (`**bold**` works). It is sent as written, so no placeholders.
+
+**Notes:**
+
+- Works on a ticket with **no email yet** — that first mail opens the provider thread and the customer's reply threads back onto the same ticket — and on a ticket that already has a thread, where it is sent as a reply.
+- **Never invent a recipient.** Ask the person for the merchant's addresses; an address that is not well-formed is rejected before anyone is asked to approve the send.
+- It is sent from the **desk's own mailbox**, not from your account, and it needs human approval like every write tool.
+- Read the thread with `spaces-emails` first when replying to one.
 
 ---
 

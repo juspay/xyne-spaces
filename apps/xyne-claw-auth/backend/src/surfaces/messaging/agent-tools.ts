@@ -12,12 +12,16 @@
  * the run is always allowed; everything else is off until an admin turns it
  * on.
  */
+import { prisma } from "../../db.js";
+import { createLogger } from "../../logger.js";
 import type { McpToolInfo } from "../../mcp/types.js";
-import { enqueueAndWait } from "./delivery.js";
+import { asLeadAndDocument, enqueueAndWait, enqueueOutbound, type OutboxAttachment } from "./delivery.js";
 import { readGroupContext } from "./group-context.js";
-import { getChannel, type ChannelDeliveryTarget, type MessagingChannelKey } from "./plugin.js";
+import { getChannel, type ChannelAccount, type ChannelDeliveryTarget, type MessageTemplate, type MessagingChannelKey } from "./plugin.js";
 import { agentActionsSchema, type AgentActionGates } from "./schema.js";
-import { getAccount, toChannelAccount } from "./store.js";
+import { getAccount, listOrgAccounts, listOwnedAccounts, toChannelAccount } from "./store.js";
+
+const log = createLogger("channel-agent-tools");
 
 const gatesSchema = agentActionsSchema();
 
@@ -53,6 +57,7 @@ export function channelAgentTools(channel: MessagingChannelKey): McpToolInfo[] {
   // opens conversations — so it is never given a way to address another chat.
   // Without that, resolving a target has nothing to resolve for.
   const mayAddressOtherChats = plugin?.accountScope !== "org";
+  const media = plugin?.capabilities.media ?? false;
   return [
     {
       name: `${prefix}_send_message`,
@@ -76,6 +81,23 @@ export function channelAgentTools(channel: MessagingChannelKey): McpToolInfo[] {
         required: ["text"],
       },
     },
+    ...(media
+      ? [{
+      name: `${prefix}_send_document`,
+      description:
+        `Send long content as a PDF in this ${label} chat instead of a wall of text: a report, a long list, a ` +
+        `table, meeting notes, anything past about 10 short lines. Pass the FULL content as markdown; it is ` +
+        `rendered to a PDF and delivered right away. Then reply with a 1-3 line takeaway — don't paste the content too.`,
+      inputSchema: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Short document title, shown on the first page and used as the file name." },
+          markdown: { type: "string", description: "The full content, as markdown (headings, lists, tables, code)." },
+        },
+        required: ["title", "markdown"],
+      },
+    }]
+      : []),
     ...(reactions
       ? [{
       name: `${prefix}_react`,
@@ -189,6 +211,21 @@ export async function handleChannelAgentTool(input: {
       return JSON.stringify({ ok: true, chatId, messageId: sent.ref?.messageId ?? null, sentToCurrentChat: chatId === target.chatId });
     }
 
+    case `${prefix}_send_document`: {
+      const title = str(params, "title") ?? "Document";
+      const markdown = str(params, "markdown");
+      if (!markdown) return JSON.stringify({ ok: false, error: "markdown is required" });
+      const { renderMarkdownToPdf } = await import("../../lib/result-pdf.js");
+      const pdf = await renderMarkdownToPdf(markdown, { title });
+      const fileName = `${title.replace(/[^A-Za-z0-9 _-]+/g, "").trim().replace(/\s+/g, "-").slice(0, 60) || "document"}.pdf`;
+      const sent = await enqueueAndWait(accountId, {
+        kind: "file",
+        chatId: target.chatId,
+        attachment: { fileName, mimeType: "application/pdf", data: pdf.toString("base64") },
+      });
+      return JSON.stringify(sent.ok ? { ok: true, fileName, sentToCurrentChat: true } : { ok: false, error: sent.error });
+    }
+
     case `${prefix}_react`: {
       if (!gates.reactions) return JSON.stringify({ ok: false, error: `Reactions are disabled for this ${channel} account.` });
       const emoji = str(params, "emoji");
@@ -251,3 +288,119 @@ export async function handleChannelAgentTool(input: {
       return JSON.stringify({ ok: false, error: `Unknown ${channel} tool: ${tool}` });
   }
 }
+
+// ── the person's own WhatsApp, from any run ──────────────────────────────────
+
+/**
+ * "Message me on WhatsApp", for runs that did NOT start in a chat — a
+ * scheduled job reporting back, a Spaces run that finishes something the
+ * person is waiting on. A virtual MCP server like the channel tools above,
+ * granted per run (routes/mcp.ts listing + lib/start-run.ts forwarded config,
+ * the two gates) to any run whose user has a WhatsApp they can be reached on.
+ *
+ * It has no recipient parameter on purpose: the only person it can reach is
+ * the user the run belongs to, resolved here from the authenticated session —
+ * an agent cannot be talked into messaging anyone else with it.
+ */
+export const NOTIFY_SERVER_TYPE = "whatsapp-notify";
+export const NOTIFY_TOOL_NAME = "whatsapp_notify_user";
+
+export const NOTIFY_TOOL: McpToolInfo = {
+  name: NOTIFY_TOOL_NAME,
+  description:
+    "Send a WhatsApp message to the person this run is working for — only them; there is no way to choose a " +
+    "recipient. Use it to report back from scheduled or background work, or to tell them something they are " +
+    "waiting on is done. Write it like a text from a friend: short, the key fact first, no greeting or sign-off. " +
+    "Don't use it to answer them in a conversation you are already having with them.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      text: { type: "string", description: "The message. Markdown is converted to WhatsApp formatting. Keep it to a few lines." },
+    },
+    required: ["text"],
+  },
+};
+
+export interface NotifyTarget {
+  account: ChannelAccount;
+  chatId: string;
+  template?: MessageTemplate;
+}
+
+function isRunning(account: ChannelAccount): boolean {
+  return account.config.desiredState === "running" && account.config.connState !== "logged_out";
+}
+
+/**
+ * Where this user can be reached. Their linked number on the org's business
+ * number first (that is the assistant they talk to), else their own linked
+ * device, where the message lands in their "You" chat. Null when neither.
+ */
+export async function findNotifyTarget(userId: string, orgId?: string | null): Promise<NotifyTarget | null> {
+  if (!userId) return null;
+  const identities = await prisma.userSurfaceIdentity
+    .findMany({
+      where: { userId, status: "ACTIVE", surface: { key: "whatsapp-cloud" }, ...(orgId ? { orgId } : {}) },
+      select: { orgId: true, surfaceUserId: true },
+      orderBy: { lastSeenAt: { sort: "desc", nulls: "last" } },
+    })
+    .catch(() => []);
+  for (const identity of identities) {
+    const account = (await listOrgAccounts("whatsapp-cloud", identity.orgId)).map(toChannelAccount).find(isRunning);
+    if (!account) continue;
+    const template = (account.channelConfig as { notificationTemplate?: MessageTemplate } | null)?.notificationTemplate;
+    return { account, chatId: identity.surfaceUserId, ...(template ? { template } : {}) };
+  }
+  if (orgId) {
+    const own = (await listOwnedAccounts("whatsapp", orgId, userId))
+      .map(toChannelAccount)
+      .find((account) => isRunning(account) && account.config.connState === "connected" && !!account.config.selfId);
+    if (own) return { account: own, chatId: own.config.selfId! };
+  }
+  return null;
+}
+
+/**
+ * Send `text` (and any files) to the user's own WhatsApp. Outside Meta's
+ * 24-hour window it goes out as the account's notification template when one
+ * is set; otherwise the failure is returned, worded for the agent.
+ */
+export async function notifyUser(input: {
+  userId: string;
+  orgId?: string | null;
+  text: string;
+  attachments?: OutboxAttachment[];
+}): Promise<{ ok: true; viaTemplate: boolean } | { ok: false; error: string }> {
+  const target = await findNotifyTarget(input.userId, input.orgId);
+  if (!target) {
+    return { ok: false, error: "This person has no WhatsApp linked to Claw, so they can't be messaged there." };
+  }
+  // A long report arrives as its lead plus a PDF, not as a wall of texts.
+  const long = await asLeadAndDocument(input.text, "Update").catch(() => null);
+  const reply = await enqueueAndWait(target.account.id, {
+    kind: "text",
+    chatId: target.chatId,
+    text: long?.text ?? input.text,
+    ...(target.template ? { template: target.template, ...(long ? { templateText: input.text } : {}) } : {}),
+  });
+  if (!reply.ok) {
+    const closed = /24|window|re-engagement/i.test(reply.error);
+    log.warn(`[notify] send failed account=${target.account.id} user=${input.userId}: ${reply.error}`);
+    return {
+      ok: false,
+      error: closed
+        ? "They haven't messaged in over 24 hours, so WhatsApp won't deliver a free-form message, and no notification template is set up for this number."
+        : reply.error,
+    };
+  }
+  // A template carries only the words: files go after, and only when the
+  // message itself went out normally (a template means the window is shut).
+  if (!reply.viaTemplate) {
+    for (const attachment of [...(long ? [long.document] : []), ...(input.attachments ?? [])]) {
+      await enqueueOutbound(target.account.id, { kind: "file", chatId: target.chatId, attachment });
+    }
+  }
+  log.info(`[notify] sent account=${target.account.id} user=${input.userId}${reply.viaTemplate ? " via template" : ""}`);
+  return { ok: true, viaTemplate: reply.viaTemplate === true };
+}
+
