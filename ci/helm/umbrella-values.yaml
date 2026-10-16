@@ -12,6 +12,8 @@ xyne-zero:
   enabled: true
 xyne-zero-replication:
   enabled: true
+xyne-sync:
+  enabled: true
 xyne-ysweet:
   enabled: true
 xyne-claw:
