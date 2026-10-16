@@ -39,6 +39,7 @@ export async function resolveMessage(
   return {
     messageId: summary.messageId,
     conversationId: summary.conversationId,
+    channelConnectId: conversation.channelConnectId ?? null,
     senderId: summary.senderId,
     workspaceId: summary.workspaceId ?? conversation.workspaceId,
     content: summary.content,

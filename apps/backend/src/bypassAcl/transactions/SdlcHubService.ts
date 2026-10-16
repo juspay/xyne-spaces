@@ -2,7 +2,8 @@ import { transaction } from '../base';
 import type { SdlcActor } from '@/sdlc/types';
 import { AppError } from '@/middleware/errorHandler';
 import { sdlcCanvasParticipants } from '@/sdlc/sdlcCanvasAccess';
-import { newConnectId, createConnectGroupForEntity, ConnectEntityType } from '@/database/connectGroup';
+import { newConnectId, createConnectGroupForEntity, resolveChannelConnectId, ConnectEntityType } from '@/database/connectGroup';
+import { channelConnectIdFor } from '@/database/connectStamp';
 import { ensureHubKnowledgeFolder, placeHubItem, ensureHubWikiFolder, ensureRepositoryWikiFolder } from '@/sdlc/hubFolders';
 import { ensureLink, refileFolderEdges } from '@/sdlc/entityLinkService';
 import { SdlcHubService, SDLC_FOLDERS, channelRepository, linkRelatedCanvases } from '@/sdlc/SdlcHubService';
@@ -95,6 +96,7 @@ export function createArtifactFromClawTx(self: SdlcHubService, actor: SdlcActor,
     const viewAccessId = randomUUID();
     // Slack Connect: a canvas is a shareable entity → its own connectId + a private connect_group row.
     const connectId = newConnectId();
+    const channelConnectId = await resolveChannelConnectId(tx, channelId);
     const canvas = await tx.canvas.create({
       data: {
         workspaceId: actor.workspaceId,
@@ -112,7 +114,7 @@ export function createArtifactFromClawTx(self: SdlcHubService, actor: SdlcActor,
         connectId,
         metadata: {} as Prisma.InputJsonValue,
         participants: {
-          create: sdlcCanvasParticipants(actor.workspaceId, channelId, actor.userId, connectId),
+          create: sdlcCanvasParticipants(actor.workspaceId, channelId, actor.userId, connectId, channelConnectId),
         },
       },
     });
@@ -263,6 +265,7 @@ export function createTrackTx(self: SdlcHubService, actor: SdlcActor, input: { n
     const track = await tx.sdlcTrack.create({
       data: {
         workspaceId: actor.workspaceId,
+        channelConnectId: await channelConnectIdFor(channelId),
         name: input.name,
         ...(input.description ? { description: input.description } : {}),
         status: 'ACTIVE',
@@ -422,6 +425,7 @@ export async function createSdlcChannel(tx: TransactionClient, actor: SdlcActor,
         channelStats: {
           create: {
             workspaceId: actor.workspaceId,
+            channelConnectId: connectId,
             lastActivityAt: now,
             participantCount: 1,
             addUserPolicy: ChannelAddUserPolicy.ADMINS_ONLY,
@@ -430,6 +434,7 @@ export async function createSdlcChannel(tx: TransactionClient, actor: SdlcActor,
         participants: {
           create: {
             workspaceId: actor.workspaceId,
+            channelConnectId: connectId,
             userId: actor.userId,
             role: ChannelRole.ADMIN,
           },
@@ -437,6 +442,7 @@ export async function createSdlcChannel(tx: TransactionClient, actor: SdlcActor,
         participantsStatus: {
           create: {
             workspaceId: actor.workspaceId,
+            channelConnectId: connectId,
             userId: actor.userId,
             isDeleted: false,
             updatedAt: now,

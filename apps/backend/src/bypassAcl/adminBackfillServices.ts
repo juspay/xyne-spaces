@@ -159,7 +159,8 @@ export function deskMetricsBackfillChannelIdBatch(batchSize: number): Promise<nu
 
 /**
  * Inserts a synthetic TICKET_CREATED activity for email-desk tickets created within the lookback
- * window that don't already have one. SQL unchanged from the original call site.
+ * window that don't already have one. SQL unchanged from the original call site, plus the ticket's
+ * Slack Connect channel handle (raw SQL bypasses the connect stamper).
  */
 export function deskMetricsBackfillTicketCreatedActivityBatch(batchSize: number, cutoff: Date): Promise<number> {
   return rawQuery(
@@ -167,7 +168,7 @@ export function deskMetricsBackfillTicketCreatedActivityBatch(batchSize: number,
     'admin backfill: insert synthetic TICKET_CREATED activity rows, across every workspace',
     () => db.$executeRaw`
       WITH batch AS (
-        SELECT t.id, t."createdBy", t."createdAt", t."channelId", t."workspaceId", t."priority", t."stageName", t."statusV2"
+        SELECT t.id, t."createdBy", t."createdAt", t."channelId", t."channelConnectId", t."workspaceId", t."priority", t."stageName", t."statusV2"
         FROM "public"."tickets" t
         WHERE t."channelId" IN (
             SELECT "channelId" FROM "public"."email_channel_preferences"
@@ -179,7 +180,7 @@ export function deskMetricsBackfillTicketCreatedActivityBatch(batchSize: number,
           )
         LIMIT ${batchSize}
       )
-      INSERT INTO "public"."ticket_activities" (id, "ticketId", "updatedBy", timestamp, "activityType", "channelId", "workspaceId", value)
+      INSERT INTO "public"."ticket_activities" (id, "ticketId", "updatedBy", timestamp, "activityType", "channelId", "channelConnectId", "workspaceId", value)
       SELECT
         gen_random_uuid()::text,
         b.id,
@@ -187,6 +188,7 @@ export function deskMetricsBackfillTicketCreatedActivityBatch(batchSize: number,
         b."createdAt",
         'TICKET_CREATED',
         b."channelId",
+        b."channelConnectId",
         b."workspaceId",
         jsonb_build_object('field', 'ticketCreated', 'priority', b."priority"::text, 'stageName', b."stageName", 'statusV2', b."statusV2"::text)
       FROM batch b

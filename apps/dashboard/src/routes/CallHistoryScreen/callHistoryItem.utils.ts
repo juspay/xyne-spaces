@@ -91,6 +91,7 @@ export function mapVespaCallResultToCall(result: DisplaySearchResult, workspaceI
 
   return {
     workspaceId,
+    channelConnectId: null,
     id: callId,
     externalId: context?.externalId || callId,
     title: stripSearchHighlight(context?.title || result.title) || null,
@@ -148,6 +149,7 @@ export function mapVespaCallResultToCall(result: DisplaySearchResult, workspaceI
 
       return {
         workspaceId,
+        channelConnectId: null,
         id: `${callId}:${userId || `external-${index}`}`,
         callId,
         userId,

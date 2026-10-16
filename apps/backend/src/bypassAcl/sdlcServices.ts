@@ -138,8 +138,10 @@ function countLegacyLinks(repoId: string): Promise<number> {
 }
 
 function stampLegacyLinks(repoId: string, channelId: string): Promise<number> {
+  // Slack Connect: raw SQL bypasses the connect stamper, so the channel's handle is set here too.
   return db.$executeRaw`
-    UPDATE "public"."sdlc_entity_links" SET "channelId" = ${channelId}
+    UPDATE "public"."sdlc_entity_links" SET "channelId" = ${channelId},
+      "channelConnectId" = (SELECT "connectId" FROM "public"."channels" WHERE id = ${channelId})
     WHERE "repoId" = ${repoId} AND "channelId" IS NULL
   `;
 }

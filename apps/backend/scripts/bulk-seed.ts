@@ -40,6 +40,7 @@ import {
   WorkspaceRole,
   ActivityClassification,
 } from '@xyne/shared';
+import { newConnectId, ConnectEntityType } from '../src/database/connectGroup';
 
 const prisma = new PrismaClient();
 
@@ -206,6 +207,7 @@ async function wipe() {
   await prisma.channelUserStatus.deleteMany({ where: { channelId: { in: channelIds } } });
   await prisma.channelStats.deleteMany({ where: { channelId: { in: channelIds } } });
   await prisma.activity.deleteMany({ where: { channelId: { in: channelIds } } });
+  await prisma.connectGroup.deleteMany({ where: { entityType: ConnectEntityType.CHANNEL, entityId: { in: channelIds } } });
   await prisma.channel.deleteMany({ where: { id: { in: channelIds } } });
   // dummy users + their org members
   const du = await prisma.user.deleteMany({ where: { email: { startsWith: USER_EMAIL_PREFIX } } });
@@ -223,11 +225,13 @@ const messages: any[] = [];
 const reactions: any[] = [];
 const reactionCounts: any[] = [];
 const activities: any[] = [];
+const connectGroups: any[] = []; // one private connect_group row per channel (Slack Connect)
 
 type ConvInfo = { createdAt: Date; createdBy: string; rootActivity: boolean };
 
 function addConversationWithMessages(
   channelId: string,
+  connectId: string,
   members: U[],
   convIndex: number,
   baseMinutes: number,
@@ -259,6 +263,7 @@ function addConversationWithMessages(
     const createdAt = minsAgo(baseMinutes - k);
     messages.push({
       workspaceId: wsId,
+      channelConnectId: connectId,
       messageId,
       conversationId,
       senderId: sender.id,
@@ -291,8 +296,8 @@ function addConversationWithMessages(
     if (k % REACT_EVERY === 0) {
       const emoji = pick(EMOJIS, k);
       const reactor = pick(members, k + 1);
-      reactions.push({ workspaceId: wsId, messageId, userId: reactor.id, emojiName: emoji });
-      reactionCounts.push({ workspaceId: wsId, messageId, emojiName: emoji, count: 1 });
+      reactions.push({ workspaceId: wsId, channelConnectId: connectId, messageId, userId: reactor.id, emojiName: emoji });
+      reactionCounts.push({ workspaceId: wsId, channelConnectId: connectId, messageId, emojiName: emoji, count: 1 });
     }
     // Mention activity — Activity page shows "<dummy> mentioned you", and the message
     // it points at really does contain the mention.
@@ -300,6 +305,7 @@ function addConversationWithMessages(
       rootActivity = true;
       activities.push({
         workspaceId: wsId,
+        channelConnectId: connectId,
         userId: meId, // receiver = me
         actorId: sender.id, // who mentioned me
         actorAction: 'mentioned_user',
@@ -318,6 +324,7 @@ function addConversationWithMessages(
   const createdAt = minsAgo(baseMinutes);
   conversations.push({
     workspaceId: wsId,
+    channelConnectId: connectId,
     conversationId,
     channelId,
     // whoever sent the initial message started the conversation — the DM unread count
@@ -349,6 +356,8 @@ function addChannel(
   // otherwise every participant resolves to "Unknown User".
   const isDm = opts.scopeType === ChannelScopeType.DM || opts.scopeType === ChannelScopeType.GROUP_DM;
   const channelName = isDm ? opts.members.map(m => m.id).sort().join(',') : opts.name;
+  const connectId = newConnectId();
+  const stampedAt = minsAgo(idx);
   channels.push({
     id: channelId,
     name: channelName,
@@ -359,21 +368,34 @@ function addChannel(
     createdBy: opts.createdBy,
     projectId: opts.projectId,
     workspaceId: opts.workspaceId,
+    connectId,
     participantCount: opts.members.length,
     isMigrated: false,
     lastActivityAt: minsAgo(idx),
+  });
+  connectGroups.push({
+    entityType: ConnectEntityType.CHANNEL,
+    entityId: channelId,
+    hostWorkspaceId: opts.workspaceId,
+    invitedEntityId: null,
+    invitedWorkspaceId: null,
+    connectId,
+    status: 'ACTIVE',
+    createdAt: stampedAt,
+    updatedAt: stampedAt,
   });
   // channel_stats — the DM list (dmChannelsLatestMessagesPaginated) queries this table,
   // NOT channels. No stats row → DM never appears in the DM page list.
   channelStats.push({
     workspaceId: opts.workspaceId,
+    channelConnectId: connectId,
     channelId,
     lastActivityAt: minsAgo(idx),
     participantCount: opts.members.length,
   });
   const convs: ConvInfo[] = [];
   for (let c = 0; c < CONVS_PER; c++) {
-    convs.push(addConversationWithMessages(channelId, opts.members, c, idx * 100 + c * 30));
+    convs.push(addConversationWithMessages(channelId, connectId, opts.members, c, idx * 100 + c * 30));
   }
   // Mirror how the backend derives unreadCount when you open a channel (mutators.ts
   // channel.markAsRead): DMs count conversations since lastViewedAt that someone else
@@ -386,9 +408,10 @@ function addChannel(
   const myLastViewedAt = allRead ? new Date(now) : new Date(oldestUnread - 1000);
   opts.members.forEach((u, mi) => {
     const isMe = u.id === meId;
-    participants.push({ workspaceId: opts.workspaceId, channelId, userId: u.id, role: mi === 0 ? ChannelRole.ADMIN : ChannelRole.MEMBER });
+    participants.push({ workspaceId: opts.workspaceId, channelConnectId: connectId, channelId, userId: u.id, role: mi === 0 ? ChannelRole.ADMIN : ChannelRole.MEMBER });
     statuses.push({
       workspaceId: opts.workspaceId,
+      channelConnectId: connectId,
       channelId,
       userId: u.id,
       lastViewedAt: isMe ? myLastViewedAt : new Date(now),
@@ -404,8 +427,9 @@ async function flush() {
     for (let i = 0; i < rows.length; i += chunk) await fn(rows.slice(i, i + chunk));
     console.log(`    ✅ ${rows.length} ${label}`);
   };
-  // order: channels -> stats -> participants/status -> conversations -> messages -> reactions
+  // order: channels -> connect_group -> stats -> participants/status -> conversations -> messages -> reactions
   await batched('channels', channels, s => prisma.channel.createMany({ data: s }));
+  await batched('connect groups', connectGroups, s => prisma.connectGroup.createMany({ data: s }));
   await batched('channel stats', channelStats, s => prisma.channelStats.createMany({ data: s }));
   await batched('participants', participants, s => prisma.channelParticipant.createMany({ data: s }));
   await batched('channel statuses', statuses, s => prisma.channelUserStatus.createMany({ data: s }));

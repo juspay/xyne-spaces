@@ -65,6 +65,7 @@ const buildTicketFromSummary = (summary: TicketCardSummary, workspaceId: string)
     isArchived: false,
     kanbanPosition: null,
     workspaceId: workspaceId,
+    channelConnectId: null,
     lastEmailAt: summary.createdAt ?? now,
     emailCount: null,
     classificationData: null,

@@ -18,6 +18,9 @@ export function setupTicketCreatedActivity(prisma: PrismaClient): void {
           timestamp: result.createdAt as Date,
           activityType: ActivityType.TICKET_CREATED,
           channelId: result.channelId as string,
+          // Slack Connect: this write is on the raw client, which the connect stamper never sees, so
+          // copy the ticket's (already stamped) channel handle.
+          channelConnectId: (result.channelConnectId as string | null | undefined) ?? null,
           workspaceId: result.workspaceId as string,
           value: {
             field: 'ticketCreated',

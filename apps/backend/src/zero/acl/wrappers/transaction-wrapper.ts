@@ -23,6 +23,7 @@ import {
   type AuditOperation,
 } from '../../audit';
 import { logger } from '@/utils/logger';
+import { stampConnectIdForZero } from '@/database/connectStamp';
 
 /**
  * Wraps a Zero transaction with ACL checks and Vespa/side-effect job collection.
@@ -108,6 +109,11 @@ function wrapMutateWithACL(
 
           return async function (this: unknown, args: unknown) {
             let previousValue: unknown = undefined;
+
+            // Slack Connect: stamp connectId from the row's channel (registered tables only) BEFORE
+            // ACL/side-effects/write, so every downstream step sees it. No-op for other tables/ops.
+            // The parent is read on this mutation's own db transaction.
+            args = await stampConnectIdForZero(tableName, operation, args, tx);
 
             // 1. ACL Check (throws if unauthorized)
             const acl = await ACLFactory.getACL(tableName as TableName, ctx);
