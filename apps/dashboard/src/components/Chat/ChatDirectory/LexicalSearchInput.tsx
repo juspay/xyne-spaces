@@ -164,15 +164,32 @@ function InitialMentionPlugin({
 
     const timeoutId = setTimeout(() => {
       editor.update(() => {
-        // Bail out before clearing if the user already has content/a chip; set
-        // the guard so this mention is treated as handled and never retried.
-        if (!$isEditorSeedable()) {
-          appliedRef.current = mentionKey;
-          return;
-        }
+        const root = $getRoot();
         appliedRef.current = mentionKey;
 
-        const root = $getRoot();
+        // A chip is already present (user picked one, or a restored query seeded it): leave it.
+        if ($rootHasFilterChip(root)) return;
+
+        // The user typed before the mention arrived (fast typing, or the channel list loaded
+        // after the palette opened). Prepend the chip and keep their text instead of dropping
+        // the scope — Desk "Select & Merge" depends on this in:<channel> chip being present.
+        if (root.getTextContent().trim().length > 0) {
+          const firstBlock = root.getFirstChild();
+          if ($isElementNode(firstBlock)) {
+            const chip = $createFilterChip(initialMention, currentUserID);
+            const spacer = $createTextNode(' ');
+            const firstInline = firstBlock.getFirstChild();
+            if (firstInline) {
+              firstInline.insertBefore(chip);
+              firstInline.insertBefore(spacer);
+            } else {
+              firstBlock.append(chip, spacer);
+            }
+            root.selectEnd();
+          }
+          return;
+        }
+
         root.clear();
         const paragraph = $createParagraphNode();
         root.append(paragraph);

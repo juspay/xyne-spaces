@@ -101,6 +101,9 @@ const GlobalCommandMenu = ({
   const [internalHideTabs, setInternalHideTabs] = useState(false);
   const [internalEnabledTabs, setInternalEnabledTabs] = useState<TabType[] | undefined>(undefined);
   const [deskMergeEnabled, setDeskMergeEnabled] = useState(false);
+  // Desk channel the palette was opened for whose channel record hadn't synced yet. Resolved into
+  // the in:<channel> chip as soon as `channelData` contains it (see effect below).
+  const [pendingDeskChannelId, setPendingDeskChannelId] = useState<string | null>(null);
   const [ticketView, setTicketView] = useState<TicketSearchView | null>(null);
 
   // External props take priority over internal state (e.g. when opened from SupportScreen)
@@ -170,10 +173,19 @@ const GlobalCommandMenu = ({
         setInternalHideTabs(false);
         setInternalEnabledTabs(undefined);
         setDeskMergeEnabled(false);
+        setPendingDeskChannelId(null);
         setTicketView(null);
       }
     },
     [onOpenChange, internalContextualTab, externalInitialTab, location.pathname],
+  );
+
+  const buildChannelMention = useCallback(
+    (channel: (typeof channelData)[number]): ChipData => {
+      const channelName = resolveChannelLabel(channel, context.userID ?? '', allUsers);
+      return { id: channel.id, name: channelName, type: 'channel', prefix: 'in:' };
+    },
+    [context.userID, allUsers],
   );
 
   const handleFindInChannel = useCallback(() => {
@@ -183,11 +195,7 @@ const GlobalCommandMenu = ({
     const pathParts = location.pathname.split('/').filter(Boolean);
     const supportIndex = pathParts.indexOf('support');
     setDeskMergeEnabled(supportIndex !== -1);
-
-    const buildChannelMention = (channel: (typeof channelData)[number]): ChipData => {
-      const channelName = resolveChannelLabel(channel, context.userID ?? '', allUsers);
-      return { id: channel.id, name: channelName, type: 'channel', prefix: 'in:' };
-    };
+    setPendingDeskChannelId(null);
 
     if (pathParts.includes('tickets') || pathParts.includes('projects')) {
       setInternalInitialMention(null);
@@ -202,6 +210,9 @@ const GlobalCommandMenu = ({
       const deskChannelId = pathParts[supportIndex + 1] || null;
       const deskChannel = deskChannelId ? channelData.find(c => c.id === deskChannelId) : undefined;
       setInternalInitialMention(deskChannel ? buildChannelMention(deskChannel) : null);
+      // Channel list not synced yet (cold load): resolve the chip once it arrives instead of
+      // opening without the in:<channel> scope, which hides "Select & Merge" for this session.
+      if (deskChannelId && !deskChannel) setPendingDeskChannelId(deskChannelId);
       setInternalContextualTab(TabType.DESK);
       setInternalHideTabs(true);
       setInternalEnabledTabs([TabType.DESK]);
@@ -265,12 +276,20 @@ const GlobalCommandMenu = ({
     location.pathname,
     location.search,
     channelData,
-    allUsers,
     onOpenChange,
-    context.userID,
     ticketScreenScope,
     openScopedToTicketScreen,
+    buildChannelMention,
   ]);
+
+  // Late-resolve the Desk channel chip when the palette opened before the channel synced.
+  useEffect(() => {
+    if (!open || !pendingDeskChannelId) return;
+    const deskChannel = channelData.find(c => c.id === pendingDeskChannelId);
+    if (!deskChannel) return;
+    setInternalInitialMention(buildChannelMention(deskChannel));
+    setPendingDeskChannelId(null);
+  }, [open, pendingDeskChannelId, channelData, buildChannelMention]);
 
   // Only the search-mode instance owns Cmd+F; the context-picker copy mounted in
   // ThreadPannel would otherwise win the tiebreak and hijack the shortcut.
