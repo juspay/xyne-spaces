@@ -219,7 +219,7 @@ const renderCommentBody = (
   return nodes.length > 0 ? nodes : [body];
 };
 
-function CanvasCommentComposer({
+export function CanvasCommentComposer({
   id,
   channelId,
   currentUserId,
