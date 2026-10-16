@@ -1701,9 +1701,9 @@ export const mapBySchema = async (
       case appSchema:
         return mapApp(args as Apps);
       case sdlcContainerSchema:
-        return mapSdlcContainer(args as unknown as SdlcContainerRow) as unknown as Promise<InsertDocument>;
+        return mapSdlcContainer(args as SdlcContainerRow);
       case sdlcRepositorySchema:
-        return mapSdlcRepository(args as unknown as SdlcRepositoryRow) as unknown as Promise<InsertDocument>;
+        return mapSdlcRepository(args as SdlcRepositoryRow);
       case samTranscriptSchema:
         throw new Error(`${schemaName}: SAM transcripts must be queued with pre-transformed data. Pass the document via vespaQueue.addJob({ data: vespaDocument }).`);
       default:
