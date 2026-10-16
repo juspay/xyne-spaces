@@ -111,7 +111,11 @@ import {
   toUserCandidates,
   type ChannelSearchItem,
 } from '../../../utils/rankingUtils';
-import { mergeRankedCandidates, type RankedCandidate } from '@xyne/shared/utils';
+import {
+  buildDmContactRecency,
+  mergeRankedCandidates,
+  type RankedCandidate,
+} from '@xyne/shared/utils';
 import type { User } from '../../../machines/stateMachine';
 import { searchMetricsService } from '../../../services/searchMetricsService';
 import { useHistoryBackedOverlay } from '../../../hooks/useHistoryBackedOverlay';
@@ -781,17 +785,10 @@ const ChannelCommandMenuContent = ({
   // used by the empty-state DIRECT MESSAGES section). `rankUsers` uses this
   // both as a "frequent contact" signal AND as a tie-breaker so the `from:`
   // typeahead's empty state mirrors the plain-search DM ordering.
-  const dmContactRecency = useMemo(() => {
-    const map = new Map<string, number>();
-    directMessages.forEach(channel => {
-      if (isOneToOneDMChannel(channel.scopeType)) {
-        const participants = parseDMParticipantIds(channel);
-        const otherUserId = participants.find(id => id !== currentUserID);
-        if (otherUserId && !map.has(otherUserId)) map.set(otherUserId, map.size);
-      }
-    });
-    return map;
-  }, [directMessages, currentUserID]);
+  const dmContactRecency = useMemo(
+    () => buildDmContactRecency(directMessages, currentUserID),
+    [directMessages, currentUserID],
+  );
 
   // Resolved enabled tabs — computed early so useEffects below can reference it
   const activeEnabledTabs = enabledTabs ?? DEFAULT_ENABLED_TABS;

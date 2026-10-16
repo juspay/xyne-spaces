@@ -1,18 +1,15 @@
 import { ReactElement, useState, useMemo, useCallback, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
-import { isDeskChannelType, ChannelType } from '@xyne/shared';
+import { ChannelType } from '@xyne/shared';
 import { useAuthContextValues } from '../../hooks/useAuth';
 import {
   useAllChannels,
   useAllVisibleChannels,
   useUserChannelStatuses,
 } from '../../hooks/useChannels';
-import {
-  groupChannelsByScope,
-  resolveChannelLabel,
-} from '../Chat/ChatDirectory/ChatDirectory.utils';
+import { resolveChannelLabel } from '../Chat/ChatDirectory/ChatDirectory.utils';
 import { useAllUnreadCount } from '../../hooks/useUnreadCount';
-import { rankChannelsByAffinity } from '../../utils/rankingUtils';
+import { buildCmdkChannelGroups } from '../../utils/rankingUtils';
 import { useAffinityCallback } from '../../hooks/useAffinityCallback';
 import ChannelCommandMenu from '../Chat/ChatDirectory/ChannelCommandMenu';
 import type { ContextItem } from '../Chat/ThreadContextPanel/ThreadContextPanel.types';
@@ -22,7 +19,6 @@ import {
   type SearchScopeToggles,
   type PaletteRestore,
 } from '../Chat/ChatDirectory/ChannelCommandMenu.types';
-import { VisibleChannel } from '../../machines/stateMachine';
 import { useShortcutById } from '../../shortcuts';
 import type { InitialQueryData } from '../Chat/ChatDirectory/LexicalSearchInput';
 import { useUsers } from '../../hooks/useUsers';
@@ -281,39 +277,9 @@ const GlobalCommandMenu = ({
   // Group channels by scope type
   const { starred, channels, directMessages } = useMemo(() => {
     // Referenced only so this memo re-runs when affinity weights finish loading (the weights
-    // themselves are read imperatively via getChannelWeight below); keeps exhaustive-deps active.
+    // themselves are read imperatively via getChannelWeight); keeps exhaustive-deps active.
     void affinityVersion;
-    if (!channelData.length) return { starred: [], channels: [], directMessages: [] };
-
-    // Index visible channels by id once (O(n)); the previous `.find` inside this
-    // `.map` was O(n * m) over ~749 all x ~431 visible channels per recompute.
-    const visibleById = new Map(visibleAllChannels.map(vc => [vc.id, vc]));
-    const visibleChannels = channelData.map(channel => {
-      const vc = visibleById.get(channel.id);
-      if (vc) {
-        return vc;
-      }
-      return {
-        ...channel,
-      };
-    }) as VisibleChannel[];
-    const grouped = groupChannelsByScope(visibleChannels, allChannelsUserStatus);
-
-    // groupChannelsByScope excludes EMAIL channels (they live in Desk, not chat sidebar).
-    // Re-include them so the search `in:` picker can scope to desk channels.
-    const emailChannels = visibleChannels.filter(c => isDeskChannelType(c.type));
-
-    // Rank each group by personalization weight (desc), tie-break on recency (shared with the
-    // `/chat`/`/call` pickers). No weights → 0 ties → pure recency, identical to the previous order.
-    const rankedStarred = rankChannelsByAffinity(grouped.starred);
-    const rankedChannels = rankChannelsByAffinity([...grouped.channels, ...emailChannels]);
-    const rankedDirectMessages = rankChannelsByAffinity(grouped.directMessages);
-
-    return {
-      starred: rankedStarred,
-      channels: rankedChannels,
-      directMessages: rankedDirectMessages,
-    };
+    return buildCmdkChannelGroups(channelData, visibleAllChannels, allChannelsUserStatus);
   }, [channelData, allChannelsUserStatus, visibleAllChannels, affinityVersion]);
 
   // Reconstruct a search (mention chips + trailing text) from results-page params.

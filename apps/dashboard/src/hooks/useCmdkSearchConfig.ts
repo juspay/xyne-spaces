@@ -1,30 +1,17 @@
 import { useMemo } from 'react';
 import { useCacConfig } from '@xyne/shared/hooks';
+import {
+  CMDK_SEARCH_CAC_KEY,
+  DEFAULT_CMDK_SEARCH_CAC_CONFIG,
+  DEFAULT_FLAT_ALL_RANK_PROFILES,
+  cmdkDefaultRankProfiles,
+  cmdkTabKeyForDocType,
+  type CmdkSearchCacConfig,
+} from '@xyne/shared/utils';
 
-export const CMDK_SEARCH_CAC_KEY = 'cmdk_search_config';
-// Per-deployment overrides come through the CAC key below.
-const DEFAULT_RANK_PROFILE = 'default_native';
-// Rank profiles whose scores are directly comparable across schemas, so the ALL tab can render
-// one global score-ordered list instead of per-docType buckets. `unified` normalizes every
-// schema's score into the same 0-1 range; add others (e.g. `personalized`) via CAC.
-const DEFAULT_FLAT_ALL_RANK_PROFILES = ['unified'];
-
-export interface CmdkSearchCacConfig {
-  /** Legacy ALL-tab override. */
-  allDefaultRankProfile: string;
-  /** Per-tab default, keyed by TabType value ('messages', 'tickets', 'attachments', 'desk', ...). */
-  tabDefaultRankProfiles?: Record<string, string>;
-  /**
-   * Rank profiles that render the ALL tab flat (one score-ordered list) instead of grouped by
-   * docType. Any profile not listed here keeps the sectioned ALL view.
-   */
-  flatAllRankProfiles?: string[];
-}
-
-export const DEFAULT_CMDK_SEARCH_CAC_CONFIG: CmdkSearchCacConfig = {
-  allDefaultRankProfile: DEFAULT_RANK_PROFILE,
-  flatAllRankProfiles: DEFAULT_FLAT_ALL_RANK_PROFILES,
-};
+// The config and its rank-profile rules live in `@xyne/shared` (shared with mobile search).
+export { CMDK_SEARCH_CAC_KEY, DEFAULT_CMDK_SEARCH_CAC_CONFIG, cmdkTabKeyForDocType };
+export type { CmdkSearchCacConfig };
 
 /**
  * Default rank profile per Cmd+K tab: `default_native` unless the `cmdk_search_config` CAC key
@@ -35,12 +22,7 @@ export function useCmdkDefaultRankProfiles(): (tab: string) => string {
     key: CMDK_SEARCH_CAC_KEY,
     fallbackConfig: DEFAULT_CMDK_SEARCH_CAC_CONFIG,
   });
-  return useMemo(() => {
-    const perTab = config.tabDefaultRankProfiles ?? {};
-    const allDefault = config.allDefaultRankProfile?.trim().toLowerCase() || DEFAULT_RANK_PROFILE;
-    return (tab: string) =>
-      perTab[tab]?.trim().toLowerCase() || (tab === 'all' ? allDefault : DEFAULT_RANK_PROFILE);
-  }, [config]);
+  return useMemo(() => cmdkDefaultRankProfiles(config), [config]);
 }
 
 /**
@@ -57,13 +39,4 @@ export function useCmdkFlatAllRankProfiles(): Set<string> {
     const profiles = config.flatAllRankProfiles ?? DEFAULT_FLAT_ALL_RANK_PROFILES;
     return new Set(profiles.map(p => p?.trim().toLowerCase()).filter(Boolean));
   }, [config]);
-}
-
-// SearchFilterBar works in docType vocabulary, which differs from TabType for two tabs.
-const DOC_TYPE_TO_TAB_KEY: Record<string, string> = {
-  files: 'attachments',
-  people: 'users',
-};
-export function cmdkTabKeyForDocType(docType: string): string {
-  return DOC_TYPE_TO_TAB_KEY[docType] ?? docType;
 }
