@@ -64,22 +64,15 @@ const CreateOrgForm = ({
     setCouponState('idle');
   };
 
+  // Only a code applied with the Apply button counts; text left in the box is ignored.
   const handleSubmit = (e: FormEvent): void => {
     e.preventDefault();
     if (!canSubmit || isCheckingCoupon) return;
-
-    void (async (): Promise<void> => {
-      let state = couponState;
-      if (coupon.trim() && state !== 'applied') {
-        state = await checkCoupon();
-        if (state === 'invalid') return;
-      }
-      onSubmit(
-        orgName.trim(),
-        workspaceName.trim(),
-        state === 'applied' ? coupon.trim() : undefined,
-      );
-    })();
+    onSubmit(
+      orgName.trim(),
+      workspaceName.trim(),
+      couponState === 'applied' ? coupon.trim() : undefined,
+    );
   };
 
   return (
