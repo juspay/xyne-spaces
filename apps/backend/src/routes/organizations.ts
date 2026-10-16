@@ -8,6 +8,9 @@ const organizationController = new OrganizationController();
 router.post('/', organizationController.createOrganization);
 router.get('/', organizationController.getUserOrganizations);
 router.get('/:orgId', organizationController.getOrganizationDetails);
+router.get('/:orgId/coupon', organizationController.getOrganizationCoupon);
+router.get('/:orgId/ai-usage', organizationController.getOrganizationAiUsage);
+router.post('/:orgId/coupon', organizationController.applyOrganizationCoupon);
 
 // Organization Member Management Routes
 router.post('/:orgId/members', organizationController.addMember);

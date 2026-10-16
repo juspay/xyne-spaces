@@ -175,6 +175,7 @@ const envSchema = Joi.object({
   LITELLM_MANAGEMENT_ADMIN_KEY: Joi.string().allow('').default(''),
   LITELLM_CHANGED_BY: Joi.string().default('external-system:xyne-spaces-external'),
   ORG_DEFAULT_MODELS: Joi.string().allow('').default('kimi-latest,private-large'),
+  ORG_AI_COUPON_CODE: Joi.string().trim().allow('').default(''),
   BACKEND_URL: Joi.string().default('http://localhost:3001'),
   SLACK_BOT_TOKEN: Joi.string().allow('').default(''),
   SLACK_FRONTEND_URL: Joi.string().allow('').default('http://localhost:5173'),
@@ -906,6 +907,7 @@ export const config = {
       (envVars.LITELLM_MANAGEMENT_BASE_URL as string) || (envVars.LITELLM_BASE_URL as string),
     litellmManagementAdminKey: envVars.LITELLM_MANAGEMENT_ADMIN_KEY as string,
     litellmChangedBy: envVars.LITELLM_CHANGED_BY as string,
+    couponCode: (envVars.ORG_AI_COUPON_CODE as string) || '',
     orgDefaultModels: (envVars.ORG_DEFAULT_MODELS as string)
       .split(',')
       .map((m: string) => m.trim())

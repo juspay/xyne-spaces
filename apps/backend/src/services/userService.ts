@@ -22,6 +22,7 @@ import { OrgRole,
   ChannelRole, WorkspaceJoinRequestStatus } from '@xyne/shared';
 import type { WorkspaceJoinPolicy as WorkspaceJoinPolicyValue, WorkspaceType as WorkspaceTypeValue } from '@xyne/shared';
 import { aiProvisioningService } from '@/services/aiProvisioningService';
+import { OrgCoupon, orgCouponService } from '@/services/orgCouponService';
 import { isOrganizationPolicyError, organizationDomainService } from '@/services/organizationDomainService';
 import { createCommunityWorkspaceDefaults } from '@/utils/communityWorkspaceDefaults';
 import { ensureGeneralChannelForWorkspace } from '@/utils/workspaceGeneralChannel';
@@ -110,13 +111,17 @@ export class UserService {
   /**
    * Find an existing user by email and workspace
    */
-  async findUserByEmail(email: string, workspaceId: string): Promise<User | null> {
+  async findUserByEmail(
+    email: string,
+    workspaceId: string,
+  ): Promise<(User & { orgMember: { role: string } | null }) | null> {
     try {
       return await this.prisma.user.findFirst({
         where: {
           email: { equals: email, mode: 'insensitive' },
           workspaceId,
-        }
+        },
+        include: { orgMember: { select: { role: true } } },
       });
     } catch (error) {
       logger.error('Error finding user by email:', error);
@@ -840,7 +845,8 @@ export class UserService {
     },
     orgName: string,
     workspaceName: string,
-    authProvider: string = 'GOOGLE'
+    authProvider: string = 'GOOGLE',
+    coupon?: OrgCoupon,
   ): Promise<{ organization: any; workspace: any; workspaceUser: User; isNewUser: boolean }> {
     try {
       await organizationDomainService.assertCanCreateOrgForEmail(userData.email);
@@ -977,6 +983,17 @@ export class UserService {
       // Sync all hardcoded bots into the new workspace
       await unifiedBotUserService.syncAllBotUsers(workspace.id);
 
+      if (coupon) {
+        try {
+          await orgCouponService.apply(organization.orgId, coupon, workspaceUser.id);
+        } catch (error) {
+          logger.error('[UserService] Failed to apply coupon to new organization', {
+            orgId: organization.orgId,
+            error,
+          });
+        }
+      }
+
       try {
         await aiProvisioningService.enqueueOrgSync(organization.orgId);
         await aiProvisioningService.enqueueWorkspaceSync(workspace.id);
@@ -1019,7 +1036,7 @@ export class UserService {
       workspaceType?: WorkspaceTypeValue;
       joinPolicy?: WorkspaceJoinPolicyValue;
     },
-  ): Promise<{ organization: any; workspace: any; workspaceUser: User }> {
+  ): Promise<{ organization: any; workspace: any; workspaceUser: User; orgRole: string }> {
     // Find the user's org membership
     const orgMember = await this.prisma.orgMember.findFirst({
       where: { email: userData.email },
@@ -1049,7 +1066,15 @@ export class UserService {
     // workspace for something that doesn't exist yet). Bootstrap it as `system` — every
     // write below already carries its own workspaceId explicitly, so nothing relies on the
     // ambient-context stamper this bypasses. See WorkspacesACL.getMutateWhere / runAsSystem.
-    return createWorkspaceInOrgData(org, userData, workspaceName, workspaceType, joinPolicy, orgMember);
+    const created = await createWorkspaceInOrgData(
+      org,
+      userData,
+      workspaceName,
+      workspaceType,
+      joinPolicy,
+      orgMember,
+    );
+    return { ...created, orgRole: orgMember.role };
   }
 
   /**

@@ -12,6 +12,7 @@ import { useActivityTracker } from '../hooks/useActivityTracker';
 import HomeScreen from './HomeScreen';
 import SlackMigration from '../pages/SlackMigration';
 import AuthScreen from './AuthScreen/AuthScreen';
+import RedeemScreen from './RedeemScreen/RedeemScreen';
 import CommunityWorkspaceSelectionRoute from './AuthScreen/CommunityWorkspaceSelectionRoute';
 import TermsOfServiceScreen from './TermsOfServiceScreen/TermsOfServiceScreen';
 import PrivacyPolicyScreen from './PrivacyPolicyScreen/PrivacyPolicyScreen';
@@ -2205,6 +2206,10 @@ export const router = createBrowserRouter(
         {
           path: '/auth',
           element: <AuthScreen />,
+        },
+        {
+          path: '/redeem',
+          element: <RedeemScreen />,
         },
         {
           path: '/terms',
