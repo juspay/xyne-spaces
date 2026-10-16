@@ -39,6 +39,9 @@ litellmModelsRouter.get("/internal/litellm/models", validateS2SKey, async (_req:
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to fetch models";
     log.error(`[litellm-models] platform listing failed: ${message}`);
-    res.status(500).json({ success: false, error: message });
+    // The listing failed, but the model a no-pin run defaults to is still
+    // known — keep it so the picker's "Uses X by default" label survives a
+    // listing outage (XYNE-66325).
+    res.status(500).json({ success: false, error: message, defaultModel: LITELLM.model || null });
   }
 });

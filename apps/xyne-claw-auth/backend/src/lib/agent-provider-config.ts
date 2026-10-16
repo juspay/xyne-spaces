@@ -229,6 +229,128 @@ export function userCredRefreshTarget(
 }
 
 /**
+ * The model a credential runs on when its row has no explicit `model`.
+ * Keep in sync with defaultModelForProvider() in services/providerCredentials.ts,
+ * which documents the measured ok-rates behind these choices. A stale id here
+ * fails silently — ~300ms error, read as an empty completion, fallback to
+ * spaces, no ERROR logged.
+ */
+export function defaultModelForProvider(provider: string): string {
+  // gpt-4o is NOT servable through Copilot OAuth here (0 ok / 21 fail over
+  // 72h) — every defaulted call fell back to spaces.
+  if (provider === "copilot") return "claude-sonnet-4.6";
+  // gpt-4.1 is NOT servable through Codex ChatGPT-account OAuth (OpenAI
+  // 400s "model is not supported when using Codex with a ChatGPT
+  // account") — every defaulted call failed and fell back to spaces.
+  if (provider === "codex") return "gpt-5.5";
+  if (provider === "litellm") return "private-large";
+  // claude-sonnet-4-5 is no longer servable on the anthropic-user OAuth
+  // path (0 ok / 1425 fail over 72h).
+  return "claude-opus-4-8";
+}
+
+/**
+ * STRICT RANKING — the order is the source of truth, top first. "spaces" is
+ * the keyless platform provider and can ALWAYS serve, so an explicit spaces
+ * entry wins over lower-ranked saved credentials; a credential only routes
+ * when its provider outranks spaces (or spaces is absent). Entries without
+ * creds are skipped. No order at all → the platform default: a credential
+ * that was saved but never selected as a provider never routes a run.
+ * (Legacy `config.provider` still counts as an explicit selection for
+ * agents predating providerOrder.)
+ *
+ * Pure: `cfg` must already be speed-adjusted (providerConfigForSpeed) and
+ * `hasCreds` answers whether a usable credential exists for a provider.
+ * Shared by resolveAgentProviderConfigs (dispatch) and
+ * resolveAgentDefaultModel (the model picker's label) so the two can't drift.
+ */
+export function rankAgentProviders(
+  cfg: Record<string, unknown>,
+  hasCreds: (provider: string) => boolean,
+): { parent?: string; providerOrder: string[]; primary?: string } {
+  const rawOrder = cfg["providerOrder"];
+  const agentProviderOrder: string[] = Array.isArray(rawOrder)
+    ? rawOrder.filter((p): p is string => typeof p === "string" && KNOWN_PROVIDERS.has(p))
+    : [];
+  const rawProvider = cfg["provider"];
+  const agentLevelProvider = typeof rawProvider === "string" ? rawProvider : undefined;
+
+  let parent: string | undefined;
+  if (agentProviderOrder.length > 0) {
+    parent = agentProviderOrder.find((p) => p === "spaces" || hasCreds(p)) ?? agentProviderOrder[0];
+  }
+  if (!parent && agentLevelProvider && hasCreds(agentLevelProvider)) parent = agentLevelProvider;
+
+  const providerOrder = agentProviderOrder.length > 0 ? agentProviderOrder : parent ? [parent] : [];
+  // The primary is only usable if it names a provider we actually hold creds
+  // for; "spaces" (or undefined) means the platform default serves.
+  const primary = parent && hasCreds(parent) ? parent : undefined;
+  return { ...(parent ? { parent } : {}), providerOrder, ...(primary ? { primary } : {}) };
+}
+
+/**
+ * The Spaces (platform) model an agent's run uses, or null when it rides the
+ * claw pod's LITELLM.model default. Mirrors xyne-claw's parseModelSettings:
+ * on a fast run, fastModeProfile.modelSettings fields override modelSettings
+ * field-by-field (regardless of the profile's providers inherit/custom).
+ */
+export function spacesModelForSpeed(config: unknown, speed: ModelSpeed): string | null {
+  const cfg = (config as Record<string, unknown> | null) ?? null;
+  const pick = (bag: unknown): string | null => {
+    if (!bag || typeof bag !== "object" || Array.isArray(bag)) return null;
+    const m = (bag as Record<string, unknown>)["model"];
+    return typeof m === "string" && m.trim() ? m.trim() : null;
+  };
+  if (speed === "fast") {
+    const profile = cfg?.["fastModeProfile"];
+    const fastModel = profile && typeof profile === "object" && !Array.isArray(profile)
+      ? pick((profile as Record<string, unknown>)["modelSettings"])
+      : null;
+    if (fastModel) return fastModel;
+  }
+  return pick(cfg?.["modelSettings"]);
+}
+
+export interface AgentDefaultModel {
+  /** Provider a no-pin run starts on: a credentialed provider, or "spaces". */
+  provider: string;
+  /** Model id that provider runs on. null ⇒ "spaces" on the claw pod's
+   *  LITELLM.model default (only claw knows it — callers fill it in). */
+  model: string | null;
+  speed: ModelSpeed;
+}
+
+/**
+ * What a no-pin agent-level run (run-stream / headless) will START on, for
+ * labels like the model picker's "Uses X by default". Same ranking and model
+ * resolution as resolveAgentProviderConfigs, minus the side effects: no key
+ * decryption and no OAuth refresh/persist (this backs a GET).
+ *
+ * Known gap: a credential row whose ciphertext fails to decrypt is dropped by
+ * the dispatch path but counted here. Quota fallbacks mid-run are not modelled
+ * — this is the primary, not a guarantee.
+ */
+export async function resolveAgentDefaultModel(
+  agent: { id: string; config?: unknown },
+  opts: { speed?: ModelSpeed } = {},
+): Promise<AgentDefaultModel> {
+  const speed = opts.speed ?? agentDefaultSpeed(agent.config);
+  const cfg = providerConfigForSpeed(agent.config, speed);
+  const rows = await agentProviderCredentialsRepository.listByAgent(agent.id).catch(() => []);
+  const usable = new Map(
+    rows.filter((r) => Boolean(r.encryptedKey && r.iv && r.authTag)).map((r) => [r.provider, r] as const),
+  );
+  const { primary } = rankAgentProviders(cfg, (p) => usable.has(p));
+  if (!primary) return { provider: "spaces", model: spacesModelForSpeed(agent.config, speed), speed };
+
+  const models: Record<string, { model: string }> = {
+    [primary]: { model: usable.get(primary)?.model ?? defaultModelForProvider(primary) },
+  };
+  applyFastModeModels(models, agent.config, speed);
+  return { provider: primary, model: models[primary]!.model, speed };
+}
+
+/**
  * Decrypt + shape one credential row into a ProviderConfig (null on failure).
  * SINGLE SOURCE OF TRUTH for per-provider default models + OAuth-bundle
  * extraction — imported by webhook / agent-chat / flow-action so a provider's
@@ -243,25 +365,9 @@ export function buildProviderConfig(provider: string, row: CredRow): ProviderCon
       provider === "codex" ? extractCodexBearer(decrypted) :
       provider === "claude" ? extractClaudeBearer(decrypted) :
       decrypted;
-    // Keep in sync with defaultModelForProvider() in services/providerCredentials.ts,
-    // which documents the measured ok-rates behind these choices. A stale id here
-    // fails silently — ~300ms error, read as an empty completion, fallback to
-    // spaces, no ERROR logged.
-    const defaultModel =
-      // gpt-4o is NOT servable through Copilot OAuth here (0 ok / 21 fail over
-      // 72h) — every defaulted call fell back to spaces.
-      provider === "copilot" ? "claude-sonnet-4.6" :
-      // gpt-4.1 is NOT servable through Codex ChatGPT-account OAuth (OpenAI
-      // 400s "model is not supported when using Codex with a ChatGPT
-      // account") — every defaulted call failed and fell back to spaces.
-      provider === "codex" ? "gpt-5.5" :
-      provider === "litellm" ? "private-large" :
-      // claude-sonnet-4-5 is no longer servable on the anthropic-user OAuth
-      // path (0 ok / 1425 fail over 72h).
-      "claude-opus-4-8";
     return {
       apiKey,
-      model: row.model ?? defaultModel,
+      model: row.model ?? defaultModelForProvider(provider),
       ...(row.baseUrl ? { baseUrl: row.baseUrl } : {}),
       ...(row.authType ? { authType: row.authType } : {}),
       ...(row.reasoningEffort ? { reasoningEffort: row.reasoningEffort } : {}),
@@ -327,13 +433,6 @@ export async function resolveAgentProviderConfigs(
     log.warn(`Provider resolution (headless-bulk): agent=${agent.id} unknown automationProvider="${automationProvider}" — ignoring`);
   }
 
-  const rawOrder = cfg?.["providerOrder"];
-  const agentProviderOrder: string[] = Array.isArray(rawOrder)
-    ? rawOrder.filter((p): p is string => typeof p === "string" && KNOWN_PROVIDERS.has(p))
-    : [];
-  const rawProvider = cfg?.["provider"];
-  const agentLevelProvider = typeof rawProvider === "string" ? rawProvider : undefined;
-
   const agentCreds = await agentProviderCredentialsRepository.listByAgent(agent.id).catch(() => []);
   const agentCredsByProvider = new Map(agentCreds.map((c) => [c.provider, c] as const));
 
@@ -376,21 +475,9 @@ export async function resolveAgentProviderConfigs(
     }
   }
 
-  // STRICT RANKING — the order is the source of truth, top first. "spaces" is
-  // the keyless platform provider and can ALWAYS serve, so an explicit spaces
-  // entry wins over lower-ranked saved credentials; a credential only routes
-  // when its provider outranks spaces (or spaces is absent). Entries without
-  // creds are skipped. No order at all → the platform default: a credential
-  // that was saved but never selected as a provider never routes a run.
-  // (Legacy `config.provider` still counts as an explicit selection for
-  // agents predating providerOrder.) Mirrors agent-chat.ts.
-  let parent: string | undefined;
-  if (agentProviderOrder.length > 0) {
-    parent = agentProviderOrder.find((p) => p === "spaces" || providerConfigs[p]) ?? agentProviderOrder[0];
-  }
-  if (!parent && agentLevelProvider && providerConfigs[agentLevelProvider]) parent = agentLevelProvider;
-
-  const providerOrder = agentProviderOrder.length > 0 ? agentProviderOrder : parent ? [parent] : [];
+  // STRICT RANKING — see rankAgentProviders (shared with the model picker's
+  // default label so the two can't drift). Mirrors agent-chat.ts.
+  const { parent, providerOrder, primary: primaryParent } = rankAgentProviders(cfg, (p) => Boolean(providerConfigs[p]));
   log.info(`Provider resolution (headless): agent=${agent.id} mode=always-on parent=${parent ?? "spaces"} creds=[${Object.keys(providerConfigs).join(",")}] order=[${providerOrder.join(",")}]`);
   // The primary is only usable if it names a provider we actually built creds
   // for; "spaces" (or undefined) means fall through to the platform default,
@@ -398,7 +485,6 @@ export async function resolveAgentProviderConfigs(
   // stream reads `provider` (matches the dispatch-body field), the scheduled
   // worker / automation webhook / run proxy read `parent`. Keep them in
   // lockstep until consumers converge on one name.
-  const primaryParent = parent && providerConfigs[parent] ? parent : undefined;
   return {
     providerConfigs,
     providerOrder,

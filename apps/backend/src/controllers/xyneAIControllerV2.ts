@@ -1366,10 +1366,14 @@ export class XyneAIControllerV2 {
     }
 
     try {
+      // Optional composer fast toggle; anything else ⇒ the agent's default speed.
+      const rawSpeed = req.query['speed'];
+      const speed = rawSpeed === 'fast' || rawSpeed === 'standard' ? rawSpeed : undefined;
       const result = await listClawAgentModels(
         { headers: req.headers, userId },
         req.params['slug'],
-        (req as any).user?.workspaceId
+        (req as any).user?.workspaceId,
+        speed
       );
       res.json(result);
     } catch (error) {
