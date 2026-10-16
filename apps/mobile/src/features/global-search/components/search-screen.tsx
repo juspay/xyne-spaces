@@ -133,8 +133,13 @@ export function GlobalSearchScreen({
   /** Results scroll offset, written on the UI thread by whichever list is mounted. */
   const scrollOffset = useSharedValue(0);
 
+  /** Mode pills (@Ch / Bot / Exact) — only on remote Vespa tabs, not DMs / Channels. */
+  const showModeFilterRow = !scope && canOpenFiltersSheet(state.tab);
+
   /** The block the filter row occupies — the only part of the toolbar that collapses. */
-  const filterRowBlock = scope ? 0 : SEARCH_FILTER_ROW_TOP_GAP + SEARCH_FILTER_ROW_HEIGHT;
+  const filterRowBlock = showModeFilterRow
+    ? SEARCH_FILTER_ROW_TOP_GAP + SEARCH_FILTER_ROW_HEIGHT
+    : 0;
 
   const toolbarHeight =
     insets.top +
@@ -390,15 +395,17 @@ const SearchToolbar = memo(function SearchToolbar({
                   ? { onFilterPress: openFilters, filterBadgeCount }
                   : {})}
               />
-              <Animated.View style={filterRowStyle}>
-                <GlobalSearchFilterBar
-                  tab={tab}
-                  onlyMyChannels={onlyMyChannels}
-                  includeBotMessages={includeBotMessages}
-                  exactMatch={exactMatch}
-                  dispatch={dispatch}
-                />
-              </Animated.View>
+              {filtersAvailable ? (
+                <Animated.View style={filterRowStyle}>
+                  <GlobalSearchFilterBar
+                    tab={tab}
+                    onlyMyChannels={onlyMyChannels}
+                    includeBotMessages={includeBotMessages}
+                    exactMatch={exactMatch}
+                    dispatch={dispatch}
+                  />
+                </Animated.View>
+              ) : null}
             </>
           )}
         </View>

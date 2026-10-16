@@ -4,7 +4,14 @@
  */
 
 export type SearchDocType =
-  'all' | 'messages' | 'files' | 'tickets' | 'channels' | 'desk' | 'people';
+  | 'all'
+  | 'messages'
+  | 'files'
+  | 'tickets'
+  | 'channels'
+  | 'desk'
+  | 'people'
+  | 'calls';
 
 /** Labeled id for pickers that need a display name after apply. */
 export type FilterEntity = {

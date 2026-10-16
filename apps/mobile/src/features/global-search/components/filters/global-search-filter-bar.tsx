@@ -44,7 +44,7 @@ export function GlobalSearchFilterBar({
   includeBotMessages,
   exactMatch,
   dispatch,
-}: GlobalSearchFilterBarProps): ReactElement {
+}: GlobalSearchFilterBarProps): ReactElement | null {
   const { accentText } = useBubbleAccent();
 
   const showChannelModes = canOpenFiltersSheet(tab);
@@ -65,6 +65,10 @@ export function GlobalSearchFilterBar({
     void (exactMatch ? haptics.toggleOff() : haptics.toggleOn());
     dispatch({ type: 'exactMatchToggled' });
   }, [dispatch, exactMatch]);
+
+  // DMs / Channels: no mode pills — skip the row entirely so the toolbar
+  // does not reserve an empty gap under the category tags.
+  if (!showChannelModes && !showBotToggle) return null;
 
   return (
     <ScrollView

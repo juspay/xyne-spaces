@@ -43,7 +43,14 @@ import {
   modalFieldEntries,
   type ModalFilterEntry,
 } from '../../utils/filter-registry';
-import { getRankProfileOptions, rankLabel, SORT_OPTIONS, type SortBy } from '../../utils/rank-sort';
+import {
+  DEFAULT_RANK_PROFILE,
+  DEFAULT_SORT_BY,
+  getRankProfileOptions,
+  rankLabel,
+  SORT_OPTIONS,
+  type SortBy,
+} from '../../utils/rank-sort';
 import type { GlobalSearchTab } from '../../utils/search-tabs';
 import { DateModeSheet } from './date-mode-sheet';
 import { FilterMultiSelectSheet, selectionFirst } from './filter-multi-select-sheet';
@@ -254,12 +261,15 @@ function FiltersSheetBody({
 
   const clearFilters = useCallback(() => {
     void haptics.buttonTap();
-    // Clear modal filter fields only — keep type / sort / rank / bar mode pills.
+    // Clear every counted modal field (including Sort / Rank). Bar mode pills
+    // (@Ch / Bot / Exact) stay on the search bar and are not part of this draft.
     setDraft(prev => ({
       ...prev,
       ...clearStructuredDraft(),
       fromUsers: [],
       inChannels: [],
+      sortBy: DEFAULT_SORT_BY,
+      rankProfile: DEFAULT_RANK_PROFILE,
     }));
     setTextDrafts({});
     setDateMode('');

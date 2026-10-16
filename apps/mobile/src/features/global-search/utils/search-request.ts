@@ -69,89 +69,6 @@ export function categoryForTab(tab: GlobalSearchTab): SearchCategory | null {
   return CATEGORY_FOR_TAB[tab];
 }
 
-/** Structured fields that this category actually serializes onto the wire. */
-function hasApplicableStructuredInput(
-  category: SearchCategory,
-  structured: StructuredSearchFilters,
-): boolean {
-  const hasDates = Boolean(structured.dateRange || structured.after || structured.before);
-  if (hasDates) return true;
-
-  if (category === 'messages') {
-    return (
-      structured.withUsers.length > 0 ||
-      structured.mentionUsers.length > 0 ||
-      structured.mentionChannels.length > 0 ||
-      structured.mentionGroups.length > 0 ||
-      structured.tags.length > 0 ||
-      structured.entities.length > 0 ||
-      structured.fromEmails.length > 0 ||
-      structured.toEmails.length > 0
-    );
-  }
-
-  if (category === 'tickets') {
-    return (
-      structured.assignees.length > 0 ||
-      structured.boards.length > 0 ||
-      structured.priority !== '' ||
-      structured.statuses.length > 0 ||
-      structured.tags.length > 0 ||
-      structured.entities.length > 0 ||
-      structured.fromEmails.length > 0 ||
-      structured.toEmails.length > 0
-    );
-  }
-
-  if (category === 'calls') {
-    return structured.withUsers.length > 0;
-  }
-
-  // files — only dates (handled above) apply from the structured set
-  return false;
-}
-
-/**
- * The request for what is on screen, or `null` when nothing should be sent.
- * Every rule about *whether* to search lives here.
- */
-export function buildSearchRequest({
-  tab,
-  query,
-  chips,
-  structured = DEFAULT_STRUCTURED_FILTERS,
-  onlyMyChannels,
-  includeBotMessages,
-  exactMatch,
-  sortBy = DEFAULT_SORT_BY,
-  rankProfile = '',
-  scope,
-}: SearchRequestInput): SearchRequest | null {
-  // Scoped search is a single messages surface with no tabs.
-  const category = scope ? 'messages' : categoryForTab(tab);
-  if (!category) return null;
-
-  const freeText = query.trim();
-  // A locked scope narrows the request; it is not something the user asked for.
-  // Mode toggles alone do not count either: alone they would mean "every hit in
-  // every channel I am in" / "every bot message".
-  // Structured fields only count when this category actually sends them.
-  const hasUserInput = scope
-    ? freeText.length > 0
-    : freeText.length > 0 || chips.length > 0 || hasApplicableStructuredInput(category, structured);
-  if (!hasUserInput) return null;
-
-  return {
-    category,
-    freeText,
-    structured,
-    sortBy,
-    rankProfile,
-    tab: scope ? 'messages' : tab,
-    ...effectiveInputsForScope({ chips, onlyMyChannels, includeBotMessages, exactMatch }, scope),
-  };
-}
-
 /** Comma-joined chip ids for one prefix — the backend ORs them. */
 function chipIds(
   chips: readonly SearchFilterChip[],
@@ -192,6 +109,108 @@ function dateParams(structured: StructuredSearchFilters): Partial<VespaSearchFil
   return { after: bounds.after, before: bounds.before };
 }
 
+/**
+ * Single place for category → wire facet rules (chips + structured).
+ * Answers both “what goes on the request” and “is there anything to search for”.
+ * Modifiers (bots, archived, sort, rank, @Ch) are applied separately — alone they
+ * must not start a search.
+ */
+function collectSearchFacets(
+  category: SearchCategory,
+  chips: readonly SearchFilterChip[],
+  structured: StructuredSearchFilters,
+): { facets: Partial<VespaSearchFilters>; hasFacets: boolean } {
+  const facets: Partial<VespaSearchFilters> = {};
+  let hasFacets = false;
+
+  const put = (key: keyof VespaSearchFilters, value: string | undefined): void => {
+    if (!value) return;
+    // Facet values on the wire are always strings here.
+    (facets as Record<string, string>)[key] = value;
+    hasFacets = true;
+  };
+
+  const from = chipIds(chips, 'from:');
+  const inside = chipIds(chips, 'in:');
+  const withUsers = entityIds(structured.withUsers);
+  const isMessages = category === 'messages';
+  const isTickets = category === 'tickets';
+  const isCalls = category === 'calls';
+
+  // Calls: from: chips map to participant `with`. Messages: from: is sender.
+  if (from) put(isCalls ? 'with' : 'from', from);
+  if (inside) put('in', inside);
+  if (withUsers && (isMessages || (isCalls && !from))) put('with', withUsers);
+
+  if (isMessages) {
+    put('mentions', entityIds(structured.mentionUsers));
+    put('channelMentions', entityIds(structured.mentionChannels));
+    put('groupMentions', entityIds(structured.mentionGroups));
+  }
+
+  if (isTickets) {
+    put('assignee', entityIds(structured.assignees));
+    put('priority', structured.priority || undefined);
+    put('board', entityIds(structured.boards));
+    put('status', joinList(structured.statuses));
+  }
+
+  if (isMessages || isTickets) {
+    put('tags', joinList(structured.tags));
+    put('entity', joinList(structured.entities));
+    put('fromEmail', joinList(structured.fromEmails));
+    put('toEmail', joinList(structured.toEmails));
+  }
+
+  const dates = dateParams(structured);
+  if (Object.keys(dates).length > 0) {
+    Object.assign(facets, dates);
+    hasFacets = true;
+  }
+
+  return { facets, hasFacets };
+}
+
+/**
+ * The request for what is on screen, or `null` when nothing should be sent.
+ * Every rule about *whether* to search lives here.
+ */
+export function buildSearchRequest({
+  tab,
+  query,
+  chips,
+  structured = DEFAULT_STRUCTURED_FILTERS,
+  onlyMyChannels,
+  includeBotMessages,
+  exactMatch,
+  sortBy = DEFAULT_SORT_BY,
+  rankProfile = '',
+  scope,
+}: SearchRequestInput): SearchRequest | null {
+  // Scoped search is a single messages surface with no tabs.
+  const category = scope ? 'messages' : categoryForTab(tab);
+  if (!category) return null;
+
+  const freeText = query.trim();
+  // A locked scope narrows the request; it is not something the user asked for.
+  // Mode toggles / sort / rank alone do not count either.
+  // Facets only count when this category actually sends them (same rules as the wire).
+  const hasUserInput = scope
+    ? freeText.length > 0
+    : freeText.length > 0 || collectSearchFacets(category, chips, structured).hasFacets;
+  if (!hasUserInput) return null;
+
+  return {
+    category,
+    freeText,
+    structured,
+    sortBy,
+    rankProfile,
+    tab: scope ? 'messages' : tab,
+    ...effectiveInputsForScope({ chips, onlyMyChannels, includeBotMessages, exactMatch }, scope),
+  };
+}
+
 export function buildSearchFilters(
   request: SearchRequest,
   options: { offset?: number } = {},
@@ -207,15 +226,11 @@ export function buildSearchFilters(
     sortBy,
     rankProfile,
   } = request;
-  const from = chipIds(chips, 'from:');
-  const inside = chipIds(chips, 'in:');
-  const withUsers = entityIds(structured.withUsers);
   const sanitized = sanitizeSearchQuery(freeText);
-
   const isMessages = category === 'messages';
   const isTickets = category === 'tickets';
-  const isCalls = category === 'calls';
-  const isMessagesOrTickets = isMessages || isTickets;
+  const inside = chipIds(chips, 'in:');
+  const { facets, hasFacets } = collectSearchFacets(category, chips, structured);
 
   const filters: VespaSearchFilters = {
     query: toSearchQuery(sanitized, exactMatch),
@@ -223,95 +238,8 @@ export function buildSearchFilters(
     offset: options.offset ?? 0,
     presentationSummary: 'lean',
     ...CATEGORY_WIRE[category],
+    ...facets,
   };
-
-  /** Entity / facet filters that justify `filterOnly` when the query is empty. */
-  let hasAppliedEntityFilter = false;
-
-  // Call search filters on participants via `with` → `withUser`. Message search
-  // uses `from:` for senders and structured `withUsers` for the With filter.
-  if (from) {
-    if (isCalls) filters.with = from;
-    else filters.from = from;
-    hasAppliedEntityFilter = true;
-  }
-  if (inside) {
-    filters.in = inside;
-    hasAppliedEntityFilter = true;
-  }
-  if (withUsers && (isMessages || (isCalls && !from))) {
-    filters.with = withUsers;
-    hasAppliedEntityFilter = true;
-  }
-
-  if (isMessages) {
-    const mentions = entityIds(structured.mentionUsers);
-    const channelMentions = entityIds(structured.mentionChannels);
-    const groupMentions = entityIds(structured.mentionGroups);
-    if (mentions) {
-      filters.mentions = mentions;
-      hasAppliedEntityFilter = true;
-    }
-    if (channelMentions) {
-      filters.channelMentions = channelMentions;
-      hasAppliedEntityFilter = true;
-    }
-    if (groupMentions) {
-      filters.groupMentions = groupMentions;
-      hasAppliedEntityFilter = true;
-    }
-  }
-
-  if (isTickets) {
-    const assignee = entityIds(structured.assignees);
-    const board = entityIds(structured.boards);
-    const status = joinList(structured.statuses);
-    if (assignee) {
-      filters.assignee = assignee;
-      hasAppliedEntityFilter = true;
-    }
-    if (structured.priority) {
-      filters.priority = structured.priority;
-      hasAppliedEntityFilter = true;
-    }
-    if (board) {
-      filters.board = board;
-      hasAppliedEntityFilter = true;
-    }
-    if (status) {
-      filters.status = status;
-      hasAppliedEntityFilter = true;
-    }
-  }
-
-  if (isMessagesOrTickets) {
-    const tags = joinList(structured.tags);
-    const entity = joinList(structured.entities);
-    const fromEmail = joinList(structured.fromEmails);
-    const toEmail = joinList(structured.toEmails);
-    if (tags) {
-      filters.tags = tags;
-      hasAppliedEntityFilter = true;
-    }
-    if (entity) {
-      filters.entity = entity;
-      hasAppliedEntityFilter = true;
-    }
-    if (fromEmail) {
-      filters.fromEmail = fromEmail;
-      hasAppliedEntityFilter = true;
-    }
-    if (toEmail) {
-      filters.toEmail = toEmail;
-      hasAppliedEntityFilter = true;
-    }
-  }
-
-  const dates = dateParams(structured);
-  if (Object.keys(dates).length > 0) {
-    Object.assign(filters, dates);
-    hasAppliedEntityFilter = true;
-  }
 
   // `in:` carries an implicit `false` so the backend does not re-narrow an explicit
   // channel list to joined channels. The toggle, when on, overrides it.
@@ -324,7 +252,7 @@ export function buildSearchFilters(
   // Show archived inverts excludeArchived on tickets (desk not a mobile tab).
   if (isTickets) filters.excludeArchived = !structured.showArchived;
 
-  if (!freeText && hasAppliedEntityFilter) filters.filterOnly = true;
+  if (!freeText && hasFacets) filters.filterOnly = true;
 
   // Prefer server-side order so pagination stays consistent with Newest/Oldest.
   if (sortBy !== DEFAULT_SORT_BY) filters.orderBy = sortBy;

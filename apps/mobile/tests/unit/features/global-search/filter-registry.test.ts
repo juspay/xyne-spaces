@@ -28,7 +28,7 @@ describe('global search filter registry', () => {
     assert.equal(docTypeForTab('tickets'), 'tickets');
     assert.equal(docTypeForTab('channels'), 'channels');
     assert.equal(docTypeForTab('chats'), 'people');
-    assert.equal(docTypeForTab('calls'), 'messages');
+    assert.equal(docTypeForTab('calls'), 'calls');
     assert.equal(docTypeForTab('files'), 'files');
   });
 
@@ -54,6 +54,8 @@ describe('global search filter registry', () => {
       'entity',
     ]);
     assert.deepEqual(fieldIds('files'), ['from', 'in', 'date']);
+    // Calls: same fields the request sends (from→with, with, in, dates) — no Mentions/Tags/Entity.
+    assert.deepEqual(fieldIds('calls'), ['from', 'in', 'with', 'date']);
     assert.deepEqual(fieldIds('tickets'), [
       'from',
       'in',
@@ -204,5 +206,33 @@ describe('global search filter registry', () => {
     assert.equal(cleared.chips.length, 0);
     assert.deepEqual(cleared.structured.withUsers, []);
     assert.equal(cleared.structured.dateRange, '');
+  });
+
+  it('does not expose or badge Mentions / Tags / Entity on Calls', () => {
+    const filters = toSearchResultsFilters({
+      tab: 'calls',
+      chips: [],
+      structured: {
+        ...DEFAULT_STRUCTURED_FILTERS,
+        tags: ['billing'],
+        entities: ['Acme'],
+        mentionUsers: [{ id: 'u1', label: 'Ada' }],
+        withUsers: [{ id: 'u2', label: 'Bob' }],
+      },
+      onlyMyChannels: false,
+      includeBotMessages: false,
+      exactMatch: false,
+    });
+
+    assert.equal(filters.docType, 'calls');
+    assert.deepEqual(fieldIds('calls'), ['from', 'in', 'with', 'date']);
+    // Only With applies — tags / entity / mentions are not Calls filters.
+    assert.equal(countActiveFilters(filters), 1);
+
+    const cleared = clearInapplicableStructured('calls', filters, []);
+    assert.deepEqual(cleared.structured.tags, []);
+    assert.deepEqual(cleared.structured.entities, []);
+    assert.deepEqual(cleared.structured.mentionUsers, []);
+    assert.deepEqual(cleared.structured.withUsers, [{ id: 'u2', label: 'Bob' }]);
   });
 });

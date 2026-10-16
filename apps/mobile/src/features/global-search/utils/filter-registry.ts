@@ -56,12 +56,17 @@ export type ModalFilterEntry = {
 
 const isTicketType = (d: SearchDocType): boolean => d === 'tickets' || d === 'all';
 const isMessageType = (d: SearchDocType): boolean => d === 'messages' || d === 'all';
+const isCallsType = (d: SearchDocType): boolean => d === 'calls';
+/** With applies to messages and calls (`with` / participant filter). */
+const isWithType = (d: SearchDocType): boolean => isMessageType(d) || isCallsType(d);
 const isTicketOrMessageType = (d: SearchDocType): boolean => isTicketType(d) || isMessageType(d);
 const isLocalType = (d: SearchDocType): boolean => d === 'channels' || d === 'people';
 const notLocal = (d: SearchDocType): boolean => !isLocalType(d);
 
 /**
  * Map mobile tabs onto dashboard docType for appliesTo / request shaping.
+ * Calls is its own type so Mentions / Tags / Entity do not appear (the wire
+ * only sends from→with, with, in, and dates for calls).
  */
 export function docTypeForTab(tab: GlobalSearchTab): SearchDocType {
   switch (tab) {
@@ -72,8 +77,7 @@ export function docTypeForTab(tab: GlobalSearchTab): SearchDocType {
     case 'files':
       return 'files';
     case 'calls':
-      // Calls are remote; From/With/Date apply. Treat as messages for “with”.
-      return 'messages';
+      return 'calls';
     case 'chats':
       return 'people';
     case 'channels':
@@ -153,7 +157,7 @@ export const FILTER_MODAL_ENTRIES: readonly ModalFilterEntry[] = [
   {
     id: 'with',
     label: 'With',
-    appliesTo: isMessageType,
+    appliesTo: isWithType,
     isActive: f => f.withUsers.length > 0,
     control: {
       kind: 'people',

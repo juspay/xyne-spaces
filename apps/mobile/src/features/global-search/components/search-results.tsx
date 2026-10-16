@@ -87,11 +87,14 @@ export function SearchResults({
   }
 
   const category = scope ? 'messages' : categoryForTab(tab);
-  // A locked scope narrows the request but is not something the user asked for.
-  const hasQuery = query.length > 0 || chips.length > 0 || hasStructuredFilterInput(structured);
+  // Local tabs: any typed/structured input. Remote: only when a request is built
+  // (category-applicable filters), so Calls + Tags alone does not show empty-state.
+  const hasLocalQuery =
+    query.length > 0 || chips.length > 0 || hasStructuredFilterInput(structured);
+  const hasRemoteQuery = request !== null;
 
   if (category === 'calls') {
-    return <CallResults request={request} query={query} hasQuery={hasQuery} {...chrome} />;
+    return <CallResults request={request} query={query} hasQuery={hasRemoteQuery} {...chrome} />;
   }
 
   if (category) {
@@ -102,7 +105,7 @@ export function SearchResults({
         category={category}
         request={request}
         query={query}
-        hasQuery={hasQuery}
+        hasQuery={hasRemoteQuery}
         scope={scope}
         onLeave={onLeave}
         {...chrome}
@@ -118,11 +121,17 @@ export function SearchResults({
     <ChannelResults
       query={query}
       browse={browse}
-      hasQuery={hasQuery}
+      hasQuery={hasLocalQuery}
       onLeave={onLeave}
       {...chrome}
     />
   ) : (
-    <ChatResults query={query} browse={browse} hasQuery={hasQuery} onLeave={onLeave} {...chrome} />
+    <ChatResults
+      query={query}
+      browse={browse}
+      hasQuery={hasLocalQuery}
+      onLeave={onLeave}
+      {...chrome}
+    />
   );
 }
