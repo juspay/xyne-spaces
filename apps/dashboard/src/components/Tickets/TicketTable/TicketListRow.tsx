@@ -98,6 +98,7 @@ const TicketListRowBase: React.FC<TicketListRowProps> = ({
       }}
       role='button'
       tabIndex={0}
+      data-testid={`ticket-row-${ticket.id}`}
       data-track-category='Tickets'
       data-track-name='TicketListRow'
     >
