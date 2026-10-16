@@ -169,9 +169,9 @@ jobs:
   test:
     name: Automation tests
     # Runs only in the merge queue, not on every PR; RUN_TEST_CASE is the kill switch.
-    if: >-
-      github.event_name == 'merge_group'
-      && vars.RUN_TEST_CASE == 'true'
+    # if: >-
+    #   github.event_name == 'merge_group'
+    #   && vars.RUN_TEST_CASE == 'true'
     runs-on: ci-cluster-github-runners
     env:
       TEST_ENV: test
@@ -187,6 +187,22 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
+
+      # npm mirror via Artifact Registry pull-through cache — see the same
+      # steps/comment on the backend job above.
+      - name: Authenticate to GCP (npm mirror)
+        id: gcp-auth
+        if: vars.USE_SELF_HOSTED_CI == 'true'
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.NPM_MIRROR_SA_KEY }}
+          token_format: access_token
+
+      - name: Configure pnpm for Artifact Registry npm mirror
+        if: vars.USE_SELF_HOSTED_CI == 'true'
+        run: |
+          pnpm config set registry "https://asia-south1-npm.pkg.dev/xyne-infra-external/npm-mirror/"
+          echo "//asia-south1-npm.pkg.dev/xyne-infra-external/npm-mirror/:_authToken=${{ steps.gcp-auth.outputs.access_token }}" >> .npmrc
 
       - name: Install dependencies
         run: pnpm install ${{ env.PNPM_FLAGS }} --filter xyne-automation...

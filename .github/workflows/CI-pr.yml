@@ -23,7 +23,7 @@ concurrency:
 
 jobs:
   ci:
-    uses: juspay/xyne-spaces/.github/workflows/ci.yml@main
+    uses: juspay/xyne-spaces/.github/workflows/ci.yml@fix/mirror-github-action-1
     secrets: inherit
     permissions:
       contents: read
