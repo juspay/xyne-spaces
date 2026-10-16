@@ -620,6 +620,10 @@ export interface Message {
    *  Drives branching-safe "Debug this response" selection — chronological
    *  turn index doesn't survive sibling branches. */
   debugSessionId?: string;
+  /** Which provider/model actually produced this assistant reply (from the
+   *  AgentRun claw-auth pairs to it), incl. whether it fell back off the
+   *  requested one. Absent on user rows and legacy runs. */
+  answeredBy?: MessageAnsweredBy;
   /** Optional comment attached to a 👎 rating (persisted to agent_runs.ratingComment). */
   ratingComment?: string | null;
   sources?: DraftSource[];
@@ -662,4 +666,14 @@ export interface Message {
     /** Original error text from the backend for debugging / transparency */
     rawError?: string;
   };
+}
+
+/** Mirrors claw-auth lib/run-answered-by.ts `AnsweredBy`. */
+export interface MessageAnsweredBy {
+  provider: string;
+  model?: string;
+  /** Undefined when the run predates fallback reporting. */
+  fellBack?: boolean;
+  requestedProvider?: string;
+  requestedModel?: string;
 }
