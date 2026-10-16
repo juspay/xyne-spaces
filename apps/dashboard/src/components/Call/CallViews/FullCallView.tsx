@@ -50,6 +50,25 @@ import { formatElapsedTime } from '../../../utils/recordingUtils';
 import { logger, Event } from '../../../utils/logger';
 import { usePlatform } from '../../../hooks/usePlatform';
 
+/**
+ * Reports whether the call is a one-on-one DM. The channel lookup goes through
+ * Zero, so this is only mounted where a ZeroProvider exists — external guests
+ * (dashboard-external) have none and would crash on it.
+ */
+function DmCallProbe({
+  channelId,
+  onChange,
+}: {
+  channelId: string | null;
+  onChange: (isDmCall: boolean) => void;
+}): null {
+  const isDmCall = useIsDmCall(channelId);
+  useEffect(() => {
+    onChange(isDmCall);
+  }, [isDmCall, onChange]);
+  return null;
+}
+
 /** Wall-clock time for the bottom-left of the bar. Polled every 10s so the minute flips promptly. */
 function useClockLabel(): string {
   const format = (): string =>
@@ -437,7 +456,7 @@ export function FullCallView({
   }, [callParticipants]);
 
   // Ring tiles are DM-only; elsewhere the sidebar carries ring status.
-  const isDmCall = useIsDmCall(channelId);
+  const [isDmCall, setIsDmCall] = useState(false);
   const ringingInvitees = useMemo(
     () =>
       isExternalUser || !isDmCall
@@ -606,6 +625,7 @@ export function FullCallView({
       className='relative flex h-screen flex-col overflow-hidden bg-[#131314]'
       data-testid='call-window'
     >
+      {!isExternalUser && <DmCallProbe channelId={channelId} onChange={setIsDmCall} />}
       {/* Floating reactions overlay */}
       <ReactionsOverlay reactions={reactions} />
 
