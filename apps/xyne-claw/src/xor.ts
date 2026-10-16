@@ -54,11 +54,13 @@ export function xorConfig(): { backend: "xor" | "llm"; url: string; key: string;
     return { backend: "llm", url: llm.url, key: llm.key, model: llm.model, timeoutMs: Math.min(XOR_TIMEOUT_MS, llm.timeoutMs) };
   }
   const litellm = env("LITELLM_URL").replace(/\/$/, "").replace(/\/v1$/, "");
+  const url = (env("XOR_URL", "OUR_NORMAL_JEV_URL", "OUR_JEV_URL") || (litellm ? `${litellm}/v1/decisions` : "")).replace(/\/v1\/systemone\/?$/, "/v1/decisions");
+  const model = env("XOR_MODEL", "OUR_NORMAL_JEV_MODEL") || "xor-latest";
   return {
     backend: "xor",
-    url: env("XOR_URL", "OUR_NORMAL_JEV_URL", "OUR_JEV_URL") || (litellm ? `${litellm}/v1/systemone` : ""),
+    url,
     key: env("XOR_API_KEY", "OUR_NORMAL_JEV_API_KEY", "OUR_JEV_API_KEY", "LITELLM_API_KEY"),
-    model: env("XOR_MODEL", "OUR_NORMAL_JEV_MODEL") || "jev-latest",
+    model: url.endsWith("/v1/decisions") && model === "jev-latest" ? "xor-latest" : model,
     timeoutMs: XOR_TIMEOUT_MS,
   };
 }
