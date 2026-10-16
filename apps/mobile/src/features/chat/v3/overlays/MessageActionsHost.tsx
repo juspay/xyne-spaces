@@ -7,13 +7,13 @@ import {
 import { useRouter } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 import { useMemo, type ReactElement } from 'react';
-import { Alert, View } from 'react-native';
+import { Alert, View, Pressable, Text } from 'react-native';
 import { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { useCSSVariable } from 'uniwind';
 import { v4 as uuidv4 } from 'uuid';
 
-import type { ChatInputEditingMessage } from '@/src/components/input-composer/input-composer.types';
 import { AppBottomSheet } from '@/src/components/ui/app-bottom-sheet';
+import { useFlag } from '@/src/flags';
 import { useZero } from '@/src/hooks/useZero';
 import { getActiveWorkspaceId } from '@/src/utils/activeWorkspace';
 import {
@@ -25,8 +25,6 @@ import { normalizeWorkspaceIdForLink } from '@/src/utils/deepLinkWorkspace';
 import { haptics } from '@/src/utils/haptics';
 import { setRichMessageClipboard } from '@/src/utils/richMessageClipboard';
 import { startAudioCall } from '@/src/utils/startAudioCall';
-import type { ChatMessageRow } from '../model/chatRow.types';
-import type { AttachmentInput } from '../model/conversationInput';
 import { ActionRow } from './ActionRow';
 import {
   ACTION_ORDER,
@@ -41,31 +39,8 @@ import { TRANSPARENT_SHEET, messageActionsChrome } from './messageActionsChrome'
 import { QuickReactionsRail } from './QuickReactionsRail';
 import { toggleReaction } from './toggleReaction';
 
-export type MessageActionsTarget = {
-  row: ChatMessageRow;
-  html: string;
-  attachments: readonly AttachmentInput[];
-  reactionsMd: string | null;
-  threadId?: string;
-};
-
-export type MessageActionsHostProps = {
-  target: MessageActionsTarget | null;
-  isOpen: boolean;
-  onOpenChange: (open: boolean) => void;
-  isThread: boolean;
-  currentUserId: string | undefined;
-  isChannelArchived: boolean;
-  isFirstInThread: boolean;
-  hasTicket: boolean;
-  repliesEnabled?: boolean;
-  onEditInChat?: (payload: ChatInputEditingMessage) => void;
-  onForward?: () => void;
-  onRemind?: () => void;
-  onMoreReactions?: () => void;
-  onBeforeMarkUnread?: () => void;
-  onMarkUnreadFailure?: () => void;
-};
+import type { MessageActionsHostProps } from './messageActions.types';
+export type { MessageActionsTarget, MessageActionsHostProps } from './messageActions.types';
 
 export function MessageActionsHost({
   target,
@@ -86,6 +61,7 @@ export function MessageActionsHost({
 }: MessageActionsHostProps): ReactElement | null {
   const model = target?.row.model;
   const zero = useZero();
+  const feedEnabled = useFlag('feed.prototype');
   const router = useRouter();
   const foreground = useCSSVariable('--color-foreground') as string;
   const accent = useCSSVariable('--color-accent') as string;
@@ -268,6 +244,29 @@ export function MessageActionsHost({
               { backgroundColor: sheetBg, borderColor: border },
             ]}
           >
+            {feedEnabled &&
+            !model.isDeleted &&
+            !isPending &&
+            model.messageId &&
+            model.messageType !== 'SYSTEM' ? (
+              <Pressable
+                accessibilityRole='button'
+                accessibilityLabel='Share to Feed'
+                className='px-5 py-4'
+                onPress={() => {
+                  close();
+                  router.push({
+                    pathname: '/(protected)/feed',
+                    params: {
+                      conversationId: model.conversationId,
+                      messageId: model.messageId ?? '',
+                    },
+                  });
+                }}
+              >
+                <Text style={{ color: foreground, fontSize: 16 }}>Share to Feed</Text>
+              </Pressable>
+            ) : null}
             {ACTION_ORDER.filter(id => renderableActions.has(id)).map(id => (
               <View key={id}>
                 {id === 'mark-as-unread' && dividerBeforeMarkAsUnread(renderableActions) ? (

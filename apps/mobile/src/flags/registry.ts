@@ -24,6 +24,12 @@ export type FlagDefinition = {
 };
 
 export const FLAGS = {
+  'feed.prototype': {
+    label: 'Workspace Feed',
+    description: 'Publish posts and conversation media to everyone in your workspace.',
+    default: false,
+    removeBy: '2026-12-31',
+  },
   'ui.shell': {
     label: 'New navigation',
     description: 'The new bottom bar in place of the swipeable pager.',

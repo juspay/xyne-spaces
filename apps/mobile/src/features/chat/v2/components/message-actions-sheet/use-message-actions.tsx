@@ -11,6 +11,7 @@ import {
   Pin,
   PinOff,
   RotateCcw,
+  Rss,
   Trash2,
 } from 'lucide-react-native';
 import { getStatus, removePending, usePendingByMessageId } from '@xyne/shared/messages';
@@ -27,6 +28,7 @@ import {
   parseForwardedMessageXml,
 } from '@xyne/shared';
 
+import { useFlag } from '@/src/flags';
 import { haptics } from '@/src/utils/haptics';
 import { useZero } from '@/src/hooks/useZero';
 import { useUserBookmarks } from '@/src/hooks/useUserBookmarks';
@@ -96,6 +98,16 @@ export const useMessageActions = ({
   const foreground = useCSSVariable('--color-foreground') as string;
   const zero = useZero();
   const router = useRouter();
+  const feedEnabled = useFlag('feed.prototype');
+  const handleShareToFeed = useCallback((): void => {
+    if (!target?.message.messageId) return;
+    closeActionSheet(() =>
+      router.push({
+        pathname: '/(protected)/feed',
+        params: { conversationId: target.conversationId, messageId: target.message.messageId },
+      }),
+    );
+  }, [closeActionSheet, router, target]);
   const { isEntityBookmarked } = useUserBookmarks({ enabled: Boolean(target) });
 
   const message = target?.message ?? null;
@@ -458,6 +470,13 @@ export const useMessageActions = ({
 
     const actions: MessageAction[] = [
       {
+        id: 'share-to-feed',
+        icon: <Rss size={20} color={foreground} />,
+        label: 'Share to Feed',
+        onPress: handleShareToFeed,
+        visible: feedEnabled && visibility.forwardMessage,
+      },
+      {
         id: 'reply-in-thread',
         icon: <MessageCircleMore size={20} color={foreground} />,
         label: 'Reply in Thread',
@@ -570,6 +589,8 @@ export const useMessageActions = ({
     handleDelete,
     handleEditInChat,
     handleForward,
+    handleShareToFeed,
+    feedEnabled,
     handleMarkAsUnread,
     handleOpenReminderOptions,
     handleReplyInThread,

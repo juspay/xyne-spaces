@@ -1,4 +1,4 @@
-import { CircleAlert } from 'lucide-react-native';
+import { CircleAlert, Rss } from 'lucide-react-native';
 
 import {
   BellIcon,
@@ -79,6 +79,12 @@ export const TAB_CATALOG: readonly TabEntry[] = [
     icon: navIcon(BellIcon),
     routeName: 'activity',
     badge: 'activity',
+  },
+  {
+    id: 'feed',
+    label: 'Feed',
+    icon: Rss,
+    externalHref: '/(protected)/feed' as Href,
   },
   {
     id: 'calls',

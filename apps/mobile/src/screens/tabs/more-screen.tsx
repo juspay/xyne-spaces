@@ -8,6 +8,7 @@ import {
   LifeBuoy,
   MessagesSquare,
   Mic,
+  Phone,
   Presentation,
   Sunrise,
   type LucideProps,
@@ -19,6 +20,7 @@ import { useRegisterTabScrollToTop } from '@/src/hooks/useRegisterTabScrollToTop
 import { useHeaderHeight } from '@/src/hooks/useHeaderHeight';
 import { useReportTabReady } from '@/src/observability/logging/hooks/navigation/useReportTabReady';
 import { haptics } from '@/src/utils/haptics';
+import { tabRoute } from '@/src/navigation/routes';
 
 type MoreRowProps = {
   icon: ComponentType<LucideProps>;
@@ -84,6 +86,13 @@ type MoreRowDefinition = {
  * these hides the tab bar and the target screen draws its own back button.
  */
 const MORE_ROWS: readonly MoreRowDefinition[] = [
+  {
+    id: 'calls',
+    icon: Phone,
+    label: 'Calls',
+    description: 'Recent and upcoming calls',
+    navigate: router => router.push(tabRoute('calls')),
+  },
   {
     id: 'morning-brief',
     icon: Sunrise,

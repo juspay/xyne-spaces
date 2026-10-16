@@ -34,6 +34,7 @@ import apiKeyRoutes from '@/routes/api-keys';
 import userManagementRoutes from '@/routes/userManagement';
 import userActivationRoutes from '@/routes/userActivation';
 import channelRoutes from '@/routes/channels';
+import feedRoutes from '@/routes/feed';
 import microsoftDeskAuthRoutes from '@/integrations/routes/microsoft-desk-auth';
 import conversationRoutes from '@/routes/conversations';
 import threadTypeVocabularyRoutes from '@/routes/threadTypeVocabulary';
@@ -516,6 +517,7 @@ export class App {
 
     // New chat schema routes
     this.app.use('/api/integrations/microsoft', microsoftDeskAuthRoutes); // Microsoft email channel OAuth (auth handled per-route)
+    this.app.use('/api/feed', authMiddleware.authenticate, feedRoutes);
     this.app.use('/api/channels', authMiddleware.authenticate, channelRoutes);
     // Claw MCP route (user + app auth) — must be before /api/conversations
     this.app.use('/api/conversations/claw', authenticateUserOrApp, conversationRoutes);
@@ -800,6 +802,7 @@ export class App {
     // Chat routes (auth only, no ACL for now)
 
     // New chat schema routes
+    this.app.use('/api/feed', authMiddleware.authenticate, feedRoutes);
     this.app.use('/api/channels', authMiddleware.authenticate, channelRoutes);
     this.app.use('/api/conversations', authMiddleware.authenticate, conversationRoutes);
     this.app.use('/api/thread-type-vocabulary', authMiddleware.authenticate, threadTypeVocabularyRoutes);

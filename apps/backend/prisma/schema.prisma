@@ -10,7 +10,7 @@ generator client {
 
 generator zero {
   provider      = "prisma-generator-zero"
-  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource", "WorkflowFolder", "WorkflowCredential", "AgentConversationShare"]
+  excludeTables = ["FeedPost", "FeedMedia", "FeedLike", "FeedComment", "FeedReport", "WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource", "WorkflowFolder", "WorkflowCredential", "AgentConversationShare"]
 }
 
 datasource db {
@@ -5205,3 +5205,71 @@ model RadarRule {
   @@schema("non_zero")
 }
 
+// Workspace-wide published snapshots. Served through authenticated REST, not Zero.
+model FeedPost {
+  id String @id
+  workspaceId String
+  authorId String
+  body String
+  excerpts Json @default("[]")
+  sourceConversationId String?
+  sourceMessageIds Json @default("[]")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now())
+  deletedAt DateTime?
+  requestId String
+  media FeedMedia[]
+  likes FeedLike[]
+  comments FeedComment[]
+  reports FeedReport[]
+  @@unique([workspaceId, authorId, requestId], map: "feed_posts_workspaceId_authorId_requestId_key")
+  @@index([workspaceId, createdAt(sort: Desc), id(sort: Desc)], map: "feed_posts_workspace_created")
+  @@map("feed_posts")
+  @@schema("non_zero")
+}
+model FeedMedia {
+  id String @id
+  postId String
+  workspaceId String
+  sourceAttachmentId String
+  path String
+  filename String
+  mimetype String
+  size Int
+  post FeedPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  @@index([postId], map: "feed_media_post")
+  @@map("feed_media")
+  @@schema("non_zero")
+}
+model FeedLike {
+  postId String
+  userId String
+  post FeedPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  @@id([postId, userId])
+  @@map("feed_likes")
+  @@schema("non_zero")
+}
+model FeedComment {
+  id String @id
+  postId String
+  authorId String
+  body String
+  requestId String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now())
+  post FeedPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  @@unique([postId, authorId, requestId], map: "feed_comments_postId_authorId_requestId_key")
+  @@index([postId, createdAt, id], map: "feed_comments_post_created")
+  @@map("feed_comments")
+  @@schema("non_zero")
+}
+model FeedReport {
+  postId String
+  userId String
+  reason String
+  createdAt DateTime @default(now())
+  post FeedPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  @@id([postId, userId])
+  @@map("feed_reports")
+  @@schema("non_zero")
+}

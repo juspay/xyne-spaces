@@ -125,12 +125,11 @@ const TabsChrome = (): ReactElement => {
   const badges = useTabNavBadges();
   const channelsBadgeLabel = formatTabBadgeLabel(badges.channels);
   const dmsBadgeLabel = formatTabBadgeLabel(badges.dms);
-  const callsBadgeLabel = formatTabBadgeLabel(badges.calls);
   const activityBadgeLabel = formatTabBadgeLabel(badges.activity);
   const androidBadgeLabels: Readonly<Record<string, string | undefined>> = {
     channels: channelsBadgeLabel,
     dms: dmsBadgeLabel,
-    calls: callsBadgeLabel,
+    feed: undefined,
     activity: activityBadgeLabel,
     more: undefined,
   };
@@ -148,7 +147,7 @@ const TabsChrome = (): ReactElement => {
     () => ({
       channels: renderAndroidTabIcon('pound'),
       dms: renderAndroidTabIcon('message'),
-      calls: renderAndroidTabIcon('phone'),
+      feed: renderAndroidTabIcon('rss'),
       activity: renderAndroidTabIcon('bell'),
       more: renderAndroidTabIcon('dots-horizontal'),
     }),
@@ -232,11 +231,10 @@ const TabsChrome = (): ReactElement => {
             }}
           />
           <Tabs.Screen
-            name='calls'
+            name='feed'
             options={{
-              title: 'Calls',
-              ...(callsBadgeLabel ? { tabBarBadge: callsBadgeLabel } : {}),
-              tabBarIcon: androidTabIcons.calls,
+              title: 'Feed',
+              tabBarIcon: androidTabIcons.feed,
             }}
           />
           <Tabs.Screen
@@ -259,6 +257,7 @@ const TabsChrome = (): ReactElement => {
               tabBarIcon: androidTabIcons.more,
             }}
           />
+          <Tabs.Screen name='calls' options={{ href: null }} />
         </Tabs>
       </View>
     );
@@ -309,18 +308,15 @@ const TabsChrome = (): ReactElement => {
           <NativeTabs.Trigger.Badge>{dmsBadgeLabel}</NativeTabs.Trigger.Badge>
         ) : null}
       </NativeTabs.Trigger>
-      <NativeTabs.Trigger name='calls' contentStyle={iosTabContentStyle}>
-        <NativeTabs.Trigger.Label>Calls</NativeTabs.Trigger.Label>
+      <NativeTabs.Trigger name='feed' contentStyle={iosTabContentStyle}>
+        <NativeTabs.Trigger.Label>Feed</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon
           sf={{
-            default: 'phone',
-            selected: 'phone.fill',
+            default: 'dot.radiowaves.left.and.right',
+            selected: 'dot.radiowaves.left.and.right',
           }}
-          src={<NativeTabs.Trigger.VectorIcon family={MaterialCommunityIcons} name='phone' />}
+          src={<NativeTabs.Trigger.VectorIcon family={MaterialCommunityIcons} name='rss' />}
         />
-        {callsBadgeLabel ? (
-          <NativeTabs.Trigger.Badge>{callsBadgeLabel}</NativeTabs.Trigger.Badge>
-        ) : null}
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name='activity' contentStyle={iosTabContentStyle}>
         <NativeTabs.Trigger.Label>Activity</NativeTabs.Trigger.Label>
@@ -347,6 +343,7 @@ const TabsChrome = (): ReactElement => {
           }
         />
       </NativeTabs.Trigger>
+      <NativeTabs.Trigger name='calls' hidden />
     </NativeTabs>
   );
 };

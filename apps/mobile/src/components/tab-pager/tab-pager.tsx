@@ -25,6 +25,7 @@ import { haptics } from '@/src/utils/haptics';
 
 import ActivityScreen from '@/src/screens/tabs/activity-screen';
 import CallsScreen from '@/src/screens/tabs/calls-screen';
+import FeedScreen from '@/src/features/feed/FeedScreen';
 import ChannelsScreen from '@/src/screens/tabs/channels-screen';
 import DmsScreen from '@/src/screens/tabs/dms-screen';
 import MoreScreen from '@/src/screens/tabs/more-screen';
@@ -39,6 +40,7 @@ import { TAB_OVERLAY_PORTAL_HOST } from './tab-overlay-portal';
 const TAB_HREF = {
   channels: tabRoute('channels'),
   dms: tabRoute('dms'),
+  feed: tabRoute('feed'),
   calls: tabRoute('calls'),
   activity: tabRoute('activity'),
   // Safe where `overflowTabPath` is not: the pager is mounted only by
@@ -50,6 +52,7 @@ const TAB_HREF = {
 const TAB_SCREENS: Record<TabName, ComponentType> = {
   channels: ChannelsScreen,
   dms: DmsScreen,
+  feed: FeedScreen,
   calls: CallsScreen,
   activity: ActivityScreen,
   more: MoreScreen,
@@ -107,12 +110,14 @@ export function TabPager({ children }: TabPagerProps): ReactElement {
   const channelsHeaderScrollY = useSharedValue(0);
   const dmsHeaderScrollY = useSharedValue(0);
   const callsHeaderScrollY = useSharedValue(0);
+  const feedHeaderScrollY = useSharedValue(0);
   const activityHeaderScrollY = useSharedValue(0);
   const moreHeaderScrollY = useSharedValue(0);
   const headerScrollYs = useMemo(
     () => ({
       channels: channelsHeaderScrollY,
       dms: dmsHeaderScrollY,
+      feed: feedHeaderScrollY,
       calls: callsHeaderScrollY,
       activity: activityHeaderScrollY,
       more: moreHeaderScrollY,
@@ -122,6 +127,7 @@ export function TabPager({ children }: TabPagerProps): ReactElement {
       callsHeaderScrollY,
       channelsHeaderScrollY,
       dmsHeaderScrollY,
+      feedHeaderScrollY,
       moreHeaderScrollY,
     ],
   );

@@ -17,4 +17,8 @@ export const TENANT_KEY_EXCLUDED_MODELS = [
   'DoclingAsyncFile',
   'DoclingAsyncPart',
   'ConnectGroup',
+  // Feed children scope through FeedPost in FeedPostChildACL.
+  'FeedLike',
+  'FeedComment',
+  'FeedReport',
 ] as const satisfies readonly Prisma.ModelName[];
