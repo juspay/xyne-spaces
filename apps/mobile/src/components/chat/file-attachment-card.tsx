@@ -1,5 +1,5 @@
 import { type ComponentType, type ReactElement } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Pressable, Text, useWindowDimensions, View } from 'react-native';
 import {
   Archive,
   Download,
@@ -15,7 +15,11 @@ import {
   formatFileSize,
   truncateFileName,
 } from '@/src/components/chat/message/message-attachments.utils';
-import { FILE_ATTACHMENT_CARD_HEIGHT } from '@/src/components/conversation-composer/attachment-layout';
+import {
+  FILE_ATTACHMENT_CARD_HEIGHT,
+  FILE_ATTACHMENT_CARD_MAX_WIDTH,
+  getFileAttachmentCardMinWidth,
+} from '@/src/components/conversation-composer/attachment-layout';
 
 type FileAttachment = {
   id?: string;
@@ -119,13 +123,23 @@ export const FileAttachmentCard = ({
   const fileSize = formatFileSize(attachment.size);
   const config = getFileTypeConfig(attachment.mimetype, attachment.originalFilename);
   const Icon = config.icon;
+  const { width: windowWidth } = useWindowDimensions();
+  // Never let the card's minimum exceed the bubble's content box; otherwise it
+  // cannot shrink and paints outside the bubble on narrow (mostly Android) phones.
+  const minWidth = getFileAttachmentCardMinWidth(windowWidth);
 
   return (
     <Pressable
       onPress={onPress}
       className='flex-row items-center'
       style={({ pressed }) => [
-        { width: '100%', minWidth: 256, maxWidth: 360, height: FILE_ATTACHMENT_CARD_HEIGHT },
+        {
+          width: '100%',
+          minWidth,
+          maxWidth: FILE_ATTACHMENT_CARD_MAX_WIDTH,
+          flexShrink: 1,
+          height: FILE_ATTACHMENT_CARD_HEIGHT,
+        },
         pressed ? { opacity: 0.85 } : null,
       ]}
     >
