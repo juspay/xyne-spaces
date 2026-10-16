@@ -198,12 +198,11 @@ export const SIDE_EFFECT_OPERATION_CONFIG: SideEffectOperationConfigMap = {
   channel_user_status: ['update'],
   conversation_participants: ['update'],
   ticket_stage_requests: ['insert', 'update', 'upsert'],
-  sdlc_entity_links: ['insert', 'upsert', 'delete'],
-  sdlc_tracks: ['update', 'upsert'],
-  sdlc_folders: ['update', 'upsert'],
+  sdlc_entity_links: ['insert', 'delete'],
+  sdlc_tracks: ['update'],
+  sdlc_folders: ['update'],
   canvas_folders: ['update'],
-  sdlc_artifacts: ['update', 'upsert'],
-  repos: ['update'],
+  repos: ['update', 'delete'],
 };
 
 export function createSideEffectJobsAccumulator(): SideEffectJobsAccumulator {

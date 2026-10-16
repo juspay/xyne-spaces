@@ -404,10 +404,6 @@ function extractEntityId(table: TableName, args: any): string | null {
       const typedArgs = args as { id: string };
       return typedArgs.id;
     }
-    case 'sdlc_artifacts': {
-      const typedArgs = args as { artifactId: string };
-      return typedArgs.artifactId;
-    }
     default: {
       return null;
     }

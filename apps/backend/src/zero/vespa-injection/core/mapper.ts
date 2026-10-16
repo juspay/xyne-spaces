@@ -1,7 +1,7 @@
 import { readFromYSweetStrict } from '@/utils/ysweetUtils';
 import { extractMentionsFromContent } from '@/utils/mentionUtils';
 import { extractChannelMentions, extractGroupMentions } from '@/utils/mentionParser';
-import { appSchema, callSchema, channelSchema, InsertDocument, mailSchema, messageSchema, projectSchema, schemaToDocType, SubApp, ticketSchema, userSchema, VespaAppDocument, VespaCallDocument, VespaChatContainerDocument, VespaChatMessageDocument, VespaDocType, VespaFileDocument, VespaMailDocument, VespaProjectDocument, VespaSchema, VespaTicketDocument, samTranscriptSchema, sdlcContainerSchema, sdlcRepositorySchema, type SdlcDiscussionFields, type SdlcFieldValues, type SdlcFileFields, type SdlcTicketFields, type VespaSdlcContainerDocument, type VespaSdlcRepositoryDocument } from '@/vespa/src/types';
+import { appSchema, callSchema, channelSchema, InsertDocument, mailSchema, messageSchema, projectSchema, schemaToDocType, SubApp, ticketSchema, userSchema, VespaAppDocument, VespaCallDocument, VespaChatContainerDocument, VespaChatMessageDocument, VespaDocType, VespaFileDocument, VespaMailDocument, VespaProjectDocument, VespaSchema, VespaTicketDocument, samTranscriptSchema, sdlcContainerSchema, sdlcRepositorySchema, type SdlcDiscussionFields, type SdlcFieldValues, type SdlcFileFields, type SdlcTicketFields, type VespaSdlcContainerDocument, type VespaSdlcRepositoryDocument, SDLC_DISCUSSION_FIELDS, SDLC_FILE_FIELDS, SDLC_TICKET_FIELDS } from '@/vespa/src/types';
 import {
   hubOfContainer,
   sdlcContainerDocument,
@@ -1578,16 +1578,17 @@ export const mapEmail = async (email: Email, workspaceId?: string, orgId?: strin
 /**
  * SDLC fields on a feed: all of them, empty ones as null. A Vespa reference cannot hold '', and
  * null leaves a field unset; sending it rather than leaving it out lets a field-scoped update
- * clear a placement the item no longer has. An item in no hub gets every field null.
+ * clear a placement the item no longer has. An item in no hub (null) gets every field null.
  */
-const sdlcValues = <T extends object>(fields: T, placed: boolean): SdlcFieldValues<T> =>
-  Object.fromEntries(Object.entries(fields).map(([field, value]) =>
-    [field, !placed || value === '' || (Array.isArray(value) && value.length === 0) ? null : value],
-  )) as SdlcFieldValues<T>;
+const sdlcValues = <T extends object>(fields: T | null, names: readonly (keyof T)[]): SdlcFieldValues<T> =>
+  Object.fromEntries(names.map(name => {
+    const value = fields?.[name];
+    return [name, value === undefined || value === '' || (Array.isArray(value) && value.length === 0) ? null : value];
+  })) as SdlcFieldValues<T>;
 
-const sdlcPlacement = (fields: SdlcDiscussionFields) => sdlcValues(fields, Boolean(fields.sdlcContainerRef));
-const sdlcTicketPlacement = (fields: SdlcTicketFields) => sdlcValues(fields, true);
-const sdlcFileFields = (fields: SdlcFileFields) => sdlcValues(fields, Boolean(fields.sdlcContainerRef));
+const sdlcPlacement = (fields: SdlcDiscussionFields | null) => sdlcValues(fields, SDLC_DISCUSSION_FIELDS);
+const sdlcTicketPlacement = (fields: SdlcTicketFields) => sdlcValues(fields, SDLC_TICKET_FIELDS);
+const sdlcFileFields = (fields: SdlcFileFields | null) => sdlcValues(fields, SDLC_FILE_FIELDS);
 
 /** A track or folder row, with the hub it is placed in (fetchDataBySchema). */
 type SdlcContainerRow = { id: string; hubId: string };
