@@ -8,7 +8,7 @@ import { KanbanTicketController } from '../controllers/kanbanTicketController';
 import { uploadMultiple } from '../middleware/upload';
 import { validate } from '../middleware/validation';
 import { ticketDuplicateCheckSchema } from '../validators/ticketDuplicateValidator';
-import { ticketBoardSuggestionSchema } from '../validators/ticketBoardValidator';
+import { ticketBoardSuggestionSchema, ticketFieldSuggestionsSchema } from '../validators/ticketBoardValidator';
 import { ReleaseReportController } from '@/controllers/releaseReportController';
 import { authorize, authorizePrivilegedOrResource } from '@/middleware/authorize';
 import { analyticsAuthMiddleware } from '@/middleware/analyticsAuth';
@@ -59,6 +59,7 @@ router.get('/workflow-metrics', analyticsAuthMiddleware.requireWorkspaceContext,
 router.post('/duplicates', validate(ticketDuplicateCheckSchema), ticketController.checkDuplicateTickets);
 router.post('/:ticketId/duplicates/recheck', ticketController.recheckTicketDuplicates);
 router.post('/suggest-board', validate(ticketBoardSuggestionSchema), ticketController.suggestBoard);
+router.post('/suggest-fields', validate(ticketFieldSuggestionsSchema), ticketController.suggestFields);
 
 router.get('/:ticketId/pending-human-intervention', ticketController.getPendingHumanIntervention);
 

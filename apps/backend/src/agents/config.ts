@@ -46,6 +46,7 @@ const DEFAULT_TICKET_DUPLICATE_JEV_THRESHOLD = 0.75;
 const DEFAULT_SUMMARY_TEMPLATE_SELECTION_XOR_ENABLED = false;
 const DEFAULT_CLASSIFICATION_XOR_ENABLED = false;
 const DEFAULT_PRIORITY_CLASSIFICATION_XOR_ENABLED = false;
+const DEFAULT_TICKET_FIELD_SUGGESTIONS_XOR_ENABLED = false;
 const DEFAULT_SUMMARISER_MODEL = 'glm-flash-experimental';
 const DEFAULT_ATTACHMENT_SUMMARISER_MODEL = 'kimi-latest';
 const DEFAULT_CLASSIFICATION_MODEL = 'glm-flash-experimental';
@@ -96,6 +97,7 @@ const CAC_KEYS = {
   summaryTemplateSelectionXorEnabled: 'summary_template_selection_xor_enabled',
   classificationXorEnabled: 'classification_xor_enabled',
   priorityClassificationXorEnabled: 'priority_classification_xor_enabled',
+  ticketFieldSuggestionsXorEnabled: 'ticket_field_suggestions_xor_enabled',
   ticketBoardModel: 'ticket_board_model_name',
   releaseNotesGeneratorModel: 'release_notes_generator_model_name',
   releaseAiModel: 'release_ai_model_name',
@@ -156,6 +158,7 @@ export class AgentsConfig {
   public readonly classificationXorEnabled: boolean;
   /** Desk email priority is scored by XOR; the LLM only on no answer. Default false. */
   public readonly priorityClassificationXorEnabled: boolean;
+  public readonly ticketFieldSuggestionsXorEnabled: boolean;
   public readonly summariserModelName: string;
   public readonly attachmentSummariserModelName: string;
 
@@ -220,6 +223,7 @@ export class AgentsConfig {
     summaryTemplateSelectionXorEnabled: boolean,
     classificationXorEnabled: boolean,
     priorityClassificationXorEnabled: boolean,
+    ticketFieldSuggestionsXorEnabled: boolean,
   ) {
     this.xyneAiTracingEnabled = xyneAiTracingEnabled;
     this.xyneAiMaskingEnabled = xyneAiMaskingEnabled;
@@ -255,6 +259,7 @@ export class AgentsConfig {
     this.summaryTemplateSelectionXorEnabled = summaryTemplateSelectionXorEnabled;
     this.classificationXorEnabled = classificationXorEnabled;
     this.priorityClassificationXorEnabled = priorityClassificationXorEnabled;
+    this.ticketFieldSuggestionsXorEnabled = ticketFieldSuggestionsXorEnabled;
   }
 
   /**
@@ -310,6 +315,7 @@ export class AgentsConfig {
       const summaryTemplateSelectionXorEnabled = getValue<boolean>(CAC_KEYS.summaryTemplateSelectionXorEnabled, DEFAULT_SUMMARY_TEMPLATE_SELECTION_XOR_ENABLED);
       const classificationXorEnabled = getValue<boolean>(CAC_KEYS.classificationXorEnabled, DEFAULT_CLASSIFICATION_XOR_ENABLED);
       const priorityClassificationXorEnabled = getValue<boolean>(CAC_KEYS.priorityClassificationXorEnabled, DEFAULT_PRIORITY_CLASSIFICATION_XOR_ENABLED);
+      const ticketFieldSuggestionsXorEnabled = getValue<boolean>(CAC_KEYS.ticketFieldSuggestionsXorEnabled, DEFAULT_TICKET_FIELD_SUGGESTIONS_XOR_ENABLED);
       const summariserModelName = getValue<string>(CAC_KEYS.summariserModel, DEFAULT_SUMMARISER_MODEL);
       const attachmentSummariserModelName = getValue<string>(CAC_KEYS.attachmentSummariserModel, DEFAULT_ATTACHMENT_SUMMARISER_MODEL);
 
@@ -584,6 +590,7 @@ export class AgentsConfig {
         summaryTemplateSelectionXorEnabled,
         classificationXorEnabled,
         priorityClassificationXorEnabled,
+        ticketFieldSuggestionsXorEnabled,
       );
     } catch (error) {
       logger.error('[Agents Config] Error fetching CAC config, using DEFAULTS:', error);
@@ -623,6 +630,7 @@ export class AgentsConfig {
         DEFAULT_SUMMARY_TEMPLATE_SELECTION_XOR_ENABLED,
         DEFAULT_CLASSIFICATION_XOR_ENABLED,
         DEFAULT_PRIORITY_CLASSIFICATION_XOR_ENABLED,
+        DEFAULT_TICKET_FIELD_SUGGESTIONS_XOR_ENABLED,
       );
     }
   }
@@ -663,6 +671,7 @@ export class AgentsConfig {
       DEFAULT_SUMMARY_TEMPLATE_SELECTION_XOR_ENABLED,
       DEFAULT_CLASSIFICATION_XOR_ENABLED,
       DEFAULT_PRIORITY_CLASSIFICATION_XOR_ENABLED,
+      DEFAULT_TICKET_FIELD_SUGGESTIONS_XOR_ENABLED,
     );
   }
 }
