@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSandboxStoreKey, sandboxConversationIdFromMeta } from "./index.js";
+import { buildSandboxStoreKey, isSandboxSessionOwnedByContext, sandboxConversationIdFromMeta } from "./index.js";
 
 describe("sandboxConversationIdFromMeta", () => {
   it("uses the run-scoped sandbox id for a run without a conversation", () => {
@@ -12,5 +12,12 @@ describe("sandboxConversationIdFromMeta", () => {
     expect(sandboxConversationIdFromMeta({ conversationId: "conv-1" })).toBe("conv-1");
     expect(sandboxConversationIdFromMeta({ userId: "u1" })).toBeUndefined();
     expect(sandboxConversationIdFromMeta(undefined)).toBeUndefined();
+  });
+});
+
+describe("isSandboxSessionOwnedByContext", () => {
+  it("refuses a lookup key with no stored session, with or without a caller", () => {
+    expect(isSandboxSessionOwnedByContext("sbx-unknown", { meta: { userId: "u1", conversationId: "conv-1", agentSlug: "a" } })).toBe(false);
+    expect(isSandboxSessionOwnedByContext("sbx-unknown", undefined)).toBe(false);
   });
 });

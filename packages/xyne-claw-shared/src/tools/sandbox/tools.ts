@@ -480,6 +480,24 @@ export function getSandboxSession(storeKey: string): Session | undefined {
   return SESSION_STORE.get(storeKey);
 }
 
+/**
+ * True for sessions that are shared across users/conversations or read-only
+ * (the sbx-git sandbox). These must never be announced as a run's live preview:
+ * the preview row grants the conversation access to the sandbox router, and the
+ * sandbox is not the one doing the run's work (XYNE-66338).
+ */
+export function isSharedOrReadOnlySandbox(sessionId: string): boolean {
+  return SHARED_SESSIONS.has(sessionId) || READONLY_SESSIONS.has(sessionId);
+}
+
+export function isSandboxSessionOwnedByContext(
+  lookupKey: string,
+  context: { meta?: Record<string, string> } | undefined,
+): boolean {
+  const session = SESSION_STORE.get(lookupKey);
+  return !!session && isSessionOwnedByContext(session, lookupKey, context);
+}
+
 /** Remove run-bound Git credential material without destroying reusable sandboxes. */
 export async function cleanupSdlcSandboxCredentialsForContext(
   context: ToolExecutionContext,
