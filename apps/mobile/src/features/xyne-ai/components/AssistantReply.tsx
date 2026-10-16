@@ -29,6 +29,8 @@ import {
   resolveCitationLink,
 } from '../model/citations';
 import { turnDurationLabel } from '../model/turnTimeline';
+import { unpresentedPendingActions } from '../model/uiFlows';
+import { FlowCards } from './FlowCards';
 import { PendingActions } from './PendingActions';
 import { StreamingMarkdown } from './StreamingMarkdown';
 import { TurnActions } from './TurnActions';
@@ -170,19 +172,24 @@ export const AssistantReply = ({
   turn,
   isLatest,
   viewerId,
+  conversationId,
   onOpenUrl,
   onFollowUp,
   onRegenerate,
   onPendingAction,
+  onFlowClose,
 }: {
   turn: AssistantTurn;
   isLatest: boolean;
   viewerId: string;
+  conversationId: string;
   onOpenUrl: (url: string) => void;
   onFollowUp: (suggestion: string) => void;
   onRegenerate: () => void;
   /** Sends the user's decision for a paused tool call; without it, pending calls are not shown. */
   onPendingAction?: (action: PendingAction, approved: boolean) => Promise<void>;
+  /** A flow card closed after an action, so the stored turn has moved on. */
+  onFlowClose: () => void;
 }): ReactElement => {
   const [sourceGroup, setSourceGroup] = useState<BriefCitation[] | null>(null);
   const openCitation = useOpenCitation();
@@ -211,6 +218,10 @@ export const AssistantReply = ({
     else onOpenUrl(url);
   };
 
+  const pendingActions = useMemo(
+    () => unpresentedPendingActions(turn.pendingActions, turn.uiFlows),
+    [turn.pendingActions, turn.uiFlows],
+  );
   const isDone = turn.status !== 'streaming';
 
   return (
@@ -227,8 +238,18 @@ export const AssistantReply = ({
         )}
       />
       {turn.plan ? <PlanChecklist plan={turn.plan} /> : null}
-      {onPendingAction && turn.pendingActions.length > 0 ? (
-        <PendingActions actions={turn.pendingActions} onRespond={onPendingAction} />
+      {turn.uiFlows.length > 0 ? (
+        <FlowCards
+          flows={turn.uiFlows}
+          conversationId={conversationId}
+          messageId={turn.messageId}
+          viewerId={viewerId}
+          onOpenUrl={onOpenUrl}
+          onClose={onFlowClose}
+        />
+      ) : null}
+      {onPendingAction && pendingActions.length > 0 ? (
+        <PendingActions actions={pendingActions} onRespond={onPendingAction} />
       ) : null}
       {isDone ? (
         <TurnOutputs turn={turn} onOpenUrl={onOpenUrl} onOpenCanvas={openCitation} />

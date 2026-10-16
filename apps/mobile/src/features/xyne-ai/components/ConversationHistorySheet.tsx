@@ -5,6 +5,7 @@ import { Pencil, Pin, PinOff, Trash2 } from 'lucide-react-native';
 import { useCSSVariable } from 'uniwind';
 
 import { AppBottomSheet } from '@/src/components/ui/app-bottom-sheet';
+import { SearchBar } from '@/src/components/ui/search-bar';
 import { ListRow, ListRowDivider } from '@/src/components/ui/settings-list';
 import { haptics } from '@/src/utils/haptics';
 import { FilterSheetHeader } from '@/src/features/global-search/components/filters/filter-sheet-header';
@@ -15,7 +16,7 @@ import {
 
 import type { ConversationSummary } from '../api/xyneAIConversations';
 import { useXyneAIConversations } from '../hooks/useXyneAIConversations';
-import { groupConversations } from '../model/conversationGroups';
+import { filterByTitle, groupConversations } from '../model/conversationGroups';
 import { PickerSheet, SheetCard, useAfterDismiss, useSheetBottomPadding } from './PickerSheet';
 
 type Item = { header: string } | { conversation: ConversationSummary };
@@ -23,12 +24,14 @@ type Item = { header: string } | { conversation: ConversationSummary };
 const ConversationRow = ({
   conversation,
   isRenaming,
+  isRunning,
   onOpen,
   onShowActions,
   onRename,
 }: {
   conversation: ConversationSummary;
   isRenaming: boolean;
+  isRunning: boolean;
   onOpen: () => void;
   onShowActions: () => void;
   onRename: (title: string) => void;
@@ -60,6 +63,7 @@ const ConversationRow = ({
       <Text numberOfLines={1} className='min-w-0 flex-1 text-[15px] text-foreground'>
         {title}
       </Text>
+      {isRunning ? <Text className='text-[11px] text-brand'>Responding</Text> : null}
       {conversation.pinned ? <Pin size={14} color={muted} /> : null}
     </Pressable>
   );
@@ -71,11 +75,14 @@ function ConversationHistoryBody({
   onDismiss,
   onOpenConversation,
   onDeleted,
+  runningConversationId,
 }: SheetMountProps & {
   onOpenConversation: (conversation: ConversationSummary) => void;
   onDeleted: (conversationId: string) => void;
+  runningConversationId: string | undefined;
 }): ReactElement {
   const { list, update, remove } = useXyneAIConversations();
+  const [query, setQuery] = useState('');
   const [renamingId, setRenamingId] = useState<string>();
   // Kept after closing so the sheet's content stays put while it animates away.
   const [actionsFor, setActionsFor] = useState<ConversationSummary>();
@@ -83,7 +90,7 @@ function ConversationHistoryBody({
   const actionsDismiss = useAfterDismiss();
   const paddingBottom = useSheetBottomPadding();
 
-  const items: Item[] = groupConversations(list.data ?? []).flatMap(group => [
+  const items: Item[] = groupConversations(filterByTitle(list.data ?? [], query)).flatMap(group => [
     { header: group.label },
     ...group.conversations.map(conversation => ({ conversation })),
   ]);
@@ -116,6 +123,7 @@ function ConversationHistoryBody({
       backdropOpacity={0.4}
     >
       <FilterSheetHeader title='History' />
+      <SearchBar value={query} onChangeText={setQuery} containerClassName='mx-4 mb-1' />
       {list.isPending ? (
         <ActivityIndicator className='mt-8' />
       ) : (
@@ -131,6 +139,7 @@ function ConversationHistoryBody({
               <ConversationRow
                 conversation={item.conversation}
                 isRenaming={renamingId === item.conversation.rowId}
+                isRunning={item.conversation.conversationId === runningConversationId}
                 onOpen={(): void => onOpenConversation(item.conversation)}
                 onShowActions={(): void => {
                   setActionsFor(item.conversation);
@@ -142,7 +151,9 @@ function ConversationHistoryBody({
           }
           ListEmptyComponent={
             <View className='py-8'>
-              <Text className='text-center text-bottomsheet-text-muted'>No chats yet</Text>
+              <Text className='text-center text-bottomsheet-text-muted'>
+                {query ? 'No matching chats' : 'No chats yet'}
+              </Text>
             </View>
           }
           onEndReached={(): void => {
@@ -199,11 +210,14 @@ export function ConversationHistorySheet({
   onClose,
   onOpenConversation,
   onDeleted,
+  runningConversationId,
 }: {
   isOpen: boolean;
   onClose: () => void;
   onOpenConversation: (conversation: ConversationSummary) => void;
   onDeleted: (conversationId: string) => void;
+  /** The chat on screen while its answer is still being written. */
+  runningConversationId: string | undefined;
 }): ReactElement | null {
   const { shouldRender, sheetProps } = useMountWhileOpen(isOpen, onClose);
   return shouldRender ? (
@@ -211,6 +225,7 @@ export function ConversationHistorySheet({
       {...sheetProps}
       onOpenConversation={onOpenConversation}
       onDeleted={onDeleted}
+      runningConversationId={runningConversationId}
     />
   ) : null;
 }

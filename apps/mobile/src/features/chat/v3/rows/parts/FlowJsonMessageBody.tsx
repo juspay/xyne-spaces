@@ -14,7 +14,6 @@ import {
   type FlowTextNormalizationOptions,
 } from '@/src/utils/flowJsonMarkdown';
 
-import type { MessageRowModel } from '../../model/chatRow.types';
 import {
   flowComponentKey,
   flowComponentRenderStyle,
@@ -30,16 +29,18 @@ import type { BlockMarkdownVariant } from '../blockMarkdownStyle';
 import { getCachedCustomEmojis, STANDARD_FLOW_EMOJIS } from './flowJsonEmoji';
 import { renderFlowSpecializedComponent } from './FlowSpecializedComponent';
 import { renderFlowWriteApproval } from './FlowWriteApprovalRenderer';
-import { useFlowMessageAction } from './useFlowMessageAction';
+import { useFlowMessageAction, type FlowHost } from './useFlowMessageAction';
 import { useFlowNormalizationOptions } from './useFlowNormalizationOptions';
 import { useChatRenderTokens } from '../../theme/ChatRenderProvider';
 
 export type FlowJsonMessageBodyProps = {
-  model: MessageRowModel;
+  model: FlowHost;
   flow: FlowDefinitionLike;
   markdownStyle: MarkdownStyle;
   mine: boolean;
   onOpenUrl: (url: string) => void;
+  /** Called when a submitted action closes the card. */
+  onClose?: () => void;
   containerStyle?: StyleProp<ViewStyle>;
   markdownVariant?: BlockMarkdownVariant;
 };
@@ -50,6 +51,7 @@ const FlowJsonMessageBodyComponent = ({
   markdownStyle,
   mine,
   onOpenUrl,
+  onClose,
   containerStyle,
   markdownVariant,
 }: FlowJsonMessageBodyProps): ReactElement => {
@@ -57,7 +59,7 @@ const FlowJsonMessageBodyComponent = ({
   const tokens = useChatRenderTokens();
   const customEmojiQuery = useCustomEmojis({ enabled: true });
   const { activeFlow, isSubmitting, canPressButtons, executeAction, updateFieldValue } =
-    useFlowMessageAction(flow, model);
+    useFlowMessageAction(flow, model, onClose);
   const stateValues = (activeFlow.state?.values ?? {}) as Record<string, unknown>;
   const flowData = (activeFlow.data ?? {}) as Record<string, unknown>;
 

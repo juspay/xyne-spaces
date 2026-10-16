@@ -1,18 +1,21 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { act, renderHook, waitFor } from '@testing-library/react-native';
+import { AppState } from 'react-native';
 
 import type {
   LiveFrame,
   PendingAction,
   XyneAIEvent,
 } from '@/src/features/xyne-ai/api/xyneAIEvents';
+import type { StoredConversation } from '@/src/features/xyne-ai/api/xyneAIConversations';
 import type { XyneAIStreamRequest } from '@/src/features/xyne-ai/api/xyneAIRequest';
-import { answerText } from '@/src/features/xyne-ai/model/assistantTurn';
+import { answerText, turnsFromMessages } from '@/src/features/xyne-ai/model/assistantTurn';
 import { useXyneAIChat } from '@/src/features/xyne-ai/hooks/useXyneAIChat';
 import { EventStreamHttpError } from '@/src/services/http/eventStream';
 
 type Stream = {
   request: XyneAIStreamRequest;
+  signal: AbortSignal;
   emit: (event: XyneAIEvent) => void;
   close: () => void;
   fail: (error: unknown) => void;
@@ -30,6 +33,8 @@ const mockRespond = jest.fn<() => Promise<unknown>>();
 const mockFetchMessages = jest.fn<() => Promise<unknown>>();
 const mockCancel = jest.fn<(traceId: string) => Promise<unknown>>();
 const NO_OPTIONS = {};
+let mockAppStateListener: (state: string) => void = () => undefined;
+const mockAppStateChange = (state: string): void => mockAppStateListener(state);
 
 jest.mock('@/src/utils/logger', () => ({ Event: {}, logger: { error: jest.fn() } }));
 
@@ -56,7 +61,7 @@ jest.mock('@/src/features/xyne-ai/api/xyneAIStream', () => ({
         typeof import('@/src/services/http/request-errors')
       >('@/src/services/http/request-errors');
       signal.addEventListener('abort', () => reject(new AbortedError()));
-      mockStreams.push({ request, emit: onEvent, close: resolve, fail: reject });
+      mockStreams.push({ request, signal, emit: onEvent, close: resolve, fail: reject });
     }),
 }));
 
@@ -106,6 +111,10 @@ const completeWithApproval = (): XyneAIEvent => ({
 const text = (delta: string): XyneAIEvent => ({ type: 'text', delta, partId: undefined });
 
 beforeEach(() => {
+  jest.spyOn(AppState, 'addEventListener').mockImplementation((_, listener) => {
+    mockAppStateListener = listener as (state: string) => void;
+    return { remove: (): void => undefined };
+  });
   mockStreams.length = 0;
   mockLive.length = 0;
   mockRespond.mockReset().mockResolvedValue(undefined);
@@ -228,6 +237,19 @@ describe('useXyneAIChat', () => {
 
     await act(async () => result.current.stop());
     expect(mockCancel).toHaveBeenCalledWith('t1');
+  });
+
+  it('leaves the server run going when unmounted', () => {
+    const { result, unmount } = renderHook(() => useXyneAIChat(NO_OPTIONS));
+    act(() => result.current.send('Long question'));
+    act(() => {
+      lastStream().emit({ type: 'start', sessionId: 's1', traceId: 't1' });
+      lastStream().emit(text('Partial'));
+    });
+
+    unmount();
+    expect(mockCancel).not.toHaveBeenCalled();
+    expect(lastStream().signal.aborted).toBe(true);
   });
 
   it('only aborts locally when the run has no trace id yet', async () => {
@@ -436,6 +458,73 @@ describe('useXyneAIChat', () => {
       });
       act(() => result.current.reset());
       expect(lastLive().signal.aborted).toBe(true);
+    });
+  });
+
+  describe('reattaching to a run', () => {
+    const storedQuestion: StoredConversation = {
+      data: [{ id: 'u1', role: 'user', content: 'Long task', createdAt: '2026-01-01T10:00:00Z' }],
+    };
+    const storedAnswered: StoredConversation = {
+      data: [
+        ...storedQuestion.data,
+        { id: 'a1', role: 'assistant', content: 'Done', createdAt: '2026-01-01T10:00:09Z' },
+      ],
+    };
+
+    it('streams a run still live into the opened conversation, then reloads it', async () => {
+      const { result } = renderHook(() => useXyneAIChat(NO_OPTIONS));
+      mockFetchMessages.mockResolvedValue(storedAnswered);
+
+      act(() => result.current.open(turnsFromMessages(storedQuestion), 's1', true));
+      expect(result.current.turns[0]?.reply.status).toBe('stopped');
+
+      await act(async () => lastLive().emit({ events: [text('Wor')], ended: false }));
+      await waitFor(() => expect(answerText(result.current.turns[0]!.reply)).toBe('Wor'));
+      expect(result.current.isStreaming).toBe(true);
+
+      await act(async () => lastLive().emit({ events: [], ended: true }));
+      await waitFor(() => expect(answerText(result.current.turns[0]!.reply)).toBe('Done'));
+      expect(result.current.isStreaming).toBe(false);
+    });
+
+    it('leaves the stored conversation alone when no run is live', async () => {
+      const { result } = renderHook(() => useXyneAIChat(NO_OPTIONS));
+
+      await act(async () => {
+        result.current.open(turnsFromMessages(storedQuestion), 's1', true);
+        lastLive().emit({ events: [], ended: true, isSnapshot: true });
+      });
+
+      expect(result.current.turns[0]?.reply.status).toBe('stopped');
+      expect(mockFetchMessages).not.toHaveBeenCalled();
+    });
+
+    it('re-reads a cut-off chat and reattaches when the app returns to the foreground', async () => {
+      const { result } = renderHook(() => useXyneAIChat(NO_OPTIONS));
+      act(() => result.current.send('Long task'));
+      await act(async () => {
+        lastStream().emit({ type: 'start', sessionId: 's1', traceId: 't1' });
+        lastStream().fail(new Error('network lost'));
+      });
+      await waitFor(() => expect(result.current.turns[0]?.reply.status).toBe('error'));
+      mockFetchMessages.mockResolvedValue(storedQuestion);
+
+      await act(async () => mockAppStateChange('active'));
+      await waitFor(() => expect(mockLive).toHaveLength(1));
+      expect(mockFetchMessages).toHaveBeenCalledTimes(1);
+      expect(mockCancel).not.toHaveBeenCalled();
+      expect(result.current.turns[0]?.reply.status).toBe('stopped');
+    });
+
+    it('does nothing on return when the last answer finished', async () => {
+      const { result } = renderHook(() => useXyneAIChat(NO_OPTIONS));
+      act(() => result.current.open(turnsFromMessages(storedAnswered), 's1', true));
+      mockLive.length = 0;
+
+      await act(async () => mockAppStateChange('active'));
+      expect(mockFetchMessages).not.toHaveBeenCalled();
+      expect(mockLive).toHaveLength(0);
     });
   });
 });

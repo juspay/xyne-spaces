@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 import { v4 as uuidv4 } from 'uuid';
 
 import { EventStreamHttpError } from '@/src/services/http/eventStream';
@@ -36,9 +37,13 @@ interface XyneAIChat {
   isStreaming: boolean;
   /** False for chats stored before branching, which cannot fork. */
   canBranch: boolean;
+  /** The server's id for this chat; empty until its first message is acknowledged. */
+  sessionId: string;
   send: (query: string, context?: AttachedContextItem[], attachments?: AttachedFile[]) => void;
-  /** Replaces the chat with a stored conversation, so follow-ups continue it. */
+  /** Replaces the chat with a stored conversation, so follow-ups continue it, and follows its run if one is live. */
   open: (turns: ChatTurn[], sessionId: string, canBranch: boolean) => void;
+  /** Re-reads the stored conversation, then follows its run if one is live. */
+  refresh: () => Promise<void>;
   /** Clears the chat when it is the one just deleted. */
   forget: (sessionId: string) => void;
   regenerate: () => void;
@@ -137,15 +142,14 @@ export function useXyneAIChat(options: XyneAIRequestOptions): XyneAIChat {
     setCanBranch(true);
   }, [stop]);
 
-  const open = useCallback(
+  const load = useCallback(
     (stored: ChatTurn[], storedSessionId: string, storedCanBranch: boolean): void => {
-      stop();
       sessionId.current = storedSessionId;
       setAllTurns(stored);
       setChosen({});
       setCanBranch(storedCanBranch);
     },
-    [stop],
+    [],
   );
 
   const forget = useCallback(
@@ -259,7 +263,7 @@ export function useXyneAIChat(options: XyneAIRequestOptions): XyneAIChat {
     );
   }, [turns, allTurns, canBranch, start]);
 
-  // A resumed run is not part of any stream this device opened, so it is followed on `/live`.
+  // A run this device is not driving (resumed by an action, or started elsewhere) is followed on `/live`.
   const followResumedRun = useCallback(
     async (turnId: string): Promise<void> => {
       controller.current?.abort();
@@ -315,11 +319,53 @@ export function useXyneAIChat(options: XyneAIRequestOptions): XyneAIChat {
         controller.current === abort &&
         sessionId.current === conversation.conversationId
       ) {
-        open(turnsFromMessages(stored), conversation.conversationId, isBranched(stored));
+        load(turnsFromMessages(stored), conversation.conversationId, isBranched(stored));
       }
     },
-    [options.agentSlug, updateReply, open],
+    [options.agentSlug, updateReply, load],
   );
+
+  const resume = useCallback(
+    (stored: ChatTurn[], storedSessionId: string, storedCanBranch: boolean): void => {
+      load(stored, storedSessionId, storedCanBranch);
+      const last = activePath(stored, {}).at(-1);
+      if (last) void followResumedRun(last.id);
+    },
+    [load, followResumedRun],
+  );
+
+  const open = useCallback(
+    (stored: ChatTurn[], storedSessionId: string, storedCanBranch: boolean): void => {
+      stop();
+      resume(stored, storedSessionId, storedCanBranch);
+    },
+    [stop, resume],
+  );
+
+  const lastReplyStatus = useRef<AssistantTurn['status']>(undefined);
+  lastReplyStatus.current = turns.at(-1)?.reply.status;
+
+  const refresh = useCallback(async (): Promise<void> => {
+    const conversation = {
+      conversationId: sessionId.current,
+      agentSlug: options.agentSlug ?? DEFAULT_AGENT_SLUG,
+    };
+    if (!conversation.conversationId || lastReplyStatus.current === 'streaming') return;
+    const stored = await fetchConversationMessages(conversation).catch(() => undefined);
+    // Not `open`: stopping would cancel the very run being picked back up.
+    if (stored && sessionId.current === conversation.conversationId) {
+      resume(turnsFromMessages(stored), conversation.conversationId, isBranched(stored));
+    }
+  }, [options.agentSlug, resume]);
+
+  // A run cut off while the app was away, or continued elsewhere, is picked up on return.
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', state => {
+      const status = lastReplyStatus.current;
+      if (state === 'active' && (status === 'stopped' || status === 'error')) void refresh();
+    });
+    return (): void => subscription.remove();
+  }, [refresh]);
 
   const respondToAction = useCallback(
     async (turnId: string, action: PendingAction, approved: boolean): Promise<void> => {
@@ -379,14 +425,17 @@ export function useXyneAIChat(options: XyneAIRequestOptions): XyneAIChat {
     [allTurns],
   );
 
-  useEffect(() => stop, [stop]);
+  // Leaving the screen detaches only; the server run continues and `open` reattaches to it.
+  useEffect(() => (): void => controller.current?.abort(), []);
 
   return {
     turns,
     isStreaming: allTurns.some(({ reply }) => reply.status === 'streaming'),
     canBranch,
+    sessionId: sessionId.current,
     send,
     open,
+    refresh,
     forget,
     regenerate,
     respondToAction,

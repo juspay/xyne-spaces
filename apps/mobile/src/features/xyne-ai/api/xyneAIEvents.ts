@@ -1,3 +1,5 @@
+import type { FlowDefinition } from '@xyne/shared';
+
 import type { BriefCitation } from '@/src/features/morning-brief/api/dailyBriefApi';
 
 export interface PlanTodo {
@@ -55,6 +57,7 @@ export type XyneAIEvent =
   | { type: 'reasoning'; delta: string; partId: string | undefined }
   | { type: 'tool'; invocation: ToolInvocation }
   | { type: 'plan'; title: string | undefined; todos: PlanTodo[] }
+  | { type: 'uiFlow'; flow: FlowDefinition }
   | {
       type: 'complete';
       content: string | undefined;
@@ -118,6 +121,12 @@ export function decodeAttachments(value: unknown): TurnAttachment[] {
       },
     ];
   });
+}
+
+export function decodeUiFlows(value: unknown): FlowDefinition[] {
+  return (Array.isArray(value) ? value : []).filter(
+    (flow): flow is FlowDefinition => text(record(flow)['screenId']) !== undefined,
+  );
 }
 
 export function decodePendingActions(value: unknown): PendingAction[] {
@@ -212,6 +221,10 @@ function toEvent(data: Record<string, unknown>): XyneAIEvent | null {
       return Array.isArray(data['todos'])
         ? { type: 'plan', title: text(data['title']), todos: data['todos'] as PlanTodo[] }
         : null;
+    case 'ui_flow': {
+      const [flow] = decodeUiFlows([data['flow']]);
+      return flow ? { type: 'uiFlow', flow } : null;
+    }
     case 'complete':
     case 'done':
       return {
@@ -287,6 +300,7 @@ export function decodeLiveEvent(name: string, data: string): LiveFrame {
   switch (name) {
     case 'snapshot': {
       const partial = record(frame['partial']);
+      const flows = record(frame['uiFlowsByMsgId'])[text(partial['msgId']) ?? ''];
       const inProgress = Array.isArray(frame['inProgress']) ? frame['inProgress'] : [];
       return {
         // Nothing partial and nothing running: no run is live.
@@ -296,6 +310,7 @@ export function decodeLiveEvent(name: string, data: string): LiveFrame {
           ...liveDelta('reasoning', partial['reasoning']),
           ...liveDelta('text', partial['content']),
           ...inProgress.flatMap(liveTool),
+          ...decodeUiFlows(flows).map((flow): XyneAIEvent => ({ type: 'uiFlow', flow })),
         ],
       };
     }
@@ -310,6 +325,10 @@ export function decodeLiveEvent(name: string, data: string): LiveFrame {
       return progress(liveTool(frame['toolInvocation']));
     case 'plan': {
       const event = toEvent({ ...frame, type: 'plan' });
+      return progress(event ? [event] : []);
+    }
+    case 'ui-flow': {
+      const event = toEvent({ type: 'ui_flow', flow: frame['flow'] });
       return progress(event ? [event] : []);
     }
     case 'done':

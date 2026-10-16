@@ -1,8 +1,11 @@
+import type { FlowDefinition } from '@xyne/shared';
+
 import type { StoredConversation } from '../api/xyneAIConversations';
 import {
   decodeAttachments,
   decodeParts,
   decodePendingActions,
+  decodeUiFlows,
   type PendingAction,
   type PlanTodo,
   type TurnAttachment,
@@ -14,6 +17,7 @@ import {
 import type { AttachedContextItem, AttachedFile } from '../api/xyneAIRequest';
 import type { Rating } from '../api/xyneAIStream';
 import { getAskAIErrorInfo, getTransportErrorInfo, type AskAIErrorInfo } from './askAIError';
+import { mergeUiFlows } from './uiFlows';
 
 export type TextPart = Extract<TurnPart, { type: 'text' }>;
 
@@ -22,6 +26,7 @@ export interface AssistantTurn {
   parts: TurnPart[];
   tools: ToolInvocation[];
   plan: { title: string | undefined; todos: PlanTodo[] } | undefined;
+  uiFlows: FlowDefinition[];
   followUps: string[];
   userTags: UserTags | undefined;
   attachments: TurnAttachment[];
@@ -50,6 +55,7 @@ export const startAssistantTurn = (now: number): AssistantTurn => ({
   parts: [],
   tools: [],
   plan: undefined,
+  uiFlows: [],
   followUps: [],
   userTags: undefined,
   attachments: [],
@@ -147,6 +153,8 @@ export function reduceAssistantTurn(
       };
     case 'plan':
       return { ...turn, plan: { title: event.title, todos: event.todos } };
+    case 'uiFlow':
+      return { ...turn, uiFlows: mergeUiFlows(turn.uiFlows, event.flow) };
     case 'complete':
       return {
         ...turn,
@@ -252,7 +260,8 @@ export function turnsFromMessages(stored: StoredConversation): ChatTurn[] {
         parentId: branched ? turnOfAnswer.get(message.parentId ?? '') : turns.at(-1)?.id,
         query: message.content,
         context: message.attachedContext ?? [],
-        attachments: (message.attachments ?? []).map(({ originalFilename, mimeType }) => ({
+        attachments: (message.attachments ?? []).map(({ id, originalFilename, mimeType }) => ({
+          id,
           filename: originalFilename,
           mimeType,
         })),
@@ -265,6 +274,7 @@ export function turnsFromMessages(stored: StoredConversation): ChatTurn[] {
           type: 'tool' as const,
           invocation,
         })),
+        ...decodeUiFlows(message.uiFlows).map(flow => ({ type: 'uiFlow' as const, flow })),
         {
           type: 'complete',
           content: message.content,

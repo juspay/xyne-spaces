@@ -10,7 +10,7 @@ import {
   answerText,
   turnsFromMessages,
 } from '@/src/features/xyne-ai/model/assistantTurn';
-import { groupConversations } from '@/src/features/xyne-ai/model/conversationGroups';
+import { filterByTitle, groupConversations } from '@/src/features/xyne-ai/model/conversationGroups';
 
 const user = (id: string, extra: Partial<StoredMessage> = {}): StoredMessage => ({
   id,
@@ -75,7 +75,9 @@ describe('turnsFromMessages', () => {
         }),
       ],
     });
-    assert.deepEqual(turn?.attachments, [{ filename: 'notes.pdf', mimeType: 'application/pdf' }]);
+    assert.deepEqual(turn?.attachments, [
+      { id: 'f1', filename: 'notes.pdf', mimeType: 'application/pdf' },
+    ]);
   });
 
   it('restores the decision on a stored pending action', () => {
@@ -187,5 +189,25 @@ describe('groupConversations', () => {
         ['Older', ['old']],
       ],
     );
+  });
+});
+
+describe('filterByTitle', () => {
+  const titled = (title: string): ConversationSummary => ({
+    rowId: title,
+    conversationId: title,
+    title,
+    lastMessageAt: '2026-03-10T08:00:00',
+    agentSlug: 'ask-ai',
+    pinned: false,
+  });
+  const all = [titled('Q3 Roadmap'), titled('Trip plan')];
+
+  it('matches a title ignoring case and surrounding spaces', () => {
+    assert.deepEqual(filterByTitle(all, '  roadmap '), [all[0]]);
+  });
+
+  it('keeps everything for a blank query', () => {
+    assert.deepEqual(filterByTitle(all, ' '), all);
   });
 });

@@ -5,6 +5,14 @@ interface ConversationGroup {
   conversations: ConversationSummary[];
 }
 
+export const filterByTitle = (
+  conversations: ConversationSummary[],
+  query: string,
+): ConversationSummary[] => {
+  const needle = query.trim().toLowerCase();
+  return conversations.filter(({ title }) => title.toLowerCase().includes(needle));
+};
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export function groupConversations(

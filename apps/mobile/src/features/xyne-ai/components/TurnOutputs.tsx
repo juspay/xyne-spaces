@@ -17,11 +17,14 @@ import { createdCanvases, openUrlTargets } from '../model/turnOutputs';
 
 const CACHE_ROOT = `${FileSystem.cacheDirectory}attachments/xyne-ai`;
 
-const cacheKey = ({ id, data, filename }: TurnAttachment): string =>
+type FileSource = Pick<TurnAttachment, 'filename' | 'mimeType'> &
+  Partial<Pick<TurnAttachment, 'id' | 'data'>>;
+
+const cacheKey = ({ id, data, filename }: FileSource): string =>
   id ?? `${filename}-${data?.length}`;
 
 // Stored files are fetched by id; a just-streamed one arrives as base64 and is written once.
-async function localUri(attachment: TurnAttachment): Promise<string> {
+async function localUri(attachment: FileSource): Promise<string> {
   const { id, data, filename } = attachment;
   const directory = `${CACHE_ROOT}/${encodeURIComponent(cacheKey(attachment))}`;
   const path = `${directory}/${filename.replace(/[\\/]/g, '_')}`;
@@ -36,15 +39,33 @@ async function localUri(attachment: TurnAttachment): Promise<string> {
   return path;
 }
 
-const Thumbnail = ({ attachment }: { attachment: TurnAttachment }): ReactElement | undefined => {
+export const Thumbnail = ({
+  attachment,
+  size = 36,
+  borderRadius = 6,
+}: {
+  attachment: FileSource;
+  size?: number;
+  borderRadius?: number;
+}): ReactElement | undefined => {
   const { data: uri } = useQuery({
     queryKey: ['xyne-ai', 'attachment', cacheKey(attachment)],
     queryFn: () => localUri(attachment),
     staleTime: Infinity,
   });
   return uri ? (
-    <Image source={{ uri }} style={{ width: 36, height: 36, borderRadius: 6 }} contentFit='cover' />
+    <Image
+      source={{ uri }}
+      style={{ width: size, height: size, borderRadius }}
+      contentFit='cover'
+    />
   ) : undefined;
+};
+
+export const openAttachment = (attachment: FileSource): void => {
+  localUri(attachment)
+    .then(uri => shareOrSaveAttachment(uri, attachment.filename, attachment.mimeType))
+    .catch(() => Alert.alert('Could not open file', 'Please try again.'));
 };
 
 const AttachmentRow = ({ attachment }: { attachment: TurnAttachment }): ReactElement => (
@@ -54,11 +75,7 @@ const AttachmentRow = ({ attachment }: { attachment: TurnAttachment }): ReactEle
       : { icon: FileText })}
     label={attachment.filename}
     description={attachment.mimeType}
-    onPress={(): void => {
-      localUri(attachment)
-        .then(uri => shareOrSaveAttachment(uri, attachment.filename, attachment.mimeType))
-        .catch(() => Alert.alert('Could not open file', 'Please try again.'));
-    }}
+    onPress={(): void => openAttachment(attachment)}
   />
 );
 

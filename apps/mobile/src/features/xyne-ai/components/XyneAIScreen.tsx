@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import * as Clipboard from 'expo-clipboard';
-import { Image } from 'expo-image';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { Alert, Keyboard, Pressable, Text, useWindowDimensions, View } from 'react-native';
 import {
@@ -44,11 +43,15 @@ import { firstName, greeting } from '../model/greeting';
 import { AssistantReply } from './AssistantReply';
 import { ICONS } from './ContextPickerSheet';
 import { ConversationHistorySheet } from './ConversationHistorySheet';
+import { openAttachment, Thumbnail } from './TurnOutputs';
 import { XyneAIComposer, type XyneAIComposerHandle } from './XyneAIComposer';
 
 const COMPOSER_KEYBOARD_GAP = 8;
 const COPIED_MS = 1500;
 const THUMBNAIL_SIZE = 160;
+
+/** The chat last open on this screen, kept in memory so coming back resumes it. */
+let rememberedChat: { userId: string; conversationId: string; agentSlug: string } | undefined;
 
 /** Route params from "Ask AI" on a message, thread or channel: what this chat is about. */
 type AskAIParams = Partial<
@@ -90,15 +93,15 @@ const FileChip = ({ filename }: { filename: string }): ReactElement => {
   );
 };
 
-// Files reloaded from history carry no bytes, so only a fresh upload can show a thumbnail.
 const Attachment = ({ file }: { file: AttachedFile }): ReactElement =>
-  file.data && file.mimeType.startsWith('image/') ? (
-    <Image
+  (file.id || file.data) && file.mimeType.startsWith('image/') ? (
+    <Pressable
+      accessibilityRole='imagebutton'
       accessibilityLabel={file.filename}
-      contentFit='cover'
-      source={{ uri: `data:${file.mimeType};base64,${file.data}` }}
-      style={{ width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE, borderRadius: 16 }}
-    />
+      onPress={(): void => openAttachment(file)}
+    >
+      <Thumbnail attachment={file} size={THUMBNAIL_SIZE} borderRadius={16} />
+    </Pressable>
   ) : (
     <FileChip filename={file.filename} />
   );
@@ -257,8 +260,10 @@ export const XyneAIScreen = (): ReactElement => {
     turns,
     isStreaming,
     canBranch,
+    sessionId,
     send,
     open,
+    refresh,
     forget,
     regenerate,
     respondToAction,
@@ -271,6 +276,10 @@ export const XyneAIScreen = (): ReactElement => {
   const foreground = useCSSVariable('--color-foreground') as string;
   const composerRef = useRef<XyneAIComposerHandle>(null);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  // Plain opens resume the remembered chat; "Ask AI" opens start fresh with their scope.
+  const [isRestoring, setIsRestoring] = useState(
+    () => !conversationId && !channelId && !!user && rememberedChat?.userId === user.user_id,
+  );
   // The turn itself, so an edit still targets it if it leaves the visible path.
   const [editing, setEditing] = useState<ChatTurn>();
 
@@ -310,24 +319,56 @@ export const XyneAIScreen = (): ReactElement => {
     if (editing) cancelEditing();
   };
 
+  const showConversation = (
+    conversation: Pick<ConversationSummary, 'conversationId' | 'agentSlug'>,
+  ): Promise<void> =>
+    fetchConversationMessages(conversation).then(stored => {
+      selection.selectAgent(
+        conversation.agentSlug === DEFAULT_AGENT_SLUG ? undefined : conversation.agentSlug,
+      );
+      setChannel(undefined);
+      setThread(undefined);
+      leaveChat();
+      blankSpace.value = 0;
+      pendingScroll.current = 'instant';
+      open(turnsFromMessages(stored), conversation.conversationId, isBranched(stored));
+    });
+
   const openConversation = (conversation: ConversationSummary): void => {
     setIsHistoryOpen(false);
-    fetchConversationMessages(conversation)
-      .then(stored => {
-        selection.selectAgent(
-          conversation.agentSlug === DEFAULT_AGENT_SLUG ? undefined : conversation.agentSlug,
-        );
-        setChannel(undefined);
-        setThread(undefined);
-        leaveChat();
-        blankSpace.value = 0;
-        pendingScroll.current = 'instant';
-        open(turnsFromMessages(stored), conversation.conversationId, isBranched(stored));
-      })
-      .catch(() => Alert.alert('Could not open this chat', 'Please try again.'));
+    showConversation(conversation).catch(() =>
+      Alert.alert('Could not open this chat', 'Please try again.'),
+    );
   };
 
+  const deleted = (conversationId: string): void => {
+    if (rememberedChat?.conversationId === conversationId) rememberedChat = undefined;
+    forget(conversationId);
+  };
+
+  useEffect(() => {
+    if (!isRestoring || !rememberedChat) return;
+    showConversation(rememberedChat)
+      .catch(() => {
+        rememberedChat = undefined;
+      })
+      .finally(() => setIsRestoring(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- restores once, on mount
+  }, []);
+
+  const { agentSlug } = selection;
+  useEffect(() => {
+    if (sessionId && user) {
+      rememberedChat = {
+        userId: user.user_id,
+        conversationId: sessionId,
+        agentSlug: agentSlug ?? DEFAULT_AGENT_SLUG,
+      };
+    }
+  }, [sessionId, user, agentSlug]);
+
   const startNewChat = (): void => {
+    rememberedChat = undefined;
     setChannel(undefined);
     setThread(undefined);
     leaveChat();
@@ -363,7 +404,7 @@ export const XyneAIScreen = (): ReactElement => {
       </View>
 
       <View className='flex-1'>
-        {turns.length === 0 ? (
+        {isRestoring ? null : turns.length === 0 ? (
           <KeyboardAvoidingView behavior='padding' className='flex-1'>
             <Reanimated.View className='flex-1' style={greetingStyle}>
               <Pressable
@@ -430,9 +471,11 @@ export const XyneAIScreen = (): ReactElement => {
                       turn={turn.reply}
                       isLatest={isLatest}
                       viewerId={user?.user_id ?? ''}
+                      conversationId={sessionId}
                       onOpenUrl={(url): void => {
                         void openUrl(url);
                       }}
+                      onFlowClose={refresh}
                       onFollowUp={(suggestion): void => composerRef.current?.setText(suggestion)}
                       onRegenerate={regenerate}
                       onPendingAction={(action, approved): Promise<void> =>
@@ -489,7 +532,8 @@ export const XyneAIScreen = (): ReactElement => {
         isOpen={isHistoryOpen}
         onClose={(): void => setIsHistoryOpen(false)}
         onOpenConversation={openConversation}
-        onDeleted={forget}
+        onDeleted={deleted}
+        runningConversationId={isStreaming ? sessionId : undefined}
       />
     </SafeAreaView>
   );

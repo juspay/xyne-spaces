@@ -43,6 +43,8 @@ export interface StoredMessage {
   attachments?: StoredAttachment[];
   /** Decoded defensively: the payload is not versioned. */
   pendingActions?: unknown[];
+  /** Flow cards the answer carries; decoded defensively like `pendingActions`. */
+  uiFlows?: unknown[];
 }
 
 export interface StoredConversation {

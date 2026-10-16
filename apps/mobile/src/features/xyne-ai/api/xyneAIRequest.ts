@@ -11,6 +11,8 @@ export interface AttachedContextItem {
 
 /** A file sent with a message; `data` is raw base64, absent on files reloaded from history. */
 export interface AttachedFile {
+  /** Set on files reloaded from history, which are fetched by id. */
+  id?: string | undefined;
   filename: string;
   mimeType: string;
   data?: string | undefined;

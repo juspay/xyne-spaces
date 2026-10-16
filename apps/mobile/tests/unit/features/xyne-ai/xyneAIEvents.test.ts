@@ -246,4 +246,24 @@ describe('decodeLiveEvent', () => {
     assert.deepEqual(live('label', { toolLabel: 'Searching' }), { events: [], ended: false });
     assert.deepEqual(decodeLiveEvent('delta', '{not json'), { events: [], ended: false });
   });
+
+  it("replays the running message's flow cards from the snapshot", () => {
+    const flow = { screenId: 'plan-1', components: [] };
+    const { events } = live('snapshot', {
+      partial: { msgId: 'm1' },
+      uiFlowsByMsgId: { m1: [flow, { title: 'no screen' }], other: [{ screenId: 'x' }] },
+    });
+    assert.deepEqual(events, [{ type: 'uiFlow', flow }]);
+    assert.deepEqual(live('ui-flow', { flow }).events, [{ type: 'uiFlow', flow }]);
+    assert.deepEqual(live('ui-flow', {}).events, []);
+  });
+});
+
+describe('decodeStreamEvent ui_flow', () => {
+  it('keeps a card that has a screen id and drops the rest', () => {
+    const flow = { screenId: 's1', components: [] };
+    assert.deepEqual(decode({ type: 'ui_flow', flow }), { type: 'uiFlow', flow });
+    assert.equal(decode({ type: 'ui_flow', flow: {} }), null);
+    assert.equal(decode({ type: 'ui_flow' }), null);
+  });
 });
