@@ -2,38 +2,50 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
-  ACTIVITY_FILTERS,
   filterCountsFrom,
-  resolveActivityFilter,
+  isFilterVisible,
+  visibleActivityFilters,
 } from '@/src/features/activity/model/filter';
 import { EMPTY_ACTIVITY_COUNTS } from '@/src/features/activity/domain/activityTypes';
 
+const ids = (actionable: boolean): string[] =>
+  visibleActivityFilters(actionable).map(option => option.id);
+
 describe('activity filters', () => {
-  it('maps Unread onto the All tab with the unread toggle on', () => {
-    assert.equal(resolveActivityFilter('unread').tab, 'all');
-    assert.equal(resolveActivityFilter('unread').unreadOnly, true);
-    assert.equal(resolveActivityFilter('all').unreadOnly, false);
+  it('shows All and the standard tabs by default', () => {
+    assert.deepEqual(ids(false), [
+      'all',
+      'your_mentions',
+      'replies',
+      'reactions',
+      'tickets',
+      'group_mentions',
+    ]);
   });
 
-  it('maps every other chip onto its own tab, never unread-only', () => {
-    for (const option of ACTIVITY_FILTERS) {
-      if (option.id === 'unread') continue;
-      assert.equal(option.tab, option.id);
-      assert.equal(option.unreadOnly, false);
-    }
+  it('swaps to All, Actionable and FYI when actionable is on', () => {
+    assert.deepEqual(ids(true), ['all', 'actionable', 'fyi']);
   });
 
-  it('counts All and Unread from the same total', () => {
+  it('knows which chips belong to which set', () => {
+    assert.equal(isFilterVisible('all', true), true);
+    assert.equal(isFilterVisible('replies', true), false);
+    assert.equal(isFilterVisible('fyi', false), false);
+    assert.equal(isFilterVisible('fyi', true), true);
+  });
+
+  it('counts each chip from its own tab', () => {
     const counts = filterCountsFrom({
       ...EMPTY_ACTIVITY_COUNTS,
       all: 6,
       your_mentions: 2,
       replies: 1,
+      actionable: 3,
     });
     assert.equal(counts.all, 6);
-    assert.equal(counts.unread, 6);
     assert.equal(counts.your_mentions, 2);
     assert.equal(counts.replies, 1);
+    assert.equal(counts.actionable, 3);
     assert.equal(counts.tickets, 0);
   });
 });

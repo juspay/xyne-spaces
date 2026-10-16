@@ -8,7 +8,6 @@ import {
   useState,
 } from 'react';
 import { useConnectionState } from '@rocicorp/zero/react';
-import { ActivityClassification } from '@xyne/shared';
 import { logger, Event } from '@/src/utils/logger';
 
 import { useCachedQuery } from '@/src/hooks/useCachedQuery';
@@ -30,6 +29,11 @@ import { useActivityLiveQueryGate } from '@/src/features/activity/sync/useActivi
 import { reconcileActivityFirstPage } from '@/src/features/activity/sync/activitySyncReconciler';
 import { useActivitySyncState } from '@/src/features/activity/sync/useActivitySyncState';
 import {
+  getActorFilterKey,
+  isActorFilterActive,
+  type ActivityActorFilter,
+} from '@/src/features/activity/domain/activityActorFilter';
+import {
   getClassificationFilter,
   getActivityTypes,
 } from '@/src/features/activity/domain/activityFilters';
@@ -49,7 +53,7 @@ import type { ActivityWithRelated } from '@/src/types/activity';
 import { buildListSyncPayload } from '@/src/utils/listSyncTelemetry';
 import { useForegroundListSyncProbe } from '@/src/hooks/useForegroundListSyncProbe';
 import { useListLiveUpdateProbe } from '@/src/hooks/useListLiveUpdateProbe';
-import { mutators } from '@/src/zero/mutators';
+import { markTabAsRead } from '@/src/features/activity/actions/markTabAsRead';
 
 const PAGE_SIZE = ACTIVITY_FIRST_PAGE_SIZE;
 
@@ -160,7 +164,11 @@ const getActivityTabCacheKey = (
   activeTab: ActivityTab,
 ): string => `${currentUserId}:${workspaceId}:${activeTab}`;
 
-const shouldPersistActivitySnapshot = (showUnreadOnly: boolean): boolean => !showUnreadOnly;
+/**
+ * Snapshots hold the plain feed per tab. A feed narrowed by unread-only or by
+ * an actor is a different list, so it is neither read from nor written to them.
+ */
+const shouldPersistActivitySnapshot = (isScoped: boolean): boolean => !isScoped;
 
 const readActivitySnapshotForTab = <TActivity extends ActivityLike>(
   currentUserId: string,
@@ -229,11 +237,26 @@ export type ActivityScreenModel = {
   showUnreadOnly: boolean;
   setShowUnreadOnly: Dispatch<SetStateAction<boolean>>;
   activityCounts: Record<ActivityTab, number>;
+  /**
+   * Ids of every unread activity, from the live unread query — or `undefined`
+   * until it has answered.
+   *
+   * The authority for read state. A row's own `isRead` is only as fresh as the
+   * page it came from: the first page is live, later pages are one-shot
+   * fetches that never hear about a read receipt.
+   */
+  unreadActivityIds: ReadonlySet<string> | undefined;
   markAsRead: () => void;
 };
 
+export type ActivityScreenModelOptions = {
+  screenReady?: boolean;
+  /** Narrows the feed to one kind of actor, or one actor. Unset: everyone. */
+  actor?: ActivityActorFilter | undefined;
+};
+
 export const useActivityScreenModel = (
-  options: { screenReady?: boolean } = {},
+  options: ActivityScreenModelOptions = {},
 ): ActivityScreenModel => {
   const zero = useZero();
   const zeroRef = useRef(zero);
@@ -255,6 +278,15 @@ export const useActivityScreenModel = (
     setBoolean(ACTIVITY_UNREAD_TOGGLE_STORAGE_KEY, showUnreadOnly);
   }, [showUnreadOnly]);
 
+  // The filter object is the caller's; the key is what decides whether it
+  // changed, so a caller rebuilding an equal object does not refetch.
+  const actorKey = getActorFilterKey(options.actor);
+  const actorFromOptions = options.actor;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const actor = useMemo(() => actorFromOptions, [actorKey]);
+  const hasActorFilter = isActorFilterActive(actor);
+  const isScoped = showUnreadOnly || hasActorFilter;
+
   useEffect(() => {
     if (options.screenReady) {
       triggerActivitySync('screen_focus');
@@ -273,9 +305,9 @@ export const useActivityScreenModel = (
         currentUserId,
         workspaceId,
         activeTab,
-        showUnreadOnly,
+        isScoped,
       ),
-    [currentUserId, workspaceId, activeTab, showUnreadOnly],
+    [currentUserId, workspaceId, activeTab, isScoped],
   );
 
   const liveDataEnabled = useActivityLiveQueryGate({
@@ -299,14 +331,14 @@ export const useActivityScreenModel = (
     enabled: liveDataEnabled && Boolean(currentUserId && workspaceId),
     identityKey:
       currentUserId && workspaceId
-        ? `activity_list:${currentUserId}:${workspaceId}:${activeTab}:${showUnreadOnly}`
+        ? `activity_list:${currentUserId}:${workspaceId}:${activeTab}:${showUnreadOnly}:${actorKey}`
         : null,
     getLatestItemAt: () => getLatestActivityTimestamp(activitiesRef.current),
     getRowCount: () => activitiesRef.current.length,
   });
   const activityLiveUpdateIdentityKey =
     currentUserId && workspaceId
-      ? `activity_list:${currentUserId}:${workspaceId}:${activeTab}:${showUnreadOnly}`
+      ? `activity_list:${currentUserId}:${workspaceId}:${activeTab}:${showUnreadOnly}:${actorKey}`
       : null;
   const { arm: armLiveUpdateProbe, consumeIfNewer: consumeLiveUpdateIfNewer } =
     useListLiveUpdateProbe();
@@ -315,7 +347,9 @@ export const useActivityScreenModel = (
   // on foreground) merges new rows into the MMKV snapshot, re-read and merge
   // into the screen state without waiting for Zero to deliver them.
   useEffect(() => {
-    if (!currentUserId || !workspaceId) return;
+    // The snapshot is the plain feed; merging it into an actor-scoped list
+    // would put other people's activities in it.
+    if (!currentUserId || !workspaceId || hasActorFilter) return;
     const unsubscribe = subscribeActivitySnapshotUpdated(() => {
       const fresh = readActivitySnapshotForTab<ActivityWithRelated>(
         currentUserId,
@@ -351,7 +385,7 @@ export const useActivityScreenModel = (
       commitActivities(merged);
     });
     return unsubscribe;
-  }, [currentUserId, workspaceId, activeTab, showUnreadOnly, commitActivities]);
+  }, [currentUserId, workspaceId, activeTab, showUnreadOnly, hasActorFilter, commitActivities]);
   const [fetchCursor, setFetchCursor] = useState<ActivityCursor | null>(null);
   const [nextCursor, setNextCursor] = useState<ActivityCursor | null>(
     () => persistedSnapshot?.nextCursor ?? null,
@@ -384,8 +418,9 @@ export const useActivityScreenModel = (
         types: currentTypes,
         classification: classificationFilter,
         showUnreadOnly,
+        actor,
       }),
-    [classificationFilter, currentTypes, fetchCursor, showUnreadOnly],
+    [actor, classificationFilter, currentTypes, fetchCursor, showUnreadOnly],
   );
 
   const [activitiesPage, activitiesDetails] = useCachedQuery(activityPageQuery, {
@@ -418,6 +453,7 @@ export const useActivityScreenModel = (
               types: currentTypes,
               classification: classificationFilter,
               showUnreadOnly,
+              actor,
             }),
             { type: 'complete' },
           )) ?? [],
@@ -440,7 +476,7 @@ export const useActivityScreenModel = (
         queryRowCount,
       };
     },
-    [activeTab, classificationFilter, currentTypes, showUnreadOnly, workspaceId],
+    [activeTab, actor, classificationFilter, currentTypes, showUnreadOnly, workspaceId],
   );
 
   const logForegroundSyncIfNewer = useCallback(
@@ -548,6 +584,7 @@ export const useActivityScreenModel = (
       showUnreadOnly ? 'unread' : 'all',
       currentTypes.join(','),
       classificationFilter ?? 'none',
+      actorKey,
     ].join(':');
 
     if (!liveDataEnabled || !currentUserId || !workspaceId || fetchCursor !== null) {
@@ -567,6 +604,7 @@ export const useActivityScreenModel = (
       logged: false,
     };
   }, [
+    actorKey,
     activeTab,
     activityInitialCacheRowCount,
     classificationFilter,
@@ -591,6 +629,7 @@ export const useActivityScreenModel = (
       showUnreadOnly ? 'unread' : 'all',
       currentTypes.join(','),
       classificationFilter ?? 'none',
+      actorKey,
     ].join(':');
     const telemetry = initialSyncTelemetryRef.current;
     if (!telemetry || telemetry.key !== syncKey || telemetry.logged) {
@@ -624,6 +663,7 @@ export const useActivityScreenModel = (
     );
     armLiveUpdateBaseline(telemetry.startedAtMs, activitiesRef.current);
   }, [
+    actorKey,
     activeTab,
     activitiesDetails,
     armLiveUpdateBaseline,
@@ -643,6 +683,7 @@ export const useActivityScreenModel = (
         showUnreadOnly ? 'unread' : 'all',
         currentTypes.join(','),
         classificationFilter ?? 'none',
+        actorKey,
       ].join(':');
       const telemetry = initialSyncTelemetryRef.current;
       if (!telemetry || telemetry.key !== syncKey || telemetry.logged) {
@@ -675,6 +716,7 @@ export const useActivityScreenModel = (
       return true;
     },
     [
+      actorKey,
       activeTab,
       armLiveUpdateBaseline,
       classificationFilter,
@@ -697,7 +739,7 @@ export const useActivityScreenModel = (
     isLoadingMoreRef.current = false;
     hasPaginatedRef.current = false;
     setSyncedUnreadActivities(null);
-  }, [commitActivities, persistedSnapshot]);
+  }, [actorKey, commitActivities, persistedSnapshot]);
 
   useEffect(() => {
     let cancelled = false;
@@ -723,7 +765,7 @@ export const useActivityScreenModel = (
           setIsLoading(false);
           commitActivities([]);
           setHasSnapshot(true);
-          if (shouldPersistActivitySnapshot(showUnreadOnly)) {
+          if (shouldPersistActivitySnapshot(isScoped)) {
             clearActivitySnapshot(currentUserId, workspaceId, activeTab);
           }
           logInitialSyncIfNeeded([], rawPage.length, false);
@@ -793,7 +835,7 @@ export const useActivityScreenModel = (
               }
             }
             setHasSnapshot(true);
-            if (shouldPersistActivitySnapshot(showUnreadOnly)) {
+            if (shouldPersistActivitySnapshot(isScoped)) {
               persistActivitySnapshot(
                 currentUserId,
                 workspaceId,
@@ -854,7 +896,7 @@ export const useActivityScreenModel = (
           logLiveUpdateIfNewer(mergedFirst, rawPage.length, nextHasMore);
         }
       }
-      if (shouldPersistActivitySnapshot(showUnreadOnly)) {
+      if (shouldPersistActivitySnapshot(isScoped)) {
         persistActivitySnapshot(
           currentUserId,
           workspaceId,
@@ -879,6 +921,7 @@ export const useActivityScreenModel = (
 
     return undefined;
   }, [
+    isScoped,
     activitiesPage,
     activitiesDetails.type,
     fetchCursor,
@@ -918,6 +961,7 @@ export const useActivityScreenModel = (
       showUnreadOnly,
       currentTypes,
       classificationFilter,
+      actor,
       pageSize: PAGE_SIZE,
       resolveDisplayPage,
     })
@@ -953,7 +997,7 @@ export const useActivityScreenModel = (
         );
         setHasSnapshot(true);
 
-        if (shouldPersistActivitySnapshot(showUnreadOnly) && mergedSync.length > 0) {
+        if (shouldPersistActivitySnapshot(isScoped) && mergedSync.length > 0) {
           persistActivitySnapshot(
             currentUserId,
             workspaceId,
@@ -975,6 +1019,8 @@ export const useActivityScreenModel = (
       cancelled = true;
     };
   }, [
+    actor,
+    isScoped,
     activeTab,
     classificationFilter,
     commitActivities,
@@ -1018,6 +1064,7 @@ export const useActivityScreenModel = (
             types: currentTypes,
             classification: classificationFilter,
             showUnreadOnly,
+            actor,
           }),
           { type: 'complete' },
         ),
@@ -1090,6 +1137,7 @@ export const useActivityScreenModel = (
         );
       });
   }, [
+    actor,
     activeTab,
     classificationFilter,
     commitActivities,
@@ -1153,41 +1201,7 @@ export const useActivityScreenModel = (
     return visibleActivities.filter(activity => unreadActivityIdSet.has(activity.id));
   }, [activities, activeTab, showUnreadOnly, unreadActivityIdSet]);
 
-  const markAsRead = useCallback(() => {
-    const filters: {
-      actorAction?: string;
-      classification?: ActivityClassification;
-    } = {};
-
-    if (activeTab === 'your_mentions') {
-      filters.actorAction = 'mentioned_user';
-    } else if (activeTab === 'group_mentions') {
-      filters.actorAction = 'group_mention';
-    } else if (activeTab === 'replies') {
-      const timestamp = Date.now();
-      void zero.mutate(
-        mutators.activities.markAsReadByFilter({ actorAction: 'replied', timestamp }),
-      );
-      void zero.mutate(
-        mutators.activities.markAsReadByFilter({ actorAction: 'replied_v2', timestamp }),
-      );
-      return;
-    } else if (activeTab === 'all') {
-      void zero.mutate(mutators.activities.markAsReadByFilter({ timestamp: Date.now() }));
-      return;
-    } else if (activeTab === 'actionable') {
-      filters.classification = ActivityClassification.ACTIONABLE;
-    } else if (activeTab === 'fyi') {
-      filters.classification = ActivityClassification.FYI;
-    }
-
-    void zero.mutate(
-      mutators.activities.markAsReadByFilter({
-        ...filters,
-        timestamp: Date.now(),
-      }),
-    );
-  }, [activeTab, zero]);
+  const markAsRead = useCallback(() => markTabAsRead(zero, activeTab), [activeTab, zero]);
 
   const isInitialLoading =
     (activitiesDetails.type !== 'complete' || isLoading) &&
@@ -1205,6 +1219,7 @@ export const useActivityScreenModel = (
     showUnreadOnly,
     setShowUnreadOnly,
     activityCounts,
+    unreadActivityIds: unreadActivityIdSet,
     markAsRead,
   };
 };

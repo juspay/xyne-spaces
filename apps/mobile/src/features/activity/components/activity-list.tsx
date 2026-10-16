@@ -22,9 +22,9 @@ import {
 } from '../constants';
 import { useActivityRows } from '../hooks/use-activity-rows';
 import { useActivityScroll } from '../hooks/use-activity-scroll';
-import { resolveActivityFilter } from '../model/filter';
 import { getActivityEmptyContent } from '../presentation/activityEmptyContent';
 import { activityFilter$ } from '../state/filter-store';
+import { appliedActivityPreferences$ } from '../state/preferences-store';
 import { activityRow$, activityRowOrder$ } from '../state/rows-store';
 import { ActivityBodyEnvironment } from './activity-body';
 import { ActivityFilterBar } from './activity-filter-bar';
@@ -33,12 +33,24 @@ import { ActivityRow } from './activity-row';
 const keyExtractor = (id: string): string => id;
 
 /**
- * Rows with a rich-text body and rows with a plain sentence or none have
- * different internals, so LegendList recycles within each rather than across
- * them. Read with `peek` — the type is a property of the row at the moment it
- * is placed, not something the list should subscribe to.
+ * Rows with a rich-text body, with attachments beneath it, and with a plain
+ * sentence or none have different internals, so LegendList recycles within
+ * each rather than across them. Read with `peek` — the type is a property of
+ * the row at the moment it is placed, not something the list should subscribe
+ * to.
  */
-const getItemType = (id: string): string => activityRow$(id).body.kind.peek() ?? 'none';
+const getItemType = (id: string): string => {
+  const body = activityRow$(id).body.peek();
+  if (body === undefined) return 'none';
+  if (
+    body.kind === 'message' &&
+    body.attachments.length > 0 &&
+    appliedActivityPreferences$.viewMode.peek() === 'detailed'
+  ) {
+    return 'message-media';
+  }
+  return body.kind;
+};
 
 function renderRow({ item }: { item: string }): ReactElement {
   return (
@@ -63,8 +75,8 @@ function ListEmpty({
   isLoading: boolean;
   viewportHeight: number;
 }): ReactElement {
-  const filter = useValue(activityFilter$);
-  const { tab, unreadOnly } = resolveActivityFilter(filter);
+  const tab = useValue(activityFilter$);
+  const unreadOnly = useValue(appliedActivityPreferences$.unreadOnly);
 
   if (isLoading) {
     const rows = Math.max(4, Math.ceil(viewportHeight / ACTIVITY_SKELETON_ROW_HEIGHT));
@@ -116,6 +128,7 @@ export function ActivityList(): ReactElement {
   useReportTabReady('activity', !isLoading);
 
   const { theme } = useUniwind();
+  const viewMode = useValue(appliedActivityPreferences$.viewMode);
   const bottomInset = useFabClearance();
   const scroll = useActivityScroll({ loadMore, isFocused });
 
@@ -152,7 +165,9 @@ export function ActivityList(): ReactElement {
           drawDistance={ACTIVITY_DRAW_DISTANCE}
           // Recycled rows keep their component instance, so a theme switch
           // would otherwise leave resolved colors from the old theme on screen.
-          extraData={theme}
+          // The view mode changes which rows carry attachments, and with it
+          // their item type.
+          extraData={`${theme}:${viewMode}`}
           ListHeaderComponent={<ActivityFilterBar />}
           ListEmptyComponent={empty}
           ListFooterComponent={footer}

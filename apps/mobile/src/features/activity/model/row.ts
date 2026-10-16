@@ -34,9 +34,27 @@ export type ActivitySubject =
   | { readonly kind: 'dm'; readonly label: string }
   | { readonly kind: 'ticket'; readonly label: string };
 
+/** The slice of a message attachment the grid needs; mirrors `MessageAttachment`. */
+export type ActivityAttachment = {
+  readonly id: string;
+  readonly mimetype: string;
+  readonly originalFilename?: string;
+  readonly size?: number;
+  readonly metadata?: { duration?: number } | null;
+};
+
 export type ActivityBody =
-  /** A chat message, rendered as rich text. `content` is the raw message HTML. */
-  | { readonly kind: 'message'; readonly content: string; readonly senderId: string }
+  /**
+   * A chat message: rich text, then its attachments. `content` is the raw
+   * message HTML and may be empty when the message is only attachments.
+   */
+  | {
+      readonly kind: 'message';
+      readonly content: string;
+      readonly senderId: string;
+      readonly conversationId: string;
+      readonly attachments: readonly ActivityAttachment[];
+    }
   /** A sentence the app composed. */
   | { readonly kind: 'text'; readonly text: string }
   | { readonly kind: 'none' };
@@ -111,10 +129,29 @@ const NONE: ActivityBody = { kind: 'none' };
 
 const text = (value: string): ActivityBody => ({ kind: 'text', text: value });
 
+const NO_ATTACHMENTS: readonly ActivityAttachment[] = [];
+
 function messageBody(activity: ActivityWithRelated): ActivityBody | null {
   const message = activity.message;
   if (!message || !message.conversation) return null;
-  return { kind: 'message', content: message.content ?? '', senderId: message.senderId };
+
+  const attachments = message.attachments;
+  return {
+    kind: 'message',
+    content: message.content ?? '',
+    senderId: message.senderId,
+    conversationId: message.conversation.conversationId,
+    attachments:
+      attachments && attachments.length > 0
+        ? attachments.map(a => ({
+            id: a.id,
+            mimetype: a.mimetype ?? 'application/octet-stream',
+            ...(a.originalFilename ? { originalFilename: a.originalFilename } : {}),
+            ...(a.size !== null && a.size !== undefined ? { size: a.size } : {}),
+            ...(a.metadata ? { metadata: a.metadata as { duration?: number } } : {}),
+          }))
+        : NO_ATTACHMENTS,
+  };
 }
 
 function pluralOthers(count: number): string {
@@ -127,7 +164,7 @@ function describeMention(activity: ActivityWithRelated): Described | null {
     const channelId = activity.channelId ?? undefined;
     return {
       badge: 'canvas',
-      verb: 'mentioned you in',
+      verb: 'mentioned',
       subject: null,
       actorId: activity.actorId ?? activity.canvas.lastEditedBy ?? '',
       body: text(`Canvas: ${activity.canvas.title ?? 'Untitled'}`),
@@ -141,7 +178,7 @@ function describeMention(activity: ActivityWithRelated): Described | null {
   }
 
   const body = messageBody(activity);
-  return body ? { badge: 'mention', verb: 'mentioned you in', body } : null;
+  return body ? { badge: 'mention', verb: 'mentioned', body } : null;
 }
 
 function describeDirectMessage(activity: ActivityWithRelated): Described | null {
@@ -173,10 +210,11 @@ function describeReply(activity: ActivityWithRelated): Described | null {
   const unique = new Set(after);
   if (recipientId) unique.delete(recipientId);
 
-  const lead = unique.size <= 1 ? '' : `${pluralOthers(unique.size)} `;
-  const verb = isRecipientOwner
-    ? `${lead}replied on your message in`
-    : `${lead}replied in a thread you're following in`;
+  // const lead = unique.size <= 1 ? '' : `${pluralOthers(unique.size)} `;
+  // const verb = isRecipientOwner
+  //   ? `${lead}replied on your message in`
+  //   : `${lead}replied in a thread you're following in`;
+  const verb = isRecipientOwner ? `replied` : `replied`;
   return { badge: 'reply', verb, body };
 }
 
@@ -190,9 +228,7 @@ function describeReaction(activity: ActivityWithRelated): Described | null {
     return {
       badge: 'reaction',
       verb:
-        activity.actorAction === 'added'
-          ? 'reacted to your message in'
-          : 'removed a reaction from your message in',
+        activity.actorAction === 'added' ? 'reacted' : 'removed a reaction from your message in',
       actorId: reaction.userId,
       reactionEmoji: reaction.emojiName,
       body,
@@ -208,8 +244,8 @@ function describeReaction(activity: ActivityWithRelated): Described | null {
 
   let verb: string;
   if (activity.actorAction === 'removed_v2') verb = 'removed a reaction from your message in';
-  else if (reactors.size <= 1) verb = 'reacted to your message in';
-  else verb = `${pluralOthers(reactors.size)} reacted to your message in`;
+  else if (reactors.size <= 1) verb = 'reacted';
+  else verb = `${pluralOthers(reactors.size)} reacted`;
 
   return { badge: 'reaction', verb, reactionEmoji: latest, body };
 }
