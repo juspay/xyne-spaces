@@ -32,6 +32,15 @@ function stripRemovedByHostFlag(metadata: unknown): Prisma.InputJsonValue {
   return rest as Prisma.InputJsonValue;
 }
 
+/**
+ * A guest the host already admitted. LEFT counts too: the LiveKit
+ * participant_left webhook flips ACCEPTED to LEFT when the guest hangs up,
+ * and they must be able to come back without being re-admitted.
+ */
+function wasAdmitted(response: string | null): boolean {
+  return response === InvitationResponse.ACCEPTED || response === InvitationResponse.LEFT;
+}
+
 /** Helper — set the HTTP-only session cookie for an external participant. */
 function setSessionCookie(
   res: Response,
@@ -70,14 +79,25 @@ export const callLobbyController = {
     try {
       const { call, callSession } = req as CallLobbyRequest;
 
+      const [participantCount, sessionParticipant] = await Promise.all([
+        repositories.calls.countInCallParticipants(call.callId),
+        callSession
+          ? repositories.calls.findExternalParticipantById({
+              participantId: callSession.participantId,
+              callId: call.callId,
+            })
+          : null,
+      ]);
+
       const base = {
         title: call.title,
         callType: call.callType,
         status: call.status,
+        participantCount,
       };
 
       if (callSession) {
-        res.json({ ...base, hasSession: true });
+        res.json({ ...base, hasSession: true, displayName: sessionParticipant?.displayName ?? null });
         return;
       }
 
@@ -127,7 +147,7 @@ export const callLobbyController = {
           return;
         }
 
-        if (existing.response !== InvitationResponse.ACCEPTED) {
+        if (!wasAdmitted(existing.response)) {
           res.status(200).json({ skipApproval: false, participantId: callSession.participantId });
           return;
         }
@@ -307,7 +327,7 @@ export const callLobbyController = {
         return;
       }
 
-      if (existing.response !== InvitationResponse.ACCEPTED) {
+      if (!wasAdmitted(existing.response)) {
         res.status(200).json({ skipApproval: false, participantId: callSession.participantId });
         return;
       }
