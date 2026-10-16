@@ -1,4 +1,5 @@
 import { s2sKeyMatches } from "../middleware/require-auth.js";
+import { parseModelFallback, type AnsweredBy } from "../lib/run-answered-by.js";
 import type { DraftAgentSpec } from "../lib/agent-card.js";
 import { isAgentOwnedRun } from "../lib/agent-owned-runs.js";
 import { applyAiScreenCommand } from "../lib/ai-screen-commands.js";
@@ -1945,6 +1946,9 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
           resolvedParentProvider = override.provider;
           if (override.model?.trim()) providerConfigs[override.provider] = { ...cfg, model: override.model.trim() };
           runtimeProviderOrder = [];
+          // Also stop claw's terminal "spaces" fallback: a pinned run answers on
+          // the pinned model or fails visibly (XYNE-66320, same as start-run.ts).
+          runAgentConfig = { ...(runAgentConfig ?? {}), providerFallbackToSpaces: false };
         } else if (override.provider === "litellm" && override.model?.trim()) {
           // No agent litellm credential — the pick came off the platform
           // allowed-model list (litellm-models' claw fallback). Apply it as a
@@ -2665,6 +2669,8 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
   // drives the SSE `done` event on the client, which triggers refreshRuns().
   // Without this await, refreshRuns would race finalize and fetch stale state
   // — stale "running" tool rows that should have been swept to completed.
+  // Set by claw only when a later provider attempt answered (XYNE-66319).
+  const callbackModelFallback = parseModelFallback((req.body as Record<string, unknown>)["modelFallback"]);
   if (sessionId) {
     const finalStatus = normalizeRunStatus(status);
     try {
@@ -2674,6 +2680,7 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
         error: error ?? null,
         ...(provider ? { provider } : {}),
         ...(model ? { model } : {}),
+        ...(callbackModelFallback ? { modelFallback: callbackModelFallback } : {}),
         toolsUsed: toolsUsed ?? [],
         ...(chatMessageId ? { chatMessageId } : {}),
         ...(toolInvocations !== undefined ? { toolInvocations } : {}),
@@ -3200,6 +3207,16 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
       }
     }
 
+    // assistantMsgId → which provider/model answered (+ what it fell back from).
+    // Same run linkage as runByMsgId; one extra indexed lookup by sessionId.
+    // Per message, so a multi-agent chat shows each reply's own model.
+    const answeredBySession = await agentRunRepository
+      .answeredByForSessions([...new Set(Object.values(runByMsgId))])
+      .catch((err: unknown) => {
+        log.warn("[agent-chat] answeredBy lookup failed:", err instanceof Error ? err.message : err);
+        return new Map<string, AnsweredBy>();
+      });
+
     // De-duplicated icon registry for the whole payload: unique iconKey → data:
     // SVG URI across every message's invocations. The dashboard re-attaches the
     // bytes per citation at render time (see resolveCitationIconUrl).
@@ -3215,6 +3232,9 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
           ? { followUpSuggestions: followUpsByMsgId[message.id] }
           : {}),
         ...(durationByMsgId[message.id] !== undefined ? { durationMs: durationByMsgId[message.id] } : {}),
+        ...(message.role === "assistant" && runByMsgId[message.id] && answeredBySession.get(runByMsgId[message.id]!)
+          ? { answeredBy: answeredBySession.get(runByMsgId[message.id]!) }
+          : {}),
       })),
       ...(Object.keys(invocationsByMsgId).length > 0 && { invocationsByMsgId }),
       ...(Object.keys(icons).length > 0 && { icons }),

@@ -6,6 +6,7 @@
  */
 
 import { ingestSandboxPreviewSignals } from "../lib/conversation-artifact-signals.js";
+import { parseModelFallback } from "../lib/run-answered-by.js";
 import { Router, type Request, type Response } from "express";
 import { errMsg } from "../lib/errors.js";
 import { deliveredDesignCommand, recordDeliveredArtifacts } from "../lib/delivered-artifacts.js";
@@ -3158,6 +3159,8 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     pendingGoalSuggestion?: { condition: string; rationale: string };
     provider?: string;
     model?: string;
+    /** claw: the requested provider/model when a later attempt answered. */
+    modelFallback?: unknown;
     localHarness?: {
       provider: string;
       harnessName: string;
@@ -3471,6 +3474,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       error: deferCompletedRecoveryForEmptyResult ? "empty_result" : payload.error ?? null,
       ...(payload.provider !== undefined ? { provider: payload.provider } : {}),
       ...(payload.model !== undefined ? { model: payload.model } : {}),
+      ...(parseModelFallback(payload.modelFallback) ? { modelFallback: parseModelFallback(payload.modelFallback)! } : {}),
       ...(payload.reasoning ? { reasoning: payload.reasoning } : {}),
       toolsUsed: payload.toolsUsed ?? [],
       ...(payload.toolInvocations !== undefined ? { toolInvocations: payload.toolInvocations } : {}),

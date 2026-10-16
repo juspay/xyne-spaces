@@ -839,6 +839,10 @@ export async function runClawAgentStream(
                   ...(parsed.followUpsPending === true && { followUpsPending: true }),
                   // The turn as ordered thinking / text / tool parts.
                   ...(Array.isArray(parsed.parts) && { parts: parsed.parts }),
+                  // Provider/model that actually answered + fallback origin
+                  // (claw-auth run-stream `answeredBy`, XYNE-66319).
+                  ...(parsed.answeredBy &&
+                    typeof parsed.answeredBy === 'object' && { answeredBy: parsed.answeredBy }),
                 })}\n\n`
               );
               if (typeof (res as any).flush === 'function') (res as any).flush();
