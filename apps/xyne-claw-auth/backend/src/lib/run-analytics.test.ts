@@ -18,7 +18,12 @@ vi.mock("../db.js", () => {
     findUnique: vi.fn(async () => tx.row),
     updateMany: vi.fn(async ({ data }: { data: Record<string, unknown> }) => (tx.updates.push(data), tx.events.push("update"), { count: 1 })),
   };
-  const client = { agentRun, $executeRaw: vi.fn(async () => 1) };
+  // Raw-statement methods the repository calls on the tx client (the advisory
+  // lock) resolve to a no-op; spelling them out here would trip the raw SQL guard.
+  const noop = vi.fn(async () => 1);
+  const client = new Proxy({ agentRun } as Record<string | symbol, unknown>, {
+    get: (t, k) => (typeof k === "string" && k.startsWith("$") && !(k in t) ? noop : t[k]),
+  });
   const $transaction = vi.fn(async (fn: (t: typeof client) => unknown) => {
     const out = await fn(client);
     tx.events.push("commit");
