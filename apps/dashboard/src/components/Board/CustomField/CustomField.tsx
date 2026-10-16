@@ -256,6 +256,9 @@ export const CustomField = ({
   // Click outside to save
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent): void => {
+      // The name autocomplete's suggestion panel is portaled; clicking it is not "outside".
+      const target = event.target as Element;
+      if (target.closest?.('[data-radix-popper-content-wrapper]')) return;
       if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
         if (supportsBranching) {
           outsideSaveTimeoutRef.current = window.setTimeout(() => {

@@ -55,7 +55,7 @@ interface FormFieldEditorProps {
   ctx: FormFieldEditorContext;
 }
 
-const NAME_CODES = new Set(['name-required', 'duplicate-name']);
+const NAME_CODES = new Set(['name-required', 'duplicate-name', 'global-name-taken']);
 const BRANCH_CODES = new Set(['branch-unresolved', 'branch-not-single-select', 'branch-nested']);
 
 const FieldTypeDropdown = ({

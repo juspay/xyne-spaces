@@ -8,6 +8,7 @@ import type { GlobalFieldSuggestion } from '../../Board/GlobalFieldNameAutocompl
 import { getApiErrorMessage } from '../../../utils/apiError';
 import { cn } from '../../../utils/classNames';
 import { useConfirmDialog } from '../../../hooks/useConfirmDialog';
+import { useGlobalFieldSearch } from '../../../hooks/useGlobalFieldSearch';
 import {
   getEditedSharedFields,
   snapshotFieldDefinition,
@@ -121,7 +122,15 @@ export const FormBuilder = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const validation = useMemo(() => validateFormBuilder(formName, fields), [formName, fields]);
+  // Same cached per-project list the name autocomplete uses; catches name collisions pre-save.
+  const { details: globalFieldsQuery } = useGlobalFieldSearch(projectId, '', {
+    enabled: !readOnlyProp && !locked,
+  });
+  const existingGlobalFields = globalFieldsQuery.data;
+  const validation = useMemo(
+    () => validateFormBuilder(formName, fields, existingGlobalFields ?? []),
+    [formName, fields, existingGlobalFields],
+  );
 
   const issuesByRowId = useMemo(() => {
     const map = new Map<string, FieldIssue[]>();
@@ -360,10 +369,17 @@ export const FormBuilder = ({
       rowId,
       current => {
         const { definitionId: _definition, membershipId: _membership, ...rest } = current;
-        return rest;
+        // The shared field keeps its name, and a new field with a taken name would be merged
+        // back into it on save, so the copy starts with a distinct one.
+        return { ...rest, fieldName: `${current.fieldName.trim()} (copy)` };
       },
       fieldLabel,
     );
+    setTimeout(() => {
+      const input = fieldInputRefs.current[rowId];
+      input?.focus();
+      input?.select();
+    }, 0);
   };
 
   const focusFirstIssue = (): void => {

@@ -1,5 +1,6 @@
 import { FormFieldType, resolveParentOption } from '@xyne/shared';
 import type { BuilderField } from './formBuilderTypes';
+import { FIELD_TYPE_OPTIONS } from '../board/stageConfigUtils';
 
 export const FORM_NAME_MAX_LENGTH = 100;
 
@@ -7,6 +8,7 @@ export type FieldErrorCode =
   | 'name-required'
   | 'unsupported-type'
   | 'duplicate-name'
+  | 'global-name-taken'
   | 'select-missing-option'
   | 'duplicate-option'
   | 'branch-unresolved'
@@ -53,9 +55,48 @@ export const isFieldStarted = (field: BuilderField): boolean =>
 export const getStartedFields = (fields: BuilderField[]): BuilderField[] =>
   fields.filter(isFieldStarted);
 
+/** A project's global field definition, as far as name collisions are concerned. */
+export interface ExistingGlobalField {
+  id: string;
+  fieldName: string;
+  fieldType: FormFieldType;
+}
+
+/**
+ * global_fields is unique on (projectId, fieldName, fieldType), matched on the trimmed,
+ * case-sensitive name, so renaming a shared field onto another definition fails on save.
+ * Legacy rows (definitionId === membershipId) are not global definitions and are skipped.
+ */
+const findGlobalNameIssue = (
+  field: BuilderField,
+  existingGlobalFields: ExistingGlobalField[],
+): FieldIssue | null => {
+  if (!field.definitionId || field.definitionId === field.membershipId) return null;
+
+  const name = field.fieldName.trim();
+  const taken = existingGlobalFields.some(
+    existing =>
+      existing.id !== field.definitionId &&
+      existing.fieldType === field.fieldType &&
+      existing.fieldName.trim() === name,
+  );
+  if (!taken) return null;
+
+  const typeLabel =
+    FIELD_TYPE_OPTIONS.find(option => option.value === field.fieldType)?.label ?? field.fieldType;
+
+  return {
+    rowId: field.rowId,
+    code: 'global-name-taken',
+    // Name + type is what must be unique, so say so: the same name with another type is fine.
+    message: `Another ${typeLabel} field is already named "${name}". Change the name or the type.`,
+  };
+};
+
 export const validateFormBuilder = (
   formName: string,
   fields: BuilderField[],
+  existingGlobalFields: ExistingGlobalField[] = [],
 ): FormBuilderValidationResult => {
   const formIssues: FormIssue[] = [];
   const fieldIssues: FieldIssue[] = [];
@@ -87,6 +128,8 @@ export const validateFormBuilder = (
       continue;
     }
     rowIdsByName.set(normalized, [...(rowIdsByName.get(normalized) ?? []), field.rowId]);
+    const globalNameIssue = findGlobalNameIssue(field, existingGlobalFields);
+    if (globalNameIssue) fieldIssues.push(globalNameIssue);
   }
   for (const rowIds of rowIdsByName.values()) {
     if (rowIds.length < 2) continue;
