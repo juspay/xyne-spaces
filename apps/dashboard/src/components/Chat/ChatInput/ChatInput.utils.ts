@@ -21,6 +21,21 @@ const escapeHtml = (unsafe: string): string => {
 export const discussionOpeningHtml = (title: string, bodyHtml: string): string =>
   `<p><strong>${escapeHtml(title)}</strong></p>${bodyHtml}`;
 
+export const discussionTitleOfBody = (body: Element): string => {
+  const [first, next] = Array.from(body.children);
+  if (!first || !next) return '';
+  const title = (first.textContent ?? '').trim();
+  if (/^H[1-3]$/.test(first.tagName)) return title;
+  const strong = first.firstElementChild;
+  if (first.tagName !== 'P' || first.childElementCount !== 1 || strong?.tagName !== 'STRONG') {
+    return '';
+  }
+  return title === (strong.textContent ?? '').trim() ? title : '';
+};
+
+export const discussionTitleOf = (html: string): string =>
+  discussionTitleOfBody(new DOMParser().parseFromString(html, 'text/html').body);
+
 export const sanitizeHtmlContent = (html: string): string => {
   const doc = new DOMParser().parseFromString(html, 'text/html');
 
