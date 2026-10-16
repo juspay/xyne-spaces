@@ -10,8 +10,20 @@ import {
 } from '../../workspaceItems';
 import { InlineCommentThread, type InlineCommentTarget } from './InlineCommentThread';
 import { usePublishViewerAction } from './viewerActions';
+import { UnmountWhenCovered } from '../../../hooks/usePageCoverage';
 
 export function AiDocItemView({ item }: { item: WorkspaceItem }): ReactElement {
+  // Not under full-page search, as leaving the page took it: its frame reloads on return, so
+  // nothing drawn over the old one comes back with it (a picked block, an open comment thread),
+  // and the doc's messages aren't listened for meanwhile.
+  return (
+    <UnmountWhenCovered fallback={<div className='h-full min-h-0 bg-background' />}>
+      <AiDocItem item={item} />
+    </UnmountWhenCovered>
+  );
+}
+
+function AiDocItem({ item }: { item: WorkspaceItem }): ReactElement {
   const [frame, setFrame] = useState<HTMLIFrameElement | null>(null);
   const [picked, setPicked] = useState<PickedBlock | null>(null);
   const [openThread, setOpenThread] = useState<InlineCommentTarget | null>(null);

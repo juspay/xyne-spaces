@@ -33,6 +33,7 @@ import { useShortcut } from '../../../shortcuts';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import type { SearchResultsFilters } from '../../../hooks/useSearchResultsScreen';
 import { useQuerySuggestions } from './filters/useQuerySuggestions';
+import { FULL_PAGE_QUERY_INPUT_ID, isDialogOpenOverPage } from '../ChatDirectory/cmdkFullPage';
 
 /** An applied filter, shown as a token inside the box the way Slack shows them. */ // HMRPROBE2
 export interface QueryToken {
@@ -50,6 +51,8 @@ export interface QueryToken {
 interface SearchQueryInputProps {
   /** The committed query — the one the results currently on screen were fetched for. */
   query: string;
+  /** `query` changed only because the page wrote a finished search to the URL: not re-seeded. */
+  queryIsOwnWrite?: boolean;
   /**
    * Applied filters, rendered as read-only tokens ahead of the text. They make the box
    * show the whole search rather than just its free-text half; editing still only ever
@@ -74,7 +77,21 @@ interface SearchQueryInputProps {
   onLiveChange: (next: string) => void;
   /** True while a search is in flight — swaps the leading icon for a spinner. */
   isSearching: boolean;
+  /**
+   * Take focus when the box appears, so typing goes straight in — Cmd+K landing on full page, or
+   * the palette expanding into it. Waits for a dialog over the page (the palette handing off) to
+   * go first, and never takes focus from something the user has already moved into.
+   */
+  autoFocus?: boolean;
+  /**
+   * Bumped to send the caret here on demand (Cmd+K / Cmd+F on the results page): focuses the box
+   * with the caret after its text, ready to edit.
+   */
+  focusRequest?: number;
 }
+
+// The longest the box waits for a dialog over the page to go before giving up on taking focus.
+const AUTO_FOCUS_WAIT_MS = 3000;
 
 /**
  * Editable query box for the full-screen search results header. Replaces the old
@@ -86,7 +103,7 @@ interface SearchQueryInputProps {
  * the chip is about a specific person, and the palette's chips already read that way.
  */
 /** Ties the wrapping <label> to the text input so a click anywhere focuses it. */
-const QUERY_INPUT_ID = 'search-query-input';
+const QUERY_INPUT_ID = FULL_PAGE_QUERY_INPUT_ID;
 
 /** Glyph-only token kinds. The rest (user/channel/priority) render their own component. */
 const GLYPH_BY_ICON_KIND: Partial<Record<TokenIcon['kind'], typeof CalendarDays>> = {
@@ -122,15 +139,46 @@ function TokenGlyph({ icon }: { icon?: TokenIcon | undefined }): ReactElement | 
 
 export function SearchQueryInput({
   query,
+  queryIsOwnWrite = false,
   tokens = [],
   filters,
   onFiltersChange,
   onSubmit,
   onLiveChange,
   isSearching,
+  autoFocus = false,
+  focusRequest = 0,
 }: SearchQueryInputProps): ReactElement {
   const { userID: currentUserId } = useAuthContextValues();
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!focusRequest) return;
+    const input = inputRef.current;
+    if (!input) return;
+    input.focus({ preventScroll: true });
+    input.setSelectionRange(input.value.length, input.value.length);
+  }, [focusRequest]);
+
+  useEffect(() => {
+    if (!autoFocus) return;
+    const deadline = performance.now() + AUTO_FOCUS_WAIT_MS;
+    let frame = 0;
+    const focusWhenClear = (): void => {
+      const input = inputRef.current;
+      if (!input) return;
+      if (isDialogOpenOverPage()) {
+        if (performance.now() < deadline) frame = requestAnimationFrame(focusWhenClear);
+        return;
+      }
+      const active = document.activeElement;
+      if (active && active !== document.body && active !== input) return;
+      input.focus({ preventScroll: true });
+      input.setSelectionRange(input.value.length, input.value.length);
+    };
+    focusWhenClear();
+    return (): void => cancelAnimationFrame(frame);
+  }, [autoFocus]);
   const [value, setValue] = useState(query);
   const [activeIndex, setActiveIndex] = useState(0);
 
@@ -163,8 +211,10 @@ export function SearchQueryInput({
   // Re-seed only on a genuine outside change (back/forward, a fresh cmd+K search). The URL
   // catching up to what was typed would otherwise fight the caret mid-word.
   useEffect(() => {
-    if (query === valueRef.current.trim()) return;
+    if (queryIsOwnWrite || query === valueRef.current.trim()) return;
     setValue(query);
+    // Only a change of `query` re-seeds; the flag just says whether that change was the page's own.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
 
   // `/` from anywhere on the results screen jumps into the box. Registered without

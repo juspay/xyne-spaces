@@ -27,6 +27,7 @@ import { DatePicker } from '../components/ui/DatePicker/DatePicker';
 import AppNavigator from '../components/AppNavigator/AppNavigator';
 import { SLACK_APP_INSTALL_URL } from '../config';
 import { cn } from '../utils/classNames';
+import { usePageCoverage, watchShown } from '../hooks/usePageCoverage';
 
 // Adaptive polling: fast when a job runs, relaxed when idle, paused when hidden,
 // and backed off when the pod is down so a restart isn't hammered by every dashboard.
@@ -760,17 +761,28 @@ export default function SlackMigration(): React.JSX.Element {
   const hasActiveRef = useRef(hasActive);
   hasActiveRef.current = hasActive;
 
+  // Under full-page search the page is out of sight, like a background tab: both polls wait, and
+  // poll again once the collapse back to it is over, as coming back to the page did.
+  const pageCoverage = usePageCoverage();
   useEffect(() => {
     let stopped = false;
     let fails = 0;
     let timer: ReturnType<typeof setTimeout>;
+    let polling = false;
+    const watch = watchShown(pageCoverage, () => {
+      if (polling) return;
+      clearTimeout(timer);
+      void loop();
+    });
     const loop = async () => {
       if (stopped) return;
-      if (document.hidden) {
+      if (document.hidden || !watch.shown()) {
         timer = setTimeout(() => void loop(), POLL_HIDDEN_MS);
         return;
       } // skip background tabs
+      polling = true;
       const ok = await refresh();
+      polling = false;
       if (stopped) return;
       fails = ok ? 0 : fails + 1;
       const next = ok
@@ -792,8 +804,9 @@ export default function SlackMigration(): React.JSX.Element {
       stopped = true;
       clearTimeout(timer);
       document.removeEventListener('visibilitychange', onVisible);
+      watch.stop();
     };
-  }, [refresh]);
+  }, [refresh, pageCoverage]);
 
   // Announcement banner: own poll loop (not tied to the jobs poll's cadence) so an
   // already-open tab picks up a Superposition edit within ANNOUNCEMENT_POLL_MS instead of
@@ -802,18 +815,26 @@ export default function SlackMigration(): React.JSX.Element {
   useEffect(() => {
     let stopped = false;
     let timer: ReturnType<typeof setTimeout>;
+    let polling = false;
+    const watch = watchShown(pageCoverage, () => {
+      if (polling) return;
+      clearTimeout(timer);
+      void loop();
+    });
     const loop = async () => {
       if (stopped) return;
-      if (document.hidden) {
+      if (document.hidden || !watch.shown()) {
         timer = setTimeout(() => void loop(), ANNOUNCEMENT_POLL_MS);
         return;
       }
+      polling = true;
       try {
         const a = await slackMigrationApi.getAnnouncement();
         if (!stopped) setAnnouncement(a.text);
       } catch {
         /* non-critical: keep showing the last known banner on a transient failure */
       }
+      polling = false;
       if (!stopped) timer = setTimeout(() => void loop(), ANNOUNCEMENT_POLL_MS);
     };
     void loop();
@@ -828,8 +849,9 @@ export default function SlackMigration(): React.JSX.Element {
       stopped = true;
       clearTimeout(timer);
       document.removeEventListener('visibilitychange', onVisible);
+      watch.stop();
     };
-  }, []);
+  }, [pageCoverage]);
 
   const run = useCallback(
     async (fn: () => Promise<unknown>): Promise<boolean> => {

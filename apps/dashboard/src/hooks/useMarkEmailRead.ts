@@ -4,6 +4,7 @@ import { useZero } from './useZero';
 import { mutators } from '../zero/mutators';
 import { trackDeskOutcome } from '../services/Analytics/deskTracking';
 import { logger, Event as LoggerEvent } from '../utils/logger';
+import { usePageCoverage, whenShown } from './usePageCoverage';
 
 /**
  * Marks a Desk ticket's latest email as read when its detail thread opens.
@@ -16,6 +17,8 @@ export function useMarkEmailRead(
   shouldMark: boolean,
 ): void {
   const zero = useZero();
+  // Under full-page search the thread is not being read: marked once it is on screen again.
+  const coverage = usePageCoverage();
 
   const markedRef = useRef<string | null>(null);
 
@@ -23,41 +26,43 @@ export function useMarkEmailRead(
     if (!shouldMark) return;
     if (!ticketId) return;
     if (!latestEmailId) return;
-    if (markedRef.current === latestEmailId) return;
-    markedRef.current = latestEmailId;
-    void zero
-      .mutate(
-        mutators.emailRead.markAsRead({
-          id: uuidv4(),
-          ticketId,
-          lastReadEmailId: latestEmailId,
-          updatedAt: Date.now(),
-        }),
-      )
-      .client.then(
-        () => {
-          // Opening the thread is the implicit "mark read"; the manual and bulk
-          // variants report the same outcome with their own trigger.
-          trackDeskOutcome(
-            'READ_STATE_CHANGED',
-            { id: ticketId },
-            {},
-            {
-              to: 'read',
-              trigger: 'open',
-              bulkCount: 1,
-            },
-          );
-        },
-        (err: unknown) => {
-          // Same handling as useMarkTicketsAsRead: a client-mutator failure is
-          // logged, not left as an unhandled rejection.
-          logger.error(LoggerEvent.ZERO_MUTATION_ERROR, {
-            hook: 'useMarkEmailRead',
-            mutator: 'emailRead.markAsRead',
-            error: err instanceof Error ? err.message : String(err),
-          });
-        },
-      );
-  }, [shouldMark, ticketId, latestEmailId, zero]);
+    return whenShown(coverage, () => {
+      if (markedRef.current === latestEmailId) return;
+      markedRef.current = latestEmailId;
+      void zero
+        .mutate(
+          mutators.emailRead.markAsRead({
+            id: uuidv4(),
+            ticketId,
+            lastReadEmailId: latestEmailId,
+            updatedAt: Date.now(),
+          }),
+        )
+        .client.then(
+          () => {
+            // Opening the thread is the implicit "mark read"; the manual and bulk
+            // variants report the same outcome with their own trigger.
+            trackDeskOutcome(
+              'READ_STATE_CHANGED',
+              { id: ticketId },
+              {},
+              {
+                to: 'read',
+                trigger: 'open',
+                bulkCount: 1,
+              },
+            );
+          },
+          (err: unknown) => {
+            // Same handling as useMarkTicketsAsRead: a client-mutator failure is
+            // logged, not left as an unhandled rejection.
+            logger.error(LoggerEvent.ZERO_MUTATION_ERROR, {
+              hook: 'useMarkEmailRead',
+              mutator: 'emailRead.markAsRead',
+              error: err instanceof Error ? err.message : String(err),
+            });
+          },
+        );
+    });
+  }, [shouldMark, ticketId, latestEmailId, zero, coverage]);
 }

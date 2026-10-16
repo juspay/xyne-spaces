@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react';
 import { mutators } from '../zero/mutators';
 import { useUnreadActivities } from './useUnreadActivities';
 import { useZero } from './useZero';
+import { usePageCoverage, whenShown } from './usePageCoverage';
 
 // actionSource is 'recording' for headless recordings (see recordSummaryReadyActivity).
 const isUnreadRecordingSummary = (activity: {
@@ -29,9 +30,14 @@ export const useMarkRecordingSummaryReadOnOpen = (callId: string | undefined): v
   const activityId = useUnreadActivities(isUnreadRecordingSummary).find(
     activity => !!callId && activity.callId === callId,
   )?.id;
+  // Under full-page search the recording is off screen: a summary ready meanwhile stays unread
+  // until it is back.
+  const coverage = usePageCoverage();
 
   useEffect(() => {
-    if (!activityId) return;
-    void zero.mutate(mutators.activities.markAsRead({ activityId }));
-  }, [activityId, zero]);
+    if (!activityId) return undefined;
+    return whenShown(coverage, () => {
+      void zero.mutate(mutators.activities.markAsRead({ activityId }));
+    });
+  }, [activityId, zero, coverage]);
 };

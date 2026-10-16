@@ -1,6 +1,7 @@
 import type { DeleteID, InsertValue, Transaction, UpdateValue, UpsertValue } from '@rocicorp/zero';
 import {
     MutationACLError,
+    type QueryContext,
   type TableSchema,
 } from '../core/types';
 import { Schema, UserStatus } from '@xyne/shared'
@@ -8,15 +9,42 @@ import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
 import { hasGuestTicketAccess } from '../core/guest-access';
 
-export class TicketACl extends BaseACL<'tickets'> {
-
-    private async verifyTicketInWorkspace(ticketId: string, tx: Transaction<Schema>): Promise<void> {
-        const ticket = await tx.run(zql.tickets.where('id', ticketId).one());
-        if (!ticket) throw new MutationACLError('Ticket not found', 'tickets');
-        if (ticket.workspaceId !== this.ctx.workspaceId) {
-            throw new MutationACLError('Ticket not found in this workspace', 'tickets');
-        }
+/**
+ * The workspace/guest/participant write gate TicketACl.canUpdate applies,
+ * exported so code paths that write outside a zero mutation (e.g. the lazy
+ * flow SKIPPED stage repair) can authorize BEFORE writing with the exact same
+ * checks instead of a copy.
+ */
+export async function assertTicketUpdateAccess(
+    ctx: QueryContext,
+    tx: Transaction<Schema>,
+    ticket: { workspaceId: string; channelId: string; projectId: string },
+): Promise<void> {
+    if (ticket.workspaceId !== ctx.workspaceId) {
+        throw new MutationACLError('Ticket not found in this workspace', 'tickets');
     }
+    if (ctx.role === 'GUEST') {
+        const hasAccess = await hasGuestTicketAccess(ctx, tx, ticket);
+        if (!hasAccess) {
+            throw new MutationACLError('Ticket update failed: guest does not have access to this ticket', 'tickets');
+        }
+        return;
+    }
+    const isParticipant = await tx
+        .run(
+        zql.channels
+        .where('projectId', ticket.projectId)
+        .whereExists('participants', (participants) => {
+            return participants.where('userId', ctx.userID)
+        })
+        .one());
+
+    if (!isParticipant) {
+        throw new MutationACLError('Ticket update failed: you must be a project participant to update tickets', 'tickets');
+    }
+}
+
+export class TicketACl extends BaseACL<'tickets'> {
 
     private async verifyGuestScope(
         tx: Transaction<Schema>,
@@ -66,7 +94,7 @@ export class TicketACl extends BaseACL<'tickets'> {
         if (!ticket) {
             throw new MutationACLError('Ticket update failed: ticket does not exist', 'tickets');
         }
-        await this.verifyTicketInWorkspace(ticket.id, tx);
+        await assertTicketUpdateAccess(this.ctx, tx, ticket);
 
         if (ticket.isArchived && args.isArchived === false) {
             throw new MutationACLError('Ticket update failed: cannot unarchive ticket - archival is permanent', 'tickets');
@@ -75,22 +103,7 @@ export class TicketACl extends BaseACL<'tickets'> {
         if (ticket.isArchived) {
             throw new MutationACLError('Ticket update failed: cannot update archived ticket', 'tickets');
         }
-
-        await this.verifyGuestScope(tx, ticket);
         if (this.ctx.role === 'GUEST') return;
-
-        const isParticipant = await tx
-            .run(
-            zql.channels
-            .where('projectId', ticket.projectId)
-            .whereExists('participants', (participants) => {
-                return participants.where('userId', this.ctx.userID)
-            })
-            .one());
-
-        if (!isParticipant) {
-            throw new MutationACLError('Ticket update failed: you must be a project participant to update tickets', 'tickets');
-        }
 
         // Require the assignee to be an active (non-left) user. Intentionally NOT filtered by
         // users.workspaceId — that column is the user's home workspace, not a tenant boundary,
