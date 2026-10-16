@@ -3504,11 +3504,7 @@ const ChannelCommandMenuContent = ({
                   heading={getGroupLabel(groupKey)}
                   className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
                 >
-                  <SearchSectionSkeleton
-                    // Screen mode previews 2 rows per section; match it to avoid a height jump.
-                    rows={searchMode === 'screen' ? 2 : 3}
-                    variant={groupSkeletonVariant(groupKey)}
-                  />
+                  <SearchSectionSkeleton rows={3} variant={groupSkeletonVariant(groupKey)} />
                 </Command.Group>
               </div>
             );

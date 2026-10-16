@@ -1734,11 +1734,10 @@ const BACKEND_GROUP_ORDER = [
 // Attachments — the page has room for it.
 const SKELETON_GROUP_KEYS = ['conversation', 'ticket', 'attachment'] as const;
 /** Skeleton shape per section / per tab — the page's cards, not cmdK's rows. */
-const FULLPAGE_SKELETON_VARIANTS: Record<string, SkeletonVariant> = {
+const FULLPAGE_SKELETON_VARIANTS: Record<(typeof SKELETON_GROUP_KEYS)[number], SkeletonVariant> = {
   conversation: 'page-message',
   ticket: 'page-ticket',
   attachment: 'page-file',
-  desk: 'page-desk',
 };
 const DOC_TYPE_SKELETON_VARIANTS: Partial<Record<string, SkeletonVariant>> = {
   messages: 'page-message',
@@ -1746,12 +1745,6 @@ const DOC_TYPE_SKELETON_VARIANTS: Partial<Record<string, SkeletonVariant>> = {
   files: 'page-file',
   desk: 'page-desk',
 };
-const SKELETON_DOC_TYPES = new Set<SearchResultsFilters['docType']>([
-  'messages',
-  'tickets',
-  'files',
-  'desk',
-]);
 
 // Labels mirror cmdK's getGroupLabel exactly
 const GROUP_LABELS: Record<string, string> = {
@@ -2427,7 +2420,7 @@ function ResultsBody({
                 <p className='px-1 pb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide font-mono'>
                   {GROUP_LABELS[gk]}
                 </p>
-                <SearchSectionSkeleton variant={FULLPAGE_SKELETON_VARIANTS[gk] ?? 'message'} />
+                <SearchSectionSkeleton variant={FULLPAGE_SKELETON_VARIANTS[gk]} />
               </div>
             ))
           ) : (
@@ -2473,13 +2466,12 @@ function ResultsBody({
   // ── Flat view — specific docType tabs and compare mode ──────────────────
   // One skeleton list while a backend-sourced tab is pending. Before the results branch, so a
   // refined query replaces the old rows.
-  if (isSearchPending && SKELETON_DOC_TYPES.has(docType) && (displayQuery || hasActiveFilters)) {
+  // Only the tabs listed in DOC_TYPE_SKELETON_VARIANTS load from the server.
+  const docTypeSkeletonVariant = DOC_TYPE_SKELETON_VARIANTS[docType];
+  if (isSearchPending && docTypeSkeletonVariant && (displayQuery || hasActiveFilters)) {
     return (
       <div className='w-full pt-2 pb-6'>
-        <SearchSectionSkeleton
-          rows={4}
-          variant={DOC_TYPE_SKELETON_VARIANTS[docType] ?? 'message'}
-        />
+        <SearchSectionSkeleton rows={4} variant={docTypeSkeletonVariant} />
       </div>
     );
   }

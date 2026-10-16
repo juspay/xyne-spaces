@@ -536,9 +536,6 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   // slow/stale response (e.g. a partial `from` query resolving after the completed `from:`
   // filter) is discarded instead of overwriting fresh results with an empty payload.
   const searchSeqRef = useRef(0);
-  // Seq of the newest run that has settled. onComplete waits until this catches up with
-  // searchSeqRef, so a run cancelled by an edit can't report the previous query's results.
-  const settledSeqRef = useRef(0);
   // Read at dispatch rather than listed as an effect dep: callers pass an inline callback, so
   // its identity changes every render. As a dep, a query with nothing to search (`from:`,
   // an empty box) re-rendered via resetSearchState, re-ran the effect, and looped every
@@ -1556,17 +1553,12 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           // Only the latest run may flip the shared loading flag off.
           if (!isStale()) {
             setIsSearching(false);
-            settledSeqRef.current = seq;
           }
           // Fires once every dispatched search has settled — including when a
           // superseded run is the last to settle — so it must report the results
           // that were actually committed and the query they came from, not this
-          // run's (possibly stale) searchText. It also waits for the latest run: seq moves
-          // on as soon as the input changes, so a run cancelled by an edit (e.g. clearing
-          // the box) settles with nothing pending yet must not report the previous query —
-          // the results page would write it back into the URL and the input.
+          // run's (possibly stale) searchText.
           if (
-            settledSeqRef.current === searchSeqRef.current &&
             pendingSearchCountRef.current === 0 &&
             latestResultsRef.current.length > 0 &&
             onComplete
