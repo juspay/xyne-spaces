@@ -34,22 +34,22 @@
 
 ## User sends a draft from the Drafts tab -> it is posted in the DM and leaves the Drafts tab
 * Using browser
-* Ensuring user "admin-1" is logged in
-* Creating DM with user "admin-1"
-* generating net-new message details "message-draft-first" with text "First message" in dm "dm-self" for user "admin-1"
-* generating net-new message details "message-draft" with text "Draft to send" in dm "dm-self" for user "admin-1"
-* Sending stored message "message-draft-first" in dm "dm-self" for user "admin-1"
-* typing stored user "admin-1" dm "dm-self" message "message-draft" in "[data-testid='message-input']"
-* waiting for stored user "admin-1" dm "dm-self" message "message-draft" to be saved as a draft
+* Ensuring user "user-3" is logged in
+* Creating DM with user "user-3"
+* generating net-new message details "message-draft-first" with text "First message" in dm "dm-self" for user "user-3"
+* generating net-new message details "message-draft" with text "Draft to send" in dm "dm-self" for user "user-3"
+* Sending stored message "message-draft-first" in dm "dm-self" for user "user-3"
+* typing stored user "user-3" dm "dm-self" message "message-draft" in "[data-testid='message-input']"
+* waiting for stored user "user-3" dm "dm-self" message "message-draft" to be saved as a draft
 * clicking on "[data-testid='open-drafts-and-sent-button']"
 * waiting for "[data-testid='drafts-sent-content']" to appear
-* clicking draft action "Send draft" for stored user "admin-1" dm "dm-self" message "message-draft"
+* clicking draft action "Send draft" for stored user "user-3" dm "dm-self" message "message-draft"
 * clicking on "[data-testid='confirm-send-draft']"
 * verifying "Message sent" is visible in "body"
-* waiting for stored user "admin-1" dm "dm-self" message "message-draft" to appear in virtuoso list
+* waiting for stored user "user-3" dm "dm-self" message "message-draft" to appear in virtuoso list
 * clicking on "[data-testid='open-drafts-and-sent-button']"
 * waiting for "[data-testid='drafts-sent-content']" to appear
-* verifying stored user "admin-1" dm "dm-self" message "message-draft" is not visible in "[data-testid='drafts-sent-content']"
+* verifying stored user "user-3" dm "dm-self" message "message-draft" is not visible in "[data-testid='drafts-sent-content']"
 
 ## User deletes a draft from the Drafts tab -> it is removed
 * Using browser
