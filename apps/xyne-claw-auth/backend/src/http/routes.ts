@@ -69,6 +69,8 @@ import { customerioOAuthRouter, customerioCallbackRouter } from "../routes/custo
 import { notionRemoteOAuthRouter, notionRemoteCallbackRouter } from "../routes/notion-remote-oauth.js";
 import { sentryRemoteOAuthRouter, sentryRemoteCallbackRouter } from "../routes/sentry-remote-oauth.js";
 import { mixpanelRemoteOAuthRouter, mixpanelRemoteCallbackRouter } from "../routes/mixpanel-remote-oauth.js";
+import { firefliesRemoteOAuthRouter, firefliesRemoteCallbackRouter } from "../routes/fireflies-remote-oauth.js";
+import { atlassianRemoteOAuthRouter, atlassianRemoteCallbackRouter } from "../routes/atlassian-remote-oauth.js";
 import { oauthTokenRouter } from "../routes/oauth-token.js";
 import { rapidApiLinkedInRouter } from "../routes/rapidapi-linkedin.js";
 import { scheduledJobsRouter } from "../routes/scheduled-jobs.js";
@@ -285,6 +287,10 @@ function mountOAuthProviders(app: Express): void {
   app.use(BASE, sentryRemoteCallbackRouter);
   app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, mixpanelRemoteOAuthRouter);
   app.use(BASE, mixpanelRemoteCallbackRouter);
+  app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, firefliesRemoteOAuthRouter);
+  app.use(BASE, firefliesRemoteCallbackRouter);
+  app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, atlassianRemoteOAuthRouter);
+  app.use(BASE, atlassianRemoteCallbackRouter);
   app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, rapidApiLinkedInRouter);
 }
 

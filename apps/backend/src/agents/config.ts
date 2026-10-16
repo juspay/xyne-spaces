@@ -43,6 +43,7 @@ const DEFAULT_RELEASE_NOTES_GENERATOR_MODEL = 'glm-latest';
 const DEFAULT_RELEASE_AI_MODEL = 'glm-flash-experimental';
 const DEFAULT_TICKET_DUPLICATE_JEV_ENABLED = false;
 const DEFAULT_TICKET_DUPLICATE_JEV_THRESHOLD = 0.75;
+const DEFAULT_SUMMARY_TEMPLATE_SELECTION_XOR_ENABLED = false;
 const DEFAULT_SUMMARISER_MODEL = 'glm-flash-experimental';
 const DEFAULT_ATTACHMENT_SUMMARISER_MODEL = 'kimi-latest';
 const DEFAULT_CLASSIFICATION_MODEL = 'glm-flash-experimental';
@@ -90,6 +91,7 @@ const CAC_KEYS = {
   tagGenerationJevEnabled: 'tag_generation_jev_enabled',
   ticketDuplicateJevEnabled: 'ticket_duplicate_jev_enabled',
   ticketDuplicateJevThreshold: 'ticket_duplicate_jev_threshold',
+  summaryTemplateSelectionXorEnabled: 'summary_template_selection_xor_enabled',
   ticketBoardModel: 'ticket_board_model_name',
   releaseNotesGeneratorModel: 'release_notes_generator_model_name',
   releaseAiModel: 'release_ai_model_name',
@@ -144,6 +146,8 @@ export class AgentsConfig {
   public readonly releaseAiModelName: string;
   public readonly ticketDuplicateJevEnabled: boolean;
   public readonly ticketDuplicateJevThreshold: number;
+  /** XOR picks the call summary template; the LLM only on no answer. Default false. */
+  public readonly summaryTemplateSelectionXorEnabled: boolean;
   public readonly summariserModelName: string;
   public readonly attachmentSummariserModelName: string;
 
@@ -205,6 +209,7 @@ export class AgentsConfig {
     tagGenerationJevEnabled: boolean,
     ticketDuplicateJevEnabled: boolean,
     ticketDuplicateJevThreshold: number,
+    summaryTemplateSelectionXorEnabled: boolean,
   ) {
     this.xyneAiTracingEnabled = xyneAiTracingEnabled;
     this.xyneAiMaskingEnabled = xyneAiMaskingEnabled;
@@ -237,6 +242,7 @@ export class AgentsConfig {
     this.tagGenerationJevEnabled = tagGenerationJevEnabled;
     this.ticketDuplicateJevEnabled = ticketDuplicateJevEnabled;
     this.ticketDuplicateJevThreshold = ticketDuplicateJevThreshold;
+    this.summaryTemplateSelectionXorEnabled = summaryTemplateSelectionXorEnabled;
   }
 
   /**
@@ -289,6 +295,7 @@ export class AgentsConfig {
       const releaseAiModelName = getValue<string>(CAC_KEYS.releaseAiModel, DEFAULT_RELEASE_AI_MODEL);
       const ticketDuplicateJevEnabled = getValue<boolean>(CAC_KEYS.ticketDuplicateJevEnabled, DEFAULT_TICKET_DUPLICATE_JEV_ENABLED);
       const ticketDuplicateJevThreshold = getValue<number>(CAC_KEYS.ticketDuplicateJevThreshold, DEFAULT_TICKET_DUPLICATE_JEV_THRESHOLD);
+      const summaryTemplateSelectionXorEnabled = getValue<boolean>(CAC_KEYS.summaryTemplateSelectionXorEnabled, DEFAULT_SUMMARY_TEMPLATE_SELECTION_XOR_ENABLED);
       const summariserModelName = getValue<string>(CAC_KEYS.summariserModel, DEFAULT_SUMMARISER_MODEL);
       const attachmentSummariserModelName = getValue<string>(CAC_KEYS.attachmentSummariserModel, DEFAULT_ATTACHMENT_SUMMARISER_MODEL);
 
@@ -560,6 +567,7 @@ export class AgentsConfig {
         tagGenerationJevEnabled,
         ticketDuplicateJevEnabled,
         ticketDuplicateJevThreshold,
+        summaryTemplateSelectionXorEnabled,
       );
     } catch (error) {
       logger.error('[Agents Config] Error fetching CAC config, using DEFAULTS:', error);
@@ -596,6 +604,7 @@ export class AgentsConfig {
         DEFAULT_TAG_GENERATION_JEV_ENABLED,
         DEFAULT_TICKET_DUPLICATE_JEV_ENABLED,
         DEFAULT_TICKET_DUPLICATE_JEV_THRESHOLD,
+        DEFAULT_SUMMARY_TEMPLATE_SELECTION_XOR_ENABLED,
       );
     }
   }
@@ -633,6 +642,7 @@ export class AgentsConfig {
       DEFAULT_TAG_GENERATION_JEV_ENABLED,
       DEFAULT_TICKET_DUPLICATE_JEV_ENABLED,
       DEFAULT_TICKET_DUPLICATE_JEV_THRESHOLD,
+      DEFAULT_SUMMARY_TEMPLATE_SELECTION_XOR_ENABLED,
     );
   }
 }

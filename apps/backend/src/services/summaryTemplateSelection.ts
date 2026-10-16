@@ -1,6 +1,7 @@
 import type { Prisma, SummaryTemplate } from '@prisma/client';
 import { SUMMARY_TEMPLATE_SELECTION_MAX_TRANSCRIPT_CHARS } from '@xyne/shared';
 import { getEnabledSummaryTemplateSections } from './summaryTemplateSections';
+import { askJev, isPrivateJevConfigured } from './queryIntent/jevClient';
 
 const MAX_STRUCTURE_CHARS = 2_000;
 const MAX_SYSTEM_PROMPT_CHARS = 1_000;
@@ -129,6 +130,39 @@ function toSelectionCandidates(templates: SummaryTemplateCandidate[]): Array<{
     ),
     generationInstructions: truncate(template.systemPrompt, MAX_SYSTEM_PROMPT_CHARS),
   }));
+}
+
+const XOR_TIMEOUT_MS = 10_000;
+const XOR_MAX_OPTIONS = 255;
+
+/**
+ * XOR picks one template id, or null when it can't answer (the caller then asks the LLM).
+ * It gets exactly the LLM's prompt; the question is that prompt's own first line and the
+ * answers are the candidates' ids. Needs a private XOR endpoint.
+ */
+export async function pickSummaryTemplateWithXor(
+  transcript: string,
+  templates: SummaryTemplateCandidate[],
+  meetingTitle?: string | null
+): Promise<string | null> {
+  if (!isPrivateJevConfigured() || templates.length < 2 || templates.length > XOR_MAX_OPTIONS) {
+    return null;
+  }
+
+  const prompt = buildSummaryTemplateSelectionPrompt(transcript, templates, meetingTitle);
+  const answers = await askJev(
+    prompt,
+    {
+      template: {
+        type: 'choice',
+        instructions: prompt.slice(0, prompt.indexOf('\n')),
+        criteria: Object.fromEntries(templates.map((template) => [template.id, template.name])),
+      },
+    },
+    XOR_TIMEOUT_MS
+  );
+  const answer = answers?.template;
+  return answer?.type === 'choice' ? answer.choice : null;
 }
 
 export function parseSelectedSummaryTemplate(

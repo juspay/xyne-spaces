@@ -135,7 +135,8 @@ function v1Handler(endpoint: Extract<V1Kind, 'query' | 'mutator'>) {
 
     if (endpoint === 'query') {
       const data = await callQuery(target.name, parsed.args, ctx);
-      res.status(200).json({ data: parsed.mapResult ? parsed.mapResult(data) : data });
+      const result = parsed.mapResult ? parsed.mapResult(data) : data;
+      res.status(200).json({ data: result ?? null });
       return;
     }
 

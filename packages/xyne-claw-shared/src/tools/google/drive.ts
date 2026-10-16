@@ -418,3 +418,220 @@ export async function shareDriveFile(
   const target = emailAddress ?? type;
   return `Granted ${role} access on ${fileId} to ${target}`;
 }
+
+// ─── Metadata & Labels ──────────────────────────────────────────────────────
+
+const LABELS_BASE = "https://drivelabels.googleapis.com/v2";
+const MAX_DESCRIPTION_LENGTH = 30_000;
+
+/** Accepts a Drive URL or a bare file ID. */
+export function resolveDriveFileId(urlOrId: string): string {
+  return extractFileId(urlOrId.trim());
+}
+
+/** Update (or clear, with an empty string) a Drive file's description. Requires drive.metadata or drive scope for files the app did not create. */
+export async function updateDriveFileDescription(
+  token: string,
+  fileUrlOrId: string,
+  description: string,
+): Promise<string> {
+  if (description.length > MAX_DESCRIPTION_LENGTH) {
+    throw new Error(`Description is ${description.length} characters; maximum is ${MAX_DESCRIPTION_LENGTH}.`);
+  }
+  const fileId = resolveDriveFileId(fileUrlOrId);
+  const updated = (await googleFetch(
+    `${BASE}/files/${encodeURIComponent(fileId)}?supportsAllDrives=true&fields=id,name,description,webViewLink`,
+    token,
+    { method: "PATCH", body: JSON.stringify({ description }) },
+  )) as { id: string; name: string; description?: string; webViewLink?: string };
+  return [
+    `Updated description on "${updated.name}" (${updated.id}).`,
+    `Description: ${updated.description ? updated.description : "(empty)"}`,
+    `URL: ${updated.webViewLink ?? `https://drive.google.com/file/d/${updated.id}/view`}`,
+  ].join("\n");
+}
+
+interface DriveLabelFieldValue {
+  valueType?: string;
+  text?: string[];
+  integer?: string[];
+  dateString?: string[];
+  selection?: string[];
+  user?: Array<{ emailAddress?: string; displayName?: string }>;
+}
+
+interface DriveAppliedLabel {
+  id: string;
+  revisionId?: string;
+  fields?: Record<string, DriveLabelFieldValue>;
+}
+
+function formatFieldValue(v: DriveLabelFieldValue): string {
+  if (v.selection?.length) return `selection=${v.selection.join(", ")}`;
+  if (v.text?.length) return `text=${v.text.join(", ")}`;
+  if (v.integer?.length) return `integer=${v.integer.join(", ")}`;
+  if (v.dateString?.length) return `date=${v.dateString.join(", ")}`;
+  if (v.user?.length) return `user=${v.user.map((u) => u.emailAddress ?? u.displayName ?? "?").join(", ")}`;
+  return v.valueType ? `(${v.valueType}, empty)` : "(empty)";
+}
+
+/** List the labels applied to a Drive file (files.listLabels). */
+export async function listDriveFileLabels(token: string, fileUrlOrId: string): Promise<string> {
+  const fileId = resolveDriveFileId(fileUrlOrId);
+  const labels: DriveAppliedLabel[] = [];
+  let pageToken: string | undefined;
+  do {
+    const url = new URL(`${BASE}/files/${encodeURIComponent(fileId)}/listLabels`);
+    url.searchParams.set("maxResults", "100");
+    if (pageToken) url.searchParams.set("pageToken", pageToken);
+    const res = (await googleFetch(url.toString(), token)) as { labels?: DriveAppliedLabel[]; nextPageToken?: string };
+    labels.push(...(res.labels ?? []));
+    pageToken = res.nextPageToken;
+  } while (pageToken);
+
+  if (labels.length === 0) return `No labels applied to file ${fileId}.`;
+  const lines = labels.map((l) => {
+    const fields = Object.entries(l.fields ?? {}).map(([fid, v]) => `    - field ${fid}: ${formatFieldValue(v)}`);
+    return [`- label ${l.id}${l.revisionId ? ` (revision ${l.revisionId})` : ""}`, ...fields].join("\n");
+  });
+  return [`${labels.length} label(s) applied to file ${fileId}:`, ...lines,
+    "Use google-drive-labels-get with a label ID to see its title, field names and choice names."].join("\n");
+}
+
+interface DriveLabelChoice { id: string; properties?: { displayName?: string } }
+interface DriveLabelField {
+  id: string;
+  properties?: { displayName?: string; required?: boolean };
+  selectionOptions?: { choices?: DriveLabelChoice[]; listOptions?: { maxEntries?: number } };
+  textOptions?: unknown;
+  integerOptions?: unknown;
+  dateOptions?: unknown;
+  userOptions?: unknown;
+}
+interface DriveLabelDefinition {
+  id: string;
+  name?: string;
+  revisionId?: string;
+  labelType?: string;
+  properties?: { title?: string; description?: string };
+  lifecycle?: { state?: string };
+  fields?: DriveLabelField[];
+}
+
+function fieldType(f: DriveLabelField): string {
+  if (f.selectionOptions) return f.selectionOptions.listOptions ? "selection (multi)" : "selection";
+  if (f.textOptions) return "text";
+  if (f.integerOptions) return "integer";
+  if (f.dateOptions) return "date";
+  if (f.userOptions) return "user";
+  return "unknown";
+}
+
+function formatLabelDefinition(l: DriveLabelDefinition, withFields: boolean): string {
+  const head = `- ${l.properties?.title ?? "(untitled)"} — id ${l.id}` +
+    `${l.labelType ? `, ${l.labelType}` : ""}${l.lifecycle?.state ? `, ${l.lifecycle.state}` : ""}`;
+  if (!withFields || !l.fields?.length) return head;
+  const fields = l.fields.map((f) => {
+    const base = `    - field "${f.properties?.displayName ?? f.id}" — id ${f.id}, ${fieldType(f)}${f.properties?.required ? ", required" : ""}`;
+    const choices = f.selectionOptions?.choices?.map((c) => `        · "${c.properties?.displayName ?? c.id}" — choice id ${c.id}`) ?? [];
+    return [base, ...choices].join("\n");
+  });
+  return [head, ...fields].join("\n");
+}
+
+/** List label definitions visible to the user (Drive Labels API labels.list). */
+export async function listDriveLabelDefinitions(
+  token: string,
+  opts: { includeFields?: boolean | undefined; maxResults?: number | undefined } = {},
+): Promise<string> {
+  const max = Math.min(Math.max(opts.maxResults ?? 50, 1), 200);
+  const labels: DriveLabelDefinition[] = [];
+  let pageToken: string | undefined;
+  do {
+    const url = new URL(`${LABELS_BASE}/labels`);
+    url.searchParams.set("view", "LABEL_VIEW_FULL");
+    url.searchParams.set("publishedOnly", "true");
+    url.searchParams.set("pageSize", String(Math.min(max - labels.length, 200)));
+    if (pageToken) url.searchParams.set("pageToken", pageToken);
+    const res = (await googleFetch(url.toString(), token)) as { labels?: DriveLabelDefinition[]; nextPageToken?: string };
+    labels.push(...(res.labels ?? []));
+    pageToken = res.nextPageToken;
+  } while (pageToken && labels.length < max);
+
+  if (labels.length === 0) return "No Drive labels are available to this user. Labels require a Google Workspace edition with Drive labels enabled.";
+  return [`${labels.length} label definition(s):`, ...labels.map((l) => formatLabelDefinition(l, opts.includeFields ?? true))].join("\n");
+}
+
+/** Get one label definition with its fields and choices (Drive Labels API labels.get). */
+export async function getDriveLabelDefinition(token: string, labelId: string): Promise<string> {
+  const id = labelId.trim().replace(/^labels\//, "");
+  const url = new URL(`${LABELS_BASE}/labels/${encodeURIComponent(id)}`);
+  url.searchParams.set("view", "LABEL_VIEW_FULL");
+  const label = (await googleFetch(url.toString(), token)) as DriveLabelDefinition;
+  const desc = label.properties?.description ? `\nDescription: ${label.properties.description}` : "";
+  return `${formatLabelDefinition(label, true)}${desc}`;
+}
+
+export interface DriveLabelFieldChange {
+  fieldId: string;
+  selectionChoiceIds?: string[];
+  text?: string[];
+  integer?: Array<number | string>;
+  date?: string[];
+  userEmails?: string[];
+  unset?: boolean;
+}
+
+export interface DriveLabelChange {
+  labelId: string;
+  removeLabel?: boolean;
+  fields?: DriveLabelFieldChange[];
+}
+
+/** Build the files.modifyLabels request body. Exported for tests. */
+export function buildLabelModifications(changes: DriveLabelChange[]): Record<string, unknown> {
+  if (!Array.isArray(changes) || changes.length === 0) throw new Error("At least one label change is required.");
+  return {
+    labelModifications: changes.map((c) => {
+      if (!c?.labelId) throw new Error("Each label change needs a labelId.");
+      if (c.removeLabel) return { labelId: c.labelId, removeLabel: true };
+      const fieldModifications = (c.fields ?? []).map((f) => {
+        if (!f?.fieldId) throw new Error(`Label ${c.labelId}: each field change needs a fieldId.`);
+        const mod: Record<string, unknown> = { fieldId: f.fieldId };
+        if (f.unset) mod.unsetValues = true;
+        else if (f.selectionChoiceIds?.length) mod.setSelectionValues = f.selectionChoiceIds;
+        else if (f.text?.length) mod.setTextValues = f.text;
+        else if (f.integer?.length) mod.setIntegerValues = f.integer.map(String);
+        else if (f.date?.length) mod.setDateValues = f.date.map((d) => {
+          const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d);
+          if (!m) throw new Error(`Field ${f.fieldId}: date "${d}" must be YYYY-MM-DD.`);
+          return { year: Number(m[1]), month: Number(m[2]), day: Number(m[3]) };
+        });
+        else if (f.userEmails?.length) mod.setUserValues = f.userEmails;
+        else throw new Error(`Field ${f.fieldId}: provide a value (selectionChoiceIds, text, integer, date, userEmails) or unset=true.`);
+        return mod;
+      });
+      return fieldModifications.length ? { labelId: c.labelId, fieldModifications } : { labelId: c.labelId };
+    }),
+  };
+}
+
+/** Apply, change or remove labels on a Drive file (files.modifyLabels). */
+export async function modifyDriveFileLabels(
+  token: string,
+  fileUrlOrId: string,
+  changes: DriveLabelChange[],
+): Promise<string> {
+  const fileId = resolveDriveFileId(fileUrlOrId);
+  const body = buildLabelModifications(changes);
+  const res = (await googleFetch(`${BASE}/files/${encodeURIComponent(fileId)}/modifyLabels`, token, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })) as { modifiedLabels?: DriveAppliedLabel[] };
+  const removed = changes.filter((c) => c.removeLabel).map((c) => c.labelId);
+  const modified = res.modifiedLabels ?? [];
+  const parts = [`Updated labels on file ${fileId}.`];
+  if (modified.length) parts.push(`Applied/changed: ${modified.map((l) => l.id).join(", ")}`);
+  if (removed.length) parts.push(`Removed: ${removed.join(", ")}`);
+  return parts.join("\n");
+}

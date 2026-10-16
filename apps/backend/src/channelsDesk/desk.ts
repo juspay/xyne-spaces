@@ -123,7 +123,6 @@ export async function createChannelsDeskTicket(conversationId: string): Promise<
     conversationId,
     messageId: conversation.initialMessageId,
     sourceChannelId,
-    sourceChannelName: sourceChannel.name,
     deskId,
     projectId: board.projectId,
     boardId,

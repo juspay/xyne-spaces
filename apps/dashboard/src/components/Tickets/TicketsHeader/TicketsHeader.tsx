@@ -20,6 +20,7 @@ import { CustomiseViewPopover } from './CustomiseViewPopover';
 import { ShareViewPopover } from './ShareViewPopover';
 import { TicketFilterChips } from './TicketFilterChips';
 import { groupByLabel, optionKey, splitGroupByChoices } from './groupBy';
+import { useTicketNoun } from '../../../contexts/TicketNounContext';
 import type { TicketsHeaderProps } from './TicketsHeader.types';
 
 const rowPillClass =
@@ -61,6 +62,7 @@ export const TicketsHeader = (props: TicketsHeaderProps): ReactElement => {
     onOpenTicketReport,
   } = props;
 
+  const noun = useTicketNoun();
   const [groupOpen, setGroupOpen] = useState(false);
   const [groupCustomOpen, setGroupCustomOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
@@ -78,7 +80,9 @@ export const TicketsHeader = (props: TicketsHeaderProps): ReactElement => {
   const showGroupPill = showFilters && props.layoutView === 'kanban';
 
   const countLabel =
-    ticketCount === null ? null : `${ticketCount} ${ticketCount === 1 ? 'ticket' : 'tickets'}`;
+    ticketCount === null
+      ? null
+      : `${ticketCount} ${ticketCount === 1 ? noun.singular : noun.plural}`;
 
   return (
     <div className='flex-shrink-0 border-b border-border/60 bg-background'>
@@ -129,11 +133,15 @@ export const TicketsHeader = (props: TicketsHeaderProps): ReactElement => {
         </div>
         <div className='min-w-0 flex-1' />
         <div className='ml-auto flex min-w-0 flex-nowrap items-center gap-2'>
-          <ShortcutTooltip label='Search tickets' shortcut='global.findInChannel' side='bottom'>
+          <ShortcutTooltip
+            label={`Search ${noun.plural}`}
+            shortcut='global.findInChannel'
+            side='bottom'
+          >
             <button
               type='button'
               onClick={onOpenSearch}
-              aria-label='Search tickets'
+              aria-label={`Search ${noun.plural}`}
               className='flex size-[30px] shrink-0 items-center justify-center rounded-lg border border-border text-muted-foreground transition-colors hover:border-muted-foreground/40 hover:text-foreground'
               data-track-category='Tickets'
               data-track-name='SearchTickets'
@@ -188,7 +196,7 @@ export const TicketsHeader = (props: TicketsHeaderProps): ReactElement => {
               className='ml-0.5 flex h-[30px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg bg-foreground px-3 text-[12.5px] font-semibold text-background transition-opacity hover:opacity-90'
             >
               <Plus className='size-[14px]' strokeWidth={2} />
-              New ticket
+              New {noun.singular}
             </button>
           )}
         </div>
@@ -507,7 +515,7 @@ export const TicketsHeader = (props: TicketsHeaderProps): ReactElement => {
                         data-track-category='TicketReports'
                         data-track-name='OpenTicketReports'
                       >
-                        Ticket report…
+                        {noun.singularTitle} report…
                       </button>
                     </>
                   )}

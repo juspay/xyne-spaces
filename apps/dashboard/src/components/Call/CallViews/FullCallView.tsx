@@ -20,6 +20,7 @@ import { ScreenShareView } from '../ScreenShareView/ScreenShareView';
 import { ControlRequestDialog } from '../CallModals/ControlRequestDialog';
 import { ParticipantsSidebar } from '../ParticipantsSidebar/ParticipantsSidebar';
 import { ParticipantsPill } from '../ParticipantsPill/ParticipantsPill';
+import { CallTranscriptPanel } from '../CallTranscriptPanel';
 import { getRingingInvitees, useIsDmCall } from '../ringStatus.utils';
 import { ConnectionStatusIndicators } from '../ConnectionStatusIndicators/ConnectionStatusIndicators';
 import { sendDrawEvent } from '../../../hooks/useDrawStore';
@@ -63,7 +64,7 @@ function useClockLabel(): string {
   return label;
 }
 
-type SidePanel = 'participants' | 'notes' | 'callChat' | 'thread';
+type SidePanel = 'participants' | 'notes' | 'transcript' | 'callChat' | 'thread';
 
 interface FullCallViewProps {
   participants: ParticipantInfo[];
@@ -200,6 +201,7 @@ export function FullCallView({
   const [focusedScreenShareIdentity, setFocusedScreenShareIdentity] = useState<string | null>(null);
   const [isParticipantsSidebarOpen, setIsParticipantsSidebarOpen] = useState(false);
   const [isNotesOpen, setIsNotesOpen] = useState(false);
+  const [isTranscriptOpen, setIsTranscriptOpen] = useState(false);
   const isWhiteboardOpen = useCallWhiteboardStore(s => s.isOpen);
   const [isPresentationMode, setIsPresentationMode] = useState(false);
   useAutoPresentationMode(isTelepresenceEnabled, setIsPresentationMode);
@@ -394,6 +396,7 @@ export function FullCallView({
     (keep: SidePanel): void => {
       if (keep !== 'participants') setIsParticipantsSidebarOpen(false);
       if (keep !== 'notes') setIsNotesOpen(false);
+      if (keep !== 'transcript') setIsTranscriptOpen(false);
       if (keep !== 'thread' && isChatOpen) onToggleThread();
       if (keep !== 'callChat' && isCallChatOpen && onToggleCallChat) onToggleCallChat();
     },
@@ -411,6 +414,12 @@ export function FullCallView({
     setIsNotesOpen(!isNotesOpen);
   }, [isNotesOpen, closePanelsExcept]);
 
+  // Live transcript panel (always available; shows an off-state hint when transcription is off).
+  const handleToggleTranscript = useCallback((): void => {
+    if (!isTranscriptOpen) closePanelsExcept('transcript');
+    setIsTranscriptOpen(!isTranscriptOpen);
+  }, [isTranscriptOpen, closePanelsExcept]);
+
   const handleToggleThread = useCallback((): void => {
     if (!isChatOpen) closePanelsExcept('thread');
     onToggleThread();
@@ -427,6 +436,7 @@ export function FullCallView({
     if (isChatOpen || isCallChatOpen) {
       setIsParticipantsSidebarOpen(false);
       setIsNotesOpen(false);
+      setIsTranscriptOpen(false);
     }
   }, [isChatOpen, isCallChatOpen]);
 
@@ -469,11 +479,13 @@ export function FullCallView({
     ? 'participants'
     : isNotesOpen && !isExternalUser
       ? 'notes'
-      : isCallChatVisible && onToggleCallChat
-        ? 'callChat'
-        : isChatOpen && channelId && conversationId
-          ? 'thread'
-          : null;
+      : isTranscriptOpen
+        ? 'transcript'
+        : isCallChatVisible && onToggleCallChat
+          ? 'callChat'
+          : isChatOpen && channelId && conversationId
+            ? 'thread'
+            : null;
 
   const activeCalls = useSelector(roomActor, state => state.context.activeCalls);
   const currentCall = useMemo(
@@ -572,6 +584,14 @@ export function FullCallView({
           <PanelBoundary key='notes' fallback={<PanelLoading />}>
             <LazyCallNotesPanel callId={callId} channelId={channelId} onClose={handleToggleNotes} />
           </PanelBoundary>
+        );
+      case 'transcript':
+        return (
+          <CallTranscriptPanel
+            callId={callId}
+            isTranscriptionEnabled={isTranscriptionEnabled}
+            onClose={handleToggleTranscript}
+          />
         );
       case 'callChat':
         return (
@@ -744,6 +764,8 @@ export function FullCallView({
             isParticipantsSidebarOpen={activePanel === 'participants'}
             isNotesOpen={activePanel === 'notes'}
             onToggleNotes={isExternalUser ? undefined : handleToggleNotes}
+            isTranscriptOpen={activePanel === 'transcript'}
+            onToggleTranscript={handleToggleTranscript}
             isAIAssistantEnabled={isAIAssistantEnabled}
             aiController={aiController}
             localParticipantId={localParticipantId}
