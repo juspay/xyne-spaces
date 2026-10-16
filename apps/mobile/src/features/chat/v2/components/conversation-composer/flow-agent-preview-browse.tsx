@@ -3,6 +3,7 @@ import { Pressable, Text, View } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 
 import { DASHBOARD_ORIGIN } from '@/src/config';
+import { getActiveWorkspaceId } from '@/src/utils/activeWorkspace';
 import type { SubagentDef } from '@/src/services/claw/clawSubagentsTypes';
 import type { Integration } from '@/src/services/claw/clawToolsTypes';
 import {
@@ -359,7 +360,7 @@ export const AgentPreviewBrowse = ({
                 : {
                     onConnect: (): void => {
                       void WebBrowser.openBrowserAsync(
-                        `${DASHBOARD_ORIGIN}/claw-agents/mcp/${item.id}`,
+                        `${DASHBOARD_ORIGIN}/${getActiveWorkspaceId()}/ai/library/mcp/${encodeURIComponent(item.type)}`,
                       ).catch(() => {});
                     },
                   })}
