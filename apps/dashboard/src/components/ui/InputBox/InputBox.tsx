@@ -243,6 +243,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       channelId,
       conversationId,
       onSendMessage,
+      clearOnSend = true,
       onContentChange,
       onCancel,
       mentionItems = [],
@@ -1410,6 +1411,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
           await onSendMessage(finalPlainText, finalHtmlContent, filesToSend);
 
+          if (!clearOnSend) return;
+
           // Tracked here, not on the Send button: Enter, the button, the mobile
           // editor and shortcuts all land in this function, and only a send that
           // succeeded should count.
@@ -1441,6 +1444,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         editor,
         allAttachments,
         onSendMessage,
+        clearOnSend,
         isSending,
         attachedCanvas,
         hasSendableContent,
