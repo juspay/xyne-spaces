@@ -128,8 +128,8 @@ export default function AccountSettingsScreen(): ReactElement {
   const themeLabel = selectedTheme.charAt(0).toUpperCase() + selectedTheme.slice(1);
   const hapticsEnabled = useSetting('appearance.haptics');
   // Same CAC list as Settings → Beta. Hide the row when there is nothing to toggle.
-  const { flags: betaFlags, isResolved: betaFlagsResolved } = useBetaFlags();
-  const showBetaSettings = betaFlagsResolved && betaFlags.length > 0;
+  const { flags } = useBetaFlags();
+  const showBetaSettings = flags.length > 0;
 
   const handleHapticsToggle = (next: boolean): void => {
     setSetting('appearance.haptics', next);
