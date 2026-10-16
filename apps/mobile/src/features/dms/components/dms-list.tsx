@@ -5,7 +5,7 @@ import { useCallback, useMemo, useRef, type ReactElement } from 'react';
 import { ActivityIndicator, Text, View } from 'react-native';
 import { useUniwind } from 'uniwind';
 
-import { useSpacesTabBarHeight } from '@/src/features/bottom-navigation';
+import { useFabClearance } from '@/src/features/quick-actions';
 import { useReportTabReady } from '@/src/observability/logging/hooks/navigation/useReportTabReady';
 
 import {
@@ -69,7 +69,7 @@ e
   useReportTabReady('dms', !(isLoading && isEmpty));
 
   const { theme } = useUniwind();
-  const bottomInset = useSpacesTabBarHeight();
+  const bottomInset = useFabClearance();
 
   const renderItem = useCallback(
     ({ item }: { item: string }) => (
@@ -170,7 +170,7 @@ e
       showsVerticalScrollIndicator={false}
       style={{ flex: 1 }}
       contentContainerStyle={{
-        paddingBottom: bottomInset + 24,
+        paddingBottom: bottomInset,
         flexGrow: order.length === 0 ? 1 : undefined,
         paddingBlock: 12,
       }}
