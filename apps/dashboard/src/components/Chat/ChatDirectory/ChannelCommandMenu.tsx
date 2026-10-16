@@ -171,7 +171,7 @@ import { TicketPreviewPanel } from './TicketPreviewPanel';
 import { DATE_RANGE_OPTIONS } from '../../../search/filterRegistry';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
-import { resolveDateKeyword } from '../../../search/filterModel';
+import { DEFAULT_SEARCH_FILTERS, resolveDateKeyword } from '../../../search/filterModel';
 import { hasExactSearchQuotes } from '../../../utils/exactSearch';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { MergeTicketsDialog } from '../../Tickets/MergeTicketsDialog/MergeTicketsDialog';
@@ -389,6 +389,12 @@ const TEXT_FILTER_HINTS: Record<string, string> = {
 };
 const TEXT_FILTER_HINT_REGEX =
   /\b(before|after|on|range|board|tags|entity|stage|status|type):\s*$/i;
+
+/** The scope a new palette session starts with — the same defaults the results page uses. */
+const DEFAULT_SCOPE_TOGGLES: SearchScopeToggles = {
+  onlyMyChannels: DEFAULT_SEARCH_FILTERS.onlyMyChannels,
+  includeBotMessages: DEFAULT_SEARCH_FILTERS.includeBotMessages,
+};
 
 /**
  * The `mentions:` result sections, in the same order `availableMentionTargets` concatenates
@@ -846,13 +852,14 @@ const ChannelCommandMenuContent = ({
     [seedCommandMode, restoredQuery, initialQuery],
   );
 
-  // Apply the restored scope on open. The hook's defaults only cover a fresh mount, and the
-  // palette stays mounted across open/close, so a restore has to push the toggles in.
-  const restoredScope = restoredToggles ?? initialToggles ?? null;
+  // Apply the session's scope on open: a restored search brings its own toggles, a new session
+  // starts from the defaults. The hook's defaults only cover a fresh mount, and the palette
+  // stays mounted across open/close, so every open has to push the toggles in.
+  const sessionScope = restoredToggles ?? initialToggles ?? DEFAULT_SCOPE_TOGGLES;
   useEffect(() => {
-    if (!open || !restoredScope) return;
-    setOnlyMyChannels(restoredScope.onlyMyChannels);
-    setIncludeBotMessages(restoredScope.includeBotMessages);
+    if (!open) return;
+    setOnlyMyChannels(sessionScope.onlyMyChannels);
+    setIncludeBotMessages(sessionScope.includeBotMessages);
     // Runs once per open: re-running on every toggle change would fight the user.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -1065,17 +1072,13 @@ const ChannelCommandMenuContent = ({
   const holdingCarriedList = open && carriesSearch && !carriedListReleased;
 
   // Bots, apps and agents post BOT-type messages, which search hides unless the Bot toggle is
-  // on — so a `from:` one of them would find nothing. The toggle follows the chip: on when one
-  // is added, off when the last is removed. Only a change flips it, so mount (a restored search)
-  // and a manual toggle while the chip is present are left alone.
+  // on — so a `from:` one of them would find nothing. Adding one turns the toggle on; it stays
+  // on for the rest of the session (removing the chip doesn't undo it) until the next open.
   const hasBotAuthorFilter = selectedMentions.some(
     mention => mention.prefix === 'from:' && isNonHumanUser(usersById.get(mention.id)),
   );
-  const prevHasBotAuthorFilterRef = useRef(hasBotAuthorFilter);
   useEffect(() => {
-    if (prevHasBotAuthorFilterRef.current === hasBotAuthorFilter) return;
-    prevHasBotAuthorFilterRef.current = hasBotAuthorFilter;
-    setIncludeBotMessages(hasBotAuthorFilter);
+    if (hasBotAuthorFilter) setIncludeBotMessages(true);
   }, [hasBotAuthorFilter, setIncludeBotMessages]);
 
   // In a ticket view, the skeleton fills the list while a search runs and nothing is listed yet.
@@ -2651,14 +2654,9 @@ const ChannelCommandMenuContent = ({
       atMentionItems[selectedMentionIndex]?.type === ChipType.USER_GROUP;
     const action =
       (userTrigger === '@' || channelTrigger === '#') && !activeAtGroupRow ? 'Open' : 'Select';
-    // No value typed yet: at rest show only the action word ("from: - Select"), not the first
-    // candidate's name - the resting highlight is arbitrary, so previewing it reads as if it were
-    // already chosen. Once the user navigates, preview the actually-highlighted name.
-    if (!query) {
-      return hasNavigated
-        ? `${mentionActiveLabel}\u00a0\u2013 ${action}`
-        : `\u00a0\u2013 ${action}`;
-    }
+    // No value typed yet: preview the highlighted candidate ("from: Vaibhav Garg - Select"),
+    // which is what Enter/Tab/Right picks, without waiting for the user to navigate.
+    if (!query) return `${mentionActiveLabel}\u00a0\u2013 ${action}`;
     // Typed value: inline-complete the remainder; nbsp keeps a leading space from collapsing.
     if (mentionActiveLabel.toLowerCase().startsWith(query.toLowerCase())) {
       const completion = mentionActiveLabel.slice(query.length).replace(/^ /, '\u00a0');
@@ -2666,7 +2664,6 @@ const ChannelCommandMenuContent = ({
     }
     return '';
   }, [
-    hasNavigated,
     mentionSearchType,
     mentionSearchQuery,
     userTrigger,

@@ -22,13 +22,10 @@ export function isUserDeactivated(
 /**
  * Bots, apps and agents. Their messages are indexed as `messageType = BOT`, which search hides
  * unless the Bot toggle is on, so a `from:` filter on one of them needs that toggle.
+ * An unknown sender (not loaded, or a Desk email id) is never treated as non-human.
  */
-export function isNonHumanUser(user: { userType?: UserType | string | null } | undefined): boolean {
-  return (
-    user?.userType === UserType.BOT ||
-    user?.userType === UserType.APP ||
-    user?.userType === UserType.AGENT
-  );
+export function isNonHumanUser(user: { userType?: UserType | null } | undefined): boolean {
+  return !!user?.userType && user.userType !== UserType.USER;
 }
 
 /**
