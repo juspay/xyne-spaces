@@ -30,6 +30,8 @@ import {
   Clock,
   MoreHorizontal,
   Quote,
+  Laptop,
+  Server,
 } from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -57,7 +59,13 @@ import type { AssistantActions } from '../Assistant/useAssistantActions';
 import { AIComposer, type AIComposerAttachment, type AIComposerHandle } from './AIComposer';
 import { ASSISTANT_PANEL_ATTR } from '../Assistant/buddy/constants';
 import { ReadonlyContextPills, useSentMentions } from './ReadonlyContextPills';
-import { type ComposerContext, toStreamOverrides, withoutPickedContext } from './composerContext';
+import {
+  type ComposerContext,
+  modelOverridesFrom,
+  toStreamOverrides,
+  withoutPickedContext,
+} from './composerContext';
+import type { StreamOverrides } from '../../hooks/useXyneAIStream';
 import { AgentByline, AgentRecipient } from './ConversationAgents';
 import { FollowUpSuggestions } from './FollowUpSuggestions';
 import {
@@ -616,6 +624,47 @@ function PlanCard({
   );
 }
 
+type RunPlace = { kind: 'device'; name: string } | { kind: 'server-fallback' };
+
+/**
+ * Where a reply ran, for its closing line (XYNE-66324). A device run is named
+ * as soon as the run starts; "ran on Xyne servers instead" only once the turn
+ * finished without a device origin after the composer promised a device run.
+ * Plain server runs get no label — that is the default everyone expects.
+ */
+function runPlaceOf(message: Message): RunPlace | null {
+  const origin = message.runOrigin;
+  if (origin?.kind === 'local-harness') {
+    return { kind: 'device', name: origin.label?.trim() || origin.harnessName || 'local harness' };
+  }
+  if (message.expectedOnDevice && !message.isStreaming && !message.errorInfo) {
+    return { kind: 'server-fallback' };
+  }
+  return null;
+}
+
+function RunPlaceLabel({ place }: { place: RunPlace }): ReactElement {
+  return place.kind === 'device' ? (
+    <span
+      data-testid='message-run-place'
+      className='inline-flex items-center gap-1'
+      title={`Generated on your device with ${place.name}`}
+    >
+      <Laptop className='h-3 w-3' aria-hidden strokeWidth={1.75} />
+      On your device · {place.name}
+    </span>
+  ) : (
+    <span
+      data-testid='message-run-place'
+      className='inline-flex items-center gap-1'
+      title='This run did not go to your device (offline, or the request needed the server), so Xyne ran it on its servers'
+    >
+      <Server className='h-3 w-3' aria-hidden strokeWidth={1.75} />
+      Ran on Xyne servers instead of your device
+    </span>
+  );
+}
+
 function ChatMessageBubble({
   message,
   onCopy,
@@ -670,6 +719,7 @@ function ChatMessageBubble({
   onBranchNavigate?: ((direction: 'prev' | 'next') => void) | undefined;
 }): ReactElement {
   const isUser = message.type === 'user';
+  const runPlace = isUser ? null : runPlaceOf(message);
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState('');
   const [copied, setCopied] = useState(false);
@@ -1326,9 +1376,10 @@ function ChatMessageBubble({
             />
           ) : null}
 
-          {/* The turn's closing line: how long it took and when it finished. */}
-          {!isUser && ((!message.isStreaming && !message.errorInfo) || onDebug) && (
+          {/* The turn's closing line: where it ran, how long it took and when it finished. */}
+          {!isUser && ((!message.isStreaming && !message.errorInfo) || onDebug || runPlace) && (
             <div className='mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground'>
+              {runPlace && <RunPlaceLabel place={runPlace} />}
               {!message.isStreaming && !message.errorInfo && (
                 <time
                   dateTime={turnFinishedAt(message).toISOString()}
@@ -1670,6 +1721,31 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
   const effectiveAgentSlugRef = useRef(effectiveAgentSlug);
   effectiveAgentSlugRef.current = effectiveAgentSlug;
 
+  // The composer's live snapshot (model pin, thinking level, device target).
+  // Regenerate and edit do not go through the composer's submit, so they read
+  // the pin from here — otherwise they re-run on the agent's default model
+  // while the pill still shows the pinned one (XYNE-66322).
+  const latestComposerContextRef = useRef<ComposerContext | null>(null);
+  const handleComposerContextChange = useCallback(
+    (ctx: ComposerContext): void => {
+      latestComposerContextRef.current = ctx;
+      onContextChange?.(ctx);
+    },
+    [onContextChange],
+  );
+  // Model overrides for re-running a turn answered by `turnAgentSlug`. The
+  // composer's pin belongs to the composer's agent's model list, so it only
+  // applies when the turn was answered by that same agent; any other agent
+  // re-runs on its own default (explicit null, never a stale pin).
+  const reRunModelOverrides = useCallback((turnAgentSlug: string | undefined): StreamOverrides => {
+    const composerAgent = effectiveAgentSlugRef.current ?? 'ask-ai';
+    const sameAgent = (turnAgentSlug ?? composerAgent) === composerAgent;
+    return {
+      ...modelOverridesFrom(sameAgent ? latestComposerContextRef.current : null),
+      ...(turnAgentSlug ? { agentSlug: turnAgentSlug } : {}),
+    };
+  }, []);
+
   const { submitQuery, abortCurrentRequest } = useXyneAIStream({
     channelIds: [],
     conversationId,
@@ -1835,9 +1911,16 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
       undefined, // isEditUserMessage
       undefined, // editedUserMessageId
       undefined, // parentAssistantMessageId
-      turnAgentSlug ? { agentSlug: turnAgentSlug } : undefined,
+      // Same agent AND the model the composer shows now (XYNE-66322).
+      reRunModelOverrides(turnAgentSlug),
     );
-  }, [isActiveSessionStreaming, displayMessages, abortCurrentRequest, submitQuery]);
+  }, [
+    isActiveSessionStreaming,
+    displayMessages,
+    abortCurrentRequest,
+    submitQuery,
+    reRunModelOverrides,
+  ]);
 
   // Edit: fork a sibling branch with new content under the same parent. For v2
   // (claw) we pass `isEditUserMessage` + `editedUserMessageId` so claw-auth
@@ -1865,11 +1948,12 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
         true, // isEditUserMessage
         messageToEdit.id, // editedUserMessageId
         editedParentAssistant, // parentAssistantMessageId
-        // Editing re-asks that turn, so it goes to the agent it was sent to.
-        messageToEdit.agentSlug ? { agentSlug: messageToEdit.agentSlug } : undefined,
+        // Editing re-asks that turn, so it goes to the agent it was sent to —
+        // on the model the composer shows now (XYNE-66322).
+        reRunModelOverrides(messageToEdit.agentSlug),
       );
     },
-    [isActiveSessionStreaming, messages, abortCurrentRequest, submitQuery],
+    [isActiveSessionStreaming, messages, abortCurrentRequest, submitQuery, reRunModelOverrides],
   );
 
   // Navigate between sibling branches at a given message.
@@ -2767,7 +2851,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
               onAgentChange={conversationId ? undefined : onAgentChange}
               showAgentSelector={isV2}
               initialExtras={composerSeed}
-              onContextChange={onContextChange}
+              onContextChange={handleComposerContextChange}
               pending={isAnyMessageStreaming || (assistant?.isRouting ?? false)}
               onStop={handleStop}
               assistant={assistant && assistant.actions.length > 0 ? assistant : undefined}

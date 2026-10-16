@@ -274,6 +274,20 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   const webSearchAccessible = configData?.webSearchAccessible ?? false;
   const deepResearchAccessible = configData?.deepResearchAccessible ?? false;
   const modelPinProvider = agentModelsData?.pinProvider ?? 'litellm';
+  // The device harness a no-pin (Auto) run routes to — claw-auth resolves it
+  // with the same resolveLocalHarnessTarget run-stream uses. Only trusted when
+  // it is in this agent's current list.
+  const recommendedId =
+    !modelsArePreviousAgent &&
+    agentModelsData?.recommendedId &&
+    agentModelsData.models.some(
+      m => m.id === agentModelsData.recommendedId && m.provider === 'local-harness',
+    )
+      ? agentModelsData.recommendedId
+      : null;
+  const runsOnDevice = effectiveModel
+    ? effectiveModel.startsWith('local-harness:')
+    : recommendedId !== null;
 
   const buildContext = useCallback(
     (): ComposerContext => ({
@@ -304,6 +318,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
         : effectiveModel.startsWith('local-harness:')
           ? 'local-harness'
           : modelPinProvider,
+      runsOnDevice,
       thinkingLevel: effectiveThinkingLevel,
       sandboxMode,
     }),
@@ -322,6 +337,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       effectiveModel,
       sandboxMode,
       modelPinProvider,
+      runsOnDevice,
       effectiveThinkingLevel,
       webSearchAccessible,
       deepResearchAccessible,
@@ -344,6 +360,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     ...buildContext(),
     model: null,
     modelProvider: null,
+    runsOnDevice: false,
     thinkingLevel: null,
   });
 
@@ -862,6 +879,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
             ? null
             : (agentModelsData?.defaultModelName ?? null),
           selectedModel: effectiveModel,
+          recommendedId,
           onSelectModel: setSelectedModel,
           thinkingLevel: effectiveThinkingLevel,
           onSelectThinking: setThinkingLevel,

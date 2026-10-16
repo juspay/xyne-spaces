@@ -561,6 +561,15 @@ export interface PlanTodo {
   status: 'pending' | 'in_progress' | 'completed' | 'failed';
 }
 
+/** claw-auth's `clawRunOrigin` for one run (see run-stream.ts). */
+export interface XyneAIRunOrigin {
+  kind?: string;
+  provider?: string;
+  harnessName?: string;
+  label?: string;
+  ownerName?: string;
+}
+
 export interface Message {
   /** Agent this turn was sent to / answered by. A chat can switch agents
    *  mid-conversation, so identity is per message. Absent on v1 rows. */
@@ -620,6 +629,16 @@ export interface Message {
    *  Drives branching-safe "Debug this response" selection — chronological
    *  turn index doesn't survive sibling branches. */
   debugSessionId?: string;
+  /** Where this reply actually ran, as reported by claw-auth for this run
+   *  (`clawRunOrigin`). `kind: 'local-harness'` = the user's own device. Absent
+   *  = the Xyne server (or an older backend that does not report it). Live
+   *  only: not persisted, so it is gone after a reload (XYNE-66319). */
+  runOrigin?: XyneAIRunOrigin;
+  /** The composer promised this turn would run on the user's device (a
+   *  local-harness pin, or Auto while a device harness is recommended). With no
+   *  local-harness `runOrigin` on completion, the reply says it ran on the
+   *  server instead. */
+  expectedOnDevice?: boolean;
   /** Optional comment attached to a 👎 rating (persisted to agent_runs.ratingComment). */
   ratingComment?: string | null;
   sources?: DraftSource[];

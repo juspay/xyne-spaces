@@ -38,6 +38,7 @@ import type {
   DebugEventRecord,
   PendingActionResolution,
   ToolInvocation,
+  XyneAIRunOrigin,
 } from '../../components/Chat/XyneAISidebar/utils/XyneAITypes';
 import { mergeUiFlows } from '../../components/Chat/XyneAISidebar/utils/XyneAITypes';
 import type { ToolOutput as GeniusToolOutput } from '../../types/toolOutput';
@@ -254,6 +255,25 @@ function withTurnDuration(msg: Message): Message {
   if (msg.type !== 'bot' || msg.durationMs !== undefined) return msg;
   const ms = Date.now() - new Date(msg.timestamp).getTime();
   return Number.isFinite(ms) && ms >= 0 ? { ...msg, durationMs: ms } : msg;
+}
+
+/** `runOrigin` off a stream event, when it is a well-formed origin object. */
+function readRunOrigin(raw: unknown): XyneAIRunOrigin | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const o = raw as Record<string, unknown>;
+  const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
+  const kind = str(o['kind']);
+  if (!kind) return undefined;
+  const origin: XyneAIRunOrigin = { kind };
+  const provider = str(o['provider']);
+  const harnessName = str(o['harnessName']);
+  const label = str(o['label']);
+  const ownerName = str(o['ownerName']);
+  if (provider) origin.provider = provider;
+  if (harnessName) origin.harnessName = harnessName;
+  if (label) origin.label = label;
+  if (ownerName) origin.ownerName = ownerName;
+  return origin;
 }
 
 class XyneAIStreamManager {
@@ -1354,6 +1374,18 @@ class XyneAIStreamManager {
       this.notifySubscribers({ ...currentState });
       void xyneAIStreamStorage.updateMessages(streamId, currentState.messages);
     };
+
+    // Where the run actually executes (claw-auth's clawRunOrigin, forwarded by
+    // the Spaces backend as `runOrigin` on start/complete). Stamped on the reply
+    // so it can say "on your device" — XYNE-66324.
+    const runOrigin = readRunOrigin(data['runOrigin']);
+    if (runOrigin && (data['type'] === 'start' || data['type'] === 'complete')) {
+      updateMessages(prev =>
+        prev.map(msg =>
+          msg.id === botMessageId && msg.type === 'bot' ? { ...msg, runOrigin } : msg,
+        ),
+      );
+    }
 
     switch (data['type']) {
       case 'start':

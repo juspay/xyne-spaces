@@ -971,11 +971,28 @@ export function ModelMenu({
     () => model.models.find(m => m.id === model.selectedModel) ?? null,
     [model.models, model.selectedModel],
   );
+  // Auto on a device: the harness a no-pin run routes to right now.
+  const recommended = useMemo(
+    () =>
+      model.selectedModel === null && model.recommendedId
+        ? (model.models.find(m => m.id === model.recommendedId && m.provider === 'local-harness') ??
+          null)
+        : null,
+    [model.models, model.selectedModel, model.recommendedId],
+  );
+  const onDevice = selected ? selected.provider === 'local-harness' : recommended !== null;
   // Names and descriptions come from claw-auth's model catalog.
   const pillLabel = selected ? selected.name : 'Auto';
+  // The pill must say where the run goes, not just which model: a device run
+  // and a server run of "Auto" are different things to the user.
+  const pillText = onDevice ? `${pillLabel} · on your device` : pillLabel;
   const summary = selected
-    ? (selected.description ?? `Every message in this chat runs on ${pillLabel}`)
-    : AUTO_MODEL_DESCRIPTION;
+    ? selected.provider === 'local-harness'
+      ? `Runs on your device with ${selected.name}. If it is offline, Xyne runs it on its servers and the reply says so.`
+      : (selected.description ?? `Every message in this chat runs on ${pillLabel}`)
+    : recommended
+      ? `Runs on your device with ${recommended.name} while it is online, otherwise on Xyne's servers.`
+      : AUTO_MODEL_DESCRIPTION;
   const defaultName = model.defaultModelName ?? model.defaultModel;
   const q = query.trim().toLowerCase();
   const filtered = model.models.filter(
@@ -1014,13 +1031,14 @@ export function ModelMenu({
       <Menu.Trigger asChild disabled={model.disabled}>
         <button
           type='button'
-          title={selected ? selected.id : (model.defaultModel ?? 'Auto')}
+          title={selected ? selected.id : (recommended?.name ?? model.defaultModel ?? 'Auto')}
           className='inline-flex h-8 min-w-0 shrink items-center rounded-full px-3 text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60 data-[state=open]:bg-secondary data-[state=open]:text-foreground'
           data-track-category='XyneAI'
           data-track-name='OPEN_MODEL_SELECTOR'
           data-testid='composer-model'
         >
-          <span className='truncate'>{pillLabel}</span>
+          {onDevice && <Laptop className='mr-1.5 size-3.5 shrink-0' aria-hidden />}
+          <span className='truncate'>{pillText}</span>
         </button>
       </Menu.Trigger>
       <Menu.Portal>
@@ -1086,7 +1104,11 @@ export function ModelMenu({
                     choice(
                       'auto',
                       'Auto',
-                      defaultName ? `Uses ${defaultName} by default` : AUTO_MODEL_DESCRIPTION,
+                      recommended
+                        ? `On your device: ${recommended.name}`
+                        : defaultName
+                          ? `Uses ${defaultName} by default`
+                          : AUTO_MODEL_DESCRIPTION,
                       model.selectedModel === null,
                       () => model.onSelectModel(null),
                     )}

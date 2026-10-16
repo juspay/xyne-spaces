@@ -50,6 +50,10 @@ export interface StreamOverrides {
    *  ("litellm" = the agent's shared credential, "spaces" = the keyless
    *  platform provider). Only sent alongside `model`. */
   modelProvider?: 'litellm' | 'spaces' | 'local-harness' | null;
+  /** The composer showed this run as "on your device" (a local-harness pin, or
+   *  Auto while the models endpoint recommends a device harness). Stamped on
+   *  the reply so it can say when the run landed on the server instead. */
+  expectOnDevice?: boolean;
   /** Per-run thinking level. Absent = the agent's configured default. */
   thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high';
   researchContext?: ResearchContext | null;
@@ -482,6 +486,9 @@ export const useXyneAIStream = ({
         participants: [],
         parentId: localUserMessageId, // Bot is child of user message in tree
         ...(isV2 && { agentSlug: eAgentSlug ?? 'ask-ai' }),
+        ...(isV2 && (ov?.expectOnDevice || eModelProvider === 'local-harness')
+          ? { expectedOnDevice: true }
+          : {}),
       };
 
       // Build initial messages list for stream manager
