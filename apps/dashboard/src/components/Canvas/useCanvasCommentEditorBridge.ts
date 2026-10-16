@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 
 import { scrollToHeading } from '../../utils/canvasUtils';
 import type { CanvasCommentAnchor } from './CanvasCommentsPanel/CanvasCommentsPanel';
+import { getCanvasCommentThreadSelector } from './CanvasCommentStyleSpec/CanvasCommentStyleSpec';
 import {
   useCanvasCommentHighlights,
   type CanvasCommentHighlightThread,
@@ -438,19 +439,34 @@ export function useCanvasCommentEditorBridge({
   }, [containerRef, getCurrentBlockId, getCurrentCommentAnchor, getEditor]);
 
   const focusCommentBlock = useCallback(
-    (blockId: string): void => {
-      setActiveCommentBlockId(blockId);
-      setActiveCommentThreadId(null);
+    (blockId: string, threadId?: string): void => {
+      const container = containerRef.current;
+      const storedBlock = container?.querySelector<HTMLElement>(
+        `[data-id="${escapeSelectorValue(blockId)}"]`,
+      );
+      const threadAnchor =
+        !storedBlock && threadId
+          ? container?.querySelector<HTMLElement>(getCanvasCommentThreadSelector(threadId))
+          : null;
+      const targetBlock = storedBlock ?? threadAnchor?.closest<HTMLElement>('[data-id]') ?? null;
+      const currentBlockId = targetBlock?.dataset['id'] || blockId;
+
+      setActiveCommentBlockId(currentBlockId);
+      setActiveCommentThreadId(threadId ?? null);
       setActiveCommentAnchor(null);
       const editor = getEditor();
       if (!editor) return;
       try {
-        editor.setTextCursorPosition(blockId, 'start');
+        editor.setTextCursorPosition(currentBlockId, 'start');
         (editor as unknown as { focus?: () => void }).focus?.();
       } catch {
         // The block may be unavailable for legacy/read-only loads; scroll still gives context.
       }
-      scrollToHeading(blockId, containerRef.current);
+      if (threadAnchor) {
+        threadAnchor.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      } else {
+        scrollToHeading(currentBlockId, container);
+      }
     },
     [containerRef, getEditor],
   );
