@@ -828,7 +828,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
 
     const handlePublishPoll = useCallback(
       async (poll: PollDraft, pollSchedule: PollSchedule): Promise<void> => {
-        if (!user?.id) throw new Error('Sign in before publishing a poll');
+        if (!user?.id) throw new Error('Sign in before posting a poll');
 
         const content = buildPollMessageSummary(poll);
         const timestamp = Date.now();
@@ -1788,11 +1788,13 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
             onTicketCreated={handleTicketCreated}
           />
         ) : null}
-        <PollComposerDialog
-          open={pollComposerOpen}
-          onClose={() => setPollComposerOpen(false)}
-          onPublish={handlePublishPoll}
-        />
+        {pollComposerOpen && (
+          <PollComposerDialog
+            open
+            onClose={() => setPollComposerOpen(false)}
+            onPublish={handlePublishPoll}
+          />
+        )}
         {relatedEnabled && (
           <RelatedContextDialog
             open={relatedPopup.open}

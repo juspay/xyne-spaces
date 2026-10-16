@@ -241,6 +241,21 @@ export async function deliverDelayedServerMessage(params: {
         delivered.conversationId,
         true,
       );
+      // The transaction wrote the message directly, so queue the search indexing that
+      // conversationService queues for every other delivered message.
+      await conversationService
+        .pushVespaJobForMessage(
+          delivered.messageId,
+          params.senderId,
+          delivered.createdPoll.workspaceId,
+          delivered.createdPoll.createdAt,
+        )
+        .catch(error => {
+          logger.error('[MessageDelivery] Failed to queue search indexing for scheduled poll', {
+            messageId: delivered.messageId,
+            error,
+          });
+        });
     }
     return {
       conversationId: delivered.conversationId,

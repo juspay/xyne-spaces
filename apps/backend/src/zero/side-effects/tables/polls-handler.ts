@@ -13,7 +13,7 @@ export class PollsSideEffectHandler extends BaseSideEffectHandler {
       select: { id: true, closesAt: true, remindAt: true, closedAt: true },
     });
 
-    if (!poll || poll.closedAt || (!poll.closesAt && !poll.remindAt)) {
+    if (!poll || poll.closedAt) {
       return;
     }
 

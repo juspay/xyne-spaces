@@ -7,7 +7,12 @@
 
 import { randomUUID } from "node:crypto";
 import { errMsg } from "../../lib/errors.js";
-import { isPollMessageMetadata } from "@xyne/shared/polls/policy";
+import { isPollClosed, isPollMessageMetadata } from "@xyne/shared/polls/policy";
+import {
+  calculateAverageRating,
+  calculateOptionResults,
+  calculateRankingResults,
+} from "@xyne/shared/polls/results";
 import {
   interact,
   search,
@@ -2440,6 +2445,7 @@ interface PollProjectionRow {
   createdBy: string;
   isAnonymous: boolean;
   resultVisibility: string;
+  closesAt?: string | null;
   closedAt?: string | null;
 }
 
@@ -2469,6 +2475,12 @@ interface PollVoteProjectionRow {
   rating?: number | null;
 }
 
+/** Gateway timestamps arrive as ISO strings; the shared poll helpers take epoch ms. */
+const pollTiming = (poll: PollProjectionRow) => ({
+  closedAt: poll.closedAt ? Date.parse(poll.closedAt) : null,
+  closesAt: poll.closesAt ? Date.parse(poll.closesAt) : null,
+});
+
 /** The gateway may hand JSON columns back as text. */
 function parseJsonColumn(value: unknown): unknown {
   if (typeof value !== "string") return value;
@@ -2479,7 +2491,20 @@ function parseJsonColumn(value: unknown): unknown {
   }
 }
 
+/** Poll summaries are extra context: a failure here must never stop the messages from returning. */
 async function resolvePollProjections(
+  messages: Array<{ messageId: string; metadata?: unknown }>,
+  requesterId: string,
+): Promise<Map<string, string>> {
+  try {
+    return await buildPollProjections(messages, requesterId);
+  } catch (error) {
+    log.warn("poll projection failed; returning messages without poll details", { error: errMsg(error) });
+    return new Map();
+  }
+}
+
+async function buildPollProjections(
   messages: Array<{ messageId: string; metadata?: unknown }>,
   requesterId: string,
 ): Promise<Map<string, string>> {
@@ -2520,7 +2545,7 @@ async function resolvePollProjections(
       pollQuestions.some((question) => question.id === result.questionId),
     );
     const lines = [
-      `Poll status: ${poll.closedAt ? "closed" : "open"}`,
+      `Poll status: ${isPollClosed(pollTiming(poll), Date.now()) ? "closed" : "open"}`,
       `Result visibility: ${poll.resultVisibility}`,
     ];
     if (visibleResults.length === 0) {
@@ -2534,26 +2559,20 @@ async function resolvePollProjections(
         ? (parsedOptions as Array<{ id: string; text: string }>)
         : [];
       if (result) {
-        const voterCount = Number(result.voterCount ?? 0);
+        const optionText = (id: string) => questionOptions.find((option) => option.id === id)?.text ?? id;
         if (question.responseType === "SINGLE_CHOICE" || question.responseType === "MULTIPLE_CHOICE") {
-          for (const option of questionOptions) {
-            const count = Number(result.optionCounts?.[option.id] ?? 0);
-            const percentage = voterCount > 0 ? Math.round((count / voterCount) * 100) : 0;
-            lines.push(`- ${option.text}: ${count} vote(s), ${percentage}%`);
+          for (const option of calculateOptionResults(questionOptions, result)) {
+            lines.push(`- ${optionText(option.optionId)}: ${option.count} vote(s), ${option.percentage}%`);
           }
         } else if (question.responseType === "RATING_1_TO_5") {
-          const average = voterCount > 0 ? Number(result.ratingTotal ?? 0) / voterCount : 0;
-          lines.push(`- ${voterCount} response(s), average ${average.toFixed(1)}/5`);
+          lines.push(`- ${result.voterCount} response(s), average ${calculateAverageRating(result).toFixed(1)}/5`);
         } else if (question.responseType === "RANKING") {
-          const totals = result.rankTotals ?? {};
-          for (const option of [...questionOptions].sort(
-            (a, b) => Number(totals[a.id] ?? 0) - Number(totals[b.id] ?? 0),
-          )) {
-            const averageRank = voterCount > 0 ? Number(totals[option.id] ?? 0) / voterCount : 0;
-            lines.push(`- ${option.text}: average rank ${averageRank > 0 ? averageRank.toFixed(1) : "—"}`);
+          for (const option of calculateRankingResults(questionOptions, result)) {
+            const rank = option.averageRank > 0 ? option.averageRank.toFixed(1) : "—";
+            lines.push(`- ${optionText(option.optionId)}: average rank ${rank}`);
           }
         } else {
-          lines.push(`- ${voterCount} response(s)`);
+          lines.push(`- ${result.voterCount} response(s)`);
         }
       }
       const visibleVotes = votes.filter((vote) => vote.questionId === question.id);

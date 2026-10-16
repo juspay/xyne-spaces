@@ -22,6 +22,11 @@
       "import": "./dist/polls/policy.js",
       "default": "./dist/polls/policy.js"
     },
+    "./polls/results": {
+      "types": "./dist/polls/results.d.ts",
+      "import": "./dist/polls/results.js",
+      "default": "./dist/polls/results.js"
+    },
     "./commands": {
       "types": "./dist/commands.d.ts",
       "import": "./dist/commands.js",

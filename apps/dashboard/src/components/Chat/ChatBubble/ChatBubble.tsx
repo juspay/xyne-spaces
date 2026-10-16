@@ -33,6 +33,7 @@ import {
   parsePreviewMd,
   isDeskChannelType,
   resolveConversationAnchorType,
+  isPollMessageMetadata,
   type ConversationAnchorType,
 } from '@xyne/shared';
 import { mutators } from '../../../zero/mutators';
@@ -865,10 +866,13 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   // but do not open this message in the generic editor, which would discard that wrapper.
   const canEditMessage =
     canModifyMessage &&
-    metadata?.['messageSubtype'] !== 'poll' &&
+    !isPollMessageMetadata(metadata) &&
     !isSlashCommandArtifactMessage(message.content) &&
     !isSharedEntityMessage;
   const canDeleteMessage = canModifyMessage && !hasTicket && !isSharedEntityMessage;
+  // The owner section of the actions menu holds Edit and Delete. A poll cannot be edited
+  // but its author must still be able to delete it.
+  const showOwnerActions = canEditMessage || (isPollMessageMetadata(metadata) && canDeleteMessage);
 
   // Check if message has meaningful text content (not just attachments).
   // Memoized: this runs a full DOMParser parse — doing it per render meant
@@ -1069,7 +1073,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     }
 
     const actions: MessageHoverToolbarActions = {
-      showEditAction: canEditMessage,
+      showEditAction: showOwnerActions,
       // Capability flags + content-copy handler for the centralized hover
       // keyboard shortcuts (mirror the old per-bubble `enabled:` expressions).
       canEditMessage,
@@ -1465,7 +1469,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
               })}
               {...(conversation && { conversation })}
               reactionsMd={message.reactions_md}
-              showEditAction={canEditMessage}
+              showEditAction={showOwnerActions}
               isPinned={conversation?.pinned || false}
               onCopyLink={onCopyLink}
               {...(!isMessageDeleted &&

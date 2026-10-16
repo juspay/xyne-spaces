@@ -1,5 +1,5 @@
 import Bull from 'bull';
-import { ChannelScopeType, NotificationType } from '@xyne/shared';
+import { ChannelScopeType, NotificationType, UserStatus, UserType } from '@xyne/shared';
 import { db } from '@/database/client';
 import * as notificationFilterService from '@/services/notificationFilterService';
 import { notificationService } from '@/services/notificationService';
@@ -40,6 +40,7 @@ async function remindPollNonVoters(pollId: string): Promise<void> {
       message: {
         select: {
           isDeleted: true,
+          conversationId: true,
           conversation: {
             select: { channel: { select: { id: true, scopeType: true } } },
           },
@@ -49,10 +50,16 @@ async function remindPollNonVoters(pollId: string): Promise<void> {
   });
   if (!poll || !poll.remindAt || poll.closedAt || poll.message.isDeleted) return;
   const channel = poll.message.conversation.channel;
+  const isDirectMessage =
+    channel.scopeType === ChannelScopeType.DM || channel.scopeType === ChannelScopeType.GROUP_DM;
 
   const [members, voters] = await Promise.all([
+    // Same recipients as channel message notifications: no apps, agents or inactive users.
     db.channelParticipant.findMany({
-      where: { channelId: channel.id },
+      where: {
+        channelId: channel.id,
+        user: { status: UserStatus.ACTIVE, userType: { notIn: [UserType.APP, UserType.AGENT] } },
+      },
       select: { userId: true },
     }),
     db.pollVote.findMany({
@@ -93,7 +100,8 @@ async function remindPollNonVoters(pollId: string): Promise<void> {
     type: NotificationType.CHANNEL_MESSAGE,
     relatedEntityType: 'message' as const,
     relatedEntityId: poll.messageId,
-    actionUrl: `/${poll.workspaceId}/chat/dir/${channel.id}?messageId=${poll.messageId}`,
+    // Same link shape as message notifications, so the chat view scrolls to the poll.
+    actionUrl: `/${poll.workspaceId}/chat/${isDirectMessage ? 'dm' : 'dir'}/${channel.id}#origin=${poll.message.conversationId}&messageId=${poll.messageId}`,
     workspaceId: poll.workspaceId,
     metadata: {
       channelId: channel.id,
@@ -126,9 +134,6 @@ async function remindPollNonVoters(pollId: string): Promise<void> {
 }
 
 async function processPollLifecycleJob(data: PollLifecycleJobData): Promise<void> {
-  if (data.kind !== 'CLOSE' && data.kind !== 'REMIND') {
-    throw new Error(`Unsupported poll lifecycle job kind: ${String(data.kind)}`);
-  }
   await runInPollWorkspace(data.pollId, () =>
     data.kind === 'CLOSE' ? closePoll(data.pollId) : remindPollNonVoters(data.pollId)
   );

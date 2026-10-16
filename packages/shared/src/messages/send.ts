@@ -48,7 +48,9 @@ export function sendMessage(
   const timestamp = payload.timestamp ?? Date.now();
   const type = payload.type ?? MessageType.USER;
 
-  clearDraft(ref);
+  // A poll is composed in its own dialog; the composer's draft is not what was sent.
+  const sendsComposerDraft = payload.poll === undefined;
+  if (sendsComposerDraft) clearDraft(ref);
 
   let childConversationId: string | undefined;
   if (ref.kind === 'thread' && payload.alsoSendToChannel) {
@@ -95,14 +97,16 @@ export function sendMessage(
   // composer. It has to happen here rather than inside the send mutator,
   // because that claim is part of the send and is rolled back with it.
   const claimedAttachmentIds = attachments.map(a => a.attachmentId);
-  zero.mutate(
-    mutators.draft.clearContent({
-      channelId: ref.channelId,
-      ...(ref.kind === 'thread' && { conversationId: ref.conversationId }),
-      timestamp: Date.now(),
-      ...(claimedAttachmentIds.length > 0 && { claimedAttachmentIds, messageId }),
-    }),
-  );
+  if (sendsComposerDraft) {
+    zero.mutate(
+      mutators.draft.clearContent({
+        channelId: ref.channelId,
+        ...(ref.kind === 'thread' && { conversationId: ref.conversationId }),
+        timestamp: Date.now(),
+        ...(claimedAttachmentIds.length > 0 && { claimedAttachmentIds, messageId }),
+      }),
+    );
+  }
 
   if (zeroStateAtSend !== 'connected') {
     return { messageId, conversationId };

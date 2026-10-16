@@ -22,8 +22,8 @@ export class PollVotesACL extends BaseACL<'poll_votes'> {
     }
   }
 
-  private validatePollOpen(poll: { closedAt?: number | null }): void {
-    if (isPollClosed(poll)) {
+  private validatePollOpen(poll: { closedAt?: number | null; closesAt?: number | null }): void {
+    if (isPollClosed(poll, Date.now())) {
       throw new MutationACLError('This poll is closed', 'poll_votes');
     }
   }
@@ -64,13 +64,14 @@ export class PollVotesACL extends BaseACL<'poll_votes'> {
     if (!vote) {
       throw new MutationACLError('Poll ballot does not exist', 'poll_votes');
     }
-    if (vote.userId !== this.ctx.userID) {
-      // Only deletePollGraph removes other people's ballots, on behalf of the poll creator.
+    const poll = await tx.run(zql.polls.where('id', '=', vote.pollId).one());
+    if (vote.userId !== this.ctx.userID || poll?.createdBy === this.ctx.userID) {
+      // deletePollGraph tearing down the creator's poll, open or closed, any ballot.
       await requirePollCreatorForDelete(vote.pollId, this.ctx, tx, 'poll_votes');
       return;
     }
+    // A voter withdrawing their own ballot, which only an open poll allows.
     this.validateOwnerAndWorkspace(vote);
-    const poll = await requireAccessiblePoll(vote.pollId, this.ctx, tx, 'poll_votes');
-    this.validatePollOpen(poll);
+    this.validatePollOpen(await requireAccessiblePoll(vote.pollId, this.ctx, tx, 'poll_votes'));
   }
 }
