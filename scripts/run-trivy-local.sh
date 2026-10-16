@@ -34,7 +34,7 @@ SOURCE_JSON="/scan/security-reports/trivy-fs.json"
 
 if [ "$SECURITY_BREAK_BUILD" = "true" ]; then EXIT_CODE=1; else EXIT_CODE=0; fi
 FS_SCANNERS="vuln,misconfig"
-SOURCE_SKIP_DIRS=(--skip-dirs /scan/.securitybin --skip-dirs /scan/security-reports --skip-dirs '**/node_modules' --skip-dirs '**/dist')
+SOURCE_SKIP_DIRS=(--skip-dirs /scan/.securitybin --skip-dirs /scan/security-reports --skip-dirs '**/node_modules' --skip-dirs '**/dist' --skip-dirs /scan/deployment/terraform)
 REPO_MOUNT=(-v "$REPO_ROOT:/scan" -v "$TRIVY_CACHE_DIR:/root/.cache/")
 
 mkdir -p "$TRIVY_CACHE_DIR" "$LOCAL_REPORT_DIR"
