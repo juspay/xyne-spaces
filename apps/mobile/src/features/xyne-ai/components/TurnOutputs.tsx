@@ -8,6 +8,7 @@ import { AppWindow, ExternalLink, FileText } from 'lucide-react-native';
 import { shareOrSaveAttachment } from '@/src/components/attachments-viewer/utils/saveAttachment';
 import { ListRow, ListRowDivider, SectionCard } from '@/src/components/ui/settings-list';
 import { API_BASE_URL, DASHBOARD_ORIGIN } from '@/src/config';
+import { useAuth } from '@/src/contexts/AuthContext';
 import type { BriefCitation } from '@/src/features/morning-brief/api/dailyBriefApi';
 import { cacheMtlsRemoteFile } from '@/src/utils/mtlsDiskCache';
 
@@ -89,6 +90,7 @@ export const TurnOutputs = ({
   onOpenUrl: (url: string) => void;
   onOpenCanvas: (canvas: BriefCitation) => void;
 }): ReactElement | null => {
+  const { user } = useAuth();
   const rows = [
     ...attachments.flatMap(({ app }) =>
       app
@@ -99,7 +101,9 @@ export const TurnOutputs = ({
               label={app.title}
               description='App'
               showChevron
-              onPress={(): void => onOpenUrl(`${DASHBOARD_ORIGIN}/app/${app.id}`)}
+              onPress={(): void =>
+                onOpenUrl(`${DASHBOARD_ORIGIN}/${user?.workspaceId}/app/${app.id}`)
+              }
             />,
           ]
         : [],
