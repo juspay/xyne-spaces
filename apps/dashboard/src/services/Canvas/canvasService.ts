@@ -2,6 +2,7 @@ import { apiInstance } from '../clients/apiClient';
 import { toast } from 'sonner';
 import { getFileDimensions } from '../../components/ui/utils/files';
 import { QueryClient } from '@tanstack/react-query';
+import type { CanvasVisibility } from '@xyne/shared';
 import { logger, Event } from '../../utils/logger';
 
 export interface YSweetAuthRequest {
@@ -36,6 +37,24 @@ export interface CanvasFileUploadResponse {
   thumbnailUrl?: string;
 }
 
+export interface DuplicatedCanvas {
+  id: string;
+  title: string;
+  visibility: CanvasVisibility;
+  channelId: string | null;
+  folderId: string | null;
+  projectId: string | null;
+  createdBy: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface DuplicateCanvasResponse {
+  canvas: DuplicatedCanvas;
+  skippedAttachmentCount: number;
+  placedInPersonalRoot: boolean;
+}
+
 // Cache for prefetched canvas data
 const prefetchedCanvases = new Map<string, { token: YSweetAuthToken; timestamp: number }>();
 const PREFETCH_CACHE_TTL = 1000 * 60 * 50; // 50 minutes (same as staleTime)
@@ -56,6 +75,17 @@ export class CanvasService {
       folderId: request.folderId,
       title: request.title || 'Untitled Canvas',
     });
+    return response.data;
+  }
+
+  async duplicateCanvas(
+    canvasId: string,
+    options?: { fromVersionId?: string },
+  ): Promise<DuplicateCanvasResponse> {
+    const response = await apiInstance.post<DuplicateCanvasResponse>(
+      `/canvas/${encodeURIComponent(canvasId)}/duplicate`,
+      options?.fromVersionId ? { fromVersionId: options.fromVersionId } : {},
+    );
     return response.data;
   }
 

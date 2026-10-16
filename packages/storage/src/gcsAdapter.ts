@@ -78,6 +78,10 @@ export class GCSAdapter implements StorageService {
     return this.gcs.listPrefixes(prefix);
   }
 
+  async copyFile(sourcePath: string, destinationPath: string): Promise<void> {
+    return this.gcs.copyFile(sourcePath, destinationPath);
+  }
+
   async moveFile(sourcePath: string, destinationPath: string): Promise<void> {
     return this.gcs.moveFile(sourcePath, destinationPath);
   }

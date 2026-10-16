@@ -28,4 +28,6 @@ router.post(
 
 router.post('/create', canvasController.createCanvas);
 
+router.post('/:canvasId/duplicate', canvasController.duplicateCanvas);
+
 export default router;
