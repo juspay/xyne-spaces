@@ -4,8 +4,10 @@ import { CompactTicketBadge } from '../CompactTicketBadge';
 import { groupTicketsByDate } from './utils';
 import { CalendarDefault as Calendar, ClockDefault as Clock } from '@xyne/icons';
 import type { DayViewProps } from './types';
+import { useTicketNoun } from '../../../../contexts/TicketNounContext';
 
 export function DayView({ currentDate, tickets, onTicketClick }: DayViewProps): React.ReactElement {
+  const noun = useTicketNoun();
   const ticketsByDate = useMemo(() => groupTicketsByDate(tickets), [tickets]);
   const dateKey = format(currentDate, 'yyyy-MM-dd');
   const dayTickets = ticketsByDate.get(dateKey) || [];
@@ -42,7 +44,7 @@ export function DayView({ currentDate, tickets, onTicketClick }: DayViewProps): 
           <div className='bg-background rounded-xl border border-border shadow-sm overflow-hidden'>
             <div className='px-6 py-4 bg-muted border-b border-border'>
               <h3 className='text-sm font-semibold text-foreground uppercase tracking-wide'>
-                Tickets
+                {noun.pluralTitle}
               </h3>
             </div>
             <div className='divide-y divide-border'>
@@ -76,9 +78,11 @@ export function DayView({ currentDate, tickets, onTicketClick }: DayViewProps): 
             <div className='w-16 h-16 rounded-full bg-muted flex items-center justify-center mb-4'>
               <Calendar className='w-8 h-8 text-muted' />
             </div>
-            <p className='text-muted-foreground font-medium'>No tickets created on this day</p>
+            <p className='text-muted-foreground font-medium'>
+              No {noun.plural} created on this day
+            </p>
             <p className='text-sm text-muted-foreground mt-1'>
-              Select another date to view tickets
+              Select another date to view {noun.plural}
             </p>
           </div>
         )}

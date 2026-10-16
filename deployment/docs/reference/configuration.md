@@ -416,7 +416,8 @@ the load balancer and writes the records itself.
 | `pods_cidr`, `services_cidr` | string | `10.20.0.0/16`, `10.30.0.0/20` | overlay pod range, service range |
 | `nat_gateway_enabled` | bool | `true` | outbound through a NAT gateway; AKS `outboundType` follows it |
 | `nat_public_ip_prefix_length` | number | `30` | prefix size for the NAT gateway |
-| `aks_inbound_ports` | list(string) | `["80", "443"]` | ports the AKS NSG admits from the internet |
+| `aks_inbound_ports` | list(string) | `["80", "443"]` | ports the AKS NSG admits for ingress: from the internet in `gateway` mode, from `appgw_subnet_cidr` otherwise |
+| `aks_inbound_cidrs` | list(string) | `[]` | restrict `aks_inbound_ports` to these source CIDRs in any mode (e.g. a CDN/WAF range in `gateway` mode, or the subnet of an external `ingress_appgw_subnet_id`) |
 | `bastion_enabled` | bool | `false` | one VM with the AAD SSH extension; SSH allowed from the VNet only |
 | `bastion_vm_size` | string | `Standard_B2s` | |
 | `bastion_public_ip` | bool | `false` | attach a public IP to the VM (the NSG still restricts SSH to the VNet unless `bastion_allowed_ssh_cidrs` is set) |

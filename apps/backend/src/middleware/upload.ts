@@ -7,6 +7,7 @@ import { AppError } from './errorHandler';
 import { config } from '@/config/env';
 import { db } from '../database/client';
 import { AttachmentUploadStatus, isHeicBuffer } from '@xyne/shared';
+import { workflowStorage } from '@/workflowsV2/adapters/storage';
 
 export const MAX_FILE_SIZE_BYTES = 1024 * 1024 * 1024; // 1GB max file size
 const MAX_FILE_FIELDS = 20; // Supports files + thumbnails in one multipart request
@@ -697,6 +698,97 @@ function makeCollectionStreamingStorage(scopeIdParam: string): multer.StorageEng
     },
   };
 }
+
+/**
+ * Streaming storage for workflow attachments.
+ *
+ * Each part is piped into the object store as it arrives and the route is
+ * handed a reference, so a request costs a chunk rather than a file. The
+ * workspace must be known before the body is read because the key carries it —
+ * `resolveWorkflowUploadScope` puts it on the request ahead of this.
+ */
+const workflowAttachmentStorage: multer.StorageEngine = {
+  _handleFile(req, file, cb) {
+    void (async () => {
+      const workspaceId = (req as { workflowUploadWorkspaceId?: string })
+        .workflowUploadWorkspaceId;
+      if (!workspaceId) {
+        throw Object.assign(
+          new Error('workflow upload has no workspace scope'),
+          { statusCode: 400 },
+        );
+      }
+
+      const originalName =
+        file.originalname && file.originalname.trim().length > 0
+          ? file.originalname
+          : `upload-${Date.now()}`;
+      const mimeType = file.mimetype || 'application/octet-stream';
+
+      // Screened in flight, as collection uploads are.
+      const attachment = await uploadScreened(
+        file.stream,
+        originalName,
+        file.mimetype,
+        async (screened) => {
+          const ref = await workflowStorage.put(
+            { workspaceId } as never,
+            { name: originalName, mimeType, stream: screened },
+          );
+          return { ...ref, path: ref.handle };
+        },
+      );
+
+      cb(null, {
+        path: attachment.handle,
+        filename: attachment.name,
+        size: attachment.size ?? 0,
+        mimetype: attachment.mimeType,
+      });
+    })().catch((error: unknown) => cb(error as Error));
+  },
+
+  _removeFile(req, file, cb) {
+    // Multer calls this when a later part of the same request fails, so the
+    // bytes already filed for this one do not outlive the request.
+    const handle = file.path;
+    if (!handle) {
+      cb(null);
+      return;
+    }
+    // Still on the request from before the body was read, so the tenant check
+    // runs on the cleanup path too.
+    const workspaceId = (req as { workflowUploadWorkspaceId?: string })
+      .workflowUploadWorkspaceId;
+    workflowStorage
+      .delete(
+        { name: file.filename ?? '', mimeType: file.mimetype ?? '', handle },
+        workspaceId ? ({ workspaceId } as never) : undefined,
+      )
+      // Never fail the request on cleanup — it would replace the real reason.
+      .then(() => cb(null))
+      .catch((error: unknown) => {
+        logger.warn(
+          `[WORKFLOWS-STORAGE] could not reclaim ${handle} after a failed upload: ${String(error)}`,
+        );
+        cb(null);
+      });
+  },
+};
+
+/**
+ * What a workflow attachment may weigh — a build log, a test report, a document
+ * to mount. Streaming makes this about storage cost rather than survival, but
+ * unbounded is still an invitation, so it sits below the gigabyte the shared
+ * `uploadConfig` allows without cutting into what a real report weighs.
+ */
+const WORKFLOW_ATTACHMENT_MAX_BYTES = 300 * 1024 * 1024;
+
+export const workflowAttachmentUpload = multer({
+  storage: workflowAttachmentStorage,
+  fileFilter: uploadFileFilter,
+  limits: { fileSize: WORKFLOW_ATTACHMENT_MAX_BYTES, files: 10 },
+});
 
 export const collectionUpload = multer({
   storage: makeCollectionStreamingStorage('collectionId'),
