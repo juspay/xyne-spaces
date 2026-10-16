@@ -200,3 +200,87 @@ describe("spaces-fetch-attachment", () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 });
+
+describe("spaces-thread-attachments", () => {
+  type Query = { model: string; where?: Record<string, unknown> };
+
+  async function threadAttachmentsTool() {
+    const mod = await import("./xyne-spaces-tools.js");
+    const tool = mod.tools.find((t) => t.name === "spaces-thread-attachments");
+    if (!tool) throw new Error("spaces-thread-attachments tool not found");
+    return tool;
+  }
+
+  const posted = {
+    id: "att-posted",
+    originalFilename: "posted.pdf",
+    mimetype: "application/pdf",
+    size: 100,
+    createdAt: "2026-10-15T08:00:00.000Z",
+    uploadedByUserId: "user-1",
+    entityId: "msg-1",
+    entityType: "CHAT",
+  };
+  const draft = {
+    ...posted,
+    id: "att-draft",
+    originalFilename: "unsent-trace.json.gz",
+    entityId: "draft-1",
+    entityType: "DRAFT",
+  };
+  const scheduled = {
+    ...posted,
+    id: "att-scheduled",
+    originalFilename: "scheduled.txt",
+    entityId: "delayed-1",
+    entityType: "DELAYED_MESSAGE",
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function mockGateway(attachmentRows: unknown[]) {
+    mocks.interact.mockImplementation(async (q: Query) => {
+      if (q.model === "message") return [{ messageId: "msg-1" }];
+      if (q.model === "conversation") return [{ channelId: "ch-1" }];
+      if (q.model === "channel") return [{ id: "ch-1", name: "general" }];
+      if (q.model === "messageAttachment") return attachmentRows;
+      return [];
+    });
+  }
+
+  it("asks the query gateway to exclude DRAFT and DELAYED_MESSAGE attachments", async () => {
+    mockGateway([posted]);
+    const tool = await threadAttachmentsTool();
+    await tool.handler({ conversationId: "conv-1" }, { userId: "u1", authMode: "user" });
+
+    const attachmentQueries = mocks.interact.mock.calls
+      .map(([q]) => q as Query)
+      .filter((q) => q.model === "messageAttachment");
+    expect(attachmentQueries).toHaveLength(2);
+    for (const q of attachmentQueries) {
+      expect(q.where?.["entityType"]).toEqual({ notIn: ["DRAFT", "DELAYED_MESSAGE"] });
+    }
+  });
+
+  it("never lists unsent draft or scheduled attachments even if the gateway returns them", async () => {
+    mockGateway([posted, draft, scheduled]);
+    const tool = await threadAttachmentsTool();
+    const result = await tool.handler({ conversationId: "conv-1" }, { userId: "u1", authMode: "user" });
+    const text = result.content[0]?.text ?? "";
+
+    expect(text).toContain("posted.pdf");
+    expect(text).toContain("1 attachment(s)");
+    expect(text).not.toContain("unsent-trace.json.gz");
+    expect(text).not.toContain("scheduled.txt");
+  });
+
+  it("reports no attachments when the thread only has drafts", async () => {
+    mockGateway([draft]);
+    const tool = await threadAttachmentsTool();
+    const result = await tool.handler({ conversationId: "conv-1" }, { userId: "u1", authMode: "user" });
+
+    expect(result.content[0]?.text).toBe("No attachments in conversation conv-1.");
+  });
+});
