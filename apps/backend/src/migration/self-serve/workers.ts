@@ -4,7 +4,7 @@ import { acquireLeadership, releaseLock, renewLock, type LockHandle } from '@/ut
 import { MigrationStore } from './store';
 import { MigrationQueues, queueFor } from './queues';
 import { SlackMigrationEngine, type CollectedConversation, type DirUser } from './engine';
-import { MigrationJob, MigrationStatus, MigrationType, QueueName } from './types';
+import { MigrationJob, MigrationStatus, MigrationType, QueueName, type ConversationIngestResult } from './types';
 import { getMigrationRuntimeConfig } from './migrationRuntimeConfig';
 
 const HEARTBEAT_MS = 15_000;
@@ -439,7 +439,7 @@ export class MigrationWorkers {
   }
 
   /** Retry a conversation load on a transient encryption/DB error (re-ingest is idempotent); rethrow otherwise. */
-  private async loadWithRetry(migrationId: string, conversationId: string, run: () => Promise<{ ingested: number; failed: number }>): Promise<{ ingested: number; failed: number }> {
+  private async loadWithRetry(migrationId: string, conversationId: string, run: () => Promise<ConversationIngestResult>): Promise<ConversationIngestResult> {
     for (let attempt = 1; ; attempt++) {
       try {
         return await run();
@@ -479,6 +479,9 @@ export class MigrationWorkers {
         const ref = await this.engine.getOfflineReference(migrationId, job.gcsPrefix);
         const onProgress = () => void this.store.markProgress(migrationId).catch(() => undefined);
         const loaded = await this.loadWithRetry(migrationId, conversationId, () => this.engine.loadConversation(job, conv, ref, onProgress));
+        if (loaded.dropped) {
+          await this.store.addIssue(migrationId, { conversationId, kind: 'dropped', label: loaded.dropped.label, reason: loaded.dropped.reason });
+        }
         if (loaded.failed > 0) {
           await this.store.addIssue(migrationId, { conversationId, kind: 'ingest-error', reason: `${loaded.failed} message(s) couldn't be migrated (unresolved sender or attachment).` });
         }

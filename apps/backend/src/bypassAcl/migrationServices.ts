@@ -4,7 +4,7 @@ import { logger } from '@/utils/logger';
 import { UserStatus } from '@xyne/shared';
 import { backfillSchema, type JobStats, type SchemaConfig } from '@/migration/vespaWorkspaceBackfill';
 import type { SlackMigrationEngine } from '@/migration/self-serve/engine';
-import type { MigrationJob } from '@/migration/self-serve/types';
+import type { ConversationIngestResult, MigrationJob } from '@/migration/self-serve/types';
 import { asSystem, asService } from './base';
 
 const BATCH_SIZE = 50;
@@ -207,7 +207,7 @@ export function loadSlackConversation(
   ref: Parameters<SlackMigrationEngine['ingestConversation']>[2],
   cfg: Parameters<SlackMigrationEngine['ingestConversation']>[3],
   onProgress?: () => void,
-): Promise<{ ingested: number; failed: number }> {
+): Promise<ConversationIngestResult> {
   return asService(
     ['User', 'Channel', 'ChannelParticipant', 'Conversation', 'Message'],
     'self-serve slack migration: background job has no request context, ingest writes stamped from the job\'s own workspace',
