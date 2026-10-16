@@ -378,6 +378,7 @@ const ImageWithDownload = ({
         onClick={handleDownload}
         className='absolute top-2 right-2 p-1.5 rounded-md bg-background/90 backdrop-blur-sm border border-border shadow-sm opacity-0 group-hover:opacity-100 transition-all duration-200 hover:bg-background z-10'
         title='Download image'
+        aria-label='Download image'
         data-track-category='XyneAI'
         data-track-name='download-image'
       >
@@ -847,6 +848,7 @@ const AttachmentImagePreview = ({
         disabled={isDownloading}
         className='absolute top-2 right-2 p-1.5 rounded-md bg-background/90 backdrop-blur-sm border border-border shadow-sm opacity-0 group-hover/image:opacity-100 transition-all duration-200 hover:bg-background disabled:opacity-50'
         title='Download image'
+        aria-label='Download image'
         data-track-category='XyneAI'
         data-track-name='download-image'
       >
@@ -1124,6 +1126,7 @@ const BranchNavigator = ({
   <div className='flex items-center gap-0.5 text-xs text-muted-foreground'>
     <button
       type='button'
+      aria-label='Previous version'
       onClick={() => onNavigate('prev')}
       className='p-0.5 hover:bg-muted rounded transition-colors'
       data-track-category='XyneAI'
@@ -1136,6 +1139,7 @@ const BranchNavigator = ({
     </span>
     <button
       type='button'
+      aria-label='Next version'
       onClick={() => onNavigate('next')}
       className='p-0.5 hover:bg-muted rounded transition-colors'
       data-track-category='XyneAI'
@@ -1662,56 +1666,51 @@ export const MessageItem = React.memo(
             />
           ) : null}
 
-          {/* User timestamp — right-aligned below the user bubble. Shown
-                  for all user messages (they're always "complete"), hidden
-                  only while the bubble is in edit mode. */}
-          {message.type === 'user' &&
-            !isEditing &&
-            (() => {
-              const stamp = formatMessageTime(message.timestamp);
-              if (!stamp) return null;
-              return (
-                <div className='mt-1 text-right text-[10px] tabular-nums text-muted-foreground/60'>
-                  {stamp}
-                </div>
-              );
-            })()}
-
           {message.type === 'user' && !isEditing && (
-            <div className='mt-0.5 flex items-center gap-1 opacity-0 group-hover/message:opacity-100 transition-opacity'>
-              {Boolean(message.content || message.streamingContent) && (
-                <button
-                  onClick={handleCopy}
-                  className='p-1.5 rounded transition-colors hover:bg-accent'
-                  title={copied ? 'Copied!' : 'Copy'}
-                  data-track-category='XyneAI'
-                  data-track-name='COPY_USER_MESSAGE'
-                  data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
-                >
-                  {copied ? (
-                    <Check size={16} className='text-muted-foreground' />
-                  ) : (
-                    <Copy size={16} className='text-muted-foreground' />
-                  )}
-                </button>
-              )}
-              {(onEditSubmit || onEditMobile) && (
-                <button
-                  onClick={() => {
-                    if (onEditMobile) {
-                      onEditMobile();
-                    } else {
-                      startEditing();
-                    }
-                  }}
-                  className='p-1.5 rounded transition-colors hover:bg-accent'
-                  title='Edit message'
-                  data-track-category='XyneAI'
-                  data-track-name='EDIT_MESSAGE'
-                >
-                  <Pencil size={16} className='text-muted-foreground' />
-                </button>
-              )}
+            <div className='flex items-center justify-end gap-1'>
+              <div className='flex items-center gap-1 opacity-0 transition-opacity group-focus-within/message:opacity-100 group-hover/message:opacity-100'>
+                {Boolean(message.content || message.streamingContent) && (
+                  <button
+                    onClick={handleCopy}
+                    className='rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
+                    title={copied ? 'Copied!' : 'Copy'}
+                    aria-label={copied ? 'Copied!' : 'Copy'}
+                    data-track-category='XyneAI'
+                    data-track-name='COPY_USER_MESSAGE'
+                    data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
+                  >
+                    {copied ? (
+                      <Check className='size-3.5' aria-hidden strokeWidth={1.75} />
+                    ) : (
+                      <Copy className='size-3.5' aria-hidden strokeWidth={1.75} />
+                    )}
+                  </button>
+                )}
+                {(onEditSubmit || onEditMobile) && (
+                  <button
+                    onClick={() => {
+                      if (onEditMobile) {
+                        onEditMobile();
+                      } else {
+                        startEditing();
+                      }
+                    }}
+                    className='rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
+                    title='Edit message'
+                    aria-label='Edit message'
+                    data-track-category='XyneAI'
+                    data-track-name='EDIT_MESSAGE'
+                  >
+                    <Pencil className='size-3.5' aria-hidden strokeWidth={1.75} />
+                  </button>
+                )}
+              </div>
+              {(() => {
+                const stamp = formatMessageTime(message.timestamp);
+                return stamp ? (
+                  <span className='text-[10px] tabular-nums text-muted-foreground/60'>{stamp}</span>
+                ) : null;
+              })()}
             </div>
           )}
         </div>
@@ -2764,16 +2763,16 @@ const MessageActions = ({
       {/* Copy Button */}
       <button
         onClick={onCopy}
-        className='p-1.5 rounded transition-colors hover:bg-accent'
+        className='rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
         title={copied ? 'Copied!' : 'Copy'}
         data-track-category='XyneAI'
         data-track-name='COPY_MESSAGE'
         data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
       >
         {copied ? (
-          <img src='/svgs/icons/check-success.svg' alt='Copied' width='16' height='16' />
+          <Check className='size-3.5' aria-hidden strokeWidth={1.75} />
         ) : (
-          <img src='/svgs/icons/copy.svg' alt='Copy' width='16' height='16' />
+          <Copy className='size-3.5' aria-hidden strokeWidth={1.75} />
         )}
       </button>
 
@@ -2782,13 +2781,14 @@ const MessageActions = ({
         <button
           onClick={onRegenerate}
           data-ph-capture-attribute-track-id='regenerate_message'
-          className='p-1.5 rounded transition-colors hover:bg-accent'
+          className='rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
           title='Regenerate response'
+          aria-label='Regenerate response'
           data-track-category='XyneAI'
           data-track-name='REGENERATE_MESSAGE'
           data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
         >
-          <RefreshCw size={16} className='text-current' />
+          <RefreshCw className='size-3.5' aria-hidden strokeWidth={1.75} />
         </button>
       )}
 
@@ -2810,6 +2810,7 @@ const MessageActions = ({
             data-ph-capture-attribute-track-id='like_message'
             className='p-1.5 rounded transition-colors hover:bg-accent'
             title='Like'
+            aria-label='Like'
             data-track-category='XyneAI'
             data-track-name='LIKE_MESSAGE'
             data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
@@ -2853,6 +2854,7 @@ const MessageActions = ({
             data-ph-capture-attribute-track-id='dislike_message'
             className='p-1.5 rounded transition-colors hover:bg-accent'
             title='Dislike'
+            aria-label='Dislike'
             data-track-category='XyneAI'
             data-track-name='DISLIKE_MESSAGE'
             data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
@@ -2897,21 +2899,6 @@ const MessageActions = ({
         </>
       )}
 
-      {/* Regenerate Button - only on the latest bot message */}
-      {onRegenerate && (
-        <button
-          onClick={onRegenerate}
-          data-ph-capture-attribute-track-id='regenerate_message'
-          className='p-1.5 rounded transition-colors hover:bg-accent'
-          title='Regenerate response'
-          data-track-category='XyneAI'
-          data-track-name='REGENERATE_MESSAGE'
-          data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
-        >
-          <RefreshCw className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
-        </button>
-      )}
-
       {/* Participants avatars - shown for Summarizer messages */}
       {(message.agentType === 'summarizer' || message.agentType === 'genius') &&
         message.participants &&
@@ -2931,6 +2918,7 @@ const MessageActions = ({
     ) && (
       <Tooltip content='Powered By searXNG' side='left'>
         <a
+          aria-label='Powered By searXNG'
           href='https://github.com/searxng/searxng'
           target='_blank'
           rel='noopener noreferrer'
