@@ -29,6 +29,10 @@ export interface AssistantActions {
   ask: (text: string) => Promise<AskOutcome>;
   // Voice: the reply to speak, '' when the text was handled with nothing to say, null to send it to Ask AI.
   answer: (text: string) => Promise<string | null>;
+  /** Shows a request at once with a loader for its reply; returns the reply's id for `endNote`. */
+  startNote: (userText: string) => string;
+  /** Puts the reply where the loader was, or, given null, takes the request and loader away. */
+  endNote: (replyId: string, reply: string | null) => void;
 }
 
 export type AskOutcome =
@@ -59,6 +63,36 @@ export const useAssistantActions = ({ enabled }: { enabled: boolean }): Assistan
     const pair = exchange(userText, chosen, new Date(), newId);
     setTurns(prev => [...prev, ...pair]);
     return pair[1].text;
+  }, []);
+
+  const startNote = useCallback((userText: string): string => {
+    const now = new Date();
+    const [requestId, replyId] = [newId(), newId()];
+    setTurns(prev => [
+      ...prev,
+      { id: requestId, role: 'user', text: userText, at: now },
+      {
+        id: replyId,
+        role: 'assistant',
+        text: '',
+        at: new Date(now.getTime() + 1),
+        pending: true,
+      },
+    ]);
+    return replyId;
+  }, []);
+
+  const endNote = useCallback((replyId: string, reply: string | null): void => {
+    setTurns(prev => {
+      const at = prev.findIndex(turn => turn.id === replyId);
+      if (at === -1) return prev;
+      if (reply) {
+        return prev.map(turn =>
+          turn.id === replyId ? { ...turn, text: reply, pending: false } : turn,
+        );
+      }
+      return prev.filter((_, index) => index !== at && index !== at - 1);
+    });
   }, []);
 
   const choose = useCallback(
@@ -122,5 +156,18 @@ export const useAssistantActions = ({ enabled }: { enabled: boolean }): Assistan
     [ask],
   );
 
-  return { actions, starters, messages, isRouting, choose, openPill, reset, cancel, ask, answer };
+  return {
+    actions,
+    starters,
+    messages,
+    isRouting,
+    choose,
+    openPill,
+    reset,
+    cancel,
+    ask,
+    answer,
+    startNote,
+    endNote,
+  };
 };

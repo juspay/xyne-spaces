@@ -31,6 +31,8 @@ import {
   listClawAgentModels,
   deleteClawConversation,
   patchClawConversation,
+  saveClawConversationNotes,
+  ClawNotesError,
   CMDK_ANSWER_AGENT_SLUG,
   type ClawRunRequest,
 } from '@/services/clawAgentService';
@@ -226,6 +228,21 @@ const XyneAIRequestSchemaV2 = z.object({
 });
 
 // Feedback request validation schema
+// claw-auth checks the limits again; these stop an oversized body at the edge.
+const ConversationNotesSchema = z.object({
+  turns: z
+    .array(
+      z.object({
+        request: z.string().trim().min(1).max(4000),
+        reply: z.string().trim().min(1).max(4000),
+      })
+    )
+    .min(1)
+    .max(5),
+  /** The reply the user is on, so the notes follow it; claw-auth falls back to the latest. */
+  parentId: z.string().max(64).optional(),
+});
+
 const FeedbackRequestSchema = z.object({
   traceId: z.string().min(1, 'traceId is required'),
   value: z.enum(['LIKE', 'DISLIKE'], { required_error: 'value must be LIKE or DISLIKE' }),
@@ -1161,6 +1178,48 @@ export class XyneAIControllerV2 {
     } finally {
       clearInterval(pingInterval);
       if (!res.writableEnded) res.end();
+    }
+  };
+
+  /**
+   * POST /api/xyne-ai/v2/conversations/:convId/notes
+   * Body: { turns: [{ request, reply }], parentId? }. Saves turns Buddy answered on screen
+   * into the chat history without a run. 409 while a reply is still running.
+   */
+  saveConversationNotes = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+
+    const { convId } = req.params;
+    if (!convId?.startsWith('chat-')) {
+      res.status(400).json({ success: false, error: 'convId must be a direct chat' });
+      return;
+    }
+
+    const parsed = ConversationNotesSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ success: false, error: 'turns must be request/reply pairs' });
+      return;
+    }
+
+    const agentSlug = (req.query.agentSlug as string) || 'ask-ai';
+
+    try {
+      const result = await saveClawConversationNotes(
+        { headers: req.headers, userId },
+        convId,
+        parsed.data.turns,
+        agentSlug,
+        parsed.data.parentId
+      );
+      res.json(result);
+    } catch (error) {
+      const status = error instanceof ClawNotesError && error.status < 500 ? error.status : 503;
+      logger.error('[XyneAIv2] saveConversationNotes error:', error);
+      res.status(status).json({ success: false, error: 'Failed to save notes' });
     }
   };
 
