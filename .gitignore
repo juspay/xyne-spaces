@@ -73,7 +73,9 @@ project_output
 .xyne/features.json
 .xyne/mprocs.yaml
 
-.claude/
+# Claude Code: personal settings stay local; shared skills are tracked.
+.claude/*
+!.claude/skills/
 venv/
 migration_output/
 
