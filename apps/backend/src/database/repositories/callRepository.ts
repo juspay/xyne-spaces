@@ -1574,6 +1574,18 @@ export class CallRepository {
     return row as { response: InvitationResponse | null } | null;
   }
 
+  /** Participants currently in the call, for the public lobby's "N in this call" line. */
+  async countInCallParticipants(callId: string): Promise<number> {
+    return await DatabaseClient.getInstance().callParticipant.count({
+      where: {
+        callId,
+        response: InvitationResponse.ACCEPTED,
+        joinedAt: { not: null },
+        leftAt: null,
+      },
+    });
+  }
+
   async findExternalParticipantById(params: {
     participantId: string;
     callId: string;
@@ -1616,6 +1628,7 @@ export class CallRepository {
         ...(params.displayName && { displayName: params.displayName }),
         response: InvitationResponse.ACCEPTED,
         joinedAt: null,
+        leftAt: null,
       },
     });
     queueCallVespaFeed(participant.callId, { source: CallVespaFeedSource.CallRepositoryAcceptExternalParticipantSession });
