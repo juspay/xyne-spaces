@@ -1,7 +1,9 @@
 import { createBrowserRouter, RouterProvider } from 'react-router-dom';
 import { Provider as TooltipProvider } from '@radix-ui/react-tooltip';
 import { Toaster } from 'sonner';
+import { Link2Off } from 'lucide-react';
 import { ExternalLobbyPage } from './routes/ExternalLobby/ExternalLobbyPage';
+import { LobbyShell, StatusCard } from './routes/ExternalLobby/LobbyChrome';
 
 /**
  * dashboard-external router.
@@ -20,14 +22,13 @@ const router = createBrowserRouter([
   {
     path: '*',
     element: (
-      <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-950 flex items-center justify-center p-4">
-        <div className="text-center">
-          <p className="text-gray-400 text-sm">Page not found.</p>
-          <p className="text-gray-600 text-xs mt-2">
-            To join a call, use the link shared by the host.
-          </p>
-        </div>
-      </div>
+      <LobbyShell>
+        <StatusCard
+          icon={<Link2Off size={28} />}
+          title='Page not found'
+          description='To join a call, use the link shared by the host.'
+        />
+      </LobbyShell>
     ),
   },
 ], { basename: '/external' });

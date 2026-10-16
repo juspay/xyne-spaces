@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { ConnectionState } from 'livekit-client';
 import { RoomAudioRenderer } from '@livekit/components-react';
 import { CallType } from '@xyne/shared';
-import { roomActor } from '@/machines/roomMachine';
+import { roomActor, type JoinMediaOverrides } from '@/machines/roomMachine';
 import { FullCallView } from '@/components/Call/CallViews/FullCallView';
 import { useHandRaise } from '@/components/Call/hooks/useHandRaise';
 import { callLobbyService } from '@/services/Call/callLobbyService';
@@ -18,6 +18,8 @@ interface ExternalCallViewProps {
   participantId: string;
   /** Called when the external user disconnects (room goes idle) */
   onDisconnected: () => void;
+  /** Mic / camera state and devices chosen in the lobby preview */
+  joinMediaOverrides?: JoinMediaOverrides;
 }
 
 /**
@@ -38,6 +40,7 @@ export function ExternalCallView({
   callType,
   participantId,
   onDisconnected,
+  joinMediaOverrides,
 }: ExternalCallViewProps) {
   const wasConnectedRef = useRef(false);
 
@@ -51,6 +54,7 @@ export function ExternalCallView({
         callType,
         externalId,
         zero: null,
+        ...(joinMediaOverrides && { joinMediaOverrides }),
       });
     }
     return () => {
