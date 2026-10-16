@@ -1531,6 +1531,55 @@ export async function deleteClawConversation(
   return (await response.json()) as { success: boolean; data: { deleted: number } };
 }
 
+/**
+ * Saves turns the dashboard answered itself (Buddy acting on screen) into a
+ * direct chat as finished messages, so they show in the history. No run.
+ */
+export async function saveClawConversationNotes(
+  req: { headers?: { cookie?: string }; userId: string },
+  convId: string,
+  turns: Array<{ request: string; reply: string }>,
+  agentSlug?: string,
+  parentId?: string
+): Promise<{
+  success: boolean;
+  conversationId: string;
+  parentId: string | null;
+  messageIds: string[];
+}> {
+  const slug = agentSlug || 'ask-ai';
+  const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/chat/${encodeURIComponent(convId)}/notes`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...extractUserIdHeader(req.userId),
+      ...extractCookieHeader(req),
+    },
+    body: JSON.stringify({ turns, ...(parentId ? { parentId } : {}) }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    logger.error(`[ClawAgentService] saveNotes failed: ${response.status} ${errorText}`);
+    throw new ClawNotesError(response.status);
+  }
+
+  return (await response.json()) as {
+    success: boolean;
+    conversationId: string;
+    parentId: string | null;
+    messageIds: string[];
+  };
+}
+
+/** claw-auth's status for a refused save: 409 while a reply still runs, so the caller saves again later. */
+export class ClawNotesError extends Error {
+  constructor(readonly status: number) {
+    super('Failed to save notes');
+  }
+}
+
 export async function patchClawConversation(
   req: { headers?: { cookie?: string }; userId: string },
   convId: string,

@@ -1,21 +1,14 @@
-import { useRef, useState, useCallback, useEffect, useReducer } from 'react';
+import { useRef, useState, useCallback, useEffect, useMemo, useReducer } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import {
-  Video,
-  VideoOff,
-  Mic,
-  MicOff,
-  PhoneOff,
-  RotateCcw,
-  User,
-  AlertTriangle,
-} from 'lucide-react';
-import { toast } from 'sonner';
-import { CallType } from '@xyne/shared';
+import { Ban, PhoneOff, RotateCcw, SearchX } from 'lucide-react';
+import { CallType, InvitationResponse } from '@xyne/shared';
 import { callLobbyService, type CallInfo } from '@/services/Call/callLobbyService';
-import { usePlatform } from '@/hooks/usePlatform';
+import type { JoinMediaOverrides } from '@/machines/roomMachine';
 import { ExternalCallView } from './ExternalCallView';
+import { LobbyShell, Spinner, StatusCard, primaryButtonClass } from './LobbyChrome';
+import { PreJoinPreview } from './PreJoinPreview';
+import { useMediaPreview } from './useMediaPreview';
 
 // ---------------------------------------------------------------------------
 // State types
@@ -43,6 +36,8 @@ interface LobbyState {
   serverUrl?: string;
   externalId?: string;
   callType?: CallType;
+  /** JOINING straight from the "you left" screen — no preview to show. */
+  rejoining?: boolean;
 }
 
 type LobbyAction =
@@ -52,7 +47,8 @@ type LobbyAction =
   | { type: 'SET_PRE_JOIN'; callInfo: CallInfo }
   | { type: 'SET_REQUESTING'; callInfo: CallInfo; displayName: string }
   | { type: 'SET_WAITING'; callInfo: CallInfo; displayName: string }
-  | { type: 'SET_JOINING' }
+  | { type: 'SET_JOINING'; rejoining?: boolean }
+  | { type: 'JOIN_FAILED' }
   | { type: 'SET_REJECTED' }
   | {
       type: 'SET_IN_CALL';
@@ -65,6 +61,9 @@ type LobbyAction =
   | { type: 'SET_DISCONNECTED' };
 
 const initialState: LobbyState = { stage: 'LOADING' };
+
+/** How often a waiting guest checks whether they've been let in. */
+const ADMISSION_POLL_MS = 2000;
 
 function getInternalCallUrl(externalId: string, workspaceId: string): string {
   const configuredBaseUrl = import.meta.env['VITE_INTERNAL_DASHBOARD_BASE_URL'] as
@@ -87,9 +86,9 @@ function lobbyReducer(state: LobbyState, action: LobbyAction): LobbyState {
     case 'SET_CALL_NOT_FOUND':
       return { stage: 'CALL_NOT_FOUND' };
     case 'SET_CALL_ENDED':
-      return { stage: 'CALL_ENDED' };
+      return { ...state, stage: 'CALL_ENDED' };
     case 'SET_PRE_JOIN':
-      return { ...state, stage: 'PRE_JOIN', callInfo: action.callInfo };
+      return { ...state, stage: 'PRE_JOIN', callInfo: action.callInfo, rejoining: false };
     case 'SET_REQUESTING':
       return {
         ...state,
@@ -103,9 +102,16 @@ function lobbyReducer(state: LobbyState, action: LobbyAction): LobbyState {
         stage: 'WAITING',
         callInfo: action.callInfo,
         displayName: action.displayName,
+        rejoining: false,
       };
     case 'SET_JOINING':
-      return { ...state, stage: 'JOINING' };
+      return { ...state, stage: 'JOINING', rejoining: action.rejoining ?? false };
+    case 'JOIN_FAILED':
+      // Nothing polls while JOINING, so return to PRE_JOIN where the user can retry.
+      if (state.stage === 'JOINING' && state.callInfo) {
+        return { ...state, stage: 'PRE_JOIN', rejoining: false };
+      }
+      return state;
     case 'SET_REJECTED':
       return { ...state, stage: 'REJECTED' };
     case 'SET_IN_CALL':
@@ -117,12 +123,25 @@ function lobbyReducer(state: LobbyState, action: LobbyAction): LobbyState {
         externalId: action.externalId,
         callType: action.callType,
         participantId: action.participantId,
+        rejoining: false,
       };
     case 'SET_DISCONNECTED':
       return { ...state, stage: 'DISCONNECTED' };
     default:
       return state;
   }
+}
+
+function participantCountLabel(count: number | undefined): string | null {
+  if (count === undefined) return null;
+  if (count === 0) return 'No one else is here yet';
+  if (count === 1) return '1 person is in this call';
+  return `${count} people are in this call`;
+}
+
+/** Touch devices pop the keyboard on focus, so only autofocus with a real pointer. */
+function hasFinePointer(): boolean {
+  return typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: fine)').matches;
 }
 
 // ---------------------------------------------------------------------------
@@ -137,14 +156,33 @@ export function ExternalLobbyPage() {
   // Form state
   const [displayName, setDisplayName] = useState('');
   const [nameError, setNameError] = useState('');
+  const [joinError, setJoinError] = useState('');
 
-  // Camera / mic preview
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const [isCamOn, setIsCamOn] = useState(false);
-  const [isMicOn, setIsMicOn] = useState(false);
-  const [micDenied, setMicDenied] = useState(false);
-  const [camDenied, setCamDenied] = useState(false);
+  // Camera / mic preview — live wherever the preview tile is on screen
+  const previewActive =
+    state.stage === 'PRE_JOIN' ||
+    state.stage === 'REQUESTING' ||
+    state.stage === 'WAITING' ||
+    (state.stage === 'JOINING' && !state.rejoining);
+  const media = useMediaPreview(previewActive);
+
+  // Whatever the user picked in the lobby goes into the call with them.
+  const joinMediaOverrides = useMemo<JoinMediaOverrides>(
+    () => ({
+      mic: media.micOn,
+      camera: media.camOn,
+      ...(media.pickedAudioDeviceId && { audioDeviceId: media.pickedAudioDeviceId }),
+      ...(media.pickedVideoDeviceId && { videoDeviceId: media.pickedVideoDeviceId }),
+    }),
+    [media.micOn, media.camOn, media.pickedAudioDeviceId, media.pickedVideoDeviceId],
+  );
+  // Frozen at join time: toggling in the lobby after that must not reconnect.
+  const [callMediaOverrides, setCallMediaOverrides] = useState<JoinMediaOverrides>();
+
+  useEffect(() => {
+    const title = state.callInfo?.title;
+    document.title = title ? `${title} · Xyne Call` : 'Xyne Call';
+  }, [state.callInfo?.title]);
 
   // -------------------------------------------------------------------------
   // 1. Load call info through the existing lobby route
@@ -178,10 +216,13 @@ export function ExternalLobbyPage() {
             window.location.replace(getInternalCallUrl(externalId, resolution.workspaceId));
             return;
           }
+          if (result.displayName) setDisplayName(result.displayName);
           dispatch({ type: 'SET_PRE_JOIN', callInfo: result });
         })
         .catch(() => {
-          if (!cancelled) dispatch({ type: 'SET_PRE_JOIN', callInfo: result });
+          if (cancelled) return;
+          if (result.displayName) setDisplayName(result.displayName);
+          dispatch({ type: 'SET_PRE_JOIN', callInfo: result });
         });
 
       return () => {
@@ -198,53 +239,16 @@ export function ExternalLobbyPage() {
   }, [callInfoQuery.isError, state.stage]);
 
   // -------------------------------------------------------------------------
-  // 2. Request to join mutation
-  // -------------------------------------------------------------------------
-  const requestToJoinMutation = useMutation({
-    mutationFn: ({ name }: { name: string }) => callLobbyService.requestToJoin(externalId!, name),
-    onSuccess: (data, variables) => {
-      if (!state.callInfo) return;
-
-      if (data.skipApproval) {
-        // Cookie session exists — go straight to join
-        dispatch({ type: 'SET_JOINING' });
-        joinMutation.mutate();
-        return;
-      }
-
-      dispatch({
-        type: 'SET_WAITING',
-        callInfo: state.callInfo,
-        displayName: variables.name,
-      });
-    },
-    onError: (err: unknown) => {
-      setNameError((err as Error)?.message ?? 'Failed to join. Please try again.');
-      if (state.callInfo) {
-        dispatch({ type: 'SET_PRE_JOIN', callInfo: state.callInfo });
-      }
-    },
-  });
-
-  // -------------------------------------------------------------------------
-  // 3. Status polling (enabled in WAITING stage)
-  // -------------------------------------------------------------------------
-  const lobbyStatusQuery = useQuery({
-    queryKey: ['call-lobby-status', externalId],
-    queryFn: () => callLobbyService.getLobbyStatus(externalId!),
-    enabled: state.stage === 'WAITING' && !!externalId,
-    refetchInterval: 10000,
-    refetchIntervalInBackground: true,
-    staleTime: 0,
-  });
-
-  // -------------------------------------------------------------------------
-  // 4. Join mutation (called when status becomes ACCEPTED)
+  // 2. Join mutation (session path, or once the host admits the guest)
   // -------------------------------------------------------------------------
   const joinMutation = useMutation({
     mutationFn: () => callLobbyService.externalJoin(externalId!),
     onSuccess: joinData => {
-      stopPreview();
+      if ((joinData as { status?: string }).status === 'ended') {
+        dispatch({ type: 'SET_CALL_ENDED' });
+        return;
+      }
+      setJoinError('');
       dispatch({
         type: 'SET_IN_CALL',
         token: joinData.token,
@@ -255,25 +259,81 @@ export function ExternalLobbyPage() {
       });
     },
     onError: () => {
-      // If we came from the session path (JOINING without WAITING), fall back to PRE_JOIN
-      if (state.stage === 'JOINING' && state.callInfo) {
-        dispatch({ type: 'SET_PRE_JOIN', callInfo: state.callInfo });
-      }
-      // Otherwise stay in WAITING so polling continues
+      setJoinError('Couldn’t join the call. Please try again.');
+      // Decided in the reducer: this callback can close over a stale stage
+      // (e.g. DISCONNECTED when the join was started from rejoin).
+      dispatch({ type: 'JOIN_FAILED' });
     },
   });
 
-  // Handle status changes
+  const startJoin = useCallback(
+    (opts?: { rejoining?: boolean }) => {
+      setCallMediaOverrides(joinMediaOverrides);
+      dispatch({ type: 'SET_JOINING', ...(opts?.rejoining && { rejoining: true }) });
+      joinMutation.mutate();
+    },
+    [joinMediaOverrides, joinMutation],
+  );
+
+  // -------------------------------------------------------------------------
+  // 3. Request to join mutation
+  // -------------------------------------------------------------------------
+  const requestToJoinMutation = useMutation({
+    mutationFn: ({ name }: { name: string }) => callLobbyService.requestToJoin(externalId!, name),
+    onSuccess: (data, variables) => {
+      if (data.status === 'ended') {
+        dispatch({ type: 'SET_CALL_ENDED' });
+        return;
+      }
+      if (!state.callInfo) return;
+
+      if (data.skipApproval) {
+        // Cookie session exists — go straight to join
+        startJoin();
+        return;
+      }
+
+      void queryClient.resetQueries({ queryKey: ['call-lobby-status', externalId] });
+      dispatch({
+        type: 'SET_WAITING',
+        callInfo: state.callInfo,
+        displayName: variables.name || displayName.trim(),
+      });
+    },
+    onError: (err: unknown) => {
+      const message =
+        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ??
+        'Couldn’t send your request. Please try again.';
+      setJoinError(message);
+      if (state.callInfo) {
+        dispatch({ type: 'SET_PRE_JOIN', callInfo: state.callInfo });
+      }
+    },
+  });
+
+  // -------------------------------------------------------------------------
+  // 4. Admission polling (WAITING only)
+  // -------------------------------------------------------------------------
+  const lobbyStatusQuery = useQuery({
+    queryKey: ['call-lobby-status', externalId],
+    queryFn: () => callLobbyService.getLobbyStatus(externalId!),
+    enabled: state.stage === 'WAITING' && !!externalId,
+    refetchInterval: ADMISSION_POLL_MS,
+    refetchIntervalInBackground: true,
+    staleTime: 0,
+  });
+
   useEffect(() => {
     if (state.stage !== 'WAITING' || !lobbyStatusQuery.isSuccess) return;
-    const { response } = lobbyStatusQuery.data;
-    if (response === 'ACCEPTED' && !joinMutation.isPending) {
-      dispatch({ type: 'SET_JOINING' });
-      joinMutation.mutate();
-    } else if (response === 'DECLINED') {
+    const { response, status } = lobbyStatusQuery.data;
+    if (status === 'ended') {
+      dispatch({ type: 'SET_CALL_ENDED' });
+    } else if (response === InvitationResponse.ACCEPTED && !joinMutation.isPending) {
+      startJoin();
+    } else if (response === InvitationResponse.DECLINED) {
       dispatch({ type: 'SET_REJECTED' });
     }
-  }, [lobbyStatusQuery.isSuccess, lobbyStatusQuery.data, state.stage, joinMutation]);
+  }, [lobbyStatusQuery.isSuccess, lobbyStatusQuery.data, state.stage, joinMutation.isPending, startJoin]);
 
   // -------------------------------------------------------------------------
   // 5. Rejoin mutation
@@ -281,146 +341,46 @@ export function ExternalLobbyPage() {
   const rejoinMutation = useMutation({
     mutationFn: () => callLobbyService.rejoinLobby(externalId!),
     onSuccess: data => {
+      if (data.status === 'ended') {
+        dispatch({ type: 'SET_CALL_ENDED' });
+        return;
+      }
       if (data.skipApproval) {
-        dispatch({ type: 'SET_JOINING' });
-        joinMutation.mutate();
+        startJoin({ rejoining: true });
         return;
       }
 
-      // Reset the status query cache so polling starts fresh with REQUESTED
+      // Needs the host again (e.g. they were removed) — back to the waiting view
       void queryClient.resetQueries({ queryKey: ['call-lobby-status', externalId] });
       if (state.callInfo) {
         dispatch({
           type: 'SET_WAITING',
           callInfo: state.callInfo,
-          displayName: state.displayName ?? '',
+          displayName: state.displayName ?? displayName.trim(),
         });
-      }
-    },
-    onError: () => {
-      // Rejoin failed — call may have ended, go back to PRE_JOIN to re-fetch
-      if (state.callInfo) {
-        dispatch({ type: 'SET_PRE_JOIN', callInfo: state.callInfo });
       }
     },
   });
 
   // -------------------------------------------------------------------------
-  // Camera/mic helpers
+  // Join button
   // -------------------------------------------------------------------------
-  const showPermissionDeniedToast = useCallback((device: 'Microphone' | 'Camera') => {
-    toast.error(`${device} access is blocked`, {
-      description: 'Please allow access in your browser settings and try again.',
-      duration: 6000,
-    });
-  }, []);
-
-  const startPreview = useCallback(
-    async (video: boolean, audio: boolean) => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video, audio });
-        streamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-        }
-        if (video) {
-          setIsCamOn(true);
-          setCamDenied(false);
-        }
-        if (audio) {
-          setIsMicOn(true);
-          setMicDenied(false);
-        }
-      } catch (err) {
-        const error = err as DOMException;
-        if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
-          if (video) {
-            setCamDenied(true);
-            showPermissionDeniedToast('Camera');
-          }
-          if (audio) {
-            setMicDenied(true);
-            showPermissionDeniedToast('Microphone');
-          }
-        }
-      }
-    },
-    [showPermissionDeniedToast],
-  );
-
-  const stopPreview = useCallback(() => {
-    streamRef.current?.getTracks().forEach(t => t.stop());
-    streamRef.current = null;
-    if (videoRef.current) videoRef.current.srcObject = null;
-    setIsCamOn(false);
-    setIsMicOn(false);
-  }, []);
-
-  const toggleCamera = useCallback(async () => {
-    if (isCamOn) {
-      streamRef.current?.getVideoTracks().forEach(t => t.stop());
-      if (videoRef.current) videoRef.current.srcObject = null;
-      setIsCamOn(false);
-    } else {
-      await startPreview(true, isMicOn);
-    }
-  }, [isCamOn, isMicOn, startPreview]);
-
-  const toggleMic = useCallback(async () => {
-    if (isMicOn) {
-      streamRef.current?.getAudioTracks().forEach(t => (t.enabled = false));
-      setIsMicOn(false);
-    } else if (streamRef.current?.getAudioTracks().length) {
-      streamRef.current.getAudioTracks().forEach(t => (t.enabled = true));
-      setIsMicOn(true);
-    } else {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        if (streamRef.current) {
-          stream.getAudioTracks().forEach(t => streamRef.current!.addTrack(t));
-        } else {
-          streamRef.current = stream;
-        }
-        setIsMicOn(true);
-        setMicDenied(false);
-      } catch (err) {
-        const error = err as DOMException;
-        if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
-          setMicDenied(true);
-          showPermissionDeniedToast('Microphone');
-        }
-      }
-    }
-  }, [isMicOn, showPermissionDeniedToast]);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      streamRef.current?.getTracks().forEach(t => t.stop());
-    };
-  }, []);
-
-  // -------------------------------------------------------------------------
-  // Submit "Join"
-  // -------------------------------------------------------------------------
-  const hasSession = state.callInfo?.hasSession;
-  const { isMobile } = usePlatform();
+  const hasSession = !!state.callInfo?.hasSession;
   const nameInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (isMobile || state.stage !== 'PRE_JOIN' || hasSession) return;
-    const rafId = requestAnimationFrame(() => {
-      nameInputRef.current?.focus();
-    });
+    if (state.stage !== 'PRE_JOIN' || hasSession || !hasFinePointer()) return;
+    const rafId = requestAnimationFrame(() => nameInputRef.current?.focus());
     return () => cancelAnimationFrame(rafId);
-  }, [state.stage, hasSession, isMobile]);
+  }, [state.stage, hasSession]);
 
   const handleJoin = useCallback(() => {
-    if (state.stage !== 'PRE_JOIN') return;
+    if (state.stage !== 'PRE_JOIN' || !state.callInfo) return;
+    setJoinError('');
 
     // Session cookie exists — skip name input, go through requestToJoin (cookie handles auth + status restore)
     if (hasSession) {
-      dispatch({ type: 'SET_REQUESTING', callInfo: state.callInfo!, displayName: '' });
+      dispatch({ type: 'SET_REQUESTING', callInfo: state.callInfo, displayName: displayName.trim() });
       requestToJoinMutation.mutate({ name: '' });
       return;
     }
@@ -428,6 +388,7 @@ export function ExternalLobbyPage() {
     const trimmed = displayName.trim();
     if (!trimmed) {
       setNameError('Please enter your name');
+      nameInputRef.current?.focus();
       return;
     }
     if (trimmed.length > 100) {
@@ -435,18 +396,14 @@ export function ExternalLobbyPage() {
       return;
     }
     setNameError('');
-    dispatch({ type: 'SET_REQUESTING', callInfo: state.callInfo!, displayName: trimmed });
+    dispatch({ type: 'SET_REQUESTING', callInfo: state.callInfo, displayName: trimmed });
     requestToJoinMutation.mutate({ name: trimmed });
   }, [state.stage, state.callInfo, hasSession, displayName, requestToJoinMutation]);
 
-  // -------------------------------------------------------------------------
-  // Disconnect handler
-  // -------------------------------------------------------------------------
   const handleDisconnected = useCallback(() => {
     dispatch({ type: 'SET_DISCONNECTED' });
   }, []);
 
-  // Rejoin handler — cookie handles identity, no participantId needed
   const handleRejoin = useCallback(() => {
     rejoinMutation.mutate();
   }, [rejoinMutation]);
@@ -455,7 +412,6 @@ export function ExternalLobbyPage() {
   // Renders
   // -------------------------------------------------------------------------
 
-  // Full-screen call
   if (state.stage === 'IN_CALL') {
     return (
       <ExternalCallView
@@ -466,254 +422,224 @@ export function ExternalLobbyPage() {
         callType={state.callType || CallType.AUDIO}
         participantId={state.participantId!}
         onDisconnected={handleDisconnected}
+        {...(callMediaOverrides && { joinMediaOverrides: callMediaOverrides })}
       />
     );
   }
 
-  // Status screens
   if (state.stage === 'LOADING') {
     return (
-      <StatusScreen>
-        <LoadingSpinner />
-        <p className='text-gray-400 text-sm mt-4'>Loading call info...</p>
-      </StatusScreen>
+      <LobbyShell>
+        <div className='flex flex-col items-center gap-5'>
+          <Spinner />
+          <p className='text-sm text-[#c4c7c5]'>Getting the call ready…</p>
+        </div>
+      </LobbyShell>
     );
   }
 
   if (state.stage === 'CALL_NOT_FOUND') {
     return (
-      <StatusScreen>
-        <div className='w-16 h-16 rounded-full bg-gray-800 flex items-center justify-center mb-4'>
-          <PhoneOff size={28} className='text-gray-500' />
-        </div>
-        <h2 className='text-xl font-semibold text-white mb-2'>Call not found</h2>
-        <p className='text-gray-400 text-sm'>
-          This link may be invalid or the call no longer exists.
-        </p>
-      </StatusScreen>
+      <LobbyShell>
+        <StatusCard
+          icon={<SearchX size={28} />}
+          title='Check your call link'
+          description='This link may be mistyped or the call no longer exists. Ask the host to share the link again.'
+        />
+      </LobbyShell>
     );
   }
 
   if (state.stage === 'CALL_ENDED') {
     return (
-      <StatusScreen>
-        <div className='w-16 h-16 rounded-full bg-gray-800 flex items-center justify-center mb-4'>
-          <PhoneOff size={28} className='text-red-400' />
-        </div>
-        <h2 className='text-xl font-semibold text-white mb-2'>This call has ended</h2>
-        <p className='text-gray-400 text-sm'>The call you tried to join is no longer active.</p>
-      </StatusScreen>
+      <LobbyShell>
+        <StatusCard
+          icon={<PhoneOff size={28} />}
+          title='This call has ended'
+          description={
+            state.callInfo?.title ? (
+              <>
+                <span className='text-[#e3e3e3]'>{state.callInfo.title}</span> is no longer active.
+              </>
+            ) : (
+              'The call you tried to join is no longer active.'
+            )
+          }
+        />
+      </LobbyShell>
     );
   }
 
   if (state.stage === 'REJECTED') {
     return (
-      <StatusScreen>
-        <div className='w-16 h-16 rounded-full bg-red-900/30 flex items-center justify-center mb-4'>
-          <PhoneOff size={28} className='text-red-400' />
-        </div>
-        <h2 className='text-xl font-semibold text-white mb-2'>Request declined</h2>
-        <p className='text-gray-400 text-sm'>The host declined your request to join this call.</p>
-      </StatusScreen>
+      <LobbyShell>
+        <StatusCard
+          icon={<Ban size={28} />}
+          tone='danger'
+          title='You can’t join this call'
+          description='Someone in the call declined your request to join.'
+        />
+      </LobbyShell>
     );
   }
 
-  if (state.stage === 'WAITING' || state.stage === 'JOINING') {
+  if (state.stage === 'DISCONNECTED' || (state.stage === 'JOINING' && state.rejoining)) {
+    const isRejoining = rejoinMutation.isPending || state.stage === 'JOINING';
     return (
-      <StatusScreen>
-        <div className='w-16 h-16 rounded-full bg-blue-900/30 flex items-center justify-center mb-6'>
-          <User size={28} className='text-blue-400' />
-        </div>
-        {state.callInfo?.title && (
-          <h2 className='text-lg font-semibold text-white mb-1'>{state.callInfo.title}</h2>
-        )}
-        <p className='text-gray-400 text-sm mb-6'>
-          {state.stage === 'JOINING'
-            ? 'Entering the call...'
-            : 'Waiting for the host to let you in...'}
-        </p>
-        <LoadingSpinner />
-        {state.displayName && (
-          <p className='text-gray-500 text-xs mt-6'>
-            Joining as <span className='text-gray-300 font-medium'>{state.displayName}</span>
-          </p>
-        )}
-      </StatusScreen>
-    );
-  }
-
-  if (state.stage === 'DISCONNECTED') {
-    return (
-      <StatusScreen>
-        <div className='w-16 h-16 rounded-full bg-gray-800 flex items-center justify-center mb-4'>
-          <PhoneOff size={28} className='text-gray-400' />
-        </div>
-        <h2 className='text-xl font-semibold text-white mb-2'>You left the call</h2>
-        <p className='text-gray-400 text-sm mb-6'>
-          {state.callInfo?.title && <span className='text-gray-300'>{state.callInfo.title}</span>}
-        </p>
-        <button
-          onClick={handleRejoin}
-          disabled={rejoinMutation.isPending}
-          data-track-category='CALLS'
-          data-track-name='EXTERNAL_REJOIN_CALL'
-          className='inline-flex items-center gap-2 px-6 py-2.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+      <LobbyShell>
+        <StatusCard
+          icon={<PhoneOff size={28} />}
+          title='You left the call'
+          description={
+            state.callInfo?.title ? (
+              <span className='text-[#e3e3e3]'>{state.callInfo.title}</span>
+            ) : undefined
+          }
         >
-          {rejoinMutation.isPending ? (
-            <>
-              <LoadingSpinner size='sm' />
-              Requesting to rejoin...
-            </>
-          ) : (
-            <>
-              <RotateCcw size={16} />
-              Rejoin call
-            </>
+          <button
+            type='button'
+            onClick={handleRejoin}
+            disabled={isRejoining}
+            data-track-category='CALLS'
+            data-track-name='EXTERNAL_REJOIN_CALL'
+            className={primaryButtonClass}
+          >
+            {isRejoining ? (
+              <>
+                <Spinner size='sm' />
+                Rejoining…
+              </>
+            ) : (
+              <>
+                <RotateCcw size={18} />
+                Rejoin
+              </>
+            )}
+          </button>
+          {rejoinMutation.isError && (
+            <p className='text-sm text-[#f2b8b5]'>Couldn’t rejoin. The call may have ended.</p>
           )}
-        </button>
-        {rejoinMutation.isError && (
-          <p className='text-red-400 text-xs mt-3'>Failed to rejoin. The call may have ended.</p>
-        )}
-      </StatusScreen>
+        </StatusCard>
+      </LobbyShell>
     );
   }
 
-  // PRE_JOIN or REQUESTING
-  const isRequesting = state.stage === 'REQUESTING' || requestToJoinMutation.isPending;
+  // PRE_JOIN · REQUESTING · WAITING · JOINING — preview on the left, join panel on the right
+  const isSubmitting = state.stage === 'REQUESTING' || state.stage === 'JOINING';
+  const isWaiting = state.stage === 'WAITING';
+  const previewName = displayName.trim() || state.displayName || '';
+  const countLabel = participantCountLabel(state.callInfo?.participantCount);
 
   return (
-    <div className='min-h-screen bg-gradient-to-br from-gray-900 to-gray-950 flex items-center justify-center p-4'>
-      <div className='flex flex-col md:flex-row gap-8 items-center max-w-[860px] w-full'>
-        {/* Left: Camera preview */}
-        <div className='relative w-full md:w-[400px] aspect-video bg-gray-800 rounded-xl overflow-hidden shadow-2xl shrink-0'>
-          <video ref={videoRef} autoPlay playsInline muted className='w-full h-full object-cover' />
-          {!isCamOn && (
-            <div className='absolute inset-0 flex flex-col items-center justify-center bg-gray-800'>
-              <div className='w-20 h-20 rounded-full bg-gray-700 flex items-center justify-center mb-2'>
-                <User size={36} className='text-gray-500' />
+    <LobbyShell>
+      <div className='grid w-full max-w-[1100px] items-center gap-8 md:gap-12 lg:grid-cols-[minmax(0,1fr)_340px]'>
+        <PreJoinPreview media={media} displayName={previewName} locked={state.stage === 'JOINING'} />
+
+        <section
+          aria-live='polite'
+          className='flex flex-col items-center text-center lg:items-center'
+        >
+          {isWaiting ? (
+            <div className='flex flex-col items-center animate-in fade-in-0 duration-300'>
+              <h1 className='text-[28px] font-normal leading-9 text-[#e3e3e3]'>Asking to join…</h1>
+              <p className='mt-3 max-w-[300px] text-[15px] leading-6 text-[#c4c7c5]'>
+                You’ll join the call when someone lets you in
+              </p>
+              <div className='mt-8'>
+                <Spinner />
               </div>
-              <p className='text-gray-500 text-xs'>Camera is off</p>
+              {previewName && (
+                <p className='mt-8 text-[13px] text-[#8e918f]'>
+                  Joining as <span className='text-[#c4c7c5]'>{previewName}</span>
+                </p>
+              )}
             </div>
-          )}
-          {/* Media toggle buttons */}
-          <div className='absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-3'>
-            <button
-              onClick={() => void toggleMic()}
-              className={`relative w-10 h-10 rounded-full flex items-center justify-center transition-colors ${
-                isMicOn
-                  ? 'bg-gray-700/80 text-white hover:bg-gray-600/80'
-                  : 'bg-red-500/90 text-white hover:bg-red-600/90'
-              }`}
-              title={
-                micDenied
-                  ? 'Microphone access denied'
-                  : isMicOn
-                    ? 'Mute microphone'
-                    : 'Unmute microphone'
-              }
-              data-track-category='CALLS'
-              data-track-name='EXTERNAL_TOGGLE_MIC'
+          ) : (
+            <form
+              className='flex w-full max-w-[320px] flex-col items-center'
+              onSubmit={e => {
+                e.preventDefault();
+                handleJoin();
+              }}
             >
-              {isMicOn ? <Mic size={18} /> : <MicOff size={18} />}
-              {micDenied && (
-                <span className='absolute -top-1 -right-1 w-4 h-4 rounded-full bg-yellow-500 flex items-center justify-center'>
-                  <AlertTriangle size={10} className='text-black' />
-                </span>
+              <h1 className='text-[28px] font-normal leading-9 text-[#e3e3e3]'>
+                {hasSession ? 'Ready to join?' : 'What’s your name?'}
+              </h1>
+              {state.callInfo?.title && (
+                <p className='mt-2 line-clamp-2 text-[15px] text-[#c4c7c5]'>{state.callInfo.title}</p>
               )}
-            </button>
-            <button
-              onClick={() => void toggleCamera()}
-              className={`relative w-10 h-10 rounded-full flex items-center justify-center transition-colors ${
-                isCamOn
-                  ? 'bg-gray-700/80 text-white hover:bg-gray-600/80'
-                  : 'bg-red-500/90 text-white hover:bg-red-600/90'
-              }`}
-              title={
-                camDenied ? 'Camera access denied' : isCamOn ? 'Turn off camera' : 'Turn on camera'
-              }
-              data-track-category='CALLS'
-              data-track-name='EXTERNAL_TOGGLE_CAMERA'
-            >
-              {isCamOn ? <Video size={18} /> : <VideoOff size={18} />}
-              {camDenied && (
-                <span className='absolute -top-1 -right-1 w-4 h-4 rounded-full bg-yellow-500 flex items-center justify-center'>
-                  <AlertTriangle size={10} className='text-black' />
-                </span>
+              {countLabel && <p className='mt-1 text-[13px] text-[#8e918f]'>{countLabel}</p>}
+
+              {!hasSession && (
+                <div className='mt-7 w-full text-left'>
+                  <label htmlFor='lobby-name' className='sr-only'>
+                    Your name
+                  </label>
+                  <input
+                    ref={nameInputRef}
+                    id='lobby-name'
+                    type='text'
+                    autoComplete='name'
+                    placeholder='Your name'
+                    value={displayName}
+                    maxLength={100}
+                    onChange={e => {
+                      setDisplayName(e.target.value);
+                      if (nameError) setNameError('');
+                    }}
+                    disabled={isSubmitting}
+                    aria-invalid={!!nameError}
+                    aria-describedby={nameError ? 'lobby-name-error' : undefined}
+                    data-track-category='CALLS'
+                    data-track-name='EXTERNAL_NAME_INPUT'
+                    className={`h-14 w-full rounded-lg border bg-transparent px-4 text-base text-[#e3e3e3] placeholder-[#8e918f] outline-none transition-colors focus:border-[#a8c7fa] focus:ring-1 focus:ring-[#a8c7fa] disabled:opacity-60 ${
+                      nameError ? 'border-[#f2b8b5]' : 'border-[#8e918f]'
+                    }`}
+                  />
+                  {nameError && (
+                    <p id='lobby-name-error' className='mt-2 px-1 text-[13px] text-[#f2b8b5]'>
+                      {nameError}
+                    </p>
+                  )}
+                </div>
               )}
-            </button>
-          </div>
-        </div>
 
-        {/* Right: Call info + name input */}
-        <div className='flex flex-col gap-4 w-full md:w-auto md:min-w-[280px] md:max-w-[320px]'>
-          <div>
-            {state.callInfo?.title && (
-              <h2 className='text-xl font-semibold text-white mb-1'>{state.callInfo.title}</h2>
-            )}
-            <p className='text-gray-400 text-sm'>
-              {hasSession ? 'Ready to join' : 'Enter your name to join'}
-            </p>
-          </div>
+              {hasSession && previewName && (
+                <p className='mt-6 text-[13px] text-[#8e918f]'>
+                  Joining as <span className='text-[#c4c7c5]'>{previewName}</span>
+                </p>
+              )}
 
-          {!hasSession && (
-            <div>
-              <label
-                htmlFor='lobby-name'
-                className='block text-xs font-medium text-gray-400 mb-1.5'
-              >
-                Your name
-              </label>
-              <input
-                ref={nameInputRef}
+              <button
+                type='submit'
+                disabled={isSubmitting}
                 data-track-category='CALLS'
-                data-track-name='EXTERNAL_NAME_INPUT'
-                id='lobby-name'
-                type='text'
-                placeholder='Enter your name'
-                value={displayName}
-                maxLength={100}
-                onChange={e => {
-                  setDisplayName(e.target.value);
-                  if (nameError) setNameError('');
-                }}
-                onKeyDown={e => e.key === 'Enter' && handleJoin()}
-                disabled={isRequesting}
-                className='w-full px-3.5 py-2.5 rounded-lg bg-gray-800 border border-gray-700 text-white text-sm placeholder-gray-500 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30 transition-colors disabled:opacity-50'
-              />
-              {nameError && <p className='text-red-400 text-xs mt-1.5'>{nameError}</p>}
-            </div>
+                data-track-name='EXTERNAL_ASK_TO_JOIN'
+                className={`${primaryButtonClass} mt-6 w-full max-w-[220px]`}
+              >
+                {isSubmitting ? (
+                  <>
+                    <Spinner size='sm' />
+                    {state.stage === 'JOINING' ? 'Joining…' : 'Asking…'}
+                  </>
+                ) : hasSession ? (
+                  'Join now'
+                ) : (
+                  'Ask to join'
+                )}
+              </button>
+
+              {joinError && <p className='mt-4 text-[13px] text-[#f2b8b5]'>{joinError}</p>}
+
+              {!hasSession && !joinError && (
+                <p className='mt-6 text-[12px] leading-5 text-[#8e918f]'>
+                  The host will be asked to let you in.
+                </p>
+              )}
+            </form>
           )}
-
-          <button
-            onClick={handleJoin}
-            disabled={isRequesting || joinMutation.isPending}
-            data-track-category='CALLS'
-            data-track-name='EXTERNAL_ASK_TO_JOIN'
-            className='w-full px-4 py-2.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
-          >
-            {isRequesting || joinMutation.isPending ? 'Joining...' : 'Join'}
-          </button>
-        </div>
+        </section>
       </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Shared sub-components
-// ---------------------------------------------------------------------------
-
-function StatusScreen({ children }: { children: React.ReactNode }) {
-  return (
-    <div className='min-h-screen bg-gradient-to-br from-gray-900 to-gray-950 flex items-center justify-center p-4'>
-      <div className='flex flex-col items-center text-center max-w-sm'>{children}</div>
-    </div>
-  );
-}
-
-function LoadingSpinner({ size = 'md' }: { size?: 'sm' | 'md' }) {
-  const sizeClasses = size === 'sm' ? 'w-4 h-4 border-2' : 'w-8 h-8 border-[3px]';
-  return (
-    <div className={`${sizeClasses} border-gray-700 border-t-blue-500 rounded-full animate-spin`} />
+    </LobbyShell>
   );
 }

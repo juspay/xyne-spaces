@@ -129,8 +129,6 @@ type SendTrigger =
   | 'mobile_editor'
   | 'unknown';
 import { useChannel } from '../../../hooks/useChannels';
-import { extractCallLinkFromInviteText } from '../../../utils/callControls';
-import { parseCallInviteLink } from '../../Chat/RenderMessageWithHTML/internalLinkUtils';
 
 const lowlight = createLowlight(all);
 
@@ -245,6 +243,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       channelId,
       conversationId,
       onSendMessage,
+      clearOnSend = true,
       onContentChange,
       onCancel,
       mentionItems = [],
@@ -1052,21 +1051,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             }
           }
 
-          // A copied call invite ("Copy link" / "Copy joining info") is written for email and
-          // calendars. In chat, keep only its link: the message then renders as the call card.
-          const inviteCallLink = extractCallLinkFromInviteText(
-            clipboard?.getData('text/plain') ?? '',
-          );
-          if (inviteCallLink && parseCallInviteLink(inviteCallLink)) {
-            event.preventDefault();
-            editor?.commands.insertContent({
-              type: 'text',
-              text: inviteCallLink,
-              marks: [{ type: 'link', attrs: { href: inviteCallLink } }],
-            });
-            return true;
-          }
-
           /** Handle File Pasting */
           const files = clipboard?.files ?? [];
           if (features.fileAttachments && files.length > 0) {
@@ -1427,6 +1411,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
           await onSendMessage(finalPlainText, finalHtmlContent, filesToSend);
 
+          if (!clearOnSend) return;
+
           // Tracked here, not on the Send button: Enter, the button, the mobile
           // editor and shortcuts all land in this function, and only a send that
           // succeeded should count.
@@ -1458,6 +1444,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         editor,
         allAttachments,
         onSendMessage,
+        clearOnSend,
         isSending,
         attachedCanvas,
         hasSendableContent,

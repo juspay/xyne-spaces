@@ -17,6 +17,7 @@ import {
   pushDebugProgress,
   applyCopilotProxyIfNeeded,
   ProviderStallError,
+  ProviderRefusalError,
   RunHandoffError,
   RunCancelledError,
   QuotaExhaustedError,
@@ -205,6 +206,8 @@ const clog = createLogger("run");
 const XYNE_CLAW_PACKAGE_DIR = fileURLToPath(new URL("../../", import.meta.url));
 /** Built-in skill bundle for coverage-gated understanding runs. */
 const UNDERSTANDING_SKILL_PATH = "understanding-skills";
+export const PROVIDER_REFUSAL_REPLY =
+  "Claude declined to answer in this conversation: its safety filter stopped the reply. Asking again in this thread will be declined the same way, so please start a new thread and rephrase the request.";
 
 const router = Router();
 
@@ -5215,6 +5218,19 @@ export async function processTask(
         ...(err instanceof RunCancelledError
           ? { tokenUsage: err.tokenUsage }
           : {}),
+        provider: callbackProvider,
+        model: callbackModel,
+      });
+    } else if (err instanceof ProviderRefusalError) {
+      logErr(`Session failed (provider refusal): ${err.message}`);
+      await sendCallback(callbackUrl, sessionToken, {
+        sessionId,
+        userId,
+        conversationId: conversationId ?? null,
+        agentSlug: agentSlug ?? null,
+        fastMode: fastModeForCallback,
+        status: "completed",
+        result: PROVIDER_REFUSAL_REPLY,
         provider: callbackProvider,
         model: callbackModel,
       });

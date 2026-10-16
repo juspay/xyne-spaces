@@ -14,6 +14,9 @@ import { repositories } from '@/database/repositories';
 import { superpositionClient } from '@/services/superpositionClient';
 import { DEFAULT_HOST_CONTROLS, normalizeHostControls, type HostControls } from '@xyne/shared';
 
+/** Most participants a single LiveKit room can hold. Keep in sync with the LiveKit server config's room.max_participants. */
+export const LIVEKIT_ROOM_MAX_PARTICIPANTS = 500;
+
 /** Open-ended role/slot name ('default', 'test', or any future canary arm) — not a fixed enum. */
 type TranscriptionAgentRole = string;
 const DEFAULT_TRANSCRIPTION_AGENT_ROLE = 'default';
@@ -218,12 +221,12 @@ export class LiveKitService {
     try {
       await this.roomService.createRoom({
         name: options.name,
-        maxParticipants: options.maxParticipants || 100,
+        maxParticipants: options.maxParticipants || LIVEKIT_ROOM_MAX_PARTICIPANTS,
         emptyTimeout: options.emptyTimeout || 120,
         metadata: options.metadata,
       });
 
-      logger.info(`[${options.name}] livekit_room_created | max_participants=${options.maxParticipants || 100}, empty_timeout=${options.emptyTimeout || 120}`);
+      logger.info(`[${options.name}] livekit_room_created | max_participants=${options.maxParticipants || LIVEKIT_ROOM_MAX_PARTICIPANTS}, empty_timeout=${options.emptyTimeout || 120}`);
     } catch (error) {
       logger.error(`[${options.name}] livekit_room_creation_failed | error=${error}`);
       throw error;
