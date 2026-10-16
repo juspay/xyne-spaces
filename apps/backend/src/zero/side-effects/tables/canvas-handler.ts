@@ -82,16 +82,6 @@ export class CanvasSideEffectHandler extends BaseSideEffectHandler {
       const bot = await repositories.users.findById(createdByUserId);
       const senderName = bot?.name || 'Xyne Automatic';
 
-      // Get channel name if canvas is in a channel
-      let channelName: string | undefined;
-      if (canvas.channelId) {
-        const channel = await db.channel.findUnique({
-          where: { id: canvas.channelId },
-          select: { name: true },
-        });
-        channelName = channel?.name || undefined;
-      }
-
       // Create activity entries for activity tab
       const activities = recipientIds.map(userId => ({
         userId,
@@ -121,7 +111,6 @@ export class CanvasSideEffectHandler extends BaseSideEffectHandler {
           createdByUserId,
           senderName,
           this.ctx.workspaceId,
-          channelName,
           undefined, // no specific blockId for AI-generated content
           undefined, // no comment thread for AI-generated content
           canvas.channelId ?? undefined,
