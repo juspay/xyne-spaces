@@ -3328,8 +3328,8 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     }
     if (event.type === "message_end") {
       flushStreamChunks(progressUrl, sessionId ?? conversationId ?? "unknown");
-      modelActive = false; // turn finished — next turn_start re-arms the watchdog
       const msg = (event as { message?: { role?: string; usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number } } }).message;
+      if (msg?.role === "assistant") modelActive = false; // turn finished — next turn_start re-arms the watchdog
       if (msg?.role === "assistant" && msg.usage) {
         tokenUsage.input += msg.usage.input ?? 0;
         tokenUsage.output += msg.usage.output ?? 0;

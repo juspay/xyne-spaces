@@ -7,6 +7,7 @@ import { roomActor } from '../../../machines/roomMachine';
 import { MiniCallView } from './MiniCallView';
 import { FullCallView } from './FullCallView';
 import { useHandRaise } from '../hooks/useHandRaise';
+import { useCallTranscriptSync } from '../hooks/useCallTranscriptSync';
 import { useAgentLeftWarning } from '../hooks/useAgentLeftWarning';
 import { useTranscriptionToggleNotice } from '../hooks/useTranscriptionToggleNotice';
 import { useTranscriptionHostToast } from '../hooks/useTranscriptionHostToast';
@@ -111,6 +112,8 @@ export function CustomLiveKitRoom({
   // Hand raise state, synced over the data channel. Lifted here (always mounted for
   // the call) so it persists and keeps receiving across mini/PIP <-> full view switches.
   const { raisedHands, toggleHandRaise } = useHandRaise(room);
+  // Live transcript, lifted here for the same reason (persists across view switches).
+  useCallTranscriptSync(room);
   useAgentLeftWarning(transcriptionAgentLeft);
 
   // Compute state from LiveKit instead of storing in context

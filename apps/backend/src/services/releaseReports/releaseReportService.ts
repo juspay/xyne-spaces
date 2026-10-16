@@ -97,7 +97,10 @@ export class ReleaseReportService {
 
     const [devTickets, applications, changeFormValues, releaseFields] = await Promise.all([
       db.ticket.findMany({ where: { id: { in: ticketIds } } }),
-      db.application.findMany({ where: { id: { in: applicationIds } } }),
+      db.application.findMany({
+        where: { id: { in: applicationIds } },
+        include: { repo: { select: { url: true, canonicalUrl: true } } },
+      }),
       db.formEntityValues.findMany({
         where: {
           contextId: ticketId,
@@ -174,10 +177,20 @@ export class ReleaseReportService {
     const mappedChanges: ReleaseReportChange[] = releaseChanges.map((change) => {
       const values = valuesByChangeId.get(change.id) ?? {};
       const application = applicationsById.get(change.applicationId);
+      // The service's repository (applications.repoId → repos), not applications.repoUrl.
+      const repository = application?.repo ?? null;
       return {
         id: change.id,
         applicationName: application?.name ?? 'Unknown application',
-        repositoryUrl: application?.repoUrl ?? null,
+        // A web URL: the registered URL when it is http(s), else the canonical URL, which
+        // VCS adapters store with its scheme and the hub canonicaliser without one.
+        repositoryUrl: repository
+          ? /^https?:\/\//i.test(repository.url) || !repository.canonicalUrl
+            ? repository.url
+            : /^https?:\/\//i.test(repository.canonicalUrl)
+              ? repository.canonicalUrl
+              : `https://${repository.canonicalUrl}`
+          : null,
         filePath: change.filePath ?? 'Unknown file',
         devTicketId: change.devTicketXyneId,
         commitId: change.commitId,

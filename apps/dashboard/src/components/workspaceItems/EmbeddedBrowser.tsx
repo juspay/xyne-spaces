@@ -19,6 +19,7 @@ import {
   type PageMenuParams,
 } from '../InAppBrowser/PageContextMenu';
 import { runPageMenuAction } from '../InAppBrowser/pageMenuActions';
+import { UnmountWhenCovered } from '../../hooks/usePageCoverage';
 import {
   canHostEmbedPages,
   embedPageOverElement,
@@ -72,7 +73,18 @@ interface OpenMenu {
  * bar of its own, which the surface around it provides. A link that wants a new
  * window opens in this same page.
  */
-export function EmbeddedBrowser({
+export function EmbeddedBrowser(props: EmbeddedBrowserProps): ReactElement {
+  // Not under full-page search: a page there plays on, and an agent can drive it out of sight (the
+  // AI browser is its page tools' target until the view goes), so it goes, as leaving the page
+  // took it, and loads again on return.
+  return (
+    <UnmountWhenCovered fallback={<div className='h-full' />}>
+      <EmbeddedBrowserView {...props} />
+    </UnmountWhenCovered>
+  );
+}
+
+function EmbeddedBrowserView({
   url,
   title,
   banner,
