@@ -2810,6 +2810,7 @@ model Activity {
   classification  String                 @default("PENDING_CLASSIFY")
   classificationConfidence Float?
   classificationJobType String?
+  fallbackClassification String? // Label used when XOR and the LLM both give no answer: set by whoever created the activity
   isRead          Boolean  @default(false)
   isThreadActivity Boolean?  // True when activity is for a message inside a thread (not the initial message)
   createdAt       DateTime @default(now())

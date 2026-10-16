@@ -6,11 +6,43 @@ import { extractSpecialMentions } from '@/utils/mentionUtils';
 import { generatePlainTextContent } from '@/utils/contentUtils';
 import { logger } from '@/utils/logger';
 import { ActivityClassification } from '@xyne/shared';
-import { classifyActivityWithXor } from '@/services/activity/activityClassificationXor';
+import { AgentsConfig } from '@/agents/config';
+import {
+  classifyActivityWithXor,
+  type ActivityInputKind,
+  type ActivityLabel,
+} from '@/services/activity/activityClassificationXor';
+import { classifyActivityWithLlm } from '@/services/activity/activityClassificationLlm';
 
 const ACTIVITY_CLASSIFICATION_CONTEXT_LIMIT = 0;
 const ACTIVITY_CLASSIFICATION_THREAD_LIMIT = 10;
 const GROUP_MEMBER_LIMIT = 10;
+/** Message text sent with a non-message activity (e.g. a reaction) is cut to this. */
+const EVENT_MESSAGE_TEXT_LIMIT = 500;
+
+/** Notifications judged on the message itself; other message activities (reactions…) are events. */
+const MESSAGE_ACTIONS = new Set([
+  'mentioned_user',
+  'group_mention',
+  'keyword_match',
+  'direct_message',
+  'replied',
+  'replied_v2',
+]);
+
+/**
+ * Plain words for action codes that don't explain themselves; any other code is used with
+ * underscores turned into spaces ("ticket_assigned" → "ticket assigned").
+ */
+const EVENT_DESCRIPTIONS: Record<string, string> = {
+  added_v2: 'reacted with an emoji to a message the recipient wrote',
+  added: 'reacted with an emoji to a message the recipient wrote',
+  removed: 'removed their emoji reaction from a message the recipient wrote',
+  kb_ingestion_completed: 'finished importing files into a knowledge base the recipient owns',
+};
+
+type DecidedBy = 'xor' | 'llm' | 'fallback';
+type Decision = { label: ActivityLabel; confidence: number | null; by: DecidedBy };
 
 type GroupMemberSummary = {
   memberCount: number;
@@ -141,11 +173,16 @@ type ThreadContextResult = {
 
 export class ActivityClassificationService {
 
+  /**
+   * Classify one activity: XOR first, the LLM when XOR has no answer or is unsure, and the
+   * label its creator passed (fallbackClassification) when both give no answer. Always ends
+   * ACTIONABLE or FYI (or SKIP, which deletes a DM activity), so Actionable + FYI = All.
+   */
   async classifyActivity(activityId: string): Promise<{
-    status: 'classified' | 'pending' | 'error' | 'skipped';
+    status: 'classified' | 'skipped';
     classification?: ActivityClassification;
     confidence?: number | null;
-    usedXor?: boolean;
+    decidedBy?: DecidedBy;
     reason?: string;
   }> {
     logger.debug('[ActivityClassification] Starting classification', { activityId });
@@ -158,72 +195,42 @@ export class ActivityClassificationService {
       return { status: 'skipped', reason: 'not_found' };
     }
 
-    if (activity.classification) {
-      const pendingStates = new Set<ActivityClassification>([
-        ActivityClassification.PENDING,
-        ActivityClassification.PENDING_CLASSIFY,
-        ActivityClassification.PROCESSING,
-      ]);
-      if (!pendingStates.has(activity.classification as ActivityClassification)) {
-        logger.debug('[ActivityClassification] Activity already classified, skipping', {
-          activityId,
-          classification: activity.classification,
-        });
-        return {
-          status: 'skipped',
-          reason: 'already_classified',
-          classification: activity.classification as ActivityClassification,
-        };
-      }
-    }
-
-    if (activity.actionSource !== 'message') {
-      await this.updateClassification(activity.id, ActivityClassification.FYI, null);
+    const pendingStates = new Set<string>([
+      ActivityClassification.PENDING,
+      ActivityClassification.PENDING_CLASSIFY,
+      ActivityClassification.PROCESSING,
+    ]);
+    if (!pendingStates.has(activity.classification)) {
+      logger.debug('[ActivityClassification] Activity already classified, skipping', {
+        activityId,
+        classification: activity.classification,
+      });
       return {
-        status: 'classified',
-        classification: ActivityClassification.FYI,
-        confidence: null,
-        usedXor: false,
+        status: 'skipped',
+        reason: 'already_classified',
+        classification: activity.classification as ActivityClassification,
       };
     }
 
-    logger.debug('[ActivityClassification] Building classification input', { activityId });
-    const inputPayload = await this.buildClassificationInput(activity);
-    if (!inputPayload) {
-      logger.error('[ActivityClassification] Failed to build classification input', { activityId });
-      await this.updateClassification(activity.id, ActivityClassification.ERROR, null);
-      return { status: 'error', usedXor: false, reason: 'input_build_failed' };
-    }
+    // A notification about a message is judged on the message; anything else (a ticket,
+    // canvas, KB, call, PR, view, reaction…) on what happened and what it happened to.
+    const messageInput =
+      activity.actionSource === 'message' && MESSAGE_ACTIONS.has(activity.actorAction)
+        ? await this.buildClassificationInput(activity)
+        : null;
+    const kind: ActivityInputKind = messageInput ? 'message' : 'event';
+    const input = messageInput ?? (await this.buildEventInput(activity));
 
-    // XOR, on the JSON the LLM prompt used to be filled with. SKIP is only ever valid for DMs.
-    const xor = await classifyActivityWithXor(inputPayload as unknown as Record<string, unknown>, {
-      allowSkip: inputPayload.actorAction === 'direct_message',
-      audience: false,
+    const decision = await this.decide(input as unknown as Record<string, unknown>, {
+      kind,
+      allowSkip: kind === 'message' && activity.actorAction === 'direct_message',
       logId: activityId,
+      workspaceId: activity.workspaceId,
+      fallback: activity.fallbackClassification,
     });
-    if (!xor.ok) {
-      // Left PENDING: the worker retries it, and marks it ERROR once retries run out.
-      logger.warn('[ActivityClassification] XOR had no answer, leaving the activity PENDING', {
-        activityId,
-        reason: xor.reason,
-      });
-      return { status: 'pending', usedXor: true, reason: `xor_${xor.reason}` };
-    }
-
-    const mappedClassification = this.mapClassification(xor.classification, activity.actorAction);
-    logger.info('[ActivityClassification] Classified', {
-      activityId,
-      classification: mappedClassification,
-      confidence: xor.confidence,
-      xorChoice: xor.xorChoice,
-    });
-    await this.updateClassification(activity.id, mappedClassification, xor.confidence);
-    return {
-      status: 'classified',
-      classification: mappedClassification,
-      confidence: xor.confidence,
-      usedXor: true,
-    };
+    const classification = this.mapClassification(decision.label, activity.actorAction);
+    await this.updateClassification(activity.id, classification, decision.confidence);
+    return { status: 'classified', classification, confidence: decision.confidence, decidedBy: decision.by };
   }
 
   async classifySpecialMentionAudience(params: {
@@ -232,10 +239,10 @@ export class ActivityClassificationService {
     channelId: string;
     recipientUserIds: string[];
   }): Promise<{
-    status: 'classified' | 'pending' | 'error' | 'skipped';
+    status: 'classified' | 'skipped';
     classification?: ActivityClassification;
     confidence?: number | null;
-    usedXor?: boolean;
+    decidedBy?: DecidedBy;
     reason?: string;
   }> {
     const { activityIds, messageId, channelId, recipientUserIds } = params;
@@ -243,52 +250,171 @@ export class ActivityClassificationService {
       return { status: 'skipped', reason: 'empty_audience' };
     }
 
-    logger.debug('[ActivityClassification] Building audience classification input', {
-      messageId,
-      channelId,
-      recipientCount: recipientUserIds.length,
+    // Every row of one audience is created together, with the same fallback and workspace.
+    const first = await db.activity.findUnique({
+      where: { id: activityIds[0] },
+      select: { workspaceId: true, fallbackClassification: true },
     });
+    const logId = `${messageId} (${activityIds.length} recipients)`;
     const inputPayload = await this.buildAudienceClassificationInput(
       messageId,
       channelId,
       recipientUserIds
     );
-    if (!inputPayload) {
-      logger.error('[ActivityClassification] Failed to build audience classification input', {
-        messageId,
-        channelId,
-      });
-      await this.updateClassificationAudience(activityIds, ActivityClassification.ERROR, null);
-      return { status: 'error', usedXor: false, reason: 'input_build_failed' };
+
+    // One decision for the whole audience. Never SKIP: it is not a DM.
+    const decision = inputPayload
+      ? await this.decide(inputPayload as unknown as Record<string, unknown>, {
+          kind: 'audience',
+          allowSkip: false,
+          logId,
+          workspaceId: first?.workspaceId ?? null,
+          fallback: first?.fallbackClassification ?? null,
+        })
+      : this.fallbackDecision(logId, first?.fallbackClassification ?? null, 'input_build_failed', 'skipped');
+    const classification = this.mapClassification(decision.label, 'group_mention');
+    await this.updateClassificationAudience(activityIds, classification, decision.confidence);
+    return { status: 'classified', classification, confidence: decision.confidence, decidedBy: decision.by };
+  }
+
+  /** XOR → LLM → fallback. Each step runs only when its CAC switch is on. */
+  private async decide(
+    input: Record<string, unknown>,
+    options: {
+      kind: ActivityInputKind;
+      allowSkip: boolean;
+      logId: string;
+      workspaceId: string | null;
+      fallback: string | null;
+    },
+  ): Promise<Decision> {
+    const cac = await AgentsConfig.fetch();
+
+    let xorReason = 'off';
+    if (cac.activityClassificationXorEnabled) {
+      const xor = await classifyActivityWithXor(input, options);
+      if (xor.ok) return { label: xor.classification, confidence: xor.confidence, by: 'xor' };
+      xorReason = xor.reason;
     }
 
-    // One XOR call for the whole audience, as the LLM call was. Never SKIP: it is not a DM.
-    const xor = await classifyActivityWithXor(inputPayload as unknown as Record<string, unknown>, {
-      allowSkip: false,
-      audience: true,
-      logId: `${messageId} (${activityIds.length} recipients)`,
-    });
-    if (!xor.ok) {
-      logger.warn('[ActivityClassification] XOR had no answer, leaving the audience PENDING', {
-        messageId,
-        reason: xor.reason,
-      });
-      return { status: 'pending', usedXor: true, reason: `xor_${xor.reason}` };
+    let llmReason = 'off';
+    if (cac.activityClassificationLlmEnabled) {
+      const llm = await classifyActivityWithLlm(input, options);
+      if (llm.ok) return { label: llm.classification, confidence: llm.confidence, by: 'llm' };
+      llmReason = llm.reason;
     }
 
-    const mappedClassification = this.mapClassification(xor.classification, inputPayload.actorAction);
-    logger.info('[ActivityClassification] Audience classified', {
-      messageId,
-      classification: mappedClassification,
-      confidence: xor.confidence,
-      xorChoice: xor.xorChoice,
-    });
-    await this.updateClassificationAudience(activityIds, mappedClassification, xor.confidence);
+    return this.fallbackDecision(options.logId, options.fallback, xorReason, llmReason);
+  }
+
+  /** The label the activity's creator passed; FYI when it passed none. */
+  private fallbackDecision(logId: string, fallback: string | null, xorReason: string, llmReason: string): Decision {
+    const label: ActivityLabel = fallback === ActivityClassification.ACTIONABLE ? 'ACTIONABLE' : 'FYI';
+    logger.info(
+      `[ACTIVITY][FALLBACK] ${logId}  fallback label ${label}  (xor: ${xorReason}, llm: ${llmReason})`,
+      { logId, label, fallback, xorReason, llmReason },
+    );
+    return { label, confidence: null, by: 'fallback' };
+  }
+
+  /**
+   * Input for an activity that is not a message notification: what happened (`actorAction`),
+   * who did it, and what it happened to — the ticket, canvas, KB, call, PR, view, track or
+   * message it points at. Lookups that fail are left out rather than failing the activity.
+   */
+  private async buildEventInput(activity: Activity): Promise<Record<string, unknown>> {
+    const names = await this.getUserNameMap([activity.userId, activity.actorId]);
+    const subject: Record<string, unknown> = {};
+    const lookup = async (key: string, fetch: () => Promise<unknown>) => {
+      try {
+        const value = await fetch();
+        if (value) subject[key] = value;
+      } catch (error) {
+        logger.debug('[ActivityClassification] Event subject lookup failed', {
+          activityId: activity.id,
+          key,
+          errorMessage: error instanceof Error ? error.message : String(error),
+        });
+      }
+    };
+
+    await Promise.all([
+      activity.ticketId &&
+        lookup('ticket', () =>
+          db.ticket.findUnique({
+            where: { id: activity.ticketId! },
+            select: { title: true, status: true, priority: true },
+          }),
+        ),
+      activity.canvasId &&
+        lookup('canvas', () =>
+          db.canvas.findUnique({ where: { id: activity.canvasId! }, select: { title: true } }),
+        ),
+      activity.actionSource === 'collection' &&
+        lookup('knowledgeBase', async () => {
+          const collection = await db.collection.findUnique({
+            where: { id: activity.actionSourceId },
+            select: { name: true },
+          });
+          // KB ingestion activities freeze "succeeded,failed" in blockId.
+          const [succeeded, failed] = (activity.blockId ?? '').split(',').map(Number);
+          return {
+            name: collection?.name ?? null,
+            ...(Number.isFinite(succeeded) && Number.isFinite(failed) ? { filesAdded: succeeded, filesFailed: failed } : {}),
+          };
+        }),
+      activity.callId &&
+        lookup('call', () =>
+          db.call.findUnique({
+            where: { id: activity.callId! },
+            select: { title: true, callType: true, status: true },
+          }),
+        ),
+      activity.pullRequestId &&
+        lookup('pullRequest', () =>
+          db.pullRequests.findUnique({
+            where: { id: activity.pullRequestId! },
+            select: { repoName: true, sourceBranchName: true, destinationBranchName: true, status: true },
+          }),
+        ),
+      activity.savedViewId &&
+        lookup('view', () =>
+          db.savedUserConfiguration.findUnique({
+            where: { id: activity.savedViewId! },
+            select: { name: true },
+          }),
+        ),
+      activity.trackId &&
+        lookup('track', () =>
+          db.sdlcTrack.findUnique({ where: { id: activity.trackId! }, select: { name: true, status: true } }),
+        ),
+      activity.channelId &&
+        lookup('channel', () =>
+          db.channel.findUnique({ where: { id: activity.channelId! }, select: { name: true, type: true } }),
+        ),
+      activity.messageId &&
+        // For a reaction this is the recipient's own message that was reacted to, not a
+        // message sent to them — named so, or its text reads like a request.
+        lookup(activity.actorAction === 'added_v2' ? 'theirMessageThatWasReactedTo' : 'message', async () => {
+          const message = await db.message.findUnique({
+            where: { messageId: activity.messageId! },
+            select: { content: true },
+          });
+          const text = message ? generatePlainTextContent(message.content || '') : '';
+          return text ? { contentText: text.slice(0, EVENT_MESSAGE_TEXT_LIMIT) } : null;
+        }),
+    ]);
+
     return {
-      status: 'classified',
-      classification: mappedClassification,
-      confidence: xor.confidence,
-      usedXor: true,
+      happened: EVENT_DESCRIPTIONS[activity.actorAction] ?? activity.actorAction.replace(/_/g, ' '),
+      actorAction: activity.actorAction,
+      actionSource: activity.actionSource,
+      recipient: { name: names.get(activity.userId) ?? null },
+      actor: {
+        name: names.get(activity.actorId) ?? null,
+        isRecipient: activity.actorId === activity.userId,
+      },
+      subject,
     };
   }
 

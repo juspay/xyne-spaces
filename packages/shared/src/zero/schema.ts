@@ -1111,6 +1111,7 @@ export const activityTable = table('activities')
     classification: enumeration<ActivityClassification>(),
     classificationConfidence: number().optional(),
     classificationJobType: enumeration<ActivityClassificationJobType>().optional(),
+    fallbackClassification: enumeration<ActivityClassification>().optional(),
     isRead: boolean(),
     isThreadActivity: boolean().optional(),
     createdAt: number(),

@@ -11,12 +11,14 @@ const MIN_INTERVAL_MS = 5000;
 const MAX_INTERVAL_MS = 15000;
 const BATCH_SIZE = 25;
 const MAX_RETRIES = config.activityClassification?.maxRetries ?? 2;
+const STALE_SWEEP_INTERVAL_MS = 60_000;
 
 class ActivityClassificationWorkerService {
   private isRunning = false;
   private currentInterval = MIN_INTERVAL_MS;
   private timeoutId?: NodeJS.Timeout;
   private retryCounts = new Map<string, number>();
+  private lastStaleSweepAt = 0;
 
   async start(): Promise<void> {
     if (this.isRunning) {
@@ -27,9 +29,8 @@ class ActivityClassificationWorkerService {
     this.isRunning = true;
     logger.info('[ActivityClassificationWorker] Started');
     if (!isJevConfigured()) {
-      // Every classification would come back "no answer" and the activities would sit in
-      // PENDING with nothing else to show for it — say so once, loudly.
-      logger.error('[ActivityClassificationWorker] JEV_API_KEY is not set: activities will stay PENDING');
+      // XOR can't answer without it, so every activity goes to the LLM, then its fallback.
+      logger.warn('[ActivityClassificationWorker] JEV_API_KEY is not set: XOR is skipped, the LLM classifies');
     }
     await this.resetProcessingOnStart();
     this.scheduleNextPoll();
@@ -58,16 +59,12 @@ class ActivityClassificationWorkerService {
   }
 
   private async pollAndProcess(): Promise<void> {
-    // One CAC read per poll: the on/off switch and the age window both live there, so either
-    // can change without a restart.
+    // The age window lives in CAC (activity_classification_max_age_days), read every poll.
+    // The XOR and LLM switches are read per activity, so they too change without a restart.
     const cac = await AgentsConfig.fetch();
-    if (!cac.activityClassificationXorEnabled) {
-      // Off: claim nothing, so activities stay PENDING exactly as they would with no worker.
-      this.currentInterval = MAX_INTERVAL_MS;
-      return;
-    }
-    // Only activities newer than this are classified (CAC activity_classification_max_age_days).
+    // Only activities newer than this are classified; older ones get their fallback label.
     const since = new Date(Date.now() - cac.activityClassificationMaxAgeDays * 24 * 60 * 60 * 1000);
+    await this.fileStaleActivities(since);
     const audienceActivities = await this.claimSpecialMentionAudienceActivities(since);
     if (audienceActivities.length > 0) {
       await this.processSpecialMentionAudienceActivities(audienceActivities);
@@ -113,6 +110,39 @@ class ActivityClassificationWorkerService {
     }
   }
 
+  /**
+   * Activities still PENDING_CLASSIFY past the age window (the worker was down or behind) get
+   * their fallback label at once instead of waiting forever, so Actionable + FYI stays = All.
+   * Runs at most once a minute.
+   */
+  private async fileStaleActivities(since: Date): Promise<void> {
+    if (Date.now() - this.lastStaleSweepAt < STALE_SWEEP_INTERVAL_MS) return;
+    this.lastStaleSweepAt = Date.now();
+    const stale = { classification: ActivityClassification.PENDING_CLASSIFY, createdAt: { lte: since } };
+    const [actionable, fyi] = await Promise.all([
+      db.activity.updateMany({
+        where: { ...stale, fallbackClassification: ActivityClassification.ACTIONABLE },
+        data: { classification: ActivityClassification.ACTIONABLE, classificationJobType: null },
+      }),
+      db.activity.updateMany({
+        where: {
+          ...stale,
+          OR: [
+            { fallbackClassification: null },
+            { fallbackClassification: { not: ActivityClassification.ACTIONABLE } },
+          ],
+        },
+        data: { classification: ActivityClassification.FYI, classificationJobType: null },
+      }),
+    ]);
+    if (actionable.count + fyi.count > 0) {
+      logger.warn('[ActivityClassificationWorker] Filed activities past the age window under their fallback label', {
+        actionable: actionable.count,
+        fyi: fyi.count,
+      });
+    }
+  }
+
   private async claimSingleActivities(since: Date): Promise<Activity[]> {
     return claimSingleActivitiesQuery(BATCH_SIZE, since);
   }
@@ -123,21 +153,9 @@ class ActivityClassificationWorkerService {
 
   private async processSingleActivity(activity: Activity): Promise<void> {
     try {
-      const result = await activityClassificationService.classifyActivity(activity.id);
-
-      if (result.status === 'classified' || result.status === 'skipped') {
-        await this.finalizeActivities([activity.id]);
-        return;
-      }
-
-      if (result.status === 'pending') {
-        await this.scheduleRetry([activity], result.reason ?? 'pending');
-        return;
-      }
-
-      if (result.status === 'error') {
-        await this.markPermanentFailure([activity], result.reason ?? 'error');
-      }
+      // Always ends with a label: XOR, the LLM or the fallback. Only a thrown error retries.
+      await activityClassificationService.classifyActivity(activity.id);
+      await this.finalizeActivities([activity.id]);
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error ?? 'unknown error'));
       logger.error('[ActivityClassificationWorker] Single activity failed', {
@@ -153,7 +171,7 @@ class ActivityClassificationWorkerService {
     if (activities.length === 0) return;
     const [first] = activities;
     if (!first.actionSourceId || !first.channelId) {
-      await this.markPermanentFailure(activities, 'missing_audience_metadata');
+      await this.fileUnderFallback(activities, 'missing_audience_metadata');
       return;
     }
 
@@ -161,27 +179,14 @@ class ActivityClassificationWorkerService {
     const recipientUserIds = activities.map(activity => activity.userId);
 
     try {
-      const result = await activityClassificationService.classifySpecialMentionAudience({
+      await activityClassificationService.classifySpecialMentionAudience({
         activityIds,
         messageId: first.actionSourceId,
         channelId: first.channelId,
         recipientUserIds,
       });
-
-      if (result.status === 'classified' || result.status === 'skipped') {
-        const retryKey = this.getAudienceRetryKey(activities);
-        await this.finalizeActivities(activityIds, retryKey ?? undefined);
-        return;
-      }
-
-      if (result.status === 'pending') {
-        await this.scheduleRetry(activities, result.reason ?? 'pending');
-        return;
-      }
-
-      if (result.status === 'error') {
-        await this.markPermanentFailure(activities, result.reason ?? 'error');
-      }
+      const retryKey = this.getAudienceRetryKey(activities);
+      await this.finalizeActivities(activityIds, retryKey ?? undefined);
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error ?? 'unknown error'));
       logger.error('[ActivityClassificationWorker] Audience classification failed', {
@@ -214,7 +219,7 @@ class ActivityClassificationWorkerService {
 
     const retryKey = this.getRetryKey(activities);
     if (!retryKey) {
-      await this.markPermanentFailure(activities, 'missing_retry_key');
+      await this.fileUnderFallback(activities, 'missing_retry_key');
       return;
     }
 
@@ -223,7 +228,7 @@ class ActivityClassificationWorkerService {
 
     if (attempts > MAX_RETRIES) {
       this.retryCounts.delete(retryKey);
-      await this.markPermanentFailure(activities, reason);
+      await this.fileUnderFallback(activities, reason);
       return;
     }
 
@@ -235,23 +240,29 @@ class ActivityClassificationWorkerService {
     });
   }
 
-  private async markPermanentFailure(activities: Activity[], reason: string): Promise<void> {
+  /** Retries ran out (or the row can't be classified): file it under its fallback label. */
+  private async fileUnderFallback(activities: Activity[], reason: string): Promise<void> {
     if (activities.length === 0) return;
     const retryKey = this.getRetryKey(activities);
     if (retryKey) {
       this.retryCounts.delete(retryKey);
     }
-    logger.warn('[ActivityClassificationWorker] Marking activities as ERROR', {
+    logger.warn('[ActivityClassificationWorker] Classification kept failing, filing under the fallback label', {
       count: activities.length,
       reason,
     });
-    await db.activity.updateMany({
-      where: { id: { in: activities.map(a => a.id) } },
-      data: {
-        classification: ActivityClassification.ERROR,
-        classificationJobType: null,
-      },
-    });
+    const isActionable = (a: Activity) => a.fallbackClassification === ActivityClassification.ACTIONABLE;
+    const groups: Array<[ActivityClassification, Activity[]]> = [
+      [ActivityClassification.ACTIONABLE, activities.filter(isActionable)],
+      [ActivityClassification.FYI, activities.filter(a => !isActionable(a))],
+    ];
+    for (const [classification, rows] of groups) {
+      if (rows.length === 0) continue;
+      await db.activity.updateMany({
+        where: { id: { in: rows.map(a => a.id) } },
+        data: { classification, classificationJobType: null },
+      });
+    }
   }
 
   private getRetryKey(activities: Activity[]): string | null {

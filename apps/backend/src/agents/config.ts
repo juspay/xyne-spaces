@@ -46,12 +46,14 @@ const DEFAULT_TICKET_DUPLICATE_JEV_THRESHOLD = 0.75;
 const DEFAULT_SUMMARY_TEMPLATE_SELECTION_XOR_ENABLED = false;
 const DEFAULT_CLASSIFICATION_XOR_ENABLED = false;
 const DEFAULT_PRIORITY_CLASSIFICATION_XOR_ENABLED = false;
-// Activity classification by Jev (services/activity/activityClassificationXor.ts).
+// Activity classification: XOR, then the LLM, then the activity's fallback label
+// (services/activity/activityClassificationXor.ts, activityClassificationLlm.ts).
 const DEFAULT_ACTIVITY_CLASSIFICATION_XOR_ENABLED = false;
 const DEFAULT_ACTIVITY_CLASSIFICATION_XOR_LOG_ENABLED = false;
 const DEFAULT_ACTIVITY_CLASSIFICATION_XOR_MIN_CONFIDENCE = 0.5;
 const DEFAULT_ACTIVITY_CLASSIFICATION_XOR_SKIP_THRESHOLD = 0.8;
 const DEFAULT_ACTIVITY_CLASSIFICATION_MAX_AGE_DAYS = 7;
+const DEFAULT_ACTIVITY_CLASSIFICATION_LLM_ENABLED = true;
 const DEFAULT_SUMMARISER_MODEL = 'glm-flash-experimental';
 const DEFAULT_ATTACHMENT_SUMMARISER_MODEL = 'kimi-latest';
 const DEFAULT_CLASSIFICATION_MODEL = 'glm-flash-experimental';
@@ -107,6 +109,7 @@ const CAC_KEYS = {
   activityClassificationXorMinConfidence: 'activity_classification_xor_min_confidence',
   activityClassificationXorSkipThreshold: 'activity_classification_xor_skip_threshold',
   activityClassificationMaxAgeDays: 'activity_classification_max_age_days',
+  activityClassificationLlmEnabled: 'activity_classification_llm_enabled',
   ticketBoardModel: 'ticket_board_model_name',
   releaseNotesGeneratorModel: 'release_notes_generator_model_name',
   releaseAiModel: 'release_ai_model_name',
@@ -167,16 +170,18 @@ export class AgentsConfig {
   public readonly classificationXorEnabled: boolean;
   /** Desk email priority is scored by XOR; the LLM only on no answer. Default false. */
   public readonly priorityClassificationXorEnabled: boolean;
-  /** Whether each Jev activity label is logged. Default false; failures are logged regardless. */
+  /** Whether each XOR activity answer is logged. Default false; LLM and fallback decisions are logged regardless. */
   public readonly activityClassificationXorLogEnabled: boolean;
-  /** Whether the worker classifies activities with Jev at all. Default false. */
+  /** Whether XOR is asked first. Default false: off, activities go to the LLM, then their fallback label. */
   public readonly activityClassificationXorEnabled: boolean;
-  /** Below this, Jev's pick is not trusted and the activity is filed as FYI. */
+  /** Below this, XOR is unsure and the LLM is asked instead. */
   public readonly activityClassificationXorMinConfidence: number;
-  /** SKIP deletes the activity, so it needs at least this confidence; below it, FYI. */
+  /** SKIP deletes the activity, so XOR needs at least this confidence; below it the LLM is asked. */
   public readonly activityClassificationXorSkipThreshold: number;
-  /** Only PENDING activities newer than this are classified; older ones are left as they are. */
+  /** Only PENDING_CLASSIFY activities newer than this are classified; older ones get their fallback label. */
   public readonly activityClassificationMaxAgeDays: number;
+  /** Whether the LLM is asked when XOR has no answer or is unsure. Default true. */
+  public readonly activityClassificationLlmEnabled: boolean;
   public readonly summariserModelName: string;
   public readonly attachmentSummariserModelName: string;
 
@@ -246,6 +251,7 @@ export class AgentsConfig {
     activityClassificationXorMinConfidence: number,
     activityClassificationXorSkipThreshold: number,
     activityClassificationMaxAgeDays: number,
+    activityClassificationLlmEnabled: boolean,
   ) {
     this.xyneAiTracingEnabled = xyneAiTracingEnabled;
     this.xyneAiMaskingEnabled = xyneAiMaskingEnabled;
@@ -286,6 +292,7 @@ export class AgentsConfig {
     this.activityClassificationXorMinConfidence = activityClassificationXorMinConfidence;
     this.activityClassificationXorSkipThreshold = activityClassificationXorSkipThreshold;
     this.activityClassificationMaxAgeDays = activityClassificationMaxAgeDays;
+    this.activityClassificationLlmEnabled = activityClassificationLlmEnabled;
   }
 
   /**
@@ -346,6 +353,7 @@ export class AgentsConfig {
       const activityClassificationXorMinConfidence = getValue<number>(CAC_KEYS.activityClassificationXorMinConfidence, DEFAULT_ACTIVITY_CLASSIFICATION_XOR_MIN_CONFIDENCE);
       const activityClassificationXorSkipThreshold = getValue<number>(CAC_KEYS.activityClassificationXorSkipThreshold, DEFAULT_ACTIVITY_CLASSIFICATION_XOR_SKIP_THRESHOLD);
       const activityClassificationMaxAgeDays = getValue<number>(CAC_KEYS.activityClassificationMaxAgeDays, DEFAULT_ACTIVITY_CLASSIFICATION_MAX_AGE_DAYS);
+      const activityClassificationLlmEnabled = getValue<boolean>(CAC_KEYS.activityClassificationLlmEnabled, DEFAULT_ACTIVITY_CLASSIFICATION_LLM_ENABLED);
       const summariserModelName = getValue<string>(CAC_KEYS.summariserModel, DEFAULT_SUMMARISER_MODEL);
       const attachmentSummariserModelName = getValue<string>(CAC_KEYS.attachmentSummariserModel, DEFAULT_ATTACHMENT_SUMMARISER_MODEL);
 
@@ -625,6 +633,7 @@ export class AgentsConfig {
         activityClassificationXorMinConfidence,
         activityClassificationXorSkipThreshold,
         activityClassificationMaxAgeDays,
+        activityClassificationLlmEnabled,
       );
     } catch (error) {
       logger.error('[Agents Config] Error fetching CAC config, using DEFAULTS:', error);
@@ -669,6 +678,7 @@ export class AgentsConfig {
         DEFAULT_ACTIVITY_CLASSIFICATION_XOR_MIN_CONFIDENCE,
         DEFAULT_ACTIVITY_CLASSIFICATION_XOR_SKIP_THRESHOLD,
         DEFAULT_ACTIVITY_CLASSIFICATION_MAX_AGE_DAYS,
+        DEFAULT_ACTIVITY_CLASSIFICATION_LLM_ENABLED,
       );
     }
   }
@@ -714,6 +724,7 @@ export class AgentsConfig {
       DEFAULT_ACTIVITY_CLASSIFICATION_XOR_MIN_CONFIDENCE,
       DEFAULT_ACTIVITY_CLASSIFICATION_XOR_SKIP_THRESHOLD,
       DEFAULT_ACTIVITY_CLASSIFICATION_MAX_AGE_DAYS,
+      DEFAULT_ACTIVITY_CLASSIFICATION_LLM_ENABLED,
     );
   }
 }

@@ -101,8 +101,8 @@ export class CanvasParticipantsSideEffectHandler extends BaseSideEffectHandler {
         actionSourceId,
         canvasId,
         actorId: this.ctx.userID,
-        // Share / role change / revoke is informational: All only, not Actionable or FYI.
-        classification: ActivityClassification.NONE,
+        // Fallback only — the worker classifies it (XOR → LLM) and uses this when both give no answer.
+        classification: ActivityClassification.FYI,
         ...(effectiveChannelId ? { channelId: effectiveChannelId } : {}),
       })),
     );
