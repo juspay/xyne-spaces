@@ -19,6 +19,7 @@ import DigitalTwinRecallTab from './tabs/DigitalTwinRecallTab';
 import DigitalTwinGraphTab from './tabs/DigitalTwinGraphTab';
 import DigitalTwinSettingsTab from './tabs/DigitalTwinSettingsTab';
 import DigitalTwinMetricsTab from './tabs/DigitalTwinMetricsTab';
+import DigitalTwinRepliesTab from './tabs/DigitalTwinRepliesTab';
 import { Pill } from '../library/shared/primitives/Pill';
 import { DIGITAL_TWIN_TABS, resolveDigitalTwinTab, type DigitalTwinTabId } from './digitalTwinTabs';
 
@@ -168,12 +169,17 @@ const DigitalTwin = (): ReactElement => {
           )}
 
           {activeTab === 'memories' && <DigitalTwinMemoriesTab />}
+          {activeTab === 'replies' && <DigitalTwinRepliesTab />}
           {activeTab === 'hot' && <DigitalTwinHotTab />}
           {activeTab === 'proposals' && <DigitalTwinProposalsTab />}
           {activeTab === 'recall' && <DigitalTwinRecallTab />}
           {activeTab === 'graph' && <DigitalTwinGraphTab />}
           {activeTab === 'metrics' && <DigitalTwinMetricsTab />}
           {activeTab === 'settings' && <DigitalTwinSettingsTab />}
+        </div>
+      ) : activeTab === 'replies' ? (
+        <div className='flex min-h-0 flex-1 flex-col overflow-auto no-scrollbar pb-6 pt-6'>
+          <DigitalTwinRepliesTab />
         </div>
       ) : (
         <div className='flex min-h-0 flex-1 flex-col overflow-auto no-scrollbar pb-6 pt-6'>
