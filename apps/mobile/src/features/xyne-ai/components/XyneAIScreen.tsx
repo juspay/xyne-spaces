@@ -27,7 +27,7 @@ import { useXyneAIChat } from '../hooks/useXyneAIChat';
 import { useXyneAISelection } from '../hooks/useXyneAISelection';
 import { useStableCallback } from '../hooks/useStableCallback';
 import { isBranched, turnsFromMessages, type ChatTurn } from '../model/assistantTurn';
-import { channelPick } from '../model/contextPicks';
+import { channelPick, oneLine } from '../model/contextPicks';
 import { firstName, greeting } from '../model/greeting';
 import { ConversationHistorySheet } from './ConversationHistorySheet';
 import { IconButton } from './IconButton';
@@ -90,7 +90,7 @@ export const XyneAIScreen = (): ReactElement => {
     conversationId
       ? {
           conversationId,
-          previewText: previewText.trim() || 'Message',
+          previewText: oneLine(previewText) || 'Message',
           senderId,
           attachmentIds: attachmentIds?.split(',') ?? [],
         }

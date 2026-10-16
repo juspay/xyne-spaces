@@ -9,7 +9,8 @@ const MAX_ATTACHED = 20;
 const MESSAGE_LABEL_MAX = 80;
 
 /** A label for a single-line pill: line breaks and runs of spaces would leave it blank or ragged. */
-export const oneLine = (value: string): string => value.replace(/\s+/g, ' ').trim();
+export const oneLine = (value: string): string =>
+  value.replace(/[\s\u200B-\u200D\u2060]+/g, ' ').trim();
 
 const plain = (value: string | undefined): string =>
   stripHtmlTags(value ?? '', HTML_TAG_OR_EMPTY).trim();

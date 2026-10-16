@@ -15,7 +15,7 @@ import {
   HeaderPill,
   HEADER_ICON_BUTTON_SIZE,
 } from '@/src/components/ui/header-icon-button';
-import { channelScopeParams } from '@/src/features/xyne-ai/model/askAIParams';
+import { channelScopeParams, messageScopeParams } from '@/src/features/xyne-ai/model/askAIParams';
 import { useConversationHeaderData } from '@/src/hooks/useConversationHeaderData';
 import { useQuery } from '@/src/hooks/useQuery';
 import { composerHtmlToPlainText } from '@/src/components/input-composer/utils/conversation-input.utils';
@@ -105,8 +105,9 @@ const ThreadHeaderV3: React.FC<ThreadHeaderV3Props> = ({ channelId, threadId, on
       params: {
         ...channelScopeParams(channel),
         conversationId: threadId,
-        previewText: composerHtmlToPlainText(rootMessage?.content ?? '').slice(0, 100) || 'Thread',
-        ...(rootMessage?.senderId && { senderId: rootMessage.senderId }),
+        ...(rootMessage
+          ? messageScopeParams(rootMessage, composerHtmlToPlainText)
+          : { previewText: 'Thread' }),
       },
     });
   }, [channel, rootMessage, router, threadId]);

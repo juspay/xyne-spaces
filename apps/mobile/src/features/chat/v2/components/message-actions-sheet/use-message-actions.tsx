@@ -45,7 +45,7 @@ import {
   getFirstImageAttachment,
 } from '@/src/utils/copyImageAttachment';
 import { TurnUpRightIcon, XyneAIStarIcon } from '@/src/components/icons';
-import { channelScopeParams } from '@/src/features/xyne-ai/model/askAIParams';
+import { channelScopeParams, messageScopeParams } from '@/src/features/xyne-ai/model/askAIParams';
 import { useChannel } from '@/src/hooks/useChannels';
 import type { ChatInputEditingMessage } from '@/src/components/input-composer/input-composer.types';
 
@@ -244,20 +244,17 @@ export const useMessageActions = ({
   const channel = useChannel(target?.channelId ?? '');
   const handleAskAI = useCallback(() => {
     if (!target || !message) return;
-    const plain = (context === 'channel' ? channelHtmlToPlainText : composerHtmlToPlainText)(
-      message.content,
-    );
     const attachmentIds = (message.attachments ?? []).map(({ id }) => id);
-    const attachmentLabel =
-      attachmentIds.length === 1 ? 'Attachment' : `${attachmentIds.length} Attachments`;
     closeActionSheet(() => {
       router.push({
         pathname: '/xyne-ai',
         params: {
           ...channelScopeParams(channel),
           conversationId: target.conversationId,
-          previewText: plain.slice(0, 100) || (attachmentIds.length > 0 ? attachmentLabel : ''),
-          senderId: message.senderId,
+          ...messageScopeParams(
+            message,
+            context === 'channel' ? channelHtmlToPlainText : composerHtmlToPlainText,
+          ),
           ...(attachmentIds.length > 0 && { attachmentIds: attachmentIds.join(',') }),
         },
       });
