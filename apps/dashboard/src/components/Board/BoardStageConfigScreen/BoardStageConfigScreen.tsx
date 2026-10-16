@@ -506,6 +506,35 @@ const LinearStageCard = ({
 };
 
 // ─── Main component ───────────────────────────────────────────────────────────
+// A read of a board's transitions issued right after a sync was observed returning no rows
+// for ~1.5s before the full set arrived (devqa: 5 sent, first read 0, all 5 on the next read).
+// A load retries on these delays when a read throws, or when it comes back empty within
+// RECENT_SYNC_WINDOW_MS of this client syncing that board (the first read is immediate). An
+// empty result otherwise means the board has no transitions and is accepted at once. If every
+// attempt throws, Save and form actions start a fresh load.
+const TRANSITIONS_LOAD_RETRY_DELAYS_MS = [0, 1000, 2000];
+const RECENT_SYNC_WINDOW_MS = 5_000;
+// boardId -> when this client last synced its transitions. Module-level so it survives the
+// screen unmounting (e.g. Back then Next straight after a save).
+const lastTransitionsSyncAt = new Map<string, number>();
+
+const wait = (ms: number): Promise<void> =>
+  ms > 0 ? new Promise(resolve => setTimeout(resolve, ms)) : Promise.resolve();
+
+/** One transition exactly as sent to (and persisted by) nonLinear.syncTransitions. */
+type SyncedTransition = {
+  id: string;
+  fromStageId: string | null;
+  toStageId: string;
+  formId?: string | null;
+  requiresApproval: boolean;
+  requestApprovalOnEntry: boolean;
+  visitSlaMode?: string;
+  fixedEtaHours?: number | null;
+  onReenter?: string;
+  approvers: Array<{ id: string; approverId: string; approverType: ApproverType }>;
+};
+
 const BoardStageConfigScreen = ({
   boardId,
   projectId,
@@ -679,12 +708,18 @@ const BoardStageConfigScreen = ({
     });
   }, []);
 
+  // Board settings follow the live board row (someone else's save updates them here), so they
+  // are not part of the unsaved-changes snapshot below; only this user's own toggles mark
+  // them edited.
+  const boardSettingsEditedRef = useRef(false);
+
   const handleBoardTypeToggle = useCallback(() => {
     if (isNonLinearToggleBlocked) {
       showNonLinearPrefillableUnsupportedToast();
       return;
     }
 
+    boardSettingsEditedRef.current = true;
     setBoardType(current =>
       current === BoardType.NON_LINEAR ? BoardType.DEFAULT : BoardType.NON_LINEAR,
     );
@@ -716,6 +751,10 @@ const BoardStageConfigScreen = ({
   const [isTransitionsLoading, setIsTransitionsLoading] = useState(false);
   const [showTransitionsLoadingNotice, setShowTransitionsLoadingNotice] = useState(false);
   const hasLoadedTransitions = useRef(false);
+  // True once a full server snapshot has been applied to the local transition maps.
+  // hasLoadedTransitions only tracks that the load effect has fired, so the save
+  // gates use this instead.
+  const transitionsSyncedRef = useRef(false);
 
   // ── Transition Metadata (non-linear boards) ─────────────────────────────────
   // Per-edge metadata keyed by "fromTempId->toTempId"
@@ -772,6 +811,12 @@ const BoardStageConfigScreen = ({
 
   const [stages, setStages] = useState<Stage[]>(defaultStages);
 
+  // Latest stages for async callbacks that resolve after their render closure is stale.
+  const stagesRef = useRef(stages);
+  useEffect(() => {
+    stagesRef.current = stages;
+  });
+
   const [nextTempId, setNextTempId] = useState(5);
   const [editingEtaId, setEditingEtaId] = useState<number | null>(null);
   const [etaValue, setEtaValue] = useState('');
@@ -781,6 +826,40 @@ const BoardStageConfigScreen = ({
   const handleGraphLayoutChange = useCallback((layout: TransitionGraphLayout | null) => {
     graphLayoutRef.current = layout;
   }, []);
+
+  // ── Unchanged-save detection ────────────────────────────────────────────────
+  // What Next would write for stages and transitions, as comparable strings. Next skips saving
+  // entirely when nothing differs from what was last loaded or saved: a no-op save still
+  // rewrites every transition and approver, and would overwrite changes someone else saved
+  // while this screen sat open. Board settings are tracked by boardSettingsEditedRef instead.
+  const stagesSnapshot = useMemo(() => JSON.stringify(stages), [stages]);
+  const transitionsSnapshot = useMemo(
+    () =>
+      JSON.stringify({
+        edges: [...transitionsByTempId]
+          .map(([fromTempId, targets]) => [fromTempId, [...targets].sort((a, b) => a - b)] as const)
+          .sort(([a], [b]) => a - b),
+        meta: [...transitionsMeta].sort(([a], [b]) => a.localeCompare(b)),
+      }),
+    [transitionsByTempId, transitionsMeta],
+  );
+  // Stages and transitions are snapshotted separately: form actions save transitions on
+  // their own, and must not mark unsaved stage edits as saved.
+  const savedStagesSnapshotRef = useRef<string | null>(null);
+  const savedTransitionsSnapshotRef = useRef<string | null>(null);
+  // Set when a load or save completes; the snapshot is taken on the next render, once the
+  // state that load or save set has been applied.
+  const snapshotPendingRef = useRef({ stages: false, transitions: false });
+  useEffect(() => {
+    if (snapshotPendingRef.current.stages) {
+      savedStagesSnapshotRef.current = stagesSnapshot;
+      snapshotPendingRef.current.stages = false;
+    }
+    if (snapshotPendingRef.current.transitions) {
+      savedTransitionsSnapshotRef.current = transitionsSnapshot;
+      snapshotPendingRef.current.transitions = false;
+    }
+  });
 
   const savedGraphLayout = useMemo((): TransitionGraphLayout | null => {
     const saved = getBoardMetadata(board)[TRANSITION_GRAPH_LAYOUT_KEY] as
@@ -857,6 +936,7 @@ const BoardStageConfigScreen = ({
     if (!isOpen) {
       hasInitializedStages.current = false;
       hasLoadedTransitions.current = false;
+      transitionsSyncedRef.current = false;
     }
   }, [isOpen]);
 
@@ -928,29 +1008,133 @@ const BoardStageConfigScreen = ({
     [],
   );
 
-  const reloadTransitionsFromServer = useCallback(async (): Promise<boolean> => {
-    if (!boardId || !stages.some(s => s.id)) {
-      return false;
-    }
+  const readBoardTransitions = useCallback(
+    (id: string) =>
+      zero.run(queries.getStageTransitionsByBoardId({ boardId: id }), { type: 'complete' }),
+    [zero],
+  );
 
-    setIsTransitionsLoading(true);
-    try {
-      const transitions = await zero.run(queries.getStageTransitionsByBoardId({ boardId }), {
-        type: 'complete',
-      });
-      applyLoadedTransitions(transitions, stages);
-      return true;
-    } catch (err) {
-      logger.error(LogEvent.FRONTEND_ERROR, {
-        type: 'migrated_console_error',
-        message: String('Failed to load stage transitions:'),
-        error: err,
-      });
-      return false;
-    } finally {
-      setIsTransitionsLoading(false);
+  // One load at a time per board: Save, form actions and the open effect can all ask for one.
+  const transitionsLoadRef = useRef<{ boardId: string; promise: Promise<boolean> } | null>(null);
+
+  const reloadTransitionsFromServer = useCallback((): Promise<boolean> => {
+    if (!boardId || !stagesRef.current.some(s => s.id)) {
+      return Promise.resolve(false);
     }
-  }, [applyLoadedTransitions, boardId, stages, zero]);
+    if (transitionsLoadRef.current?.boardId === boardId) return transitionsLoadRef.current.promise;
+
+    // One retry loop covers both a read that throws and a read that comes back empty: an empty
+    // result can be a just-synced board whose rows have not arrived yet, and applying it would
+    // blank the editor (and a later save would delete everything). An empty result is only
+    // accepted on the last attempt, as a board that really has no transitions.
+    const load = async (): Promise<boolean> => {
+      // Save stays blocked while this runs (isTransitionsLoading).
+      setIsTransitionsLoading(true);
+      try {
+        let loaded: Awaited<ReturnType<typeof readBoardTransitions>> | null = null;
+        const justSynced =
+          Date.now() - (lastTransitionsSyncAt.get(boardId) ?? 0) < RECENT_SYNC_WINDOW_MS;
+        for (const [attempt, delayMs] of TRANSITIONS_LOAD_RETRY_DELAYS_MS.entries()) {
+          await wait(delayMs);
+          try {
+            loaded = await readBoardTransitions(boardId);
+          } catch (err) {
+            logger.error(LogEvent.FRONTEND_ERROR, {
+              type: 'migrated_console_error',
+              message: String('Failed to load stage transitions:'),
+              error: err,
+            });
+            continue;
+          }
+          if (loaded.length > 0 || !justSynced) {
+            if (loaded.length > 0 && attempt > 0) {
+              logger.info(LogEvent.FRONTEND_ERROR, {
+                type: 'stage_transitions_load_read_lagged',
+                message: `Board ${boardId}: transitions load returned rows only on attempt ${attempt + 1}`,
+                boardId,
+                got: loaded.length,
+              });
+            }
+            break;
+          }
+        }
+        // Every attempt threw: leave the maps untouched; Save and form actions start a new load.
+        if (!loaded) return false;
+        applyLoadedTransitions(loaded, stagesRef.current);
+        transitionsSyncedRef.current = true;
+        // Only transitions: a load can finish after stage edits (made during the load, or
+        // before a Save that restarted it), which must stay unsaved.
+        snapshotPendingRef.current.transitions = true;
+        return true;
+      } finally {
+        setIsTransitionsLoading(false);
+        if (transitionsLoadRef.current?.promise === promise) transitionsLoadRef.current = null;
+      }
+    };
+
+    const promise = load();
+    transitionsLoadRef.current = { boardId, promise };
+    return promise;
+  }, [applyLoadedTransitions, boardId, readBoardTransitions]);
+
+  // After a confirmed sync the server holds exactly what was sent, so the local maps are
+  // rebuilt from that payload rather than refetched — a refetch right after a form action was
+  // coming back without the board's transitions and blanked the editor even though the save
+  // had persisted.
+  const applySyncedTransitions = useCallback(
+    (synced: SyncedTransition[]) => {
+      applyLoadedTransitions(
+        synced.map(t => ({
+          id: t.id,
+          fromStageId: t.fromStageId,
+          toStageId: t.toStageId,
+          formId: t.formId ?? null,
+          requiresApproval: t.requiresApproval,
+          // Mirrors the server's coercion in nonLinear.syncTransitions.
+          requestApprovalOnEntry: t.requestApprovalOnEntry && t.requiresApproval,
+          visitSlaMode: (t.visitSlaMode as VisitSlaMode | undefined) ?? null,
+          fixedEtaHours: t.fixedEtaHours ?? null,
+          onReenter: (t.onReenter as ReenterMode | undefined) ?? null,
+          transitionApprovers: t.approvers.map(a => ({
+            approverType: a.approverType,
+            userId: a.approverType === ApproverType.ROLE ? null : a.approverId,
+            roleId: a.approverType === ApproverType.ROLE ? a.approverId : null,
+          })),
+        })),
+        stagesRef.current,
+      );
+
+      // Edges touching a stage that has not been saved yet cannot be synced (no stage id),
+      // so they are absent from `synced`; keep them on screen until the board is saved.
+      const unsavedTempIds = new Set(stagesRef.current.filter(s => !s.id).map(s => s.tempId));
+      const unsavedEdges = [...transitionsByTempId].flatMap(([fromTempId, targets]) =>
+        [...targets]
+          .filter(toTempId => unsavedTempIds.has(fromTempId) || unsavedTempIds.has(toTempId))
+          .map(toTempId => [fromTempId, toTempId] as const),
+      );
+      if (unsavedEdges.length > 0) {
+        setTransitionsByTempId(prev => {
+          const next = new Map(prev);
+          for (const [fromTempId, toTempId] of unsavedEdges) {
+            next.set(fromTempId, new Set(next.get(fromTempId) ?? []).add(toTempId));
+          }
+          return next;
+        });
+        setTransitionsMeta(prev => {
+          const next = new Map(prev);
+          for (const [fromTempId, toTempId] of unsavedEdges) {
+            const key = `${fromTempId}->${toTempId}`;
+            const meta = transitionsMeta.get(key);
+            if (meta) next.set(key, meta);
+          }
+          return next;
+        });
+      }
+      transitionsSyncedRef.current = true;
+      snapshotPendingRef.current.transitions = true;
+    },
+    [applyLoadedTransitions, transitionsByTempId, transitionsMeta],
+  );
 
   useEffect(() => {
     if (!isOpen) {
@@ -1081,6 +1265,8 @@ const BoardStageConfigScreen = ({
       }
     });
     setStages(loadedStages);
+    // The stages as loaded from the DB are the saved baseline for the unchanged-save check.
+    snapshotPendingRef.current.stages = true;
     setNextTempId(loadedStages.length + 1);
   }, [board, boardStages, formMap]);
 
@@ -1668,8 +1854,21 @@ const BoardStageConfigScreen = ({
       stageIdLookup: Record<string, string> = {},
       metaOverrides: Map<string, Partial<TransitionMeta>> = new Map(),
       transitionOverrides?: Map<number, Set<number>>,
-    ): Promise<void> => {
-      if (!boardId) return;
+    ): Promise<SyncedTransition[]> => {
+      if (!boardId) return [];
+
+      // syncTransitions deletes every board transition before re-inserting, so
+      // never run it against an unloaded or mid-reload local map.
+      if (isTransitionsLoading || (stages.some(s => s.id) && !transitionsSyncedRef.current)) {
+        const message = 'Stage transitions are still loading; save again once loading finishes.';
+        logger.warn(LogEvent.FRONTEND_ERROR, {
+          type: 'transition_sync_skipped_not_loaded',
+          message,
+        });
+        // A previous load may have failed for good; start another so a retry can succeed.
+        void reloadTransitionsFromServer();
+        throw new Error(message);
+      }
 
       const resolvedStageIds: Record<string, string> = { ...stageIdLookup };
       for (const stage of stages) {
@@ -1736,7 +1935,7 @@ const BoardStageConfigScreen = ({
         );
       }
 
-      const transitionsWithIds = desiredTransitions.map(t => ({
+      const transitionsWithIds: SyncedTransition[] = desiredTransitions.map(t => ({
         id: t.transitionId ?? uuidv4(),
         fromStageId: t.fromStageId ?? null,
         toStageId: t.toStageId,
@@ -1768,8 +1967,24 @@ const BoardStageConfigScreen = ({
       if (syncRes?.type === 'error') {
         throw new Error(syncRes.error?.message ?? 'Failed to sync stage transitions');
       }
+      // Only a non-empty sync can be followed by a misleadingly empty read; after a sync that
+      // left the board with no transitions, an empty read is the truth and needs no retry.
+      if (transitionsWithIds.length > 0) {
+        lastTransitionsSyncAt.set(boardId, Date.now());
+      } else {
+        lastTransitionsSyncAt.delete(boardId);
+      }
+      return transitionsWithIds;
     },
-    [boardId, stages, transitionsByTempId, transitionsMeta, zero],
+    [
+      boardId,
+      stages,
+      transitionsByTempId,
+      transitionsMeta,
+      isTransitionsLoading,
+      reloadTransitionsFromServer,
+      zero,
+    ],
   );
 
   const persistEdgeTransitionForm = useCallback(
@@ -1802,12 +2017,10 @@ const BoardStageConfigScreen = ({
       targets.add(toTempId);
       edgeTransitions.set(fromTempId, targets);
 
-      await syncStageTransitions({}, metaOverride, edgeTransitions);
-      hasLoadedTransitions.current = false;
-      await reloadTransitionsFromServer();
+      applySyncedTransitions(await syncStageTransitions({}, metaOverride, edgeTransitions));
     },
     [
-      reloadTransitionsFromServer,
+      applySyncedTransitions,
       stages,
       syncStageTransitions,
       transitionsByTempId,
@@ -2031,9 +2244,8 @@ const BoardStageConfigScreen = ({
         allEdgeTransitions.set(pair.fromTempId, targets);
       });
       void syncStageTransitions({}, metaOverrides, allEdgeTransitions)
-        .then(async () => {
-          hasLoadedTransitions.current = false;
-          await reloadTransitionsFromServer();
+        .then(synced => {
+          applySyncedTransitions(synced);
           toast.success(`Form "${formMap.get(formId) ?? 'Form'}" attached`);
         })
         .catch(() => toast.error('Failed to attach form'));
@@ -2043,7 +2255,7 @@ const BoardStageConfigScreen = ({
       formMap,
       syncStageTransitions,
       transitionsByTempId,
-      reloadTransitionsFromServer,
+      applySyncedTransitions,
       stages,
     ],
   );
@@ -2105,9 +2317,7 @@ const BoardStageConfigScreen = ({
           targets.add(pair.toTempId);
           allEdgeTransitions.set(pair.fromTempId, targets);
         });
-        await syncStageTransitions({}, metaOverrides, allEdgeTransitions);
-        hasLoadedTransitions.current = false;
-        await reloadTransitionsFromServer();
+        applySyncedTransitions(await syncStageTransitions({}, metaOverrides, allEdgeTransitions));
         setIsEdgeFormOpen(false);
         setEdgeFormTarget(null);
         setEdgeFormAllPairs(null);
@@ -2128,7 +2338,7 @@ const BoardStageConfigScreen = ({
       updateTransitionMeta,
       syncStageTransitions,
       transitionsByTempId,
-      reloadTransitionsFromServer,
+      applySyncedTransitions,
       stages,
     ],
   );
@@ -2137,8 +2347,33 @@ const BoardStageConfigScreen = ({
   const handleSave = useCallback(async () => {
     if (!boardId) return;
 
-    if (isTransitionsLoading || (stages.some(s => s.id) && !hasLoadedTransitions.current)) {
+    if (isTransitionsLoading || (stages.some(s => s.id) && !transitionsSyncedRef.current)) {
+      logger.warn(LogEvent.FRONTEND_ERROR, {
+        type: 'board_save_blocked_transitions_loading',
+        message: 'Save blocked while stage transitions are unloaded or reloading.',
+      });
+      // A previous load may have failed for good; start another so the next Save can go through.
+      void reloadTransitionsFromServer();
       setShowTransitionsLoadingNotice(true);
+      return;
+    }
+
+    // Nothing edited since the last load or save: move on without writing anything. The graph
+    // only reports a layout once a node has been dragged, so any layout counts as an edit.
+    const hasUnsavedChanges =
+      savedStagesSnapshotRef.current !== stagesSnapshot ||
+      savedTransitionsSnapshotRef.current !== transitionsSnapshot ||
+      boardSettingsEditedRef.current ||
+      !!graphLayoutRef.current;
+    if (!hasUnsavedChanges) {
+      hasInitializedStages.current = false;
+      if (onNext) {
+        onNext();
+      } else {
+        toast.info('No changes to save');
+        onSave?.();
+        onClose();
+      }
       return;
     }
 
@@ -2263,9 +2498,11 @@ const BoardStageConfigScreen = ({
       } else {
         // Sync stage transitions for all board types
         try {
-          await syncStageTransitions(stageIds);
-          hasLoadedTransitions.current = false;
-          await reloadTransitionsFromServer();
+          applySyncedTransitions(await syncStageTransitions(stageIds));
+          snapshotPendingRef.current = { stages: true, transitions: true };
+          boardSettingsEditedRef.current = false;
+          // The dragged layout is saved; only a new drag should count as an edit again.
+          graphLayoutRef.current = undefined;
           toast.success('Board stages updated successfully');
           hasInitializedStages.current = false;
           if (onNext) {
@@ -2308,7 +2545,10 @@ const BoardStageConfigScreen = ({
     showNextStageFormInTicketDetails,
     boardType,
     syncStageTransitions,
+    applySyncedTransitions,
     reloadTransitionsFromServer,
+    stagesSnapshot,
+    transitionsSnapshot,
     isTransitionsLoading,
     transitionsByTempId,
     confirm,
@@ -2421,9 +2661,10 @@ const BoardStageConfigScreen = ({
               {/* Right: toggle switch */}
               <ToggleSwitch
                 checked={slaPolicyType === 'priority'}
-                onToggle={() =>
-                  setSlaPolicyType(slaPolicyType === 'priority' ? 'stages' : 'priority')
-                }
+                onToggle={() => {
+                  boardSettingsEditedRef.current = true;
+                  setSlaPolicyType(slaPolicyType === 'priority' ? 'stages' : 'priority');
+                }}
                 trackName='toggle_priority_sla'
               />
             </div>
@@ -2451,7 +2692,10 @@ const BoardStageConfigScreen = ({
                 </div>
                 <ToggleSwitch
                   checked={showNextStageFormInTicketDetails}
-                  onToggle={() => setShowNextStageFormInTicketDetails(value => !value)}
+                  onToggle={() => {
+                    boardSettingsEditedRef.current = true;
+                    setShowNextStageFormInTicketDetails(value => !value);
+                  }}
                   trackName='toggle_next_stage_form_ticket_details'
                 />
               </div>
