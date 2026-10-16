@@ -1200,7 +1200,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       }
 
       if (serverType === "agent-tools" && AGENT_TOOL_SLUGS.has(tool)) {
-        const draftOnly = applyToDraft === true && tool === "create-agent";
+        const draftOnly = applyToDraft === true && (tool === "create-agent" || tool === "update-agent");
         const outcome = draftOnly
           ? { ok: true as const, message: "Agent setup updated" }
           : await applyAgentToolAction(tool, params, writeClawUserId);

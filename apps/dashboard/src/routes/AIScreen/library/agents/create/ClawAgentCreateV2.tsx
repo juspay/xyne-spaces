@@ -12,11 +12,12 @@ import { cn } from '@/utils/classNames';
 import { PencilEditLine } from '@xyne/icons';
 import { ChevronLeft, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button/index';
+import { Popover } from '@/components/ui/Popover';
+import { AgentColorRow } from './AgentColorRow';
 import { useAuth } from '@/hooks/useAuth';
 import { useAgentNameCheck } from '@/hooks/useAgentNameCheck';
 import { useCreateClawAgent } from '@/hooks/useCreateClawAgent';
 import {
-  COLORS,
   INITIAL_WIZARD_STATE,
   effectiveSlug,
   slugify,
@@ -65,6 +66,8 @@ interface ClawAgentCreateV2Props {
   busy?: boolean;
   instructionsPatchNonce?: number;
   hideBack?: boolean;
+  hideSubmit?: boolean;
+  registerSave?: (save: ((options?: { quiet?: boolean }) => Promise<void>) | null) => void;
 }
 
 const ClawAgentCreateV2 = ({
@@ -74,6 +77,8 @@ const ClawAgentCreateV2 = ({
   busy = false,
   instructionsPatchNonce = 0,
   hideBack = false,
+  hideSubmit = false,
+  registerSave,
 }: ClawAgentCreateV2Props = {}): ReactElement => {
   const isEdit = agent !== undefined;
   const navigate = useNavigate();
@@ -127,10 +132,7 @@ const ClawAgentCreateV2 = ({
 
   const leavePath = isEdit ? `${libraryPath}/agent/${agent.slug}?tab=persona` : libraryPath;
 
-  const cycleColor = (): void => {
-    const index = (COLORS as readonly string[]).indexOf(state.color);
-    update({ color: COLORS[(index + 1) % COLORS.length] ?? COLORS[0] });
-  };
+  const [colorOpen, setColorOpen] = useState(false);
 
   const slug = effectiveSlug(state);
   const nameCheck = useAgentNameCheck(isEdit ? '' : state.name.trim(), slug);
@@ -141,7 +143,7 @@ const ClawAgentCreateV2 = ({
   const edited = savedComparable === null || comparable(state) !== savedComparable;
 
   const createMutation = useCreateClawAgent();
-  const saveMutation = useSaveClawAgent(agent);
+  const saveMutation = useSaveClawAgent(agent, { redirectOnSuccess: !registerSave });
 
   const errors = useMemo<DraftErrors>(() => {
     const next: DraftErrors = {};
@@ -161,6 +163,32 @@ const ClawAgentCreateV2 = ({
         ...(nameCheck.nameError ? { name: nameCheck.nameError } : {}),
         ...(nameCheck.slugError ? { slug: nameCheck.slugError } : {}),
       };
+
+  const liveRef = useRef({ state, errors });
+  liveRef.current = { state, errors };
+
+  const { save: saveAgent } = saveMutation;
+  const saveFromForm = useCallback(
+    async (options?: { quiet?: boolean }): Promise<void> => {
+      const { state: current, errors: currentErrors } = liveRef.current;
+      if (Object.keys(currentErrors).length > 0) {
+        if (!options?.quiet) {
+          setShowErrors(true);
+          scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+        throw new Error('Fix the highlighted fields before saving this agent.');
+      }
+      setShowErrors(false);
+      await saveAgent(current, options);
+    },
+    [saveAgent],
+  );
+
+  useEffect(() => {
+    if (!registerSave) return;
+    registerSave(saveFromForm);
+    return (): void => registerSave(null);
+  }, [registerSave, saveFromForm]);
 
   const handleSubmit = (): void => {
     if (Object.keys(errors).length > 0) {
@@ -209,21 +237,51 @@ const ClawAgentCreateV2 = ({
             )}
 
             <div className='flex w-full items-start gap-4'>
-              <button
-                type='button'
-                onClick={cycleColor}
-                aria-label='Change agent colour'
-                title='Change agent colour'
-                data-track-category='Claw Agents'
-                data-track-name='Create agent v2: cycle colour'
-                className='shrink-0 rounded-xl transition-transform hover:scale-105 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
+              <Popover
+                open={colorOpen}
+                onOpenChange={setColorOpen}
+                side='bottom'
+                align='start'
+                sideOffset={8}
+                trigger={
+                  <button
+                    type='button'
+                    aria-label='Change agent colour'
+                    aria-haspopup='dialog'
+                    aria-expanded={colorOpen}
+                    data-track-category='Claw Agents'
+                    data-track-name='Create agent v2: open colour picker'
+                    className='group relative shrink-0 rounded-xl transition-transform hover:scale-105 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
+                  >
+                    <LibraryIconTile
+                      name={state.name || 'Agent'}
+                      color={state.color || '#6366f1'}
+                      size='lg'
+                    />
+                    <span
+                      aria-hidden
+                      className={cn(
+                        'absolute -bottom-1 -right-1 flex size-5 items-center justify-center rounded-full border border-border bg-background text-muted-foreground opacity-0 shadow-sm transition-opacity',
+                        'group-hover:opacity-100 group-focus-visible:opacity-100',
+                        colorOpen && 'opacity-100',
+                      )}
+                    >
+                      <PencilEditLine className='size-3' />
+                    </span>
+                  </button>
+                }
               >
-                <LibraryIconTile
-                  name={state.name || 'Agent'}
-                  color={state.color || '#6366f1'}
-                  size='lg'
-                />
-              </button>
+                <div className='flex flex-col gap-2 p-3'>
+                  <p className='text-xs font-medium text-muted-foreground'>Colour</p>
+                  <AgentColorRow
+                    color={state.color || '#6366f1'}
+                    onChange={next => {
+                      update({ color: next });
+                      setColorOpen(false);
+                    }}
+                  />
+                </div>
+              </Popover>
 
               <div className='flex min-w-0 flex-1 flex-col gap-1.5'>
                 <div className='flex w-full items-center gap-2'>
@@ -425,7 +483,7 @@ const ClawAgentCreateV2 = ({
             )}
 
             <div className='mt-5 flex w-full items-center justify-end gap-3'>
-              {edited && (
+              {edited && !hideSubmit && (
                 <Button
                   onClick={handleSubmit}
                   disabled={busy || Object.keys(errors).length > 0}
@@ -434,7 +492,7 @@ const ClawAgentCreateV2 = ({
                   data-track-category='Claw Agents'
                   data-track-name={`Create agent v2: ${isEdit ? 'save' : 'create'}`}
                 >
-                  {isEdit ? 'Save' : 'Create agent'}
+                  {isEdit ? 'Save' : 'Save agent'}
                 </Button>
               )}
             </div>
