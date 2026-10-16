@@ -15,7 +15,6 @@ import { MessageAttachmentsVespaHandler } from '../tables/message-attachments-ha
 import { ChannelStatsVespaHandler } from '../tables/channel-stats-handler';
 import { FormEntityValuesVespaHandler } from '../tables/form-entity-values-handler';
 import { AppsVespaHandler } from '../tables/apps-handler';
-import { ReposVespaHandler } from '../tables/sdlc-handlers';
 /**
  * Factory for getting the appropriate Vespa handler for a given table.
  * 
@@ -73,10 +72,6 @@ export class VespaHandlerFactory {
       // xyne-apps catalog
       case 'apps':
         return new AppsVespaHandler(ctx);
-
-      // SDLC Hub search: a deleted repository (other changes: side effects)
-      case 'repos':
-        return new ReposVespaHandler(ctx);
 
       // Default: no Vespa jobs for unhandled tables
       default:
