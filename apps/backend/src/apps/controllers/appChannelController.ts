@@ -8,7 +8,10 @@ import { channelsDeskOf } from '@/channelsDesk/desk';
 import { ChannelController } from '@/controllers/channelController';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
+import { AppError } from '@/middleware/errorHandler';
+import { addChannelParticipants, type AddedChannelParticipant } from '@/services/channelParticipantsService';
 import { ChannelFieldError, prepareChannelFields, writeChannelFields } from '@/services/channelFieldService';
+import { ChannelParticipantsSideEffectHandler } from '@/zero/side-effects/tables/channel-participants-handler';
 import { logger } from '@/utils/logger';
 import { GuestError } from '../core/guestUtils';
 import { findMembers, findProject } from '../utils/channelUtils';
@@ -49,6 +52,12 @@ const AddParticipantsBodySchema = z
   .refine((body) => body.adminEmails.length + body.memberEmails.length > 0, {
     message: 'Give at least one email in adminEmails or memberEmails',
   });
+
+const ADD_PARTICIPANTS_ERROR_CODES: Record<number, string> = {
+  400: 'VALIDATION_FAILED',
+  403: 'FORBIDDEN',
+  404: 'CHANNEL_NOT_FOUND',
+};
 
 const NO_DESK = { error: 'This app has no Channels desk yet; an admin links one in Desks.', code: 'NO_DESK' };
 const ON_OTHER_DESK = { error: 'This channel is already on another desk.', code: 'CHANNEL_ON_OTHER_DESK' };
@@ -166,40 +175,77 @@ export class AppChannelController {
       const adminIds = await findMembers(app, adminEmails);
       const memberIds = await findMembers(app, memberEmails);
 
-      const added: string[] = [];
+      const added: AddedChannelParticipant[] = [];
       const alreadyMembers: string[] = [];
       for (const [userIds, role] of [
         [adminIds, ChannelRole.ADMIN],
         [memberIds, ChannelRole.MEMBER],
       ] as const) {
         if (userIds.length === 0) continue;
-        const { body } = await callController(
-          {
-            method: 'post',
-            path: '/channel/participants',
-            controller: channelController.addChannelParticipants,
-            mapBody: () => ({ channelId, userIds, role }),
-          },
-          req,
-        );
-        const result = body as { added: string[]; alreadyMembers: string[] };
+        const result = await addChannelParticipants({
+          channelId,
+          actorId: app.botUserId,
+          actorWorkspaceRole: req.user!.role,
+          workspaceId: app.workspaceId,
+          userIds,
+          role,
+        });
         added.push(...result.added);
         alreadyMembers.push(...result.alreadyMembers);
       }
-      res.status(added.length > 0 ? 201 : 200).json({ channelId, added, alreadyMembers });
+
+      if (added.length > 0) {
+        await this.announceAdded(req, channelId, added);
+      }
+      res.status(added.length > 0 ? 201 : 200).json({
+        channelId,
+        added: added.map(({ userId }) => userId),
+        alreadyMembers,
+      });
     } catch (error) {
       if (error instanceof GuestError) {
         res.status(error.status).json({ error: error.message, code: error.code });
         return;
       }
-      if (error instanceof SdkApiError && error.status < 500) {
-        res.status(error.status).json({ error: error.message, code: error.code.toUpperCase() });
+      if (error instanceof AppError && error.statusCode < 500) {
+        res.status(error.statusCode).json({ error: error.message, code: ADD_PARTICIPANTS_ERROR_CODES[error.statusCode] ?? 'BAD_REQUEST' });
         return;
       }
       logger.error('[APP-CHANNEL] Add participants failed:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   };
+
+  /** The "X was added by Y" channel message, then the participants side effects (sync, notifications). */
+  private async announceAdded(req: Request, channelId: string, added: AddedChannelParticipant[]): Promise<void> {
+    const bot = req.user!;
+    try {
+      await channelController.sendAddAndRemoveParticipantsSystemMessage(
+        channelId,
+        added.map(({ userId, userName }) => ({ userId, userName })),
+        { id: bot.id, name: bot.name },
+        'participants_added',
+      );
+    } catch (error) {
+      logger.error('[APP-CHANNEL] Failed to post add-people system message', {
+        error: (error instanceof Error ? error.message : String(error)).replace(/\n|\r/g, ' '),
+      });
+    }
+    const handler = new ChannelParticipantsSideEffectHandler({
+      userID: bot.id,
+      workspaceId: bot.workspaceId,
+      role: bot.role,
+      orgRole: bot.orgRole,
+      memberId: bot.memberId,
+    });
+    await Promise.all(
+      added.map((participant) =>
+        handler
+          .onInsert({ entityId: participant.participantId, entityType: 'channel_participants', operation: 'insert' })
+          .catch((err) => logger.error('Side-effect handler error: channel_participants onInsert', err)),
+      ),
+    );
+  }
 
   /**
    * Set the fields of a channel the app's bot is in, and put it on the app's Channels desk or take it off
