@@ -220,9 +220,31 @@ class VersionReleaseMappingService {
     // once per PR.
     const boardApplications = await prisma.application.findMany({
       where: { mainReleaseBoardId },
+      include: { repo: { select: { url: true, canonicalUrl: true } } },
     });
 
+    // Service regexes only see file paths, so a PR in another repository with the
+    // same layout would match them. Only the release's own repository counts.
+    const releaseRepo = boardApplications[0]?.repo;
+    const releaseRepoUrl = releaseRepo ? releaseRepo.canonicalUrl || releaseRepo.url : null;
+    const releaseRepoKey = releaseRepoUrl ? parseBitbucketRepoUrl(releaseRepoUrl) : null;
+    const isReleaseRepo = (repositoryUrl: string): boolean => {
+      const prRepo = parseBitbucketRepoUrl(repositoryUrl);
+      return (
+        !!releaseRepoKey &&
+        !!prRepo &&
+        prRepo.projectKey.toUpperCase() === releaseRepoKey.projectKey.toUpperCase() &&
+        prRepo.repoSlug.toLowerCase() === releaseRepoKey.repoSlug.toLowerCase()
+      );
+    };
+
     for (const pr of pullRequests) {
+      if (!isReleaseRepo(pr.repositoryUrl)) {
+        logger.info(
+          `[VersionReleaseMapping] skipped PR ${pr.prUrl}: not in the release repository of board ${mainReleaseBoardId}`,
+        );
+        continue;
+      }
       const diffContext = await this.getPullRequestDiffContext(pr);
       if (!diffContext || diffContext.filePaths.length === 0) continue;
 

@@ -4,8 +4,11 @@ import {
   SDLC_HUB_ITEM_FLAT_RELATION,
   SDLC_HUB_ITEM_RELATION,
   SDLC_MEMBERSHIP_RELATION,
+  SDLC_RELEASE_CONFIG_RELATION,
   SDLC_STRUCTURAL_RELATIONS,
   SDLC_TRACK_MEMBERSHIP_RELATION,
+  OrgRole,
+  WorkspaceRole,
   type Schema,
 } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
@@ -40,6 +43,12 @@ export class SdlcEntityLinksACL extends BaseACL<'sdlc_entity_links'> {
         'sdlc_entity_links',
       );
     }
+    // A release config is written by project.saveReleaseBoardConfig, which checks
+    // release-manage access; the writer must also be in that hub, or a workspace admin.
+    if (args.relationType === SDLC_RELEASE_CONFIG_RELATION) {
+      await this.assertHubMemberOrAdmin(args.channelId, tx);
+      return;
+    }
     // Track membership is structure too, but sdlc.createTrack writes it through this
     // path, so it is gated rather than refused: the writer must be in that hub.
     if (args.relationType === SDLC_TRACK_MEMBERSHIP_RELATION) {
@@ -71,6 +80,13 @@ export class SdlcEntityLinksACL extends BaseACL<'sdlc_entity_links'> {
       throw new MutationACLError('SDLC entity link does not exist', 'sdlc_entity_links');
     }
     assertWorkspaceMatch(this.ctx, row.workspaceId, 'sdlc_entity_links');
+    // A release config is re-pointed or removed with its main release board, by a
+    // member of the hub that owns it or a workspace admin. The link API still refuses
+    // it as structural.
+    if (row.relationType === SDLC_RELEASE_CONFIG_RELATION) {
+      await this.assertHubMemberOrAdmin(row.channelId ?? '', tx);
+      return;
+    }
     // Folder edges follow an item whenever it is moved or unfiled, and those
     // mutators are what delete them. The link API still refuses them as structural.
     if (
@@ -89,5 +105,20 @@ export class SdlcEntityLinksACL extends BaseACL<'sdlc_entity_links'> {
     _tx: Transaction<Schema>,
   ): Promise<void> {
     throw new MutationACLError('SDLC entity links cannot be upserted', 'sdlc_entity_links');
+  }
+
+  private async assertHubMemberOrAdmin(channelId: string, tx: Transaction<Schema>): Promise<void> {
+    const isAdmin =
+      this.ctx.role === WorkspaceRole.ADMIN ||
+      this.ctx.role === WorkspaceRole.OWNER ||
+      this.ctx.orgRole === OrgRole.ADMIN ||
+      this.ctx.orgRole === OrgRole.OWNER;
+    if (isAdmin) return;
+    const participant = await tx.run(
+      zql.channel_participants.where('channelId', channelId).where('userId', this.ctx.userID).one(),
+    );
+    if (!participant) {
+      throw new MutationACLError('Hub membership required', 'sdlc_entity_links');
+    }
   }
 }

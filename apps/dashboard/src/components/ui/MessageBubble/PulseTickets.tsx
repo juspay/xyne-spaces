@@ -8,6 +8,7 @@ export type { PulseItem };
 interface PulseTicketsProps {
   content: string;
   callId: string;
+  channelId?: string;
   conversationId: string;
   messageId: string;
 }
@@ -15,6 +16,7 @@ interface PulseTicketsProps {
 export const PulseTickets: React.FC<PulseTicketsProps> = ({
   content,
   callId,
+  channelId,
   conversationId,
   messageId,
 }) => {
@@ -153,6 +155,7 @@ export const PulseTickets: React.FC<PulseTicketsProps> = ({
           isOpen={true}
           onClose={handleModalClose}
           callId={callId}
+          {...(channelId && { channelId })}
           item={activeItem}
           merchant={activeMerchant ?? null}
           conversationId={conversationId}

@@ -3,7 +3,7 @@ import type { Request } from 'express';
 import { db } from '@/database/client';
 import { newConnectId, createConnectGroupForEntity, ConnectEntityType } from '@/database/connectGroup';
 import { reactivateOrCreateSources } from '@/integrations/routes/social-media/app-store';
-import { ChannelType, ChannelScopeType, ChannelVisibility, ChannelRole, DeskType, EmailMergeMode } from '@xyne/shared';
+import { BoardType, ChannelType, ChannelScopeType, ChannelVisibility, ChannelRole, DeskType, EmailMergeMode } from '@xyne/shared';
 
 
 export function postAppStoreConnectTx(input: { keyId: string; privateKey: string; channelName: string; applications: { bundleId: string; }[]; projectId: string; boardId: string; visibility: "PUBLIC" | "PRIVATE" | "public" | "private"; assigneeUserGroupId?: string | undefined; }, applications: { appId: string; displayName: string; }[], userId: string, workspaceId: string, now: Date, encryptedCredentials: string) {
@@ -55,7 +55,7 @@ export function postAppStoreConnectTx(input: { keyId: string; privateKey: string
     });
 
     const mappingBoards = await tx.board.findMany({
-      where: { projectId: input.projectId },
+      where: { projectId: input.projectId, boardType: { not: BoardType.RELEASE } },
       orderBy: { createdAt: 'asc' },
       select: { id: true },
     });

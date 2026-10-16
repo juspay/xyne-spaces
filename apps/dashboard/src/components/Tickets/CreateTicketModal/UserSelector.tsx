@@ -20,6 +20,7 @@ import { useChannelAssignGate } from '../../../hooks/useChannelAssignGate';
 import { useUserGroupById } from '../../../hooks/useUserGroup';
 import { channelMembersFirst, currentUserFirst } from '../../../utils/channelMembersFirst';
 import { useExclusivePicker } from '../TicketTable/ExclusivePickerScope';
+import { useTicketNoun } from '../../../contexts/TicketNounContext';
 
 interface UserSelectorProps {
   selectedUserId: string | null;
@@ -62,6 +63,7 @@ export function UserSelector({
   triggerTooltip,
   analytics,
 }: UserSelectorProps): ReactElement {
+  const noun = useTicketNoun();
   const [open, setOpen] = useState(false);
   useExclusivePicker(open, setOpen);
   const [searchValue, setSearchValue] = useState('');
@@ -159,7 +161,7 @@ export function UserSelector({
     return (
       <button
         type='button'
-        aria-label={hasAssignee ? 'Change assignee' : 'Assign ticket'}
+        aria-label={hasAssignee ? 'Change assignee' : `Assign ${noun.singular}`}
         data-track-category='Tickets'
         data-track-name='ToggleRowAssignee'
         onClick={stopRowInteraction}

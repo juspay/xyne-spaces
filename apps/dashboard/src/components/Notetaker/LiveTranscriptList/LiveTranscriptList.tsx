@@ -18,6 +18,7 @@ import Input from '../../ui/Input';
 import { useTextSearch } from '../../../hooks/useTextSearch';
 import { cn } from '../../../utils/classNames';
 import { formatElapsedTime } from '../../../utils/recordingUtils';
+import { formatTimeAmPm } from '../../../utils/dateUtils';
 import type { TranscriptEntry } from '../../../stores/recordingStore';
 import { HighlightedText } from '../../../routes/RecordingsScreen/components/HighlightedText';
 import { MarkedMomentDivider } from '../MarkedMomentDivider';
@@ -34,6 +35,7 @@ export const LiveTranscriptList = ({
   variant,
   isScrollSuspended = false,
   trackCategory,
+  showSpeaker = false,
   className,
 }: LiveTranscriptListProps): ReactElement => {
   const styles = VARIANT_STYLES[variant];
@@ -47,7 +49,10 @@ export const LiveTranscriptList = ({
   const [isFollowing, setIsFollowing] = useState(true);
   const getTranscriptText = useCallback((entry: TranscriptEntry) => entry.text, []);
   const search = useTextSearch({ items: transcripts, getText: getTranscriptText });
-  const { markedTranscriptIds, hasLeadingMoment } = markedMomentAnchors(markedMoments);
+  const { markedTranscriptIds, hasLeadingMoment, hasTrailingMoment } = markedMomentAnchors(
+    markedMoments,
+    transcripts,
+  );
   const firstSpokenAt = transcripts[0]?.spokenAt;
 
   const getViewport = useCallback(
@@ -110,6 +115,14 @@ export const LiveTranscriptList = ({
                     {formatElapsedTime(Math.max(0, entry.spokenAt - firstSpokenAt))}
                   </span>
                 )}
+                {showSpeaker && (
+                  <div className='mb-0.5 flex items-baseline gap-2'>
+                    <span className='truncate font-medium text-foreground'>{entry.speaker}</span>
+                    <span className='shrink-0 font-mono text-xs text-muted-foreground'>
+                      {formatTimeAmPm(entry.timestamp)}
+                    </span>
+                  </div>
+                )}
                 <p>
                   <HighlightedText
                     text={entry.text}
@@ -124,6 +137,7 @@ export const LiveTranscriptList = ({
               </div>
             </Fragment>
           ))}
+          {hasTrailingMoment && <MarkedMomentDivider />}
         </div>
       )}
 
