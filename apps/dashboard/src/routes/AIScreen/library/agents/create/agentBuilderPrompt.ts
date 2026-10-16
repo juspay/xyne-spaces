@@ -97,9 +97,6 @@ function toolNames(state: WizardState): string[] {
   ];
 }
 
-/** Fields the form holds differently from what is stored. Named only — sending
- *  both versions of a long prompt would double a context that is already large,
- *  and the agent must anchor on the saved text regardless. */
 function unsavedFields(saved: WizardState, draft: WizardState): string[] {
   const changed: string[] = [];
   if (saved.name.trim() !== draft.name.trim()) changed.push('name');
@@ -110,9 +107,6 @@ function unsavedFields(saved: WizardState, draft: WizardState): string[] {
   return changed;
 }
 
-/** Once the agent exists, describe what is STORED. update-agent resolves its
- *  promptEdits against the saved prompt, so an agent shown the form's copy
- *  anchors on text the server cannot find and the edit is refused. */
 function savedSummary(saved: WizardState, draft: WizardState, intent: string): string[] {
   const unsaved = unsavedFields(saved, draft);
   return [
@@ -215,8 +209,6 @@ const HOW_TO_PROPOSE = [
   'created or live — say it is ready for them to review and save.',
 ];
 
-/** Once the agent exists, propose-agent can only ever fail: it drafts a NEW
- *  agent and the slug is taken. Changes have to go through update-agent. */
 function howToUpdate(slug: string): string[] {
   return [
     `The agent \`${slug}\` has been created and is saved. propose-agent is done —`,

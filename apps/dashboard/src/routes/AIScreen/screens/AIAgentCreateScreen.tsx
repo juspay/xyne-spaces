@@ -11,7 +11,10 @@ import {
 } from '../../ClawAgentsScreen/create/wizardState';
 import { useAIChatHandoff } from '../useAIChatHandoff';
 import { useClawAgentDetail } from '../../../hooks/useClawAgentDetail';
+import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
 import { wizardStateFromAgent } from '../library/agents/create/agentDraft';
+
+const AUTOSAVE_DELAY_MS = 1200;
 
 export interface AgentDraftSeed {
   name?: string;
@@ -35,17 +38,26 @@ const AIAgentCreateScreen = (): ReactElement => {
   const seed = (location.state as { draftSeed?: AgentDraftSeed } | null)?.draftSeed;
 
   const [draft, setDraft] = useState<WizardState>(() => seededDraft(seed));
+
+  const saveRef = useRef<((options?: { quiet?: boolean }) => Promise<void>) | null>(null);
+  const createdRef = useRef(false);
+
+  const [editTick, setEditTick] = useState(0);
   const applyPatch = useCallback((patch: Partial<WizardState>) => {
     setDraft(prev => ({ ...prev, ...patch }));
+    setEditTick(tick => tick + 1);
   }, []);
+
+  const autosaveTick = useDebouncedValue(editTick, AUTOSAVE_DELAY_MS);
+  useEffect(() => {
+    if (autosaveTick === 0 || !createdRef.current) return;
+    void saveRef.current?.({ quiet: true }).catch(() => {});
+  }, [autosaveTick]);
 
   const [instructionsPatchNonce, setInstructionsPatchNonce] = useState(0);
 
   const [aiBusy, setAiBusy] = useState(false);
 
-  // The draft card creates the agent, so this screen only ever creates through
-  // it. Once it has, we stay put — the conversation that built the agent is
-  // alongside — and switch the form over to editing the real thing.
   const [createdSlug, setCreatedSlug] = useState<string | null>(null);
   const {
     data: createdAgent,
@@ -53,10 +65,6 @@ const AIAgentCreateScreen = (): ReactElement => {
     refetch: refetchCreatedAgent,
   } = useClawAgentDetail(createdSlug ?? undefined);
 
-  // Show what was actually saved, not the proposal it came from: the server
-  // normalises names and expands tool sets, so leaving the proposal on screen
-  // would read as unsaved edits the moment the form switches to editing. Once
-  // per agent — a refetch must not overwrite what the user has typed since.
   const syncedSlugRef = useRef<string | null>(null);
   useEffect(() => {
     if (!createdAgent || syncedSlugRef.current === createdAgent.slug) return;
@@ -64,7 +72,17 @@ const AIAgentCreateScreen = (): ReactElement => {
     setDraft(wizardStateFromAgent(createdAgent));
   }, [createdAgent]);
 
-  const createdRef = useRef(false);
+  const registerSave = useCallback(
+    (save: ((options?: { quiet?: boolean }) => Promise<void>) | null) => {
+      saveRef.current = save;
+    },
+    [],
+  );
+  const requestSave = useCallback(async (): Promise<void> => {
+    if (!saveRef.current) throw new Error('The setup form is not ready yet.');
+    await saveRef.current();
+  }, []);
+
   createdRef.current = createdSlug !== null;
   const applyAiPatch = useCallback((patch: Partial<WizardState>) => {
     setDraft(prev => ({ ...prev, ...patch }));
@@ -96,6 +114,7 @@ const AIAgentCreateScreen = (): ReactElement => {
           onAgentCreated={setCreatedSlug}
           createdSlug={createdSlug}
           savedAgent={createdAgent}
+          onRequestSave={requestSave}
         />
       }
     >
@@ -103,8 +122,6 @@ const AIAgentCreateScreen = (): ReactElement => {
         data-id='ai-agent-create-view'
         className='relative flex h-full flex-1 flex-col overflow-hidden'
       >
-        {/* The agent exists — only loading it back failed. Say so and offer a
-            retry, or the form sits there with no way to save and no reason. */}
         {createdSlug && createdAgentFailed && (
           <div className='mx-auto flex w-full max-w-[720px] items-center justify-between gap-3 px-6 pt-4'>
             <p className='text-sm text-muted-foreground'>
@@ -127,9 +144,8 @@ const AIAgentCreateScreen = (): ReactElement => {
           onDraftChange={applyPatch}
           busy={aiBusy}
           instructionsPatchNonce={instructionsPatchNonce}
-          hideSubmit={!createdAgent}
-          keepSubmitVisible
-          submitLabel='Update agent'
+          hideSubmit
+          registerSave={registerSave}
           {...(createdAgent ? { agent: createdAgent } : {})}
         />
       </main>

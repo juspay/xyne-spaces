@@ -72,9 +72,6 @@ function addSubagent(tools: ToolSelection, name: string): ToolSelection {
   return { ...tools, subagents: [...tools.subagents, name] };
 }
 
-/** Exported so the builder's prompt can state the real limit. A second copy of
- *  the number there would drift, and the agent would keep proposing what this
- *  silently drops. */
 export const MAX_SUBAGENTS = 2;
 
 interface JudgedSelection {
@@ -112,11 +109,6 @@ function judgeSelection(
   return { tools: { ...tools, subagents, direct }, deduped, trimmedSubagents };
 }
 
-/** Mirrors expandMcpRequests in xyne-claw-auth: an integration named by slug or
- *  label grants that integration's whole tool set. matchTool only knows tool
- *  slugs, so an integration name reaching it resolves to nothing — or worse, to
- *  the subagent that shares its name, which is how "add the Slack MCP" ended up
- *  granting the Slack subagent instead. */
 function expandMcpNames(
   names: readonly string[],
   entries: readonly McpCatalogEntry[],
@@ -165,8 +157,6 @@ export function resolveProposedTools(
     gateway: [],
     callableAgents: current.callableAgents,
   };
-  // Integrations resolve to their tool ids BEFORE the matcher sees them, so a
-  // name that is also a subagent can no longer be mistaken for one.
   const expandedMcps = expandMcpNames(mcpNames, catalogs.mcpEntries);
   const unknown: string[] = [...expandedMcps.unknown];
 
@@ -257,10 +247,6 @@ export function paramsToDraftPatch(
     patch.systemPrompt = prompt.prompt;
   }
 
-  // `mcps` carries integrations asked for by name ("add the github MCP"); the
-  // agent is told to keep those out of `tools`. They are resolved separately,
-  // against the integration catalogue, so a name shared with a subagent can
-  // only ever mean the integration here.
   const proposedTools = params['tools'];
   const proposedMcps = params['mcps'];
   if (Array.isArray(proposedTools) || Array.isArray(proposedMcps)) {

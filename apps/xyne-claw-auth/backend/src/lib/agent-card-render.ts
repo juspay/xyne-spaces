@@ -206,8 +206,6 @@ export async function retireSupersededAgentCards(
         return false;
       });
     if (replaced) log.info(`[agent-card] retired superseded card ${screenId} on ${row.id}`);
-    // A false return is replaceUiFlow finding no such card on the row, not a
-    // failure — the throw above is the case that was going unreported.
     else log.info(`[agent-card] card ${screenId} not on row ${row.id}; nothing retired`);
   }
 }

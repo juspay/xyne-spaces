@@ -1200,8 +1200,6 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       }
 
       if (serverType === "agent-tools" && AGENT_TOOL_SLUGS.has(tool)) {
-        // update-agent as well: the builder keeps editing after the agent is
-        // saved, and those changes belong on its form until the user commits.
         const draftOnly = applyToDraft === true && (tool === "create-agent" || tool === "update-agent");
         const outcome = draftOnly
           ? { ok: true as const, message: "Agent setup updated" }

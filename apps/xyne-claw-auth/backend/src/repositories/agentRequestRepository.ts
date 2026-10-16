@@ -220,9 +220,6 @@ export const agentRequestRepository = {
         requestType: "agent_create",
         status: "pending",
       } as const;
-      // Read the ids first so their cards can be retired, but close the rows on
-      // the predicate itself — closing by id would miss a row that turned up
-      // between the two statements, which is the window this is meant to deny.
       const stale = await tx.agentRequest.findMany({ where: stalePredicate, select: { id: true } });
       const supersededIds = stale.map((row) => row.id);
       const superseded = await tx.agentRequest.updateMany({

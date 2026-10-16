@@ -3,8 +3,6 @@ import { useAuth } from './useAuth';
 import { listClawAuthAgents } from '../services/claw/clawAuthAgentsService';
 import type { Agent } from '../services/claw/clawAuthAgentTypes';
 
-/** Root of the agent-list key. Invalidate on this alone to reach every user's
- *  list without having to know whose it is. */
 export const CLAW_AUTH_AGENTS_KEY = 'claw-auth-agents';
 
 export const clawAuthAgentsKey = (userId: string | undefined): readonly unknown[] => [

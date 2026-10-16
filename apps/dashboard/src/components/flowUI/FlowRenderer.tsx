@@ -180,14 +180,6 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
   const draftScope = useFlowDraftScope();
   const draftClaimsFlow = validatedFlow !== null && (draftScope?.claims(validatedFlow) ?? false);
 
-  // Seed the draft from a claimed card as soon as it renders, so what the agent
-  // proposed is on screen without waiting for a decision. Deliberately NOT
-  // deduped here: this component is remounted whenever the card settles, so a
-  // guard kept in it would reset and re-apply. The scope owns that, since it
-  // outlives the card.
-  //
-  // Keyed on screenId, not the flow: validatedFlow is a fresh object out of the
-  // zod parse on every render, so depending on it would fire this every time.
   const claimedScreenId = draftClaimsFlow ? (validatedFlow?.screenId ?? null) : null;
   const seenFlowRef = useRef<FlowDefinition | null>(null);
   seenFlowRef.current = validatedFlow;
@@ -299,8 +291,6 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
         context: [stateRef.current.values],
       });
       try {
-        // The draft's own values win: it is the surface the user reviewed and
-        // edited, so the card must not be decided from a staler copy.
         const draftValues =
           action.type === 'submit' && draftClaimsFlow
             ? draftScope?.valuesForSubmit?.(validatedFlow, action.actionId)

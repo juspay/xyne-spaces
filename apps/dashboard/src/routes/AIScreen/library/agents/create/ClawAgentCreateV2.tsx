@@ -66,13 +66,8 @@ interface ClawAgentCreateV2Props {
   busy?: boolean;
   instructionsPatchNonce?: number;
   hideBack?: boolean;
-  /** The builder creates from its draft card, so this form must not offer a
-   *  second create button — pressing it would only fail on the taken handle. */
   hideSubmit?: boolean;
-  /** Keep the button on screen while there is nothing to save, disabled. The
-   *  builder needs the affordance visible so it is clear where edits land. */
-  keepSubmitVisible?: boolean;
-  submitLabel?: string;
+  registerSave?: (save: ((options?: { quiet?: boolean }) => Promise<void>) | null) => void;
 }
 
 const ClawAgentCreateV2 = ({
@@ -83,8 +78,7 @@ const ClawAgentCreateV2 = ({
   instructionsPatchNonce = 0,
   hideBack = false,
   hideSubmit = false,
-  keepSubmitVisible = false,
-  submitLabel,
+  registerSave,
 }: ClawAgentCreateV2Props = {}): ReactElement => {
   const isEdit = agent !== undefined;
   const navigate = useNavigate();
@@ -149,7 +143,7 @@ const ClawAgentCreateV2 = ({
   const edited = savedComparable === null || comparable(state) !== savedComparable;
 
   const createMutation = useCreateClawAgent();
-  const saveMutation = useSaveClawAgent(agent);
+  const saveMutation = useSaveClawAgent(agent, { redirectOnSuccess: !registerSave });
 
   const errors = useMemo<DraftErrors>(() => {
     const next: DraftErrors = {};
@@ -169,6 +163,32 @@ const ClawAgentCreateV2 = ({
         ...(nameCheck.nameError ? { name: nameCheck.nameError } : {}),
         ...(nameCheck.slugError ? { slug: nameCheck.slugError } : {}),
       };
+
+  const liveRef = useRef({ state, errors });
+  liveRef.current = { state, errors };
+
+  const { save: saveAgent } = saveMutation;
+  const saveFromForm = useCallback(
+    async (options?: { quiet?: boolean }): Promise<void> => {
+      const { state: current, errors: currentErrors } = liveRef.current;
+      if (Object.keys(currentErrors).length > 0) {
+        if (!options?.quiet) {
+          setShowErrors(true);
+          scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+        throw new Error('Fix the highlighted fields before saving this agent.');
+      }
+      setShowErrors(false);
+      await saveAgent(current, options);
+    },
+    [saveAgent],
+  );
+
+  useEffect(() => {
+    if (!registerSave) return;
+    registerSave(saveFromForm);
+    return (): void => registerSave(null);
+  }, [registerSave, saveFromForm]);
 
   const handleSubmit = (): void => {
     if (Object.keys(errors).length > 0) {
@@ -463,16 +483,16 @@ const ClawAgentCreateV2 = ({
             )}
 
             <div className='mt-5 flex w-full items-center justify-end gap-3'>
-              {(edited || keepSubmitVisible) && !hideSubmit && (
+              {edited && !hideSubmit && (
                 <Button
                   onClick={handleSubmit}
-                  disabled={busy || !edited || Object.keys(errors).length > 0}
+                  disabled={busy || Object.keys(errors).length > 0}
                   loading={isEdit ? saveMutation.saving : createMutation.isPending}
                   className='rounded-xl'
                   data-track-category='Claw Agents'
                   data-track-name={`Create agent v2: ${isEdit ? 'save' : 'create'}`}
                 >
-                  {submitLabel ?? (isEdit ? 'Save' : 'Save agent')}
+                  {isEdit ? 'Save' : 'Save agent'}
                 </Button>
               )}
             </div>

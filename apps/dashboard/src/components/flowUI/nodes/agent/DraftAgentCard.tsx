@@ -46,8 +46,6 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
   // expand control there so it can't open a nested preview.
   const insidePreview = useContext(InsideAgentPreviewContext);
   const queryClient = useQueryClient();
-  // Only the agent builder provides a draft scope, so this is "the setup screen
-  // is on the other side of this card".
   const inBuilder = useFlowDraftScope() !== null;
 
   const capabilities = props.agent.capabilities ?? [];
@@ -79,9 +77,6 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
       // to stay open — that is where the fields it names are edited.
       if (!(await executeAction({ type: 'submit', actionId }))) return;
       setExpanded(false);
-      // The agent is created server-side from this card, so nothing seeds the
-      // library's cached list the way creating from the form does. Without this
-      // it keeps serving a copy without the new agent for its whole staleTime.
       if (actionId === 'agent-draft-approve') {
         void queryClient.invalidateQueries({ queryKey: [CLAW_AUTH_AGENTS_KEY] });
       }
@@ -205,9 +200,6 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
               // The agent exists now, so its detail page shows everything the
               // preview dialog only summarises. While still a draft there is no
               // page to open, so the dialog stays the way to see the spec.
-              // In the builder the page is a dead end — it leaves the setup
-              // screen and the conversation that built the agent — so there the
-              // preview stays the way to look at it, same as before creation.
               <Link
                 to={`/ai/library/agent/${encodeURIComponent(props.agent.slug)}?tab=persona`}
                 className='shrink-0 rounded-[10px] px-2 py-1 text-sm font-medium leading-5 !text-muted-foreground !no-underline transition-colors hover:bg-accent hover:!text-foreground'
