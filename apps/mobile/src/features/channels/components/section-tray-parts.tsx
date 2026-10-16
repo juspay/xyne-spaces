@@ -1,20 +1,23 @@
 import { useValue } from '@legendapp/state/react';
-import { Check, ChevronLeft, Lock } from 'lucide-react-native';
-import { useCallback, useMemo, useState, type ReactElement, type ReactNode } from 'react';
+import { Check, Lock } from 'lucide-react-native';
+import { useCallback, useMemo, useState, type ReactElement } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
 import { useCSSVariable } from 'uniwind';
 
 import { SECTION_NAME_MAX_LENGTH } from '@/src/components/chat/channel-list/section-sheet-parts';
 import { HashIcon } from '@/src/ui/icons';
+import { BackHeader, OptionRow, TrayTitle, TRAY_ROW_HEIGHT } from '@/src/ui/tray/parts';
 import { cn } from '@/src/utils/cn';
 import { haptics } from '@/src/utils/haptics';
 
 import { channelAllIds$, channelRow$ } from '../state/rows-store';
 
-export const TRAY_ROW_HEIGHT = 52;
 const INDICATOR_SIZE = 22;
 const CHANNEL_GLYPH_SIZE = 20;
 const BUTTON_HEIGHT = 48;
+
+// Shared with the other trays; re-exported so this feature's imports stay put.
+export { BackHeader, OptionRow, TrayTitle, TRAY_ROW_HEIGHT };
 
 /**
  * Single choice: a ring, with a dot inside when chosen.
@@ -49,87 +52,6 @@ export function CheckCircle({ checked }: { checked: boolean }): ReactElement {
       style={{ width: INDICATOR_SIZE, height: INDICATOR_SIZE }}
     >
       {checked ? <Check size={14} color={onAccent} strokeWidth={3} /> : null}
-    </View>
-  );
-}
-
-type OptionRowProps = {
-  label: string;
-  leading: ReactNode;
-  trailing?: ReactNode;
-  highlighted?: boolean;
-  /** Accent-coloured label, for the row that creates or destroys rather than chooses. */
-  emphasis?: boolean;
-  onPress: () => void;
-};
-
-/** One tappable line of a tray list. */
-export function OptionRow({
-  label,
-  leading,
-  trailing,
-  highlighted = false,
-  emphasis = false,
-  onPress,
-}: OptionRowProps): ReactElement {
-  return (
-    <Pressable
-      accessibilityRole='button'
-      accessibilityState={{ selected: highlighted }}
-      onPress={() => {
-        void haptics.buttonTap();
-        onPress();
-      }}
-      className={cn('flex-row items-center rounded-2xl px-3', highlighted && 'bg-spaces-surface')}
-      style={{ height: TRAY_ROW_HEIGHT }}
-    >
-      <View className='w-6 items-center justify-center'>{leading}</View>
-      <Text
-        numberOfLines={1}
-        className={cn(
-          'flex-1 text-[16px] font-medium ml-3',
-          emphasis ? 'text-spaces-accent' : 'text-spaces-foreground',
-        )}
-      >
-        {label}
-      </Text>
-      {trailing}
-    </Pressable>
-  );
-}
-
-/** The small muted line that opens a view: "Move #x to", "Native App". */
-export function TrayTitle({ children }: { children: string }): ReactElement {
-  return (
-    <Text numberOfLines={1} className='px-3 pb-2 text-[14px] text-spaces-muted'>
-      {children}
-    </Text>
-  );
-}
-
-/**
- * Back arrow and the view's title, for the views that sit one level in.
- */
-export function BackHeader({ title, onBack }: { title: string; onBack: () => void }): ReactElement {
-  const foreground = useCSSVariable('--color-spaces-foreground') as string;
-
-  return (
-    <View className='flex-row items-center pb-3'>
-      <Pressable
-        accessibilityRole='button'
-        accessibilityLabel='Back'
-        hitSlop={8}
-        onPress={() => {
-          void haptics.buttonTap();
-          onBack();
-        }}
-        className='h-9 w-9 items-center justify-center rounded-full bg-spaces-surface'
-      >
-        <ChevronLeft size={20} color={foreground} strokeWidth={2} />
-      </Pressable>
-      <Text numberOfLines={1} className='flex-1 pl-3 text-[14px] text-spaces-muted'>
-        {title}
-      </Text>
     </View>
   );
 }
