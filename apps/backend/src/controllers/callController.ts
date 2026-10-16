@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import {
   livekitService,
+  LIVEKIT_ROOM_MAX_PARTICIPANTS,
   allowedSourcesForHostControls,
   hasTurnedOffHostControl,
   getHostControls,
@@ -531,7 +532,7 @@ export class CallController {
         stage = 'livekit_room_creation';
         await livekitService.createRoom({
           name: callExternalId,
-          maxParticipants: 100,
+          maxParticipants: LIVEKIT_ROOM_MAX_PARTICIPANTS,
           emptyTimeout: 120,
           metadata: roomMetadata,
         });
@@ -797,7 +798,7 @@ export class CallController {
       stage = 'livekit_room_creation';
       await livekitService.createRoom({
         name: callExternalId,
-        maxParticipants: 100,
+        maxParticipants: LIVEKIT_ROOM_MAX_PARTICIPANTS,
         emptyTimeout: 120,
         metadata: roomMetadata,
       });
@@ -1038,7 +1039,7 @@ export class CallController {
         // Create LiveKit room
         await livekitService.createRoom({
           name: callId,
-          maxParticipants: 100,
+          maxParticipants: LIVEKIT_ROOM_MAX_PARTICIPANTS,
           emptyTimeout: 120,
           metadata: roomMetadata,
         });
