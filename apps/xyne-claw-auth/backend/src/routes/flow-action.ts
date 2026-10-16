@@ -1200,7 +1200,9 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       }
 
       if (serverType === "agent-tools" && AGENT_TOOL_SLUGS.has(tool)) {
-        const draftOnly = applyToDraft === true && tool === "create-agent";
+        // update-agent as well: the builder keeps editing after the agent is
+        // saved, and those changes belong on its form until the user commits.
+        const draftOnly = applyToDraft === true && (tool === "create-agent" || tool === "update-agent");
         const outcome = draftOnly
           ? { ok: true as const, message: "Agent setup updated" }
           : await applyAgentToolAction(tool, params, writeClawUserId);
@@ -2160,41 +2162,6 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       }
       if (actionId !== "agent-draft-approve" && actionId !== "agent-draft-decline") {
         res.status(400).json({ type: "error", message: `Unknown agent-card action: ${actionId}` } satisfies AppActionResponse);
-        return;
-      }
-
-      if (applyToDraft === true && actionId === "agent-draft-approve") {
-        await prisma.agentRequest
-          .updateMany({
-            where: { id: requestId, status: "pending", requesterId: callerUserId },
-            data: {
-              status: "rejected",
-              reviewerId: callerUserId,
-              reviewNote: "Applied to the agent builder draft — nothing created",
-            },
-          })
-          .catch((err: unknown) => log.warn(`[flow-action] agent-card draft retire failed: ${errMsg(err)}`));
-
-        resp = { type: "close_screen", finalMessage: "Applied the draft successfully." };
-        if (xyneAiChatMessageId) {
-          const { replaceFlowCardOnRow } = await import("../lib/flow-card-delivery.js");
-          const appliedFlow: FlowDefinition = {
-            ...flowJSON,
-            components: flowJSON.components.map((component) =>
-              component.type === "agent"
-                ? { ...component, props: { ...(component.props ?? {}), phase: "applied" } }
-                : component,
-            ),
-          };
-          await replaceFlowCardOnRow({
-            chatMessageId: xyneAiChatMessageId,
-            screenId: flowJSON.screenId,
-            flow: appliedFlow,
-            userId: callerUserId,
-          }).catch(() => false);
-        }
-        res.json(resp);
-        log.info(`[flow-action] agent-card applied to builder draft request=${requestId} by=${callerUserId}`);
         return;
       }
 

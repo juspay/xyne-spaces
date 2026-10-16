@@ -843,13 +843,7 @@ export const agentIdentitySchema = z
   })
   .strict();
 
-export const agentDraftPhaseSchema = z.enum([
-  'pending',
-  'created',
-  'rejected',
-  'superseded',
-  'applied',
-]);
+export const agentDraftPhaseSchema = z.enum(['pending', 'created', 'rejected', 'superseded']);
 
 export const agentChangeSchema = z
   .object({

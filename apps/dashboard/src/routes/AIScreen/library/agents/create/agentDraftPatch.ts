@@ -72,7 +72,10 @@ function addSubagent(tools: ToolSelection, name: string): ToolSelection {
   return { ...tools, subagents: [...tools.subagents, name] };
 }
 
-const MAX_SUBAGENTS = 2;
+/** Exported so the builder's prompt can state the real limit. A second copy of
+ *  the number there would drift, and the agent would keep proposing what this
+ *  silently drops. */
+export const MAX_SUBAGENTS = 2;
 
 interface JudgedSelection {
   tools: ToolSelection;
@@ -109,12 +112,44 @@ function judgeSelection(
   return { tools: { ...tools, subagents, direct }, deduped, trimmedSubagents };
 }
 
+/** Mirrors expandMcpRequests in xyne-claw-auth: an integration named by slug or
+ *  label grants that integration's whole tool set. matchTool only knows tool
+ *  slugs, so an integration name reaching it resolves to nothing — or worse, to
+ *  the subagent that shares its name, which is how "add the Slack MCP" ended up
+ *  granting the Slack subagent instead. */
+function expandMcpNames(
+  names: readonly string[],
+  entries: readonly McpCatalogEntry[],
+): { tools: string[]; unknown: string[] } {
+  const byKey = new Map<string, McpCatalogEntry>();
+  for (const entry of entries) {
+    byKey.set(entry.slug.toLowerCase(), entry);
+    byKey.set(entry.label.toLowerCase(), entry);
+  }
+
+  const tools: string[] = [];
+  const unknown: string[] = [];
+  const seen = new Set<string>();
+  for (const name of names) {
+    const entry = byKey.get(name.trim().toLowerCase());
+    if (!entry) {
+      if (!unknown.includes(name)) unknown.push(name);
+      continue;
+    }
+    if (seen.has(entry.slug)) continue;
+    seen.add(entry.slug);
+    for (const tool of entry.tools) tools.push(tool.slug);
+  }
+  return { tools, unknown };
+}
+
 export function resolveProposedTools(
   names: readonly string[],
   catalog: AvailableTools | undefined,
   current: ToolSelection,
+  mcpNames: readonly string[] = [],
 ): ResolvedTools {
-  if (names.length === 0) return { status: 'nothing-proposed' };
+  if (names.length === 0 && mcpNames.length === 0) return { status: 'nothing-proposed' };
   if (!catalog) return { status: 'catalog-unavailable' };
 
   const catalogs: Catalogs = {
@@ -130,9 +165,12 @@ export function resolveProposedTools(
     gateway: [],
     callableAgents: current.callableAgents,
   };
-  const unknown: string[] = [];
+  // Integrations resolve to their tool ids BEFORE the matcher sees them, so a
+  // name that is also a subagent can no longer be mistaken for one.
+  const expandedMcps = expandMcpNames(mcpNames, catalogs.mcpEntries);
+  const unknown: string[] = [...expandedMcps.unknown];
 
-  for (const raw of names) {
+  for (const raw of [...names, ...expandedMcps.tools]) {
     const match = matchTool(bareToolSlug(raw), catalogs);
 
     switch (match.kind) {
@@ -169,14 +207,7 @@ export function resolveProposedTools(
   };
 }
 
-const FIELDS_THIS_DRAFT_CANNOT_SET = [
-  'modelId',
-  'skills',
-  'knowledge',
-  'mcps',
-  'scope',
-  'memory',
-] as const;
+const FIELDS_THIS_DRAFT_CANNOT_SET = ['modelId', 'skills', 'knowledge', 'scope', 'memory'] as const;
 
 export interface DraftPatch {
   patch: Partial<WizardState>;
@@ -220,10 +251,23 @@ export function paramsToDraftPatch(
     patch.systemPrompt = prompt.prompt;
   }
 
+  // `mcps` carries integrations asked for by name ("add the github MCP"); the
+  // agent is told to keep those out of `tools`. They are resolved separately,
+  // against the integration catalogue, so a name shared with a subagent can
+  // only ever mean the integration here.
   const proposedTools = params['tools'];
-  if (Array.isArray(proposedTools)) {
-    const names = proposedTools.filter((entry): entry is string => typeof entry === 'string');
-    const resolved = resolveProposedTools(names, catalog, draft.tools);
+  const proposedMcps = params['mcps'];
+  if (Array.isArray(proposedTools) || Array.isArray(proposedMcps)) {
+    const strings = (value: unknown): string[] =>
+      Array.isArray(value)
+        ? value.filter((entry): entry is string => typeof entry === 'string')
+        : [];
+    // `tools` names the whole intended set, so it replaces — that is the
+    // contract, and the only way a proposal can drop a capability. `mcps`
+    // alone is an addition: rebuilding from it would strip everything else.
+    const kept = Array.isArray(proposedTools) ? [] : grantedNames(draft.tools);
+    const names = [...kept, ...strings(proposedTools)];
+    const resolved = resolveProposedTools(names, catalog, draft.tools, strings(proposedMcps));
 
     if (resolved.status === 'catalog-unavailable') {
       problems.push('Tools not applied — the tool catalogue is still loading. Try again.');
@@ -243,7 +287,7 @@ export function paramsToDraftPatch(
         );
       }
       if (resolved.removed.length > 0) {
-        problems.push(`Removed tool(s) you had selected: ${resolved.removed.join(', ')}`);
+        problems.push(`This proposal drops: ${resolved.removed.join(', ')}`);
       }
     }
   }

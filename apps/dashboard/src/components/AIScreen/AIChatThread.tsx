@@ -642,7 +642,7 @@ function ChatMessageBubble({
   readOnly?: boolean;
   /** FlowUI actions are dispatched against (messageId, conversationId). */
   conversationId?: string | undefined;
-  onFlowActionComplete?: ((finalMessage?: string) => void) | undefined;
+  onFlowActionComplete?: (() => void) | undefined;
   /** Run dimensions merged into every act-on-answer click (joins to the run). */
   trackContext?: Record<string, unknown> | undefined;
   agentSlug?: string | undefined;

@@ -213,19 +213,20 @@ export const agentRequestRepository = {
     requestNote?: string | null;
   }) =>
     prisma.$transaction(async (tx) => {
-      const stale = await tx.agentRequest.findMany({
-        where: {
-          targetType: "agent",
-          agentSlug: data.agentSlug,
-          requesterId: data.requesterId,
-          requestType: "agent_create",
-          status: "pending",
-        },
-        select: { id: true },
-      });
+      const stalePredicate = {
+        targetType: "agent",
+        agentSlug: data.agentSlug,
+        requesterId: data.requesterId,
+        requestType: "agent_create",
+        status: "pending",
+      } as const;
+      // Read the ids first so their cards can be retired, but close the rows on
+      // the predicate itself — closing by id would miss a row that turned up
+      // between the two statements, which is the window this is meant to deny.
+      const stale = await tx.agentRequest.findMany({ where: stalePredicate, select: { id: true } });
       const supersededIds = stale.map((row) => row.id);
       const superseded = await tx.agentRequest.updateMany({
-        where: { id: { in: supersededIds } },
+        where: stalePredicate,
         data: {
           status: "rejected",
           reviewerId: data.requesterId,

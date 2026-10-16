@@ -66,6 +66,13 @@ interface ClawAgentCreateV2Props {
   busy?: boolean;
   instructionsPatchNonce?: number;
   hideBack?: boolean;
+  /** The builder creates from its draft card, so this form must not offer a
+   *  second create button — pressing it would only fail on the taken handle. */
+  hideSubmit?: boolean;
+  /** Keep the button on screen while there is nothing to save, disabled. The
+   *  builder needs the affordance visible so it is clear where edits land. */
+  keepSubmitVisible?: boolean;
+  submitLabel?: string;
 }
 
 const ClawAgentCreateV2 = ({
@@ -75,6 +82,9 @@ const ClawAgentCreateV2 = ({
   busy = false,
   instructionsPatchNonce = 0,
   hideBack = false,
+  hideSubmit = false,
+  keepSubmitVisible = false,
+  submitLabel,
 }: ClawAgentCreateV2Props = {}): ReactElement => {
   const isEdit = agent !== undefined;
   const navigate = useNavigate();
@@ -453,16 +463,16 @@ const ClawAgentCreateV2 = ({
             )}
 
             <div className='mt-5 flex w-full items-center justify-end gap-3'>
-              {edited && (
+              {(edited || keepSubmitVisible) && !hideSubmit && (
                 <Button
                   onClick={handleSubmit}
-                  disabled={busy || Object.keys(errors).length > 0}
+                  disabled={busy || !edited || Object.keys(errors).length > 0}
                   loading={isEdit ? saveMutation.saving : createMutation.isPending}
                   className='rounded-xl'
                   data-track-category='Claw Agents'
                   data-track-name={`Create agent v2: ${isEdit ? 'save' : 'create'}`}
                 >
-                  {isEdit ? 'Save' : 'Save agent'}
+                  {submitLabel ?? (isEdit ? 'Save' : 'Save agent')}
                 </Button>
               )}
             </div>

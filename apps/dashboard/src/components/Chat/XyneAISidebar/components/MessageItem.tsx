@@ -648,9 +648,7 @@ interface MessageContentProps {
   /** Run dimensions merged into tracked clicks (see MessageItemProps). */
   trackContext?: Record<string, unknown> | undefined;
   /** See MessageItemProps.flowCards — absence means render no cards. */
-  flowCards?:
-    | { conversationId: string; onActionComplete: (finalMessage?: string) => void }
-    | undefined;
+  flowCards?: { conversationId: string; onActionComplete: () => void } | undefined;
   onInterceptPendingAction?: ((action: PendingAction, approved: boolean) => boolean) | undefined;
 }
 
@@ -749,9 +747,7 @@ interface MessageItemProps {
   /** Render this message's FlowUI artifact cards. Opt-in on purpose: absence
    *  is the off switch, so a surface that cannot service a flow action never
    *  shows a card it would leave stuck. */
-  flowCards?:
-    | { conversationId: string; onActionComplete: (finalMessage?: string) => void }
-    | undefined;
+  flowCards?: { conversationId: string; onActionComplete: () => void } | undefined;
   onInterceptPendingAction?: ((action: PendingAction, approved: boolean) => boolean) | undefined;
 }
 

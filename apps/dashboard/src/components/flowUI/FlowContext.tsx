@@ -28,6 +28,14 @@ export interface FlowContextValue {
 
 export interface FlowDraftScope {
   claims: (flow: FlowDefinition) => boolean;
+  /** A claimed card rendered — seed the draft from what it proposed. Fires on
+   *  every render AND again after the card settles (which remounts it), so the
+   *  scope must dedupe by screenId; a guard kept here would reset. */
+  onCardSeen?: (flow: FlowDefinition) => void;
+  /** Extra flow-state values to send with a claimed card's submit. Lets the
+   *  draft hand over what the user edited, which the server would otherwise
+   *  never see — it decides from the spec it stored when the card was built. */
+  valuesForSubmit?: (flow: FlowDefinition, actionId: string) => Record<string, unknown> | null;
   onApplied: (actionId: string, flow: FlowDefinition) => void;
 }
 

@@ -3,7 +3,9 @@ import type { AgentDraftProps } from '@xyne/shared';
 import type { AgentToolboxSelection, ToolboxSelection } from '@/services/claw/clawToolsTypes';
 import { useFlow } from '../../FlowContext';
 
-const EDITS_STATE_KEY = 'agent-edits';
+/** Mirrors AGENT_EDITS_STATE_KEY in xyne-claw-auth. Exported so anything else
+ *  handing the server retyped identity uses the one key it reads. */
+export const EDITS_STATE_KEY = 'agent-edits';
 
 /** Mirrors isValidAgentSlug in xyne-claw-auth — reject here, not on approve. */
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
