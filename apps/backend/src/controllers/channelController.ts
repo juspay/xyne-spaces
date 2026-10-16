@@ -131,7 +131,7 @@ export class ChannelController {
   }
 
   // Helper method to send system message for added/removed participants
-  private async sendAddAndRemoveParticipantsSystemMessage(
+  async sendAddAndRemoveParticipantsSystemMessage(
     channelId: string,
     newParticipants: Array<{ userId: string; userName: string }>,
     authData: { id: string; name: string },
