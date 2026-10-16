@@ -100,6 +100,26 @@ describe('onAction', (): void => {
     assert.deepEqual(copied, ['Helloworld', 'Hello\nworld']);
   });
 
+  it('copies markdown agent responses as formatted HTML with readable plain text', (): void => {
+    const copied: Array<{ plain: string; html: string }> = [];
+    onAction(
+      deps({
+        copyText: (plain, html): void => {
+          copied.push({ plain, html });
+        },
+      }),
+      'copy-message',
+      { ...target, html: '**Ticket:** XYNE-1\n\n- one\n- two' },
+      false,
+    );
+    assert.deepEqual(copied, [
+      {
+        plain: 'Ticket: XYNE-1\n\n• one\n• two',
+        html: '<p><strong>Ticket:</strong> XYNE-1</p><p></p><ul><li><p>one</p></li><li><p>two</p></li></ul>',
+      },
+    ]);
+  });
+
   it('opens a thread and asks before delete', (): void => {
     const threads: string[] = [];
     let confirmed = false;

@@ -3,6 +3,7 @@ import { BookmarkEntityType, isForwardedMessageXml, parseForwardedMessageXml } f
 
 import type { ChatInputEditingMessage } from '@/src/components/input-composer/input-composer.types';
 import { composerHtmlToPlainText } from '@/src/components/input-composer/utils/conversation-input.utils';
+import { isMarkdownMessageBody, markdownToMessageCopy } from '@/src/utils/markdownMessageCopy';
 import { mutators } from '@/src/zero/mutators';
 import type { MessageRowModel } from '../model/chatRow.types';
 import { channelHtmlToPlainText } from '../model/messageCopy';
@@ -119,8 +120,14 @@ export const onAction = (
     return;
   }
   if (id === 'copy-message') {
-    const html = parseForwardedMessageXml(target.html)?.content ?? target.html;
-    const plain = (isThread ? composerHtmlToPlainText(html) : channelHtmlToPlainText(html)).trim();
+    const body = parseForwardedMessageXml(target.html)?.content ?? target.html;
+    // Agent/bot responses are stored as markdown; convert so paste keeps formatting.
+    const markdownCopy = isMarkdownMessageBody(body) ? markdownToMessageCopy(body) : null;
+    const html = markdownCopy?.storedHtml ?? body;
+    const plain = (
+      markdownCopy?.plainText ??
+      (isThread ? composerHtmlToPlainText(body) : channelHtmlToPlainText(body))
+    ).trim();
     if (plain) {
       deps.copyText(plain, html);
     }
