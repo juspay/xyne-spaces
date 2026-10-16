@@ -1,6 +1,6 @@
 import { logger, Event as LogEvent } from '../../utils/logger';
-import axios from 'axios';
 import { API_BASE_URL } from '../../config';
+import { apiInstance } from '../clients/apiClient';
 
 type JSONSerializable =
   | string
@@ -30,7 +30,8 @@ class SudoQueryService {
   private eventQueue: QueuedEvent[] = [];
   private flushIntervalId: ReturnType<typeof setInterval> | null = null;
   private readonly FLUSH_INTERVAL = 10000; // 10 seconds
-  private readonly API_ENDPOINT = `${API_BASE_URL}/search-metrics/metrics`;
+  private readonly API_PATH = '/search-metrics/metrics';
+  private readonly API_ENDPOINT = `${API_BASE_URL}${this.API_PATH}`;
 
   constructor() {
     // Start the flush interval
@@ -80,16 +81,11 @@ class SudoQueryService {
     });
 
     try {
-      const response = await axios.post<FlushResponse>(
-        this.API_ENDPOINT,
-        { events: eventsToSend },
-        {
-          withCredentials: true,
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        },
-      );
+      // apiInstance sends x-workspace-id, so the backend attributes events to the user of the
+      // workspace they came from rather than the last-used workspace's cookie.
+      const response = await apiInstance.post<FlushResponse>(this.API_PATH, {
+        events: eventsToSend,
+      });
 
       if (response.data.success) {
         logger.info(LogEvent.INFO, {
