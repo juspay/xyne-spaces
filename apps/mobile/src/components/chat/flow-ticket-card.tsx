@@ -1,16 +1,27 @@
 import { useRouter } from 'expo-router';
 import { Calendar, NotebookText, TriangleAlert, User } from 'lucide-react-native';
-import { memo, useCallback, useMemo, type ReactElement } from 'react';
-import { Pressable, Text, View, type StyleProp, type ViewStyle } from 'react-native';
+import { memo, useCallback, useState, type ReactElement } from 'react';
+import {
+  ActivityIndicator,
+  Pressable,
+  Text,
+  View,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
+import type { FlowAction } from '@xyne/shared';
 import { useCSSVariable } from 'uniwind';
 
 import Avatar from '@/src/components/ui/avatar';
-import { Button } from '@/src/components/ui/button';
+import { TicketCard } from '@/src/features/chat/v3/rows/parts/TicketCard';
+import { useRecyclingState } from '@/src/features/chat/v3/rows/useRecyclingState';
 import { useUser } from '@/src/hooks/useUsers';
 import type { FlowActionButton } from '@/src/utils/flowAction';
 import type { FlowComponentLike } from '@/src/utils/flowJsonMarkdown';
 import {
   createTicketCardViewModel,
+  toTicketPreview,
+  type TicketCardViewModel,
   type TicketPriority,
   type TicketStatus,
 } from '@/src/utils/flowTicketUtils';
@@ -19,6 +30,16 @@ import {
   navigateToTicketDeepLinkIfApplicable,
   openTicketDeepLink,
 } from '@/src/utils/ticketDeepLink';
+
+const ACCENT = '#EB5F3A';
+
+/** The slice of a flow renderer's action state the card needs (v2 and v3 both provide it). */
+export type TicketCardActions = {
+  canPressButtons: boolean;
+  isSubmitting: boolean;
+  executeAction: (action: FlowAction) => Promise<unknown>;
+};
+const BUTTON_HEIGHT = 36;
 
 const STATUS_DOT_CLASS: Record<TicketStatus, string> = {
   TODO: 'bg-ticket-status-todo',
@@ -87,22 +108,187 @@ const Assignee = ({ assigneeId }: { assigneeId: string | undefined }): ReactElem
 };
 
 /**
- * Native renderer for the FlowJSON `ticket` artifact — both the approval card
- * an agent posts before `spaces-create-ticket` runs and the created-ticket card
- * that replaces it. Shared by chat v2 and v3.
+ * Fixed-size action button: equal-width slot in the row, centred label, and the
+ * spinner is overlaid on the label instead of pushing it, so tapping never
+ * reflows the row.
+ */
+const TicketActionButton = ({
+  button,
+  loading,
+  disabled,
+  onPress,
+}: {
+  button: FlowActionButton;
+  loading: boolean;
+  disabled: boolean;
+  onPress: () => void;
+}): ReactElement => {
+  const foreground = useCSSVariable('--color-foreground') as string;
+  const primary = button.variant === 'primary';
+  const textColor = primary ? '#ffffff' : foreground;
+  return (
+    <Pressable
+      accessibilityRole='button'
+      accessibilityLabel={button.label}
+      accessibilityState={{ disabled, busy: loading }}
+      disabled={disabled}
+      hitSlop={4}
+      onPressIn={event => event.stopPropagation()}
+      onPress={event => {
+        event.stopPropagation();
+        onPress();
+      }}
+      className={`items-center justify-center rounded-lg px-2 ${
+        primary ? '' : 'border border-border'
+      }`}
+      style={({ pressed }) => ({
+        flexGrow: 1,
+        flexShrink: 1,
+        flexBasis: 0,
+        minWidth: 0,
+        height: BUTTON_HEIGHT,
+        backgroundColor: primary ? ACCENT : 'transparent',
+        opacity: disabled && !loading ? 0.5 : pressed ? 0.75 : 1,
+      })}
+    >
+      <Text
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.8}
+        style={{
+          color: textColor,
+          fontSize: 14,
+          fontWeight: '600',
+          textAlign: 'center',
+          opacity: loading ? 0 : 1,
+        }}
+      >
+        {button.label}
+      </Text>
+      {loading ? (
+        <View
+          pointerEvents='none'
+          style={{
+            position: 'absolute',
+            top: 0,
+            right: 0,
+            bottom: 0,
+            left: 0,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <ActivityIndicator size='small' color={textColor} />
+        </View>
+      ) : null}
+    </Pressable>
+  );
+};
+
+const DraftTicketCard = ({
+  viewModel,
+  recyclingKey,
+  actions,
+}: {
+  viewModel: TicketCardViewModel;
+  recyclingKey: string;
+  actions: TicketCardActions;
+}): ReactElement => {
+  const { canPressButtons: canInteract, isSubmitting, executeAction } = actions;
+  const muted = useCSSVariable('--color-muted-text') as string;
+  // Which button the user tapped. The submit flag from the flow hook is shared
+  // by the whole card, so only the tapped button shows the spinner.
+  const [pendingKey, setPendingKey] = useRecyclingState<string | null>(
+    `${recyclingKey}:ticket-pending`,
+    null,
+  );
+  const [inFlight, setInFlight] = useState(false);
+  const busy = inFlight || isSubmitting;
+
+  const run = (button: FlowActionButton): void => {
+    if (busy || !canInteract) return;
+    setPendingKey(button.key);
+    setInFlight(true);
+    void executeAction(button.action).finally(() => setInFlight(false));
+  };
+
+  return (
+    <View style={{ alignSelf: 'stretch', width: '100%', minWidth: 0, gap: 10 }}>
+      <View
+        className='w-full gap-3 rounded-xl border border-dashed border-border bg-chat-card px-3 py-3'
+        style={{ alignSelf: 'stretch', minWidth: 0 }}
+      >
+        <View className='flex-row flex-wrap items-center justify-between gap-2'>
+          <View className='min-w-0 shrink flex-row items-center gap-1.5'>
+            <NotebookText size={16} color={muted} strokeWidth={1.75} />
+            <Text
+              className='min-w-0 shrink font-mono text-[13px] text-foreground/80'
+              numberOfLines={1}
+            >
+              {viewModel.idLabel}
+            </Text>
+          </View>
+          <View className='flex-row items-center gap-3'>
+            <View className='flex-row items-center gap-1.5'>
+              <View className={`h-2 w-2 rounded-full ${STATUS_DOT_CLASS[viewModel.status]}`} />
+              <Text className='text-sm text-foreground'>{viewModel.statusLabel}</Text>
+            </View>
+            <View className='flex-row items-center gap-1.5'>
+              <PriorityGlyph priority={viewModel.priority} />
+              <Text className='text-sm text-foreground'>{viewModel.priorityLabel}</Text>
+            </View>
+          </View>
+        </View>
+
+        <Text className='text-[15px] font-medium leading-5 text-foreground'>{viewModel.title}</Text>
+
+        <View className='flex-row flex-wrap items-center gap-x-4 gap-y-2'>
+          <Assignee assigneeId={viewModel.assigneeId} />
+          {viewModel.etaLabel ? (
+            <View className='flex-row items-center gap-1.5'>
+              <Calendar size={14} color={muted} strokeWidth={1.75} />
+              <Text className='text-sm text-foreground'>{viewModel.etaLabel}</Text>
+            </View>
+          ) : null}
+        </View>
+      </View>
+
+      {viewModel.buttons.length > 0 ? (
+        <View style={{ flexDirection: 'row', alignItems: 'stretch', gap: 8, width: '100%' }}>
+          {viewModel.buttons.map(button => (
+            <TicketActionButton
+              key={button.key}
+              button={button}
+              loading={busy && pendingKey === button.key}
+              disabled={!canInteract || busy}
+              onPress={() => run(button)}
+            />
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
+};
+
+/**
+ * Native renderer for the FlowJSON `ticket` artifact, shared by chat v2 and v3.
+ *  - proposed: the approval card an agent posts before `spaces-create-ticket` runs.
+ *  - created: rendered with the same `TicketCard` the chat uses for ticket
+ *    messages; tapping it opens the ticket (card-click only, like web).
  */
 export const FlowTicketCard = memo(function FlowTicketCard({
   component,
+  recyclingKey,
   containerStyle,
-  renderButton,
+  actions,
 }: {
   component: FlowComponentLike;
+  recyclingKey: string;
   containerStyle?: StyleProp<ViewStyle>;
-  renderButton: (button: FlowActionButton) => ReactElement;
+  actions: TicketCardActions;
 }): ReactElement | null {
   const router = useRouter();
-  const muted = useCSSVariable('--color-muted-text') as string;
-  const viewModel = useMemo(() => createTicketCardViewModel(component), [component]);
+  const viewModel = createTicketCardViewModel(component);
   const link = viewModel?.link;
 
   const openTicket = useCallback((): void => {
@@ -113,62 +299,23 @@ export const FlowTicketCard = memo(function FlowTicketCard({
   }, [link, router]);
 
   if (!viewModel) return null;
-  const proposed = viewModel.phase === 'proposed';
 
-  const card = (
-    <View
-      className={`w-full gap-3 rounded-xl border bg-chat-card px-3 py-3 ${
-        proposed ? 'border-dashed border-border' : 'border-border'
-      }`}
-      style={{ alignSelf: 'stretch', minWidth: 0 }}
-    >
-      <View className='flex-row flex-wrap items-center justify-between gap-2'>
-        <View className='min-w-0 shrink flex-row items-center gap-1.5'>
-          <NotebookText size={16} color={muted} strokeWidth={1.75} />
-          <Text
-            className='min-w-0 shrink font-mono text-[13px] text-foreground/80'
-            numberOfLines={1}
-          >
-            {viewModel.idLabel}
-          </Text>
-        </View>
-        <View className='flex-row items-center gap-3'>
-          <View className='flex-row items-center gap-1.5'>
-            <View className={`h-2 w-2 rounded-full ${STATUS_DOT_CLASS[viewModel.status]}`} />
-            <Text className='text-sm text-foreground'>{viewModel.statusLabel}</Text>
-          </View>
-          <View className='flex-row items-center gap-1.5'>
-            <PriorityGlyph priority={viewModel.priority} />
-            <Text className='text-sm text-foreground'>{viewModel.priorityLabel}</Text>
-          </View>
-        </View>
+  if (viewModel.phase === 'proposed') {
+    return (
+      <View
+        style={[{ alignSelf: 'stretch', width: '100%', minWidth: 0 }, containerStyle]}
+        accessibilityLabel={`Ticket draft: ${viewModel.title}`}
+      >
+        <DraftTicketCard viewModel={viewModel} recyclingKey={recyclingKey} actions={actions} />
       </View>
+    );
+  }
 
-      <Text className='text-[15px] font-medium leading-5 text-foreground'>{viewModel.title}</Text>
-
-      <View className='flex-row flex-wrap items-center gap-x-4 gap-y-2'>
-        <Assignee assigneeId={viewModel.assigneeId} />
-        {viewModel.etaLabel ? (
-          <View className='flex-row items-center gap-1.5'>
-            <Calendar size={14} color={muted} strokeWidth={1.75} />
-            <Text className='text-sm text-foreground'>{viewModel.etaLabel}</Text>
-          </View>
-        ) : null}
-        {viewModel.stageName ? (
-          <View className='rounded-full bg-ticket-label-blue-bg px-2 py-0.5'>
-            <Text className='text-xs font-medium text-ticket-label-blue-text' numberOfLines={1}>
-              {viewModel.stageName}
-            </Text>
-          </View>
-        ) : null}
-      </View>
-    </View>
-  );
-
+  const card = <TicketCard ticket={toTicketPreview(viewModel)} mine={false} />;
   return (
     <View
-      style={[{ alignSelf: 'stretch', width: '100%', minWidth: 0, gap: 10 }, containerStyle]}
-      accessibilityLabel={`${proposed ? 'Ticket draft' : `Ticket ${viewModel.idLabel}`}: ${viewModel.title}`}
+      style={[{ alignSelf: 'stretch', width: '100%', minWidth: 0 }, containerStyle]}
+      accessibilityLabel={`Ticket ${viewModel.idLabel}: ${viewModel.title}`}
     >
       {link ? (
         <Pressable onPress={openTicket} accessibilityRole='button'>
@@ -177,27 +324,6 @@ export const FlowTicketCard = memo(function FlowTicketCard({
       ) : (
         card
       )}
-
-      {proposed && viewModel.buttons.length > 0 ? (
-        <View className='flex-row flex-wrap items-center justify-end gap-2'>
-          {viewModel.buttons.map(button => renderButton(button))}
-        </View>
-      ) : null}
-
-      {link ? (
-        <View className='flex-row'>
-          <Button
-            size='xs'
-            label='Open ticket'
-            variant='secondary'
-            onPressIn={event => event.stopPropagation()}
-            onPress={event => {
-              event.stopPropagation();
-              openTicket();
-            }}
-          />
-        </View>
-      ) : null}
     </View>
   );
 });

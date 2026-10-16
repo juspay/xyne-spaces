@@ -2,14 +2,13 @@ import { type ReactElement, type ReactNode } from 'react';
 import { View, type StyleProp, type ViewStyle } from 'react-native';
 import type { MarkdownStyle } from 'react-native-enriched-markdown';
 
+import { FlowTicketCard } from '@/src/components/chat/flow-ticket-card';
 import { implicitActionsForComponent, parseFlowAction } from '@/src/utils/flowAction';
 import { createAgentCardViewModel } from '@/src/utils/flowAgentUtils';
 import { codeComponentToMarkdown } from '@/src/utils/flowCodeUtils';
 import { createMcpSuggestViewModel } from '@/src/utils/flowMcpSuggestUtils';
 import { createCallScheduleViewModel } from '@/src/utils/flowCallScheduleUtils';
 import { createPrCardViewModel } from '@/src/utils/flowPrUtils';
-import { createTicketCardViewModel } from '@/src/utils/flowTicketUtils';
-import { FlowTicketCard } from '@/src/components/chat/flow-ticket-card';
 import { createUserQuestionViewModel } from '@/src/utils/flowUserQuestionUtils';
 import { showMessageToast } from '@/src/utils/toast';
 import {
@@ -128,15 +127,17 @@ export const renderFlowSpecializedComponent = (
   }
 
   if (componentType === 'ticket') {
-    return createTicketCardViewModel(component) ? (
+    // FlowTicketCard returns null for a malformed ticket (no title).
+    return (
       <View key={componentKey} style={[CARD_WRAPPER_STYLE, renderStyle]}>
         <FlowTicketCard
           component={component}
+          recyclingKey={`${model.conversationId}:${componentKey}`}
           containerStyle={inheritedContainerStyle}
-          renderButton={button => renderFlowActionButton(button, context)}
+          actions={context}
         />
       </View>
-    ) : null;
+    );
   }
 
   if (componentType === 'plan') {

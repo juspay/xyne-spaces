@@ -503,7 +503,7 @@ describe('v3 remaining chrome vs v2', (): void => {
     const componentRecyclingKey =
       /recyclingKey=\{`\$\{model\.conversationId\}:\$\{componentKey\}`\}/g;
 
-    assert.equal(specialized.match(componentRecyclingKey)?.length, 5);
+    assert.equal(specialized.match(componentRecyclingKey)?.length, 6);
     assert.equal(/recyclingKey=\{model\.conversationId\}/.test(specialized), false);
   });
 

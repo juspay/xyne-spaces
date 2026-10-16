@@ -1,11 +1,9 @@
-import type { FlowAction } from '@xyne/shared';
+import type { FlowAction, TicketArtifactPriority, TicketArtifactStatus } from '@xyne/shared';
+
+import type { TicketPreview } from '@/src/features/chat/v3/model/chatRow.types';
 
 import type { FlowActionButton } from '@/src/utils/flowAction';
-import type {
-  FlowComponentLike,
-  FlowDefinitionLike,
-  FlowTextNormalizationOptions,
-} from '@/src/utils/flowJsonMarkdown';
+import type { FlowComponentLike, FlowDefinitionLike } from '@/src/utils/flowJsonMarkdown';
 
 /**
  * View model for the FlowJSON `ticket` artifact (packages/shared flowSchema
@@ -18,8 +16,9 @@ import type {
  * Mirrors apps/dashboard/src/components/flowUI/nodes/TicketNode.tsx.
  */
 
-export type TicketStatus = 'TODO' | 'STARTED' | 'PAUSED' | 'CANCELLED' | 'COMPLETED';
-export type TicketPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+// Reuse the shared FlowJSON schema enums so mobile can't drift from ticketPropsSchema.
+export type TicketStatus = TicketArtifactStatus;
+export type TicketPriority = TicketArtifactPriority;
 export type TicketPhase = 'proposed' | 'created';
 
 export type TicketCardLink = {
@@ -84,8 +83,8 @@ export const formatTicketEta = (eta: string | undefined): string | undefined => 
   if (!eta) return undefined;
   const parsed = new Date(eta);
   if (Number.isNaN(parsed.getTime())) return undefined;
-  const month = parsed.toLocaleString('en-US', { month: 'short' });
-  return `${parsed.getDate()} ${month}`;
+  // Device locale, matching the dashboard TicketNode's formatEta.
+  return parsed.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 };
 
 /** `/<workspaceId>/chat/dir/<channelId>?...` → workspaceId (see claw-auth ticket-card.ts). */
@@ -186,10 +185,7 @@ export const createTicketCardViewModel = (
 };
 
 /** Plain-text/markdown form used for chat previews, copy and notifications. */
-export const ticketComponentToMarkdown = (
-  component: FlowComponentLike,
-  _options: FlowTextNormalizationOptions = {},
-): string => {
+export const ticketComponentToMarkdown = (component: FlowComponentLike): string => {
   const viewModel = createTicketCardViewModel(component);
   if (!viewModel) return '';
   const heading =
@@ -205,3 +201,17 @@ export const ticketComponentToMarkdown = (
     .join(' · ');
   return [heading, viewModel.title, meta].join('\n\n');
 };
+
+/**
+ * Maps a created ticket card onto the chat's `TicketPreview`, so the created
+ * artifact renders with the same `TicketCard` as ticket messages in chat.
+ * Status pill mirrors the chat: stage name when present, else the status label.
+ */
+export const toTicketPreview = (viewModel: TicketCardViewModel): TicketPreview => ({
+  ticketId: viewModel.xyneId ?? viewModel.idLabel,
+  title: viewModel.title,
+  description: null,
+  statusLabel: viewModel.stageName ?? viewModel.statusLabel,
+  priority: viewModel.priority,
+  assigneeId: viewModel.assigneeId ?? null,
+});

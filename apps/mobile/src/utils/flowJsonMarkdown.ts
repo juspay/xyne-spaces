@@ -532,7 +532,7 @@ const collectFlowComponentMarkdown = (
   }
 
   if (type === 'ticket') {
-    const markdown = ticketComponentToMarkdown(component, options);
+    const markdown = ticketComponentToMarkdown(component);
     if (markdown) out.push(markdown);
     return;
   }
