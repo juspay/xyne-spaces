@@ -72,7 +72,7 @@ function addSubagent(tools: ToolSelection, name: string): ToolSelection {
   return { ...tools, subagents: [...tools.subagents, name] };
 }
 
-const MAX_SUBAGENTS = 2;
+export const MAX_SUBAGENTS = 2;
 
 interface JudgedSelection {
   tools: ToolSelection;
@@ -109,12 +109,39 @@ function judgeSelection(
   return { tools: { ...tools, subagents, direct }, deduped, trimmedSubagents };
 }
 
+function expandMcpNames(
+  names: readonly string[],
+  entries: readonly McpCatalogEntry[],
+): { tools: string[]; unknown: string[] } {
+  const byKey = new Map<string, McpCatalogEntry>();
+  for (const entry of entries) {
+    byKey.set(entry.slug.toLowerCase(), entry);
+    byKey.set(entry.label.toLowerCase(), entry);
+  }
+
+  const tools: string[] = [];
+  const unknown: string[] = [];
+  const seen = new Set<string>();
+  for (const name of names) {
+    const entry = byKey.get(name.trim().toLowerCase());
+    if (!entry) {
+      if (!unknown.includes(name)) unknown.push(name);
+      continue;
+    }
+    if (seen.has(entry.slug)) continue;
+    seen.add(entry.slug);
+    for (const tool of entry.tools) tools.push(tool.slug);
+  }
+  return { tools, unknown };
+}
+
 export function resolveProposedTools(
   names: readonly string[],
   catalog: AvailableTools | undefined,
   current: ToolSelection,
+  mcpNames: readonly string[] = [],
 ): ResolvedTools {
-  if (names.length === 0) return { status: 'nothing-proposed' };
+  if (names.length === 0 && mcpNames.length === 0) return { status: 'nothing-proposed' };
   if (!catalog) return { status: 'catalog-unavailable' };
 
   const catalogs: Catalogs = {
@@ -130,9 +157,10 @@ export function resolveProposedTools(
     gateway: [],
     callableAgents: current.callableAgents,
   };
-  const unknown: string[] = [];
+  const expandedMcps = expandMcpNames(mcpNames, catalogs.mcpEntries);
+  const unknown: string[] = [...expandedMcps.unknown];
 
-  for (const raw of names) {
+  for (const raw of [...names, ...expandedMcps.tools]) {
     const match = matchTool(bareToolSlug(raw), catalogs);
 
     switch (match.kind) {
@@ -169,18 +197,16 @@ export function resolveProposedTools(
   };
 }
 
-const FIELDS_THIS_DRAFT_CANNOT_SET = [
-  'modelId',
-  'skills',
-  'knowledge',
-  'mcps',
-  'scope',
-  'memory',
-] as const;
+const FIELDS_THIS_DRAFT_CANNOT_SET = ['modelId', 'skills', 'knowledge', 'scope', 'memory'] as const;
 
 export interface DraftPatch {
   patch: Partial<WizardState>;
   problems: string[];
+}
+
+export interface DraftPatchContext {
+  toolsIntent?: 'replace' | 'merge';
+  anchorPrompt?: string;
 }
 
 function text(value: unknown): string | undefined {
@@ -191,6 +217,7 @@ export function paramsToDraftPatch(
   params: Record<string, unknown>,
   draft: WizardState,
   catalog: AvailableTools | undefined,
+  context: DraftPatchContext = {},
 ): DraftPatch {
   const patch: Partial<WizardState> = {};
   const problems: string[] = [];
@@ -213,7 +240,7 @@ export function paramsToDraftPatch(
   const color = text(params['color']);
   if (color !== undefined) patch.color = color;
 
-  const prompt = resolvePromptChange(params, draft.systemPrompt);
+  const prompt = resolvePromptChange(params, context.anchorPrompt ?? draft.systemPrompt);
   if (prompt.error !== undefined) {
     problems.push(`Instructions not applied — ${prompt.error}`);
   } else if (prompt.prompt !== undefined) {
@@ -221,30 +248,21 @@ export function paramsToDraftPatch(
   }
 
   const proposedTools = params['tools'];
-  if (Array.isArray(proposedTools)) {
-    const names = proposedTools.filter((entry): entry is string => typeof entry === 'string');
-    const resolved = resolveProposedTools(names, catalog, draft.tools);
+  const proposedMcps = params['mcps'];
+  if (Array.isArray(proposedTools) || Array.isArray(proposedMcps)) {
+    const strings = (value: unknown): string[] =>
+      Array.isArray(value)
+        ? value.filter((entry): entry is string => typeof entry === 'string')
+        : [];
+    const replaces = context.toolsIntent !== 'merge' && Array.isArray(proposedTools);
+    const kept = replaces ? [] : grantedNames(draft.tools);
+    const names = [...kept, ...strings(proposedTools)];
+    const resolved = resolveProposedTools(names, catalog, draft.tools, strings(proposedMcps));
 
     if (resolved.status === 'catalog-unavailable') {
       problems.push('Tools not applied — the tool catalogue is still loading. Try again.');
     } else if (resolved.status === 'resolved') {
       patch.tools = resolved.tools;
-      if (resolved.unknown.length > 0) {
-        problems.push(`Skipped unrecognised tool(s): ${resolved.unknown.join(', ')}`);
-      }
-      if (resolved.deduped.length > 0) {
-        problems.push(
-          `Skipped tool(s) already covered by a granted subagent: ${resolved.deduped.join(', ')}`,
-        );
-      }
-      if (resolved.trimmedSubagents.length > 0) {
-        problems.push(
-          `Kept the first ${2} subagent(s); skipped: ${resolved.trimmedSubagents.join(', ')}`,
-        );
-      }
-      if (resolved.removed.length > 0) {
-        problems.push(`Removed tool(s) you had selected: ${resolved.removed.join(', ')}`);
-      }
     }
   }
 
