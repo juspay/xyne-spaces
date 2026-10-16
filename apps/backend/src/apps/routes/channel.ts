@@ -61,6 +61,7 @@ router.get('/list', requirePermission('channels:read'), channelController.listCh
 
 router.post('/create', requirePermission('channels:write', { strict: true }), appChannelController.create);
 router.post('/update', requirePermission('channels:write', { strict: true }), appChannelController.update);
+router.get('/participants', requirePermission('channels:read', { strict: true }), appChannelController.listParticipants);
 router.post('/participants', requirePermission('channels:write', { strict: true }), appChannelController.addParticipants);
 
 export default router;

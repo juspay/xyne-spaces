@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
-import { ChannelRole, ChannelScopeType, ChannelVisibility } from '@xyne/shared';
+import { ChannelRole, ChannelScopeType, ChannelVisibility, UserStatus } from '@xyne/shared';
 import { callController } from '@/api/sdk/direct';
 import { SdkApiError } from '@/api/sdk/errors';
 import { setAppChannelOnDesk } from '@/channelsDesk/admin';
@@ -52,6 +52,14 @@ const AddParticipantsBodySchema = z
   .refine((body) => body.adminEmails.length + body.memberEmails.length > 0, {
     message: 'Give at least one email in adminEmails or memberEmails',
   });
+
+const ListParticipantsQuerySchema = z
+  .object({
+    channelId: z.string().trim().min(1),
+    limit: z.coerce.number().int().min(1).max(200).default(100),
+    cursor: z.string().trim().min(1).max(64).optional(),
+  })
+  .strict();
 
 const ADD_PARTICIPANTS_ERROR_CODES: Record<number, string> = {
   400: 'VALIDATION_FAILED',
@@ -212,6 +220,52 @@ export class AppChannelController {
         return;
       }
       logger.error('[APP-CHANNEL] Add participants failed:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
+   * List the active participants of a channel the app's bot is in
+   * GET /api/apps/channel/participants?channelId=&limit=&cursor=
+   */
+  listParticipants = async (req: Request, res: Response): Promise<void> => {
+    const queryResult = ListParticipantsQuerySchema.safeParse(req.query);
+    if (!queryResult.success) {
+      res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: queryResult.error.errors });
+      return;
+    }
+    const { channelId, limit, cursor } = queryResult.data;
+    const workspaceId = req.user!.workspaceId!;
+
+    try {
+      // Same rule as update and add: the bot must be in the channel, so one app can't read another's channels.
+      const inChannel = await db.channelParticipant.findFirst({
+        where: { channelId, userId: req.user!.id, workspaceId },
+        select: { channelId: true },
+      });
+      if (!inChannel) {
+        res.status(403).json({ error: `${channelId} is not a channel this app is in.`, code: 'CHANNEL_NOT_ALLOWED' });
+        return;
+      }
+      const rows = await db.channelParticipant.findMany({
+        where: {
+          channelId,
+          workspaceId,
+          user: { workspaceId, status: UserStatus.ACTIVE, leftAt: null },
+          ...(cursor && { id: { gt: cursor } }),
+        },
+        orderBy: { id: 'asc' },
+        take: limit + 1,
+        select: { id: true, userId: true, user: { select: { email: true } } },
+      });
+      const page = rows.slice(0, limit);
+      res.status(200).json({
+        channelId,
+        participants: page.map((row) => ({ userId: row.userId, email: row.user.email })),
+        nextCursor: rows.length > limit ? page[page.length - 1].id : null,
+      });
+    } catch (error) {
+      logger.error('[APP-CHANNEL] List participants failed:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   };
