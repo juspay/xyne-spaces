@@ -18,6 +18,8 @@ import {
 } from '../services/heicAttachmentService';
 import type { UploadedFile } from '../components/ui/files/Files.types';
 import { logger, Event } from '../utils/logger';
+import { runWithConcurrency } from '../utils/attachmentUploadProgress';
+import { useAttachmentUploadStore } from '../store/useAttachmentUploadStore';
 
 /** Extract file extension (e.g. ".pdf") from a filename. Returns empty string if none. */
 const getFileExtension = (name: string): string => {
@@ -27,6 +29,102 @@ const getFileExtension = (name: string): string => {
 
 // Format: Record<attachmentId, File> - local cache of File objects for newly uploaded files
 const filesMapRef: Record<string, File> = {};
+
+const UPLOAD_CONCURRENCY = 3;
+
+interface UploadJob {
+  file: File;
+  thumbnailBlob: Blob | undefined;
+  width: number | undefined;
+  height: number | undefined;
+  duration: number | undefined;
+  draftMessageId: string;
+  channelId: string;
+  conversationId: string | undefined;
+}
+
+const uploadJobs: Record<string, UploadJob> = {};
+const uploadControllers: Record<string, AbortController> = {};
+
+async function uploadAttachment(attachmentId: string): Promise<boolean> {
+  const job = uploadJobs[attachmentId];
+  if (!job) return false;
+  const store = useAttachmentUploadStore.getState();
+  const controller = new AbortController();
+  uploadControllers[attachmentId] = controller;
+  const startedAt = Date.now();
+
+  const formData = new FormData();
+  // Text fields go in BEFORE the file bodies. Multipart parts are parsed in wire
+  // order, so on a mid-upload disconnect the server has already read the ids and
+  // can mark those rows FAILED; appended last, they would never arrive.
+  formData.append(
+    'fileMetadata',
+    JSON.stringify([
+      {
+        fileIndex: 0,
+        hasThumbnail: !!job.thumbnailBlob,
+        thumbnailIndex: job.thumbnailBlob ? 0 : -1,
+        width: job.width,
+        height: job.height,
+        duration: job.duration,
+      },
+    ]),
+  );
+  formData.append('attachmentIds', JSON.stringify([attachmentId]));
+  formData.append('draftMessageId', job.draftMessageId);
+  formData.append('channelId', job.channelId);
+  if (job.conversationId) formData.append('conversationId', job.conversationId);
+  formData.append('files', job.file);
+  if (job.thumbnailBlob) {
+    formData.append('thumbnails', job.thumbnailBlob, `${job.file.name}_thumb.jpg`);
+  } else {
+    formData.append('thumbnails', new Blob([]), '');
+  }
+
+  try {
+    await apiInstance.post('/drafts/attachments/upload', formData, {
+      signal: controller.signal,
+      onUploadProgress: event => {
+        const total = event.total ?? job.file.size;
+        store.progress(attachmentId, Math.min(event.loaded, total), total);
+      },
+    });
+    logger.info(Event.ATTACHMENT_UPLOAD_SUCCESS, {
+      fileCount: 1,
+      latency: Date.now() - startedAt,
+      channelId: job.channelId,
+      draftMessageId: job.draftMessageId,
+    });
+    delete uploadJobs[attachmentId];
+    useAttachmentUploadStore.getState().clear([attachmentId]);
+    return true;
+  } catch (error) {
+    if (controller.signal.aborted) return true;
+    logger.error(Event.ATTACHMENT_UPLOAD_FAILED, {
+      fileCount: 1,
+      error: error instanceof Error ? error.message : String(error),
+      channelId: job.channelId,
+      conversationId: job.conversationId,
+      draftMessageId: job.draftMessageId,
+    });
+    useAttachmentUploadStore
+      .getState()
+      .fail(attachmentId, error instanceof Error ? error.message : 'Upload failed');
+    return false;
+  } finally {
+    if (uploadControllers[attachmentId] === controller) delete uploadControllers[attachmentId];
+  }
+}
+
+function discardUploads(attachmentIds: readonly string[]): void {
+  for (const id of attachmentIds) {
+    uploadControllers[id]?.abort();
+    delete uploadControllers[id];
+    delete uploadJobs[id];
+  }
+  useAttachmentUploadStore.getState().clear(attachmentIds);
+}
 
 // Helper function to get image dimensions by loading the image
 async function getImageDimensions(file: File): Promise<{ width: number; height: number } | null> {
@@ -264,99 +362,58 @@ export function useDraftAttachments() {
         }),
       );
 
-      // Store files in local map
-      processedFiles.forEach(({ attachmentId, file }) => {
+      processedFiles.forEach(({ attachmentId, file, thumbnailBlob, width, height, duration }) => {
         filesMapRef[attachmentId] = file;
+        uploadJobs[attachmentId] = {
+          file,
+          thumbnailBlob,
+          width,
+          height,
+          duration,
+          draftMessageId,
+          channelId,
+          conversationId,
+        };
+        useAttachmentUploadStore.getState().start(attachmentId, file.size);
       });
 
-      // Upload all files to API in a single batch request
-      try {
-        const uploadStartTime = Date.now();
-        const totalSizeBytes = filesArray.reduce((sum, f) => sum + f.size, 0);
+      logger.info(Event.ATTACHMENT_UPLOAD_STARTED, {
+        fileCount: filesArray.length,
+        totalSizeBytes: filesArray.reduce((sum, f) => sum + f.size, 0),
+        extensions: filesArray.map(f => getFileExtension(f.name)),
+        fileTypes: filesArray.map(f => f.type || 'unknown'),
+        channelId,
+        conversationId,
+        draftMessageId,
+      });
 
-        logger.info(Event.ATTACHMENT_UPLOAD_STARTED, {
-          fileCount: filesArray.length,
-          totalSizeBytes,
-          extensions: filesArray.map(f => getFileExtension(f.name)),
-          fileTypes: filesArray.map(f => f.type || 'unknown'),
-          channelId,
-          conversationId,
-          draftMessageId,
-        });
+      const failures: string[] = [];
+      await runWithConcurrency(attachmentIds, UPLOAD_CONCURRENCY, async attachmentId => {
+        const ok = await uploadAttachment(attachmentId);
+        if (!ok) failures.push(attachmentId);
+      });
 
-        const formData = new FormData();
-
-        // Text fields go in BEFORE the file bodies. Multipart parts are parsed in wire
-        // order, so on a mid-upload disconnect the server has already read the ids and
-        // can mark those rows FAILED; appended last, they would never arrive.
-        const fileMetadataArray = processedFiles.map(
-          ({ index, thumbnailBlob, width, height, duration }) => ({
-            fileIndex: index,
-            hasThumbnail: !!thumbnailBlob,
-            thumbnailIndex: processedFiles.findIndex(f => f.index === index && f.thumbnailBlob),
-            width,
-            height,
-            duration,
-          }),
+      if (failures.length > 0) {
+        throw new Error(
+          failures.length === filesArray.length
+            ? 'Upload failed — use Retry on the attachment'
+            : `${failures.length} of ${filesArray.length} files failed — use Retry on the attachment`,
         );
-        formData.append('fileMetadata', JSON.stringify(fileMetadataArray));
-
-        formData.append('attachmentIds', JSON.stringify(attachmentIds));
-        formData.append('draftMessageId', draftMessageId);
-        formData.append('channelId', channelId);
-
-        if (conversationId) {
-          formData.append('conversationId', conversationId);
-        }
-
-        // Add all files
-        filesArray.forEach(file => {
-          formData.append('files', file);
-        });
-
-        // Add all thumbnails (if available)
-        processedFiles.forEach(({ thumbnailBlob, file }) => {
-          if (thumbnailBlob) {
-            formData.append('thumbnails', thumbnailBlob, `${file.name}_thumb.jpg`);
-          } else {
-            // Add placeholder for consistent indexing
-            formData.append('thumbnails', new Blob([]), '');
-          }
-        });
-
-        await apiInstance.post('/drafts/attachments/upload', formData);
-
-        logger.info(Event.ATTACHMENT_UPLOAD_SUCCESS, {
-          fileCount: filesArray.length,
-          latency: Date.now() - uploadStartTime,
-          channelId,
-          draftMessageId,
-        });
-
-        // Return results in same order as input
-        return processedFiles.map(({ attachmentId, file }) => ({
-          attachmentId: attachmentId,
-          file,
-        }));
-      } catch (error) {
-        logger.error(Event.FRONTEND_ERROR, {
-          type: 'migrated_console_error',
-          message: String('Failed to upload files:'),
-          error: error,
-        });
-        logger.error(Event.ATTACHMENT_UPLOAD_FAILED, {
-          fileCount: filesArray.length,
-          error: error instanceof Error ? error.message : String(error),
-          channelId,
-          conversationId,
-          draftMessageId,
-        });
-        removeDroppedFiles(attachmentIds);
-        throw error;
       }
+
+      return processedFiles.map(({ attachmentId, file }) => ({
+        attachmentId: attachmentId,
+        file,
+      }));
     },
     [zero],
   );
+
+  const retryUpload = useCallback(async (attachmentId: string) => {
+    if (!uploadJobs[attachmentId]) return false;
+    useAttachmentUploadStore.getState().start(attachmentId, uploadJobs[attachmentId].file.size);
+    return uploadAttachment(attachmentId);
+  }, []);
 
   const removeDroppedFile = useCallback(
     // eslint-disable-next-line @typescript-eslint/require-await
@@ -366,6 +423,7 @@ export function useDraftAttachments() {
 
       // Remove from local state
       delete filesMapRef[attachmentId];
+      discardUploads([attachmentId]);
     },
     [zero],
   );
@@ -379,6 +437,7 @@ export function useDraftAttachments() {
       attachmentIds.forEach(id => {
         delete filesMapRef[id];
       });
+      discardUploads(attachmentIds);
     },
     [zero],
   );
@@ -402,6 +461,7 @@ export function useDraftAttachments() {
       draftMessage.attachments.forEach(attachment => {
         delete filesMapRef[attachment.id];
       });
+      discardUploads(draftMessage.attachments.map(attachment => attachment.id));
     },
     [zero, draftMessages],
   );
@@ -468,6 +528,7 @@ export function useDraftAttachments() {
   return useMemo(
     () => ({
       addDroppedFiles,
+      retryUpload,
       removeDroppedFile,
       removeDroppedFiles,
       clearDroppedFiles,
@@ -475,6 +536,7 @@ export function useDraftAttachments() {
     }),
     [
       addDroppedFiles,
+      retryUpload,
       removeDroppedFile,
       removeDroppedFiles,
       clearDroppedFiles,

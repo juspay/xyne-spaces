@@ -1,3 +1,4 @@
+import type { AttachmentUploadState } from '../../../utils/attachmentUploadProgress';
 export interface UploadedFile {
   id: string;
   originalName: string;
@@ -14,6 +15,8 @@ export interface AttachmentPreviewProps {
   onRemove: () => void;
   onPreview?: () => void;
   isUploading?: boolean;
+  upload?: AttachmentUploadState | undefined;
+  onRetry?: (() => void) | undefined;
   variant?: 'compact' | 'detailed';
 }
 
