@@ -18,6 +18,7 @@ import { logger } from '@/utils/logger';
 import { syncToYSweet } from '@/utils/ysweetUtils';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { commitAndSyncCanvasArtifact, readCanvasMarkdown } from '../sdlcCanvasSync';
+import { withSdlcSearchSync } from '@/zero/vespa-injection/core/sdlc-sync';
 import { ensureHubWikiFolder, ensureRepositoryWikiFolder } from '../hubFolders';
 import { mutateMarkdownSection } from '../markdownSection';
 
@@ -142,9 +143,9 @@ export class SdlcWikiPageStore {
       if (!membership || !repo) {
         throw new AppError('This repository is not part of that SDLC hub', 404);
       }
-      folderId = await ensureRepositoryWikiFolder(this.prisma, actor, input.channelId, repo);
+      folderId = await withSdlcSearchSync(changes => ensureRepositoryWikiFolder(this.prisma, actor, input.channelId, repo, changes));
     } else {
-      folderId = await ensureHubWikiFolder(this.prisma, actor, input.channelId);
+      folderId = await withSdlcSearchSync(changes => ensureHubWikiFolder(this.prisma, actor, input.channelId, changes));
     }
     return {
       workspaceId: input.workspaceId,
@@ -267,7 +268,7 @@ export class SdlcWikiPageStore {
     const content = await convertMarkdownToBlockNote(page.markdown);
     const actor = { workspaceId: scope.workspaceId, userId: scope.actorUserId };
     const canvasId = await commitAndSyncCanvasArtifact(
-      () => createTx(this, scope, page, content, typeFolderId, commitSha, actor, parentId),
+      changes => createTx(this, scope, page, content, typeFolderId, commitSha, actor, parentId, changes),
       syncToYSweet,
       scope.actorUserId
     );

@@ -14,6 +14,7 @@ import type { BlockNoteBlock } from '@/types/blockNoteTypes';
 import { listS2SClawSkills } from '@/services/clawAgentService';
 import { readFromYSweet } from '@/utils/ysweetUtils';
 import { ensureLink } from './entityLinkService';
+import { withSdlcSearchSync } from '@/zero/vespa-injection/core/sdlc-sync';
 import type { SdlcActor } from './types';
 
 export interface HubKnowledgeDocument {
@@ -181,7 +182,7 @@ export async function linkHubSkill(
   if (skill.scope === 'global' && !isAdmin) {
     throw new AppError('Only a hub admin can link a global skill', 403);
   }
-  await ensureLink(db, skillLink(channelId, skillId), actor);
+  await withSdlcSearchSync(changes => ensureLink(db, skillLink(channelId, skillId), actor, changes));
 }
 
 export async function unlinkHubSkill(
@@ -255,5 +256,5 @@ export async function setHubPin(
       throw new AppError('A personal skill can be pinned only for yourself', 400);
     }
   }
-  await ensureLink(db, pin, actor);
+  await withSdlcSearchSync(changes => ensureLink(db, pin, actor, changes));
 }

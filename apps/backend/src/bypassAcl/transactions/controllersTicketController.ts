@@ -1,4 +1,5 @@
 import { transaction } from '../base';
+import { withSdlcSearchSync } from '@/zero/vespa-injection/core/sdlc-sync';
 import { MessageAttachment } from '@prisma/client';
 import { Ticket } from '@prisma/client';
 import { prismaClient } from '@/apps/controllers/ticketController';
@@ -172,7 +173,7 @@ export function transferTicketToBoardTx(targetBoardId: string, ticketId: string,
   });
 }
 export function createTicketWithConversationTx(self: TicketController, conversationId: string, projectId: string, title: string, description: string, createdBy: string, updatedBy: string, assignedTo: string | undefined, boardId: string, statusV2: string, priority: string, messageContent: string | undefined, messageSubtype: string, metadata: Record<string, any>, entityLinkContext: { sourceId: string; sourceType: "CANVAS" | "ATTACHMENT" | "TRACK" | "FOLDER" | "LINK"; } | undefined) {
-  return transaction(['Board', 'Conversation', 'ConversationParticipant', 'Message', 'Project', 'SdlcEntityLink', 'Stage', 'StageTransition', 'Ticket', 'TicketActivity', 'TicketStageEta'], 'createTicketWithConversation: ticket, system message, conversation link and entity links must commit atomically; tx is not ACL-wrapped', prisma, async (tx) => {
+  return withSdlcSearchSync(changes => transaction(['Board', 'Conversation', 'ConversationParticipant', 'Message', 'Project', 'SdlcEntityLink', 'Stage', 'StageTransition', 'Ticket', 'TicketActivity', 'TicketStageEta'], 'createTicketWithConversation: ticket, system message, conversation link and entity links must commit atomically; tx is not ACL-wrapped', prisma, async (tx) => {
     // Get channelId from conversation
     const conversation = await self.conversationRepository.findById(conversationId);
     if (!conversation) {
@@ -273,13 +274,14 @@ export function createTicketWithConversationTx(self: TicketController, conversat
         tx,
         { owner: linkOwner, channelId, conversationId, ticketId: ticket.id },
         { workspaceId: channelWorkspaceId, userId: createdBy },
+        changes,
       );
     }
 
     await self.channelRepository.updateLastActivity(channelId);
 
     return ticket;
-  });
+  }));
 }
 export class TicketCreateAccessError extends Error {
   constructor(
@@ -373,7 +375,7 @@ async function assertTicketCreateAccess(tx: Prisma.TransactionClient, userId: st
 }
 
 export function createTicketTx(projectId: string, sourceConversationId: string | undefined, validatedConversation: any, self: TicketController, requestedTicketId: string | undefined, title: string, description: string, userId: string, finalAssignedTo: string | undefined, userGroupId: string | undefined, boardId: string, effectiveStatusV2: TicketStatusV2, priority: TicketPriority | undefined, eta: Date | undefined, metadata: Record<string, unknown> | undefined, closedAt: Date | undefined, closedBy: string | undefined, sourceMessageId: string | undefined, effectiveTicketType: string | undefined, effectiveStageName: string | undefined, dynamicFields: Record<string, string | string[]>, formFieldChangesForEmit: FormFieldChanges | undefined, channelId: string | undefined, excludedChatAttachmentIds: string[] | undefined, entityLinkOwner: { sourceId: string; sourceType: "CANVAS" | "ATTACHMENT" | "TRACK" | "FOLDER" | "LINK"; } | undefined, fromTicketsTab: boolean, initialMessageId: `${string}-${string}-${string}-${string}-${string}`, board: { name: string; boardType: BoardType; projectId: string; } | null, uploadedFiles: UploadedFileResult[], draftAttachmentIds: string[] | undefined, access?: TicketCreateAccessInput) {
-  return transaction(['Board', 'Channel', 'Conversation', 'ConversationParticipant', 'MessageAttachment', 'Project', 'SdlcEntityLink', 'Stage', 'StageTransition', 'Ticket', 'TicketActivity', 'TicketStageEta'], 'createTicket: ticket, conversation, participant, attachment and entity-link writes must commit atomically; tx is not ACL-wrapped', prisma, async (tx) => {
+  return withSdlcSearchSync(changes => transaction(['Board', 'Channel', 'Conversation', 'ConversationParticipant', 'MessageAttachment', 'Project', 'SdlcEntityLink', 'Stage', 'StageTransition', 'Ticket', 'TicketActivity', 'TicketStageEta'], 'createTicket: ticket, conversation, participant, attachment and entity-link writes must commit atomically; tx is not ACL-wrapped', prisma, async (tx) => {
     if (access) await assertTicketCreateAccess(tx, userId, access);
 
     // Generate xyneId using project-scoped format
@@ -519,6 +521,7 @@ export function createTicketTx(projectId: string, sourceConversationId: string |
             ticketId: ticket.id,
           },
           { workspaceId: existingConversationWorkspaceId, userId },
+          changes,
         );
       }
     } else {
@@ -649,6 +652,7 @@ export function createTicketTx(projectId: string, sourceConversationId: string |
             ticketId: ticket.id,
           },
           { workspaceId: newConversationWorkspaceId, userId },
+          changes,
         );
       }
     }
@@ -765,7 +769,7 @@ export function createTicketTx(projectId: string, sourceConversationId: string |
     }
 
     return { ticket, conversationId };
-  });
+  }));
 }
 export function mergeTicketTx(ticketId: string, targetTicketId: any, userId: string, source: any, target: any) {
   return transaction(['Ticket', 'TicketActivity', 'TicketReferenceMapping'], 'mergeTicket: merge mapping, source archive and both timeline entries must commit atomically; tx is not ACL-wrapped', prisma, async (tx) => {

@@ -208,6 +208,21 @@ export async function collectSideEffectJobs(
     }
   }
 
+  // A deleted SDLC edge only carries its id; keep the row so its search entries can follow.
+  if (operation === 'delete' && table === 'sdlc_entity_links') {
+    const link = await tx.run(zql.sdlc_entity_links.where('id', entityId).one());
+    if (link) {
+      previousValue = {
+        channelId: link.channelId,
+        sourceType: link.sourceType,
+        sourceId: link.sourceId,
+        targetType: link.targetType,
+        targetId: link.targetId,
+        relationType: link.relationType,
+      };
+    }
+  }
+
   if (operation === 'update' && table === 'email_reads') {
     const entity = await tx.run(zql.email_reads.where('id', entityId).one());
     if (entity) {
@@ -380,7 +395,12 @@ function extractEntityId(table: TableName, args: any): string | null {
     case 'link_access':
     case 'rcas':
     case 'view_access':
-    case 'ticket_stage_requests': {
+    case 'ticket_stage_requests':
+    case 'sdlc_entity_links':
+    case 'sdlc_tracks':
+    case 'sdlc_folders':
+    case 'canvas_folders':
+    case 'repos': {
       const typedArgs = args as { id: string };
       return typedArgs.id;
     }

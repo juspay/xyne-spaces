@@ -5,6 +5,7 @@ import { ChannelParticipantRepository } from '@/database/repositories/channelPar
 import { AppError } from '@/middleware/errorHandler';
 import { listScopedClawAgents } from '@/services/clawAgentService';
 import { ensureLink } from './entityLinkService';
+import { withSdlcSearchSync } from '@/zero/vespa-injection/core/sdlc-sync';
 import type { SdlcActor } from './types';
 
 const participants = new ChannelParticipantRepository();
@@ -113,7 +114,7 @@ export async function markHubAgentPending(
   if (!agent || !agent.ownedByScopeUser || agent.spacesAppUserId) {
     throw new AppError('Only your own agent awaiting approval can be linked to a hub', 403);
   }
-  await ensureLink(
+  await withSdlcSearchSync(changes => ensureLink(
     db,
     {
       channelId,
@@ -123,6 +124,7 @@ export async function markHubAgentPending(
       targetId: agentId,
       relationType: SDLC_AGENT_PENDING_RELATION,
     },
-    actor
-  );
+    actor,
+    changes
+  ));
 }
