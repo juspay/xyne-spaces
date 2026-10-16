@@ -387,6 +387,7 @@ export class TicketRepository {
               statusV2: newStatusV2,
               updatedBy: updatedBy,
               updatedAt: new Date(),
+              ...(statusChanged ? { statusUpdatedAt: new Date() } : {}),
             },
           });
         guardedUpdatedTicket = options.requiredActiveFlowRootId
@@ -894,6 +895,9 @@ export class TicketRepository {
         : null;
     }
     const previousStatus: TicketStatusV2 | null = prevSnapshot?.statusV2 ?? null;
+    if (fields.statusV2 !== undefined && fields.statusV2 !== previousStatus) {
+      data.statusUpdatedAt = data.updatedAt;
+    }
 
     const updatedTicket = await prisma.ticket.update({ where: { id: ticketId }, data });
     if (fields.description !== undefined) {
