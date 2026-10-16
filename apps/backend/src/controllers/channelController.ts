@@ -73,6 +73,8 @@ import { vespaService } from '@/services/vespaSearch';
 import { ChannelEmailAliasService } from '@/services/channelEmailAliasService';
 import { ensureDmConversationAuthorParticipant } from '@/utils/dmConversationParticipants';
 import { groupDmParticipantService } from '@/services/groupDmParticipantService';
+import { addChannelParticipants } from '@/services/channelParticipantsService';
+import type { AddChannelParticipantsBody } from '@/validators/channelValidator';
 import { AppError } from '@/middleware/errorHandler';
 import { sendForwardedMessageTx } from '@/bypassAcl/transactions/channelController';
 
@@ -2506,6 +2508,73 @@ export class ChannelController {
         return;
       }
 
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  // POST /api/channels/:channelId/participants - Add users to an existing channel
+  addChannelParticipants = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const actorId = req.user!.id;
+      const workspaceId = req.user!.workspaceId;
+      if (!workspaceId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+      const { channelId } = req.params;
+      const { userIds, role } = req.body as AddChannelParticipantsBody;
+
+      const result = await addChannelParticipants({
+        channelId,
+        actorId,
+        actorWorkspaceRole: req.user!.role,
+        workspaceId,
+        userIds,
+        role: role as ChannelRole,
+      });
+
+      if (result.added.length > 0) {
+        const authData = await this.getUserInfo(actorId);
+        try {
+          await this.sendAddAndRemoveParticipantsSystemMessage(
+            channelId,
+            result.added.map(({ userId, userName }) => ({ userId, userName })),
+            authData,
+            'participants_added'
+          );
+        } catch (error) {
+          logger.error('Failed to post add-people system message', {
+            error: (error instanceof Error ? error.message : String(error)).replace(/\n|\r/g, ' '),
+          });
+        }
+
+        const handler = new ChannelParticipantsSideEffectHandler({
+          userID: actorId,
+          workspaceId,
+          role: req.user!.role,
+          orgRole: req.user!.orgRole,
+          memberId: req.user!.memberId,
+        });
+        await Promise.all(result.added.map(participant =>
+          handler.onInsert({
+            entityId: participant.participantId,
+            entityType: 'channel_participants',
+            operation: 'insert'
+          }).catch(err => logger.error('Side-effect handler error: channel_participants onInsert', err))
+        ));
+      }
+
+      res.status(result.added.length > 0 ? 201 : 200).json({
+        channelId,
+        added: result.added.map(({ userId }) => userId),
+        alreadyMembers: result.alreadyMembers,
+      });
+    } catch (error) {
+      if (error instanceof AppError) {
+        res.status(error.statusCode).json({ error: error.message });
+        return;
+      }
+      logger.error('Error adding channel participants:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   };
