@@ -1582,12 +1582,37 @@ type SdlcRepositoryRow = {
   hubIds: string[];
 };
 
+/** A track or folder row and the hub that places it; null once it is in no hub. */
+export const fetchSdlcContainerRow = async (docId: string): Promise<SdlcContainerRow | null> => {
+  const row = (await db.sdlcTrack.findUnique({ where: { id: docId }, select: { id: true } }))
+    ?? (await db.sdlcFolder.findUnique({ where: { id: docId }, select: { id: true } }));
+  const hubId = row ? await hubOfContainer(docId) : null;
+  return row && hubId ? { id: row.id, hubId } : null;
+};
+
 /**
  * A track or folder of an SDLC hub. Its place (parent, path, scope ids, track and status,
  * branch, repository) comes from its whole hub, as a document's place does (sdlc-index.ts).
  */
-export const mapSdlcContainer = async (row: SdlcContainerRow): Promise<VespaSdlcContainerDocument | null> =>
-  (await loadSdlcHubIndex(row.hubId))?.containers.get(row.id) ?? null;
+export const mapSdlcContainer = async (row: SdlcContainerRow): Promise<VespaSdlcContainerDocument> => {
+  const container = (await loadSdlcHubIndex(row.hubId))?.containers.get(row.id);
+  if (!container) throw new Error(`${sdlcContainerSchema}: ${row.id} is not placed in hub ${row.hubId}`);
+  return container;
+};
+
+/** A repository row with every hub it is attached to; null once it is deleted. */
+export const fetchSdlcRepositoryRow = async (docId: string): Promise<SdlcRepositoryRow | null> => {
+  const repo = await db.repo.findUnique({
+    where: { id: docId },
+    select: { id: true, name: true, url: true, projectId: true, workspaceId: true },
+  });
+  if (!repo) return null;
+  const memberships = await db.sdlcEntityLink.findMany({
+    where: { sourceType: 'CHANNEL', targetType: 'REPOSITORY', targetId: docId, relationType: SDLC_MEMBERSHIP_RELATION },
+    select: { channelId: true },
+  });
+  return { ...repo, hubIds: [...new Set(memberships.map(m => m.channelId))] };
+};
 
 /** A repository registered for SDLC, with every hub it is attached to. */
 export const mapSdlcRepository = async (row: SdlcRepositoryRow): Promise<VespaSdlcRepositoryDocument> => {
@@ -1655,12 +1680,8 @@ export const mapBySchema = async (
         return mapEmail(args as unknown as Email, workspaceId, orgId);
       case appSchema:
         return mapApp(args as Apps);
-      case sdlcContainerSchema: {
-        const row = args as unknown as SdlcContainerRow;
-        const container = await mapSdlcContainer(row);
-        if (!container) throw new Error(`${schemaName}: ${row.id} is not placed in hub ${row.hubId}`);
-        return container as unknown as InsertDocument;
-      }
+      case sdlcContainerSchema:
+        return mapSdlcContainer(args as unknown as SdlcContainerRow) as unknown as Promise<InsertDocument>;
       case sdlcRepositorySchema:
         return mapSdlcRepository(args as unknown as SdlcRepositoryRow) as unknown as Promise<InsertDocument>;
       case samTranscriptSchema:
@@ -1693,7 +1714,7 @@ export const fetchDataBySchema = async (
   schema: VespaSchema,
   docId: string,
   app?: SubApp
-): Promise<Channel | Message | Project | Ticket | Email | RCAWithRelations | Canvas | Call | CollectionItem | Apps | User | null> => {
+): Promise<Channel | Message | Project | Ticket | Email | RCAWithRelations | Canvas | Call | CollectionItem | Apps | User | SdlcContainerRow | SdlcRepositoryRow | null> => {
   switch (schema) {
     case userSchema:
       return await db.user.findUnique({
@@ -1768,26 +1789,11 @@ export const fetchDataBySchema = async (
     case samTranscriptSchema:
       throw new Error(`${schema}: SAM transcripts have no DB table. Pass pre-transformed data via vespaQueue.addJob({ data: vespaDocument }).`);
 
-    case sdlcContainerSchema: {
-      // A track or folder row, and the hub that places it; none once it is in no hub.
-      const row = (await db.sdlcTrack.findUnique({ where: { id: docId }, select: { id: true } }))
-        ?? (await db.sdlcFolder.findUnique({ where: { id: docId }, select: { id: true } }));
-      const hubId = row ? await hubOfContainer(docId) : null;
-      return row && hubId ? ({ id: row.id, hubId } satisfies SdlcContainerRow) as any : null;
-    }
+    case sdlcContainerSchema:
+      return await fetchSdlcContainerRow(docId);
 
-    case sdlcRepositorySchema: {
-      const repo = await db.repo.findUnique({
-        where: { id: docId },
-        select: { id: true, name: true, url: true, projectId: true, workspaceId: true },
-      });
-      if (!repo) return null;
-      const memberships = await db.sdlcEntityLink.findMany({
-        where: { sourceType: 'CHANNEL', targetType: 'REPOSITORY', targetId: docId, relationType: SDLC_MEMBERSHIP_RELATION },
-        select: { channelId: true },
-      });
-      return ({ ...repo, hubIds: [...new Set(memberships.map(m => m.channelId))] } satisfies SdlcRepositoryRow) as any;
-    }
+    case sdlcRepositorySchema:
+      return await fetchSdlcRepositoryRow(docId);
 
     default:
       throw new Error(`Unknown schema: ${schema}`);
