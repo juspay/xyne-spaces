@@ -3,8 +3,6 @@ import { ChannelController } from '../controllers/channelController';
 import { ConversationController } from '../controllers/conversationController';
 import { ShareAgentConversationController } from '../controllers/shareAgentConversationController';
 import { uploadMultiple } from '../middleware/upload';
-import { validateZod } from '../middleware/validation';
-import { AddChannelParticipantsSchema } from '../validators/channelValidator';
 
 const router = Router();
 const channelController = new ChannelController();
@@ -21,7 +19,6 @@ router.get('/:channelId/connected-email', channelController.getConnectedEmail); 
 router.get('/:channelId/email-alias', channelController.getEmailAlias); // Derived inbound email alias for channel routing
 router.get('/:channelId/vespa-participants', channelController.getVespaParticipants); // Channel participant user IDs from Vespa chat_container.permissions
 router.get('/:channelId/members', channelController.getChannelMembers); // Active channel members as { id, name } (for participant pickers)
-router.post('/:channelId/participants', validateZod(AddChannelParticipantsSchema), channelController.addChannelParticipants); // Add users to an existing channel (same workspace only)
 router.get('/:channelId/can-link-boards', channelController.canLinkChannelBoards); // Whether the caller may link boards to this channel (UI gate; ACL still enforces)
 
 // Conversation Routes (nested under channels)

@@ -74,7 +74,6 @@ import { ChannelEmailAliasService } from '@/services/channelEmailAliasService';
 import { ensureDmConversationAuthorParticipant } from '@/utils/dmConversationParticipants';
 import { groupDmParticipantService } from '@/services/groupDmParticipantService';
 import { addChannelParticipants } from '@/services/channelParticipantsService';
-import type { AddChannelParticipantsBody } from '@/validators/channelValidator';
 import { AppError } from '@/middleware/errorHandler';
 import { sendForwardedMessageTx } from '@/bypassAcl/transactions/channelController';
 
@@ -2512,7 +2511,7 @@ export class ChannelController {
     }
   };
 
-  // POST /api/channels/:channelId/participants - Add users to an existing channel
+  // Not routed: served by the apps API (POST /api/apps/channel/participants) through callController
   addChannelParticipants = async (req: Request, res: Response): Promise<void> => {
     try {
       const actorId = req.user!.id;
@@ -2521,8 +2520,7 @@ export class ChannelController {
         res.status(401).json({ error: 'Unauthorized' });
         return;
       }
-      const { channelId } = req.params;
-      const { userIds, role } = req.body as AddChannelParticipantsBody;
+      const { channelId, userIds, role } = req.body as { channelId: string; userIds: string[]; role: ChannelRole };
 
       const result = await addChannelParticipants({
         channelId,
@@ -2530,7 +2528,7 @@ export class ChannelController {
         actorWorkspaceRole: req.user!.role,
         workspaceId,
         userIds,
-        role: role as ChannelRole,
+        role,
       });
 
       if (result.added.length > 0) {

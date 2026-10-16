@@ -32,15 +32,3 @@ export const AddGroupDmParticipantsSchema = z
   });
 
 export type AddGroupDmParticipantsBody = z.infer<typeof AddGroupDmParticipantsSchema>;
-
-export const AddChannelParticipantsSchema = z
-  .object({
-    userIds: z
-      .array(z.string().trim().min(1))
-      .min(1, { message: 'At least one user is required' })
-      .max(100, { message: 'At most 100 users can be added at once' }),
-    role: z.enum(['MEMBER', 'ADMIN']).default('MEMBER'),
-  })
-  .strict();
-
-export type AddChannelParticipantsBody = z.infer<typeof AddChannelParticipantsSchema>;
