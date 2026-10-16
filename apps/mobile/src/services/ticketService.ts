@@ -11,6 +11,14 @@ export interface CreateTicketRequest {
   createdBy: string;
   updatedBy: string;
   sourceConversationId?: string;
+  sourceMessageId?: string;
+  statusV2?: string;
+  stageName?: string;
+  ticketType?: string;
+  eta?: string;
+  tags?: string[];
+  merchantId?: string;
+  dynamicFields?: Record<string, string | string[]>;
   projectId?: string;
   priority?: TicketPriority;
   assignedTo?: string;
@@ -39,5 +47,18 @@ export const createTicket = async (payload: CreateTicketRequest): Promise<Create
   if (payload.assignedTo) body['assignedTo'] = payload.assignedTo;
   if (payload.userGroupId) body['userGroupId'] = payload.userGroupId;
 
+  for (const key of [
+    'sourceMessageId',
+    'statusV2',
+    'stageName',
+    'ticketType',
+    'eta',
+    'tags',
+    'merchantId',
+    'dynamicFields',
+  ] as const) {
+    const value = payload[key];
+    if (value !== undefined) body[key] = value;
+  }
   return apiPost<CreateTicketResponse>('/tickets', body);
 };

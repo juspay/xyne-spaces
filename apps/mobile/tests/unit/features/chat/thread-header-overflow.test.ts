@@ -28,7 +28,7 @@ describe('getThreadCallBlockReason', () => {
       getThreadCallBlockReason({
         canUseMemberActions: false,
         isInCall: true,
-        currentCallExternalId: 'other-channel',
+        currentCallChannelId: 'other-channel',
         channelId: 'channel-1',
       }),
       'join-channel',
@@ -40,7 +40,7 @@ describe('getThreadCallBlockReason', () => {
       getThreadCallBlockReason({
         canUseMemberActions: true,
         isInCall: true,
-        currentCallExternalId: 'other-channel',
+        currentCallChannelId: 'other-channel',
         channelId: 'channel-1',
       }),
       'already-in-call',
@@ -49,7 +49,7 @@ describe('getThreadCallBlockReason', () => {
       getThreadCallBlockReason({
         canUseMemberActions: true,
         isInCall: true,
-        currentCallExternalId: 'channel-1',
+        currentCallChannelId: 'channel-1',
         channelId: 'channel-1',
       }),
       null,
@@ -58,7 +58,7 @@ describe('getThreadCallBlockReason', () => {
       getThreadCallBlockReason({
         canUseMemberActions: true,
         isInCall: false,
-        currentCallExternalId: null,
+        currentCallChannelId: null,
         channelId: 'channel-1',
       }),
       null,
@@ -114,4 +114,52 @@ describe('shouldBlockSubscriptionToggle', () => {
       false,
     );
   });
+});
+
+it('keeps recordings accessible while preventing another recording in an archived thread', () => {
+  const actions = getThreadHeaderOverflowActions(false, { canEdit: false, recordingActive: true });
+  assert.equal(actions.find(action => action.id === 'take-notes')?.label, 'Open recording');
+  assert.equal(actions.find(action => action.id === 'take-notes')?.disabled, false);
+  assert.equal(actions.find(action => action.id === 'thread-tags')?.disabled, true);
+  assert.equal(
+    getThreadHeaderOverflowActions(false, { canEdit: false }).find(
+      action => action.id === 'take-notes',
+    )?.disabled,
+    true,
+  );
+});
+
+it('blocks a different thread call in the same channel, including a channel-wide call', () => {
+  const args = {
+    canUseMemberActions: true,
+    isInCall: true,
+    currentCallChannelId: 'channel',
+    channelId: 'channel',
+    threadId: 'thread',
+  };
+  assert.equal(
+    getThreadCallBlockReason({ ...args, currentConversationId: 'other-thread' }),
+    'already-in-call',
+  );
+  assert.equal(
+    getThreadCallBlockReason({ ...args, currentConversationId: null }),
+    'already-in-call',
+  );
+  assert.equal(getThreadCallBlockReason({ ...args, currentConversationId: 'thread' }), null);
+});
+
+it('offers context on editable threads and ticket creation only when eligible', () => {
+  const actions = getThreadHeaderOverflowActions(false, { canEdit: true, canCreateTicket: true });
+  assert.equal(actions.find(action => action.id === 'add-context')?.disabled, false);
+  assert.ok(actions.some(action => action.id === 'create-ticket'));
+  assert.equal(
+    getThreadHeaderOverflowActions(false).some(action => action.id === 'create-ticket'),
+    false,
+  );
+  assert.equal(
+    getThreadHeaderOverflowActions(false, { canEdit: false }).find(
+      action => action.id === 'add-context',
+    )?.disabled,
+    true,
+  );
 });

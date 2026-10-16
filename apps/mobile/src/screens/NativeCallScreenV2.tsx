@@ -67,6 +67,7 @@ import {
 } from '@/src/features/chat/navigation/chatOpenIntent';
 
 interface NativeCallScreenProps {
+  conversationId?: string;
   channelId: string;
   callType?: CallType;
   shouldInitiateCall?: boolean;
@@ -502,6 +503,7 @@ const styles = StyleSheet.create({
 export const NativeCallScreen: React.FC<NativeCallScreenProps> = ({
   channelId,
   callType = CallType.AUDIO,
+  conversationId,
   shouldInitiateCall = true,
   initialMicrophoneEnabled,
   initialCameraEnabled,
@@ -681,6 +683,7 @@ export const NativeCallScreen: React.FC<NativeCallScreenProps> = ({
       roomActor.send({
         type: 'INITIATE_CALL',
         channelId,
+        ...(conversationId ? { conversationId } : {}),
         callType,
         zero: null, // Zero is managed separately in Lotus
         viewMode: 'full',
@@ -698,7 +701,14 @@ export const NativeCallScreen: React.FC<NativeCallScreenProps> = ({
       });
     }
     // else: call was already initiated externally (e.g. instant call from sheet) — just show machine state
-  }, [channelId, callType, initialCameraEnabled, initialMicrophoneEnabled, shouldInitiateCall]);
+  }, [
+    channelId,
+    conversationId,
+    callType,
+    initialCameraEnabled,
+    initialMicrophoneEnabled,
+    shouldInitiateCall,
+  ]);
 
   // Leaves the call screen with the call still running behind the top bar. `thenOpen` navigates
   // on from wherever that lands; it is skipped when the phone has to go back to the lock screen.

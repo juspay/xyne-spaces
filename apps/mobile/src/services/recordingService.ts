@@ -31,7 +31,11 @@ class RecordingService {
    * Start a headless recording session.
    * Calls /calls/initiate with isHeadless:true and returns LiveKit credentials.
    */
-  async startRecording(params?: { sttModel?: SttModel }): Promise<RecordingSession> {
+  async startRecording(params?: {
+    sttModel?: SttModel;
+    channelId?: string;
+    conversationId?: string;
+  }): Promise<RecordingSession> {
     const token = await getAuthToken();
     const response = await apiPost<InitiateCallResponse>(
       '/calls/initiate',
@@ -39,6 +43,9 @@ class RecordingService {
         isHeadless: true,
         callType: 'AUDIO',
         sttModel: params?.sttModel ?? 'google',
+        ...(params?.channelId && params?.conversationId
+          ? { channelId: params.channelId, conversationId: params.conversationId }
+          : {}),
       },
       token ? { token } : {},
     );
