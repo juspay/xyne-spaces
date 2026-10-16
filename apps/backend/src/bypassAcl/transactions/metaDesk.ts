@@ -3,6 +3,7 @@ import type { ExternalSourcePlatform } from '@/integrations/core/types';
 import { db } from '@/database/client';
 import { newConnectId, createConnectGroupForEntity, ConnectEntityType } from '@/database/connectGroup';
 import {
+  BoardType,
   ChannelType,
   ChannelScopeType,
   ChannelVisibility,
@@ -101,7 +102,7 @@ export function createMetaDeskTx(
       // Dual-write: mirror the channel→project board set into ChannelBoardMapping
       // so downstream consumers never need to read channel.projectId.
       const mappingBoards = await tx.board.findMany({
-        where: { projectId: state.projectId },
+        where: { projectId: state.projectId, boardType: { not: BoardType.RELEASE } },
         orderBy: { createdAt: 'asc' },
         select: { id: true },
       });

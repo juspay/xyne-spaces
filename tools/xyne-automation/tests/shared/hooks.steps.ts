@@ -89,6 +89,11 @@ export default class HooksSteps {
       gaugeLogger.info(`Step PASS: ${stepName}`, { durationMs });
       Gauge.writeMessage(`✓ ${stepName} (${durationMs}ms)`);
     }
+
+    // Opt-in (STEP_DELAY) pause so each step's result stays on screen in a headed run.
+    if (config.stepDelay > 0) {
+      await new Promise((resolve) => setTimeout(resolve, config.stepDelay));
+    }
   }
 
   @AfterScenario()

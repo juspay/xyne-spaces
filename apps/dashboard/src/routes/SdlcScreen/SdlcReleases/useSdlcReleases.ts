@@ -4,7 +4,6 @@ import { v4 as uuidv4 } from 'uuid';
 import { BoardType, ReleaseTrackingMode, resolveTicketDescription } from '@xyne/shared';
 import { buildStagesByBoard } from '../../../components/Release/releaseChanges.utils';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
-import { useChannelParticipation } from '../../../hooks/useChannels';
 import { useUsersById } from '../../../hooks/useUsers';
 import { resolveStageStatus } from '../../../utils/board/stageStatusIcon';
 import { useZero } from '../../../hooks/useZero';
@@ -30,50 +29,33 @@ import {
   firstBranch,
   formatReleaseDate,
   jsonStringArray,
-  normalizeRepoUrl,
   releaseTitle,
   repoHostLabel,
-  repoMatchesUrl,
 } from './SdlcReleases.utils';
 
 const PAGE_SIZE = 20;
 
-interface ApplicationRow {
-  mainReleaseBoardId?: string | null | undefined;
-  repoUrl: string;
-}
-
-// An exact URL match wins over a prefix match (e.g. a repoUrl saved with /browse).
-function matchingMainBoardId(
-  repoUrl: string,
-  applications: readonly ApplicationRow[],
-): string | null {
-  const candidates = applications.filter(
-    app => !!app.mainReleaseBoardId && repoMatchesUrl(repoUrl, app.repoUrl),
-  );
-  const exact = candidates.find(app => normalizeRepoUrl(app.repoUrl) === normalizeRepoUrl(repoUrl));
-  return (exact ?? candidates[0])?.mainReleaseBoardId ?? null;
-}
-
-/** The hub's repositories with their release config. Config is scoped by the hub's
- *  project, like the project release manager; the repository only supplies URL and branch. */
+/** The hub's repositories with their release config. A config belongs to the hub through
+ *  its RELEASE_CONFIG edge; the repository supplies URL and branch. */
 export function useSdlcReleaseRepos(
   repositories: readonly SdlcHubRepoInput[],
   projectId: string | null,
+  hubChannelId: string,
+  hubChannelName: string,
 ): { repos: SdlcReleaseRepo[]; loading: boolean } {
   const [applications, applicationsStatus] = useCachedQuery(
     queries.applicationsByProjectId({ projectId: projectId ?? '' }),
     { enabled: !!projectId },
   );
+  const [releaseConfigs, releaseConfigsStatus] = useCachedQuery(
+    queries.getSdlcHubReleaseConfigs({ channelId: hubChannelId }),
+    { enabled: !!hubChannelId },
+  );
 
-  const mainBoardIdByRepo = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const repo of repositories) {
-      const boardId = matchingMainBoardId(repo.canonicalUrl || repo.url, applications ?? []);
-      if (boardId) map.set(repo.id, boardId);
-    }
-    return map;
-  }, [repositories, applications]);
+  const mainBoardIdByRepo = useMemo(
+    () => new Map((releaseConfigs ?? []).map(link => [link.sourceId, link.targetId])),
+    [releaseConfigs],
+  );
 
   // Service boards come along so a save keeps their current names.
   const boardIds = useMemo(() => {
@@ -131,14 +113,25 @@ export function useSdlcReleaseRepos(
           host: repoHostLabel(repoUrl),
           branch: firstBranch(repo.baseBranch),
           projectId,
+          hubChannelId,
+          hubChannelName,
           config,
         };
       }),
-    [repositories, projectId, mainBoardIdByRepo, boards, applications],
+    [
+      repositories,
+      projectId,
+      hubChannelId,
+      hubChannelName,
+      mainBoardIdByRepo,
+      boards,
+      applications,
+    ],
   );
 
   const loading =
     (!!projectId && applicationsStatus.type !== 'complete' && !applications) ||
+    (!!hubChannelId && releaseConfigsStatus.type !== 'complete' && !releaseConfigs) ||
     (boardIds.length > 0 && boardsStatus.type !== 'complete' && !boards);
 
   return { repos, loading };
@@ -317,14 +310,6 @@ export function useAssignReleaseQa(): (artIds: readonly string[], userId: string
   );
 }
 
-export function useReleaseThreadAccess(releaseId: string | null): boolean {
-  const [release] = useCachedQuery(queries.ticketRowById({ ticketId: releaseId ?? '' }), {
-    enabled: !!releaseId,
-  });
-  const participation = useChannelParticipation(releaseId ? (release?.channelId ?? '') : '');
-  return !!releaseId && !!participation;
-}
-
 /** release_repositories is not synced through Zero, so it comes over REST along with the
  *  release's analysis canvas id. */
 const releaseRepositoryListeners = new Set<(releaseId: string) => void>();
@@ -397,15 +382,16 @@ export function useSaveReleaseRepoConfig(): {
         return false;
       }
       if (!draft.channelId) return false;
-      const mainBoardName = draft.mainBoardName || buildMainReleaseBoardName(repo.repoUrl);
+      const mainBoardName =
+        draft.mainBoardName || buildMainReleaseBoardName(repo.repoUrl, repo.hubChannelName);
       const applications = draft.services.map(service => ({
         id: service.id,
         boardId: service.boardId,
         boardName:
-          service.boardName.trim() || buildApplicationReleaseBoardName(repo.repoUrl, service.name),
+          service.boardName.trim() ||
+          buildApplicationReleaseBoardName(repo.repoUrl, service.name, repo.hubChannelName),
         name: service.name.trim(),
         regex: service.regex.trim(),
-        repoUrl: repo.repoUrl,
         ownerTeam: service.ownerTeam,
         envPaths: service.envPaths,
         migrationPaths: service.migrationPaths,
@@ -419,11 +405,12 @@ export function useSaveReleaseRepoConfig(): {
       try {
         const response = await zero.mutate(
           mutators.project.saveReleaseBoardConfig({
-            projectId: repo.projectId,
             mainBoardId: draft.mainBoardId || uuidv4(),
             mainBoardName,
             releaseTrackingMode: draft.mode,
             channelId: draft.channelId,
+            hubChannelId: repo.hubChannelId,
+            repoId: repo.id,
             applications,
           }),
         ).server;

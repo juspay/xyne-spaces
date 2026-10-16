@@ -61,6 +61,37 @@ export const chatMessageRepository = {
     });
   },
 
+  /** Appends finished user/assistant pairs in one transaction, chained from
+   *  `parentId` so the tree stays linear. `createdAt` is set a millisecond
+   *  apart: rows of one transaction would otherwise share a timestamp and the
+   *  transcript (ordered by createdAt) could show a reply before its request. */
+  appendTurns: (data: {
+    conversationId: string;
+    agentSlug: string;
+    userId: string;
+    orgId: string;
+    parentId: string | null;
+    turns: Array<{ request: string; reply: string }>;
+  }) =>
+    prisma.$transaction(async (tx) => {
+      const { turns, parentId: firstParentId, ...owner } = data;
+      const start = Date.now();
+      const ids: string[] = [];
+      let parentId = firstParentId;
+      for (const [index, turn] of turns.flatMap((t) => [
+        { role: "user", content: t.request },
+        { role: "assistant", content: t.reply },
+      ]).entries()) {
+        const row = await tx.chatMessage.create({
+          data: { ...owner, ...turn, status: "completed", parentId, createdAt: new Date(start + index) },
+          select: { id: true },
+        });
+        ids.push(row.id);
+        parentId = row.id;
+      }
+      return ids;
+    }),
+
   /** The pending action exactly as the run stored it, found by signature. */
   findPendingAction: async (conversationId: string, signature: string): Promise<Record<string, unknown> | null> => {
     const row = await prisma.chatMessage.findFirst({

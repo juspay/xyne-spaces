@@ -31,7 +31,7 @@ const GRID_CLASS = 'grid grid-cols-[minmax(0,1.1fr)_minmax(0,1.1fr)_minmax(0,0.8
 
 export function SdlcReleaseServices({
   repoName,
-  repoUrl,
+  repoId,
   projectId,
   services,
   onChange,
@@ -51,7 +51,7 @@ export function SdlcReleaseServices({
     try {
       const response = await apiInstance.post<{ services?: SuggestedService[]; message?: string }>(
         '/commits/analyze/suggest-services',
-        { repoUrl, projectId },
+        { repoId, projectId },
       );
       const have = new Set(services.map(service => service.name.trim().toLowerCase()));
       const added = (response.data.services ?? [])

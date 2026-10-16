@@ -39,8 +39,10 @@ import {
   buildSummaryTemplateSelectionPrompt,
   formatSummaryTemplateSections,
   parseSelectedSummaryTemplate,
+  pickSummaryTemplateWithXor,
   type SummaryTemplateCandidate,
 } from './summaryTemplateSelection';
+import { AgentsConfig } from '@/agents/config';
 import { getMandatorySummarySectionState } from './summaryTemplateSections';
 import {
   DEFAULT_RECORDING_SUMMARY_TEMPLATE,
@@ -1085,6 +1087,19 @@ export class CallDocumentService {
   ): Promise<RecordingSummaryTemplateSelection<T>> {
     if (templates.length === 0) {
       return { template: defaultTemplate, fellBack: true, reason: 'no_templates' };
+    }
+
+    if ((await AgentsConfig.fetch()).summaryTemplateSelectionXorEnabled) {
+      const xorId = await pickSummaryTemplateWithXor(transcript, templates, meetingTitle);
+      const template = templates.find(candidate => candidate.id === xorId);
+      if (template) {
+        logger.info(`[${callId}] recording_summary_template_selected`, {
+          template_id: template.id,
+          template_name: template.name,
+          source: 'xor',
+        });
+        return { template, fellBack: false, reason: null };
+      }
     }
 
     const result = await executeStreamingLlmRequest({

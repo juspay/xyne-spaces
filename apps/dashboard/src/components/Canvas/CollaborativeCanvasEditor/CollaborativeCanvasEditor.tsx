@@ -16,6 +16,7 @@ import {
   getDefaultReactSlashMenuItems,
   DefaultReactSuggestionItem,
 } from '@blocknote/react';
+import { Loader2 } from 'lucide-react';
 import { BlockNoteView } from '@blocknote/mantine';
 import { getDiagramSlashMenuItems } from '@blocknote/diagram-block';
 import { getMathSlashMenuItems } from '@blocknote/math-block';
@@ -211,6 +212,7 @@ export const CollaborativeCanvasEditor = forwardRef<
       connectionStatus,
       isReadOnly,
       connectionFailed,
+      isReconnecting,
       reconnect,
     } = useCanvasYjsProvider({
       canvasId,
@@ -237,8 +239,8 @@ export const CollaborativeCanvasEditor = forwardRef<
       hasCollaborationInitializedRef.current = true;
     }
 
-    const shouldUseCollaboration = hasCollaborationInitializedRef.current || isCollaborationReady;
-    const canMountEditor = shouldUseCollaboration && !!provider && !!fragment;
+    const shouldUseCollaboration = !!fragment;
+    const canMountEditor = shouldUseCollaboration;
 
     const dictionary = useMemo(
       () => (placeholder ? buildCanvasDictionary(placeholder) : canvasDictionary),
@@ -255,7 +257,7 @@ export const CollaborativeCanvasEditor = forwardRef<
     };
 
     const editorOptions =
-      shouldUseCollaboration && provider && fragment
+      shouldUseCollaboration && fragment
         ? withCollaboration({
             ...baseEditorOptions,
             collaboration: {
@@ -265,7 +267,7 @@ export const CollaborativeCanvasEditor = forwardRef<
                 name: currentUserName,
                 color: currentUserColor,
               },
-              provider,
+              ...(provider ? { provider } : {}),
             },
           })
         : baseEditorOptions;
@@ -802,15 +804,37 @@ export const CollaborativeCanvasEditor = forwardRef<
         tabIndex={-1}
         data-testid='canvas-editor'
       >
-        {connectionFailed && (
-          <div className='flex items-center justify-between gap-3 border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive'>
-            <span>Connection to the canvas failed. Your changes may not be saved.</span>
-            <Button size='sm' variant='outline' onClick={reconnect}>
-              Reconnect
-            </Button>
-          </div>
-        )}
         <div className='relative flex min-h-0 flex-1 overflow-hidden'>
+          {(connectionFailed || isReconnecting) && (
+            <div
+              className='absolute right-3 top-3 z-20 flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs text-destructive shadow-sm'
+              title={
+                isReconnecting
+                  ? 'Reconnecting to the canvas...'
+                  : 'Connection to the canvas failed. Your changes may not be saved.'
+              }
+            >
+              <span className='max-w-[220px] truncate'>
+                {isReconnecting ? 'Reconnecting…' : 'Connection failed'}
+              </span>
+              <Button
+                size='sm'
+                variant='outline'
+                onClick={reconnect}
+                disabled={isReconnecting}
+                className='h-6 shrink-0 px-2 py-0 text-xs'
+              >
+                {isReconnecting ? (
+                  <span className='flex items-center gap-1'>
+                    <Loader2 size={12} className='animate-spin' />
+                    Reconnecting
+                  </span>
+                ) : (
+                  'Reconnect'
+                )}
+              </Button>
+            </div>
+          )}
           <div
             className='thin-scrollbar relative min-h-0 flex-1 overflow-auto pt-8'
             style={{

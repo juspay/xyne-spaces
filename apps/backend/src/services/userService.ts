@@ -972,7 +972,7 @@ export class UserService {
 
       // Grant ORGANIZATIONS ADMIN access to the org owner (same path the org-members
       // updateRole mutator uses when a member is promoted to ADMIN/OWNER)
-      await syncOrgResourceAdminAccess(organization.orgId, userData.email, true, workspaceUser.id);
+      await syncOrgResourceAdminAccess(organization.orgId, userData.email, workspaceUser.id);
 
       // Sync all hardcoded bots into the new workspace
       await unifiedBotUserService.syncAllBotUsers(workspace.id);

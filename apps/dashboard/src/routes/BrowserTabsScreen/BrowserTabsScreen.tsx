@@ -58,6 +58,7 @@ import {
   type PageKeyCommand,
 } from '../../components/InAppBrowser';
 import { browserPages, usePageLives } from './browserPages';
+import { UnmountWhenCovered } from '../../hooks/usePageCoverage';
 
 /** A playing tab's speaker, as Chrome's: click to mute it, again to hear it. */
 function TabSound(props: { tab: BrowserTab }): ReactElement {
@@ -118,10 +119,27 @@ const tabName = (tab: BrowserTab): string =>
  * The pages themselves aren't here: they live in BrowserPageLayer, drawn over the
  * hole this leaves, so docking or undocking never reloads them.
  */
-export function BrowserTabsScreen({
+export function BrowserTabsScreen(props: BrowserTabsScreenProps = {}): ReactElement {
+  // On the web it has no tabs to take: just its desktop-app notice.
+  if (!isElectronApp()) return <BrowserTabsView {...props} />;
+  // Not under full-page search, as leaving the page took it: with the screen gone its hole is, so
+  // the page layer puts its pages aside as when the browser closes, and it opens no links or new
+  // tabs alongside the docked browser. Its empty frame meanwhile, so a collapse shrinks onto it.
+  return (
+    <UnmountWhenCovered fallback={<div className={SCREEN_FRAME_CLASS} />}>
+      <BrowserTabsView {...props} />
+    </UnmountWhenCovered>
+  );
+}
+
+// The screen's frame: drawn empty in its place while full-page search covers it.
+const SCREEN_FRAME_CLASS =
+  'flex h-full flex-col overflow-hidden bg-background shadow-md md:rounded-2xl';
+
+function BrowserTabsView({
   variant = 'fullscreen',
   pendingUrls: externalPendingUrls,
-}: BrowserTabsScreenProps = {}): ReactElement {
+}: BrowserTabsScreenProps): ReactElement {
   const tabs = useSelector(browserPanelActor, state => state.context.tabs);
   const activeTabId = useSelector(browserPanelActor, state => state.context.activeTabId);
   const statePendingUrls = useSelector(browserPanelActor, state => state.context.pendingUrls);
@@ -389,10 +407,7 @@ export function BrowserTabsScreen({
   const menuIcon = 'size-4 text-muted-foreground';
 
   return (
-    <div
-      ref={rootRef}
-      className='flex h-full flex-col overflow-hidden bg-background shadow-md md:rounded-2xl'
-    >
+    <div ref={rootRef} className={SCREEN_FRAME_CLASS}>
       {/* The tabs, as Chrome draws them: + follows the last; the list of every tab
           and closing the panel sit at the far end. */}
       {/* Taking the keyboard back from a page as the pointer arrives: while a page

@@ -473,6 +473,19 @@ export class ProviderTerminalError extends Error {
   }
 }
 
+const REFUSAL_TURN_ERROR = "An unknown error occurred";
+
+export function isRefusalTurnError(provider: string | undefined, detail: string): boolean {
+  return provider === "claude" && detail.trim() === REFUSAL_TURN_ERROR;
+}
+
+export class ProviderRefusalError extends Error {
+  constructor(public readonly provider: string) {
+    super(`Provider ${provider} declined to answer this conversation (stop_reason refusal)`);
+    this.name = "ProviderRefusalError";
+  }
+}
+
 /**
  * Transient provider/network failures that should FALL BACK to the next provider
  * (ultimately "spaces") instead of dropping the run — connection resets, DNS
@@ -486,6 +499,7 @@ export class ProviderTerminalError extends Error {
  * substrings here can't turn a user stop into a fallback.
  */
 export function isTransientProviderError(err: unknown): boolean {
+  if (err instanceof ProviderRefusalError) return false;
   if (err instanceof ProviderStallError) return true;
   if (err instanceof ProviderTerminalError) return true;
   const msg = (err instanceof Error ? err.message : String(err ?? "")).toLowerCase();
@@ -3328,8 +3342,8 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     }
     if (event.type === "message_end") {
       flushStreamChunks(progressUrl, sessionId ?? conversationId ?? "unknown");
-      modelActive = false; // turn finished — next turn_start re-arms the watchdog
       const msg = (event as { message?: { role?: string; usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number } } }).message;
+      if (msg?.role === "assistant") modelActive = false; // turn finished — next turn_start re-arms the watchdog
       if (msg?.role === "assistant" && msg.usage) {
         tokenUsage.input += msg.usage.input ?? 0;
         tokenUsage.output += msg.usage.output ?? 0;
@@ -4294,6 +4308,9 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       provider: provider ?? "spaces",
       agentSlug: progressMeta?.agentSlug ?? "unknown",
     });
+    if (isRefusalTurnError(provider, lastTurnErrorDetail)) {
+      throw new ProviderRefusalError(provider ?? "spaces");
+    }
     throw new ProviderTerminalError(provider ?? "spaces", lastTurnErrorDetail);
   }
   const parts = turnParts.finish();

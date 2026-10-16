@@ -231,6 +231,7 @@ export function useCanvasCommentEditorBridge({
     if (!inlineCommentThread) return;
 
     const handlePointerDown = (event: PointerEvent): void => {
+      if (document.querySelector('[data-canvas-comment-delete-dialog="true"]')) return;
       const target = event.target;
       if (!(target instanceof Element)) return;
       if (target.closest(INLINE_COMMENT_INTERACTIVE_SELECTOR)) return;
@@ -238,6 +239,7 @@ export function useCanvasCommentEditorBridge({
     };
 
     const handleKeyDown = (event: KeyboardEvent): void => {
+      if (document.querySelector('[data-canvas-comment-delete-dialog="true"]')) return;
       if (event.key === 'Escape') {
         setInlineCommentThread(null);
       }

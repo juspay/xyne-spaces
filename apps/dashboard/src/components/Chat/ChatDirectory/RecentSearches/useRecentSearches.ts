@@ -52,10 +52,10 @@ export interface UseRecentSearches {
  * never shows a stale label, and the container is decoupled from name resolution entirely.
  *
  * @remarks
- * Use this hook only on a surface that DISPLAYS and replays recents (the palette empty state).
- * A surface that only needs to record a recent — with no list to render — skips the hook and
- * calls {@link saveCurrentSearchQuery} directly, as the full-screen results page (SearchResults)
- * does; the hook's list-ownership and name-resolution machinery would be dead weight there.
+ * Use this hook only on a surface that DISPLAYS and replays recents: the palette's empty state,
+ * and full page with nothing searched (SearchResults). A surface that only needs to record a
+ * recent — with no list to render — skips the hook and calls {@link saveCurrentSearchQuery}
+ * directly; the hook's list-ownership and name-resolution machinery would be dead weight there.
  */
 export function useRecentSearches(params: UseRecentSearchesParams): UseRecentSearches {
   const { open, enabled, workspaceId, userId, query } = params;

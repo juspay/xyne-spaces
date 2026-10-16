@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { type TabItem } from '../../ui/Tabs';
 import { cn } from '../../../utils/classNames';
+import { usePageCoverage } from '../../../hooks/usePageCoverage';
 import { useCitationDocs } from '../citationDocs';
 import CitationDocsPanel from '../CitationDocsPanel';
 import type { ConversationArtifact } from '../../../services/XyneAI/XyneAIArtifactsService';
@@ -474,14 +475,16 @@ function WorkspacePaneInner({
   const [maximized, setMaximized] = useState(false);
   const onToggleMaximize = useCallback(() => setMaximized(value => !value), []);
 
+  // Not while full-page search covers the page: its Esc is full page's.
+  const coverage = usePageCoverage();
   useEffect(() => {
     if (!maximized) return;
     const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setMaximized(false);
+      if (event.key === 'Escape' && !coverage.isCovered()) setMaximized(false);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [maximized]);
+  }, [maximized, coverage]);
 
   const goBack = useCallback((): void => {
     setSelectedId(null);

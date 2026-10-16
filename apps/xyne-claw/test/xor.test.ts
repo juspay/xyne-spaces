@@ -248,3 +248,41 @@ describe("llm judge reply parsing", () => {
     expect(() => parseLlmJudgeReply("I cannot answer that", QUESTIONS)).toThrow();
   });
 });
+
+describe("xor images", () => {
+  const PNG = "data:image/png;base64,iVBORw0KGgo=";
+
+  it("sends images alongside the state", async () => {
+    enable();
+    fetchMock.mockResolvedValue(systemOneReply({ a: 0.9, b: 0.1 }));
+    const answers = await xor({ state: "screenshot", questions: QUESTIONS, purpose: "ui-tester", images: [PNG, PNG] });
+    expect(answers?.["a"]?.noul).toBe(0.9);
+    const body = JSON.parse(fetchMock.mock.calls[0]![1].body as string);
+    expect(body.images).toEqual([PNG, PNG]);
+    expect(body.state).toBe("screenshot");
+  });
+
+  it("omits the images field when there are none", async () => {
+    enable();
+    fetchMock.mockResolvedValue(systemOneReply({ a: 0.9, b: 0.1 }));
+    await xor({ state: "s", questions: QUESTIONS, purpose: "p" });
+    expect(JSON.parse(fetchMock.mock.calls[0]![1].body as string)).not.toHaveProperty("images");
+  });
+
+  it("refuses raw base64 or URLs without calling the backend", async () => {
+    enable();
+    expect(await xor({ state: "s", questions: QUESTIONS, purpose: "p", images: ["iVBORw0KGgo="] })).toBeNull();
+    expect(await xor({ state: "s", questions: QUESTIONS, purpose: "p", images: ["https://x/y.png"] })).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("falls back when the llm backend is asked to read images", async () => {
+    process.env["XOR_BACKEND"] = "llm";
+    process.env["JUDGE_LLM_URL"] = "https://llm.internal/v1/chat/completions";
+    process.env["JUDGE_LLM_API_KEY"] = "k-llm";
+    process.env["JUDGE_LLM_MODEL"] = "small";
+    fetchMock.mockResolvedValue(chatReply({ a: 0.9, b: 0.1 }));
+    expect(await xor({ state: "s", questions: QUESTIONS, purpose: "p", images: [PNG] })).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

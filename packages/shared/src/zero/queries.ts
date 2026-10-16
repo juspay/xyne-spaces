@@ -29,6 +29,7 @@ import {
   SDLC_WORKFLOW_RELATION,
   SDLC_WIKI_WORKFLOW_RELATION,
   SDLC_HUB_ITEM_RELATION,
+  SDLC_RELEASE_CONFIG_RELATION,
 } from '../sdlc';
 import {
   ActivityClassification,
@@ -2520,14 +2521,18 @@ export const queries = defineQueries({
         .orderBy('createdAt', 'asc');
     },
   ),
-  subTicketsForTicket: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) => {
-    return zql.ticket_sub_ticket_mappings
-      .where('ticketId', ticketId)
-      .related('subTicket', subTicketQuery =>
-        subTicketQuery.related('conversation').related('mappedTicket'),
-      )
-      .orderBy('id', 'asc');
-  }),
+  subTicketsForTicket: defineQuery(
+    z.object({ ticketId: z.string(), limit: z.number().int().positive().optional() }),
+    ({ args: { ticketId, limit } }) => {
+      const query = zql.ticket_sub_ticket_mappings
+        .where('ticketId', ticketId)
+        .related('subTicket', subTicketQuery =>
+          subTicketQuery.related('conversation').related('mappedTicket'),
+        )
+        .orderBy('id', 'asc');
+      return limit ? query.limit(limit) : query;
+    },
+  ),
   subTicketMappingsForTickets: defineQuery(
     z.object({ ticketIds: z.array(z.string()) }),
     ({ args: { ticketIds } }) => {
@@ -3141,6 +3146,27 @@ export const queries = defineQueries({
         .one(),
   ),
 
+  oatsRecordingsByIds: defineQuery(
+    z.object({ ids: z.array(z.string()).max(1000) }),
+    ({ ctx, args: { ids } }) =>
+      zql.calls
+        .where('workspaceId', ctx.workspaceId)
+        .where('callType', CallType.HEADLESS)
+        .where('id', 'IN', ids)
+        .related('shares', shares =>
+          shares
+            .where('shareableEntityType', ShareableEntityType.NOTE_TAKER)
+            .where('entityUserAccess', '!=', EntityUserAccess.REVOKED)
+            .where(({ or, cmp, exists }) =>
+              or(
+                cmp('userId', ctx.userID),
+                exists('userGroupMemberships', m => m.where('userId', ctx.userID)),
+                exists('channelMembers', m => m.where('userId', ctx.userID)),
+              ),
+            ),
+        ),
+  ),
+
   // Fetches the HEADLESS recording (+ shares) by its public
   // externalId (what's in the URL / RecordingDetail.externalId) — used by
   // the Share modal and the detail screen alike.
@@ -3318,8 +3344,11 @@ export const queries = defineQueries({
       isRead: z.boolean().optional(),
       actorTypes: z.array(z.nativeEnum(UserType)).optional(),
       actorId: z.string().optional(),
+      channelIds: z.array(z.string()).optional(),
     }),
-    ({ args: { limit, start, types, classification, isRead, actorTypes, actorId } }) => {
+    ({
+      args: { limit, start, types, classification, isRead, actorTypes, actorId, channelIds },
+    }) => {
       let query = zql.activities;
 
       if (types.length > 0) {
@@ -3336,6 +3365,10 @@ export const queries = defineQueries({
 
       if (isRead !== undefined) {
         query = query.where('isRead', isRead);
+      }
+
+      if (channelIds && channelIds.length > 0) {
+        query = query.where('channelId', 'IN', channelIds);
       }
 
       // Actor kind lives on users.userType, not on the activity row, so this has to
@@ -5000,6 +5033,23 @@ export const queries = defineQueries({
         .related('workflow')
         .one(),
   ),
+  /** The hub's release configs: one REPOSITORY -> main release BOARD edge per repository. */
+  getSdlcHubReleaseConfigs: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ args: { channelId } }) =>
+      zql.sdlc_entity_links
+        .where('channelId', channelId)
+        .where('relationType', SDLC_RELEASE_CONFIG_RELATION),
+  ),
+  /** The release config edge of a main release board; it names the hub that owns it. */
+  releaseConfigByMainBoardId: defineQuery(
+    z.object({ boardId: z.string() }),
+    ({ args: { boardId } }) =>
+      zql.sdlc_entity_links
+        .where('relationType', SDLC_RELEASE_CONFIG_RELATION)
+        .where('targetId', boardId)
+        .one(),
+  ),
   /** Every Wiki and Hub Knowledge placement edge in a hub; the tree is built from these. */
   getSdlcHubItems: defineQuery(z.object({ channelId: z.string() }), ({ args: { channelId } }) =>
     zql.sdlc_entity_links
@@ -5385,7 +5435,7 @@ export const queries = defineQueries({
     ({ args: { releaseId } }) => {
       return zql.release_change_types
         .where('releaseId', releaseId)
-        .related('application')
+        .related('application', application => application.related('repo'))
         .orderBy('createdAt', 'desc');
     },
   ),
@@ -5992,7 +6042,7 @@ export const queries = defineQueries({
   applicationsByProjectId: defineQuery(
     z.object({ projectId: z.string() }),
     ({ args: { projectId } }) => {
-      return zql.applications.where('projectId', projectId);
+      return zql.applications.where('projectId', projectId).related('repo');
     },
   ),
   // Multi-project variant, for callers whose boards can span projects (a channel's
@@ -6003,7 +6053,9 @@ export const queries = defineQueries({
   applicationsByProjectIds: defineQuery(
     z.object({ projectIds: z.array(z.string()) }),
     ({ args: { projectIds } }) => {
-      return zql.applications.where(helpers => helpers.cmp('projectId', 'IN', projectIds));
+      return zql.applications
+        .where(helpers => helpers.cmp('projectId', 'IN', projectIds))
+        .related('repo');
     },
   ),
   roles: defineQuery(

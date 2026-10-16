@@ -12,6 +12,7 @@ import {
   withoutResetParam,
 } from './lastSdlcLocation';
 import { openLink } from '../../utils/openLink';
+import { isFullPageSearchPath } from '../../components/Chat/ChatDirectory/cmdkFullPage';
 import { SdlcEmbeddedWebview } from './SdlcEmbeddedWebview';
 import { registerSdlcFramePoster } from '../../components/AIScreen/Workspace/sdlcBrowserTarget';
 
@@ -26,7 +27,7 @@ import { registerSdlcFramePoster } from '../../components/AIScreen/Workspace/sdl
  * See docs/sdlc-fast-lane.md.
  */
 const SdlcFrameHost = (): ReactElement | null => {
-  const { viewport } = useSdlcFrame();
+  const { viewport, covered } = useSdlcFrame();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
   const location = useLocation();
   const navigate = useNavigate();
@@ -87,6 +88,10 @@ const SdlcFrameHost = (): ReactElement | null => {
 
   // frame → parent
   useEffect(() => {
+    // Full-page search keeps the SDLC page, and so its viewport, mounted under it. The address bar
+    // is full page's until the route is back here — through a collapse too, which shows the page
+    // (and the frame) before the URL comes back.
+    const onFullPage = isFullPageSearchPath(location.pathname);
     const onMessage = (event: MessageEvent): void => {
       if (event.origin !== window.location.origin) return;
       if (!iframeRef.current || event.source !== iframeRef.current.contentWindow) return;
@@ -128,7 +133,7 @@ const SdlcFrameHost = (): ReactElement | null => {
         frameLocationRef.current = null;
         setIsReady(false);
         setResetCount(count => count + 1);
-        if (location.pathname !== root) void navigate(root, { replace: true });
+        if (location.pathname !== root && !onFullPage) void navigate(root, { replace: true });
         return;
       }
 
@@ -139,7 +144,7 @@ const SdlcFrameHost = (): ReactElement | null => {
       if (workspaceId) setLastSdlcLocation(workspaceId, reported);
       // Only while on screen — a hidden frame must not move the address bar.
       const current = `${location.pathname}${location.search}${location.hash}`;
-      if (viewport && isSdlcPath(reported) && reported !== current) {
+      if (viewport && !onFullPage && isSdlcPath(reported) && reported !== current) {
         void navigate(reported, { replace: true });
       }
     };
@@ -177,6 +182,11 @@ const SdlcFrameHost = (): ReactElement | null => {
 
   if (!container || !hasActivated || !initialSrcRef.current) return null;
 
+  // Full-page search keeps the SDLC page, and so its viewport, mounted under it: hidden while it
+  // covers the page, as off the page, so focus and the pointer can't reach the frame, and its
+  // webviews unmount (as leaving the page unmounted them). Both are back as a collapse uncovers
+  // the page; one given up on the way unmounts the webviews again.
+  const shown = !!viewport && !covered;
   return createPortal(
     <>
       <iframe
@@ -191,14 +201,14 @@ const SdlcFrameHost = (): ReactElement | null => {
           width: viewport?.width ?? 0,
           height: viewport?.height ?? 0,
           border: 0,
-          visibility: viewport ? 'visible' : 'hidden',
-          pointerEvents: viewport ? 'auto' : 'none',
+          visibility: shown ? 'visible' : 'hidden',
+          pointerEvents: shown ? 'auto' : 'none',
           zIndex: 1,
         }}
         allow='clipboard-read; clipboard-write'
       />
       <SdlcEmbeddedWebview
-        offset={viewport ? { top: viewport.top, left: viewport.left } : null}
+        offset={viewport && shown ? { top: viewport.top, left: viewport.left } : null}
         getFrameWindow={() => iframeRef.current?.contentWindow ?? null}
       />
     </>,
