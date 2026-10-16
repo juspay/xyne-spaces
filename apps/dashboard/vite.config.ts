@@ -12,7 +12,7 @@ const require = createRequire(import.meta.url);
 const ortDistDir = path.dirname(
   require.resolve('onnxruntime-web', {
     paths: [path.dirname(require.resolve('@huggingface/transformers'))],
-  })
+  }),
 );
 
 export default defineConfig(({ command, mode }) => {
@@ -113,15 +113,23 @@ export default defineConfig(({ command, mode }) => {
             dest: 'pdfjs/wasm',
           },
           {
-          src: [
-            `${ortDistDir}/ort-wasm-simd-threaded.asyncify.wasm`,
-            `${ortDistDir}/ort-wasm-simd-threaded.asyncify.mjs`,
-            `${ortDistDir}/ort-wasm-simd-threaded.wasm`,
-            `${ortDistDir}/ort-wasm-simd-threaded.mjs`,
-          ],
-          dest: 'onnx',
-        },
-      ],
+            src: [
+              `${ortDistDir}/ort-wasm-simd-threaded.asyncify.wasm`,
+              `${ortDistDir}/ort-wasm-simd-threaded.asyncify.mjs`,
+              `${ortDistDir}/ort-wasm-simd-threaded.wasm`,
+              `${ortDistDir}/ort-wasm-simd-threaded.mjs`,
+            ],
+            dest: 'onnx',
+          },
+          // MediaPipe Wasm runtime for call background effects — self-hosted rather than
+          // loaded from a CDN at runtime (works offline/behind strict CSPs). The model
+          // itself is small and lives in public/mediapipe/. SIMD build only: every browser
+          // we support has Wasm SIMD, and supportsBackgroundEffects() hides the feature otherwise.
+          {
+            src: 'node_modules/@mediapipe/tasks-vision/wasm/vision_wasm_internal.*',
+            dest: 'mediapipe/wasm',
+          },
+        ],
       }),
     ],
     build: {
