@@ -16,6 +16,7 @@ import {
   isAgentCardFlow,
 } from './flowAgentUtils';
 import { isWriteApprovalFlow, writeApprovalFlowToMarkdown } from './flowApprovalUtils';
+import { ticketComponentToMarkdown } from './flowTicketUtils';
 import {
   isUserQuestionFlow,
   userQuestionComponentToMarkdown,
@@ -526,6 +527,12 @@ const collectFlowComponentMarkdown = (
 
   if (type === 'mcp_suggest') {
     const markdown = mcpSuggestComponentToMarkdown(component, options);
+    if (markdown) out.push(markdown);
+    return;
+  }
+
+  if (type === 'ticket') {
+    const markdown = ticketComponentToMarkdown(component);
     if (markdown) out.push(markdown);
     return;
   }

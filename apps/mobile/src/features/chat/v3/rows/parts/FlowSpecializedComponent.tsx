@@ -2,6 +2,7 @@ import { type ReactElement, type ReactNode } from 'react';
 import { View, type StyleProp, type ViewStyle } from 'react-native';
 import type { MarkdownStyle } from 'react-native-enriched-markdown';
 
+import { FlowTicketCard } from '@/src/components/chat/flow-ticket-card';
 import { implicitActionsForComponent, parseFlowAction } from '@/src/utils/flowAction';
 import { createAgentCardViewModel } from '@/src/utils/flowAgentUtils';
 import { codeComponentToMarkdown } from '@/src/utils/flowCodeUtils';
@@ -123,6 +124,20 @@ export const renderFlowSpecializedComponent = (
         />
       </View>
     ) : null;
+  }
+
+  if (componentType === 'ticket') {
+    // FlowTicketCard returns null for a malformed ticket (no title).
+    return (
+      <View key={componentKey} style={[CARD_WRAPPER_STYLE, renderStyle]}>
+        <FlowTicketCard
+          component={component}
+          recyclingKey={`${model.conversationId}:${componentKey}`}
+          containerStyle={inheritedContainerStyle}
+          actions={context}
+        />
+      </View>
+    );
   }
 
   if (componentType === 'plan') {
