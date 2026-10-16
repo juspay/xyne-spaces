@@ -96,12 +96,12 @@ const SORT_KEY: Record<SortBy, ToolSortKey> = {
   contextBytes: "bytes",
 };
 
-/** Which floor gates a rate sort: a 1-of-1 error rate must not top a ranking. */
-const RATE_SORT_FLOOR: Partial<Record<SortBy, (r: ToolRow) => boolean>> = {
-  errorRate: (r) => r.calls >= SAMPLE_FLOORS.toolRateRow,
-  recoveryRate: (r) => r.errors >= SAMPLE_FLOORS.recovery,
-  p95: (r) => r.timedCalls >= SAMPLE_FLOORS.p95,
-};
+/** Which floor gates a rate sort: a 1-of-1 error rate must not top a ranking. A Map, so no name reaches Object.prototype. */
+const RATE_SORT_FLOOR = new Map<SortBy, (r: ToolRow) => boolean>([
+  ["errorRate", (r) => r.calls >= SAMPLE_FLOORS.toolRateRow],
+  ["recoveryRate", (r) => r.errors >= SAMPLE_FLOORS.recovery],
+  ["p95", (r) => r.timedCalls >= SAMPLE_FLOORS.p95],
+]);
 
 const KIND_TO_REQUEST: Record<SessionsKind, { kind: "tool" | "failed" | "slow"; signal?: ToolSignal }> = {
   tool_errored: { kind: "tool", signal: "errors" },
@@ -376,7 +376,7 @@ export function shapeToolRow(r: ToolRow): Record<string, unknown> {
 /** Ranked rows; rows under a rate sort's floor go after the ones that clear it. */
 export function rankToolRows(rows: ToolRow[], sortBy: SortBy, limit: number): { rows: ToolRow[]; total: number } {
   const sorted = pageToolRows(rows, { sort: SORT_KEY[sortBy], dir: "desc", limit: rows.length, offset: 0 }).rows;
-  const floor = RATE_SORT_FLOOR[sortBy];
+  const floor = RATE_SORT_FLOOR.get(sortBy);
   const ordered = floor ? [...sorted.filter(floor), ...sorted.filter((r) => !floor(r))] : sorted;
   return { rows: ordered.slice(0, limit), total: rows.length };
 }
@@ -622,7 +622,7 @@ export async function handleGetAgentMetrics(
       const rows = ranked.rows.map(shapeToolRow);
       const caveats = [...scopeCaveats(ctx), ...toolCoverageCaveats(cov)];
       if (ranked.total > rows.length) caveats.push(`Showing the top ${rows.length} of ${fmt(ranked.total)} tools by ${sortBy}.`);
-      if (RATE_SORT_FLOOR[sortBy]) caveats.push(`Ranking by ${sortBy} lists tools above the sample floor first.`);
+      if (RATE_SORT_FLOOR.has(sortBy)) caveats.push(`Ranking by ${sortBy} lists tools above the sample floor first.`);
       if (rows.some((r) => r["p95Ms"] !== null || r["p95Over"] !== undefined)) caveats.push(BUCKET_CAVEAT);
       if (t.calls === 0) caveats.push("No summarised tool calls in this window for this scope.");
       const top = ranked.rows.find((r) => r.errors > 0)?.tool ?? null;

@@ -183,6 +183,13 @@ describe("views", () => {
     expect(out["caveats"].join(" ")).toMatch(/of 5,000 tools/);
   });
 
+  it.each([["errorRate", ["big", "tiny"], true], ["errors", ["tiny", "big"], false]] as const)("tools: sortBy %s ranks %j, floor caveat %s", async (sortBy, order, caveat) => {
+    fetchToolRollup.mockResolvedValue(rollup([toolRow("tiny", { calls: 1, errors: 1, errorRate: 1 }), toolRow("big", { calls: 10, errors: 0, errorRate: 0 })]));
+    const out = await metrics({ view: "tools", sortBy });
+    expect(out["data"]["rows"].map((r: { tool: string }) => r.tool)).toEqual(order);
+    expect(out["caveats"].some((c: string) => /sample floor first/.test(c))).toBe(caveat);
+  });
+
   it("overview: envelope, previous window, worst tools, top agents and next calls", async () => {
     isClawAdmin.mockResolvedValue(true);
     fetchAgentLeaderboard.mockResolvedValue([
