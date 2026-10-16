@@ -3,6 +3,7 @@ import { PassThrough, Writable, type Readable } from 'node:stream';
 import { Parse as parseZipStream, type Entry as ZipEntry } from 'unzipper';
 import { logger } from '../utils/logger';
 import { storageService } from '../services/storage';
+import { scanStream } from '../services/clamav';
 import { AppError } from './errorHandler';
 import { config } from '@/config/env';
 import { db } from '../database/client';
@@ -444,6 +445,58 @@ function screenArchiveContent(
   return { body, verdict };
 }
 
+/**
+ * Scan an upload with ClamAV while it streams to storage. Same shape as
+ * screenArchiveContent: `body` is what storage receives and `verdict` settles when
+ * clamd answers. In enforce mode an infection destroys `body` and rejects `verdict`
+ * so the caller removes anything already stored; in shadow mode it is only logged.
+ * With CLAMAV_FAIL_CLOSED, an unreachable clamd also refuses the file (enforce only).
+ */
+function screenVirusContent(
+  stream: Readable,
+  originalName: string,
+): { body: Readable; verdict: Promise<void> } {
+  const { mode, host, port, timeoutMs, failClosed } = config.uploads.clamav;
+  if (mode === 'off') return { body: stream, verdict: Promise.resolve() };
+
+  const body = new PassThrough();
+  const toScanner = new PassThrough();
+  stream.once('error', (err) => {
+    body.destroy(err);
+    toScanner.destroy(err);
+  });
+  stream.pipe(body);
+  stream.pipe(toScanner);
+
+  const scanStartedAt = Date.now();
+  const verdict = scanStream(toScanner, { host, port, timeoutMs }).then((result) => {
+    logger.info('[UPLOAD] Virus scan finished', {
+      originalName,
+      mode,
+      result: result.status,
+      durationMs: Date.now() - scanStartedAt,
+    });
+    if (result.status === 'clean') return;
+
+    const infected = result.status === 'infected';
+    logger.warn(infected ? '[UPLOAD] Virus detected' : '[UPLOAD] Virus scan unavailable', {
+      originalName,
+      mode,
+      ...(infected ? { signature: result.signature } : { reason: result.reason }),
+    });
+    if (mode === 'shadow' || (!infected && !failClosed)) return;
+
+    const rejection = new AppError(
+      infected ? 'File failed virus scan' : 'File could not be virus scanned',
+      infected ? 400 : 503,
+    );
+    body.destroy(rejection);
+    throw rejection;
+  });
+
+  return { body, verdict };
+}
+
 /** Exposed for tests; resolves to the full stored bytes or rejects with the verdict. */
 export async function __screenArchiveContentForTest(stream: Readable, originalName: string): Promise<Buffer> {
   const { body, verdict } = screenArchiveContent(stream, originalName);
@@ -471,13 +524,22 @@ async function uploadScreened<R extends { path: string }>(
   upload: (body: Readable) => Promise<R>,
 ): Promise<R> {
   const screened = await screenExecutableContent(stream, originalName, mimetype);
-  if (extensionOf(originalName) !== 'zip') {
-    return upload(screened);
+
+  const virus = screenVirusContent(screened, originalName);
+  let body = virus.body;
+  const verdicts: Promise<void>[] = [virus.verdict];
+  if (extensionOf(originalName) === 'zip') {
+    const archive = screenArchiveContent(body, originalName);
+    body = archive.body;
+    verdicts.push(archive.verdict);
+  }
+  if (verdicts.length === 1 && config.uploads.clamav.mode === 'off') {
+    return upload(body);
   }
 
-  const { body, verdict } = screenArchiveContent(screened, originalName);
-  const [uploadOutcome, verdictOutcome] = await Promise.allSettled([upload(body), verdict]);
-  if (verdictOutcome.status === 'rejected') {
+  const [uploadOutcome, ...verdictOutcomes] = await Promise.allSettled([upload(body), ...verdicts]);
+  const verdictOutcome = verdictOutcomes.find((outcome) => outcome.status === 'rejected');
+  if (verdictOutcome?.status === 'rejected') {
     if (uploadOutcome.status === 'fulfilled') {
       await storageService.deleteFile(uploadOutcome.value.path).catch((err) => {
         logger.error('[UPLOAD] Failed to remove rejected archive from storage', {

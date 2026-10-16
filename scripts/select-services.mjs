@@ -19,6 +19,7 @@ export const FEATURES = [
   { id: "search", number: 7, label: "Search", hint: "vespa full-text search" },
   { id: "observability", number: 8, label: "Observability", hint: "otel-collector, victoriametrics, grafana" },
   { id: "flags", number: 9, label: "Feature Flags", hint: "superposition" },
+  { id: "antivirus", number: 10, label: "Antivirus", hint: "clamav virus scan of uploads" },
 ];
 
 const featureIds = FEATURES.map((feature) => feature.id);
@@ -80,6 +81,9 @@ export function servicePortEntries(numbers) {
       port: envPort("SUPERPOSITION_BIND_PORT", 9999),
       label: "superposition",
     });
+  }
+  if (has(10)) {
+    entries.push({ port: envPort("CLAMAV_BIND_PORT", 3310), label: "clamav" });
   }
   return entries;
 }

@@ -179,6 +179,7 @@ FEATURE_LABELS=(
     "Search            (vespa full-text search)"
     "Observability     (otel-collector, victoriametrics, grafana)"
     "Feature Flags     (superposition)"
+    "Antivirus         (clamav — virus scan of uploads)"
 )
 NUM_FEATURES=${#FEATURE_LABELS[@]}
 
@@ -192,7 +193,7 @@ elif [ ! -t 0 ]; then
 else
 
 CURSOR=1                          # start on Xyne-Claw (first toggleable item)
-declare -a CHECKED=(1 0 0 0 0 0 0 0 0)  # index 0 = Chat & Tickets, always on
+declare -a CHECKED=(1 0 0 0 0 0 0 0 0 0)  # index 0 = Chat & Tickets, always on
 
 render_menu() {
     echo ""
@@ -312,6 +313,9 @@ if echo "$SELECTED_FEATURES" | grep -qw "9"; then
     ENABLE_FEATURE_FLAGS=1
     SERVICES="$SERVICES superposition"
 fi
+if echo "$SELECTED_FEATURES" | grep -qw "10"; then
+    SERVICES="$SERVICES clamav"
+fi
 
 # Build summary
 SELECTED_NAMES=""
@@ -326,6 +330,7 @@ for f in $(echo "$SELECTED_FEATURES" | tr ',' ' '); do
         7) SELECTED_NAMES="${SELECTED_NAMES}Search " ;;
         8) SELECTED_NAMES="${SELECTED_NAMES}Observability " ;;
         9) SELECTED_NAMES="${SELECTED_NAMES}Feature-Flags " ;;
+        10) SELECTED_NAMES="${SELECTED_NAMES}Antivirus " ;;
     esac
 done
 echo ""
