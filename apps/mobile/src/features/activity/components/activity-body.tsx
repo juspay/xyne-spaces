@@ -4,23 +4,47 @@ import { useCSSVariable, useUniwind } from 'uniwind';
 import type { MarkdownStyle } from 'react-native-enriched-markdown';
 
 import { MessageAttachmentsGrid } from '@/src/components/chat/all-threads-list/message-attachments-grid';
-import { RichInlineText } from '@/src/components/conversation-composer/rich-inline-text';
 import {
   htmlToMD,
   normalizeActivityPreviewMarkdown,
 } from '@/src/components/conversation-composer/utils/htmlToMD';
 import { buildComposerMarkdownStyle } from '@/src/components/conversation-composer/utils/markdownStyle';
+import {
+  RichInlineTextWithPalette,
+  type MentionPalette,
+} from '@/src/features/chat/v2/components/conversation-composer/rich-inline-text';
 import { useSelf } from '@/src/hooks/useUsers';
+import { DEFAULT_CHAT_BUBBLE_OPTION } from '@/src/theme/chatBubbleTheme';
+import { deriveChatBubbleContentTokens } from '@/src/theme/chatBubbleContentTokens';
 
 import { ACTIVITY_BODY_LINES, ACTIVITY_PREVIEW_CACHE_SIZE } from '../constants';
 import type { ActivityAttachment } from '../model/row';
 
 type BodyEnvironment = {
   markdownStyle: MarkdownStyle;
+  mentionPalette: MentionPalette;
   currentUserId: string | undefined;
 };
 
 const BodyEnvironmentContext = createContext<BodyEnvironment | null>(null);
+
+/**
+ * The mention chips' colours, as the shared tokens give them — except a mention
+ * of *you*, which takes the colour the default chat bubble theme draws for the
+ * same case: a soft yellow in light mode, a muted gold in dark. The shared token
+ * is one saturated gold meant for a chat bubble's own background; on an
+ * activity row's plain surface it reads as heavy.
+ *
+ * Built here rather than by changing the shared tokens, which chat reads too.
+ */
+function buildMentionPalette(theme: string, tokens: MentionPalette): MentionPalette {
+  const mode = theme === 'dark' ? 'dark' : 'light';
+  const { mentionSelfBgOther, mentionSelfTextOther } = deriveChatBubbleContentTokens(
+    mode === 'dark' ? DEFAULT_CHAT_BUBBLE_OPTION.darkColor : DEFAULT_CHAT_BUBBLE_OPTION.lightColor,
+    mode,
+  );
+  return { ...tokens, mentionedYouBg: mentionSelfBgOther, mentionedYouText: mentionSelfTextOther };
+}
 
 /**
  * Resolves what every message body shares, once for the list.
@@ -35,6 +59,18 @@ export function ActivityBodyEnvironment({ children }: { children: ReactNode }): 
   const cardBg = useCSSVariable('--color-card') as string;
   const brand = useCSSVariable('--color-brand') as string;
   const { theme } = useUniwind();
+  const otherBg = useCSSVariable('--color-chat-mention-inline-other-bg') as string;
+  const otherText = useCSSVariable('--color-chat-mention-inline-other-text') as string;
+  const currentOtherBg = useCSSVariable('--color-chat-mention-inline-current-other-bg') as string;
+  const currentOtherText = useCSSVariable(
+    '--color-chat-mention-inline-current-other-text',
+  ) as string;
+  const mentionedYouBg = useCSSVariable('--color-chat-mention-inline-mentioned-you-bg') as string;
+  const mentionedYouText = useCSSVariable(
+    '--color-chat-mention-inline-mentioned-you-text',
+  ) as string;
+  const currentSelfBg = useCSSVariable('--color-chat-mention-inline-current-self-bg') as string;
+  const currentSelfText = useCSSVariable('--color-chat-mention-inline-current-self-text') as string;
   const currentUser = useSelf();
   const currentUserId = currentUser?.id;
 
@@ -48,9 +84,33 @@ export function ActivityBodyEnvironment({ children }: { children: ReactNode }): 
         linkColor: theme === 'light' ? '#1B8755' : '#21C063',
         variant: 'activity',
       }),
+      mentionPalette: buildMentionPalette(theme, {
+        otherBg,
+        otherText,
+        currentOtherBg,
+        currentOtherText,
+        mentionedYouBg,
+        mentionedYouText,
+        currentSelfBg,
+        currentSelfText,
+      }),
       currentUserId,
     }),
-    [brand, cardBg, currentUserId, foreground, theme],
+    [
+      brand,
+      cardBg,
+      currentOtherBg,
+      currentOtherText,
+      currentSelfBg,
+      currentSelfText,
+      currentUserId,
+      foreground,
+      mentionedYouBg,
+      mentionedYouText,
+      otherBg,
+      otherText,
+      theme,
+    ],
   );
 
   return (
@@ -104,15 +164,16 @@ export const ActivityMessageBody = memo(function ActivityMessageBody({
   content,
   senderId,
 }: MessageBodyProps): ReactElement | null {
-  const { markdownStyle, currentUserId } = useActivityBodyEnvironment();
+  const { markdownStyle, mentionPalette, currentUserId } = useActivityBodyEnvironment();
   const markdown = useMemo(() => toPreviewMarkdown(content), [content]);
   if (markdown.trim() === '') return null;
 
   return (
     <View pointerEvents='none'>
-      <RichInlineText
+      <RichInlineTextWithPalette
         markdown={markdown}
         markdownStyle={markdownStyle}
+        mentionPalette={mentionPalette}
         numberOfLines={ACTIVITY_BODY_LINES}
         selectable={false}
         {...(currentUserId ? { currentUserId } : {})}
