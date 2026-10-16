@@ -169,9 +169,9 @@ jobs:
   test:
     name: Automation tests
     # Runs only in the merge queue, not on every PR; RUN_TEST_CASE is the kill switch.
-    if: >-
-      github.event_name == 'merge_group'
-      && vars.RUN_TEST_CASE == 'true'
+    # if: >-
+    #   github.event_name == 'merge_group'
+    #   && vars.RUN_TEST_CASE == 'true'
     runs-on: ci-cluster-github-runners
     env:
       TEST_ENV: test
