@@ -151,7 +151,7 @@ export class AppChannelController {
   };
 
   /**
-   * Add workspace members to a channel the app's bot is in
+   * Add workspace members to a channel the app's bot is in, or set the role of those already in it
    * POST /api/apps/channel/participants
    */
   addParticipants = async (req: Request, res: Response): Promise<void> => {
@@ -183,24 +183,17 @@ export class AppChannelController {
       const adminIds = await findMembers(app, adminEmails);
       const memberIds = await findMembers(app, memberEmails);
 
-      const added: AddedChannelParticipant[] = [];
-      const alreadyMembers: string[] = [];
-      for (const [userIds, role] of [
-        [adminIds, ChannelRole.ADMIN],
-        [memberIds, ChannelRole.MEMBER],
-      ] as const) {
-        if (userIds.length === 0) continue;
-        const result = await addChannelParticipants({
-          channelId,
-          actorId: app.botUserId,
-          actorWorkspaceRole: req.user!.role,
-          workspaceId: app.workspaceId,
-          userIds,
-          role,
-        });
-        added.push(...result.added);
-        alreadyMembers.push(...result.alreadyMembers);
-      }
+      // New people get the role of the list they are in; people already in the channel have their role set to it.
+      const { added, updated, alreadyMembers } = await addChannelParticipants({
+        channelId,
+        actorId: app.botUserId,
+        actorWorkspaceRole: req.user!.role,
+        workspaceId: app.workspaceId,
+        targets: [
+          ...adminIds.map((userId) => ({ userId, role: ChannelRole.ADMIN })),
+          ...memberIds.map((userId) => ({ userId, role: ChannelRole.MEMBER })),
+        ],
+      });
 
       if (added.length > 0) {
         await this.announceAdded(req, channelId, added);
@@ -208,6 +201,7 @@ export class AppChannelController {
       res.status(added.length > 0 ? 201 : 200).json({
         channelId,
         added: added.map(({ userId }) => userId),
+        updated,
         alreadyMembers,
       });
     } catch (error) {
