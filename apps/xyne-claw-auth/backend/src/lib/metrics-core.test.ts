@@ -3,8 +3,6 @@ import { Prisma } from "@prisma/client";
 
 const findUnique = vi.fn();
 const isClawAdmin = vi.fn();
-const executeRawUnsafe = vi.fn((sql: string) => `exec:${sql}`);
-const transaction = vi.fn(async (ops: unknown[]) => ops);
 
 function fakeRedis(status = "ready") {
   const store = new Map<string, string>();
@@ -20,7 +18,7 @@ function fakeRedis(status = "ready") {
 let redisClient = fakeRedis("wait");
 
 vi.mock("../logger.js", () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }) }));
-vi.mock("../db.js", () => ({ prisma: { user: { findUnique }, $executeRawUnsafe: executeRawUnsafe, $queryRaw: vi.fn(() => "query-result"), $transaction: transaction } }));
+vi.mock("../db.js", () => ({ prisma: { user: { findUnique } } }));
 vi.mock("../middleware/agent-acl.js", () => ({
   isClawAdmin,
   getOrgId: (r: { headers: Record<string, string> }) => r.headers["x-org-id"] || undefined,
@@ -29,7 +27,7 @@ vi.mock("../middleware/agent-acl.js", () => ({
 vi.mock("../redis.js", () => ({ redisService: { getConnection: () => redisClient } }));
 
 const core = await import("./metrics-core.js");
-const { ORPHAN_EXCLUSION, TRIGGER_GROUP, WALL_MS, agentPredicate, windowPredicate, floorToMinute, previousWindow, rate, parseTz, parseDays, snapDays, parseAgentSlugs, parseIntParam, cachedMetric, invalidateMetricsCache, buildScopedWindow, resolveRequestWindow, runAnalytics, windowInfo } = core;
+const { ORPHAN_EXCLUSION, TRIGGER_GROUP, WALL_MS, agentPredicate, windowPredicate, floorToMinute, previousWindow, rate, parseTz, parseDays, snapDays, parseAgentSlugs, parseIntParam, cachedMetric, invalidateMetricsCache, buildScopedWindow, resolveRequestWindow, windowInfo } = core;
 type AnalyticsWindow = import("./metrics-core.js").AnalyticsWindow;
 
 const ORPHAN_LITERAL = "'interrupted (orphaned run)'";
@@ -49,7 +47,7 @@ const scoped = async (input: Parameters<typeof buildScopedWindow>[0]) => {
 };
 
 beforeEach(() => {
-  for (const m of [findUnique, isClawAdmin, executeRawUnsafe, transaction]) m.mockClear();
+  for (const m of [findUnique, isClawAdmin]) m.mockClear();
   findUnique.mockReset();
   isClawAdmin.mockReset();
   redisClient = fakeRedis("wait");
@@ -117,19 +115,6 @@ describe("window and request helpers", () => {
     expect(parseAgentSlugs(req({ agentSlug: Array.from({ length: 80 }, (_, i) => `s${i}`).join(",") }))).toHaveLength(50);
   });
 
-});
-
-describe("runAnalytics", () => {
-  it("sets a local timeout and JIT off in one transaction, with options only when asked", async () => {
-    const settings = async (opts?: Parameters<typeof runAnalytics>[1]) => {
-      executeRawUnsafe.mockClear();
-      await runAnalytics(Prisma.sql`SELECT 1`, opts);
-      return executeRawUnsafe.mock.calls.map((c) => c[0]);
-    };
-    expect(await settings()).toEqual(["SET LOCAL statement_timeout = 8000", "SET LOCAL jit = off"]);
-    expect(await settings({ customPlan: true })).toContain("SET LOCAL plan_cache_mode = force_custom_plan");
-    expect((await settings({ workMemMb: 4096 })).at(-1)).toBe(`SET LOCAL work_mem = '${core.MAX_ANALYTICS_WORK_MEM_MB}MB'`);
-  });
 });
 
 describe("cachedMetric", () => {

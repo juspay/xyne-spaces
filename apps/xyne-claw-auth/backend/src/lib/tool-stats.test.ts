@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import {
   DURATION_BUCKETS_MS, HISTOGRAM_SLOTS, errorClassesByTool, extractCitedToolCallIds, isSyntheticInvocation, normalizeError,
   percentileFromBuckets, persistRunStats, runToolNames, summarizeRun, toolStatRows, type ToolStat,
@@ -144,45 +144,51 @@ describe("normalizeError", () => {
 
 describe("persistRunStats", () => {
   const run = { id: "run1", orgId: "o1", userId: "u1", agentSlug: "xyne", completedAt: new Date("2026-10-01T00:01:00Z") };
-  const mockTx = (applied: string[] = ["run1"]) => {
-    const tx = { $executeRaw: vi.fn().mockResolvedValue(1), $queryRaw: vi.fn().mockResolvedValue(applied.map((runId) => ({ runId }))) };
+  const mockTx = ({ created = ["run1"], updated = 0 }: { created?: string[]; updated?: number } = {}) => {
+    const tx = {
+      agentRunStats: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+        createManyAndReturn: vi.fn().mockResolvedValue(created.map((runId) => ({ runId }))),
+        updateMany: vi.fn().mockResolvedValue({ count: updated }),
+      },
+      agentRunToolStats: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }), createMany: vi.fn().mockResolvedValue({ count: 2 }) },
+    };
     return { tx, asTx: tx as unknown as Prisma.TransactionClient };
   };
   const summary = summarizeRun([inv({ tool: "a", isError: true, result: "boom" }), inv({ tool: "b" })], null);
   const none = { statsRows: 0, toolRows: 0, errorCalls: 0 };
-  const sqlText = (call: unknown[] | undefined): string => ((call?.[0] as { join?: (s: string) => string } | undefined)?.join?.("?") ?? "");
 
-  it("upserts the run row guarded by completedAt, then replaces its tool rows", async () => {
+  it("inserts the run row, then replaces its tool rows", async () => {
     const { tx, asTx } = mockTx();
     expect(await persistRunStats(asTx, [{ run, summary, llmCalls: [{ m: "x" }], toolsUsed: ["c"] }])).toEqual({ statsRows: 1, toolRows: 2, errorCalls: 1 });
-
-    const upsert = sqlText(tx.$queryRaw.mock.calls[0]);
-    expect(upsert).toContain('ON CONFLICT ("runId") DO UPDATE');
-    expect(upsert).toContain('COALESCE(EXCLUDED."llmCalls", "agent_run_stats"."llmCalls")');
-    expect(upsert).toContain('WHERE "agent_run_stats"."completedAt" <= EXCLUDED."completedAt"');
-    expect(upsert).toContain('RETURNING "runId"');
-
-    const [del, ins] = tx.$executeRaw.mock.calls;
-    expect(sqlText(del)).toContain('DELETE FROM "agent_run_tool_stats"');
-    expect(sqlText(ins)).toContain('INSERT INTO "agent_run_tool_stats"');
-    const rows = JSON.parse(String(ins!.slice(1).find((v) => typeof v === "string" && v.startsWith("["))));
+    expect(tx.agentRunStats.createManyAndReturn.mock.calls[0]![0]).toMatchObject({
+      skipDuplicates: true,
+      data: [{ runId: "run1", toolCalls: 2, toolErrors: 1, toolNames: ["a", "b", "c"], llmCallCount: 1, llmCalls: [{ m: "x" }] }],
+    });
+    expect(tx.agentRunStats.updateMany).not.toHaveBeenCalled();
+    expect(tx.agentRunToolStats.deleteMany).toHaveBeenCalledWith({ where: { runId: { in: ["run1"] } } });
+    const rows = tx.agentRunToolStats.createMany.mock.calls[0]![0].data;
     expect(rows).toHaveLength(2);
-    expect(rows[0]).toMatchObject({ runId: "run1", tool: "a", orgId: "o1", completedAt: "2026-10-01T00:01:00.000Z", calls: 1, errors: 1, errorClasses: [{ class: "boom", count: 1 }] });
-    expect(rows[1]).toMatchObject({ tool: "b", errors: 0, errorClasses: null });
+    expect(rows[0]).toMatchObject({ runId: "run1", tool: "a", orgId: "o1", completedAt: run.completedAt, calls: 1, errors: 1, errorClasses: [{ class: "boom", count: 1 }] });
+    expect(rows[1]).toMatchObject({ tool: "b", errors: 0, errorClasses: Prisma.DbNull });
   });
 
-  it("leaves the tool rows alone when the stored run row is newer", async () => {
-    const { tx, asTx } = mockTx([]);
-    expect(await persistRunStats(asTx, [{ run, summary }])).toEqual(none);
-    expect(tx.$executeRaw).not.toHaveBeenCalled();
+  it("moves a stored row only forward, keeping llm fields the item lacks, and replaces tool rows only then", async () => {
+    const newer = mockTx({ created: [], updated: 0 });
+    expect(await persistRunStats(newer.asTx, [{ run, summary }])).toEqual(none);
+    expect(newer.tx.agentRunToolStats.deleteMany).not.toHaveBeenCalled();
+    const older = mockTx({ created: [], updated: 1 });
+    expect(await persistRunStats(older.asTx, [{ run, summary }])).toMatchObject({ statsRows: 1, toolRows: 2 });
+    const { where, data } = older.tx.agentRunStats.updateMany.mock.calls[0]![0];
+    expect(where).toEqual({ runId: "run1", completedAt: { lte: run.completedAt } });
+    expect(data).not.toHaveProperty("llmCalls");
   });
 
   it("keeps no rows for an orphan-closed run: only its run row is deleted", async () => {
     const { tx, asTx } = mockTx();
     expect(await persistRunStats(asTx, [{ run: { ...run, error: "interrupted (orphaned run)" }, summary }])).toEqual(none);
-    expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
-    expect(sqlText(tx.$executeRaw.mock.calls[0])).toContain('DELETE FROM "agent_run_stats"');
-    expect(tx.$queryRaw).not.toHaveBeenCalled();
+    expect(tx.agentRunStats.deleteMany).toHaveBeenCalledWith({ where: { runId: { in: ["run1"] } } });
+    expect(tx.agentRunStats.createManyAndReturn).not.toHaveBeenCalled();
   });
 });
 
@@ -199,7 +205,7 @@ describe("tool rows", () => {
     const s = summarizeRun([inv({ tool: "a".repeat(300), durationMs: 120 }), inv({ tool: "a".repeat(300), isError: true, result: "x" })], null);
     s.stats[0]!.ms = 5e12;
     const [row] = toolStatRows({ run: { id: "r", orgId: "o", userId: "u", agentSlug: "g", completedAt: new Date(0) }, summary: s });
-    expect(row).toMatchObject({ runId: "r", calls: 2, errors: 1, totalMs: 2_147_483_647, completedAt: "1970-01-01T00:00:00.000Z" });
+    expect(row).toMatchObject({ runId: "r", calls: 2, errors: 1, totalMs: 2_147_483_647, completedAt: new Date(0) });
     expect(row!.tool).toHaveLength(200);
   });
 });

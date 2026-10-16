@@ -11,7 +11,7 @@
  * re-citing an earlier chunk is not seen at finalize.
  */
 
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 
 /** Upper bounds in ms; a final overflow bucket is implied. */
 export const DURATION_BUCKETS_MS = [50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000, 60000, 120000, 300000] as const;
@@ -354,13 +354,13 @@ export function runToolNames(summary: RunToolSummary, toolsUsed: readonly string
   return [...names].sort();
 }
 
-interface ToolErrorClass {
+type ToolErrorClass = {
   class: string;
   count: number;
   /** The first sample of this class in the run. */
   sample: string;
   notFound: boolean;
-}
+};
 
 /** A run's errored calls per tool, grouped by failure class in the order the run first hit each. */
 export function errorClassesByTool(errors: readonly ToolErrorRow[]): Map<string, ToolErrorClass[]> {
@@ -379,30 +379,21 @@ export function errorClassesByTool(errors: readonly ToolErrorRow[]): Map<string,
   return new Map([...byTool].map(([tool, classes]) => [tool, [...classes.values()]]));
 }
 
-interface ToolStatRow {
-  runId: string; tool: string; orgId: string; userId: string; agentSlug: string; completedAt: string;
-  calls: number; topLevelCalls: number; errors: number; recovered: number; notFound: number; dropped: number;
-  duplicates: number; empty: number; citeable: number; cited: number; totalMs: number; maxMs: number; resultBytes: number;
-  durationBuckets: number[];
-  errorClasses: ToolErrorClass[] | null;
-}
-
 const MAX_TOOL_NAME = 200;
 const INT4_MAX = 2_147_483_647;
 /** Counters are int4 columns: clamped, so one absurd value can never fail the write. */
 const int4 = (n: number): number => (Number.isFinite(n) ? Math.min(Math.max(Math.round(n), 0), INT4_MAX) : 0);
 
 /** The run's per-tool rows: plain columns from its summary, errors folded in by class. */
-export function toolStatRows({ run, summary }: Pick<RunStatsItem, "run" | "summary">): ToolStatRow[] {
+export function toolStatRows({ run, summary }: Pick<RunStatsItem, "run" | "summary">): Prisma.AgentRunToolStatsCreateManyInput[] {
   const classes = errorClassesByTool(summary.errors);
-  const completedAt = run.completedAt.toISOString();
   return summary.stats.map((s) => ({
     runId: run.id,
     tool: s.t.slice(0, MAX_TOOL_NAME),
     orgId: run.orgId,
     userId: run.userId,
     agentSlug: run.agentSlug,
-    completedAt,
+    completedAt: run.completedAt,
     calls: int4(s.c),
     topLevelCalls: int4(s.tl),
     errors: int4(s.e),
@@ -417,7 +408,7 @@ export function toolStatRows({ run, summary }: Pick<RunStatsItem, "run" | "summa
     maxMs: int4(s.mx),
     resultBytes: int4(s.b),
     durationBuckets: s.h.map(int4),
-    errorClasses: classes.get(s.t) ?? null,
+    errorClasses: classes.get(s.t) ?? Prisma.DbNull,
   }));
 }
 
@@ -439,65 +430,38 @@ export async function persistRunStats(
   const orphanIds = items.filter((i) => i.run.error === ORPHAN_MARKER).map((i) => i.run.id);
 
   // The tool rows go with the run row (foreign key, ON DELETE CASCADE).
-  if (orphanIds.length > 0) {
-    await tx.$executeRaw`DELETE FROM "agent_run_stats" WHERE "runId" = ANY(${orphanIds}::text[])`;
-  }
+  if (orphanIds.length > 0) await tx.agentRunStats.deleteMany({ where: { runId: { in: orphanIds } } });
   if (live.length === 0) return none;
 
-  // completedAt travels as ISO text, converted to UTC wall time like Prisma's timestamp(3) columns.
-  const applied = await tx.$queryRaw<Array<{ runId: string }>>`
-    INSERT INTO "agent_run_stats"
-      ("runId", "orgId", "userId", "agentSlug", "completedAt", "toolCalls", "toolErrors", "toolNames", "llmCallCount", "llmCalls", "citationOutcome")
-    SELECT v.id, v.org, v.usr, v.agent, (v.done::timestamptz AT TIME ZONE 'UTC')::timestamp(3), v.c, v.e,
-           ARRAY(SELECT jsonb_array_elements_text(v.n::jsonb)),
-           CASE WHEN v.l IS NULL THEN NULL ELSE jsonb_array_length(v.l::jsonb) END, v.l::jsonb, v.co
-    FROM unnest(
-      ${live.map((i) => i.run.id)}::text[],
-      ${live.map((i) => i.run.orgId)}::text[],
-      ${live.map((i) => i.run.userId)}::text[],
-      ${live.map((i) => i.run.agentSlug)}::text[],
-      ${live.map((i) => i.run.completedAt.toISOString())}::text[],
-      ${live.map((i) => int4(i.summary.totals.calls))}::int[],
-      ${live.map((i) => int4(i.summary.totals.errors))}::int[],
-      ${live.map((i) => JSON.stringify(runToolNames(i.summary, i.toolsUsed).map((n) => n.slice(0, MAX_TOOL_NAME))))}::text[],
-      ${live.map((i) => (Array.isArray(i.llmCalls) ? JSON.stringify(i.llmCalls) : null))}::text[],
-      ${live.map((i) => (typeof i.citationOutcome === "string" && i.citationOutcome !== "" ? i.citationOutcome : null))}::text[]
-    ) AS v(id, org, usr, agent, done, c, e, n, l, co)
-    ON CONFLICT ("runId") DO UPDATE SET
-      "completedAt"     = EXCLUDED."completedAt",
-      "toolCalls"       = EXCLUDED."toolCalls",
-      "toolErrors"      = EXCLUDED."toolErrors",
-      "toolNames"       = EXCLUDED."toolNames",
-      "llmCallCount"    = COALESCE(EXCLUDED."llmCallCount", "agent_run_stats"."llmCallCount"),
-      "llmCalls"        = COALESCE(EXCLUDED."llmCalls", "agent_run_stats"."llmCalls"),
-      "citationOutcome" = COALESCE(EXCLUDED."citationOutcome", "agent_run_stats"."citationOutcome")
-    WHERE "agent_run_stats"."completedAt" <= EXCLUDED."completedAt"
-    RETURNING "runId"
-  `;
-  if (applied.length === 0) return none;
-  const ids = new Set(applied.map((r) => r.runId));
-  const written = live.filter((i) => ids.has(i.run.id));
-  await tx.$executeRaw`DELETE FROM "agent_run_tool_stats" WHERE "runId" = ANY(${[...ids]}::text[])`;
-
-  const rows = written.flatMap(toolStatRows);
-  if (rows.length > 0) {
-    await tx.$executeRaw`
-      INSERT INTO "agent_run_tool_stats"
-        ("runId", "tool", "orgId", "userId", "agentSlug", "completedAt", "calls", "topLevelCalls", "errors", "recovered",
-         "notFound", "dropped", "duplicates", "empty", "citeable", "cited", "totalMs", "maxMs", "resultBytes",
-         "durationBuckets", "errorClasses")
-      SELECT t."runId", t."tool", t."orgId", t."userId", t."agentSlug",
-             (t."completedAt"::timestamptz AT TIME ZONE 'UTC')::timestamp(3),
-             t."calls", t."topLevelCalls", t."errors", t."recovered", t."notFound", t."dropped", t."duplicates",
-             t."empty", t."citeable", t."cited", t."totalMs", t."maxMs", t."resultBytes",
-             ARRAY(SELECT b.n::int FROM jsonb_array_elements_text(t."durationBuckets") WITH ORDINALITY AS b(n, i) ORDER BY b.i),
-             t."errorClasses"
-      FROM jsonb_to_recordset(${JSON.stringify(rows)}::jsonb) AS t(
-        "runId" text, "tool" text, "orgId" text, "userId" text, "agentSlug" text, "completedAt" text,
-        "calls" int, "topLevelCalls" int, "errors" int, "recovered" int, "notFound" int, "dropped" int,
-        "duplicates" int, "empty" int, "citeable" int, "cited" int, "totalMs" int, "maxMs" int, "resultBytes" int,
-        "durationBuckets" jsonb, "errorClasses" jsonb)
-    `;
+  const rows = live.map(statsRow);
+  const created = await tx.agentRunStats.createManyAndReturn({ data: rows, skipDuplicates: true, select: { runId: true } });
+  const ids = new Set(created.map((r) => r.runId));
+  for (const { runId, ...data } of rows) {
+    if (ids.has(runId)) continue;
+    const { count } = await tx.agentRunStats.updateMany({ where: { runId, completedAt: { lte: data.completedAt } }, data });
+    if (count > 0) ids.add(runId);
   }
-  return { statsRows: ids.size, toolRows: rows.length, errorCalls: written.reduce((n, i) => n + i.summary.errors.length, 0) };
+  if (ids.size === 0) return none;
+  const written = live.filter((i) => ids.has(i.run.id));
+  await tx.agentRunToolStats.deleteMany({ where: { runId: { in: [...ids] } } });
+
+  const toolRows = written.flatMap(toolStatRows);
+  if (toolRows.length > 0) await tx.agentRunToolStats.createMany({ data: toolRows });
+  return { statsRows: ids.size, toolRows: toolRows.length, errorCalls: written.reduce((n, i) => n + i.summary.errors.length, 0) };
+}
+
+/** Absent llm and citation fields keep what a stored row holds. */
+function statsRow(i: RunStatsItem): Prisma.AgentRunStatsCreateManyInput {
+  return {
+    runId: i.run.id,
+    orgId: i.run.orgId,
+    userId: i.run.userId,
+    agentSlug: i.run.agentSlug,
+    completedAt: i.run.completedAt,
+    toolCalls: int4(i.summary.totals.calls),
+    toolErrors: int4(i.summary.totals.errors),
+    toolNames: runToolNames(i.summary, i.toolsUsed).map((n) => n.slice(0, MAX_TOOL_NAME)),
+    ...(Array.isArray(i.llmCalls) ? { llmCallCount: i.llmCalls.length, llmCalls: i.llmCalls as Prisma.InputJsonValue } : {}),
+    ...(typeof i.citationOutcome === "string" && i.citationOutcome !== "" ? { citationOutcome: i.citationOutcome } : {}),
+  };
 }

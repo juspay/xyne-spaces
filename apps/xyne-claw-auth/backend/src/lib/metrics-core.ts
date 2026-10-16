@@ -17,6 +17,8 @@ import { redisService } from "../redis.js";
 import { MESSAGING_CHANNEL_KEYS } from "../surfaces/messaging/plugin.js";
 import { createLogger } from "../logger.js";
 
+export { runAnalytics } from "./metrics-sql.js";
+
 const log = createLogger("metrics-core");
 
 
@@ -68,7 +70,7 @@ function column(alias: string | undefined, name: string): Prisma.Sql {
 /** Single-quoted SQL literal for compile-time constants only. */
 const literal = (v: string): string => `'${v.replace(/'/g, "''")}'`;
 
-const ORPHAN_MARKER = "interrupted (orphaned run)";
+export const ORPHAN_MARKER = "interrupted (orphaned run)";
 
 /** Literal text, not a bind: the covering index is partial on exactly this predicate. */
 export const ORPHAN_EXCLUSION = (alias?: string): Prisma.Sql => {
@@ -293,40 +295,6 @@ export function windowInfo(
     computedAt: new Date().toISOString(),
     cached,
   };
-}
-
-
-/** Shared DB with the live run path: analytics must fail fast. */
-const DEFAULT_TIMEOUT_MS = 8_000;
-
-export const MAX_ANALYTICS_WORK_MEM_MB = 128;
-
-export interface RunAnalyticsOptions {
-  timeoutMs?: number;
-  customPlan?: boolean;
-  /** work_mem in MB, clamped to 1..MAX_ANALYTICS_WORK_MEM_MB; it is per sort/hash node per process. */
-  workMemMb?: number;
-}
-
-/**
- * Runs one statement in a transaction with LOCAL settings: statement_timeout,
- * jit off (it cost 0.5-1.3 s on these aggregates), optionally force_custom_plan
- * (the generic plan was 100x slower on skewed probes) and work_mem.
- * SET LOCAL takes no bind parameters, hence the interpolated integers.
- */
-export async function runAnalytics<T>(query: Prisma.Sql, opts: RunAnalyticsOptions = {}): Promise<T[]> {
-  const timeoutMs = Math.max(1, Math.trunc(Number.isFinite(opts.timeoutMs) ? (opts.timeoutMs as number) : DEFAULT_TIMEOUT_MS));
-  const workMemMb = Number.isFinite(opts.workMemMb)
-    ? Math.min(Math.max(Math.trunc(opts.workMemMb as number), 1), MAX_ANALYTICS_WORK_MEM_MB)
-    : undefined;
-  const settings = [
-    prisma.$executeRawUnsafe(`SET LOCAL statement_timeout = ${timeoutMs}`),
-    prisma.$executeRawUnsafe("SET LOCAL jit = off"),
-    ...(opts.customPlan ? [prisma.$executeRawUnsafe("SET LOCAL plan_cache_mode = force_custom_plan")] : []),
-    ...(workMemMb !== undefined ? [prisma.$executeRawUnsafe(`SET LOCAL work_mem = '${workMemMb}MB'`)] : []),
-  ];
-  const results = await prisma.$transaction([...settings, prisma.$queryRaw<T[]>(query)]);
-  return results[results.length - 1] as T[];
 }
 
 

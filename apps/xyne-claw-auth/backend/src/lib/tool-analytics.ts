@@ -17,7 +17,7 @@ import { Prisma } from "@prisma/client";
 import { findUnusedGrants, getSubagentDefinition, resolveAgentToolsConfig, type AgentToolsConfig } from "xyne-claw-shared";
 import { prisma } from "../db.js";
 import { createLogger } from "../logger.js";
-import { invalidateMetricsCache, rate, runAnalytics, statsWindowPredicate, windowPredicate, type AnalyticsWindow } from "./metrics-core.js";
+import { ORPHAN_MARKER, invalidateMetricsCache, rate, runAnalytics, statsWindowPredicate, windowPredicate, type AnalyticsWindow } from "./metrics-core.js";
 import {
   HISTOGRAM_SLOTS,
   percentileFromBuckets,
@@ -743,19 +743,18 @@ async function grantServers(grants: Array<{ kind: keyof AgentToolsConfig; grant:
   }
   if (lookups.size > 0) {
     const names = [...lookups];
-    // A bare grant is a custom slug or the tool part of an MCP slug (`<type>__<tool>`).
-    const rows = await prisma.$queryRaw<Array<{ grant: string; source: string | null }>>(Prisma.sql`
-      SELECT g AS "grant",
-             (SELECT t.source FROM "tools" t
-               WHERE t.slug = g OR right(t.slug, length(g) + 2) = '__' || g
-               ORDER BY (t.slug = g) DESC LIMIT 1) AS source
-      FROM unnest(${names}::text[]) AS g
-    `);
-    const sourceByGrant = new Map(rows.map((r) => [r.grant, r.source]));
+    // A bare grant is a custom slug or the tool part of an MCP slug (`<type>__<tool>`); an exact slug wins.
+    const tools = await prisma.tool.findMany({
+      where: { OR: [{ slug: { in: names } }, ...names.map((g) => ({ slug: { endsWith: `__${g}` } }))] },
+      select: { slug: true, source: true },
+      orderBy: { slug: "asc" },
+    });
+    const sourceOf = (g: string): string | null =>
+      (tools.find((t) => t.slug === g) ?? tools.find((t) => t.slug.endsWith(`__${g}`)))?.source ?? null;
     for (const { kind, grant } of grants) {
       const key = `${kind}\u0000${grant}`;
       if (out.has(key)) continue;
-      const source = sourceByGrant.get(grant) ?? null;
+      const source = sourceOf(grant);
       out.set(key, source ? (source.startsWith("mcp:") ? source.slice(4) : source) : null);
     }
   }
@@ -864,35 +863,38 @@ export interface BackfillReport {
 const BACKFILL_DEFAULTS = { batchSize: 200, pauseMs: 50 } as const;
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-interface BackfillRow {
-  id: string; orgId: string; userId: string; agentSlug: string;
-  completedAt: Date; error: string | null; result: string | null;
-  toolInvocations: unknown; toolsUsed: string[] | null; citation_outcome: string | null;
-}
+const BACKFILL_SELECT = {
+  id: true, orgId: true, userId: true, agentSlug: true, completedAt: true,
+  error: true, result: true, toolInvocations: true, toolsUsed: true, metadata: true,
+} satisfies Prisma.AgentRunSelect;
+type BackfillRow = Prisma.AgentRunGetPayload<{ select: typeof BACKFILL_SELECT }>;
 
 const asTx = (tx: unknown): Prisma.TransactionClient => tx as Prisma.TransactionClient;
 
 const EMPTY: RunToolSummary = { stats: [], totals: { calls: 0, errors: 0 }, errors: [] };
 
+/** Prisma codes for SQLSTATE 22001, 23505, 23503, 23502 and 22003. */
+const DATA_ERROR_CODES = new Set(["P2000", "P2002", "P2003", "P2011", "P2020"]);
+
 /**
  * A write failing on the run's own data (SQLSTATE class 22 or 23) fails on every
  * retry; anything else (timeout, pool, connection) may pass next call, so no
- * empty summary may be written for it.
+ * empty summary may be written for it. Prisma reports SQLSTATEs it has no code
+ * for only in the message.
  */
 export function isDataWriteError(err: unknown): boolean {
-  const code = (err as { meta?: { code?: unknown } } | null | undefined)?.meta?.code;
-  return typeof code === "string" && /^2[23]/.test(code);
+  const e = err as { code?: unknown; message?: unknown } | null | undefined;
+  if (typeof e?.code === "string") return DATA_ERROR_CODES.has(e.code);
+  return typeof e?.message === "string" && /PostgresError \{ code: "2[23]/.test(e.message);
 }
 
 /** Finished, non-orphan runs in range; `missing` limits them to runs without a stats row. */
-function backfillRangeSql(opts: BackfillOptions, missing: boolean): Prisma.Sql {
-  return Prisma.sql`
-    r."completedAt" IS NOT NULL
-    ${opts.since ? Prisma.sql`AND r."completedAt" >= ${opts.since}` : Prisma.empty}
-    ${opts.until ? Prisma.sql`AND r."completedAt" < ${opts.until}` : Prisma.empty}
-    AND (r."error" IS NULL OR r."error" <> 'interrupted (orphaned run)')
-    ${missing ? Prisma.sql`AND NOT EXISTS (SELECT 1 FROM "agent_run_stats" s WHERE s."runId" = r."id")` : Prisma.empty}
-  `;
+function backfillWhere(opts: BackfillOptions, missing: boolean): Prisma.AgentRunWhereInput {
+  return {
+    completedAt: { not: null, ...(opts.since ? { gte: opts.since } : {}), ...(opts.until ? { lt: opts.until } : {}) },
+    OR: [{ error: null }, { error: { not: ORPHAN_MARKER } }],
+    ...(missing ? { stats: { is: null } } : {}),
+  };
 }
 
 /**
@@ -927,10 +929,10 @@ export async function backfillToolStats(opts: BackfillOptions = {}): Promise<Bac
         summary = EMPTY;
       }
       return {
-        run: { id: r.id, orgId: r.orgId, userId: r.userId, agentSlug: r.agentSlug, completedAt: r.completedAt, error: r.error },
+        run: { id: r.id, orgId: r.orgId, userId: r.userId, agentSlug: r.agentSlug, completedAt: r.completedAt!, error: r.error },
         summary,
         toolsUsed: r.toolsUsed,
-        citationOutcome: r.citation_outcome,
+        citationOutcome: (r.metadata as { citationReflection?: { outcome?: string } } | null)?.citationReflection?.outcome,
       };
     });
     try {
@@ -958,15 +960,12 @@ export async function backfillToolStats(opts: BackfillOptions = {}): Promise<Bac
   for (;;) {
     const take = opts.maxRows === undefined ? batchSize : Math.min(batchSize, opts.maxRows - report.scanned);
     if (take <= 0) break;
-    const rows = await prisma.$queryRaw<BackfillRow[]>(Prisma.sql`
-      SELECT r."id", r."orgId", r."userId", r."agentSlug", r."completedAt",
-             r."error", r."result", r."toolInvocations", r."toolsUsed",
-             r."metadata"->'citationReflection'->>'outcome' AS citation_outcome
-      FROM "agent_runs" r
-      WHERE r."id" > ${cursor} AND ${backfillRangeSql(opts, !opts.force)}
-      ORDER BY r."id"
-      LIMIT ${take}
-    `);
+    const rows = await prisma.agentRun.findMany({
+      where: { id: { gt: cursor }, ...backfillWhere(opts, !opts.force) },
+      orderBy: { id: "asc" },
+      take,
+      select: BACKFILL_SELECT,
+    });
     if (rows.length === 0) break;
     cursor = rows[rows.length - 1]!.id;
     report.batches += 1;
@@ -977,12 +976,10 @@ export async function backfillToolStats(opts: BackfillOptions = {}): Promise<Bac
     if (pauseMs > 0) await sleep(pauseMs);
   }
 
-  const [left] = await prisma.$queryRaw<Array<{ n: bigint }>>(Prisma.sql`
-    SELECT count(*) AS n FROM "agent_runs" r WHERE ${backfillRangeSql(opts, true)}
-  `);
+  const remaining = await prisma.agentRun.count({ where: backfillWhere(opts, true) });
   if (report.scanned > 0) await invalidateMetricsCache();
 
-  const result: BackfillReport = { ...report, durationMs: Date.now() - startedAt, remaining: num(left?.n) };
+  const result: BackfillReport = { ...report, durationMs: Date.now() - startedAt, remaining };
   log.info(`[backfill] done: ${JSON.stringify(result)}`);
   return result;
 }

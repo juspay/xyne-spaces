@@ -93,7 +93,7 @@ All routes live under `/claw/api/v1/metrics`, mounted as `requireAuth`, `require
 
 **Common start of every v2 GET** (`resolveRequestWindow`, `lib/metrics-core.ts`): `isClawAdmin` (`user_roles` unique `(userId, role)`, about 0.2 ms); a `users` pkey lookup for the org only when `x-org-id` is missing (prod's `requireAuth` stamps it); then the window: `completedAt` in `[windowEnd − D days, windowEnd)` with `windowEnd` = now floored to the minute, plus `orgId =` (admin) or `userId =` (non-admin), the agent filter and the orphan exclusion `("error" IS NULL OR "error" <> 'interrupted (orphaned run)')`.
 
-**Execution**: every statement goes through `runAnalytics`, a `$transaction` of `SET LOCAL statement_timeout` (8 s), `SET LOCAL jit = off` and the query, holding one pooled connection. Handlers keep at most 3 statements in flight (`boundedAll`). v2 responses start with `window: WindowInfo` (about 200 B).
+**Execution**: every statement goes through `runAnalytics` (`lib/metrics-sql.ts`, the only file in the metrics code that runs raw SQL), a `$transaction` of one `set_config` statement (`statement_timeout` 8 s, `jit` off, transaction-local) and the query, holding one pooled connection. Handlers keep at most 3 statements in flight (`boundedAll`). v2 responses start with `window: WindowInfo` (about 200 B).
 
 **Stats readers** window `agent_run_stats` and `agent_run_tool_stats` on their own copies of `orgId`, `userId`, `agentSlug` and `completedAt` (`statsWindowPredicate`). No orphan predicate and no join to `agent_runs` are needed: orphan-closed runs never get stats rows.
 
@@ -192,7 +192,7 @@ All routes live under `/claw/api/v1/metrics`, mounted as `requireAuth`, `require
 
 - **Purpose**: palette state per agent (`scoped`, `open-palette`, `unscoped`), granted/used/unused counts, unused grants with their server. Observed tools = each stats row's `toolNames`: the run's `toolsUsed` merged with the tools its recorded calls named. Neither list alone is complete (some finalize paths omitted `toolsUsed`; about 6% of `toolsUsed` entries have no recorded call), and a used tool must never be reported unused.
 - **Called by**: Coverage tab (P1); agent tool `view=coverage`.
-- **SQL**: (1) observed: `GROUP BY agentSlug, orgId` with `array_agg(DISTINCT t)` over `LEFT JOIN LATERAL unnest(toolNames)` on `agent_run_stats`; (2) `agent.findMany(OR pairs)`; (3) `grantServers`: `unnest($names)` with a correlated subquery on `tools`; (4) grant matching in TypeScript (`findUnusedGrants`).
+- **SQL**: (1) observed: `GROUP BY agentSlug, orgId` with `array_agg(DISTINCT t)` over `LEFT JOIN LATERAL unnest(toolNames)` on `agent_run_stats`; (2) `agent.findMany(OR pairs)`; (3) `grantServers`: `tool.findMany` for the exact slugs and `__<name>` suffixes, an exact slug first, then slug order; (4) grant matching in TypeScript (`findUnusedGrants`).
 - **Columns**: `agent_run_stats` `toolNames` (`text[]`, inline) and window columns; `agents`; `tools` (`slug`, `source`). It does not read `agent_runs`.
 - **Plan**: 30d ws Seq Scan of `agent_run_stats` (81 MB on the bench) + HashAggregate; 30d xyne Index Scan `agent_run_stats_orgId_agentSlug_completedAt_idx`, 32 ms; servers under 1 ms.
 - **Time**: Θ(R) stats rows (Θ(N) with the seq scan) + Θ(R × \|toolNames\|) + O(A·G) matching + O(U_g × \|tools\|). **Space**: DB O(A × distinct tools); response O(A + unused grants).
@@ -245,7 +245,7 @@ All routes live under `/claw/api/v1/metrics`, mounted as `requireAuth`, `require
 ### 3.16 GET /awakening, GET /awakening/:agentId/runs
 
 - **Purpose**: activity of agents that wake on their own: totals, per day, per agent and kind, skip reasons, current state; the second endpoint pages one agent's wake history. Called by Overview "Awakened agents" and row expansion.
-- **SQL**: `/awakening` = 5 plain `prisma.$queryRaw` statements in parallel (totals; per day; per agent `LEFT JOIN agents LIMIT 50`; skip reasons `LIMIT 20`; states `LEFT JOIN agents LIMIT 100`). Runs = a page `LEFT JOIN agent_runs ON sessionId` with `ORDER BY startedAt DESC LIMIT/OFFSET` and a `COUNT(*)`. No timeout, no cache.
+- **SQL**: `/awakening` = 5 plain raw SQL statements in parallel (totals; per day; per agent `LEFT JOIN agents LIMIT 50`; skip reasons `LIMIT 20`; states `LEFT JOIN agents LIMIT 100`). Runs = a page `LEFT JOIN agent_runs ON sessionId` with `ORDER BY startedAt DESC LIMIT/OFFSET` and a `COUNT(*)`. No timeout, no cache.
 - **Tables / indexes**: `agent_awakening_runs` (`agent_awakening_runs_orgId_startedAt_idx`, `agent_awakening_runs_agentId_windowStartMs_idx` prefix only), `agent_awakening_state` (`_orgId_idx`), `agents`, `agent_runs` (`agent_runs_sessionId_key`).
 - **Time**: /awakening 4 × Θ(W) + O(W log W); runs O(W_a + offset + P log N) + Θ(W_a) count. **Space**: /awakening ≤ 15 KB; runs O(P), about 0.4 KB per row.
 - **Bench**: tables empty, so scale cost not measured: /awakening cold 29 to 40 ms, warm 7 ms, 153 B; runs 5 to 8 ms. Estimate: 50 agents waking every 15 minutes for 30 days is 144k rows, about 30 ms per index range scan.
@@ -258,7 +258,7 @@ All routes live under `/claw/api/v1/metrics`, mounted as `requireAuth`, `require
   - The admin **Run backfill** button on the Tools, Quality and Coverage tabs calls this endpoint repeatedly with `maxRows` 5000 until `remaining` is 0, shows "N left" while it runs, and shares one running state across the three tabs.
   - If a slice makes no progress it stops early and shows "Stopped with N left".
   - An admin can still call the API directly in slices of any `maxRows`. Calls are idempotent and resumable, and each stays well under a gateway timeout.
-- **SQL**: batches of `SELECT … FROM agent_runs r WHERE r.id > $cursor AND completedAt IS NOT NULL AND <not orphan> AND NOT EXISTS (SELECT 1 FROM agent_run_stats s WHERE s."runId" = r.id) ORDER BY r.id LIMIT $n`, then `summarizeRun` in Node and `persistRunStats` (§4.1) per batch; finally one `count(*)` of runs still missing a row.
+- **SQL**: batches of `agentRun.findMany` with `id > cursor`, finished, not orphaned and `stats: { is: null }` (Prisma compiles it to a `LEFT JOIN agent_run_stats … IS NULL` anti-join), `ORDER BY id LIMIT n`, then `summarizeRun` in Node and `persistRunStats` (§4.1) per batch; finally one `agentRun.count` of runs still missing a row.
 - **Columns**: `agent_runs` `toolInvocations`, `result`, `toolsUsed`, `metadata->'citationReflection'->>'outcome'`, run keys; writes both stats tables.
 - **Failures**: a failed batch is retried row by row. A row that fails on its own data (SQLSTATE class 22 or 23) is written as an empty summary so the walk never stalls. Any other failure (timeout, pool, connection) leaves the row missing and counted in `failed`, so the next call retries it.
 - **Time**: O(N) primary-key walk per full pass (an anti-join probe of the stats pkey per run) + O(B) per run with invocations (a run without invocations gets an empty summary, as finalize writes one). **Space**: O(1) response, about 150 B.
@@ -274,8 +274,8 @@ The run's own transaction is the same as on `main` apart from the metadata merge
 - **Not on the run's path**: it runs outside the run's transaction and lock in its own short transaction; a failure is logged (`event: agent_run_stats_failed`), never thrown.
 - `summarizeRun(merged invocations, answer)`: one O(T) pass in memory.
 - `persistRunStats` (`lib/tool-stats.ts`, shared with the backfill):
-  - one `INSERT … ON CONFLICT ("runId") DO UPDATE … WHERE stored.completedAt <= new.completedAt RETURNING "runId"` into `agent_run_stats`: run keys, `toolCalls`, `toolErrors`, `toolNames`, `llmCalls` (capped at 200 calls), `llmCallCount`, `citationOutcome`. A later write without a series or outcome keeps the stored one (`COALESCE`); an older write never replaces a newer one (two finalizes of one session can land out of order).
-  - only for runs the upsert returned: `DELETE` and re-`INSERT` of their `agent_run_tool_stats` rows through `jsonb_to_recordset`, so re-summarising is idempotent.
+  - `createManyAndReturn` with `skipDuplicates` (`INSERT … ON CONFLICT DO NOTHING RETURNING "runId"`) into `agent_run_stats`: run keys, `toolCalls`, `toolErrors`, `toolNames`, `llmCalls` (capped at 200 calls), `llmCallCount`, `citationOutcome`. A run that already has a row gets an `updateMany` guarded by `completedAt <= new`, so an older write never replaces a newer one (two finalizes of one session can land out of order); a write without a series or outcome leaves the stored one.
+  - only for runs inserted or updated: `deleteMany` and `createMany` of their `agent_run_tool_stats` rows, so re-summarising is idempotent.
   - an orphan-closed run gets no rows; deleting its stats row cascades to its tool rows.
 - **Shutdown**: `main.ts` waits (bounded) for in-flight metrics writes before exiting. A write lost anyway (a crash) leaves the run without stats rows, which the backfill repairs.
 
@@ -452,7 +452,7 @@ A timeout surfaces as HTTP 500 with Postgres 57014 and is remembered for 15 s pe
 
 ### 8.5 Connections and fan-out
 
-- Each `runAnalytics` call holds one pooled connection for its whole duration (2 to 4 `SET LOCAL` round trips plus the query); handlers keep at most 3 in flight, so a cold tab first paint holds up to about 6 connections for under 1.5 s.
+- Each `runAnalytics` call holds one pooled connection for its whole duration (one `set_config` round trip plus the query); handlers keep at most 3 in flight, so a cold tab first paint holds up to about 6 connections for under 1.5 s.
 - Single-flight collapses identical keys within a process; different scopes and minutes do not collapse.
 - Check prod's Prisma `connection_limit` against the expected concurrent cold dashboards: the pool is shared with the live run path.
 

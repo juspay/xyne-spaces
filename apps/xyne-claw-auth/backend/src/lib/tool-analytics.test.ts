@@ -121,8 +121,9 @@ describe("rankTools", () => {
 
 describe("isDataWriteError", () => {
   it("treats only errors in the row's own data (SQLSTATE class 22 or 23) as permanent", () => {
-    for (const code of ["23505", "22P02"]) expect(isDataWriteError({ code: "P2010", meta: { code } })).toBe(true);
-    for (const e of [{ code: "P2010", meta: { code: "57014" } }, { code: "P2024" }, new Error("Connection reset"), null]) expect(isDataWriteError(e)).toBe(false);
+    const unmapped = (code: string) => new Error(`ConnectorError { kind: QueryError(PostgresError { code: "${code}", message: "x" }) }`);
+    for (const e of [{ code: "P2003" }, { code: "P2002" }, unmapped("22P05"), unmapped("22021")]) expect(isDataWriteError(e)).toBe(true);
+    for (const e of [unmapped("57014"), { code: "P2024" }, { code: "P2028" }, new Error("Connection reset"), null]) expect(isDataWriteError(e)).toBe(false);
   });
 });
 
