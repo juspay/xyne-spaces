@@ -20,6 +20,7 @@ import { findAgents, INDEX_KINDS, type IndexKind } from "../../services/agent-in
 import { listTools, searchTools } from "../../services/tool-index/index.js";
 import { handleGetFleetStats } from "./fleet-stats.js";
 import { handleGetAgentDiagnostics } from "./agent-diagnostics.js";
+import { handleFindMetricSessions, handleGetAgentMetrics } from "./agent-metrics.js";
 const log = createLogger("agent-introspect");
 
 // Slugs MUST match the `tools` rows seeded by the add_agent_introspect_tools
@@ -34,6 +35,8 @@ export const AGENT_INTROSPECT_TOOLS: McpToolInfo[] = AGENT_INTROSPECT_TOOL_DEFS.
   description: d.description,
   inputSchema: d.inputSchema as unknown as McpToolInfo["inputSchema"],
   selectionKey: d.slug,
+  // Declared so claw's open-palette gate doesn't guess risk from tool names.
+  readOnly: true,
 }));
 
 export const AGENT_INTROSPECT_TOOL_NAMES = AGENT_INTROSPECT_TOOLS.map((t) => t.name);
@@ -492,6 +495,10 @@ export async function handleAgentIntrospect(
       return handleGetFleetStats(params, contextOrgId, requestingUserId);
     case "get_agent_diagnostics":
       return handleGetAgentDiagnostics(params, contextOrgId, requestingUserId);
+    case "get_agent_metrics":
+      return handleGetAgentMetrics(params, contextOrgId, requestingUserId);
+    case "find_metric_sessions":
+      return handleFindMetricSessions(params, contextOrgId, requestingUserId);
     default:
       log.warn(`[agent-introspect] unknown tool ${tool}`);
       throw new Error(`Unknown agent-introspect tool: ${tool}`);

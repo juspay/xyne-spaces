@@ -1,1352 +1,1684 @@
 /**
- * MetricsPageV3 — workspace-wide latency & throughput dashboard.
+ * MetricsPageV3 — workspace-wide agent observability: sticky filters, headline KPIs, sticky tabs, one tab body.
  *
- * Purpose: a single page where the operator can see whether changes are
- * improving things — sessions per day, p50/p95 of totalMs, LLM vs Tool
- * split, error rate, and a per-agent leaderboard.
- *
- * All charts are inline SVG with no library dependency, sized for a
- * 1180px max-width column matching the rest of v3.
+ * The page owns no metrics fetch: every card calls its own hook with the shared `scope`, and the
+ * module-level cache in useDeepMetrics makes cards asking the same question share one request.
+ * Range, agents, org scope, tab, card measures and drawers live in the query string; a range or
+ * agent change clears the drill keys (`clearDrillParams`).
  */
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
+import { Link, useSearchParams } from "react-router-dom";
+import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import {
-  ResponsiveContainer,
-  BarChart, Bar,
-  LineChart, Line,
-  XAxis, YAxis as RcYAxis, CartesianGrid, Tooltip, Legend as RcLegend,
-} from "recharts";
+  AlarmClock,
+  ArrowRight,
+  BrainCircuit,
+  CalendarClock,
+  ChevronDown,
+  ChevronRight,
+  Circle,
+  CircleMinus,
+  Coins,
+  Database,
+  GitFork,
+  History,
+  MessageCircleReply,
+  MessageSquare,
+  RefreshCcwDot,
+  RefreshCw,
+  Terminal,
+  ThumbsDown,
+  ThumbsUp,
+  UserRound,
+  Workflow,
+  Wrench,
+  type LucideIcon,
+} from "lucide-react";
 import {
-  fetchGlobalMetrics, fetchAgentMetrics, listAgents,
-  fetchAwakeningActivity, type AwakeningActivity,
-  fetchAwakeningRuns, type AwakeningRun,
-  fetchAgentImprovements, applyImprovement, dismissImprovement,
-  type GlobalMetrics, type GlobalMetricsDayBucket, type AgentMetrics,
-  type SlowSession, type ToolLatencyRow, type AgentSentiment, type GlobalMetricsProviderRow,
-  type ImprovementCandidate, type ImprovementBucket, type AdminOrgScope,
+  applyImprovement,
+  dismissImprovement,
+  fetchAgentImprovements,
+  fetchAwakeningActivity,
+  fetchAwakeningRuns,
+  listAgents,
+  type AdminOrgScope,
+  type AgentLeaderRow,
+  type AwakeningActivity,
+  type AwakeningRun,
+  type DailyPoint,
+  type ImprovementBucket,
+  type ImprovementCandidate,
+  type MetricSessionsRequest,
+  type RankPoint,
+  type RouteRow,
+  type SummaryFigures,
+  type TriggerGroup,
+  type TriggerRow,
 } from "../../lib/api";
+import type { AgentLight } from "../../lib/types";
+import { cn } from "../../lib/utils";
 import { Skeleton } from "./ui/Skeleton";
-import { Switch } from "./ui/Switch";
+import { Tabs, type TabItem } from "./ui/Tabs";
 import { useAdminStatus } from "../hooks/useAdminStatus";
+import {
+  invalidateMetrics,
+  useActiveAgents,
+  useAgentsTop,
+  useMetricsResource,
+  useRoutes,
+  useRunDaily,
+  useSentiment,
+  useSummary,
+  useTools,
+  type MetricsDays,
+  type MetricsScopeParams,
+} from "../hooks/useDeepMetrics";
+import { HeadlineKpis } from "./metrics/HeadlineKpis";
+import {
+  AXIS_LINE,
+  AXIS_TICK,
+  BAR_CURSOR,
+  ChartLegend,
+  ChartSkeleton,
+  ChartTooltip,
+  DataTable,
+  Drawer,
+  EmptyCardRow,
+  InlineBar,
+  KpiStrip,
+  LINE_CURSOR,
+  LazyCard,
+  MeasureToggle,
+  MetricsCard,
+  MetricsVizStyle,
+  MultiSelect,
+  PanelError,
+  RowsSkeleton,
+  SAMPLE_FLOORS,
+  SampleChip,
+  SegmentedControl,
+  SessionsList,
+  StatusGlyph,
+  StatusValue,
+  TableSkeleton,
+  ToggleField,
+  ToolName,
+  Unknown,
+  VIZ,
+  ZeroCell,
+  clearDrillParams,
+  floorFor,
+  fmtCompact,
+  fmtDateTime,
+  fmtDay,
+  fmtInt,
+  fmtMs,
+  fmtPct,
+  fmtTokens,
+  fmtTps,
+  plural,
+  statusFor,
+  statusText,
+  useMeasure,
+  useMetricsParams,
+  worstStatus,
+  type Column,
+  type Kpi,
+  type MeasureOptions,
+  type Status,
+} from "./metrics/MetricsPrimitives";
+import { ToolsPanel } from "./metrics/panels/ToolsPanel";
+import { LlmCallsPanel } from "./metrics/panels/LlmCallsPanel";
+import { QualityPanel } from "./metrics/panels/QualityPanel";
+import { CoveragePanel } from "./metrics/panels/CoveragePanel";
 
 interface MetricsPageV3Props {
   userId: string;
 }
 
-const DAY_OPTIONS: Array<{ label: string; days: 1 | 7 | 30 }> = [
-  { label: "1d", days: 1 },
-  { label: "7d", days: 7 },
-  { label: "30d", days: 30 },
+type MetricsTab = "overview" | "tools" | "llm" | "quality" | "coverage";
+
+const TABS: Array<TabItem<MetricsTab>> = [
+  { id: "overview", label: "Overview" },
+  { id: "tools", label: "Tools" },
+  { id: "llm", label: "LLM calls" },
+  { id: "quality", label: "Quality" },
+  { id: "coverage", label: "Coverage" },
 ];
 
-function fmtMs(ms: number | null | undefined): string {
-  if (ms == null) return "—";
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${(ms / 60_000).toFixed(1)}m`;
-}
+const RANGE_OPTIONS = [
+  { id: "1", label: "1d" },
+  { id: "7", label: "7d" },
+  { id: "30", label: "30d" },
+] as const;
 
-function fmtPct(p: number | null | undefined): string {
-  if (p == null || Number.isNaN(p)) return "—";
-  return `${(p * 100).toFixed(1)}%`;
-}
+/** Per-day buckets follow the viewer's day, not UTC's. */
+const VIEWER_TZ: string = (() => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+})();
 
-function fmtSignedMs(ms: number | null | undefined): { label: string; tone: "good" | "bad" | "flat" } {
-  if (ms == null) return { label: "—", tone: "flat" };
-  if (Math.abs(ms) < 50) return { label: "≈0", tone: "flat" };
-  const sign = ms > 0 ? "+" : "";
-  return {
-    label: `${sign}${fmtMs(Math.abs(ms))}${ms > 0 ? " slower" : " faster"}`,
-    tone: ms > 0 ? "bad" : "good",
-  };
-}
-
-function fmtSignedPct(p: number | null | undefined): { label: string; tone: "good" | "bad" | "flat" } {
-  if (p == null || Number.isNaN(p)) return { label: "—", tone: "flat" };
-  if (Math.abs(p) < 0.001) return { label: "≈0", tone: "flat" };
-  const sign = p > 0 ? "+" : "";
-  return { label: `${sign}${(p * 100).toFixed(1)}pp`, tone: p > 0 ? "bad" : "good" };
-}
-
-/**
- * Reusable metrics panel — used by both MetricsPageV3 (workspace-wide) and
- * AgentDetailPageV3 (single agent). Accepts a `fetcher` so the parent
- * decides which endpoint to hit; charts and tiles render the same shape.
- *
- * Pass `showLeaderboard=true` to render the top-agents table (only valid
- * when the data has a `topAgents` field — i.e. global mode).
- */
-export function MetricsPanel({
-  userId,
-  fetcher,
-  showLeaderboard = false,
-  onAgentClick,
-  orgScope,
-}: {
-  userId: string;
-  fetcher: (userId: string, days: 1 | 7 | 30) => Promise<GlobalMetrics | AgentMetrics>;
-  showLeaderboard?: boolean;
-  /** Passed through to the awakening rollup, which fetches independently. */
-  orgScope?: AdminOrgScope;
-  /** When the workspace leaderboard renders an agent, clicking it bubbles up
-   *  so the parent page can pivot to that agent's view. */
-  onAgentClick?: (agentSlug: string) => void;
-}) {
-  const [days, setDays] = useState<1 | 7 | 30>(7);
-  const [data, setData] = useState<GlobalMetrics | AgentMetrics | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    fetcher(userId, days)
-      .then((d) => { if (!cancelled) setData(d); })
-      .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [userId, days, fetcher]);
-
-  return (
-    <div className="flex flex-col gap-[20px]">
-      <div className="flex items-center justify-end">
-        <div className="flex items-center gap-1 rounded-full bg-xyne-bg-secondary p-1">
-          {DAY_OPTIONS.map((opt) => (
-            <button
-              key={opt.days}
-              onClick={() => setDays(opt.days)}
-              className={
-                "px-3 py-1 rounded-full text-[12px] font-medium transition-colors " +
-                (days === opt.days
-                  ? "bg-xyne-fg-primary text-xyne-fg-inverse"
-                  : "text-xyne-fg-muted hover:text-xyne-fg-primary")
-              }
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {error && (
-        <div className="rounded-xl bg-red-500/10 text-red-500 p-4 text-[13px]">
-          Failed to load metrics: {error}
-        </div>
-      )}
-
-      {loading || !data ? (
-        <>
-          <Skeleton className="h-[120px] w-full" />
-          <Skeleton className="h-[260px] w-full" />
-          <Skeleton className="h-[260px] w-full" />
-        </>
-      ) : (
-        <>
-          <TotalsStrip data={data} />
-          {showLeaderboard && "byTrigger" in data && (
-            <Card title="By trigger" subtitle="User combines Spaces mentions, DMs, and dashboard chat. CLI is API-triggered runs.">
-              <TriggerTiles rows={data.byTrigger} />
-            </Card>
-          )}
-          {showLeaderboard && "byTrigger" in data ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[20px]">
-              <Card title="How many runs each day" subtitle="Bar height = total runs. Stacked by outcome.">
-                <SessionsBarChart perDay={data.perDay} />
-              </Card>
-              <Card title="Daily runs by trigger" subtitle="Same run volume, grouped by how the run started.">
-                <TriggerBarChart perDay={data.perDay} />
-              </Card>
-            </div>
-          ) : (
-            <Card title="How many runs each day" subtitle="Bar height = total runs. Stacked by outcome.">
-              <SessionsBarChart perDay={data.perDay} />
-            </Card>
-          )}
-          {/* Two charts side-by-side so each line gets its own y-axis. When
-              p50 and p95 share a scale (p95 is 10-20× larger), the p50 line
-              flattens to the baseline and looks broken. */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-[20px]">
-            <Card title="Typical run time over time" subtitle="p50 — half of runs finished faster than this each day. Watch for upward drift.">
-              <SingleLineChart perDay={data.perDay} valueKey="p50TotalMs" color="#3b82f6" displayName="Typical run (p50)" />
-            </Card>
-            <Card title="Slow-tail over time" subtitle="p95 — the slowest 5% each day. This is where pain lives.">
-              <SingleLineChart perDay={data.perDay} valueKey="p95TotalMs" color="#ef4444" displayName="Slow tail (p95)" />
-            </Card>
-          </div>
-          <Card title="LLM time vs Tool time" subtitle="If the orange grows, tools are dragging things. If the blue grows, the LLM itself is slow.">
-            <SplitChart perDay={data.perDay} />
-          </Card>
-          {showLeaderboard && "byProvider" in data && (
-            <Card title="LLM latency by provider/model" subtitle="Compare provider+model pairs using the same window. Sort by any column to isolate slow tails or unstable providers.">
-              <ProviderLatencyTable rows={data.byProvider} />
-            </Card>
-          )}
-          {showLeaderboard && "topAgents" in data && (
-            <Card title="Agents leaderboard" subtitle={`Top ${data.topAgents.length} by run count — click a row to drill into one agent`}>
-              <AgentTable rows={data.topAgents} onAgentClick={onAgentClick} />
-            </Card>
-          )}
-          {"sentiment" in data && data.sentiment.totalRuns > 0 && (
-            <Card title="User sentiment & feedback" subtitle="Explicit ratings + behavioural signals from the same window. Lower bars are better.">
-              <SentimentPanel sentiment={data.sentiment} />
-            </Card>
-          )}
-          {"agentSlug" in data && (
-            <ImprovementsCard userId={userId} agentSlug={data.agentSlug} />
-          )}
-          {"toolLatency" in data && data.toolLatency.length > 0 && (
-            <Card title="Tool latency for this agent" subtitle={`Top ${data.toolLatency.length} tools by cumulative time — find the one dragging the agent down`}>
-              <ToolLatencyTable rows={data.toolLatency} />
-            </Card>
-          )}
-          {showLeaderboard && (
-            <AwakeningActivityCard userId={userId} days={days} orgScope={orgScope} />
-          )}
-          {data.slowSessions.length > 0 && (
-            <Card title="Slowest sessions" subtitle={`Top ${data.slowSessions.length} by total wall-clock — expand a row for the tool breakdown`}>
-              <SlowSessionsTable rows={data.slowSessions} showAgent={showLeaderboard} />
-            </Card>
-          )}
-        </>
-      )}
-    </div>
-  );
-}
-
-function SlowSessionsTable({ rows, showAgent }: { rows: SlowSession[]; showAgent: boolean }) {
-  const [openId, setOpenId] = useState<string | null>(null);
-  return (
-    <div className="overflow-x-auto -mx-1 px-1">
-      <table className="w-full min-w-[720px] text-[13px]">
-        <thead>
-          <tr className="text-left text-xyne-fg-muted text-[11px] uppercase tracking-wider">
-            <th className="py-2 pr-3 w-8"></th>
-            <th className="py-2 pr-3">Session</th>
-            {showAgent && <th className="py-2 pr-3">Agent</th>}
-            <th className="py-2 pr-3 text-right">Total</th>
-            <th className="py-2 pr-3 text-right">LLM</th>
-            <th className="py-2 pr-3 text-right">Tool</th>
-            <th className="py-2 pr-3 text-right">When</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => {
-            const open = openId === r.sessionId;
-            return (
-              <React.Fragment key={r.sessionId}>
-                <tr
-                  className="border-t border-xyne-border cursor-pointer hover:bg-xyne-bg-secondary/40"
-                  onClick={() => setOpenId(open ? null : r.sessionId)}
-                >
-                  <td className="py-2 pr-3 text-xyne-fg-muted">{open ? "▾" : "▸"}</td>
-                  <td className="py-2 pr-3 font-mono text-[12px] text-xyne-fg-primary truncate max-w-[180px]">
-                    {r.sessionId}
-                  </td>
-                  {showAgent && <td className="py-2 pr-3">{r.agentSlug}</td>}
-                  <td className="py-2 pr-3 text-right tabular-nums font-medium">{fmtMs(r.totalMs)}</td>
-                  <td className="py-2 pr-3 text-right tabular-nums">{fmtMs(r.llmTotalMs)}</td>
-                  <td className="py-2 pr-3 text-right tabular-nums">{fmtMs(r.toolMs)}</td>
-                  <td className="py-2 pr-3 text-right tabular-nums text-xyne-fg-muted">
-                    {new Date(r.completedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
-                  </td>
-                </tr>
-                {open && (
-                  <tr className="bg-xyne-bg-secondary/30">
-                    <td></td>
-                    <td colSpan={showAgent ? 6 : 5} className="py-3 pr-3">
-                      {r.task && (
-                        <div className="mb-2 text-[12px] text-xyne-fg-muted line-clamp-2">
-                          <span className="text-xyne-fg-primary">Task: </span>{r.task}
-                        </div>
-                      )}
-                      <div className="text-[11px] uppercase tracking-wider text-xyne-fg-muted mb-1">Top tools by time</div>
-                      {r.topTools.length === 0 ? (
-                        <div className="text-[12px] text-xyne-fg-muted">No tool calls recorded.</div>
-                      ) : (
-                        <table className="w-full text-[12px]">
-                          <thead>
-                            <tr className="text-left text-xyne-fg-muted">
-                              <th className="py-1 pr-3 font-normal">Tool</th>
-                              <th className="py-1 pr-3 font-normal text-right">Cumulative</th>
-                              <th className="py-1 pr-3 font-normal text-right">Calls</th>
-                              <th className="py-1 pr-3 font-normal text-right">Avg</th>
-                              <th className="py-1 pr-3 font-normal text-right">Error</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {r.topTools.map((t) => (
-                              <tr key={t.tool} className="border-t border-xyne-border-subtle">
-                                <td className="py-1 pr-3 font-mono text-[12px]">{t.tool}</td>
-                                <td className="py-1 pr-3 text-right tabular-nums">{fmtMs(t.ms)}</td>
-                                <td className="py-1 pr-3 text-right tabular-nums">{t.calls}</td>
-                                <td className="py-1 pr-3 text-right tabular-nums">{fmtMs(Math.round(t.ms / Math.max(t.calls, 1)))}</td>
-                                <td className="py-1 pr-3 text-right">
-                                  {t.isError ? <span className="text-red-500">⚠</span> : <span className="text-xyne-fg-muted">—</span>}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      )}
-                    </td>
-                  </tr>
-                )}
-              </React.Fragment>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
+function message(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 export function MetricsPageV3({ userId }: MetricsPageV3Props) {
-  const { isAdmin } = useAdminStatus();
-  // null = workspace-wide view, otherwise a single agent's slug.
-  // The selector below drives this; the leaderboard renders agent rows as
-  // clickable links into the per-agent view so you can pivot without scrolling
-  // back to the dropdown.
-  const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
-  const [agentSlugs, setAgentSlugs] = useState<string[]>([]);
-  const [allOrgs, setAllOrgs] = useState(false);
-  const adminOrgScope: AdminOrgScope = allOrgs ? "all" : "org";
+  const { isAdmin, isAdminLoading } = useAdminStatus();
+  const [params, setParams] = useSearchParams();
 
-  useEffect(() => {
-    if (!isAdmin && allOrgs) setAllOrgs(false);
-  }, [isAdmin, allOrgs]);
+  const days = parseDays(params.get("range"));
+  const agentParam = params.get("agent");
+  const selectedAgents = useMemo(() => parseList(agentParam), [agentParam]);
+  const tab = parseTab(params.get("tab"));
+  const orgParam = params.get("orgScope");
+  // orgScope is only honoured once admin status is known: reading it earlier
+  // sent every all-orgs link out as "org" first and then again as "all".
+  const scopeReady = !(orgParam && isAdminLoading);
+  const allOrgs = !isAdminLoading && isAdmin && orgParam === "all";
+  const orgScope: AdminOrgScope = allOrgs ? "all" : "org";
 
-  // Populate the agent selector from the FULL agent roster (allAgents=true, so
-  // admins get every user's agents) UNIONed with agents that have runs in the
-  // last 30d. Using only /metrics/global.topAgents (the old behaviour) left out
-  // every agent without recent runs — and, for admins, other users' private
-  // agents — so the dropdown couldn't reach them. The union keeps run-only
-  // slugs that might not be in the roster (e.g. deleted agents) as a fallback.
+  const scope = useMemo<MetricsScopeParams>(
+    () => ({ userId: scopeReady ? userId : "", days, orgScope, agentSlugs: selectedAgents, tz: VIEWER_TZ, isAdmin }),
+    [scopeReady, userId, days, orgScope, selectedAgents, isAdmin],
+  );
+
+  const update = useCallback(
+    (mutate: (next: URLSearchParams) => void) => {
+      setParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          mutate(next);
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setParams],
+  );
+
+  // A non-admin who opens an all-orgs link gets their own org — but only once
+  // admin status has resolved, or every admin's shared link would lose it.
   useEffect(() => {
-    let cancelled = false;
-    Promise.all([
-      listAgents(userId, true, adminOrgScope).then((rows) => rows.map((a) => a.slug)).catch(() => [] as string[]),
-      fetchGlobalMetrics(userId, 30, adminOrgScope).then((g) => g.topAgents.map((a) => a.agentSlug)).catch(() => [] as string[]),
-    ]).then(([all, withRuns]) => {
-      if (cancelled) return;
-      setAgentSlugs([...new Set([...all, ...withRuns])].sort());
+    if (!isAdminLoading && !isAdmin && orgParam) update((n) => n.delete("orgScope"));
+  }, [isAdmin, isAdminLoading, orgParam, update]);
+
+  // "Updating…" follows the headline, the one request every tab makes.
+  const summary = useSummary(scope);
+  const updating = summary.data !== undefined && (summary.loading || summary.isPlaceholder);
+
+  // The tab bar sticks under the filter bar; DataTable headers stick under both via --metrics-sticky-offset.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const filterBarRef = useRef<HTMLDivElement>(null);
+  const tabsBarRef = useRef<HTMLDivElement>(null);
+  const tabsAnchorRef = useRef<HTMLDivElement>(null);
+  const [sticky, setSticky] = useState({ filter: 57, tabs: 41 });
+  useLayoutEffect(() => {
+    const filter = filterBarRef.current;
+    const tabs = tabsBarRef.current;
+    if (!filter || !tabs) return;
+    const measure = (): void => setSticky({ filter: filter.offsetHeight, tabs: tabs.offsetHeight });
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(filter);
+    observer.observe(tabs);
+    return () => observer.disconnect();
+  }, []);
+
+  const setTab = (id: MetricsTab): void => {
+    update((n) => {
+      if (id === "overview") n.delete("tab");
+      else n.set("tab", id);
+      clearDrillParams(n, { keepMeasures: true });
     });
-    return () => { cancelled = true; };
-  }, [userId, adminOrgScope]);
+    // Switching tabs from deep in a long one would otherwise land mid-page.
+    const container = scrollRef.current;
+    const anchor = tabsAnchorRef.current;
+    if (container && anchor) {
+      const top = anchor.offsetTop - sticky.filter;
+      if (container.scrollTop > top) container.scrollTop = top;
+    }
+  };
 
-  // The fetcher passed to MetricsPanel switches based on selection. Memoising
-  // would be cleaner but a fresh function per render is fine here since the
-  // panel re-runs its effect on every fetcher identity change anyway.
-  const fetcher = useCallback((uid: string, days: 1 | 7 | 30) => (
-    selectedAgent
-      ? fetchAgentMetrics(uid, selectedAgent, days, adminOrgScope)
-      : fetchGlobalMetrics(uid, days, adminOrgScope)
-  ), [selectedAgent, adminOrgScope]);
+  const setAgents = useCallback(
+    (next: string[]) =>
+      update((n) => {
+        if (next.length > 0) n.set("agent", next.join(","));
+        else n.delete("agent");
+        clearDrillParams(n);
+      }),
+    [update],
+  );
+
+  const single = selectedAgents.length === 1 ? selectedAgents[0]! : null;
 
   return (
-    <div className="flex-1 overflow-auto">
-      <div className="max-w-[1180px] mx-auto px-[40px] pt-[32px] pb-[56px] w-full min-w-[640px]">
-        <div className="mb-[16px] flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <h1 className="text-[22px] font-semibold text-xyne-fg-primary">
-              {selectedAgent ? `Agent · ${selectedAgent}` : "Workspace Metrics"}
-            </h1>
-            <p className="text-[13px] text-xyne-fg-muted mt-1">
-              {selectedAgent
-                ? `Latency, throughput, tokens, users, and tool-by-tool breakdown for ${selectedAgent}.`
-                : "Latency, throughput, and error trends across all agents and users."}
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
+    <div
+      ref={scrollRef}
+      className="relative flex-1 overflow-auto"
+      style={{ ["--metrics-sticky-offset" as string]: `${sticky.filter + sticky.tabs}px` }}
+    >
+      <MetricsVizStyle />
+      <div className="mx-auto w-full min-w-[640px] max-w-[1180px] px-[40px] pb-[56px] pt-[32px]">
+        <div className="mb-[16px]">
+          <h1 className="text-[22px] font-semibold text-xyne-fg-primary">{single ? `Agent · ${single}` : "Workspace Metrics"}</h1>
+          <p className="mt-1 text-[13px] text-xyne-fg-muted">
+            {single
+              ? `Latency, reliability, tokens, tools and per-call model performance for ${single}.`
+              : "Latency, reliability, tokens, tools and model performance across all agents and users."}
+          </p>
+        </div>
+
+        {/* One filter row, sticky, so range and scope stay reachable from deep in a panel. */}
+        <div
+          ref={filterBarRef}
+          className="sticky top-0 z-20 -mx-[40px] border-b border-xyne-border-subtle bg-xyne-surface/95 px-[40px] py-3 backdrop-blur"
+        >
+          <div className="flex flex-wrap items-center gap-3">
+            <AgentPicker userId={scopeReady ? userId : ""} scope={scope} selected={selectedAgents} onChange={setAgents} />
+            <SegmentedControl
+              ariaLabel="Time range"
+              options={RANGE_OPTIONS}
+              value={String(days) as (typeof RANGE_OPTIONS)[number]["id"]}
+              onChange={(id) =>
+                update((n) => {
+                  if (id === "7") n.delete("range");
+                  else n.set("range", id);
+                  clearDrillParams(n);
+                })
+              }
+            />
             {isAdmin && (
-              <label className="flex shrink-0 items-center gap-2 text-[12px] text-xyne-fg-muted">
-                <Switch checked={allOrgs} onChange={setAllOrgs} />
-                All orgs
-              </label>
+              <ToggleField
+                label="All orgs"
+                checked={allOrgs}
+                onChange={(next) =>
+                  update((n) => {
+                    if (next) n.set("orgScope", "all");
+                    else n.delete("orgScope");
+                    clearDrillParams(n);
+                  })
+                }
+                hint="Show metrics across every organization"
+              />
             )}
-            <label className="text-[12px] text-xyne-fg-muted">View:</label>
-            <select
-              value={selectedAgent ?? ""}
-              onChange={(e) => setSelectedAgent(e.target.value || null)}
-              className="text-[13px] rounded-md bg-xyne-bg-secondary border border-xyne-border px-3 py-1.5 text-xyne-fg-primary focus:outline-none focus:ring-1 focus:ring-xyne-fg-primary/30"
-            >
-              <option value="">All workspace</option>
-              {agentSlugs.map((s) => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
+            <div className="ml-auto flex items-center gap-3">
+              {updating && (
+                <span className="inline-flex items-center gap-1.5 text-[12px] text-xyne-fg-muted" role="status">
+                  <RefreshCw size={12} className="animate-spin" aria-hidden />
+                  Updating…
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => invalidateMetrics()}
+                title="Fetch every card again with the same filters"
+                className="inline-flex h-8 items-center gap-1.5 rounded-full border border-xyne-border px-3 text-[12px] font-medium text-xyne-fg-secondary hover:border-xyne-border-strong hover:text-xyne-fg-primary"
+              >
+                <RefreshCw size={12} aria-hidden />
+                Refresh
+              </button>
+            </div>
           </div>
         </div>
-        <MetricsPanel
-          // Re-key on selection so the panel resets its day-window state to 7d
-          // each time we switch agent — avoids the dropdown going stale on a
-          // window that has zero data for the newly-picked agent.
-          key={selectedAgent ?? "__global__"}
-          userId={userId}
-          fetcher={fetcher}
-          showLeaderboard={!selectedAgent}
-          onAgentClick={(slug) => setSelectedAgent(slug)}
-          orgScope={adminOrgScope}
-        />
+
+        <div className="mb-[20px] mt-[20px]">
+          <HeadlineKpis scope={scope} />
+        </div>
+
+        <div ref={tabsAnchorRef} />
+        <div
+          ref={tabsBarRef}
+          className="sticky z-10 -mx-[40px] mb-[20px] bg-xyne-surface/95 px-[40px] backdrop-blur"
+          style={{ top: sticky.filter }}
+        >
+          <Tabs items={TABS} selected={tab} onSelect={setTab} />
+        </div>
+
+        {tab === "overview" && <OverviewTab scope={scope} onAgent={(slug) => setAgents([slug])} />}
+        {tab === "tools" && <ToolsPanel scope={scope} />}
+        {tab === "llm" && <LlmCallsPanel scope={scope} />}
+        {tab === "quality" && <QualityPanel scope={scope} />}
+        {tab === "coverage" && <CoveragePanel scope={scope} />}
       </div>
+
+      <SessionsDrawer scope={scope} />
     </div>
   );
 }
 
-/**
- * Awakening rollup — agents that ran with nobody triggering them.
- *
- * Fetches independently rather than riding the main metrics payload: awakened
- * runs live in their own table (`agent_awakening_runs`) with no `userId`, and
- * folding unattended runs into per-user latency would skew it.
- *
- * Renders nothing at all when no agent in the org has ever woken, so the
- * section stays invisible for workspaces that do not use the feature.
- */
-function AwakeningActivityCard({
+function parseDays(raw: string | null): MetricsDays {
+  const n = Number(raw);
+  return n === 1 || n === 30 ? n : 7;
+}
+
+/** Comma-separated URL list → deduped values. Empty yields []. */
+function parseList(raw: string | null): string[] {
+  if (!raw) return [];
+  return [...new Set(raw.split(",").map((v) => v.trim()).filter(Boolean))];
+}
+
+function parseTab(raw: string | null): MetricsTab {
+  return TABS.some((t) => t.id === raw) ? (raw as MetricsTab) : "overview";
+}
+
+/* ── Agent picker ─────────────────────────────────────────────────────────── */
+
+/** Agent filter options: the roster united with agents that ran in the last 30 days; the run list loads on first open. */
+function AgentPicker({
   userId,
-  days,
-  orgScope,
+  scope,
+  selected,
+  onChange,
 }: {
   userId: string;
-  days: 1 | 7 | 30;
-  orgScope?: AdminOrgScope;
-}) {
-  const [data, setData] = useState<AwakeningActivity | null>(null);
-  const [failed, setFailed] = useState(false);
-  // Keyed by agent AND kind: the rollup lists one row per wake kind, so keying
-  // on agentId alone expanded an agent's heartbeat and reflex rows together.
-  const [openRow, setOpenRow] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    setFailed(false);
-    fetchAwakeningActivity(userId, days, orgScope)
-      .then((d) => { if (!cancelled) setData(d); })
-      .catch(() => { if (!cancelled) setFailed(true); });
-    return () => { cancelled = true; };
-  }, [userId, days, orgScope]);
-
-  if (failed || !data) return null;
-  // Never configured here — do not show an empty shell.
-  if (data.agents.length === 0 && data.totals.runs === 0) return null;
-
-  const { totals } = data;
-  const stopped = data.agents.filter((a) => !a.enabled || a.lastError);
-
+  scope: MetricsScopeParams;
+  selected: string[];
+  onChange: (next: string[]) => void;
+}): ReactElement {
+  const [opened, setOpened] = useState(false);
+  const rosterKey = userId ? `${userId} /agents?scope=all&orgScope=${scope.orgScope}` : null;
+  const roster = useMetricsResource<AgentLight[]>(rosterKey, "/agents", () => listAgents(userId, true, scope.orgScope));
+  const active = useActiveAgents(scope, undefined, { enabled: opened });
+  const options = useMemo(() => {
+    const slugs = new Set<string>();
+    for (const a of roster.data ?? []) slugs.add(a.slug);
+    for (const a of active.data?.agents ?? []) slugs.add(a.agentSlug);
+    return [...slugs].sort();
+  }, [roster.data, active.data]);
+  const loading = roster.loading || (opened && active.loading);
   return (
-    <Card
-      title="Awakened agents"
-      subtitle="Runs that nobody triggered — the agent woke on a heartbeat or a reflex and decided for itself whether to act."
-    >
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-[12px] mb-[16px]">
-        <Tile label="Wakes" value={String(totals.runs)} sub={`${totals.events} events collected`} />
-        <Tile
-          label="Acted"
-          value={String(totals.ran)}
-          sub={totals.shadow > 0 ? `${totals.shadow} in shadow` : undefined}
-        />
-        <Tile
-          label="Stayed quiet"
-          value={String(totals.skipped)}
-          sub="gate found nothing worth doing"
-        />
-        <Tile
-          label="Failed"
-          value={String(totals.failed)}
-          sub={totals.injections > 0 ? `${totals.injections} live updates` : undefined}
-          subTone={totals.failed > 0 ? "bad" : "flat"}
-        />
-      </div>
-
-      {stopped.length > 0 && (
-        <div className="mb-[16px] rounded-lg border border-amber-300/60 bg-amber-50 p-3 dark:border-amber-900/60 dark:bg-amber-950/30">
-          <div className="text-[12px] font-medium text-amber-900 dark:text-amber-200 mb-1">
-            {stopped.length} agent{stopped.length === 1 ? "" : "s"} not waking
-          </div>
-          {stopped.slice(0, 5).map((a) => (
-            <div key={a.agentSlug} className="text-[12px] text-amber-800 dark:text-amber-300">
-              <span className="font-mono">{a.agentSlug}</span>
-              {a.lastError ? ` — ${a.lastError}` : " — switched off"}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {data.byAgent.length > 0 && (
-        <table className="w-full text-[12px]">
-          <thead className="text-xyne-fg-muted">
-            <tr className="text-left border-b border-xyne-border">
-              <th className="py-2 font-medium">Agent</th>
-              <th className="py-2 font-medium">Kind</th>
-              <th className="py-2 font-medium text-right">Wakes</th>
-              <th className="py-2 font-medium text-right">Acted</th>
-              <th className="py-2 font-medium text-right">Quiet</th>
-              <th className="py-2 font-medium text-right">Failed</th>
-              <th className="py-2 font-medium text-right">Events</th>
-              <th className="py-2 font-medium text-right">Last wake</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.byAgent.map((r) => (
-              <React.Fragment key={`${r.agentId}:${r.kind}`}>
-              <tr
-                className="border-b border-xyne-border/50 cursor-pointer hover:bg-xyne-bg-secondary/60"
-                onClick={() => setOpenRow(openRow === rowKey(r) ? null : rowKey(r))}
-              >
-                <td className="py-2 font-mono text-xyne-fg-primary">
-                  <span className="mr-1 inline-block w-3 text-xyne-fg-muted">
-                    {openRow === rowKey(r) ? "▾" : "▸"}
-                  </span>
-                  {r.agentSlug}
-                </td>
-                <td className="py-2 text-xyne-fg-muted">{r.kind}</td>
-                <td className="py-2 text-right text-xyne-fg-primary">{r.runs}</td>
-                <td className="py-2 text-right text-xyne-fg-primary">{r.ran}</td>
-                <td className="py-2 text-right text-xyne-fg-muted">{r.skipped}</td>
-                <td className={"py-2 text-right " + (r.failed > 0 ? "text-red-500" : "text-xyne-fg-muted")}>
-                  {r.failed}
-                </td>
-                <td className="py-2 text-right text-xyne-fg-muted">{r.events}</td>
-                <td className="py-2 text-right text-xyne-fg-muted">
-                  {r.lastRunAt ? new Date(r.lastRunAt).toLocaleString() : "—"}
-                </td>
-              </tr>
-              {openRow === rowKey(r) && (
-                <tr>
-                  <td colSpan={8} className="p-0">
-                    <AwakeningRunsPanel
-                      userId={userId}
-                      agentId={r.agentId}
-                      agentSlug={r.agentSlug}
-                      kind={r.kind}
-                      days={days}
-                      orgScope={orgScope}
-                    />
-                  </td>
-                </tr>
-              )}
-              </React.Fragment>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      {data.skipReasons.length > 0 && (
-        <div className="mt-[16px]">
-          <div className="text-[12px] text-xyne-fg-muted mb-2">
-            Why it stayed quiet — a healthy agent skips far more often than it acts.
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {data.skipReasons.map((r) => (
-              <span
-                key={r.reason}
-                className="rounded-full bg-xyne-bg-secondary px-3 py-1 text-[12px] text-xyne-fg-muted"
-              >
-                <span className="font-mono">{r.reason}</span> · {r.count}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-    </Card>
+    <MultiSelect
+      noun="agents"
+      allLabel="All agents"
+      options={options}
+      selected={selected}
+      emptyMessage={loading ? "Loading agents…" : "No agents yet."}
+      onChange={onChange}
+      // The run list loads the first time the list opens and stays loaded.
+      onOpenChange={(open) => {
+        if (open) setOpened(true);
+      }}
+    />
   );
 }
 
-const RUNS_PAGE_SIZE = 20;
+/* ── Sessions drawer (drill=failed|slow|model) ────────────────────────────── */
 
-/** The rollup is one row per (agent, wake kind) — both are needed to identify a row. */
-const rowKey = (r: { agentId: string; kind: string }): string => `${r.agentId}:${r.kind}`;
+type DrillKind = "failed" | "slow" | "model";
 
-/**
- * One agent's wake history, paginated.
- *
- * Lists every wake ATTEMPT, not just the ones that acted — a skipped wake
- * carries the gate rule that fired, which is usually the thing you opened this
- * to find out. Wakes that dispatched link to their transcript; skipped ones
- * never created a conversation and have nothing to link to.
- */
-function AwakeningRunsPanel({
-  userId,
-  agentId,
-  agentSlug,
-  kind,
-  days,
-  orgScope,
-}: {
-  userId: string;
-  agentId: string;
-  agentSlug: string;
-  /** Narrows to the wake kind of the row that was clicked. */
-  kind: string;
-  days: 1 | 7 | 30;
-  orgScope?: AdminOrgScope;
-}) {
-  const [runs, setRuns] = useState<AwakeningRun[]>([]);
-  const [total, setTotal] = useState(0);
-  const [offset, setOffset] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+function parseStatuses(raw: string | null): Array<"failed" | "cancelled"> {
+  const out = parseList(raw).filter((s): s is "failed" | "cancelled" => s === "failed" || s === "cancelled");
+  return out.length > 0 ? out : ["failed", "cancelled"];
+}
 
-  // Reset paging when the window changes — offset 40 is meaningless against a
-  // freshly narrowed result set.
-  useEffect(() => { setOffset(0); }, [days, agentId, kind]);
+/** Run-level drill-down (failed/slow/model); page-level and URL-driven, so Back closes it. */
+function SessionsDrawer({ scope }: { scope: MetricsScopeParams }): ReactElement | null {
+  const [params] = useSearchParams();
+  const patch = useMetricsParams();
+  const raw = params.get("drill");
+  if (raw !== "failed" && raw !== "slow" && raw !== "model") return null;
+  const kind: DrillKind = raw;
+  const close = (): void => patch({ drill: null, status: null, minMs: null, model: null, provider: null });
+  const widen = (): void => patch({ range: 30 }, { replace: true });
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    fetchAwakeningRuns(userId, agentId, days, RUNS_PAGE_SIZE, offset, orgScope, kind)
-      .then((page) => {
-        if (cancelled) return;
-        setRuns(page.runs);
-        setTotal(page.total);
-      })
-      .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [userId, agentId, kind, days, offset, orgScope]);
-
-  const from = total === 0 ? 0 : offset + 1;
-  const to = Math.min(offset + RUNS_PAGE_SIZE, total);
+  let request: Omit<MetricSessionsRequest, "limit" | "cursor" | "count">;
+  let title: string;
+  let subject: ReactNode;
+  let subtitle: ReactNode;
+  if (kind === "failed") {
+    const statuses = parseStatuses(params.get("status"));
+    request = { kind, status: statuses };
+    const both = statuses.length === 2;
+    title = both ? "Failed and cancelled runs" : statuses[0] === "failed" ? "Failed runs" : "Cancelled runs";
+    subject = both ? "the run failed or was cancelled" : statuses[0] === "failed" ? "the run failed" : "the run was cancelled";
+    subtitle = "Newest first. Open a run to read its transcript and trace.";
+  } else if (kind === "slow") {
+    const minMs = Number(params.get("minMs"));
+    const hasMin = Number.isFinite(minMs) && minMs > 0;
+    request = hasMin ? { kind, minMs: Math.round(minMs) } : { kind };
+    title = hasMin ? `Runs at or above ${fmtMs(minMs)}` : "Slowest runs";
+    subject = hasMin ? `the run took at least ${fmtMs(minMs)} end to end` : "the run completed, slowest first";
+    subtitle = "Completed runs by end-to-end time, slowest first. The bar splits each run into model, tool and other time.";
+  } else {
+    const model = params.get("model") ?? "";
+    const provider = params.get("provider");
+    request = provider ? { kind, model, provider } : { kind, model };
+    title = `Runs on ${model || "unknown model"}`;
+    subject = (
+      <>
+        the run used <code className="font-mono">{model}</code>
+        {provider ? <> via {provider}</> : null}
+      </>
+    );
+    subtitle = "Newest first, with each run's model-call figures where the per-call series was recorded.";
+  }
 
   return (
-    <div className="bg-xyne-bg-secondary/40 px-3 py-3 border-b border-xyne-border/50">
-      {error ? (
-        <div className="text-[12px] text-red-500">Failed to load sessions: {error}</div>
-      ) : loading && runs.length === 0 ? (
-        <Skeleton className="h-[120px] w-full" />
-      ) : runs.length === 0 ? (
-        <div className="text-[12px] text-xyne-fg-muted">
-          No {kind} wakes for {agentSlug} in this window.
+    <Drawer title={title} heading={<span className="font-sans">{title}</span>} subtitle={subtitle} onClose={close} width={760}>
+      <SessionsList scope={scope} request={request} subject={subject} onWiden={widen} />
+    </Drawer>
+  );
+}
+
+/* ── Overview ─────────────────────────────────────────────────────────────── */
+
+/** Sections sharing the headline's requests come first; later ones are LazyCards that fetch on scroll. */
+function OverviewTab({ scope, onAgent }: { scope: MetricsScopeParams; onAgent: (slug: string) => void }): ReactElement {
+  const agent = scope.agentSlugs.length === 1 ? scope.agentSlugs[0]! : null;
+  return (
+    <div className="flex flex-col gap-[28px]">
+      <Section question="Where does the time go?">
+        <TimeSplitCard scope={scope} />
+      </Section>
+
+      <Section question="Is it getting slower?">
+        <RunTimeCard scope={scope} />
+      </Section>
+
+      <Section question="How much is it used?">
+        <RunsPerDayCard scope={scope} />
+        <div className="grid grid-cols-1 items-start gap-[20px] lg:grid-cols-2">
+          <TriggerMixCard scope={scope} />
+          <TokensCard scope={scope} />
         </div>
+      </Section>
+
+      <Section question={agent ? "How do users feel, and what should change?" : "Which agents and models?"}>
+        {agent ? (
+          <>
+            <LazyCard minHeight={260} placeholder={<CardPlaceholder title="User sentiment and feedback" skeleton={<RowsSkeleton rows={2} />} />}>
+              <SentimentCard scope={scope} />
+            </LazyCard>
+            <LazyCard minHeight={120}>
+              <ImprovementsCard userId={scope.userId} agentSlug={agent} />
+            </LazyCard>
+            <LazyCard minHeight={300} placeholder={<CardPlaceholder title="Slowest tools for this agent" skeleton={<TableSkeleton rows={5} cols={6} />} />}>
+              <ToolLatencyCard scope={scope} />
+            </LazyCard>
+          </>
+        ) : (
+          <LazyCard minHeight={360} placeholder={<CardPlaceholder title="Agents leaderboard" skeleton={<TableSkeleton rows={6} cols={7} />} />}>
+            <AgentsLeaderboardCard scope={scope} onAgent={onAgent} />
+          </LazyCard>
+        )}
+        <LazyCard minHeight={260} placeholder={<CardPlaceholder title="Model time by route and model" skeleton={<TableSkeleton rows={4} cols={8} />} />}>
+          <RoutesCard scope={scope} />
+        </LazyCard>
+      </Section>
+
+      <Section question="What was slowest?">
+        <LazyCard minHeight={400} placeholder={<CardPlaceholder title="Slowest runs" skeleton={<RowsSkeleton rows={4} />} />}>
+          <SlowestRunsCard scope={scope} />
+        </LazyCard>
+        {!agent && (
+          <LazyCard minHeight={56}>
+            <AwakeningActivityCard scope={scope} />
+          </LazyCard>
+        )}
+      </Section>
+    </div>
+  );
+}
+
+function Section({ question, children }: { question: string; children: ReactNode }): ReactElement {
+  return (
+    <section className="flex flex-col gap-[12px]" aria-label={question}>
+      <h2 className="text-[13px] font-semibold text-xyne-fg-secondary">{question}</h2>
+      <div className="flex flex-col gap-[20px]">{children}</div>
+    </section>
+  );
+}
+
+/** What a LazyCard shows before it mounts: the card's own frame and skeleton, so nothing jumps. */
+function CardPlaceholder({ title, skeleton }: { title: string; skeleton: ReactNode }): ReactElement {
+  return <MetricsCard title={title} loading skeleton={skeleton} />;
+}
+
+/* ── Shared chart bits ────────────────────────────────────────────────────── */
+
+const CHART_HEIGHT = 220;
+
+/** The y-axis "what": a muted caption above the plot, never rotated text that clips. */
+function AxisCaption({ children }: { children: ReactNode }): ReactElement {
+  return <p className="mb-1 text-[11px] text-xyne-fg-muted">{children}</p>;
+}
+
+/** One unit per chart, picked from its max, so ticks never mix "45.0s" with "1.0m". */
+function timeUnit(maxMs: number): { div: number; suffix: string; label: string } {
+  if (maxMs >= 2 * 3_600_000) return { div: 3_600_000, suffix: "h", label: "hours" };
+  if (maxMs >= 120_000) return { div: 60_000, suffix: "m", label: "minutes" };
+  return { div: 1000, suffix: "s", label: "seconds" };
+}
+
+function tickIn(unit: { div: number; suffix: string }): (v: number) => string {
+  return (v: number) => {
+    const x = v / unit.div;
+    return `${x >= 10 || Number.isInteger(x) ? Math.round(x) : x.toFixed(1)}${unit.suffix}`;
+  };
+}
+
+/** Diagonal-stripe fills for days that rest on too few runs; referenced as url(#id) from any chart. */
+function HatchDefs({ id, colors }: { id: string; colors: Record<string, string> }): ReactElement {
+  return (
+    <svg aria-hidden width="0" height="0" className="absolute">
+      <defs>
+        {Object.entries(colors).map(([key, color]) => (
+          <pattern key={key} id={`${id}-${key}`} patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
+            <rect width="6" height="6" fill={VIZ.neutralSoft} fillOpacity={0.35} />
+            <line x1="0" y1="0" x2="0" y2="6" stroke={color} strokeWidth="3" />
+          </pattern>
+        ))}
+      </defs>
+    </svg>
+  );
+}
+
+function useSvgId(prefix: string): string {
+  return `${prefix}${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
+}
+
+/* ── 1. Where does the time go? ───────────────────────────────────────────── */
+
+type SplitMeasure = "avg" | "total";
+const SPLIT_OPTIONS: MeasureOptions<SplitMeasure> = [
+  { id: "avg", label: "Average per run" },
+  { id: "total", label: "Total per day" },
+];
+
+interface SplitDatum {
+  day: string;
+  llm: number | null;
+  tool: number | null;
+  n: number;
+  runs: number;
+}
+
+function TimeSplitCard({ scope }: { scope: MetricsScopeParams }): ReactElement {
+  const daily = useRunDaily(scope);
+  const summary = useSummary(scope);
+  const [measure] = useMeasure("split", SPLIT_OPTIONS, "avg");
+  const hatch = useSvgId("split");
+  const avg = measure === "avg";
+
+  const data: SplitDatum[] = (daily.data?.days ?? []).map((d) => ({
+    day: fmtDay(d.day),
+    llm: d.agent.n === 0 ? null : avg ? d.agent.avgLlmMs : d.agent.totalLlmMs,
+    tool: d.agent.n === 0 ? null : avg ? d.agent.avgToolMs : d.agent.totalToolMs,
+    n: d.agent.n,
+    runs: d.runs,
+  }));
+  const max = Math.max(0, ...data.map((d) => (d.llm ?? 0) + (d.tool ?? 0)));
+  const unit = timeUnit(max);
+  const cur = summary.data?.current;
+  const anyThin = data.some((d) => d.n > 0 && d.n < SAMPLE_FLOORS.avg);
+
+  const headline = cur ? <SplitHeadline cur={cur} /> : null;
+  const empty = daily.data && data.every((d) => d.n === 0);
+
+  return (
+    <MetricsCard
+      title="Where a run's time goes, per day"
+      subtitle={
+        avg
+          ? "Bar = average time per run, split into model time and tool time (agent-reported)."
+          : "Bar = all model and tool time added up across the day's runs (agent-reported)."
+      }
+      action={<MeasureToggle card="split" options={SPLIT_OPTIONS} defaultId="avg" ariaLabel="Average or total" />}
+      loading={!daily.data && !daily.error}
+      busy={daily.isPlaceholder}
+      footnote={
+        cur ? (
+          <>
+            Agent-reported time from {fmtInt(cur.agent.n)} of {fmtInt(cur.runs)} runs; end-to-end time is in the headline.
+            {anyThin && avg && <> Striped days rest on fewer than {SAMPLE_FLOORS.avg} runs.</>}
+          </>
+        ) : undefined
+      }
+    >
+      {daily.error ? (
+        <PanelError error={daily.error} onRetry={daily.refetch} />
+      ) : empty ? (
+        <p className="py-10 text-center text-[13px] text-xyne-fg-muted">No run in this window reported its model or tool time.</p>
       ) : (
         <>
-          <table className="w-full text-[12px]">
-            <thead className="text-xyne-fg-muted">
-              <tr className="text-left border-b border-xyne-border/60">
-                <th className="py-1.5 font-medium">When</th>
-                <th className="py-1.5 font-medium">Outcome</th>
-                <th className="py-1.5 font-medium">Why</th>
-                <th className="py-1.5 font-medium text-right">Events</th>
-                <th className="py-1.5 font-medium text-right">Updates</th>
-                <th className="py-1.5 font-medium text-right">Took</th>
-                <th className="py-1.5 font-medium text-right">Transcript</th>
-              </tr>
-            </thead>
-            <tbody>
-              {runs.map((r) => (
-                <tr key={r.id} className="border-b border-xyne-border/30">
-                  <td className="py-1.5 text-xyne-fg-primary whitespace-nowrap">
-                    {new Date(r.startedAt).toLocaleString()}
-                  </td>
-                  <td className={"py-1.5 " + outcomeTone(r.outcome)}>{r.outcome}</td>
-                  <td className="py-1.5 font-mono text-xyne-fg-muted">{r.skipReason ?? "—"}</td>
-                  <td className="py-1.5 text-right text-xyne-fg-muted">{r.eventCount}</td>
-                  <td className="py-1.5 text-right text-xyne-fg-muted">
-                    {r.injectionsUsed > 0 ? r.injectionsUsed : "—"}
-                  </td>
-                  <td className="py-1.5 text-right text-xyne-fg-muted">{fmtMs(r.durationMs)}</td>
-                  <td className="py-1.5 text-right">
-                    {r.conversationId ? (
-                      <a
-                        className="text-blue-500 hover:underline"
-                        href={`/claw/v3/chat?agent=${encodeURIComponent(agentSlug)}&conversation=${encodeURIComponent(r.conversationId)}&allRuns=1`}
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        open
-                      </a>
-                    ) : (
-                      <span className="text-xyne-fg-muted">—</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          <div className="mt-2 flex items-center justify-between text-[12px] text-xyne-fg-muted">
-            <span>{from}–{to} of {total}</span>
-            <div className="flex items-center gap-2">
-              <button
-                disabled={offset === 0 || loading}
-                onClick={() => setOffset(Math.max(0, offset - RUNS_PAGE_SIZE))}
-                className="rounded-md border border-xyne-border px-2 py-1 disabled:opacity-40 hover:text-xyne-fg-primary"
-              >
-                Previous
-              </button>
-              <button
-                disabled={to >= total || loading}
-                onClick={() => setOffset(offset + RUNS_PAGE_SIZE)}
-                className="rounded-md border border-xyne-border px-2 py-1 disabled:opacity-40 hover:text-xyne-fg-primary"
-              >
-                Next
-              </button>
-            </div>
+          {headline}
+          <div className="mb-2 flex flex-wrap items-end justify-between gap-2">
+            <AxisCaption>{avg ? `${titleCase(unit.label)} per run` : `${titleCase(unit.label)} per day`}</AxisCaption>
+            <ChartLegend
+              items={[
+                { label: "Model time", color: VIZ.accent },
+                { label: "Tool time", color: VIZ.neutral },
+              ]}
+            />
           </div>
+          <HatchDefs id={hatch} colors={{ llm: VIZ.accent, tool: VIZ.neutral }} />
+          <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
+            <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+              <CartesianGrid stroke={VIZ.grid} vertical={false} />
+              <XAxis dataKey="day" tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} minTickGap={8} />
+              <YAxis tick={AXIS_TICK} axisLine={false} tickLine={false} width={44} tickFormatter={tickIn(unit)} />
+              <Tooltip
+                cursor={BAR_CURSOR}
+                content={
+                  <ChartTooltip<SplitDatum>
+                    rows={(d) =>
+                      d.n === 0
+                        ? [{ label: "no run reported its time", value: "—" }]
+                        : [
+                            { label: avg ? "model, per run" : "model, all runs", value: fmtMs(d.llm), color: VIZ.accent },
+                            { label: avg ? "tools, per run" : "tools, all runs", value: fmtMs(d.tool), color: VIZ.neutral },
+                            { label: `of ${fmtInt(d.runs)} ${plural(d.runs, "run")} reported time`, value: fmtInt(d.n) },
+                          ]
+                    }
+                  />
+                }
+              />
+              <Bar dataKey="llm" stackId="s" stroke={VIZ.surface} strokeWidth={2} maxBarSize={24} isAnimationActive={false}>
+                {data.map((d) => (
+                  <Cell key={d.day} fill={avg && d.n < SAMPLE_FLOORS.avg ? `url(#${hatch}-llm)` : VIZ.accent} />
+                ))}
+              </Bar>
+              <Bar dataKey="tool" stackId="s" stroke={VIZ.surface} strokeWidth={2} maxBarSize={24} radius={[4, 4, 0, 0]} isAnimationActive={false}>
+                {data.map((d) => (
+                  <Cell key={d.day} fill={avg && d.n < SAMPLE_FLOORS.avg ? `url(#${hatch}-tool)` : VIZ.neutral} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
         </>
       )}
-    </div>
+    </MetricsCard>
   );
 }
 
-function outcomeTone(outcome: string): string {
-  if (outcome === "failed") return "text-red-500";
-  if (outcome === "skipped") return "text-xyne-fg-muted";
-  if (outcome === "shadow") return "text-amber-500";
-  return "text-xyne-fg-primary";
-}
-
-/* ── building blocks ──────────────────────────────────────────────────── */
-
-function Card({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
+/** "Avg run: 20.0s model · 2.1s tools" — the window mean, with its n when thin. */
+function SplitHeadline({ cur }: { cur: SummaryFigures }): ReactElement | null {
+  const a = cur.agent;
+  if (a.n === 0) return null;
+  const thin = a.n < SAMPLE_FLOORS.avg;
   return (
-    <div className="rounded-xl bg-xyne-surface shadow-sm p-[20px]">
-      <div className="mb-3">
-        <div className="text-[14px] font-semibold text-xyne-fg-primary">{title}</div>
-        {subtitle && <div className="text-[12px] text-xyne-fg-muted mt-0.5">{subtitle}</div>}
-      </div>
-      {children}
-    </div>
+    <p className={cn("mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] tabular-nums", thin ? "text-xyne-fg-muted" : "text-xyne-fg-primary")}>
+      <span className="text-xyne-fg-muted">Avg run:</span>
+      <span className="inline-flex items-center gap-1 font-semibold">
+        <BrainCircuit size={13} className="text-xyne-fg-muted" aria-hidden />
+        {fmtMs(a.avgLlmMs)} model
+      </span>
+      <span className="text-xyne-fg-muted">·</span>
+      <span className="inline-flex items-center gap-1 font-semibold">
+        <Wrench size={13} className="text-xyne-fg-muted" aria-hidden />
+        {fmtMs(a.avgToolMs)} tools
+      </span>
+      {a.avgOtherMs != null && a.avgOtherMs > 0 && <span className="text-xyne-fg-muted">· {fmtMs(a.avgOtherMs)} other</span>}
+      {thin && <SampleChip n={a.n} noun="runs with agent-reported time" floor={SAMPLE_FLOORS.avg} />}
+    </p>
   );
 }
 
-function TotalsStrip({ data }: { data: GlobalMetrics | AgentMetrics }) {
-  const p50d = fmtSignedMs(data.delta.p50TotalMs);
-  const p95d = fmtSignedMs(data.delta.p95TotalMs);
-  const errd = fmtSignedPct(data.delta.errorRate);
-  const errPct = data.totals.errorRate;
+function titleCase(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
 
-  // ── Status read-out: turns numbers into a one-line health summary. ──
-  // Thresholds tuned for the typical claw run mix; tweak as we learn what's
-  // "normal". The point is to anchor the eye before it dives into details.
-  const isErrorHigh = errPct > 0.1;             // >10% errors
-  const isP95Slow = (data.totals.p95TotalMs ?? 0) > 5 * 60_000; // >5 min p95
-  const errGettingWorse = (data.delta.errorRate ?? 0) > 0.02;   // +2pp
-  const latGettingWorse = (data.delta.p95TotalMs ?? 0) > 30_000; // +30s p95
-  const concerns: string[] = [];
-  if (isErrorHigh)      concerns.push(`error rate is ${fmtPct(errPct)} — high`);
-  if (isP95Slow)        concerns.push(`tail latency p95 = ${fmtMs(data.totals.p95TotalMs)} — slow`);
-  if (errGettingWorse)  concerns.push(`errors trending up vs previous window`);
-  if (latGettingWorse)  concerns.push(`p95 latency trending up vs previous window`);
-  const tone = concerns.length === 0 ? "good"
-              : (isErrorHigh || (isP95Slow && latGettingWorse)) ? "bad"
-              : "warn";
-  const bannerStyle =
-    tone === "good" ? "bg-green-500/10 text-green-700 dark:text-green-300 border-green-500/30" :
-    tone === "bad"  ? "bg-red-500/10   text-red-700   dark:text-red-300   border-red-500/30"   :
-                      "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30";
-  const bannerLabel =
-    tone === "good" ? `Workspace looks healthy across ${data.totals.runs} run${data.totals.runs === 1 ? "" : "s"}.`
-    : `${concerns.length} issue${concerns.length === 1 ? "" : "s"}: ${concerns.join(" · ")}`;
+/* ── 2. Is it getting slower? ─────────────────────────────────────────────── */
 
+interface PctDatum {
+  day: string;
+  value: number | null;
+  n: number;
+  runs: number;
+}
+
+function RunTimeCard({ scope }: { scope: MetricsScopeParams }): ReactElement {
+  const daily = useRunDaily(scope);
+  const days = daily.data?.days ?? [];
+  const p50: PctDatum[] = days.map((d) => ({ day: fmtDay(d.day), value: d.wall.n > 0 ? d.wall.p50Ms : null, n: d.wall.n, runs: d.runs }));
+  const p95: PctDatum[] = days.map((d) => ({ day: fmtDay(d.day), value: d.wall.n > 0 ? d.wall.p95Ms : null, n: d.wall.n, runs: d.runs }));
+  const empty = daily.data && days.every((d) => d.wall.n === 0);
   return (
-    <div className="flex flex-col gap-3">
-      {/* Status banner */}
-      <div className={`rounded-xl border px-4 py-3 text-[13px] ${bannerStyle}`}>
-        {bannerLabel}
-      </div>
-
-      {/* Hero row — the two questions you actually open this page to answer */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <Hero
-          label="Typical run time"
-          help="Half of runs finished in under this. Lower = faster."
-          value={fmtMs(data.totals.p50TotalMs)}
-          delta={p50d}
-        />
-        <Hero
-          label="Slow-tail run time"
-          help="Slowest 5% of runs took this long or more — the painful ones."
-          value={fmtMs(data.totals.p95TotalMs)}
-          delta={p95d}
-        />
-      </div>
-
-      {/* Supporting metrics in smaller tiles */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Tile
-          label="Total runs"
-          value={String(data.totals.runs)}
-          sub={`${data.delta.runs >= 0 ? "+" : ""}${data.delta.runs} vs previous`}
-        />
-        <Tile
-          label="Where time goes"
-          value={`${fmtMs(data.totals.avgLlmMs)} LLM`}
-          sub={`${fmtMs(data.totals.avgToolMs)} in tools`}
-        />
-        <Tile
-          label="Error rate"
-          value={fmtPct(errPct)}
-          sub={errd.label}
-          subTone={errd.tone}
-        />
-        <Tile
-          label="Outcomes"
-          value={`${data.totals.completed}✓`}
-          sub={`${data.totals.failed}✗ · ${data.totals.cancelled}⊘`}
-        />
-        {"uniqueUsers" in data.totals && data.totals.uniqueUsers != null && (
-          <Tile
-            label="Unique users"
-            value={String(data.totals.uniqueUsers)}
-            sub="distinct users in this window"
-          />
-        )}
-        {/* The managed number for memory: % of runs that actually recalled
-            from the bank. A growing bank with a flat rate here = dead weight. */}
-        {"memoryRecall" in data.totals && data.totals.memoryRecall != null && (
-          <Tile
-            label="Memory usage"
-            value={`${Math.round(data.totals.memoryRecall.rate * 100)}%`}
-            sub={`${data.totals.memoryRecall.runsWithRecall} runs recalled memory`}
-          />
-        )}
-      </div>
-
-      {/* Token consumption for the window. IN counts fresh + cached input —
-          cached context is replayed on every turn and dominates real volume
-          on agentic loops; fresh-only "in" understates usage ~10x. Only the
-          per-agent endpoint reports tokens, hence the narrowing guard. */}
-      {"tokens" in data.totals && data.totals.tokens && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <Tile
-            label="Tokens in"
-            value={fmtTokens(data.totals.tokens.in + data.totals.tokens.cacheRead + data.totals.tokens.cacheWrite)}
-            sub={`${fmtTokens(data.totals.tokens.in)} fresh · ${fmtTokens(data.totals.tokens.cacheRead + data.totals.tokens.cacheWrite)} cached`}
-          />
-          <Tile
-            label="Tokens out"
-            value={fmtTokens(data.totals.tokens.out)}
-          />
-          <Tile
-            label="Cache hit ratio"
-            value={
-              data.totals.tokens.in + data.totals.tokens.cacheRead > 0
-                ? `${Math.round((data.totals.tokens.cacheRead / (data.totals.tokens.in + data.totals.tokens.cacheRead)) * 100)}%`
-                : "—"
-            }
-            sub="of input context served from cache"
-          />
-          <Tile
-            label="Tokens / run"
-            value={
-              data.totals.runs > 0
-                ? fmtTokens(Math.round((data.totals.tokens.in + data.totals.tokens.cacheRead + data.totals.tokens.cacheWrite + data.totals.tokens.out) / data.totals.runs))
-                : "—"
-            }
-            sub="total processed, avg per run"
-          />
+    <MetricsCard
+      title="Run time per day"
+      subtitle="End-to-end time of the day's completed runs. Watch the slow tail for upward drift."
+      loading={!daily.data && !daily.error}
+      busy={daily.isPlaceholder}
+      skeleton={<ChartSkeleton height={280} />}
+      footnote={
+        <>
+          Hollow grey points rest on too few runs that day (under {SAMPLE_FLOORS.p50} for the typical run, under {SAMPLE_FLOORS.p95} for the slow
+          tail); gaps are days with no completed run.
+        </>
+      }
+    >
+      {daily.error ? (
+        <PanelError error={daily.error} onRetry={daily.refetch} />
+      ) : empty ? (
+        <p className="py-10 text-center text-[13px] text-xyne-fg-muted">No completed runs in this window.</p>
+      ) : (
+        <div className="flex flex-col gap-4">
+          <PctMiniChart data={p50} label="Typical run (p50)" floor={SAMPLE_FLOORS.p50} showX={false} />
+          <PctMiniChart data={p95} label="Slow tail (p95)" floor={SAMPLE_FLOORS.p95} showX />
         </div>
       )}
+    </MetricsCard>
+  );
+}
+
+function PctMiniChart({ data, label, floor, showX }: { data: PctDatum[]; label: string; floor: number; showX: boolean }): ReactElement {
+  const unit = timeUnit(Math.max(0, ...data.map((d) => d.value ?? 0)));
+  return (
+    <div>
+      <AxisCaption>
+        <span className="font-medium text-xyne-fg-secondary">{label}</span> · {unit.label}
+      </AxisCaption>
+      <ResponsiveContainer width="100%" height={showX ? 130 : 110}>
+        <LineChart data={data} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
+          <CartesianGrid stroke={VIZ.grid} vertical={false} />
+          <XAxis dataKey="day" hide={!showX} tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} minTickGap={8} />
+          <YAxis tick={AXIS_TICK} axisLine={false} tickLine={false} width={44} tickFormatter={tickIn(unit)} />
+          <Tooltip
+            cursor={LINE_CURSOR}
+            content={
+              <ChartTooltip<PctDatum>
+                rows={(d) =>
+                  d.value == null
+                    ? [{ label: "no completed run", value: "—" }]
+                    : [
+                        { label, value: fmtMs(d.value), color: VIZ.accent },
+                        { label: `completed ${plural(d.n, "run")}${d.n < floor ? " — too few to trust" : ""}`, value: fmtInt(d.n) },
+                      ]
+                }
+              />
+            }
+          />
+          <Line
+            type="linear"
+            dataKey="value"
+            name={label}
+            stroke={VIZ.accent}
+            strokeWidth={2}
+            connectNulls={false}
+            isAnimationActive={false}
+            dot={(props: { cx?: number; cy?: number; index?: number; payload?: PctDatum }) => {
+              const { cx, cy, payload, index } = props;
+              if (cx == null || cy == null || !payload || payload.value == null) return <g key={`d${index}`} />;
+              const hollow = payload.n < floor;
+              return (
+                <circle
+                  key={`d${index}`}
+                  cx={cx}
+                  cy={cy}
+                  r={4}
+                  fill={hollow ? VIZ.surface : VIZ.accent}
+                  stroke={hollow ? VIZ.neutral : VIZ.surface}
+                  strokeWidth={2}
+                />
+              );
+            }}
+            activeDot={{ r: 5, stroke: VIZ.surface, strokeWidth: 2 }}
+          />
+        </LineChart>
+      </ResponsiveContainer>
     </div>
   );
 }
 
-/** 1234567 → "1.2M", 45600 → "45.6K" — token counts read better compact. */
-function fmtTokens(n: number): string {
-  if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
-  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
-  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
-  return String(n);
-}
+/* ── 3. How much is it used? ──────────────────────────────────────────────── */
 
-function Hero({ label, help, value, delta }: { label: string; help: string; value: string; delta: { label: string; tone: "good" | "bad" | "flat" } }) {
-  const toneClass =
-    delta.tone === "good" ? "text-green-600 dark:text-green-400" :
-    delta.tone === "bad"  ? "text-red-600 dark:text-red-400"   :
-                            "text-xyne-fg-muted";
-  return (
-    <div className="rounded-xl bg-xyne-surface shadow-sm px-5 py-4 flex flex-col">
-      <div className="text-[12px] uppercase tracking-wider text-xyne-fg-muted">{label}</div>
-      <div className="flex items-baseline gap-3 mt-1">
-        <span className="text-[32px] font-semibold text-xyne-fg-primary tabular-nums">{value}</span>
-        <span className={`text-[13px] font-medium ${toneClass}`}>{delta.label}</span>
-      </div>
-      <div className="text-[12px] text-xyne-fg-muted mt-1">{help}</div>
-    </div>
-  );
-}
+type RunsMeasure = "outcome" | "trigger";
+const RUNS_OPTIONS: MeasureOptions<RunsMeasure> = [
+  { id: "outcome", label: "By outcome" },
+  { id: "trigger", label: "By trigger" },
+];
 
-function Tile({ label, value, sub, subTone = "flat" as "good" | "bad" | "flat" }: { label: string; value: string; sub?: string; subTone?: "good" | "bad" | "flat" }) {
-  const toneClass =
-    subTone === "good" ? "text-green-600 dark:text-green-400" :
-    subTone === "bad"  ? "text-red-600 dark:text-red-400"   :
-                         "text-xyne-fg-muted";
-  return (
-    <div className="rounded-xl bg-xyne-surface shadow-sm px-4 py-3 flex flex-col">
-      <span className="text-[11px] uppercase tracking-wider text-xyne-fg-muted">{label}</span>
-      <span className="text-[20px] font-semibold text-xyne-fg-primary mt-1 tabular-nums">{value}</span>
-      {sub && <span className={`text-[11px] mt-0.5 ${toneClass}`}>{sub}</span>}
-    </div>
-  );
-}
+const TRIGGER_META: Record<TriggerGroup, { label: string; icon: LucideIcon }> = {
+  user: { label: "User", icon: UserRound },
+  automation: { label: "Automation", icon: Workflow },
+  scheduled: { label: "Scheduled", icon: CalendarClock },
+  api: { label: "API / CLI", icon: Terminal },
+  awakened: { label: "Awakened", icon: AlarmClock },
+  delegation: { label: "Delegated", icon: GitFork },
+  messaging: { label: "Messaging", icon: MessageSquare },
+  other: { label: "Other", icon: Circle },
+};
+const TRIGGER_ORDER: TriggerGroup[] = ["user", "automation", "scheduled", "api", "awakened", "delegation", "messaging", "other"];
+/** Fixed order, never cycled; groups past the third fold into "Other" (four colours is the palette). */
+const TRIGGER_COLORS = [VIZ.accent, VIZ.accentSoft, VIZ.neutral] as const;
 
-const TRIGGER_LABELS = {
-  user: "User",
-  automation: "Automation",
-  scheduled: "Scheduled",
-  api: "CLI",
-} as const;
+type RunsDatum = { day: string; runs: number; completed: number; failed: number; cancelled: number } & Record<string, number | string>;
 
-function TriggerTiles({ rows }: { rows: GlobalMetrics["byTrigger"] }) {
-  return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-      {rows.map((r) => (
-        <div key={r.trigger} className="rounded-lg bg-xyne-bg-secondary/40 px-3 py-2.5">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[11px] uppercase tracking-wider text-xyne-fg-muted">{TRIGGER_LABELS[r.trigger]}</span>
-            <span className="text-[11px] text-xyne-fg-muted tabular-nums">{r.runs} runs</span>
-          </div>
-          <div className="mt-2 grid grid-cols-3 gap-2">
-            <MetricChip label="Error" value={fmtPct(r.errorRate)} />
-            <MetricChip label="p50" value={fmtMs(r.p50TotalMs)} />
-            <MetricChip label="p95" value={fmtMs(r.p95TotalMs)} />
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
+function RunsPerDayCard({ scope }: { scope: MetricsScopeParams }): ReactElement {
+  const daily = useRunDaily(scope);
+  const [measure] = useMeasure("runs", RUNS_OPTIONS, "outcome");
+  const days = daily.data?.days ?? [];
+  const triggers = daily.data?.triggers ?? [];
 
-function MetricChip({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="min-w-0">
-      <div className="text-[10px] text-xyne-fg-muted">{label}</div>
-      <div className="text-[13px] font-medium text-xyne-fg-primary tabular-nums truncate">{value}</div>
-    </div>
-  );
-}
+  // Colour follows the trigger's rank in the WINDOW, so a day's bars never repaint.
+  const ranked = [...triggers].sort((a, b) => b.runs - a.runs).map((t) => t.group);
+  const shown = ranked.length <= TRIGGER_COLORS.length + 1 ? ranked : ranked.slice(0, TRIGGER_COLORS.length);
+  const folded = ranked.filter((g) => !shown.includes(g));
+  const series = [
+    ...shown.map((g, i) => ({ key: g, label: TRIGGER_META[g].label, color: TRIGGER_COLORS[i] ?? VIZ.neutralSoft })),
+    ...(folded.length > 0 ? [{ key: "__other", label: `Other (${folded.length})`, color: VIZ.neutralSoft }] : []),
+  ];
 
-/* ── Charts (recharts) ────────────────────────────────────────────────── */
-
-const CHART_HEIGHT = 240;
-const GRID_COLOR = "currentColor";
-const GRID_OPACITY = 0.10;
-
-// Shared X-axis day formatting and Y-axis number formatting are tiny enough
-// to inline at each call site. Tooltip is shared.
-const tickStyle = { fontSize: 11, fill: "currentColor", opacity: 0.65 };
-const axisStyle = { stroke: "currentColor", opacity: 0.2 };
-
-interface TooltipPayloadItem {
-  name?: string;
-  value?: number;
-  color?: string;
-}
-
-function MetricsTooltip({ active, payload, label, valueFormat }: {
-  active?: boolean;
-  payload?: TooltipPayloadItem[];
-  label?: string;
-  valueFormat?: (v: number) => string;
-}) {
-  if (!active || !payload || payload.length === 0) return null;
-  return (
-    <div className="rounded-md border border-xyne-border bg-xyne-surface px-3 py-2 text-[12px] shadow-md">
-      <div className="font-medium text-xyne-fg-primary mb-1">{label}</div>
-      {payload.map((p, i) => (
-        <div key={i} className="flex items-center gap-2 text-xyne-fg-muted">
-          <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: p.color }} />
-          <span>{p.name}:</span>
-          <span className="tabular-nums text-xyne-fg-primary">{valueFormat && typeof p.value === "number" ? valueFormat(p.value) : p.value}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function SessionsBarChart({ perDay }: { perDay: GlobalMetricsDayBucket[] }) {
-  const data = perDay.map((d) => ({
-    day: d.day.slice(5),
-    Completed: d.completed,
-    Failed: d.failed,
-    Cancelled: d.cancelled,
-  }));
-  return (
-    <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-      <BarChart data={data} margin={{ top: 16, right: 16, bottom: 0, left: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR} opacity={GRID_OPACITY} vertical={false} />
-        <XAxis dataKey="day" tick={tickStyle} axisLine={axisStyle} tickLine={false} />
-        <RcYAxis tick={tickStyle} axisLine={axisStyle} tickLine={false} width={40} allowDecimals={false} />
-        <Tooltip content={<MetricsTooltip />} cursor={{ fill: "currentColor", opacity: 0.05 }} />
-        <RcLegend wrapperStyle={{ fontSize: 12, paddingBottom: 8 }} verticalAlign="top" align="left" />
-        <Bar dataKey="Completed" stackId="s" fill="#22c55e" radius={[0, 0, 0, 0]} />
-        <Bar dataKey="Failed"    stackId="s" fill="#ef4444" />
-        <Bar dataKey="Cancelled" stackId="s" fill="#94a3b8" radius={[4, 4, 0, 0]} />
-      </BarChart>
-    </ResponsiveContainer>
-  );
-}
-
-function TriggerBarChart({ perDay }: { perDay: GlobalMetricsDayBucket[] }) {
-  const data = perDay.map((d) => ({
-    day: d.day.slice(5),
-    User: d.user ?? 0,
-    Automation: d.automation ?? 0,
-    Scheduled: d.scheduled ?? 0,
-    CLI: d.api ?? 0,
-  }));
-  return (
-    <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-      <BarChart data={data} margin={{ top: 16, right: 16, bottom: 0, left: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR} opacity={GRID_OPACITY} vertical={false} />
-        <XAxis dataKey="day" tick={tickStyle} axisLine={axisStyle} tickLine={false} />
-        <RcYAxis tick={tickStyle} axisLine={axisStyle} tickLine={false} width={40} allowDecimals={false} />
-        <Tooltip content={<MetricsTooltip />} cursor={{ fill: "currentColor", opacity: 0.05 }} />
-        <RcLegend wrapperStyle={{ fontSize: 12, paddingBottom: 8 }} verticalAlign="top" align="left" />
-        <Bar dataKey="User" stackId="s" fill="#3b82f6" radius={[0, 0, 0, 0]} />
-        <Bar dataKey="Automation" stackId="s" fill="#a855f7" />
-        <Bar dataKey="Scheduled" stackId="s" fill="#f59e0b" />
-        <Bar dataKey="CLI" stackId="s" fill="#14b8a6" radius={[4, 4, 0, 0]} />
-      </BarChart>
-    </ResponsiveContainer>
-  );
-}
-
-function SingleLineChart({ perDay, valueKey, color, displayName }: {
-  perDay: GlobalMetricsDayBucket[];
-  valueKey: "p50TotalMs" | "p95TotalMs";
-  color: string;
-  displayName: string;
-}) {
-  const data = perDay.map((d) => ({
-    day: d.day.slice(5),
-    [displayName]: d[valueKey],
-  }));
-  return (
-    <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-      <LineChart data={data} margin={{ top: 16, right: 16, bottom: 0, left: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR} opacity={GRID_OPACITY} vertical={false} />
-        <XAxis dataKey="day" tick={tickStyle} axisLine={axisStyle} tickLine={false} />
-        <RcYAxis tick={tickStyle} axisLine={axisStyle} tickLine={false} width={56} tickFormatter={(v) => fmtMs(Math.round(v))} />
-        <Tooltip content={<MetricsTooltip valueFormat={(v) => fmtMs(v)} />} />
-        <Line
-          type="monotone"
-          dataKey={displayName}
-          stroke={color}
-          strokeWidth={2.5}
-          dot={{ r: 3.5, fill: color }}
-          activeDot={{ r: 5 }}
-          connectNulls
-          isAnimationActive={false}
-        />
-      </LineChart>
-    </ResponsiveContainer>
-  );
-}
-
-function SplitChart({ perDay }: { perDay: GlobalMetricsDayBucket[] }) {
-  const data = perDay.map((d) => ({
-    day: d.day.slice(5),
-    "Avg LLM time":  d.avgLlmMs  ?? 0,
-    "Avg Tool time": d.avgToolMs ?? 0,
-  }));
-  return (
-    <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-      <BarChart data={data} margin={{ top: 16, right: 16, bottom: 0, left: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR} opacity={GRID_OPACITY} vertical={false} />
-        <XAxis dataKey="day" tick={tickStyle} axisLine={axisStyle} tickLine={false} />
-        <RcYAxis tick={tickStyle} axisLine={axisStyle} tickLine={false} width={56} tickFormatter={(v) => fmtMs(Math.round(v))} />
-        <Tooltip content={<MetricsTooltip valueFormat={(v) => fmtMs(v)} />} cursor={{ fill: "currentColor", opacity: 0.05 }} />
-        <RcLegend wrapperStyle={{ fontSize: 12, paddingBottom: 8 }} verticalAlign="top" align="left" />
-        <Bar dataKey="Avg LLM time"  stackId="s" fill="#6366f1" />
-        <Bar dataKey="Avg Tool time" stackId="s" fill="#f59e0b" radius={[4, 4, 0, 0]} />
-      </BarChart>
-    </ResponsiveContainer>
-  );
-}
-
-function AgentTable({ rows, onAgentClick }: {
-  rows: GlobalMetrics["topAgents"];
-  onAgentClick?: (slug: string) => void;
-}) {
-  const showOrgLabels = rows.some((r) => r.orgName || r.orgId);
-  return (
-    <div className="overflow-x-auto -mx-1 px-1">
-      <table className="w-full min-w-[640px] text-[13px]">
-        <thead>
-          <tr className="text-left text-xyne-fg-muted text-[11px] uppercase tracking-wider">
-            <th className="py-2 pr-3">Agent</th>
-            <th className="py-2 pr-3 text-right">Runs</th>
-            <th className="py-2 pr-3 text-right">p50</th>
-            <th className="py-2 pr-3 text-right">p95</th>
-            <th className="py-2 pr-3 text-right">Avg LLM</th>
-            <th className="py-2 pr-3 text-right">Avg Tool</th>
-            <th className="py-2 pr-3 text-right">Errors</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 && (
-            <tr><td colSpan={7} className="py-6 text-center text-xyne-fg-muted">No runs in window.</td></tr>
-          )}
-          {rows.map((r) => (
-            <tr
-              key={r.agentSlug}
-              className={"border-t border-xyne-border " + (onAgentClick ? "cursor-pointer hover:bg-xyne-bg-secondary/40" : "")}
-              onClick={onAgentClick ? () => onAgentClick(r.agentSlug) : undefined}
-              title={onAgentClick ? `Drill into ${r.agentSlug}'s metrics` : undefined}
-            >
-              <td className="py-2 pr-3">
-                <div className="font-medium text-xyne-fg-primary">{r.agentSlug}</div>
-                {showOrgLabels && (
-                  <div className="mt-0.5 text-[11px] text-xyne-fg-muted">{r.orgName ?? r.orgId ?? "unknown org"}</div>
-                )}
-              </td>
-              <td className="py-2 pr-3 text-right tabular-nums">{r.runs}</td>
-              <td className="py-2 pr-3 text-right tabular-nums">{fmtMs(r.p50TotalMs)}</td>
-              <td className="py-2 pr-3 text-right tabular-nums">{fmtMs(r.p95TotalMs)}</td>
-              <td className="py-2 pr-3 text-right tabular-nums">{fmtMs(r.avgLlmMs)}</td>
-              <td className="py-2 pr-3 text-right tabular-nums">{fmtMs(r.avgToolMs)}</td>
-              <td className="py-2 pr-3 text-right tabular-nums">{fmtPct(r.errorRate)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-type ProviderSortKey =
-  | "providerModel"
-  | "runs"
-  | "p50LlmMs"
-  | "p95LlmMs"
-  | "p50TtftMs"
-  | "avgTokensPerSec"
-  | "errorRate";
-
-function ProviderLatencyTable({ rows }: { rows: GlobalMetricsProviderRow[] }) {
-  const [sortKey, setSortKey] = useState<ProviderSortKey>("runs");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
-
-  const sortedRows = [...rows].sort((a, b) => {
-    const providerModelA = `${a.provider} · ${a.model ?? "unknown"}`;
-    const providerModelB = `${b.provider} · ${b.model ?? "unknown"}`;
-    const av = sortKey === "providerModel" ? providerModelA : a[sortKey];
-    const bv = sortKey === "providerModel" ? providerModelB : b[sortKey];
-    if (typeof av === "string" && typeof bv === "string") {
-      return sortDir === "asc" ? av.localeCompare(bv) : bv.localeCompare(av);
-    }
-    const na = av ?? (sortDir === "asc" ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY);
-    const nb = bv ?? (sortDir === "asc" ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY);
-    return sortDir === "asc" ? Number(na) - Number(nb) : Number(nb) - Number(na);
+  const data: RunsDatum[] = days.map((d) => {
+    const row: RunsDatum = { day: fmtDay(d.day), runs: d.runs, completed: d.completed, failed: d.failed, cancelled: d.cancelled };
+    for (const g of shown) row[g] = d.byTrigger[g] ?? 0;
+    if (folded.length > 0) row.__other = folded.reduce((a, g) => a + (d.byTrigger[g] ?? 0), 0);
+    return row;
   });
 
-  const toggleSort = (nextKey: ProviderSortKey) => {
-    if (sortKey === nextKey) setSortDir((d) => (d === "desc" ? "asc" : "desc"));
-    else {
-      setSortKey(nextKey);
-      setSortDir(nextKey === "providerModel" ? "asc" : "desc");
-    }
-  };
-
-  const SortHeader = ({ label, sort }: { label: string; sort: ProviderSortKey }) => (
-    <button
-      type="button"
-      onClick={() => toggleSort(sort)}
-      className="inline-flex items-center gap-1 text-inherit hover:text-xyne-fg-primary"
-    >
-      <span>{label}</span>
-      <span className="text-[10px] opacity-60">{sortKey === sort ? (sortDir === "desc" ? "↓" : "↑") : "↕"}</span>
-    </button>
-  );
+  const total = days.reduce((a, d) => a + d.runs, 0);
+  const peak = days.reduce<DailyPoint | null>((best, d) => (!best || d.runs > best.runs ? d : best), null);
+  const dominant = peak && total > 0 && days.length > 1 && peak.runs / total > 0.5 ? peak : null;
+  const outcome = measure === "outcome";
+  const stacks = outcome
+    ? [
+        { key: "completed", label: "Completed", color: VIZ.accent },
+        { key: "failed", label: "Failed", color: VIZ.danger },
+        { key: "cancelled", label: "Cancelled", color: VIZ.neutral },
+      ]
+    : series;
 
   return (
-    <div className="overflow-x-auto -mx-1 px-1">
-      <table className="w-full min-w-[860px] text-[13px]">
-        <thead>
-          <tr className="text-left text-xyne-fg-muted text-[11px] uppercase tracking-wider">
-            <th className="py-2 pr-3"><SortHeader label="Provider · Model" sort="providerModel" /></th>
-            <th className="py-2 pr-3 text-right"><SortHeader label="Runs" sort="runs" /></th>
-            <th className="py-2 pr-3 text-right"><SortHeader label="p50 LLM" sort="p50LlmMs" /></th>
-            <th className="py-2 pr-3 text-right"><SortHeader label="p95 LLM" sort="p95LlmMs" /></th>
-            <th className="py-2 pr-3 text-right"><SortHeader label="p50 TTFT" sort="p50TtftMs" /></th>
-            <th className="py-2 pr-3 text-right"><SortHeader label="TPS" sort="avgTokensPerSec" /></th>
-            <th className="py-2 pr-3 text-right"><SortHeader label="Error %" sort="errorRate" /></th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 && (
-            <tr><td colSpan={7} className="py-8 text-center text-xyne-fg-muted">No provider-tagged runs yet — populates as new runs complete.</td></tr>
-          )}
-          {sortedRows.map((r) => (
-            <tr key={`${r.provider}:${r.model ?? "unknown"}`} className="border-t border-xyne-border">
-              <td className="py-2 pr-3">
-                <div className="font-medium text-xyne-fg-primary">{r.provider}</div>
-                <div className="font-mono text-[12px] text-xyne-fg-muted">{r.model ?? "unknown"}</div>
-              </td>
-              <td className="py-2 pr-3 text-right tabular-nums">{r.runs}</td>
-              <td className="py-2 pr-3 text-right tabular-nums">{fmtMs(r.p50LlmMs)}</td>
-              <td className="py-2 pr-3 text-right tabular-nums">{fmtMs(r.p95LlmMs)}</td>
-              <td className="py-2 pr-3 text-right tabular-nums">{fmtMs(r.p50TtftMs)}</td>
-              <td className="py-2 pr-3 text-right tabular-nums">{r.avgTokensPerSec == null ? "—" : Math.round(r.avgTokensPerSec).toString()}</td>
-              <td className="py-2 pr-3 text-right tabular-nums">{fmtPct(r.errorRate)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <MetricsCard
+      title="Runs per day"
+      subtitle={outcome ? "Bar height = runs that finished that day, stacked by outcome." : "Bar height = runs that finished that day, stacked by what started them."}
+      action={<MeasureToggle card="runs" options={RUNS_OPTIONS} defaultId="outcome" ariaLabel="Stack by" />}
+      loading={!daily.data && !daily.error}
+      busy={daily.isPlaceholder}
+      footnote={dominant ? <>{fmtDay(dominant.day)} holds {fmtPct(dominant.runs / total)} of the window's runs.</> : undefined}
+    >
+      {daily.error ? (
+        <PanelError error={daily.error} onRetry={daily.refetch} />
+      ) : total === 0 ? (
+        <p className="py-10 text-center text-[13px] text-xyne-fg-muted">No runs finished in this window.</p>
+      ) : (
+        <>
+          <div className="mb-2 flex flex-wrap items-end justify-between gap-2">
+            <AxisCaption>Runs</AxisCaption>
+            <ChartLegend items={stacks.map((s) => ({ label: s.label, color: s.color }))} />
+          </div>
+          <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
+            <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+              <CartesianGrid stroke={VIZ.grid} vertical={false} />
+              <XAxis dataKey="day" tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} minTickGap={8} />
+              <YAxis tick={AXIS_TICK} axisLine={false} tickLine={false} width={44} allowDecimals={false} tickFormatter={(v: number) => fmtCompact(v)} />
+              <Tooltip
+                cursor={BAR_CURSOR}
+                content={
+                  <ChartTooltip<RunsDatum>
+                    rows={(d) => [
+                      ...stacks.map((s) => ({ label: s.label.toLowerCase(), value: fmtInt(Number(d[s.key] ?? 0)), color: s.color })),
+                      { label: "runs in total", value: fmtInt(d.runs) },
+                      ...(d.runs > 0 ? [{ label: "failed or cancelled", value: fmtPct((d.failed + d.cancelled) / d.runs) }] : []),
+                    ]}
+                  />
+                }
+              />
+              {stacks.map((s, i) => (
+                <Bar
+                  key={s.key}
+                  dataKey={s.key}
+                  stackId="s"
+                  fill={s.color}
+                  stroke={VIZ.surface}
+                  strokeWidth={2}
+                  maxBarSize={24}
+                  radius={i === stacks.length - 1 ? [4, 4, 0, 0] : undefined}
+                  isAnimationActive={false}
+                />
+              ))}
+            </BarChart>
+          </ResponsiveContainer>
+        </>
+      )}
+    </MetricsCard>
   );
 }
 
-function SentimentPanel({ sentiment }: { sentiment: AgentSentiment }) {
-  const ratingPct = sentiment.ratingRatio != null ? sentiment.ratingRatio : null;
-  // Tone the headline based on ratio + behavioural signals. The rules are
-  // intentionally simple — we want the page to read in 3 seconds.
-  const concerns: string[] = [];
-  if (ratingPct != null && ratingPct < 0.5)    concerns.push(`thumbs-up rate ${(ratingPct * 100).toFixed(0)}% — users mostly unhappy`);
-  if (sentiment.apologeticRate > 0.2)          concerns.push(`${(sentiment.apologeticRate * 100).toFixed(0)}% of replies sound apologetic ("I couldn't…")`);
-  if (sentiment.failedRate > 0.1)              concerns.push(`${(sentiment.failedRate * 100).toFixed(0)}% of runs failed outright`);
-  if (sentiment.cancelledRate > 0.1)           concerns.push(`${(sentiment.cancelledRate * 100).toFixed(0)}% of runs were cancelled (user gave up)`);
-  if (sentiment.retriedRate > 0.2)             concerns.push(`${(sentiment.retriedRate * 100).toFixed(0)}% of runs needed an LLM retry`);
-  const tone = concerns.length === 0 ? "good" : concerns.length >= 3 ? "bad" : "warn";
-  const bannerStyle =
-    tone === "good" ? "bg-green-500/10 text-green-700 dark:text-green-300 border-green-500/30" :
-    tone === "bad"  ? "bg-red-500/10   text-red-700   dark:text-red-300   border-red-500/30"   :
-                      "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30";
-  const headline =
-    sentiment.ratingTotal === 0 && concerns.length === 0
-      ? `No ratings yet — ${sentiment.totalRuns} runs in window. Behavioural signals look normal.`
-      : concerns.length === 0
-      ? `Sentiment looks healthy across ${sentiment.totalRuns} runs (${sentiment.ratingTotal} rated, ${sentiment.ratingUp} 👍 vs ${sentiment.ratingDown} 👎).`
-      : `${concerns.length} concern${concerns.length === 1 ? "" : "s"}: ${concerns.join(" · ")}`;
+/** Only triggers that ran; the rest collapse into one muted line instead of empty tiles. */
+function TriggerMixCard({ scope }: { scope: MetricsScopeParams }): ReactElement {
+  const daily = useRunDaily(scope);
+  const rows = [...(daily.data?.triggers ?? [])].filter((t) => t.runs > 0).sort((a, b) => b.runs - a.runs);
+  const absent = TRIGGER_ORDER.filter((g) => g !== "other" && !rows.some((r) => r.group === g)).map((g) => TRIGGER_META[g].label);
+  return (
+    <MetricsCard
+      title="What starts the runs"
+      subtitle="Runs per trigger, with how often they succeed and how long they take end to end."
+      loading={!daily.data && !daily.error}
+      busy={daily.isPlaceholder}
+      skeleton={<RowsSkeleton rows={3} />}
+      footnote={absent.length > 0 && rows.length > 0 ? <>No {joinWords(absent.map((a) => a.toLowerCase()))} runs in this window.</> : undefined}
+    >
+      {daily.error ? (
+        <PanelError error={daily.error} onRetry={daily.refetch} />
+      ) : rows.length === 0 ? (
+        <p className="py-8 text-center text-[13px] text-xyne-fg-muted">No runs finished in this window.</p>
+      ) : (
+        <ul className="flex flex-col">
+          {rows.map((r) => (
+            <TriggerRowView key={r.group} row={r} />
+          ))}
+        </ul>
+      )}
+    </MetricsCard>
+  );
+}
+
+function TriggerRowView({ row }: { row: TriggerRow }): ReactElement {
+  const meta = TRIGGER_META[row.group];
+  const Icon = meta.icon;
+  const success = statusFor("runSuccess", row.successRate, row.runs);
+  const p50 = statusFor("runP50", row.wall.p50Ms, row.wall.n);
+  const p95 = statusFor("runP95", row.wall.p95Ms, row.wall.n);
+  return (
+    <li className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-x-4 border-t border-xyne-border-subtle py-2.5 first:border-t-0">
+      <span className="flex min-w-0 items-center gap-2">
+        <Icon size={14} className="shrink-0 text-xyne-fg-muted" aria-hidden />
+        <span className="truncate text-[13px] text-xyne-fg-primary">{meta.label}</span>
+        <span className="text-[18px] font-semibold tabular-nums text-xyne-fg-primary">{fmtInt(row.runs)}</span>
+      </span>
+      <MiniFigure label="success">
+        <StatusValue status={success} n={row.runs} noun="runs" floor={floorFor("runSuccess")}>
+          {fmtPct(row.successRate)}
+        </StatusValue>
+      </MiniFigure>
+      <MiniFigure label="p50">
+        <StatusValue status={p50} n={row.wall.n} noun="timed runs" floor={SAMPLE_FLOORS.p50} naWhy="No completed run">
+          {fmtMs(row.wall.p50Ms)}
+        </StatusValue>
+      </MiniFigure>
+      <MiniFigure label="p95">
+        {p95 === "thin" ? (
+          <span className="text-xyne-fg-muted" title={`Only ${fmtInt(row.wall.n)} timed runs — p95 needs ${SAMPLE_FLOORS.p95}+`}>
+            —
+          </span>
+        ) : (
+          <StatusValue status={p95} naWhy="No completed run">
+            {fmtMs(row.wall.p95Ms)}
+          </StatusValue>
+        )}
+      </MiniFigure>
+    </li>
+  );
+}
+
+function MiniFigure({ label, children }: { label: string; children: ReactNode }): ReactElement {
+  return (
+    <span className="flex min-w-[64px] flex-col items-end text-[13px] tabular-nums">
+      {children}
+      <span className="text-[10px] uppercase tracking-wider text-xyne-fg-muted">{label}</span>
+    </span>
+  );
+}
+
+function joinWords(words: string[]): string {
+  if (words.length <= 1) return words.join("");
+  return `${words.slice(0, -1).join(", ")} or ${words[words.length - 1]}`;
+}
+
+type TokensMeasure = "run" | "total";
+const TOKENS_OPTIONS: MeasureOptions<TokensMeasure> = [
+  { id: "run", label: "Per run" },
+  { id: "total", label: "Window total" },
+];
+
+/** Same definition as the headline tile: prompt = fresh + cache read + cache write, over runs with tokens. */
+function TokensCard({ scope }: { scope: MetricsScopeParams }): ReactElement {
+  const summary = useSummary(scope);
+  const [measure] = useMeasure("tokens", TOKENS_OPTIONS, "run");
+  const tk = summary.data?.current.tokens;
+  const runs = summary.data?.current.runs ?? 0;
+  const perRun = measure === "run";
+  // Same rule as the headline tile: under the average floor or under 10% capture.
+  const thin = tk ? tk.n < SAMPLE_FLOORS.avg || statusFor("capture", tk.n / Math.max(1, runs), runs) === "thin" : false;
+
+  let items: Kpi[] = [];
+  if (tk) {
+    const fresh = perRun ? tk.freshPerRun : tk.freshPerRun != null ? tk.freshPerRun * tk.n : null;
+    const cached = perRun ? tk.cachedPerRun : tk.cachedPerRun != null ? tk.cachedPerRun * tk.n : null;
+    const prompt = perRun ? tk.promptPerRun : tk.promptTotal;
+    const output = perRun ? tk.outputPerRun : tk.outputTotal;
+    const split = fresh != null && cached != null && fresh + cached > 0 ? cached / (fresh + cached) : null;
+    const status: Status | undefined = tk.n === 0 ? "na" : thin ? "thin" : undefined;
+    items = [
+      {
+        key: "prompt",
+        label: "Prompt",
+        icon: Coins,
+        value: fmtTokens(prompt),
+        status,
+        n: tk.n,
+        nLabel: "runs with tokens",
+        floor: SAMPLE_FLOORS.avg,
+        naWhy: "No run recorded tokens",
+        hint: "Every token sent to the model: fresh input plus cache reads and writes.",
+        line:
+          split != null ? (
+            <span className="flex items-center gap-1.5">
+              <InlineBar value={split} color={VIZ.accent} width={48} />
+              {fmtTokens(fresh)} fresh · {fmtTokens(cached)} cached
+            </span>
+          ) : undefined,
+      },
+      {
+        key: "output",
+        label: "Output",
+        icon: Coins,
+        value: fmtTokens(output),
+        status,
+        n: tk.n,
+        nLabel: "runs with tokens",
+        floor: SAMPLE_FLOORS.avg,
+        naWhy: "No run recorded tokens",
+        line: perRun ? "Generated by the model, per run." : "Generated by the model in this window.",
+      },
+      {
+        key: "cache",
+        label: "Cache hit",
+        icon: Database,
+        value: fmtPct(tk.cacheHitRate),
+        status: tk.n === 0 ? "na" : statusFor("cacheHit", tk.cacheHitRate, tk.n),
+        n: tk.n,
+        nLabel: "runs with tokens",
+        floor: floorFor("cacheHit"),
+        naWhy: "No run recorded tokens",
+        hint: "Cache-read ÷ every prompt token. Higher is cheaper and faster.",
+        line: "Of prompt tokens served from cache.",
+      },
+    ];
+  }
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className={`rounded-xl border px-4 py-3 text-[13px] ${bannerStyle}`}>{headline}</div>
+    <MetricsCard
+      title="Tokens"
+      subtitle={perRun ? "Averaged over runs that recorded tokens." : "Added up across the window."}
+      action={<MeasureToggle card="tokens" options={TOKENS_OPTIONS} defaultId="run" ariaLabel="Per run or window total" />}
+      loading={!summary.data && !summary.error}
+      skeleton={<RowsSkeleton rows={2} />}
+      busy={summary.isPlaceholder}
+      footnote={tk && runs > 0 && tk.n / runs < 0.9 ? <>Tokens recorded for {fmtInt(tk.n)} of {fmtInt(runs)} runs.</> : undefined}
+    >
+      {summary.error ? <PanelError error={summary.error} onRetry={summary.refetch} /> : <KpiStrip items={items} cols="grid-cols-1 @min-[420px]:grid-cols-3" />}
+    </MetricsCard>
+  );
+}
 
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <MiniTile label="Ratings 👍" value={String(sentiment.ratingUp)} sub={sentiment.ratingTotal > 0 ? `${((sentiment.ratingUp / sentiment.ratingTotal) * 100).toFixed(0)}% of rated` : "—"} />
-        <MiniTile label="Ratings 👎" value={String(sentiment.ratingDown)} sub={sentiment.ratingTotal > 0 ? `${((sentiment.ratingDown / sentiment.ratingTotal) * 100).toFixed(0)}% of rated` : "—"} />
-        <MiniTile label="Apologetic replies" value={`${(sentiment.apologeticRate * 100).toFixed(1)}%`} sub="of completed runs" />
-        <MiniTile label="Cancelled" value={`${(sentiment.cancelledRate * 100).toFixed(1)}%`} sub="of all runs" />
-        <MiniTile label="Needed retry" value={`${(sentiment.retriedRate * 100).toFixed(1)}%`} sub="LLM retries fired" />
-      </div>
+/* ── 4. Which agents and models? ──────────────────────────────────────────── */
 
-      {sentiment.recentComments.length > 0 && (
-        <div>
-          <div className="text-[11px] uppercase tracking-wider text-xyne-fg-muted mb-2">
-            Recent rating comments ({sentiment.recentComments.length})
-          </div>
-          <div className="flex flex-col gap-2">
-            {sentiment.recentComments.map((c) => (
-              <div key={c.sessionId} className="flex items-start gap-3 rounded-lg bg-xyne-bg-secondary/40 p-3">
-                <span className="text-[18px] leading-none mt-0.5" title={c.rating === "up" ? "thumbs up" : "thumbs down"}>
-                  {c.rating === "up" ? "👍" : "👎"}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <div className="text-[13px] text-xyne-fg-primary whitespace-pre-wrap break-words">{c.comment}</div>
-                  <div className="text-[11px] text-xyne-fg-muted mt-1 flex items-center gap-2">
-                    <span className="font-mono">{c.sessionId.slice(0, 16)}</span>
-                    <span>·</span>
-                    <span>{new Date(c.completedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+function AgentsLeaderboardCard({ scope, onAgent }: { scope: MetricsScopeParams; onAgent: (slug: string) => void }): ReactElement {
+  const top = useAgentsTop(scope, { limit: 20 });
+  const rows = top.data?.rows ?? [];
+  const maxRuns = Math.max(1, ...rows.map((r) => r.runs));
+  const showOrg = scope.orgScope === "all";
+
+  const columns: Array<Column<AgentLeaderRow>> = [
+    {
+      key: "agent",
+      header: "Agent",
+      sortValue: (r) => r.agentSlug,
+      render: (r) => {
+        const worst = worstStatus([statusFor("runSuccess", r.successRate, r.runs), statusFor("runP95", r.wall.p95Ms, r.wall.n)]);
+        return (
+          <span className="flex min-w-0 items-center gap-1.5">
+            <StatusGlyph status={worst} />
+            <span className="flex min-w-0 flex-col">
+              <span className="truncate font-mono text-[12px] font-medium">{r.agentSlug}</span>
+              {showOrg && <span className="truncate text-[11px] text-xyne-fg-muted">{r.orgName ?? "Unnamed org"}</span>}
+            </span>
+          </span>
+        );
+      },
+    },
+    {
+      key: "runs",
+      header: "Runs",
+      numeric: true,
+      sortValue: (r) => r.runs,
+      render: (r) => (
+        <span className="inline-flex items-center justify-end gap-2">
+          <InlineBar value={r.runs / maxRuns} color={VIZ.accentSoft} width={40} />
+          <span className="min-w-[40px] font-medium">{fmtInt(r.runs)}</span>
+        </span>
+      ),
+    },
+    {
+      key: "success",
+      header: "Success",
+      numeric: true,
+      sortValue: (r) => r.successRate,
+      hint: "Completed ÷ finished runs",
+      render: (r) => (
+        <StatusValue status={statusFor("runSuccess", r.successRate, r.runs)} n={r.runs} noun="runs" floor={floorFor("runSuccess")}>
+          {fmtPct(r.successRate)}
+        </StatusValue>
+      ),
+    },
+    {
+      key: "p50",
+      header: "p50",
+      group: "End-to-end",
+      numeric: true,
+      sortValue: (r) => r.wall.p50Ms,
+      render: (r) => (
+        <StatusValue status={statusFor("runP50", r.wall.p50Ms, r.wall.n)} n={r.wall.n} noun="timed runs" floor={SAMPLE_FLOORS.p50} naWhy="No completed run">
+          {fmtMs(r.wall.p50Ms)}
+        </StatusValue>
+      ),
+    },
+    {
+      key: "p95",
+      header: "p95",
+      group: "End-to-end",
+      numeric: true,
+      sortValue: (r) => (r.wall.n >= SAMPLE_FLOORS.p95 ? r.wall.p95Ms : null),
+      render: (r) => <P95Cell p95={r.wall.p95Ms} n={r.wall.n} />,
+    },
+    {
+      key: "llm",
+      header: "Model",
+      group: "Avg per run",
+      numeric: true,
+      sortValue: (r) => r.agent.avgLlmMs,
+      hint: "Agent-reported model time per run",
+      render: (r) => <AvgCell ms={r.agent.avgLlmMs} n={r.agent.n} />,
+    },
+    {
+      key: "tool",
+      header: "Tools",
+      group: "Avg per run",
+      numeric: true,
+      sortValue: (r) => r.agent.avgToolMs,
+      hint: "Agent-reported tool time per run",
+      render: (r) => <AvgCell ms={r.agent.avgToolMs} n={r.agent.n} />,
+    },
+    {
+      key: "open",
+      header: "",
+      render: () => <ChevronRight size={14} className="text-xyne-fg-muted" aria-hidden />,
+    },
+  ];
+
+  return (
+    <MetricsCard
+      title="Agents leaderboard"
+      subtitle="By runs in the window. Click a row to scope the page to that agent."
+      loading={!top.data && !top.error}
+      skeleton={<TableSkeleton rows={6} cols={7} />}
+      busy={top.isPlaceholder}
+    >
+      {top.error ? (
+        <PanelError error={top.error} onRetry={top.refetch} />
+      ) : (
+        <DataTable
+          rows={rows}
+          columns={columns}
+          rowKey={(r) => `${r.orgId}\u0000${r.agentSlug}`}
+          initialSort={{ key: "runs", dir: "desc" }}
+          onRowClick={(r) => onAgent(r.agentSlug)}
+          rowTitle={(r) => `Scope the page to ${r.agentSlug}`}
+          rowStatus={(r) => worstStatus([statusFor("runSuccess", r.successRate, r.runs), statusFor("runP95", r.wall.p95Ms, r.wall.n)])}
+          emptyMessage="No runs in this window."
+          // Ten rows plus the grouped header; the org line makes each row taller.
+          maxHeight={showOrg ? 560 : 440}
+          minWidth={720}
+          maxRows={10}
+        />
+      )}
+    </MetricsCard>
+  );
+}
+
+/** p95 is hidden under its floor (a p95 of 3 runs is just the slowest run), with the n beside the dash. */
+function P95Cell({ p95, n }: { p95: number | null; n: number }): ReactElement {
+  if (n === 0 || p95 == null) return <Unknown why="No timed run" />;
+  if (n < SAMPLE_FLOORS.p95) {
+    return (
+      <span className="inline-flex items-center justify-end gap-1">
+        <Unknown why={`Only ${fmtInt(n)} timed ${plural(n, "run")} — p95 needs ${SAMPLE_FLOORS.p95}+`} />
+        <SampleChip n={n} noun="timed runs" floor={SAMPLE_FLOORS.p95} />
+      </span>
+    );
+  }
+  return <StatusValue status={statusFor("runP95", p95, n)}>{fmtMs(p95)}</StatusValue>;
+}
+
+function AvgCell({ ms, n }: { ms: number | null; n: number }): ReactElement {
+  if (n === 0 || ms == null) return <Unknown why="No run reported this time" />;
+  if (ms === 0) return <ZeroCell />;
+  const thin = n < SAMPLE_FLOORS.avg;
+  return (
+    <StatusValue status={thin ? "thin" : "ok"} n={n} noun="runs" floor={SAMPLE_FLOORS.avg}>
+      {fmtMs(ms)}
+    </StatusValue>
+  );
+}
+
+/** Route = the run-level `provider` column; "Timed" shows how many runs carry LLM timing. */
+function RoutesCard({ scope }: { scope: MetricsScopeParams }): ReactElement {
+  const routes = useRoutes(scope);
+  const patch = useMetricsParams();
+  const rows = routes.data?.rows ?? [];
+  const columns: Array<Column<RouteRow>> = [
+    {
+      key: "model",
+      header: "Model",
+      sortValue: (r) => `${r.model ?? ""} ${r.route}`,
+      render: (r) => (
+        <span className="flex min-w-0 flex-col">
+          <span className="truncate font-mono text-[12px] font-medium">{r.model ?? "unknown model"}</span>
+          <span className="truncate text-[11px] text-xyne-fg-muted">{r.route}</span>
+        </span>
+      ),
+    },
+    { key: "runs", header: "Runs", numeric: true, sortValue: (r) => r.runs, render: (r) => fmtInt(r.runs) },
+    {
+      key: "timed",
+      header: "Timed",
+      numeric: true,
+      sortValue: (r) => r.timed,
+      hint: "Runs carrying LLM timing — the n behind the next columns",
+      render: (r) => (r.timed === 0 ? <ZeroCell title="No run on this route carried LLM timing" /> : <span className="text-xyne-fg-secondary">{fmtInt(r.timed)}</span>),
+    },
+    {
+      key: "p50",
+      header: "p50",
+      group: "Model time per run",
+      numeric: true,
+      sortValue: (r) => r.llm.p50Ms,
+      render: (r) => (
+        <StatusValue status={r.llm.n === 0 ? "na" : statusFor("runP50", r.llm.p50Ms, r.llm.n)} n={r.llm.n} noun="timed runs" floor={SAMPLE_FLOORS.p50} naWhy="No timed run">
+          {fmtMs(r.llm.p50Ms)}
+        </StatusValue>
+      ),
+    },
+    {
+      key: "p95",
+      header: "p95",
+      group: "Model time per run",
+      numeric: true,
+      sortValue: (r) => (r.llm.n >= SAMPLE_FLOORS.p95 ? r.llm.p95Ms : null),
+      render: (r) =>
+        r.llm.n === 0 || r.llm.p95Ms == null ? (
+          <Unknown why="No timed run" />
+        ) : r.llm.n < SAMPLE_FLOORS.p95 ? (
+          <span className="inline-flex items-center justify-end gap-1">
+            <Unknown why={`Only ${fmtInt(r.llm.n)} timed ${plural(r.llm.n, "run")} — p95 needs ${SAMPLE_FLOORS.p95}+`} />
+            <SampleChip n={r.llm.n} noun="timed runs" floor={SAMPLE_FLOORS.p95} />
+          </span>
+        ) : (
+          fmtMs(r.llm.p95Ms)
+        ),
+    },
+    {
+      key: "reply",
+      header: "Reply starts",
+      numeric: true,
+      sortValue: (r) => r.replyStart.p50Ms,
+      hint: "p50 time until the run's first model reply starts streaming",
+      render: (r) => (
+        <StatusValue status={r.replyStart.n === 0 ? "na" : statusFor("runP50", r.replyStart.p50Ms, r.replyStart.n)} n={r.replyStart.n} noun="runs" floor={SAMPLE_FLOORS.p50} naWhy="Not captured">
+          {fmtMs(r.replyStart.p50Ms)}
+        </StatusValue>
+      ),
+    },
+    {
+      key: "tps",
+      header: "tok/s",
+      numeric: true,
+      sortValue: (r) => r.tokensPerSec,
+      hint: "Output tokens ÷ decode seconds, weighted",
+      render: (r) => (r.tokensPerSec == null ? <Unknown why="No decode timing" /> : fmtTps(r.tokensPerSec).replace(" tok/s", "")),
+    },
+    {
+      key: "errors",
+      header: "Failed",
+      numeric: true,
+      sortValue: (r) => r.errorRate,
+      hint: "Failed runs ÷ runs on this route and model",
+      render: (r) => {
+        if (r.failed === 0) return <ZeroCell />;
+        const status = statusFor("runSuccess", r.errorRate == null ? null : 1 - r.errorRate, r.runs);
+        return (
+          <StatusValue status={status} title={`${fmtInt(r.failed)} of ${fmtInt(r.runs)} runs failed`}>
+            {fmtPct(r.errorRate)}
+          </StatusValue>
+        );
+      },
+    },
+  ];
+  return (
+    <MetricsCard
+      title="Model time by route and model"
+      subtitle="One row per route and model. Click a row to list its runs."
+      loading={!routes.data && !routes.error}
+      skeleton={<TableSkeleton rows={4} cols={8} />}
+      busy={routes.isPlaceholder}
+    >
+      {routes.error ? (
+        <PanelError error={routes.error} onRetry={routes.refetch} />
+      ) : (
+        <DataTable
+          rows={rows}
+          columns={columns}
+          rowKey={(r) => `${r.route}\u0000${r.model ?? ""}`}
+          initialSort={{ key: "runs", dir: "desc" }}
+          onRowClick={(r) => {
+            if (r.model) patch({ drill: "model", model: r.model, provider: null, status: null, minMs: null });
+          }}
+          rowTitle={(r) => (r.model ? `List the runs on ${r.model}` : "No model recorded")}
+          emptyMessage="No runs with a route in this window."
+          maxHeight={420}
+          minWidth={820}
+          maxRows={8}
+        />
+      )}
+    </MetricsCard>
+  );
+}
+
+type ToolMeasure = "avg" | "total";
+const TOOL_OPTIONS: MeasureOptions<ToolMeasure> = [
+  { id: "avg", label: "Avg per call" },
+  { id: "total", label: "Total time" },
+];
+
+/** Top 5 only — the Tools tab has the full table. Avg ranks tools with 5+ calls (server-side floor). */
+function ToolLatencyCard({ scope }: { scope: MetricsScopeParams }): ReactElement {
+  const tools = useTools(scope, { limit: 5 });
+  const [measure] = useMeasure("toollat", TOOL_OPTIONS, "avg");
+  const [params] = useSearchParams();
+  const set = tools.data?.ranking.time;
+  const rows = (measure === "avg" ? set?.byAvg : set?.byTotal)?.slice(0, 5) ?? [];
+  const totalMs = tools.data?.totals.totalMs ?? 0;
+  const toolsHref = (() => {
+    const next = clearDrillParams(new URLSearchParams(params), { keepMeasures: true });
+    next.set("tab", "tools");
+    return `/v3/metrics?${next.toString()}`;
+  })();
+  const columns: Array<Column<RankPoint>> = [
+    { key: "tool", header: "Tool", render: (r) => <ToolName name={r.tool} className="max-w-[300px]" /> },
+    { key: "calls", header: "Calls", numeric: true, render: (r) => fmtInt(r.calls) },
+    { key: "avg", header: "Avg", numeric: true, render: (r) => fmtMs(r.avg) },
+    {
+      key: "p95",
+      header: "p95",
+      numeric: true,
+      hint: "Slow tail per call, estimated from duration buckets",
+      render: (r) => <StatusValue status={statusFor("toolP95", r.p95Ms, r.calls)} n={r.calls} noun="calls" floor={SAMPLE_FLOORS.p95} naWhy="No timed call">{fmtMs(r.p95Ms)}</StatusValue>,
+    },
+    {
+      key: "share",
+      header: "Share",
+      numeric: true,
+      hint: "Share of all tool time in the window",
+      // The avg ranking carries no share of its own (its value is a per-call mean).
+      render: (r) => fmtPct(r.share ?? (r.avg != null && totalMs > 0 ? (r.avg * r.calls) / totalMs : null)),
+    },
+    {
+      key: "errors",
+      header: "Errors",
+      numeric: true,
+      render: (r) =>
+        r.errorRate === 0 ? (
+          <ZeroCell />
+        ) : (
+          <StatusValue status={statusFor("toolErrorRate", r.errorRate, r.calls, { row: true })} n={r.calls} noun="calls" floor={floorFor("toolErrorRate", { row: true })}>
+            {fmtPct(r.errorRate)}
+          </StatusValue>
+        ),
+    },
+  ];
+  return (
+    <MetricsCard
+      title={measure === "avg" ? "Slowest tools for this agent" : "Where this agent's tool time goes"}
+      subtitle={measure === "avg" ? "Top 5 by average time per call, among tools with 5+ calls." : "Top 5 by time spent in the window."}
+      action={
+        <>
+          <MeasureToggle card="toollat" options={TOOL_OPTIONS} defaultId="avg" ariaLabel="Average or total" />
+          <Link to={toolsHref} className="inline-flex items-center gap-1 text-[12px] font-medium text-xyne-fg-muted hover:text-xyne-fg-primary">
+            Open in Tools tab
+            <ArrowRight size={12} aria-hidden />
+          </Link>
+        </>
+      }
+      loading={!tools.data && !tools.error}
+      skeleton={<TableSkeleton rows={5} cols={6} />}
+      busy={tools.isPlaceholder}
+    >
+      {tools.error ? (
+        <PanelError error={tools.error} onRetry={tools.refetch} />
+      ) : (
+        <DataTable
+          rows={rows}
+          columns={columns}
+          rowKey={(r) => r.tool}
+          emptyMessage={measure === "avg" ? "No tool with 5 or more calls in this window." : "No tool calls in this window."}
+          maxHeight={320}
+          minWidth={640}
+        />
+      )}
+    </MetricsCard>
+  );
+}
+
+const BANNER_TONE = {
+  good: "border-xyne-success-border bg-xyne-success-bg text-xyne-success-fg",
+  warn: "border-xyne-warning-border bg-xyne-warning-bg text-xyne-warning-fg",
+  neutral: "border-xyne-neutral-border bg-xyne-neutral-bg text-xyne-neutral-fg",
+} as const;
+
+/** Explicit ratings plus behavioural signals; neutral with no ratings, each rate judged only over enough runs. */
+function SentimentCard({ scope }: { scope: MetricsScopeParams }): ReactElement {
+  const state = useSentiment(scope);
+  const s = state.data?.sentiment;
+  const mem = state.data?.memoryRecall;
+
+  let body: ReactNode = null;
+  if (s && mem) {
+    const judged = s.totalRuns >= SAMPLE_FLOORS.rate;
+    const concerns: string[] = [];
+    if (s.ratingTotal >= 5 && s.ratingRatio != null && s.ratingRatio < 0.5) concerns.push(`thumbs-up rate ${fmtPct(s.ratingRatio)}`);
+    if (judged && s.apologeticRate > 0.2) concerns.push(`${fmtPct(s.apologeticRate)} of replies sound apologetic`);
+    if (judged && s.failedRate > 0.1) concerns.push(`${fmtPct(s.failedRate)} of runs failed`);
+    if (judged && s.cancelledRate > 0.1) concerns.push(`${fmtPct(s.cancelledRate)} of runs cancelled`);
+    if (s.retriesKnown >= SAMPLE_FLOORS.rate && s.retriedRate > 0.2) concerns.push(`${fmtPct(s.retriedRate)} of runs needed a model retry`);
+    const tone: keyof typeof BANNER_TONE = concerns.length > 0 ? "warn" : s.ratingTotal > 0 && judged ? "good" : "neutral";
+    const headline =
+      concerns.length > 0
+        ? `${concerns.length} ${plural(concerns.length, "concern")}: ${concerns.join(" · ")}`
+        : s.ratingTotal === 0
+          ? `No ratings yet — ${fmtInt(s.totalRuns)} ${plural(s.totalRuns, "run")} in this window.`
+          : judged
+            ? `No concerns across ${fmtInt(s.totalRuns)} runs (${fmtInt(s.ratingTotal)} rated: ${fmtInt(s.ratingUp)} up, ${fmtInt(s.ratingDown)} down).`
+            : `Too few runs to judge — ${fmtInt(s.totalRuns)} in this window, ${fmtInt(s.ratingTotal)} rated.`;
+    const rateOf = (rate: number, n: number, floor: number): ReactNode =>
+      n < floor ? (
+        <span className="inline-flex items-center gap-1 font-normal text-xyne-fg-muted">
+          {fmtPct(rate)}
+          <SampleChip n={n} noun="runs" floor={floor} />
+        </span>
+      ) : rate === 0 ? (
+        <span className="text-xyne-fg-muted">0</span>
+      ) : (
+        fmtPct(rate)
+      );
+    body = (
+      <div className="flex flex-col gap-4">
+        <div className={cn("rounded-xl border px-4 py-3 text-[13px]", BANNER_TONE[tone])}>{headline}</div>
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+          <MiniStat
+            label="Rated up"
+            icon={ThumbsUp}
+            value={s.ratingUp === 0 ? <span className="text-xyne-fg-muted">0</span> : fmtInt(s.ratingUp)}
+            sub={s.ratingTotal > 0 ? `${fmtPct(s.ratingUp / s.ratingTotal)} of rated` : "no ratings"}
+          />
+          <MiniStat
+            label="Rated down"
+            icon={ThumbsDown}
+            value={s.ratingDown === 0 ? <span className="text-xyne-fg-muted">0</span> : fmtInt(s.ratingDown)}
+            sub={s.ratingTotal > 0 ? `${fmtPct(s.ratingDown / s.ratingTotal)} of rated` : "no ratings"}
+          />
+          <MiniStat label="Apologetic" icon={MessageCircleReply} value={rateOf(s.apologeticRate, s.totalRuns, SAMPLE_FLOORS.rate)} sub="of completed runs" />
+          <MiniStat label="Cancelled" icon={CircleMinus} value={rateOf(s.cancelledRate, s.totalRuns, SAMPLE_FLOORS.rate)} sub="of all runs" />
+          <MiniStat
+            label="Needed retry"
+            icon={RefreshCcwDot}
+            value={s.retriesKnown === 0 ? <Unknown why="Retries not captured for this agent's runs" /> : rateOf(s.retriedRate, s.retriesKnown, SAMPLE_FLOORS.rate)}
+            sub={s.retriesKnown > 0 ? `of ${fmtInt(s.retriesKnown)} runs with retry data` : "not captured"}
+          />
+          <MiniStat
+            label="Memory recall"
+            icon={History}
+            value={!mem.captured || mem.rate == null ? <Unknown why="Memory recall is not instrumented for these runs" /> : rateOf(mem.rate, mem.runs, SAMPLE_FLOORS.rate)}
+            sub={mem.captured ? `${fmtInt(mem.recalled)} of ${fmtInt(mem.runs)} runs recalled` : "not captured"}
+          />
+        </div>
+        {s.recentComments.length > 0 && (
+          <div>
+            <div className="mb-2 text-[11px] uppercase tracking-wider text-xyne-fg-muted">Recent rating comments ({s.recentComments.length})</div>
+            <div className="flex flex-col gap-2">
+              {s.recentComments.map((c) => (
+                <div key={c.sessionId} className="flex items-start gap-3 rounded-lg bg-xyne-surface-subtle p-3">
+                  <span className="mt-0.5 shrink-0 text-xyne-fg-muted" title={c.rating === "up" ? "Rated up" : "Rated down"}>
+                    {c.rating === "up" ? <ThumbsUp size={15} aria-label="Rated up" /> : <ThumbsDown size={15} aria-label="Rated down" />}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="whitespace-pre-wrap break-words text-[13px] text-xyne-fg-primary">{c.comment}</div>
+                    <div className="mt-1 text-[11px] text-xyne-fg-muted">{fmtDateTime(c.completedAt)}</div>
                   </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <MetricsCard
+      title="User sentiment and feedback"
+      subtitle="Explicit ratings plus behavioural signals from the same window. Lower is better for every rate."
+      loading={!state.data && !state.error}
+      skeleton={<RowsSkeleton rows={2} />}
+      busy={state.isPlaceholder}
+    >
+      {state.error ? <PanelError error={state.error} onRetry={state.refetch} /> : body}
+    </MetricsCard>
+  );
+}
+
+function MiniStat({ label, value, sub, icon: Icon }: { label: string; value: ReactNode; sub?: string; icon?: LucideIcon }): ReactElement {
+  return (
+    <div className="flex min-w-0 flex-col rounded-lg bg-xyne-surface-subtle px-3 py-2">
+      <span className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-xyne-fg-muted">
+        {Icon && <Icon size={11} aria-hidden />}
+        {label}
+      </span>
+      <span className="mt-0.5 text-[18px] font-semibold tabular-nums text-xyne-fg-primary">{value}</span>
+      {sub && <span className="mt-0.5 text-[10px] text-xyne-fg-muted">{sub}</span>}
     </div>
   );
 }
 
 /**
- * Improvement suggestions surfaced by the hourly FailureCurator. Three
- * collapsible buckets (agent_unable_to_do_work / failure / user_frustrated)
- * each containing the curator's findings. Apply marks the candidate as
- * applied; Dismiss kicks off the 7-day cool-down. Both call admin-only
- * endpoints.
+ * Improvement suggestions surfaced by the hourly FailureCurator, in three
+ * collapsible buckets. Apply marks a candidate handled; Dismiss starts the
+ * 7-day cool-down. Read through the metrics cache so StrictMode and a tab
+ * revisit do not refetch.
  */
 function ImprovementsCard({ userId, agentSlug }: { userId: string; agentSlug: string }) {
-  const [items, setItems] = useState<ImprovementCandidate[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const url = `/metrics/agent/${encodeURIComponent(agentSlug)}/improvements`;
+  const state = useMetricsResource<ImprovementCandidate[]>(userId ? `${userId} ${url}` : null, url, () =>
+    fetchAgentImprovements(userId, agentSlug),
+  );
   const [openBucket, setOpenBucket] = useState<ImprovementBucket | null>(null);
-  const [busy, setBusy] = useState<string | null>(null); // candidate id currently mutating
+  const [busy, setBusy] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
-  const reload = React.useCallback(() => {
-    setError(null);
-    fetchAgentImprovements(userId, agentSlug)
-      .then(setItems)
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
-  }, [userId, agentSlug]);
-
-  useEffect(() => { reload(); }, [reload]);
-
+  const error = actionError ?? state.error;
   if (error) {
-    // Permission failures (admin / owner / contributor gate) — hide the
-    // card entirely rather than show a scary banner for users who simply
-    // aren't part of this agent's editor group.
-    const isAuth = /403|admin|owner|contributor|forbidden/i.test(error);
-    if (isAuth) return null;
-    return <Card title="Improvement suggestions" subtitle="Auto-generated by the FailureCurator"><div className="text-[13px] text-red-500">Failed to load suggestions: {error}</div></Card>;
+    // Permission failures (admin / owner / contributor gate): hide the card
+    // for users who are simply not part of this agent's editor group.
+    if (/403|admin|owner|contributor|forbidden/i.test(error)) return null;
+    return (
+      <MetricsCard title="Improvement suggestions" subtitle="Auto-generated by the FailureCurator">
+        <PanelError error={error} onRetry={() => { setActionError(null); state.refetch(); }} />
+      </MetricsCard>
+    );
   }
-  if (items === null) {
-    return <Card title="Improvement suggestions" subtitle="Auto-generated by the FailureCurator"><Skeleton className="h-[80px] w-full" /></Card>;
+  const items = state.data;
+  if (!items) {
+    return (
+      <MetricsCard title="Improvement suggestions" subtitle="Auto-generated by the FailureCurator">
+        <Skeleton className="h-[60px] w-full" />
+      </MetricsCard>
+    );
   }
   if (items.length === 0) {
-    return <Card title="Improvement suggestions" subtitle="Auto-generated by the FailureCurator hourly worker">
-      <div className="text-[13px] text-xyne-fg-muted">No pending suggestions. The curator runs hourly; once it has enough negative-signal sessions to spot a pattern, findings will appear here.</div>
-    </Card>;
+    return <EmptyCardRow title="Improvement suggestions" message="nothing pending. The curator runs hourly and adds findings once it spots a pattern." />;
   }
 
-  const buckets: Array<{ key: ImprovementBucket; label: string; tone: "good" | "warn" | "bad" }> = [
-    { key: "agent_unable_to_do_work", label: "Agent unable to do work", tone: "warn" },
-    { key: "failure",                 label: "Failures",                tone: "bad" },
-    { key: "user_frustrated",         label: "User frustrated",         tone: "bad" },
+  const buckets: Array<{ key: ImprovementBucket; label: string; alarming: boolean }> = [
+    { key: "agent_unable_to_do_work", label: "Agent unable to do work", alarming: true },
+    { key: "failure", label: "Failures", alarming: true },
+    { key: "user_frustrated", label: "User frustrated", alarming: false },
   ];
 
-  const onApply = async (id: string) => {
+  const act = async (id: string, fn: (userId: string, id: string) => Promise<void>) => {
     setBusy(id);
-    try { await applyImprovement(userId, id); reload(); }
-    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
-    finally { setBusy(null); }
-  };
-  const onDismiss = async (id: string) => {
-    setBusy(id);
-    try { await dismissImprovement(userId, id); reload(); }
-    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
-    finally { setBusy(null); }
-  };
-
-  const itemsByBucket: Record<ImprovementBucket, ImprovementCandidate[]> = {
-    agent_unable_to_do_work: items.filter((i) => i.bucket === "agent_unable_to_do_work"),
-    failure:                 items.filter((i) => i.bucket === "failure"),
-    user_frustrated:         items.filter((i) => i.bucket === "user_frustrated"),
+    try {
+      await fn(userId, id);
+      state.refetch();
+    } catch (e) {
+      setActionError(message(e));
+    } finally {
+      setBusy(null);
+    }
   };
 
   return (
-    <Card
+    <MetricsCard
       title="Improvement suggestions"
-      subtitle={`${items.length} pending — auto-generated hourly from negative-signal sessions. Acting on a suggestion is manual: read the proposed fix, make the change in the agent editor (system prompt, tools, memory…), then click “Mark as handled.” Use “Dismiss” to silence the same root-cause finding for this agent for 7 days.`}
+      subtitle={`${items.length} pending, generated hourly from negative-signal sessions. Make the change in the agent editor, then mark it handled; dismiss silences the same root cause for 7 days.`}
+      busy={state.loading}
     >
       <div className="flex flex-col gap-2">
         {buckets.map((b) => {
-          const rows = itemsByBucket[b.key];
+          const rows = items.filter((i) => i.bucket === b.key);
           const open = openBucket === b.key;
           return (
-            <div key={b.key} className="rounded-lg border border-xyne-border">
+            <div key={b.key} className="rounded-lg border border-xyne-border-subtle">
               <button
+                type="button"
                 onClick={() => setOpenBucket(open ? null : b.key)}
-                className="w-full flex items-center justify-between px-4 py-2.5 text-left hover:bg-xyne-bg-secondary/40"
+                aria-expanded={open}
+                className="flex w-full items-center gap-2 px-4 py-2.5 text-left hover:bg-xyne-surface-subtle"
               >
-                <span className="flex items-center gap-2">
-                  <span className="text-xyne-fg-muted">{open ? "▾" : "▸"}</span>
-                  <span className="font-medium text-xyne-fg-primary">{b.label}</span>
-                  <span className="text-[12px] text-xyne-fg-muted">
-                    {rows.length} finding{rows.length === 1 ? "" : "s"}
-                  </span>
+                <span className="text-xyne-fg-muted">{open ? <ChevronDown size={14} aria-hidden /> : <ChevronRight size={14} aria-hidden />}</span>
+                <span className="text-[13px] font-medium text-xyne-fg-primary">{b.label}</span>
+                <span
+                  className={cn(
+                    "inline-flex h-5 items-center gap-1 rounded-full px-2 text-[11px] font-medium tabular-nums",
+                    rows.length > 0 && b.alarming ? "bg-xyne-warning-bg text-xyne-warning-fg" : "bg-xyne-neutral-bg text-xyne-neutral-fg",
+                  )}
+                >
+                  {rows.length > 0 && b.alarming && <StatusGlyph status="warn" size={11} />}
+                  {fmtInt(rows.length)}
                 </span>
               </button>
               {open && rows.length > 0 && (
-                <div className="border-t border-xyne-border-subtle p-3 flex flex-col gap-3">
+                <div className="flex flex-col gap-3 border-t border-xyne-border-subtle p-3">
                   {rows.map((c) => (
                     <ImprovementRow
                       key={c.id}
                       c={c}
-                      onApply={() => onApply(c.id)}
-                      onDismiss={() => onDismiss(c.id)}
+                      onApply={() => void act(c.id, applyImprovement)}
+                      onDismiss={() => void act(c.id, (u, id) => dismissImprovement(u, id))}
                       busy={busy === c.id}
                     />
                   ))}
@@ -1359,62 +1691,45 @@ function ImprovementsCard({ userId, agentSlug }: { userId: string; agentSlug: st
           );
         })}
       </div>
-    </Card>
+    </MetricsCard>
   );
 }
 
-function ImprovementRow({ c, onApply, onDismiss, busy }: {
-  c: ImprovementCandidate;
-  onApply: () => void;
-  onDismiss: () => void;
-  busy: boolean;
-}) {
-  const confTone =
-    c.confidence === "high" ? "text-green-600 dark:text-green-400 bg-green-500/10" :
-    c.confidence === "low"  ? "text-amber-700 dark:text-amber-300 bg-amber-500/10" :
-                              "text-xyne-fg-muted bg-xyne-bg-secondary";
+function ImprovementRow({ c, onApply, onDismiss, busy }: { c: ImprovementCandidate; onApply: () => void; onDismiss: () => void; busy: boolean }) {
   return (
-    <div className="rounded-lg bg-xyne-bg-secondary/30 p-3 flex flex-col gap-2">
-      <div className="flex items-center gap-2 flex-wrap text-[11px]">
-        <span className="font-mono px-2 py-0.5 rounded bg-xyne-bg-secondary text-xyne-fg-primary">{c.rootCause}</span>
-        <span className={`px-2 py-0.5 rounded ${confTone}`}>{c.confidence}</span>
-        <span className="text-xyne-fg-muted">·</span>
-        <span className="text-xyne-fg-muted">{c.evidence.length} session{c.evidence.length === 1 ? "" : "s"} as evidence</span>
+    <div className="flex flex-col gap-2 rounded-lg bg-xyne-surface-subtle p-3">
+      <div className="flex flex-wrap items-center gap-2 text-[11px]">
+        <span className="rounded bg-xyne-surface-sunken px-2 py-0.5 font-mono text-xyne-fg-primary">{c.rootCause}</span>
+        <span className="rounded bg-xyne-neutral-bg px-2 py-0.5 text-xyne-neutral-fg">{c.confidence} confidence</span>
+        <span className="text-xyne-fg-muted">
+          · {c.evidence.length} {plural(c.evidence.length, "session")} as evidence
+        </span>
       </div>
       <div className="text-[13px] text-xyne-fg-primary">{c.finding}</div>
-      <div className="rounded-md bg-xyne-bg-secondary px-3 py-2 text-[12px] flex items-start gap-2">
-        <span className="font-mono text-xyne-fg-muted shrink-0">{c.proposedFix.type}:</span>
-        <span className="text-xyne-fg-primary whitespace-pre-wrap break-words">{c.proposedFix.description}</span>
-      </div>
-      <div className="flex items-center gap-3 text-[11px]">
-        <span className="text-xyne-fg-muted">Evidence:</span>
-        <div className="flex flex-wrap gap-1">
-          {c.evidence.slice(0, 8).map((sid) => (
-            <span key={sid} className="font-mono px-1.5 py-0.5 rounded bg-xyne-bg-secondary text-xyne-fg-muted">{sid.slice(0, 14)}</span>
-          ))}
-          {c.evidence.length > 8 && <span className="text-xyne-fg-muted">+{c.evidence.length - 8} more</span>}
-        </div>
+      <div className="flex items-start gap-2 rounded-md bg-xyne-surface-sunken px-3 py-2 text-[12px]">
+        <span className="shrink-0 font-mono text-xyne-fg-muted">{c.proposedFix.type}:</span>
+        <span className="whitespace-pre-wrap break-words text-xyne-fg-primary">{c.proposedFix.description}</span>
       </div>
       <div className="flex items-center justify-between gap-3 pt-1">
-        <span className="text-[11px] text-xyne-fg-muted italic">
-          “Mark as handled” records that you made this change manually — it does <em>not</em> auto-edit the agent.
-        </span>
+        <span className="text-[11px] text-xyne-fg-muted">Mark as handled records a change you made yourself; it does not edit the agent.</span>
         <div className="flex gap-2">
           <button
+            type="button"
             onClick={onDismiss}
             disabled={busy}
-            title="Hide this finding and silence the same root cause for this agent for 7 days. Use when the finding isn't actionable."
-            className="text-[12px] px-3 py-1 rounded-md bg-xyne-bg-secondary hover:bg-xyne-bg-secondary/70 text-xyne-fg-muted disabled:opacity-40"
+            title="Hide this finding and silence the same root cause for this agent for 7 days"
+            className="rounded-md bg-xyne-surface-sunken px-3 py-1 text-[12px] text-xyne-fg-muted hover:text-xyne-fg-primary disabled:opacity-40"
           >
             Dismiss
           </button>
           <button
+            type="button"
             onClick={onApply}
             disabled={busy}
-            title="Mark as handled. Record-keeping only — does not apply the change. Make the edit yourself in the agent editor, then click this."
-            className="text-[12px] px-3 py-1 rounded-md bg-xyne-fg-primary text-xyne-fg-inverse hover:opacity-90 disabled:opacity-40"
+            title="Record that you made this change in the agent editor"
+            className="rounded-md bg-xyne-fg-primary px-3 py-1 text-[12px] text-xyne-fg-inverse hover:opacity-90 disabled:opacity-40"
           >
-            {busy ? "..." : "Mark as handled"}
+            {busy ? "…" : "Mark as handled"}
           </button>
         </div>
       </div>
@@ -1422,73 +1737,257 @@ function ImprovementRow({ c, onApply, onDismiss, busy }: {
   );
 }
 
-function MiniTile({ label, value, sub }: { label: string; value: string; sub: string }) {
+/* ── 5. What was slowest? ─────────────────────────────────────────────────── */
+
+function SlowestRunsCard({ scope }: { scope: MetricsScopeParams }): ReactElement {
+  const summary = useSummary(scope);
+  const patch = useMetricsParams();
+  const wall = summary.data?.current.wall;
+  const p95 = wall && wall.n >= SAMPLE_FLOORS.p95 ? wall.p95Ms : null;
   return (
-    <div className="rounded-lg bg-xyne-bg-secondary/40 px-3 py-2 flex flex-col">
-      <span className="text-[10px] uppercase tracking-wider text-xyne-fg-muted">{label}</span>
-      <span className="text-[18px] font-semibold text-xyne-fg-primary tabular-nums mt-0.5">{value}</span>
-      <span className="text-[10px] text-xyne-fg-muted mt-0.5">{sub}</span>
-    </div>
+    <MetricsCard
+      title="Slowest runs"
+      subtitle="The ten slowest completed runs by end-to-end time. Open one for its transcript and trace."
+      action={
+        p95 != null ? (
+          <button
+            type="button"
+            onClick={() => patch({ drill: "slow", minMs: Math.floor(p95), status: null, model: null, provider: null })}
+            className="inline-flex min-h-[28px] items-center gap-1 rounded-full border border-xyne-border px-3 text-[12px] font-medium text-xyne-fg-secondary hover:border-xyne-border-strong hover:text-xyne-fg-primary"
+          >
+            See all runs at or above p95 ({fmtMs(p95)})
+            <ChevronRight size={12} aria-hidden />
+          </button>
+        ) : undefined
+      }
+    >
+      <SessionsList scope={scope} request={{ kind: "slow" }} limit={10} subject="the run completed, slowest first" />
+    </MetricsCard>
   );
 }
 
-function ToolLatencyTable({ rows }: { rows: ToolLatencyRow[] }) {
-  // Total of all tools' cumulative ms — drives the visual bar so the eye sees
-  // proportional share at a glance instead of having to compare numbers.
-  const grandTotal = rows.reduce((a, r) => a + (r.totalMs || 0), 0) || 1;
+/** Awakening rollup: renders nothing if no agent ever woke; amber only for a real failure (lastError). */
+function AwakeningActivityCard({ scope }: { scope: MetricsScopeParams }) {
+  const url = `/metrics/awakening?days=${scope.days}&orgScope=${scope.orgScope}`;
+  const state = useMetricsResource<AwakeningActivity>(scope.userId ? `${scope.userId} ${url}` : null, url, () =>
+    fetchAwakeningActivity(scope.userId, scope.days, scope.orgScope),
+  );
+  const [openRow, setOpenRow] = useState<string | null>(null);
+  const data = state.data;
+  if (state.error || !data) return null;
+  if (data.agents.length === 0 && data.totals.runs === 0) return null;
+
+  const { totals } = data;
+  const failing = data.agents.filter((a) => a.lastError);
+  const off = data.agents.filter((a) => !a.enabled && !a.lastError);
+  const offNote = off.length > 0 ? `${fmtInt(off.length)} ${plural(off.length, "agent has", "agents have")} waking switched off` : null;
+
+  if (totals.runs === 0) {
+    return (
+      <EmptyCardRow
+        title="Awakened agents"
+        message={
+          <>
+            No wakes in this window{offNote ? ` · ${offNote}` : ""}
+            {failing.length > 0 && (
+              <span className="ml-1 inline-flex items-center gap-1 font-medium text-xyne-warning-fg">
+                · <StatusGlyph status="warn" /> {fmtInt(failing.length)} failing: {failing.slice(0, 3).map((a) => a.agentSlug).join(", ")}
+              </span>
+            )}
+          </>
+        }
+      />
+    );
+  }
+
+  const th = "py-2 text-[11px] font-medium uppercase tracking-wider";
   return (
-    <div className="overflow-x-auto -mx-1 px-1">
-      <table className="w-full min-w-[720px] text-[13px]">
-        <thead>
-          <tr className="text-left text-xyne-fg-muted text-[11px] uppercase tracking-wider">
-            <th className="py-2 pr-3">Tool</th>
-            <th className="py-2 pr-3 text-right">Calls</th>
-            <th className="py-2 pr-3 text-right">Avg</th>
-            <th className="py-2 pr-3 text-right">p50</th>
-            <th className="py-2 pr-3 text-right">p95</th>
-            <th className="py-2 pr-3 text-right">Cumulative</th>
-            <th className="py-2 pr-3">Share</th>
-            <th className="py-2 pr-3 text-right">Errors</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => {
-            const share = r.totalMs / grandTotal;
-            const isHot = share >= 0.25; // tools eating ≥25% of total tool time = headline offender
-            return (
-              <tr key={r.tool} className="border-t border-xyne-border">
-                <td className={"py-2 pr-3 font-mono text-[12px] " + (isHot ? "text-amber-500" : "text-xyne-fg-primary")}>
-                  {r.tool}
-                </td>
-                <td className="py-2 pr-3 text-right tabular-nums">{r.calls}</td>
-                <td className="py-2 pr-3 text-right tabular-nums">{fmtMs(r.avgMs)}</td>
-                <td className="py-2 pr-3 text-right tabular-nums">{fmtMs(r.p50Ms)}</td>
-                <td className="py-2 pr-3 text-right tabular-nums">{fmtMs(r.p95Ms)}</td>
-                <td className="py-2 pr-3 text-right tabular-nums font-medium">{fmtMs(r.totalMs)}</td>
-                <td className="py-2 pr-3">
-                  <div className="flex items-center gap-2">
-                    <div className="h-1.5 w-[120px] rounded-full bg-xyne-bg-secondary overflow-hidden">
-                      <div
-                        className="h-full rounded-full"
-                        style={{
-                          width: `${Math.max(2, share * 100)}%`,
-                          background: isHot ? "#f59e0b" : "#6366f1",
-                        }}
-                      />
-                    </div>
-                    <span className="text-[11px] text-xyne-fg-muted tabular-nums w-[42px]">
-                      {(share * 100).toFixed(1)}%
-                    </span>
-                  </div>
-                </td>
-                <td className="py-2 pr-3 text-right tabular-nums">
-                  {r.errors > 0 ? <span className="text-red-500">{r.errors}</span> : <span className="text-xyne-fg-muted">—</span>}
-                </td>
+    <MetricsCard
+      title="Awakened agents"
+      subtitle="Runs nobody triggered: the agent woke on a heartbeat or a reflex and decided for itself whether to act."
+      busy={state.loading}
+    >
+      <KpiStrip
+        cols="grid-cols-2 @min-[560px]:grid-cols-4"
+        items={[
+          { key: "wakes", label: "Wakes", value: fmtInt(totals.runs), line: `${fmtInt(totals.events)} events collected` },
+          { key: "acted", label: "Acted", value: fmtInt(totals.ran), line: totals.shadow > 0 ? `${fmtInt(totals.shadow)} in shadow` : undefined },
+          { key: "quiet", label: "Stayed quiet", value: fmtInt(totals.skipped), line: "Gate found nothing worth doing" },
+          {
+            key: "failed",
+            label: "Failed",
+            value: totals.failed === 0 ? <span className="font-normal text-xyne-fg-muted">0</span> : fmtInt(totals.failed),
+            status: totals.failed > 0 ? "warn" : undefined,
+          },
+        ]}
+      />
+      {(failing.length > 0 || offNote) && (
+        <div className="mt-3 flex flex-col gap-1 text-[12px]">
+          {failing.map((a) => (
+            <div key={a.agentSlug} className="inline-flex items-center gap-1 text-xyne-warning-fg">
+              <StatusGlyph status="warn" />
+              <span className="font-mono">{a.agentSlug}</span> — {a.lastError}
+            </div>
+          ))}
+          {offNote && <div className="text-xyne-fg-muted">{offNote}.</div>}
+        </div>
+      )}
+      {data.byAgent.length > 0 && (
+        <table className="mt-4 w-full text-[12px]">
+          <thead className="text-xyne-fg-muted">
+            <tr className="border-b border-xyne-border text-left">
+              <th className={th}>Agent</th>
+              <th className={th}>Kind</th>
+              <th className={cn(th, "text-right")}>Wakes</th>
+              <th className={cn(th, "text-right")}>Acted</th>
+              <th className={cn(th, "text-right")}>Quiet</th>
+              <th className={cn(th, "text-right")}>Failed</th>
+              <th className={cn(th, "text-right")}>Last wake</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.byAgent.map((r) => {
+              const key = `${r.agentId}:${r.kind}`;
+              const open = openRow === key;
+              return (
+                <React.Fragment key={key}>
+                  <tr
+                    className="cursor-pointer border-b border-xyne-border-subtle hover:bg-xyne-surface-subtle"
+                    onClick={() => setOpenRow(open ? null : key)}
+                    aria-expanded={open}
+                  >
+                    <td className="py-2 font-mono text-xyne-fg-primary">
+                      <span className="mr-1 inline-flex w-3 align-middle text-xyne-fg-muted">
+                        {open ? <ChevronDown size={12} aria-hidden /> : <ChevronRight size={12} aria-hidden />}
+                      </span>
+                      {r.agentSlug}
+                    </td>
+                    <td className="py-2 text-xyne-fg-muted">{r.kind}</td>
+                    <td className="py-2 text-right tabular-nums text-xyne-fg-primary">{fmtInt(r.runs)}</td>
+                    <td className="py-2 text-right tabular-nums text-xyne-fg-primary">{fmtInt(r.ran)}</td>
+                    <td className="py-2 text-right tabular-nums text-xyne-fg-muted">{fmtInt(r.skipped)}</td>
+                    <td className={cn("py-2 text-right tabular-nums", r.failed > 0 ? statusText("warn") : "text-xyne-fg-muted")}>{fmtInt(r.failed)}</td>
+                    <td className="py-2 text-right tabular-nums text-xyne-fg-muted">{fmtDateTime(r.lastRunAt)}</td>
+                  </tr>
+                  {open && (
+                    <tr>
+                      <td colSpan={7} className="p-0">
+                        <AwakeningRunsPanel scope={scope} agentId={r.agentId} agentSlug={r.agentSlug} kind={r.kind} />
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+      {data.skipReasons.length > 0 && (
+        <div className="mt-4">
+          <div className="mb-2 text-[12px] text-xyne-fg-muted">Why it stayed quiet — a healthy agent skips far more often than it acts.</div>
+          <div className="flex flex-wrap gap-2">
+            {data.skipReasons.map((r) => (
+              <span key={r.reason} className="rounded-full bg-xyne-surface-subtle px-3 py-1 text-[12px] text-xyne-fg-muted">
+                <span className="font-mono">{r.reason}</span> · <span className="tabular-nums">{fmtInt(r.count)}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </MetricsCard>
+  );
+}
+
+const WAKES_PAGE_SIZE = 20;
+
+/** One agent's paginated wake attempts; skipped wakes carry the gate rule that fired. */
+function AwakeningRunsPanel({ scope, agentId, agentSlug, kind }: { scope: MetricsScopeParams; agentId: string; agentSlug: string; kind: string }) {
+  const [offset, setOffset] = useState(0);
+  const url = `/metrics/awakening/${encodeURIComponent(agentId)}/runs?days=${scope.days}&kind=${kind}&offset=${offset}&orgScope=${scope.orgScope}`;
+  const state = useMetricsResource(scope.userId ? `${scope.userId} ${url}` : null, url, () =>
+    fetchAwakeningRuns(scope.userId, agentId, scope.days, WAKES_PAGE_SIZE, offset, scope.orgScope, kind),
+  );
+  const page = state.data;
+  const runs: AwakeningRun[] = page?.runs ?? [];
+  const total = page?.total ?? 0;
+  const from = total === 0 ? 0 : offset + 1;
+  const to = Math.min(offset + WAKES_PAGE_SIZE, total);
+  const th = "py-1.5 font-medium";
+  return (
+    <div className="border-b border-xyne-border-subtle bg-xyne-surface-subtle px-3 py-3">
+      {state.error ? (
+        <PanelError error={state.error} onRetry={state.refetch} />
+      ) : !page ? (
+        <Skeleton className="h-[120px] w-full" />
+      ) : runs.length === 0 ? (
+        <div className="text-[12px] text-xyne-fg-muted">
+          No {kind} wakes for {agentSlug} in this window.
+        </div>
+      ) : (
+        <>
+          <table className="w-full text-[12px]">
+            <thead className="text-xyne-fg-muted">
+              <tr className="border-b border-xyne-border-subtle text-left">
+                <th className={th}>When</th>
+                <th className={th}>Outcome</th>
+                <th className={th}>Why</th>
+                <th className={cn(th, "text-right")}>Events</th>
+                <th className={cn(th, "text-right")}>Took</th>
+                <th className={cn(th, "text-right")}>Transcript</th>
               </tr>
-            );
-          })}
-        </tbody>
-      </table>
+            </thead>
+            <tbody className={cn(state.isPlaceholder && "opacity-60")}>
+              {runs.map((r) => (
+                <tr key={r.id} className="border-b border-xyne-border-subtle">
+                  <td className="whitespace-nowrap py-1.5 text-xyne-fg-primary">{fmtDateTime(r.startedAt)}</td>
+                  <td className={cn("py-1.5", r.outcome === "failed" ? statusText("bad") : r.outcome === "skipped" ? "text-xyne-fg-muted" : "text-xyne-fg-primary")}>
+                    {r.outcome}
+                  </td>
+                  <td className="py-1.5 font-mono text-xyne-fg-muted">{r.skipReason ?? "—"}</td>
+                  <td className="py-1.5 text-right tabular-nums text-xyne-fg-muted">{fmtInt(r.eventCount)}</td>
+                  <td className="py-1.5 text-right tabular-nums text-xyne-fg-muted">{fmtMs(r.durationMs)}</td>
+                  <td className="py-1.5 text-right">
+                    {r.conversationId ? (
+                      <Link
+                        className="text-xyne-fg-link underline underline-offset-2 hover:opacity-80"
+                        to={`/v3/chat?${new URLSearchParams({ agent: agentSlug, conversation: r.conversationId, allRuns: "1", ...(r.sessionId ? { debug: r.sessionId } : {}) }).toString()}`}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        open
+                      </Link>
+                    ) : (
+                      <span className="text-xyne-fg-muted">—</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="mt-2 flex items-center justify-between text-[12px] text-xyne-fg-muted">
+            <span className="tabular-nums">
+              {fmtInt(from)}–{fmtInt(to)} of {fmtInt(total)}
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={offset === 0 || state.loading}
+                onClick={() => setOffset(Math.max(0, offset - WAKES_PAGE_SIZE))}
+                className="rounded-md border border-xyne-border px-2 py-1 hover:text-xyne-fg-primary disabled:opacity-40"
+              >
+                Previous
+              </button>
+              <button
+                type="button"
+                disabled={to >= total || state.loading}
+                onClick={() => setOffset(offset + WAKES_PAGE_SIZE)}
+                className="rounded-md border border-xyne-border px-2 py-1 hover:text-xyne-fg-primary disabled:opacity-40"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

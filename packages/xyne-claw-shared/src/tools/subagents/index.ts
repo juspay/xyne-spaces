@@ -3,6 +3,8 @@ export {
   getSubagentDefinition,
   findSubagentDefinitionForServer,
   parseToolsConfig,
+  grantMatchesToolName,
+  findUnusedGrants,
   resolveAgentToolsConfig,
   isEmptyToolsSelection,
   type SubagentDefinition,
