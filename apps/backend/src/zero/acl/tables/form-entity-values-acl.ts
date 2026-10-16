@@ -5,6 +5,7 @@ import {
 } from '../core/types';
 import { ChannelRole, ChannelVisibility, FormEntityType, Schema, WorkspaceRole } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
+import { hasGuestChannelAccess, hasGuestTicketAccess } from '../core/guest-access';
 import { zql } from '../../queries';
 
 export class FormEntityValuesACL extends BaseACL<'form_entity_values'> {
@@ -37,11 +38,44 @@ export class FormEntityValuesACL extends BaseACL<'form_entity_values'> {
     return !!accessible;
   }
 
+  // Guests write only TICKET / SUB_TICKET values, and only where they have guest access to the
+  // owning channel (guest_access mapping or channel participant), matching the guest read ACL.
+  private async verifyGuestEntityAccess(entityType: string, entityId: string, tx: Transaction<Schema>): Promise<void> {
+    if (!(await this.guestCanAccessEntity(entityType, entityId, tx))) {
+      throw new MutationACLError('Form entity value failed: you do not have access to the referenced entity', 'form_entity_values');
+    }
+  }
+
+  private async guestCanAccessEntity(entityType: string, entityId: string, tx: Transaction<Schema>): Promise<boolean> {
+    if (entityType === FormEntityType.TICKET) {
+      const ticket = await tx.run(zql.tickets.where('id', entityId).one());
+      return !!ticket && (await hasGuestTicketAccess(this.ctx, tx, ticket));
+    }
+    if (entityType === FormEntityType.SUB_TICKET) {
+      const subTicket = await tx.run(zql.sub_tickets.where('id', entityId).one());
+      if (!subTicket || subTicket.workspaceId !== this.ctx.workspaceId) return false;
+      if (subTicket.mappedTicketId) {
+        const ticket = await tx.run(zql.tickets.where('id', subTicket.mappedTicketId).one());
+        if (ticket && (await hasGuestTicketAccess(this.ctx, tx, ticket))) return true;
+      }
+      if (subTicket.conversationId) {
+        const conversation = await tx.run(zql.conversations.where('conversationId', subTicket.conversationId).one());
+        if (conversation && (await hasGuestChannelAccess(this.ctx, tx, conversation.channelId))) return true;
+      }
+      return false;
+    }
+    return false;
+  }
+
   // Gate ticket-scoped entities on the referenced ticket's channel. TICKET: entityId is a
   // ticket id. SUB_TICKET: entityId is a SUB_TICKET id — resolve the sub-ticket, verify its
   // workspace, and (when it is mapped to a parent ticket) gate on that ticket's channel; an
   // unmapped sub-ticket is authorized by the workspace check alone.
   private async verifyEntityAccess(entityType: string, entityId: string, tx: Transaction<Schema>): Promise<void> {
+    if (this.ctx.role === WorkspaceRole.GUEST) {
+      await this.verifyGuestEntityAccess(entityType, entityId, tx);
+      return;
+    }
     if (entityType === FormEntityType.TICKET) {
       if (!(await this.ticketChannelAccessible(entityId, tx))) {
         throw new MutationACLError('Form entity value failed: you do not have access to the referenced ticket', 'form_entity_values');

@@ -173,6 +173,7 @@ const GUEST_MUTATION_ALLOWLIST: readonly TableName[] = [
   'ticket_tags',
   'project_tags',
   'ticket_tag_mappings',
+  'form_entity_values',
   'users',
 ];
 
