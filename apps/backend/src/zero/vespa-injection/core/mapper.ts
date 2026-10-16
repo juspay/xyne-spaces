@@ -1,7 +1,7 @@
 import { readFromYSweetStrict } from '@/utils/ysweetUtils';
 import { extractMentionsFromContent } from '@/utils/mentionUtils';
 import { extractChannelMentions, extractGroupMentions } from '@/utils/mentionParser';
-import { appSchema, callSchema, channelSchema, InsertDocument, mailSchema, messageSchema, projectSchema, schemaToDocType, SubApp, ticketSchema, userSchema, VespaAppDocument, VespaCallDocument, VespaChatContainerDocument, VespaChatMessageDocument, VespaDocType, VespaFileDocument, VespaMailDocument, VespaProjectDocument, VespaSchema, VespaTicketDocument, samTranscriptSchema, sdlcContainerSchema, sdlcRepositorySchema, type SdlcDiscussionFields, type SdlcFieldValues, type SdlcFileFields, type SdlcTicketFields, type VespaSdlcContainerDocument, type VespaSdlcRepositoryDocument, SDLC_DISCUSSION_FIELDS, SDLC_FILE_FIELDS, SDLC_TICKET_FIELDS } from '@/vespa/src/types';
+import { appSchema, callSchema, channelSchema, InsertDocument, mailSchema, messageSchema, projectSchema, schemaToDocType, SubApp, ticketSchema, userSchema, VespaAppDocument, VespaCallDocument, VespaChatContainerDocument, VespaChatMessageDocument, VespaDocType, VespaFileDocument, VespaMailDocument, VespaProjectDocument, VespaSchema, VespaTicketDocument, samTranscriptSchema, sdlcContainerSchema, sdlcRepositorySchema, type SdlcDiscussionFields, type SdlcFieldValues, type SdlcFileFields, type SdlcTicketFields, type VespaSdlcContainerDocument, type VespaSdlcRepositoryDocument } from '@/vespa/src/types';
 import {
   hubOfContainer,
   sdlcContainerDocument,
@@ -1589,44 +1589,6 @@ const sdlcPlacement = (fields: SdlcDiscussionFields) => sdlcValues(fields, Boole
 const sdlcTicketPlacement = (fields: SdlcTicketFields) => sdlcValues(fields, true);
 const sdlcFileFields = (fields: SdlcFileFields) => sdlcValues(fields, Boolean(fields.sdlcContainerRef));
 
-/**
- * A field-scoped update that asks only for SDLC fields: those values alone, the same the full
- * mapper would give them, without building the document (no content, users, board or thread).
- * Null when the job asks for anything else, so the worker maps the document as usual.
- */
-const mapSdlcFieldsOnly = async (
-  schema: VespaSchema,
-  docId: string,
-  app: SubApp | undefined,
-  fields: string[],
-): Promise<Partial<InsertDocument> | null> => {
-  const only = (allowed: readonly string[]) => fields.length > 0 && fields.every(f => allowed.includes(f));
-  const pick = (values: object): Partial<InsertDocument> =>
-    Object.fromEntries(fields.filter(f => f in values).map(f => [f, (values as Record<string, unknown>)[f]])) as Partial<InsertDocument>;
-  const notFound = () => new Error(`Data not found for ${schema}/${docId}`);
-
-  if (schema === fileSchema && app === SubApp.CANVAS && only(SDLC_FILE_FIELDS)) {
-    const canvas = await db.canvas.findUnique({ where: { id: docId }, select: { id: true, channelId: true } });
-    if (!canvas) throw notFound();
-    return pick(sdlcFileFields(await sdlcFieldsForCanvas(canvas)));
-  }
-  if (schema === fileSchema && (app === SubApp.CHAT_ATTACHMENT || app === SubApp.TICKET_ATTACHMENT) && only(SDLC_FILE_FIELDS)) {
-    const attachment = await db.messageAttachment.findUnique({ where: { id: docId }, select: { id: true, entityType: true, entityId: true } });
-    if (!attachment) throw notFound();
-    return pick(sdlcFileFields(await sdlcFieldsForAttachment(attachment)));
-  }
-  if (schema === ticketSchema && only(SDLC_TICKET_FIELDS)) {
-    if (!(await db.ticket.findUnique({ where: { id: docId }, select: { id: true } }))) throw notFound();
-    return pick(sdlcTicketPlacement(await sdlcFieldsForTicket(docId)));
-  }
-  if (schema === messageSchema && only(SDLC_DISCUSSION_FIELDS)) {
-    const message = await db.message.findUnique({ where: { messageId: docId }, select: { conversationId: true } });
-    if (!message) throw notFound();
-    return pick(sdlcPlacement(await sdlcFieldsForConversation(message.conversationId)));
-  }
-  return null;
-};
-
 /** A track or folder row, with the hub it is placed in (fetchDataBySchema). */
 type SdlcContainerRow = { id: string; hubId: string };
 
@@ -1901,36 +1863,6 @@ export const fetchAndMapBySchema = async (
   return await mapBySchema(schema, rawData, jobType, app, workspaceId, orgId, metadataOnly);
 }
 
-/**
- * A field-scoped update: only the requested fields, for a partial Vespa update. Canvas
- * permissions and SDLC fields are computed on their own (no content extraction or full map);
- * anything else builds the document the way a feed would and keeps those fields.
- */
-export const mapFieldsBySchema = async (
-  schema: VespaSchema,
-  docId: string,
-  fields: string[],
-  app?: SubApp,
-  workspaceId?: string,
-  orgId?: string,
-  // Map metadata only (no content download/parse): the requested fields don't need it, e.g. a
-  // transcript's title/ACL/labels refresh.
-  metadataOnly?: boolean,
-): Promise<Partial<InsertDocument>> => {
-  if (app === SubApp.CANVAS && fields.length === 1 && fields[0] === 'permissions') {
-    return { permissions: await computeCanvasPermissions(docId) } as Partial<InsertDocument>;
-  }
-  const sdlc = await mapSdlcFieldsOnly(schema, docId, app, fields);
-  if (sdlc) return sdlc;
-  const rawData = await fetchDataBySchema(schema, docId, app);
-  if (!rawData) {
-    throw new Error(`Data not found for ${schema}/${docId}`);
-  }
-  const fullDoc = await mapBySchema(schema, rawData, 'feed', app, workspaceId, orgId, metadataOnly);
-  return Object.fromEntries(
-    fields.filter(field => field in fullDoc).map(field => [field, (fullDoc as Record<string, unknown>)[field]]),
-  ) as Partial<InsertDocument>;
-};
 
 export const VespaOperationType: Record<VespaJobType, VespaOpType> = {
   feed: VespaOpType.INSERT,
