@@ -814,6 +814,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const { user: currentUser } = useAuth();
   const currentUserRoleIds = useCurrentUserRoleIds();
 
+  // Only the ticket creator may inline-edit the title and description.
+  const canEditTicketDetails = currentUser?.id === ticket?.createdBy;
+
   const handleNonFormReviewSubmit = async (): Promise<void> => {
     if (!nonFormReviewDialog || !ticket) return;
     const trimmedComment = nonFormReviewComment.trim();
@@ -4198,18 +4201,25 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             </div>
           ) : (
             <div
-              role='button'
-              tabIndex={0}
-              className='flex-1 -mx-[7px] cursor-text rounded-lg px-[7px] py-[3px] text-[24px] font-semibold leading-[1.32] tracking-[-0.5px] text-foreground break-words transition-colors duration-150 hover:bg-muted/50'
-              onClick={() => setEditingTitle(true)}
-              onKeyDown={e => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  setEditingTitle(true);
-                }
-              }}
-              data-track-category='Tickets'
-              data-track-name='StartEditTitle'
+              role={canEditTicketDetails ? 'button' : undefined}
+              tabIndex={canEditTicketDetails ? 0 : undefined}
+              className={cn(
+                'flex-1 -mx-[7px] rounded-lg px-[7px] py-[3px] text-[24px] font-semibold leading-[1.32] tracking-[-0.5px] text-foreground break-words transition-colors duration-150',
+                canEditTicketDetails ? 'cursor-text hover:bg-muted/50' : 'cursor-default',
+              )}
+              onClick={canEditTicketDetails ? () => setEditingTitle(true) : undefined}
+              onKeyDown={
+                canEditTicketDetails
+                  ? e => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setEditingTitle(true);
+                      }
+                    }
+                  : undefined
+              }
+              data-track-category={canEditTicketDetails ? 'Tickets' : undefined}
+              data-track-name={canEditTicketDetails ? 'StartEditTitle' : undefined}
             >
               {ticket.title}
             </div>
@@ -4824,21 +4834,30 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             </div>
           ) : (
             <div
-              role='button'
-              tabIndex={0}
-              className='flex cursor-text flex-col px-[15px] py-[11px] text-foreground'
-              onClick={() => setEditingDescription(true)}
-              onKeyDown={e => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  setEditingDescription(true);
-                }
-              }}
-              data-track-category='Tickets'
-              data-track-name='StartEditDescription'
+              role={canEditTicketDetails ? 'button' : undefined}
+              tabIndex={canEditTicketDetails ? 0 : undefined}
+              className={cn(
+                'flex flex-col px-[15px] py-[11px] text-foreground',
+                canEditTicketDetails ? 'cursor-text' : 'cursor-default',
+              )}
+              onClick={canEditTicketDetails ? () => setEditingDescription(true) : undefined}
+              onKeyDown={
+                canEditTicketDetails
+                  ? e => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setEditingDescription(true);
+                      }
+                    }
+                  : undefined
+              }
+              data-track-category={canEditTicketDetails ? 'Tickets' : undefined}
+              data-track-name={canEditTicketDetails ? 'StartEditDescription' : undefined}
             >
               {!resolveTicketDescription(ticket) ? (
-                <p className='text-sm text-muted-foreground italic'>Add description</p>
+                canEditTicketDetails ? (
+                  <p className='text-sm text-muted-foreground italic'>Add description</p>
+                ) : null
               ) : (
                 <>
                   <div className='relative'>
