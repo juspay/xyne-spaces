@@ -1197,8 +1197,11 @@ export async function prepareRun(
 
     // Apply the per-run provider/model pin. "spaces" rides claw's per-agent
     // modelSettings override (agent-model-settings.ts); other providers pin
-    // their config's model. providerOrder is cleared so a quota fallback can't
-    // silently swap providers mid-run.
+    // their config's model. providerOrder is cleared AND the terminal spaces
+    // fallback is disabled so a quota/auth/transient failure can't silently
+    // swap the user's explicitly picked model for the platform model mid-run
+    // (XYNE-66320) — claw appends "spaces" to every non-spaces chain unless
+    // agentConfig.providerFallbackToSpaces === false (routes/run.ts).
     if (runOverride?.provider) {
       if (runOverride.provider === "spaces") {
         effectiveProvider = "spaces";
@@ -1252,6 +1255,7 @@ export async function prepareRun(
             effectiveProviderConfigs = Object.fromEntries(nextConfigs);
           }
           effectiveProviderOrder = [];
+          mergedAgentConfig = { ...mergedAgentConfig, providerFallbackToSpaces: false };
         } else if (runOverride.provider === "litellm" && runOverride.model?.trim()) {
           // No agent litellm credential — the pick came off the platform
           // allowed-model list (litellm-models' claw fallback). Apply it as a

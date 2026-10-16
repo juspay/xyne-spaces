@@ -243,6 +243,9 @@ export interface FinalizeRunInput {
    *  deterministically once branching introduces multiple assistant siblings. */
   chatMessageId?: string | null;
   fastMode?: boolean | null;
+  /** Shallow-merged into the existing `metadata` JSON (never replaces it —
+   *  start() may already have stored e.g. external callback config). */
+  metadataPatch?: Record<string, unknown>;
 }
 
 /**
@@ -497,8 +500,12 @@ export const agentRunRepository = {
     // "running" placeholders (see below).
     const existingRow = await tx.agentRun.findUnique({
       where: { sessionId },
-      select: { toolInvocations: true, userId: true, agentSlug: true },
+      select: { toolInvocations: true, userId: true, agentSlug: true, metadata: true },
     });
+    const existingMetadata =
+      existingRow?.metadata && typeof existingRow.metadata === "object" && !Array.isArray(existingRow.metadata)
+        ? (existingRow.metadata as Record<string, unknown>)
+        : {};
     const existing = Array.isArray(existingRow?.toolInvocations)
       ? (existingRow!.toolInvocations as Array<Record<string, unknown>>)
       : [];
@@ -567,6 +574,9 @@ export const agentRunRepository = {
           lastRetryReason: input.latency.lastRetryReason ?? null,
         } : {}),
         ...(input.chatMessageId !== undefined ? { chatMessageId: input.chatMessageId } : {}),
+        ...(input.metadataPatch
+          ? { metadata: { ...existingMetadata, ...input.metadataPatch } as Prisma.InputJsonValue }
+          : {}),
         completedAt: new Date(),
         currentToolLabel: null,
       },
@@ -873,6 +883,25 @@ export const agentRunRepository = {
         toolInvocations: true,
       },
     }),
+
+  /**
+   * Narrow "who answered" projection for the chat /messages route. Kept OUT of
+   * listByUser / listByConversation on purpose: `metadata` can hold external
+   * callback config (encrypted secret), and those list rows are returned to
+   * clients by other routes. This read never leaves the server — the caller
+   * maps it through lib/run-answered-by.ts, which only reads
+   * `metadata.modelFallback`. Callers MUST pass sessionIds that already came
+   * out of an ACL-scoped list.
+   */
+  listAnsweredBy: async (
+    sessionIds: string[],
+  ): Promise<Array<{ sessionId: string; provider: string | null; model: string | null; metadata: Prisma.JsonValue }>> => {
+    if (sessionIds.length === 0) return [];
+    return prisma.agentRun.findMany({
+      where: { sessionId: { in: sessionIds } },
+      select: { sessionId: true, provider: true, model: true, metadata: true },
+    });
+  },
 
   findBySessionId: (sessionId: string) =>
     prisma.agentRun.findUnique({ where: { sessionId } }),

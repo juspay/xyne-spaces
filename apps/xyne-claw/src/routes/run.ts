@@ -82,6 +82,7 @@ import {
 } from "../verified-response.js";
 import {
   parseModelSettings,
+  platformModelOverride,
   parseOutputFormat,
   buildSubmitResultTool,
   buildSubmitResultInstruction,
@@ -3250,6 +3251,14 @@ export async function processTask(
     // repos read-only). A rare automation that genuinely needs to write/run can
     // opt out with agentConfig.allowWriteInReadOnlyJob.
     const isReadOnlyJob = eventType === "automation" || eventType === "scheduled" || isScheduledRun;
+    // The model a platform ("spaces") attempt actually runs — same precedence
+    // runTask applies (agent.ts → platformModelOverride, fed the same
+    // modelSettings + automationRun: isReadOnlyJob). Used everywhere this run
+    // REPORTS a spaces model so a pinned / per-agent spaces model is no longer
+    // misreported as LITELLM.model (XYNE-66321).
+    const spacesRunModel =
+      platformModelOverride(modelSettings, isReadOnlyJob, LITELLM.automationModel) ?? LITELLM.model;
+    if (callbackProvider === "spaces") callbackModel = spacesRunModel;
     const allowWriteInReadOnlyJob = agentConfig?.["allowWriteInReadOnlyJob"] === true;
     // forceReadOnlySandbox: per-agent opt-in to the read-only sbx-git path for ALL
     // runs (reviewer agents). It wins over allowWriteInReadOnlyJob — explicit
@@ -4277,7 +4286,7 @@ export async function processTask(
           if (to === "spaces" && from !== "spaces") {
             const wantedAttempt = attemptByProvider.get(from);
             if (wantedAttempt?.config) {
-              const usingModel = LITELLM.model;
+              const usingModel = spacesRunModel;
               clog.warn(
                 `[agent] provider-fallthrough session=${sessionId} wanted=${from}/${wantedAttempt.config.model} using=spaces/${usingModel} reason=${lastFallbackUnderlying}`,
               );
@@ -4499,7 +4508,14 @@ export async function processTask(
     // (column left unset) rather than a model that never ran.
     const completedModel =
       completedAttempt?.config?.model ??
-      (completedProvider === "spaces" ? LITELLM.model : undefined);
+      (completedProvider === "spaces" ? spacesRunModel : undefined);
+    // What the run was ASKED to use (the primary attempt). Sent alongside the
+    // completed provider/model so surfaces can say "answered by X (fell back
+    // from Y)" instead of implying the requested model answered (XYNE-66319).
+    const requestedProvider = runtimeProvider ?? "spaces";
+    const requestedModel =
+      providerConfig?.model ?? (requestedProvider === "spaces" ? spacesRunModel : undefined);
+    const fellBack = fellBackProvider !== null;
     callbackProvider = completedProvider;
     callbackModel = completedModel;
 
@@ -4851,6 +4867,12 @@ export async function processTask(
       followUpsPending: followUpOutcome === "parallel_pending",
       provider: completedProvider,
       model: completedModel,
+      // Provider-fallback provenance (XYNE-66319). Always sent so claw-auth
+      // can tell "first attempt answered" apart from an older pod that does
+      // not report it (field absent).
+      fellBack,
+      requestedProvider,
+      ...(requestedModel ? { requestedModel } : {}),
     });
     if (followUpOutcome === "parallel_pending" && followUpPromise && lateFollowUpDeliveryUrl) {
       // Attached only after the main result callback above has been sent, so

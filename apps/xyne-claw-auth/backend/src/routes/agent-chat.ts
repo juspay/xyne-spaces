@@ -91,6 +91,7 @@ import { resolveSdlcRepositoryForUser } from "../lib/sdlc-repository-context.js"
 import { attachArtifactToApp, type ArtifactAppTarget } from "../lib/artifact-app-session.js";
 import { createLogger } from "../logger.js";
 import { safeFetch } from "../lib/safe-fetch.js";
+import { answeredByFromRun, type AnsweredBy } from "../lib/run-answered-by.js";
 const log = createLogger("agent-chat");
 
 const XYNE_CHAT_SURFACE_PRIMER = [
@@ -3139,6 +3140,24 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
     const ratingByMsgId: Record<string, { rating: "up" | "down" | null; comment: string | null }> = {};
     // assistantMsgId → how long its run took, start to finish ("Worked for 2m 31s").
     const durationByMsgId: Record<string, number> = {};
+    // assistantMsgId → which provider/model actually answered (+ fallback
+    // provenance). Per reply, so multi-agent threads and fallbacks show the
+    // real model instead of the composer's pick (XYNE-66319 / XYNE-66326).
+    const answeredByMsgId: Record<string, AnsweredBy> = {};
+    const answeredBySession = new Map(
+      (await agentRunRepository
+        .listAnsweredBy(agentRuns.map((r) => r.sessionId).filter((id): id is string => !!id))
+        .catch((err: unknown) => {
+          // Cosmetic only — never fail the message list over the model label.
+          log.warn("[agent-chat] answeredBy lookup failed:", err instanceof Error ? err.message : String(err));
+          return [];
+        })
+      ).map((r) => [r.sessionId, r] as const),
+    );
+    const answeredByFor = (sessionId: string | null | undefined): AnsweredBy | undefined => {
+      const row = sessionId ? answeredBySession.get(sessionId) : undefined;
+      return row ? answeredByFromRun(row) : undefined;
+    };
     const linkedAssistantIds = new Set<string>();
     for (const run of agentRuns) {
       const linkedId = (run as { chatMessageId?: string | null }).chatMessageId;
@@ -3146,6 +3165,8 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
       if (run.sessionId) runByMsgId[linkedId] = run.sessionId;
       const linkedDuration = runDurationMs(run);
       if (linkedDuration !== null) durationByMsgId[linkedId] = linkedDuration;
+      const linkedAnsweredBy = answeredByFor(run.sessionId);
+      if (linkedAnsweredBy) answeredByMsgId[linkedId] = linkedAnsweredBy;
       if (run.rating) ratingByMsgId[linkedId] = { rating: run.rating as "up" | "down", comment: run.ratingComment ?? null };
       const invocations = run.toolInvocations;
       if (Array.isArray(invocations) && (invocations as unknown[]).length > 0) {
@@ -3182,6 +3203,8 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
       if (run.rating) ratingByMsgId[msg.id] = { rating: run.rating as "up" | "down", comment: run.ratingComment ?? null };
       const pairedDuration = runDurationMs(run);
       if (pairedDuration !== null) durationByMsgId[msg.id] = pairedDuration;
+      const pairedAnsweredBy = answeredByFor(run.sessionId);
+      if (pairedAnsweredBy) answeredByMsgId[msg.id] = pairedAnsweredBy;
       const invocations = run.toolInvocations;
       if (Array.isArray(invocations) && (invocations as unknown[]).length > 0) {
         const followUps = extractFollowUpSuggestionsFromInvocations(invocations);
@@ -3215,6 +3238,7 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
           ? { followUpSuggestions: followUpsByMsgId[message.id] }
           : {}),
         ...(durationByMsgId[message.id] !== undefined ? { durationMs: durationByMsgId[message.id] } : {}),
+        ...(answeredByMsgId[message.id] ? { answeredBy: answeredByMsgId[message.id] } : {}),
       })),
       ...(Object.keys(invocationsByMsgId).length > 0 && { invocationsByMsgId }),
       ...(Object.keys(icons).length > 0 && { icons }),
