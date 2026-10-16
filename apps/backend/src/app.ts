@@ -108,7 +108,10 @@ import sdlcRepoCredentialBackfillRoutes from '@/routes/sdlcRepoCredentialBackfil
 import searchMetricsRoutes from '@/routes/searchMetrics';
 import searchFeedbackRoutes from '@/routes/searchFeedback';
 import knowledgeRoutes from '@/routes/knowledge';
-import vespaSearchRoutes, { relatedContextRouter } from '@/routes/vespaSearch';
+import vespaSearchRoutes, {
+  discussionTitleRouter,
+  relatedContextRouter,
+} from '@/routes/vespaSearch';
 import assistantRouteRoutes from '@/routes/assistantRoute';
 import { dashboardClawRouter } from '@/routes/dashboardClaw';
 import summarizeRoutes from '@/routes/summarize';
@@ -839,6 +842,11 @@ export class App {
     // Vespa search routes (auth required)
     // Ahead of the general mount, so a lookup is answered here and nothing else runs.
     this.app.use('/api/vespaSearch/related', authMiddleware.authenticate, relatedContextRouter);
+    this.app.use(
+      '/api/vespaSearch/discussion-title',
+      authMiddleware.authenticate,
+      discussionTitleRouter
+    );
     this.app.use('/api/vespaSearch', authMiddleware.authenticate, vespaSearchRoutes);
 
     this.app.use('/api/assistant/route', authMiddleware.authenticate, assistantRouteRoutes);
