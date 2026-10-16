@@ -16,7 +16,7 @@ const QUESTIONS: Record<string, XorQuestion> = {
 };
 
 const ENV_KEYS = [
-  "XOR_URL", "XOR_API_KEY", "XOR_MODEL", "XOR_BACKEND",
+  "XOR_URL", "XOR_API_KEY", "XOR_MODEL", "XOR_BACKEND", "XOR_VISION_URL", "XOR_VISION_MODEL",
   "OUR_JEV_URL", "OUR_JEV_API_KEY", "OUR_NORMAL_JEV_URL", "OUR_NORMAL_JEV_API_KEY", "OUR_NORMAL_JEV_MODEL",
   "JUDGE_LLM_URL", "JUDGE_LLM_API_KEY", "JUDGE_LLM_MODEL", "JUDGE_LLM_TIMEOUT_MS", "JUDGE_BACKEND",
   "LITELLM_URL", "LITELLM_API_KEY", "LITELLM_AUTOMATION_API_KEY", "LITELLM_MODEL", "LITELLM_FAST_MODEL",
@@ -252,14 +252,27 @@ describe("llm judge reply parsing", () => {
 describe("xor images", () => {
   const PNG = "data:image/png;base64,iVBORw0KGgo=";
 
-  it("sends images alongside the state", async () => {
+  it("sends images to the decisions endpoint on the vision model, text stays on systemone", async () => {
     enable();
     fetchMock.mockResolvedValue(systemOneReply({ a: 0.9, b: 0.1 }));
-    const answers = await xor({ state: "screenshot", questions: QUESTIONS, purpose: "ui-tester", images: [PNG, PNG] });
+    const answers = await xor({ state: "screenshot", questions: QUESTIONS, purpose: "ui-tester", images: [PNG] });
     expect(answers?.["a"]?.noul).toBe(0.9);
+    expect(fetchMock.mock.calls[0]![0]).toBe("https://ourjev.internal/v1/decisions");
     const body = JSON.parse(fetchMock.mock.calls[0]![1].body as string);
-    expect(body.images).toEqual([PNG, PNG]);
-    expect(body.state).toBe("screenshot");
+    expect(body).toMatchObject({ model: "xor-omni", state: "screenshot", images: [PNG] });
+    await xor({ state: "text", questions: QUESTIONS, purpose: "plan-gate" });
+    expect(fetchMock.mock.calls[1]![0]).toBe("https://ourjev.internal/v1/systemone");
+    expect(JSON.parse(fetchMock.mock.calls[1]![1].body as string).model).toBe("jev-latest");
+  });
+
+  it("lets XOR_VISION_URL / XOR_VISION_MODEL override the image route", async () => {
+    enable();
+    process.env["XOR_VISION_URL"] = "https://vision.internal/v1/decisions";
+    process.env["XOR_VISION_MODEL"] = "xor-omni-next";
+    fetchMock.mockResolvedValue(systemOneReply({ a: 0.9, b: 0.1 }));
+    await xor({ state: "s", questions: QUESTIONS, purpose: "p", images: [PNG] });
+    expect(fetchMock.mock.calls[0]![0]).toBe("https://vision.internal/v1/decisions");
+    expect(JSON.parse(fetchMock.mock.calls[0]![1].body as string).model).toBe("xor-omni-next");
   });
 
   it("omits the images field when there are none", async () => {

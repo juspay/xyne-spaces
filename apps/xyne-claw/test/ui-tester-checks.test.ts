@@ -27,6 +27,18 @@ describe("judgeVariation", () => {
     expect(v.findings.map((f) => f.message).join("\n")).toMatch(/past the right edge of a 390px viewport: Dashboard, Refresh[\s\S]*NaN[\s\S]*x3/);
   });
 
+  it("reads yes/no (noul) answers for cut_off", () => {
+    const base = answers();
+    const fine = { ...base, cut_off: { type: "noul", noul: 0.14 } };
+    const cut = { ...base, cut_off: { type: "noul", noul: 0.95 } };
+    const unsure = { ...base, cut_off: { type: "noul", noul: 0.6 } };
+    expect(STANDARD_QUESTIONS["cut_off"]!.type).toBe("noul");
+    expect(judgeVariation(result(), fine).verdict).toBe("pass");
+    expect(judgeVariation(result(), cut).verdict).toBe("fail");
+    expect(judgeVariation(result(), unsure).verdict).toBe("unsure");
+    expect(judgeVariation(result(), cut).visual["cut_off"]).toEqual({ choice: "yes", confidence: 0.9 });
+  });
+
   it("treats low-confidence visual problems as unsure, confident ones as failures", () => {
     expect(judgeVariation(result(), answers({ cut_off: ["yes", 0.64] })).verdict).toBe("unsure");
     expect(judgeVariation(result(), answers({ cut_off: ["yes", 0.76] })).verdict).toBe("fail");
