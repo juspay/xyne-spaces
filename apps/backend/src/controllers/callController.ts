@@ -531,7 +531,7 @@ export class CallController {
         stage = 'livekit_room_creation';
         await livekitService.createRoom({
           name: callExternalId,
-          maxParticipants: 100,
+          maxParticipants: 500,
           emptyTimeout: 120,
           metadata: roomMetadata,
         });
@@ -797,7 +797,7 @@ export class CallController {
       stage = 'livekit_room_creation';
       await livekitService.createRoom({
         name: callExternalId,
-        maxParticipants: 100,
+        maxParticipants: 500,
         emptyTimeout: 120,
         metadata: roomMetadata,
       });
@@ -1038,7 +1038,7 @@ export class CallController {
         // Create LiveKit room
         await livekitService.createRoom({
           name: callId,
-          maxParticipants: 100,
+          maxParticipants: 500,
           emptyTimeout: 120,
           metadata: roomMetadata,
         });

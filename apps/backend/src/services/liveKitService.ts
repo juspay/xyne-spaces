@@ -218,12 +218,12 @@ export class LiveKitService {
     try {
       await this.roomService.createRoom({
         name: options.name,
-        maxParticipants: options.maxParticipants || 100,
+        maxParticipants: options.maxParticipants || 500,
         emptyTimeout: options.emptyTimeout || 120,
         metadata: options.metadata,
       });
 
-      logger.info(`[${options.name}] livekit_room_created | max_participants=${options.maxParticipants || 100}, empty_timeout=${options.emptyTimeout || 120}`);
+      logger.info(`[${options.name}] livekit_room_created | max_participants=${options.maxParticipants || 500}, empty_timeout=${options.emptyTimeout || 120}`);
     } catch (error) {
       logger.error(`[${options.name}] livekit_room_creation_failed | error=${error}`);
       throw error;

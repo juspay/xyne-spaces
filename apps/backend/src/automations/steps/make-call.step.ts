@@ -249,7 +249,7 @@ export class MakeCallStep extends BaseActionStep<typeof MakeCallConfigSchema, Ma
     });
 
     const effectiveMaxParticipants = Math.max(
-      config.maxParticipants ?? 100,
+      config.maxParticipants ?? 500,
       allInvitedUserIds.length + 1
     );
 
