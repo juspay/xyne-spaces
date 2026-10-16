@@ -39,6 +39,13 @@ import { channelService } from '../services/Chat/channelService';
 
 interface InitialStateLoaderProps {
   children: ReactNode;
+  /**
+   * Render children right away instead of behind the app loader, with the
+   * workspace data (users, channels, permissions) filling in as it arrives.
+   * For the desktop call window, whose call UI needs none of it to start and
+   * reads it reactively. The providers below do not depend on that data.
+   */
+  renderBeforeLoaded?: boolean;
 }
 
 interface PermissionsApiResponse {
@@ -78,7 +85,10 @@ const areQueriesCompleted = (obj: QueryDetails[]): boolean => {
   return obj.every(isQueryCompleted);
 };
 
-const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): ReactNode => {
+const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({
+  children,
+  renderBeforeLoaded = false,
+}): ReactNode => {
   const isRefreshing = useRef(false);
   const persistenceSetup = useRef(false);
 
@@ -482,7 +492,7 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
     permissionsQuery.data?.success === true &&
     permissionsHydrated;
 
-  if (areAllQueriesCompleted) {
+  if (areAllQueriesCompleted || renderBeforeLoaded) {
     return (
       <SharedAuthProvider value={context}>
         <HttpClientProvider client={axiosHttpClient}>
@@ -492,7 +502,7 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
                 channelService.getVespaParticipants(id)
               }
             >
-              <DeferredLoader />
+              {areAllQueriesCompleted && <DeferredLoader />}
               {children}
             </ChannelServiceProvider>
           </AffinityServiceProvider>

@@ -660,6 +660,7 @@ const envSchema = Joi.object({
   PYROSCOPE_SERVER_ADDRESS: Joi.string().allow('').default(''),
   PYROSCOPE_FLUSH_INTERVAL_MS: Joi.number().integer().min(1000).default(60000),
 
+  DEEP_RESEARCH_BASE_URL: Joi.string().allow('').default(''),
 }).unknown();
 
 const { error, value: envVars } = envSchema.validate(process.env);
@@ -1407,4 +1408,5 @@ export const config = {
     serverAddress: envVars.PYROSCOPE_SERVER_ADDRESS as string,
     flushIntervalMs: envVars.PYROSCOPE_FLUSH_INTERVAL_MS as number,
   },
+  deepResearchBaseUrl: envVars.DEEP_RESEARCH_BASE_URL as string,
 };

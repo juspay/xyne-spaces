@@ -156,6 +156,8 @@ module "network" {
   nat_gateway_enabled           = var.nat_gateway_enabled
   nat_public_ip_prefix_length   = var.nat_public_ip_prefix_length
   aks_inbound_ports             = var.aks_inbound_ports
+  aks_inbound_public            = local.ingress_gateway_mode
+  aks_inbound_cidrs             = var.aks_inbound_cidrs
   livekit_port_range_start      = var.livekit_port_range_start
   livekit_port_range_end        = var.livekit_port_range_end
   tags                          = var.tags

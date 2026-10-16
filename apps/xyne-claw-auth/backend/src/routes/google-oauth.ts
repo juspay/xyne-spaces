@@ -22,6 +22,10 @@ const { router, callbackRouter, provider } = createClassicOAuthProvider({
     "https://www.googleapis.com/auth/forms.responses.readonly",
     "https://www.googleapis.com/auth/drive.file",
     "https://www.googleapis.com/auth/drive.readonly",
+    // Edit metadata (description, labels) on any file, not just app-created ones.
+    "https://www.googleapis.com/auth/drive.metadata",
+    // Read Drive label definitions (Drive Labels API).
+    "https://www.googleapis.com/auth/drive.labels.readonly",
   ].join(" "),
   extraAuthParams: { access_type: "offline", prompt: "consent" },
   rotatesRefreshToken: false,

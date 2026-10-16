@@ -167,6 +167,14 @@ export const SDLC_TRACK_FLAT_RELATION = "TRACK_ITEM_SECONDARY";
 export const SDLC_FOLDER_FLAT_RELATION = "FOLDER_ITEM_SECONDARY";
 
 /**
+ * A REPOSITORY -> BOARD edge scoped to a hub: that hub releases the repository
+ * through that main release board. Written only by project.saveReleaseBoardConfig.
+ * Partial unique indexes (raw migration) allow one per hub and repository, and one
+ * per board.
+ */
+export const SDLC_RELEASE_CONFIG_RELATION = "RELEASE_CONFIG";
+
+/**
  * Edges no user may write or delete through the generic link API. Derived or
  * structural: the app maintains them with the thing they describe.
  */
@@ -182,6 +190,7 @@ export const SDLC_STRUCTURAL_RELATIONS = [
   SDLC_AGENT_PENDING_RELATION,
   SDLC_HUB_SKILL_RELATION,
   SDLC_HUB_PIN_RELATION,
+  SDLC_RELEASE_CONFIG_RELATION,
 ] as const;
 
 /**
@@ -202,6 +211,7 @@ export const SDLC_HUB_GRAPH_EXCLUDED_RELATIONS = [
   SDLC_AGENT_PENDING_RELATION,
   SDLC_HUB_SKILL_RELATION,
   SDLC_HUB_PIN_RELATION,
+  SDLC_RELEASE_CONFIG_RELATION,
 ] as const;
 
 /** Relation types a user may create or delete through the generic link API. */

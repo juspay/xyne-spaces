@@ -25,6 +25,7 @@ import { getApiErrorMessage } from '../../../utils/apiError';
 import { SearchChannel } from '../../ui/SearchChannel/SearchChannel';
 import { ChannelScopeType } from '@xyne/shared';
 import { useReleaseConfigForm } from './useReleaseConfigForm';
+import { repoWebUrl } from '../repoVisual';
 import {
   ReleaseTrackingMode,
   type ApplicationConfig,
@@ -590,7 +591,10 @@ function buildExistingConfig(
     readonly id: string;
     readonly boardId: string;
     readonly name: string;
-    readonly repoUrl: string;
+    readonly repo?:
+      | { readonly url: string; readonly canonicalUrl?: string | null }
+      | null
+      | undefined;
     readonly regex: string;
     readonly ownerTeam: string;
     readonly channelId?: string | null;
@@ -612,7 +616,7 @@ function buildExistingConfig(
       boardId: application.boardId,
       boardName: boardNamesById[application.boardId] ?? '',
       name: application.name,
-      repoUrl: application.repoUrl,
+      repoUrl: repoWebUrl(application.repo) ?? '',
       regex: application.regex,
       ownerTeam: application.ownerTeam,
       envPaths: jsonStringArray(application.envPaths).join(', '),
@@ -689,33 +693,17 @@ const ReleaseConfigWizardForm = ({
     setConnectionTest(null);
   }, [form.sharedRepoUrl]);
 
-  const [isSuggesting, setIsSuggesting] = useState(false);
+  const isSuggesting = false;
   const [suggestions, setSuggestions] = useState<SuggestedService[] | null>(null);
   const [suggestChecked, setSuggestChecked] = useState<boolean[]>([]);
   const [suggestMode, setSuggestMode] = useState<'add' | 'replace'>('add');
 
-  const handleSuggestServices = async (): Promise<void> => {
-    if (!form.sharedRepoUrl.trim()) return;
-    setIsSuggesting(true);
-    try {
-      const response = await apiInstance.post<{ services?: SuggestedService[]; message?: string }>(
-        '/commits/analyze/suggest-services',
-        { repoUrl: form.sharedRepoUrl.trim(), projectId },
-      );
-      const services = response.data.services ?? [];
-      if (services.length === 0) {
-        toast.info(response.data.message ?? 'No services could be suggested for this repository.');
-        return;
-      }
-      setSuggestions(services);
-      setSuggestChecked(services.map(() => true));
-      // Default to replacing when there's nothing to preserve.
-      setSuggestMode(form.applications.some(app => app.name.trim()) ? 'add' : 'replace');
-    } catch (err) {
-      toast.error(getApiErrorMessage(err, 'Failed to suggest services'));
-    } finally {
-      setIsSuggesting(false);
-    }
+  // Suggestions read a registered repository (repoId), which only SDLC hubs have.
+  const handleSuggestServices = (): Promise<void> => {
+    toast.info(
+      "Service suggestions have moved to SDLC hubs. Set this repository up from its hub's Releases tab.",
+    );
+    return Promise.resolve();
   };
 
   const applyPickedSuggestions = (): void => {
