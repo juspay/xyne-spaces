@@ -8,7 +8,6 @@ import {
   sdlcHubWikiFolderId,
   sdlcWikiFolderId,
 } from '@xyne/shared';
-import type { PrismaClient } from '@prisma/client';
 import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import {
@@ -51,7 +50,7 @@ const ms = (d: Date | null | undefined): number => (d ? d.getTime() : 0);
 
 // Vespa document ids are id:<namespace>:<schema>::<id>, the namespace being the deployment's
 // (VESPA_NAMESPACE), as in the mapper's getRef.
-export const sdlcContainerRef = (containerId: string): string =>
+const sdlcContainerRef = (containerId: string): string =>
   `id:${NAMESPACE}:${sdlcContainerSchema}::${containerId}`;
 const repositoryRef = (repoId: string): string =>
   `id:${NAMESPACE}:${sdlcRepositorySchema}::${repoId}`;
@@ -101,7 +100,7 @@ interface Position {
  * One hub, read only as far as the entries asked for need. Short-lived: made for a job (or a
  * backfill pass) and dropped after it.
  */
-function sdlcHub(hubId: string, prisma: PrismaClient = db) {
+function sdlcHub(hubId: string) {
   const wikiRoot = sdlcWikiFolderId(hubId);
   const hubWiki = sdlcHubWikiFolderId(hubId);
   const knowledgeRoot = sdlcHubKnowledgeFolderId(hubId);
@@ -109,7 +108,7 @@ function sdlcHub(hubId: string, prisma: PrismaClient = db) {
 
   /** The hub's channel; null when it is not an SDLC hub. */
   const hubChannel = once(async (_: true) => {
-    const channel = await prisma.channel.findUnique({ where: { id: hubId }, select: { type: true, projectId: true } });
+    const channel = await db.channel.findUnique({ where: { id: hubId }, select: { type: true, projectId: true } });
     return channel?.type === ChannelType.SDLC ? channel : null;
   });
 
@@ -118,7 +117,7 @@ function sdlcHub(hubId: string, prisma: PrismaClient = db) {
    * wins, as when a hub's edges are read in the order they were written.
    */
   const placementOf = once(async (id: string): Promise<Placement> => {
-    const links = await prisma.sdlcEntityLink.findMany({
+    const links = await db.sdlcEntityLink.findMany({
       where: { channelId: hubId, targetId: id, relationType: { in: PLACING_RELATIONS } },
       orderBy: OLDEST_FIRST,
       select: { sourceType: true, sourceId: true, targetType: true, relationType: true },
@@ -161,8 +160,8 @@ function sdlcHub(hubId: string, prisma: PrismaClient = db) {
     return [];
   });
 
-  const trackRow = once((id: string) => prisma.sdlcTrack.findUnique({ where: { id } }));
-  const folderRow = once((id: string) => prisma.sdlcFolder.findUnique({ where: { id } }));
+  const trackRow = once((id: string) => db.sdlcTrack.findUnique({ where: { id } }));
+  const folderRow = once((id: string) => db.sdlcFolder.findUnique({ where: { id } }));
 
   const isTrack = async (id: string): Promise<boolean> => id !== hubId && (await placementOf(id)).isTrack;
 
@@ -180,7 +179,7 @@ function sdlcHub(hubId: string, prisma: PrismaClient = db) {
   };
 
   const isAttached = once(async (repoId: string): Promise<boolean> => {
-    const membership = await prisma.sdlcEntityLink.findFirst({
+    const membership = await db.sdlcEntityLink.findFirst({
       where: { channelId: hubId, sourceType: 'CHANNEL', targetType: 'REPOSITORY', targetId: repoId, relationType: SDLC_MEMBERSHIP_RELATION },
       select: { id: true },
     });
@@ -279,7 +278,7 @@ function sdlcHub(hubId: string, prisma: PrismaClient = db) {
 
   /** A canvas's own SDLC fields (no related documents yet); null when it is not an SDLC document of the hub. */
   const canvas = once(async (id: string): Promise<SdlcFileFields | null> => {
-    const row = await prisma.canvas.findFirst({
+    const row = await db.canvas.findFirst({
       where: { id, channelId: hubId, sdlcArtifact: { isNot: null } },
       select: { folderId: true, sdlcArtifact: { select: { artifactStatus: true } } },
     });
@@ -290,7 +289,7 @@ function sdlcHub(hubId: string, prisma: PrismaClient = db) {
 
     // Its type is its canvas folder ("PRDs", "Tech Docs").
     const type = row.folderId
-      ? await prisma.canvasFolder.findFirst({ where: { id: row.folderId, channelId: hubId }, select: { name: true } })
+      ? await db.canvasFolder.findFirst({ where: { id: row.folderId, channelId: hubId }, select: { name: true } })
       : null;
 
     return {
@@ -303,7 +302,7 @@ function sdlcHub(hubId: string, prisma: PrismaClient = db) {
 
   /** An upload's own SDLC fields; null when it is not filed in the hub's tracks. */
   const upload = once(async (id: string): Promise<SdlcFileFields | null> => {
-    const filed = await prisma.sdlcEntityLink.findFirst({
+    const filed = await db.sdlcEntityLink.findFirst({
       where: { channelId: hubId, relationType: SDLC_CONTAINMENT_RELATION, targetType: 'ATTACHMENT', targetId: id },
       select: { id: true },
     });
@@ -334,7 +333,7 @@ function sdlcHub(hubId: string, prisma: PrismaClient = db) {
     if (!own) return null;
 
     // 2. Its CONTEXT edges, oldest first; the other end counts when it is a document of the hub.
-    const links = await prisma.sdlcEntityLink.findMany({
+    const links = await db.sdlcEntityLink.findMany({
       where: { channelId: hubId, relationType: 'CONTEXT', OR: [{ sourceType: type, sourceId: id }, { targetType: type, targetId: id }] },
       orderBy: OLDEST_FIRST,
       select: { sourceType: true, sourceId: true, targetType: true, targetId: true },
@@ -362,7 +361,7 @@ function sdlcHub(hubId: string, prisma: PrismaClient = db) {
    */
   const ticket = async (ticketId: string): Promise<SdlcTicketFields | null> => {
     // 1. Its links, oldest first.
-    const links = await prisma.sdlcEntityLink.findMany({
+    const links = await db.sdlcEntityLink.findMany({
       where: {
         channelId: hubId,
         OR: [
