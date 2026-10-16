@@ -1,3 +1,20 @@
+## [1.504.0](https://github.com/juspay/xyne-spaces/compare/v1.503.0...v1.504.0) (2026-10-16)
+
+
+### Features
+
+* sandbox-repo-setup returns after checkout, backgrounds prebake/service waits ([#3162](https://github.com/juspay/xyne-spaces/issues/3162)) ([9f2f957](https://github.com/juspay/xyne-spaces/commit/9f2f957efc0c681a0690408d568afa08dbf3a5c1))
+
+
+### Bug Fixes
+
+* move xor calls to /v1/decisions (xor-latest text, xor-omni images) ([#3163](https://github.com/juspay/xyne-spaces/issues/3163)) ([6c63829](https://github.com/juspay/xyne-spaces/commit/6c63829e909914c7b3d36a5efa2a3250d9ec00ac))
+
+
+### Performance Improvements
+
+* start streaming sooner by overlapping run set-up and caching tool lists ([#3161](https://github.com/juspay/xyne-spaces/issues/3161)) ([72c2631](https://github.com/juspay/xyne-spaces/commit/72c26318de40ce1ef7faa4ec0581d0fc218c8705))
+
 ## [1.503.0](https://github.com/juspay/xyne-spaces/compare/v1.502.0...v1.503.0) (2026-10-16)
 
 
