@@ -4,12 +4,12 @@ import { useRouter } from 'expo-router';
 import {
   Bookmark,
   CircleAlert,
+  CircleQuestionMark,
   FileText,
   LifeBuoy,
   MessagesSquare,
   Mic,
   Presentation,
-  Sparkles,
   Sunrise,
   type LucideProps,
 } from 'lucide-react-native';
@@ -85,18 +85,6 @@ type MoreRowDefinition = {
  * these hides the tab bar and the target screen draws its own back button.
  */
 const MORE_ROWS: readonly MoreRowDefinition[] = [
-  // Not released yet: only development builds can open it.
-  ...(__DEV__
-    ? [
-        {
-          id: 'xyne-ai',
-          icon: Sparkles,
-          label: 'Xyne AI',
-          description: 'Ask anything about your workspace',
-          navigate: (router: ReturnType<typeof useRouter>): void => router.push('/xyne-ai'),
-        },
-      ]
-    : []),
   {
     id: 'morning-brief',
     icon: Sunrise,
@@ -145,6 +133,13 @@ const MORE_ROWS: readonly MoreRowDefinition[] = [
     label: 'Xyne Desks',
     description: 'Browse your desks and tickets',
     navigate: router => router.push('/xyne-desks'),
+  },
+  {
+    id: 'user-guide',
+    icon: CircleQuestionMark,
+    label: 'Help',
+    description: 'Short guides for using the app',
+    navigate: router => router.push('/(protected)/guide'),
   },
   {
     id: 'report-issue',

@@ -1,5 +1,6 @@
 import {
   createContext,
+  type ComponentType,
   memo,
   useCallback,
   useContext,
@@ -29,10 +30,11 @@ import { useAuth } from '@/src/contexts/AuthContext';
 import { useHeaderHeight } from '@/src/hooks/useHeaderHeight';
 import { useWorkspaces } from '@/src/hooks/useWorkspaces';
 import { cn } from '@/src/utils/cn';
-import { useRouter, type Href } from 'expo-router';
-import { CircleQuestionMark, House, RefreshCw, type LucideIcon } from 'lucide-react-native';
+import { useRouter } from 'expo-router';
+import { House, RefreshCw } from 'lucide-react-native';
 import { useCSSVariable } from 'uniwind';
 
+import { XyneAIStarIcon } from '@/src/components/icons';
 import { ConnectionStatusSheet } from '@/src/components/connection-status-sheet';
 import { describeConnectionState } from '@/src/components/connection-status-sheet/connection-status-copy';
 import { tabRoute } from '@/src/navigation/routes';
@@ -169,11 +171,10 @@ const WorkspaceSwitcher = memo(function AppHeaderWorkspaceSwitcher() {
   );
 });
 
-const USER_GUIDE_HREF = '/(protected)/guide' as Href;
 const HOME_HREF = tabRoute('dms');
 
 type RoundButtonProps = {
-  icon: LucideIcon;
+  icon: ComponentType<{ size?: number; color?: string; strokeWidth?: number }>;
   accessibilityLabel: string;
   accessibilityHint: string;
   onPress: () => void;
@@ -214,18 +215,15 @@ const RoundButton = ({
   );
 };
 
-/**
- * Help entry point, placed to the left of the avatar on every screen that
- * shows one. Opens the in-app User Guide hub.
- */
-const UserGuide = memo(function AppHeaderUserGuide() {
+/** Opens Xyne AI, like the dashboard's Ask AI button. */
+const XyneAI = memo(function AppHeaderXyneAI() {
   const router = useRouter();
   return (
     <RoundButton
-      icon={CircleQuestionMark}
-      accessibilityLabel='User guide'
-      accessibilityHint='Opens short guides for the app'
-      onPress={() => router.push(USER_GUIDE_HREF)}
+      icon={XyneAIStarIcon}
+      accessibilityLabel='Ask AI'
+      accessibilityHint='Ask anything about your workspace'
+      onPress={() => router.push('/xyne-ai')}
     />
   );
 });
@@ -342,7 +340,7 @@ export const AppHeader = Object.assign(AppHeaderRoot, {
   Host: AppHeaderHost,
   Title,
   UserProfile,
-  UserGuide,
+  XyneAI,
   Home,
   WorkspaceSwitcher,
   ConnectionStatus,

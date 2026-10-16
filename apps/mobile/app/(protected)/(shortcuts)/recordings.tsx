@@ -155,7 +155,7 @@ const RecordingsScreen = (): ReactElement => {
             <AppHeader.Title className='text-foreground'>Recordings</AppHeader.Title>
           </View>
           <View className='flex-row items-center gap-4'>
-            <AppHeader.UserGuide />
+            <AppHeader.XyneAI />
             <AppHeader.UserProfile />
           </View>
         </AppHeader>

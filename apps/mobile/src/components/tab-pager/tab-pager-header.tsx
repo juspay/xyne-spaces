@@ -66,7 +66,7 @@ export function TabPagerHeader({ activeTab, scrollY }: TabPagerHeaderProps): Rea
       </TabsScreenHeader.Leading>
       <TabsScreenHeader.Trailing>
         <AppHeader.ConnectionStatus />
-        <AppHeader.UserGuide />
+        <AppHeader.XyneAI />
         <AppHeader.UserProfile />
       </TabsScreenHeader.Trailing>
       {config.search ? <TabsScreenHeader.SearchBar {...config.search} /> : null}
