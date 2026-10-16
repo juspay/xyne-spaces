@@ -74,6 +74,7 @@ import { MAX_FILES, fileLimitError, withCommand } from '../model/composerInputs'
 import {
   channelPick,
   isCollectionPick,
+  oneLine,
   personPick,
   pickKey,
   togglePick,
@@ -125,7 +126,7 @@ const Chip = ({
   >
     {leading}
     <Text numberOfLines={1} className={`shrink text-[13px] ${textClassName}`}>
-      {label}
+      {oneLine(label)}
     </Text>
     <X size={12} color={iconColor} />
   </Pressable>

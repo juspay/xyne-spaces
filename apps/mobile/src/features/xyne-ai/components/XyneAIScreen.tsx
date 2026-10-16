@@ -88,7 +88,12 @@ export const XyneAIScreen = (): ReactElement => {
   );
   const [thread, setThread] = useState(() =>
     conversationId
-      ? { conversationId, previewText, senderId, attachmentIds: attachmentIds?.split(',') ?? [] }
+      ? {
+          conversationId,
+          previewText: previewText.trim() || 'Message',
+          senderId,
+          attachmentIds: attachmentIds?.split(',') ?? [],
+        }
       : undefined,
   );
   const requestOptions = useMemo(

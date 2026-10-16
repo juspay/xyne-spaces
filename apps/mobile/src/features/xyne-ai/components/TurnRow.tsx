@@ -10,6 +10,7 @@ import { formatTime } from '@/src/utils/timeSelection';
 import type { PendingAction } from '../api/xyneAIEvents';
 import type { AttachedContextItem, AttachedFile } from '../api/xyneAIRequest';
 import type { ChatTurn } from '../model/assistantTurn';
+import { oneLine } from '../model/contextPicks';
 import { AssistantReply } from './AssistantReply';
 import { ICONS } from './ContextPickerSheet';
 import { IconButton } from './IconButton';
@@ -56,7 +57,7 @@ const ContextPills = ({ items }: { items: AttachedContextItem[] }): ReactElement
           >
             {Icon ? <Icon size={12} color={muted} /> : null}
             <Text numberOfLines={1} className='shrink text-[12px] text-secondary-foreground'>
-              {title}
+              {oneLine(title)}
             </Text>
           </View>
         );

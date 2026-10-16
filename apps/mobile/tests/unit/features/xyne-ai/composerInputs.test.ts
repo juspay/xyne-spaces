@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { fileLimitError } from '@/src/features/xyne-ai/model/composerInputs';
-import { isCollectionPick, togglePick } from '@/src/features/xyne-ai/model/contextPicks';
+import { isCollectionPick, oneLine, togglePick } from '@/src/features/xyne-ai/model/contextPicks';
 import { commandSections, withCommand } from '@/src/features/xyne-ai/model/composerInputs';
 
 const MB = 1024 * 1024;
@@ -52,6 +52,12 @@ describe('togglePick', () => {
     }));
     assert.equal(togglePick(full, folder, root), full);
     assert.equal(togglePick(full, root).length, 20);
+  });
+});
+
+describe('oneLine', () => {
+  it('keeps a label that starts with a line break readable on one line', () => {
+    assert.equal(oneLine('\n\nShip it   today\n'), 'Ship it today');
   });
 });
 
