@@ -1,9 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
-import { ActivityIndicator, Alert, Platform, Pressable, Text, TextInput, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useKeyboardState } from 'react-native-keyboard-controller';
-import { BottomSheetFlatList, BottomSheetScrollView } from '@gorhom/bottom-sheet';
-import { Check, Hash, Lock, Search, X } from 'lucide-react-native';
+import { BottomSheetFlatList } from '@gorhom/bottom-sheet';
+import { Check, Hash, Link2, Lock, Search, Users, X } from 'lucide-react-native';
 import { useCSSVariable } from 'uniwind';
 import { ChannelScopeType, ChannelVisibility } from '@xyne/shared';
 
@@ -21,6 +30,8 @@ import { haptics } from '@/src/utils/haptics';
 const ROW_HEIGHT = 60;
 const USER_LIMIT = 20;
 const CHANNEL_LIMIT = 10;
+/** Gorhom's drag handle, which sits inside the 100% snap box above our content. */
+const SHEET_HANDLE_HEIGHT = 24;
 
 type ShareSearchItem = {
   id: string;
@@ -30,22 +41,58 @@ type ShareSearchItem = {
   isPrivate?: boolean;
 };
 
+/** Someone who already has access, listed under "Shared with" (the owner is pinned first). */
+export type ShareAccessEntry = {
+  key: string;
+  label: string;
+  kind: 'owner' | 'user' | 'channel' | 'user_group';
+  targetId: string;
+  isPrivate?: boolean;
+  /** The card the share posted, when there is one to jump to. */
+  post?: { channelId: string; conversationId: string } | null;
+};
+
 interface ShareRecordingSheetProps {
   callId: string;
   isOpen: boolean;
   onClose: () => void;
+  /** Sheet heading. Defaults to "Share Recording". */
+  title?: string;
+  /** Overrides the recording share call — e.g. a regular call shares via /calls/:id/sharing. */
+  onShare?: (targets: Array<{ type: 'user' | 'channel'; id: string }>) => Promise<void>;
+  /** Alert body when sharing fails. */
+  errorMessage?: string;
+  /** Existing access, shown under "Shared with" while the search is empty. */
+  sharedWith?: ShareAccessEntry[];
+  /** Remove a share. Rows only get a remove button when this is set. */
+  onRevoke?: (entry: ShareAccessEntry) => Promise<void>;
+  /** Open the conversation a share posted into. */
+  onOpenSharedPost?: (entry: ShareAccessEntry) => void;
 }
 
 export function ShareRecordingSheet({
   callId,
   isOpen,
   onClose,
+  title = 'Share Recording',
+  onShare,
+  errorMessage = 'Failed to share recording.',
+  sharedWith,
+  onRevoke,
+  onOpenSharedPost,
 }: ShareRecordingSheetProps): ReactElement {
   const foreground = useCSSVariable('--color-foreground') as string;
   const mutedColor = useCSSVariable('--color-secondary-foreground') as string;
   const { accentBg, accentFg } = useBubbleAccent();
   const insets = useSafeAreaInsets();
-  const isKeyboardVisible = useKeyboardState(state => state.isVisible);
+  const { height: windowHeight } = useWindowDimensions();
+  // Same sizing as the create-DM drawer: a flex-1 root inside the sheet has no
+  // definite height, so the list would grow to every row instead of scrolling.
+  const sheetBodyHeight =
+    windowHeight -
+    insets.top -
+    (Platform.OS === 'android' ? insets.bottom : 0) -
+    SHEET_HANDLE_HEIGHT;
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTargets, setSelectedTargets] = useState<ShareSearchItem[]>([]);
@@ -120,31 +167,125 @@ export function ShareRecordingSheet({
     if (selectedTargets.length === 0 || isSubmitting) return;
     setIsSubmitting(true);
     try {
-      await recordingService.shareRecording(
-        callId,
-        selectedTargets.map(t => ({ type: t.type, id: t.id })),
-      );
+      const targets = selectedTargets.map(t => ({ type: t.type, id: t.id }));
+      if (onShare) {
+        await onShare(targets);
+      } else {
+        await recordingService.shareRecording(callId, targets);
+      }
       void haptics.success();
       onClose();
     } catch (err) {
       logRecordingError('ShareRecordingSheet.share', err);
       void haptics.error();
-      Alert.alert('Error', 'Failed to share recording.');
+      Alert.alert('Error', errorMessage);
     } finally {
       setIsSubmitting(false);
     }
-  }, [callId, selectedTargets, isSubmitting, onClose]);
+  }, [callId, selectedTargets, isSubmitting, onClose, onShare, errorMessage]);
+
+  const sharedTargetKeys = useMemo(
+    () => new Set((sharedWith ?? []).map(entry => `${entry.kind}-${entry.targetId}`)),
+    [sharedWith],
+  );
+
+  const handleRevoke = useCallback(
+    (entry: ShareAccessEntry): void => {
+      if (!onRevoke) return;
+      Alert.alert('Remove access?', `${entry.label} will no longer have access.`, [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: (): void => {
+            onRevoke(entry).catch(err => {
+              logRecordingError('ShareRecordingSheet.revoke', err);
+              void haptics.error();
+              Alert.alert('Error', 'Failed to remove access.');
+            });
+          },
+        },
+      ]);
+    },
+    [onRevoke],
+  );
+
+  const sharedWithHeader =
+    !searchQuery.trim() && sharedWith && sharedWith.length > 0 ? (
+      <View className='pb-2'>
+        <Text className='px-5 pb-1 pt-2 text-[13px] font-medium' style={{ color: mutedColor }}>
+          Shared with
+        </Text>
+        {sharedWith.map(entry => (
+          <View
+            key={entry.key}
+            style={{ height: ROW_HEIGHT }}
+            className='flex-row items-center gap-3.5 px-5'
+          >
+            {entry.kind === 'channel' || entry.kind === 'user_group' ? (
+              <View className='size-9 items-center justify-center rounded-lg bg-foreground/5'>
+                {entry.kind === 'user_group' ? (
+                  <Users size={16} color={foreground} />
+                ) : entry.isPrivate ? (
+                  <Lock size={16} color={foreground} />
+                ) : (
+                  <Hash size={16} color={foreground} />
+                )}
+              </View>
+            ) : (
+              <Avatar userIds={[entry.targetId]} size={36} />
+            )}
+            <Text className='min-w-0 flex-1 text-[16px] text-foreground' numberOfLines={1}>
+              {entry.label}
+            </Text>
+            {entry.post && onOpenSharedPost ? (
+              <Pressable
+                onPress={() => onOpenSharedPost(entry)}
+                hitSlop={8}
+                accessibilityRole='link'
+                accessibilityLabel='Open shared conversation'
+                className='p-1 active:opacity-60'
+              >
+                <Link2 size={16} color={mutedColor} />
+              </Pressable>
+            ) : null}
+            {entry.kind === 'owner' ? (
+              <Text className='text-[13px]' style={{ color: mutedColor }}>
+                Owner
+              </Text>
+            ) : onRevoke ? (
+              <Pressable
+                onPress={() => handleRevoke(entry)}
+                hitSlop={8}
+                accessibilityRole='button'
+                accessibilityLabel={`Remove access for ${entry.label}`}
+                className='p-1 active:opacity-60'
+              >
+                <X size={16} color={mutedColor} />
+              </Pressable>
+            ) : null}
+          </View>
+        ))}
+        <Text className='px-5 pb-1 pt-3 text-[13px] font-medium' style={{ color: mutedColor }}>
+          Share with more
+        </Text>
+      </View>
+    ) : null;
 
   const renderItem = useCallback(
     ({ item }: { item: ShareSearchItem }): ReactElement => {
       const isSelected = selectedTargets.some(t => t.id === item.id && t.type === item.type);
+      const isShared =
+        sharedTargetKeys.has(`${item.type}-${item.id}`) ||
+        (item.type === 'user' && sharedTargetKeys.has(`owner-${item.id}`));
       return (
         <Pressable
           accessibilityRole='button'
-          accessibilityState={{ selected: isSelected }}
+          accessibilityState={{ selected: isSelected, disabled: isShared }}
           accessibilityLabel={item.name}
           onPress={() => handleToggleSelect(item)}
-          style={{ height: ROW_HEIGHT }}
+          disabled={isShared}
+          style={{ height: ROW_HEIGHT, opacity: isShared ? 0.5 : 1 }}
           className='flex-row items-center gap-3.5 px-5 active:opacity-70'
         >
           {item.type === 'channel' ? (
@@ -168,22 +309,53 @@ export function ShareRecordingSheet({
               </Text>
             ) : null}
           </View>
-          {isSelected ? <Check size={18} color={accentBg} strokeWidth={2.5} /> : null}
+          {isShared ? (
+            <Text className='text-[13px]' style={{ color: mutedColor }}>
+              Has access
+            </Text>
+          ) : isSelected ? (
+            <Check size={18} color={accentBg} strokeWidth={2.5} />
+          ) : null}
         </Pressable>
       );
     },
-    [selectedTargets, handleToggleSelect, foreground, mutedColor, accentBg],
+    [selectedTargets, sharedTargetKeys, handleToggleSelect, foreground, mutedColor, accentBg],
   );
 
   return (
-    <View className='min-h-0 flex-1'>
+    <View style={{ height: sheetBodyHeight }}>
       <View className='h-12 flex-row items-center px-5'>
-        <Text className='flex-1 text-[17px] font-semibold text-foreground'>Share Recording</Text>
+        <Text className='flex-1 text-[17px] font-semibold text-foreground'>{title}</Text>
+        {/* In the header, not at the bottom: the search field auto-focuses, and the
+            keyboard would otherwise cover the submit button. */}
+        <Pressable
+          onPress={() => void handleSubmit()}
+          disabled={selectedTargets.length === 0 || isSubmitting}
+          accessibilityRole='button'
+          accessibilityState={{ disabled: selectedTargets.length === 0 || isSubmitting }}
+          hitSlop={6}
+          className='h-8 min-w-[64px] items-center justify-center rounded-full px-3.5 active:opacity-70'
+          style={{
+            backgroundColor: accentBg,
+            opacity: selectedTargets.length === 0 || isSubmitting ? 0.4 : 1,
+          }}
+        >
+          {isSubmitting ? (
+            <ActivityIndicator size='small' color={accentFg} />
+          ) : (
+            <Text className='text-sm font-semibold' style={{ color: accentFg }}>
+              {selectedTargets.length > 1 ? `Share with ${selectedTargets.length}` : 'Share'}
+            </Text>
+          )}
+        </Pressable>
       </View>
 
       {selectedTargets.length > 0 ? (
-        <BottomSheetScrollView
+        // Plain ScrollView: a horizontal BottomSheetScrollView registers as the
+        // sheet's active scrollable and steals the list's vertical drags.
+        <ScrollView
           horizontal
+          keyboardShouldPersistTaps='handled'
           showsHorizontalScrollIndicator={false}
           className='mb-2'
           style={{ flexGrow: 0, flexShrink: 0 }}
@@ -218,7 +390,7 @@ export function ShareRecordingSheet({
               </Pressable>
             </View>
           ))}
-        </BottomSheetScrollView>
+        </ScrollView>
       ) : null}
 
       <View className='px-4'>
@@ -241,9 +413,11 @@ export function ShareRecordingSheet({
           data={filteredItems}
           keyExtractor={item => `${item.type}-${item.id}`}
           keyboardShouldPersistTaps='handled'
+          keyboardDismissMode='on-drag'
           showsVerticalScrollIndicator={false}
           renderItem={renderItem}
-          contentContainerStyle={{ paddingBottom: 8 }}
+          ListHeaderComponent={sharedWithHeader}
+          contentContainerStyle={{ paddingBottom: Platform.OS === 'ios' ? insets.bottom + 8 : 8 }}
           ListEmptyComponent={
             <View className='flex-1 items-center justify-center gap-3 px-8'>
               <View
@@ -260,29 +434,6 @@ export function ShareRecordingSheet({
           }
         />
       </View>
-
-      <Pressable
-        onPress={() => void handleSubmit()}
-        disabled={selectedTargets.length === 0 || isSubmitting}
-        className='mx-4 mt-2 items-center rounded-xl py-3 active:opacity-70'
-        style={{
-          backgroundColor: accentBg,
-          opacity: selectedTargets.length === 0 || isSubmitting ? 0.4 : 1,
-          marginBottom: isKeyboardVisible
-            ? 4
-            : Platform.OS === 'ios'
-              ? Math.max(insets.bottom, 4)
-              : 4,
-        }}
-      >
-        {isSubmitting ? (
-          <ActivityIndicator size='small' color={accentFg} />
-        ) : (
-          <Text className='text-sm font-semibold' style={{ color: accentFg }}>
-            {selectedTargets.length > 1 ? `Share with ${selectedTargets.length}` : 'Share'}
-          </Text>
-        )}
-      </Pressable>
     </View>
   );
 }
