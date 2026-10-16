@@ -124,7 +124,13 @@ export function subscribeRecordingStore(listener: Listener): () => void {
 export type RecordingStoreAction =
   | { type: 'requestAutoStart' }
   | { type: 'requestStop' }
-  | { type: 'startRecording'; sttModel?: SttModel; source?: RecordingSource }
+  | {
+      type: 'startRecording';
+      sttModel?: SttModel;
+      source?: RecordingSource;
+      channelId?: string;
+      conversationId?: string;
+    }
   | {
       type: 'recordingStarted';
       room: Room;
@@ -223,6 +229,7 @@ export function sendRecordingAction(action: RecordingStoreAction): void {
     }
 
     case 'startRecording': {
+      if (current.status !== 'idle' && current.status !== 'error') return;
       const sttModel = action.sttModel ?? current.sttModel;
       const source: RecordingSource = action.source ?? 'app';
       setState({
@@ -236,8 +243,14 @@ export function sendRecordingAction(action: RecordingStoreAction): void {
 
       ensureLiveKitGlobals();
 
+      let startingRoom: Room | null = null;
       recordingService
-        .startRecording({ sttModel })
+        .startRecording({
+          sttModel,
+          ...(action.channelId && action.conversationId
+            ? { channelId: action.channelId, conversationId: action.conversationId }
+            : {}),
+        })
         .then(async session => {
           try {
             await startRecordingAudioSession();
@@ -258,6 +271,7 @@ export function sendRecordingAction(action: RecordingStoreAction): void {
           }
 
           const room = new Room();
+          startingRoom = room;
           await room.connect(session.serverUrl, session.token, { autoSubscribe: true });
           await room.localParticipant.setMicrophoneEnabled(true);
 
@@ -276,6 +290,8 @@ export function sendRecordingAction(action: RecordingStoreAction): void {
           logger.info(Event.RECORDING_STARTED, { externalId: session.externalId, source });
         })
         .catch((error: unknown) => {
+          // A failed mic/connection setup has not reached state.room yet.
+          void startingRoom?.disconnect();
           const message = error instanceof Error ? error.message : 'Failed to start recording';
           logger.error(Event.RECORDING_ERROR, {
             context: 'startRecording',
