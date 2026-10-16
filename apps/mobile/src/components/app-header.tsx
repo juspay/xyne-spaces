@@ -1,6 +1,5 @@
 import {
   createContext,
-  type ComponentType,
   memo,
   useCallback,
   useContext,
@@ -31,7 +30,7 @@ import { useHeaderHeight } from '@/src/hooks/useHeaderHeight';
 import { useWorkspaces } from '@/src/hooks/useWorkspaces';
 import { cn } from '@/src/utils/cn';
 import { useRouter } from 'expo-router';
-import { House, RefreshCw } from 'lucide-react-native';
+import { House, RefreshCw, type LucideIcon } from 'lucide-react-native';
 import { useCSSVariable } from 'uniwind';
 
 import { XyneAIStarIcon } from '@/src/components/icons';
@@ -174,7 +173,7 @@ const WorkspaceSwitcher = memo(function AppHeaderWorkspaceSwitcher() {
 const HOME_HREF = tabRoute('dms');
 
 type RoundButtonProps = {
-  icon: ComponentType<{ size?: number; color?: string; strokeWidth?: number }>;
+  icon: LucideIcon;
   accessibilityLabel: string;
   accessibilityHint: string;
   onPress: () => void;
@@ -215,16 +214,24 @@ const RoundButton = ({
   );
 };
 
-/** Opens Xyne AI, like the dashboard's Ask AI button. */
+/** Opens Xyne AI, like the dashboard's Ask AI button: the gradient star on its own. */
 const XyneAI = memo(function AppHeaderXyneAI() {
   const router = useRouter();
   return (
-    <RoundButton
-      icon={XyneAIStarIcon}
+    <Pressable
+      accessibilityRole='button'
       accessibilityLabel='Ask AI'
       accessibilityHint='Ask anything about your workspace'
-      onPress={() => router.push('/xyne-ai')}
-    />
+      hitSlop={8}
+      className='items-center justify-center active:opacity-60'
+      style={{ width: HEADER_AVATAR_SIZE, height: HEADER_AVATAR_SIZE }}
+      onPress={() => {
+        void haptics.buttonTap();
+        router.push('/xyne-ai');
+      }}
+    >
+      <XyneAIStarIcon size={24} />
+    </Pressable>
   );
 });
 

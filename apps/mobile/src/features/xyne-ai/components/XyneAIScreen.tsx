@@ -23,7 +23,6 @@ import {
 import { useCSSVariable } from 'uniwind';
 
 import { XyneAIStarIcon } from '@/src/components/icons';
-import { HeaderBackButton, HeaderIconButton } from '@/src/components/ui/header-icon-button';
 import { SafeAreaView } from '@/src/components/ui/safe-area-view';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { ChatComposerScrollToBottomButton } from '@/src/features/chat/v2/components/chat/chat-composer-dock';
@@ -129,21 +128,24 @@ const ContextPills = ({ items }: { items: AttachedContextItem[] }): ReactElement
 const IconButton = ({
   label,
   onPress,
+  disabled = false,
   children,
 }: {
   label: string;
   onPress: () => void;
+  disabled?: boolean;
   children: ReactNode;
 }): ReactElement => (
   <Pressable
     accessibilityRole='button'
     accessibilityLabel={label}
     hitSlop={8}
+    disabled={disabled}
     onPress={(): void => {
       void haptics.buttonTap();
       onPress();
     }}
-    className='p-1 active:opacity-60'
+    className={`p-1 active:opacity-60 ${disabled ? 'opacity-40' : ''}`}
   >
     {children}
   </Pressable>
@@ -342,29 +344,22 @@ export const XyneAIScreen = (): ReactElement => {
     <SafeAreaView className='flex-1 bg-chat-screen' edges={['top']}>
       <Stack.Screen options={{ headerShown: false }} />
 
-      <View className='min-h-14 flex-row items-center gap-3 px-2'>
-        <HeaderBackButton liquidGlass onPress={(): void => router.back()} />
+      <View className='min-h-14 flex-row items-center gap-4 px-4'>
+        <IconButton label='Back' onPress={(): void => router.back()}>
+          <ChevronLeft size={26} color={foreground} />
+        </IconButton>
         <Text
           accessibilityRole='header'
           className='flex-1 text-[17px] font-semibold text-foreground'
         >
           Xyne AI
         </Text>
-        <HeaderIconButton
-          liquidGlass
-          accessibilityLabel='History'
-          onPress={(): void => setIsHistoryOpen(true)}
-        >
-          <History size={20} color={foreground} />
-        </HeaderIconButton>
-        <HeaderIconButton
-          liquidGlass
-          accessibilityLabel='New chat'
-          disabled={turns.length === 0}
-          onPress={startNewChat}
-        >
-          <SquarePen size={20} color={foreground} />
-        </HeaderIconButton>
+        <IconButton label='History' onPress={(): void => setIsHistoryOpen(true)}>
+          <History size={22} color={foreground} />
+        </IconButton>
+        <IconButton label='New chat' disabled={turns.length === 0} onPress={startNewChat}>
+          <SquarePen size={22} color={foreground} />
+        </IconButton>
       </View>
 
       <View className='flex-1'>
