@@ -43,6 +43,8 @@ import {
   processMessageForSending,
   containsSpecialBroadcastMention,
   discussionOpeningHtml,
+  DISCUSSION_TITLE_MAX,
+  liftableLineOf,
 } from './ChatInput.utils';
 import { saveDraft, useDraft, useDraftFromDB } from '../../../hooks/useDraft';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
@@ -224,11 +226,14 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     // Not on a phone: the editor keeps its header, where the title field sits, off
     // mobile, so a title there could never be given.
     const { isMobile: onMobilePlatform } = usePlatform();
+    // Registry command id of the artifact currently being drafted, if any.
+    const [activeArtifactCommand, setActiveArtifactCommand] = useState<string | null>(null);
     const canTitle = !onMobilePlatform && !messageId && !conversation?.conversationId && !twinEdit;
     const startsDiscussion = discussionList !== null && canTitle;
     const offersTitle = discussionList === null && canTitle;
-    const titleShown = startsDiscussion || (offersTitle && titleDraft.open);
-    /** The html to send, titled when it opens a discussion; null when the title is missing. */
+    const titleShown =
+      startsDiscussion || (offersTitle && titleDraft.open && !activeArtifactCommand);
+    /** The html to send, titled when it has one; null when a discussion's title is missing. */
     const withDiscussionTitle = useCallback(
       (html: string): string | null => {
         if (!titleShown) return html;
@@ -299,8 +304,6 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       [conversationId, openArtifacts],
     );
 
-    // Registry command id of the artifact currently being drafted, if any.
-    const [activeArtifactCommand, setActiveArtifactCommand] = useState<string | null>(null);
     const [shortcutModalOpen, setShortcutModalOpen] = useState(false);
 
     // Threads, tickets, canvases and calls the draft relates to. Opt-in per device
@@ -510,10 +513,11 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         channel?.scopeType !== ChannelScopeType.DM,
       draftKey: channelId,
       userId: user?.id,
+      debounceMs: relatedDebounceMs,
     });
 
-    // Every edit, as it happens: typing indicator, and the related-context lookup
-    // dropped the moment the draft it was for changes.
+    // Every edit, as it happens: typing indicator, and the related-context lookup and
+    // title offer dropped the moment the draft they were for changes.
     const handleComposerTyping = useCallback((): void => {
       handleTyping();
       interruptRelated();
@@ -526,11 +530,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         inputBoxRef.current?.getHtml?.() ?? '',
         'text/html',
       ).body;
-      const [first, next] = Array.from(body.children);
-      const line =
-        first?.tagName === 'P' && next?.textContent?.trim() ? (first.textContent ?? '').trim() : '';
-      const words = line.split(/\s+/).length;
-      setLiftableLine(line.length <= 80 && words >= 2 && words <= 12 ? line : '');
+      setLiftableLine(liftableLineOf(body));
       setTitleDraft({ open: true, title: titleDrafts.get(channelId)?.title ?? '' });
       requestAnimationFrame(() => discussionTitleRef.current?.focus());
     }, [channelId, setTitleDraft, withdrawTitleOffer]);
@@ -558,23 +558,22 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       const box = inputBoxRef.current;
       const editorLine = titleRowRef.current?.parentElement?.querySelector('.ProseMirror > *');
       const body = new DOMParser().parseFromString(box?.getHtml?.() ?? '', 'text/html').body;
-      const line = liftableLine;
-      if (!box || !body.firstElementChild) return;
+      const line = liftableLineOf(body);
+      setLiftableLine(line);
+      if (!box || !line) return;
       const from = editorLine?.getBoundingClientRect();
       const fromFont = editorLine ? getComputedStyle(editorLine).font : '';
-      body.firstElementChild.remove();
+      body.firstElementChild?.remove();
       box.clearTextOnly();
       box.insertContent(body.innerHTML);
+      setTitleDraft({ open: true, title: line });
+      setLiftableLine('');
       const input = discussionTitleRef.current;
       input?.focus();
-      const finish = (): void => {
-        setTitleDraft({ open: true, title: line });
-        setLiftableLine('');
-      };
       if (!from || !input || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-        finish();
         return;
       }
+      input.style.color = 'transparent';
       const to = input.getBoundingClientRect();
       const inputStyle = getComputedStyle(input);
       const fly = document.createElement('span');
@@ -597,7 +596,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         { duration: 320, easing: 'cubic-bezier(0.2, 0, 0, 1)', fill: 'forwards' },
       );
       flight.onfinish = (): void => {
-        finish();
+        input.style.removeProperty('color');
         fly.remove();
       };
     };
@@ -858,6 +857,9 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       (html: string, text: string): void => {
         onRelatedDraftChange(text);
         onTitleOfferDraftChange(text);
+        if (titleDraft.open) {
+          setLiftableLine(liftableLineOf(new DOMParser().parseFromString(html, 'text/html').body));
+        }
         try {
           const processedHtml = processMessageForSending(html, allUsersForMentionResolution);
           if (messageId || twinEdit) return;
@@ -871,7 +873,14 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           // Unable to save draft
         }
       },
-      [lookupId, messageId, twinEdit, onRelatedDraftChange, onTitleOfferDraftChange],
+      [
+        lookupId,
+        messageId,
+        twinEdit,
+        onRelatedDraftChange,
+        onTitleOfferDraftChange,
+        titleDraft.open,
+      ],
     );
 
     const handleSendMessage = useCallback(
@@ -1397,7 +1406,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
             aria-pressed={titleDraft.open}
             className={`xyne-title-offer flex items-center rounded p-1.5 transition-[background-color,color,box-shadow] duration-200 ease-in-out ${
               titleOffered
-                ? 'bg-[#fff6ee] text-[#b34700] shadow-[0_0_0_1px_rgba(255,137,4,0.38),0_2px_12px_rgba(255,79,0,0.14)] dark:bg-[#2a1d14] dark:text-[#ffb27a]'
+                ? 'bg-[#fff6ee] text-[#b34700] shadow-[0_0_0_1px_rgba(255,137,4,0.38),0_2px_12px_rgba(255,79,0,0.14)]'
                 : titleDraft.open
                   ? 'bg-accent text-foreground'
                   : 'text-muted-foreground hover:bg-accent'
@@ -1563,14 +1572,14 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                             }
                             if (
                               event.key === 'Escape' ||
-                              (event.key === 'Backspace' && !discussionTitle)
+                              (event.key === 'Backspace' && !discussionTitle && !event.repeat)
                             ) {
                               event.preventDefault();
                               if (discussionTitle) inputBoxRef.current?.focus();
                               else closeTitle();
                             }
                           }}
-                          maxLength={200}
+                          maxLength={startsDiscussion ? 200 : DISCUSSION_TITLE_MAX}
                           placeholder={liftableLine || 'Discussion title'}
                           aria-label='Discussion title'
                           data-track-category='CHAT_INPUT'

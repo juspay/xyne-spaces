@@ -1,5 +1,5 @@
 import type { JsonValue } from '@openfeature/server-sdk';
-import { normalizeRelatedDraft } from '@xyne/shared';
+import { isRelatedDraftWorthLookingUp, normalizeRelatedDraft } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { superpositionClient } from '@/services/superpositionClient';
 import {
@@ -80,6 +80,7 @@ export async function checkDiscussionTitle(
   if (!config.enabled) return null;
 
   const draft = normalizeRelatedDraft(text);
+  if (!isRelatedDraftWorthLookingUp(draft)) return { offer: false, hold: false };
   if (Date.now() < jevDownUntil) return KEEP_SHOWING;
 
   const started = Date.now();

@@ -21,16 +21,31 @@ const escapeHtml = (unsafe: string): string => {
 export const discussionOpeningHtml = (title: string, bodyHtml: string): string =>
   `<p><strong>${escapeHtml(title)}</strong></p>${bodyHtml}`;
 
+export const DISCUSSION_TITLE_MAX = 100;
+
 export const discussionTitleOfBody = (body: Element): string => {
   const [first, next] = Array.from(body.children);
   if (!first || !next) return '';
   const title = (first.textContent ?? '').trim();
-  if (/^H[1-3]$/.test(first.tagName)) return title;
   const strong = first.firstElementChild;
-  if (first.tagName !== 'P' || first.childElementCount !== 1 || strong?.tagName !== 'STRONG') {
+  if (
+    first.tagName !== 'P' ||
+    first.childElementCount !== 1 ||
+    strong?.tagName !== 'STRONG' ||
+    strong.childElementCount !== 0 ||
+    title.length > DISCUSSION_TITLE_MAX
+  ) {
     return '';
   }
   return title === (strong.textContent ?? '').trim() ? title : '';
+};
+
+export const liftableLineOf = (body: Element): string => {
+  const [first, next] = Array.from(body.children);
+  if (first?.tagName !== 'P' || !next?.textContent?.trim()) return '';
+  const line = (first.textContent ?? '').trim();
+  const words = line.split(/\s+/).length;
+  return line.length <= 80 && words >= 2 && words <= 12 ? line : '';
 };
 
 export const discussionTitleOf = (html: string): string =>

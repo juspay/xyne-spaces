@@ -5071,12 +5071,12 @@ img.inline-emoji,
   }
 }
 
-.message-html-root > p.discussion-title:not([data-message-preview="true"] p) {
+[data-message-id] .message-html-root > p.discussion-title:not([data-message-preview="true"] p) {
   font-size: 15px;
   line-height: 20px;
 }
 
-.message-html-root > p.discussion-title + * {
+[data-message-id] .message-html-root > p.discussion-title + * {
   margin-top: 2px;
 }
 
@@ -5086,6 +5086,11 @@ img.inline-emoji,
 
 [data-titled-thread] [data-first-in-thread] .message-html-root > p.discussion-title + * {
   margin-top: 0;
+}
+
+[data-theme="midnight"] .xyne-title-offer[data-offered="true"] {
+  background-color: #2a1d14;
+  color: #ffb27a;
 }
 
 @keyframes xyne-title-offer-sweep {

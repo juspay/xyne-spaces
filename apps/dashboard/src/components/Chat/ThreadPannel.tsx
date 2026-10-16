@@ -1562,8 +1562,9 @@ export const ThreadMessages = ({
               <h3
                 className={cn(
                   'text-[17px] font-semibold overflow-hidden min-w-0',
-                  headerShowsTitle ? 'line-clamp-2 break-words' : 'whitespace-nowrap text-ellipsis',
+                  headerShowsTitle ? 'line-clamp-3 break-words' : 'whitespace-nowrap text-ellipsis',
                 )}
+                {...(headerShowsTitle && { title: discussionTitle })}
               >
                 {isTicketThread && ticket ? ticket.title : discussionTitle || 'Thread message'}
               </h3>
@@ -2048,9 +2049,10 @@ export const ThreadMessages = ({
                     className={cn(
                       'text-[17px] font-semibold overflow-hidden min-w-0 text-foreground first:ml-1.5',
                       headerShowsTitle
-                        ? 'line-clamp-2 break-words'
+                        ? 'line-clamp-3 break-words'
                         : 'whitespace-nowrap text-ellipsis',
                     )}
+                    {...(headerShowsTitle && { title: discussionTitle })}
                   >
                     {simpleView
                       ? 'Thread'

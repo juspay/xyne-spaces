@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { normalizeRelatedDraft } from '@xyne/shared';
 import { searchService } from '../services/searchService';
 import { globalClickTracker } from '../services/Analytics/globalClickTracker';
-import { MIN_RELATED_CONTEXT_DEBOUNCE_MS } from './useRelatedContext';
+import { clampDebounceMs } from './useRelatedContext';
 
 const MIN_WORDS = 12;
 const MAX_IGNORED = 3;
@@ -57,12 +57,16 @@ export function useDiscussionTitleOffer({
   enabled,
   draftKey,
   userId,
+  debounceMs,
 }: {
   enabled: boolean;
   draftKey: string;
   userId: string | undefined;
+  debounceMs: number;
 }): DiscussionTitleOffer {
   const [offeredKey, setOfferedKey] = useState<string | null>(null);
+  const wait = useRef(clampDebounceMs(debounceMs));
+  wait.current = clampDebounceMs(debounceMs);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const inFlight = useRef<AbortController | null>(null);
   const latestText = useRef('');
@@ -143,7 +147,7 @@ export function useDiscussionTitleOffer({
     timer.current = setTimeout(() => {
       timer.current = undefined;
       void check();
-    }, MIN_RELATED_CONTEXT_DEBOUNCE_MS);
+    }, wait.current);
   }, [cancel, check]);
 
   const reset = useCallback((): void => {
