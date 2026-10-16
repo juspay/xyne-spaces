@@ -566,10 +566,10 @@ export class SdlcHubService implements SdlcHub {
         channelId,
         sdlcArtifact: { isNot: null },
       },
-      select: { id: true, viewAccessId: true, title: true, folder: { select: { name: true } } },
+      select: { id: true, viewAccessId: true, title: true, folder: { select: { name: true } }, sdlcArtifact: { select: { artifactType: true } } },
     });
     if (!existing) throw new AppError('SDLC artifact not found', 404);
-    if (existing.folder?.name === SDLC_HUB_KNOWLEDGE_FOLDER) {
+    if (existing.folder?.name === SDLC_HUB_KNOWLEDGE_FOLDER || existing.sdlcArtifact?.artifactType === 'WIKI') {
       // Same rule as creating one: every member's runs read Hub Knowledge.
       await this.requireChannelRole(actor, channelId, true);
     }
@@ -771,7 +771,7 @@ export class SdlcHubService implements SdlcHub {
     actor: SdlcActor,
     input: ArchiveSdlcClawArtifactInput
   ): Promise<{ canvasId: string; archived: boolean }> {
-    await this.requireClawArtifact(actor, input.canvasId);
+    await this.requireClawArtifact(actor, input.canvasId, input);
     await this.prisma.sdlcArtifact.update({
       where: { artifactId: input.canvasId },
       data: { artifactStatus: input.archived ? 'ARCHIVED' : 'ACTIVE' },
@@ -779,16 +779,20 @@ export class SdlcHubService implements SdlcHub {
     return { canvasId: input.canvasId, archived: input.archived };
   }
 
-  private async requireClawArtifact(actor: SdlcActor, canvasId: string) {
+  private async requireClawArtifact(actor: SdlcActor, canvasId: string, generation?: { generationCommit?: string; repoId?: string }) {
     const channelId = await this.hubOf('canvas', canvasId);
     if (!channelId) throw new AppError('SDLC artifact not found', 404);
     await this.requireChannelRole(actor, channelId, false);
     const canvas = await this.prisma.canvas.findFirst({
       where: { id: canvasId, channelId, sdlcArtifact: { isNot: null } },
-      select: { id: true, title: true, folderId: true, createdBy: true, content: true, folder: { select: { name: true } } },
+      select: { id: true, title: true, folderId: true, createdBy: true, content: true, folder: { select: { name: true } }, sdlcArtifact: { select: { artifactType: true } } },
     });
     if (!canvas) throw new AppError('SDLC artifact not found', 404);
-    if (canvas.folder?.name === SDLC_HUB_KNOWLEDGE_FOLDER) {
+    const wiki = canvas.sdlcArtifact?.artifactType === 'WIKI';
+    if (
+      canvas.folder?.name === SDLC_HUB_KNOWLEDGE_FOLDER
+      || (wiki && !(await sdlcWikiPageStore.isGenerationRun({ channelId, actorUserId: actor.userId, ...generation })))
+    ) {
       // Same rule as creating one: every member's runs read Hub Knowledge.
       await this.requireChannelRole(actor, channelId, true);
     }

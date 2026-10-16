@@ -711,6 +711,8 @@ export type CreateSdlcClawTrackFolderInput = z.infer<typeof createSdlcClawTrackF
 export const archiveSdlcClawArtifactSchema = z.object({
   canvasId: z.string().min(1),
   archived: z.boolean(),
+  generationCommit: z.string().trim().min(1).max(255).optional(),
+  repoId: z.string().min(1).optional(),
 });
 export type ArchiveSdlcClawArtifactInput = z.infer<typeof archiveSdlcClawArtifactSchema>;
 
