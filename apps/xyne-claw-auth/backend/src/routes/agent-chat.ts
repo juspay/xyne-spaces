@@ -54,7 +54,8 @@ import { prisma } from "../db.js";
 import { cancelRunRecovery } from "../queue/run-recovery-worker.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
-import { KNOWN_PROVIDERS, buildProviderConfig, agentCredRefreshTarget, userCredRefreshTarget, agentDefaultSpeed, providerConfigForSpeed, applyFastModeModels } from "../lib/agent-provider-config.js";
+import { KNOWN_PROVIDERS, buildProviderConfig, agentCredRefreshTarget, userCredRefreshTarget, agentDefaultSpeed, providerConfigForSpeed, applyFastModeModels, resolveAgentProviderConfigs } from "../lib/agent-provider-config.js";
+import { parseSpeedParam, resolvePickerDefault } from "../lib/picker-default-model.js";
 import { awaitTurnHandoff, isTurnControlCommand } from "../lib/run-turn-handoff.js";
 import { dispatchLocalHarnessRun, isLocalHarnessProvider, localHarnessProviderLabel, pinnedModelForProvider, resolveLocalHarnessTarget, resolveLocalHarnessTargetForProvider, resolveLocalSandbox } from "../lib/local-harness.js";
 
@@ -1168,43 +1169,52 @@ router.get("/:slug/litellm-models", async (req: Request<{ slug: string }>, res: 
     const cred = await agentProviderCredentialsRepository.findByAgentAndProvider(agent.id, "litellm").catch(() => null);
     const hasCred = Boolean(cred?.encryptedKey && cred?.iv && cred?.authTag);
 
-    // The picker follows the agent's provider ORDER: whichever of spaces /
-    // litellm would serve a no-pin run supplies both the model list and the
-    // "Recommended" default, so the label always matches what actually runs.
-    //   [spaces, litellm…]    → platform list; default = modelSettings.model
-    //                           (the agent's Spaces model) ?? platform default
-    //   [litellm, …] + cred   → the credential's list; default = cred.model
-    //   no order + cred       → litellm (bare-credential fallback, mirrors
-    //                           resolveAgentProviderConfigs)
-    //   otherwise             → spaces (keyless platform default, via claw —
-    //                           LITELLM_API_KEY stays on the claw pod, same
-    //                           pattern as entity-llm). pinProvider tells the
-    //                           composer which providerOverride a pick rides.
+    // Two separate questions, answered from the same speed-adjusted config:
+    //  1. Which LIST (and pinProvider) the picker offers — whichever of
+    //     spaces / litellm ranks first in the order serves picks:
+    //       [spaces, litellm…]  → platform list (picks pin "spaces")
+    //       [litellm, …] + cred → the credential's list (picks pin "litellm")
+    //       no order + legacy config.provider="litellm" + cred → litellm
+    //       otherwise           → platform list via claw (LITELLM_API_KEY
+    //                             stays on the claw pod, same as entity-llm)
+    //  2. Which model the "Default" row names — what a NO-PIN run actually
+    //     starts on. That is NOT limited to spaces/litellm (an agent ranked
+    //     [claude, spaces] runs Claude), so it comes from the run paths' own
+    //     resolver at the run's speed (run-stream.ts resolves with the
+    //     effective speed; a custom fast profile swaps order + models) —
+    //     see lib/picker-default-model.ts. XYNE-66318 / XYNE-66323.
+    // `?speed=fast|standard` mirrors the composer's per-message toggle; absent
+    // ⇒ the agent's modelSettings.speed, exactly as run-stream defaults it.
+    const speed = parseSpeedParam(req.query["speed"]) ?? agentDefaultSpeed(agent.config);
     const agentCfg = (agent.config ?? {}) as Record<string, unknown>;
-    const rawOrder = agentCfg["providerOrder"];
+    const speedCfg = providerConfigForSpeed(agent.config, speed);
+    const rawOrder = speedCfg["providerOrder"];
     const order = Array.isArray(rawOrder) ? rawOrder.filter((e): e is string => typeof e === "string") : [];
     const relevant = order.filter((e) => e === "spaces" || (e === "litellm" && hasCred));
     // No order → the platform default serves (strict ranking: a credential
     // that was saved but never selected as a provider never routes a run).
     // Legacy config.provider = "litellm" still counts as an explicit selection.
-    const legacyProvider = typeof agentCfg["provider"] === "string" ? agentCfg["provider"] : undefined;
+    const legacyProvider = typeof speedCfg["provider"] === "string" ? speedCfg["provider"] : undefined;
     const primary = relevant[0] ?? (order.length === 0 && legacyProvider === "litellm" && hasCred ? "litellm" : "spaces");
+    const resolved = await resolveAgentProviderConfigs(agent, { speed, skipOAuthRefresh: true }).catch((err) => {
+      log.warn(`[agent-chat] litellm-models: provider resolution failed for ${req.params.slug}: ${errMsg(err)}`);
+      return null;
+    });
 
     const harnessEntries = await resolveHarnessModelEntries(userId, agent.orgId, req.params.slug, agentCfg);
     const recommendedHarness = harnessEntries.find((entry) => entry.recommended);
 
     if (primary === "spaces" || !cred?.encryptedKey || !cred.iv || !cred.authTag) {
       const platform = await listPlatformModels();
-      const ms = agentCfg["modelSettings"] as Record<string, unknown> | undefined;
-      const rawSpacesModel = ms?.["model"];
-      const spacesModel = typeof rawSpacesModel === "string" && rawSpacesModel.trim() ? rawSpacesModel.trim() : null;
       const platformData = Array.isArray(platform.data) ? platform.data : [];
-      const defaultModel = spacesModel ?? platform.defaultModel;
+      const def = resolvePickerDefault({ config: agent.config, speed, resolved, platformDefaultModel: platform.defaultModel });
       res.json({
         ...platform,
         data: [...harnessEntries, ...platformData].map(labelModel),
-        defaultModel,
-        defaultModelName: defaultModel ? modelDisplayName(defaultModel) : null,
+        defaultModel: def.defaultModel,
+        defaultModelName: def.defaultModelName,
+        defaultProvider: def.provider,
+        speed,
         ...(recommendedHarness ? { recommendedId: recommendedHarness.id } : {}),
       });
       return;
@@ -1226,11 +1236,20 @@ router.get("/:slug/litellm-models", async (req: Request<{ slug: string }>, res: 
       .filter((m): m is { id: string } => Boolean(m.id))
       .map((m) => ({ id: m.id, name: m.id }))
       .sort((a, b) => a.name.localeCompare(b.name));
+    const resolvedDefault = resolvePickerDefault({ config: agent.config, speed, resolved, platformDefaultModel: null });
+    // Resolution failed (null) ⇒ the credential's own model, as before.
+    const def = resolved ? resolvedDefault : {
+      provider: "litellm",
+      defaultModel: cred.model ?? null,
+      defaultModelName: cred.model ? modelDisplayName(cred.model) : null,
+    };
     res.json({
       success: true,
       data: [...harnessEntries, ...models].map(labelModel),
-      defaultModel: cred.model ?? null,
-      defaultModelName: cred.model ? modelDisplayName(cred.model) : null,
+      defaultModel: def.defaultModel,
+      defaultModelName: def.defaultModelName,
+      defaultProvider: def.provider,
+      speed,
       pinProvider: "litellm",
       ...(recommendedHarness ? { recommendedId: recommendedHarness.id } : {}),
     });

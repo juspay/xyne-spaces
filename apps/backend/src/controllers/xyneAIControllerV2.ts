@@ -1366,10 +1366,12 @@ export class XyneAIControllerV2 {
     }
 
     try {
+      const rawSpeed = req.query['speed'];
       const result = await listClawAgentModels(
         { headers: req.headers, userId },
         req.params['slug'],
-        (req as any).user?.workspaceId
+        (req as any).user?.workspaceId,
+        rawSpeed === 'fast' || rawSpeed === 'standard' ? rawSpeed : undefined
       );
       res.json(result);
     } catch (error) {

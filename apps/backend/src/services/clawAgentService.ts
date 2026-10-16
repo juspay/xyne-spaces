@@ -13,8 +13,6 @@ import { sendWebhookNotification, signWebhookPayload } from '@/apps/core/eventSu
 import { attachXyneAiFlowToken } from '@/apps/core/flowToken';
 import { BaseAppEvent, AppEventType } from '@/apps/types';
 import { decrypt } from '@/services/encryptionService';
-import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
-import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 import { Agent } from 'undici';
 
 // A brief run streams nothing while the model composes; undici's default 300s
@@ -1099,9 +1097,9 @@ export async function listAccessibleClawAgents(req: {
  * 2. When the agent has no such credential (the normal production case — Ask
  *    AI runs on the keyless platform "spaces" provider), fall back to the
  *    workspace's allowed model list: the `models` table rows synced daily from
- *    LiteLLM (modelSyncService), with the org LLM credential's defaultModel as
- *    the "Recommended" label. Picks from this list pin provider "spaces",
- *    which claw-auth applies through the agent's modelSettings.model.
+ *    LiteLLM (modelSyncService). The "Default" label always stays claw-auth's
+ *    resolved default (what a no-pin run starts on). Picks from this list pin
+ *    provider "spaces", which claw-auth applies through modelSettings.model.
  *
  * `pinProvider` tells the composer which providerOverride.provider a pick must
  * be sent with — a "litellm" pin silently no-ops for agents without the
@@ -1110,7 +1108,11 @@ export async function listAccessibleClawAgents(req: {
 export async function listClawAgentModels(
   req: { headers?: { cookie?: string }; userId: string },
   agentSlug?: string,
-  workspaceId?: string
+  workspaceId?: string,
+  /** The run's speed, so the "Default" label names the model a fast run
+   *  starts on (a custom fast profile swaps providers/models). Absent ⇒
+   *  claw-auth uses the agent's modelSettings.speed, as run-stream does. */
+  speed?: 'fast' | 'standard'
 ): Promise<{
   success: boolean;
   data: ClawAgentModel[];
@@ -1121,7 +1123,9 @@ export async function listClawAgentModels(
   defaultModelName?: string | null;
 }> {
   const slug = agentSlug || 'ask-ai';
-  const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/litellm-models`;
+  const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/litellm-models${
+    speed ? `?speed=${speed}` : ''
+  }`;
   try {
     const response = await fetch(url, {
       headers: {
@@ -1154,9 +1158,33 @@ export async function listClawAgentModels(
         };
       }
       if (result.success) {
-        // Deliberate empty answer (no credential AND no platform list on the
-        // claw side) — the workspace's synced allowed list may still serve.
-        return listWorkspaceAllowedModels(workspaceId);
+        // An empty list off the agent's OWN LiteLLM credential must not fall
+        // back to the platform list: its picks pin "spaces", which outranks
+        // and bypasses that key. Hide the picker but keep claw's default.
+        // (Old claw-auth omits pinProvider and only served the cred list.)
+        const clawDefault = result.defaultModel ?? null;
+        const clawDefaultName = result.defaultModelName ?? null;
+        if ((result.pinProvider ?? 'litellm') === 'litellm') {
+          return {
+            success: true,
+            data: [],
+            defaultModel: clawDefault,
+            defaultModelName: clawDefaultName,
+            pinProvider: 'litellm',
+          };
+        }
+        // Deliberate empty answer on the platform path (claw listed no
+        // models) — the workspace's synced allowed list may still serve the
+        // MENU, but the "Default" label stays what claw-auth resolved: the
+        // model a no-pin run actually starts on (provider order, the agent's
+        // Spaces model, claw's LITELLM.model), named. The org credential's
+        // defaultModel is not what claw runs. XYNE-66325.
+        const fallback = await listWorkspaceAllowedModels(workspaceId);
+        return {
+          ...fallback,
+          defaultModel: clawDefault,
+          defaultModelName: clawDefault ? clawDefaultName : null,
+        };
       }
     } else {
       const errorText = await response.text();
@@ -1172,19 +1200,18 @@ export async function listClawAgentModels(
 }
 
 /**
- * Platform fallback for the model picker: the workspace's allowed LiteLLM
- * models from the `models` table (synced daily by modelSyncService) plus the
- * org LLM credential's defaultModel. Fail-soft — a missing sync or credential
- * yields an empty list / null default, and the picker simply hides.
+ * Platform fallback for the model picker MENU: the workspace's allowed LiteLLM
+ * models from the `models` table (synced daily by modelSyncService). The
+ * "Default" label is not derived here — claw-auth resolves it from the agent's
+ * provider order and claw's own default (see listClawAgentModels). Fail-soft —
+ * a missing sync yields an empty list and the picker simply hides.
  */
 async function listWorkspaceAllowedModels(workspaceId?: string): Promise<{
   success: boolean;
   data: ClawAgentModel[];
-  defaultModel: string | null;
   pinProvider: 'spaces';
 }> {
   let data: ClawAgentModel[] = [];
-  let defaultModel: string | null = null;
   const effectiveWorkspaceId = workspaceId ?? config.defaultWorkspaceId;
   try {
     const rows = await db.model.findMany({
@@ -1198,19 +1225,7 @@ async function listWorkspaceAllowedModels(workspaceId?: string): Promise<{
   } catch (err) {
     logger.error('[ClawAgentService] listWorkspaceAllowedModels db error:', err);
   }
-  try {
-    const credential = await orgLLMCredentialService.getCredentialByWorkspaceId(
-      effectiveWorkspaceId,
-      OrgLLMServiceAccountPurpose.DEFAULT,
-    );
-    // The sync strips claude/gemini from the table; a default naming a model
-    // that is not in the menu could never be re-selected once un-picked.
-    const candidate = credential?.defaultModel ?? null;
-    defaultModel = candidate && data.some((m) => m.id === candidate) ? candidate : null;
-  } catch (err) {
-    logger.error('[ClawAgentService] listWorkspaceAllowedModels credential error:', err);
-  }
-  return { success: true, data, defaultModel, pinProvider: 'spaces' };
+  return { success: true, data, pinProvider: 'spaces' };
 }
 
 export interface ClawConversationListQuery {
