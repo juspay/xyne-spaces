@@ -708,12 +708,18 @@ const BoardStageConfigScreen = ({
     });
   }, []);
 
+  // Board settings follow the live board row (someone else's save updates them here), so they
+  // are not part of the unsaved-changes snapshot below; only this user's own toggles mark
+  // them edited.
+  const boardSettingsEditedRef = useRef(false);
+
   const handleBoardTypeToggle = useCallback(() => {
     if (isNonLinearToggleBlocked) {
       showNonLinearPrefillableUnsupportedToast();
       return;
     }
 
+    boardSettingsEditedRef.current = true;
     setBoardType(current =>
       current === BoardType.NON_LINEAR ? BoardType.DEFAULT : BoardType.NON_LINEAR,
     );
@@ -820,6 +826,40 @@ const BoardStageConfigScreen = ({
   const handleGraphLayoutChange = useCallback((layout: TransitionGraphLayout | null) => {
     graphLayoutRef.current = layout;
   }, []);
+
+  // ── Unchanged-save detection ────────────────────────────────────────────────
+  // What Next would write for stages and transitions, as comparable strings. Next skips saving
+  // entirely when nothing differs from what was last loaded or saved: a no-op save still
+  // rewrites every transition and approver, and would overwrite changes someone else saved
+  // while this screen sat open. Board settings are tracked by boardSettingsEditedRef instead.
+  const stagesSnapshot = useMemo(() => JSON.stringify(stages), [stages]);
+  const transitionsSnapshot = useMemo(
+    () =>
+      JSON.stringify({
+        edges: [...transitionsByTempId]
+          .map(([fromTempId, targets]) => [fromTempId, [...targets].sort((a, b) => a - b)] as const)
+          .sort(([a], [b]) => a - b),
+        meta: [...transitionsMeta].sort(([a], [b]) => a.localeCompare(b)),
+      }),
+    [transitionsByTempId, transitionsMeta],
+  );
+  // Stages and transitions are snapshotted separately: form actions save transitions on
+  // their own, and must not mark unsaved stage edits as saved.
+  const savedStagesSnapshotRef = useRef<string | null>(null);
+  const savedTransitionsSnapshotRef = useRef<string | null>(null);
+  // Set when a load or save completes; the snapshot is taken on the next render, once the
+  // state that load or save set has been applied.
+  const snapshotPendingRef = useRef({ stages: false, transitions: false });
+  useEffect(() => {
+    if (snapshotPendingRef.current.stages) {
+      savedStagesSnapshotRef.current = stagesSnapshot;
+      snapshotPendingRef.current.stages = false;
+    }
+    if (snapshotPendingRef.current.transitions) {
+      savedTransitionsSnapshotRef.current = transitionsSnapshot;
+      snapshotPendingRef.current.transitions = false;
+    }
+  });
 
   const savedGraphLayout = useMemo((): TransitionGraphLayout | null => {
     const saved = getBoardMetadata(board)[TRANSITION_GRAPH_LAYOUT_KEY] as
@@ -1022,6 +1062,7 @@ const BoardStageConfigScreen = ({
         if (!loaded) return false;
         applyLoadedTransitions(loaded, stagesRef.current);
         transitionsSyncedRef.current = true;
+        snapshotPendingRef.current = { stages: true, transitions: true };
         return true;
       } finally {
         setIsTransitionsLoading(false);
@@ -1087,6 +1128,7 @@ const BoardStageConfigScreen = ({
         });
       }
       transitionsSyncedRef.current = true;
+      snapshotPendingRef.current.transitions = true;
     },
     [applyLoadedTransitions, transitionsByTempId, transitionsMeta],
   );
@@ -2305,6 +2347,25 @@ const BoardStageConfigScreen = ({
       return;
     }
 
+    // Nothing edited since the last load or save: move on without writing anything. The graph
+    // only reports a layout once a node has been dragged, so any layout counts as an edit.
+    const hasUnsavedChanges =
+      savedStagesSnapshotRef.current !== stagesSnapshot ||
+      savedTransitionsSnapshotRef.current !== transitionsSnapshot ||
+      boardSettingsEditedRef.current ||
+      !!graphLayoutRef.current;
+    if (!hasUnsavedChanges) {
+      hasInitializedStages.current = false;
+      if (onNext) {
+        onNext();
+      } else {
+        toast.info('No changes to save');
+        onSave?.();
+        onClose();
+      }
+      return;
+    }
+
     if (
       boardType === BoardType.NON_LINEAR &&
       !Array.from(transitionsByTempId.values()).some(targets => targets.size > 0)
@@ -2427,6 +2488,8 @@ const BoardStageConfigScreen = ({
         // Sync stage transitions for all board types
         try {
           applySyncedTransitions(await syncStageTransitions(stageIds));
+          snapshotPendingRef.current = { stages: true, transitions: true };
+          boardSettingsEditedRef.current = false;
           toast.success('Board stages updated successfully');
           hasInitializedStages.current = false;
           if (onNext) {
@@ -2471,6 +2534,8 @@ const BoardStageConfigScreen = ({
     syncStageTransitions,
     applySyncedTransitions,
     reloadTransitionsFromServer,
+    stagesSnapshot,
+    transitionsSnapshot,
     isTransitionsLoading,
     transitionsByTempId,
     confirm,
@@ -2583,9 +2648,10 @@ const BoardStageConfigScreen = ({
               {/* Right: toggle switch */}
               <ToggleSwitch
                 checked={slaPolicyType === 'priority'}
-                onToggle={() =>
-                  setSlaPolicyType(slaPolicyType === 'priority' ? 'stages' : 'priority')
-                }
+                onToggle={() => {
+                  boardSettingsEditedRef.current = true;
+                  setSlaPolicyType(slaPolicyType === 'priority' ? 'stages' : 'priority');
+                }}
                 trackName='toggle_priority_sla'
               />
             </div>
@@ -2613,7 +2679,10 @@ const BoardStageConfigScreen = ({
                 </div>
                 <ToggleSwitch
                   checked={showNextStageFormInTicketDetails}
-                  onToggle={() => setShowNextStageFormInTicketDetails(value => !value)}
+                  onToggle={() => {
+                    boardSettingsEditedRef.current = true;
+                    setShowNextStageFormInTicketDetails(value => !value);
+                  }}
                   trackName='toggle_next_stage_form_ticket_details'
                 />
               </div>
