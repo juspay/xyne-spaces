@@ -70,6 +70,7 @@ export interface OrganizerGroup {
   channelIds: string[];
   excludedChannelIds: string[];
   expanded: boolean;
+  mergeIntoSectionId: string | null;
 }
 
 export type OrganizerMode = 'project' | 'activity' | 'dms';
@@ -95,6 +96,8 @@ interface SectionOrganizerDialogProps {
   onActiveWindowDaysChange: (days: number) => void;
   onCancel: () => void;
   onConfirm: (groups: OrganizerGroup[]) => void;
+  isLoading?: boolean;
+  onOptOut?: () => void;
 }
 
 const ChannelIcon = ({ channel }: { channel: VisibleChannel }): ReactElement => {
@@ -145,6 +148,7 @@ const buildGroups = (
     channelIds: [...s.channelIds],
     excludedChannelIds: [],
     expanded: totalChannels <= AUTO_EXPAND_MAX_CHANNELS,
+    mergeIntoSectionId: s.mergeIntoSectionId,
   }));
 
 export const SectionOrganizerDialog = ({
@@ -157,6 +161,8 @@ export const SectionOrganizerDialog = ({
   onActiveWindowDaysChange,
   onCancel,
   onConfirm,
+  isLoading = false,
+  onOptOut,
 }: SectionOrganizerDialogProps): ReactElement => {
   const totalChannels = useMemo(
     () => suggestions.reduce((sum, s) => sum + s.channelIds.length, 0),
@@ -173,13 +179,29 @@ export const SectionOrganizerDialog = ({
   suggestionsRef.current = suggestions;
   totalChannelsRef.current = totalChannels;
 
-  const appliedSignatureRef = useRef(groupsSignature(suggestions));
+  const suggestionsSignature = groupsSignature(suggestions);
+  const appliedSignatureRef = useRef(suggestionsSignature);
   useEffect(() => {
     const nextSignature = groupsSignature(suggestionsRef.current);
     if (nextSignature === appliedSignatureRef.current) return;
     appliedSignatureRef.current = nextSignature;
-    setGroups(buildGroups(suggestionsRef.current, totalChannelsRef.current));
-  }, [mode, activeWindowDays]);
+    const rebuilt = buildGroups(suggestionsRef.current, totalChannelsRef.current);
+    setGroups(prev => {
+      const prevById = new Map(prev.map(group => [group.id, group]));
+      return rebuilt.map(group => {
+        const existing = prevById.get(group.id);
+        if (!existing) return group;
+        return {
+          ...group,
+          name: existing.name,
+          expanded: existing.expanded,
+          excludedChannelIds: existing.excludedChannelIds.filter(id =>
+            group.channelIds.includes(id),
+          ),
+        };
+      });
+    });
+  }, [mode, activeWindowDays, suggestionsSignature]);
 
   const { userID } = useAuthContextValues();
   const allUsers = useUsers();
@@ -209,6 +231,17 @@ export const SectionOrganizerDialog = ({
 
   const updateGroup = (groupId: string, patch: Partial<OrganizerGroup>): void => {
     setGroups(prev => prev.map(g => (g.id === groupId ? { ...g, ...patch } : g)));
+  };
+
+  const renameGroup = (groupId: string, name: string): void => {
+    const original = suggestionsRef.current.find(s => s.id === groupId);
+    const keepsMerge =
+      !!original?.mergeIntoSectionId &&
+      name.trim().toLowerCase() === original.name.trim().toLowerCase();
+    updateGroup(groupId, {
+      name,
+      mergeIntoSectionId: keepsMerge ? (original?.mergeIntoSectionId ?? null) : null,
+    });
   };
 
   const toggleExpanded = (groupId: string): void => {
@@ -274,7 +307,8 @@ export const SectionOrganizerDialog = ({
   const seen = new Set<string>();
   for (const group of selectedGroups) {
     const normalized = group.name.trim().toLowerCase();
-    if (!normalized || takenNames.has(normalized) || seen.has(normalized)) {
+    const collidesWithExisting = takenNames.has(normalized) && !group.mergeIntoSectionId;
+    if (!normalized || collidesWithExisting || seen.has(normalized)) {
       invalidNames.add(group.id);
     }
     seen.add(normalized);
@@ -305,6 +339,15 @@ export const SectionOrganizerDialog = ({
 
   const canConfirm = selectedGroups.length > 0 && invalidNames.size === 0;
   const selectedChannelCount = selectedGroups.reduce((sum, g) => sum + g.channelIds.length, 0);
+
+  const mergeGroups = selectedGroups.filter(g => g.mergeIntoSectionId);
+  const newGroupCount = selectedGroups.length - mergeGroups.length;
+  const confirmLabel =
+    selectedGroups.length === 0
+      ? 'Create sections'
+      : newGroupCount === 0
+        ? `Add to ${mergeGroups.length} section${mergeGroups.length === 1 ? '' : 's'}`
+        : `Create ${newGroupCount} section${newGroupCount === 1 ? '' : 's'}`;
 
   const [tipIndex] = useState(() => {
     const stored = Number(localStorage.getItem(TIP_INDEX_KEY));
@@ -372,13 +415,15 @@ export const SectionOrganizerDialog = ({
         searchPlaceholder='Search channels...'
         isEmpty={visibleGroups.length === 0}
         emptyLabel={
-          query
-            ? 'No channels found'
-            : mode === 'activity'
-              ? `Everything falls on one side of ${activeWindowDays} ${activeWindowDays === 1 ? 'day' : 'days'}. Try a shorter window.`
-              : mode === 'dms'
-                ? 'No app, bot or group DMs to group.'
-                : 'No channels found'
+          isLoading
+            ? 'Looking at your channels…'
+            : query
+              ? 'No channels found'
+              : mode === 'activity'
+                ? `Everything falls on one side of ${activeWindowDays} ${activeWindowDays === 1 ? 'day' : 'days'}. Try a shorter window.`
+                : mode === 'dms'
+                  ? 'No app, bot or group DMs to group.'
+                  : 'Nothing to group here — try another view.'
         }
         trackCategory='CHAT_SIDEBAR'
         trackName='ORGANIZER_SEARCH'
@@ -405,7 +450,7 @@ export const SectionOrganizerDialog = ({
                       value={row.group.name}
                       autoFocus
                       onFocus={e => e.target.select()}
-                      onChange={e => updateGroup(row.group.id, { name: e.target.value })}
+                      onChange={e => renameGroup(row.group.id, e.target.value)}
                       onBlur={() => setEditingGroupId(null)}
                       onKeyDown={e => {
                         if (e.key !== 'Enter' && e.key !== 'Escape') return;
@@ -435,6 +480,11 @@ export const SectionOrganizerDialog = ({
                       )}
                     >
                       {row.group.name}
+                      {row.group.mergeIntoSectionId && (
+                        <span className='ml-1.5 font-normal text-muted-foreground'>
+                          · you already have this section — we&apos;ll add to it
+                        </span>
+                      )}
                     </button>
                   )}
                 </GroupedSelectGroupHeader>
@@ -477,10 +527,23 @@ export const SectionOrganizerDialog = ({
       </GroupedSelectList>
 
       <div className='flex items-center justify-between gap-3'>
-        <span className='text-xs text-muted-foreground'>
-          {query
-            ? `Filtered view — Create still applies to all ${selectedChannelCount} channels.`
-            : SECTION_TIPS[tipIndex]}
+        <span className='flex min-w-0 flex-col gap-0.5 text-xs text-muted-foreground'>
+          <span className='truncate'>
+            {query
+              ? `Filtered view — Create still applies to all ${selectedChannelCount} channels.`
+              : SECTION_TIPS[tipIndex]}
+          </span>
+          {onOptOut && (
+            <button
+              type='button'
+              onClick={onOptOut}
+              data-track-category='CHAT_SIDEBAR'
+              data-track-name='ORGANIZER_OPT_OUT'
+              className='w-fit text-left underline-offset-2 transition-colors hover:text-foreground hover:underline'
+            >
+              Don&apos;t suggest this again
+            </button>
+          )}
         </span>
         <span className={cn('inline-flex', !canConfirm && 'cursor-not-allowed')}>
           <Button
@@ -492,9 +555,7 @@ export const SectionOrganizerDialog = ({
             data-track-category='CHAT_SIDEBAR'
             data-track-name='ORGANIZER_CONFIRM'
           >
-            {selectedGroups.length === 0
-              ? 'Create sections'
-              : `Create ${selectedGroups.length} section${selectedGroups.length === 1 ? '' : 's'}`}
+            {confirmLabel}
           </Button>
         </span>
       </div>

@@ -1,8 +1,11 @@
-import { ChannelScopeType, ProjectType } from '../zero/types.js';
+import { ChannelScopeType, ChannelType, ProjectType } from '../zero/types.js';
 import { isDeskChannelType } from './channel.js';
 
 export const SECTION_NAME_MAX_LENGTH = 50;
 export const DEFAULT_MIN_CHANNELS = 2;
+
+export const OTHER_PROJECTS_SUGGESTION_ID = '__otherProjects__';
+export const OTHER_PROJECTS_SUGGESTION_NAME = 'Everything else';
 
 export const ACTIVE_SUGGESTION_ID = '__active__';
 export const DORMANT_SUGGESTION_ID = '__dormant__';
@@ -35,6 +38,7 @@ export const clampActiveWindowDays = (days: number): number => {
 
 export type SectionSuggestionKind =
   | 'project'
+  | 'otherProjects'
   | 'active'
   | 'dormant'
   | 'bots'
@@ -64,25 +68,31 @@ export interface SuggestionProject {
   type: string;
 }
 
+export interface ExistingSection {
+  id: string;
+  name: string;
+}
+
 export interface SectionSuggestion {
   id: string;
   kind: SectionSuggestionKind;
   name: string;
   channelIds: string[];
+  mergeIntoSectionId: string | null;
 }
 
 export interface ComputeProjectSectionSuggestionsInput {
   channels: readonly SuggestionChannel[];
   statuses: readonly SuggestionChannelStatus[];
   projects: readonly SuggestionProject[];
-  existingSectionNames: readonly string[];
+  existingSections: readonly ExistingSection[];
   minChannels?: number;
 }
 
 export interface ComputeActivitySectionSuggestionsInput {
   channels: readonly SuggestionChannel[];
   statuses: readonly SuggestionChannelStatus[];
-  existingSectionNames: readonly string[];
+  existingSections: readonly ExistingSection[];
   nowMs: number;
   activeWindowDays?: number;
   minChannels?: number;
@@ -91,7 +101,7 @@ export interface ComputeActivitySectionSuggestionsInput {
 export interface ComputeDmSectionSuggestionsInput {
   channels: readonly SuggestionChannel[];
   statuses: readonly SuggestionChannelStatus[];
-  existingSectionNames: readonly string[];
+  existingSections: readonly ExistingSection[];
   minChannels?: number;
   maxFrequentContacts?: number;
   maxGroupDms?: number;
@@ -102,16 +112,25 @@ const normalizeName = (name: string): string => name.trim().toLowerCase();
 
 const makeBucketAdder = (
   suggestions: SectionSuggestion[],
-  existingSectionNames: readonly string[],
+  existingSections: readonly ExistingSection[],
   minChannels: number,
 ): ((id: string, kind: SectionSuggestionKind, name: string, ids: string[]) => void) => {
-  const takenNames = new Set(existingSectionNames.map(normalizeName));
+  const sectionIdByName = new Map(
+    existingSections.map(section => [normalizeName(section.name), section.id]),
+  );
+  const takenNames = new Set<string>();
   return (id, kind, name, ids) => {
     if (ids.length < minChannels) return;
     const normalized = normalizeName(name);
     if (takenNames.has(normalized)) return;
     takenNames.add(normalized);
-    suggestions.push({ id, kind, name, channelIds: ids });
+    suggestions.push({
+      id,
+      kind,
+      name,
+      channelIds: ids,
+      mergeIntoSectionId: sectionIdByName.get(normalized) ?? null,
+    });
   };
 };
 
@@ -120,7 +139,7 @@ const suppressAllEncompassing = (
   candidateCount: number,
 ): SectionSuggestion[] => {
   const only = suggestions.length === 1 ? suggestions[0] : undefined;
-  if (only && only.channelIds.length === candidateCount) return [];
+  if (only && !only.mergeIntoSectionId && only.channelIds.length === candidateCount) return [];
   return suggestions;
 };
 
@@ -143,15 +162,17 @@ const isUnfiled = (
   return !status.isDeleted && !status.isStarred && !status.sectionId;
 };
 
+const isSectionable = (channel: SuggestionChannel): boolean => {
+  if (channel.scopeType !== ChannelScopeType.DEFAULT) return false;
+  if (isDeskChannelType(channel.type)) return false;
+  return channel.type !== ChannelType.SDLC;
+};
+
 const selectCandidates = (
   channels: readonly SuggestionChannel[],
   statusByChannelId: Map<string, SuggestionChannelStatus>,
 ): SuggestionChannel[] =>
-  channels.filter(channel => {
-    if (channel.scopeType !== ChannelScopeType.DEFAULT) return false;
-    if (isDeskChannelType(channel.type)) return false;
-    return isUnfiled(channel.id, statusByChannelId);
-  });
+  channels.filter(channel => isSectionable(channel) && isUnfiled(channel.id, statusByChannelId));
 
 const selectDmCandidates = (
   channels: readonly SuggestionChannel[],
@@ -170,22 +191,20 @@ const selectDmCandidates = (
 export interface CandidateProjectIdsInput {
   channels: readonly SuggestionChannel[];
   statuses: readonly SuggestionChannelStatus[];
-  minChannels?: number;
 }
 
+// Every project holding an unfiled channel, including the ones below
+// minChannels: computeProjectSectionSuggestions pools those into
+// OTHER_PROJECTS_SUGGESTION_NAME, and it can only do that for projects it
+// was actually given.
 export function getCandidateProjectIds(input: CandidateProjectIdsInput): string[] {
-  const { channels, statuses, minChannels = DEFAULT_MIN_CHANNELS } = input;
+  const { channels, statuses } = input;
 
-  const counts = new Map<string, number>();
+  const ids = new Set<string>();
   for (const channel of selectCandidates(channels, indexStatuses(statuses))) {
-    counts.set(channel.projectId, (counts.get(channel.projectId) ?? 0) + 1);
+    ids.add(channel.projectId);
   }
-
-  const ids: string[] = [];
-  for (const [projectId, count] of counts) {
-    if (count >= minChannels) ids.push(projectId);
-  }
-  return ids.sort();
+  return [...ids].sort();
 }
 
 export function computeProjectSectionSuggestions(
@@ -195,7 +214,7 @@ export function computeProjectSectionSuggestions(
     channels,
     statuses,
     projects,
-    existingSectionNames,
+    existingSections,
     minChannels = DEFAULT_MIN_CHANNELS,
   } = input;
 
@@ -215,7 +234,7 @@ export function computeProjectSectionSuggestions(
   }
 
   const suggestions: SectionSuggestion[] = [];
-  const addBucket = makeBucketAdder(suggestions, existingSectionNames, minChannels);
+  const addBucket = makeBucketAdder(suggestions, existingSections, minChannels);
 
   const ordered = [...channelIdsByProjectId].sort(([aId, aIds], [bId, bIds]) => {
     if (bIds.length !== aIds.length) return bIds.length - aIds.length;
@@ -224,6 +243,7 @@ export function computeProjectSectionSuggestions(
     return aName.localeCompare(bName);
   });
 
+  const pooled: string[] = [];
   for (const [projectId, channelIds] of ordered) {
     const project = projectById.get(projectId);
     if (!project) continue;
@@ -231,8 +251,20 @@ export function computeProjectSectionSuggestions(
     const name = project.name.trim().slice(0, SECTION_NAME_MAX_LENGTH).trim();
     if (!name) continue;
 
+    if (channelIds.length < minChannels) {
+      pooled.push(...channelIds);
+      continue;
+    }
+
     addBucket(projectId, 'project', name, channelIds);
   }
+
+  addBucket(
+    OTHER_PROJECTS_SUGGESTION_ID,
+    'otherProjects',
+    OTHER_PROJECTS_SUGGESTION_NAME,
+    pooled,
+  );
 
   return suppressAllEncompassing(suggestions, candidates.length);
 }
@@ -243,7 +275,7 @@ export function computeActivitySectionSuggestions(
   const {
     channels,
     statuses,
-    existingSectionNames,
+    existingSections,
     nowMs,
     activeWindowDays = DEFAULT_ACTIVE_WINDOW_DAYS,
     minChannels = DEFAULT_MIN_CHANNELS,
@@ -263,7 +295,7 @@ export function computeActivitySectionSuggestions(
   }
 
   const suggestions: SectionSuggestion[] = [];
-  const addBucket = makeBucketAdder(suggestions, existingSectionNames, minChannels);
+  const addBucket = makeBucketAdder(suggestions, existingSections, minChannels);
 
   addBucket(ACTIVE_SUGGESTION_ID, 'active', ACTIVE_SUGGESTION_NAME, activeChannelIds);
   addBucket(DORMANT_SUGGESTION_ID, 'dormant', DORMANT_SUGGESTION_NAME, dormantChannelIds);
@@ -277,7 +309,7 @@ export function computeDmSectionSuggestions(
   const {
     channels,
     statuses,
-    existingSectionNames,
+    existingSections,
     minChannels = DEFAULT_MIN_CHANNELS,
     maxFrequentContacts = MAX_FREQUENT_CONTACTS,
     maxGroupDms = MAX_GROUP_DMS,
@@ -316,7 +348,7 @@ export function computeDmSectionSuggestions(
     .map(channel => channel.id);
 
   const suggestions: SectionSuggestion[] = [];
-  const addBucket = makeBucketAdder(suggestions, existingSectionNames, minChannels);
+  const addBucket = makeBucketAdder(suggestions, existingSections, minChannels);
 
   addBucket(
     FREQUENT_CONTACTS_SUGGESTION_ID,
