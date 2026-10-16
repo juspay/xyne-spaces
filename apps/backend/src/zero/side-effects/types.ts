@@ -181,6 +181,7 @@ export const SIDE_EFFECT_OPERATION_CONFIG: SideEffectOperationConfigMap = {
   canvases: ['insert'],
   form_entity_values: ['insert', 'update', 'delete'],
   delayed_messages: ['insert', 'update', 'delete'],
+  polls: ['insert'],
   channels: ['update'],
   email_reads: ['insert', 'update', 'delete'],
   conversation_label_mappings: ['insert', 'delete'],

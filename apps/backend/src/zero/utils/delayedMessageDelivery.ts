@@ -9,6 +9,7 @@ export interface DeliverDelayedMessageInput {
   senderId: string;
   content: string;
   hasAttachment: boolean;
+  hasPollDraft?: boolean;
 }
 
 export interface DeliverDelayedMessageResult {
@@ -57,6 +58,7 @@ export async function deliverDelayedMessage(
       conversationId,
       senderId,
       content,
+      hasPollDraft: input.hasPollDraft,
     });
 
     return {

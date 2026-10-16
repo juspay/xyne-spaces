@@ -69,6 +69,10 @@ import {
   RcasACL,
   ReactionCountsACL,
   ReactionsACL,
+  PollsACL,
+  PollQuestionsACL,
+  PollVotesACL,
+  PollQuestionResultsACL,
   RecurringCallSeriesACL,
   ReleaseAttributionsACL,
   ReleaseChangesACL,
@@ -287,6 +291,14 @@ export class ACLFactory {
       return new ReactionsACL(ctx, prisma)
     case 'reactionCount':
       return new ReactionCountsACL(ctx, prisma)
+    case 'poll':
+      return new PollsACL(ctx, prisma)
+    case 'pollQuestion':
+      return new PollQuestionsACL(ctx, prisma)
+    case 'pollVote':
+      return new PollVotesACL(ctx, prisma)
+    case 'pollQuestionResult':
+      return new PollQuestionResultsACL(ctx, prisma)
     case 'recurringCallSeries':
       return new RecurringCallSeriesACL(ctx, prisma)
     case 'releaseAttribution':

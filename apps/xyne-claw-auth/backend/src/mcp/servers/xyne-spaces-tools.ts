@@ -7,6 +7,12 @@
 
 import { randomUUID } from "node:crypto";
 import { errMsg } from "../../lib/errors.js";
+import { isPollClosed, isPollMessageMetadata } from "@xyne/shared/polls/policy";
+import {
+  calculateAverageRating,
+  calculateOptionResults,
+  calculateRankingResults,
+} from "@xyne/shared/polls/results";
 import {
   interact,
   search,
@@ -2432,6 +2438,167 @@ interface TicketRow {
 
 // ── spaces-messages ──────────────────────────────────────────────────
 
+interface PollProjectionRow {
+  id: string;
+  messageId: string;
+  createdBy: string;
+  isAnonymous: boolean;
+  resultVisibility: string;
+  closesAt?: string | null;
+  closedAt?: string | null;
+}
+
+interface PollQuestionProjectionRow {
+  id: string;
+  pollId: string;
+  question: string;
+  responseType: string;
+  position: number;
+  options?: Array<{ id: string; text: string }> | string;
+}
+
+interface PollResultProjectionRow {
+  questionId: string;
+  voterCount: number;
+  optionCounts?: Record<string, number>;
+  rankTotals?: Record<string, number>;
+  ratingTotal?: number;
+}
+
+interface PollVoteProjectionRow {
+  questionId: string;
+  userId: string;
+  optionIds?: string[];
+  textAnswer?: string | null;
+  rankedOptionIds?: string[] | null;
+  rating?: number | null;
+}
+
+/** Gateway timestamps arrive as ISO strings; the shared poll helpers take epoch ms. */
+const pollTiming = (poll: PollProjectionRow) => ({
+  closedAt: poll.closedAt ? Date.parse(poll.closedAt) : null,
+  closesAt: poll.closesAt ? Date.parse(poll.closesAt) : null,
+});
+
+/** The gateway may hand JSON columns back as text. */
+function parseJsonColumn(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Poll summaries are extra context: a failure here must never stop the messages from returning. */
+async function resolvePollProjections(
+  messages: Array<{ messageId: string; metadata?: unknown }>,
+  requesterId: string,
+): Promise<Map<string, string>> {
+  try {
+    return await buildPollProjections(messages, requesterId);
+  } catch (error) {
+    log.warn("poll projection failed; returning messages without poll details", { error: errMsg(error) });
+    return new Map();
+  }
+}
+
+async function buildPollProjections(
+  messages: Array<{ messageId: string; metadata?: unknown }>,
+  requesterId: string,
+): Promise<Map<string, string>> {
+  const messageIds = messages
+    .filter((message) => isPollMessageMetadata(parseJsonColumn(message.metadata)))
+    .map((message) => message.messageId);
+  if (messageIds.length === 0) return new Map();
+
+  const polls = (await interact({
+    model: "poll",
+    operation: "findMany",
+    where: { messageId: { in: messageIds } },
+  })) as PollProjectionRow[];
+  if (!polls.length) return new Map();
+  const pollIds = polls.map((poll) => poll.id);
+  const [questions, results, votes] = await Promise.all([
+    interact({
+      model: "pollQuestion",
+      operation: "findMany",
+      where: { pollId: { in: pollIds } },
+      orderBy: [{ position: "asc" }],
+    }) as Promise<PollQuestionProjectionRow[]>,
+    interact({
+      model: "pollQuestionResult",
+      operation: "findMany",
+      where: { pollId: { in: pollIds } },
+    }) as Promise<PollResultProjectionRow[]>,
+    interact({ model: "pollVote", operation: "findMany", where: { pollId: { in: pollIds } } }) as Promise<
+      PollVoteProjectionRow[]
+    >,
+  ]);
+  const voterInfo = await resolveUserInfo(votes.map((vote) => vote.userId));
+  const output = new Map<string, string>();
+
+  for (const poll of polls) {
+    const pollQuestions = questions.filter((question) => question.pollId === poll.id);
+    const visibleResults = results.filter((result) =>
+      pollQuestions.some((question) => question.id === result.questionId),
+    );
+    const lines = [
+      `Poll status: ${isPollClosed(pollTiming(poll), Date.now()) ? "closed" : "open"}`,
+      `Result visibility: ${poll.resultVisibility}`,
+    ];
+    if (visibleResults.length === 0) {
+      lines.push("Results: hidden by the poll's visibility policy for this requester.");
+    }
+    for (const question of pollQuestions) {
+      lines.push(`Question: ${question.question} (${question.responseType})`);
+      const result = visibleResults.find((row) => row.questionId === question.id);
+      const parsedOptions = parseJsonColumn(question.options);
+      const questionOptions = Array.isArray(parsedOptions)
+        ? (parsedOptions as Array<{ id: string; text: string }>)
+        : [];
+      if (result) {
+        const optionText = (id: string) => questionOptions.find((option) => option.id === id)?.text ?? id;
+        if (question.responseType === "SINGLE_CHOICE" || question.responseType === "MULTIPLE_CHOICE") {
+          for (const option of calculateOptionResults(questionOptions, result)) {
+            lines.push(`- ${optionText(option.optionId)}: ${option.count} vote(s), ${option.percentage}%`);
+          }
+        } else if (question.responseType === "RATING_1_TO_5") {
+          lines.push(`- ${result.voterCount} response(s), average ${calculateAverageRating(result).toFixed(1)}/5`);
+        } else if (question.responseType === "RANKING") {
+          for (const option of calculateRankingResults(questionOptions, result)) {
+            const rank = option.averageRank > 0 ? option.averageRank.toFixed(1) : "—";
+            lines.push(`- ${optionText(option.optionId)}: average rank ${rank}`);
+          }
+        } else {
+          lines.push(`- ${result.voterCount} response(s)`);
+        }
+      }
+      const visibleVotes = votes.filter((vote) => vote.questionId === question.id);
+      if (visibleVotes.length > 0) {
+        lines.push(
+          ...visibleVotes.map((vote) => {
+            const who =
+              vote.userId === requesterId
+                ? "Your response"
+                : `${formatUserRef(vote.userId, voterInfo)} response`;
+            if (vote.textAnswer) return `- ${who}: ${cleanSnippet(vote.textAnswer)}`;
+            if (vote.rating) return `- ${who}: ${vote.rating}/5`;
+            const selected = (vote.rankedOptionIds ?? vote.optionIds ?? [])
+              .map((id) => questionOptions.find((option) => option.id === id)?.text ?? id)
+              .join(", ");
+            return `- ${who}: ${selected}`;
+          }),
+        );
+      } else if (poll.isAnonymous) {
+        lines.push("Voter identities: anonymous.");
+      }
+    }
+    output.set(poll.messageId, lines.join("\n"));
+  }
+  return output;
+}
+
 const spacesMessages: ToolDef = {
   name: "spaces-messages",
   description:
@@ -2469,7 +2636,7 @@ const spacesMessages: ToolDef = {
     },
     required: ["conversationId"],
   },
-  handler: withToolErrors("Messages error", async (args) => {
+  handler: withToolErrors("Messages error", async (args, ctx) => {
       const conversationId = String(args["conversationId"]);
       const sortDir: "asc" | "desc" = args["sortOrder"] === "desc" ? "desc" : "asc";
       const msgTypes = Array.isArray(args["msgType"])
@@ -2508,6 +2675,7 @@ const spacesMessages: ToolDef = {
       const userInfo = await resolveUserInfo(userIds);
       const channelInfo = await resolveChannelInfo(channelId ? [channelId] : []);
       const channelName = channelId ? channelInfo.get(channelId)?.name : undefined;
+      const pollProjections = await resolvePollProjections(rows, ctx.userId);
 
       const lines = rows.map((m) => {
         const time = toIST(m.createdAt);
@@ -2517,7 +2685,8 @@ const spacesMessages: ToolDef = {
         const react = reactions ? ` {${reactions}}` : "";
         // Message bodies are stored as rich-text HTML — strip to markdown-ish
         // plain text so the model doesn't wade through <p class=…>/<h2>/<li> noise.
-        return `[${time}] ${formatUserRef(m.senderId, userInfo)}${attach}${edited}${react}: ${cleanSnippet(m.content)}`;
+        const poll = pollProjections.get(m.messageId);
+        return `[${time}] ${formatUserRef(m.senderId, userInfo)}${attach}${edited}${react}: ${cleanSnippet(m.content)}${poll ? `\n${poll}` : ""}`;
       });
 
       const context: string[] = [];
@@ -2571,6 +2740,7 @@ interface MessageRow {
   conversationId?: string;
   /** The Prisma scalar — gateway returns this, but NOT the joined `sender.name`. */
   senderId?: string;
+  metadata?: unknown;
 }
 
 // ── spaces-message-detail ────────────────────────────────────────────
@@ -2589,7 +2759,7 @@ const spacesMessageDetail: ToolDef = {
     },
     required: ["messageId"],
   },
-  handler: withToolErrors("Message detail error", async (args) => {
+  handler: withToolErrors("Message detail error", async (args, ctx) => {
       const messageId = String(args["messageId"]);
       const rows = (await interact({
         model: "message",
@@ -2611,6 +2781,7 @@ const spacesMessageDetail: ToolDef = {
       const channelInfo = await resolveChannelInfo(channelId ? [channelId] : []);
       const channelName = channelId ? channelInfo.get(channelId)?.name : undefined;
       const reactions = formatReactions(m.reactions_md, userInfo);
+      const pollProjection = (await resolvePollProjections([m], ctx.userId)).get(m.messageId);
 
       const parts = [
         `Message: ${m.messageId}`,
@@ -2624,6 +2795,7 @@ const spacesMessageDetail: ToolDef = {
         ...(reactions ? [`Reactions: ${reactions}`] : []),
         // Message body is rich-text HTML — clean to markdown-ish plain text.
         `\n${cleanSnippet(m.content)}`,
+        ...(pollProjection ? [`\n${pollProjection}`] : []),
       ];
 
       if (m.hasAttachment) {
@@ -2658,6 +2830,7 @@ interface MessageDetailRow {
   reactions_md?: string;
   conversationId?: string;
   senderId?: string;
+  metadata?: unknown;
 }
 
 // ── spaces-channels ──────────────────────────────────────────────────

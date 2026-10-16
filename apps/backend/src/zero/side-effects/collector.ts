@@ -354,6 +354,7 @@ function extractEntityId(table: TableName, args: any): string | null {
     case 'bookmarks':
     case 'calls':
     case 'delayed_messages':
+    case 'polls':
     case 'draft_messages':
     case 'user_assignment_states':
     case 'board_complexity_scores':

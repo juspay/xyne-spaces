@@ -142,6 +142,26 @@ import {
   type ChannelPublishedTab,
 } from '@xyne/shared';
 import {
+  aggregatePollBallots,
+  appendPollOption,
+  assertCompleteRanking,
+  assertPollMessageActive,
+  assertPollOpen,
+  assertPollScheduleAfter,
+  ballotFieldsForResponse,
+  buildPollMessageSummary,
+  deletePollGraph,
+  insertPollGraph,
+  isChoiceResponseType,
+  isPollClosed,
+  isPollMessageMetadata,
+  nextBallotOptionIds,
+  pollDraftSchema,
+  pollResponseSchema,
+  pollScheduleSchema,
+  POLL_LIMITS,
+} from '@xyne/shared';
+import {
   evaluateEta,
   buildEtaActivityIntents,
   stageEtaActivityOutbox,
@@ -235,6 +255,7 @@ import {
 import { validateFlowDecisionFields } from '@/zero/utils/flowPlanValidation';
 import { getEncryptionProvider } from '@/services/encryption';
 import { escapeHtml } from '@/utils/htmlEscape';
+import { lockRowForUpdate } from '@/bypassAcl/lockServices';
 
 function sortCallParticipantsForPreview<T extends {
   id: string;
@@ -1105,6 +1126,32 @@ async function createNonParticipantSystemMessages(
     logger.error('❌ [NON-PARTICIPANT] Error creating non-participant system messages:', error);
     // Don't throw - let the message creation succeed even if system message fails
   }
+}
+
+/**
+ * Recomputes a question's identity-free result row from its ballots. The row lock
+ * serializes concurrent voters on one question; under READ COMMITTED the ballot read
+ * that follows sees every ballot committed before the lock was granted.
+ */
+async function refreshPollQuestionResult(
+  tx: Transaction<Schema>,
+  questionId: string,
+  timestamp: number
+): Promise<void> {
+  if (tx.location === 'server') {
+    await lockRowForUpdate(
+      tx.dbTransaction,
+      'poll_question_results',
+      questionId,
+      'serialize concurrent votes on one poll question while its result row is recomputed'
+    );
+  }
+  const ballots = await tx.run(zql.poll_votes.where('questionId', '=', questionId));
+  await tx.mutate.poll_question_results.update({
+    questionId,
+    ...aggregatePollBallots(ballots),
+    updatedAt: timestamp,
+  });
 }
 
 export function createMutators(
@@ -2732,6 +2779,8 @@ export function createMutators(
           timestamp: z.number(),
           attachmentIds: z.array(z.string()).optional(),
           entityLinkContext: entityLinkContextSchema.optional(),
+          poll: pollDraftSchema.optional(),
+          pollSchedule: pollScheduleSchema.optional(),
         }),
         async ({
           tx,
@@ -2744,15 +2793,18 @@ export function createMutators(
             timestamp,
             attachmentIds,
             entityLinkContext,
+            poll,
+            pollSchedule,
           },
         }) => {
-          if (content === '') {
+          if (content === '' && !poll) {
             throw new Error('Message content or files are required to start a conversation');
           }
           content = await guestSafeContent(tx, authData.role, channelId, content);
 
           const user = await tx.run(zql.users.where('id', authData.sub).one());
           const now = timestamp;
+          const messageContent = poll ? buildPollMessageSummary(poll) : content.trim();
 
           const participant = await tx.run(zql.channel_participants
             .where('userId', authData.sub)
@@ -2908,16 +2960,16 @@ export function createMutators(
             conversationId,
             workspaceId: authData.workspaceId,
             senderId: authData.sub,
-            content: content.trim(),
+            content: messageContent,
             msgType: type,
             hasAttachment: false,
             edited: false,
             showInChannel: false,
             createdAt: now,
-            metadata: undefined,
+            metadata: poll ? { messageSubtype: 'poll' } : undefined,
             visibleTo: null,
             isDeleted: false,
-            isSent: true
+            isSent: true,
           };
 
           if (attachmentIds !== undefined) {
@@ -2995,7 +3047,19 @@ export function createMutators(
           }
 
           await tx.mutate.messages.insert(message);
-          logger.info(`💬 [MUTATOR-CREATE-MESSAGE] Message ${message.messageId} created, type: ${type}`);
+          if (poll) {
+            await insertPollGraph(tx, {
+              draft: poll,
+              messageId,
+              workspaceId: authData.workspaceId,
+              userId: authData.sub,
+              timestamp: now,
+              schedule: pollSchedule,
+            });
+          }
+          logger.info(
+            `💬 [MUTATOR-CREATE-MESSAGE] Message ${message.messageId} created, type: ${type}`
+          );
 
           if (type === MessageType.USER) {
             const userProfile = await tx.run(zql.user_profiles.where('userId', authData.sub).one());
@@ -3581,6 +3645,168 @@ export function createMutators(
         }
       ),
     },
+    polls: {
+      respond: defineMutator(
+        z.object({
+          responseId: z.string(),
+          pollId: z.string(),
+          response: pollResponseSchema,
+          timestamp: z.number(),
+        }),
+        async ({ tx, args }) => {
+          const [poll, question, existing] = await Promise.all([
+            tx.run(zql.polls.where('id', '=', args.pollId).related('message').one()),
+            tx.run(zql.poll_questions.where('id', '=', args.response.questionId).one()),
+            tx.run(
+              zql.poll_votes
+                .where('questionId', '=', args.response.questionId)
+                .where('userId', '=', authData.sub)
+                .one()
+            ),
+          ]);
+          if (
+            !poll ||
+            !question ||
+            question.pollId !== poll.id ||
+            question.responseType !== args.response.responseType
+          ) {
+            throw new ApplicationError('Poll question is not available');
+          }
+          assertPollMessageActive(poll.message);
+          assertPollOpen(poll, Date.now());
+          if ('rankedOptionIds' in args.response) {
+            assertCompleteRanking(question.options, args.response.rankedOptionIds);
+          }
+          const row = { ...ballotFieldsForResponse(args.response), updatedAt: args.timestamp };
+          if (existing) {
+            await tx.mutate.poll_votes.update({ id: existing.id, ...row });
+          } else {
+            await tx.mutate.poll_votes.insert({
+              id: args.responseId,
+              workspaceId: authData.workspaceId,
+              pollId: poll.id,
+              questionId: question.id,
+              userId: authData.sub,
+              ...row,
+              createdAt: args.timestamp,
+            });
+          }
+          await refreshPollQuestionResult(tx, question.id, args.timestamp);
+        }
+      ),
+      vote: defineMutator(
+        z.object({
+          voteId: z.string(),
+          pollId: z.string(),
+          questionId: z.string(),
+          optionId: z.string(),
+          selected: z.boolean(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args }) => {
+          const [poll, question, existing] = await Promise.all([
+            tx.run(zql.polls.where('id', '=', args.pollId).related('message').one()),
+            tx.run(zql.poll_questions.where('id', '=', args.questionId).one()),
+            tx.run(
+              zql.poll_votes
+                .where('questionId', '=', args.questionId)
+                .where('userId', '=', authData.sub)
+                .one()
+            ),
+          ]);
+          if (
+            !poll ||
+            poll.workspaceId !== authData.workspaceId ||
+            !question ||
+            question.pollId !== poll.id ||
+            !question.options.some((option) => option.id === args.optionId)
+          ) {
+            throw new ApplicationError('Poll option is not available');
+          }
+          assertPollMessageActive(poll.message);
+          assertPollOpen(poll, Date.now());
+          if (!isChoiceResponseType(question.responseType)) {
+            throw new ApplicationError('This question does not accept choice votes');
+          }
+          const optionIds = nextBallotOptionIds(
+            existing?.optionIds ?? [],
+            args.optionId,
+            args.selected,
+            question.responseType
+          );
+          if (optionIds.length === 0) {
+            if (existing) await tx.mutate.poll_votes.delete({ id: existing.id });
+          } else if (existing) {
+            await tx.mutate.poll_votes.update({
+              id: existing.id,
+              optionIds,
+              updatedAt: args.timestamp,
+            });
+          } else {
+            await tx.mutate.poll_votes.insert({
+              id: args.voteId,
+              workspaceId: authData.workspaceId,
+              pollId: poll.id,
+              questionId: question.id,
+              userId: authData.sub,
+              optionIds,
+              createdAt: args.timestamp,
+              updatedAt: args.timestamp,
+            });
+          }
+          await refreshPollQuestionResult(tx, question.id, args.timestamp);
+        }
+      ),
+      close: defineMutator(
+        z.object({ pollId: z.string(), timestamp: z.number() }),
+        async ({ tx, args }) => {
+          const poll = await tx.run(zql.polls.where('id', '=', args.pollId).one());
+          if (!poll || poll.createdBy !== authData.sub) {
+            throw new ApplicationError('Only the poll creator can close this poll');
+          }
+          if (!isPollClosed(poll)) {
+            await tx.mutate.polls.update({ id: poll.id, closedAt: args.timestamp });
+          }
+        }
+      ),
+      addOption: defineMutator(
+        z.object({
+          id: z.string().uuid(),
+          questionId: z.string(),
+          text: z.string().trim().min(1).max(POLL_LIMITS.maxOptionLength),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args }) => {
+          // Lock the question row so concurrent additions append to the latest options.
+          if (tx.location === 'server') {
+            await lockRowForUpdate(
+              tx.dbTransaction,
+              'poll_questions',
+              args.questionId,
+              'serialize concurrent audience options appended to one poll question'
+            );
+          }
+          const question = await tx.run(
+            zql.poll_questions
+              .where('id', '=', args.questionId)
+              .related('poll', (poll) => poll.related('message'))
+              .one()
+          );
+          if (!question?.poll || question.workspaceId !== authData.workspaceId) {
+            throw new ApplicationError('Poll question is not available');
+          }
+          assertPollMessageActive(question.poll.message);
+          assertPollOpen(question.poll, Date.now());
+          if (question.poll.createdBy !== authData.sub && !question.poll.allowAudienceChoices) {
+            throw new ApplicationError('This poll does not allow audience options');
+          }
+          await tx.mutate.poll_questions.update({
+            id: question.id,
+            options: appendPollOption(question, { id: args.id, text: args.text }),
+          });
+        }
+      ),
+    },
     messages: {
       send: defineMutator(
         z.object({
@@ -3592,8 +3818,12 @@ export function createMutators(
           messageId: z.string(),
           childConversationId: z.string().optional(),
           attachmentIds: z.array(z.string()).optional(),
+          poll: pollDraftSchema.optional(),
         }),
-        async ({ tx, args: { conversationId, content, type, showInChannel = false, timestamp, messageId, childConversationId, attachmentIds } }) => {
+        async ({ tx, args: { conversationId, content, type, showInChannel = false, timestamp, messageId, childConversationId, attachmentIds, poll } }) => {
+          if (poll) {
+            throw new ApplicationError('Polls can only be posted as top-level channel messages');
+          }
           if (content === '') {
             throw new Error('Message content or files are required to start a conversation');
           }
@@ -4029,6 +4259,10 @@ export function createMutators(
           const message = await tx.run(zql.messages.where('messageId', messageId).one());
           if (!message) {
             throw new Error('Message not available');
+          }
+
+          if (isPollMessageMetadata(message.metadata)) {
+            throw new ApplicationError('Poll messages cannot be edited');
           }
 
           // For forwarded messages, empty content is allowed (clearing optional message)
@@ -4592,6 +4826,11 @@ export function createMutators(
               });
             })
           );
+
+          const poll = await tx.run(zql.polls.where('messageId', '=', messageId).one());
+          if (poll) {
+            await deletePollGraph(tx, poll.id);
+          }
 
           // Get all OTHER messages in the conversation (excluding the one being deleted)
           const allMessages = await tx.run(zql.messages
@@ -17940,16 +18179,21 @@ export function createMutators(
           channelId: z.string(),
           conversationId: z.string().optional(),
           content: z.string(),
+          poll: pollDraftSchema.optional(),
+          pollSchedule: pollScheduleSchema.optional(),
           scheduledFor: z.number(),
           timestamp: z.number(),
         }),
         async ({
           tx,
           ctx,
-          args: { id, channelId, conversationId, content, scheduledFor, timestamp },
+          args: { id, channelId, conversationId, content, poll, pollSchedule, scheduledFor, timestamp },
         }) => {
           if (scheduledFor <= Date.now()) {
             throw new Error('Scheduled time must be in the future');
+          }
+          if (poll && conversationId) {
+            throw new ApplicationError('Polls can only be posted as top-level channel messages');
           }
 
           const channel = await tx.run(zql.channels.where('id', channelId).one());
@@ -17963,7 +18207,8 @@ export function createMutators(
               .where("userId", ctx.userID)
               .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null))),
           );
-          const existingDraft = channelDrafts.find(
+          // A scheduled poll never takes over the composer's draft or its files.
+          const existingDraft = poll ? undefined : channelDrafts.find(
             (d) =>
               d.conversationId === (conversationId ?? null) &&
               d.messageId === null,
@@ -17977,7 +18222,7 @@ export function createMutators(
             )
             : [];
 
-          if (content.trim() === '' && scheduledAttachments.length === 0) {
+          if (!poll && content.trim() === '' && scheduledAttachments.length === 0) {
             throw new Error('Message content is required');
           }
 
@@ -17989,7 +18234,8 @@ export function createMutators(
             channelId,
             conversationId: conversationId ?? null,
             senderId: ctx.userID,
-            content: content.trim(),
+            content: poll ? buildPollMessageSummary(poll) : content.trim(),
+            pollDraft: poll ? { poll, schedule: pollSchedule ?? {} } : null,
             hasAttachment: scheduledAttachments.length > 0,
             scheduledFor,
             status: DelayedMessageStatus.PENDING,
@@ -18063,6 +18309,9 @@ export function createMutators(
           if (scheduled.status !== DelayedMessageStatus.PENDING) {
             throw new Error(`Cannot reschedule a message with status: ${scheduled.status}`);
           }
+          if (scheduled.pollDraft) {
+            assertPollScheduleAfter(scheduled.pollDraft, scheduledFor);
+          }
 
           await tx.mutate.delayed_messages.update({
             id,
@@ -18088,6 +18337,10 @@ export function createMutators(
 
           if (scheduled.status !== DelayedMessageStatus.PENDING) {
             throw new Error(`Cannot edit a message with status: ${scheduled.status}`);
+          }
+
+          if (scheduled.pollDraft) {
+            throw new ApplicationError('Scheduled polls cannot be edited');
           }
 
           if (scheduled.updatedAt !== updatedAt) {
@@ -18120,6 +18373,10 @@ export function createMutators(
 
           if (scheduled.status !== DelayedMessageStatus.PENDING) {
             throw new Error(`Cannot convert a message with status: ${scheduled.status} to draft`);
+          }
+
+          if (scheduled.pollDraft) {
+            throw new ApplicationError('Scheduled polls cannot be converted to a draft');
           }
 
           const channelDrafts = await tx.run(

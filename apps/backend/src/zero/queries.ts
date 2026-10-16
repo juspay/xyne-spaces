@@ -1082,6 +1082,32 @@ const applyArchiveFilter = <T extends { where: Function }>(
 };
 
 export const queries: AnyQueryRegistry = defineQueries({
+  pollByMessageId: defineQuery(
+    // channelId is intentionally consumed by defineQuery's ACL wrapper rather
+    // than this query body. PollsACL scopes poll -> message -> conversation -> channel.
+    z.object({ messageId: z.string(), channelId: z.string().optional() }),
+    ({ args: { messageId } }) =>
+      zql.polls
+        .where('messageId', '=', messageId)
+        .whereExists('message', (message) => message.where('isDeleted', false))
+        .related('questions', (question) => question.orderBy('position', 'asc'))
+        .one()
+  ),
+  pollQuestionResultsByPollId: defineQuery(
+    z.object({ pollId: z.string(), channelId: z.string().optional() }),
+    ({ args: { pollId } }) => zql.poll_question_results.where('pollId', '=', pollId)
+  ),
+  myPollVotesByPollId: defineQuery(
+    z.object({ pollId: z.string(), channelId: z.string().optional() }),
+    ({ ctx, args: { pollId } }) =>
+      zql.poll_votes.where('pollId', '=', pollId).where('userId', '=', ctx.userID)
+  ),
+  pollVoterDetails: defineQuery(
+    // channelId is consumed by the ACL wrapper; PollVotesACL limits other people's
+    // ballots to the creator of a non-anonymous poll.
+    z.object({ pollId: z.string(), channelId: z.string().optional() }),
+    ({ args: { pollId } }) => zql.poll_votes.where('pollId', '=', pollId)
+  ),
   activeSlashCommandArtifacts: defineQuery(({ ctx }) =>
     zql.message_artifacts
       .where('workspaceId', ctx.workspaceId)

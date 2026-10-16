@@ -15,6 +15,7 @@ import { ViewAccessSideEffectHandler } from './tables/view-access-handler';
 import { UserGroupMappingsSideEffectHandler } from './tables/user-group-mappings-handler';
 import { ReactionsSideEffectHandler } from './tables/reactions-handler';
 import { DelayedMessagesSideEffectHandler } from './tables/delayed-messages-handler';
+import { PollsSideEffectHandler } from './tables/polls-handler';
 import { TicketTagsSideEffectHandler } from './tables/ticket-tags-handler';
 import { TicketTagMappingsSideEffectHandler } from './tables/ticket-tag-mappings-handler';
 import { ChannelsSideEffectHandler } from './tables/channels-handler';
@@ -67,6 +68,8 @@ export class SideEffectHandlerFactory {
         return new CanvasSideEffectHandler(ctx);
       case 'delayed_messages':
         return new DelayedMessagesSideEffectHandler(ctx);
+      case 'polls':
+        return new PollsSideEffectHandler(ctx);
 
       case 'ticket_tags':
         return new TicketTagsSideEffectHandler(ctx);

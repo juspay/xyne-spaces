@@ -62,6 +62,7 @@ export interface InputBoxProps {
   isDMThread?: boolean;
   onCreateTicket?: (description?: string) => void;
   onCreateCanvas?: (initialContent?: string) => void;
+  onCreatePoll?: () => void;
   onTranscriptSelect?: (content: string) => void;
   onScheduleSend?: (scheduledFor: number, content: string, files: File[]) => void | Promise<void>;
   showSchedulePresets?: boolean;

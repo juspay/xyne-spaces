@@ -17,6 +17,7 @@ import { MessageCard } from '../MessageCard';
 import { RecipientAvatar, useRecipientName } from '../MessageCard/avatarHelpers';
 import { ScheduleMessageDialog } from '../../ui/ScheduleMessageDialog/ScheduleMessageDialog';
 import { useUserDelayedMessages } from '../../../hooks/useUserDelayedMessages';
+import { surfaceMutationError } from '../../../utils/zeroMutationToast';
 
 type DelayedMessageWithAttachments = DelayedMessage & {
   attachments?: readonly MessageAttachment[] | undefined;
@@ -77,19 +78,17 @@ const DelayedMessageRow = ({
   const handleRescheduleClick = (): void => setIsRescheduleDialogOpen(true);
 
   const handleRescheduleConfirm = (scheduledFor: number): void => {
-    try {
-      zero.mutate(
-        mutators.delayedMessages.reschedule({
-          id: delayedMessage.id,
-          scheduledFor,
-          timestamp: Date.now(),
-        }),
-      );
-      toast.success('Message rescheduled');
-      setIsRescheduleDialogOpen(false);
-    } catch {
-      toast.error('Failed to reschedule message');
-    }
+    const mutation = zero.mutate(
+      mutators.delayedMessages.reschedule({
+        id: delayedMessage.id,
+        scheduledFor,
+        timestamp: Date.now(),
+      }),
+    );
+    setIsRescheduleDialogOpen(false);
+    void surfaceMutationError(mutation, 'Failed to reschedule message').then(ok => {
+      if (ok) toast.success('Message rescheduled');
+    });
   };
 
   const performSendNow = (): void => {
@@ -157,13 +156,18 @@ const DelayedMessageRow = ({
     </div>
   );
 
+  // A scheduled poll's content is generated from its poll draft, so it cannot be
+  // edited as text or converted back into a plain message draft.
+  const isPoll = !!delayedMessage.pollDraft;
   const actions = (
     <DelayedMessageDropdown
       delayedMessage={delayedMessage}
-      onEdit={() => onEdit(delayedMessage)}
+      {...(!isPoll && {
+        onEdit: () => onEdit(delayedMessage),
+        onSaveToDrafts: handleSaveToDrafts,
+      })}
       onReschedule={handleRescheduleClick}
       onSendNow={() => setShowSendNowConfirm(true)}
-      onSaveToDrafts={handleSaveToDrafts}
       onDelete={() => setShowDeleteConfirm(true)}
       loading={isSendNowLoading}
     />
@@ -180,7 +184,7 @@ const DelayedMessageRow = ({
         timestampLayout='floating'
         actions={actions}
         className='rounded-xl'
-        onClick={() => onEdit(delayedMessage)}
+        {...(!isPoll && { onClick: () => onEdit(delayedMessage) })}
         trackCategory='delayed-messages'
         trackName='scheduled-message-row-open'
         attachments={panelAttachments}

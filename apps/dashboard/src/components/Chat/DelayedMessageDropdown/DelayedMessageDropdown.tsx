@@ -10,13 +10,13 @@ import { DelayedMessageStatus } from '@xyne/shared';
 export interface DelayedMessageDropdownProps {
   /** The scheduled message this dropdown acts on */
   delayedMessage: DelayedMessage;
-  /** Callback when user clicks "Edit" */
+  /** Callback when user clicks "Edit"; the button is hidden when omitted */
   onEdit?: () => void;
   /** Callback when user clicks "Reschedule" */
   onReschedule?: () => void;
   /** Callback when user clicks "Send Now" */
   onSendNow?: () => void;
-  /** Callback when user clicks "Save to Drafts" */
+  /** Callback when user clicks "Save to Drafts"; the item is hidden when omitted */
   onSaveToDrafts?: () => void;
   /** Callback when user clicks "Delete" */
   onDelete?: () => void;
@@ -44,20 +44,22 @@ export const DelayedMessageDropdown = ({
 
   return (
     <div className={cn('flex items-center gap-0.5', className)}>
-      <button
-        type='button'
-        disabled={isDisabled}
-        onClick={() => onEdit?.()}
-        className={cn(
-          'p-1.5 rounded hover:bg-accent hover:text-foreground transition-all',
-          isDisabled && 'opacity-50 cursor-not-allowed',
-        )}
-        aria-label='Edit scheduled message'
-        data-track-category='delayed-messages'
-        data-track-name='edit-scheduled-message'
-      >
-        <Pencil size={14} />
-      </button>
+      {onEdit && (
+        <button
+          type='button'
+          disabled={isDisabled}
+          onClick={() => onEdit()}
+          className={cn(
+            'p-1.5 rounded hover:bg-accent hover:text-foreground transition-all',
+            isDisabled && 'opacity-50 cursor-not-allowed',
+          )}
+          aria-label='Edit scheduled message'
+          data-track-category='delayed-messages'
+          data-track-name='edit-scheduled-message'
+        >
+          <Pencil size={14} />
+        </button>
+      )}
 
       <button
         type='button'
@@ -112,22 +114,24 @@ export const DelayedMessageDropdown = ({
           collisionPadding={8}
           className='z-[60] min-w-[240px] max-w-[280px] bg-background border border-border rounded-lg shadow-lg py-1.5'
         >
-          <button
-            type='button'
-            disabled={isDisabled}
-            onClick={() => {
-              onSaveToDrafts?.();
-              setIsMoreMenuOpen(false);
-            }}
-            className={cn(
-              'w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-accent transition-colors',
-              isDisabled && 'opacity-50 cursor-not-allowed',
-            )}
-            data-track-category='delayed-messages'
-            data-track-name='saveToDrafts-scheduled-message'
-          >
-            Cancel schedule and save to drafts
-          </button>
+          {onSaveToDrafts && (
+            <button
+              type='button'
+              disabled={isDisabled}
+              onClick={() => {
+                onSaveToDrafts();
+                setIsMoreMenuOpen(false);
+              }}
+              className={cn(
+                'w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-accent transition-colors',
+                isDisabled && 'opacity-50 cursor-not-allowed',
+              )}
+              data-track-category='delayed-messages'
+              data-track-name='saveToDrafts-scheduled-message'
+            >
+              Cancel schedule and save to drafts
+            </button>
+          )}
           <button
             type='button'
             disabled={isDisabled}

@@ -2641,6 +2641,7 @@ model Message {
   reactions      Reaction[]
   reactionCounts ReactionCount[]
   externalMessages   ExternalMessage[] @relation("ExternalMessageEntity")
+  poll           Poll?
 
   @@index([conversationId, createdAt]) // Fast conversation message lookup
   @@index([workspaceId]) // ACL workspace filtering
@@ -2656,6 +2657,98 @@ model Message {
   @@index([conversationId, messageId])
   @@index([channelConnectId])
   @@map("messages")
+  @@schema("public")
+}
+
+model Poll {
+  id                   String    @id
+  workspaceId          String
+  messageId            String    @unique
+  createdBy            String
+  allowAudienceChoices Boolean   @default(false)
+  // Hides voter identities from the poll creator; enforced by the poll_votes ACLs.
+  isAnonymous          Boolean   @default(false)
+  resultVisibility     String    @default("EVERYONE")
+  closesAt             DateTime?
+  remindAt             DateTime?
+  closedAt             DateTime?
+  createdAt            DateTime  @default(now())
+
+  message   Message              @relation(fields: [messageId], references: [messageId])
+  questions PollQuestion[]
+  votes     PollVote[]
+  results   PollQuestionResult[]
+
+  @@index([workspaceId])
+  @@index([createdBy])
+  @@map("polls")
+  @@schema("public")
+}
+
+model PollQuestion {
+  id           String   @id
+  workspaceId  String
+  pollId       String
+  question     String
+  position     Int
+  responseType String   @default("SINGLE_CHOICE")
+  // Ordered [{ id, text, createdBy }]. Audience-added options are appended.
+  options      Json     @default("[]")
+  createdAt    DateTime @default(now())
+
+  poll   Poll                @relation(fields: [pollId], references: [id])
+  votes  PollVote[]
+  result PollQuestionResult?
+
+  @@unique([pollId, position])
+  @@index([workspaceId])
+  @@index([pollId])
+  @@map("poll_questions")
+  @@schema("public")
+}
+
+model PollVote {
+  id              String   @id
+  workspaceId     String
+  pollId          String
+  questionId      String
+  userId          String
+  optionIds       Json
+  textAnswer      String?  @db.Text
+  rankedOptionIds Json?
+  rating          Int?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  poll     Poll         @relation(fields: [pollId], references: [id])
+  question PollQuestion @relation(fields: [questionId], references: [id])
+
+  @@unique([questionId, userId])
+  @@index([workspaceId])
+  @@index([pollId])
+  @@index([userId])
+  @@map("poll_votes")
+  @@schema("public")
+}
+
+// Identity-free aggregates, recomputed by the vote mutators so poll participants
+// can see totals without reading other people's ballots.
+model PollQuestionResult {
+  questionId   String   @id
+  workspaceId  String
+  pollId       String
+  voterCount   Int      @default(0)
+  optionCounts Json     @default("{}")
+  rankTotals   Json     @default("{}")
+  ratingTotal  Int      @default(0)
+  updatedAt    DateTime @updatedAt
+
+  poll     Poll         @relation(fields: [pollId], references: [id])
+  question PollQuestion @relation(fields: [questionId], references: [id])
+
+  @@index([workspaceId])
+  @@index([pollId])
+  @@map("poll_question_results")
   @@schema("public")
 }
 
@@ -4822,6 +4915,7 @@ model DelayedMessage {
   conversationId  String?                // Target conversation (for thread replies, no FK constraint)
   senderId        String                 // User who scheduled the message (no FK constraint)
   content         String                 // Message content (HTML)
+  pollDraft       Json?                  // Poll payload published when this delayed message is delivered
   hasAttachment   Boolean                @default(false)
   scheduledFor    Float                  // Unix ms timestamp when the message should be sent
   status          String               @default("PENDING")
@@ -5454,4 +5548,3 @@ model RadarRule {
   @@map("radar_rules")
   @@schema("non_zero")
 }
-

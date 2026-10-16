@@ -222,6 +222,10 @@ class DelayedMessageWorker {
     }
 
     try {
+      const delayedMessage = await prisma.delayedMessage.findUnique({
+        where: { id: delayedMessageId },
+        select: { pollDraft: true },
+      });
       // Deliver the message via Zero mutators (same code path as normal message sending)
       // This ensures all side effects fire: notifications, unread counts, mentions,
       // DM reopen, bot execution, search indexing, metadata sync, etc.
@@ -232,6 +236,7 @@ class DelayedMessageWorker {
         senderId,
         content,
         hasAttachment: job.data.hasAttachment,
+        hasPollDraft: delayedMessage?.pollDraft != null,
       });
 
       if (!result.success) {

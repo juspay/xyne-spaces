@@ -7,6 +7,8 @@ import { MessagesSideEffectHandler } from '@/zero/side-effects/tables/messages-h
 import { ConversationsSideEffectHandler } from '@/zero/side-effects/tables/conversations-handler';
 import type { QueryContext } from '@/zero/acl/core/types';
 import { cleanupSourceTransactionTx } from '@/bypassAcl/transactions/messageDeliveryService';
+import { deliverScheduledPollTx } from '@/bypassAcl/transactions/scheduledPollDelivery';
+import { pollLifecycleQueue } from '@/queues/pollLifecycleQueue';
 
 type DeliverySource =
   | { kind: 'DRAFT'; id: string }
@@ -214,7 +216,53 @@ export async function deliverDelayedServerMessage(params: {
   conversationId: string | null | undefined;
   senderId: string;
   content: string;
+  hasPollDraft?: boolean;
 }): Promise<DeliverServerMessageResult> {
+  if (params.hasPollDraft) {
+    const delivered = await deliverScheduledPollTx({
+      delayedMessageId: params.delayedMessageId,
+      expectedChannelId: params.channelId,
+      expectedSenderId: params.senderId,
+      timestamp: Date.now(),
+    });
+    if (delivered.createdPoll) {
+      try {
+        await pollLifecycleQueue.schedulePoll(delivered.createdPoll);
+      } catch (error) {
+        // polls.closesAt/remindAt stay set; the lifecycle worker re-enqueues them on start.
+        logger.error('[MessageDelivery] Failed to enqueue scheduled poll lifecycle jobs', {
+          pollId: delivered.createdPoll.id,
+          error,
+        });
+      }
+      await runSideEffects(
+        params.senderId,
+        delivered.messageId,
+        delivered.conversationId,
+        true,
+      );
+      // The transaction wrote the message directly, so queue the search indexing that
+      // conversationService queues for every other delivered message.
+      await conversationService
+        .pushVespaJobForMessage(
+          delivered.messageId,
+          params.senderId,
+          delivered.createdPoll.workspaceId,
+          delivered.createdPoll.createdAt,
+        )
+        .catch(error => {
+          logger.error('[MessageDelivery] Failed to queue search indexing for scheduled poll', {
+            messageId: delivered.messageId,
+            error,
+          });
+        });
+    }
+    return {
+      conversationId: delivered.conversationId,
+      messageId: delivered.messageId,
+    };
+  }
+
   return deliverServerMessage({
     senderId: params.senderId,
     channelId: params.channelId,

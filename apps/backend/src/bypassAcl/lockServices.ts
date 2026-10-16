@@ -52,3 +52,31 @@ export async function tryAdvisoryXactLock(
       `);
   return rows[0]?.locked === true;
 }
+
+/** Rows a Zero server mutator may lock; table and key column come only from this map. */
+const ROW_LOCK_TARGETS = {
+  poll_questions: { model: 'PollQuestion', keyColumn: 'id' },
+  poll_question_results: { model: 'PollQuestionResult', keyColumn: 'questionId' },
+} as const satisfies Record<string, { model: TableName; keyColumn: string }>;
+
+/** The part of Zero's server transaction (`tx.dbTransaction`) this needs. */
+export interface ZeroDbTransaction {
+  query(sql: string, params: unknown[]): Promise<unknown>;
+}
+
+/**
+ * `SELECT 1 … FOR UPDATE` on one row, inside a Zero server mutator's own transaction, so
+ * concurrent mutators on that row run one after another. Zero mutators have no Prisma
+ * client, so this takes the mutator's transaction handle instead.
+ */
+export function lockRowForUpdate(
+  dbTransaction: ZeroDbTransaction,
+  table: keyof typeof ROW_LOCK_TARGETS,
+  key: string,
+  reason: string,
+): Promise<unknown> {
+  const { model, keyColumn } = ROW_LOCK_TARGETS[table];
+  return rawQuery([model], reason, () =>
+    dbTransaction.query(`SELECT 1 FROM "${table}" WHERE "${keyColumn}" = $1 FOR UPDATE`, [key]),
+  );
+}
