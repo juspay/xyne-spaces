@@ -2171,7 +2171,8 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     }
 
     // Filing a personal canvas into a hub widens its audience: only an approved (signed "ask") call may.
-    if (serverType === "xyne-spaces" && tool === SDLC_TOOL_NAMES.writeArtifact) {
+    // Keyed on tool only: automation runs reach the same handler as xyne-spaces-app-tools.
+    if (tool === SDLC_TOOL_NAMES.writeArtifact) {
       effectiveParams = { ...effectiveParams, adoptApproved: effectivePermission === "ask" };
     }
 

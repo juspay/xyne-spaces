@@ -5911,6 +5911,7 @@ const spacesSdlcArchiveArtifact = sdlcTool({
     sdlcClawCall("Archive SDLC artifact", "/artifacts/archive", {
       canvasId: args["canvasId"],
       archived: args["action"] === "archive",
+      ...pick(args, ["generationCommit", "repoId"]),
     }, ctx),
 });
 

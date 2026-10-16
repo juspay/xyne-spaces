@@ -119,7 +119,7 @@ export class SdlcWikiPageStore {
   }
 
   /** Wiki generation runs as the workflow author, who may not be an admin: trust the commit only if that run is live. */
-  private async isGenerationRun(input: WriteSdlcWikiPageInput): Promise<boolean> {
+  async isGenerationRun(input: Pick<WriteSdlcWikiPageInput, 'channelId' | 'actorUserId' | 'repoId' | 'generationCommit'>): Promise<boolean> {
     const commit = input.generationCommit;
     if (!commit) return false;
     const link = await this.prisma.sdlcEntityLink.findFirst({

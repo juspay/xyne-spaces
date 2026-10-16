@@ -24,10 +24,14 @@ export function trustedSdlcToolBindings(sdlcContext: unknown): TrustedMcpToolBin
   // A wiki workflow run pins the commit its pages describe. Always bound so a
   // chat run cannot supply one: it lets non-admins write Wiki pages.
   const generationCommit = context["generationCommit"];
-  bindings[SDLC_TOOL_NAMES.writeArtifact] = {
+  const commit = typeof generationCommit === "string" && generationCommit ? generationCommit : undefined;
+  bindings[SDLC_TOOL_NAMES.writeArtifact] = { workspaceId, actorUserId, generationCommit: commit };
+  // Wiki runs archive pages through the general artifact route; repoId matches the run's step.
+  bindings[SDLC_TOOL_NAMES.archiveArtifact] = {
     workspaceId,
     actorUserId,
-    generationCommit: typeof generationCommit === "string" && generationCommit ? generationCommit : undefined,
+    generationCommit: commit,
+    repoId: record(context["repository"])?.["id"],
   };
   return bindings;
 }
