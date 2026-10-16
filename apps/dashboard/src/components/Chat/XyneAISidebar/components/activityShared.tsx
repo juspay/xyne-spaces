@@ -28,24 +28,26 @@ export function formatSeconds(ms: number): string {
 }
 
 /**
- * Live wall-clock elapsed for a streaming turn. Captures the start on the first
- * render where `active` is true, ticks every 250ms, and freezes the final value
- * when `active` flips false so the user sees total thinking time. Returns null
- * for history-loaded messages never seen active.
+ * Live wall-clock elapsed for a streaming turn. Seeds the clock from
+ * `startAtMs` when the turn's real start is known (a tab reattaching to a live
+ * run passes the run's createdAt), else from the first render where `active` is
+ * true. Ticks every 250ms and freezes the final value when `active` flips false
+ * so the user sees total thinking time. Returns null for history-loaded
+ * messages never seen active. Clamped at 0 so clock skew never reads negative.
  */
-export function useElapsedMs(active: boolean): number | null {
+export function useElapsedMs(active: boolean, startAtMs?: number | undefined): number | null {
   const startRef = useRef<number | null>(null);
   const finalRef = useRef<number | null>(null);
   const [, force] = useState(0);
 
   if (active && startRef.current === null) {
-    startRef.current = Date.now();
+    startRef.current = startAtMs ?? Date.now();
   }
 
   useEffect(() => {
     if (!active) {
       if (startRef.current !== null && finalRef.current === null) {
-        finalRef.current = Date.now() - startRef.current;
+        finalRef.current = Math.max(0, Date.now() - startRef.current);
       }
       return;
     }
@@ -54,7 +56,7 @@ export function useElapsedMs(active: boolean): number | null {
   }, [active]);
 
   if (active && startRef.current !== null) {
-    return Date.now() - startRef.current;
+    return Math.max(0, Date.now() - startRef.current);
   }
   return finalRef.current;
 }

@@ -43,7 +43,7 @@ export interface TurnTextState {
 
 type TurnMessage = Pick<
   Message,
-  'parts' | 'reasoning' | 'toolInvocations' | 'isStreaming' | 'isAborted' | 'statusMessage'
+  'parts' | 'reasoning' | 'toolInvocations' | 'isStreaming' | 'isAborted' | 'statusMessage' | 'timestamp'
 >;
 
 interface TurnTimelineProps {
@@ -71,6 +71,13 @@ export function TurnTimeline({
   plan,
 }: TurnTimelineProps): ReactElement {
   const streaming = !!message.isStreaming;
+  // When the turn actually started — a tab reattaching to a live run resumes
+  // the real clock instead of restarting it. Guarded: a missing or invalid
+  // timestamp falls back to useElapsedMs' own first-render capture.
+  const startedAtMs = useMemo(() => {
+    const t = message.timestamp ? new Date(message.timestamp).getTime() : NaN;
+    return Number.isFinite(t) ? t : undefined;
+  }, [message.timestamp]);
   const tree = useMemo(
     () => groupInvocations(message.toolInvocations ?? [], !!message.isAborted),
     [message.toolInvocations, message.isAborted],
@@ -117,6 +124,7 @@ export function TurnTimeline({
           live
           statusMessage={message.statusMessage}
           previewLines={previewLines}
+          turnStartedAtMs={startedAtMs}
         />
       )}
       {planAfter < 0 && planNode}
@@ -135,6 +143,7 @@ export function TurnTimeline({
                 live={streaming && isLast}
                 statusMessage={message.statusMessage}
                 previewLines={previewLines}
+                turnStartedAtMs={startedAtMs}
               />
             )}
             {index === planAfter && planNode}
@@ -184,6 +193,7 @@ function StepGroup({
   live,
   statusMessage,
   previewLines,
+  turnStartedAtMs,
 }: {
   steps: Step[];
   tree: InvocationTree;
@@ -191,11 +201,13 @@ function StepGroup({
   /** The run's latest progress label ("Searching tickets…"). */
   statusMessage?: Message['statusMessage'];
   previewLines: number;
+  /** When the turn actually started, if known — see TurnTimeline. */
+  turnStartedAtMs?: number | undefined;
 }): ReactElement {
   const [open, setOpen] = useState(false);
   const bodyId = useId();
   const summary = useMemo(() => summarizeSteps(steps, tree), [steps, tree]);
-  const elapsedMs = useElapsedMs(live);
+  const elapsedMs = useElapsedMs(live, turnStartedAtMs);
 
   const current = steps[steps.length - 1];
   const status = Array.isArray(statusMessage)
