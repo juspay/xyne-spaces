@@ -246,6 +246,80 @@ export default class MessagingSteps {
     await this.pickForwardTargetUser(targetUserAlias);
   }
 
+  // The composer saves a draft to local storage shortly after typing stops, and only that saved
+  // copy goes to the server when the conversation is left — leaving sooner loses the draft.
+  @Step(
+    'waiting for stored user <userAlias> dm <dmAlias> message <messageAlias> to be saved as a draft'
+  )
+  public async waitForStoredDmMessageSavedAsDraft(
+    userAlias: string,
+    dmAlias: string,
+    messageAlias: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidDmAlias(dmAlias);
+    assertValidMessageAlias(messageAlias);
+
+    const text = getStoredDmMessageText(userAlias, dmAlias, messageAlias);
+    await testContext.activePage.waitForFunction(
+      ({ key, expected }) => {
+        const storage = (
+          globalThis as unknown as { localStorage: { getItem(k: string): string | null } }
+        ).localStorage;
+        return (storage.getItem(key) ?? '').includes(expected);
+      },
+      { key: 'channel-draft-message', expected: text },
+      { timeout: 10000 }
+    );
+  }
+
+  // Draft rows show their Edit / Send / Schedule / Delete buttons on hover, and the list can hold
+  // other drafts, so the row is picked by the stored draft text.
+  @Step(
+    'clicking draft action <actionLabel> for stored user <userAlias> dm <dmAlias> message <messageAlias>'
+  )
+  public async clickDraftActionForStoredDmMessage(
+    actionLabel: string,
+    userAlias: string,
+    dmAlias: string,
+    messageAlias: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidDmAlias(dmAlias);
+    assertValidMessageAlias(messageAlias);
+
+    const text = getStoredDmMessageText(userAlias, dmAlias, messageAlias);
+    const row = testContext.activePage
+      .locator("[data-testid='draft-row']")
+      .filter({ hasText: text })
+      .first();
+    await row.waitFor({ state: 'visible' });
+    await row.hover();
+    await row.locator(`button[aria-label='${actionLabel}']`).click();
+  }
+
+  @Step(
+    'forwarding stored user <userAlias> dm <dmAlias> message <messageAlias> to channel <channelAlias>'
+  )
+  public async forwardStoredDmMessageToChannel(
+    userAlias: string,
+    dmAlias: string,
+    messageAlias: string,
+    channelAlias: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidDmAlias(dmAlias);
+    assertValidMessageAlias(messageAlias);
+    assertValidChannelAlias(channelAlias);
+
+    await clickHoverActionOnMessage(
+      "[data-testid='hover-action-more']",
+      getStoredDmMessageText(userAlias, dmAlias, messageAlias)
+    );
+    await testContext.activePage.locator("[data-testid='hover-action-forward-message']").click();
+    await this.pickForwardTargetChannel(userAlias, channelAlias);
+  }
+
   @Step(
     'verifying clipboard contains stored dm message <messageAlias> for user <userAlias> dm <dmAlias>'
   )
@@ -444,6 +518,24 @@ export default class MessagingSteps {
     ).toBeVisible({
       timeout: 15000,
     });
+  }
+
+  private async pickForwardTargetChannel(userAlias: string, channelAlias: string): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidChannelAlias(channelAlias);
+    const channelName = getStoredUser(userAlias).channels[channelAlias]?.name;
+    assert.ok(channelName, `No stored channel "${channelAlias}" for user "${userAlias}".`);
+    const page = testContext.activePage;
+    const form = page.locator("[data-testid='forward-message-form']");
+
+    await form.waitFor({ state: 'visible' });
+    await page.locator("input[placeholder='Search channels or users...']").fill(channelName);
+    await page.locator('[data-combobox-popup]').getByText(channelName).first().click();
+
+    const forwardButton = form.getByRole('button', { name: 'Forward' });
+    await expect(forwardButton).toBeEnabled({ timeout: 10000 });
+    await forwardButton.click();
+    await form.waitFor({ state: 'hidden' });
   }
 
   private async pickForwardTargetUser(targetUserAlias: string): Promise<void> {
