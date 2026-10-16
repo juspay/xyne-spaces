@@ -1,3 +1,11 @@
+## [1.502.0-release-20261016.2](https://github.com/juspay/xyne-spaces/compare/v1.502.0-release-20261016.1...v1.502.0-release-20261016.2) (2026-10-16)
+
+
+### Bug Fixes
+
+* agent builder draft approval fills the setup form ins… ([#3057](https://github.com/juspay/xyne-spaces/issues/3057)) ([#3151](https://github.com/juspay/xyne-spaces/issues/3151)) ([f864cb3](https://github.com/juspay/xyne-spaces/commit/f864cb3a53da42741cf602195472dc0fcccb80d1))
+* external dashboard :) ([#3150](https://github.com/juspay/xyne-spaces/issues/3150)) ([d0ec6f1](https://github.com/juspay/xyne-spaces/commit/d0ec6f1ff168a8adc973080878952c068afba8ba))
+
 ## [1.502.0-release-20261016.1](https://github.com/juspay/xyne-spaces/compare/v1.501.2...v1.502.0-release-20261016.1) (2026-10-16)
 
 
