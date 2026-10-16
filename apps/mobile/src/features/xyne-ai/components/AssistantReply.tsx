@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactElement } from 'react';
+import { useCallback, useMemo, useState, type ReactElement } from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import {
   AlertCircle,
@@ -211,12 +211,15 @@ export const AssistantReply = ({
       dashboard: DASHBOARD_ORIGIN,
     });
 
-  const openLink = (url: string): void => {
-    const tap = resolveCitationLink(url, sources);
-    if (tap?.kind === 'citation') openCitation(tap.citation);
-    else if (tap?.kind === 'group') setSourceGroup(tap.citations);
-    else onOpenUrl(url);
-  };
+  const openLink = useCallback(
+    (url: string): void => {
+      const tap = resolveCitationLink(url, sources);
+      if (tap?.kind === 'citation') openCitation(tap.citation);
+      else if (tap?.kind === 'group') setSourceGroup(tap.citations);
+      else onOpenUrl(url);
+    },
+    [sources, openCitation, onOpenUrl],
+  );
 
   const pendingActions = useMemo(
     () => unpresentedPendingActions(turn.pendingActions, turn.uiFlows),

@@ -10,6 +10,8 @@ import { haptics } from '@/src/utils/haptics';
 
 import { splitCodeBlocks } from '../model/codeBlocks';
 
+const MarkdownSegment = memo(BlockMarkdown);
+
 const INCOMPLETE_IMAGE = `](${INCOMPLETE_IMAGE_PLACEHOLDER})`;
 // Same as the dashboard: longer blocks open as a 20-line preview.
 const COLLAPSE_LINES = 50;
@@ -107,7 +109,7 @@ export const StreamingMarkdown = ({
         segment.kind === 'code' ? (
           <CodeBlock key={index} code={segment.value} />
         ) : (
-          <BlockMarkdown
+          <MarkdownSegment
             key={index}
             markdown={segment.value}
             mine={false}

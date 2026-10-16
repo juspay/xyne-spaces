@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react';
-import * as Clipboard from 'expo-clipboard';
+import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { Alert, Keyboard, Pressable, Text, useWindowDimensions, View } from 'react-native';
 import {
@@ -9,16 +8,7 @@ import {
 } from 'react-native-keyboard-controller';
 import Reanimated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import {
-  Check,
-  ChevronLeft,
-  ChevronRight,
-  Copy,
-  History,
-  Paperclip,
-  Pencil,
-  SquarePen,
-} from 'lucide-react-native';
+import { ChevronLeft, History, SquarePen } from 'lucide-react-native';
 import { useCSSVariable } from 'uniwind';
 
 import { XyneAIStarIcon } from '@/src/components/icons';
@@ -29,26 +19,22 @@ import { useMentionPress } from '@/src/features/chat/v2/components/conversation-
 import { ChatRenderProvider } from '@/src/features/chat/v3/theme/ChatRenderProvider';
 import { BRIEF_SERIF_FONT } from '@/src/features/morning-brief/components/BriefTitle';
 import { useChatRenderTokens } from '@/src/theme/useChatRenderTokens';
-import { haptics } from '@/src/utils/haptics';
-import { formatTime } from '@/src/utils/timeSelection';
 
 import { DEFAULT_AGENT_SLUG } from '../api/xyneAICatalog';
-import type { AttachedContextItem, AttachedFile } from '../api/xyneAIRequest';
+import type { PendingAction } from '../api/xyneAIEvents';
 import { fetchConversationMessages, type ConversationSummary } from '../api/xyneAIConversations';
 import { useXyneAIChat } from '../hooks/useXyneAIChat';
 import { useXyneAISelection } from '../hooks/useXyneAISelection';
+import { useStableCallback } from '../hooks/useStableCallback';
 import { isBranched, turnsFromMessages, type ChatTurn } from '../model/assistantTurn';
 import { channelPick } from '../model/contextPicks';
 import { firstName, greeting } from '../model/greeting';
-import { AssistantReply } from './AssistantReply';
-import { ICONS } from './ContextPickerSheet';
 import { ConversationHistorySheet } from './ConversationHistorySheet';
-import { openAttachment, Thumbnail } from './TurnOutputs';
+import { IconButton } from './IconButton';
+import { TurnRow } from './TurnRow';
 import { XyneAIComposer, type XyneAIComposerHandle } from './XyneAIComposer';
 
 const COMPOSER_KEYBOARD_GAP = 8;
-const COPIED_MS = 1500;
-const THUMBNAIL_SIZE = 160;
 
 /** The chat last open on this screen, kept in memory so coming back resumes it. */
 let rememberedChat: { userId: string; conversationId: string; agentSlug: string } | undefined;
@@ -77,148 +63,6 @@ const Greeting = (): ReactElement => {
       >
         {text}
       </Text>
-    </View>
-  );
-};
-
-const FileChip = ({ filename }: { filename: string }): ReactElement => {
-  const muted = useCSSVariable('--color-secondary-foreground') as string;
-  return (
-    <View className='max-w-full flex-row items-center gap-1.5 rounded-full bg-secondary px-3 py-1.5'>
-      <Paperclip size={13} color={muted} />
-      <Text numberOfLines={1} className='shrink text-[13px] text-foreground'>
-        {filename}
-      </Text>
-    </View>
-  );
-};
-
-const Attachment = ({ file }: { file: AttachedFile }): ReactElement =>
-  (file.id || file.data) && file.mimeType.startsWith('image/') ? (
-    <Pressable
-      accessibilityRole='imagebutton'
-      accessibilityLabel={file.filename}
-      onPress={(): void => openAttachment(file)}
-    >
-      <Thumbnail attachment={file} size={THUMBNAIL_SIZE} borderRadius={16} />
-    </Pressable>
-  ) : (
-    <FileChip filename={file.filename} />
-  );
-
-const ContextPills = ({ items }: { items: AttachedContextItem[] }): ReactElement => {
-  const muted = useCSSVariable('--color-secondary-foreground') as string;
-  return (
-    <View className='flex-row flex-wrap justify-end gap-1.5'>
-      {items.map(({ type, id, title }) => {
-        const Icon = ICONS[type];
-        return (
-          <View
-            key={`${type}:${id}`}
-            className='h-6 max-w-[200px] flex-row items-center gap-1 rounded-full border border-border px-2'
-          >
-            {Icon ? <Icon size={12} color={muted} /> : null}
-            <Text numberOfLines={1} className='shrink text-[12px] text-secondary-foreground'>
-              {title}
-            </Text>
-          </View>
-        );
-      })}
-    </View>
-  );
-};
-
-const IconButton = ({
-  label,
-  onPress,
-  disabled = false,
-  children,
-}: {
-  label: string;
-  onPress: () => void;
-  disabled?: boolean;
-  children: ReactNode;
-}): ReactElement => (
-  <Pressable
-    accessibilityRole='button'
-    accessibilityLabel={label}
-    hitSlop={8}
-    disabled={disabled}
-    onPress={(): void => {
-      void haptics.buttonTap();
-      onPress();
-    }}
-    className={`p-1 active:opacity-60 ${disabled ? 'opacity-40' : ''}`}
-  >
-    {children}
-  </Pressable>
-);
-
-const UserBubble = ({
-  turn,
-  version,
-  onSwitchVersion,
-  onEdit,
-}: {
-  turn: ChatTurn;
-  version: { index: number; total: number } | undefined;
-  onSwitchVersion: (step: 1 | -1) => void;
-  /** Absent when this message cannot be rewritten. */
-  onEdit: (() => void) | undefined;
-}): ReactElement => {
-  const muted = useCSSVariable('--color-secondary-foreground') as string;
-  const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    if (!copied) return;
-    const timer = setTimeout(() => setCopied(false), COPIED_MS);
-    return (): void => clearTimeout(timer);
-  }, [copied]);
-
-  const CopyIcon = copied ? Check : Copy;
-  return (
-    <View className='max-w-[78%] items-end gap-1 self-end'>
-      {turn.attachments.map((file, index) => (
-        <Attachment key={`${index}:${file.filename}`} file={file} />
-      ))}
-      <View className='rounded-3xl bg-secondary px-4 py-2.5'>
-        <Text selectable className='text-[15px] leading-6 text-foreground'>
-          {turn.query}
-        </Text>
-      </View>
-      {turn.context.length > 0 ? <ContextPills items={turn.context} /> : null}
-      <View className='flex-row items-center gap-1 px-1'>
-        {version ? (
-          <>
-            <IconButton label='Previous version' onPress={(): void => onSwitchVersion(-1)}>
-              <ChevronLeft size={16} color={muted} />
-            </IconButton>
-            <Text className='text-[12px] text-secondary-foreground'>
-              {`${version.index + 1}/${version.total}`}
-            </Text>
-            <IconButton label='Next version' onPress={(): void => onSwitchVersion(1)}>
-              <ChevronRight size={16} color={muted} />
-            </IconButton>
-          </>
-        ) : null}
-        <IconButton
-          label='Copy message'
-          onPress={(): void => {
-            void Clipboard.setStringAsync(turn.query);
-            setCopied(true);
-          }}
-        >
-          <CopyIcon size={16} color={muted} />
-        </IconButton>
-        {onEdit ? (
-          <IconButton label='Edit message' onPress={onEdit}>
-            <Pencil size={16} color={muted} />
-          </IconButton>
-        ) : null}
-        <Text className='text-[11px] text-secondary-foreground'>
-          {formatTime(new Date(turn.reply.startedAt))}
-        </Text>
-      </View>
     </View>
   );
 };
@@ -310,6 +154,24 @@ export const XyneAIScreen = (): ReactElement => {
     setEditing(turn);
     composerRef.current?.setText(turn.query);
   };
+
+  const onLatestLayout = useStableCallback((height: number): void => {
+    blankSpace.value = Math.max(0, viewportHeight.current - height);
+  });
+  const onSwitchVersion = useStableCallback(switchVersion);
+  const onEdit = useStableCallback(startEditing);
+  const onOpenUrl = useStableCallback((url: string): void => {
+    void openUrl(url);
+  });
+  const onFlowClose = useStableCallback(refresh);
+  const onFollowUp = useStableCallback((suggestion: string): void =>
+    composerRef.current?.setText(suggestion),
+  );
+  const onRegenerate = useStableCallback(regenerate);
+  const onPendingAction = useStableCallback(
+    (turn: ChatTurn, action: PendingAction, approved: boolean): Promise<void> =>
+      respondToAction(turn.id, action, approved),
+  );
 
   const cancelEditing = (): void => {
     setEditing(undefined);
@@ -442,47 +304,27 @@ export const XyneAIScreen = (): ReactElement => {
             >
               {turns.map((turn, index) => {
                 const isLatest = index === turns.length - 1;
+                const version = versionOf(turn);
                 return (
-                  <View
+                  <TurnRow
                     key={turn.id}
-                    className='gap-6'
-                    onLayout={
-                      isLatest && isStreaming
-                        ? ({ nativeEvent }): void => {
-                            blankSpace.value = Math.max(
-                              0,
-                              viewportHeight.current - nativeEvent.layout.height,
-                            );
-                          }
-                        : undefined
-                    }
-                  >
-                    <UserBubble
-                      turn={turn}
-                      version={versionOf(turn)}
-                      onSwitchVersion={(step): void => switchVersion(turn, step)}
-                      onEdit={
-                        canBranch && isLatest && !isStreaming && turn.reply.userMessageId
-                          ? (): void => startEditing(turn)
-                          : undefined
-                      }
-                    />
-                    <AssistantReply
-                      turn={turn.reply}
-                      isLatest={isLatest}
-                      viewerId={user?.user_id ?? ''}
-                      conversationId={sessionId}
-                      onOpenUrl={(url): void => {
-                        void openUrl(url);
-                      }}
-                      onFlowClose={refresh}
-                      onFollowUp={(suggestion): void => composerRef.current?.setText(suggestion)}
-                      onRegenerate={regenerate}
-                      onPendingAction={(action, approved): Promise<void> =>
-                        respondToAction(turn.id, action, approved)
-                      }
-                    />
-                  </View>
+                    turn={turn}
+                    isLatest={isLatest}
+                    isStreaming={isLatest && isStreaming}
+                    canEdit={canBranch && isLatest && !isStreaming && !!turn.reply.userMessageId}
+                    versionIndex={version?.index}
+                    versionTotal={version?.total}
+                    viewerId={user?.user_id ?? ''}
+                    conversationId={sessionId}
+                    onLatestLayout={onLatestLayout}
+                    onSwitchVersion={onSwitchVersion}
+                    onEdit={onEdit}
+                    onOpenUrl={onOpenUrl}
+                    onFlowClose={onFlowClose}
+                    onFollowUp={onFollowUp}
+                    onRegenerate={onRegenerate}
+                    onPendingAction={onPendingAction}
+                  />
                 );
               })}
             </KeyboardChatScrollView>
