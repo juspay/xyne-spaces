@@ -4,6 +4,7 @@ import { Pressable, Text, View } from 'react-native';
 import { Check, ChevronLeft, ChevronRight, Copy, Paperclip, Pencil } from 'lucide-react-native';
 import { useCSSVariable } from 'uniwind';
 
+import { useChatRenderTokens } from '@/src/features/chat/v3/theme/ChatRenderProvider';
 import { formatTime } from '@/src/utils/timeSelection';
 
 import type { PendingAction } from '../api/xyneAIEvents';
@@ -85,14 +86,15 @@ const UserBubble = ({
     return (): void => clearTimeout(timer);
   }, [copied]);
 
+  const { currentUserBubbleBg, rootTextUser } = useChatRenderTokens();
   const CopyIcon = copied ? Check : Copy;
   return (
     <View className='max-w-[78%] items-end gap-1 self-end'>
       {turn.attachments.map((file, index) => (
         <Attachment key={`${index}:${file.filename}`} file={file} />
       ))}
-      <View className='rounded-3xl bg-secondary px-4 py-2.5'>
-        <Text selectable className='text-[15px] leading-6 text-foreground'>
+      <View className='rounded-3xl px-4 py-2.5' style={{ backgroundColor: currentUserBubbleBg }}>
+        <Text selectable className='text-[15px] leading-6' style={{ color: rootTextUser }}>
           {turn.query}
         </Text>
       </View>
