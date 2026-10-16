@@ -530,13 +530,19 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   // results — would hand the callback fresh results labelled with its stale query.
   const latestQueryRef = useRef('');
   const sessionFiltersRef = useRef<Set<string>>(new Set());
-  // Guards out-of-order responses. Each dispatch claims the next sequence number at the
-  // call site (alongside the abort below); only the latest run may commit its results, and
+  // Guards out-of-order responses. Each change to the search inputs claims the next sequence
+  // number (alongside the abort below); only the latest run may commit its results, and
   // the same seq gates the loader disarm — so no separate loader counter is needed. A
   // slow/stale response (e.g. a partial `from` query resolving after the completed `from:`
   // filter) is discarded instead of overwriting fresh results with an empty payload.
   const searchSeqRef = useRef(0);
-  // Cancels the previous in-flight vespaSearch when a newer search is dispatched.
+  // Read at dispatch rather than listed as an effect dep: callers pass an inline callback, so
+  // its identity changes every render. As a dep, a query with nothing to search (`from:`,
+  // an empty box) re-rendered via resetSearchState, re-ran the effect, and looped every
+  // debounce — leaving the loading state stuck on.
+  const onSearchCompleteRef = useRef(options.onSearchComplete);
+  onSearchCompleteRef.current = options.onSearchComplete;
+  // The in-flight vespaSearch, cancelled as soon as the search inputs change. Null once it settles.
   const searchAbortRef = useRef<AbortController | null>(null);
 
   /**
@@ -1180,6 +1186,20 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
             cumulativeCount: results.length,
           },
         }));
+      } else if (activeTab === TabType.CHANNELS) {
+        // Channels are local-only (filteredLocalChannels), so there is nothing to fetch —
+        // the backend call would only be discarded by the caller.
+        setSearchResults([]);
+        setPaginationState(prev => ({
+          ...prev,
+          [activeTab]: {
+            page: 1,
+            hasMore: false,
+            total: 0,
+            offset: 0,
+            cumulativeCount: 0,
+          },
+        }));
       } else if (hasActiveMentionFilter(query, selectedMentions)) {
         setSearchResults([]);
         setPaginationState(prev => ({
@@ -1426,8 +1446,11 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               // A newer search superseded this one — drop this out-of-order response.
               if (isStale()) return;
 
-              // Honor the backend grouping decision: flat response => flat ALL view.
-              setIsGrouped(vespaResponse.grouped);
+              // Honor the backend grouping decision: flat response => flat ALL view. Skip empty
+              // ones: they are always `grouped: false` and say nothing about the mode.
+              if (vespaResponse.results.length > 0) {
+                setIsGrouped(vespaResponse.grouped);
+              }
 
               // Merge local people only when the active filters make the People category relevant.
               // from:/in:/assignee:/with:/@/# and non-people type: filters scope to content — people
@@ -1596,6 +1619,9 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     ticketViewKey: 'null',
   });
 
+  // The rank profile alone decides flat vs sectioned ALL, so it is known before any request.
+  const isFlatAllRank = flatAllRankProfiles.has(rankProfile || allDefaultRankProfile);
+
   // Debounced backend search with pagination reset
   useEffect(() => {
     if (options.mentionSearchType) {
@@ -1608,6 +1634,11 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     // but the hook can just handle it.
 
     const normalizedText = searchedQueryText(text);
+
+    // Claim the layout now, so the skeleton is in the right mode for the whole debounce rather
+    // than switching when the request goes out. Above the dedup check: toggling the rank back
+    // to the last searched one returns early but must still restore that layout.
+    if (activeTab === TabType.ALL) setIsGrouped(!isFlatAllRank);
 
     // Skip if text, tab, mentions, and includeBotMessages are all the same as last search
     // This prevents unnecessary API calls when typing only spaces
@@ -1632,6 +1663,18 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       // Nothing searched: the skip-the-wait is not left over for the next keystroke.
       immediateNextSearchRef.current = false;
       return;
+    }
+
+    // Discard on edit: the inputs changed, so any in-flight search is for a query the user has
+    // already moved past. Claim a new seq now (not at dispatch) so that run can neither commit
+    // its results nor disarm the loader during this debounce, and cancel it on the network.
+    const seq = ++searchSeqRef.current;
+    if (searchAbortRef.current) {
+      searchAbortRef.current.abort();
+      searchAbortRef.current = null;
+      // The cancelled query never produced results, so returning to it (e.g. type then
+      // backspace inside the debounce) must not be skipped by the dedup check above.
+      lastSearchedParamsRef.current.text = '';
     }
 
     // Arm the loader now (before the 300ms debounce) so we never flash "No results"
@@ -1662,10 +1705,6 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         ticketViewKey,
         mentionsKey: currentMentionsKey,
       };
-      // Mint this dispatch's run identity here (not in the effect body) so the abort fires at
-      // dispatch time, not on every keystroke; seq and the abort stay atomic together.
-      const seq = ++searchSeqRef.current;
-      searchAbortRef.current?.abort();
       const abortController = new AbortController();
       searchAbortRef.current = abortController;
       void performSearch(
@@ -1676,13 +1715,16 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         selectedMentions,
         filteredLocalUsers,
         filteredLocalChannels,
-        options.onSearchComplete,
+        onSearchCompleteRef.current,
       ).finally(() => {
         // Runs on every exit path of performSearch (returns, errors, aborts). Only the
         // newest dispatch may clear the flag — a superseded run settling (aborted
         // mid-flight) must not hide the loader while a fresher search is still running.
         if (seq === searchSeqRef.current) {
           setIsSearchPending(false);
+        }
+        if (searchAbortRef.current === abortController) {
+          searchAbortRef.current = null;
         }
       });
     }, delay);
@@ -1695,7 +1737,6 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     filteredLocalUsers,
     filteredLocalChannels.length,
     isLocalSearchPending,
-    options.onSearchComplete,
     options.mentionSearchType,
     performSearch,
     includeBotMessages,
@@ -1708,6 +1749,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     includeDebugInfo,
     structuredFiltersKey,
     ticketViewKey,
+    isFlatAllRank,
   ]);
 
   // The people search answering after the results on screen merged theirs (a slow worker): the new
