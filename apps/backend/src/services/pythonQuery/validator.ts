@@ -37,7 +37,12 @@ export const ALLOWED_MODELS = new Set([
   'callParticipant',
   'bookmark',
   'savedUserConfiguration',
-  'savedUserConfigurationValue'
+  'savedUserConfigurationValue',
+  // Poll rows are filtered by their Prisma ACLs (database/acl/tables/poll*-acl.ts).
+  'poll',
+  'pollQuestion',
+  'pollQuestionResult',
+  'pollVote'
 ])
 
 // Allowed operators for where conditions

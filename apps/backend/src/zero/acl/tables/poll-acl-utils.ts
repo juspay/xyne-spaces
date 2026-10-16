@@ -35,18 +35,35 @@ export async function requireAccessiblePoll(
   return poll;
 }
 
-/** Poll rows are removed only by `deletePollGraph`, which runs for the poll creator. */
-export async function requirePollCreatorForDelete(
+/** Creator checks already run in this mutation, by poll id. Keyed on the transaction. */
+const creatorDeleteChecks = new WeakMap<object, Map<string, Promise<unknown>>>();
+
+/**
+ * Poll rows are removed only by `deletePollGraph`, which runs for the poll creator. It deletes
+ * every ballot, result and question one by one, so the check runs once per poll per mutation.
+ */
+export function requirePollCreatorForDelete(
   pollId: string,
   ctx: QueryContext,
   tx: Transaction<Schema>,
   tableName: string,
-) {
-  const poll = await requireAccessiblePoll(pollId, ctx, tx, tableName, {
-    allowDeletedMessage: true,
-  });
-  if (poll.createdBy !== ctx.userID) {
-    throw new MutationACLError('Only the poll creator can delete poll data', tableName);
+): Promise<unknown> {
+  let byPoll = creatorDeleteChecks.get(tx);
+  if (!byPoll) {
+    byPoll = new Map();
+    creatorDeleteChecks.set(tx, byPoll);
   }
-  return poll;
+  const cached = byPoll.get(pollId);
+  if (cached) return cached;
+  const check = (async () => {
+    const poll = await requireAccessiblePoll(pollId, ctx, tx, tableName, {
+      allowDeletedMessage: true,
+    });
+    if (poll.createdBy !== ctx.userID) {
+      throw new MutationACLError('Only the poll creator can delete poll data', tableName);
+    }
+    return poll;
+  })();
+  byPoll.set(pollId, check);
+  return check;
 }

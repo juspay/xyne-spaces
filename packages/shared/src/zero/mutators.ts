@@ -135,6 +135,7 @@ import {
   appendPollOption,
   assertCompleteRanking,
   assertPollScheduleAfter,
+  ballotFieldsForResponse,
   assertPollMessageActive,
   assertPollOpen,
   buildPollMessageSummary,
@@ -2536,16 +2537,10 @@ export const mutators = defineMutators({
         }
         assertPollMessageActive(poll.message);
         assertPollOpen(poll);
-        if (args.response.rankedOptionIds) {
+        if ('rankedOptionIds' in args.response) {
           assertCompleteRanking(question.options, args.response.rankedOptionIds);
         }
-        const row = {
-          optionIds: [],
-          textAnswer: args.response.textAnswer ?? null,
-          rankedOptionIds: args.response.rankedOptionIds ?? null,
-          rating: args.response.rating ?? null,
-          updatedAt: args.timestamp,
-        };
+        const row = { ...ballotFieldsForResponse(args.response), updatedAt: args.timestamp };
         if (existing) {
           await tx.mutate.poll_votes.update({ id: existing.id, ...row });
           return;
@@ -2639,7 +2634,7 @@ export const mutators = defineMutators({
     ),
     addOption: defineMutator(
       z.object({
-        id: z.string(),
+        id: z.string().uuid(),
         questionId: z.string(),
         text: z.string().trim().min(1).max(POLL_LIMITS.maxOptionLength),
         timestamp: z.number(),
@@ -2661,11 +2656,7 @@ export const mutators = defineMutators({
         }
         await tx.mutate.poll_questions.update({
           id: question.id,
-          options: appendPollOption(question, {
-            id: args.id,
-            text: args.text,
-            createdBy: ctx.userID,
-          }),
+          options: appendPollOption(question, { id: args.id, text: args.text }),
         });
       },
     ),

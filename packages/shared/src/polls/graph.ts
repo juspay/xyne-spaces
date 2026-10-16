@@ -1,4 +1,5 @@
-import type { PollDraft, PollOption, PollSchedule } from "./types.js";
+import type { PollOption } from "./types.js";
+import type { PollDraft, PollSchedule } from "./validation.js";
 
 export interface PollRowsInput {
   draft: PollDraft;
@@ -7,6 +8,11 @@ export interface PollRowsInput {
   userId: string;
   timestamp: number;
   schedule?: PollSchedule;
+  /**
+   * Scheduled delivery can run after the close or reminder time (restart grace, retries).
+   * It then posts the poll already closed, without a reminder, instead of failing.
+   */
+  lateDelivery?: boolean;
 }
 
 const toEpoch = (value: string | null | undefined): number | null =>
@@ -23,15 +29,19 @@ export function buildPollRows({
   userId,
   timestamp,
   schedule = {},
+  lateDelivery = false,
 }: PollRowsInput) {
   const closesAt = toEpoch(schedule.closeAt);
-  const remindAt = toEpoch(schedule.remindAt);
-  if (closesAt !== null && closesAt <= timestamp) {
+  let remindAt = toEpoch(schedule.remindAt);
+  const closeHasPassed = closesAt !== null && closesAt <= timestamp;
+  const reminderHasPassed = remindAt !== null && remindAt <= timestamp;
+  if (!lateDelivery && closeHasPassed) {
     throw new Error("Poll close time must be in the future");
   }
-  if (remindAt !== null && remindAt <= timestamp) {
+  if (!lateDelivery && reminderHasPassed) {
     throw new Error("Poll reminder time must be in the future");
   }
+  if (reminderHasPassed || closeHasPassed) remindAt = null;
 
   return {
     poll: {
@@ -44,7 +54,7 @@ export function buildPollRows({
       resultVisibility: draft.resultVisibility ?? "EVERYONE",
       closesAt,
       remindAt,
-      closedAt: null,
+      closedAt: closeHasPassed ? closesAt : null,
       createdAt: timestamp,
     },
     questions: draft.questions.map((question, position) => ({
@@ -54,9 +64,7 @@ export function buildPollRows({
       question: question.question,
       position,
       responseType: question.responseType ?? "SINGLE_CHOICE",
-      options: question.options.map(
-        (option): PollOption => ({ id: option.id, text: option.text, createdBy: userId }),
-      ),
+      options: question.options.map((option): PollOption => ({ id: option.id, text: option.text })),
       createdAt: timestamp,
     })),
     results: draft.questions.map((question) => ({

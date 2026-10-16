@@ -1,18 +1,20 @@
-import {
-  POLL_LIMITS,
-  isChoiceResponseType,
-  type PollOption,
-  type PollSchedule,
-} from "./types.js";
+import { POLL_LIMITS, isChoiceResponseType, type PollOption } from "./types.js";
+
+type PollTiming = { closedAt?: number | null; closesAt?: number | null };
 
 export const normalizePollChoice = (text: string): string =>
   text.normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase();
 
-export const isPollClosed = (poll: { closedAt?: number | null }): boolean =>
-  poll.closedAt != null;
+/**
+ * A poll is closed once `closedAt` is set, or, when `now` is given, once its `closesAt`
+ * has passed even if the close job has not run yet. Client mutators omit `now` so they
+ * stay deterministic; the server and the UI pass the current time.
+ */
+export const isPollClosed = (poll: PollTiming, now?: number): boolean =>
+  poll.closedAt != null || (now !== undefined && poll.closesAt != null && poll.closesAt <= now);
 
-export function assertPollOpen(poll: { closedAt?: number | null }): void {
-  if (isPollClosed(poll)) {
+export function assertPollOpen(poll: PollTiming, now?: number): void {
+  if (isPollClosed(poll, now)) {
     throw new Error("This poll is closed");
   }
 }
@@ -42,6 +44,9 @@ export function appendPollOption(
   }
   if (question.options.length >= POLL_LIMITS.maxOptions) {
     throw new Error("This question already has the maximum number of options");
+  }
+  if (question.options.some((existing) => existing.id === option.id)) {
+    throw new Error("This option already exists");
   }
   const normalizedText = normalizePollChoice(option.text);
   if (question.options.some((existing) => normalizePollChoice(existing.text) === normalizedText)) {
@@ -75,7 +80,8 @@ export function assertPollScheduleAfter(
   pollDraft: unknown,
   publishAt: number,
 ): void {
-  const schedule = (pollDraft as { schedule?: PollSchedule } | null)?.schedule;
+  const schedule = (pollDraft as { schedule?: { closeAt?: string | null; remindAt?: string | null } } | null)
+    ?.schedule;
   for (const time of [schedule?.closeAt, schedule?.remindAt]) {
     if (time && Date.parse(time) <= publishAt) {
       throw new Error("Pick a time before the poll's close and reminder times");

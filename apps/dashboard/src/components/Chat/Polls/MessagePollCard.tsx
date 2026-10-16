@@ -2,13 +2,16 @@ import { useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { formatDistanceToNow } from 'date-fns';
 import { toast } from 'sonner';
-import { Check, ChevronDown, ChevronUp, Circle, Lock, Plus, ShieldCheck } from 'lucide-react';
+import { Check, Lock, Plus } from 'lucide-react';
+import { ChevronDown, ChevronUp, Circle, ShieldCheck } from '@xyne/icons';
 import type { QueryResultType } from '@rocicorp/zero';
 import {
   POLL_LIMITS,
+  calculateAverageRating,
+  calculateOptionResults,
+  calculateRankingResults,
   isChoiceResponseType,
   isPollClosed,
-  type PollNonChoiceResponseType,
   type PollResponseInput,
 } from '@xyne/shared';
 import { queries } from '../../../zero/queries';
@@ -17,13 +20,14 @@ import { useQuery } from '../../../hooks/useQuery';
 import { useUsersById } from '../../../hooks/useUsers';
 import { useZero } from '../../../hooks/useZero';
 import { useConfirmDialog } from '../../../hooks/useConfirmDialog';
+import { useNowWithBoundary } from '../../../hooks/useNowWithBoundary';
+import { cn } from '../../../utils/classNames';
 import { surfaceMutationError } from '../../../utils/zeroMutationToast';
 import { Badge } from '../../ui/Badge';
 import { Button } from '../../ui/Button';
 import Input from '../../ui/Input';
 import Textarea from '../../ui/Textarea';
 import UserAvatar, { AvatarSize } from '../../UserAvatar/UserAvatar';
-import { calculatePollResults, calculateRankingResult, calculateRatingResult } from './pollResults';
 import { buildPollResponseDetails, buildPollVoterDetails } from './pollVoterDetails';
 
 type LoadedPoll = NonNullable<QueryResultType<typeof queries.pollByMessageId>>;
@@ -69,7 +73,10 @@ function LoadedMessagePollCard({ poll, channelId }: { poll: LoadedPoll; channelI
     showVoterDetails,
   );
   const [newChoices, setNewChoices] = useState<Record<string, string>>({});
-  const isClosed = isPollClosed(poll);
+  // Ticks every minute and exactly at `closesAt`, so a passed close time closes the
+  // card even before the lifecycle job writes `closedAt`.
+  const now = useNowWithBoundary(poll.closesAt ?? null, !isPollClosed(poll));
+  const isClosed = isPollClosed(poll, now);
   // A zero-valued result row is created with every question. If ACLs hide that
   // row, this array is empty; the UI never reimplements result authorization.
   const resultsVisible = resultRows.length > 0;
@@ -115,7 +122,9 @@ function LoadedMessagePollCard({ poll, channelId }: { poll: LoadedPoll; channelI
       {poll.questions.map(question => {
         const aggregate = resultRows.find(result => result.questionId === question.id);
         const ownVotes = myVotes.filter(vote => vote.questionId === question.id);
-        const results = calculatePollResults(question.options, aggregate, ownVotes);
+        const optionResults = calculateOptionResults(question.options, aggregate);
+        const voterCount = aggregate?.voterCount ?? 0;
+        const currentSelections = ownVotes[0]?.optionIds ?? [];
         const isChoice = isChoiceResponseType(question.responseType);
         const isSingleChoice = question.responseType === 'SINGLE_CHOICE';
         const questionBallots = voterBallots.filter(ballot => ballot.questionId === question.id);
@@ -130,8 +139,8 @@ function LoadedMessagePollCard({ poll, channelId }: { poll: LoadedPoll; channelI
             )}
             {isChoice ? (
               question.options.map(option => {
-                const result = results.options.find(item => item.optionId === option.id)!;
-                const selected = results.currentSelections.includes(option.id);
+                const result = optionResults.find(item => item.optionId === option.id)!;
+                const selected = currentSelections.includes(option.id);
                 return (
                   <button
                     key={option.id}
@@ -162,13 +171,21 @@ function LoadedMessagePollCard({ poll, channelId }: { poll: LoadedPoll; channelI
                     />
                     {isSingleChoice ? (
                       <span
-                        className={`relative flex size-4 shrink-0 items-center justify-center rounded-full border-[1.5px] ${selected ? 'border-primary' : 'border-secondary-foreground/50'}`}
+                        className={cn(
+                          'relative flex size-4 shrink-0 items-center justify-center rounded-full border-[1.5px]',
+                          selected ? 'border-primary' : 'border-secondary-foreground/50',
+                        )}
                       >
-                        {selected && <Circle className='size-2 fill-primary stroke-none' />}
+                        {selected && <Circle className='size-2 fill-primary text-primary' />}
                       </span>
                     ) : (
                       <span
-                        className={`relative flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[4px] border ${selected ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-card'}`}
+                        className={cn(
+                          'relative flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[4px] border',
+                          selected
+                            ? 'border-primary bg-primary text-primary-foreground'
+                            : 'border-border bg-card',
+                        )}
                       >
                         {selected && <Check className='size-3' />}
                       </span>
@@ -194,8 +211,8 @@ function LoadedMessagePollCard({ poll, channelId }: { poll: LoadedPoll; channelI
             {resultsVisible && <TypedResultSummary question={question} aggregate={aggregate} />}
             {resultsVisible ? (
               <p className='text-xs text-muted-foreground'>
-                {results.voterCount} {isChoice ? 'voter' : 'response'}
-                {results.voterCount === 1 ? '' : 's'}
+                {voterCount} {isChoice ? 'voter' : 'response'}
+                {voterCount === 1 ? '' : 's'}
               </p>
             ) : (
               resultsLocked && (
@@ -370,25 +387,19 @@ function NonChoicePollAnswer({
     ownResponse?.rankedOptionIds ?? question.options.map(option => option.id),
   );
 
-  const submit = (answer: Omit<PollResponseInput, 'questionId' | 'responseType'>) => {
+  const submit = (response: PollResponseInput): Promise<boolean> => {
     const mutation = zero.mutate(
       mutators.polls.respond({
         responseId: uuidv4(),
         pollId,
-        response: {
-          questionId: question.id,
-          responseType: question.responseType as PollNonChoiceResponseType,
-          ...answer,
-        },
+        response,
         timestamp: Date.now(),
       }),
     );
     return surfaceMutationError(mutation, 'Unable to submit your response');
   };
-  const submitWithToast = (
-    answer: Omit<PollResponseInput, 'questionId' | 'responseType'>,
-  ): void => {
-    void submit(answer).then(ok => ok && toast.success('Response submitted'));
+  const submitWithToast = (response: PollResponseInput): void => {
+    void submit(response).then(ok => ok && toast.success('Response submitted'));
   };
 
   if (question.responseType === 'RATING_1_TO_5') {
@@ -404,8 +415,15 @@ function NonChoicePollAnswer({
             disabled={disabled}
             aria-pressed={rating === value}
             onClick={() => {
+              const previous = rating;
               setRating(value);
-              void submit({ rating: value });
+              void submit({
+                questionId: question.id,
+                responseType: 'RATING_1_TO_5',
+                rating: value,
+              }).then(ok => {
+                if (!ok) setRating(previous);
+              });
             }}
             data-track-category='POLL'
             data-track-name='RATE'
@@ -470,7 +488,13 @@ function NonChoicePollAnswer({
           type='button'
           disabled={disabled}
           size='sm'
-          onClick={() => submitWithToast({ rankedOptionIds: ranking })}
+          onClick={() =>
+            submitWithToast({
+              questionId: question.id,
+              responseType: 'RANKING',
+              rankedOptionIds: ranking,
+            })
+          }
           data-track-category='POLL'
           data-track-name='SUBMIT_RANKING'
         >
@@ -479,6 +503,9 @@ function NonChoicePollAnswer({
       </div>
     );
   }
+
+  if (question.responseType !== 'SHORT_TEXT' && question.responseType !== 'Q_AND_A') return null;
+  const responseType = question.responseType;
 
   return (
     <div className='space-y-2' data-prevent-thread>
@@ -503,7 +530,9 @@ function NonChoicePollAnswer({
         type='button'
         disabled={disabled || !text.trim()}
         size='sm'
-        onClick={() => submitWithToast({ textAnswer: text.trim() })}
+        onClick={() =>
+          submitWithToast({ questionId: question.id, responseType, textAnswer: text.trim() })
+        }
         data-track-category='POLL'
         data-track-name='SUBMIT_RESPONSE'
       >
@@ -521,15 +550,15 @@ function TypedResultSummary({
   aggregate: PollResultRow | undefined;
 }) {
   if (question.responseType === 'RATING_1_TO_5') {
-    const rating = calculateRatingResult(aggregate);
+    const average = calculateAverageRating(aggregate);
     return (
       <div className='rounded-md bg-muted/40 px-3 py-2 text-sm text-muted-foreground'>
-        Average <span className='font-semibold text-foreground'>{rating.average || '—'}</span>/5
+        Average <span className='font-semibold text-foreground'>{average || '—'}</span>/5
       </div>
     );
   }
   if (question.responseType === 'RANKING') {
-    const ranked = calculateRankingResult(question.options, aggregate);
+    const ranked = calculateRankingResults(question.options, aggregate);
     return (
       <ol className='space-y-1 rounded-md bg-muted/40 px-3 py-2 text-sm'>
         {ranked.map((result, index) => (

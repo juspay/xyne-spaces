@@ -3771,11 +3771,6 @@ export const messageTableRelationships = relationships(messageTable, ({ one, man
     destField: ['messageId'],
     destSchema: surfaceNudgeCountTable,
   }),
-  poll: one({
-    sourceField: ['messageId'],
-    destField: ['messageId'],
-    destSchema: pollTable,
-  }),
 }));
 
 export const pollTableRelationships = relationships(pollTable, ({ one, many }) => ({
@@ -3789,35 +3784,15 @@ export const pollTableRelationships = relationships(pollTable, ({ one, many }) =
     destField: ['pollId'],
     destSchema: pollQuestionTable,
   }),
-  votes: many({
-    sourceField: ['id'],
-    destField: ['pollId'],
-    destSchema: pollVoteTable,
-  }),
-  results: many({
-    sourceField: ['id'],
-    destField: ['pollId'],
-    destSchema: pollQuestionResultTable,
-  }),
 }));
 
 export const pollQuestionTableRelationships = relationships(
   pollQuestionTable,
-  ({ one, many }) => ({
+  ({ one }) => ({
     poll: one({
       sourceField: ['pollId'],
       destField: ['id'],
       destSchema: pollTable,
-    }),
-    votes: many({
-      sourceField: ['id'],
-      destField: ['questionId'],
-      destSchema: pollVoteTable,
-    }),
-    result: one({
-      sourceField: ['id'],
-      destField: ['questionId'],
-      destSchema: pollQuestionResultTable,
     }),
   }),
 );
@@ -3830,11 +3805,6 @@ export const pollVoteTableRelationships = relationships(
       destField: ['id'],
       destSchema: pollTable,
     }),
-    question: one({
-      sourceField: ['questionId'],
-      destField: ['id'],
-      destSchema: pollQuestionTable,
-    }),
   }),
 );
 
@@ -3845,11 +3815,6 @@ export const pollQuestionResultTableRelationships = relationships(
       sourceField: ['pollId'],
       destField: ['id'],
       destSchema: pollTable,
-    }),
-    question: one({
-      sourceField: ['questionId'],
-      destField: ['id'],
-      destSchema: pollQuestionTable,
     }),
   }),
 );

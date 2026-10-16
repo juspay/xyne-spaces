@@ -148,6 +148,7 @@ import {
   assertPollMessageActive,
   assertPollOpen,
   assertPollScheduleAfter,
+  ballotFieldsForResponse,
   buildPollMessageSummary,
   deletePollGraph,
   insertPollGraph,
@@ -254,6 +255,7 @@ import {
 import { validateFlowDecisionFields } from '@/zero/utils/flowPlanValidation';
 import { getEncryptionProvider } from '@/services/encryption';
 import { escapeHtml } from '@/utils/htmlEscape';
+import { lockRowForUpdate } from '@/bypassAcl/lockServices';
 
 function sortCallParticipantsForPreview<T extends {
   id: string;
@@ -1137,9 +1139,11 @@ async function refreshPollQuestionResult(
   timestamp: number
 ): Promise<void> {
   if (tx.location === 'server') {
-    await tx.dbTransaction.query(
-      'SELECT 1 FROM "poll_question_results" WHERE "questionId" = $1 FOR UPDATE',
-      [questionId]
+    await lockRowForUpdate(
+      tx.dbTransaction,
+      'poll_question_results',
+      questionId,
+      'serialize concurrent votes on one poll question while its result row is recomputed'
     );
   }
   const ballots = await tx.run(zql.poll_votes.where('questionId', '=', questionId));
@@ -3669,17 +3673,11 @@ export function createMutators(
             throw new ApplicationError('Poll question is not available');
           }
           assertPollMessageActive(poll.message);
-          assertPollOpen(poll);
-          if (args.response.rankedOptionIds) {
+          assertPollOpen(poll, Date.now());
+          if ('rankedOptionIds' in args.response) {
             assertCompleteRanking(question.options, args.response.rankedOptionIds);
           }
-          const row = {
-            optionIds: [],
-            textAnswer: args.response.textAnswer ?? null,
-            rankedOptionIds: args.response.rankedOptionIds ?? null,
-            rating: args.response.rating ?? null,
-            updatedAt: args.timestamp,
-          };
+          const row = { ...ballotFieldsForResponse(args.response), updatedAt: args.timestamp };
           if (existing) {
             await tx.mutate.poll_votes.update({ id: existing.id, ...row });
           } else {
@@ -3726,7 +3724,7 @@ export function createMutators(
             throw new ApplicationError('Poll option is not available');
           }
           assertPollMessageActive(poll.message);
-          assertPollOpen(poll);
+          assertPollOpen(poll, Date.now());
           if (!isChoiceResponseType(question.responseType)) {
             throw new ApplicationError('This question does not accept choice votes');
           }
@@ -3773,7 +3771,7 @@ export function createMutators(
       ),
       addOption: defineMutator(
         z.object({
-          id: z.string(),
+          id: z.string().uuid(),
           questionId: z.string(),
           text: z.string().trim().min(1).max(POLL_LIMITS.maxOptionLength),
           timestamp: z.number(),
@@ -3781,9 +3779,11 @@ export function createMutators(
         async ({ tx, args }) => {
           // Lock the question row so concurrent additions append to the latest options.
           if (tx.location === 'server') {
-            await tx.dbTransaction.query(
-              'SELECT 1 FROM "poll_questions" WHERE "id" = $1 FOR UPDATE',
-              [args.questionId]
+            await lockRowForUpdate(
+              tx.dbTransaction,
+              'poll_questions',
+              args.questionId,
+              'serialize concurrent audience options appended to one poll question'
             );
           }
           const question = await tx.run(
@@ -3796,17 +3796,13 @@ export function createMutators(
             throw new ApplicationError('Poll question is not available');
           }
           assertPollMessageActive(question.poll.message);
-          assertPollOpen(question.poll);
+          assertPollOpen(question.poll, Date.now());
           if (question.poll.createdBy !== authData.sub && !question.poll.allowAudienceChoices) {
             throw new ApplicationError('This poll does not allow audience options');
           }
           await tx.mutate.poll_questions.update({
             id: question.id,
-            options: appendPollOption(question, {
-              id: args.id,
-              text: args.text,
-              createdBy: authData.sub,
-            }),
+            options: appendPollOption(question, { id: args.id, text: args.text }),
           });
         }
       ),

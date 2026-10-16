@@ -23,6 +23,18 @@ export const POLL_CHOICE_RESPONSE_TYPES = ["SINGLE_CHOICE", "MULTIPLE_CHOICE"] a
 
 export type PollChoiceResponseType = (typeof POLL_CHOICE_RESPONSE_TYPES)[number];
 
+/** Question types whose answers refer to the question's options. */
+export const POLL_OPTION_RESPONSE_TYPES = ["SINGLE_CHOICE", "MULTIPLE_CHOICE", "RANKING"] as const;
+
+export const usesPollOptions = (responseType: string): boolean =>
+  (POLL_OPTION_RESPONSE_TYPES as readonly string[]).includes(responseType);
+
+/** Free-text question types; their answers exist only on each voter's own ballot. */
+export const POLL_TEXT_RESPONSE_TYPES = ["SHORT_TEXT", "Q_AND_A"] as const;
+
+export const isTextResponseType = (responseType: string): boolean =>
+  (POLL_TEXT_RESPONSE_TYPES as readonly string[]).includes(responseType);
+
 export const isChoiceResponseType = (
   responseType: string,
 ): responseType is PollChoiceResponseType =>
@@ -51,39 +63,4 @@ export type PollResultVisibility = (typeof POLL_RESULT_VISIBILITIES)[number];
 export type PollOption = {
   id: string;
   text: string;
-  createdBy: string;
 };
-
-export interface PollOptionDraft {
-  id: string;
-  text: string;
-}
-
-export interface PollQuestionDraft {
-  id: string;
-  question: string;
-  options: PollOptionDraft[];
-  responseType?: PollResponseType;
-}
-
-export interface PollResponseInput {
-  questionId: string;
-  responseType: PollNonChoiceResponseType;
-  textAnswer?: string;
-  rankedOptionIds?: string[];
-  rating?: number;
-}
-
-export interface PollDraft {
-  pollId: string;
-  allowAudienceChoices: boolean;
-  isAnonymous: boolean;
-  resultVisibility?: PollResultVisibility;
-  questions: PollQuestionDraft[];
-}
-
-export interface PollSchedule {
-  publishAt?: string | null;
-  closeAt?: string | null;
-  remindAt?: string | null;
-}

@@ -2,15 +2,15 @@ import { z } from 'zod';
 
 import {
   POLL_LIMITS,
-  POLL_NON_CHOICE_RESPONSE_TYPES,
   POLL_RESPONSE_TYPES,
   POLL_RESULT_VISIBILITIES,
-  type PollDraft,
-  type PollSchedule,
+  isTextResponseType,
+  usesPollOptions,
 } from "./types.js";
 import { normalizePollChoice } from "./policy.js";
 
-const stableIdSchema = z.string().trim().min(1, "A stable ID is required");
+// Client-generated ids. UUIDs only: ids key the stored counts and ballots.
+const stableIdSchema = z.string().uuid("A UUID is required");
 
 const pollOptionDraftSchema = z
   .object({
@@ -36,29 +36,16 @@ const pollQuestionDraftSchema = z
   })
   .strict()
   .superRefine((question, context) => {
-    if (
-      ['SINGLE_CHOICE', 'MULTIPLE_CHOICE', 'RANKING'].includes(question.responseType) &&
-      question.options.length < POLL_LIMITS.minOptions
-    ) {
+    if (usesPollOptions(question.responseType) && question.options.length < POLL_LIMITS.minOptions) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         message: 'At least two choices are required',
         path: ['options'],
       });
     }
-    const optionIds = new Set<string>();
     const optionLabels = new Set<string>();
 
     question.options.forEach((option, index) => {
-      if (optionIds.has(option.id)) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'Duplicate choice ID',
-          path: ['options', index, 'id'],
-        });
-      }
-      optionIds.add(option.id);
-
       const normalizedLabel = normalizePollChoice(option.text);
       if (optionLabels.has(normalizedLabel)) {
         context.addIssue({
@@ -84,6 +71,14 @@ export const pollDraftSchema = z
   })
   .strict()
   .superRefine((draft, context) => {
+    // Text answers live only on ballots, which an anonymous poll's creator cannot read.
+    if (draft.isAnonymous && draft.questions.some((question) => isTextResponseType(question.responseType))) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Anonymous polls cannot include text or Q&A questions',
+        path: ['isAnonymous'],
+      });
+    }
     const questionIds = new Set<string>();
     const optionIds = new Set<string>();
 
@@ -110,8 +105,7 @@ export const pollDraftSchema = z
     });
   });
 
-export const normalizePollDraft = (draft: unknown): PollDraft =>
-  pollDraftSchema.parse(draft);
+export type PollDraft = z.input<typeof pollDraftSchema>;
 
 export const pollScheduleSchema = z
   .object({
@@ -159,73 +153,34 @@ export const pollScheduleSchema = z
     }
   });
 
-export const normalizePollSchedule = (schedule: unknown): PollSchedule =>
-  pollScheduleSchema.parse(schedule);
+export type PollSchedule = z.input<typeof pollScheduleSchema>;
 
-export const pollResponseSchema = z
-  .object({
+const textAnswerSchema = (maxLength: number) => z.string().trim().min(1).max(maxLength);
+
+export const pollResponseSchema = z.discriminatedUnion("responseType", [
+  z.object({
     questionId: stableIdSchema,
-    responseType: z.enum(POLL_NON_CHOICE_RESPONSE_TYPES),
-    textAnswer: z.string().trim().min(1).max(POLL_LIMITS.maxLongTextLength).optional(),
-    rankedOptionIds: z.array(stableIdSchema).min(2).optional(),
-    rating: z.number().int().min(1).max(5).optional(),
-  })
-  .strict()
-  .superRefine((response, context) => {
-    const hasDuplicates = (values: readonly string[] | undefined): boolean =>
-      !!values && new Set(values).size !== values.length;
-    const hasOnly = (key: "textAnswer" | "rankedOptionIds" | "rating") => {
-      const keys = ["textAnswer", "rankedOptionIds", "rating"] as const;
-      return keys.every(
-        (candidate) => candidate === key || response[candidate] === undefined,
-      );
-    };
-    if (
-      (response.responseType === "SHORT_TEXT" ||
-        response.responseType === "Q_AND_A") &&
-      (!response.textAnswer || !hasOnly("textAnswer"))
-    ) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Text responses require an answer",
-      });
-    }
-    if (
-      response.responseType === "SHORT_TEXT" &&
-      (response.textAnswer?.length ?? 0) > POLL_LIMITS.maxShortTextLength
-    ) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Short answers are limited to 500 characters",
-        path: ["textAnswer"],
-      });
-    }
-    if (
-      response.responseType === "RANKING" &&
-      (!response.rankedOptionIds || !hasOnly("rankedOptionIds"))
-    ) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Ranking responses require ranked options",
-      });
-    }
-    if (hasDuplicates(response.rankedOptionIds)) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Ranking responses cannot contain duplicate option IDs",
-        path: ["rankedOptionIds"],
-      });
-    }
-    if (
-      response.responseType === "RATING_1_TO_5" &&
-      (response.rating === undefined || !hasOnly("rating"))
-    ) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Rating responses require a rating from 1 to 5",
-      });
-    }
-  });
+    responseType: z.literal("SHORT_TEXT"),
+    textAnswer: textAnswerSchema(POLL_LIMITS.maxShortTextLength),
+  }).strict(),
+  z.object({
+    questionId: stableIdSchema,
+    responseType: z.literal("Q_AND_A"),
+    textAnswer: textAnswerSchema(POLL_LIMITS.maxLongTextLength),
+  }).strict(),
+  z.object({
+    questionId: stableIdSchema,
+    responseType: z.literal("RANKING"),
+    rankedOptionIds: z.array(stableIdSchema).min(2),
+  }).strict(),
+  z.object({
+    questionId: stableIdSchema,
+    responseType: z.literal("RATING_1_TO_5"),
+    rating: z.number().int().min(1).max(5),
+  }).strict(),
+]);
+
+export type PollResponseInput = z.input<typeof pollResponseSchema>;
 
 const escapeHtml = (value: string): string =>
   value.replace(

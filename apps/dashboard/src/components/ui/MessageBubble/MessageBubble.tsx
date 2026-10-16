@@ -12,6 +12,7 @@ import {
   parseReactionsMd,
   ReactionsData,
   parseTicketMd,
+  isPollMessageMetadata,
 } from '@xyne/shared';
 import {
   formatFullTimestamp,
@@ -1336,7 +1337,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             <div className='w-full flex flex-col gap-1 '>
               {message.isDeleted ? (
                 <div className='text-sm text-muted-foreground italic'>This message was deleted</div>
-              ) : metadata?.messageSubtype === 'poll' ? (
+              ) : isPollMessageMetadata(metadata) ? (
                 <MessagePollCard messageId={message.messageId} {...(channelId && { channelId })} />
               ) : isMentionUserAddition ? (
                 <NonParticipantActions

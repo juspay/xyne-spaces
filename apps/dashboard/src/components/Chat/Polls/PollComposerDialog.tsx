@@ -1,9 +1,14 @@
 import { useState } from 'react';
-import { Circle, Plus, Trash2 } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
+import { Circle } from '@xyne/icons';
 import { v4 as uuidv4 } from 'uuid';
 import {
   POLL_LIMITS,
   POLL_RESPONSE_TYPES,
+  POLL_RESULT_VISIBILITIES,
+  isChoiceResponseType,
+  isTextResponseType,
+  usesPollOptions,
   type PollDraft,
   type PollResponseType,
   type PollResultVisibility,
@@ -33,7 +38,27 @@ const RESPONSE_TYPE_LABEL: Record<PollResponseType, string> = {
   Q_AND_A: 'Ask me anything (Q&A)',
 };
 
-type TimingMode = 'NONE' | '10' | '30' | '60' | '180' | '1440' | '10080' | 'CUSTOM';
+const TIMING_PRESETS = [
+  ['10', '10 minutes'],
+  ['30', '30 minutes'],
+  ['60', '1 hour'],
+  ['180', '3 hours'],
+  ['1440', '1 day'],
+  ['10080', '7 days'],
+] as const;
+
+const TIMING_MODES = ['NONE', ...TIMING_PRESETS.map(([minutes]) => minutes), 'CUSTOM'] as const;
+
+type TimingMode = 'NONE' | (typeof TIMING_PRESETS)[number][0] | 'CUSTOM';
+
+const isTimingMode = (value: string): value is TimingMode =>
+  (TIMING_MODES as readonly string[]).includes(value);
+
+const isPollResponseType = (value: string): value is PollResponseType =>
+  (POLL_RESPONSE_TYPES as readonly string[]).includes(value);
+
+const isPollResultVisibility = (value: string): value is PollResultVisibility =>
+  (POLL_RESULT_VISIBILITIES as readonly string[]).includes(value);
 
 const newQuestion = (): DraftQuestion => ({
   id: uuidv4(),
@@ -72,19 +97,23 @@ function TimingField({
 }) {
   return (
     <div className='space-y-2'>
-      <label className='text-sm font-medium'>{label}</label>
-      <Select value={value} onValueChange={next => onChange(next as TimingMode)}>
+      <p className='text-sm font-medium'>{label}</p>
+      <Select
+        value={value}
+        onValueChange={next => {
+          if (isTimingMode(next)) onChange(next);
+        }}
+      >
         <SelectTrigger className='w-full' aria-label={label}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value='NONE'>{includeNow ? 'Publish now' : 'No'}</SelectItem>
-          <SelectItem value='10'>{includeNow ? 'In 10 minutes' : 'After 10 minutes'}</SelectItem>
-          <SelectItem value='30'>{includeNow ? 'In 30 minutes' : 'After 30 minutes'}</SelectItem>
-          <SelectItem value='60'>{includeNow ? 'In 1 hour' : 'After 1 hour'}</SelectItem>
-          <SelectItem value='180'>{includeNow ? 'In 3 hours' : 'After 3 hours'}</SelectItem>
-          <SelectItem value='1440'>{includeNow ? 'In 1 day' : 'After 1 day'}</SelectItem>
-          <SelectItem value='10080'>{includeNow ? 'In 7 days' : 'After 7 days'}</SelectItem>
+          <SelectItem value='NONE'>{includeNow ? 'Post now' : 'No'}</SelectItem>
+          {TIMING_PRESETS.map(([minutes, duration]) => (
+            <SelectItem key={minutes} value={minutes}>
+              {includeNow ? `In ${duration}` : `After ${duration}`}
+            </SelectItem>
+          ))}
           <SelectItem value='CUSTOM'>Custom date and time…</SelectItem>
         </SelectContent>
       </Select>
@@ -108,7 +137,7 @@ export function PollComposerDialog({
   onClose: () => void;
   onPublish: (draft: PollDraft, schedule: PollSchedule) => Promise<void>;
 }) {
-  const [pollId, setPollId] = useState(() => uuidv4());
+  const [pollId] = useState(() => uuidv4());
   const [step, setStep] = useState<'edit' | 'preview'>('edit');
   const [questions, setQuestions] = useState<DraftQuestion[]>([newQuestion()]);
   const [allowAudienceChoices, setAllowAudienceChoices] = useState(false);
@@ -125,27 +154,6 @@ export function PollComposerDialog({
   const [showErrors, setShowErrors] = useState(false);
   const { confirm, ConfirmDialog } = useConfirmDialog();
 
-  const reset = () => {
-    setPollId(uuidv4());
-    setStep('edit');
-    setQuestions([newQuestion()]);
-    setAllowAudienceChoices(false);
-    setIsAnonymous(false);
-    setResultVisibility('EVERYONE');
-    setPublishMode('NONE');
-    setCloseMode('NONE');
-    setReminderMode('NONE');
-    setCustomPublishAt(null);
-    setCustomCloseAt(null);
-    setCustomReminderAt(null);
-    setPublishError(null);
-    setIsSubmitting(false);
-    setShowErrors(false);
-  };
-  const close = () => {
-    reset();
-    onClose();
-  };
   const hasDraftContent = questions.some(
     question => question.question.trim() || question.choices.some(choice => choice.text.trim()),
   );
@@ -163,7 +171,7 @@ export function PollComposerDialog({
     ) {
       return;
     }
-    close();
+    onClose();
   };
 
   const now = Date.now();
@@ -182,21 +190,25 @@ export function PollComposerDialog({
     questions.every(
       question =>
         question.question.trim() &&
-        (!['SINGLE_CHOICE', 'MULTIPLE_CHOICE', 'RANKING'].includes(question.responseType) ||
+        (!usesPollOptions(question.responseType) ||
           (question.choices.length >= POLL_LIMITS.minOptions &&
             question.choices.every(choice => choice.text.trim()))),
     );
 
+  // Anonymous ballots hide text answers from everyone, so text questions rule it out.
+  const hasTextQuestion = questions.some(question => isTextResponseType(question.responseType));
+  // Only choice questions accept options added by voters.
+  const hasChoiceQuestion = questions.some(question => isChoiceResponseType(question.responseType));
   const draft: PollDraft = {
     pollId,
-    allowAudienceChoices,
-    isAnonymous,
+    allowAudienceChoices: allowAudienceChoices && hasChoiceQuestion,
+    isAnonymous: isAnonymous && !hasTextQuestion,
     resultVisibility,
     questions: questions.map(question => ({
       id: question.id,
       question: question.question.trim(),
       responseType: question.responseType,
-      options: ['SINGLE_CHOICE', 'MULTIPLE_CHOICE', 'RANKING'].includes(question.responseType)
+      options: usesPollOptions(question.responseType)
         ? question.choices.map(choice => ({ id: choice.id, text: choice.text.trim() }))
         : [],
     })),
@@ -212,9 +224,9 @@ export function PollComposerDialog({
     setIsSubmitting(true);
     try {
       await onPublish(draft, schedule);
-      close();
+      onClose();
     } catch (error) {
-      setPublishError(error instanceof Error ? error.message : 'Failed to publish poll');
+      setPublishError(error instanceof Error ? error.message : 'Failed to post poll');
       setIsSubmitting(false);
     }
   };
@@ -238,16 +250,15 @@ export function PollComposerDialog({
           {step === 'edit' ? (
             <>
               {questions.map((question, questionIndex) => {
-                const usesChoices = ['SINGLE_CHOICE', 'MULTIPLE_CHOICE', 'RANKING'].includes(
-                  question.responseType,
-                );
+                const usesChoices = usesPollOptions(question.responseType);
+                const questionInputId = `poll-question-${question.id}`;
                 return (
                   <section
                     key={question.id}
                     className='space-y-3 rounded-xl border border-border p-4'
                   >
                     <div className='flex items-center gap-2'>
-                      <label className='flex-1 text-sm font-semibold'>
+                      <label htmlFor={questionInputId} className='flex-1 text-sm font-semibold'>
                         Question {questionIndex + 1}
                       </label>
                       {questions.length > 1 && (
@@ -265,6 +276,7 @@ export function PollComposerDialog({
                       )}
                     </div>
                     <Input
+                      id={questionInputId}
                       value={question.question}
                       maxLength={POLL_LIMITS.maxQuestionLength}
                       placeholder='Write your question…'
@@ -278,11 +290,11 @@ export function PollComposerDialog({
                     )}
                     <Select
                       value={question.responseType}
-                      onValueChange={value =>
-                        updateQuestion(question.id, {
-                          responseType: value as PollResponseType,
-                        })
-                      }
+                      onValueChange={value => {
+                        if (isPollResponseType(value)) {
+                          updateQuestion(question.id, { responseType: value });
+                        }
+                      }}
                     >
                       <SelectTrigger
                         className='w-full'
@@ -306,6 +318,7 @@ export function PollComposerDialog({
                               value={choice.text}
                               maxLength={POLL_LIMITS.maxOptionLength}
                               placeholder={`Option ${choiceIndex + 1}`}
+                              aria-label={`Question ${questionIndex + 1}, option ${choiceIndex + 1}`}
                               aria-invalid={showErrors && !choice.text.trim()}
                               onChange={event =>
                                 updateQuestion(question.id, {
@@ -369,21 +382,33 @@ export function PollComposerDialog({
 
               <section className='space-y-4 rounded-xl border border-border p-4'>
                 <h3 className='font-semibold'>Settings</h3>
-                <Checkbox
-                  checked={isAnonymous}
-                  onChange={setIsAnonymous}
-                  label='Make responses anonymous'
-                />
-                <Checkbox
-                  checked={allowAudienceChoices}
-                  onChange={setAllowAudienceChoices}
-                  label='Allow others to add options'
-                />
+                <div className='space-y-1'>
+                  <Checkbox
+                    checked={isAnonymous && !hasTextQuestion}
+                    onChange={setIsAnonymous}
+                    disabled={hasTextQuestion}
+                    label='Make responses anonymous'
+                  />
+                  {hasTextQuestion && (
+                    <p className='text-xs text-muted-foreground'>
+                      Not available with short text or Q&A questions.
+                    </p>
+                  )}
+                </div>
+                {hasChoiceQuestion && (
+                  <Checkbox
+                    checked={allowAudienceChoices}
+                    onChange={setAllowAudienceChoices}
+                    label='Allow others to add options'
+                  />
+                )}
                 <div className='space-y-2'>
                   <p className='text-sm font-medium'>Show results of the poll</p>
                   <Select
                     value={resultVisibility}
-                    onValueChange={value => setResultVisibility(value as PollResultVisibility)}
+                    onValueChange={value => {
+                      if (isPollResultVisibility(value)) setResultVisibility(value);
+                    }}
                   >
                     <SelectTrigger className='w-full' aria-label='Show results of the poll'>
                       <SelectValue />
@@ -402,7 +427,7 @@ export function PollComposerDialog({
                 <h3 className='font-semibold'>Scheduling</h3>
                 <div className='grid gap-4 md:grid-cols-2'>
                   <TimingField
-                    label='Publish poll'
+                    label='Post poll'
                     value={publishMode}
                     customValue={customPublishAt}
                     includeNow
@@ -466,7 +491,7 @@ export function PollComposerDialog({
           <Button
             type='button'
             variant='outline'
-            onClick={step === 'preview' ? () => setStep('edit') : close}
+            onClick={step === 'preview' ? () => setStep('edit') : onClose}
           >
             {step === 'preview' ? 'Back' : 'Cancel'}
           </Button>

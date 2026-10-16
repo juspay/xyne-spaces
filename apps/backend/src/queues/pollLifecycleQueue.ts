@@ -79,20 +79,11 @@ class PollLifecycleQueue {
   }
 
   async schedulePoll(poll: PollLifecycleSchedule): Promise<void> {
-    if (!poll.closesAt && !poll.remindAt) return;
     await this.initialize();
     if (!this.queue) {
       throw new Error('[POLL-LIFECYCLE-QUEUE] Queue not initialized');
     }
     await addPollLifecycleJobs(this.queue, poll);
-  }
-
-  async close(): Promise<void> {
-    if (this.queue) {
-      await this.queue.close();
-      this.queue = null;
-      logger.info('[POLL-LIFECYCLE-QUEUE] Closed');
-    }
   }
 }
 

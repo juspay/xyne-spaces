@@ -7,8 +7,8 @@ import {
   buildInitialMessageMd,
   buildPollMessageSummary,
   buildPollRows,
-  normalizePollDraft,
-  normalizePollSchedule,
+  pollDraftSchema,
+  pollScheduleSchema,
 } from '@xyne/shared';
 import type { Prisma } from '@prisma/client';
 import { v5 as uuidv5 } from 'uuid';
@@ -25,8 +25,14 @@ export interface ScheduledPollDeliveryInput {
 export interface ScheduledPollDeliveryResult {
   conversationId: string;
   messageId: string;
-  /** Set only when this call created the poll; the caller schedules its close/reminder jobs. */
-  createdPoll: { id: string; closesAt: Date | null; remindAt: Date | null } | null;
+  /** Set only when this call created the poll; the caller schedules its jobs and indexes it. */
+  createdPoll: {
+    id: string;
+    workspaceId: string;
+    createdAt: Date;
+    closesAt: Date | null;
+    remindAt: Date | null;
+  } | null;
 }
 
 function scheduledPollIds(delayedMessageId: string): {
@@ -48,8 +54,8 @@ function parseScheduledPollPayload(value: Prisma.JsonValue | null) {
     throw new Error('Scheduled poll payload is missing');
   }
   return {
-    poll: normalizePollDraft(value.poll),
-    schedule: normalizePollSchedule(value.schedule ?? {}),
+    poll: pollDraftSchema.parse(value.poll),
+    schedule: pollScheduleSchema.parse(value.schedule ?? {}),
   };
 }
 
@@ -127,6 +133,7 @@ export function deliverScheduledPollTx(
         userId: delayed.senderId,
         timestamp: input.timestamp,
         schedule,
+        lateDelivery: true,
       });
       const content = buildPollMessageSummary(draft);
       const createdAt = new Date(input.timestamp);
@@ -187,6 +194,7 @@ export function deliverScheduledPollTx(
         ...rows.poll,
         closesAt: toDate(rows.poll.closesAt),
         remindAt: toDate(rows.poll.remindAt),
+        closedAt: toDate(rows.poll.closedAt),
         createdAt,
       };
       await tx.poll.create({ data: poll });
@@ -211,7 +219,13 @@ export function deliverScheduledPollTx(
 
       return {
         ...ids,
-        createdPoll: { id: poll.id, closesAt: poll.closesAt, remindAt: poll.remindAt },
+        createdPoll: {
+          id: poll.id,
+          workspaceId: delayed.workspaceId,
+          createdAt,
+          closesAt: poll.closesAt,
+          remindAt: poll.remindAt,
+        },
       };
     },
   );

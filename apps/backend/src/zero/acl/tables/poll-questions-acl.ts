@@ -33,7 +33,7 @@ export class PollQuestionsACL extends BaseACL<'poll_questions'> {
       throw new MutationACLError('Poll question not found in this workspace', 'poll_questions');
     }
     const poll = await requireAccessiblePoll(question.pollId, this.ctx, tx, 'poll_questions');
-    if (isPollClosed(poll)) {
+    if (isPollClosed(poll, Date.now())) {
       throw new MutationACLError('This poll is closed', 'poll_questions');
     }
     if (poll.createdBy !== this.ctx.userID && !poll.allowAudienceChoices) {
