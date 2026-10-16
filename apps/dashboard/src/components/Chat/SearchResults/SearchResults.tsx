@@ -595,15 +595,15 @@ const SearchResults = (): ReactElement => {
 
   const handleFiltersChange = useCallback(
     (newFilters: SearchResultsFilters) => {
-      // A `from:` bot/app/agent finds nothing while bot messages are excluded, so the Bot
-      // toggle follows it: on when the first one is added, off when the last is removed. Only
-      // a change in that flips it, so toggling the pill by hand is left alone.
+      // A `from:` bot/app/agent finds nothing while bot messages are excluded, so adding the
+      // first one turns the Bot toggle on. Removing it leaves the toggle as is; a new search
+      // session from cmd+K starts from the palette's own toggle.
       const hasBotAuthor = (f: SearchResultsFilters): boolean =>
         f.fromUserIds.some(id => isNonHumanUser(usersById.get(id)));
       setFilters(prev =>
-        hasBotAuthor(prev) === hasBotAuthor(newFilters)
-          ? newFilters
-          : { ...newFilters, includeBotMessages: hasBotAuthor(newFilters) },
+        !hasBotAuthor(prev) && hasBotAuthor(newFilters)
+          ? { ...newFilters, includeBotMessages: true }
+          : newFilters,
       );
       // Immediately sync tab, member-scope flag, and mentions to hook
       if (newFilters.docType !== 'channels') {
