@@ -1,7 +1,7 @@
 import type { Query } from '@rocicorp/zero';
 import { type Schema, type Context } from '../../schema';
 import { BaseQueryACL } from '../core/base-acl';
-import { guestProjectAccessWhere, isGuestContext } from '../core/guest-acl-utils';
+import { guestBoardAccessWhere, isGuestContext } from '../core/guest-acl-utils';
 
 export class StageTransitionsACL extends BaseQueryACL<'stage_transitions'> {
   constructor(ctx: Context) {
@@ -15,9 +15,7 @@ export class StageTransitionsACL extends BaseQueryACL<'stage_transitions'> {
       return query.whereExists('board', (boardQuery) =>
         boardQuery
           .where('workspaceId', '=', this.ctx.workspaceId)
-          .whereExists('project', (projectQuery) =>
-            projectQuery.where(guestProjectAccessWhere(this.ctx)),
-          ),
+          .where(guestBoardAccessWhere(this.ctx)),
       );
     }
 

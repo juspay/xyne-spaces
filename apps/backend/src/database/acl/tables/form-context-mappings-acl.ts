@@ -1,6 +1,5 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
-import { denyGuestWhere, isGuestContext } from './channel-access-helper'
 
 export class FormContextMappingsACL extends BaseQueryACL<
   Prisma.FormContextMappingWhereInput,
@@ -11,11 +10,7 @@ export class FormContextMappingsACL extends BaseQueryACL<
   }
 
   async getWhereClause(): Promise<Prisma.FormContextMappingWhereInput> {
-    const ctx = this.ctx
-    if (isGuestContext(ctx)) {
-      return denyGuestWhere('id')
-    }
-
+    // Form definitions are workspace-scoped for guests too; guests need them to fill ticket fields.
       return { workspaceId: this.ctx.workspaceId }
   }
 

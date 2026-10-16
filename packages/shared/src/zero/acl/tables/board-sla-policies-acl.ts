@@ -1,7 +1,7 @@
 import type { Query } from '@rocicorp/zero';
 import type { Schema, Context } from '../../schema';
 import { BaseQueryACL } from '../core/base-acl';
-import { guestProjectAccessWhere, isGuestContext } from '../core/guest-acl-utils';
+import { guestBoardAccessWhere, isGuestContext } from '../core/guest-acl-utils';
 
 /**
  * ACL for board_sla_policies.
@@ -21,7 +21,7 @@ export class BoardSlaPoliciesACL extends BaseQueryACL<'board_sla_policies'> {
       return query.whereExists('board', (b) =>
         b
           .where('workspaceId', '=', this.ctx.workspaceId)
-          .whereExists('project', (p) => p.where(guestProjectAccessWhere(this.ctx))),
+          .where(guestBoardAccessWhere(this.ctx)),
       );
     }
 
