@@ -1258,6 +1258,7 @@ model AgentRun {
   /// The `call-agent` tool call that spawned this run, lining a child row up
   /// with its row in the caller's trace.
   parentToolCallId String?
+  stats            AgentRunStats?
 
   @@index([userId, status, startedAt])
   @@index([parentSessionId])
@@ -1274,7 +1275,70 @@ model AgentRun {
   @@index([completedAt, triggerSource])
   @@index([userId, startedAt])
   @@index([orgId, startedAt])
+  // agent_runs_metrics_window_idx (partial covering index) lives only in migration 20261015120000; Prisma can't express it.
   @@map("agent_runs")
+}
+
+/// One row per finished run, written after finalize commits (src/lib/tool-stats.ts).
+/// Run keys are copied so metrics reads never join agent_runs.
+model AgentRunStats {
+  runId           String              @id
+  orgId           String
+  userId          String
+  agentSlug       String
+  completedAt     DateTime
+  toolCalls       Int
+  toolErrors      Int
+  /// toolsUsed plus every tool the run's calls named.
+  toolNames       String[]            @default([])
+  /// NULL when the run recorded no per-call series.
+  llmCallCount    Int?
+  /// Shape owned by xyne-claw/src/llm-turn-stats.ts.
+  llmCalls        Json?
+  citationOutcome String?
+  run             AgentRun            @relation(fields: [runId], references: [id], onDelete: Cascade)
+  tools           AgentRunToolStats[]
+
+  @@index([orgId, completedAt])
+  @@index([orgId, agentSlug, completedAt])
+  @@map("agent_run_stats")
+}
+
+/// One row per tool per finished run, written with its AgentRunStats row.
+model AgentRunToolStats {
+  runId           String
+  tool            String
+  orgId           String
+  userId          String
+  agentSlug       String
+  completedAt     DateTime
+  calls           Int
+  /// Calls with no parent tool call.
+  topLevelCalls   Int
+  /// Includes notFound; dropped calls are not errors.
+  errors          Int
+  /// Errors followed by a later success of the same tool in the run.
+  recovered       Int
+  notFound        Int
+  /// Calls whose end event never arrived.
+  dropped         Int
+  duplicates      Int
+  empty           Int
+  citeable        Int
+  cited           Int
+  totalMs         Int
+  maxMs           Int
+  resultBytes     Int
+  /// Calls per DURATION_BUCKETS_MS bucket (src/lib/tool-stats.ts), then overflow.
+  durationBuckets Int[]
+  /// [{ class, count, sample, notFound }] in first-seen order; NULL when no call errored.
+  errorClasses    Json?
+  stats           AgentRunStats @relation(fields: [runId], references: [runId], onDelete: Cascade)
+
+  @@id([runId, tool])
+  @@index([orgId, completedAt])
+  @@index([orgId, tool, completedAt])
+  @@map("agent_run_tool_stats")
 }
 
 /// Durable mapping from an agent-authored widget/card to WHERE it lives in a

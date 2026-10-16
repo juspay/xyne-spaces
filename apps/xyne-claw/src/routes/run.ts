@@ -27,7 +27,11 @@ import {
   type ProgressDest,
   type ProgressEmitter,
   type Attachment,
+  type ToolInvocation,
+  type LatencyMetrics,
+  type TokenUsage,
 } from "../agent.js";
+import { mergeLlmCallSeries, type LlmCallStat } from "../llm-turn-stats.js";
 import { parseReplyFormat,
   frameSseEvent,
   KEEPALIVE_FRAME,
@@ -1437,6 +1441,37 @@ function buildInterruptSummary(partialResult: string, fallback?: { toolsUsed?: s
     : `${lead}\n\n**Summary of the work so far:** ${fallbackText}`;
 }
 
+/** Telemetry fields an aborted run's terminal callback carries. */
+export interface AbortTelemetry {
+  toolsUsed?: string[];
+  toolInvocations?: ToolInvocation[];
+  tokenUsage?: TokenUsage;
+  latency?: LatencyMetrics;
+  llmCalls?: LlmCallStat[];
+}
+
+/** Run telemetry for abort-path callbacks. Only RunCancelledError / ProviderStallError carry a snapshot; other errors report nothing. */
+export function abortTelemetry(
+  err: unknown,
+  nested: {
+    toolsUsed?: readonly string[];
+    invocations?: readonly ToolInvocation[];
+    llmCalls?: readonly LlmCallStat[];
+  } = {},
+): AbortTelemetry {
+  if (!(err instanceof RunCancelledError || err instanceof ProviderStallError)) return {};
+  const toolsUsed = [...err.toolsUsed, ...(nested.toolsUsed ?? [])];
+  const toolInvocations = [...err.toolInvocations, ...(nested.invocations ?? [])];
+  const llmCalls = mergeLlmCallSeries(err.llmCalls, nested.llmCalls).calls;
+  return {
+    ...(toolsUsed.length > 0 ? { toolsUsed } : {}),
+    ...(toolInvocations.length > 0 ? { toolInvocations } : {}),
+    tokenUsage: err.tokenUsage,
+    ...(err.latency ? { latency: err.latency } : {}),
+    ...(llmCalls.length > 0 ? { llmCalls } : {}),
+  };
+}
+
 export async function processTask(
   sessionId: string,
   sessionToken: string,
@@ -1631,6 +1666,15 @@ export async function processTask(
     true,
   );
   const runDebugStartedAt = new Date().toISOString();
+  // Nested-loop sinks live outside the try so the catch can report them (aborted runs land there).
+  // Subagents append inner MCP tool names here so chain `toolsMustInclude`/`toolsMustExclude`
+  // can target nested tools (e.g. Bitbucket__create_pull_request), not just wrapper names.
+  const subagentInnerTools: string[] = [];
+  // Durable sink for subagent tool calls: the live push is fire-and-forget. Finalize dedupes by
+  // toolCallId. A2A callees are not folded in; each has its own run row.
+  const nestedInvocations: ToolInvocation[] = [];
+  // Subagent LLM calls, tagged with the subagent name, merged into the parent's series.
+  const nestedLlmCalls: LlmCallStat[] = [];
 
   try {
     // SSRF guard: progressUrl is caller-supplied and gets POSTed to on every
@@ -2136,11 +2180,6 @@ export async function processTask(
       subagentsFollowParent && provider && (["copilot", "claude", "codex"] as readonly string[]).includes(provider)
         ? provider
         : "spaces";
-    // Shared ref: subagents append their inner MCP tool names here so chain
-    // `toolsMustInclude`/`toolsMustExclude` conditions can target specific
-    // nested tools (e.g. Bitbucket__create_pull_request), not just the
-    // subagent wrapper names returned by the parent agent.
-    const subagentInnerTools: string[] = [];
     // NOTE: the "sandbox" subagent was removed (2026-06-14). Sandbox tools now
     // mount directly on the parent (see parentHoistedTools below); playwright
     // browser tools are hoisted alongside them for sandbox-capable agents. The
@@ -2236,6 +2275,8 @@ export async function processTask(
                 }
               : {}),
             parentToolsUsed: subagentInnerTools,
+            parentToolInvocations: nestedInvocations,
+            parentLlmCalls: nestedLlmCalls,
             parentMeta: {
               ...(conversationId ? { conversationId } : {}),
               ...(agentSlug ? { agentSlug } : {}),
@@ -2417,6 +2458,9 @@ export async function processTask(
             : "spaces";
         const calleeDirectPickSuffixes = calleeToolsConfig?.direct ?? [];
         const calleeInnerTools: string[] = [];
+        // The callee's subagent work belongs on the callee's run row, so it gets its own sinks.
+        const calleeNestedInvocations: ToolInvocation[] = [];
+        const calleeNestedLlmCalls: LlmCallStat[] = [];
         const calleeDebugHandle: import("../subagent-tools.js").ParentDebugHandle = {};
         const calleeSubagents = buildSubagentTools(
           calleeGroups,
@@ -2439,6 +2483,8 @@ export async function processTask(
                 }
               : {}),
             parentToolsUsed: calleeInnerTools,
+            parentToolInvocations: calleeNestedInvocations,
+            parentLlmCalls: calleeNestedLlmCalls,
             parentMeta: {
               ...(conversationId ? { conversationId } : {}),
               agentSlug: spec.slug,
@@ -2571,16 +2617,21 @@ export async function processTask(
             },
             { toolCallId },
           );
+          // Reported on the callee's own run row, never folded into the caller's (double count).
+          const calleeLlmCalls = mergeLlmCallSeries(result.llmCalls, calleeNestedLlmCalls).calls;
+          const calleeModel = result.model ?? providerConfig?.model;
           await reportDelegatedRunFinish({
             sessionId: calleeSessionId,
             status: "completed",
             result: result.text,
-            ...(spec.provider ? { provider: spec.provider } : {}),
-            ...(providerConfig?.model ? { model: providerConfig.model } : {}),
-            toolsUsed: result.toolsUsed,
-            toolInvocations: result.toolInvocations,
+            // Resolved values, as a top-level run reports them (unset provider is the platform route).
+            provider: spec.provider ?? "spaces",
+            ...(calleeModel ? { model: calleeModel } : {}),
+            toolsUsed: [...result.toolsUsed, ...calleeInnerTools],
+            toolInvocations: [...result.toolInvocations, ...calleeNestedInvocations],
             tokenUsage: result.tokenUsage,
             ...(result.latency ? { latency: result.latency } : {}),
+            ...(calleeLlmCalls.length > 0 ? { llmCalls: calleeLlmCalls } : {}),
           });
           return {
             text: result.text,
@@ -2604,7 +2655,13 @@ export async function processTask(
             sessionId: calleeSessionId,
             status: signal?.aborted ? "cancelled" : "failed",
             error: err instanceof Error ? err.message : String(err),
-            ...(spec.provider ? { provider: spec.provider } : {}),
+            provider: spec.provider ?? "spaces",
+            ...(providerConfig?.model ? { model: providerConfig.model } : {}),
+            ...abortTelemetry(err, {
+              toolsUsed: calleeInnerTools,
+              invocations: calleeNestedInvocations,
+              llmCalls: calleeNestedLlmCalls,
+            }),
           });
           throw err;
         }
@@ -4508,6 +4565,10 @@ export async function processTask(
     // on specific inner tools (Bitbucket__create_pull_request) in addition to
     // subagent wrappers (bitbucket).
     const combinedToolsUsed = [...result.toolsUsed, ...subagentInnerTools];
+    if (nestedInvocations.length > 0) {
+      result.toolInvocations.push(...nestedInvocations);
+    }
+    const llmCallSeries = mergeLlmCallSeries(result.llmCalls, nestedLlmCalls).calls;
 
     const lat = result.latency;
     const latencyStr = lat
@@ -4676,6 +4737,8 @@ export async function processTask(
         toolsUsed: combinedToolsUsed,
         tokenUsage: result.tokenUsage,
         ...(result.toolInvocations.length > 0 ? { toolInvocations: result.toolInvocations } : {}),
+        ...(result.latency ? { latency: result.latency } : {}),
+        ...(llmCallSeries.length > 0 ? { llmCalls: llmCallSeries } : {}),
         provider: completedProvider,
         model: completedModel,
       });
@@ -4810,6 +4873,8 @@ export async function processTask(
           }
         : {}),
       ...(result.latency ? { latency: result.latency } : {}),
+      ...(result.citationReflection ? { citationReflection: result.citationReflection } : {}),
+      ...(llmCallSeries.length > 0 ? { llmCalls: llmCallSeries } : {}),
       ...(result.toolInvocations.length > 0
         ? { toolInvocations: result.toolInvocations }
         : {}),
@@ -4982,6 +5047,11 @@ export async function processTask(
     // "Query aborted by user." in the UI. When the user cancelled, fall through
     // to the cancelled branch below instead.
     const isUserCancel = activeRuns.get(sessionId)?.userCancelled === true;
+    const abortFields = abortTelemetry(err, {
+      toolsUsed: subagentInnerTools,
+      invocations: nestedInvocations,
+      llmCalls: nestedLlmCalls,
+    });
     if (
       pendingResponsesAtError.length > 0 &&
       !isUserCancel &&
@@ -5046,9 +5116,7 @@ export async function processTask(
         ...(pendingGoalSuggestion ? { pendingGoalSuggestion } : {}),
         ...(dedupedPendingActionsAtError.length > 0 ? { pendingActions: dedupedPendingActionsAtError } : {}),
         ...(attachmentsAtError.length > 0 ? { attachments: attachmentsAtError } : {}),
-        ...(err instanceof RunCancelledError && err.toolsUsed.length > 0 ? { toolsUsed: err.toolsUsed } : {}),
-        ...(err instanceof RunCancelledError && err.toolInvocations.length > 0 ? { toolInvocations: err.toolInvocations } : {}),
-        ...(err instanceof RunCancelledError ? { tokenUsage: err.tokenUsage } : {}),
+        ...abortFields,
         ...(llmCitationsAtError && llmCitationsAtError.length > 0 ? { llmCitations: llmCitationsAtError } : {}),
         provider: callbackProvider,
         model: callbackModel,
@@ -5077,9 +5145,7 @@ export async function processTask(
         status: "completed",
         result: "",
         pendingPlan: proposePlanRef.value,
-        ...(err instanceof RunCancelledError && err.toolsUsed.length > 0 ? { toolsUsed: err.toolsUsed } : {}),
-        ...(err instanceof RunCancelledError && err.toolInvocations.length > 0 ? { toolInvocations: err.toolInvocations } : {}),
-        ...(err instanceof RunCancelledError ? { tokenUsage: err.tokenUsage } : {}),
+        ...abortFields,
         provider: callbackProvider,
         model: callbackModel,
       });
@@ -5107,9 +5173,7 @@ export async function processTask(
         status: "completed",
         result: "",
         pendingAgentCard: proposeAgentRef.value,
-        ...(err instanceof RunCancelledError && err.toolsUsed.length > 0 ? { toolsUsed: err.toolsUsed } : {}),
-        ...(err instanceof RunCancelledError && err.toolInvocations.length > 0 ? { toolInvocations: err.toolInvocations } : {}),
-        ...(err instanceof RunCancelledError ? { tokenUsage: err.tokenUsage } : {}),
+        ...abortFields,
         provider: callbackProvider,
         model: callbackModel,
       });
@@ -5137,9 +5201,7 @@ export async function processTask(
         status: "completed",
         result: "",
         dailyBrief: emitBriefRef.value,
-        ...(err instanceof RunCancelledError && err.toolsUsed.length > 0 ? { toolsUsed: err.toolsUsed } : {}),
-        ...(err instanceof RunCancelledError && err.toolInvocations.length > 0 ? { toolInvocations: err.toolInvocations } : {}),
-        ...(err instanceof RunCancelledError ? { tokenUsage: err.tokenUsage } : {}),
+        ...abortFields,
         provider: callbackProvider,
         model: callbackModel,
       });
@@ -5158,9 +5220,7 @@ export async function processTask(
         fastMode: fastModeForCallback,
         status: "completed",
         result: partialResult || "Experiment complete — report recorded.",
-        ...(err instanceof RunCancelledError && err.toolsUsed.length > 0 ? { toolsUsed: err.toolsUsed } : {}),
-        ...(err instanceof RunCancelledError && err.toolInvocations.length > 0 ? { toolInvocations: err.toolInvocations } : {}),
-        ...(err instanceof RunCancelledError ? { tokenUsage: err.tokenUsage } : {}),
+        ...abortFields,
         provider: callbackProvider,
         model: callbackModel,
       });
@@ -5181,15 +5241,7 @@ export async function processTask(
           fastMode: fastModeForCallback,
           status: "completed",
           result: interruptSummary,
-          ...(err instanceof RunCancelledError && err.toolsUsed.length > 0
-            ? { toolsUsed: err.toolsUsed }
-            : {}),
-          ...(err instanceof RunCancelledError && err.toolInvocations.length > 0
-            ? { toolInvocations: err.toolInvocations }
-            : {}),
-          ...(err instanceof RunCancelledError
-            ? { tokenUsage: err.tokenUsage }
-            : {}),
+          ...abortFields,
           provider: callbackProvider,
           model: callbackModel,
         });
@@ -5206,15 +5258,7 @@ export async function processTask(
         ...(err instanceof RunCancelledError && err.partialText
           ? { result: err.partialText }
           : {}),
-        ...(err instanceof RunCancelledError && err.toolsUsed.length > 0
-          ? { toolsUsed: err.toolsUsed }
-          : {}),
-        ...(err instanceof RunCancelledError && err.toolInvocations.length > 0
-          ? { toolInvocations: err.toolInvocations }
-          : {}),
-        ...(err instanceof RunCancelledError
-          ? { tokenUsage: err.tokenUsage }
-          : {}),
+        ...abortFields,
         provider: callbackProvider,
         model: callbackModel,
       });
@@ -5275,15 +5319,7 @@ export async function processTask(
           : { status: "completed" as const, result: "" }),
         emptyReason: "provider_capacity" as const,
         ...(transientDetail ? { emptyReasonDetail: transientDetail } : {}),
-        ...(err instanceof ProviderStallError && err.toolsUsed.length > 0
-          ? { toolsUsed: err.toolsUsed }
-          : {}),
-        ...(err instanceof ProviderStallError && err.toolInvocations.length > 0
-          ? { toolInvocations: err.toolInvocations }
-          : {}),
-        ...(err instanceof ProviderStallError
-          ? { tokenUsage: err.tokenUsage }
-          : {}),
+        ...abortFields,
         provider: callbackProvider,
         model: callbackModel,
       });

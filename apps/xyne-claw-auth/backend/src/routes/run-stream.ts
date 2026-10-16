@@ -21,6 +21,7 @@ import { isDirectChatConversation } from "../lib/conversation-kind.js";
 import { applyAiScreenCommand } from "../lib/ai-screen-commands.js";
 import { parseSlashCommand } from "../lib/parseSlashCommand.js";
 import { localHarnessSessionRepository } from "../repositories/localHarnessSessionRepository.js";
+import { clawMetricsFields } from "../repositories/agentRunRepository.js";
 import {
   localFolderUnavailableMessage,
   splitLocalFolderContext,
@@ -2627,7 +2628,7 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
           // them by id instead of by chronology (which breaks once a user
           // message has multiple assistant siblings).
           ...(assistantMessageId ? { chatMessageId: assistantMessageId } : {}),
-          ...(toolInvocations ? { toolInvocations } : {}),
+          ...clawMetricsFields(body),
           ...(typeof body["fastMode"] === "boolean" ? { fastMode: body["fastMode"] as boolean } : {}),
         });
       } catch (finalizeErr) {

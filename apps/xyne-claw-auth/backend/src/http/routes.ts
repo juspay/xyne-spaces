@@ -82,6 +82,7 @@ import { settingsRouter } from "../routes/settings.js";
 import { localHarnessBridgeRouter, localHarnessRouter } from "../routes/local-harness.js";
 import { runsRouter } from "../routes/runs.js";
 import { metricsRouter } from "../routes/metrics.js";
+import { metricsToolsRouter } from "../routes/metrics-tools.js";
 import { memoryRouter } from "../routes/memory.js";
 import { agentIndexRouter } from "../routes/agent-index.js";
 import { toolIndexRouter } from "../routes/tool-index.js";
@@ -340,7 +341,8 @@ function mountWorkspace(app: Express): void {
   // the CLI can list/search/fetch its own runs (GET /runs/light, /runs/search,
   // /runs/:id). Reads pass with the scope; token writes are still rejected.
   app.use(`${BASE}/runs`, requireAuth, allowReadAccessToken("runs:read"), runsRouter);
-  app.use(`${BASE}/metrics`, requireAuth, requireNoAccessToken, metricsRouter);
+  // One chain so unhandled requests fall through without re-authenticating.
+  app.use(`${BASE}/metrics`, requireAuth, requireNoAccessToken, metricsRouter, metricsToolsRouter);
   // Mount-level baseline auth (defense-in-depth): every memory route also has
   // stricter per-route middleware (requireUserAuth / requireClawAdmin), but a
   // future route that forgets it must still fail closed at the mount. requireAuth

@@ -59,6 +59,7 @@ import { awaitTurnHandoff, isTurnControlCommand } from "../lib/run-turn-handoff.
 import { dispatchLocalHarnessRun, isLocalHarnessProvider, localHarnessProviderLabel, pinnedModelForProvider, resolveLocalHarnessTarget, resolveLocalHarnessTargetForProvider, resolveLocalSandbox } from "../lib/local-harness.js";
 
 import { planServerContinuation } from "../lib/local-harness-continuation.js";
+import { clawMetricsFields } from "../repositories/agentRunRepository.js";
 import { authenticatedProviders, localHarnessRepository } from "../repositories/localHarnessRepository.js";
 import { localHarnessSessionRepository } from "../repositories/localHarnessSessionRepository.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
@@ -2603,7 +2604,7 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
   // from query because the callback may land on a different pod than the SSE
   // owner, so pendingStreams may not have it locally.
   const queryAssistantMessageId = req.query["assistantMessageId"] as string | undefined;
-  const { result: rawResult, status, error, pendingActions, pendingResponses, sessionId, userId, toolsUsed, toolInvocations, tokenUsage, attachments, llmCitations, provider, model, fastMode } = req.body as {
+  const { result: rawResult, status, error, pendingActions, pendingResponses, sessionId, userId, toolsUsed, toolInvocations, attachments, llmCitations, provider, model, fastMode } = req.body as {
     result?: string;
     status?: string;
     error?: string;
@@ -2676,8 +2677,7 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
         ...(model ? { model } : {}),
         toolsUsed: toolsUsed ?? [],
         ...(chatMessageId ? { chatMessageId } : {}),
-        ...(toolInvocations !== undefined ? { toolInvocations } : {}),
-        ...(tokenUsage ? { tokenUsage } : {}),
+        ...clawMetricsFields(req.body as Record<string, unknown>),
         ...(fastMode !== undefined ? { fastMode } : {}),
       });
     } catch (err) {

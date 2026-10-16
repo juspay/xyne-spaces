@@ -1764,3 +1764,46 @@ export function isEmptyToolsSelection(config: AgentToolsConfig): boolean {
   const palette = raw["openPalette"];
   return !anyListed && palette !== "read" && palette !== "all";
 }
+
+/**
+ * Whether a grant entry matches a recorded tool name. Mirrors `matchesDirectPick` in xyne-claw's
+ * tool-resolution.ts minus its `selectionKey` convention. Analysis only, NOT an authorization check.
+ */
+export function grantMatchesToolName(grant: string, toolName: string): boolean {
+  if (!grant || !toolName) return false;
+  const norm = (s: string): string => s.toLowerCase().replace(/_/g, "-");
+  return (
+    toolName === grant ||
+    toolName.endsWith(grant) ||
+    grant.endsWith(`__${toolName}`) ||
+    norm(toolName) === norm(grant)
+  );
+}
+
+/**
+ * Grant entries in `config.tools` that no observed tool exercised. `subagents` and `gateway` grants
+ * name a wrapper or server, so any observed tool carrying their `<grant>__` prefix counts.
+ */
+export function findUnusedGrants(
+  cfg: AgentToolsConfig | undefined,
+  observedToolNames: Iterable<string>,
+): Array<{ kind: keyof AgentToolsConfig; grant: string }> {
+  if (!cfg) return [];
+  const observed = [...new Set(observedToolNames)];
+  const unused: Array<{ kind: keyof AgentToolsConfig; grant: string }> = [];
+
+  const scan = (kind: keyof AgentToolsConfig, matcher: (grant: string, tool: string) => boolean): void => {
+    for (const grant of cfg[kind] ?? []) {
+      if (!observed.some((tool) => matcher(grant, tool))) unused.push({ kind, grant });
+    }
+  };
+
+  const prefixMatch = (grant: string, tool: string): boolean =>
+    grantMatchesToolName(grant, tool) || tool.toLowerCase().startsWith(`${grant.toLowerCase()}__`);
+
+  scan("subagents", prefixMatch);
+  scan("gateway", prefixMatch);
+  scan("direct", grantMatchesToolName);
+  scan("custom", grantMatchesToolName);
+  return unused;
+}

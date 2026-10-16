@@ -8,7 +8,7 @@ import { CONFIG } from "../config.js";
 import { decrypt } from "../crypto.js";
 import { spacesAppFetch } from "../lib/spaces-api.js";
 import { agentRepository, chatMessageRepository, agentRunRepository, chatAttachmentRepository, userProviderCredentialsRepository, userAgentInstructionRepository } from "../repositories/index.js";
-import type { FinalizeRunInput } from "../repositories/agentRunRepository.js";
+import { clawMetricsFields, type FinalizeRunInput } from "../repositories/agentRunRepository.js";
 import { resolveBriefAgentSlug } from "../services/dailyBrief.js";
 import { buildAgentCatalog } from "../services/agentCatalogService.js";
 import { gcsService } from "../services/storageService.js";
@@ -390,9 +390,7 @@ router.post("/delegated-run/finish", requireStrictS2S, async (req: Request, res:
       ...(body.provider ? { provider: body.provider } : {}),
       ...(body.model ? { model: body.model } : {}),
       ...(body.toolsUsed ? { toolsUsed: body.toolsUsed } : {}),
-      ...(body.toolInvocations !== undefined ? { toolInvocations: body.toolInvocations } : {}),
-      ...(body.tokenUsage ? { tokenUsage: body.tokenUsage } : {}),
-      ...(body.latency ? { latency: body.latency } : {}),
+      ...clawMetricsFields(body),
       ...(chatMessageId ? { chatMessageId } : {}),
     });
     res.json({ success: true });
@@ -860,7 +858,6 @@ router.post(
     const status = payload["status"] as string;
     const reasoning = (payload["reasoning"] as string | undefined) || undefined;
 
-    const toolInvocations = payload["toolInvocations"] as unknown[] | undefined;
     const toolsUsed = payload["toolsUsed"] as string[] | undefined;
     const attachments = payload["attachments"] as
       | Array<{ fileName: string; mimeType: string; data: string }>
@@ -956,7 +953,7 @@ router.post(
           ...(typeof payload.provider === "string" ? { provider: payload.provider } : {}),
           ...(typeof payload.model === "string" ? { model: payload.model } : {}),
           toolsUsed: toolsUsed ?? [],
-          ...(toolInvocations ? { toolInvocations } : {}),
+          ...clawMetricsFields(payload),
           ...((payload as { fastMode?: boolean }).fastMode !== undefined
             ? { fastMode: (payload as { fastMode?: boolean }).fastMode === true }
             : {}),
